@@ -167,7 +167,11 @@ tasks:
         (0600, not in docker inspect, not on disk) but is lost on restart and must be re-delivered by `reader up`.
         Needs a proposed amendment of ADR-0011/0023's delivery text (owner).",
       note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used." }
-  - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }
+  - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton],
+      note: "Obsolete under ADR-0026 (spikes/compose-secrets-ro; recorded from OPS-DEPLOY round 3): FR-CONFIG-14's wording
+        that OPS-CLI declares `<name>: { environment: <VAR> }` Compose secrets, and `secret_env_var` itself. Secrets are
+        files in a tmpfs /run/secrets written over docker exec; `secret_file_name` stays. Needs a paired spec + tests
+        change later (H2); the coordinator schedules it." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
       note: "From OPS-DEPLOY (round 2) and spikes/compose-secrets-ro: secrets are delivered after container start over
         `docker exec -i` stdin into a tmpfs /run/secrets (umask 077, mode 0600), never as Compose secrets or env; values

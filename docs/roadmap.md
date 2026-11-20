@@ -166,8 +166,30 @@ check "anonymous 401"   test "$(curl -s -o /dev/null -w '%{http_code}' https://l
 # Four default-profile services (OPS-DEPLOY, owner 2026-11-20): caddy, api, worker, postgres. Not six: mcp arrives in
 # stage 7 (profile mcp), the kernel services in stage 4 (profile kernels), Rotel with SRV-OBS in stage 2.
 check "four healthy"    test "$(docker compose -f deploy/compose.yaml ps --format json | jq -s '[.[]|select(.Health=="healthy")]|length')" = 4
-check "no env secrets"  ! docker inspect $(docker compose -f deploy/compose.yaml ps -q) | grep -q "$READER_CANARY"
-check "no secret on disk" ! docker diff $(docker compose -f deploy/compose.yaml ps -q) | grep -q '/run/secrets/'
+# Secret checks (ADR-0026, OPS-DEPLOY FR-DEPLOY-10, INV-DEPLOY-2): one function per check, each looping per container,
+# so `check` sees the whole verdict and no pipe sits outside it.
+CONSUMERS="postgres api worker"   # mcp and agent-proxy join in later stages
+no_canary_in_inspect() { local c; for c in $(docker compose -f deploy/compose.yaml ps -q); do
+  docker inspect "$c" | grep -q "$READER_CANARY" && return 1; done; return 0; }
+no_secret_in_diff() { local c; for c in $(docker compose -f deploy/compose.yaml ps -q); do
+  docker diff "$c" | grep -q '/run/secrets' && return 1; done; return 0; }
+secret_files_ok() { local s uid; for s in $CONSUMERS; do
+  uid=$(docker compose -f deploy/compose.yaml exec -T "$s" id -u) || return 1
+  [ "$(docker compose -f deploy/compose.yaml exec -T "$s" stat -c '%a %u' /run/secrets/db-password)" = "600 $uid" ] || return 1
+  done; return 0; }
+api_health() { docker inspect -f '{{.State.Health.Status}}' "$(docker compose -f deploy/compose.yaml ps -q api)"; }
+redelivered_after_restart() { docker compose -f deploy/compose.yaml restart api >/dev/null || return 1
+  sleep 20; [ "$(api_health)" != healthy ] || return 1        # fails closed without its file (FR-DEPLOY-10 d)
+  reader up >/dev/null || return 1                             # re-delivery
+  for _ in $(seq 60); do
+    [ "$(api_health)" = healthy ] && docker compose -f deploy/compose.yaml exec -T api test -s /run/secrets/db-password \
+      && return 0
+    sleep 2; done; return 1; }
+check "no env secrets"          no_canary_in_inspect
+check "no secret on disk"       no_secret_in_diff
+check "secret files 0600, owner = service uid" secret_files_ok
+check "re-delivered after restart, before healthy" redelivered_after_restart
+check "postgres hardened"       test "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}}' "$(docker compose -f deploy/compose.yaml ps -q postgres)")" = "999:999 true"
 check "doctor"          reader doctor --json | jq -e 'all(.[]; .ok)'
 # manual, once: open the bootstrap link in Safari, register a passkey, then:
 check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me | jq -e '.role=="owner"'
