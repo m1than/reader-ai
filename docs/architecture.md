@@ -87,7 +87,7 @@ Plain nbformat v4 `.ipynb`. reader-ai semantics live in cell metadata under the 
 
 ## Configuration and secrets (ADR-0011)
 
-One declarative file, `reader.yaml`, validated by a JSON Schema generated from Pydantic models. Secrets are references, never values: `secret://env/NAME`, `secret://file/run/secrets/NAME`, `secret://keychain/reader-ai/NAME`, `secret://op/vault/item/field`. Keychain references are resolved on the host by the `reader` CLI (macOS Keychain, Windows Credential Locker, Linux Secret Service through `keyring`) and handed to containers as Compose secrets, never as files in the repository.
+One declarative file, `reader.yaml`, validated by a JSON Schema generated from Pydantic models. Secrets are references, never values: `secret://env/NAME`, `secret://file/run/secrets/NAME`, `secret://keychain/reader-ai/NAME`, `secret://op/vault/item/field`. Keychain references are resolved on the host by the `reader` CLI (macOS Keychain, Windows Credential Locker, Linux Secret Service through `keyring`) and delivered by OPS-CLI over `docker exec` stdin into each consumer's tmpfs at `/run/secrets` (ADR-0026), never as files in the repository or on disk.
 
 ## Quality attributes
 

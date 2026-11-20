@@ -67,14 +67,12 @@ def test_rejects(case: dict[str, str]) -> None:
 
 @pytest.mark.parametrize("text", ["garbage", "garbage\nINJECT", "secret://env/X\nINJECT"])
 def test_constructor_never_makes_an_invalid_reference(text: str) -> None:
-    from reader.config import SecretRef, secret_env_var, secret_file_name
+    from reader.config import SecretRef, secret_file_name
 
     with pytest.raises(ValueError):
         SecretRef(text)
     with pytest.raises(ValueError):
         secret_file_name(text)
-    with pytest.raises(ValueError):
-        secret_env_var(text)
 
 
 _valid = st.sampled_from([c["ref"] for c in REFS["accept"]])
