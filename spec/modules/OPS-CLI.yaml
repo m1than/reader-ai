@@ -10,18 +10,18 @@
 #   argument; the reader.yaml field is a future SRV-CONFIG task (owner note below).
 #
 # Dependencies: SRV-CONFIG (merged: load_config, SecretRef, Secret, SecretResolutionError, SECRET_MAX_BYTES,
-# secret_file_name, host_registry, ResolverRegistry); OPS-DEPLOY (branch 1/S1.OPS-DEPLOY: deploy/compose.yaml with a
-# top-level `name`, the `x-kernel` template, FR-DEPLOY-10 b's consumers, the backup labels, VEC-DEPLOY-3); SRV-AUTH
-# (draft, branch 1/S1.SRV-AUTH: `reader-server bootstrap-link` and the bootstrap URL that `reader bootstrap` opens).
+# secret_file_name, host_registry, ResolverRegistry); OPS-DEPLOY (merged, #27: deploy/compose.yaml with a top-level
+# `name`, the `x-kernel` template, FR-DEPLOY-10 b's consumers, the backup labels, VEC-DEPLOY-3); SRV-AUTH (approved,
+# branch 1/S1.SRV-AUTH: `reader-server bootstrap-link [--handle H]` and the bootstrap URL that `reader bootstrap` opens).
 #
 # Review policy (owner, 2026-11-20): this module handles secrets, so it keeps full deep-reviewer review until approve.
 
 id: OPS-CLI
 title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bootstrap, doctor, secrets set, trust, backup/restore
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable), 2026-11-20. Round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid and caddy_config dropped, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Correction after round 4 (coordinator): caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0; reviewer confirms this delta only. Status stays draft until the Red tests (T5), which wait for OPS-DEPLOY's amended VEC-DEPLOY-3."
+status: approved
+approved_by: agent
+approved_at: 2026-11-20
+review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`)."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -61,8 +61,9 @@ requirements:
   - id: FR-CLI-1
     text: >-
       `reader` is a console script (`[project.scripts] reader = "reader.cli.app:main"` in server/pyproject.toml, added
-      in Green with the `keyring` dependency) with the subcommands `up`, `down [--untrust]`, `status [--json]`,
-      `watcher status`, `watcher stop`, `bootstrap`, `doctor [--json]`, `secrets set NAME`, `trust`, `backup DIR` and
+      in Green; the `keyring` dependency comes with the Red tests, which use its exception types) with the subcommands
+      `up`, `down [--untrust]`, `status [--json]`, `watcher status`, `watcher stop`, `bootstrap [--handle H]`,
+      `doctor [--json]`, `secrets set NAME`, `trust`, `backup DIR` and
       `restore DIR`. `up`, `bootstrap`, `doctor`, `trust`, `backup` and `restore` read reader.yaml through SRV-CONFIG's
       `load_config` (path from `--config`, default `./reader.yaml`) and exit 2 with SRV-CONFIG's error text on a
       `ConfigError`. `down`, `status`, `watcher status|stop` and `secrets set` work without a valid config (FR-CLI-7,
@@ -219,9 +220,11 @@ requirements:
     text: >-
       `reader backup DIR` (DIR required in stage 1) refuses a DIR inside a git work tree and refuses unless the watcher
       runs (the services it restarts need delivery). With api, worker and mcp stopped it writes, each file created by the
-      host with mode 0600 from a stdout stream: `db.dump` from `pg_dump -Fc` run with `docker exec` in the postgres
-      container (pgdata); for every other named volume labelled `org.reader-ai.backup=include` (in stage 1: blobs and
-      caddy_config, ADR-0012), a tar from a one-off
+      host with mode 0600 from a stdout stream: `db.dump` from
+      `docker compose -p <name> exec -T postgres pg_dump -Fc -U postgres postgres` (pgdata; the official image's default
+      role and database, which compose.yaml leaves unchanged); for every other named volume labelled
+      `org.reader-ai.backup=include` (in stage 1: blobs and caddy_config, ADR-0012), `<key>.tar` from a one-off, where
+      `<volume>` is the rendered `.volumes.<key>.name`:
       `docker run --rm --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
       where `<server image>` is the `api` service's image in the rendered model and `<uid>` comes from the rendered
       `user` of the services that mount the volume: their common `user` (blobs: api and worker, `10001:10001`), or
@@ -235,8 +238,12 @@ requirements:
   - id: FR-CLI-18
     text: >-
       `reader restore DIR` refuses unless the watcher runs, then verifies every sha256 in the manifest. Precondition: no
-      application table holds a row and the blobs volume is empty; otherwise it refuses and changes nothing. It stops
-      api, worker, mcp and caddy, runs `pg_restore --clean --if-exists` inside the postgres container, and for each tar
+      application table holds a row (one `psql -U postgres -d postgres -At` query summing exact `count(*)` over every
+      table outside `pg_catalog` and `information_schema`) and the blobs volume is empty (a one-off as below running
+      `find /v -mindepth 1 -print -quit` prints nothing); otherwise it refuses and changes nothing. It stops
+      api, worker, mcp and caddy, runs
+      `docker compose -p <name> exec -T postgres pg_restore --clean --if-exists -U postgres -d postgres` with `db.dump`
+      on stdin, and for each tar
       in the manifest runs a one-off container hardened as in FR-CLI-17, with the same `--user` and with `-i` to take the
       archive on stdin, the volume mounted read-write:
       `docker run --rm -i --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v <server image> sh -c 'find /v -mindepth 1 -delete && tar -C /v -xf -'`,
@@ -258,13 +265,15 @@ requirements:
       timeout), then exits.
   - id: FR-CLI-21
     text: >-
-      `reader bootstrap` (for SRV-AUTH's first-owner sign-up) works only while the stack is healthy (FR-CLI-13 exit 0;
-      otherwise it exits non-zero with a fixed message and runs nothing else). It runs
-      `docker compose -p <name> exec -T api reader-server bootstrap-link` with a 15 s timeout, captures stdout, and
+      `reader bootstrap [--handle H]` (for SRV-AUTH's sign-up links, FR-AUTH-4) works only while the stack is healthy
+      (FR-CLI-13 exit 0; otherwise it exits non-zero with a fixed message and runs nothing else). H must pass FR-CLI-4's
+      handle rule, else `bootstrap` exits 2 and runs nothing. It runs
+      `docker compose -p <name> exec -T api reader-server bootstrap-link`, followed by `--handle H` when given (without
+      it SRV-AUTH picks the owner), with a 15 s timeout, captures stdout, and
       accepts exactly one line that starts with the literal string `<instance.url>/api/auth/bootstrap#` (prefix built
       from reader.yaml's `instance.url`, compared with `str.startswith`, not a regex) and whose remainder is a non-empty
-      run of `[A-Za-z0-9_-]`. Exit 1 of `bootstrap-link` gives the fixed message "owner already has
-      a passkey"; any other non-zero exit, a timeout or any other output gives one fixed error message that quotes none
+      run of `[A-Za-z0-9_-]`. Exit 1 of `bootstrap-link` gives the fixed message "the user already has a passkey, or
+      the handle is unknown" (FR-AUTH-4's two exit-1 cases); any other non-zero exit, a timeout or any other output gives one fixed error message that quotes none
       of the captured output. The URL is passed only as the argument of macOS `open <url>`, with a 10 s timeout: `reader`
       never prints it, logs it or writes it to disk, and drops both children's stderr instead of relaying it. A failure
       of either call (non-zero exit, `CalledProcessError`, `TimeoutExpired`, `OSError`) is caught inside the call site

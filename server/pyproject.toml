@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "reader-ai server: api, worker, mcp and the host CLI `reader`"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+  "keyring==25.7.0",           # OPS-CLI: macOS Keychain backend only, pinned in code (REF-CLI-5)
   "pydantic>=2.14.4,<3",       # SRV-CONFIG: typed settings and JSON Schema (REF-CONFIG-2)
   "ruamel.yaml==0.19.1",       # SRV-CONFIG: YAML 1.2 event parser with source marks (REF-CONFIG-5)
 ]

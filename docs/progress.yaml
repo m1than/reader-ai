@@ -222,8 +222,14 @@ tasks:
       note: "green locally; deep-reviewer next. Branch 1/S1.SRV-CONFIG-adr26; spec stays approved (review field: amended for
         ADR-0026, paired change, coordinator-scheduled). Tests 245 → 246 (secret_env_var assertions removed; one test added
         asserting the export is gone)." }
-  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
-      note: "Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
+  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S1.SRV-CONFIG, S1.OPS-DEPLOY],
+      review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve (97b422e), caddy_config delta confirmed (5c15d21)",
+      note: "Spec approved (approved_by: agent, 2026-11-20) with the Red tests: 196 tests in server/tests/cli/ (8 files),
+        196/196 failing on AssertionError inside their bodies (a last meta-path finder in tests/cli/conftest.py turns a
+        missing reader.cli module into an assertion). Paired at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4),
+        exact pg_dump/pg_restore/psql argv (role and database `postgres`), learner `live-check` in deploy/reader.example.yaml
+        (no OPS-DEPLOY test pins the example's users). keyring==25.7.0 added with Red (tests use keyring.errors).
+        Earlier context: Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
         watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
         tmpfs /run/secrets/<secret_file_name(ref)> via `docker exec -i -u <uid>` over stdin (no Compose secrets). The DB password is
         generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 now names /run/secrets files
