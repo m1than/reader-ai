@@ -1,0 +1,183 @@
+# reader-ai stack on the owner's Mac (spec/modules/OPS-DEPLOY.yaml). Started by `reader up` (OPS-CLI), which adds an
+# in-memory override (kernel-<user> services) and delivers secrets into the tmpfs /run/secrets of each consumer over
+# `docker exec` stdin (ADR-0026). This file holds no secret and no interpolation. The override also binds the owner's
+# reader.yaml read-only into the server roles at READER_CONFIG's path (FR-DEPLOY-5).
+name: reader
+
+# Health timing for postgres and the server roles (FR-DEPLOY-11): poll every 2 s instead of Docker's default 30 s, so
+# each `service_healthy` hop costs seconds against NFR-DEPLOY-1's 120 s; failures in the first 60 s do not count,
+# which covers initdb on the first start and the wait for secret delivery. Structural bounds, revised from the stage-1
+# live check.
+x-health: &health
+  interval: 2s
+  timeout: 2s
+  retries: 3
+  start_period: 60s
+
+x-kernel: &kernel
+  image: reader-kernel:local
+  user: "1000:1000"
+  read_only: true
+  tmpfs:
+    - /home/lab:noexec,size=256m,uid=1000
+    - /tmp:noexec,size=256m,uid=1000
+    - /run/evcxr:exec,nosuid,nodev,size=1g,uid=1000
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: 2g
+  memswap_limit: 2g
+  cpus: 2
+  pids_limit: 256
+  restart: always
+  profiles: [kernels]
+  healthcheck:
+    test: ["CMD", "/usr/local/bin/reader-kernel-health"]
+
+x-server: &server
+  image: reader-server:local
+  build:
+    context: ..
+    dockerfile: deploy/images/server.Dockerfile
+  user: "10001:10001"
+  read_only: true
+  tmpfs:
+    - /home/reader:size=64m,uid=10001,mode=0700
+    - /tmp:size=64m,uid=10001
+    - /run/secrets:uid=10001,mode=0700,size=256k
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: 1g
+  memswap_limit: 1g
+  restart: unless-stopped
+  environment:
+    READER_CONFIG: /etc/reader/reader.yaml
+  depends_on:
+    postgres:
+      condition: service_healthy
+
+services:
+  caddy:
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    ports:
+      - "127.0.0.1:443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./spa-placeholder:/srv/spa:ro
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    networks: [edge, front]
+    healthcheck:
+      # 127.0.0.1, not localhost: the admin endpoint listens on IPv4 loopback only, and busybox wget tries ::1 first.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+
+  api:
+    <<: *server
+    command: ["reader-server", "--role", "api", "--bind", "10.230.1.10:8000"]
+    volumes:
+      - blobs:/var/lib/reader/blobs
+    networks:
+      front:
+        ipv4_address: 10.230.1.10
+      core: {}
+      sb-pair-1: {}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "reader-server", "--role", "api", "--healthcheck"]
+
+  worker:
+    <<: *server
+    command: ["reader-server", "--role", "worker"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    volumes:
+      - blobs:/var/lib/reader/blobs
+    networks: [core, agentnet, sb-verify, sb-agent]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
+
+  mcp:
+    <<: *server
+    profiles: [mcp]
+    command: ["reader-server", "--role", "mcp", "--bind", "0.0.0.0:8001"]
+    networks: [front, core]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "reader-server", "--role", "mcp", "--healthcheck"]
+
+  postgres:
+    image: reader-postgres:local
+    build:
+      context: ./images
+      dockerfile: postgres.Dockerfile
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /var/run/postgresql:uid=999,mode=0775
+      - /tmp:uid=999
+      - /run/secrets:uid=999,mode=0700,size=256k
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+    volumes:
+      - pgdata:/var/lib/postgresql
+    networks: [core]
+    healthcheck:
+      <<: *health
+      # TCP on 127.0.0.1: the entrypoint's temporary initdb server listens on the socket only, so it never looks healthy.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+
+  agent-proxy:
+    image: reader-agent-proxy:local
+    profiles: [agents]
+    user: "10002:10002"
+    read_only: true
+    tmpfs:
+      - /home/proxy:size=16m,uid=10002,mode=0700
+      - /tmp:size=16m,uid=10002
+      - /run/secrets:uid=10002,mode=0700,size=256k
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+    networks: [agentnet, egress]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/reader-agent-proxy-health"]
+
+  kernel-verify:
+    <<: *kernel
+    networks: [sb-verify]
+
+  kernel-agent:
+    <<: *kernel
+    networks: [sb-agent]
+
+  kernel-pair-1:
+    <<: *kernel
+    networks: [sb-pair-1]
+
+networks:
+  edge: {}
+  egress: {}
+  front:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.230.1.0/24
+          ip_range: 10.230.1.128/25 # dynamic addresses stay away from api's fixed 10.230.1.10
+  core: { internal: true }
+  agentnet: { internal: true }
+  sb-verify: { internal: true }
+  sb-agent: { internal: true }
+  sb-pair-1: { internal: true }
+
+volumes:
+  pgdata: { labels: { org.reader-ai.backup: include } }
+  blobs: { labels: { org.reader-ai.backup: include } }
+  caddy_data: { labels: { org.reader-ai.backup: exclude } }
+  caddy_config: { labels: { org.reader-ai.backup: include } }
