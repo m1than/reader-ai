@@ -161,12 +161,17 @@ tasks:
 
   # Stage 1 — stack on the Mac
   - { id: S1.spike.compose-secrets-ro, stage: 1, kind: spike, status: in_progress, needs: [],
-      result: "spikes/compose-secrets-ro/RESULT.md: Compose refuses environment-sourced secrets in read-only services
-        ('`file` is the sole supported option'); with a writable root the value is copied into the container layer (VM disk);
-        read-only + tmpfs /run/secrets (0700, service uid) + value via `docker exec -i` over stdin keeps every constraint
-        (0600, not in docker inspect, not on disk) but is lost on restart and must be re-delivered by `reader up`.
-        Needs a proposed amendment of ADR-0011/0023's delivery text (owner).",
-      note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used." }
+      result: "spikes/compose-secrets-ro/RESULT.md, run results/20261120T214345/ (bash spikes/compose-secrets-ro/run.sh):
+        (a) env-sourced secret on a read-only service refused ('`file` is the sole supported option');
+        (b) writable root puts the value in the container layer (docker export finds it, also after stop);
+        (c) tmpfs /run/secrets + atomic `docker exec -i` delivery: 0600, 0 matches in inspect/config/export/events/Desktop logs,
+        nothing in the layer, memory.swap.max 0 with memswap_limit == mem_limit, lost on restart; naive delivery gave a full read
+        in 3 of 20 trials, atomic in 20 of 20; delivery after `up` fails `up` with health dependencies (exit 1), concurrent succeeds;
+        (d) file-sourced Compose secret: 0600, 0 value matches, source path in inspect, survives restart, works with `up`.
+        VM swaps to /var/lib/swap; tmpfs `noswap` rejected. Proposed ADR-0026: owner chooses A (= c, recommended) or C (= d).",
+      review: "deep-reviewer (Fable): round 1 changes (memory-only claim, atomicity, up lifecycle, option C unmeasured); revised",
+      note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used. Task id S1.spike…; the branch is
+        named 0/S0.spike.compose-secrets-ro for historical reasons." }
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG] }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
