@@ -1,0 +1,22 @@
+{
+  "variant": "d",
+  "host_source_mode": "600",
+  "host_source_dir_mode": "700",
+  "consumer": {
+    "uid": 1000,
+    "file_uid": 1000,
+    "mode": "0o600",
+    "length": 39,
+    "canary_prefix": true
+  },
+  "found": {
+    "inspect": 0,
+    "config": 0,
+    "layer_paths_below_run_secrets": 1,
+    "export": 0,
+    "events": 0,
+    "desktop_log_files": 0,
+    "inspect_shows_source_path": true
+  },
+  "file_after_restart": true
+}

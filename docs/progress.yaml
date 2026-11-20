@@ -161,34 +161,46 @@ tasks:
 
   # Stage 1 — stack on the Mac
   - { id: S1.spike.compose-secrets-ro, stage: 1, kind: spike, status: in_progress, needs: [],
-      result: "spikes/compose-secrets-ro/RESULT.md: Compose refuses environment-sourced secrets in read-only services
-        ('`file` is the sole supported option'); with a writable root the value is copied into the container layer (VM disk);
-        read-only + tmpfs /run/secrets (0700, service uid) + value via `docker exec -i` over stdin keeps every constraint
-        (0600, not in docker inspect, not on disk) but is lost on restart and must be re-delivered by `reader up`.
-        Needs a proposed amendment of ADR-0011/0023's delivery text (owner).",
-      note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used." }
+      result: "spikes/compose-secrets-ro/RESULT.md, run results/20261120T214345/ (bash spikes/compose-secrets-ro/run.sh):
+        (a) env-sourced secret on a read-only service refused ('`file` is the sole supported option');
+        (b) writable root puts the value in the container layer (docker export finds it, also after stop);
+        (c) tmpfs /run/secrets + atomic `docker exec -i` delivery: 0600, 0 matches in inspect/config/export/events/Desktop logs,
+        nothing in the layer, memory.swap.max 0 with memswap_limit == mem_limit, lost on restart; naive delivery gave a full read
+        in 3 of 20 trials, atomic in 20 of 20; delivery after `up` fails `up` with health dependencies (exit 1), concurrent succeeds;
+        (d) file-sourced Compose secret: 0600, 0 value matches, source path in inspect, survives restart, works with `up`.
+        VM swaps to /var/lib/swap; tmpfs `noswap` rejected. ADR-0026 (proposed): A (= c) chosen by the owner on 2026-11-20;
+        C (= d) rejected. Status flip to accepted is the owner's. Proposed owner control: a .claude/settings.json deny rule for direct
+        `docker exec` by the agent (anyone with the owner's Docker socket can read a consumer's file).",
+      review: "deep-reviewer (Fable): round 1 changes (memory-only claim, atomicity, up lifecycle, option C unmeasured);
+        round 2 changes (A's Docker-socket exposure, the A-vs-C difference, enforced control); revised",
+      note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used. Task id S1.spike…; the branch is
+        named 0/S0.spike.compose-secrets-ro for historical reasons." }
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton],
       note: "Obsolete under ADR-0026 (spikes/compose-secrets-ro; recorded from OPS-DEPLOY round 3): FR-CONFIG-14's wording
         that OPS-CLI declares `<name>: { environment: <VAR> }` Compose secrets, and `secret_env_var` itself. Secrets are
         files in a tmpfs /run/secrets written over docker exec; `secret_file_name` stays. Needs a paired spec + tests
         change later (H2); the coordinator schedules it." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
-      note: "From OPS-DEPLOY (round 2) and spikes/compose-secrets-ro: secrets are delivered after container start over
-        `docker exec -i` stdin into a tmpfs /run/secrets (umask 077, mode 0600), never as Compose secrets or env; values
-        are lost on restart, so OPS-CLI re-delivers after every start or restart and services wait for their file.
+      note: "From OPS-DEPLOY and ADR-0026 (option A): `reader up` stays running as a watcher and delivers secrets
+        concurrently with `docker compose up` and again on every observed container start (docker events start events, or
+        polling): `docker exec -i -u <service uid>` with `umask 077; cat > /run/secrets/.<name>.tmp && mv … <name>`, exit
+        code checked, value on stdin only. OPS-CLI decides whether `reader up` daemonises once the stack is healthy (the
+        live-check scripts call `reader up` and continue), how `reader down` stops the watcher, and guarantees that with
+        the watcher dead a restarted consumer stays unhealthy (fail closed) until the next `reader up`.
         DB password (owner, 2026-11-20): generated once, kept in the Keychain as `reader-ai/postgres`, delivered as
-        /run/secrets/db-password; POSTGRES_PASSWORD_FILE applies only at initdb, so it is never regenerated while
+        /run/secrets/db-password; the cluster password is set only at initdb, so it is never regenerated while
         `pgdata` exists, and a restore needs the same Keychain item. OPS-CLI also emits the in-memory override of
         OPS-DEPLOY VEC-DEPLOY-3 (fully expanded kernel-<user> services, their networks, api attachments)." }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: in_progress,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S1.SRV-CONFIG],
-      note: "spec draft, round 2 after deep-reviewer round 1 (spec/modules/OPS-DEPLOY.yaml, branch 1/S1.OPS-DEPLOY).
-        Depends on OPS-CLI (secret delivery over docker exec, the kernel-<user> override, db-password), OPS-SANDBOX
-        (kernel image and health command, stage 4), SRV-AGENT (agent-proxy image and provider egress allowlist, stage 5),
-        SRV-OBS (Rotel and the trace backend, stage 2), server modules (role health commands, api --bind, worker without
-        a listener). Owner answers 2026-11-20: stage-1 live check covers the four default-profile services (roadmap
-        edited in this branch); DB password from Keychain item reader-ai/postgres. Open owner items: ADR-0014
-        verified_by / roadmap line 224 rewording for per-kernel networks; ADR-0011/0023 delivery amendment (coordinator)." }
+      note: "spec draft, round 4 after deep-reviewer rounds 1–2 (spec/modules/OPS-DEPLOY.yaml, branch 1/S1.OPS-DEPLOY).
+        Aligned with ADR-0026 option A (owner, 2026-11-20). Depends on OPS-CLI (the watching `reader up`, atomic delivery,
+        the kernel-<user> override, db-password), OPS-SANDBOX (kernel image and health command, stage 4), SRV-AGENT
+        (agent-proxy image and provider egress allowlist, stage 5), SRV-OBS (Rotel and the trace backend, stage 2), server
+        modules (role health commands, api --bind, worker without a listener). Owner answers 2026-11-20: stage-1 live check
+        covers the four default-profile services (roadmap edited in this branch); DB password from Keychain item
+        reader-ai/postgres. Open owner items: ADR-0014 verified_by / roadmap line 224 rewording for per-kernel networks;
+        the proposed .claude/settings.json deny rules (ADR-0026). Approval waits for ADR-0026 and PR #22 (N1)." }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }

@@ -1,0 +1,15 @@
+{
+  "variant": "e",
+  "c_delivery_after_up": {
+    "up_exit": 1,
+    "seconds": 4
+  },
+  "c_delivery_concurrent_polling": {
+    "up_exit": 0,
+    "seconds": 3
+  },
+  "d_file_secret": {
+    "up_exit": 0,
+    "seconds": 2
+  }
+}
