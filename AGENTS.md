@@ -69,6 +69,8 @@ Complex work is always done with Claude Fable, through the `deep-reviewer` and `
 
 ## Checks before every PR
 
+`bash tools/ci-local.sh` runs the first four lines below, the same jobs as `.github/workflows/ci.yml`. While GitHub Actions cannot run on the owner's account, its PASS is the gate (owner, 2026-11-20).
+
 ```bash
 node tools/trace/check.mjs                              # T1–T9 (T9: docs/progress.yaml parses and is consistent)
 node tools/trace/guard-tests.mjs --base origin/main     # P7
@@ -83,7 +85,7 @@ bash e2e/live/stage-N.sh                                # for the stage you touc
 AGENTS.md, CLAUDE.md  agent rules (this file; CLAUDE.md adds Claude Code specifics)
 docs/                 architecture.md, roadmap.md, progress.yaml (run state), adr/, research/
 spec/modules/         module specs (YAML); template spec/_template.yaml; fixtures in spec/fixtures/
-server/               Python 3.13: api, worker, mcp, host CLI `reader`; tests in server/tests/
+server/               Python 3.14 (ADR-0020): api, worker, mcp, host CLI `reader`; tests in server/tests/
 web/                  React + TypeScript + Vite + Storybook; tests *.test.ts(x)
 sandbox/              kernel image (ADR-0014)
 deploy/               compose.yaml, Caddyfile, Rotel config, reader.example.yaml

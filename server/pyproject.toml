@@ -2,7 +2,7 @@
 name = "reader"
 version = "0.0.0"
 description = "reader-ai server: api, worker, mcp and the host CLI `reader`"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.14,<3.15"
 dependencies = []
 
 # Entry points `reader` (host CLI) and `reader-server --role api|worker|mcp` are added with the
@@ -23,7 +23,7 @@ package = false
 
 [tool.ruff]
 line-length = 110
-target-version = "py313"
+target-version = "py314"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
@@ -35,7 +35,7 @@ ignore = []
 
 [tool.mypy]
 strict = true
-python_version = "3.13"
+python_version = "3.14"
 mypy_path = "src"
 warn_unreachable = true
 

@@ -1,0 +1,75 @@
+{
+  "exit_code": 0,
+  "peak_mem_mib": 5642.24,
+  "docker_vm_cpus": 4,
+  "mode": "ocr",
+  "dpi": 200,
+  "lang": [
+    "ru",
+    "en"
+  ],
+  "pages": [
+    {
+      "page": 30,
+      "seconds": 46.4,
+      "chars": 2718,
+      "char_accuracy": 0.9628
+    },
+    {
+      "page": 95,
+      "seconds": 36.4,
+      "chars": 1312,
+      "char_accuracy": 0.6784
+    },
+    {
+      "page": 170,
+      "seconds": 40.7,
+      "chars": 2353,
+      "char_accuracy": 0.9703
+    },
+    {
+      "page": 260,
+      "seconds": 34.4,
+      "chars": 2496,
+      "char_accuracy": 0.9515
+    },
+    {
+      "page": 320,
+      "seconds": 53.8,
+      "chars": 2682,
+      "char_accuracy": 0.956
+    },
+    {
+      "page": 420,
+      "seconds": 67.5,
+      "chars": 1869,
+      "char_accuracy": 0.8534
+    },
+    {
+      "page": 520,
+      "seconds": 37.3,
+      "chars": 1874,
+      "char_accuracy": 0.8863
+    },
+    {
+      "page": 600,
+      "seconds": 35.4,
+      "chars": 2611,
+      "char_accuracy": 0.9525
+    },
+    {
+      "page": 700,
+      "seconds": 34.7,
+      "chars": 1665,
+      "char_accuracy": 0.7093
+    },
+    {
+      "page": 850,
+      "seconds": 28.8,
+      "chars": 1621,
+      "char_accuracy": 0.7791
+    }
+  ],
+  "char_accuracy_mean": 0.87,
+  "char_accuracy_min": 0.6784
+}
