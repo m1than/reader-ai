@@ -33,7 +33,7 @@ def test_network_membership() -> None:
     assert members["sb-pair-1"] == {"api", "kernel-pair-1"}
     assert members["sb-user-ivan"] == {"api", "kernel-user-ivan"}
     front = model["networks"]["front"]
-    assert front["ipam"]["config"] == [{"subnet": "10.230.1.0/24"}]
+    assert front["ipam"]["config"] == [{"subnet": "10.230.1.0/24", "ip_range": "10.230.1.128/25"}]
     assert model["services"]["api"]["networks"]["front"]["ipv4_address"] == API_FRONT
 
 

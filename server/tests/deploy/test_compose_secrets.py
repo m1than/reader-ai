@@ -8,6 +8,7 @@ from .conftest import (
     COMPOSE,
     DEPLOY,
     SECRET_CONSUMERS,
+    SERVER_ROLES,
     all_renders,
     full_render,
     requires_docker_cli,
@@ -79,7 +80,7 @@ def test_secret_tmpfs_on_exactly_the_consumers() -> None:
 
 def test_health_dependencies_on_postgres() -> None:
     services = full_render()["services"]
-    for name in ("api", "worker", "mcp"):
+    for name in SERVER_ROLES:
         assert services[name]["depends_on"]["postgres"]["condition"] == "service_healthy", name
 
 
@@ -100,21 +101,46 @@ def test_entrypoint_wrappers_wait_for_their_file() -> None:
     assert "/run/secrets/" in waiter
 
 
+def test_wrappers_exit_on_sigterm() -> None:
+    for name in ("wait-for-secret.sh", "reader-postgres-entrypoint.sh"):
+        path = DEPLOY / "images" / name
+        assert path.exists(), name
+        assert "trap 'exit 143' TERM" in path.read_text(), name
+
+
+# start_period 60s, as Compose renders it
+HEALTH_TIMING = {"interval": "2s", "timeout": "2s", "retries": 3, "start_period": "1m0s"}
+
+
 def test_every_service_has_a_healthcheck() -> None:
     services = full_render()["services"]
     for name, svc in services.items():
         assert (svc.get("healthcheck") or {}).get("test"), name
-    assert "pg_isready" in " ".join(services["postgres"]["healthcheck"]["test"])
-    assert "2019" in " ".join(services["caddy"]["healthcheck"]["test"])
-    for role in ("api", "worker", "mcp"):
-        test = services[role]["healthcheck"]["test"]
-        assert test[1:] == ["reader-server", "--role", role, "--healthcheck"], role
+    expected = {
+        "postgres": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
+        "caddy": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"],
+    } | {role: ["CMD", "reader-server", "--role", role, "--healthcheck"] for role in SERVER_ROLES}
+    for name, test in expected.items():
+        assert services[name]["healthcheck"]["test"] == test, name
+    for name in ("postgres", *SERVER_ROLES):
+        health = services[name]["healthcheck"]
+        assert {k: health.get(k) for k in HEALTH_TIMING} == HEALTH_TIMING, name
 
 
 def test_compose_source_has_no_interpolation() -> None:
     assert COMPOSE.exists()
     text = COMPOSE.read_text().replace("$$", "")
     assert "$" not in text, re.findall(r".{0,20}\$.{0,20}", text)
+
+
+def test_only_server_roles_have_environment() -> None:
+    for model in all_renders():
+        for name, svc in model["services"].items():
+            env = svc.get("environment") or {}
+            if name in SERVER_ROLES:
+                assert env == {"READER_CONFIG": "/etc/reader/reader.yaml"}, name
+            else:
+                assert not env, name
 
 
 def test_caddyfile_has_no_env_placeholders() -> None:

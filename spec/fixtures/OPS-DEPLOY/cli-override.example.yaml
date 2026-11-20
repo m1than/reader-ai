@@ -4,6 +4,17 @@
 # services (the base's static ones and this one) are equal to each other on every key except `networks`, and that one
 # of them equals FR-DEPLOY-8's literals after size normalisation (Compose renders 2g as 2147483648; tmpfs options are
 # compared as sets). There is no merge step in the test.
+# The override also binds the owner's reader.yaml read-only into api, worker and mcp, and only those (FR-DEPLOY-5);
+# compose.yaml sets READER_CONFIG to the target path. The source path is illustrative: OPS-CLI writes the real one.
+# `create_host_path: false`: a missing file fails the start instead of Docker creating a directory in its place.
+x-reader-config: &reader-config
+  type: bind
+  source: /Users/ivan/.config/reader-ai/reader.yaml
+  target: /etc/reader/reader.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+
 services:
   kernel-user-ivan:
     image: reader-kernel:local
@@ -27,6 +38,11 @@ services:
   api:
     networks:
       sb-user-ivan: {}
+    volumes: [*reader-config]
+  worker:
+    volumes: [*reader-config]
+  mcp:
+    volumes: [*reader-config]
 
 networks:
   sb-user-ivan:

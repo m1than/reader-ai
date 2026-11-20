@@ -1,8 +1,10 @@
 # @trace FR-DEPLOY-1, FR-DEPLOY-2, FR-DEPLOY-5, FR-DEPLOY-6, INV-DEPLOY-1, INV-DEPLOY-3
-# @trace INV-DEPLOY-6, INV-DEPLOY-7, INV-DEPLOY-9, INV-DEPLOY-10
-"""OPS-DEPLOY [config]: services by profile, images, volumes and mounts, ports, forbidden options."""
+# @trace INV-DEPLOY-6, INV-DEPLOY-7, INV-DEPLOY-9, INV-DEPLOY-10, VEC-DEPLOY-3
+"""OPS-DEPLOY [config]: services by profile, images and build inputs, volumes and mounts, ports, forbidden
+options."""
 
 import re
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,6 +13,8 @@ from .conftest import (
     COMPOSE,
     DEPLOY,
     PROFILE_SETS,
+    PROFILES,
+    SERVER_ROLES,
     all_renders,
     render,
     requires_docker_cli,
@@ -19,6 +23,7 @@ from .conftest import (
 pytestmark = requires_docker_cli
 
 DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
+TAGGED_DIGEST = re.compile(r"^[^@:]+:[^@:/]+@sha256:[0-9a-f]{64}$")
 LOCAL_IMAGES = {
     "reader-server:local", "reader-postgres:local", "reader-kernel:local", "reader-agent-proxy:local",
 }
@@ -54,18 +59,49 @@ def _third_party_images(model: dict[str, Any]) -> set[str]:
 def test_images_pinned_by_digest_in_compose() -> None:
     images = set().union(*(_third_party_images(m) for m in all_renders()))
     assert images, "no third-party image declared"
-    assert all(DIGEST.search(img) for img in images), images
+    assert all(TAGGED_DIGEST.match(img) for img in images), images
     assert not any(":latest" in img for img in images)
 
 
+def _dockerfiles() -> list[Path]:
+    """Every file under deploy/** named `Dockerfile` or `*.Dockerfile` (INV-DEPLOY-7)."""
+    return sorted(
+        p for p in DEPLOY.rglob("*") if p.is_file() and (p.name == "Dockerfile" or p.suffix == ".Dockerfile")
+    )
+
+
+def _instructions(path: Path, keyword: str) -> list[list[str]]:
+    """Arguments of each `keyword` instruction, flags such as `--platform=` or `--chmod=` removed."""
+    lines = path.read_text().splitlines()
+    return [
+        [arg for arg in line.split()[1:] if not arg.startswith("--")]
+        for line in lines if line.split()[:1] and line.split()[0].upper() == keyword
+    ]
+
+
 def test_dockerfile_from_lines_pinned() -> None:
-    dockerfiles = sorted((DEPLOY / "images").glob("*.Dockerfile"))
-    assert dockerfiles, "no Dockerfile under deploy/images"
+    dockerfiles = _dockerfiles()
+    assert {p.name for p in dockerfiles} >= {"server.Dockerfile", "postgres.Dockerfile"}
     for path in dockerfiles:
-        lines = path.read_text().splitlines()
-        froms = [line.split()[1] for line in lines if line.upper().startswith("FROM ")]
+        froms = [args[0] for args in _instructions(path, "FROM")]
         assert froms, path
-        assert all(DIGEST.search(ref) for ref in froms), (path, froms)
+        assert all(TAGGED_DIGEST.match(ref) for ref in froms), (path, froms)
+        assert not any(":latest@" in ref for ref in froms), (path, froms)
+
+
+COPY_ALLOW_LIST = {
+    "server.Dockerfile": {"server/pyproject.toml", "server/src", "deploy/images/wait-for-secret.sh"},
+    "postgres.Dockerfile": {"reader-postgres-entrypoint.sh"},
+}
+
+
+def test_dockerfile_build_inputs_are_an_allow_list() -> None:
+    dockerfiles = _dockerfiles()
+    assert {p.name for p in dockerfiles} == set(COPY_ALLOW_LIST)
+    for path in dockerfiles:
+        assert not _instructions(path, "ADD"), path
+        sources = {src for args in _instructions(path, "COPY") for src in args[:-1]}
+        assert sources == COPY_ALLOW_LIST[path.name], (path.name, sources)
 
 
 def _mounts(model: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -82,15 +118,46 @@ def test_volumes_and_mounts() -> None:
     assert named["postgres"] == {"pgdata"}
     assert {n for n, vols in named.items() if "pgdata" in vols} == {"postgres"}
     assert {n for n, vols in named.items() if "blobs" in vols} == {"api", "worker"}
-    assert {n for n, b in binds.items() if b} == {"caddy"}
+    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES}  # server roles: the override's bind
     caddy_binds = {(m["target"], m.get("read_only", False)) for m in binds["caddy"]}
     assert caddy_binds == {("/srv/spa", True), ("/etc/caddy/Caddyfile", True)}
     labels = {
         name: (v.get("labels") or {}).get("org.reader-ai.backup") for name, v in model["volumes"].items()
     }
     assert labels == {
-        "pgdata": "include", "blobs": "include", "caddy_data": "exclude", "caddy_config": "include",
+        "pgdata": "include", "blobs": "include", "caddy_data": "exclude", "caddy_config": "exclude",
     }
+
+
+CONFIG_BIND = {
+    "type": "bind",
+    "source": "/Users/ivan/.config/reader-ai/reader.yaml",  # the fixture's illustrative path
+    "target": "/etc/reader/reader.yaml",
+    "read_only": True,
+    "bind": {"create_host_path": False},
+}
+
+
+def _binds(svc: dict[str, Any]) -> list[dict[str, Any]]:
+    return [m for m in svc.get("volumes") or [] if m["type"] == "bind"]
+
+
+def test_base_has_no_bind_on_server_roles() -> None:
+    for profiles in PROFILE_SETS:
+        services = render(profiles)["services"]
+        assert not any(_binds(services[r]) for r in SERVER_ROLES if r in services), profiles
+
+
+def test_override_binds_the_config_file_into_server_roles_only() -> None:
+    services = render(PROFILES, override=True)["services"]
+    with_config = {
+        name for name, svc in services.items()
+        if any(m["target"] == CONFIG_BIND["target"] for m in svc.get("volumes") or [])
+    }
+    assert with_config == set(SERVER_ROLES)
+    for role in SERVER_ROLES:
+        assert _binds(services[role]) == [CONFIG_BIND], role
+        assert services[role]["environment"] == {"READER_CONFIG": CONFIG_BIND["target"]}, role
 
 
 def test_caddy_volumes_only_in_caddy() -> None:
@@ -125,6 +192,13 @@ def test_no_docker_socket() -> None:
 
 FORBIDDEN_KEYS = ("network_mode", "cap_add", "volumes_from", "extra_hosts", "devices")
 HOST_NAMESPACES = ("pid", "ipc", "uts", "cgroup", "userns_mode")
+UNCONFINED = re.compile(r"(seccomp|apparmor)[=:]unconfined")  # current and legacy forms (INV-DEPLOY-10)
+
+
+def test_unconfined_pattern_covers_both_forms() -> None:
+    for opt in ("seccomp=unconfined", "seccomp:unconfined", "apparmor=unconfined", "apparmor:unconfined"):
+        assert UNCONFINED.search(opt), opt
+    assert not UNCONFINED.search("no-new-privileges:true")
 
 
 def test_forbidden_options() -> None:
@@ -133,9 +207,8 @@ def test_forbidden_options() -> None:
             assert not any(svc.get(k) for k in FORBIDDEN_KEYS), name
             assert not svc.get("privileged"), name
             assert all(svc.get(ns) != "host" for ns in HOST_NAMESPACES), name
-            opts = " ".join(svc.get("security_opt") or [])
-            assert "seccomp=unconfined" not in opts, name
-            assert "apparmor=unconfined" not in opts, name
+            opts = svc.get("security_opt") or []
+            assert not any(UNCONFINED.search(opt) for opt in opts), (name, opts)
 
 
 @pytest.mark.parametrize("profiles", PROFILE_SETS)

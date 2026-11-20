@@ -4,6 +4,8 @@
 # is empty. On later starts the variable stays unset, so a restart without `reader up` still starts the database
 # (the stage-1 live check verifies that the official entrypoint reads the variable on every start).
 set -eu
+# As PID 1 the shell ignores SIGTERM without a handler; exit at once while waiting (the exec below replaces it).
+trap 'exit 143' TERM
 if [ ! -s "$PGDATA/PG_VERSION" ]; then
   while [ ! -s /run/secrets/db-password ]; do
     sleep 1

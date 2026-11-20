@@ -1,7 +1,18 @@
 # reader-ai stack on the owner's Mac (spec/modules/OPS-DEPLOY.yaml). Started by `reader up` (OPS-CLI), which adds an
 # in-memory override (kernel-<user> services) and delivers secrets into the tmpfs /run/secrets of each consumer over
-# `docker exec` stdin (ADR-0026). This file holds no secret and no interpolation.
+# `docker exec` stdin (ADR-0026). This file holds no secret and no interpolation. The override also binds the owner's
+# reader.yaml read-only into the server roles at READER_CONFIG's path (FR-DEPLOY-5).
 name: reader
+
+# Health timing for postgres and the server roles (FR-DEPLOY-11): poll every 2 s instead of Docker's default 30 s, so
+# each `service_healthy` hop costs seconds against NFR-DEPLOY-1's 120 s; failures in the first 60 s do not count,
+# which covers initdb on the first start and the wait for secret delivery. Structural bounds, revised from the stage-1
+# live check.
+x-health: &health
+  interval: 2s
+  timeout: 2s
+  retries: 3
+  start_period: 60s
 
 x-kernel: &kernel
   image: reader-kernel:local
@@ -38,13 +49,15 @@ x-server: &server
   mem_limit: 1g
   memswap_limit: 1g
   restart: unless-stopped
+  environment:
+    READER_CONFIG: /etc/reader/reader.yaml
   depends_on:
     postgres:
       condition: service_healthy
 
 services:
   caddy:
-    image: caddy@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
     ports:
       - "127.0.0.1:443:443"
     volumes:
@@ -56,7 +69,8 @@ services:
     restart: unless-stopped
     networks: [edge, front]
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:2019/config/"]
+      # 127.0.0.1, not localhost: the admin endpoint listens on IPv4 loopback only, and busybox wget tries ::1 first.
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
 
   api:
     <<: *server
@@ -69,6 +83,7 @@ services:
       core: {}
       sb-pair-1: {}
     healthcheck:
+      <<: *health
       test: ["CMD", "reader-server", "--role", "api", "--healthcheck"]
 
   worker:
@@ -80,6 +95,7 @@ services:
       - blobs:/var/lib/reader/blobs
     networks: [core, agentnet, sb-verify, sb-agent]
     healthcheck:
+      <<: *health
       test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
 
   mcp:
@@ -88,6 +104,7 @@ services:
     command: ["reader-server", "--role", "mcp", "--bind", "0.0.0.0:8001"]
     networks: [front, core]
     healthcheck:
+      <<: *health
       test: ["CMD", "reader-server", "--role", "mcp", "--healthcheck"]
 
   postgres:
@@ -110,7 +127,9 @@ services:
       - pgdata:/var/lib/postgresql
     networks: [core]
     healthcheck:
-      test: ["CMD", "pg_isready", "-h", "/var/run/postgresql", "-U", "postgres"]
+      <<: *health
+      # TCP on 127.0.0.1: the entrypoint's temporary initdb server listens on the socket only, so it never looks healthy.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
 
   agent-proxy:
     image: reader-agent-proxy:local
@@ -150,6 +169,7 @@ networks:
     ipam:
       config:
         - subnet: 10.230.1.0/24
+          ip_range: 10.230.1.128/25 # dynamic addresses stay away from api's fixed 10.230.1.10
   core: { internal: true }
   agentnet: { internal: true }
   sb-verify: { internal: true }
@@ -160,4 +180,6 @@ volumes:
   pgdata: { labels: { org.reader-ai.backup: include } }
   blobs: { labels: { org.reader-ai.backup: include } }
   caddy_data: { labels: { org.reader-ai.backup: exclude } }
-  caddy_config: { labels: { org.reader-ai.backup: include } }
+  # Excluded: root-owned 0700, unreadable by OPS-CLI's hardened backup container; Caddy regenerates its autosave at
+  # start (ADR-0024).
+  caddy_config: { labels: { org.reader-ai.backup: exclude } }

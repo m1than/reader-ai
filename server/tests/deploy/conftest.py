@@ -1,8 +1,8 @@
 """Helpers for the OPS-DEPLOY [config] and [image] tests.
 
 [config] tests need only the docker CLI (`docker compose config` renders without a daemon); they skip when the
-CLI is absent. [image] tests need a running daemon and network access to the registry; they skip when
-`docker info` fails.
+CLI is absent. [image] tests need a running daemon; they skip when `docker info` fails. [image: registry]
+tests also query the remote registry and run only with READER_TEST_REGISTRY=1.
 Inputs that do not exist yet make a test fail on an assertion inside its body, never at collection.
 """
 
@@ -32,6 +32,7 @@ PROFILE_SETS: list[tuple[str, ...]] = [
 ]
 KERNEL_PREFIX = "kernel-"
 SECRET_CONSUMERS = {"postgres", "api", "worker", "mcp", "agent-proxy"}
+SERVER_ROLES = ("api", "worker", "mcp")
 
 requires_docker_cli = pytest.mark.skipif(shutil.which("docker") is None, reason="docker CLI not installed")
 

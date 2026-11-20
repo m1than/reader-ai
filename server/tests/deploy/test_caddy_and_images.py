@@ -66,6 +66,22 @@ def _walk(node: Any) -> list[dict[str, Any]]:
     return found
 
 
+def _path_upstreams(nodes: list[dict[str, Any]]) -> dict[str, set[str]]:
+    """Each route with a path matcher → the upstreams of the reverse proxies inside its handlers."""
+    mapping: dict[str, set[str]] = {}
+    for route in nodes:
+        paths = [p for m in route.get("match") or [] if isinstance(m, dict) for p in m.get("path", [])]
+        dials = {
+            u["dial"]
+            for n in _walk(route.get("handle", []))
+            if n.get("handler") == "reverse_proxy"
+            for u in n.get("upstreams", [])
+        }
+        for path in paths:
+            mapping.setdefault(path, set()).update(dials)
+    return mapping
+
+
 @requires_docker_daemon
 def test_caddy_adapt_in_pinned_image() -> None:
     caddy_image = render()["services"]["caddy"]["image"]
@@ -82,6 +98,7 @@ def test_caddy_adapt_in_pinned_image() -> None:
     proxies = [n for n in nodes if n.get("handler") == "reverse_proxy"]
     upstreams = {u["dial"] for n in proxies for u in n.get("upstreams", [])}
     assert upstreams == {"10.230.1.10:8000", "mcp:8001"}
+    assert _path_upstreams(nodes) == {"/api/*": {"10.230.1.10:8000"}, "/mcp": {"mcp:8001"}}
     assert any(n.get("handler") == "file_server" for n in nodes)
     issuers = {i.get("module") for n in nodes for i in n.get("issuers", []) if isinstance(i, dict)}
     assert "internal" in issuers

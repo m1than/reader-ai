@@ -28,6 +28,7 @@ LITERAL_TMPFS = {
     "/run/evcxr": {"exec", "nosuid", "nodev", "size=1g", "uid=1000"},
 }
 FORBIDDEN = ("secrets", "volumes", "ports", "environment")
+RENDER_KEYS = {"tmpfs", "networks", "command", "entrypoint"}  # command/entrypoint: null, added by Compose
 
 
 def _without_networks(svc: dict[str, Any]) -> dict[str, Any]:
@@ -52,6 +53,9 @@ def test_one_kernel_equals_the_spec_literals() -> None:
     svc = kernel_services(full_render())["kernel-verify"]
     assert {k: svc.get(k) for k in LITERAL} == LITERAL
     assert tmpfs_map(svc) == LITERAL_TMPFS
+    assert set(svc) == set(LITERAL) | RENDER_KEYS, set(svc) ^ (set(LITERAL) | RENDER_KEYS)
+    assert svc["command"] is None
+    assert svc["entrypoint"] is None
 
 
 def test_kernels_carry_no_secrets_volumes_ports_or_env() -> None:
