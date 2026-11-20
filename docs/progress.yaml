@@ -310,8 +310,10 @@ tasks:
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.SRV-JOBS-min],
       branch: V/V.SRV-INGEST-min,
-      note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none); awaits round 2, spikes/ingest-confine
-        (profile allow-list, CPU pages/min under the profile) and the owner's decision on ADR-0027.
+      note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
+        (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
+        non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line
+        is the owner's). Awaits round 2.
         spec/modules/SRV-INGEST.yaml (slice revision): host command `reader-ingest` copies the PDF into a private work
         dir and runs Docling natively on CPU as a deny-by-default sandbox-exec child (no network, no Unix sockets, no
         mach services), then streams the validated artifact over `docker exec -i <worker> python -I -m
