@@ -216,7 +216,7 @@ tasks:
         replaced by ADR-0026; tests server/tests/config/test_names.py and test_secret_ref.py drop secret_env_var cases;
         code: remove secret_env_var from server/src/reader/config/refs.py and __init__.py exports. OPS-CLI does not depend on it.",
       note: "green locally; deep-reviewer next. Branch 1/S1.SRV-CONFIG-adr26; spec stays approved (review field: amended for
-        ADR-0026, paired change, coordinator-scheduled). Tests 245 → 245 (secret_env_var assertions removed; one test added
+        ADR-0026, paired change, coordinator-scheduled). Tests 245 → 246 (secret_env_var assertions removed; one test added
         asserting the export is gone)." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
       note: "Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
