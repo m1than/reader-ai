@@ -81,7 +81,8 @@ tasks:
         Needs an exec tmpfs /run/evcxr and a per-kernel copy of the evcxr cache via a launcher (shared cache breaks concurrent kernels);
         per-kernel dirs leak 86 MiB each (13th kernel fails) (cleanup open for OPS-SANDBOX); --memory-swap must equal --memory.
         Proposed ADR-0014 amendment (exec tmpfs, writable cache, verification in its own container) goes to S0.exit." }
-  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: in_progress, needs: [S0.skeleton],
+  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
+      review: "deep-reviewer (Fable): approve, round 2",
       note: "input: the Bashir PDF on the owner's Mac (owner gave the path 2026-11-20; sha256 matches pilot/bashir/plan.yaml)",
       result: "Throughput PASS, fidelity FAIL (spikes/ingest-docling/RESULT.md). Docker CPU, 935 pages: 29.6 pages/min, peak 5.0 GiB;
         67 tables, 35 formula items. Fidelity on 20 pages (rule A: flattening is not a misread): 8/20 without the formula model;
