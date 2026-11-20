@@ -132,9 +132,9 @@ requirements:
       "reader.ingest.host.cli:main"`). It loads reader.yaml with SRV-CONFIG's `load_config` (exit 2 with its error text
       on a ConfigError) and finds the material by `materials[].id` (exit 2 `unknown_material`). It takes an exclusive
       non-blocking `flock` on `<data_dir>/ingest/locks/<material sha256>.lock` for the whole run; a held lock exits 3
-      `busy`. It creates `<work>` = `<data_dir>/ingest/work/<16 random hex>/` (0700) and records its own pid in
-      `<data_dir>/ingest/run/<work name>.pid`, outside the child's tree, and later the child's session id beside it.
-      It opens `materials[].file` with
+      `busy`. It creates `<work>` = `<data_dir>/ingest/work/<16 random hex>/` (0700). Outside the child's tree it writes
+      the run record `<data_dir>/ingest/run/<work name>.json` (0600) = `{material_sha256, work, child_sid,
+      child_start}`, filled in once the child has started (FR-INGEST-16). It opens `materials[].file` with
       `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, requires `fstat` to report a regular file, and copies it into
       `<work>/in/material.pdf` (0400) while computing its sha256 over the copied bytes. A mismatch with
       `materials[].sha256` exits 2 `sha256_mismatch` and runs nothing else. The child only ever reads the copy.
@@ -177,14 +177,15 @@ requirements:
       **Record and checks.**
       - Setup writes `setup.json` = `{converter_version, converter_source_sha256, requirements_lock_sha256,
         models_lock_sha256}`.
-      - `converter_source_sha256` is the sha256 over the sorted (relative path, file sha256) pairs of the source
-        files the converter imports: `reader/ingest/__init__.py`, `reader/ingest/artifact.py` and
-        `reader/ingest/host/**`. A wheel's hash is not reproducible across builds, so the source is hashed instead.
+      - `converter_source_sha256` is the sha256 over the sorted (relative path, file sha256) pairs of the `reader`
+        package source files in the converter's import closure. One function computes that closure, statically from
+        `reader.ingest.host.convert`, and both this hash and the imports test below use it. A wheel's hash is not
+        reproducible across builds, so the source is hashed instead.
       - A normal run recomputes that hash from the checkout. It exits 2 `setup_missing` or `setup_stale` when the
         venv, `setup.json` or any locked model file is absent, or when any recorded value differs from the
         checkout's.
-      **Unit test:** every module the converter imports, collected statically from `reader/ingest/host/**` and the
-      modules it imports, is satisfied by a distribution named in `requirements.lock` or by the stdlib.
+      **Unit test:** every third-party module in that same import closure is satisfied by a distribution named in
+      `requirements.lock`, and every other module is in the stdlib or the `reader` package.
       [host; unit for the checks]
   - id: FR-INGEST-4
     text: >-
@@ -325,8 +326,9 @@ requirements:
       - **Deadline before storage completes** (the final rename): receive removes its temporary directory, exits 1
         with `timeout`, and has written nothing (INV-INGEST-3).
       - **Deadline or database error after storage:** the content-addressed directory is valid and stays. It is never
-        deleted on a timeout or an error. Receive exits 1 with `enqueue_failed`. At most a `job_keys` row may exist
-        without a job, and the SRV-EVENTS sweep enqueues it (FR-EVENTS-15). A re-run of `reader-ingest` is
+        deleted on a timeout or an error. Receive exits 1 with `enqueue_failed`. What may exist beyond the directory
+        is at most the key's `job_keys` row and its job; a key row left without a job is enqueued by the SRV-EVENTS
+        sweep (FR-EVENTS-15). A re-run of `reader-ingest` is
         idempotent: same artifact id, existing directory verified and kept, enqueue returns the key's state.
       **Stream checks.** It reads the tar from stdin in stream mode with a strict reader:
       - only ustar regular-file headers, in the order manifest, spans, outline;
@@ -419,14 +421,32 @@ requirements:
       [db]
   - id: FR-INGEST-16
     text: >-
-      `reader-ingest` removes `<work>` and its pid file on every exit path:
+      `reader-ingest` removes `<work>` and its run record on every exit path:
       - success, and any error code;
       - SIGINT and SIGTERM, which are handled: the child's session gets SIGTERM, then SIGKILL after 10 s;
       - the 4 h child timeout.
-      At start, once it holds the material lock, every work directory and pid record left for that material is stale.
-      A free lock proves that no live run owns them, whatever pids the files name. For each stale record it first kills
-      the recorded child session (`killpg` with SIGKILL, ignoring "no such process"), then removes the work directory
-      and the record. The artifact holds material text, so it never stays on the host. [unit]
+      **Run record.** Once the child has started, the record holds:
+      - `child_sid`: the child's session id, which equals its pid because it leads a new session;
+      - `child_start`: the child's start time, read with `ps -o lstart= -p <pid>` (no new dependency).
+      **Stale cleanup at start.**
+      - Once it holds the material lock, every run record whose `material_sha256` is this material's is stale. A free
+        lock proves that no live run of this material owns it.
+      - Records of other materials are never read for cleanup, signalled or removed; their own runs clean them under
+        their own locks.
+      For each stale record of this material:
+      - **Kill only a verified process.** `killpg(child_sid, SIGKILL)` is sent only if all three hold:
+        - a process with that pid is alive;
+        - its start time from `ps -o lstart=` equals `child_start`;
+        - its cwd, from `lsof -a -d cwd -p <pid> -Fn`, is the record's `work` directory, compared as realpaths.
+        Otherwise nothing is signalled, because the id may have been reused by an unrelated process.
+      - **Then** remove the record's work directory, if it lies under `<data_dir>/ingest/work/`, and the record.
+      The artifact holds material text, so it never stays on the host.
+      **Unit cases:**
+      - a record whose id now belongs to another process (different start time or cwd) is not signalled, and its work
+        directory and record are removed;
+      - a record of another material is left untouched;
+      - a matching record has its session killed, and its directory and record removed.
+      [unit]
   - id: FR-INGEST-17
     text: >-
       Span ids and frozen versions (coordinator decision, 2026-11-21):
@@ -483,8 +503,8 @@ invariants:
     text: >-
       A rejected receive, or one whose deadline comes before storage completes, changes nothing: no file or directory
       under `<BLOBS_DIR>/ingest/` other than its own temporary directory, which it removes; no `job_keys` row; no
-      procrastinate job. A deadline or database error after storage (`enqueue_failed`) leaves only the valid stored
-      directory, plus at most a `job_keys` row without a job. The stored directory is never deleted, and a re-run then
+      procrastinate job. A deadline or database error after storage (`enqueue_failed`) leaves the valid stored
+      directory, plus at most the key row and its job. The stored directory is never deleted, and a re-run then
       reaches exactly one import.
       **Covered:**
       - each rejection code;
