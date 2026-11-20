@@ -20,7 +20,7 @@ The roadmap (docs/roadmap.md, "Two budget facts", item 2, line 20) says CI has n
 | --- | --- |
 | `docker run -e VAR` copies the value into `Config.Env`, readable through `docker inspect` while the container runs; also in `/proc/<pid>/environ` and in the host `docker` process's environment | finding 2 |
 | bootstrap's check for `CLAUDE_CODE_OAUTH_TOKEN` keeps failing in the agent's shell, "because the variable does not reach the agent's commands". The owner stored the token in the Keychain item `reader-ai/claude-oauth-token`, which the spike's runner read successfully | progress.yaml S0.owner.machine; agent-sdk-container RESULT.md |
-| The owner allowed Keychain reads for these spike runners only: agent-sdk-container (progress.yaml on main), compile-cost and trace-backend (branch `0/S0.spike.compile-cost` @ 582f326, until it lands) | progress.yaml |
+| The owner allowed Keychain reads for these spike runners only: agent-sdk-container, compile-cost and trace-backend ("allow keychain for compile-cost and trace-backend", 2026-11-20) | progress.yaml on main, task notes of S0.spike.agent-sdk-container and S0.spike.compile-cost |
 
 ## Options
 
@@ -54,4 +54,4 @@ The roadmap (docs/roadmap.md, "Two budget facts", item 2, line 20) says CI has n
 
 - None. The owner answered on 2026-11-20, in chat: **yes**, an agent-run `reader up` may resolve the Keychain item for stage live checks, and the agent itself never reads it. Two AGENTS.md edits follow:
   - **Applied** on branch `0/S0.exit-adr-drafts`: "The owner's machine", the provider credential is the Keychain item `reader-ai/claude-oauth-token`, referenced as `secret://keychain/reader-ai/claude-oauth-token`.
-  - **Pending, the owner's edit:** a new line under "Secrets": "The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items." The agent's own edit of this secrets rule was refused by the auto-mode classifier ("Undermining Oversight"), so the owner applies it.
+  - **Added by the owner, 2026-11-20:** a new line under "Secrets": "The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items." The agent's own edit of this secrets rule had been refused by the auto-mode classifier ("Undermining Oversight"), so the owner made it himself.

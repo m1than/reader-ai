@@ -3,7 +3,7 @@ id: ADR-0022
 title: Kernel sandbox amendment — exec tmpfs and per-kernel evcxr cache with cleanup, enforced memory, a declared set of static kernel services with one principal or session each
 status: proposed
 date: 2026-11-20
-verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; routes match the declared set (api relay → kernel-<user>, kernel-pair-*; worker → kernel-verify, kernel-agent; nothing else); a session waits when the pair pool is exhausted; on a shared service (kernel-verify, kernel-agent, kernel-pair-*) a file in /home/lab and in /run/evcxr and a background process left by session 1 are absent in session 2; two worker jobs for different users never hold kernel-agent or kernel-verify at the same time; no service mounts the Docker socket; all of it re-run on python:3.14-slim-trixie"
+verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; routes match the declared set (api relay → kernel-<user>, kernel-pair-*; worker → kernel-verify, kernel-agent; nothing else); a session waits when the pair pool is exhausted; on a shared service (kernel-verify, kernel-agent, kernel-pair-*) a file in /home/lab and in /run/evcxr and a background process left by session 1 (including one that tries to survive the reset: detached, ignoring SIGTERM) are absent in session 2, also after a crashed worker or an abandoned session; the caller refuses a service whose start nonce did not change; two worker jobs for different users never hold kernel-agent or kernel-verify at the same time; no service mounts the Docker socket; all of it re-run on python:3.14-slim-trixie"
 revisit_when: "More than ≈ 12 concurrent Rust kernels are needed in one container (1,024 MiB tmpfs ÷ ≈ 85 MiB per kernel); or evcxr gains a read-only cache or an exec-free cell loader"
 supersedes: []
 ---
@@ -57,7 +57,8 @@ This amends ADR-0014's "Process", "Resources" and "Network" rows.
 - **Reset between principals, without a Docker socket:**
   - At the end of a run or session, the gateway process exits.
   - The service's restart policy brings up a fresh container: empty tmpfs (`/home/lab`, `/tmp`, `/run/evcxr`) and no leftover processes.
-  - The worker or the api relay waits for the restarted service to report healthy before handing it to the next principal.
+  - The worker or the api relay waits for the restarted service before handing it to the next principal. It confirms a **new container instance**, a changed start nonce that the container writes at boot, not just "healthy", and fails closed if the nonce did not change.
+  - The reset is tied to **every hand-off**, including a crashed worker or an abandoned session. The holder's lease expires, and the next caller forces the gateway exit before taking the service. A service is never handed over without a reset.
 - **Memory budget:** each `kernel-<user>` carries its own 2 GiB limit, against the Docker VM's 11.6 GiB. Limits are not reservations. The expected count is the owner plus a few partners.
 - **Routes:**
   - the api relay reaches `kernel-<user>` and `kernel-pair-*`;
@@ -75,6 +76,7 @@ This amends ADR-0014's "Process", "Resources" and "Network" rows.
 - **A deliberate weakening of ADR-0014:** any kernel can drop and run a native binary in `/run/evcxr`. The practical loss is small: rustc, cc, ld and Python's `ctypes` are in the image anyway, and caps, no-new-privileges and seccomp hold (reviewer: `CapEff=0`, `NoNewPrivs=1`, `Seccomp=2`).
 - **Hypotheses:**
   - the sweeping launcher frees every dead kernel's directory: measured by the `verified_by` tests;
+  - reset by gateway exit and restart policy gives the next principal a clean container (empty tmpfs, no surviving process, a new start nonce) after every hand-off: the leftover test in `verified_by`;
   - the numbers hold on 3.14 and trixie: the re-run.
 - **Memory:** peak 1.0 GiB warm and 1.4 GiB cold with up to two Rust kernels (`results/*.json`). More concurrent Rust kernels need a larger limit, or fewer kernels per container.
 - **Agent sandbox:** the agent sandbox and the provider credential are decided separately, in ADR-0025. `kernel-agent` has no route to `agent-proxy`.

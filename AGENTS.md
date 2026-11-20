@@ -40,6 +40,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - Every test file contains `@trace <ID>`; IDs come only from specs.
 - **Secrets never enter the repository, logs, traces, notebooks, prompts or your context.**
   - Never read `~/Developer/.token_tg_bot`, `.env` files or Keychain items.
+  - The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items (owner, 2026-11-20; ADR-0023).
   - Never print environment variables.
   - Reference secrets as `secret://…` (ADR-0011).
 - Copyrighted source material is never committed. Pilots reference it by sha256.
