@@ -4,8 +4,18 @@
 # Comparison is INV-DEPLOY-8's equality. The test loads VEC-CLI-1 from /tmp/reader-ai-test/reader.yaml; the expected
 # bind source is that path after `Path.resolve(strict=True)` (on macOS /tmp is a symlink, so it becomes
 # /private/tmp/reader-ai-test/reader.yaml), and the test substitutes the resolved form for the literal below on api,
-# worker and mcp (FR-CLI-4). A further case: a config path containing `$` makes `up` refuse before any `docker compose`
-# call. No secrets.
+# worker and mcp (FR-CLI-4). Only the bind is added: compose.yaml sets READER_CONFIG statically (OPS-DEPLOY FR-DEPLOY-5).
+# The `x-reader-config` anchor mirrors VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065); the comparison covers `services`
+# and `networks`, after YAML alias expansion, and ignores top-level `x-` fields. A further case: a config path
+# containing `$` makes `up` refuse before any `docker compose` call. No secrets.
+x-reader-config: &reader-config
+  type: bind
+  source: /tmp/reader-ai-test/reader.yaml # equal to OPS-DEPLOY's VEC-DEPLOY-3
+  target: /etc/reader/reader.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+
 services:
   kernel-user-ivan:
     image: reader-kernel:local
@@ -49,20 +59,11 @@ services:
     networks:
       sb-user-ivan: {}
       sb-user-anna: {}
-    volumes:
-      - { type: bind, source: /tmp/reader-ai-test/reader.yaml, target: /etc/reader/reader.yaml, read_only: true }
-    environment:
-      READER_CONFIG: /etc/reader/reader.yaml
+    volumes: [*reader-config]
   worker:
-    volumes:
-      - { type: bind, source: /tmp/reader-ai-test/reader.yaml, target: /etc/reader/reader.yaml, read_only: true }
-    environment:
-      READER_CONFIG: /etc/reader/reader.yaml
+    volumes: [*reader-config]
   mcp:
-    volumes:
-      - { type: bind, source: /tmp/reader-ai-test/reader.yaml, target: /etc/reader/reader.yaml, read_only: true }
-    environment:
-      READER_CONFIG: /etc/reader/reader.yaml
+    volumes: [*reader-config]
 
 networks:
   sb-user-ivan:
