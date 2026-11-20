@@ -1,0 +1,53 @@
+{
+  "docker_run_wall_s": 4.45,
+  "model": "claude-haiku-5-5",
+  "mode": "tools",
+  "marks_s": {
+    "init": 0.985,
+    "first_token": 2.891,
+    "result": 2.993
+  },
+  "text_deltas": 5,
+  "answer_ok": true,
+  "answer": "aarch64\n1000\ntouch: cannot touch '/probe-root': Read-only file system\nsandbox-ok",
+  "answer_chars": 80,
+  "is_error": false,
+  "total_cost_usd": 0.00048384000000000003,
+  "usage": {
+    "input_tokens": 4,
+    "cache_creation_input_tokens": 194,
+    "cache_read_input_tokens": 23024,
+    "output_tokens": 167,
+    "output_tokens_details": {
+      "thinking_tokens": 0
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 194,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 39,
+        "cache_read_input_tokens": 11512,
+        "cache_creation_input_tokens": 194,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 194
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "duration_ms": 2225,
+  "duration_api_ms": 2702,
+  "num_turns": 2
+}
