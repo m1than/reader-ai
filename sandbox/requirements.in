@@ -1,0 +1,4 @@
+# Top-level Python packages of the kernel image (OPS-SANDBOX FR-SANDBOX-1). The versions are the ones the
+# kernel-roundtrip spike verified. Regenerate the hash-pinned lock with `bash sandbox/lock.sh`.
+jupyter_kernel_gateway==3.0.1
+ipykernel==7.4.0

@@ -294,9 +294,15 @@ tasks:
       note: "multilingual-e5-small (spike embeddings-local; v2 benchmark pending)" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "specs revised after deep-reviewer rounds 1 (B1–B8) and 2 (N1 env rule, N2 signals, router move); await
-        round 3 (OPS-SANDBOX + SRV-KERNEL, python3 only, ADR-0022; branch V/V.KERNEL-min). Cross-spec: SRV-AUTH's app
-        factory includes routers from a declared list naming reader.kernels.routes" }
+      note: "Branch V/V.KERNEL-min. Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21).
+        OPS-SANDBOX approved; green locally, code review next: 24 tests in server/tests/sandbox (all pass; [image] tests
+        build reader-kernel:local and run it with the x-kernel flags on throwaway --internal networks). Measured:
+        image 404,228,564 bytes (docker image inspect .Size; vs 1.91 GB for the spike's 3-kernel image); KG 3.0.1 +
+        ipykernel 7.4.0 run on python:3.14-slim-trixie (lock: 80 pinned packages, all binary wheels); 4 idle python3
+        kernels 248 MiB; reset round trip 1.12–1.20 s (3 resets, 11 s apart); exit with 50 idle connections held:
+        process gone 0.11 s after the 202. SRV-KERNEL stays draft until SRV-AUTH merges (its Red needs the app and
+        session layers). Cross-spec: SRV-AUTH's app factory includes routers from a declared list naming
+        reader.kernels.routes" }
   - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
       note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }

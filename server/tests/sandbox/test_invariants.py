@@ -133,7 +133,7 @@ import json, os
 paths = ["/home/lab/m", "/tmp/m", "/run/evcxr/m", "/dev/shm/m", "/dev/mqueue/m"]
 alive = []
 for pid in os.listdir("/proc"):
-    if pid.isdigit():
+    if pid.isdigit() and pid != str(os.getpid()):
         try:
             if b"survivor-marker" in open(f"/proc/{pid}/cmdline", "rb").read():
                 alive.append(pid)
