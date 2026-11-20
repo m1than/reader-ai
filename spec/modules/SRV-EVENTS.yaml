@@ -2,26 +2,25 @@
 #
 # The roadmap gives SRV-EVENTS both `server/src/reader/events/**` and `server/src/reader/jobs/**`. This revision
 # specifies only the jobs half, the part the slice needs (ingest, compile and embedding jobs). The stage-2 revision
-# of this same spec adds the event half (see `defers`) with new tables only: no data migration of the job tables.
+# of this same spec adds the event half (see `defers`) with new tables only: no data migration of the job table.
 #
 # Queue: procrastinate 3.12.0 (ADR-0006: "Postgres queue (FOR UPDATE SKIP LOCKED, LISTEN/NOTIFY wake-up) through
-# procrastinate"). Fetch, LISTEN/NOTIFY, retry scheduling, worker heartbeats (every 10 s) and stalled-worker detection
-# (30 s without a heartbeat) are procrastinate's (REF-EVENTS-2, -3). This module adds what procrastinate lacks:
-#   - per-key state: procrastinate's `queueing_lock` is unique only among `todo` jobs and its `lock` only among `doing`
-#     jobs (REF-EVENTS-4), so neither stops a second run after success, and a new procrastinate job restarts its
-#     attempt count. Two tables of this module, `job_keys` (args and the per-key attempt count) and `job_outcomes`
-#     (the first terminal outcome), carry the per-key truth; procrastinate's tables carry delivery only.
-#   - a declared job registry, payload validation and the "no secret in a payload" rule;
-#   - the sweep: stalled-job recovery and reconciliation of procrastinate status against `job_outcomes`.
+# procrastinate"). procrastinate delivers: fetch, LISTEN/NOTIFY, scheduled start (`schedule_in`), worker heartbeats
+# (every 10 s) and stalled-worker detection (30 s without a heartbeat) (REF-EVENTS-2, -3). Every procrastinate job is
+# single-shot: procrastinate never retries (no RetryStrategy, `max_attempts=None`). This module is the one judge of
+# retries, attempts and outcomes, and keeps them per key in one table, `job_keys` (FR-EVENTS-11), because
+# procrastinate's `queueing_lock` is unique only among `todo` jobs and its `lock` only among `doing` jobs
+# (REF-EVENTS-4): neither stops a second run after success, and each new procrastinate job starts at 0 attempts.
 #
-# The key lock. Every read-then-write of a key's state (run, outcome write, sweep, requeue) happens inside a Postgres
-# transaction holding `pg_advisory_xact_lock(lock_id(key))` (FR-EVENTS-13). A running job holds it for its whole run,
-# so a key lock that cannot be taken proves a live session is running that key; Postgres releases it when the
-# session ends, including when the worker process is killed and its connection closes.
+# The key lock. Every read-then-write of a key's state by a worker, the sweep or `requeue_dead` happens inside a
+# Postgres transaction holding the key's advisory lock (FR-EVENTS-13). A running job holds it for its whole run, so a
+# key lock that cannot be taken means a live session is running that key. Postgres releases it when the session ends,
+# including when the worker process is killed and the kernel closes its connection. `enqueue` never takes it and
+# never waits (FR-EVENTS-3).
 #
-# Drivers (owner note below): asyncpg for SQLAlchemy (ADR-0006), psycopg 3 inside procrastinate only. Enqueue therefore
-# commits on procrastinate's connection, independently of any caller transaction (FR-EVENTS-3); atomic enqueue with a
-# caller's state change is deferred to the stage-2 outbox.
+# Drivers (owner note below): asyncpg for SQLAlchemy (ADR-0006), psycopg 3 inside procrastinate only. Enqueue commits
+# independently of any caller transaction (FR-EVENTS-3); atomic enqueue with a caller's state change is deferred to the
+# stage-2 outbox.
 #
 # ADR status: ADR-0006, ADR-0007 and ADR-0018 are `proposed`; this spec follows their text as the current design, as
 # the owner directed for the proposed stage-0 ADRs. ADR-0020 is accepted.
@@ -31,16 +30,17 @@
 #   - `version_locations` is computed at start (Alembic does not glob): every existing `server/src/reader/*/migrations`
 #     directory, plus procrastinate's shipped `procrastinate/contrib/alembic/versions` (located through the installed
 #     package). Migration runs `alembic upgrade heads`; readiness compares the database against all heads.
-#   - SRV-AUTH's owner_id invariant exempts the system tables that other specs declare as such: `job_keys`,
-#     `job_outcomes` and procrastinate's `procrastinate_*` tables are system tables (jobs are server work, not user data;
-#     a job's owner, when one exists, is a field of its `args`).
-#   - SRV-AUTH's migration advisory lock uses a namespace other than this module's (FR-EVENTS-13).
+#   - The migration advisory lock is session-level (`pg_advisory_lock`), not transaction-level, because procrastinate's
+#     revisions commit inside `autocommit_block`; and it uses a namespace other than this module's (FR-EVENTS-13).
+#   - SRV-AUTH's owner_id invariant exempts the system tables other specs declare: `job_keys` and procrastinate's
+#     `procrastinate_*` tables (jobs are server work, not user data; a job's owner, when one exists, is a field of its
+#     `args`).
 #   - `reader-server --role worker` calls `reader.jobs.worker.run(settings)` (FR-EVENTS-9) and nothing else.
 #
 # Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
 
 id: SRV-EVENTS
-title: Job queue on procrastinate with per-key idempotent outcomes, declared job kinds and a reconciling sweep (slice subset)
+title: Job queue on procrastinate with per-key attempts and outcomes, declared job kinds and a reconciling sweep (slice subset)
 status: draft
 approved_by: null
 approved_at: null
@@ -48,7 +48,7 @@ layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer round 1 (2026-11-20): changes — procrastinate integration seams; revised per coordinator decisions 1–11"
+review: "deep-reviewer round 1 (2026-11-20): changes (procrastinate seams); round 2: changes (seams the revision added) — revised per coordinator decisions 1–6: single-shot procrastinate jobs, per-key reconcile, non-blocking enqueue, one table"
 
 paths:
   - server/src/reader/jobs/**
@@ -62,16 +62,16 @@ normative:
     title: "procrastinate 3.12.0 (PyPI; requires Python >= 3.11; async connector on psycopg 3; extra `alembic` ships revisions procrastinate_0000 … procrastinate_0043, branch label `procrastinate`)"
     url: https://pypi.org/project/procrastinate/3.12.0/
   - id: REF-EVENTS-3
-    title: "procrastinate — Retry stalled jobs (heartbeat every 10 s; stalled after 30 s without one; get_stalled_jobs, retry_job)"
+    title: "procrastinate — Retry stalled jobs (heartbeat every 10 s; stalled after 30 s without one; get_stalled_jobs)"
     url: https://procrastinate.readthedocs.io/en/stable/howto/production/retry_stalled_jobs.html
   - id: REF-EVENTS-4
     title: "procrastinate 3.12.0 schema.sql — job statuses; lock_mode (default `ordered`); partial unique indexes: queueing_lock WHERE status = 'todo', lock WHERE status = 'doing'"
     url: https://github.com/procrastinate-org/procrastinate/blob/3.12.0/procrastinate/sql/schema.sql
   - id: REF-EVENTS-5
-    title: "procrastinate 3.12.0 retry.py — RetryStrategy: a job is not retried when `job.attempts >= max_attempts` (attempts start at 0)"
-    url: https://github.com/procrastinate-org/procrastinate/blob/3.12.0/procrastinate/retry.py
+    title: "procrastinate 3.12.0 worker.py — a job cancelled at shutdown or by abort ends `aborted`; log records carry `extra={'job': {... 'task_kwargs', 'call_string' ...}}`"
+    url: https://github.com/procrastinate-org/procrastinate/blob/3.12.0/procrastinate/worker.py
   - id: REF-EVENTS-6
-    title: "PostgreSQL 18 — advisory locks: one bigint key space and the two-int4 key space do not overlap; xact locks release at transaction end"
+    title: "PostgreSQL 18 — advisory locks: one bigint key space and the two-int4 key space do not overlap; xact locks release at transaction end, session locks at session end"
     url: https://www.postgresql.org/docs/18/explicit-locking.html#ADVISORY-LOCKS
   - id: REF-EVENTS-7
     title: "Docker Compose — `docker compose stop` default timeout 10 s before SIGKILL"
@@ -82,9 +82,10 @@ bounds:
   - { name: heartbeat interval, value: "10 s", kind: "library default (REF-EVENTS-3), not tuned" }
   - { name: stalled after, value: "30 s without heartbeat", kind: "library default (REF-EVENTS-3), not tuned" }
   - { name: sweep period, value: "every minute, plus once at worker start", kind: "structural: cron granularity" }
-  - { name: recovery bound, value: "≤ the stalled job's timeout_s + 60 s + 30 s", kind: "derived: a killed job is seen stalled after 30 s, the next sweep runs within 60 s; a sweep that finds the key lock held waits for the live holder, which ends within timeout_s" }
-  - { name: default max_attempts (runs per key), value: 3, kind: "structural: retries are for transient faults only (FR-EVENTS-6); a deterministic failure retried more only repeats spend (compile-cost spike: 0 of 2 runs converged)" }
-  - { name: default backoff, value: "exponential_wait 5 s → waits 5 s, 25 s", kind: "structural: two retries span about 30 s; SRV-AGENT replaces it with the provider's Retry-After" }
+  - { name: reconcile age, value: "job_keys.updated_at older than 60 s", kind: "structural: far above the milliseconds between FR-EVENTS-3's key commit and its defer, so the sweep never races a live enqueue" }
+  - { name: recovery bound, value: "≤ max over kinds of timeout_s + 60 s + 30 s", kind: "derived: a killed worker is stalled after 30 s; the next sweep runs within 60 s; a sweep that finds the key lock held waits for that holder, which ends within its kind's timeout_s. Holds for a worker restarted within 30 s too (the old worker id still goes stale). Does not hold when a dead session's connection is not closed by the kernel (network partition, frozen VM): the lock then stays until Postgres drops the connection" }
+  - { name: default max_attempts (counted runs per key), value: 3, kind: "structural: retries are for transient faults only (FR-EVENTS-6); a deterministic failure retried more only repeats spend (compile-cost spike: 0 of 2 runs converged)" }
+  - { name: retry delays, value: "5 s after the 1st counted failure, 25 s after the 2nd", kind: "structural: two retries span about 30 s; SRV-AGENT replaces them with the provider's Retry-After" }
   - { name: worker concurrency, value: 1, kind: "structural: ADR-0006 load profile < 1 job/s; one compile stage at a time keeps spend serial against budget.live_runs_usd" }
   - { name: shutdown_graceful_timeout, value: "8 s", kind: "structural: below Compose's 10 s stop timeout (REF-EVENTS-7), so procrastinate aborts the job and records it before SIGKILL" }
 
@@ -93,10 +94,10 @@ requirements:
     text: >-
       Job kinds are declared as data: a `JobKind` record has `name` (`^[a-z][a-z0-9_.]{2,63}$`), `queue`, `args`
       (a Pydantic model with `extra="forbid"`), `key` (the ordered list of `args` field names that form the
-      idempotency key), `retry` (`max_attempts` ≥ 1 runs per key, `exponential_wait`, `transient`: a tuple of
-      exception types) and `timeout_s`. `reader.jobs.catalog.KINDS` is the one tuple of kinds the worker serves;
-      building it rejects a duplicate name, a `key` field missing from `args`, and an `args` model that fails
-      FR-EVENTS-10. Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
+      idempotency key), `max_attempts` (≥ 1 counted runs per key), `transient` (a tuple of exception types) and
+      `timeout_s`. `reader.jobs.catalog.KINDS` is the one tuple of kinds the worker serves; building it rejects a
+      duplicate name, the reserved name `jobs.sweep`, a `key` field missing from `args`, and an `args` model that
+      fails FR-EVENTS-10. Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
       cancellation flag between steps, because `timeout_s` cannot interrupt blocking synchronous code.
   - id: FR-EVENTS-2
     text: >-
@@ -105,54 +106,63 @@ requirements:
       For compile stages the fields are `(lesson, stage, input_sha256)` (ADR-0006).
   - id: FR-EVENTS-3
     text: >-
-      `enqueue(kind, args)` runs FR-EVENTS-10's checks, validates `args`, then, under the key lock, inserts the
-      `job_keys` row if absent (args, attempts 0) and returns exactly one of: `already_done(job_id)` when
-      `job_outcomes` holds `succeeded`; `dead(job_id)` when it holds `dead`; `already_queued` when procrastinate
-      raises `AlreadyEnqueued`; otherwise `queued(job_id)` after deferring a procrastinate job with `queueing_lock`
-      and `lock` both set to the key and `lock_mode` `ordered`. Enqueue commits on procrastinate's own connection,
-      independently of any caller transaction: a caller that changes its state and crashes before enqueue leaves no
-      job, and recovers by enqueueing again, which the key makes safe.
+      `enqueue(kind, args, schedule_in=0)` never takes the key lock and never waits on one. It runs FR-EVENTS-10's
+      checks, validates `args`, then in one short transaction inserts the `job_keys` row with `ON CONFLICT DO NOTHING`
+      and reads the key's outcome, and commits. With an outcome it returns `already_done(job_id)` (`succeeded`) or
+      `dead(job_id)` (`dead`) and defers nothing. Otherwise it defers a procrastinate job with `queueing_lock` and
+      `lock` both set to the key, `lock_mode` `ordered` and the given `schedule_in`, returning `queued(job_id)`, or
+      `already_queued` when procrastinate raises `AlreadyEnqueued` (a `todo` job exists). The key row commits before
+      the defer; a crash between the two leaves a key without a job, which the sweep defers (FR-EVENTS-15). Enqueue
+      commits independently of any caller transaction. An outcome written after enqueue read none is caught by the
+      worker, which re-checks under the key lock (FR-EVENTS-4).
   - id: FR-EVENTS-4
     text: >-
-      A worker runs each job in one SQLAlchemy transaction (READ COMMITTED, `idle_in_transaction_session_timeout`
-      0) that first takes the key lock, then reads `job_outcomes`. If ANY outcome row exists, the job returns without
-      calling the handler and procrastinate finishes it `succeeded`. Otherwise, if FR-EVENTS-14's predicate says the
-      key is exhausted, it writes `dead` (`error_code` `exhausted`) and returns. Otherwise the handler runs with that
-      session under `asyncio.timeout(timeout_s)`, started after the lock is acquired, and the `succeeded` outcome
-      is written by FR-EVENTS-13 in the same transaction as the handler's writes. The handler never commits, rolls
-      back or opens a session. The outcome transaction commits before procrastinate records the job's status.
+      A worker runs each job in one SQLAlchemy transaction (READ COMMITTED, `idle_in_transaction_session_timeout` 0)
+      that first takes the key lock, then reads the key row. With no `job_keys` row, the job is finished `failed`,
+      logged with its job id, and gets no outcome. With any outcome, the job returns without calling the handler and
+      procrastinate finishes it `succeeded`. Otherwise, if FR-EVENTS-14 says the key is exhausted, it writes `dead`
+      (`error_code` `exhausted`). Otherwise the handler runs with that session under `asyncio.timeout(timeout_s)`,
+      started after the lock is acquired, and the `succeeded` outcome is written by FR-EVENTS-13 in the same
+      transaction as the handler's writes. The handler never commits, rolls back or opens a session. The outcome
+      commits before procrastinate records the job's status.
   - id: FR-EVENTS-5
     text: >-
       A handler gets the validated `args` model, the session and a context with `job_id`, the key and the key's
       attempt count. Effects outside the database must be idempotent per key: blobs are written content-addressed
       (ADR-0007), so a repeated write is a no-op. Provider calls are not idempotent: a run that fails after a
-      provider call, or a run lost to a stall, spends again on its next attempt (bounded by `max_attempts`).
+      provider call, is lost to a stall, or is aborted by shutdown spends again on its next run. Counted runs are
+      bounded by `max_attempts`; shutdown aborts are not counted (FR-EVENTS-14), so provider spend per key is not
+      bounded by `max_attempts` when the worker is stopped repeatedly mid-run.
   - id: FR-EVENTS-6
     text: >-
-      On a handler exception whose type is in `transient`, the worker increments the key's attempt count under the
-      key lock in a separate transaction. If FR-EVENTS-14 then says exhausted, it writes `dead` (`error_code` = the
-      exception's class name) and the job ends; otherwise it re-raises for procrastinate's `RetryStrategy(
-      max_attempts = kind.max_attempts - 1, exponential_wait, retry_exceptions = transient)` (REF-EVENTS-5: attempts
-      start at 0, so 2 gives 3 runs, waiting 5 s and 25 s). Any other exception, and a `timeout_s` overrun
-      (`error_code` `timeout`), increments the count and writes `dead` at once. In every case the wrapper raises a
-      sanitized `JobFailed(error_code)` `from None`, so neither procrastinate nor a log sees the original message,
-      traceback locals or args.
+      Retries are decided by this module alone. On a handler exception, the run's transaction rolls back; then, under
+      the key lock in a new transaction, the worker increments the key's attempt count. A `transient` exception on a
+      key FR-EVENTS-14 does not call exhausted: after that commit the worker enqueues the same key through
+      FR-EVENTS-3 with `schedule_in` 5 s after the first counted failure and 25 s after the second (a fresh
+      procrastinate job), then ends the current job `failed`. Any other exception, a `timeout_s` overrun
+      (`error_code` `timeout`) and a transient exception on an exhausted key write `dead` (`error_code` = the
+      exception's class name, or `timeout`) in that transaction. In every case the wrapper raises a sanitized
+      `JobFailed(error_code)` `from None`; procrastinate records `failed` and never retries, so neither procrastinate
+      nor a log sees the original message, traceback locals or args.
   - id: FR-EVENTS-7
     text: >-
-      The sweep runs once at worker start, outside the job slot, and then as the periodic job `jobs.sweep` every
-      minute, with its own `queueing_lock` and the highest priority. For each stalled job from `get_stalled_jobs()`
-      it uses `pg_try_advisory_xact_lock` on the key: when the lock is held, a live session runs the key and the job
-      is left alone this round. With the lock, it reads the outcome: if one exists, it finishes the procrastinate
-      job; otherwise it increments the key's attempt count (a stall counts as an attempt) and either retries the job
-      or, when FR-EVENTS-14 says exhausted, writes `dead` (`error_code` `stalled`) and finishes it `failed`.
-      A stalled or queued job whose `task_name` is not in `KINDS` gets `dead` with `error_code` `unknown_kind`.
+      Stalled jobs. The sweep runs once at worker start, outside the job slot, and then as the periodic job
+      `jobs.sweep` every minute, with its own `queueing_lock` and the highest priority. For each job from
+      `get_stalled_jobs()`: a stalled `jobs.sweep` job is finished `failed` with no outcome; a job whose `task_name`
+      is not in `KINDS` gets `dead` (`error_code` `unknown_kind`) when its key row exists, and is finished `failed`.
+      For a known kind it uses `pg_try_advisory_xact_lock` on the key: when the lock is held, a live session runs the
+      key and the job is left alone this round. With the lock: if the key has an outcome, the job is finished
+      (`succeeded` for `succeeded`, `failed` for `dead`); otherwise the attempt count is incremented (a stall counts)
+      and, unless FR-EVENTS-14 now says exhausted, the key is enqueued again through FR-EVENTS-3 at once; if
+      exhausted, `dead` is written (`error_code` `stalled`). The stalled job is then finished `failed`.
   - id: FR-EVENTS-8
     text: >-
-      `requeue_dead(kind, key)` under the key lock: when the outcome is `dead`, it deletes the outcome, resets the
-      attempt count to 0 and commits, then defers a new procrastinate job with the stored args and returns
-      `queued(job_id)`. When no outcome and no `todo`/`doing` job exists but the `job_keys` row does (a crash between
-      that commit and the defer, the accepted gap), it defers and returns `queued(job_id)`. Otherwise it changes
-      nothing and returns `already_done(job_id)`, `already_queued`, or `unknown_key`. It is the only way out of `dead`.
+      `requeue_dead(kind, key)` takes `pg_try_advisory_xact_lock` on the key and never waits: when the lock is held it
+      returns `running`. With the lock, when the outcome is `dead`, it clears the outcome columns, resets the attempt
+      count to 0, commits, then enqueues through FR-EVENTS-3 and returns its result (`queued(job_id)`); a crash between
+      the commit and the defer leaves a key without a job, which the sweep defers. When the key has no outcome it
+      returns FR-EVENTS-3's result for the stored args (`already_queued` or `queued`). It returns `already_done(job_id)`
+      for `succeeded` and `unknown_key` when no row exists. It is the only way out of `dead`.
   - id: FR-EVENTS-9
     text: >-
       `reader.jobs.worker.run(settings)` opens the procrastinate app on the DB settings from SRV-CONFIG, runs the
@@ -163,69 +173,81 @@ requirements:
   - id: FR-EVENTS-10
     text: >-
       No job payload carries a secret. An `args` model must not contain a field of type `reader.config.Secret`, at any
-      depth. `enqueue` rejects any value that is a `Secret` instance, and any payload whose canonical JSON contains,
-      as a substring, a resolved secret value held by the process's loaded settings. Both fail with error code
-      `secret_in_payload` and no part of the value in the error.
+      depth. `enqueue` rejects any value that is a `Secret` instance, and any payload with a string leaf (after JSON
+      encoding and decoding of the validated model) that contains, as a substring, a resolved secret value held by
+      the process's loaded settings. Resolved values are never empty (SRV-CONFIG rejects empty secrets); the check
+      asserts that and skips an empty value defensively. Both rejections use error code `secret_in_payload` and carry
+      no part of the value.
   - id: FR-EVENTS-11
     text: >-
       One Alembic revision under `server/src/reader/jobs/migrations/` with branch label `jobs`, `down_revision` None
       and `depends_on = "procrastinate_0043"` (the head shipped by procrastinate 3.12.0's `alembic` extra) creates
-      `job_keys(kind text, key text, args jsonb, attempts int not null default 0, created_at timestamptz, primary key
-      (kind, key))` and `job_outcomes(kind text, key text, job_id bigint, status text check in ('succeeded','dead'),
-      args jsonb, error_code text null, attempts int, finished_at timestamptz, primary key (kind, key), foreign key
-      (kind, key) references job_keys)`. Its downgrade drops these two tables only. procrastinate's own schema comes
-      from its shipped revisions; downgrading them is declared unsupported.
+      one table, `job_keys(kind text, key text, args jsonb not null, attempts int not null default 0, outcome text
+      null check in ('succeeded','dead'), error_code text null, job_id bigint null, created_at timestamptz,
+      updated_at timestamptz, finished_at timestamptz null, primary key (kind, key))`, with a partial index on
+      `updated_at` where `outcome is null`. `outcome`, `error_code`, `job_id` and `finished_at` are set together.
+      Every write sets `updated_at`. Its downgrade drops `job_keys` only. procrastinate's own schema comes from its
+      shipped revisions; downgrading them is declared unsupported.
   - id: FR-EVENTS-12
     text: >-
-      `job_status(kind, key)` returns one of `none`, `queued`, `running`, `succeeded`, `dead`, computed from
-      `job_outcomes` first and from procrastinate's jobs for the key second, by the mapping in VEC-EVENTS-3. When one
-      `doing` and one `todo` job coexist for a key, the `doing` job decides the status; the `todo` job later skips
-      by FR-EVENTS-4.
+      `job_status(kind, key)` returns one of `none`, `queued`, `running`, `succeeded`, `dead` from the key's outcome
+      first and otherwise from its deciding procrastinate job, by VEC-EVENTS-3. The deciding job is a `doing` job if
+      one exists (`aborting`, legacy, counts as `doing`), else a `todo` job, else the newest job by id.
   - id: FR-EVENTS-13
     text: >-
       Key lock and outcome writes. `lock_id(key)` is the first 8 bytes of `sha256("reader.jobs\0" + key)` read as a
       signed big-endian int64, used with the one-bigint advisory lock form; other modules' advisory locks (SRV-AUTH's
       migration lock included) use a different namespace string or the two-int4 form (REF-EVENTS-6). A collision
-      only serializes two keys. Every outcome write runs under the key lock and is `INSERT … ON CONFLICT (kind, key)
-      DO NOTHING`; the first committed outcome wins. A writer whose insert affects no row rolls back its whole
-      transaction (a handler's effects included) and logs `outcome_lost` with the winning status.
+      only serializes two keys. Every outcome write runs under the key lock and is `UPDATE job_keys SET outcome = …
+      WHERE kind = … AND key = … AND outcome IS NULL`; the first committed outcome wins. A writer whose update
+      affects no row rolls back its whole transaction (a handler's effects included) and logs `outcome_lost` with the
+      winning outcome.
   - id: FR-EVENTS-14
     text: >-
       The attempt predicate, the only one used by FR-EVENTS-4, -6 and -7: a key is exhausted when
       `job_keys.attempts >= kind.max_attempts`. The count is per key, so a new procrastinate job for the key does not
-      reset it; only `requeue_dead` does. Failures and stalls increment it. Aborts by shutdown or cancellation do
-      not: they are the operator's action, not the job's. Stalls do, because a stall can be caused by the job itself
-      (out of memory, a crash in native code), and not counting it would retry such a job forever.
+      reset it; only `requeue_dead` does. Counted: handler failures, timeouts and stalls. Not counted: shutdown aborts
+      and cancellations, which are the operator's action, not the job's. Stalls count because a job can cause its
+      own stall (out of memory, a crash in native code), and not counting them would rerun such a job forever. Two
+      sweeps, or a sweep and a crashed worker's own increment, can count one lost run twice; this errs toward `dead`
+      sooner, never toward an extra run.
   - id: FR-EVENTS-15
     text: >-
-      The sweep also reconciles procrastinate status with outcomes, under the key lock: a `doing` (stalled) or
-      `failed` job whose key has an outcome is finished; a `failed` or `succeeded` job without an outcome gets `dead`
-      with `error_code` `orphaned`; an `aborted` job without an outcome is deferred again without counting an
-      attempt.
+      Reconciliation, per key. Each sweep enumerates `job_keys` rows with no outcome, `updated_at` older than 60 s,
+      and no `todo` or `doing` procrastinate job, and for each takes `pg_try_advisory_xact_lock` (skipping the key when
+      held) and looks only at the key's newest procrastinate job (max id): none (a crash between key commit and defer,
+      or after `requeue_dead`'s commit) or `aborted`: enqueue through FR-EVENTS-3 without counting an attempt;
+      `failed` or `succeeded`: write `dead` with `error_code` `orphaned`; `cancelled`: no action (an operator cancel).
+      Because a re-deferred key has a `todo` job, a key is re-deferred at most once per abort. Separately, each sweep
+      cancels every `todo` job whose `task_name` is neither in `KINDS` nor `jobs.sweep`.
   - id: FR-EVENTS-16
     text: >-
-      Logging. A filter on the `procrastinate` logger hierarchy drops the `args` and `call_string` fields from every
-      record and replaces any message that formats them with the task name and job id. The module's own records
-      carry kind, key, job id, attempt count and error code only.
+      Logging. The worker installs one filter on every handler of the root logger (a logger-level filter does not see
+      records propagated from child loggers). For records from the `procrastinate` hierarchy it deletes
+      `record.job["task_kwargs"]` and `record.job["call_string"]` (REF-EVENTS-5) and replaces any occurrence of the
+      call string in the message with `<task_name>[<job_id>]`. The module's own records carry kind, key, job id,
+      attempt count and error code only.
 
 invariants:
   - id: INV-EVENTS-1
     text: At most one job per key is in procrastinate status `doing` (the `lock` index) and at most one in `todo` (the `queueing_lock` index); with `lock_mode` `ordered`, a `todo` job never starts while the key's `doing` job runs.
   - id: INV-EVENTS-2
     text: >-
-      For every key, `job_outcomes` has at most one row, and the handler's committed database effect happens at most
-      once, under any interleaving of enqueue, worker kill, stall, sweep, shutdown abort and requeue. Provider spend
-      is not covered: it can repeat up to `max_attempts` times per key (FR-EVENTS-5).
+      For every key, the outcome is written at most once until `requeue_dead`, and the handler's committed database
+      effect happens at most once per outcome, under any interleaving of enqueue, worker kill, stall, sweep,
+      shutdown abort and requeue. Provider spend is not covered (FR-EVENTS-5).
   - id: INV-EVENTS-3
-    text: A key with any outcome is never handed to its handler again until `requeue_dead`; enqueue returns `already_done` or `dead`, and a claimed job skips.
+    text: A key with an outcome is never handed to its handler again until `requeue_dead`; enqueue returns `already_done` or `dead`, and a claimed job skips.
   - id: INV-EVENTS-4
-    text: Every `doing` job of a killed worker reaches a terminal state or `todo` within the recovery bound (≤ timeout_s + 60 s + 30 s); no job stays `doing` forever, and no key exceeds `max_attempts` counted runs.
+    text: Every `doing` job of a killed worker reaches a terminal procrastinate status within the recovery bound, and its key then has an outcome or a `todo` job; no key exceeds `max_attempts` counted runs.
   - id: INV-EVENTS-5
     text: >-
       No `Secret` value and no resolved secret value of the process's settings appears in `procrastinate_jobs.args`,
-      `job_keys`, `job_outcomes`, or any log record emitted in the worker process, `procrastinate.*` loggers included.
+      `job_keys`, or any log record emitted in the worker process, `procrastinate.*` loggers included.
   - id: INV-EVENTS-6
-    text: The per-key transition function over (state, event) is total, matches VEC-EVENTS-1 exactly, and has no `invalid` result; `succeeded` and `dead` are terminal except for `requeue` from `dead`.
+    text: The per-key transition function over (state, event) is total and matches VEC-EVENTS-1 exactly; `succeeded` and `dead` are terminal except for `requeue` from `dead`.
+  - id: INV-EVENTS-7
+    text: "`enqueue` never waits for a key lock: with the key lock held by another session for the whole call, it completes, under a 2 s `statement_timeout` set by the test only."
 
 nfr: []
 
@@ -251,24 +273,32 @@ vectors:
 #
 # Named [db] tests and their fault points (FR/INV in brackets):
 #   - test_kill_after_commit_before_finish: a subprocess worker is SIGKILLed after the outcome commit and before
-#     `finish_job` (a test hook pauses there); the sweep finishes the job; effect count 1 [FR-EVENTS-4, -15, INV-EVENTS-2].
-#   - test_kill_mid_handler: SIGKILL during the handler; the transaction rolls back, the sweep retries, attempts +1,
-#     effect count 1 after success [FR-EVENTS-7, -14, INV-EVENTS-4].
-#   - test_stale_heartbeat_live_holder: a slow live original with its heartbeat stopped; the sweep finds the key
-#     lock held and leaves it; a second worker re-claiming finds the outcome and skips; effect count 1, final
-#     outcome succeeded [FR-EVENTS-7, -13, INV-EVENTS-2].
-#   - test_finish_after_reclaim_not_found: procrastinate's `finish_job` for a job the sweep already finished is
-#     expected and handled without a second outcome or a crash [FR-EVENTS-15].
+#     procrastinate finishes the job (a test hook pauses there); the sweep finishes it; effect count 1
+#     [FR-EVENTS-4, -7, INV-EVENTS-2].
+#   - test_kill_mid_handler: SIGKILL during the handler; the transaction rolls back, the sweep counts the stall and
+#     re-enqueues; effect count 1 after success [FR-EVENTS-7, -14, INV-EVENTS-4].
+#   - test_stale_heartbeat_lock_held_is_skipped: a live run with its worker's heartbeat stopped; the sweep finds the
+#     key lock held and changes nothing [FR-EVENTS-7, -13].
+#   - test_reclaim_after_success_skips: a second job for the key claimed after the first run's outcome committed
+#     skips the handler; effect count 1 [FR-EVENTS-4, INV-EVENTS-2, -3].
+#   - test_finish_after_sweep_finished: the original worker's finish of a job the sweep already finished is
+#     expected and handled without a second outcome or a crash [FR-EVENTS-7].
 #   - test_dead_then_claim: a todo job queued behind a running one that ends dead is claimed and skips [FR-EVENTS-4].
 #   - test_enqueue_races_each_transition: concurrent enqueue against run start, success, transient failure,
-#     exhaustion, stall and requeue; results match VEC-EVENTS-1 and INV-EVENTS-1..3 hold [FR-EVENTS-3, -8].
-#   - test_shutdown_abort_not_counted: SIGTERM with a running job past 8 s; status aborted, attempts unchanged, the
-#     sweep re-defers it [FR-EVENTS-9, -14, -15].
-#   - test_exhaustion_counts_per_key: three transient failures across two procrastinate jobs for one key end dead
-#     with attempts 3 [FR-EVENTS-6, -14].
-#   - test_canary_secret_never_logged: every logger captured at DEBUG (root handler), canary in settings and a
-#     handler error message containing it; no record, table or args contains it [INV-EVENTS-5, FR-EVENTS-10, -16].
-#   - test_migration_heads: upgrade heads from empty, downgrade of the `jobs` branch drops only its two tables [FR-EVENTS-11].
+#     exhaustion, stall and requeue; results match VEC-EVENTS-1; INV-EVENTS-1..3 and -7 hold [FR-EVENTS-3, -8].
+#   - test_requeue_then_sweep: requeue_dead, then a sweep before and after the defer (crash injected between the
+#     commit and the defer); exactly one todo job results [FR-EVENTS-8, -15].
+#   - test_failed_plus_todo_then_sweep: a key whose newest job is todo behind an older failed one is not
+#     reconciled; with the todo removed, the failed newest job gives `orphaned` [FR-EVENTS-15].
+#   - test_shutdown_abort_not_counted: SIGTERM with a running job past 8 s; status aborted, attempts unchanged, one
+#     sweep re-defers it once, a second sweep does nothing [FR-EVENTS-9, -14, -15].
+#   - test_exhaustion_counts_per_key: three transient failures across three procrastinate jobs end dead with
+#     attempts 3; schedule_in 5 s then 25 s [FR-EVENTS-6, -14].
+#   - test_unknown_kind_and_orphan_jobs: a todo job of an unknown kind is cancelled; a job without a key row is
+#     finished failed with no outcome; a stalled `jobs.sweep` job is finished failed [FR-EVENTS-4, -7, -15].
+#   - test_canary_secret_never_logged: every logger captured at DEBUG through a root handler, a canary in settings
+#     and a handler error message containing it; no record, table or args contains it [INV-EVENTS-5, FR-EVENTS-10, -16].
+#   - test_migration_heads: upgrade heads from empty; downgrade of the `jobs` branch drops only `job_keys` [FR-EVENTS-11].
 test_levels:
   FR-EVENTS-1: unit
   FR-EVENTS-2: unit
@@ -292,6 +322,7 @@ test_levels:
   INV-EVENTS-4: db
   INV-EVENTS-5: "unit + db"
   INV-EVENTS-6: unit
+  INV-EVENTS-7: db
 
 # What the full stage-2 revision of SRV-EVENTS adds (docs/roadmap.md stage 2, SRV-EVENTS row).
 defers:

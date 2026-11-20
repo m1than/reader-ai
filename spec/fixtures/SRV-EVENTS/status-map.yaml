@@ -1,30 +1,33 @@
-# VEC-EVENTS-3 — procrastinate job status x key outcome -> job_status (FR-EVENTS-12) and sweep action (FR-EVENTS-15).
+# VEC-EVENTS-3 — the key's deciding procrastinate job x the key's outcome -> job_status (FR-EVENTS-12) and the
+# reconcile action of the sweep (FR-EVENTS-15).
 # Source: hand-derived over procrastinate 3.12.0's seven statuses (REF-EVENTS-4: `aborting` is legacy, unused since 3.0).
-# `procrastinate` is the status of the key's deciding job: `doing` over `todo` when both exist (FR-EVENTS-12).
-# `outcome` is the key's job_outcomes status, or none. `sweep` applies only to jobs the sweep inspects (stalled `doing`,
-# `failed`, `succeeded`, `aborted`); `-` means no action.
+# Deciding job, by precedence: a `doing` job (`aborting` counts as doing) > a `todo` job > the newest job by id
+# (terminal: succeeded, failed, cancelled, aborted) > absent (no procrastinate job for the key).
+# `reconcile`: what FR-EVENTS-15 does for a key with no outcome, updated_at older than 60 s and no todo/doing job;
+# `-` = not reconciled (the key has an outcome, or a todo/doing job). Stalled `doing` jobs are FR-EVENTS-7's, not
+# reconciliation's.
 rows:
-  - { procrastinate: todo,      outcome: none,      job_status: queued,    sweep: "-" }
-  - { procrastinate: todo,      outcome: succeeded, job_status: succeeded, sweep: "-", note: "skips when claimed (FR-EVENTS-4)" }
-  - { procrastinate: todo,      outcome: dead,      job_status: dead,      sweep: "-", note: "skips when claimed" }
-  - { procrastinate: doing,     outcome: none,      job_status: running,   sweep: "stalled: retry or dead `stalled` (FR-EVENTS-7)" }
-  - { procrastinate: doing,     outcome: succeeded, job_status: succeeded, sweep: "stalled: finish succeeded" }
-  - { procrastinate: doing,     outcome: dead,      job_status: dead,      sweep: "stalled: finish failed" }
-  - { procrastinate: succeeded, outcome: none,      job_status: dead,      sweep: "write dead `orphaned`" }
-  - { procrastinate: succeeded, outcome: succeeded, job_status: succeeded, sweep: "-" }
-  - { procrastinate: succeeded, outcome: dead,      job_status: dead,      sweep: "-", note: "a skipped todo job behind a dead run finishes succeeded" }
-  - { procrastinate: failed,    outcome: none,      job_status: dead,      sweep: "write dead `orphaned`" }
-  - { procrastinate: failed,    outcome: succeeded, job_status: succeeded, sweep: "-" }
-  - { procrastinate: failed,    outcome: dead,      job_status: dead,      sweep: "-" }
-  - { procrastinate: cancelled, outcome: none,      job_status: none,      sweep: "-", note: "an operator cancel of a todo job; enqueue again is allowed" }
-  - { procrastinate: cancelled, outcome: succeeded, job_status: succeeded, sweep: "-" }
-  - { procrastinate: cancelled, outcome: dead,      job_status: dead,      sweep: "-" }
-  - { procrastinate: aborting,  outcome: none,      job_status: running,   sweep: "treated as doing" }
-  - { procrastinate: aborting,  outcome: succeeded, job_status: succeeded, sweep: "treated as doing" }
-  - { procrastinate: aborting,  outcome: dead,      job_status: dead,      sweep: "treated as doing" }
-  - { procrastinate: aborted,   outcome: none,      job_status: queued,    sweep: "defer again, attempts unchanged (FR-EVENTS-14)" }
-  - { procrastinate: aborted,   outcome: succeeded, job_status: succeeded, sweep: "-" }
-  - { procrastinate: aborted,   outcome: dead,      job_status: dead,      sweep: "-" }
-  - { procrastinate: absent,    outcome: none,      job_status: none,      sweep: "-", note: "no job_keys row, or the requeue crash gap (FR-EVENTS-8)" }
-  - { procrastinate: absent,    outcome: succeeded, job_status: succeeded, sweep: "-" }
-  - { procrastinate: absent,    outcome: dead,      job_status: dead,      sweep: "-" }
+  - { deciding: doing,     outcome: none,      job_status: running,   reconcile: "-" }
+  - { deciding: doing,     outcome: succeeded, job_status: succeeded, reconcile: "-", note: "the job skips or the sweep finishes it when stalled" }
+  - { deciding: doing,     outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: aborting,  outcome: none,      job_status: running,   reconcile: "-", note: "legacy status, treated as doing" }
+  - { deciding: aborting,  outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: aborting,  outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: todo,      outcome: none,      job_status: queued,    reconcile: "-" }
+  - { deciding: todo,      outcome: succeeded, job_status: succeeded, reconcile: "-", note: "skips when claimed (FR-EVENTS-4)" }
+  - { deciding: todo,      outcome: dead,      job_status: dead,      reconcile: "-", note: "skips when claimed" }
+  - { deciding: succeeded, outcome: none,      job_status: dead,      reconcile: "write dead `orphaned`" }
+  - { deciding: succeeded, outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: succeeded, outcome: dead,      job_status: dead,      reconcile: "-", note: "a job queued behind a dead run skipped and finished succeeded" }
+  - { deciding: failed,    outcome: none,      job_status: dead,      reconcile: "write dead `orphaned`" }
+  - { deciding: failed,    outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: failed,    outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: cancelled, outcome: none,      job_status: none,      reconcile: "no action (operator cancel); enqueue again is allowed" }
+  - { deciding: cancelled, outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: cancelled, outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: aborted,   outcome: none,      job_status: queued,    reconcile: "enqueue again, attempts unchanged; the new todo job stops a second re-defer" }
+  - { deciding: aborted,   outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: aborted,   outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: absent,    outcome: none,      job_status: queued,    reconcile: "enqueue (crash between key commit and defer, or after requeue_dead's commit)", note: "job_status is `none` when no job_keys row exists" }
+  - { deciding: absent,    outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: absent,    outcome: dead,      job_status: dead,      reconcile: "-" }

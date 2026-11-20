@@ -5,14 +5,16 @@
 #   enqueue         FR-EVENTS-3
 #   claim           a worker fetches a todo job of the key (procrastinate todo -> doing)
 #   ok              the handler returns; outcome `succeeded` commits with its effect (FR-EVENTS-4, -13)
-#   fail_transient  a transient exception, key not exhausted after the increment (FR-EVENTS-6)
+#   fail_transient  a transient exception, key not exhausted after the increment; the worker enqueues a fresh job
+#                   with schedule_in 5 or 25 s and ends this one `failed` (FR-EVENTS-6; procrastinate never retries)
 #   fail_last       a transient exception that exhausts the key (FR-EVENTS-6, -14)
 #   fail_permanent  a non-transient exception or a timeout (FR-EVENTS-6)
 #   stall           the sweep takes the key lock of a stalled job, key not exhausted after the increment (FR-EVENTS-7)
 #   stall_last      as stall, but the increment exhausts the key
 #   stall_live      the sweep finds the key lock held by a live session (FR-EVENTS-7)
 #   abort           shutdown aborts the running job; the sweep re-defers it without counting (FR-EVENTS-9, -14, -15)
-#   requeue         requeue_dead (FR-EVENTS-8)
+#   requeue         requeue_dead (FR-EVENTS-8); it uses a try-lock, so in `running` (lock held) it returns `running`
+# enqueue never takes the key lock (FR-EVENTS-3); its result depends only on the outcome and on whether a todo job exists.
 # Columns: `next` state; `result` returned to the caller of enqueue or requeue (`-` for worker and sweep events);
 # `effect` = handler database effects committed (INV-EVENTS-2); `attempts` = change of job_keys.attempts.
 # `noop`: the event has no subject in this state (no doing job, for example) and changes nothing. The table is total:
@@ -54,7 +56,8 @@ rows:
   - { state: running, event: stall_last,     next: dead,      result: "-",            effect: 0, attempts: 1 }
   - { state: running, event: stall_live,     next: running,   result: "-",            effect: 0, attempts: 0 }
   - { state: running, event: abort,          next: queued,    result: "-",            effect: 0, attempts: 0 }
-  - { state: running, event: requeue,        next: running,   result: already_queued, effect: 0, attempts: 0 }
+  - { state: running, event: requeue,        next: running,   result: running,        effect: 0, attempts: 0,
+      note: "the key lock is held by the run; requeue_dead returns without waiting" }
 
   - { state: succeeded, event: enqueue,        next: succeeded, result: already_done, effect: 0, attempts: 0 }
   - { state: succeeded, event: claim,          next: succeeded, result: skipped,      effect: 0, attempts: 0,
