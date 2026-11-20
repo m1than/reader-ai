@@ -101,8 +101,51 @@ sequences:
       - {close: 4401, cell_state: {c1: lost}, action: "navigate to /api/auth/signin"}
   - id: network-drop
     steps:
-      - {close: 1006, cell_state: {c1: lost}, slot: null, action: "reconnect to the same session after 1 s, 2 s, 4 s"}
-      - {reconnect: failed, attempt: 3, session: disconnected, action: "show Retry; Retry (or the next Run) creates the session again"}
+      - {close: 1006, cell_state: {c1: lost}, slot: null, action: "reconnect tries after 1 s, 2 s, 4 s"}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 200, body: {session_id: s1}}, then: "open the WebSocket of s1", result: failed}
+      - {reconnect_try: 2, http: {request: "POST /api/kernel/sessions", status: 200, body: {session_id: s1}}, then: "open the WebSocket of s1", result: open, session: s1}
+  - id: network-drop-gives-up
+    steps:
+      - {close: 1011, cell_state: {c1: lost}}
+      - {reconnect_try: 3, result: failed, session: disconnected, notice: connect_failed, action: "Retry runs the same procedure"}
+  - id: reconnect-after-api-restart
+    note: "the api lost its session map; POST creates a new session, then the WebSocket opens"
+    steps:
+      - {close: 1006}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 201, body: {session_id: s9}}, then: "open the WebSocket of s9", result: open, session: s9}
+  - id: reconnect-session-expired
+    note: "an expired sign-in at the upgrade shows only as 1006; the POST before the upgrade reveals it"
+    steps:
+      - {close: 1006}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 401}, action: "navigate to /api/auth/signin; no further tries"}
+  - id: create-401
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 401}, cell_state: {c1: idle}, action: "navigate to /api/auth/signin"}
+  - id: create-409
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 409, body: {error: too_many_kernels}}, cell_state: {c1: idle}, slot: null, notice: too_many_kernels, notice_text: "too many open lessons; close one or reset"}
+  - id: create-502
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 502, body: {error: kernel_upstream}}, cell_state: {c1: idle}, notice: kernel_upstream}
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 201, body: {session_id: s1}}, cell_state: {c1: running}}
+  - id: create-503
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 503, body: {error: kernel_unavailable}}, cell_state: {c1: idle}, notice: kernel_unavailable, action: "the next Run tries again"}
+  - id: interrupt-404
+    steps:
+      - {user: interrupt, http: {request: "POST /api/kernel/sessions/{sid}/interrupt", status: 404}, cell_state: {c1: lost}, slot: null, session: forgotten, action: "the next Run creates the session again"}
+  - id: interrupt-401
+    steps:
+      - {user: interrupt, http: {request: "POST /api/kernel/sessions/{sid}/interrupt", status: 401}, action: "navigate to /api/auth/signin"}
+  - id: reset-503
+    steps:
+      - {user: reset, http: {request: "POST /api/kernel/reset", status: 503, body: {error: kernel_unavailable}}, notice: kernel_unavailable, action: "Retry"}
+  - id: late-reply-after-timeout-and-reset
+    note: "after timeout the reset's lost event freed the slot; the late execute_reply is ignored"
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, slot: e1}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_reset, parent_msg_id: null}}, cell_state: {c1: lost}, slot: null}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: lost}, slot: null}
   - id: third-tab
     note: "SRV-KERNEL allows 2 browser connections per session; a third upgrade is refused with 409, which a browser sees as a failed connection (close 1006)"
     steps:

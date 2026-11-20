@@ -132,18 +132,29 @@ requirements:
     text: >-
       Notices, closes and the single reconnect procedure (VEC-NOTEBOOK-2 has a case for each row).
       A lost event marks the in-flight cell `lost` (outputs kept), returns client-queued cells to `idle` and frees the
-      slot. Table — notice `timeout` (parent = in-flight): marker `timed_out` on the cell, the slot stays until the
-      execute_reply (final state `timed_out`) or a lost event; `output_truncated`: a note on the cell, nothing else;
+      slot. Table — notice `timeout` (parent = in-flight): marker `timed_out` on the cell; the slot stays until the
+      execute_reply (final state `timed_out`) or, when the relay's reset follows (SRV-KERNEL FR-KERNEL-10), the lost event
+      of `kernel_reset` or of the close after it, which then frees the slot; an execute_reply that arrives for a cell no
+      longer in flight is ignored; `output_truncated`: a note on the cell, nothing else;
       `busy` or `rejected` whose parent is the in-flight execute: lost event; with another parent: a notice only;
       `kernel_restarted`: lost event, socket and session kept; `kernel_reset`, `kernel_dead`, `kernel_unavailable`:
       lost event, then the close that follows decides. Close (any close the client did not start is a lost event first)
       — 4401: navigate to `/api/auth/signin`; 1013: state `unavailable`, no automatic reconnect, Retry or the next Run
       creates the session again; 1000, 1003, 1009, 1012: forget the session, the next Run creates it again (no
-      automatic reconnect); 1006, 1011 and any other code, and a socket that fails before opening: reconnect to the same
-      session after 1, 2 and 4 s (structural: three tries cover a container restart, measured 0.2–3.3 s by SRV-KERNEL's
-      review), then state `disconnected` with Retry, which creates the session again. The `disconnected` notice says the
-      lesson may be open in other tabs (SRV-KERNEL refuses a third connection, which a browser sees as a failed
-      connection). Every notice text comes from WEB-UI's fixed catalogue. [unit]
+      automatic reconnect); 1006, 1011 and any other code, and a socket that fails before opening: reconnect after 1, 2
+      and 4 s (structural: three tries cover a container restart, measured 0.2–3.3 s by SRV-KERNEL's review), where each
+      try first calls `POST /api/kernel/sessions` for the lesson (idempotent: it returns the existing session, or creates
+      a new one after an api restart) and then opens the WebSocket of the session it returns; after the third failed try,
+      state `disconnected` with Retry, which runs the same procedure. The `disconnected` notice says the lesson may be
+      open in other tabs (SRV-KERNEL refuses a third connection, which a browser sees as a failed connection).
+      HTTP results — `POST /api/kernel/sessions` (on Run and in every reconnect try): 401 navigates to
+      `/api/auth/signin` (an expired session at the WebSocket upgrade shows only as 1006, so this call is how the client
+      reaches sign-in instead of retrying); 409 `too_many_kernels` shows "too many open lessons; close one or reset" and
+      the Run is not queued; 502 `kernel_upstream` or 503 `kernel_unavailable` shows its catalogue message, the Run is
+      not queued, and the next Run tries again (during a reconnect it counts as a failed try). `POST …/interrupt`: 404
+      means the session is gone and is a lost event (the session is forgotten and created again on the next Run); 401
+      navigates to sign-in; 502 or 503 shows its message. `POST /api/kernel/reset`: 401 navigates to sign-in; 503 shows
+      "kernel unavailable" with Retry. Every notice text comes from WEB-UI's fixed catalogue. [unit]
   - id: FR-NOTEBOOK-9
     text: >-
       Lab code is editable in a plain monospace text area (Tab inserts four spaces; the edited source lives in memory
