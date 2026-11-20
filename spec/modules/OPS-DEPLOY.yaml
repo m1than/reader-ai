@@ -19,9 +19,10 @@
 
 id: OPS-DEPLOY
 title: Compose stack, networks, volumes, secret mounts and Caddy for the Mac
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-20
+review: "deep-reviewer (Fable): rounds 1–3 changes, round 4 approve"
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -92,7 +93,8 @@ requirements:
   - id: FR-DEPLOY-5
     text: >-
       Volumes and mounts: `pgdata` (postgres only), `blobs` (api and worker), `caddy_data` and `caddy_config` (caddy
-      only, ADR-0024), and the read-only bind mount `./spa-placeholder` → `/srv/spa` in caddy. Kernel services have only
+      only, ADR-0024), and two read-only bind mounts in caddy: `./spa-placeholder` → `/srv/spa` and `./Caddyfile` →
+      `/etc/caddy/Caddyfile`. No other service has a bind mount. Kernel services have only
       tmpfs (FR-DEPLOY-8). `caddy_data` carries the label `org.reader-ai.backup=exclude` (ADR-0024); every other named
       volume `org.reader-ai.backup=include`. Backup and restore are OPS-CLI's. [config]
   - id: FR-DEPLOY-6
@@ -118,8 +120,10 @@ requirements:
     text: >-
       Process hardening: `worker`, `agent-proxy`, `api` and `mcp` run with a non-root `user`, `read_only: true`, a
       tmpfs home, `cap_drop: [ALL]` and `no-new-privileges` (ADR-0025 rule 3 for worker and agent-proxy; the same image
-      for api and mcp). `postgres` runs as `user: "999:999"` (the postgres user of postgres:18-trixie 18.7, pinned by
-      digest; checked against the pinned image's /etc/passwd [image]), with `cap_drop: [ALL]`, `no-new-privileges`,
+      for api and mcp). `postgres` runs the image `reader-postgres:local`, built from
+      `deploy/images/postgres.Dockerfile` `FROM` the pinned postgres:18-trixie digest plus the wait wrapper of
+      FR-DEPLOY-10 (d), as `user: "999:999"` (the postgres user of postgres:18-trixie 18.7; checked against the pinned
+      image's /etc/passwd [image]), with `cap_drop: [ALL]`, `no-new-privileges`,
       `read_only: true` and tmpfs `/var/run/postgresql` and `/tmp`. Exceptions: none declared; whether postgres starts
       with cap-drop ALL and a read-only root as uid 999 is unmeasured and is a stage-1 live check, and any exception
       found there is added here with its reason. `caddy` keeps the image's user and its default capabilities, with
@@ -184,7 +188,7 @@ invariants:
       [config] (2) The source text of `deploy/compose.yaml` contains no `$` that is not followed by another `$`
       (which rejects `${NAME}` and unbraced `$NAME` under any key, and allows only the escape `$$`); the allow-list of
       non-secret variables is empty for stage 1. Dockerfiles and scripts under `deploy/images/**` are out of this rule's
-      scope. [config] (3) `deploy/Caddyfile` contains no `{$` environment placeholder. [config] (4) After `reader up` and
+      scope. [config] (3) `deploy/Caddyfile` contains no `{$` and no `{env.` environment placeholder. [config] (4) After `reader up` and
       delivery, `docker inspect` of every container contains no canary, and `docker diff` of every container lists no
       path below `/run/secrets/`. [live]
   - id: INV-DEPLOY-3
