@@ -1,0 +1,6 @@
+# Caddy's internal CA for localhost (ADR-0012). Inside the container Caddy listens on 443;
+# compose publishes it on 127.0.0.1:${PORT:-443}.
+localhost {
+	tls internal
+	reverse_proxy app:8000
+}

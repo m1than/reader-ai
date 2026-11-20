@@ -1,0 +1,26 @@
+{
+  "name": "reader-spike-library-consumer",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=26 <27" },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "vite build",
+    "build:baseline": "vite build --mode baseline",
+    "build-storybook": "storybook build --quiet -o storybook-static"
+  },
+  "dependencies": {
+    "@acme/ui": "file:../../../data/spikes/library-publish/acme-ui-0.0.0.tgz",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@storybook/react-vite": "^10.6.8",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "storybook": "^10.6.8",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}
