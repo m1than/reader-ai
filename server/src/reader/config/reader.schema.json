@@ -6,6 +6,7 @@
         "monthly_usd": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0.0,
               "type": "number"
             },
             {
@@ -17,6 +18,8 @@
         "warn_at": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0.0,
+              "maximum": 1.0,
               "type": "number"
             },
             {
@@ -40,6 +43,7 @@
       "additionalProperties": false,
       "properties": {
         "data_dir": {
+          "minLength": 1,
           "title": "Data Dir",
           "type": "string"
         },
@@ -59,22 +63,27 @@
       "additionalProperties": false,
       "properties": {
         "file": {
+          "minLength": 1,
           "title": "File",
           "type": "string"
         },
         "id": {
+          "minLength": 1,
           "title": "Id",
           "type": "string"
         },
         "language": {
+          "minLength": 1,
           "title": "Language",
           "type": "string"
         },
         "license": {
+          "minLength": 1,
           "title": "License",
           "type": "string"
         },
         "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
           "title": "Sha256",
           "type": "string"
         }
@@ -93,6 +102,7 @@
       "additionalProperties": false,
       "properties": {
         "kind": {
+          "minLength": 1,
           "title": "Kind",
           "type": "string"
         },
@@ -114,6 +124,7 @@
         "budget_usd_per_lesson": {
           "anyOf": [
             {
+              "exclusiveMinimum": 0.0,
               "type": "number"
             },
             {
@@ -127,6 +138,7 @@
           "title": "Budget Usd Per Lesson"
         },
         "model": {
+          "minLength": 1,
           "title": "Model",
           "type": "string"
         }
@@ -141,6 +153,7 @@
       "additionalProperties": false,
       "properties": {
         "handle": {
+          "minLength": 1,
           "title": "Handle",
           "type": "string"
         },
@@ -153,6 +166,7 @@
           "type": "array"
         },
         "role": {
+          "minLength": 1,
           "title": "Role",
           "type": "string"
         }
@@ -184,6 +198,7 @@
     "kernels": {
       "default": [],
       "items": {
+        "minLength": 1,
         "type": "string"
       },
       "title": "Kernels",
@@ -223,7 +238,6 @@
       "type": "array"
     },
     "version": {
-      "const": 1,
       "title": "Version",
       "type": "integer"
     }

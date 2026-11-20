@@ -1,83 +1,124 @@
 """Typed, immutable settings for reader.yaml v1 (the spec's field table) and their JSON Schema.
 
-FR-CONFIG-1, FR-CONFIG-4.
+FR-CONFIG-1, FR-CONFIG-4. The models enforce the same constraints as the loader (checks.py), so
+`ReaderConfig.model_validate` cannot construct a config that `load_config` would reject.
 """
 
 from collections.abc import Mapping
 from decimal import Decimal
-from types import MappingProxyType
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Self
 
-from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SkipValidation
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    PlainValidator,
+    StringConstraints,
+    model_validator,
+)
 
+from reader.config.checks import FrozenDict, decimal_in_context, freeze_opaque, unique, url_problem
 from reader.config.refs import SecretRef
 
-_FROZEN = ConfigDict(frozen=True, extra="forbid")
+_FROZEN = ConfigDict(frozen=True, extra="forbid", strict=True)
 
 
-def _freeze[V](mapping: Mapping[str, V]) -> Mapping[str, V]:
-    return MappingProxyType(dict(mapping))
+def _url(value: str) -> str:
+    if url_problem(value):
+        raise ValueError("bad_url")
+    return value
+
+
+def _in_context(value: Decimal) -> Decimal:
+    if not decimal_in_context(value):
+        raise ValueError("out_of_range")
+    return value
+
+
+def _one(value: int) -> int:
+    if value != 1:
+        raise ValueError("bad_version")
+    return value
 
 
 def _empty() -> Mapping[str, Any]:
-    return MappingProxyType({})
+    return FrozenDict()
 
 
-Opaque = Annotated[Mapping[str, Any], SkipValidation]  # already an immutable tree of core-schema values
+Text = Annotated[str, StringConstraints(min_length=1)]
+Url = Annotated[str, AfterValidator(_url)]
+Sha256 = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+Positive = Annotated[Decimal, Field(gt=0, allow_inf_nan=False), AfterValidator(_in_context)]
+Fraction = Annotated[Decimal, Field(gt=0, le=1, allow_inf_nan=False), AfterValidator(_in_context)]
+Opaque = Annotated[Mapping[str, Any], PlainValidator(freeze_opaque, json_schema_input_type=Mapping[str, Any])]
 
 
 class Instance(BaseModel):
     model_config = _FROZEN
-    url: str
-    data_dir: str
+    url: Url
+    data_dir: Text
 
 
 class Provider(BaseModel):
     model_config = _FROZEN
-    kind: str
+    kind: Text
     token: SecretRef
 
 
 class User(BaseModel):
     model_config = _FROZEN
-    handle: str
-    role: str
+    handle: Text
+    role: Text
     providers: tuple[Provider, ...] = ()
 
 
 class Task(BaseModel):
     model_config = _FROZEN
-    model: str
-    budget_usd_per_lesson: Decimal | None = None
+    model: Text
+    budget_usd_per_lesson: Positive | None = None
+
+
+def _tasks(value: Mapping[str, Task]) -> Mapping[str, Task]:
+    if not all(value):
+        raise ValueError("empty_key")
+    return FrozenDict(value)
 
 
 class Budgets(BaseModel):
     model_config = _FROZEN
-    monthly_usd: Decimal
-    warn_at: Decimal | None = None
+    monthly_usd: Positive
+    warn_at: Fraction | None = None
 
 
 class Material(BaseModel):
     model_config = _FROZEN
-    id: str
-    file: str
-    sha256: str
-    license: str
-    language: str
+    id: Text
+    file: Text
+    sha256: Sha256
+    license: Text
+    language: Text
 
 
 class ReaderConfig(BaseModel):
     model_config = _FROZEN
-    version: Literal[1]
+    version: Annotated[int, AfterValidator(_one)]  # strict int: refuses True, which Literal[1] accepts
     instance: Instance
     users: tuple[User, ...] = ()
-    # Mapping defaults come from factories: Pydantic deep-copies plain defaults, which a mappingproxy refuses.
-    tasks: Annotated[Mapping[str, Task], AfterValidator(_freeze)] = Field(default_factory=_empty)
+    # Mappings are FrozenDict (immutable, yet copyable, picklable, dumpable); defaults come from factories.
+    tasks: Annotated[Mapping[str, Task], AfterValidator(_tasks)] = Field(default_factory=_empty)
     budgets: Budgets | None = None
-    kernels: tuple[str, ...] = ()
+    kernels: tuple[Text, ...] = ()
     materials: tuple[Material, ...] = ()
     sectors: Opaque = Field(default_factory=_empty)
     sharing: Opaque = Field(default_factory=_empty)
+
+    @model_validator(mode="after")
+    def _unique(self) -> Self:
+        lists = ([u.handle for u in self.users], [m.id for m in self.materials], list(self.kernels))
+        if not all(unique(values) for values in lists):
+            raise ValueError("not_unique")
+        return self
 
 
 def export_json_schema() -> dict[str, Any]:

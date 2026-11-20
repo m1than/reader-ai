@@ -4,8 +4,12 @@
 @trace VEC-CONFIG-1, VEC-CONFIG-2, INV-CONFIG-3, INV-CONFIG-4, INV-CONFIG-5
 """
 
+import copy
 import json
+import os
+import pickle
 import sys
+from collections.abc import Iterator, MutableMapping
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -18,6 +22,14 @@ from hypothesis import strategies as st
 VALID_HEAD = "version: 1\ninstance: { url: https://reader.local, data_dir: ./data }\n"
 INVALID_CASES = load_fixture("invalid/cases.yaml")["cases"]
 EXPECT = load_fixture("reader.example.expect.yaml")
+
+
+def _text(case: dict[str, Any]) -> str:
+    """The case's YAML with `expand` placeholders filled (inputs too long to store in the fixture)."""
+    text: str = case["yaml"]
+    for name, count in case.get("expand", {}).items():
+        text = text.replace("{" + name + "}", "9" * count if name == "nines" else "")
+    return text
 
 
 def test_example_loads_with_expected_values(tmp_path: Path) -> None:
@@ -51,7 +63,7 @@ def test_paths_are_joined_and_normalised_lexically(tmp_path: Path, case: dict[st
 def test_invalid_configs_give_the_exact_error_list(tmp_path: Path, case: dict[str, Any]) -> None:
     from reader.config import ConfigError, load_config
 
-    path = write_config(tmp_path, case["yaml"])
+    path = write_config(tmp_path, _text(case))
     with pytest.raises(ConfigError) as caught:
         load_config(path)
     got = [(p.line, p.path, p.code) for p in caught.value.problems]
@@ -62,7 +74,7 @@ def test_invalid_configs_give_the_exact_error_list(tmp_path: Path, case: dict[st
 def test_errors_render_file_line_path_code_and_never_input(tmp_path: Path, case: dict[str, Any]) -> None:
     from reader.config import ConfigError, load_config
 
-    path = write_config(tmp_path, case["yaml"])
+    path = write_config(tmp_path, _text(case))
     with pytest.raises(ConfigError) as caught:
         load_config(path)
     error = caught.value
@@ -98,7 +110,50 @@ def test_config_is_immutable(tmp_path: Path) -> None:
     assert config.sectors == {"a": (1, 2)}
 
 
-def test_load_config_reads_only_the_given_file_and_no_environment(tmp_path: Path) -> None:
+def test_config_dumps_copies_and_pickles(tmp_path: Path) -> None:
+    from reader.config import ReaderConfig, load_config
+
+    text = (Path(__file__).resolve().parents[3] / "spec/fixtures/SRV-CONFIG/reader.example.yaml").read_text()
+    config = load_config(write_config(tmp_path, text + "sectors: { a: [1, { b: x }] }\n"))
+    assert ReaderConfig.model_validate(config.model_dump()) == config
+    assert copy.deepcopy(config) == config
+    assert pickle.loads(pickle.dumps(config)) == config  # noqa: S301 - our own bytes
+
+
+_GOOD: dict[str, Any] = {"version": 1, "instance": {"url": "https://reader.local", "data_dir": "/d"}}
+
+
+@pytest.mark.parametrize("change", [
+    {"version": True}, {"version": "1"}, {"version": 2},
+    {"instance": {"url": "http://reader.local", "data_dir": "/d"}},
+    {"instance": {"url": "https://@", "data_dir": "/d"}},
+    {"instance": {"url": "https://reader.local", "data_dir": ""}},
+    {"users": ({"handle": "a", "role": "r"}, {"handle": "a", "role": "r"})},
+    {"users": ({"handle": "", "role": "r"},)},
+    {"users": ({"handle": "a", "role": "r", "providers": ({"kind": "k", "token": "literal"},)},)},
+    {"kernels": ("python3", "python3")},
+    {"tasks": {"": {"model": "opus"}}},
+    {"budgets": {"monthly_usd": Decimal("NaN")}},
+    {"budgets": {"monthly_usd": Decimal(0)}},
+    {"budgets": {"monthly_usd": Decimal(1), "warn_at": Decimal("1.5")}},
+    {"materials": ({"id": "m", "file": "/f", "sha256": "ABC", "license": "l", "language": "ru"},)},
+    {"sectors": {"a": float("inf")}},
+    {"sectors": {1: "x"}},
+    {"unknown": 1},
+], ids=lambda change: next(iter(change)))
+def test_models_reject_what_the_loader_rejects(change: dict[str, Any]) -> None:
+    from pydantic import ValidationError
+
+    from reader.config import ReaderConfig
+
+    ReaderConfig.model_validate(_GOOD)
+    with pytest.raises(ValidationError):
+        ReaderConfig.model_validate({**_GOOD, **change})
+
+
+def test_load_config_reads_only_the_given_file_and_no_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from reader.config import load_config
 
     text = VALID_HEAD + (
@@ -118,11 +173,47 @@ def test_load_config_reads_only_the_given_file_and_no_environment(tmp_path: Path
             opened.append(str(args[0]))
 
     sys.addaudithook(hook)
-    try:
-        load_config(path)
-    finally:
-        watching = False
+    recording = _RecordingEnviron(os.environ)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", recording)  # every os.getenv and os.environ[...] goes through it
+        try:
+            load_config(path)
+        finally:
+            watching = False
     assert {Path(p).resolve() for p in opened} <= {path.resolve()}
+    assert recording.accessed == []
+
+
+class _RecordingEnviron(MutableMapping[str, str]):
+    """Stands in for os.environ and records every access (INV-CONFIG-4)."""
+
+    def __init__(self, real: MutableMapping[str, str]) -> None:
+        self.real = real
+        self.accessed: list[str] = []
+
+    def __getitem__(self, key: str) -> str:
+        self.accessed.append(key)
+        return self.real[key]
+
+    def __setitem__(self, key: str, value: str) -> None:
+        self.accessed.append(key)
+        self.real[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        self.accessed.append(key)
+        del self.real[key]
+
+    def __iter__(self) -> Iterator[str]:
+        self.accessed.append("<iter>")
+        return iter(self.real)
+
+    def __len__(self) -> int:
+        self.accessed.append("<len>")
+        return len(self.real)
+
+    def __contains__(self, key: object) -> bool:
+        self.accessed.append(str(key))
+        return key in self.real
 
 
 _segment = st.text(alphabet="abcdefghij", min_size=1, max_size=6)

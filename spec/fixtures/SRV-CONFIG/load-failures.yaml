@@ -133,6 +133,31 @@ cases:
       version: !!int 1
     error: { code: tag_not_allowed, line: 1 }
 
+  # `nest: N` replaces `{nest}` with N nested flow sequences. Depth: root 1, sectors 2, so N sequences give 2 + N.
+  - name: nesting 3,000 levels deep
+    nest: 3000
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { a: {nest} }
+    error: { code: too_deep, line: 3 }
+
+  - name: depth 65, one beyond MAX_DEPTH
+    nest: 63
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { a: {nest} }
+    error: { code: too_deep, line: 3 }
+
+# Depth exactly MAX_DEPTH (64 = 2 + 62 nested sequences) loads.
+depth_ok:
+  nest: 62
+  text: |
+    version: 1
+    instance: { url: https://reader.local, data_dir: ./data }
+    sectors: { a: {nest} }
+
 # Each scalar is written as `sectors.<key>: <plain scalar>` in an otherwise valid config; `expect` is the resolved value.
 scalars:
   - { plain: "2026-11-20", expect: { str: "2026-11-20" } }          # date-like: a string under the core schema

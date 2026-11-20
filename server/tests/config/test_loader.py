@@ -16,6 +16,12 @@ CASES = LOADER["cases"]
 HEAD = "version: 1\ninstance: { url: https://reader.local, data_dir: ./data }\n"
 
 
+def _nested(case: dict[str, Any]) -> str:
+    """The case's text with `{nest}` replaced by `nest` nested flow sequences."""
+    depth = case.get("nest", 0)
+    return str(case["text"]).replace("{nest}", "[" * depth + "]" * depth)
+
+
 def _prepare(tmp_path: Path, case: dict[str, Any]) -> Path:
     path = tmp_path / "reader.yaml"
     if case.get("missing"):
@@ -23,7 +29,7 @@ def _prepare(tmp_path: Path, case: dict[str, Any]) -> Path:
     if "bytes_b64" in case:
         path.write_bytes(base64.b64decode(case["bytes_b64"]))
     else:
-        write_config(tmp_path, case["text"])
+        write_config(tmp_path, _nested(case))
     if case.get("mode") is not None:
         os.chmod(path, case["mode"])
     return path
@@ -93,3 +99,13 @@ def test_quoted_merge_key_is_an_ordinary_key(tmp_path: Path) -> None:
     case = LOADER["quoted_merge_key"]
     config = load_config(write_config(tmp_path, case["text"]))
     assert dict(config.sectors) == case["expect"]
+
+
+def test_depth_at_the_bound_loads(tmp_path: Path) -> None:
+    from reader.config import load_config
+
+    config = load_config(write_config(tmp_path, _nested(LOADER["depth_ok"])))
+    value: Any = config.sectors["a"]
+    for _ in range(LOADER["depth_ok"]["nest"] - 1):
+        value = value[0]
+    assert value == ()

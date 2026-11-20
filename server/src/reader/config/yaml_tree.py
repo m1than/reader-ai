@@ -82,6 +82,24 @@ def _line(event: Event) -> int:
     return int(event.start_mark.line) + 1
 
 
+class _Oversized:
+    """An int that Python refuses to convert (its 4,300-digit limit); validation reports `out_of_range`."""
+
+    def __repr__(self) -> str:
+        return "<oversized int>"
+
+
+OVERSIZED: Final = _Oversized()
+MAX_DEPTH: Final = 64  # structural bound on collection nesting (FR-CONFIG-15), not a measured limit
+
+
+def _int(convert: Callable[[str], int], text: str) -> int | _Oversized:
+    try:
+        return convert(text)
+    except ValueError:
+        return OVERSIZED
+
+
 def resolve_plain(text: str) -> tuple[Kind, object]:
     if text in _NULL:
         return "null", None
@@ -89,7 +107,7 @@ def resolve_plain(text: str) -> tuple[Kind, object]:
         return "bool", _BOOL[text]
     for pattern, convert in _INT:
         if pattern.fullmatch(text):
-            return "int", convert(text)
+            return "int", _int(convert, text)
     for pattern, convert_float in _FLOAT:
         if pattern.fullmatch(text):
             return "float", convert_float(text)
@@ -109,7 +127,7 @@ def _parse(text: str) -> list[Event]:
 
 
 def _check_events(events: Sequence[Event]) -> None:
-    """First violation in stream order: anchors, aliases, merge keys, tags, a second document."""
+    """First violation in stream order: anchors, aliases, merge keys, tags, a second document, depth."""
     documents = 0
     expect_key: list[bool | None] = []  # per open collection: mapping → expecting a key next; sequence → None
     for event in events:
@@ -129,30 +147,28 @@ def _check_events(events: Sequence[Event]) -> None:
                 expect_key[-1] = not expect_key[-1]
             if is_key and isinstance(event, ScalarEvent) and event.style is None and event.value == "<<":
                 raise LoadFailure("alias_not_allowed", _line(event))
-            if isinstance(event, MappingStartEvent):
-                expect_key.append(True)
-            elif isinstance(event, SequenceStartEvent):
-                expect_key.append(None)
+            if isinstance(event, MappingStartEvent | SequenceStartEvent):
+                if len(expect_key) >= MAX_DEPTH:
+                    raise LoadFailure("too_deep", _line(event))
+                expect_key.append(True if isinstance(event, MappingStartEvent) else None)
         elif isinstance(event, CollectionEndEvent):
             expect_key.pop()
 
 
 def _build(events: Iterator[Event], first: Event) -> Node:
+    """Construct one node. The parser guarantees balanced events, and the event pass bounds the depth."""
     if isinstance(first, ScalarEvent):
         text = str(first.value)
         kind, value = resolve_plain(text) if first.style is None else ("str", text)
         return Scalar(_line(first), kind, value, text)
     if isinstance(first, SequenceStartEvent):
         items: list[Node] = []
-        for event in events:
-            if isinstance(event, CollectionEndEvent):
-                return Seq(_line(first), tuple(items))
+        while not isinstance(event := next(events), CollectionEndEvent):
             items.append(_build(events, event))
+        return Seq(_line(first), tuple(items))
     entries: list[Entry] = []
     seen: set[str] = set()
-    for event in events:
-        if isinstance(event, CollectionEndEvent):
-            return Map(_line(first), tuple(entries))
+    while not isinstance(event := next(events), CollectionEndEvent):
         key = _build(events, event)
         if not (isinstance(key, Scalar) and key.kind == "str"):
             raise LoadFailure("non_string_key", key.line)
@@ -161,7 +177,7 @@ def _build(events: Iterator[Event], first: Event) -> Node:
             raise LoadFailure("duplicate_key", key.line)
         seen.add(key_text)
         entries.append(Entry(key_text, key.line, _build(events, next(events))))
-    raise LoadFailure("yaml_syntax", None)  # unreachable for a stream the parser accepted
+    return Map(_line(first), tuple(entries))
 
 
 def load_tree(text: str) -> Map:

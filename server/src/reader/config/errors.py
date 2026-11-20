@@ -29,6 +29,7 @@ MESSAGES: Final[Mapping[str, str]] = MappingProxyType({
     "duplicate_key": "key appears twice in the same mapping",
     "non_string_key": "mapping keys must be strings",
     "alias_not_allowed": "anchors, aliases and merge keys are not allowed",
+    "too_deep": "collections are nested too deeply",
     "tag_not_allowed": "explicit tags are not allowed",
 })
 

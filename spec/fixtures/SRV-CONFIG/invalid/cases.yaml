@@ -1,7 +1,79 @@
 # VEC-CONFIG-2: invalid configs and the EXACT expected error list (FR-CONFIG-3, FR-CONFIG-11).
 # `line` is 1-based within `yaml`. Each error renders as `<file>:<line>: <path>: <code>: <fixed message>`.
 # No secret values: "literal" cases use the canary placeholder, which must not appear in any error output.
+# `expand: { nines: N }` replaces `{nines}` in `yaml` with N nines (inputs too long to store here).
 cases:
+  - name: url with an invalid bracketed host holding a canary
+    yaml: |
+      version: 1
+      instance: { url: "https://[CANARY-zz]/", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: url with an unbalanced bracket
+    yaml: |
+      version: 1
+      instance: { url: "https://[::1", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: url with userinfo but no host
+    yaml: |
+      version: 1
+      instance: { url: "https://@", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: url with a port but no host
+    yaml: |
+      version: 1
+      instance: { url: "https://:443", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: url with a leading space
+    yaml: |
+      version: 1
+      instance: { url: " https://x", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: 5,000-digit integer in an opaque mapping
+    expand: { nines: 5000 }
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { big: {nines} }
+    errors:
+      - { line: 3, path: "sectors.<key #1>", code: out_of_range }
+
+  - name: 5,000-digit integer as a budget
+    expand: { nines: 5000 }
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      budgets:
+        monthly_usd: {nines}
+    errors:
+      - { line: 4, path: budgets.monthly_usd, code: out_of_range }
+
+  - name: Decimal exponent beyond the decimal context
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      budgets: { monthly_usd: 1e-99999999999999999999 }
+    errors:
+      - { line: 3, path: budgets.monthly_usd, code: out_of_range }
+
+  - name: an empty kernel does not also count as a repeat
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      kernels: ["", ""]
+    errors:
+      - { line: 3, path: kernels.0, code: empty_string }
+      - { line: 3, path: kernels.1, code: empty_string }
+
   - name: inline literal instead of a reference
     yaml: |
       version: 1

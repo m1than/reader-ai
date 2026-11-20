@@ -45,10 +45,14 @@ class SecretRef(str):
 
     __slots__ = ()
 
-    @classmethod
-    def parse(cls, text: object) -> Self:
+    def __new__(cls, text: object) -> Self:
+        """Every construction validates, so no invalid reference object can exist (FR-CONFIG-5)."""
         if not isinstance(text, str) or not _valid(text):
             raise ValueError("not a secret:// reference (FR-CONFIG-5)")
+        return super().__new__(cls, text)
+
+    @classmethod
+    def parse(cls, text: object) -> Self:
         return cls(text)
 
     @property
@@ -78,19 +82,20 @@ class SecretRef(str):
         return core_schema.no_info_after_validator_function(cls.parse, core_schema.str_schema())
 
 
-def _digest(ref: SecretRef) -> tuple[str, str]:
-    if ref.scheme == "file":
+def _digest(ref: SecretRef | str) -> tuple[str, str]:
+    parsed = ref if isinstance(ref, SecretRef) else SecretRef(ref)  # never hashes an invalid reference
+    if parsed.scheme == "file":
         raise ValueError("a file reference already names its file under /run/secrets")
-    return ref.scheme, hashlib.sha256(ref.encode("utf-8")).hexdigest()[:32]
+    return parsed.scheme, hashlib.sha256(parsed.encode("utf-8")).hexdigest()[:32]
 
 
-def secret_file_name(ref: SecretRef) -> str:
+def secret_file_name(ref: SecretRef | str) -> str:
     """Compose secret name, mounted at /run/secrets/<name> (FR-CONFIG-14); shared with OPS-CLI."""
     scheme, digest = _digest(ref)
     return f"{scheme}-{digest}"
 
 
-def secret_env_var(ref: SecretRef) -> str:
+def secret_env_var(ref: SecretRef | str) -> str:
     """Environment variable that carries the value into `docker compose` (FR-CONFIG-14)."""
     scheme, digest = _digest(ref)
     return f"READER_SECRET_{scheme.upper()}_{digest.upper()}"

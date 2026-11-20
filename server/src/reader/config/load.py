@@ -7,8 +7,6 @@ context.
 import os
 from pathlib import Path
 
-from pydantic import ValidationError
-
 from reader.config.errors import ConfigError, Problem
 from reader.config.model import ReaderConfig
 from reader.config.validate import ROOT, Context
@@ -44,14 +42,6 @@ def load_config(path: str | os.PathLike[str]) -> ReaderConfig:
     if ctx.problems:
         problems = [Problem(file, line, key_path, code) for line, key_path, code in ctx.problems]
         raise ConfigError(problems) from None
-    built = _build(values)
-    if built is None:
-        raise ConfigError([Problem(file, tree.line, "", "wrong_type")]) from None
-    return built
-
-
-def _build(values: object) -> ReaderConfig | None:
-    try:
-        return ReaderConfig.model_validate(values)
-    except ValidationError:
-        return None
+    # The rules in validate.py and the model constraints come from the same checks (checks.py); values that
+    # passed the rules always validate here.
+    return ReaderConfig.model_validate(values)

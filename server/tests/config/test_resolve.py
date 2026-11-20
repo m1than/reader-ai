@@ -94,6 +94,13 @@ def test_registry_is_immutable() -> None:
     registry = ResolverRegistry([("env", lambda ref: Secret("x"))])
     with pytest.raises((AttributeError, TypeError)):
         registry.resolvers = {}  # type: ignore[attr-defined, misc]
+    with pytest.raises(AttributeError):
+        registry._resolvers = {}  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        registry._resolvers["keychain"] = lambda ref: Secret("y")  # type: ignore[index]
+    with pytest.raises(AttributeError):
+        del registry._resolvers
+    assert registry.get("keychain") is None
 
 
 def test_host_registry_accepts_extra_resolvers() -> None:
@@ -116,6 +123,10 @@ def test_secret_never_shows_its_value() -> None:
             continue
         assert CANARY not in repr(out)
         assert CANARY.encode() not in (out if isinstance(out, bytes) else b"")
+    with pytest.raises(TypeError):
+        secret.__getstate__()
+    with pytest.raises(TypeError):
+        secret.__reduce_ex__(4)
     assert secret.reveal() == CANARY
 
 

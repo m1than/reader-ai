@@ -4,6 +4,7 @@ A resolved value lives only inside `Secret`. Readers return a `Secret` or a fail
 raised in a frame that never held the value, so tracebacks with locals cannot show it (INV-CONFIG-2).
 """
 
+import errno
 import logging
 import os
 import stat
@@ -41,6 +42,9 @@ class Secret:
         return _MASK
 
     def __reduce_ex__(self, protocol: object) -> NoReturn:
+        raise TypeError("a Secret cannot be serialised")
+
+    def __getstate__(self) -> NoReturn:
         raise TypeError("a Secret cannot be serialised")
 
     def __copy__(self) -> NoReturn:
@@ -81,6 +85,9 @@ class ResolverRegistry:
     def __setattr__(self, name: str, value: object) -> NoReturn:
         raise AttributeError("ResolverRegistry is immutable")
 
+    def __delattr__(self, name: str) -> NoReturn:
+        raise AttributeError("ResolverRegistry is immutable")
+
     def get(self, scheme: str) -> Resolver | None:
         return self._resolvers.get(scheme)
 
@@ -101,19 +108,20 @@ def _read_under(root: Path, name: str) -> Secret | str:
     real = os.path.realpath(target)
     if os.path.commonpath([root_real, real]) != root_real:
         return "outside_root"
-    try:
-        mode = os.stat(real).st_mode
+    try:  # no symlink at open time, no blocking on a FIFO; every later check is on this descriptor
+        fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return "not_found"
-    except OSError:
-        return "unreadable"
-    if not stat.S_ISREG(mode):
+    except OSError as error:
+        return "outside_root" if error.errno == errno.ELOOP else "unreadable"
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
         return "not_regular_file"
-    try:
-        with open(real, "rb") as handle:
+    with os.fdopen(fd, "rb") as handle:
+        try:
             data = handle.read(SECRET_MAX_BYTES + 1)
-    except OSError:
-        return "unreadable"
+        except OSError:
+            return "unreadable"
     if len(data) > SECRET_MAX_BYTES:
         return "too_large"
     try:

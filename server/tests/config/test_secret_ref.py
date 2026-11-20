@@ -61,6 +61,20 @@ def test_rejects(case: dict[str, str]) -> None:
         SecretRef.parse(case["ref"])
     if case["ref"]:
         assert case["ref"] not in str(caught.value)
+    with pytest.raises(ValueError):
+        SecretRef(case["ref"])  # the constructor validates too
+
+
+@pytest.mark.parametrize("text", ["garbage", "garbage\nINJECT", "secret://env/X\nINJECT"])
+def test_constructor_never_makes_an_invalid_reference(text: str) -> None:
+    from reader.config import SecretRef, secret_env_var, secret_file_name
+
+    with pytest.raises(ValueError):
+        SecretRef(text)
+    with pytest.raises(ValueError):
+        secret_file_name(text)
+    with pytest.raises(ValueError):
+        secret_env_var(text)
 
 
 _valid = st.sampled_from([c["ref"] for c in REFS["accept"]])
