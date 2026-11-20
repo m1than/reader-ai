@@ -212,7 +212,7 @@ tasks:
         a namespace package. Depends on SRV-OBS and SRV-EVENTS for redaction in the shared logger and event serializer.
         Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved inside containers;
         ADR-0017 cross-user reference exposure is SRV-AGENT's; no spaces in keychain/1Password names." }
-  - { id: S1.SRV-CONFIG-adr26, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S1.SRV-CONFIG],
+  - { id: S1.SRV-CONFIG-adr26, stage: 1, kind: module, track: engineering, status: done, pr: 26, needs: [S1.SRV-CONFIG],
       what: "Paired SRV-CONFIG change after ADR-0026 (H2: spec, fixtures, tests and code in one commit, then a deep-reviewer pass):
         FR-CONFIG-14 drops the Compose-secret wording (`<name>: { environment: <VAR> }`, 'Compose mounts the value') and says
         OPS-CLI writes /run/secrets/<name> over docker exec (ADR-0026); remove secret_env_var from FR-CONFIG-14 and INV-CONFIG-6;
