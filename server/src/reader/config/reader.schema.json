@@ -238,6 +238,7 @@
       "type": "array"
     },
     "version": {
+      "const": 1,
       "title": "Version",
       "type": "integer"
     }

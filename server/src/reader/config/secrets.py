@@ -4,7 +4,6 @@ A resolved value lives only inside `Secret`. Readers return a `Secret` or a fail
 raised in a frame that never held the value, so tracebacks with locals cannot show it (INV-CONFIG-2).
 """
 
-import errno
 import logging
 import os
 import stat
@@ -108,12 +107,14 @@ def _read_under(root: Path, name: str) -> Secret | str:
     real = os.path.realpath(target)
     if os.path.commonpath([root_real, real]) != root_real:
         return "outside_root"
-    try:  # no symlink at open time, no blocking on a FIFO; every later check is on this descriptor
+    # O_NOFOLLOW guards the last component only: a final symlink (swapped in after realpath, or a loop) fails
+    # with ELOOP and gives `unreadable`. No blocking on a FIFO; every later check is on this descriptor.
+    try:
         fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return "not_found"
-    except OSError as error:
-        return "outside_root" if error.errno == errno.ELOOP else "unreadable"
+    except OSError:
+        return "unreadable"
     if not stat.S_ISREG(os.fstat(fd).st_mode):
         os.close(fd)
         return "not_regular_file"

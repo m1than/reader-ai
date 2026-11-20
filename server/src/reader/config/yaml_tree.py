@@ -83,7 +83,7 @@ def _line(event: Event) -> int:
 
 
 class _Oversized:
-    """An int that Python refuses to convert (its 4,300-digit limit); validation reports `out_of_range`."""
+    """An int whose absolute value is at least 10^4300, in any base; validation reports `out_of_range`."""
 
     def __repr__(self) -> str:
         return "<oversized int>"
@@ -91,13 +91,24 @@ class _Oversized:
 
 OVERSIZED: Final = _Oversized()
 MAX_DEPTH: Final = 64  # structural bound on collection nesting (FR-CONFIG-15), not a measured limit
+INT_BOUND: Final = 10**4300  # decided by value for every base; matches Python's decimal conversion limit
 
 
 def _int(convert: Callable[[str], int], text: str) -> int | _Oversized:
     try:
-        return convert(text)
-    except ValueError:
+        value = convert(text)
+    except ValueError:  # decimal text beyond Python's 4,300-digit limit
         return OVERSIZED
+    return value if abs(value) < INT_BOUND else OVERSIZED
+
+
+def _encodable(text: str) -> bool:
+    """False for text that UTF-8 cannot encode (lone surrogates from `\\ud800`-style escapes)."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def resolve_plain(text: str) -> tuple[Kind, object]:
@@ -159,6 +170,8 @@ def _build(events: Iterator[Event], first: Event) -> Node:
     """Construct one node. The parser guarantees balanced events, and the event pass bounds the depth."""
     if isinstance(first, ScalarEvent):
         text = str(first.value)
+        if not _encodable(text):  # scalars and keys alike: keys are built through this branch
+            raise LoadFailure("not_utf8_encodable", _line(first))
         kind, value = resolve_plain(text) if first.style is None else ("str", text)
         return Scalar(_line(first), kind, value, text)
     if isinstance(first, SequenceStartEvent):

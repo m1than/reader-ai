@@ -1,8 +1,48 @@
 # VEC-CONFIG-2: invalid configs and the EXACT expected error list (FR-CONFIG-3, FR-CONFIG-11).
 # `line` is 1-based within `yaml`. Each error renders as `<file>:<line>: <path>: <code>: <fixed message>`.
 # No secret values: "literal" cases use the canary placeholder, which must not appear in any error output.
-# `expand: { nines: N }` replaces `{nines}` in `yaml` with N nines (inputs too long to store here).
+# `expand: { NAME: { char: C, count: N } }` replaces `{NAME}` in `yaml` with N copies of C (inputs too long to
+# store here).
 cases:
+  - name: url with a non-numeric port holding a canary
+    yaml: |
+      version: 1
+      instance: { url: "https://x:CANARY-port/", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: url with an out-of-range port
+    yaml: |
+      version: 1
+      instance: { url: "https://x:99999/", data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: url with a backslash
+    yaml: |
+      version: 1
+      instance: { url: 'https://x\@evil', data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: hex integer of 5,000 digits (at least 10^4300 by value)
+    expand: { fs: { char: f, count: 5000 } }
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { big: 0x{fs} }
+    errors:
+      - { line: 3, path: "sectors.<key #1>", code: out_of_range }
+
+  - name: octal integer of 6,000 digits (at least 10^4300 by value)
+    expand: { sevens: { char: "7", count: 6000 } }
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { big: 0o{sevens} }
+    errors:
+      - { line: 3, path: "sectors.<key #1>", code: out_of_range }
+
   - name: url with an invalid bracketed host holding a canary
     yaml: |
       version: 1
@@ -39,7 +79,7 @@ cases:
       - { line: 2, path: instance.url, code: bad_url }
 
   - name: 5,000-digit integer in an opaque mapping
-    expand: { nines: 5000 }
+    expand: { nines: { char: "9", count: 5000 } }
     yaml: |
       version: 1
       instance: { url: https://reader.local, data_dir: ./data }
@@ -48,7 +88,7 @@ cases:
       - { line: 3, path: "sectors.<key #1>", code: out_of_range }
 
   - name: 5,000-digit integer as a budget
-    expand: { nines: 5000 }
+    expand: { nines: { char: "9", count: 5000 } }
     yaml: |
       version: 1
       instance: { url: https://reader.local, data_dir: ./data }

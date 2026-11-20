@@ -134,13 +134,60 @@ cases:
     error: { code: tag_not_allowed, line: 1 }
 
   # `nest: N` replaces `{nest}` with N nested flow sequences. Depth: root 1, sectors 2, so N sequences give 2 + N.
-  - name: nesting 3,000 levels deep
-    nest: 3000
+  # 1,100 levels: above Python's default recursion limit (1,000), without ruamel's quadratic cost at 3,000 (3.9 s).
+  - name: nesting 1,100 levels deep
+    nest: 1100
     text: |
       version: 1
       instance: { url: https://reader.local, data_dir: ./data }
       sectors: { a: {nest} }
     error: { code: too_deep, line: 3 }
+
+  # Lone surrogates from double-quoted escapes (the fixture keeps the backslash escapes literally).
+  - name: lone surrogate in a handle, with a canary
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      users: [{ handle: "\ud800CANARY-surrogate-7f3a", role: r }]
+    error: { code: not_utf8_encodable, line: 3 }
+
+  - name: lone surrogate as a kernel
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      kernels: ["\ud800"]
+    error: { code: not_utf8_encodable, line: 3 }
+
+  - name: lone surrogate in data_dir, with a canary
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: "\ud800CANARY-surrogate-7f3a" }
+    error: { code: not_utf8_encodable, line: 2 }
+
+  - name: lone surrogate in a material licence
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      materials:
+        - id: m
+          file: ./f.pdf
+          sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
+          license: "\udfff"
+          language: ru
+    error: { code: not_utf8_encodable, line: 7 }
+
+  - name: lone surrogate in the url path
+    text: |
+      version: 1
+      instance: { url: "https://x/\ud800", data_dir: ./data }
+    error: { code: not_utf8_encodable, line: 2 }
+
+  - name: lone surrogates as an opaque key and value
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { "\ud800": "\udfff" }
+    error: { code: not_utf8_encodable, line: 3 }
 
   - name: depth 65, one beyond MAX_DEPTH
     nest: 63

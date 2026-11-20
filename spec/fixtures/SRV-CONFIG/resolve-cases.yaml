@@ -16,11 +16,14 @@ tree:
     over_bound: { size: 65537 }
     link_inside: { link: claude_token }                     # symlink to a file inside the root
     link_outside: { link: ../outside/secret }               # symlink whose target leaves the root
+    loop_a: { link: loop_b }                                # a symlink loop inside the root: ELOOP → unreadable
+    loop_b: { link: loop_a }
     keychain-e35683c33bd94de8486a116f9c3efc47: { content: "kc-value" }   # host-resolved name of the keychain ref below
   outside:
     secret: { content: "outside-value" }
 
 cases:
+  - { registry: container, ref: "secret://file/run/secrets/loop_a", code: unreadable }
   - { registry: container, ref: "secret://file/run/secrets/claude_token", value: "tok-123" }
   - { registry: container, ref: "secret://file/run/secrets/two_newlines", value: "tok\n" }
   - { registry: container, ref: "secret://file/run/secrets/link_inside", value: "tok-123" }

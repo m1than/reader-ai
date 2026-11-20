@@ -6,11 +6,12 @@ FR-CONFIG-1, FR-CONFIG-4. The models enforce the same constraints as the loader 
 
 from collections.abc import Mapping
 from decimal import Decimal
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     AfterValidator,
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     PlainValidator,
@@ -36,9 +37,10 @@ def _in_context(value: Decimal) -> Decimal:
     return value
 
 
-def _one(value: int) -> int:
-    if value != 1:
-        raise ValueError("bad_version")
+def _not_bool(value: object) -> object:
+    """Literal[1] accepts True (True == 1); the version must be the integer 1."""
+    if isinstance(value, bool):
+        raise ValueError("wrong_type")
     return value
 
 
@@ -102,7 +104,7 @@ class Material(BaseModel):
 
 class ReaderConfig(BaseModel):
     model_config = _FROZEN
-    version: Annotated[int, AfterValidator(_one)]  # strict int: refuses True, which Literal[1] accepts
+    version: Annotated[Literal[1], BeforeValidator(_not_bool)]  # schema keeps "const": 1
     instance: Instance
     users: tuple[User, ...] = ()
     # Mappings are FrozenDict (immutable, yet copyable, picklable, dumpable); defaults come from factories.

@@ -5,7 +5,7 @@ One definition per rule, so `ReaderConfig.model_validate` rejects what `load_con
 
 import math
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Hashable, Mapping, Sequence
 from decimal import Decimal
 from typing import Any, Final, NoReturn
 from urllib.parse import urlsplit
@@ -14,17 +14,22 @@ SHA256: Final = re.compile(r"[0-9a-f]{64}")
 DECIMAL_EXPONENT: Final = 999999  # default decimal context Emax/-Emin (FR-CONFIG-10)
 
 
-def _forbidden(c: str) -> bool:
+def forbidden(c: str) -> bool:
+    """Whitespace or a control character (FR-CONFIG-5); the one definition, used by refs.py too."""
     return c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F
 
 
 def url_problem(value: str) -> str | None:
-    """`bad_url` unless an absolute https URL with a host and no whitespace (FR-CONFIG-3)."""
-    if any(_forbidden(c) for c in value):
+    """`bad_url` unless an absolute https URL with a host and a valid port, free of whitespace and `\\`.
+
+    FR-CONFIG-3.
+    """
+    if "\\" in value or any(forbidden(c) for c in value):
         return "bad_url"
     try:
         parts = urlsplit(value)
         host = parts.hostname
+        parts.port  # noqa: B018 - reading it validates it (non-numeric or out of range raises ValueError)
     except ValueError:
         return "bad_url"
     return None if parts.scheme == "https" and host else "bad_url"
@@ -71,10 +76,5 @@ def freeze_opaque(value: object) -> Any:
     raise ValueError("opaque values must be core-schema values")
 
 
-def unique(values: Iterable[object]) -> bool:
-    seen: list[object] = []
-    for value in values:
-        if value in seen:
-            return False
-        seen.append(value)
-    return True
+def unique(values: Sequence[Hashable]) -> bool:
+    return len(set(values)) == len(values)

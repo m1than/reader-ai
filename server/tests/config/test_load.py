@@ -27,8 +27,8 @@ EXPECT = load_fixture("reader.example.expect.yaml")
 def _text(case: dict[str, Any]) -> str:
     """The case's YAML with `expand` placeholders filled (inputs too long to store in the fixture)."""
     text: str = case["yaml"]
-    for name, count in case.get("expand", {}).items():
-        text = text.replace("{" + name + "}", "9" * count if name == "nines" else "")
+    for name, spec in case.get("expand", {}).items():
+        text = text.replace("{" + name + "}", str(spec["char"]) * int(spec["count"]))
     return text
 
 
@@ -118,6 +118,33 @@ def test_config_dumps_copies_and_pickles(tmp_path: Path) -> None:
     assert ReaderConfig.model_validate(config.model_dump()) == config
     assert copy.deepcopy(config) == config
     assert pickle.loads(pickle.dumps(config)) == config  # noqa: S301 - our own bytes
+    assert json.loads(config.model_dump_json())["sectors"] == {"a": [1, {"b": "x"}]}
+
+
+def test_no_pydantic_error_leaves_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A forced disagreement between loader rules and models: fixed code, no echo, nothing chained."""
+    from pydantic import ValidationError
+
+    from reader.config import ConfigError, ReaderConfig, load, load_config
+
+    canary = "CANARY-model-mismatch-7f3a"
+
+    class Diverging:
+        @staticmethod
+        def model_validate(values: object) -> ReaderConfig:
+            return ReaderConfig.model_validate({"version": canary, "instance": {"url": canary}})
+
+    with pytest.raises(ValidationError) as real:  # the Pydantic error itself would quote the input
+        Diverging.model_validate({})
+    assert canary in str(real.value)
+    monkeypatch.setattr(load, "ReaderConfig", Diverging)
+    with pytest.raises(ConfigError) as caught:
+        load_config(write_config(tmp_path, VALID_HEAD))
+    surfaces = rendered(caught.value)
+    assert [(p.line, p.path, p.code) for p in caught.value.problems] == [(None, "", "model_rule_mismatch")]
+    assert canary not in surfaces
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None or caught.value.__suppress_context__
 
 
 _GOOD: dict[str, Any] = {"version": 1, "instance": {"url": "https://reader.local", "data_dir": "/d"}}

@@ -31,6 +31,8 @@ MESSAGES: Final[Mapping[str, str]] = MappingProxyType({
     "alias_not_allowed": "anchors, aliases and merge keys are not allowed",
     "too_deep": "collections are nested too deeply",
     "tag_not_allowed": "explicit tags are not allowed",
+    "not_utf8_encodable": "text contains characters that UTF-8 cannot encode",
+    "model_rule_mismatch": "the configuration passed the loader rules but not the model (internal mismatch)",
 })
 
 

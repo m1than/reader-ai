@@ -7,15 +7,13 @@ from typing import Any, Final, Self
 from pydantic import GetCoreSchemaHandler
 from pydantic_core import core_schema
 
+from reader.config.checks import forbidden
+
 SCHEMES: Final = ("env", "file", "hostfile", "keychain", "op")
 _PREFIX: Final = re.compile(r"secret://(env|file|hostfile|keychain|op)/(.*)", re.DOTALL)
 _ENV_NAME: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _FILE_NAME: Final = re.compile(r"[A-Za-z0-9._-]+")
 _SEGMENTS: Final = {"keychain": 2, "op": 3}  # exact segment counts; hostfile takes any count >= 1
-
-
-def _forbidden(c: str) -> bool:
-    return c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F
 
 
 def _segment(part: str) -> bool:
@@ -24,7 +22,7 @@ def _segment(part: str) -> bool:
 
 def _valid(text: str) -> bool:
     match = _PREFIX.fullmatch(text)
-    if match is None or any(_forbidden(c) for c in text):
+    if match is None or any(forbidden(c) for c in text):
         return False
     scheme, rest = match.groups()
     parts = rest.split("/")
