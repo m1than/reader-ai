@@ -93,8 +93,14 @@ requirements:
       `profiles: [kernels]` and the network `sb-user-<handle>`, declares that network `internal: true`, and attaches it
       to `api`. Equality is INV-DEPLOY-8's (all kernel services equal on every key except `networks`). A handle longer
       than 50 characters or not matching `[a-z0-9][a-z0-9-]*` stops `up` with an error naming the handle: 50 keeps
-      `kernel-user-<handle>` within a 63-character DNS label. The override carries no secret and reaches
-      `docker compose` only on stdin.
+      `kernel-user-<handle>` within a 63-character DNS label. The override also gives exactly `api`, `worker` and `mcp`
+      (for SRV-AUTH and the other server roles) a read-only bind of the loaded reader.yaml,
+      `{type: bind, source: <path>, target: /etc/reader/reader.yaml, read_only: true}`, and the environment entry
+      `READER_CONFIG: /etc/reader/reader.yaml`; no other service gets either. `<path>` is the `--config` path after
+      `Path.resolve(strict=True)`; `up` refuses to start, naming the reason and not the path's contents, if that path is
+      not absolute or contains `$` (Compose would interpolate it). The override is the only route of this path into the
+      containers: compose.yaml keeps no `$` (OPS-DEPLOY INV-DEPLOY-2). The override carries no secret (reader.yaml holds
+      only `secret://` references) and reaches `docker compose` only on stdin.
   - id: FR-CLI-5
     text: >-
       Active profiles: in stage 1 `reader up` activates the default profile only and takes no `--profile` flag; a later
@@ -314,7 +320,7 @@ vectors:
     source: "A reader.yaml with two users and env, keychain, op and hostfile references (references only, no values)"
     file: spec/fixtures/OPS-CLI/config.yaml
   - id: VEC-CLI-2
-    source: "Expected override for VEC-CLI-1's two users; for `ivan` alone the override equals OPS-DEPLOY's VEC-DEPLOY-3"
+    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the reader.yaml bind plus READER_CONFIG on api, worker and mcp); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 as amended to the same shape"
     file: spec/fixtures/OPS-CLI/override-two-users.yaml
   - id: VEC-CLI-3
     source: "Rendered-model excerpts (project name, pgdata volume name, consumer uids) and the expected default-profile delivery plan; no values"

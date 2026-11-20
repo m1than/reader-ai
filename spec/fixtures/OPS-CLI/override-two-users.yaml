@@ -1,6 +1,10 @@
 # VEC-CLI-2: the override FR-CLI-4 must emit, in memory, for VEC-CLI-1 (users ivan and anna). The kernel service body is
 # the `x-kernel` field of deploy/compose.yaml's parsed source; this fixture repeats OPS-DEPLOY's VEC-DEPLOY-3 body, and
-# for `ivan` alone the expected override is VEC-DEPLOY-3 itself. Comparison is INV-DEPLOY-8's equality. No secrets.
+# for `ivan` alone the expected override is VEC-DEPLOY-3 as OPS-DEPLOY amends it to the same shape. Comparison is
+# INV-DEPLOY-8's equality. The test loads VEC-CLI-1 from /tmp/reader-ai-test/reader.yaml (already absolute and resolved,
+# no `$`), so that path is the bind source on api, worker and mcp (FR-CLI-4). Further cases the test derives from this
+# fixture: a config path containing `$`, and one that is not absolute after resolution, make `up` refuse before any
+# `docker compose` call. No secrets.
 services:
   kernel-user-ivan:
     image: reader-kernel:local
@@ -44,6 +48,20 @@ services:
     networks:
       sb-user-ivan: {}
       sb-user-anna: {}
+    volumes:
+      - { type: bind, source: /tmp/reader-ai-test/reader.yaml, target: /etc/reader/reader.yaml, read_only: true }
+    environment:
+      READER_CONFIG: /etc/reader/reader.yaml
+  worker:
+    volumes:
+      - { type: bind, source: /tmp/reader-ai-test/reader.yaml, target: /etc/reader/reader.yaml, read_only: true }
+    environment:
+      READER_CONFIG: /etc/reader/reader.yaml
+  mcp:
+    volumes:
+      - { type: bind, source: /tmp/reader-ai-test/reader.yaml, target: /etc/reader/reader.yaml, read_only: true }
+    environment:
+      READER_CONFIG: /etc/reader/reader.yaml
 
 networks:
   sb-user-ivan:
