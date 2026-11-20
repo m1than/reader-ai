@@ -39,7 +39,7 @@ title: Kernel sessions and the authenticated WebSocket relay to Kernel Gateway, 
 status: draft
 approved_by: null
 approved_at: null
-review: "deep-reviewer (Fable) round 1 changes (B1–B8), revised"
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Stays draft until SRV-AUTH merges (its Red needs the app and session layers)"
 layer: server
 track: engineering
 adr: [ADR-0022, ADR-0014, ADR-0006, ADR-0012, ADR-0013, ADR-0024, ADR-0026]
@@ -95,11 +95,12 @@ requirements:
   # Sessions
   - id: FR-KERNEL-2
     text: >-
-      `POST /api/kernel/sessions` with JSON `{"lesson_id": <1–128 chars of [A-Za-z0-9._-]>}` creates a python3 kernel
-      with `POST http://kernel-user-<h>:8888/api/kernels` body `{"name": "python3"}` (no `env`, no `path`) and answers
-      201 `{"session_id": <32 hex>, "lesson_id": ...}`. If the user already has a session for that lesson, it answers
-      200 with the existing one, after checking that `/control/state` still answers with the nonce recorded for the user
-      (FR-KERNEL-14); on a different nonce the FR-KERNEL-14 restart handling runs first and a new session is created.
+      `POST /api/kernel/sessions` with JSON `{"lesson_id": <1–128 chars of [A-Za-z0-9._-]>}` first checks that
+      `/control/state` answers with the nonce recorded for the user and `gateway: up` (FR-KERNEL-14); on a different
+      nonce or `exiting`, the FR-KERNEL-14 restart handling runs first. Then, if the user has a session for that lesson,
+      it answers 200 with the existing one; otherwise it creates a python3 kernel with
+      `POST http://kernel-user-<h>:8888/api/kernels` body `{"name": "python3"}` (no `env`, no `path`) and answers 201
+      `{"session_id": <32 hex>, "lesson_id": ...}`.
       The returned kernel id must match `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
       otherwise the call counts as failed (FR-KERNEL-13). Session ids come from `secrets.token_hex(16)`; the kernel id
       never leaves the api. Sessions live in the api process's memory (single api replica, ADR-0012). [unit]
@@ -252,7 +253,7 @@ invariants:
   - id: INV-KERNEL-5
     text: >-
       No session outlives its nonce: every session belongs to the nonce recorded when it was created or returned
-      (FR-KERNEL-2 compares the current nonce), and once the api observes a different nonce or `exiting` (FR-KERNEL-5,
+      (FR-KERNEL-2 compares the current nonce on every request), and once the api observes a different nonce or `exiting` (FR-KERNEL-5,
       FR-KERNEL-14) no session of the old nonce is used again; no session is created or returned and no WebSocket is
       opened between a reset's step 2 and a confirmed new nonce, nor while the service is marked unusable. [unit]
   - id: INV-KERNEL-6
