@@ -313,7 +313,8 @@ tasks:
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line
-        is the owner's). Awaits round 2.
+        is the owner's). Round 2: two B4 holes fixed (post-storage timeout → enqueue_failed, directory kept;
+        pages_converted from SUCCESS batches only) plus non-blocking items; awaits round 3.
         spec/modules/SRV-INGEST.yaml (slice revision): host command `reader-ingest` copies the PDF into a private work
         dir and runs Docling natively on CPU as a deny-by-default sandbox-exec child (no network, no Unix sockets, no
         mach services), then streams the validated artifact over `docker exec -i <worker> python -I -m

@@ -62,7 +62,11 @@ This replaces only Decision item 3's transport ("over `127.0.0.1`", "listens on 
 - Ingestion of the slice is started on the Mac (`reader-ingest bashir-2025`). Browser upload waits for a later decision, which this ADR's `revisit_when` names.
 
 **Confinement:**
-- **Hypothesis:** `sandbox-exec` with a deny-by-default profile can run Docling 2.151.1 on Python 3.14 on CPU at the native speed ADR-0021 measured. The spike `spikes/ingest-confine` measures this before SRV-INGEST is approved. If `sandbox-exec` cannot run it, the fallback is ADR-0021's other confinement, a dedicated macOS user, which needs the owner's one-time `sudo`.
+- **Measured** (`spikes/ingest-confine`, RESULT.md and `converter.sb`): a deny-by-default `sandbox-exec` profile runs Docling 2.151.1 configuration D on Python 3.14, on CPU, at native speed.
+  - Throughput on the 20 pilot pages: 15.69–15.85 pages/min confined, against 15.85–16.57 unconfined. The output is identical: 6 formulas and 11 tables.
+  - Every negative probe was denied: TCP and Unix sockets (the Docker socket included), mach lookups, exec of other binaries, signalling the parent, `/dev/tty`, reads of the home directory, and writes outside WORK.
+  - The dedicated-macOS-user fallback is not needed.
+- **Planned live check:** `e2e/live/slice.sh` probes `host.docker.internal` from the confined child against the running stack. That is the one network path the spike could not test without `reader up`.
 - **CPU only.** Docling's layout and table models could use MPS, but MPS would need Metal mach services inside the sandbox. The formula model, which dominates the time, is CPU-only anyway (spike ingest-docling).
 - **No new capability.** Any process with the owner's Docker socket can already exec into the worker (ADR-0026). The receive command adds nothing to that: it accepts only validated artifacts for materials declared in reader.yaml.
 
@@ -70,4 +74,4 @@ This replaces only Decision item 3's transport ("over `127.0.0.1`", "listens on 
 
 ## Open questions
 
-- None beyond the hypothesis above. The owner decides the status.
+- None. The owner accepted this decision in chat on 2026-11-21 and sets the status line.
