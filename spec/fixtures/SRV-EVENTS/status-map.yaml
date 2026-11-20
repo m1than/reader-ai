@@ -16,10 +16,10 @@ rows:
   - { deciding: todo,      outcome: none,      job_status: queued,    reconcile: "-" }
   - { deciding: todo,      outcome: succeeded, job_status: succeeded, reconcile: "-", note: "skips when claimed (FR-EVENTS-4)" }
   - { deciding: todo,      outcome: dead,      job_status: dead,      reconcile: "-", note: "skips when claimed" }
-  - { deciding: succeeded, outcome: none,      job_status: dead,      reconcile: "write dead `orphaned`" }
+  - { deciding: succeeded, outcome: none,      job_status: queued,    reconcile: "stall-like: count an attempt, then enqueue again; dead `orphaned` if exhausted (FR-EVENTS-14)" }
   - { deciding: succeeded, outcome: succeeded, job_status: succeeded, reconcile: "-" }
   - { deciding: succeeded, outcome: dead,      job_status: dead,      reconcile: "-", note: "a job queued behind a dead run skipped and finished succeeded" }
-  - { deciding: failed,    outcome: none,      job_status: dead,      reconcile: "write dead `orphaned`" }
+  - { deciding: failed,    outcome: none,      job_status: queued,    reconcile: "stall-like: count an attempt, then enqueue again; dead `orphaned` if exhausted (FR-EVENTS-14)", note: "covers requeue_dead's crash gap (the newest job is the old failed one) and a re-enqueue in FR-EVENTS-6 that raised" }
   - { deciding: failed,    outcome: succeeded, job_status: succeeded, reconcile: "-" }
   - { deciding: failed,    outcome: dead,      job_status: dead,      reconcile: "-" }
   - { deciding: cancelled, outcome: none,      job_status: none,      reconcile: "no action (operator cancel); enqueue again is allowed" }
@@ -28,6 +28,7 @@ rows:
   - { deciding: aborted,   outcome: none,      job_status: queued,    reconcile: "enqueue again, attempts unchanged; the new todo job stops a second re-defer" }
   - { deciding: aborted,   outcome: succeeded, job_status: succeeded, reconcile: "-" }
   - { deciding: aborted,   outcome: dead,      job_status: dead,      reconcile: "-" }
-  - { deciding: absent,    outcome: none,      job_status: queued,    reconcile: "enqueue (crash between key commit and defer, or after requeue_dead's commit)", note: "job_status is `none` when no job_keys row exists" }
+  - { deciding: absent,    outcome: none,      key_row: present, job_status: queued, reconcile: "enqueue, attempts unchanged (a crash between FR-EVENTS-3's key commit and its defer)" }
+  - { deciding: absent,    outcome: none,      key_row: absent,  job_status: none,   reconcile: "- (never enqueued; nothing to reconcile)" }
   - { deciding: absent,    outcome: succeeded, job_status: succeeded, reconcile: "-" }
   - { deciding: absent,    outcome: dead,      job_status: dead,      reconcile: "-" }

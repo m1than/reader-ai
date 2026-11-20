@@ -239,7 +239,7 @@ tasks:
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "spec revised after deep-reviewer rounds 1 and 2 (changes), awaits round 3 (spec/modules/SRV-EVENTS.yaml, jobs
+      note: "spec revised after deep-reviewer rounds 1–3 (changes), awaits round 4 (spec/modules/SRV-EVENTS.yaml, jobs
         half; procrastinate 3.12.0 per ADR-0006, single-shot jobs, one table job_keys; complex area: full review).
         Cross-spec on S1.SRV-AUTH: computed version_locations + upgrade heads, session-level migration lock in its own
         namespace, system-table exemption for job_keys/procrastinate_*, reader-server --role worker dispatch" }
