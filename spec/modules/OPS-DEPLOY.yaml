@@ -122,9 +122,15 @@ requirements:
       digest; checked against the pinned image's /etc/passwd [image]), with `cap_drop: [ALL]`, `no-new-privileges`,
       `read_only: true` and tmpfs `/var/run/postgresql` and `/tmp`. Exceptions: none declared; whether postgres starts
       with cap-drop ALL and a read-only root as uid 999 is unmeasured and is a stage-1 live check, and any exception
-      found there is added here with its reason. `caddy` keeps the image's user with `cap_drop: [ALL]`, `no-new-privileges` and no `cap_add`; binding
-      443 then relies on Docker setting `net.ipv4.ip_unprivileged_port_start=0` in container namespaces, which is
-      unmeasured here and is a stage-1 live check. [config]
+      found there is added here with its reason. `caddy` keeps the image's user with `cap_drop: [ALL]`,
+      `no-new-privileges` and no `cap_add`; binding 443 then relies on Docker setting
+      `net.ipv4.ip_unprivileged_port_start=0` in container namespaces, which is unmeasured here and is a stage-1 live
+      check. Memory: every secret consumer sets `mem_limit` and `memswap_limit` equal (ADR-0026: with them equal the
+      cgroup's `memory.swap.max` is 0, measured in spikes/compose-secrets-ro, so the tmpfs value is not swapped to the
+      VM disk). Values: postgres 1g, api 1g, mcp 1g, worker 2g, agent-proxy 256m. These are structural bounds, not
+      measurements: no spike recorded a peak for these services (agent-sdk-container ran the agent container under a
+      2 GiB limit without recording its peak). The stage-1 live check records each consumer's peak (`docker stats`), and
+      the values are revised from it. [config]
   - id: FR-DEPLOY-10
     text: >-
       Secrets follow ADR-0026 (REF-DEPLOY-6):
@@ -135,15 +141,23 @@ requirements:
       postgres, api, worker and mcp read `db-password` (servers as `secret://file/run/secrets/db-password`);
       agent-proxy reads the provider token files named `secret_file_name(ref)` (SRV-CONFIG) and is the only service
       that receives provider tokens. [config]
-      (c) Delivery is OPS-CLI's and atomic: `docker exec -i -u <service uid> <container> sh -c 'umask 077; cat >
-      /run/secrets/.<name>.tmp && mv /run/secrets/.<name>.tmp /run/secrets/<name>'` from stdin, so the file is owned by
-      the service uid with mode 0600 and appears only complete; consumers wait for the final name only. Consumer
-      images therefore provide `sh`, `cat` and `mv` (a requirement on SRV-AGENT's agent-proxy image). [live]
-      (d) Every start waits: the values are lost on every container restart, and postgres's entrypoint reads
-      `POSTGRES_PASSWORD_FILE=/run/secrets/db-password` on every start, so each consumer's entrypoint is wrapped to
-      wait for its file before starting. A consumer restarted while `reader up` is not running fails closed: it stays
-      unhealthy, and for postgres the database stays down, until the next `reader up` re-delivers. [live]
-      (e) No service has `env_file`, and no secret appears in the source text (INV-DEPLOY-2). [config]
+      (c) Delivery is OPS-CLI's (ADR-0026 option A): `reader up` stays running as a watcher and delivers each value
+      concurrently with `docker compose up` and again on every container start it observes. Each write is atomic and
+      runs as the service uid: `docker exec -i -u <service uid> <container> sh -c 'umask 077; cat >
+      /run/secrets/.<name>.tmp && mv /run/secrets/.<name>.tmp /run/secrets/<name>'`, value on stdin only, exit code
+      checked; the file is mode 0600, owned by the service uid, and appears only complete. Consumer images therefore
+      provide `sh`, `cat` and `mv` (a requirement on SRV-AGENT's agent-proxy image). [live]
+      (d) Waiting and fail-closed: values are lost on every container restart. api, worker, mcp and agent-proxy wrap
+      their entrypoint to wait for their file on every start and report healthy only after it exists. postgres runs as
+      uid 999; its wrapper waits for `/run/secrets/db-password` and sets `POSTGRES_PASSWORD_FILE` only while PGDATA is
+      empty, because the cluster password is set at initdb (ADR-0026). Hypothesis for the stage-1 live check: the
+      official entrypoint reads `POSTGRES_PASSWORD_FILE` (in `docker_setup_env`) on every start, so the variable must
+      stay unset on later starts or a missing file would stop postgres. If the watcher is dead, a restarted api, worker,
+      mcp or agent-proxy stays unhealthy until the next `reader up`. [live]
+      (e) Health dependencies: `depends_on: { <consumer>: { condition: service_healthy } }` stays valid because delivery
+      is concurrent with `up`: spikes/compose-secrets-ro case (e) measured `docker compose up -d` exit 0 with concurrent
+      delivery and exit 1 with delivery after `up` returned. [config for the declarations, live for the behaviour]
+      (f) No service has `env_file`, and no secret appears in the source text (INV-DEPLOY-2). [config]
   - id: FR-DEPLOY-11
     text: >-
       Every service declares a `healthcheck`: postgres `pg_isready`; caddy a request to its localhost admin endpoint;
@@ -166,7 +180,8 @@ invariants:
     text: >-
       Secrets stay out of every Compose surface. (1) The rendered model (same sets as INV-DEPLOY-1) has no top-level
       `secrets`, no service `secrets` and no `env_file`, and the tmpfs `/run/secrets` (service uid, 0700, 256k) is on
-      exactly the consumers of FR-DEPLOY-10 (b). [config] (2) The source text of every file under deploy/** contains no
+      exactly the consumers of FR-DEPLOY-10 (b), each of which has `memswap_limit` equal to `mem_limit` (FR-DEPLOY-9).
+      [config] (2) The source text of every file under deploy/** contains no
       `${…}` interpolation outside the allow-list of non-secret variables, which is empty for stage 1 (so any `${` fails),
       under any key: environment, env_file, labels, command, entrypoint, healthcheck or elsewhere. [config]
       (3) After `reader up` and delivery, `docker inspect` of every container contains no canary, and `docker diff` of
@@ -228,11 +243,12 @@ vectors:
 
 # Owner notes (not requirements):
 # - Availability cost of ADR-0026: values live only in container memory, so a Docker Desktop restart or a Mac reboot
-#   leaves postgres, api, worker, mcp and agent-proxy down until the next `reader up`. The owner starts the stack with
-#   `reader up` anyway; after a reboot that is one command.
-# - ADR-0026 says the tmpfs is "size ≤ 64 KiB"; FR-DEPLOY-10 (b) uses 256k because atomic delivery needs room for a
-#   temporary and a final file of up to SECRET_MAX_BYTES each, and agent-proxy holds several tokens. ADR-0026 is still
-#   proposed; its size wording should follow (coordinator).
+#   leaves api, worker, mcp and agent-proxy down until the next `reader up` (postgres needs the file only at initdb).
+#   The owner starts the stack with `reader up` anyway; after a reboot that is one command.
+# - The tmpfs size 256k matches ADR-0026 ("size ≥ 256 KiB").
+# - The proposed `.claude/settings.json` deny rules of ADR-0026 (`docker exec`, `docker compose exec`, `docker run`
+#   with `--pid container:`) are the owner's to add; this spec does not depend on them. The stage-1 live check uses
+#   `docker compose exec` for its file checks, so once the rules exist it runs with the owner's permissions.
 # - Stage-1 live check (owner, 2026-11-20): it checks the four default-profile services; `.kernel=="ok"` and the
 #   kernel probes move to stage 4. docs/roadmap.md is edited in this branch.
 # - ADR-0014 `verified_by` says the kernel "cannot resolve postgres or api", and roadmap line 224 (OPS-SANDBOX) repeats
@@ -240,8 +256,8 @@ vectors:
 #   "cannot resolve postgres or any service other than its declared caller, and cannot connect to any port of that
 #   caller". Owner's decision; ADR-0014 is not edited here.
 # - DB password (owner, 2026-11-20): OPS-CLI generates it once and keeps it in the Keychain as `reader-ai/postgres`.
-#   The postgres entrypoint reads POSTGRES_PASSWORD_FILE on every start, but the password is set in the cluster only at
-#   initdb, so it is never regenerated while `pgdata` exists, and a restore needs the same Keychain item.
+#   The cluster password is set only at initdb (the wrapper passes POSTGRES_PASSWORD_FILE only while PGDATA is empty,
+#   FR-DEPLOY-10 d), so it is never regenerated while `pgdata` exists, and a restore needs the same Keychain item.
 # - The provider egress allowlist is SRV-AGENT's (agent-proxy's own configuration), not a Compose property. ADR-0025's
 #   fallback (worker holds the token) would change FR-DEPLOY-10's consumer list and INV-DEPLOY-5.
 # - The lab egress proxy (ADR-0014) is OPS-SANDBOX's.

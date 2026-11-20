@@ -177,19 +177,33 @@ secret_files_ok() { local s uid; for s in $CONSUMERS; do
   uid=$(docker compose -f deploy/compose.yaml exec -T "$s" id -u) || return 1
   [ "$(docker compose -f deploy/compose.yaml exec -T "$s" stat -c '%a %u' /run/secrets/db-password)" = "600 $uid" ] || return 1
   done; return 0; }
-api_health() { docker inspect -f '{{.State.Health.Status}}' "$(docker compose -f deploy/compose.yaml ps -q api)"; }
-redelivered_after_restart() { docker compose -f deploy/compose.yaml restart api >/dev/null || return 1
-  sleep 20; [ "$(api_health)" != healthy ] || return 1        # fails closed without its file (FR-DEPLOY-10 d)
-  reader up >/dev/null || return 1                             # re-delivery
-  for _ in $(seq 60); do
-    [ "$(api_health)" = healthy ] && docker compose -f deploy/compose.yaml exec -T api test -s /run/secrets/db-password \
-      && return 0
-    sleep 2; done; return 1; }
+# `reader up` above returned 0 with `depends_on: service_healthy` declared: delivery runs concurrently with `up` and the
+# watcher keeps running (ADR-0026; spikes/compose-secrets-ro case e). The watcher's stop command is fixed by OPS-CLI's
+# spec; `reader watcher stop` stands for it here.
+health_of() { docker inspect -f '{{.State.Health.Status}}' "$(docker compose -f deploy/compose.yaml ps -q "$1")"; }
+healthy_with_file_within() { local s="$1" n="$2"; for _ in $(seq "$n"); do
+  [ "$(health_of "$s")" = healthy ] && docker compose -f deploy/compose.yaml exec -T "$s" test -s /run/secrets/db-password \
+    && return 0; sleep 2; done; return 1; }
+redelivered_by_watcher() { docker compose -f deploy/compose.yaml restart api >/dev/null || return 1
+  healthy_with_file_within api 30; }                            # no second `reader up`
+fails_closed_without_watcher() { reader watcher stop || return 1
+  docker compose -f deploy/compose.yaml restart api >/dev/null || return 1
+  sleep 20; [ "$(health_of api)" != healthy ] || return 1      # no file, no watcher: stays unhealthy (FR-DEPLOY-10 d)
+  reader up >/dev/null || return 1; healthy_with_file_within api 30; }
+postgres_restarts_without_file() { reader watcher stop || return 1   # hypothesis of FR-DEPLOY-10 d: PGDATA initialised,
+  docker compose -f deploy/compose.yaml restart postgres >/dev/null || return 1   # so the wrapper does not need the file
+  for _ in $(seq 30); do [ "$(health_of postgres)" = healthy ] && { reader up >/dev/null; return $?; }; sleep 2; done
+  reader up >/dev/null; return 1; }
+record_consumer_peaks() { docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' \
+  $(docker compose -f deploy/compose.yaml ps -q $CONSUMERS) >&2; }   # FR-DEPLOY-9 limits are revised from these
 check "no env secrets"          no_canary_in_inspect
 check "no secret on disk"       no_secret_in_diff
 check "secret files 0600, owner = service uid" secret_files_ok
-check "re-delivered after restart, before healthy" redelivered_after_restart
+check "re-delivered by the watcher after a restart" redelivered_by_watcher
+check "fails closed without the watcher" fails_closed_without_watcher
+check "postgres restarts without its file" postgres_restarts_without_file
 check "postgres hardened"       test "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}}' "$(docker compose -f deploy/compose.yaml ps -q postgres)")" = "999:999 true"
+check "consumer memory recorded" record_consumer_peaks
 check "doctor"          reader doctor --json | jq -e 'all(.[]; .ok)'
 # manual, once: open the bootstrap link in Safari, register a passkey, then:
 check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me | jq -e '.role=="owner"'
