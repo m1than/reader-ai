@@ -57,9 +57,9 @@ def full(pdf: str, batch: int) -> dict[str, object]:
             "pages_per_min": round(pages / total * 60, 2), "batches": batches}
 
 
-def sample(pdf: str, pages: list[int]) -> dict[str, object]:
-    conv = converter(formulas=True)
-    out = OUT / "sample"
+def sample(pdf: str, pages: list[int], formulas: bool) -> dict[str, object]:
+    conv = converter(formulas=formulas)
+    out = OUT / ("sample" if formulas else "sample-noformula")
     out.mkdir(parents=True, exist_ok=True)
     rows = []
     for p in pages:
@@ -68,7 +68,7 @@ def sample(pdf: str, pages: list[int]) -> dict[str, object]:
         (out / f"p{p:04d}.md").write_text(doc.export_to_markdown())
         rows.append({"page": p, "seconds": round(time.monotonic() - t1, 1), "tables": len(doc.tables),
                      "formulas": sum(1 for t in doc.texts if t.label == "formula")})
-    return {"mode": "sample", "pages": rows}
+    return {"mode": "sample", "formula_enrichment": formulas, "pages": rows}
 
 
 def norm(s: str) -> str:
@@ -103,9 +103,10 @@ def main() -> None:
     ap.add_argument("pdf")
     ap.add_argument("--batch", type=int, default=50)
     ap.add_argument("--pages", default="")
+    ap.add_argument("--no-formulas", action="store_true", help="sample without the formula model (CPU: ~11 min/page with it)")
     a = ap.parse_args()
     pages = [int(x) for x in a.pages.split(",") if x]
-    result = full(a.pdf, a.batch) if a.mode == "full" else sample(a.pdf, pages) if a.mode == "sample" \
+    result = full(a.pdf, a.batch) if a.mode == "full" else sample(a.pdf, pages, not a.no_formulas) if a.mode == "sample" \
         else ocr(a.pdf, pages)
     print(json.dumps(result))
 

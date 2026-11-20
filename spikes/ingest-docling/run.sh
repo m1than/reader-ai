@@ -17,7 +17,7 @@ echo "pdf_sha256=$(shasum -a 256 "$PDF" | awk '{print $1}')"
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 # No network at run time: models are in the image (ADR-0014 spirit; the ingest worker needs no egress).
 docker run -d --name "$NAME" --platform linux/arm64 --network none \
-  -v "$PDF:/in/source.pdf:ro" -v "$OUT:/out" reader-spike-docling "$MODE" /in/source.pdf --pages "$PAGES" >/dev/null
+  -v "$PDF:/in/source.pdf:ro" -v "$OUT:/out" reader-spike-docling "$MODE" /in/source.pdf --pages "$PAGES" ${EXTRA:-} >/dev/null
 
 mem_mib() { docker stats --no-stream --format '{{.MemUsage}}' "$NAME" 2>/dev/null | awk '{ v = $1
   if (v ~ /GiB/) { sub(/GiB/, "", v); v *= 1024 } else if (v ~ /KiB/) { sub(/KiB/, "", v); v /= 1024 } else { sub(/MiB/, "", v) }
