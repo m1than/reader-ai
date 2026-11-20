@@ -49,7 +49,9 @@ def as_json(text: str) -> tuple[object | None, str]:
 async def run_stage(name: str, model: str, budget: float, prompt: str) -> dict[str, object]:
     t0 = time.monotonic()
     text, result = "", None
-    options = ClaudeAgentOptions(model=model, max_turns=3, allowed_tools=[], disallowed_tools=NO_TOOLS,
+    # tools=[] gives the model no tools at all (ClaudeAgentOptions.tools in 0.2.186); the denylist stays as a second
+    # layer. The two recorded runs used the denylist only (tools=[] was added after them, without a new run).
+    options = ClaudeAgentOptions(model=model, max_turns=3, tools=[], allowed_tools=[], disallowed_tools=NO_TOOLS,
                                  setting_sources=[], max_budget_usd=budget)
     async for msg in query(prompt=prompt, options=options):
         if isinstance(msg, AssistantMessage):

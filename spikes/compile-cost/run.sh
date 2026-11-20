@@ -5,7 +5,9 @@
 # Source pages: data/spikes/compile-cost/source/pNNNN.md, PDF pages 60-84, produced by
 #   CODE=0 uv run --script spikes/ingest-docling/convert_native.py <pdf> 60,...,84 data/spikes/compile-cost/source
 #
-# Spend cap: CAP_USD (default 8.00, owner 2026-11-20) minus everything already recorded in results/*/*.json.
+# Spend cap: CAP_USD (default 8.00, owner 2026-11-20) minus everything already recorded in the per-stage files
+# results/*/[0-9]*.json. Enforcement is a running-total check before each stage (overshoot is bounded by one stage,
+# at most ≈ $1.5 here) plus the SDK's per-stage max_budget_usd, which no stage reached, so its stop is untested.
 # Token: the owner allowed this spike to read the Keychain item reader-ai/claude-oauth-token (2026-11-20). It is
 # piped to the container on stdin, exported only inside it, never printed, and never in `docker inspect`.
 set -euo pipefail
@@ -19,10 +21,12 @@ TEXT="$REPO/data/spikes/compile-cost/runs/$RUN_ID"
 NUM="$HERE/results/$RUN_ID"
 [[ -n "$(ls "$SRC"/p*.md 2>/dev/null)" ]] || { echo "no source pages in $SRC"; exit 1; }
 
+# Sum the per-stage files, not summary.json: a run killed mid-way leaves stage files but no summary, and its
+# spend must still count against the cap.
 shopt -s nullglob
-summaries=("$HERE"/results/*/summary.json)
+stages=("$HERE"/results/*/[0-9]*.json)
 spent=0
-((${#summaries[@]})) && spent=$(jq -s 'map(.total_cost_usd) | add // 0' "${summaries[@]}")
+((${#stages[@]})) && spent=$(jq -s 'map(.total_cost_usd // 0) | add // 0' "${stages[@]}")
 left=$(jq -n --argjson cap "$CAP_USD" --argjson s "$spent" '$cap - $s')
 echo "cap=$CAP_USD already_spent=$spent left=$left"
 jq -e -n --argjson l "$left" '$l >= 0.5' >/dev/null || { echo "cap reached"; exit 1; }
