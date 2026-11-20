@@ -48,12 +48,16 @@ tasks:
         node@26 is installed as a separate Homebrew keg (the Mac's default node stays 22). New spikes use python:3.14-slim-trixie
         (agent-sdk-container measured, PR #6). Pending evidence: OCR conversion on 3.14 (ingest-docling) and a kernel-roundtrip re-run on 3.14.
         On acceptance by the owner: move the 3.13 pins listed in ADR-0020 Consequences in one PR. This PR carries an ADR, so it waits for the owner." }
-  - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: in_progress, needs: [S0.skeleton],
+  - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: blocked, needs: [S0.skeleton],
       pr: "https://github.com/m1than/reader-ai/pull/7",
-      result: "PASS with one substitution (spikes/passkey-localhost/RESULT.md): WebAuthn RP (webauthn 3.0.1) behind Caddy tls internal on https://localhost;
-        browser-free checks 12/12. Owner run 2026-11-20: Safari 27.2 and Dia (Chromium 157) each register.ok + login.ok, multi-device,
-        backed up, UV true, once the owner trusted the Caddy root CA. Google Chrome would not launch on the owner's Mac, so it is untested.
-        Host name for stage 1: localhost; mkcert fallback not needed." }
+      result: "Safari 27.2 and Dia (Chromium 157) each register.ok + login.ok on https://localhost behind Caddy tls internal,
+        both through Apple Passwords (AAGUID fbfc3007-…), UV true, server verifies challenge/origin/RP ID/UV/signature
+        (spikes/passkey-localhost/RESULT.md). Host name for stage 1 provisionally localhost; mkcert fallback not needed so far.
+        Owner's keychain checked clean after teardown (no Caddy trust setting or certificate left).",
+      reason: "The roadmap criterion and ADR-0012 name Google Chrome. It would not launch on the owner's Mac, and its own passkey
+        provider (Google Password Manager) was not exercised. Swapping the criterion is the owner's call.",
+      ask: "Either accept Safari + Chromium (Dia) via Apple Passwords as meeting the criterion (reply 'accept passkey substitution'),
+        or fix/reinstall Google Chrome and rerun steps 1–4 of RESULT.md in Chrome (about 5 minutes)." }
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
       pr: "https://github.com/m1than/reader-ai/pull/6", review: "deep-reviewer (Fable): approve, round 3",
       note: "The owner allowed spikes/agent-sdk-container/run.sh, for this spike only, to read the Keychain item
