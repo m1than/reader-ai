@@ -208,6 +208,16 @@ tasks:
         a namespace package. Depends on SRV-OBS and SRV-EVENTS for redaction in the shared logger and event serializer.
         Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved inside containers;
         ADR-0017 cross-user reference exposure is SRV-AGENT's; no spaces in keychain/1Password names." }
+  - { id: S1.SRV-CONFIG-adr26, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S1.SRV-CONFIG],
+      what: "Paired SRV-CONFIG change after ADR-0026 (H2: spec, fixtures, tests and code in one commit, then a deep-reviewer pass):
+        FR-CONFIG-14 drops the Compose-secret wording (`<name>: { environment: <VAR> }`, 'Compose mounts the value') and says
+        OPS-CLI writes /run/secrets/<name> over docker exec (ADR-0026); remove secret_env_var from FR-CONFIG-14 and INV-CONFIG-6;
+        VEC-CONFIG-5 (spec/fixtures/SRV-CONFIG/secret-names.yaml) drops the env-var column; REF-CONFIG-7 (Compose secrets docs)
+        replaced by ADR-0026; tests server/tests/config/test_names.py and test_secret_ref.py drop secret_env_var cases;
+        code: remove secret_env_var from server/src/reader/config/refs.py and __init__.py exports. OPS-CLI does not depend on it.",
+      note: "green locally; deep-reviewer next. Branch 1/S1.SRV-CONFIG-adr26; spec stays approved (review field: amended for
+        ADR-0026, paired change, coordinator-scheduled). Tests 245 → 245 (secret_env_var assertions removed; one test added
+        asserting the export is gone)." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
       note: "Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
         watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
