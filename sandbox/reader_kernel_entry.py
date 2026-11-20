@@ -230,9 +230,9 @@ class Supervisor:
         if method == b"GET" and path == b"/control/state":
             self.respond(conn, 200, self.state_body())
         elif method == b"POST" and path == b"/control/exit":
+            # The serve loop runs begin_exit() outside the contained per-connection block (fail-stop).
             self.exiting = True
             self.respond(conn, 202)
-            self.begin_exit()
         else:
             self.respond(conn, 404)
         return True
@@ -329,6 +329,8 @@ class Supervisor:
                     self.service(sock, conns, close)
                 except Exception:  # noqa: BLE001 - one connection never ends the control loop
                     close(sock)
+                if self.exiting and not self.exit_armed.is_set():
+                    self.begin_exit()  # outside the contained block: an error here stays fail-stop
             now = time.monotonic()
             for conn in [c for c, v in conns.items() if v[1] <= now]:
                 close(conn)

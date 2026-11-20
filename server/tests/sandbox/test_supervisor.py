@@ -499,7 +499,7 @@ def test_own_address_source_counts_as_local(sandbox: Sandbox) -> None:
     nonce = sandbox.start()["nonce"]
     counted = json.loads(sandbox.exec_ok(COUNT_SPOOFED))
     assert counted["connected"] > 64, counted
-    assert counted["open"] <= 192, counted
+    assert 64 < counted["open"] <= 192, counted
     time.sleep(6)  # let the read timeout clear the counted connections
     docker("exec", "-d", "-u", "1000:1000", sandbox.name, "python3", "-I", "-c", SPOOF_FLOOD, "25")
     time.sleep(2)

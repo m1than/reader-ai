@@ -58,7 +58,7 @@ title: Kernel image (python3), fail-stop in-container supervisor with start nonc
 status: approved
 approved_by: agent
 approved_at: 2026-11-21
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests. Code review round 2 changes (own-address source classed remote; double close crashed PID 1): FR-SANDBOX-6 (d) classification by destination, peer and interface addresses, idempotent close, per-connection errors contained, with tests"
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests. Code review round 2 changes (own-address source classed remote; double close crashed PID 1): FR-SANDBOX-6 (d) classification by destination, peer and interface addresses, idempotent close, per-connection errors contained, with tests. Code review round 3 approve (2026-11-21); applied its notes: own-address test asserts more than 64 open, begin_exit runs outside the contained block"
 layer: ops
 track: engineering
 adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
@@ -268,6 +268,8 @@ vectors:
     file: spec/fixtures/OPS-SANDBOX/probes.yaml
 
 # Owner notes:
+# - The container's own addresses (FR-SANDBOX-6 d) are read once at start. That is enough for a kernel on a single
+#   network that never changes while it runs; revisit in stage 4a if a kernel service can gain networks at run time.
 # - The slice image carries only the Python standard library for labs. Packages the L02 labs need are added to the lock
 #   when V.COMPILE-min fixes L02 (pip in a cell cannot reach the network).
 # - The `x-kernel` template mounts /run/evcxr (exec, 1 GiB) although the python3-only image does not use it; it stays
