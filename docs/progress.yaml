@@ -235,12 +235,16 @@ tasks:
         hash-derived names (SRV-CONFIG FR-CONFIG-14); services that need a provider token reference those secrets." }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: in_progress, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG],
       branch: 1/S1.SRV-AUTH,
-      note: "spec rounds 1–2 changes applied (B1–B10, N1–N4, non-blocking, multi-head Alembic through asyncpg);
-        awaits deep-reviewer round 3. Also claims the stage-1 server skeleton (reader.db, reader.api, reader-server).
-        Paired: compose.yaml sets READER_CONFIG statically; the override adds only the read-only bind of reader.yaml
-        at /etc/reader/reader.yaml (FR-DEPLOY-5 amended); reader.example.yaml shows learner `live-check`; OPS-CLI
-        `reader bootstrap [--handle]` opens the link without printing it. S1.live: learner `live-check` reset through
-        psql each run, software authenticator with a per-run key, plus a manual owner check in Safari." }
+      note: "spec approved (deep-reviewer round 3 approve, 2026-11-20); Red 3af4f19 (117 failing in their bodies, 1
+        fixture-determinism check passing), Green 2b49745: 119 auth tests pass against Postgres 18 (pinned digest,
+        testcontainers), 365 server tests in all; ruff and mypy --strict clean. Awaits code review (complex area:
+        auth and sessions). Deps: fastapi 0.165.0, uvicorn 0.54.0, sqlalchemy 2.1.9, asyncpg 0.32.0, alembic 1.20.1,
+        webauthn 3.0.1; dev httpx 0.28.1. Also claims the stage-1 server skeleton (reader.db, reader.api,
+        reader-server). Paired: compose.yaml sets READER_CONFIG statically; the override adds only the read-only bind
+        of reader.yaml at /etc/reader/reader.yaml (FR-DEPLOY-5 amended); reader.example.yaml shows learner
+        `live-check`; OPS-CLI `reader bootstrap [--handle]` opens the link without printing it. S1.live: learner
+        `live-check` reset through psql each run, software authenticator with a per-run key, plus a manual owner
+        check in Safari." }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
 
