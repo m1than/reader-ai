@@ -88,15 +88,33 @@ docker build --platform linux/arm64 -t reader-spike-embeddings spikes/embeddings
   QUESTIONS=questions-v2.yaml TAG=v2 bash spikes/embeddings-local/run.sh "<path to the Bashir PDF>"
 ```
 
-The first run embeds and caches the full pilot for each model. It takes about 2.7 + 37 + 32 min on the 4-CPU VM and is the timed run. Later runs on any question set (v1, edits to v2) take seconds per model.
+The first run embeds and caches the full pilot for each model and is the timed run. Later runs on any question set (v1, edits to v2) take seconds per model.
+
+**Measured** (`results/20261120T232835-v2/`, 2026-11-20): Docker VM at 13 CPUs, aarch64, 13 torch threads, cache miss for all three, 2,285 chunks of the full pilot, 40 questions. Pure dense retrieval, without the full-text half of the planned hybrid.
 
 | Model | Chunks/s | Full pilot (min) | recall@10 | recall@3 | recall@1 | MRR | Worst gold rank |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| multilingual-e5-small | | | | | | | |
-| USER-bge-m3 | | | | | | | |
-| bge-m3 | | | | | | | |
+| multilingual-e5-small | 31.81 | 1.2 | 0.400 | 0.225 | 0.150 | 0.230 | 488 |
+| USER-bge-m3 | 2.53 | 15.1 | **0.750** | **0.450** | 0.275 | 0.409 | 253 |
+| bge-m3 | 2.71 | 14.1 | 0.675 | 0.400 | **0.325** | **0.413** | 320 |
+
+**Reading:**
+- On v1 all three models reached recall@10 = 1.0, so v1 could not separate them. v2 does: e5-small misses 24 of 40 questions in its top 10, while both bge-m3 models miss 10 or 13.
+- The two bge-m3 models are within noise of each other on 40 questions: 30 vs 27 hits at 10, 11 vs 13 at 1, MRR 0.409 vs 0.413.
+- Cost: about 12 times slower than e5-small, but embedding is a one-time cost per material (≈ 15 min for this 800-page book at 13 CPUs). Query embedding is a single short text.
+- 13 CPUs vs the earlier 4-CPU estimate (32–37 min) gave about 2.3–2.6 times the speed.
+
+**Recommendation (agent):** `BAAI/bge-m3` for V.SRV-SEARCH-min.
+- It is within noise of USER-bge-m3 on this Russian book, and has the best recall@1 and MRR.
+- It is the general multilingual model, and reader-ai takes "any study material", not only Russian. USER-bge-m3 is a Russian-tuned derivative.
+- Licence: MIT (model card). USER-bge-m3 is Apache-2.0; either is fine.
+- e5-small is rejected on recall.
+
+The full-text half of the hybrid search (Postgres FTS) is expected to raise recall on term-heavy questions. V.SRV-SEARCH-min should measure the hybrid on this same v2 set as its acceptance number.
 
 ## Needs the owner
+
+- Confirm the model choice: `BAAI/bge-m3` (recommended) or `deepvk/USER-bge-m3`. Until then the slice uses bge-m3.
 
 - Skim `questions-v2.yaml` (40 questions, all chapters). Rewording is fine; keep `gold_pages`, and rerun `check_questions.py` after editing.
 - v1 `questions.yaml` (30 questions, chapters 1–21) remains for comparison and needs no further review if v2 replaces it.
