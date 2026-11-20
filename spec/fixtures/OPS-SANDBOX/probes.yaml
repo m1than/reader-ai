@@ -1,0 +1,18 @@
+# VEC-SANDBOX-1 — probes run from a python3 kernel cell.
+# Source: OPS-DEPLOY network table (VEC-DEPLOY-2), ADR-0014 controls, ADR-0022 routes.
+# expect: resolve_fails | connect_fails | absent | equals
+# level: image (throwaway --internal network, a probe container stands in for api) | live (reader up)
+
+probes:
+  - { id: dns-external,   action: "socket.getaddrinfo('example.com', 443)",        expect: resolve_fails, level: [image, live] }
+  - { id: ip-external,    action: "socket.create_connection(('1.1.1.1', 443), 3)", expect: connect_fails, level: [image, live] }
+  - { id: http-external,  action: "urllib.request.urlopen('https://pypi.org', timeout=3)", expect: connect_fails, level: [image, live] }
+  - { id: dns-postgres,   action: "socket.getaddrinfo('postgres', 5432)",          expect: resolve_fails, level: [live] }
+  - { id: dns-worker,     action: "socket.getaddrinfo('worker', 80)",              expect: resolve_fails, level: [live] }
+  - { id: dns-caddy,      action: "socket.getaddrinfo('caddy', 443)",              expect: resolve_fails, level: [live] }
+  - { id: dns-agentproxy, action: "socket.getaddrinfo('agent-proxy', 80)",         expect: resolve_fails, level: [live] }
+  - { id: api-front,      action: "socket.create_connection(('10.230.1.10', 8000), 3)", expect: connect_fails, level: [live] }
+  - { id: api-sandbox,    action: "for each address of 'api': connect to ports 1-65535 (sampled: 22, 80, 443, 5432, 8000, 8001, 8888)", expect: connect_fails, level: [live] }
+  - { id: secrets-dir,    action: "os.path.exists('/run/secrets')",                expect: absent, level: [image, live] }
+  - { id: docker-sock,    action: "os.path.exists('/var/run/docker.sock') or os.path.exists('/run/docker.sock')", expect: absent, level: [image, live] }
+  - { id: env-names,      action: "sorted(os.environ)", expect: equals, value: [HOME, HOSTNAME, JUPYTER_PATH, JUPYTER_RUNTIME_DIR, LANG, PATH, PYTHONDONTWRITEBYTECODE, PYTHONUNBUFFERED], level: [image, live], note: "ipykernel may add JPY_* / PYDEVD_* names at kernel start; the [image] test records the exact list once and this vector is amended with the recorded names, never widened by pattern" }

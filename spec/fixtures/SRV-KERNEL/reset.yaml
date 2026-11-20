@@ -1,0 +1,29 @@
+# VEC-KERNEL-2 — reset sequences against a fake control endpoint (SRV-KERNEL FR-KERNEL-5, INV-KERNEL-5).
+# Source: FR-KERNEL-5 and ADR-0022 "Reset between principals" (fail closed when the start nonce did not change).
+# Each step is what the fake /control/state answers on successive polls after POST /control/exit (250 ms apart).
+
+cases:
+  - id: changes
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: [connection_refused, connection_refused, { nonce: "00000000000000000000000000000002", gateway: starting }, { nonce: "00000000000000000000000000000002", gateway: up }]
+    expect: { result: ok, sessions_dropped: true, notice_before_close: kernel_reset, close_code: 1012 }
+  - id: same-nonce-up
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: [{ nonce: "00000000000000000000000000000001", gateway: up }]
+    expect: { result: kernel_unavailable, http: 503, service_usable: false }
+  - id: deadline
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: [connection_refused, "... until 30 s"]
+    expect: { result: kernel_unavailable, http: 503, service_usable: false }
+  - id: state-unreachable
+    before: connection_refused
+    expect: { result: kernel_unavailable, http: 503, service_usable: false, exit_called: false }
+  - id: recovery-after-failure
+    precondition: { service_usable: false }
+    before: { nonce: "00000000000000000000000000000003", gateway: up }
+    exit: 202
+    polls: [{ nonce: "00000000000000000000000000000004", gateway: up }]
+    expect: { result: ok, service_usable: true }

@@ -244,8 +244,9 @@ tasks:
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
       note: "multilingual-e5-small (spike embeddings-local; v2 benchmark pending)" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
-  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
-      note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
+  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+      note: "specs drafted, await deep-reviewer (OPS-SANDBOX + SRV-KERNEL, python3 only, ADR-0022; branch V/V.KERNEL-min).
+        Needs a paired OPS-CLI change: start profile `kernels` once reader-kernel:local exists" }
   - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],
       note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
