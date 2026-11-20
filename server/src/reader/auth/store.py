@@ -1,0 +1,591 @@
+"""SRV-AUTH persistence and ceremonies: users, bootstrap tokens, challenges, credentials, sessions, failures.
+
+Secrets that reach the browser (session ids, ceremony ids, bootstrap tokens) are stored only as SHA-256 of
+their text form (INV-AUTH-5). Transaction boundaries follow FR-AUTH-5..8: ceremonies that fail roll back and
+record their failure in a separate transaction, except sign-in, whose challenge consumption commits with the
+failure.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import json
+import math
+import secrets
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import Row, text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+from webauthn import generate_authentication_options, generate_registration_options, options_to_json
+from webauthn.helpers.cose import COSEAlgorithmIdentifier
+from webauthn.helpers.structs import (
+    AttestationConveyancePreference,
+    AuthenticatorSelectionCriteria,
+    PublicKeyCredentialDescriptor,
+    ResidentKeyRequirement,
+    UserVerificationRequirement,
+)
+
+from reader.auth import webauthn as seam
+from reader.auth.policy import (
+    ALGORITHMS,
+    BOOTSTRAP_TOKEN_BYTES,
+    BOOTSTRAP_TOKEN_TTL_S,
+    CHALLENGE_BYTES,
+    CHALLENGE_TTL_S,
+    FAILURE_MAX,
+    FAILURE_WINDOW_S,
+    SESSION_ID_BYTES,
+    SESSION_TTL_S,
+    FailureReason,
+    Settings,
+)
+
+Json = dict[str, Any]
+
+
+def b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def digest(value: str) -> bytes:
+    return hashlib.sha256(value.encode("utf-8")).digest()
+
+
+def _secret_text(n_bytes: int) -> str:
+    return b64url(secrets.token_bytes(n_bytes))
+
+
+class BootstrapRefused(Exception):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class SessionUser:
+    id: UUID
+    handle: str
+    role: str
+    display_name: str
+    consent_evaluation: bool
+    consent_tuning: bool
+    session_created_at: datetime
+    session_age_s: float
+
+
+# Startup -------------------------------------------------------------------------------------------------
+
+
+async def cleanup(engine: AsyncEngine) -> None:
+    """FR-AUTH-17: delete spent or expired ceremonies and tokens, ended sessions, failures past the window."""
+    async with engine.begin() as conn:
+        grace = {"grace": CHALLENGE_TTL_S}
+        await conn.execute(
+            text(
+                "DELETE FROM auth_challenges WHERE expires_at < now() "
+                "OR consumed_at < now() - make_interval(secs => :grace)"
+            ),
+            grace,
+        )
+        await conn.execute(
+            text(
+                "DELETE FROM bootstrap_tokens WHERE expires_at < now() "
+                "OR consumed_at < now() - make_interval(secs => :grace) "
+                "OR revoked_at < now() - make_interval(secs => :grace)"
+            ),
+            grace,
+        )
+        await conn.execute(text("DELETE FROM sessions WHERE expires_at < now() OR revoked_at IS NOT NULL"))
+        await conn.execute(
+            text("DELETE FROM auth_failures WHERE at < now() - make_interval(secs => :w)"),
+            {"w": FAILURE_WINDOW_S},
+        )
+
+
+async def sync_users(engine: AsyncEngine, settings: Settings) -> None:
+    """FR-AUTH-1: one row per configured user; users no longer configured are disabled, their rows kept."""
+    handles = [u.handle for u in settings.users]
+    async with engine.begin() as conn:
+        for user in settings.users:
+            await conn.execute(
+                text(
+                    "INSERT INTO users (handle, role, webauthn_user_id, display_name, consent_evaluation) "
+                    "VALUES (:handle, :role, :uid, :handle, :consent) "
+                    "ON CONFLICT (handle) DO UPDATE SET role = excluded.role, disabled_at = NULL"
+                ),
+                {
+                    "handle": user.handle,
+                    "role": user.role,
+                    "uid": secrets.token_bytes(64),
+                    "consent": user.role == "owner",
+                },
+            )
+        await conn.execute(
+            text(
+                "UPDATE users SET disabled_at = now() WHERE disabled_at IS NULL AND handle <> ALL(:handles)"
+            ),
+            {"handles": handles},
+        )
+        await conn.execute(
+            text(
+                "UPDATE sessions SET revoked_at = now() WHERE revoked_at IS NULL AND owner_id IN "
+                "(SELECT id FROM users WHERE disabled_at IS NOT NULL)"
+            )
+        )
+
+
+async def prepare(engine: AsyncEngine, settings: Settings) -> None:
+    """The api startup work after migrations: cleanup, then the user sync."""
+    await cleanup(engine)
+    await sync_users(engine, settings)
+
+
+# Failures ------------------------------------------------------------------------------------------------
+
+
+async def record_failure(engine: AsyncEngine, reason: FailureReason) -> None:
+    async with engine.begin() as conn:
+        await _insert_failure(conn, reason)
+
+
+async def _insert_failure(conn: AsyncConnection, reason: FailureReason) -> None:
+    await conn.execute(text("INSERT INTO auth_failures (reason) VALUES (:r)"), {"r": reason.value})
+
+
+async def retry_after(engine: AsyncEngine) -> int | None:
+    """FR-AUTH-11: seconds until the oldest counted failure leaves the window, while the limit is reached."""
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT count(*), extract(epoch FROM min(at) + make_interval(secs => :w) - now()) "
+                    "FROM auth_failures WHERE at > now() - make_interval(secs => :w)"
+                ),
+                {"w": FAILURE_WINDOW_S},
+            )
+        ).one()
+    count, remaining = int(row[0]), row[1]
+    if count < FAILURE_MAX:
+        return None
+    return max(1, math.ceil(float(remaining)))
+
+
+# Bootstrap tokens (FR-AUTH-4) ----------------------------------------------------------------------------
+
+
+async def create_bootstrap_token(engine: AsyncEngine, settings: Settings, handle: str | None) -> str:
+    target = handle or settings.owner_handle
+    token = _secret_text(BOOTSTRAP_TOKEN_BYTES)
+    async with engine.begin() as conn:
+        user = (
+            await conn.execute(
+                text("SELECT id, disabled_at FROM users WHERE handle = :h FOR UPDATE"), {"h": target}
+            )
+        ).first()
+        if user is None:
+            raise BootstrapRefused("unknown_handle")
+        if user.disabled_at is not None:
+            raise BootstrapRefused(FailureReason.user_disabled.value)
+        if await _has_credential(conn, user.id):
+            raise BootstrapRefused(FailureReason.owner_has_credential.value)
+        await conn.execute(
+            text(
+                "UPDATE bootstrap_tokens SET revoked_at = now() "
+                "WHERE user_id = :u AND consumed_at IS NULL AND revoked_at IS NULL"
+            ),
+            {"u": user.id},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO bootstrap_tokens (token_sha256, user_id, expires_at) "
+                "VALUES (:h, :u, now() + make_interval(secs => :ttl))"
+            ),
+            {"h": digest(token), "u": user.id, "ttl": BOOTSTRAP_TOKEN_TTL_S},
+        )
+    return token
+
+
+async def _has_credential(conn: AsyncConnection, user_id: UUID) -> bool:
+    found = await conn.execute(
+        text("SELECT 1 FROM webauthn_credentials WHERE owner_id = :u LIMIT 1"), {"u": user_id}
+    )
+    return found.first() is not None
+
+
+# Ceremonies ----------------------------------------------------------------------------------------------
+
+
+async def _new_ceremony(
+    conn: AsyncConnection, kind: str, user_id: UUID | None, token_sha: bytes | None = None
+) -> tuple[str, bytes]:
+    ceremony = _secret_text(32)
+    challenge = secrets.token_bytes(CHALLENGE_BYTES)
+    await conn.execute(
+        text(
+            "INSERT INTO auth_challenges (ceremony_sha256, kind, challenge, user_id, bootstrap_token_sha256, "
+            "expires_at) VALUES (:c, :k, :ch, :u, :t, now() + make_interval(secs => :ttl))"
+        ),
+        {
+            "c": digest(ceremony),
+            "k": kind,
+            "ch": challenge,
+            "u": user_id,
+            "t": token_sha,
+            "ttl": CHALLENGE_TTL_S,
+        },
+    )
+    return ceremony, challenge
+
+
+async def _consume_ceremony(conn: AsyncConnection, ceremony: str | None, kind: str) -> Row[Any] | None:
+    if not ceremony:
+        return None
+    return (
+        await conn.execute(
+            text(
+                "UPDATE auth_challenges SET consumed_at = now() WHERE ceremony_sha256 = :c AND kind = :k "
+                "AND consumed_at IS NULL AND expires_at > now() "
+                "RETURNING challenge, user_id, bootstrap_token_sha256"
+            ),
+            {"c": digest(ceremony), "k": kind},
+        )
+    ).first()
+
+
+async def _registration_options(
+    conn: AsyncConnection, settings: Settings, user_id: UUID, challenge: bytes
+) -> Json:
+    user = (
+        await conn.execute(
+            text("SELECT handle, display_name, webauthn_user_id FROM users WHERE id = :u"), {"u": user_id}
+        )
+    ).one()
+    existing = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT credential_id FROM webauthn_credentials WHERE owner_id = :u ORDER BY created_at"
+                ),
+                {"u": user_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    options = generate_registration_options(
+        rp_id=settings.rp_id,
+        rp_name="reader-ai",
+        user_name=user.handle,
+        user_id=bytes(user.webauthn_user_id),
+        user_display_name=user.display_name,
+        challenge=challenge,
+        timeout=CHALLENGE_TTL_S * 1000,
+        attestation=AttestationConveyancePreference.NONE,
+        authenticator_selection=AuthenticatorSelectionCriteria(
+            resident_key=ResidentKeyRequirement.REQUIRED,
+            require_resident_key=True,
+            user_verification=UserVerificationRequirement.REQUIRED,
+        ),
+        exclude_credentials=[PublicKeyCredentialDescriptor(id=bytes(c)) for c in existing],
+        supported_pub_key_algs=[COSEAlgorithmIdentifier(a) for a in ALGORITHMS],
+    )
+    parsed: Json = json.loads(options_to_json(options))
+    return parsed
+
+
+async def _store_credential(conn: AsyncConnection, user_id: UUID, cred: seam.RegisteredCredential) -> bool:
+    inserted = await conn.execute(
+        text(
+            "INSERT INTO webauthn_credentials (credential_id, owner_id, public_key, sign_count, transports, "
+            "aaguid, backed_up) VALUES (:id, :u, :pk, :n, :t, :a, :b) ON CONFLICT (credential_id) DO NOTHING "
+            "RETURNING 1"
+        ),
+        {
+            "id": cred.credential_id,
+            "u": user_id,
+            "pk": cred.public_key,
+            "n": cred.sign_count,
+            "t": list(cred.transports),
+            "a": UUID(cred.aaguid),
+            "b": cred.backed_up,
+        },
+    )
+    return inserted.first() is not None
+
+
+async def _start_session(conn: AsyncConnection, user_id: UUID, presented: str | None) -> str:
+    """FR-AUTH-8: a fresh session; the session presented with the request is revoked."""
+    if presented:
+        await conn.execute(
+            text("UPDATE sessions SET revoked_at = now() WHERE id_sha256 = :h AND revoked_at IS NULL"),
+            {"h": digest(presented)},
+        )
+    session = _secret_text(SESSION_ID_BYTES)
+    await conn.execute(
+        text(
+            "INSERT INTO sessions (id_sha256, owner_id, expires_at) "
+            "VALUES (:h, :u, now() + make_interval(secs => :ttl))"
+        ),
+        {"h": digest(session), "u": user_id, "ttl": SESSION_TTL_S},
+    )
+    return session
+
+
+class _Rollback(Exception):
+    def __init__(self, reason: FailureReason) -> None:
+        super().__init__(reason.value)
+        self.reason = reason
+
+
+async def bootstrap_options(
+    engine: AsyncEngine, settings: Settings, token: str
+) -> tuple[Json, str] | FailureReason:
+    async with engine.begin() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT t.user_id, u.disabled_at FROM bootstrap_tokens t "
+                    "JOIN users u ON u.id = t.user_id "
+                    "WHERE t.token_sha256 = :h AND t.consumed_at IS NULL AND t.revoked_at IS NULL "
+                    "AND t.expires_at > now()"
+                ),
+                {"h": digest(token)},
+            )
+        ).first()
+        if row is None:
+            return FailureReason.token_invalid
+        if row.disabled_at is not None:
+            return FailureReason.user_disabled
+        if await _has_credential(conn, row.user_id):
+            return FailureReason.owner_has_credential
+        ceremony, challenge = await _new_ceremony(conn, "bootstrap", row.user_id, digest(token))
+        return await _registration_options(conn, settings, row.user_id, challenge), ceremony
+
+
+async def bootstrap_verify(
+    engine: AsyncEngine, settings: Settings, ceremony: str | None, credential: Json, presented: str | None
+) -> str | FailureReason:
+    """FR-AUTH-5: one transaction; any failure rolls it back so the token and challenge stay usable."""
+    try:
+        async with engine.begin() as conn:
+            pending = (
+                await conn.execute(
+                    text(
+                        "SELECT user_id, bootstrap_token_sha256 FROM auth_challenges "
+                        "WHERE ceremony_sha256 = :c "
+                        "AND kind = 'bootstrap' AND consumed_at IS NULL AND expires_at > now()"
+                    ),
+                    {"c": digest(ceremony or "")},
+                )
+            ).first()
+            if pending is None:
+                raise _Rollback(FailureReason.ceremony_invalid)
+            user = (
+                await conn.execute(
+                    text("SELECT id, disabled_at FROM users WHERE id = :u FOR UPDATE"), {"u": pending.user_id}
+                )
+            ).one()
+            if user.disabled_at is not None:
+                raise _Rollback(FailureReason.user_disabled)
+            if await _has_credential(conn, user.id):
+                raise _Rollback(FailureReason.owner_has_credential)
+            token = (
+                await conn.execute(
+                    text(
+                        "UPDATE bootstrap_tokens SET consumed_at = now() "
+                        "WHERE token_sha256 = :h AND user_id = :u "
+                        "AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now() RETURNING 1"
+                    ),
+                    {"h": pending.bootstrap_token_sha256, "u": user.id},
+                )
+            ).first()
+            if token is None:
+                raise _Rollback(FailureReason.token_invalid)
+            consumed = await _consume_ceremony(conn, ceremony, "bootstrap")
+            if consumed is None:
+                raise _Rollback(FailureReason.ceremony_invalid)
+            session = await _register(
+                conn, settings, user.id, bytes(consumed.challenge), credential, presented
+            )
+            return session
+    except _Rollback as failure:
+        await record_failure(engine, failure.reason)
+        return failure.reason
+
+
+async def _register(
+    conn: AsyncConnection,
+    settings: Settings,
+    user_id: UUID,
+    challenge: bytes,
+    credential: Json,
+    presented: str | None,
+) -> str:
+    result = seam.verify_registration(settings.rp_id, settings.origin, challenge, credential)
+    if isinstance(result, FailureReason):
+        raise _Rollback(result)
+    if not await _store_credential(conn, user_id, result):
+        raise _Rollback(FailureReason.credential_id_taken)
+    return await _start_session(conn, user_id, presented)
+
+
+async def register_options(engine: AsyncEngine, settings: Settings, user: SessionUser) -> tuple[Json, str]:
+    async with engine.begin() as conn:
+        ceremony, challenge = await _new_ceremony(conn, "register", user.id)
+        return await _registration_options(conn, settings, user.id, challenge), ceremony
+
+
+async def register_verify(
+    engine: AsyncEngine,
+    settings: Settings,
+    user: SessionUser,
+    ceremony: str | None,
+    credential: Json,
+    presented: str | None,
+) -> str | FailureReason:
+    """FR-AUTH-6: bound to the signed-in user; failure rolls back (the challenge stays usable)."""
+    try:
+        async with engine.begin() as conn:
+            consumed = await _consume_ceremony(conn, ceremony, "register")
+            if consumed is None or consumed.user_id != user.id:
+                raise _Rollback(FailureReason.ceremony_invalid)
+            return await _register(conn, settings, user.id, bytes(consumed.challenge), credential, presented)
+    except _Rollback as failure:
+        await record_failure(engine, failure.reason)
+        return failure.reason
+
+
+async def signin_options(engine: AsyncEngine, settings: Settings) -> tuple[Json, str]:
+    async with engine.begin() as conn:
+        ceremony, challenge = await _new_ceremony(conn, "authenticate", None)
+    options = generate_authentication_options(
+        rp_id=settings.rp_id,
+        challenge=challenge,
+        timeout=CHALLENGE_TTL_S * 1000,
+        allow_credentials=[],
+        user_verification=UserVerificationRequirement.REQUIRED,
+    )
+    parsed: Json = json.loads(options_to_json(options))
+    return parsed, ceremony
+
+
+def _raw_id(credential: Json) -> bytes | None:
+    raw = credential.get("rawId") if isinstance(credential, dict) else None
+    if not isinstance(raw, str):
+        return None
+    try:
+        return base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+    except ValueError:
+        return None
+
+
+async def signin_verify(
+    engine: AsyncEngine, settings: Settings, ceremony: str | None, credential: Json, presented: str | None
+) -> str | FailureReason:
+    """FR-AUTH-7: the challenge is consumed, and a failure recorded, in a transaction that always commits."""
+    async with engine.begin() as conn:
+        consumed = await _consume_ceremony(conn, ceremony, "authenticate")
+        result: seam.Authenticated | FailureReason
+        if consumed is None:
+            result = FailureReason.ceremony_invalid
+        else:
+            raw_id = _raw_id(credential)
+            row = (
+                None
+                if raw_id is None
+                else (
+                    await conn.execute(
+                        text(
+                            "SELECT c.public_key, c.sign_count, c.owner_id, u.webauthn_user_id, "
+                            "u.disabled_at FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id "
+                            "WHERE c.credential_id = :id"
+                        ),
+                        {"id": raw_id},
+                    )
+                ).first()
+            )
+            if row is None:
+                result = FailureReason.malformed if raw_id is None else FailureReason.unknown_credential
+            elif row.disabled_at is not None:
+                result = FailureReason.user_disabled
+            else:
+                result = seam.verify_authentication(
+                    settings.rp_id,
+                    settings.origin,
+                    bytes(consumed.challenge),
+                    credential,
+                    bytes(row.public_key),
+                    int(row.sign_count),
+                    bytes(row.webauthn_user_id),
+                )
+        if isinstance(result, FailureReason):
+            await _insert_failure(conn, result)
+            return result
+        owner_id = row.owner_id if row is not None else None
+    if owner_id is None or not await finish_signin(
+        engine, result.credential_id, result.new_sign_count, result.backed_up
+    ):
+        await record_failure(engine, FailureReason.counter_regressed)
+        return FailureReason.counter_regressed
+    async with engine.begin() as conn:
+        return await _start_session(conn, owner_id, presented)
+
+
+async def finish_signin(engine: AsyncEngine, credential_id: bytes, new_count: int, backed_up: bool) -> bool:
+    """The conditional counter update of FR-AUTH-7; False when another sign-in already moved the counter."""
+    async with engine.begin() as conn:
+        updated = await conn.execute(
+            text(
+                "UPDATE webauthn_credentials SET sign_count = :n, last_used_at = now(), backed_up = :b "
+                "WHERE credential_id = :id AND (sign_count < :n OR (sign_count = 0 AND :n = 0)) RETURNING 1"
+            ),
+            {"id": credential_id, "n": new_count, "b": backed_up},
+        )
+        return updated.first() is not None
+
+
+# Sessions ------------------------------------------------------------------------------------------------
+
+
+async def session_user(engine: AsyncEngine, session: str | None) -> SessionUser | None:
+    if not session:
+        return None
+    async with engine.connect() as conn:
+        row = (
+            await conn.execute(
+                text(
+                    "SELECT u.id, u.handle, u.role, u.display_name, u.consent_evaluation, u.consent_tuning, "
+                    "s.created_at, extract(epoch FROM now() - s.created_at) AS age FROM sessions s "
+                    "JOIN users u ON u.id = s.owner_id WHERE s.id_sha256 = :h AND s.revoked_at IS NULL "
+                    "AND s.expires_at > now() AND u.disabled_at IS NULL"
+                ),
+                {"h": digest(session)},
+            )
+        ).first()
+    if row is None:
+        return None
+    return SessionUser(
+        row.id,
+        row.handle,
+        row.role,
+        row.display_name,
+        row.consent_evaluation,
+        row.consent_tuning,
+        row.created_at,
+        float(row.age),
+    )
+
+
+async def revoke_session(engine: AsyncEngine, session: str | None) -> None:
+    if not session:
+        return
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE sessions SET revoked_at = now() WHERE id_sha256 = :h AND revoked_at IS NULL"),
+            {"h": digest(session)},
+        )
