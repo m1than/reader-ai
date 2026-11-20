@@ -140,18 +140,40 @@ tasks:
         release run's duration; tell the agent the version. Installing from GitHub Packages needs a read:packages token on the Mac,
         likely a classic PAT (to be verified). Until then reader-ai consumes the built-commit tarball (verified fallback)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: in_progress, needs: [S0.spike.agent-sdk-container],
+      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (recommendation wording)",
       note: "The owner allowed Keychain use for this spike in chat (2026-11-20: 'allow keychain for compile-cost and trace-backend').
         run.sh pipes the item reader-ai/claude-oauth-token to the probe on stdin; never printed, not in docker inspect.",
       result: "PASS for both (spikes/trace-backend/RESULT.md): reader.stage → claude_code.interaction → llm_request nest via TRACEPARENT
         (claude-agent-sdk 0.2.186 injects it from the active span); a score (Phoenix annotation / MLflow assessment) is visible on the
-        trace; the seeded failure is found by API (fetch 0.025–0.030 s + walk); human UI time not measured. Idle over 3 starts:
-        Phoenix 467–831 MiB, 22 PIDs; MLflow minimal (--workers 1, job execution off) 372–581 MiB, 10 PIDs (default config 2.4 GiB).
-        498-span replay: both ingest 498/498, peak Phoenix 470 MiB, MLflow 441 MiB. Recommendation: MLflow minimal (lighter,
-        Apache-2.0, no mandatory API key); Postgres, concurrency and REST scores unmeasured. Ingest switch = 3 Rotel env vars." }
-  - { id: S0.exit, stage: 0, kind: live, status: todo,
+        trace; the seeded failure is found by API (fetch 0.025–0.030 s + walk); human UI time not measured.
+        Memory comparable in MLflow's minimal configuration (--workers 1, job execution off): idle starts 2–3 MLflow 372 vs Phoenix
+        467 MiB (first starts 581/831), probe peak 491 vs 467 MiB, 498-span replay 441 vs 470 MiB, 10–16 vs 22–23 PIDs; MLflow default
+        config 2.4 GiB. The replay shows a lesson-sized trace is ingested (498/498), not memory over a minutes-long compile.
+        Recommendation: MLflow minimal, resting on the licence (Apache-2.0 vs Phoenix ELv2, owner-only). Unmeasured for SRV-OBS:
+        server-side scorers/evaluation need the job runner that the minimal config disables (with it, --workers 1 idled at 1.61 GiB,
+        reviewer); client-side evaluation; Postgres; concurrency; REST scores; MLflow auth (none; --allowed-hosts \"*\" in the spike)." }
+  - { id: S0.exit, stage: 0, kind: live, status: in_progress,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
-      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions" }
+      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions",
+      note: "Not all needs are done: embeddings-local and trace-backend are still open (compile-cost landed on main, #17).
+        Drafts (status: proposed, branch 0/S0.exit-adr-drafts; deep-reviewer round 4: approve for all five, non-blocking items applied):
+        ADR-0021 ingestion (amends ADR-0008; revisit_when triggered): formula model on, code from the text layer, a deterministic
+        page-expectation check incl. block order; Docker or native decided by M1 (≤ 51 s per formula, excl. load, keeps Docker);
+        native converter confined (own user or sandbox profile, loopback only, no secrets);
+        ADR-0022 kernel sandbox (amends ADR-0014): exec tmpfs (exec,nosuid,nodev,size=1g), per-kernel evcxr cache with a sweeping cleanup and
+        liveness marker, memory-swap = memory, a declared set of static kernel services (kernel-<user>, kernel-verify, kernel-agent,
+        kernel-pair-1..N) with one principal or session each; shared services reset between principals by gateway exit and restart policy,
+        with a changed start nonce confirmed on every hand-off;
+        ADR-0023 token delivery (amends ADR-0011): Keychain store, delivery only to the credential holder;
+        ADR-0024 local CA (amends ADR-0012): localhost confirmed, -p ssl owner-run trust recorded and removed by hash, caddy_data not backed up;
+        ADR-0025 agent sandbox (amends ADR-0014/0005/0012): a credential-injecting proxy reachable only by the worker with per-run per-user
+        handles, tools by allow-list checked against the CLI's init tool list.
+        Owner answers, 2026-11-20 in chat:
+        - 0021: the 30-min bound is agreed; if M1 at 4 VM CPUs misses, the owner raises Docker Desktop's CPUs for a second M1 run before native.
+        - 0023: an agent-run `reader up` may resolve the Keychain item; the agent never reads it. The AGENTS.md provider-credential line is
+          updated; the new secrets rule was added by the owner, 2026-11-20 (the auto-mode classifier had refused the agent's edit).
+        Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }

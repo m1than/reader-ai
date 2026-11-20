@@ -5,7 +5,7 @@
 **Pass criterion:** agent spans nest under our stage span; a score is visible on the trace.
 
 **Verdict: PASS for both backends.**
-- **Recommendation: MLflow** in its minimal configuration (`--workers 1`, `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`), re-derived from the round-2 numbers (see "Recommendation").
+- **Recommendation: MLflow** in its minimal configuration (`--workers 1`, `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`). Memory is comparable, so the recommendation rests on the licence: Apache-2.0 against Phoenix's ELv2, owner-only. Server-side evaluation needs the job runner, which this configuration disables (see "Recommendation").
 - **Switching:** for ingest, it changed only Rotel's three exporter variables. Writing scores and querying traces are backend-specific (`query.py`).
 
 Date: 2026-11-20.
@@ -29,7 +29,9 @@ Both backends keep SQLite inside their container, with no volume; each `down -v`
 
 **Load:**
 1. **Probe:** 3 stages on `claude-haiku-5-5`: `draft`, `fact_check` (seeded failure: model `claude-nonexistent-0-0`) and `review`, each one turn without tools. 11–12 spans.
-2. **Synthetic replay** (`replay.py`, no model calls): one lesson-sized trace of **498 spans**. That is 1 job span plus 7 stages × 10 interactions × (1 interaction + 3 `llm_request` + `tool` with 2 children), with `gen_ai.*` token attributes. It matches ADR-0018's estimate of about 7 stages × ~70 spans per lesson.
+2. **Synthetic replay** (`replay.py`, no model calls): one lesson-sized trace of **498 spans**. That is 1 job span plus 7 stages × 10 interactions × (1 interaction + 3 `llm_request` + `tool` with 2 children), with `gen_ai.*` token attributes. It matches ADR-0018's estimate of about 7 stages × ~70 spans per lesson, and stands in for the roadmap's "under one lesson compile".
+   - **Limits:** the replay is a burst of zero-duration spans from one process, delivered in about one OTLP batch, with no concurrent queries, and memory sampled at intervals of 1 s or more.
+   - **What it shows:** each backend ingests a lesson-sized trace. It does not show memory over a minutes-long compile.
 
 ## Results (round 2)
 
@@ -50,7 +52,8 @@ Both backends keep SQLite inside their container, with no volume; each `down -v`
 | Image | 1,433 MB | 1,369 MB |
 | Token in `docker inspect` of the probe container | 0 entries | 0 entries |
 
-- **First start:** the first of the three starts used more memory for both backends: 831 against 467 MiB for Phoenix, 581 against 372 MiB for MLflow. Starts 2 and 3 agree. The cause was not investigated.
+- **First start:** the first of the three starts used more memory for both backends: 831 against 467 MiB for Phoenix, 581 against 372 MiB for MLflow. Starts 2 and 3 agree, so they are the fairer comparison.
+  - **Hypothesis, untested** (the reviewer's): the first start pulls image files into the VM's page cache, and `docker stats` counts that against the container.
 - **MLflow default configuration:** round 1, without `--workers 1` and with job execution on, idled at 2,445 MiB (`results/20261120T201622/mlflow.json`). The two settings cut idle memory by about 4–6×.
 - **Human triage time not measured.** No browser was used, so how many minutes a person needs in either UI is unknown. The timings above are the API procedure only: fetch the trace's spans, then walk from the deepest error span up to its stage. Both backends are equivalent on it; the cause sits two hops from the stage span and names the failing stage.
 
@@ -74,15 +77,27 @@ reader.job lesson-compile-spike
 
 ## Recommendation (for S0.exit; the decision is the owner's)
 
-**MLflow, minimal configuration**, re-derived from round 2:
-- **Resources:** it is now lighter than Phoenix at idle (372–581 against 467–831 MiB), under the replay (441 against 470 MiB) and in process count (10–16 against 22–23). The VM has 11.62 GiB and also runs the kernel sandbox, Docling and the stack.
-- **Licence:** Apache-2.0. Phoenix's Elastic License 2.0 keeps the trace backend owner-only (ADR-0018), which constrains the v2 VPS and sharing plans (ADR-0016, ADR-0017).
-- **No mandatory API key** on the local network. Phoenix's Docker image requires one by default.
-- **v2:** MLflow's evaluation and model registry are the ones ADR-0018 plans for tuning.
+**MLflow, minimal configuration.** The recommendation rests on the **licence**:
+- **Licence:** MLflow is Apache-2.0. Phoenix's Elastic License 2.0 keeps the trace backend owner-only (ADR-0018), which constrains the v2 VPS and sharing plans (ADR-0016, ADR-0017).
+- **Memory: comparable** in MLflow's minimal configuration, not lighter overall.
+  - Idle, starts 2–3: 372 against 467 MiB.
+  - Probe peak: 491 against 467 MiB.
+  - Replay peak: 441 against 470 MiB.
+  - Processes: 10–16 against 22–23.
 
-What stays unmeasured for MLflow, and should be checked in SRV-OBS before relying on it:
-- **Postgres:** it was measured on SQLite inside the container, while ADR-0018 plans our Postgres.
-- **Concurrency:** one worker was not tested under concurrent ingest.
+  The VM has 11.62 GiB and also runs the kernel sandbox, Docling and the stack. MLflow's default configuration (2.4 GiB) would not be comparable.
+- **v2:** MLflow's evaluation and model registry are the ones ADR-0018 plans for tuning. The minimal configuration disables the server job runner, though: with `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, MLflow 3.18.0 refuses jobs (`server/jobs/__init__.py:312`). That turns off server-side scorers, evaluation, discovery and optimize jobs. Using them needs the runner (see below).
+
+**Auth: no advantage either way.** Both ran without auth on 127.0.0.1.
+- **MLflow:** it has no auth in this configuration, and `--allowed-hosts "*"` removes its host-header check.
+- **Phoenix:** it ships with auth on, and the spike disabled it.
+
+**What stays unmeasured for MLflow**, to check in SRV-OBS before relying on it:
+- **Server-side scoring and evaluation:** they need the job runner. With the runner on and `--workers 1`, MLflow idled at 1.61 GiB in the reviewer's round-1 measurement; this spike's measured configuration has it off.
+- **Client-side evaluation:** not tested.
+- **Auth:** MLflow's auth (its basic-auth app, or a proxy) and a strict `--allowed-hosts`.
+- **Postgres:** measured on SQLite inside the container, while ADR-0018 plans our Postgres.
+- **Concurrency:** one worker was not tested under concurrent ingest, or over a minutes-long compile.
 - **Scores over REST:** scores were written through the Python client only.
 
 Phoenix remains a valid fallback, with an equal result on nesting, scores and triage.
