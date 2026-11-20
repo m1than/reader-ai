@@ -237,8 +237,10 @@ requirements:
       `reader restore DIR` refuses unless the watcher runs, then verifies every sha256 in the manifest. Precondition: no
       application table holds a row and the blobs volume is empty; otherwise it refuses and changes nothing. It stops
       api, worker, mcp and caddy, runs `pg_restore --clean --if-exists` inside the postgres container, and for each tar
-      in the manifest runs a one-off container hardened as in FR-CLI-17, with the same `--user` (volume mounted
-      read-write, archive on stdin), that empties the volume and untars into it; then it starts the services again.
+      in the manifest runs a one-off container hardened as in FR-CLI-17, with the same `--user` and with `-i` to take the
+      archive on stdin, the volume mounted read-write:
+      `docker run --rm -i --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v <server image> sh -c 'find /v -mindepth 1 -delete && tar -C /v -xf -'`,
+      which empties the volume and untars into it; then it starts the services again.
       caddy_config may be non-empty (Caddy autosaves its configuration at start) and is replaced; it holds no user data.
       Why both: the row check is the safety rule (a
       restore never discards data), and `--clean --if-exists` lets the archive replace the empty schema that migrations
@@ -328,7 +330,7 @@ vectors:
     source: "A reader.yaml with two users and env, keychain, op and hostfile references (references only, no values)"
     file: spec/fixtures/OPS-CLI/config.yaml
   - id: VEC-CLI-2
-    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the read-only reader.yaml bind with create_host_path false on api, worker and mcp, no environment entry); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065), same bind source /tmp/reader-ai-test/reader.yaml. The test compares against the fixture path with the resolved prefix swapped in (macOS /tmp → /private/tmp); VEC-DEPLOY-3 is static and never resolved"
+    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the read-only reader.yaml bind with create_host_path false on api, worker and mcp, no environment entry); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065), same bind source /tmp/reader-ai-test/reader.yaml. The test writes the config into a per-test temporary directory and compares with that directory's resolved path substituted for /tmp/reader-ai-test (a general swap, not macOS-specific); VEC-DEPLOY-3 is static and never resolved"
     file: spec/fixtures/OPS-CLI/override-two-users.yaml
   - id: VEC-CLI-3
     source: "Rendered-model excerpts (project name, pgdata volume name, consumer uids) and the expected default-profile delivery plan; no values"
