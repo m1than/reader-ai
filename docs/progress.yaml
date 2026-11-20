@@ -302,13 +302,15 @@ tasks:
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
       branch: V/V.SRV-SEARCH-min,
-      note: "spec drafted, awaits deep-reviewer. BAAI/bge-m3 (owner-confirmed 2026-11-21) in a dedicated internal `embed`
-        service (core network, no egress, no secrets, model baked at build from a pinned revision with sha256s): fp32
-        weights 2.27 GB exceed the worker's 2g and the api's 1g. Its mem_limit comes from spike spikes/embed-service
-        (to run before approval). pgvector 0.8.7 (PGDG) added to reader-postgres; HNSW plus GIN tsvector (russian /
-        english / simple by materials[].language); RRF k=60; acceptance NFR-SEARCH-1 hybrid recall@10 on questions-v2
-        ≥ 0.675 (dense measured). Paired changes: OPS-DEPLOY (embed service and image, pgvector), SRV-AUTH (ROUTERS,
-        version_locations), SRV-EVENTS (kind module), SRV-INGEST (enqueue search.embed after import)." }
+      note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 (proposed)
+        drafted for the embed service and goes to its own review, then the owner sets its status. BAAI/bge-m3
+        (owner-confirmed 2026-11-21) in service `embed` on its own internal network (api, worker, embed), no secrets,
+        model baked from a pinned revision; one encode at a time, passage batches of 8, query timeout 10 s,
+        max_seq_length 512. Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
+        lexemes, RRF k=60, total orders. Acceptance: hybrid hits ≥ dense-only hits in the same run and ≥ 27/40 on
+        questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
+        VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
+        module, a 'deferred' result), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
       note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }

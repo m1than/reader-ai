@@ -1,7 +1,9 @@
 # VEC-SEARCH-1 — reciprocal rank fusion, hand-computed (FR-SEARCH-7, REF-SEARCH-4).
 # score(c) = sum over lists L containing c of 1 / (k + rank_L(c)), ranks start at 1, k = 60.
-# Ties are broken by the better (smaller) dense rank, then by chunk id ascending (FR-SEARCH-7).
-# Chunk ids are opaque strings here; values are exact fractions written as decimals rounded to 9 places.
+# Equal scores: the better (smaller) dense rank wins; a missing dense rank counts as worse than any present one.
+# (Two chunks with equal scores and equal dense ranks cannot occur: equal dense ranks mean the same chunk, and two
+# full-text-only chunks have different full-text ranks, hence different scores.)
+# Values are rounded to 9 places, checked with a Python float sum.
 k: 60
 cases:
   - name: overlap-and-singletons
@@ -18,6 +20,12 @@ cases:
     expected:
       - { id: x, score: 0.032522475 }   # 1/61 + 1/62, dense rank 1
       - { id: y, score: 0.032522475 }   # 1/62 + 1/61, dense rank 2
+  - name: tie-dense-present-beats-missing
+    dense: [p]
+    fts: [q]
+    expected:
+      - { id: p, score: 0.016393443 }   # 1/61, dense rank 1
+      - { id: q, score: 0.016393443 }   # 1/61, no dense rank
   - name: fts-empty
     dense: [p, q]
     fts: []

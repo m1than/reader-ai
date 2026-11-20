@@ -5,7 +5,8 @@
 # Per page, in span seq order: each span's text is whitespace-collapsed (" ".join(text.split())); empty results are
 # skipped; the rest are joined with one space. Windows start at range(0, max(len(text) - overlap, 1), size - overlap)
 # and take text[start:start + size]; a window shorter than `min` is dropped. A chunk lists every span seq whose
-# character range intersects the window; its primary span is the first of them.
+# character range intersects the window; its primary span is the one with the largest overlap with the window, the
+# first such span on a tie. (Chunk 1 below: seq 0 overlaps 10 characters [0,10), seq 2 overlaps 9 [11,20) -> seq 0.)
 params: { size: 20, overlap: 5, min: 4 }
 spans:
   - { seq: 0, page: 1, text: "Alpha beta" }

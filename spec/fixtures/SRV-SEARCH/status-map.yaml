@@ -1,0 +1,18 @@
+# VEC-SEARCH-4 — search_status (FR-SEARCH-9): the search.embed job status for the material's current key
+# (SRV-EVENTS FR-EVENTS-12: none | queued | running | succeeded | dead) and whether a search_embeds row exists for that
+# key, mapped to the status V.COMPILE-min waits on.
+rows:
+  - { job: none,      embeds_row: false, status: none }
+  - { job: queued,    embeds_row: false, status: queued }
+  - { job: running,   embeds_row: false, status: running }
+  - { job: dead,      embeds_row: false, status: dead }
+  # The row and the success outcome commit in one transaction (FR-SEARCH-5 step 3), so succeeded without the row is
+  # unreachable; it is reported as none, so `ensure` enqueues again rather than waiting forever.
+  - { job: succeeded, embeds_row: false, status: none }
+  # A row means the vectors exist for the current key, whatever the job record says.
+  - { job: succeeded, embeds_row: true,  status: ready }
+  - { job: none,      embeds_row: true,  status: ready }
+  - { job: queued,    embeds_row: true,  status: ready }
+  - { job: running,   embeds_row: true,  status: ready }
+  - { job: dead,      embeds_row: true,  status: ready }
+# A "deferred" end (embed service not healthy yet, FR-SEARCH-5 step 2) re-enqueues the key, so it shows as queued.
