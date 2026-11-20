@@ -1,5 +1,6 @@
-# VEC-CLI-1: a reader.yaml (SRV-CONFIG field table) with two users and keychain, op and hostfile references.
-# References only; no secret values. The hostfile path is a placeholder the tests replace with a temporary file.
+# VEC-CLI-1: a reader.yaml (SRV-CONFIG field table) with two users and env, keychain, op and hostfile references.
+# References only; no secret values. The hostfile path is a placeholder the tests replace with a temporary file; the
+# env variable is set by the test to a canary value and must never reach a subprocess environment (INV-CLI-2).
 version: 1
 instance:
   url: https://localhost
@@ -10,6 +11,8 @@ users:
     providers:
       - kind: claude-subscription
         token: secret://keychain/reader-ai/claude-oauth-token
+      - kind: api-key
+        token: secret://env/READER_TEST_TOKEN
   - handle: anna
     role: learner
     providers:

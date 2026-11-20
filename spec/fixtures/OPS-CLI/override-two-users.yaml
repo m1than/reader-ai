@@ -1,0 +1,52 @@
+# VEC-CLI-2: the override FR-CLI-4 must emit, in memory, for VEC-CLI-1 (users ivan and anna). The kernel service body is
+# the `x-kernel` field of deploy/compose.yaml's parsed source; this fixture repeats OPS-DEPLOY's VEC-DEPLOY-3 body, and
+# for `ivan` alone the expected override is VEC-DEPLOY-3 itself. Comparison is INV-DEPLOY-8's equality. No secrets.
+services:
+  kernel-user-ivan:
+    image: reader-kernel:local
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /home/lab:noexec,size=256m,uid=1000
+      - /tmp:noexec,size=256m,uid=1000
+      - /run/evcxr:exec,nosuid,nodev,size=1g,uid=1000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    restart: always
+    profiles: [kernels]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/reader-kernel-health"]
+    networks: [sb-user-ivan]
+  kernel-user-anna:
+    image: reader-kernel:local
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /home/lab:noexec,size=256m,uid=1000
+      - /tmp:noexec,size=256m,uid=1000
+      - /run/evcxr:exec,nosuid,nodev,size=1g,uid=1000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    restart: always
+    profiles: [kernels]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/reader-kernel-health"]
+    networks: [sb-user-anna]
+  api:
+    networks:
+      sb-user-ivan: {}
+      sb-user-anna: {}
+
+networks:
+  sb-user-ivan:
+    internal: true
+  sb-user-anna:
+    internal: true

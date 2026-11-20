@@ -1,14 +1,18 @@
 # OPS-CLI — the host CLI `reader` that starts, watches and maintains the stack on the owner's Mac (stage 1).
 #
-# Deviation from docs/roadmap.md's OPS-CLI row, declared: the row says values reach Compose "only as environment of the
-# child process". Accepted ADR-0026 (option A, the owner's choice) replaces that: no value ever enters Compose. `reader up`
-# stays running as a watcher and writes each value into the consumer's tmpfs /run/secrets over `docker exec -i` stdin.
-# Everything else in the row (up/down/status, keychain and op resolution on the host, doctor, secrets set, trust,
-# backup/restore, the no-file INV) is kept.
+# Declared deviations:
+# - docs/roadmap.md's OPS-CLI row says values reach Compose "only as environment of the child process". Accepted
+#   ADR-0026 (option A, the owner's choice) replaces that: no value enters Compose. `reader up` hands the resolved values
+#   to a watcher process that writes each into the consumer's tmpfs /run/secrets over `docker exec -i` stdin.
+# - The row's separate `reader untrust` becomes `reader down --untrust` (ADR-0024). `reader trust` is kept for an
+#   explicit owner-run trust; `reader up` also offers it interactively.
 #
-# Dependencies: SRV-CONFIG (merged: load_config, SecretRef, Secret, secret_file_name, host_registry, ResolverRegistry);
-# OPS-DEPLOY (branch 1/S1.OPS-DEPLOY: deploy/compose.yaml, the `x-kernel` template, the consumer list of FR-DEPLOY-10 b,
-# VEC-DEPLOY-3). This spec does not use SRV-CONFIG's `secret_env_var`, which ADR-0026 made obsolete.
+# Dependencies: SRV-CONFIG (merged: load_config, SecretRef, Secret, SecretResolutionError codes, SECRET_MAX_BYTES,
+# secret_file_name, host_registry, ResolverRegistry); OPS-DEPLOY (branch 1/S1.OPS-DEPLOY: deploy/compose.yaml with a
+# top-level `name`, the `x-kernel` template, FR-DEPLOY-10 b's consumers, the backup labels, VEC-DEPLOY-3). OPS-CLI does
+# not use SRV-CONFIG's `secret_env_var` (obsolete under ADR-0026; paired change S1.SRV-CONFIG-adr26).
+#
+# Review policy (owner, 2026-11-20): this module handles secrets, so it keeps full deep-reviewer review until approve.
 
 id: OPS-CLI
 title: Host CLI `reader` — up/down/status with the secret-delivery watcher, doctor, secrets set, trust, backup/restore
@@ -26,175 +30,247 @@ paths:
 
 normative:
   - id: REF-CLI-1
-    title: "ADR-0026 — Secret delivery to read-only services (option A: watcher, atomic docker exec over stdin)"
+    title: "ADR-0026 — Secret delivery to read-only services (option A: watcher, atomic docker exec over stdin) — accepted"
     url: docs/adr/0026-secret-delivery-read-only-services.md
   - id: REF-CLI-2
     title: "ADR-0011 — Configuration and secrets (secret:// schemes resolved on the host; `reader doctor` rules for hostfile)"
     url: docs/adr/0011-config-and-secrets.md
   - id: REF-CLI-3
-    title: "ADR-0024 — Local CA trust and passkey browsers (owner-run trust, TLS only, untrust by SHA-1, caddy_data not backed up)"
+    title: "ADR-0024 — Local CA trust (owner-run, TLS only, host copy and SHA-1 of each root, `reader down --untrust`, verify by export)"
     url: docs/adr/0024-local-ca-trust-and-passkey-browsers.md
   - id: REF-CLI-4
-    title: "Docker CLI reference — docker exec (-i, -u), docker events (--filter, --format), docker compose (-f -, --profile)"
+    title: "Docker CLI reference — docker exec (-i, -u), docker events (--since, --filter, --format), docker compose (-f -, config --format json), docker volume inspect"
     url: https://docs.docker.com/reference/cli/docker/
   - id: REF-CLI-5
-    title: "keyring (Python) — platform keyrings: macOS Keychain, Windows Credential Locker, Linux Secret Service"
+    title: "keyring (Python) — macOS backend `keyring.backends.macOS.Keyring`; `get_password` returns None when the item is absent"
     url: https://pypi.org/project/keyring/
   - id: REF-CLI-6
     title: "1Password CLI — `op read <secret reference>` prints the value on stdout"
     url: https://developer.1password.com/docs/cli/reference/commands/read/
   - id: REF-CLI-7
-    title: "spikes/compose-secrets-ro/RESULT.md — measured delivery, atomicity (naive 3/20, atomic 20/20), concurrent up (case e)"
+    title: "spikes/compose-secrets-ro/RESULT.md — delivery, atomicity (naive 3/20, atomic 20/20), concurrent up (case e)"
     url: spikes/compose-secrets-ro/RESULT.md
+  - id: REF-CLI-8
+    title: "ADR-0020 — Toolchain baseline (Docker Desktop with Compose v2 on the owner's Mac)"
+    url: docs/adr/0020-toolchain-baseline.md
+  - id: REF-CLI-9
+    title: "PostgreSQL — pg_dump / pg_restore, custom archive format (-Fc)"
+    url: https://www.postgresql.org/docs/current/app-pgdump.html
 
 requirements:
   - id: FR-CLI-1
     text: >-
-      `reader` is a console script (`[project.scripts] reader = "reader.cli.app:main"` in server/pyproject.toml) with the
-      subcommands `up`, `down`, `status`, `watcher status`, `watcher stop`, `doctor` (`--json`), `secrets set NAME`,
-      `trust`, `untrust`, `backup DIR` and `restore DIR`. Every subcommand reads reader.yaml through SRV-CONFIG's
-      `load_config` (path from `--config`, default `./reader.yaml`) and exits non-zero with SRV-CONFIG's error text on a
-      `ConfigError`.
+      `reader` is a console script (`[project.scripts] reader = "reader.cli.app:main"` in server/pyproject.toml, added
+      in Green with the `keyring` dependency) with the subcommands `up`, `down [--untrust]`, `status [--json]`,
+      `watcher status`, `watcher stop`, `doctor [--json]`, `secrets set NAME`, `trust`, `backup [DIR]` and
+      `restore DIR`. `up`, `doctor`, `trust`, `backup` and `restore` read reader.yaml through SRV-CONFIG's
+      `load_config` (path from `--config`, default `./reader.yaml`) and exit 2 with SRV-CONFIG's error text on a
+      `ConfigError`. `down`, `watcher status|stop` and `secrets set` work without a valid config (FR-CLI-7, FR-CLI-12).
   - id: FR-CLI-2
     text: >-
-      Host resolvers: `reader` registers resolvers for `hostfile`, `keychain` and `op` through SRV-CONFIG's
-      `host_registry(extra)`; `env` and `file` are SRV-CONFIG's. `keychain` reads `secret://keychain/<service>/<account>`
-      with `keyring.get_password`; `op` runs `op read <reference>` with the value taken from stdout of a pipe;
-      `hostfile` reads the file only if it is a regular file, mode 0600, owned by the invoking user and outside every
-      git work tree (ADR-0011). Each returns SRV-CONFIG's `Secret` or raises SRV-CONFIG's `SecretResolutionError` with a
-      fixed code; no resolver puts a value in argv, environment, a file or a log line.
+      Host resolvers, registered through SRV-CONFIG's `host_registry(extra)` (`env` and `file` are SRV-CONFIG's):
+      `keychain` reads `secret://keychain/<service>/<account>` with `keyring.get_password` on the macOS backend, and any
+      other configured backend (file and null backends included) is refused with code `no_resolver`; `op` runs
+      `op read <reference>` and takes the value from the stdout pipe; `hostfile` opens the path with
+      `O_RDONLY | O_NOFOLLOW` and checks on that descriptor (`fstat`) that it is a regular file, mode 0600 and owned by
+      the invoking user, and checks that no ancestor directory of the path contains `.git`. Failures raise SRV-CONFIG's
+      `SecretResolutionError` with FR-CONFIG-8's codes: `not_found` for an absent item or file, `unreadable`,
+      `not_regular_file`, and `outside_root` for a hostfile inside a git work tree or with a wrong mode or owner. Every
+      resolved value, whatever its scheme, is then checked on the host before it is kept: at most `SECRET_MAX_BYTES`
+      (65,536) bytes (`too_large`), valid UTF-8 (`not_utf8`), non-empty (`empty`).
   - id: FR-CLI-3
     text: >-
-      Override in memory: `reader up` builds the Compose override as a Python mapping and passes it to
-      `docker compose -f deploy/compose.yaml -f - …` on stdin. For each `users[].handle` it adds the service
-      `kernel-user-<handle>`, equal to the base file's rendered `x-kernel` template plus `profiles: [kernels]` and the
-      network `sb-user-<handle>` (internal), and attaches that network to `api`. For the fixture config this equals
-      OPS-DEPLOY's VEC-DEPLOY-3 file exactly. A handle that is not a valid Compose service-name suffix
-      (`[a-z0-9][a-z0-9-]{0,62}`) stops `up` with an error naming the handle. The override carries no secret.
+      The rendered model is the single source of names: `reader` runs
+      `docker compose -f deploy/compose.yaml -f - config --format json` with the override (FR-CLI-4) on stdin, and takes
+      the project name from `.name` and the pgdata volume name from `.volumes.pgdata.name`. Neither is hard-coded.
   - id: FR-CLI-4
     text: >-
-      Consumers and uids come from the rendered model: the watcher runs
-      `docker compose -f deploy/compose.yaml -f - config --format json` once per `up`, takes FR-DEPLOY-10 (b)'s consumer
-      set (postgres, api, worker, mcp receive `db-password`; agent-proxy receives one file per provider token,
-      `secret_file_name(ref)` for every `users[].providers[].token`) and each consumer's numeric `user` uid. A consumer
-      without a numeric uid stops `up` with an error naming the service. Kernel services never receive anything.
+      Override in memory: for each `users[].handle` the override adds the service `kernel-user-<handle>`, equal to the
+      `x-kernel` extension field of the parsed source of deploy/compose.yaml (not the rendered model) plus
+      `profiles: [kernels]` and the network `sb-user-<handle>`, declares that network `internal: true`, and attaches it
+      to `api`. Equality is INV-DEPLOY-8's (all kernel services equal on every key except `networks`). A handle longer
+      than 50 characters or not matching `[a-z0-9][a-z0-9-]*` stops `up` with an error naming the handle: 50 keeps
+      `kernel-user-<handle>` within a 63-character DNS label. The override carries no secret and reaches
+      `docker compose` only on stdin.
   - id: FR-CLI-5
     text: >-
-      Delivery protocol (ADR-0026): for one (container, uid, name, value) the watcher runs exactly
-      `docker exec -i -u <uid> <container> sh -c 'umask 077; cat > "/run/secrets/.$1.tmp" && mv "/run/secrets/.$1.tmp" "/run/secrets/$1"' sh <name>`
-      with the value written to stdin and stdin closed; the script text is a constant, the name is passed as `$1` and
-      matches `db-password` or `(env|hostfile|keychain|op)-[0-9a-f]{32}`. A non-zero exit is retried up to 3 times with
-      1 s between attempts, then logged (container, name, exit code; never the value) and left undelivered, so the
-      consumer stays unhealthy.
+      Active profiles: in stage 1 `reader up` activates the default profile only and takes no `--profile` flag; a later
+      stage adds profiles by amending this requirement. The consumer set is FR-DEPLOY-10 (b)'s, restricted to services
+      present in the rendered active model; each consumer's uid is the numeric `user` of its rendered service, and a
+      consumer without one stops `up` naming the service. `reader up` resolves and hands over only the values whose
+      consumer is in that set: `db-password` for postgres, api, worker and mcp; for agent-proxy, one file per
+      `users[].providers[].token`, named `secret_file_name(ref)`. Kernel services receive nothing.
   - id: FR-CLI-6
     text: >-
-      Watcher lifecycle: `reader up` resolves every value first (a failure stops `up` before any container starts), then
-      starts the watcher as a detached background process (new session, stdin/stdout/stderr not inherited, log file
-      ~/Library/Logs/reader-ai/watcher.log, pid file in a 0700 runtime directory), which subscribes to
-      `docker events --filter type=container --filter event=start --filter label=com.docker.compose.project=reader-ai --format '{{json .}}'`
-      before `reader up` runs `docker compose … up -d`. The watcher delivers to each consumer on every start event, and
-      once for consumers already running when it starts. `reader up` returns 0 when every default-profile service is
-      healthy (timeout 180 s, then non-zero) and leaves the watcher running, so the live-check scripts can call
-      `reader up` and continue. A second `reader up` with a live watcher replaces it (stop, then start).
+      Delivery protocol (ADR-0026): for one (container, uid, name, value) the watcher runs
+      `docker exec -i -u <uid> <container> sh -c 'umask 077; cat > "/run/secrets/.$1.tmp" && mv "/run/secrets/.$1.tmp" "/run/secrets/$1"' sh <name>`,
+      writes the whole value to stdin, then closes stdin. The script text is a constant; the name is passed as `$1` and
+      matches `db-password` or `(env|file|hostfile|keychain|op)-[0-9a-f]{32}`. Each call has a 10 s timeout. A non-zero
+      exit or a timeout is retried up to 3 times, 1 s apart, then logged (container, name, exit code or timeout; never
+      the value) and left undelivered, so the consumer stays unhealthy. Deliveries to one container run one after
+      another; different containers are served concurrently. Delivery is idempotent: re-delivering a value replaces the
+      file atomically. These bounds are structural, not measured: 10 s and 3 × 1 s keep a stuck daemon from blocking
+      the other containers while tolerating a container that is still starting.
   - id: FR-CLI-7
     text: >-
-      `reader watcher stop` stops the watcher (SIGTERM, then SIGKILL after 5 s) and removes its pid file; the stack keeps
-      running, and a consumer that restarts afterwards stays unhealthy (fail closed) until the next `reader up`.
-      `reader watcher status` prints running or stopped and exits 0 or 3. `reader down` runs `reader watcher stop`, then
-      `docker compose … down` without removing volumes. `reader status` prints each service's health and the watcher
-      state, with `--json` for scripts.
+      Runtime directory `~/Library/Application Support/reader-ai/run/`, mode 0700, created by `reader`. The watcher
+      holds an exclusive `flock` on `run/watcher.lock` for its whole lifetime and records its pid in `run/watcher.pid`;
+      a second watcher cannot start while the lock is held. `reader watcher status` prints `running` (exit 0) while the
+      lock is held, else `stopped` (exit 3). `reader watcher stop` signals only the recorded pid, and only after
+      verifying that the lock is held: SIGTERM, then SIGKILL after 5 s. `reader down` runs `watcher stop`, then
+      `docker compose -p <name> down --remove-orphans` without removing volumes; `<name>` is FR-CLI-3's project name or,
+      without a valid config, the one `up` recorded in `run/project`.
   - id: FR-CLI-8
     text: >-
-      Database password: `reader up` reads the Keychain item `reader-ai/postgres`. If it is missing and the Compose
-      volume `reader-ai_pgdata` does not exist, it generates 32 random bytes with `secrets.token_urlsafe(32)`, stores
-      them with `keyring.set_password` and continues. If it is missing and the volume exists, `up` stops with an error
-      that the password cannot be regenerated for an existing database (never regenerates).
+      Watcher start and hand-off. `reader up` (1) takes T0 = now; (2) resolves every value of FR-CLI-5, and any failure
+      stops `up` before a container starts; (3) starts the watcher as a new program (`python -m reader.cli.watcher`,
+      `start_new_session`, never a fork without exec, for the macOS keyring's fork safety), streams a bundle of
+      length-prefixed (name, value) records over a dedicated pipe on file descriptor 3, then closes it; the watcher
+      inherits neither stdin, stdout nor stderr. The watcher holds the values in memory for its lifetime and never
+      re-resolves. (4) The watcher subscribes to
+      `docker events --since <T0> --filter type=container --filter event=start --filter label=com.docker.compose.project=<name> --filter label=com.docker.compose.oneoff=False --format '{{json .}}'`,
+      then reconciles by listing the running consumers and delivering to each, and delivers on every later start event.
+      (5) Only then does `reader up` run `docker compose … up -d`. If the event stream exits, the watcher resubscribes
+      with a backoff of 1 s, 2 s and 4 s and reconciles again; after 3 consecutive failures it logs the failure and exits
+      non-zero, so consumers fail closed. If `up` fails, `reader up` stops the watcher.
   - id: FR-CLI-9
     text: >-
-      `reader secrets set NAME` stores a value in the platform keyring under service `reader-ai`, account NAME
-      (`[a-z0-9][a-z0-9._-]{0,63}`), reading it from a no-echo prompt (`getpass`) or from stdin when stdin is not a TTY;
-      the value is never an argument. It prints the reference `secret://keychain/reader-ai/<NAME>` and nothing else.
+      `reader up` exits 0 when every default-profile service is healthy within 180 s, else non-zero, and leaves the
+      watcher running, so live-check scripts can call `reader up` and continue. 180 s is a structural bound:
+      NFR-DEPLOY-1's 120 s covers a restart with an initialised pgdata; the first start adds initdb, which NFR-DEPLOY-1
+      reports without a threshold. A second `reader up` while a watcher runs stops that watcher first; FR-CLI-7's lock
+      keeps two watchers from overlapping.
   - id: FR-CLI-10
     text: >-
-      `reader doctor` runs a fixed list of checks and prints one line per check, or with `--json` a list of
-      `{name, ok, detail}`; it exits 0 only if all pass. Checks: docker reachable; `docker compose version` ≥ 2;
-      reader.yaml loads; every secret reference resolves (the value is discarded, `detail` holds only the code on
-      failure); every `hostfile` reference is 0600, owned by the user and outside every git work tree; the Keychain
-      item `reader-ai/postgres` exists or the pgdata volume does not; the watcher runs while the stack runs; every
-      CA root recorded by `reader trust` is still trusted. No check prints a value.
+      Every subprocess `reader` starts (docker, op, security, the watcher) gets an explicit allow-listed environment
+      built from the invoking one: `PATH`, `HOME`, `LANG`, and `DOCKER_HOST` and `DOCKER_CONTEXT` when set, and nothing
+      else. `env` is never `None`, so nothing is inherited. The watcher passes the same allow-list to its own children.
   - id: FR-CLI-11
     text: >-
-      `reader trust` (owner-run, ADR-0024) exports Caddy's root certificate from the `caddy` container to memory,
-      records its SHA-1 and subject in ~/.config/reader-ai/trusted-roots.json (not a secret), and runs
-      `security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db` on a 0600 temporary file
-      that is removed afterwards. `reader untrust` removes the trust setting and the certificate of every recorded root
-      by SHA-1 (`security remove-trusted-cert`, `security delete-certificate -t -Z`). `reader up` never runs `trust`.
+      Database password: Keychain service `reader-ai-system`, account `postgres`. `reader up` generates a password
+      (`secrets.token_urlsafe(32)`) and stores it with `keyring.set_password` only when both answers are a definite
+      "not found": `keyring.get_password` returns None, and `docker volume inspect <pgdata volume name>` fails with
+      "no such volume". If the item is absent and the volume exists, `up` stops, because an existing database cannot
+      take a new password. Any other error from either check stops `up`.
   - id: FR-CLI-12
     text: >-
-      `reader backup DIR` writes a logical dump of the database (`pg_dump` inside the postgres container) and a tar of
-      the `blobs` volume into DIR, plus a manifest with sha256 of each file; `caddy_data` is never included (ADR-0024).
-      `reader restore DIR` verifies the manifest, then restores into a stack whose pgdata is freshly initialised.
-      Neither prints or stores a secret; the database password stays in the Keychain item.
+      `reader secrets set NAME` stores a value in the Keychain under service `reader-ai`, account NAME, where NAME matches
+      `[a-z0-9][a-z0-9._-]{0,63}` and is not reserved (`postgres`, or any name starting with `system`). The value comes
+      from a no-echo prompt (`getpass`), or from stdin when stdin is not a TTY; it is never an argument, and it is
+      checked as in FR-CLI-2 (size, UTF-8, non-empty). The command prints `secret://keychain/reader-ai/<NAME>` and
+      nothing else, and needs no config.
   - id: FR-CLI-13
     text: >-
-      Logging: the CLI and the watcher log with structured fields (event, service, container, name, exit code,
-      duration); a field that would carry a `Secret` is rejected by the logger at the call site (TypeError in tests),
-      so values cannot be logged by accident.
+      `reader status` prints each service's health and the watcher state; `--json` prints
+      `{"project": str, "watcher": "running"|"stopped", "services": [{"name": str, "state": str, "health": str|null}]}`.
+      Exit 0 when the watcher runs and every running default-profile service is healthy; 1 when a service is not
+      healthy; 3 when the watcher is stopped while the stack runs.
+  - id: FR-CLI-14
+    text: >-
+      `reader doctor` runs a fixed list of checks and prints one line per check, or with `--json` a list of
+      `{"name", "ok", "detail"}`; it exits 0 only if all pass. Checks: docker is reachable; `docker compose version`
+      reports v2 (ADR-0020); the keyring backend is the macOS Keychain and answers a lookup; reader.yaml loads; every
+      reference of FR-CLI-5 resolves (the value is discarded at once, and `detail` holds only the code on failure);
+      every `hostfile` reference passes FR-CLI-2's checks; the Keychain item `reader-ai-system/postgres` exists or the
+      pgdata volume does not; the watcher runs while the stack runs; every root recorded by `reader trust` is still
+      trusted. No check prints a value.
+  - id: FR-CLI-15
+    text: >-
+      Trust (owner-run, ADR-0024). `reader trust`, and `reader up` when stdin is a TTY (it asks first; non-interactive
+      runs such as agent-run live checks skip the step), exports Caddy's root certificate from the `caddy` container,
+      keeps a host copy (PEM, public) and its SHA-1 in `run/trusted-roots/`, and runs
+      `security add-trusted-cert -r trustRoot -p ssl -k ~/Library/Keychains/login.keychain-db` (user domain, login
+      keychain). `reader down --untrust` removes the trust setting (`security remove-trusted-cert <pem>`) and deletes
+      the certificate by SHA-1 (`security delete-certificate -t -Z <sha1>`) for every recorded root, then verifies with
+      `security trust-settings-export` that no recorded SHA-1 remains, and exits non-zero if one does.
+  - id: FR-CLI-16
+    text: >-
+      `reader backup [DIR]` writes to DIR, by default the backup directory from reader.yaml (ADR-0012; the field comes
+      with the paired SRV-CONFIG change), and refuses a DIR inside a git work tree. With api, worker and mcp stopped it
+      writes: `db.dump` from `pg_dump -Fc` run inside the postgres container; for every other named volume labelled
+      `org.reader-ai.backup=include` (blobs, caddy_config), a tar made by a one-off container that mounts the volume
+      read-only; and `manifest.json` = `{"created": RFC 3339, "reader": version, "postgres": server version,
+      "files": [{"name", "sha256", "bytes"}]}`. `caddy_data` (label `exclude`, ADR-0024) is never included. Every output
+      file has mode 0600. Afterwards the stopped services start again.
+  - id: FR-CLI-17
+    text: >-
+      `reader restore DIR` first verifies every sha256 in the manifest, then refuses unless the database is freshly
+      initialised (no tables in the application schemas) and the target volumes are empty; a refusal changes nothing.
+      It stops api, worker and mcp, runs `pg_restore` inside the postgres container, untars each volume through a
+      one-off container, and starts the services again. The database password stays FR-CLI-11's Keychain item; a
+      restore on another machine needs that item.
+  - id: FR-CLI-18
+    text: >-
+      Logging: the CLI and the watcher log structured fields (event, service, container, name, exit code, duration). A
+      field holding a `Secret` raises TypeError at the call site, so a value cannot be logged by accident. The watcher's
+      log `~/Library/Logs/reader-ai/watcher.log` has mode 0600 and is capped at 10 MiB, rotated once.
+  - id: FR-CLI-19
+    text: >-
+      Watcher hardening: RLIMIT_CORE is 0, the working directory is the runtime directory, the umask is 077, and on
+      SIGTERM the watcher finishes in-flight deliveries (each bounded by FR-CLI-6's timeout) before it exits.
 
 invariants:
   - id: INV-CLI-1
     text: >-
       No resolved value is written to any file: after `reader up`, a scan of the repository work tree, the runtime and
-      log directories and ~/.config/reader-ai finds no canary value (test: fake keyring with canary values and an
-      audit hook on `open` in write modes; live: the stage-1 check scans the same directories).
+      log directories and any backup output finds no canary value. Unit: a fake keyring with canary values and an audit
+      hook on `open` in write modes. Live: the stage-1 check scans the same directories.
   - id: INV-CLI-2
     text: >-
-      No resolved value appears in the argv or environment of any subprocess `reader` starts, in its stdout or stderr,
-      or in its logs (test: a fake process runner records argv, env and stdin of every call; the canary appears only in
-      the stdin of FR-CLI-5 calls).
+      A resolved value appears only on the watcher hand-off descriptor (FR-CLI-8) and on the stdin of FR-CLI-6's
+      delivery calls: never in the argv or environment of a subprocess, on stdout or stderr, or in a log. Unit: a fake
+      process runner records the argv, env, stdin and extra descriptors of every call; `env` is never None and holds no
+      resolved value and no variable that a `secret://env/` reference names.
   - id: INV-CLI-3
     text: >-
-      Every delivery uses FR-CLI-5's constant script and a name matching its pattern; no other `docker exec` writes
-      under /run/secrets, so a consumer can only observe a complete file (atomic rename, spike: 20 of 20 complete).
+      Every write under /run/secrets uses FR-CLI-6's constant script with a name matching its pattern. A consumer sees
+      either no file or a file that `mv` committed. Because `cat` commits whatever arrived before EOF, the watcher never
+      closes stdin before the whole value is written and finishes in-flight deliveries on SIGTERM.
   - id: INV-CLI-4
     text: >-
-      Fail closed: if resolution fails, `up` starts nothing; if delivery fails or the watcher is not running, no
-      fallback writes an empty or partial file, puts a value in Compose, or weakens a consumer's wait.
+      Fail closed: if resolution fails, `up` starts nothing; if delivery fails or the watcher is not running, nothing
+      writes an empty file, puts a value into Compose, or weakens a consumer's wait.
   - id: INV-CLI-5
     text: >-
-      The database password is never regenerated while the pgdata volume exists (FR-CLI-8), for every ordering of
-      "item present/absent" and "volume present/absent".
+      The database password is never regenerated while the pgdata volume exists, for every combination of the item
+      (present, absent, error) and the volume (present, absent, error); see FR-CLI-11.
   - id: INV-CLI-6
     text: >-
       The Compose override never touches disk: `docker compose` receives it only on stdin, and no temporary file is
       created for it.
+  - id: INV-CLI-7
+    text: >-
+      At most one watcher runs per user (FR-CLI-7's lock), and `watcher stop` never signals a pid whose lock is not held.
 
 nfr: []
 
 vectors:
   - id: VEC-CLI-1
-    source: "A reader.yaml with two users and keychain, op and hostfile references (canary-free; references only)"
+    source: "A reader.yaml with two users and env, keychain, op and hostfile references (references only, no values)"
     file: spec/fixtures/OPS-CLI/config.yaml
   - id: VEC-CLI-2
-    source: "The override FR-CLI-3 must emit for VEC-CLI-1's user `ivan` alone equals OPS-DEPLOY's VEC-DEPLOY-3"
-    file: spec/fixtures/OPS-DEPLOY/cli-override.example.yaml
+    source: "Expected override for VEC-CLI-1's two users; for `ivan` alone the override equals OPS-DEPLOY's VEC-DEPLOY-3"
+    file: spec/fixtures/OPS-CLI/override-two-users.yaml
   - id: VEC-CLI-3
-    source: "A rendered-model excerpt (consumers with uids) and the expected delivery plan of FR-CLI-4/5 (no values)"
+    source: "Rendered-model excerpts (project name, pgdata volume name, consumer uids) and the expected default-profile delivery plan; no values"
     file: spec/fixtures/OPS-CLI/delivery-plan.yaml
 
-# Test levels. [unit]: pytest with a fake process runner, a fake keyring and a temporary HOME; no docker daemon.
-# [live]: e2e/live/stage-1.sh against `reader up` on the owner's Mac. Live items: FR-CLI-6 (watcher re-delivery after
-# `docker compose restart api`, `reader up` returning with health dependencies), FR-CLI-7 (fail closed after
-# `reader watcher stop`, the command the roadmap's stage-1 script uses), FR-CLI-11 (trust: owner-run, needs the owner's
-# password), FR-CLI-12 (backup/restore drill: the stage-1 exit), and ADR-0026's verified_by items OPS-CLI owns: no value
-# in `docker inspect`, `docker export`, `docker events` since `reader up`, the Docker Desktop logs, or argv.
+# Test levels. [unit]: pytest with a fake process runner (records argv, env, stdin, extra descriptors and timeouts), a
+# fake keyring, a temporary HOME and runtime directory; no docker daemon. [live]: e2e/live/stage-1.sh against
+# `reader up` on the owner's Mac.
+# Live items: FR-CLI-8/9 (re-delivery after `docker compose restart api`; `reader up` returning with health), FR-CLI-7
+# (fail closed after `reader watcher stop`, which the roadmap's stage-1 script uses), FR-CLI-15 (trust and
+# `down --untrust`: owner-run, needs the owner's password), FR-CLI-16/17 (the backup-restore drill, the stage-1 exit),
+# and the ADR-0026 verified_by items OPS-CLI owns: no value in `docker inspect`, `docker export`, `docker events` since
+# `reader up`, the Docker Desktop logs, or argv.
 #
 # Owner notes:
-# - The watcher is a detached background process (FR-CLI-6), because the live-check scripts call `reader up` and continue;
-#   a foreground `reader up` would block them.
-# - In stage 1 `reader up` starts the default profile only; `--profile kernels|agents|mcp` adds the others once their
-#   images exist (stage 4 and later).
-# - The pair-pool size is not a reader.yaml field (SRV-CONFIG's table); v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
-# - Backups are not encrypted by `reader` (FR-CLI-12); DIR is the owner's choice (for example an encrypted volume).
+# - The watcher is a detached background process (FR-CLI-8), because live-check scripts call `reader up` and continue.
+# - The DB password item is renamed: the owner named "Keychain item reader-ai/postgres"; this spec uses service
+#   `reader-ai-system`, account `postgres`, so `reader secrets set` (service `reader-ai`) can never overwrite it.
+# - `reader doctor` reads hostfile secrets to check them (FR-CLI-14); each value is discarded at once.
+# - The pair-pool size is not a reader.yaml field; v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
+# - `reader backup` does not encrypt (FR-CLI-16); the directory is the owner's choice (ADR-0012), for example an
+#   encrypted volume.
 # - `op` needs the 1Password CLI signed in; `reader doctor` reports it.
 # - The power assertion (`caffeinate`) from the roadmap's risk table belongs to the job runner (stage 2+), not here.

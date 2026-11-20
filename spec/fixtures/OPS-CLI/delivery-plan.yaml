@@ -1,22 +1,52 @@
-# VEC-CLI-3: input = an excerpt of `docker compose config --format json` for the consumers (example uids) plus VEC-CLI-1;
-# output = the delivery plan of FR-CLI-4/5: one (service, uid, name) per file, sorted by service then name. No values.
-# Names: `db-password`, and secret_file_name(ref) (SRV-CONFIG FR-CONFIG-14) computed with sha256 for VEC-CLI-1's refs.
-# Kernel services never appear in the plan.
-rendered_services:
-  postgres: { user: "999:999" }
-  api: { user: "10001:10001" }
-  worker: { user: "10001:10001" }
-  mcp: { user: "10001:10001" }
-  agent-proxy: { user: "10002:10002" }
-  kernel-pair-1: { user: "1000:1000" }
-  kernel-user-ivan: { user: "1000:1000" }
-plan:
-  - { service: agent-proxy, uid: 10002, name: hostfile-dc508ac58158f9290f84c8b40cc20878 }
-  - { service: agent-proxy, uid: 10002, name: keychain-e35683c33bd94de8486a116f9c3efc47 }
-  - { service: agent-proxy, uid: 10002, name: op-9a5e6d577d30a8fe4de846fad7a527ee }
-  - { service: api, uid: 10001, name: db-password }
-  - { service: mcp, uid: 10001, name: db-password }
-  - { service: postgres, uid: 999, name: db-password }
-  - { service: worker, uid: 10001, name: db-password }
+# VEC-CLI-3: input = an excerpt of `docker compose config --format json` (FR-CLI-3) plus VEC-CLI-1; output = the
+# FR-CLI-5 delivery plan: one (service, uid, name) per file, sorted by service then name. No values.
+# Names: `db-password`, and secret_file_name(ref) (SRV-CONFIG FR-CONFIG-14) for VEC-CLI-1's refs.
+# The project and volume names are deliberately not `reader`/`reader_pgdata`, so a hard-coded name fails the test.
+cases:
+  - id: default-profile
+    # Stage 1, no agent-proxy in the active model (FR-CLI-5): only db-password is resolved and planned; the provider
+    # tokens are neither resolved nor handed to the watcher. Kernel services never appear in a plan.
+    rendered:
+      name: reader-vec
+      volumes: { pgdata: { name: reader-vec_pgdata } }
+      services:
+        postgres: { user: "999:999" }
+        api: { user: "10001:10001" }
+        worker: { user: "10001:10001" }
+        caddy: { user: "0:0" }
+        kernel-pair-1: { user: "1000:1000" }
+        kernel-user-ivan: { user: "1000:1000" }
+    expected:
+      project: reader-vec
+      pgdata_volume: reader-vec_pgdata
+      resolved: [db-password]
+      plan:
+        - { service: api, uid: 10001, name: db-password }
+        - { service: postgres, uid: 999, name: db-password }
+        - { service: worker, uid: 10001, name: db-password }
+  - id: with-agent-proxy
+    # The same rule once a stage adds mcp and agent-proxy to the active model: one file per provider token.
+    rendered:
+      name: reader-vec
+      volumes: { pgdata: { name: reader-vec_pgdata } }
+      services:
+        postgres: { user: "999:999" }
+        api: { user: "10001:10001" }
+        worker: { user: "10001:10001" }
+        mcp: { user: "10001:10001" }
+        agent-proxy: { user: "10002:10002" }
+        kernel-user-ivan: { user: "1000:1000" }
+    expected:
+      project: reader-vec
+      pgdata_volume: reader-vec_pgdata
+      plan:
+        - { service: agent-proxy, uid: 10002, name: env-377976ff0d3a5456d4aac017ea45c3cc }
+        - { service: agent-proxy, uid: 10002, name: hostfile-dc508ac58158f9290f84c8b40cc20878 }
+        - { service: agent-proxy, uid: 10002, name: keychain-e35683c33bd94de8486a116f9c3efc47 }
+        - { service: agent-proxy, uid: 10002, name: op-9a5e6d577d30a8fe4de846fad7a527ee }
+        - { service: api, uid: 10001, name: db-password }
+        - { service: mcp, uid: 10001, name: db-password }
+        - { service: postgres, uid: 999, name: db-password }
+        - { service: worker, uid: 10001, name: db-password }
 script: >-
   umask 077; cat > "/run/secrets/.$1.tmp" && mv "/run/secrets/.$1.tmp" "/run/secrets/$1"
