@@ -1,0 +1,30 @@
+# VEC-EVENTS-3 — procrastinate job status x key outcome -> job_status (FR-EVENTS-12) and sweep action (FR-EVENTS-15).
+# Source: hand-derived over procrastinate 3.12.0's seven statuses (REF-EVENTS-4: `aborting` is legacy, unused since 3.0).
+# `procrastinate` is the status of the key's deciding job: `doing` over `todo` when both exist (FR-EVENTS-12).
+# `outcome` is the key's job_outcomes status, or none. `sweep` applies only to jobs the sweep inspects (stalled `doing`,
+# `failed`, `succeeded`, `aborted`); `-` means no action.
+rows:
+  - { procrastinate: todo,      outcome: none,      job_status: queued,    sweep: "-" }
+  - { procrastinate: todo,      outcome: succeeded, job_status: succeeded, sweep: "-", note: "skips when claimed (FR-EVENTS-4)" }
+  - { procrastinate: todo,      outcome: dead,      job_status: dead,      sweep: "-", note: "skips when claimed" }
+  - { procrastinate: doing,     outcome: none,      job_status: running,   sweep: "stalled: retry or dead `stalled` (FR-EVENTS-7)" }
+  - { procrastinate: doing,     outcome: succeeded, job_status: succeeded, sweep: "stalled: finish succeeded" }
+  - { procrastinate: doing,     outcome: dead,      job_status: dead,      sweep: "stalled: finish failed" }
+  - { procrastinate: succeeded, outcome: none,      job_status: dead,      sweep: "write dead `orphaned`" }
+  - { procrastinate: succeeded, outcome: succeeded, job_status: succeeded, sweep: "-" }
+  - { procrastinate: succeeded, outcome: dead,      job_status: dead,      sweep: "-", note: "a skipped todo job behind a dead run finishes succeeded" }
+  - { procrastinate: failed,    outcome: none,      job_status: dead,      sweep: "write dead `orphaned`" }
+  - { procrastinate: failed,    outcome: succeeded, job_status: succeeded, sweep: "-" }
+  - { procrastinate: failed,    outcome: dead,      job_status: dead,      sweep: "-" }
+  - { procrastinate: cancelled, outcome: none,      job_status: none,      sweep: "-", note: "an operator cancel of a todo job; enqueue again is allowed" }
+  - { procrastinate: cancelled, outcome: succeeded, job_status: succeeded, sweep: "-" }
+  - { procrastinate: cancelled, outcome: dead,      job_status: dead,      sweep: "-" }
+  - { procrastinate: aborting,  outcome: none,      job_status: running,   sweep: "treated as doing" }
+  - { procrastinate: aborting,  outcome: succeeded, job_status: succeeded, sweep: "treated as doing" }
+  - { procrastinate: aborting,  outcome: dead,      job_status: dead,      sweep: "treated as doing" }
+  - { procrastinate: aborted,   outcome: none,      job_status: queued,    sweep: "defer again, attempts unchanged (FR-EVENTS-14)" }
+  - { procrastinate: aborted,   outcome: succeeded, job_status: succeeded, sweep: "-" }
+  - { procrastinate: aborted,   outcome: dead,      job_status: dead,      sweep: "-" }
+  - { procrastinate: absent,    outcome: none,      job_status: none,      sweep: "-", note: "no job_keys row, or the requeue crash gap (FR-EVENTS-8)" }
+  - { procrastinate: absent,    outcome: succeeded, job_status: succeeded, sweep: "-" }
+  - { procrastinate: absent,    outcome: dead,      job_status: dead,      sweep: "-" }

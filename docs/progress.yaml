@@ -239,8 +239,10 @@ tasks:
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "spec drafted, awaits deep-reviewer (spec/modules/SRV-EVENTS.yaml, jobs half; procrastinate per ADR-0006;
-        complex area: full review). Depends on the db/Alembic and reader-server skeleton drafted in S1.SRV-AUTH" }
+      note: "spec revised after deep-reviewer round 1 (changes), awaits round 2 (spec/modules/SRV-EVENTS.yaml, jobs half;
+        procrastinate 3.12.0 per ADR-0006; complex area: full review). Cross-spec on S1.SRV-AUTH: computed
+        version_locations + upgrade heads, system-table exemption for job_keys/job_outcomes/procrastinate_*, a separate
+        advisory-lock namespace, reader-server --role worker dispatch" }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],

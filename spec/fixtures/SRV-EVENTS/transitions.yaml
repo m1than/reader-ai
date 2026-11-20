@@ -1,40 +1,84 @@
-# VEC-EVENTS-1 — job state transitions per idempotency key (FR-EVENTS-3, -4, -6, -7, -8; INV-EVENTS-6).
-# Source: hand-derived from the FRs above and procrastinate's statuses (todo, doing, succeeded, failed).
-# States are this module's view (FR-EVENTS-12): none, queued, running, succeeded, dead.
+# VEC-EVENTS-1 — per-key state transitions (FR-EVENTS-3, -4, -6, -7, -8, -14, -15; INV-EVENTS-6).
+# Source: hand-derived from the FRs above and procrastinate 3.12.0's statuses (REF-EVENTS-4).
+# States are this module's per-key view (FR-EVENTS-12): none, queued, running, succeeded, dead.
 # Events:
-#   enqueue            FR-EVENTS-3
-#   claim              a worker fetches the job (procrastinate todo -> doing)
-#   ok                 the handler returns; outcome succeeded committed with its effect (FR-EVENTS-4)
-#   fail_transient     a transient exception with attempts left (FR-EVENTS-6)
-#   fail_last          a transient exception on the last attempt (FR-EVENTS-6)
-#   fail_permanent     a non-transient exception or timeout (FR-EVENTS-6)
-#   stall              the sweep finds the job stalled with attempts left (FR-EVENTS-7)
-#   stall_last         the sweep finds the job stalled with no attempts left (FR-EVENTS-7)
-#   requeue            requeue_dead (FR-EVENTS-8)
-# `result` is enqueue's / requeue's return value; `-` means the event returns nothing to a caller.
-# `effect` counts handler database effects committed by the event (INV-EVENTS-2). `invalid` rows cannot occur and
-# the implementation must ignore them without a state change (a claim with no queued job, for example).
-# Every (state, event) pair not listed below is `invalid` with no state change (ok and fail_* outside `running`).
+#   enqueue         FR-EVENTS-3
+#   claim           a worker fetches a todo job of the key (procrastinate todo -> doing)
+#   ok              the handler returns; outcome `succeeded` commits with its effect (FR-EVENTS-4, -13)
+#   fail_transient  a transient exception, key not exhausted after the increment (FR-EVENTS-6)
+#   fail_last       a transient exception that exhausts the key (FR-EVENTS-6, -14)
+#   fail_permanent  a non-transient exception or a timeout (FR-EVENTS-6)
+#   stall           the sweep takes the key lock of a stalled job, key not exhausted after the increment (FR-EVENTS-7)
+#   stall_last      as stall, but the increment exhausts the key
+#   stall_live      the sweep finds the key lock held by a live session (FR-EVENTS-7)
+#   abort           shutdown aborts the running job; the sweep re-defers it without counting (FR-EVENTS-9, -14, -15)
+#   requeue         requeue_dead (FR-EVENTS-8)
+# Columns: `next` state; `result` returned to the caller of enqueue or requeue (`-` for worker and sweep events);
+# `effect` = handler database effects committed (INV-EVENTS-2); `attempts` = change of job_keys.attempts.
+# `noop`: the event has no subject in this state (no doing job, for example) and changes nothing. The table is total:
+# 5 states x 11 events = 55 rows.
 rows:
-  - { state: none,      event: enqueue,        next: queued,    result: queued,       effect: 0 }
-  - { state: none,      event: claim,          next: none,      result: invalid,      effect: 0 }
-  - { state: none,      event: requeue,        next: none,      result: none,         effect: 0 }
-  - { state: queued,    event: enqueue,        next: queued,    result: already_queued, effect: 0 }
-  - { state: queued,    event: claim,          next: running,   result: "-",          effect: 0 }
-  - { state: queued,    event: requeue,        next: queued,    result: already_queued, effect: 0 }
-  - { state: running,   event: enqueue,        next: running,   result: queued,       effect: 0,
-      note: "procrastinate allows one todo beside one doing (REF-EVENTS-4); the second job runs after the first and is skipped by FR-EVENTS-4 if the first succeeded" }
-  - { state: running,   event: ok,             next: succeeded, result: "-",          effect: 1 }
-  - { state: running,   event: fail_transient, next: queued,    result: "-",          effect: 0 }
-  - { state: running,   event: fail_last,      next: dead,      result: "-",          effect: 0 }
-  - { state: running,   event: fail_permanent, next: dead,      result: "-",          effect: 0 }
-  - { state: running,   event: stall,          next: queued,    result: "-",          effect: 0 }
-  - { state: running,   event: stall_last,     next: dead,      result: "-",          effect: 0 }
-  - { state: running,   event: requeue,        next: running,   result: running,      effect: 0 }
-  - { state: succeeded, event: enqueue,        next: succeeded, result: already_done, effect: 0 }
-  - { state: succeeded, event: claim,          next: succeeded, result: skipped,      effect: 0,
-      note: "a job queued behind a running one, claimed after it succeeded: FR-EVENTS-4 skips the handler" }
-  - { state: succeeded, event: requeue,        next: succeeded, result: already_done, effect: 0 }
-  - { state: dead,      event: enqueue,        next: dead,      result: dead,         effect: 0 }
-  - { state: dead,      event: claim,          next: dead,      result: invalid,      effect: 0 }
-  - { state: dead,      event: requeue,        next: queued,    result: queued,       effect: 0 }
+  - { state: none, event: enqueue,        next: queued, result: queued,      effect: 0, attempts: 0 }
+  - { state: none, event: claim,          next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: ok,             next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: fail_transient, next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: fail_last,      next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: fail_permanent, next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: stall,          next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: stall_last,     next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: stall_live,     next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: abort,          next: none,   result: noop,        effect: 0, attempts: 0 }
+  - { state: none, event: requeue,        next: none,   result: unknown_key, effect: 0, attempts: 0 }
+
+  - { state: queued, event: enqueue,        next: queued,  result: already_queued, effect: 0, attempts: 0 }
+  - { state: queued, event: claim,          next: running, result: "-",            effect: 0, attempts: 0 }
+  - { state: queued, event: ok,             next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: fail_transient, next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: fail_last,      next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: fail_permanent, next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: stall,          next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: stall_last,     next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: stall_live,     next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: abort,          next: queued,  result: noop,           effect: 0, attempts: 0 }
+  - { state: queued, event: requeue,        next: queued,  result: already_queued, effect: 0, attempts: 0 }
+
+  - { state: running, event: enqueue,        next: running,   result: queued,         effect: 0, attempts: 0,
+      note: "one todo beside one doing is allowed (REF-EVENTS-4); lock_mode ordered holds it until the doing job ends, then it skips if an outcome exists" }
+  - { state: running, event: claim,          next: running,   result: noop,           effect: 0, attempts: 0,
+      note: "no second doing job for the key (INV-EVENTS-1)" }
+  - { state: running, event: ok,             next: succeeded, result: "-",            effect: 1, attempts: 0 }
+  - { state: running, event: fail_transient, next: queued,    result: "-",            effect: 0, attempts: 1 }
+  - { state: running, event: fail_last,      next: dead,      result: "-",            effect: 0, attempts: 1 }
+  - { state: running, event: fail_permanent, next: dead,      result: "-",            effect: 0, attempts: 1 }
+  - { state: running, event: stall,          next: queued,    result: "-",            effect: 0, attempts: 1 }
+  - { state: running, event: stall_last,     next: dead,      result: "-",            effect: 0, attempts: 1 }
+  - { state: running, event: stall_live,     next: running,   result: "-",            effect: 0, attempts: 0 }
+  - { state: running, event: abort,          next: queued,    result: "-",            effect: 0, attempts: 0 }
+  - { state: running, event: requeue,        next: running,   result: already_queued, effect: 0, attempts: 0 }
+
+  - { state: succeeded, event: enqueue,        next: succeeded, result: already_done, effect: 0, attempts: 0 }
+  - { state: succeeded, event: claim,          next: succeeded, result: skipped,      effect: 0, attempts: 0,
+      note: "a todo job queued behind the successful run; FR-EVENTS-4 skips on any outcome" }
+  - { state: succeeded, event: ok,             next: succeeded, result: noop,         effect: 0, attempts: 0 }
+  - { state: succeeded, event: fail_transient, next: succeeded, result: noop,         effect: 0, attempts: 0 }
+  - { state: succeeded, event: fail_last,      next: succeeded, result: noop,         effect: 0, attempts: 0 }
+  - { state: succeeded, event: fail_permanent, next: succeeded, result: noop,         effect: 0, attempts: 0 }
+  - { state: succeeded, event: stall,          next: succeeded, result: finished,     effect: 0, attempts: 0,
+      note: "killed after the outcome commit, before finish_job; the sweep finishes the procrastinate job (FR-EVENTS-15)" }
+  - { state: succeeded, event: stall_last,     next: succeeded, result: finished,     effect: 0, attempts: 0 }
+  - { state: succeeded, event: stall_live,     next: succeeded, result: noop,         effect: 0, attempts: 0 }
+  - { state: succeeded, event: abort,          next: succeeded, result: noop,         effect: 0, attempts: 0 }
+  - { state: succeeded, event: requeue,        next: succeeded, result: already_done, effect: 0, attempts: 0 }
+
+  - { state: dead, event: enqueue,        next: dead,   result: dead,     effect: 0, attempts: 0 }
+  - { state: dead, event: claim,          next: dead,   result: skipped,  effect: 0, attempts: 0,
+      note: "a todo job queued behind a run that ended dead; FR-EVENTS-4 skips on any outcome" }
+  - { state: dead, event: ok,             next: dead,   result: noop,     effect: 0, attempts: 0 }
+  - { state: dead, event: fail_transient, next: dead,   result: noop,     effect: 0, attempts: 0 }
+  - { state: dead, event: fail_last,      next: dead,   result: noop,     effect: 0, attempts: 0 }
+  - { state: dead, event: fail_permanent, next: dead,   result: noop,     effect: 0, attempts: 0 }
+  - { state: dead, event: stall,          next: dead,   result: finished, effect: 0, attempts: 0 }
+  - { state: dead, event: stall_last,     next: dead,   result: finished, effect: 0, attempts: 0 }
+  - { state: dead, event: stall_live,     next: dead,   result: noop,     effect: 0, attempts: 0 }
+  - { state: dead, event: abort,          next: dead,   result: noop,     effect: 0, attempts: 0 }
+  - { state: dead, event: requeue,        next: queued, result: queued,   effect: 0, attempts: reset }
