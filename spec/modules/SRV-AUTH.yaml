@@ -177,7 +177,11 @@ requirements:
       `config_errors` codes and SRV-CONFIG's problem codes. `--role worker` without `--healthcheck` waits until the
       schema is at all heads without migrating, writing `reader-server: database_unreachable` at most once per 30 s
       while the database cannot be polled, then runs until SIGTERM and exits 0. `--role mcp` exits 2 with "mcp role
-      arrives with SRV-MCP".
+      arrives with SRV-MCP". Logging: the one-shot paths (`--healthcheck`, `bootstrap-link`, startup before
+      serving) silence library records, so their output stays the one line. Once the api serves (and once the
+      worker sees all heads), any logger's WARNING and above reaches stderr as one line with the logger name, the
+      level, the message template and the exception type, never the stack or the args; `reader.*` records add their
+      own args (route, failure reason) and never a stack.
   - id: FR-AUTH-3
     text: >-
       RP ID is the lower-cased host of `instance.url`; the only accepted origin is `scheme://host[:port]`, lower-cased,
@@ -257,7 +261,10 @@ requirements:
       equal to the origin of FR-AUTH-3; every non-GET request with a body must have a Content-Type whose media type
       (compared per REF-AUTH-7, parameters ignored) is `application/json`. A request with more than one `Origin`
       header is refused. Otherwise 403 `{"error":"origin"}` (a WebSocket is closed with code 1008) or 415
-      `{"error":"content_type"}`, before any handler runs or any row is written.
+      `{"error":"content_type"}`, before any handler runs or any row is written. A JSON body over 64 KiB (a
+      structural bound: the largest stage-1 body, a registration response, is a few KiB; reading stops at the
+      bound), not JSON, or nested deeper than the parser's recursion limit is unparseable: the ceremony treats it
+      as an empty body (`token_invalid`, `ceremony_invalid` or `malformed`, with a failure row), never a 500.
   - id: FR-AUTH-13
     text: >-
       Groundwork (ADR-0017, ADR-0018). `users.consent_evaluation` defaults to true for role owner and false otherwise;

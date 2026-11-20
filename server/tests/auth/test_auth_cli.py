@@ -10,6 +10,7 @@ READER_SECRETS_ROOT and READER_RUN_DIR; the defaults are the container paths (po
 from __future__ import annotations
 
 import json
+import logging
 import signal
 import socket
 import subprocess
@@ -341,3 +342,40 @@ def test_bootstrap_link_and_http_ceremony_keep_secrets_out_of_output(api_server:
     password = (Path(env["READER_SECRETS_ROOT"]) / "db-password").read_text(encoding="utf-8")
     for secret in [token, ceremony.split("=", 1)[1], session.split("=", 1)[1], password]:
         assert secret not in output
+
+
+@pytest.fixture
+def restore_logging() -> Iterator[None]:
+    root, reader = logging.getLogger(), logging.getLogger("reader")
+    saved = (list(root.handlers), root.level, list(reader.handlers), reader.level, reader.propagate)
+    yield
+    root.handlers[:], root.level = saved[0], saved[1]
+    reader.handlers[:], reader.level, reader.propagate = saved[2], saved[3], saved[4]
+
+
+@pytest.mark.usefixtures("restore_logging")
+def test_serving_logs_show_third_party_errors_without_stack_or_args(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The logging the api and worker install once serving (FR-AUTH-2)."""
+    from reader.serve.main import serving_logs
+
+    serving_logs()
+    secret = "CANARY-arg-" + "y" * 12
+    try:
+        raise ValueError("CANARY-exc-detail")
+    except ValueError:
+        logging.getLogger("sqlalchemy.pool.impl").error("Exception during reset %s", secret, exc_info=True)
+        logging.getLogger("asyncio").error(ValueError(secret))
+        logging.getLogger("reader.auth").warning("auth failure %s %s", "/api/x", "malformed", exc_info=True)
+    logging.getLogger("uvicorn.error").info("Started server process")  # below WARNING: dropped
+    err = capsys.readouterr().err
+    lines = err.splitlines()
+    assert lines == [
+        "ERROR sqlalchemy.pool.impl: Exception during reset %s [ValueError]",
+        "ERROR asyncio: <ValueError>",
+        "WARNING reader.auth: auth failure /api/x malformed [ValueError]",
+    ]
+    assert "Traceback" not in err
+    assert secret not in err
+    assert "CANARY-exc-detail" not in err

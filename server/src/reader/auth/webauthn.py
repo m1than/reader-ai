@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
+from cryptography.hazmat.primitives.asymmetric import rsa
 from webauthn import verify_authentication_response, verify_registration_response
 from webauthn.helpers import (
     decode_credential_public_key,
@@ -66,7 +66,6 @@ class _Fail(Exception):
 # What the library's parsers and key loaders raise on hostile input (LookupError: IndexError, KeyError).
 _PARSE_ERRORS = (WebAuthnException, ValueError, TypeError, LookupError, AttributeError, OverflowError)
 MIN_RSA_BITS = 2048
-OKP_KEY_BYTES = 32
 
 
 def _key(public_key: bytes) -> tuple[int, Any]:
@@ -77,9 +76,8 @@ def _key(public_key: bytes) -> tuple[int, Any]:
         key = decoded_public_key_to_cryptography(decoded)
     except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
+    # A short OKP key already fails to load above (Ed25519 needs exactly 32 bytes); RSA loads at any size.
     if isinstance(key, rsa.RSAPublicKey) and key.key_size < MIN_RSA_BITS:
-        raise _Fail(FailureReason.malformed)
-    if isinstance(key, ed25519.Ed25519PublicKey) and len(key.public_bytes_raw()) != OKP_KEY_BYTES:
         raise _Fail(FailureReason.malformed)
     return alg, key
 

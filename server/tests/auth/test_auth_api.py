@@ -168,6 +168,27 @@ async def test_bootstrap_with_unencodable_or_non_string_token(pg: Pg, tmp_path: 
     await engine.dispose()
 
 
+DEEP_OVER_CAP = b"[" * 200_000 + b"]" * 200_000  # 400 KB, over the 64 KiB bound
+DEEP_UNDER_CAP = b"[" * 30_000 + b"]" * 30_000  # 60 KB, under the bound, deeper than the recursion limit
+JSON_HEADERS = {"Content-Type": "application/json"}
+
+
+async def test_oversized_or_too_deep_bodies_are_unparseable(pg: Pg, tmp_path: Path) -> None:
+    settings, engine = await _setup(pg, tmp_path)
+    async with client(settings, engine) as c:
+        for body in (DEEP_OVER_CAP, DEEP_UNDER_CAP):
+            r = await c.post("/api/auth/bootstrap/options", content=body, headers=JSON_HEADERS)
+            assert r.status_code == 400
+            assert r.json() == {"error": "bootstrap_failed"}
+            await c.post("/api/auth/signin/options", json={})  # a live ceremony, so the body is what fails
+            r = await c.post("/api/auth/signin/verify", content=body, headers=JSON_HEADERS)
+            assert r.status_code == 400
+            assert r.json() == {"error": "signin_failed"}
+    assert await scalar(engine, "SELECT count(*) FROM auth_failures WHERE reason = 'token_invalid'") == 2
+    assert await scalar(engine, "SELECT count(*) FROM auth_failures WHERE reason = 'malformed'") == 2
+    await engine.dispose()
+
+
 # INV-AUTH-7----------------------------------------------------------------------------------------------
 
 
@@ -779,9 +800,11 @@ async def test_websocket_scope_needs_the_exact_origin() -> None:
 
 
 async def test_more_than_one_origin_header_is_refused() -> None:
-    sent, reached = await _through_gate(_scope("http", [ORIGIN, ORIGIN], method="POST"))
-    assert not reached
-    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 403
+    evil = "https://evil.example"
+    for origins in ([ORIGIN, ORIGIN], [evil, ORIGIN], [ORIGIN, evil]):
+        sent, reached = await _through_gate(_scope("http", origins, method="POST"))
+        assert not reached, origins
+        assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 403
     _, reached = await _through_gate(_scope("http", [ORIGIN], method="POST"))
     assert reached
 

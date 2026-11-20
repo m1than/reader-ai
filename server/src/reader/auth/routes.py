@@ -121,8 +121,13 @@ async def signout(ctx: Ctx) -> Response:
 
 
 def _static(name: str, media_type: str) -> Handler:
-    async def serve(_: Ctx) -> Response:
-        return Response((_STATIC / name).read_bytes(), media_type=media_type)
+    async def serve(ctx: Ctx) -> Response:
+        try:
+            content = (_STATIC / name).read_bytes()
+        except OSError:  # a damaged install, not a database failure
+            log.warning("static_unavailable %s", ctx.request.url.path)
+            return error(503, "unavailable")
+        return Response(content, media_type=media_type)
 
     return serve
 

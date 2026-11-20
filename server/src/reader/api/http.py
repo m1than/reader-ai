@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
@@ -14,6 +15,8 @@ from reader.auth.policy import SESSION_COOKIE, Settings
 from reader.auth.store import SessionUser
 
 Auth = Literal["public", "session", "recent_session"]
+# Structural bound on JSON bodies: the largest stage-1 body is a registration response of a few KiB.
+MAX_BODY_BYTES: Final = 65536
 
 
 @dataclass(frozen=True)
@@ -38,9 +41,19 @@ class Ctx:
         return self.user
 
     async def json(self) -> Any:
+        """The JSON body, or None when it is unparseable: over MAX_BODY_BYTES (read no further), not JSON,
+        not UTF-8, or nested deeper than the parser's recursion limit."""
+        declared = self.request.headers.get("content-length", "")
+        if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+            return None
+        body = bytearray()
+        async for chunk in self.request.stream():
+            body += chunk
+            if len(body) > MAX_BODY_BYTES:
+                return None
         try:
-            return await self.request.json()
-        except ValueError:
+            return json.loads(body)
+        except ValueError, RecursionError:
             return None
 
 

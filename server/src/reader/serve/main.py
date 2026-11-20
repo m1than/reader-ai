@@ -161,13 +161,12 @@ def _serve_api(bind: str, env: Env) -> None:
                 (env.run_dir / API_ADDR_FILE).write_text(bind, encoding="utf-8")
             except OSError:
                 raise Failure("run_dir_unwritable") from None
-            # Request-time logs (FR-AUTH-18 failure lines, database_unreachable) go to stderr, one line each.
-            handler = logging.StreamHandler(sys.stderr)
-            handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
-            logging.getLogger("reader").addHandler(handler)
-            logging.getLogger("reader").setLevel(logging.INFO)
+            serving_logs()
             app = create_app(settings, engine)
-            server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, proxy_headers=False))
+            # log_config=None: uvicorn's records go through the root handler of serving_logs (no tracebacks).
+            server = uvicorn.Server(
+                uvicorn.Config(app, host=host, port=port, proxy_headers=False, log_config=None)
+            )
             await server.serve()
         finally:
             await engine.dispose()
@@ -193,7 +192,8 @@ def _run_worker(env: Env) -> None:
             loop.add_signal_handler(sig, stop.set)
         engine = make_engine(target)
         try:
-            await wait_for_heads(engine, stop, on_error=report)
+            if await wait_for_heads(engine, stop, on_error=report):
+                serving_logs()
             await stop.wait()  # jobs arrive with V.SRV-JOBS-min
         finally:
             await engine.dispose()
@@ -249,9 +249,55 @@ def run(argv: list[str], environ: Mapping[str, str]) -> int:
     return 0
 
 
+_QUIET: Final = logging.NullHandler()
+
+
+class SafeFormatter(logging.Formatter):
+    """Logger name, level and the message template; an exception shows as its type only.
+
+    Third-party records may carry driver detail in their args or tracebacks, so neither is printed.
+    """
+
+    def format(self, record: logging.LogRecord) -> str:
+        template = record.msg if isinstance(record.msg, str) else f"<{type(record.msg).__name__}>"
+        text = f"{record.levelname} {record.name}: {template}"
+        if record.exc_info and record.exc_info[0] is not None:
+            text += f" [{record.exc_info[0].__name__}]"
+        return text
+
+
+class ReaderFormatter(logging.Formatter):
+    """reader.* records: our own messages and args (route, failure reason); never a traceback."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        text = f"{record.levelname} {record.name}: {record.getMessage()}"
+        if record.exc_info and record.exc_info[0] is not None:
+            text += f" [{record.exc_info[0].__name__}]"
+        return text
+
+
+def serving_logs() -> None:
+    """Long-running roles: WARNING and above from any logger reach stderr, one line each, without stack or
+    args; reader.* records at INFO with their own args. The one-shot quiet handler is removed."""
+    root = logging.getLogger()
+    root.removeHandler(_QUIET)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(SafeFormatter())
+    handler.setLevel(logging.WARNING)
+    root.addHandler(handler)
+    root.setLevel(logging.WARNING)
+    reader = logging.getLogger("reader")
+    own = logging.StreamHandler(sys.stderr)
+    own.setFormatter(ReaderFormatter())
+    reader.addHandler(own)
+    reader.setLevel(logging.INFO)
+    reader.propagate = False
+
+
 def main(argv: list[str] | None = None) -> int:
-    # No library log record may reach stderr through logging's last-resort handler: the output is one line.
-    logging.getLogger().addHandler(logging.NullHandler())
+    # One-shot paths (healthcheck, bootstrap-link, startup before serving): no library record may reach stderr
+    # through logging's last-resort handler, so the output stays one line. serving_logs() replaces this.
+    logging.getLogger().addHandler(_QUIET)
     try:
         return run(sys.argv[1:] if argv is None else argv, os.environ)
     except Failure as failure:
