@@ -49,7 +49,7 @@ Python has no LTS line. "Latest LTS" for Python therefore means the newest minor
 
 | Image | Evidence | Status |
 | --- | --- | --- |
-| Agent SDK worker (`claude-agent-sdk` 0.2.186) | `spikes/agent-sdk-container/results/20261120T180638/` and `20261120T180949/` (PR #6): 3 text runs and 1 sandboxed tools run pass | measured (runs) |
+| Agent SDK worker (`claude-agent-sdk` 0.2.186) | `spikes/agent-sdk-container/results/20261120T180638/` and `20261120T180949/` (PR #6, merged): 2 text runs and 1 sandboxed tools run pass | measured (runs) |
 | Docling + EasyOCR ingest | image builds on `python:3.14-slim-trixie` (branch `0/S0.spike.ingest-docling`) | build only; an OCR conversion is pending in `spikes/ingest-docling/RESULT.md` (hypothesis until then) |
 | Kernel sandbox (Kernel Gateway 3.0.1, ipykernel, evcxr, deno) | none; `spikes/kernel-roundtrip` measured `python:3.13-slim-bookworm` | not measured (hypothesis); re-run on 3.14 pending |
 
@@ -67,7 +67,7 @@ Python has no LTS line. "Latest LTS" for Python therefore means the newest minor
 - **Python 3.14** for `server/`, the worker, the ingest image and the sandbox image.
 - **Debian 13 trixie** as the base of every image reader-ai builds (`python:3.14-slim-trixie`).
 
-This replaces the "Runtime" row of ADR-0006 (Python 3.13 → 3.14) and the roadmap's "Node 22+". For the kernel sandbox and the OCR path, the decision holds only after their pending runs pass (see the table above). If either fails on 3.14, that image stays on 3.13/trixie until it is fixed, and this ADR is amended.
+This replaces the "Runtime" row of ADR-0006 (Python 3.13 → 3.14) and the roadmap's "Node 22+". For the kernel sandbox and the OCR path, the decision holds only after their pending runs pass (see the table above). If either fails on 3.14, that image stays on Python 3.13 (on bookworm as measured; 3.13 on trixie is itself a hypothesis) until it is fixed, and this ADR is amended. The owner should accept this ADR knowing that the kernel and OCR rows are hypotheses until their runs exist.
 
 ## Rejected options — why (numbers)
 
