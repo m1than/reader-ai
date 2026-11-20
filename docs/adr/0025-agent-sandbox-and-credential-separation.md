@@ -1,7 +1,7 @@
 ---
 id: ADR-0025
 title: Agent sandbox and credential separation — a credential-injecting egress proxy reachable only by the worker; tools by allow-list where a secret lives
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "SRV-AGENT/OPS-SANDBOX tests: in the worker and every kernel-* service, the provider token is absent from env, /proc/*/environ, /run/secrets, ~/.claude and `docker inspect`; kernel-agent cannot connect to agent-proxy; a request without a valid per-run handle gets no credential; user A's handle never yields user B's token; injection never applies to a non-provider host; the tool list the CLI reports at session start (init SystemMessage) equals the stage's declared set; no service mounts the Docker socket"
 revisit_when: "The Agent SDK's CLI can authenticate through a proxy-only mechanism; or an agent stage needs a tool that the separation rules forbid"

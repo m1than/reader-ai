@@ -1,7 +1,7 @@
 ---
 id: ADR-0024
 title: Local CA and passkeys — localhost confirmed, TLS-only trust recorded and removed by hash, no backup of the internal CA key in Mac-only v1
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "OPS-DEPLOY: `reader up` trusts the root in the user domain (login keychain) with `-p ssl` and records the root and its SHA-1 on the host; `reader down --untrust` removes every recorded root by hash, and a trust-settings export shows none left; owner live check: passkey register and sign-in pass with TLS-only trust in Safari and a Chromium browser"
 revisit_when: "Caddy's internal CA supports name constraints; a browser fails passkeys on https://localhost; reader-ai moves to a VPS with a public certificate"

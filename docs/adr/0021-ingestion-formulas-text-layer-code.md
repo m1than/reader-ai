@@ -1,7 +1,7 @@
 ---
 id: ADR-0021
 title: Ingestion amendment — formula model on, code from the PDF text layer, a deterministic page-expectation check; Docker or native decided by one measurement
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "SRV-INGEST local check on the owner's Mac against committed per-page expectations for the 20 pilot pages (counts and hashes only, no book text, expected hashes computed independently of the pipeline): code-block count, lines per block, sha256 of each block's text equal to the committed sha256 of the text layer inside its box, block order relative to list items (block index before or after a list-item index; pages 461, 468), decoded-formula count, table shape (rows × columns). It runs only where the sha256-matched PDF is present; a missing PDF is reported as a skip, never as a pass. Plus measurement M1 deciding Docker or native, and, if native, the confinement check in Consequences"
 revisit_when: "After SRV-INGEST is green: the owner's fidelity live check misreads more than 2 of the 20 pages (rule B); or a native or Docker full run with the formula model falls below 10 pages/min; or Docling's formula model gains MPS support"
