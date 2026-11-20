@@ -55,10 +55,10 @@
 
 id: OPS-SANDBOX
 title: Kernel image (python3), fail-stop in-container supervisor with start nonce and control endpoint, sandbox probes
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) round 1 changes (B1–B8), revised"
+status: approved
+approved_by: agent
+approved_at: 2026-11-21
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21)"
 layer: ops
 track: engineering
 adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
