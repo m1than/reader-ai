@@ -5,7 +5,7 @@
   "results": {
     "light": {
       "canvas": "#f6f4ef",
-      "accent": "#3d6b6e",
+      "accent": "#315c5f",
       "bodyBackground": "rgba(0, 0, 0, 0)",
       "mainChildren": 20,
       "tabs": 2,
@@ -21,7 +21,7 @@
     },
     "dark": {
       "canvas": "#1b1a18",
-      "accent": "#8fb8b6",
+      "accent": "#a1c6c4",
       "bodyBackground": "rgba(0, 0, 0, 0)",
       "mainChildren": 20,
       "tabs": 2,

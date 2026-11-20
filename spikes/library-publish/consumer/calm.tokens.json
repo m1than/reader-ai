@@ -8,30 +8,30 @@
     "text-muted": { "$type": "color", "$value": "#5e5a52" },
     "border": { "$type": "color", "$value": "#e2ded5" },
     "control-border": { "$type": "color", "$value": "#858074" },
-    "accent": { "$type": "color", "$value": "#3d6b6e" },
+    "accent": { "$type": "color", "$value": "#315c5f" },
     "on-tone": { "$type": "color", "$value": "#ffffff" },
-    "neutral": { "$type": "color", "$value": "#5e5a52" },
+    "neutral": { "$type": "color", "$value": "#56524a" },
     "success": { "$type": "color", "$value": "#2f6b43" },
     "warning": { "$type": "color", "$value": "#85560f" },
-    "danger": { "$type": "color", "$value": "#a63a32" },
+    "danger": { "$type": "color", "$value": "#943229" },
     "info": { "$type": "color", "$value": "#2f5f86" },
-    "focus": { "$type": "color", "$value": "#3d6b6e" }
+    "focus": { "$type": "color", "$value": "#315c5f" }
   },
   "dark": {
     "canvas": { "$type": "color", "$value": "#1b1a18" },
     "surface": { "$type": "color", "$value": "#222120" },
     "surface-raised": { "$type": "color", "$value": "#2a2927" },
     "text": { "$type": "color", "$value": "#ece9e2" },
-    "text-muted": { "$type": "color", "$value": "#a9a499" },
+    "text-muted": { "$type": "color", "$value": "#bdb8ad" },
     "border": { "$type": "color", "$value": "#3a3835" },
-    "control-border": { "$type": "color", "$value": "#7f7a70" },
-    "accent": { "$type": "color", "$value": "#8fb8b6" },
+    "control-border": { "$type": "color", "$value": "#878277" },
+    "accent": { "$type": "color", "$value": "#a1c6c4" },
     "on-tone": { "$type": "color", "$value": "#14211f" },
-    "neutral": { "$type": "color", "$value": "#a9a499" },
+    "neutral": { "$type": "color", "$value": "#c7c2b7" },
     "success": { "$type": "color", "$value": "#8fc49d" },
     "warning": { "$type": "color", "$value": "#d9b26a" },
-    "danger": { "$type": "color", "$value": "#e39a92" },
+    "danger": { "$type": "color", "$value": "#f0b6af" },
     "info": { "$type": "color", "$value": "#93b6d6" },
-    "focus": { "$type": "color", "$value": "#8fb8b6" }
+    "focus": { "$type": "color", "$value": "#a1c6c4" }
   }
 }
