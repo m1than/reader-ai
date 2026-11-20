@@ -3,10 +3,22 @@ name = "reader"
 version = "0.0.0"
 description = "reader-ai server: api, worker, mcp and the host CLI `reader`"
 requires-python = ">=3.14,<3.15"
-dependencies = []
+dependencies = [
+  "pydantic>=2.14.4,<3",       # SRV-CONFIG: typed settings and JSON Schema (REF-CONFIG-2)
+  "ruamel.yaml==0.19.1",       # SRV-CONFIG: YAML 1.2 event parser with source marks (REF-CONFIG-5)
+]
 
 # Entry points `reader` (host CLI) and `reader-server --role api|worker|mcp` are added with the
-# specs that claim server/src/reader (OPS-CLI, OPS-DEPLOY). Until then the project is not built.
+# specs that claim them (OPS-CLI, OPS-DEPLOY). The project is built (editable) so that `python -m reader.…`
+# works outside pytest (SRV-CONFIG FR-CONFIG-4). `reader` is a namespace package: no spec claims
+# src/reader/__init__.py, so each claimed subpackage (reader.config, …) carries its own __init__.py.
+
+[build-system]
+requires = ["hatchling>=1.33"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reader"]
 
 [dependency-groups]
 dev = [
@@ -17,9 +29,6 @@ dev = [
   "ruff>=0.17",
   "testcontainers>=4.15",
 ]
-
-[tool.uv]
-package = false
 
 [tool.ruff]
 line-length = 110
