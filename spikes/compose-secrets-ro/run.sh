@@ -120,7 +120,7 @@ jq -n --argjson a "$after_rc" --argjson as "$after_s" --argjson c "$conc_rc" --a
 cat "$OUT/e.json"
 
 echo "== VM swap facts"
-swaps=$(docker run --rm "$IMG" cat /proc/swaps | tail -n +2 | awk '{print $1" size_kb="$3" used_kb="$4}')
-noswap=$(docker run --rm --tmpfs /x:noswap "$IMG" true 2>&1 | grep -c 'invalid tmpfs option')
+swaps=$(docker run --rm --network none "$IMG" cat /proc/swaps | tail -n +2 | awk '{print $1" size_kb="$3" used_kb="$4}')
+noswap=$(docker run --rm --network none --tmpfs /x:noswap "$IMG" true 2>&1 | grep -c 'invalid tmpfs option')
 jq -n --arg swaps "$swaps" --argjson noswap_rejected "$noswap" '{vm_swaps: $swaps, tmpfs_noswap_rejected: ($noswap_rejected > 0)}' > "$OUT/vm.json"
 cat "$OUT/vm.json"

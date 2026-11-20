@@ -168,8 +168,11 @@ tasks:
         nothing in the layer, memory.swap.max 0 with memswap_limit == mem_limit, lost on restart; naive delivery gave a full read
         in 3 of 20 trials, atomic in 20 of 20; delivery after `up` fails `up` with health dependencies (exit 1), concurrent succeeds;
         (d) file-sourced Compose secret: 0600, 0 value matches, source path in inspect, survives restart, works with `up`.
-        VM swaps to /var/lib/swap; tmpfs `noswap` rejected. Proposed ADR-0026: owner chooses A (= c, recommended) or C (= d).",
-      review: "deep-reviewer (Fable): round 1 changes (memory-only claim, atomicity, up lifecycle, option C unmeasured); revised",
+        VM swaps to /var/lib/swap; tmpfs `noswap` rejected. ADR-0026 (proposed): A (= c) chosen by the owner on 2026-11-20;
+        C (= d) rejected. Status flip to accepted is the owner's. Proposed owner control: a .claude/settings.json deny rule for direct
+        `docker exec` by the agent (anyone with the owner's Docker socket can read a consumer's file).",
+      review: "deep-reviewer (Fable): round 1 changes (memory-only claim, atomicity, up lifecycle, option C unmeasured);
+        round 2 changes (A's Docker-socket exposure, the A-vs-C difference, enforced control); revised",
       note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used. Task id S1.spike…; the branch is
         named 0/S0.spike.compose-secrets-ro for historical reasons." }
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }

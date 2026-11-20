@@ -9,7 +9,7 @@ revisit_when: "A deployment target cannot use any of the four reference schemes"
 
 > Proposed amendment: [ADR-0023](0023-provider-token-delivery.md) (2026-11-20) — secrets reach only their holder: `/run/secrets`, or a per-run subprocess environment. Never service-level `environment:`, `env_file:` or `docker run -e`.
 >
-> Proposed amendment: [ADR-0026](0026-secret-delivery-read-only-services.md) (2026-11-20) — Compose refuses environment-sourced secrets on read-only services (spikes/compose-secrets-ro). Delivery becomes either a tmpfs `/run/secrets` filled by `reader up` over `docker exec` stdin (recommended) or a file-sourced Compose secret; the owner chooses.
+> Proposed amendment: [ADR-0026](0026-secret-delivery-read-only-services.md) (2026-11-20) — Compose refuses environment-sourced secrets on read-only services (spikes/compose-secrets-ro). Delivery becomes a tmpfs `/run/secrets` filled by a watching `reader up` over `docker exec` stdin (option A, chosen by the owner on 2026-11-20).
 
 ## Context
 
