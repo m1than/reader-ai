@@ -226,7 +226,8 @@ tasks:
       note: "Spec reviewed (deep-reviewer, Fable, full review for secrets per owner policy 2026-11-20): round 1 changes (B1–B10),
         round 2 changes (five blocking; reader bootstrap added), round 3 changes (backup uid, caddy_config dropped, bootstrap
         token never in exceptions; reader.yaml bind into api/worker/mcp added), round 4 VERDICT: approve on 97b422e with
-        non-blocking items applied. Status stays draft: approval goes into the Red-tests commit (T5), and Red waits for
+        non-blocking items applied; then a coordinator correction (caddy_config back in backup/restore per ADR-0012:27 and
+        ADR-0024:45, one-off uid = mounting services' common user or 0:0), delta-only confirmation pending. Status stays draft: approval goes into the Red-tests commit (T5), and Red waits for
         OPS-DEPLOY to merge with VEC-DEPLOY-3 amended (reader.yaml bind, path /tmp/reader-ai-test/reader.yaml). Delivery per ADR-0026 option A: `reader up` builds images, resolves,
         execs a watcher (python -m reader.cli.watcher), hands the values over fd 3 and waits ≤ 10 s for a readiness byte on
         fd 4; the watcher subscribes to docker events --since T0 (daemon time), reconciles, re-checks each event's own labels,

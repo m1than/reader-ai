@@ -21,7 +21,7 @@ title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bo
 status: draft
 approved_by: null
 approved_at: null
-review: "deep-reviewer (Fable), 2026-11-20. Round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid and caddy_config dropped, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Status stays draft until the Red tests (T5), which wait for OPS-DEPLOY's amended VEC-DEPLOY-3."
+review: "deep-reviewer (Fable), 2026-11-20. Round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid and caddy_config dropped, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Correction after round 4 (coordinator): caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0; reviewer confirms this delta only. Status stays draft until the Red tests (T5), which wait for OPS-DEPLOY's amended VEC-DEPLOY-3."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -220,25 +220,27 @@ requirements:
       `reader backup DIR` (DIR required in stage 1) refuses a DIR inside a git work tree and refuses unless the watcher
       runs (the services it restarts need delivery). With api, worker and mcp stopped it writes, each file created by the
       host with mode 0600 from a stdout stream: `db.dump` from `pg_dump -Fc` run with `docker exec` in the postgres
-      container; for every other named volume labelled `org.reader-ai.backup=include` except `caddy_config` (in stage 1:
-      blobs), a tar from a one-off
+      container (pgdata); for every other named volume labelled `org.reader-ai.backup=include` (in stage 1: blobs and
+      caddy_config, ADR-0012), a tar from a one-off
       `docker run --rm --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
-      where `<uid>` is the rendered numeric `user` of the services that mount the volume (blobs: api and worker, 10001;
-      with all capabilities dropped, root could not read files it does not own); if those services disagree on the uid,
-      or one has no numeric `user`, backup and restore refuse naming the volume and `<server image>` is the `api` service's image
-      in the rendered model; and `manifest.json` =
+      where `<server image>` is the `api` service's image in the rendered model and `<uid>` comes from the rendered
+      `user` of the services that mount the volume: their common `user` (blobs: api and worker, `10001:10001`), or
+      `0:0` when none declares one (caddy_config: caddy). The reason: with all capabilities dropped, root still reads and
+      writes files it owns, but not files owned by another uid without DAC_OVERRIDE, so such files need their owner's
+      uid. If the mounting services disagree on `user`, or some declare one and others do not, backup and restore refuse
+      naming the volume. `manifest.json` =
       `{"created": RFC 3339, "reader": version, "postgres": server version, "files": [{"name", "sha256", "bytes"}]}`.
-      `caddy_data` (label `exclude`, ADR-0024) and `caddy_config` are never included: `caddy_config` holds only Caddy's
-      autosaved configuration, which Caddy regenerates from the Caddyfile at start, and ADR-0024 already accepts that a
-      restart regenerates Caddy's state; it is also root-owned 0700, unreadable to the hardened one-off. Afterwards the
-      stopped services start again.
+      Volumes labelled `exclude` are never included (stage 1: `caddy_data`, ADR-0024). Afterwards the stopped services
+      start again.
   - id: FR-CLI-18
     text: >-
       `reader restore DIR` refuses unless the watcher runs, then verifies every sha256 in the manifest. Precondition: no
       application table holds a row and the blobs volume is empty; otherwise it refuses and changes nothing. It stops
-      api, worker and mcp, runs `pg_restore --clean --if-exists` inside the postgres container, untars each volume
-      through a one-off container hardened as in FR-CLI-17, with the same `--user <uid>` (volume mounted read-write,
-      archive on stdin), and starts the services again. `caddy_config` is neither restored nor touched (FR-CLI-17). Why both: the row check is the safety rule (a
+      api, worker, mcp and caddy, runs `pg_restore --clean --if-exists` inside the postgres container, and for each tar
+      in the manifest runs a one-off container hardened as in FR-CLI-17, with the same `--user` (volume mounted
+      read-write, archive on stdin), that empties the volume and untars into it; then it starts the services again.
+      caddy_config may be non-empty (Caddy autosaves its configuration at start) and is replaced; it holds no user data.
+      Why both: the row check is the safety rule (a
       restore never discards data), and `--clean --if-exists` lets the archive replace the empty schema that migrations
       created at first start instead of failing on existing objects. The `-Fc` archive holds one database and no roles or
       passwords; the restored database is served by the target's postgres with the target machine's own FR-CLI-14 item.
@@ -343,7 +345,8 @@ vectors:
 # `reader up` returning with health), FR-CLI-7 (fail closed after `reader watcher stop`, which the roadmap's stage-1
 # script uses), FR-CLI-16 (trust and `down --untrust`: owner-run, needs the owner's password), FR-CLI-17/18 (the
 # backup-restore drill, the stage-1 exit: back up, restore onto a fresh pgdata and empty blobs, and check that the
-# one-off containers read and write the 10001-owned blobs with `--user`), and the ADR-0026 verified_by items OPS-CLI owns: no value in
+# one-off containers read and write the 10001-owned blobs with `--user 10001:10001`, and caddy_config backup and
+# restore as uid 0 with cap-drop ALL), and the ADR-0026 verified_by items OPS-CLI owns: no value in
 # `docker inspect`, `docker export`, `docker events` since `reader up`, the Docker Desktop logs, or argv.
 #
 # Owner notes:
@@ -356,9 +359,6 @@ vectors:
 # - Backups are unencrypted (FR-CLI-17); the directory is the owner's choice (ADR-0012), for example an encrypted volume.
 # - ADR-0012's backup folder "set in reader.yaml" is deferred: a future SRV-CONFIG task adds the field, and then
 #   `reader backup` may default to it.
-# - `caddy_config` is left out of backup and restore (FR-CLI-17), although OPS-DEPLOY labels it `include`: Caddy
-#   regenerates it at start (ADR-0024's reasoning). OPS-DEPLOY's label should become `exclude` at its next change; the
-#   exception stays here until it does.
 # - After editing reader.yaml, run `reader up` again, and `reader down` first if the edit touched nothing Compose
 #   renders: the single-file bind (FR-CLI-4) keeps the old inode, so running containers do not see an editor's
 #   replace-on-save, and `up -d` recreates only containers whose rendered configuration changed.
