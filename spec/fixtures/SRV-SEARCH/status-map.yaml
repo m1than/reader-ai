@@ -7,8 +7,10 @@ rows:
   - { job: running,   embeds_row: false, status: running }
   - { job: dead,      embeds_row: false, status: dead }
   # The row and the success outcome commit in one transaction (FR-SEARCH-5 step 3), so succeeded without the row is
-  # unreachable; it is reported as none, so `ensure` enqueues again rather than waiting forever.
-  - { job: succeeded, embeds_row: false, status: none }
+  # unreachable. If it is ever seen, it is reported as `dead` with a logged `status_inconsistent` line: enqueueing a
+  # succeeded key returns already_done (SRV-EVENTS FR-EVENTS-3), so `ensure` cannot re-run it and a caller must not
+  # wait on it; the owner-visible fix is a new key (a chunking or model change) or a manual cleanup.
+  - { job: succeeded, embeds_row: false, status: dead }
   # A row means the vectors exist for the current key, whatever the job record says.
   - { job: succeeded, embeds_row: true,  status: ready }
   - { job: none,      embeds_row: true,  status: ready }

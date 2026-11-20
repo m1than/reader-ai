@@ -32,8 +32,11 @@
 # Declared deviations:
 #   - ADR-0007 (proposed) and the roadmap's stage-3 row name pgvector HNSW. The slice uses an exact scan (FR-SEARCH-7):
 #     the pilot has 2,285 chunks, which is 2,285 × 1024 × 4 B ≈ 9.4 MB of vectors read in one pass per query, and an
-#     exact scan has no recall loss and no tuning. HNSW is deferred until a measured row count or a measured p95 says
-#     otherwise.
+#     exact scan has no recall loss and no tuning. The reviewer measured the exact scan at slice scale: a Seq Scan of
+#     6.6 ms. HNSW is deferred until a measured row count or a measured p95 says otherwise.
+#   - The roadmap's stage-3 row and ADR-0007 sketch a GET search route; this spec uses `POST /api/search` (FR-SEARCH-8),
+#     so the query never appears in a URL or an access log. A POST must carry the exact Origin (SRV-AUTH FR-AUTH-12),
+#     so the live check sends Origin with it.
 #   - The roadmap's stage-3 bound is recall@10 ≥ 0.8 on the 30-question v1 set, and ADR-0007's revisit_when fires below
 #     0.8 "on the pilot question set". The slice's acceptance is NFR-SEARCH-1 on the harder, owner-accepted v2 set.
 #     Which set ADR-0007's trigger means is an owner question.
@@ -89,9 +92,10 @@ normative:
 #   chunk_size 1200, chunk_overlap 200, chunk_min 80 characters — the spike's parameters behind the measured recall
 #     (spikes/embeddings-local/bench.py chunk_pages).
 #   dimensions 1024 — bge-m3 dense output (REF-SEARCH-3).
-#   max_seq_length 512 tokens — structural: 1,200 characters of Cyrillic prose is about 300–450 tokens for bge-m3's
-#     XLM-R tokenizer, so the cap never truncates a real chunk and keeps the attention cost (quadratic in length) and the
-#     peak RSS bounded far below the model's 8192.
+#   max_seq_length 1,024 tokens — measured by the reviewer with bge-m3's tokenizer on 1,200-character texts: Russian
+#     prose 266, Rust code 603, hex 740, LaTeX 887 tokens. 1,024 covers all four kinds, so code and formula chunks are
+#     not cut, and keeps the attention cost (quadratic in length) and the peak RSS bounded well below the model's 8192.
+#     The [local] bench reports how many chunks the cap truncated; spikes/embed-service measures memory at this cap.
 #   embed request: at most 32 texts; a passage at most 1,200 characters, a query at most 1,000 — the callers' own
 #     limits, so nothing larger is ever sent; 32 is the spike's batch (bench.py --batch default).
 #   embed body cap 256 KiB — structural: 32 × 1,200 characters × 6 bytes (a \uXXXX JSON escape, the worst case) is
@@ -114,7 +118,7 @@ requirements:
     text: >-
       **The embed service.** `python -I -m reader.search.embed_service` (service `embed`) loads `BAAI/bge-m3` with
       sentence-transformers from the baked directory `/opt/models/bge-m3`, on CPU, once at start, with
-      `max_seq_length = 512`; weights load through `torch.load(..., weights_only=True)`. It serves on `0.0.0.0:8100`:
+      `max_seq_length = 1024`; weights load through `torch.load(..., weights_only=True)`. It serves on `0.0.0.0:8100`:
       - `POST /embed` with JSON `{"kind": "passage" | "query", "texts": [str, …]}` returns
         `{"model": "BAAI/bge-m3@<revision>", "dimensions": 1024, "vectors": [[float × 1024], …]}`, one L2-normalised
         vector per text (`normalize_embeddings=True`), no prefix or instruction for either kind (REF-SEARCH-3).
@@ -170,18 +174,26 @@ requirements:
       - **transient:** `asyncpg.exceptions.ConnectionDoesNotExistError`, `asyncpg.exceptions.CannotConnectNowError`,
         `ConnectionRefusedError`, `httpx.ConnectError`, `httpx.TimeoutException`, `reader.search.errors.EmbedUnavailable`
         (HTTP 503 from the service), and `reader.search.errors.IngestNotReady`. Everything else is permanent, including
-        `model_mismatch` (a vector not of length 1024, or a response `model` different from the lock's id).
+        `model_mismatch` (a vector not of length 1024, or a response `model` different from the lock's id),
+        `ingest_superseded` and `params_mismatch`.
       **The handler:**
-      1. resolves the material's frozen ingest (SRV-INGEST FR-INGEST-17) by `material_sha256`; if there is none, or it
-         is not `args.ingest_id`, it raises `IngestNotReady`;
+      1. resolves the material's frozen ingest (SRV-INGEST FR-INGEST-17) by `material_sha256`. If there is none yet
+         (the import has not committed), it polls for up to 120 s inside the handler (structural: the import job is the
+         previous job on the same single-slot worker, so 120 s covers a commit that is in flight) and then raises
+         `IngestNotReady`. If the frozen ingest exists but is not `args.ingest_id`, it fails permanently with
+         `ingest_superseded`;
+      1a. recomputes `params_sha256` from the current chunk parameters, the lock's model id and the material's current
+         `fts_config` (FR-SEARCH-6), and fails permanently with `params_mismatch` when it differs from
+         `args.params_sha256` (a language change since enqueue; `ensure` enqueues the new key);
       2. waits for embed `/health` up to 300 s; if it is still not 200, it raises `EmbedUnavailable`, a declared
          transient, which spends an attempt. With 3 attempts that tolerates about 15 minutes of an unavailable embed
          service (3 × 300 s plus SRV-EVENTS' backoff); after that the key is dead and `reader.search.ensure` requeues it
          (FR-SEARCH-9);
       3. chunks the spans (FR-SEARCH-3), sends passage batches of 8 (30 s each), and in the run session inserts every
          chunk, then the `search_embeds` row, as the run transaction's last statements (SRV-EVENTS FR-EVENTS-4).
-      [db] with a fake embed service, including an ingest that is aborted between enqueue and run (IngestNotReady, then
-      success once the import commits).
+      [db] with a fake embed service, including an ingest that is aborted between enqueue and run (IngestNotReady after
+      the 120 s poll, then success once the import commits), a superseded ingest (`ingest_superseded`), and a
+      language change between enqueue and run (`params_mismatch`).
   - id: FR-SEARCH-6
     text: >-
       **Full-text configuration.** A material's `fts_config` comes from its reader.yaml `materials[].language`, looked up
@@ -195,9 +207,9 @@ requirements:
       1. embeds the query (kind `query`, 10 s);
       2. **dense list:** an exact scan, `ORDER BY embedding <=> $q, id`, top 50, over the owner's (and material's) chunks;
       3. **full-text list:** the query's lexemes come from `tsvector_to_array(to_tsvector(cfg, query))` for each
-         configuration present; each lexeme is `quote_literal`-quoted and the quoted lexemes are joined with ` | ` and
-         cast to `tsquery`, so no operator is ever parsed from user text and a chunk matches when it shares any lexeme
-         (OR). Rows `WHERE fts @@ tsq` are ordered by `ts_rank_cd(fts, tsq) DESC, id`, top 50; lists of several
+         configuration present. Each lexeme is quoted for tsquery input explicitly: every `'` is doubled, every `\` is
+         doubled, and the result is wrapped in single quotes. The quoted lexemes are joined with ` | ` and cast to
+         `tsquery`, so no operator is ever parsed from user text and a chunk matches when it shares any lexeme (OR). Rows `WHERE fts @@ tsq` are ordered by `ts_rank_cd(fts, tsq) DESC, id`, top 50; lists of several
          configurations merge by the same order. A query with no lexemes gives an empty list.
       4. **fusion:** reciprocal rank fusion with k = 60 (VEC-SEARCH-1): score = Σ 1/(60 + rank); on equal scores the
          chunk with the better dense rank wins, where a missing dense rank counts as worse than any present one.
@@ -274,6 +286,12 @@ nfr:
     threshold: 0.8
     verified_by: bench
     note: "The roadmap's stage-3 SRV-SEARCH bound; dense bge-m3 measured 1.0 on v1. [local]."
+  - id: NFR-SEARCH-4
+    metric: pilot chunks whose token count exceeds max_seq_length 1,024 (truncated)
+    threshold: 0
+    verified_by: bench
+    note: "From the reviewer's tokenizer measurement, the worst 1,200-character kind (LaTeX) is 887 tokens, so none is
+      expected. [local] reports the count with the tokenizer of the lock's revision."
   - id: NFR-SEARCH-3
     metric: full-pilot embed job wall time, minutes
     threshold: 60
@@ -317,5 +335,6 @@ owner_notes:
   - "The pgvector extension is added to the reader-postgres image (PGDG package 0.8.7)."
   - "ADR-0007's revisit trigger says 'below 0.8 on the pilot question set'. Does that mean v1 (30 questions, dense 1.0) or v2 (40 harder questions, dense 0.675)? The slice reports both."
   - "While the full pilot embeds (about 14 min), the worker's single job slot is busy; compile stages wait."
+  - "After changing a material's `language` in reader.yaml, run `reader.search.ensure <material>`: search keeps using the old chunks until the new key is embedded, and nothing re-embeds automatically."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Awaits spikes/embed-service for mem_limit."
+review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Awaits spikes/embed-service for mem_limit at that cap before approval."

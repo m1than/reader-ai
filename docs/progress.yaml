@@ -306,7 +306,7 @@ tasks:
         drafted for the embed service and goes to its own review, then the owner sets its status. BAAI/bge-m3
         (owner-confirmed 2026-11-21) in service `embed` on its own internal network (api, worker, embed), no secrets,
         model baked from a pinned revision; one encode at a time, passage batches of 8, query timeout 10 s,
-        max_seq_length 512. Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
+        max_seq_length 1,024 (reviewer-measured: prose 266, Rust 603, hex 740, LaTeX 887 tokens per 1,200 chars). Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
         lexemes, RRF k=60, total orders. Acceptance: hybrid hits ≥ dense-only hits in the same run and ≥ 27/40 on
         questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
         VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
