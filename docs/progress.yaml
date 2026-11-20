@@ -294,9 +294,13 @@ tasks:
       note: "multilingual-e5-small (spike embeddings-local; v2 benchmark pending)" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "specs drafted, await deep-reviewer (OPS-SANDBOX + SRV-KERNEL, python3 only, ADR-0022; branch V/V.KERNEL-min).
-        Needs a paired OPS-CLI change: start profile `kernels` once reader-kernel:local exists" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],
+      note: "specs revised after deep-reviewer round 1 (B1–B8 + non-blocking), await round 2 (OPS-SANDBOX + SRV-KERNEL,
+        python3 only, ADR-0022; branch V/V.KERNEL-min). Cross-spec: SRV-AUTH's app includes routers from a declared list
+        naming server/src/reader/api/routes_kernels.py" }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
+      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
+        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels],
       note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);

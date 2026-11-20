@@ -3,36 +3,60 @@
 #
 # Scope (slice): python3 only. The image runs under OPS-DEPLOY's `x-kernel` template unchanged (read-only root, uid
 # 1000, tmpfs /home/lab, /tmp and /run/evcxr, cap_drop ALL, no-new-privileges, 2 GiB with swap equal, 2 CPUs, 256 PIDs,
-# `restart: always`). This spec owns what OPS-DEPLOY leaves to it: the image, the health command
-# `/usr/local/bin/reader-kernel-health` and the start nonce (OPS-DEPLOY header, FR-DEPLOY-8).
+# `restart: always`). The per-user service is `kernel-user-<handle>` (OPS-DEPLOY VEC-DEPLOY-3, OPS-CLI FR-CLI-4). This
+# spec owns what OPS-DEPLOY leaves to it: the image, the health command `/usr/local/bin/reader-kernel-health` and the
+# start nonce (OPS-DEPLOY header, FR-DEPLOY-8).
 #
 # Reset without a Docker socket (ADR-0022 "Reset between principals"): an in-image supervisor is PID 1. It holds a
 # start nonce generated at boot and exposes a control endpoint on the kernel's own network. A caller asks it to exit;
-# PID 1 exiting ends every process in the container's PID namespace; `restart: always` (OPS-DEPLOY) brings a fresh
-# container with empty tmpfs; the caller confirms the new nonce (SRV-KERNEL FR-KERNEL-5).
+# PID 1 exiting ends every process in the container's PID namespace (REF-SANDBOX-5); `restart: always` (OPS-DEPLOY)
+# brings a fresh container with empty tmpfs; the caller confirms the new nonce (SRV-KERNEL FR-KERNEL-5). The supervisor
+# is fail-stop: anything unexpected ends PID 1, which is itself a full reset, so the only states a caller can observe
+# are "same container, same nonce" and "fresh container, new nonce".
+#
+# Facts measured by deep-reviewer round 1 in throwaway containers under the template's settings (uid 1000, cap_drop
+# ALL, no-new-privileges, default seccomp), used below:
+# - from a cell, `ptrace(PTRACE_ATTACH, 1)` and `process_vm_readv` on PID 1 fail with EPERM; opening `/proc/1/mem`,
+#   `/proc/1/environ` and `/proc/1/fd` is denied once PID 1 is non-dumpable;
+# - binding 0.0.0.0:8889 while the supervisor holds it fails with EADDRINUSE;
+# - Kernel Gateway's traits are `JupyterWebsocketPersonality.env_whitelist` and `JupyterWebsocketPersonality.list_kernels`;
+#   only `KERNEL_*` keys of a kernel-creation request's `env` that are also whitelisted reach the kernel;
+# - the environment a python3 kernel sees, with the gateway started under the explicit environment of FR-SANDBOX-8, is
+#   VEC-SANDBOX-1 `env-names`.
+# Derived from REF-SANDBOX-4: the Docker restart delay doubles from 100 ms on each restart of a container that ran less
+# than 10 s, so the tenth reset in quick succession waits 51.2 s, longer than SRV-KERNEL's 30 s deadline.
 #
 # Dependencies:
-# - OPS-DEPLOY: the `x-kernel` template, per-kernel internal networks `sb-user-<handle>` shared only with `api`, and
-#   api serving HTTP only on its `front` address (FR-DEPLOY-4).
-# - OPS-CLI: generates `kernel-<user>` from the template and must start profile `kernels` once this image exists.
-#   OPS-CLI's current draft starts the default profile only (stage 1); the slice needs a paired OPS-CLI change.
+# - OPS-DEPLOY: the `x-kernel` template, per-kernel internal IPv4 networks `sb-user-<handle>` shared only with `api`,
+#   and api serving HTTP only on its `front` address (FR-DEPLOY-4).
+# - OPS-CLI: generates `kernel-user-<handle>` from the template. Starting profile `kernels` is task `V.OPS-CLI-kernels`
+#   (docs/progress.yaml); that profile also starts kernel-verify, kernel-agent and kernel-pair-1 from the same image.
 # - SRV-KERNEL: the only caller (the api relay).
 #
-# Declared deviations:
+# Declared deviations and security notes:
 # - ADR-0014's `verified_by` says the kernel "cannot resolve postgres or api". With OPS-DEPLOY's per-kernel networks
 #   the kernel resolves its declared caller `api` by design but cannot connect to any port of it (OPS-DEPLOY header
 #   proposes the ADR rewording; owner's decision). INV-SANDBOX-3 tests the reworded form.
 # - ADR-0022's Kernel Gateway "auth token, or reachable only from its declared caller": this spec takes network-only
 #   reachability. A token would be a secret delivered to a kernel service, and ADR-0026 keeps kernels secret-free.
+#   Consequence: a cell can call the gateway on 127.0.0.1:8888 and create or delete kernels, and call
+#   `POST /control/exit`. Both act only on its own principal's container (one principal per container, ADR-0022); the
+#   recovery from a confused kernel set is a reset (SRV-KERNEL FR-KERNEL-5).
+# - The boundary is the container limits and the network (ADR-0014); SRV-KERNEL's execution timeout is a usability
+#   control, not a security one.
 #
-# Test levels: [image] runs the built image with `docker run` flags equal to the rendered `x-kernel` template on a
-# throwaway `--internal` network with a probe container in the caller's place; [live] runs against `reader up`.
+# Test levels: [image] runs the built image with `docker run` flags equal to the rendered `x-kernel` template plus
+# `--restart always` on a throwaway `--internal` IPv4 network with a probe container in the caller's place; exits and
+# attacks are triggered from inside the container (a cell or `docker exec` as uid 1000), never by `docker stop`/`kill`.
+# [live] runs in `e2e/live/slice.sh` against `reader up`: it signs in with the stage-1 `live-check` software-
+# authenticator session (SRV-AUTH), opens a kernel session through SRV-KERNEL and runs the probe cells there.
 
 id: OPS-SANDBOX
-title: Kernel image (python3), in-container supervisor with start nonce and control endpoint, sandbox probes
+title: Kernel image (python3), fail-stop in-container supervisor with start nonce and control endpoint, sandbox probes
 status: draft
 approved_by: null
 approved_at: null
+review: "deep-reviewer (Fable) round 1 changes (B1–B8), revised"
 layer: ops
 track: engineering
 adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
@@ -40,12 +64,16 @@ adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
 paths:
   - sandbox/**
   - server/tests/sandbox/**
+  - spec/fixtures/OPS-SANDBOX/**
 
 defers:
   - "rust (evcxr) and deno kernels, the evcxr launcher with per-kernel cache and sweep (ADR-0022 Process): stage 4a"
   - "pilot crates pre-built into the image: stage 4a"
   - "lab egress proxy with per-lab allowlist (ADR-0014 Egress): stage 4a"
   - "per-lab scoped RPC values (ADR-0014 Secrets): stage 4a, needs its own ADR-0026 reading"
+  - "lab files copied in per session (ADR-0014 Data): stage 4a with SRV-LESSON"
+  - "the CPU-limit test (ADR-0014 '2 CPUs'): stage 4a"
+  - "the gVisor `runtime: runsc` switch (ADR-0014 Isolation upgrade): not on Docker Desktop; stage 4a decides"
   - "kernel-verify, kernel-agent, kernel-pair-* and the lease-based hand-off between principals: stages 5 and 8"
   - "course-specific pip packages: added to the lock when V.COMPILE-min fixes L02's labs (image rebuild)"
   - "idle culling: stage 4a (the slice bounds kernels by count, FR-SANDBOX-3)"
@@ -58,7 +86,7 @@ normative:
     title: ADR-0022 — exec tmpfs, enforced memory, declared static kernel services, reset by fresh container and start nonce
     url: docs/adr/0022-kernel-sandbox-evcxr-memory-declared-services.md
   - id: REF-SANDBOX-3
-    title: Jupyter Kernel Gateway — configuration options (jupyter_websocket personality, max_kernels, list_kernels)
+    title: Jupyter Kernel Gateway — configuration options (JupyterWebsocketPersonality.env_whitelist, .list_kernels; KernelGatewayApp.max_kernels)
     url: https://jupyter-kernel-gateway.readthedocs.io/en/latest/config-options.html
   - id: REF-SANDBOX-4
     title: Docker — restart policies (`always`; restart delay doubling from 100 ms, reset after 10 s of running)
@@ -72,6 +100,9 @@ normative:
   - id: REF-SANDBOX-7
     title: spikes/kernel-roundtrip/RESULT.md — Kernel Gateway 3.0.1 + ipykernel 7.4.0 under ADR-0014 controls (python3 numbers)
     url: spikes/kernel-roundtrip/RESULT.md
+  - id: REF-SANDBOX-8
+    title: Python command line — `-I` isolated mode (no PYTHON* environment variables, no script or user site directory on sys.path)
+    url: https://docs.python.org/3/using/cmdline.html#cmdoption-I
 
 requirements:
   # Image
@@ -81,8 +112,9 @@ requirements:
       index digest OPS-DEPLOY uses for the server image (ADR-0020). Python packages are installed only from
       `sandbox/requirements.lock` with `pip install --require-hashes --no-deps`; the lock pins
       `jupyter_kernel_gateway==3.0.1` and `ipykernel==7.4.0` (the versions the kernel-roundtrip spike verified) and their
-      dependency closure. No `curl | sh`, no apt build tools, no compiler. [image] The build succeeds without network
-      access to anything but the base registry and PyPI, and `pip check` passes in the image.
+      dependency closure. No `curl | sh`, no apt build tools, no compiler, and no `VOLUME` instruction. [image]
+      `pip check` passes in the image, and a container started with the template's flags has an empty `.Mounts`
+      (tmpfs mounts are not listed there; no anonymous volume exists).
   - id: FR-SANDBOX-2
     text: >-
       The image has a user `lab` with uid 1000, gid 1000 and home /home/lab, and ends with `USER 1000:1000`. Every file
@@ -92,58 +124,68 @@ requirements:
   - id: FR-SANDBOX-3
     text: >-
       Kernel Gateway runs with: personality `kernel_gateway.jupyter_websocket`; ip 0.0.0.0, port 8888; `auth_token`
-      empty (network-only reachability, header note); `list_kernels` false; `max_kernels` 4; `default_kernel_name`
-      python3; no `allow_origin`; `env_process_whitelist` empty, so a kernel-creation request cannot pass environment
-      variables into the kernel. `max_kernels` 4 is a structural bound: one kernel per open lesson (SRV-KERNEL
-      FR-KERNEL-6) with headroom under the 2 GiB limit; the spike measured 53.5–54.0 MiB idle per container but did not
-      measure an idle python3 kernel, so the [image] test records the memory of 4 idle python3 kernels and fails above
-      1 GiB. [image] A fifth `POST /api/kernels` is refused.
+      empty (network-only reachability, header note); `JupyterWebsocketPersonality.list_kernels` false;
+      `KernelGatewayApp.max_kernels` 4; `default_kernel_name` python3; no `allow_origin`;
+      `JupyterWebsocketPersonality.env_whitelist` empty. Only `KERNEL_*` keys of a kernel-creation request's `env` can
+      ever reach a kernel, and with the empty whitelist none does (SRV-KERNEL sends no `env`). `max_kernels` 4 is a
+      structural bound: one kernel per open lesson (SRV-KERNEL FR-KERNEL-6) with headroom under the 2 GiB limit; the
+      [image] test records the memory of 4 idle python3 kernels and fails above 1 GiB. [image] A fifth
+      `POST /api/kernels` is refused; a request with `env: {"KERNEL_X": "1", "OTHER": "1"}` yields a kernel whose
+      environment has neither.
 
   # Supervisor, start nonce, control endpoint
   - id: FR-SANDBOX-4
     text: >-
-      The image's entrypoint is the supervisor `/usr/local/bin/reader-kernel-entry` (Python, standard library only),
-      running as PID 1. At start it (a) calls `prctl(PR_SET_DUMPABLE, 0)`; (b) generates the start nonce as 16 bytes from
-      `os.urandom`, hex-encoded, held only in its memory and never written to a file; (c) starts Kernel Gateway as its
-      child in a new process group; (d) serves the control endpoint on 0.0.0.0:8889 (FR-SANDBOX-5). If the gateway
-      child exits for any reason, the supervisor exits with status 1. On SIGTERM it ends the gateway as in
-      FR-SANDBOX-5 (b) and exits 0. [image]
+      The image's entrypoint is the supervisor `/usr/local/bin/reader-kernel-entry`, run as `python -I`
+      (REF-SANDBOX-8, standard library only), as PID 1. At start it (a) calls `prctl(PR_SET_DUMPABLE, 0)`; (b) generates
+      the start nonce as 16 bytes from `os.urandom`, hex-encoded, held only in its memory and never written to a file;
+      (c) binds the control endpoint on 0.0.0.0:8889 and, when the container has any IPv6 address (including ::1), on
+      [::]:8889 with IPV6_V6ONLY, so no cell can take port 8889 in either family; when the container has no IPv6 at all,
+      no cell can bind it either (INV-SANDBOX-6 d); (d) starts Kernel Gateway as its child in a new process group with
+      an explicit environment (FR-SANDBOX-8). [image]
   - id: FR-SANDBOX-5
     text: >-
-      Control endpoint (HTTP/1.1, JSON, no authentication, reachable only on the kernel's network, header note):
-      (a) `GET /control/state` answers 200 `{"nonce": "<32 hex>", "gateway": "starting" | "up"}`; `up` means the
-      gateway's `GET /api` on 127.0.0.1:8888 answered 200 at least once since this start. (b) `POST /control/exit`
-      answers 202 with an empty body, then sends SIGTERM to the gateway's process group, waits up to 2 s, sends SIGKILL
-      to the group, and exits 0. The 2 s grace is a structural bound: Kernel Gateway's own shutdown of idle python3
-      kernels is not measured; the reset does not depend on it because PID 1's exit kills every remaining process
-      (REF-SANDBOX-5). (c) Any other method or path answers 404; a request body over 1 KiB is refused with 413 (the
-      endpoint takes no body). [image]
+      Fail-stop: PID 1 calls `os._exit(1)` when the gateway child exits for any reason, on any catchable signal other
+      than SIGTERM, on any uncaught exception in any of its threads, and when its control loop ends for any reason.
+      SIGTERM runs the exit path of FR-SANDBOX-6 (b) and ends with `os._exit(0)`. PID 1 never closes its 8889 sockets
+      before it exits, the grace period included. [image]
   - id: FR-SANDBOX-6
     text: >-
-      `/usr/local/bin/reader-kernel-health` (the command OPS-DEPLOY's template names) exits 0 only when
-      `GET http://127.0.0.1:8889/control/state` answers `gateway: up` within 2 s, and 1 otherwise. It prints nothing
-      but a one-word state. [image]
+      Control endpoint (HTTP/1.1, JSON, no authentication, reachable only on the kernel's network, header note):
+      (a) `GET /control/state` answers 200 `{"nonce": "<32 hex>", "gateway": "starting" | "up" | "exiting"}`; `up` means
+      the gateway's `GET /api` on 127.0.0.1:8888 answered 200 at least once since this start and no exit was accepted;
+      `exiting` from the moment an exit is accepted. (b) `POST /control/exit` answers 202 with an empty body, sets the
+      state to `exiting`, sends SIGTERM to the gateway's process group, and arms an unconditional exit: at 2 s it sends
+      SIGKILL to the group and calls `os._exit(0)`, from a timer that depends neither on the control loop nor on open
+      client connections. The process is gone within 2 s plus a 1 s margin for scheduling under the 2-CPU limit.
+      (c) Any other method or path answers 404; a request body over 1 KiB is refused with 413 (the endpoint takes no
+      body); each connection gets a 5 s read timeout so idle connections cannot hold the loop. [image] Including the
+      case of 50 idle connections held open by a cell while `/control/exit` completes on time.
   - id: FR-SANDBOX-7
     text: >-
-      Reset round trip: after `POST /control/exit`, with the container run under `--restart always` and the template's
-      settings, `GET /control/state` answers again with a different nonce and `gateway: up`. [image] The time from the
-      202 to `up` is recorded (not a threshold; Docker's restart delay starts at 100 ms and doubles on restarts within
-      10 s of each other, REF-SANDBOX-4); three resets in a row all complete within SRV-KERNEL's 30 s deadline.
-
-  # Environment and egress
+      `/usr/local/bin/reader-kernel-health` (the command OPS-DEPLOY's template names), run as `python -I`, exits 0 only
+      when `GET http://127.0.0.1:8889/control/state` answers `gateway: up` within 2 s, and 1 otherwise. It prints nothing
+      but a one-word state. [image]
   - id: FR-SANDBOX-8
     text: >-
-      The image declares no `ENV` other than PATH, LANG, PYTHONDONTWRITEBYTECODE, PYTHONUNBUFFERED, JUPYTER_PATH,
-      JUPYTER_RUNTIME_DIR (on /tmp) and HOME. [image] Inside a python3 kernel, the names in `os.environ` equal
-      VEC-SANDBOX-1 `env-names` exactly (that list plus HOSTNAME from the runtime and the names Kernel Gateway and
-      ipykernel set at kernel start, recorded once), none carries a value from outside the image or the gateway, and
-      `/run/secrets` does not exist.
+      The image declares no `ENV` beyond what the base image sets and PATH, LANG and HOME. The supervisor starts the
+      gateway with exactly `{HOME=/home/lab, HOSTNAME=<its own>, LANG=C.UTF-8, PATH=<the image PATH>}` and nothing
+      inherited, so base-image variables such as PYTHON_VERSION and PYTHON_SHA256 do not reach kernels. [image] Inside a
+      python3 kernel, the names in `os.environ` equal VEC-SANDBOX-1 `env-names` exactly (the four above plus the names
+      Kernel Gateway and ipykernel set at kernel start, as measured), and `/run/secrets` does not exist.
   - id: FR-SANDBOX-9
     text: >-
+      Reset round trip: after `POST /control/exit` from inside the container, under `--restart always` and the
+      template's settings, `GET /control/state` answers again with a different nonce and `gateway: up`. [image] The
+      time from the 202 to `up` is recorded (not a threshold). Three resets in a row each complete within SRV-KERNEL's
+      30 s deadline. The doubling restart delay (header) means about the tenth reset within 10 s of the previous one
+      exceeds the deadline; SRV-KERNEL then fails closed, and the service is retried on the next explicit reset.
+  - id: FR-SANDBOX-10
+    text: >-
       The image works under exactly the rendered `x-kernel` template: read-only root; /home/lab and /tmp `noexec`;
-      uid 1000; no capabilities. Kernel Gateway's runtime files (connection files, `JUPYTER_RUNTIME_DIR`) live under
-      /tmp. [image] A kernel starts, executes `print(1)` and streams `1`; a write to `/usr/local` or `/` from a cell
-      fails with a read-only or permission error; executing a file copied to /tmp fails with permission denied.
+      uid 1000; no capabilities. Kernel Gateway's runtime files live under /home/lab. [image] A kernel starts, executes
+      `print(1)` and streams `1`; a write to `/usr/local` or `/` from a cell fails with a read-only or permission
+      error; executing a file copied to /tmp fails with permission denied.
 
 invariants:
   - id: INV-SANDBOX-1
@@ -153,38 +195,42 @@ invariants:
       on a `--internal` network; [live] against `reader up`.
   - id: INV-SANDBOX-2
     text: >-
-      No secret reaches a kernel: `/run/secrets` is absent; the kernel environment is FR-SANDBOX-8's list; no file in
-      the image or the running container matches a value delivered to any other service (live check scans for the
-      canaries OPS-CLI delivers); the Docker socket path does not exist. [image] and [live]
+      No secret reaches a kernel: `/run/secrets` is absent; the kernel environment is FR-SANDBOX-8's measured list; no
+      file in the running container matches a value delivered to any other service (the live check scans for the
+      canaries OPS-CLI delivers); no Docker socket path exists. [image] and [live]
   - id: INV-SANDBOX-3
     text: >-
-      From a kernel, `postgres`, `worker`, `caddy`, `mcp` and `agent-proxy` do not resolve, and no TCP port of `api` is
-      connectable on any of its addresses (ADR-0014 as reworded by OPS-DEPLOY, header note). [live]
+      From a kernel, `postgres`, `worker`, `caddy`, `mcp`, `agent-proxy` and every other kernel service do not resolve,
+      and no TCP port 1–65535 of `api` is connectable on any of its addresses (ADR-0014 as reworded by OPS-DEPLOY,
+      header note). [live]
   - id: INV-SANDBOX-4
     text: >-
       Limits hold from a cell: the process runs as uid 1000 with `CapEff` 0, `NoNewPrivs` 1 and `Seccomp` 2 in
-      `/proc/self/status`; a 2.6 GB allocation ends the kernel process, not the container (the supervisor's nonce is
-      unchanged afterwards); creating processes beyond the 256-PID limit fails with an error while the control
-      endpoint keeps answering. [image]
+      `/proc/self/status`; a 2.6 GB allocation ends the kernel process, not the container (the nonce is unchanged
+      afterwards); creating processes beyond the 256-PID limit fails with an error while the control endpoint keeps
+      answering. [image]
   - id: INV-SANDBOX-5
     text: >-
-      Reset leaves nothing behind: a file written by a cell to /home/lab, /tmp and /run/evcxr, and a background process
-      started by a cell that detaches (new session) and ignores SIGTERM, are all absent after `POST /control/exit` and
-      the restart, and the nonce differs. [image]
+      Reset leaves nothing behind: a file written by a cell to /home/lab, /tmp, /run/evcxr and /dev/shm, a POSIX message
+      queue in /dev/mqueue, and a background process started by a cell that detaches (new session) and ignores SIGTERM,
+      are all absent after `POST /control/exit` and the restart, and the nonce differs. [image]
   - id: INV-SANDBOX-6
     text: >-
-      Kernel code cannot forge the reset signal: from a cell, attempts to (a) ptrace-attach to PID 1, (b) open
-      `/proc/1/mem` for writing, (c) send SIGSTOP or SIGKILL to PID 1, and (d) bind 0.0.0.0:8889 all fail, and
-      afterwards `GET /control/state` returns the same nonce as before the attempts. [image] (A cell may still call
-      `POST /control/exit` itself; that resets its own principal's container only, which ADR-0022 permits.)
+      Kernel code cannot forge a reset or a non-reset: from a cell, (a) `ptrace(PTRACE_ATTACH, 1)` and
+      `process_vm_readv` on PID 1 fail with EPERM; (b) opening `/proc/1/mem` for reading or writing is denied;
+      (c) for every signal 1–64 sent to PID 1, afterwards either `/control/state` answers with the same nonce, or a real
+      restart happened: the nonce changed and a marker file written to /tmp before the signal is gone; (d) binding
+      8889 on 0.0.0.0 and on [::] fails (EADDRINUSE, or EADDRNOTAVAIL/EAFNOSUPPORT when the container has no IPv6).
+      [image] (A cell may still call `POST /control/exit` itself; that resets its own principal's container only, which
+      ADR-0022 permits.)
 
 nfr: []
 
 vectors:
   - id: VEC-SANDBOX-1
     source: >-
-      Probe targets derived from OPS-DEPLOY's network table (VEC-DEPLOY-2) and ADR-0014's controls; expected outcomes
-      per target and test level
+      Probe targets derived from OPS-DEPLOY's network table (VEC-DEPLOY-2) and ADR-0014's controls; the kernel
+      environment list measured by deep-reviewer round 1
     file: spec/fixtures/OPS-SANDBOX/probes.yaml
 
 # Owner notes:
@@ -192,5 +238,5 @@ vectors:
 #   when V.COMPILE-min fixes L02 (pip in a cell cannot reach the network).
 # - The `x-kernel` template mounts /run/evcxr (exec, 1 GiB) although the python3-only image does not use it; it stays
 #   because the template is fixed by OPS-DEPLOY and ADR-0022, and it is empty after every reset (INV-SANDBOX-5).
-# - Re-run of the kernel-roundtrip numbers on Python 3.14 / trixie (ADR-0022 hypothesis) is covered for python3 by
-#   FR-SANDBOX-1..9 [image]; if KG 3.0.1 or ipykernel 7.4.0 fails on 3.14, the task blocks with the version evidence.
+# - Re-run of the kernel-roundtrip numbers on Python 3.14 / trixie (ADR-0022 hypothesis) is covered for python3 by the
+#   [image] tests; if KG 3.0.1 or ipykernel 7.4.0 fails on 3.14, the task blocks with the version evidence.
