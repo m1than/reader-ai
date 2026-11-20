@@ -300,14 +300,16 @@ tasks:
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.SRV-JOBS-min],
       branch: V/V.SRV-INGEST-min,
-      note: "spec drafted, awaits deep-reviewer. spec/modules/SRV-INGEST.yaml (slice revision): host command
-        `reader-ingest` runs the Docling converter natively as a sandbox-exec child (no network, read-only input and
-        models, writes only its work dir), streams the validated artifact over `docker exec -T worker python -I -m
-        reader.ingest.receive` stdin; the worker stores it on blobs and enqueues `ingest.import`. Transport differs from
-        ADR-0021 Decision 3 (loopback listener, unreachable from the worker's internal networks): ADR-0027 drafted as
-        proposed; the spec waits for the owner's decision on it. Cross-spec: SRV-EVENTS KINDS from a declared module
-        list; SRV-AUTH ROUTERS + version_locations add ingest. Spike before Green: spikes/ingest-confine (sandbox-exec
-        with Docling on Python 3.14; fallback a dedicated macOS user). Owner: browser upload deferred (reader.yaml +
+      note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none); awaits round 2, spikes/ingest-confine
+        (profile allow-list, CPU pages/min under the profile) and the owner's decision on ADR-0027.
+        spec/modules/SRV-INGEST.yaml (slice revision): host command `reader-ingest` copies the PDF into a private work
+        dir and runs Docling natively on CPU as a deny-by-default sandbox-exec child (no network, no Unix sockets, no
+        mach services), then streams the validated artifact over `docker exec -i <worker> python -I -m
+        reader.ingest.receive` stdin; the worker stores it on blobs and enqueues `ingest.import`. Span ids
+        `<material_sha256>:<seq>`; converter_version frozen at first import. Transport differs from ADR-0021 Decision 3
+        (loopback listener, unreachable from the worker's internal networks): ADR-0027 proposed. Cross-spec: SRV-EVENTS
+        KINDS from a declared module list; SRV-AUTH ROUTERS + version_locations add ingest; OPS-DEPLOY creates
+        /var/lib/reader/blobs owned by 10001 (paired change scheduled). Owner: browser upload deferred (reader.yaml +
         host command instead)." }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
