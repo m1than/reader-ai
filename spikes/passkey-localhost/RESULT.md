@@ -94,7 +94,7 @@ If the second command succeeds, the third may report that the certificate is not
 - The agent then checked by name: `security dump-trust-settings` lists no Caddy entry, and `security find-certificate -a -c "Caddy Local Authority"` finds none in the login keychain.
 - The name check misses orphans: `dump-trust-settings` resolves names through the certificate, which was already deleted. A stricter check, prompted by the review, found the leftover: `security trust-settings-export` (user domain) still contained the root's SHA-1 `9D060DB20AA489FEA1BF5654F580C5B590CC38CB`. That is an orphaned trust setting, left because `delete-certificate` ran without `-t`.
 - Risk: none in practice, because the CA's private key was destroyed with the volume, so nothing can be signed under that root again.
-- Removal is the owner's action: `security remove-trusted-cert data/spikes/passkey-localhost/caddy-root.crt`, then repeat the export check.
+- Removal is the owner's action: `security remove-trusted-cert data/spikes/passkey-localhost/caddy-root.crt`, then repeat the export check. **Done 2026-11-20:** the owner removed it, and the agent's repeat of the export check found 0 entries for `9D060DB2…38CB`. Nothing from this spike remains in the owner's trust settings or login keychain.
 - Owner's note: the agent ran these listing commands. They read trust settings and certificate names, no passwords or secrets. AGENTS.md says the agent never reads Keychain items, so whether such checks are allowed is the owner's call. Passkeys created for `localhost` stay in iCloud Keychain or the Chrome profile. Delete them in System Settings → Passwords, or in Chrome → Password Manager, if you want.
 
 ## Notes for OPS-DEPLOY and SRV-AUTH
