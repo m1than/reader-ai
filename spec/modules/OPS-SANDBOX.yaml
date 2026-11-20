@@ -58,7 +58,7 @@ title: Kernel image (python3), fail-stop in-container supervisor with start nonc
 status: approved
 approved_by: agent
 approved_at: 2026-11-21
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests"
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests. Code review round 2 changes (own-address source classed remote; double close crashed PID 1): FR-SANDBOX-6 (d) classification by destination, peer and interface addresses, idempotent close, per-connection errors contained, with tests"
 layer: ops
 track: engineering
 adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
@@ -172,11 +172,20 @@ requirements:
       client connections. The process is gone within 2 s plus a 1 s margin for scheduling under the 2-CPU limit.
       (c) Any other method or path answers 404; a request body over 1 KiB is refused with 413 (the endpoint takes no
       body); each connection gets a 5 s read timeout so idle connections cannot hold the loop. (d) Connection table: a
-      connection whose peer is a loopback address or one of the container's own addresses (anything a cell can open)
-      counts against 192 local slots, and further local connections are closed at once; a connection from any other
-      peer (the caller) takes one of 64 slots the cell cannot consume, and when those are full the oldest of them is
-      closed to admit it. A cell therefore cannot keep the caller from reading the state or requesting an exit. (The
-      split 192/64 is a structural bound: the caller makes one request at a time per reset.) [image] Including: 50
+      connection is local when its destination (the accepted socket's own address) is loopback, its peer is loopback,
+      its peer is one of the addresses assigned to the container's interfaces (read at start from
+      `/proc/net/fib_trie` and `/proc/net/if_inet6`), or its peer equals its destination; an address that cannot be
+      parsed counts as local. Local connections, which is everything a cell can open whatever source address it binds,
+      count against 192 local slots, and further local connections are closed at once. Only connections from other
+      hosts on the kernel network are remote: they take one of 64 slots the cell cannot consume, and when those are full
+      the oldest of them is closed to admit the new one. A cell therefore cannot keep the caller from reading the state
+      or requesting an exit. (The split 192/64 is a structural bound: the caller makes one request at a time per
+      reset.) Closing is idempotent, and an error while serving one connection closes that connection without ending
+      the control loop; any other unexpected error stays fail-stop (FR-SANDBOX-5). [image] Including: more than 64
+      connections from inside with the source bound to the container's own address and the destination 127.0.0.1 are
+      held to the local limit, while a probe that sends its request 20 ms after connecting is answered 40 of 40 times;
+      remote connections opened and closed in a flood that forces evictions leave the nonce and the container
+      unchanged; 50
       idle connections held open by a cell while `/control/exit` completes on time; the table held full from inside
       while a probe container's `GET /control/state` and `POST /control/exit` both succeed within 10 s; an idle
       connection is closed by the supervisor between 5 and 7 s after it opened; with the gateway stopped (SIGSTOP from

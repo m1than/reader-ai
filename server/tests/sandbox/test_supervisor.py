@@ -419,3 +419,130 @@ time.sleep(30)
     gone_after = _ts(sandbox.inspect()["State"]["FinishedAt"]) - float(result["t"])
     print(f"stopped gateway: process gone {gone_after:.2f} s after the 202")
     assert 2.0 <= gone_after <= 3.0
+
+
+# Connections from inside with the source bound to the container's eth0 address, destination 127.0.0.1
+# (the reviewer's evict.py "remote" case); 8 processes, each holding up to 40 and replacing the oldest.
+SPOOF_FLOOD = r'''
+import os, socket, sys, time
+own = socket.gethostbyname(socket.gethostname())
+dur = float(sys.argv[1])
+for _ in range(8):
+    if os.fork() == 0:
+        end = time.time() + dur
+        held = []
+        while time.time() < end:
+            try:
+                s = socket.socket()
+                s.bind((own, 0))
+                s.settimeout(0.5)
+                s.connect(("127.0.0.1", 8889))
+                held.append(s)
+            except OSError:
+                pass
+            if len(held) > 40:
+                held.pop(0).close()
+        os._exit(0)
+time.sleep(dur + 0.5)
+'''
+
+COUNT_SPOOFED = r'''
+import json, select, socket, time
+own = socket.gethostbyname(socket.gethostname())
+held = []
+for _ in range(300):
+    s = socket.socket()
+    s.bind((own, 0))
+    s.settimeout(0.5)
+    try:
+        s.connect(("127.0.0.1", 8889))
+        held.append(s)
+    except OSError:
+        pass
+time.sleep(1.0)
+open_ = 0
+for s in held:
+    r, _, _ = select.select([s], [], [], 0)
+    if not r:
+        open_ += 1
+        continue
+    try:
+        if s.recv(1) != b"":
+            open_ += 1
+    except OSError:
+        pass
+print(json.dumps({"connected": len(held), "open": open_}))
+'''
+
+SLOW_CALLER = r'''
+import json, socket, time
+ok, fails = 0, {}
+for _ in range(40):
+    try:
+        s = socket.create_connection(("kernel", 8889), timeout=10)
+        time.sleep(0.02)
+        s.sendall(b"GET /control/state HTTP/1.1\r\nHost: k\r\n\r\n")
+        if b"200 OK" in s.recv(300):
+            ok += 1
+        else:
+            fails["closed-without-answer"] = fails.get("closed-without-answer", 0) + 1
+        s.close()
+    except OSError as e:
+        fails[type(e).__name__] = fails.get(type(e).__name__, 0) + 1
+    time.sleep(0.05)
+print(json.dumps({"ok": ok, "fails": fails}))
+'''
+
+
+@requires_docker_daemon
+def test_own_address_source_counts_as_local(sandbox: Sandbox) -> None:
+    nonce = sandbox.start()["nonce"]
+    counted = json.loads(sandbox.exec_ok(COUNT_SPOOFED))
+    assert counted["connected"] > 64, counted
+    assert counted["open"] <= 192, counted
+    time.sleep(6)  # let the read timeout clear the counted connections
+    docker("exec", "-d", "-u", "1000:1000", sandbox.name, "python3", "-I", "-c", SPOOF_FLOOD, "25")
+    time.sleep(2)
+    proc = sandbox.probe(SLOW_CALLER)
+    assert proc.returncode == 0, proc.stderr
+    result = json.loads(proc.stdout)
+    assert result == {"ok": 40, "fails": {}}, result
+    # The local slots are still full from the flood, so read the nonce from the caller's position.
+    assert json.loads(sandbox.http("GET", 8889, "/control/state")["body"])["nonce"] == nonce
+
+
+# A remote caller flood that forces evictions and closes its own (possibly evicted) sockets.
+REMOTE_EVICT_FLOOD = r'''
+import os, socket, time
+for _ in range(8):
+    if os.fork() == 0:
+        end = time.time() + 8
+        held = []
+        while time.time() < end:
+            try:
+                s = socket.create_connection(("kernel", 8889), timeout=0.5)
+                held.append(s)
+            except OSError:
+                pass
+            if len(held) > 40:
+                held.pop(0).close()
+        for s in held:
+            s.close()
+        os._exit(0)
+for _ in range(8):
+    os.wait()
+print("done")
+'''
+
+
+@requires_docker_daemon
+def test_eviction_under_flood_keeps_pid1(sandbox: Sandbox) -> None:
+    nonce = sandbox.start()["nonce"]
+    started = sandbox.inspect()["State"]["StartedAt"]
+    proc = sandbox.probe(REMOTE_EVICT_FLOOD, timeout=120)
+    assert proc.returncode == 0, proc.stderr
+    time.sleep(1)
+    assert sandbox.state()["nonce"] == nonce
+    info = sandbox.inspect()
+    assert info["State"]["StartedAt"] == started
+    assert info["RestartCount"] == 0

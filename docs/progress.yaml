@@ -307,7 +307,10 @@ tasks:
       note: "Branch V/V.KERNEL-min. Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21).
         OPS-SANDBOX approved; green locally. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
         runs; connection-table veto by a cell) fixed: lock-free supervisor with a SIGTERM self-pipe, local 192 / remote
-        64 connection slots with eviction; code review round 2 next. 29 tests in server/tests/sandbox, all pass
+        64 connection slots with eviction. Code review round 2 changes (a cell binding its eth0 address as source was
+        classed remote and could evict the api; closing an evicted socket in the same select batch crashed PID 1)
+        fixed: local = loopback destination or peer, an interface address, or peer == destination; idempotent close;
+        per-connection errors contained. Code review round 3 next. 31 tests in server/tests/sandbox, all pass
         (incl. 30 fresh containers with SIGTERM/SIGINT under a state flood: 30/30 real restarts; full table held from
         inside: caller's state and exit served; stopped gateway killed 2.01 s after the 202 with 8889 held). Measured:
         image 404,228,564 bytes (docker image inspect .Size; vs 1.91 GB for the spike's 3-kernel image); KG 3.0.1 +

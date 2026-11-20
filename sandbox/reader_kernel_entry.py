@@ -25,6 +25,7 @@ import sys
 import threading
 import time
 import urllib.request
+from collections.abc import Callable
 
 GATEWAY = "/usr/local/bin/jupyter-kernelgateway"
 GATEWAY_PORT = 8888
@@ -44,18 +45,45 @@ def die(code: int) -> None:
     os._exit(code)
 
 
-def is_local(conn: socket.socket, peer: str) -> bool:
-    """A peer is local when it is a loopback address or one of the container's own addresses."""
-    ip = ipaddress.ip_address(peer.split("%", 1)[0])
+def _addr(text: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address:
+    ip = ipaddress.ip_address(text.split("%", 1)[0])
     if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    if ip.is_loopback:
-        return True
+        return ip.ipv4_mapped
+    return ip
+
+
+def own_addresses() -> set[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """Every address assigned to the container's interfaces, from /proc/net/fib_trie (IPv4 `/32 host LOCAL`
+    entries) and /proc/net/if_inet6 (IPv6)."""
+    out: set[ipaddress.IPv4Address | ipaddress.IPv6Address] = set()
     try:
-        own = str(conn.getsockname()[0]).split("%", 1)[0]
+        with open("/proc/net/fib_trie", encoding="ascii") as f:
+            lines = f.read().splitlines()
+        for prev, line in zip(lines, lines[1:], strict=False):
+            if line.strip() == "/32 host LOCAL" and prev.strip().startswith("|--"):
+                out.add(ipaddress.IPv4Address(prev.strip()[3:].strip()))
     except OSError:
+        pass
+    try:
+        with open("/proc/net/if_inet6", encoding="ascii") as f:
+            for line in f:
+                hexaddr = line.split()[0]
+                out.add(ipaddress.IPv6Address(int(hexaddr, 16)))
+    except OSError:
+        pass
+    return out
+
+
+def is_local(conn: socket.socket, peer: str, own: set[ipaddress.IPv4Address | ipaddress.IPv6Address]) -> bool:
+    """FR-SANDBOX-6 (d): local when the destination is loopback, the peer is loopback, the peer is one of the
+    container's own addresses, or the peer equals the destination. Anything a cell can open is local; only other
+    hosts on the kernel network are remote. Unparseable addresses count as local (the cell's share)."""
+    try:
+        peer_ip = _addr(peer)
+        dest_ip = _addr(str(conn.getsockname()[0]))
+    except (OSError, ValueError):
         return True
-    return peer.split("%", 1)[0] == own or str(ip) == own
+    return dest_ip.is_loopback or peer_ip.is_loopback or peer_ip in own or peer_ip == dest_ip
 
 
 class Supervisor:
@@ -209,6 +237,26 @@ class Supervisor:
             self.respond(conn, 404)
         return True
 
+    def service(self, sock: socket.socket, conns: dict[socket.socket, tuple[bytearray, float, bool, float]],
+                close: "Callable[[socket.socket], None]") -> None:
+        """Read from one connection and answer it once its request is complete."""
+        try:
+            data = sock.recv(4096)
+        except (BlockingIOError, InterruptedError):
+            return
+        except OSError:
+            close(sock)
+            return
+        if not data:
+            close(sock)
+            return
+        entry = conns.get(sock)
+        if entry is None:
+            return
+        entry[0].extend(data)
+        if self.handle(sock, entry[0]):
+            close(sock)
+
     def serve(self, listeners: list[socket.socket]) -> None:
         sel = selectors.DefaultSelector()
         for lst in listeners:
@@ -217,14 +265,23 @@ class Supervisor:
         sel.register(self.wake_r, selectors.EVENT_READ, "wake")
         # conn -> (buffer, deadline, local, accepted_at)
         conns: dict[socket.socket, tuple[bytearray, float, bool, float]] = {}
+        own = own_addresses()
 
         def close(conn: socket.socket) -> None:
-            sel.unregister(conn)
-            conns.pop(conn, None)
-            conn.close()
+            """Idempotent: a connection may be closed by eviction and still appear in the same select batch."""
+            if conns.pop(conn, None) is None:
+                return
+            try:
+                sel.unregister(conn)
+            except (KeyError, ValueError, OSError):
+                pass
+            try:
+                conn.close()
+            except OSError:
+                pass
 
         def admit(conn: socket.socket, peer: str) -> bool:
-            local = is_local(conn, peer)
+            local = is_local(conn, peer, own)
             same = [c for c, v in conns.items() if v[2] == local]
             if local and len(same) >= LOCAL_SLOTS:
                 return False
@@ -255,23 +312,22 @@ class Supervisor:
                         conn, addr = sock.accept()
                     except OSError:
                         continue
-                    conn.setblocking(False)
-                    if not admit(conn, str(addr[0])):
-                        conn.close()
+                    try:
+                        conn.setblocking(False)
+                        if not admit(conn, str(addr[0])):
+                            conn.close()
+                    except Exception:  # noqa: BLE001 - one connection never ends the control loop
+                        conns.pop(conn, None)
+                        try:
+                            conn.close()
+                        except OSError:
+                            pass
+                    continue
+                if sock not in conns:  # closed earlier in this batch (eviction)
                     continue
                 try:
-                    data = sock.recv(4096)
-                except (BlockingIOError, InterruptedError):
-                    continue
-                except OSError:
-                    close(sock)
-                    continue
-                if not data:
-                    close(sock)
-                    continue
-                buf = conns[sock][0]
-                buf += data
-                if self.handle(sock, buf):
+                    self.service(sock, conns, close)
+                except Exception:  # noqa: BLE001 - one connection never ends the control loop
                     close(sock)
             now = time.monotonic()
             for conn in [c for c, v in conns.items() if v[1] <= now]:
