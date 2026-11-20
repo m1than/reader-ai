@@ -1,10 +1,10 @@
 # SRV-CONFIG — reader.yaml: typed settings, JSON Schema, secret references, the container secret path (ADR-0011).
 #
 # Scope split with OPS-CLI (docs/roadmap.md stage 1): this module parses every `secret://` scheme, defines the resolver
-# registry and its two builders, the `Secret` value type, and the one function that names a reference's Compose secret.
-# It provides the `env`, `file` and `host-resolved` resolvers. OPS-CLI resolves `hostfile`, `keychain` and `op` on the
-# host, passes each value to `docker compose` as an environment variable of the child process, declares the matching
-# Compose secret (in memory, never on disk), and owns `reader doctor`.
+# registry and its two builders, the `Secret` value type, and the one function that names a reference's file under
+# /run/secrets (FR-CONFIG-14). It provides the `env`, `file` and `host-resolved` resolvers. OPS-CLI resolves `hostfile`,
+# `keychain` and `op` on the host and delivers each value over `docker exec` stdin into the consumer's tmpfs at
+# /run/secrets/<name> (ADR-0026), and owns `reader doctor`.
 #
 # Dependencies: redaction of secrets in the shared logger and the event serializer belongs to SRV-OBS and SRV-EVENTS.
 # This module only guarantees that its own objects, errors and log calls never carry a secret or an input scalar.
@@ -17,10 +17,10 @@ title: reader.yaml settings, JSON Schema export, secret references and the conta
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording"
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording"
 layer: server
 track: engineering
-adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020]
+adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026]
 
 paths:
   - server/src/reader/config/**
@@ -46,8 +46,8 @@ normative:
     title: "ADR-0020 — Toolchain baseline, Python 3.14 (accepted on main)"
     url: docs/adr/0020-toolchain-baseline.md
   - id: REF-CONFIG-7
-    title: Docker Compose — secrets with `environment` as source, mounted at /run/secrets/<name>
-    url: https://docs.docker.com/reference/compose-file/secrets/
+    title: "ADR-0026 — Secret delivery to read-only services: tmpfs /run/secrets filled by OPS-CLI over docker exec (accepted)"
+    url: docs/adr/0026-secret-delivery-read-only-services.md
 
 # Field table for reader.yaml v1. Paths use `.` for mapping keys and `[]` for list items. "Required" is within the parent.
 # A missing required key is reported at the line where its parent mapping node starts (its first key in block style,
@@ -193,18 +193,16 @@ requirements:
       read, not a measured limit. The file is opened with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`, and the regular-file
       check runs on the open descriptor (`fstat`). `O_NOFOLLOW` guards only the last path component: a final component
       swapped for a symlink after the realpath check, or a symlink loop, fails the open with ELOOP and gives
-      `unreadable`. Directories above it are not re-checked at open time; the root is expected to be a mount that only
-      the container runtime writes (Compose secrets at /run/secrets).
+      `unreadable`. Directories above it are not re-checked at open time; the root is expected to be a mount
+      writable only by the service uid (the consumer's tmpfs at /run/secrets, ADR-0026).
   - id: FR-CONFIG-14
     text: >-
       `secret_file_name(ref)` is the single, deterministic map from an `env`, `hostfile`, `keychain` or `op` reference to
-      its Compose secret name: `<scheme>-<first 32 hex characters of sha256(UTF-8 bytes of the reference)>`, so
-      Compose mounts the value at `/run/secrets/<name>`. `secret_env_var(ref)` maps the same reference to the
-      environment variable that carries the value into `docker compose`:
-      `READER_SECRET_<SCHEME in upper case>_<the same 32 hex characters in upper case>`, because a hyphen is not valid in
-      an environment variable name. Both are shared with OPS-CLI, which declares one Compose secret per reference,
-      `<name>: { environment: <VAR> }` (ADR-0011), in memory: nothing is written to disk. For a `file` reference both
-      raise `ValueError`, because that reference already names its file.
+      its file name under `/run/secrets`: `<scheme>-<first 32 hex characters of sha256(UTF-8 bytes of the reference)>`.
+      It is shared with OPS-CLI, which resolves the reference on the host and writes the value to
+      `/run/secrets/<name>` in the consumer's tmpfs by atomic `docker exec` delivery over stdin (ADR-0026); no Compose
+      secret and no environment variable carries the value. For a `file` reference it raises `ValueError`, because that
+      reference already names its file.
   - id: FR-CONFIG-15
     text: >-
       Load failures raise `ConfigError` with a fixed code, plus `file:line` where a line exists:
@@ -267,8 +265,8 @@ invariants:
       over generated valid configs).
   - id: INV-CONFIG-6
     text: >-
-      `secret_file_name` and `secret_env_var` are deterministic, depend only on the reference string, and always match
-      `(env|hostfile|keychain|op)-[0-9a-f]{32}` and `READER_SECRET_(ENV|HOSTFILE|KEYCHAIN|OP)_[0-9A-F]{32}`.
+      `secret_file_name` is deterministic, depends only on the reference string, and always matches
+      `(env|hostfile|keychain|op)-[0-9a-f]{32}`.
 
 nfr: []
 
@@ -286,7 +284,7 @@ vectors:
     source: "Hand-written loader cases (FR-CONFIG-15): failures with codes, and core-schema scalar resolution"
     file: spec/fixtures/SRV-CONFIG/load-failures.yaml
   - id: VEC-CONFIG-5
-    source: "Fixed reference → secret_file_name and secret_env_var values (FR-CONFIG-14), computed with sha256"
+    source: "Fixed reference → secret_file_name values (FR-CONFIG-14), computed with sha256"
     file: spec/fixtures/SRV-CONFIG/secret-names.yaml
   - id: VEC-CONFIG-6
     source: "Resolver cases over a test root (FR-CONFIG-6, 8, 13): values, codes, symlinks, permissions, size bound"
@@ -295,7 +293,7 @@ vectors:
 # Owner notes (not requirements):
 # - ADR-0011's revisit_when says "any of the four reference schemes"; its table lists five. Wording fix for the owner.
 # - ADR-0011's table lists `env` as resolved "inside containers, the server". This spec routes every non-`file` secret
-#   into containers through Compose secrets at /run/secrets/ (`host-resolved`), and `env` serves the host CLI and tests.
+#   into containers through files OPS-CLI delivers to /run/secrets/ (ADR-0026; `host-resolved`), and `env` serves the host CLI and tests.
 #   This matches the stage-1 live check ("no env secrets") and should be reflected in ADR-0011 by the owner.
 # - ADR-0017 (multiple users): reader.yaml holds every user's provider references, and a registry resolves any of them.
 #   SRV-AGENT must resolve only the acting user's references; that cross-user exposure is outside this module.

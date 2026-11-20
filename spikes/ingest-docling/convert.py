@@ -24,9 +24,9 @@ OUT = Path("/out")
 MODELS = "/models"
 
 
-def converter(*, formulas: bool = False, full_page_ocr: bool = False) -> DocumentConverter:
+def converter(*, formulas: bool = False, full_page_ocr: bool = False, ocr: bool = True) -> DocumentConverter:
     opts = PdfPipelineOptions(artifacts_path=MODELS)
-    opts.do_ocr = True  # bitmap regions only, unless full_page_ocr
+    opts.do_ocr = ocr  # bitmap regions only, unless full_page_ocr; ADR-0021: off for born-digital pages
     opts.ocr_options = EasyOcrOptions(lang=["ru", "en"], force_full_page_ocr=full_page_ocr)
     opts.do_table_structure = True
     opts.do_formula_enrichment = formulas
@@ -71,6 +71,30 @@ def sample(pdf: str, pages: list[int], formulas: bool) -> dict[str, object]:
     return {"mode": "sample", "formula_enrichment": formulas, "pages": rows}
 
 
+def m1(pdf: str, pages: list[int]) -> dict[str, object]:
+    """ADR-0021 measurement M1: formula model on, OCR off, model load timed separately."""
+    conv = converter(formulas=True, ocr=False)
+    t0 = time.monotonic()
+    conv.initialize_pipeline(InputFormat.PDF)
+    load = time.monotonic() - t0
+    out = OUT / "sample-m1"
+    out.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for p in pages:
+        t1 = time.monotonic()
+        doc = conv.convert(pdf, page_range=(p, p)).document
+        md = doc.export_to_markdown()
+        (out / f"p{p:04d}.md").write_text(md)
+        rows.append({"page": p, "seconds": round(time.monotonic() - t1, 1),
+                     "formulas_decoded": md.count("$$") // 2, "not_decoded": md.count("formula-not-decoded")})
+        print(json.dumps({"progress": rows[-1]}), flush=True)
+    formulas = sum(r["formulas_decoded"] for r in rows)
+    seconds = sum(r["seconds"] for r in rows)
+    return {"mode": "m1", "do_ocr": False, "formula_enrichment": True, "model_load_s": round(load, 1),
+            "seconds_total": round(seconds, 1), "formulas_decoded": formulas,
+            "seconds_per_formula": round(seconds / formulas, 1) if formulas else None, "pages": rows}
+
+
 def norm(s: str) -> str:
     return " ".join(s.split())
 
@@ -99,15 +123,20 @@ def ocr(pdf: str, pages: list[int]) -> dict[str, object]:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["full", "sample", "ocr"])
+    ap.add_argument("mode", choices=["full", "sample", "ocr", "m1"])
     ap.add_argument("pdf")
     ap.add_argument("--batch", type=int, default=50)
     ap.add_argument("--pages", default="")
     ap.add_argument("--no-formulas", action="store_true", help="sample without the formula model (CPU: ~11 min/page with it)")
     a = ap.parse_args()
     pages = [int(x) for x in a.pages.split(",") if x]
-    result = full(a.pdf, a.batch) if a.mode == "full" else sample(a.pdf, pages, not a.no_formulas) if a.mode == "sample" \
-        else ocr(a.pdf, pages)
+    modes = {
+        "full": lambda: full(a.pdf, a.batch),
+        "sample": lambda: sample(a.pdf, pages, not a.no_formulas),
+        "ocr": lambda: ocr(a.pdf, pages),
+        "m1": lambda: m1(a.pdf, pages),
+    }
+    result = modes[a.mode]()
     print(json.dumps(result))
 
 
