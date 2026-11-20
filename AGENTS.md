@@ -40,6 +40,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - Every test file contains `@trace <ID>`; IDs come only from specs.
 - **Secrets never enter the repository, logs, traces, notebooks, prompts or your context.**
   - Never read `~/Developer/.token_tg_bot`, `.env` files or Keychain items.
+  - The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items (owner, 2026-11-20; ADR-0023).
   - Never print environment variables.
   - Reference secrets as `secret://…` (ADR-0011).
 - Copyrighted source material is never committed. Pilots reference it by sha256.
@@ -69,6 +70,8 @@ Complex work is always done with Claude Fable, through the `deep-reviewer` and `
 
 ## Checks before every PR
 
+`bash tools/ci-local.sh` runs the first four lines below, the same jobs as `.github/workflows/ci.yml`. While GitHub Actions cannot run on the owner's account, its PASS is the gate (owner, 2026-11-20).
+
 ```bash
 node tools/trace/check.mjs                              # T1–T9 (T9: docs/progress.yaml parses and is consistent)
 node tools/trace/guard-tests.mjs --base origin/main     # P7
@@ -83,7 +86,7 @@ bash e2e/live/stage-N.sh                                # for the stage you touc
 AGENTS.md, CLAUDE.md  agent rules (this file; CLAUDE.md adds Claude Code specifics)
 docs/                 architecture.md, roadmap.md, progress.yaml (run state), adr/, research/
 spec/modules/         module specs (YAML); template spec/_template.yaml; fixtures in spec/fixtures/
-server/               Python 3.13: api, worker, mcp, host CLI `reader`; tests in server/tests/
+server/               Python 3.14 (ADR-0020): api, worker, mcp, host CLI `reader`; tests in server/tests/
 web/                  React + TypeScript + Vite + Storybook; tests *.test.ts(x)
 sandbox/              kernel image (ADR-0014)
 deploy/               compose.yaml, Caddyfile, Rotel config, reader.example.yaml
@@ -96,7 +99,7 @@ tools/                trace-check, guard-tests, hooks; tools/agent/ (bootstrap, 
 ## The owner's machine
 
 - macOS, Apple Silicon, Docker Desktop. v1 runs only here (ADR-0012).
-- Provider credential: `CLAUDE_CODE_OAUTH_TOKEN` in the environment, referenced as `secret://env/CLAUDE_CODE_OAUTH_TOKEN`.
+- Provider credential: the Keychain item `reader-ai/claude-oauth-token`, referenced as `secret://keychain/reader-ai/claude-oauth-token` (ADR-0023).
 - Telegram bot token: a private file on the host, referenced as `secret://hostfile/…`. Only `tools/agent/notify.mjs` and `reader up` read it.
 - Repositories: `m1than/reader-ai` and `m1than/ui-builder-lib-with-agents`. The library has its own rules: in that repository, follow its AGENTS.md, which forbids agents to push or publish. Prepare changes there as a branch, then block the task for the owner.
 

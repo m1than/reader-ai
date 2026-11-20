@@ -1,0 +1,54 @@
+{
+ "stage": "5-fact_check",
+ "model": "claude-sonnet-5-5",
+ "max_budget_usd": 1.0,
+ "wall_s": 43.8,
+ "total_cost_usd": 0.2424338,
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 44379,
+  "cache_read_input_tokens": 6803,
+  "output_tokens": 5997,
+  "output_tokens_details": {
+   "thinking_tokens": 5405
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 44379,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 5997,
+    "cache_read_input_tokens": 6803,
+    "cache_creation_input_tokens": 44379,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 44379
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "num_turns": 1,
+ "duration_api_ms": 44086,
+ "subtype": "success",
+ "is_error": false,
+ "output_chars": 1360,
+ "json_ok": true,
+ "json_error": "",
+ "claims_checked": 94,
+ "supported": 91,
+ "verdict": "fail",
+ "n_miscited": 0,
+ "n_unsupported": 2,
+ "n_contradicted": 1
+}

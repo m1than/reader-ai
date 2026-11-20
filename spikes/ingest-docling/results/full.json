@@ -1,0 +1,182 @@
+{
+  "exit_code": 0,
+  "peak_mem_mib": 5005.31,
+  "docker_vm_cpus": 4,
+  "mode": "full",
+  "pages": 935,
+  "seconds": 1895.3,
+  "pages_per_min": 29.6,
+  "batches": [
+    {
+      "pages": [
+        1,
+        50
+      ],
+      "seconds": 117.8,
+      "tables": 12,
+      "pictures": 30
+    },
+    {
+      "pages": [
+        51,
+        100
+      ],
+      "seconds": 68.8,
+      "tables": 5,
+      "pictures": 31
+    },
+    {
+      "pages": [
+        101,
+        150
+      ],
+      "seconds": 102.5,
+      "tables": 3,
+      "pictures": 34
+    },
+    {
+      "pages": [
+        151,
+        200
+      ],
+      "seconds": 118.3,
+      "tables": 5,
+      "pictures": 43
+    },
+    {
+      "pages": [
+        201,
+        250
+      ],
+      "seconds": 127.2,
+      "tables": 9,
+      "pictures": 37
+    },
+    {
+      "pages": [
+        251,
+        300
+      ],
+      "seconds": 81.5,
+      "tables": 2,
+      "pictures": 46
+    },
+    {
+      "pages": [
+        301,
+        350
+      ],
+      "seconds": 86.9,
+      "tables": 1,
+      "pictures": 36
+    },
+    {
+      "pages": [
+        351,
+        400
+      ],
+      "seconds": 121.1,
+      "tables": 0,
+      "pictures": 46
+    },
+    {
+      "pages": [
+        401,
+        450
+      ],
+      "seconds": 149.3,
+      "tables": 0,
+      "pictures": 20
+    },
+    {
+      "pages": [
+        451,
+        500
+      ],
+      "seconds": 155.6,
+      "tables": 9,
+      "pictures": 27
+    },
+    {
+      "pages": [
+        501,
+        550
+      ],
+      "seconds": 67.1,
+      "tables": 0,
+      "pictures": 37
+    },
+    {
+      "pages": [
+        551,
+        600
+      ],
+      "seconds": 88.1,
+      "tables": 2,
+      "pictures": 26
+    },
+    {
+      "pages": [
+        601,
+        650
+      ],
+      "seconds": 70.4,
+      "tables": 2,
+      "pictures": 27
+    },
+    {
+      "pages": [
+        651,
+        700
+      ],
+      "seconds": 59.9,
+      "tables": 5,
+      "pictures": 24
+    },
+    {
+      "pages": [
+        701,
+        750
+      ],
+      "seconds": 96.3,
+      "tables": 0,
+      "pictures": 20
+    },
+    {
+      "pages": [
+        751,
+        800
+      ],
+      "seconds": 59.2,
+      "tables": 1,
+      "pictures": 22
+    },
+    {
+      "pages": [
+        801,
+        850
+      ],
+      "seconds": 76.0,
+      "tables": 3,
+      "pictures": 29
+    },
+    {
+      "pages": [
+        851,
+        900
+      ],
+      "seconds": 66.5,
+      "tables": 0,
+      "pictures": 36
+    },
+    {
+      "pages": [
+        901,
+        935
+      ],
+      "seconds": 182.7,
+      "tables": 8,
+      "pictures": 15
+    }
+  ]
+}

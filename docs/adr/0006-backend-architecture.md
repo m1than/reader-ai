@@ -17,7 +17,7 @@ Load profile (hypothesis, single owner plus a few partners): one course compile 
 
 | Concern | Choice |
 | --- | --- |
-| Runtime | Python 3.13, `uv` for dependencies and lockfile |
+| Runtime | Python 3.14, `uv` for dependencies and lockfile (amended by ADR-0020; was 3.13) |
 | HTTP | FastAPI on Uvicorn (ASGI), Pydantic v2 models as the API contract; OpenAPI → generated TypeScript client for `web/` |
 | Streams to the browser | Server-Sent Events for events and token streams (resumable with `Last-Event-ID`); WebSocket only for the kernel relay, which is bidirectional by protocol |
 | Database access | SQLAlchemy 2 async with asyncpg; Alembic migrations |
