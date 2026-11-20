@@ -34,9 +34,6 @@ Run Jupyter Kernel Gateway in `jupyter-websocket` mode inside the `kernel` conta
 
 ## Consequences
 
-- Kernel images are declared per course in `reader.yaml` (`kernels: [python3, evcxr, deno]`) and built into the sandbox image.
+- v1 ships three kernels (owner, 2026-11-20): `python3` (ipykernel), `rust` (evcxr, matches the wallet's Rust core) and `deno` (TypeScript, matches the wallet UI). Each course declares the kernels it uses in `reader.yaml`.
+- The Rust kernel compiles crates on first use; the sandbox image pre-builds the crates the pilot needs so a lab does not wait on a cold build. Image size and cold-start time are measured in `spikes/kernel-roundtrip`.
 - Kernel state is disposable: lessons must be re-runnable from top to bottom; lab verification (ADR-0009) checks exactly this.
-
-## Open questions
-
-1. Which kernels does v1 ship besides `python3`? Rust (evcxr) matches the wallet core; it adds build time and image size.

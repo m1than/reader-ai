@@ -55,7 +55,7 @@ Model choice is declared per task in config (`tasks.draft.model`, `tasks.fact_ch
 - **Messages API directly.** Cannot use the subscription at all, which the owner requires; also rewrites the agent loop the SDK already ships.
 - **Multi-vendor framework now.** Today there is 1 provider family in use and 0 users asking for another; the port keeps the door open at the cost of one interface instead of a framework.
 
-## Open questions
+## Resolved questions (owner, 2026-11-20)
 
-1. Term 1 says products built with the Agent SDK should use API keys. reader-ai on the owner's subscription is personal use metered by the Agent SDK credit, but it is a judgement call: does the owner accept this reading, or should `anthropic-api` be the default even for himself?
-2. Study partners in paired programs: do they each have a Claude plan or API key, or is the program read-only for people without one?
+1. reader-ai on the owner's own subscription is personal use, metered by his Agent SDK credit.
+2. Every invited person connects their own materials and their own provider; every agent action runs on the credentials of the person it acts for. A person without a provider gets read-only access (ADR-0016).

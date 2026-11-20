@@ -14,10 +14,11 @@ Owner decisions, 2026-11-20:
 - Use the verticals of James Clear's *Atomic Habits*: distance, engagement and principles.
 - "Distance" covers three things: friction before starting, the long run (compounding over months), and the intervals between repetitions.
 - Engagement mechanics stay soft: habit tracker, never miss twice, visible progress. No points or leaderboards.
-- Atomic Habits is a design frame, not a pilot course.
+- Atomic Habits is the conceptual basis for how a learner works with data and text in the app. The book is not loaded into the app and is not a pilot course.
+- Notifications go to Telegram first; any other channel is an adapter the user enables.
 - Study budget: 60 minutes a day (2026-11-06).
 
-The book's core: four laws of behavior change, one per step of the habit loop (cue, craving, response, reward): make it obvious, attractive, easy, satisfying. Supporting ideas: identity-based habits, the two-minute rule, habit stacking, environment design, habit tracking with "never miss twice", the plateau of latent potential, and the Goldilocks rule (work at the edge of current ability). Chapter and page references are added when the owner's copy of the book is uploaded.
+The book's core: four laws of behavior change, one per step of the habit loop (cue, craving, response, reward): make it obvious, attractive, easy, satisfying. Supporting ideas: identity-based habits, the two-minute rule, habit stacking, environment design, habit tracking with "never miss twice", the plateau of latent potential, and the Goldilocks rule (work at the edge of current ability).
 
 ## Decision: the four laws as product requirements
 
@@ -39,6 +40,22 @@ The book's core: four laws of behavior change, one per step of the habit loop (c
 ## Decision: engagement level (Goldilocks rule)
 
 The tutor calibrates question difficulty so the learner answers about 85% correctly: hard enough to stay engaged, easy enough to keep going. This matches Wilson et al., "The Eighty Five Percent Rule for optimal learning" (Nature Communications 10, 4646, 2019), which derives an optimal training accuracy of about 85%. Accuracy above 90% for a week raises difficulty; below 80% lowers it.
+
+## Notifications
+
+A `Notifier` port with adapters declared as data. A user enables channels in their settings; each channel declares which events it receives (the day's cue, the never-miss-twice nudge, a partner's check-in, a lesson waiting at gate G2, a budget warning).
+
+```yaml
+notifications:
+  channels:
+    - kind: telegram
+      bot_token: secret://keychain/reader-ai/telegram-bot-token   # one bot per instance
+      events: [daily_cue, missed_day, partner_checkin, gate_waiting, budget_warning]
+```
+
+- **Telegram first.** One bot per instance; a user links their chat by opening a one-time deep link (`/start <token>`). While v1 runs on the owner's Mac with no public URL, the adapter uses Bot API long polling (`getUpdates`), not webhooks; webhooks switch on with the VPS (ADR-0012).
+- **Any other source** (email, Slack, ntfy, a generic webhook) is one adapter class implementing `send(user, event)` plus its config schema; no core change.
+- Delivery goes through the job queue (ADR-0006): retries with backoff, idempotency key per (user, event id, channel), quiet hours per user.
 
 ## Tutor
 
@@ -65,7 +82,7 @@ The tutor is bound to the current cell: its context is the cell, its citations a
 - **Full gamification.** Rejected by the owner; it would also add a second objective (points) that can be maximized without passing a single recall card.
 - **SM-2.** On the public srs-benchmark FSRS has lower prediction error than SM-2, which translates into fewer reviews at the same target retention; at 60 minutes a day every saved review is study time.
 
-## Open questions
+## Resolved questions (owner, 2026-11-20)
 
-1. The owner's study time and place for the implementation intention: same 60-minute slot daily, or per day of week?
-2. Should missed-day notifications go anywhere outside the app (email, Telegram), or stay in-app only?
+1. The implementation intention (time, place, habit stack) is set by each learner in the app when a course starts, not in this ADR.
+2. Notifications: Telegram adapter first, behind a port that any channel the user enables can implement.

@@ -19,7 +19,8 @@ Owner decisions, 2026-11-20:
 - A web UI whose components can be changed on the fly through a Storybook component library.
 - Pilot: Bashir, «Блокчейн. Исчерпывающее руководство» (DMK 2025, Russian edition of *Mastering Blockchain*, 4th ed.), with every lesson marked up.
 - An MCP connector for other agents, organised by knowledge sectors; sharing; paired study and teaching programs.
-- Learning-loop principles come from James Clear, *Atomic Habits*: distance (friction to start, the long run, spacing), engagement and the four laws. Soft engagement mechanics only.
+- Learning-loop principles come from James Clear, *Atomic Habits*: distance (friction to start, the long run, spacing), engagement and the four laws. The ideas are the design basis for how learners work with data and text; the book itself is not loaded into the app. Soft engagement mechanics only.
+- v1 runs on the owner's Mac; a VPS follows once load is measured (ADR-0012).
 
 ## Scope (v1)
 
@@ -29,7 +30,7 @@ Owner decisions, 2026-11-20:
 | Course plan → lessons as `.ipynb` with a reader-ai cell schema | 0004, 0009 |
 | Staged compile with fact-check, lab verification, adversarial review, two owner gates | 0009 |
 | Notebook UI with a sandboxed kernel for labs | 0003, 0013, 0014 |
-| Tutor chat bound to the current cell; recall cards (FSRS); habit tracker | 0010 |
+| Tutor chat bound to the current cell; recall cards (FSRS); habit tracker; notifications (Telegram first) | 0010 |
 | Agent providers per user, budgets and cost ledger | 0005 |
 | Sectorized knowledge base and MCP server | 0015 |
 | Sharing, roles, paired programs | 0016 |
@@ -50,7 +51,7 @@ Owner decisions, 2026-11-20:
 
 Two findings from building the manifest:
 
-1. Chapter 23 «Альтернативные блокчейны» (book pages 877–915) was missing from the study plan, which covered 22 chapters. It is added as stage S16 with an open budget.
+1. Chapter 23 «Альтернативные блокчейны» (book pages 877–915) was missing from the study plan, which covered 22 chapters. It is added as stage S16 with 5 sessions: 4 theory hours × 1.2 buffer. Chapter 22 has the same 39 pages and was planned at 3 hours; chapter 23 gets one hour more because alternative chains changed the most since the 2023 original, so its "what changed" cells need the most web verification. The owner delegated this estimate and gives feedback after the stage.
 2. A text parse of the table of contents dropped 3 of 23 chapters (8, 20, 23: titles that wrap to a second line). The bookmark outline had all 23. This is the measurement behind outline-first ingestion (ADR-0008).
 
 ## Options
@@ -70,7 +71,7 @@ A separate web application that speaks the Jupyter kernel protocol and stores le
 - **JupyterLab extension.** Of the 10 v1 capabilities in the scope table, only 2 (notebook UI, kernel) come from JupyterLab; the other 8 would be custom panels inside a host UI the owner cannot restyle through Storybook, which contradicts the owner's UI requirement.
 - **`%cc` magic.** Covers 1 of 10 capabilities (a tutor in the notebook) and has no place for owner gates.
 
-## Open questions
+## Resolved questions (owner, 2026-11-20)
 
-1. Chapter 23 budget: how many 60-minute sessions? The plan's per-stage formula needs theory hours, which were estimated per chapter by reading pace.
-2. Should course content (lessons, findings) be versioned in git per course, or only as immutable revisions in Postgres (ADR-0007 proposes the latter)?
+1. Chapter 23 budget: delegated to the agent; 5 sessions, see above.
+2. Course content is versioned as immutable revisions in Postgres and blobs (ADR-0007); git export is a later feature, not the store.

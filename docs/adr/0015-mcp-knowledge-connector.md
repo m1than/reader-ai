@@ -17,7 +17,7 @@ MCP state as of 2026-11-20: revision 2026-07-28 (final since 2026-07-28) removed
 
 | Entity | Meaning |
 | --- | --- |
-| **Sector** | A node in a hierarchy of topics (`crypto/hash`, `crypto/ecc/signatures`, `bitcoin/transactions`). Seeded from course outlines, extended by the agent, curated by the owner |
+| **Sector** | A node in a top-down hierarchy of topics (`crypto/hash`, `crypto/ecc/signatures`, `bitcoin/transactions`). The top levels are a taxonomy of the knowledge domain, not of any book: the agent proposes them at gate G1 from the material and the learner's profile, the owner approves, lower levels grow from findings |
 | **Finding** | A unit of knowledge produced while studying: `conclusion`, `tradeoff`, `decision`, `measurement`, `definition`, `erratum`, `open_question`. Has citations (source spans or URLs), sectors, the lesson and cell it came from, author (learner or agent), and `verified` (passed the fact-check stage) |
 | **Link** | Typed relation between findings or sectors: `supports`, `contradicts`, `supersedes`, `depends_on` |
 
@@ -55,7 +55,11 @@ Resources mirror the read tools (`reader://sector/{id}`, `reader://finding/{id}`
 - **REST only.** Each consuming agent needs 1 custom integration; with MCP the count is 0.
 - **File export only.** Access control is lost the moment a file is copied; personal-use material would leak through any shared folder.
 
-## Open questions
+## The book turned around for the learner
 
-1. Sector seed: start from the Bashir outline (23 chapters, 149 sections) or from a fixed top-level taxonomy the owner writes (crypto, bitcoin, ethereum, scaling, privacy, identity, DeFi, enterprise)?
-2. Should external agents be allowed `propose_finding`, or is the MCP connector read-only in v1?
+A book's table of contents is not used as the sector tree. It is used once, for a view that shows the learner how the material is reorganised for them: every source section is mapped onto sectors and marked by the learner's state (known from the diagnostic → skim; new → read in depth; a prerequisite missing → read another sector first). For the Bashir pilot this is the visible answer to "why the plan's order differs from the book's chapter order".
+
+## Resolved questions (owner, 2026-11-20)
+
+1. Sectors grow top-down from a domain taxonomy; the table of contents only feeds the view above.
+2. External agents may propose findings through MCP (`kb:write`); proposals land in the owner's review queue. MCP is the dedicated layer for this.

@@ -31,6 +31,10 @@ Constraints:
 
 **Sharing.** Invitation links carry a role and an expiry; recipients sign in with a passkey. A shared course shares lessons, findings and labs. Source files with `license: personal-use` are never served to others; a learner who wants the reading route attaches their own copy, matched by sha256.
 
+**Own materials, own provider.** Every invited person connects their own materials and their own provider (ADR-0005). Every agent action (tutor, lab hints, compiling their own materials) runs on the credentials of the person it acts for. A person with no provider connected is a **viewer** whatever role the invitation carried: they can read and follow, but no agent runs for them. Connecting a provider upgrades them to the invited role.
+
+**Mentors follow stages.** A mentor sees each learner's position in the plan, gate status of the learner's own courses, recall accuracy (if the learner opts in) and missed days.
+
 **Paired program** = a cohort on one course with a schedule:
 
 - shared progress board (who finished which lesson, recall accuracy if the member opts in);
@@ -53,7 +57,10 @@ Constraints:
 - **Public links only.** Covers 1 of 3 requested capabilities (sharing), not paired study or teaching.
 - **CRDT co-editing.** Solves simultaneous authoring, which v1 does not have (lessons are authored by the pipeline and published at gate G2); its cost is a merge layer over every cell type.
 
+## Resolved questions (owner, 2026-11-20)
+
+1. A partner without a provider takes part read-only. Without their own subscription or key, there is nothing for an agent to run on.
+
 ## Open questions
 
-1. A partner without a Claude plan or API key: allow participation without the tutor (labs and chat with humans only), or require a provider?
-2. Who will be in the first paired program, and what is the shared course?
+1. Who is in the first paired program, and on which course? This decides the acceptance test of the sharing stage.

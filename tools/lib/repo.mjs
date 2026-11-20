@@ -6,6 +6,8 @@ import { parse as parseYaml } from 'yaml';
 
 export const SPEC_STATUSES = ['draft', 'approved', 'implemented'];
 export const LOCKED_SPEC_STATUSES = ['approved', 'implemented'];
+// Delivery tracks (ADR-0001): product features, AI, engineering and optimization.
+export const TRACKS = ['product', 'ai', 'engineering'];
 export const ADR_STATUSES = ['proposed', 'accepted', 'superseded', 'rejected'];
 
 export const MODULE_ID = /^(SRV|WEB|OPS)-[A-Z0-9]+$/;

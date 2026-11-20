@@ -13,7 +13,9 @@ Self-hosted: Docker Compose behind Caddy, Postgres with pgvector, passkey sign-i
 
 ## Status
 
-Design phase. The decision package is in [docs/adr](docs/adr/) (16 ADRs, all `proposed`) with an overview in [docs/architecture.md](docs/architecture.md). Implementation starts module by module once the owner accepts the ADRs and approves the first specs.
+Design phase. The decision package is in [docs/adr](docs/adr/) (18 ADRs) with an overview in [docs/architecture.md](docs/architecture.md) and the staged build plan in [docs/roadmap.md](docs/roadmap.md). ADR-0001 … 0016 are accepted by the owner (status flip pending his commit); 0017 and 0018 are proposed. Implementation starts with stage 0 of the roadmap.
+
+Users own what they build: the whole knowledge base can be downloaded at any time as an open archive (Markdown, `.ipynb`, JSON). The product charges for the transformation, the work in which a person and the AI turn material into knowledge (ADR-0017).
 
 | ADR | Decision |
 | --- | --- |
@@ -33,6 +35,8 @@ Design phase. The decision package is in [docs/adr](docs/adr/) (16 ADRs, all `pr
 | [0014](docs/adr/0014-sandbox-security.md) | Sandbox for lab execution |
 | [0015](docs/adr/0015-mcp-knowledge-connector.md) | MCP connector over the sectorized knowledge base |
 | [0016](docs/adr/0016-sharing-and-paired-programs.md) | Sharing, roles, paired programs |
+| [0017](docs/adr/0017-accounts-data-ownership-and-monetization.md) | Accounts, always-available export, monetization of transformation |
+| [0018](docs/adr/0018-agent-bus-traces-and-local-models.md) | Agent bus, run traces and quality signals (v1); evaluation, local models, tuning (v2) |
 
 ## Pilot
 

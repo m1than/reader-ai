@@ -4,7 +4,7 @@ title: Self-hosted deployment — Docker Compose, Caddy, named volumes, passkey 
 status: proposed
 date: 2026-11-20
 verified_by: "OPS-DEPLOY: `reader up` on a clean machine reaches a healthy stack; e2e sign-in with a virtual WebAuthn authenticator; backup-restore drill reproduces a published lesson"
-revisit_when: "More than 20 active users, or a host that cannot run Docker Compose"
+revisit_when: "Moving from the owner's Mac to a VPS (planned after load measurement), more than 20 active users, or a host that cannot run Docker Compose"
 ---
 
 ## Context
@@ -44,6 +44,13 @@ Owner decision, 2026-11-20: start as containers, set up volumes properly, config
 - **Kubernetes.** Control-plane overhead and Helm charts for a stack of 6 containers serving 1–20 users.
 - **systemd processes.** Works on 1 of the 3 required operating systems.
 
-## Open questions
+## Resolved questions (owner, 2026-11-20)
 
-1. Where does the instance run first: the owner's Mac only, or also a small VPS so partners can reach it? This decides public TLS and backups off-machine.
+1. v1 runs only on the owner's Mac. A VPS follows after load is measured on the Mac (job throughput, kernel memory per session, ingestion CPU time, tutor concurrency); the roadmap's last stage produces those numbers.
+
+Mac-only consequences:
+
+- TLS through Caddy's internal CA for `localhost`; `reader up` offers to trust the root certificate. Passkeys on `https://localhost` are verified in `spikes/passkey-localhost` in Safari and Chrome before OPS-DEPLOY is approved.
+- No public URL: MCP for local agents uses personal access tokens over `localhost`; OAuth for remote MCP clients and Telegram webhooks switch on with the VPS.
+- Containers run under Docker Desktop on Apple Silicon (arm64 images); the Apple GPU is not available inside containers, so model inference in ingestion runs on CPU (ADR-0008).
+- Backups go to a folder the owner chooses (an external disk or a synced folder), set in `reader.yaml`.

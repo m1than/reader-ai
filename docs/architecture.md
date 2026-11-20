@@ -1,6 +1,6 @@
 # Architecture
 
-reader-ai is a self-hosted web application. It turns uploaded material (books, papers, docs, repositories) into an interactive notebook course, verifies every lesson before publishing, and runs study sessions with Claude as a tutor. Practice happens in the same notebook, against a sandboxed Jupyter kernel. A separate MCP connector exposes the knowledge built while reading to other agents.
+reader-ai is a self-hosted web application; v1 runs on the owner's Mac, a VPS follows after load is measured. It turns uploaded material (books, papers, docs, repositories) into an interactive notebook course, verifies every lesson before publishing, and runs study sessions with Claude as a tutor. Practice happens in the same notebook, against a sandboxed Jupyter kernel. A separate MCP connector exposes the knowledge built while reading to other agents.
 
 All decisions below are recorded as ADRs in [docs/adr](adr/). Every one is `proposed` until the owner accepts it.
 
@@ -20,6 +20,7 @@ flowchart LR
   api <-->|kernel protocol over WebSocket| kgw[sandbox: Kernel Gateway]
   worker <-->|lab verification| kgw
   worker -->|Agent SDK| claude[(Anthropic: subscription or API key)]
+  worker -->|Notifier adapters| tg[(Telegram Bot API, other channels)]
   api -->|Agent SDK, tutor| claude
   api <--> blobs[(volume: blobs, content-addressed)]
   worker <--> blobs

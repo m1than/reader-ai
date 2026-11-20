@@ -6,6 +6,7 @@ id: SRV-EXAMPLE             # <SRV|WEB|OPS>-<NAME>
 title: Example module
 status: draft               # draft -> approved (owner gate) -> implemented (owner gate)
 layer: server               # server | web | ops
+track: product              # product (user-facing features) | ai (agents, models, evaluation) | engineering (platform, performance, optimization)
 adr: [ADR-0006]             # ADRs this module implements or depends on
 
 # Files this module owns. Implementation outside approved specs is blocked (hook H1, CI T8).

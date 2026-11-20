@@ -13,7 +13,7 @@ material:
 outline:
   bookmarks: 494
   chapters: 23
-budget_sessions_total: 347
+budget_sessions_total: 352
 stages:
 - id: S01
   title: Orientation
@@ -1081,7 +1081,7 @@ stages:
       book_page: 875
 - id: S16
   title: Alternative blockchains
-  budget_sessions: null
+  budget_sessions: 5
   lessons:
   - id: L23
     plan_order: 23

@@ -4,7 +4,7 @@
 import { resolve } from 'node:path';
 import {
   loadRepo, isImplFile, claimsOf, MODULE_ID, ITEM_ID, ADR_ID,
-  SPEC_STATUSES, LOCKED_SPEC_STATUSES, ADR_STATUSES,
+  SPEC_STATUSES, LOCKED_SPEC_STATUSES, ADR_STATUSES, TRACKS,
 } from '../lib/repo.mjs';
 
 const root = resolve(process.argv[2] ?? '.');
@@ -22,6 +22,7 @@ const rules = {
       ...(doc.title ? [] : [`${file}: missing title`]),
       ...((doc.normative ?? []).length > 0 ? [] : [`${file}: no normative source`]),
       ...((doc.paths ?? []).length > 0 ? [] : [`${file}: no paths (globs of the files this module owns)`]),
+      ...(TRACKS.includes(doc.track) ? [] : [`${file}: track must be one of ${TRACKS.join(' | ')}`]),
       ...items
         .filter((item) => !ITEM_ID.test(item.id ?? ''))
         .map((item) => `${file}: ${item.section}: id "${item.id}" does not match ${ITEM_ID}`),

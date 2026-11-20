@@ -37,11 +37,19 @@ Unknown numbers are measured before the spec is approved, in `spikes/<name>/` wi
 
 Every spec declares `paths`: globs of the files the module owns.
 
+Every spec also declares a `track`, so that planning, review and the backlog keep three kinds of work apart (owner, 2026-11-20):
+
+| Track | Covers |
+| --- | --- |
+| `product` | User-facing features: what a learner, mentor or owner can do |
+| `ai` | Agents, prompts, models, retrieval, evaluation, traces of agent runs, local models and tuning |
+| `engineering` | Platform, deployment, security, performance and cost optimization |
+
 ## CI rules (tools/trace)
 
 | ID | Rule |
 | --- | --- |
-| T1 | Spec is well-formed: id, status, title, `paths`, at least one normative source, item ID format, every NFR has a numeric threshold and verified_by |
+| T1 | Spec is well-formed: id, status, title, `paths`, `track`, at least one normative source, item ID format, every NFR has a numeric threshold and verified_by |
 | T2 | IDs are unique across the repository |
 | T3 | Every test file contains `@trace` |
 | T4 | `@trace` references only declared IDs |

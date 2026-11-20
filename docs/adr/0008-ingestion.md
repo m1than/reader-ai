@@ -38,7 +38,9 @@ Measurement on the pilot PDF (2026-11-20): parsing the printed table of contents
 
 `spikes/ingest-docling`: run Docling on all 935 pages; record pages per minute, peak memory, and fidelity on 20 sampled pages (10 with formulas, 10 with tables) against the PDF. The numbers go into SRV-INGEST NFRs.
 
-## Open questions
+## Resolved questions (owner, 2026-11-20)
 
-1. Scanned material (no text layer) needs OCR; is it in v1 scope?
-2. Default limit for web fetches: same-domain crawl depth and page count?
+1. OCR is in v1. Pages without a text layer go through Docling's OCR pipeline; the engine and its Russian accuracy are measured in `spikes/ingest-docling` on 10 rendered-as-image pages of the pilot.
+2. Web fetch defaults (agent's choice, configurable per material): same domain only, link depth 2, at most 200 pages, `robots.txt` respected.
+
+Note for Mac-only v1 (ADR-0012): Docker containers on macOS have no access to the Apple GPU, so Docling's layout and OCR models run on CPU. The spike measures that path.

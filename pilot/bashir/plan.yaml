@@ -42,8 +42,8 @@ stages:
   - { id: S14,  title: Enterprise blockchain,                    chapters: [14, 16],    theory_h: 6.5, code_h: 0 }
   - { id: S15,  title: Future,                                   chapters: [22],        theory_h: 3,   code_h: 0 }
   # Chapter 23 was missing from the 2026-11-06 plan (found while building this manifest, 2026-11-20).
-  # Budget is an open question for the owner; null keeps it out of totals.
-  - { id: S16,  title: Alternative blockchains,                  chapters: [23],        theory_h: null, code_h: 0 }
+  # 39 pages like chapter 22 (3 h), plus 1 h for web verification of what changed since 2023 (ADR-0002).
+  - { id: S16,  title: Alternative blockchains,                  chapters: [23],        theory_h: 4,   code_h: 0 }
 
 # Lessons whose content already exists (migrated from the Claude Docs knowledge base).
 drafted: [1]
