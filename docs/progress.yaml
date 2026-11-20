@@ -17,6 +17,8 @@ owner_review:            # stage exits waiting for the owner's live check and `i
   pending: []
   merge_gate: "2026-11-20: a Claude Code PreToolUse hook on the owner's machine forbids `gh pr merge` for the agent,
     contrary to AGENTS.md step 6. Until the owner removes it or changes AGENTS.md, every PR waits for the owner's merge."
+  ci_gate: "owner 2026-11-20: GitHub Actions may fail for now; a red CI run is not a blocker. The agent still runs the local checks
+    (trace-check, guard-tests, layer checks) before every PR and records any red CI run in the PR description."
 
 tasks:
   # Stage 0 — groundwork and spikes
@@ -41,15 +43,22 @@ tasks:
       what: "server/pyproject.toml (uv, ruff, mypy strict, pytest, anyio, hypothesis, testcontainers), web/package.json (Vite, React 19, Vitest, Storybook 10, Playwright), e2e/live/lib.sh",
       note: "server is `package = false` until OPS-CLI/OPS-DEPLOY claim server/src/reader and add the entry points;
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
-  - { id: S0.toolchain-baseline, stage: 0, kind: setup, status: in_progress, needs: [],
+  - { id: S0.toolchain-baseline, stage: 0, kind: setup, status: done, needs: [],
+      accepted: "owner 2026-11-20 accepted ADR-0020 in chat ('3 - accept') and set its status: line with a one-line command (H3).
+        Branch 0/python-3.14 (PR #14) moves the 3.13 pins: server requires-python, ruff target, mypy python_version, .python-version,
+        uv.lock, AGENTS.md, roadmap 0.2, ADR-0006 runtime row note. Evidence: Docling + EasyOCR run on python:3.14-slim-trixie
+        (ingest-docling). Kernel-roundtrip re-run on 3.14 still pending (ADR-0020 evidence table).",
       pr: "https://github.com/m1than/reader-ai/pull/8", review: "deep-reviewer (Fable): approve, round 3",
       what: "owner 2026-11-20: use the latest LTS versions. Proposed ADR-0020: Node 26 LTS, Python 3.14 (3.15: 5 dependencies lack cp315 aarch64 wheels), Debian 13 trixie",
       note: "Done in this branch: web/ engines >=26 <27 and .nvmrc; CI reads web/.nvmrc (typecheck, vitest, storybook green on node 26.13.0).
-        node@26 is installed as a separate Homebrew keg (the Mac's default node stays 22). New spikes use python:3.14-slim-trixie
+        node@26 is installed as a separate Homebrew keg; `brew install node@26` had also linked it to /opt/homebrew/bin/node, so the agent
+        ran `brew unlink node` (2026-11-20). The Mac's default node is nvm's 22. New spikes use python:3.14-slim-trixie
         (agent-sdk-container measured, PR #6). Pending evidence: OCR conversion on 3.14 (ingest-docling) and a kernel-roundtrip re-run on 3.14.
         On acceptance by the owner: move the 3.13 pins listed in ADR-0020 Consequences in one PR. This PR carries an ADR, so it waits for the owner." }
-  - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: blocked, needs: [S0.skeleton],
-      pr: "https://github.com/m1than/reader-ai/pull/7",
+  - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
+      pr: "https://github.com/m1than/reader-ai/pull/7", review: "deep-reviewer (Fable): approve, round 2",
+      accepted: "owner 2026-11-20: 'accept passkey substitution' — Safari + Chromium (Dia) via Apple Passwords meet the criterion;
+        Google Chrome and Google Password Manager stay untested. Host name for stage 1: localhost.",
       result: "Safari 27.2 and Dia (Chromium 157) each register.ok + login.ok on https://localhost behind Caddy tls internal,
         both through Apple Passwords (AAGUID fbfc3007-…), UV true, server verifies challenge/origin/RP ID/UV/signature
         (spikes/passkey-localhost/RESULT.md). Host name for stage 1 provisionally localhost; mkcert fallback not needed so far.
@@ -74,8 +83,17 @@ tasks:
         Needs an exec tmpfs /run/evcxr and a per-kernel copy of the evcxr cache via a launcher (shared cache breaks concurrent kernels);
         per-kernel dirs leak 86 MiB each (13th kernel fails) (cleanup open for OPS-SANDBOX); --memory-swap must equal --memory.
         Proposed ADR-0014 amendment (exec tmpfs, writable cache, verification in its own container) goes to S0.exit." }
-  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
-      note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml)" }
+  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
+      review: "deep-reviewer (Fable): approve, round 2",
+      note: "input: the Bashir PDF on the owner's Mac (owner gave the path 2026-11-20; sha256 matches pilot/bashir/plan.yaml)",
+      result: "Throughput PASS, fidelity FAIL (spikes/ingest-docling/RESULT.md). Docker CPU, 935 pages: 29.6 pages/min, peak 5.0 GiB;
+        67 tables, 35 formula items. Fidelity on 20 pages (rule A: flattening is not a misread): 8/20 without the formula model;
+        7/20 with formula + code models; best D (formula model on, code model off, judged directly) 3/20 (rule B: 7/20);
+        remaining failures are code blocks (378, 461, 468). Tables 11/11.
+        Formula model: one Docker page with 2 formulas 689 s incl. load (hand-recorded, 4 VM CPUs); natively ≈ 19.7 s per formula;
+        Docling refuses MPS for it; more VM CPUs not tried. OCR on 10 rendered pages: char accuracy mean 0.870 (0.678–0.970),
+        word recall 0.607–0.900 (low pages lose figure text), 1.44 pages/min. Triggers ADR-0008 revisit_when;
+        proposed amendment for S0.exit: native ingest (or a larger Docker VM, untested), formula model on, code from the PDF text layer." }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
       note: "spends Agent SDK credit; record in budget.ledger" }
@@ -93,9 +111,12 @@ tasks:
         Library size gate fails 5 entries by 1–19 B under Node 26 but passes under Node 22 (its CI runtime).",
       reason: "Publishing is the owner's: the library's AGENTS.md forbids agents to push or publish. Install-by-version and release
         time are therefore unmeasured.",
-      ask: "Review and push library branch release/github-packages (dbb932cb), merge it into web3/material-parity, push tag v0.1.0
-        and note the release workflow's gates duration; then tell the agent the version. Installing from GitHub Packages needs a
-        read:packages token on the Mac, likely a classic PAT (fine-grained tokens may not cover Packages; to be verified)." }
+      ask: "State 2026-11-20: the owner pushed release/github-packages and opened library PR #1. GitHub Actions do not start on the
+        owner's account ('recent account payments have failed or your spending limit needs to be increased'), so the PR's CI and any
+        release run are refused. A tag v0.1.0 was pushed on acc9e4af (before the merge, without release.yml) and then deleted by the owner.
+        Remaining: fix GitHub billing; merge library PR #1; tag v0.1.0 on the merged web3/material-parity and push it; note the
+        release run's duration; tell the agent the version. Installing from GitHub Packages needs a read:packages token on the Mac,
+        likely a classic PAT (to be verified). Until then reader-ai consumes the built-commit tarball (verified fallback)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
   - { id: S0.exit, stage: 0, kind: live, status: in_progress,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
