@@ -105,6 +105,16 @@ tasks:
         Docling refuses MPS for it; more VM CPUs not tried. OCR on 10 rendered pages: char accuracy mean 0.870 (0.678–0.970),
         word recall 0.607–0.900 (low pages lose figure text), 1.44 pages/min. Triggers ADR-0008 revisit_when;
         proposed amendment for S0.exit: native ingest (or a larger Docker VM, untested), formula model on, code from the PDF text layer." }
+  - { id: S0.spike.ingest-confine, stage: 0, kind: spike, status: done, needs: [S0.spike.ingest-docling],
+      result: "Docling configuration D (formula on, code off, OCR off, CPU, models via artifacts_path, offline) runs under a
+        deny-default sandbox-exec profile (spikes/ingest-confine/converter.sb): no mach-lookup, iokit, network, ipc-posix or
+        signal; writes only under WORK. Same 20 pages, same counts (6 formulas, 11 tables). Confined 15.69 / 15.85 pages/min
+        vs unconfined 15.85 / 16.57 (no measurable cost); ≈ 11.5 s per formula, 0.2–0.7 s per other page; model load 1.9 s.
+        Extra allowances: read of '/' (dyld), /private/etc/apache2/mime.types (stdlib mimetypes), exec of the resolved
+        interpreter; cwd must be in WORK; -D params must be realpaths. POSIX semaphores and shm not needed. All negative probes
+        denied (TCP, Unix connect/bind incl. docker socket, Keychain Mach service, exec of security/docker/sh, signal to
+        parent, /dev/tty, home reads, writes outside WORK); socketpair, symlink and mkfifo inside WORK allowed (parent must
+        not trust WORK). Book estimate ≈ 12.7 min (not measured). Input for SRV-INGEST review B1/B2." }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: done, pr: 28, needs: [S0.skeleton],
       decision: "owner 2026-11-21: BAAI/bge-m3 confirmed; questions-v2.yaml left to the agent ('do themself with the most
         appropriate'), accepted as the retrieval acceptance set",
