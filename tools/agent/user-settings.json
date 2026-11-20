@@ -1,0 +1,24 @@
+{
+  "autoMode": {
+    "environment": [
+      "$defaults",
+      "Trusted source control: the GitHub repositories m1than/reader-ai and m1than/ui-builder-lib-with-agents, owned by the user",
+      "The reader-ai Docker Compose stack on localhost (caddy, api, worker, mcp, kernel, postgres, rotel) is the project's own development environment"
+    ],
+    "allow": [
+      "$defaults",
+      "In ~/Developer/reader-ai: creating branches, committing, pushing branches other than main, opening pull requests and squash-merging them with gh once CI is green",
+      "Running uv, npm, node, cargo, docker compose, and curl or Playwright against localhost for the reader-ai stack",
+      "Sending a Telegram message to the user with node tools/agent/notify.mjs"
+    ],
+    "soft_deny": [
+      "$defaults",
+      "Publishing a package or creating a release in any repository",
+      "Pushing to the main branch of any repository, or merging a pull request that changes an ADR status line"
+    ],
+    "hard_deny": [
+      "$defaults",
+      "Reading, printing or copying secrets: ~/Developer/.token_tg_bot, Keychain items, the CLAUDE_CODE_OAUTH_TOKEN value, .env files"
+    ]
+  }
+}

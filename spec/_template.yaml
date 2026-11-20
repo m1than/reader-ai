@@ -4,7 +4,9 @@
 
 id: SRV-EXAMPLE             # <SRV|WEB|OPS>-<NAME>
 title: Example module
-status: draft               # draft -> approved (owner gate) -> implemented (owner gate)
+status: draft               # draft -> approved (agent, after a fresh-subagent review; ADR-0019) -> implemented (owner, after the stage live check)
+approved_by: null           # agent | owner — set together with status: approved
+approved_at: null           # YYYY-MM-DD
 layer: server               # server | web | ops
 track: product              # product (user-facing features) | ai (agents, models, evaluation) | engineering (platform, performance, optimization)
 adr: [ADR-0006]             # ADRs this module implements or depends on

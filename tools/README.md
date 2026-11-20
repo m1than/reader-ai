@@ -14,6 +14,10 @@ node tools/trace/guard-tests.mjs --base origin/main  # P7: tests change only wit
 | `trace/check.mjs` | Rules T1–T8, CI job `trace` |
 | `trace/guard-tests.mjs` | Rule P7 on pull requests; escape hatch: commit trailer `Spec-Neutral: <reason>` |
 | `hooks/pre-write.mjs` | Claude Code PreToolUse hook: H1–H3, wired in `.claude/settings.json` |
+| `agent/kickoff.md` | The prompt the owner starts the autonomous run with (ADR-0019) |
+| `agent/bootstrap-mac.sh` | Readiness checks of the owner's Mac; `--install` adds missing CLI tools with Homebrew; never prints secrets |
+| `agent/notify.mjs` | Telegram messages to the owner; Stop and Notification hook; `link` stores the chat id |
+| `agent/user-settings.json` | Auto mode classifier rules to merge into `~/.claude/settings.json` (not read from project settings) |
 
 ## File classes
 
@@ -33,7 +37,9 @@ Run against a scratch copy of the repository with an `SRV-INGEST` fixture spec c
 | 1 | Write implementation claimed only by a draft spec | H1 blocks | ✓ exit 2 |
 | 2 | Write implementation no spec claims | H1 blocks | ✓ exit 2 |
 | 3 | Write under `spikes/` | allowed | ✓ exit 0 |
-| 4 | Agent sets a spec to `approved` | H3 blocks | ✓ exit 2 |
+| 4 | Agent sets a spec to `approved` | allowed since ADR-0019 (was: H3 blocks) | ✓ exit 0 (re-run 2026-11-20) |
+| 4a | Agent sets a spec to `implemented`, or writes a new spec as `implemented` | H3 blocks | ✓ exit 2 |
+| 4b | Approved spec without tests | T5 fails | ✓ 1 error |
 | 5 | Agent sets an ADR to `accepted` | H3 blocks | ✓ exit 2 |
 | 6 | Agent creates a new ADR already `accepted` | H3 blocks | ✓ exit 2 |
 | 7 | Write implementation claimed by an approved spec | allowed | ✓ exit 0 |
