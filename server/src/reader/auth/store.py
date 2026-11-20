@@ -345,6 +345,10 @@ class _Rollback(Exception):
 async def bootstrap_options(
     engine: AsyncEngine, settings: Settings, token: str
 ) -> tuple[Json, str] | FailureReason:
+    try:
+        token_sha = digest(token)
+    except UnicodeEncodeError:  # e.g. a lone surrogate from JSON "\ud800"
+        return FailureReason.token_invalid
     async with engine.begin() as conn:
         row = (
             await conn.execute(
@@ -354,7 +358,7 @@ async def bootstrap_options(
                     "WHERE t.token_sha256 = :h AND t.consumed_at IS NULL AND t.revoked_at IS NULL "
                     "AND t.expires_at > now()"
                 ),
-                {"h": digest(token)},
+                {"h": token_sha},
             )
         ).first()
         if row is None:
@@ -363,7 +367,7 @@ async def bootstrap_options(
             return FailureReason.user_disabled
         if await _has_credential(conn, row.user_id):
             return FailureReason.owner_has_credential
-        ceremony, challenge = await _new_ceremony(conn, "bootstrap", row.user_id, digest(token))
+        ceremony, challenge = await _new_ceremony(conn, "bootstrap", row.user_id, token_sha)
         return await _registration_options(conn, settings, row.user_id, challenge), ceremony
 
 
@@ -487,66 +491,74 @@ def _raw_id(credential: Json) -> bytes | None:
 async def signin_verify(
     engine: AsyncEngine, settings: Settings, ceremony: str | None, credential: Json, presented: str | None
 ) -> str | FailureReason:
-    """FR-AUTH-7: the challenge is consumed, and a failure recorded, in a transaction that always commits."""
+    """FR-AUTH-7, two transactions: (1) consume the challenge, verify, and on failure record it, always
+    committed; (2) on one connection, the conditional counter update and the new session, or a rollback."""
     async with engine.begin() as conn:
-        consumed = await _consume_ceremony(conn, ceremony, "authenticate")
-        result: seam.Authenticated | FailureReason
-        if consumed is None:
-            result = FailureReason.ceremony_invalid
-        else:
-            raw_id = _raw_id(credential)
-            row = (
-                None
-                if raw_id is None
-                else (
-                    await conn.execute(
-                        text(
-                            "SELECT c.public_key, c.sign_count, c.owner_id, u.webauthn_user_id, "
-                            "u.disabled_at FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id "
-                            "WHERE c.credential_id = :id"
-                        ),
-                        {"id": raw_id},
-                    )
-                ).first()
-            )
-            if row is None:
-                result = FailureReason.malformed if raw_id is None else FailureReason.unknown_credential
-            elif row.disabled_at is not None:
-                result = FailureReason.user_disabled
-            else:
-                result = seam.verify_authentication(
-                    settings.rp_id,
-                    settings.origin,
-                    bytes(consumed.challenge),
-                    credential,
-                    bytes(row.public_key),
-                    int(row.sign_count),
-                    bytes(row.webauthn_user_id),
-                )
-        if isinstance(result, FailureReason):
-            await _insert_failure(conn, result)
-            return result
-        owner_id = row.owner_id if row is not None else None
-    if owner_id is None or not await finish_signin(
-        engine, result.credential_id, result.new_sign_count, result.backed_up
-    ):
-        await record_failure(engine, FailureReason.counter_regressed)
-        return FailureReason.counter_regressed
-    async with engine.begin() as conn:
-        return await _start_session(conn, owner_id, presented)
+        checked = await _signin_check(conn, settings, ceremony, credential)
+        if isinstance(checked, FailureReason):
+            await _insert_failure(conn, checked)
+            return checked
+    authenticated, owner_id = checked
+    try:
+        async with engine.begin() as conn:
+            if not await finish_signin(
+                conn, authenticated.credential_id, authenticated.new_sign_count, authenticated.backed_up
+            ):
+                raise _Rollback(FailureReason.counter_regressed)
+            return await _start_session(conn, owner_id, presented)
+    except _Rollback as failure:
+        await record_failure(engine, failure.reason)
+        return failure.reason
 
 
-async def finish_signin(engine: AsyncEngine, credential_id: bytes, new_count: int, backed_up: bool) -> bool:
-    """The conditional counter update of FR-AUTH-7; False when another sign-in already moved the counter."""
-    async with engine.begin() as conn:
-        updated = await conn.execute(
+async def _signin_check(
+    conn: AsyncConnection, settings: Settings, ceremony: str | None, credential: Json
+) -> tuple[seam.Authenticated, UUID] | FailureReason:
+    consumed = await _consume_ceremony(conn, ceremony, "authenticate")
+    if consumed is None:
+        return FailureReason.ceremony_invalid
+    raw_id = _raw_id(credential)
+    if raw_id is None:
+        return FailureReason.malformed
+    row = (
+        await conn.execute(
             text(
-                "UPDATE webauthn_credentials SET sign_count = :n, last_used_at = now(), backed_up = :b "
-                "WHERE credential_id = :id AND (sign_count < :n OR (sign_count = 0 AND :n = 0)) RETURNING 1"
+                "SELECT c.public_key, c.sign_count, c.owner_id, u.webauthn_user_id, "
+                "u.disabled_at FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id "
+                "WHERE c.credential_id = :id"
             ),
-            {"id": credential_id, "n": new_count, "b": backed_up},
+            {"id": raw_id},
         )
-        return updated.first() is not None
+    ).first()
+    if row is None:
+        return FailureReason.unknown_credential
+    if row.disabled_at is not None:
+        return FailureReason.user_disabled
+    result = seam.verify_authentication(
+        settings.rp_id,
+        settings.origin,
+        bytes(consumed.challenge),
+        credential,
+        bytes(row.public_key),
+        int(row.sign_count),
+        bytes(row.webauthn_user_id),
+    )
+    if isinstance(result, FailureReason):
+        return result
+    owner_id: UUID = row.owner_id
+    return result, owner_id
+
+
+async def finish_signin(conn: AsyncConnection, credential_id: bytes, new_count: int, backed_up: bool) -> bool:
+    """The conditional counter update of FR-AUTH-7; False when another sign-in already moved the counter."""
+    updated = await conn.execute(
+        text(
+            "UPDATE webauthn_credentials SET sign_count = :n, last_used_at = now(), backed_up = :b "
+            "WHERE credential_id = :id AND (sign_count < :n OR (sign_count = 0 AND :n = 0)) RETURNING 1"
+        ),
+        {"id": credential_id, "n": new_count, "b": backed_up},
+    )
+    return updated.first() is not None
 
 
 # Sessions ------------------------------------------------------------------------------------------------

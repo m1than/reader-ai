@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric import ed25519, rsa
 from webauthn import verify_authentication_response, verify_registration_response
 from webauthn.helpers import (
     decode_credential_public_key,
@@ -62,10 +63,31 @@ class _Fail(Exception):
         self.reason = reason
 
 
+# What the library's parsers and key loaders raise on hostile input (LookupError: IndexError, KeyError).
+_PARSE_ERRORS = (WebAuthnException, ValueError, TypeError, LookupError, AttributeError, OverflowError)
+MIN_RSA_BITS = 2048
+OKP_KEY_BYTES = 32
+
+
+def _key(public_key: bytes) -> tuple[int, Any]:
+    """Decode a COSE key into (alg, usable cryptography key); `malformed` when it can never verify."""
+    try:
+        decoded = decode_credential_public_key(public_key)
+        alg = int(decoded.alg)
+        key = decoded_public_key_to_cryptography(decoded)
+    except _PARSE_ERRORS as error:
+        raise _Fail(FailureReason.malformed) from error
+    if isinstance(key, rsa.RSAPublicKey) and key.key_size < MIN_RSA_BITS:
+        raise _Fail(FailureReason.malformed)
+    if isinstance(key, ed25519.Ed25519PublicKey) and len(key.public_bytes_raw()) != OKP_KEY_BYTES:
+        raise _Fail(FailureReason.malformed)
+    return alg, key
+
+
 def _client_data(raw: bytes, kind: ClientDataType, challenge: bytes, origin: str) -> CollectedClientData:
     try:
         data = parse_client_data_json(raw)
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     if data.type != kind:
         raise _Fail(FailureReason.wrong_type)
@@ -88,31 +110,33 @@ def _flags(auth_data: AuthenticatorData, rp_id: str) -> None:
 def _registration(rp_id: str, origin: str, challenge: bytes, response: Response) -> RegisteredCredential:
     try:
         credential: RegistrationCredential = parse_registration_credential_json(response)
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     _client_data(credential.response.client_data_json, ClientDataType.WEBAUTHN_CREATE, challenge, origin)
     try:
         raw = parse_cbor(credential.response.attestation_object)
-    except (WebAuthnException, ValueError, TypeError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     if not isinstance(raw, dict) or not isinstance(raw.get("authData"), bytes):
         raise _Fail(FailureReason.malformed)
-    if raw.get("fmt") not in ATTESTATION_FORMATS:
+    fmt = raw.get("fmt")
+    if not isinstance(fmt, str) or fmt not in ATTESTATION_FORMATS:
         raise _Fail(FailureReason.attestation_format_refused)
     try:
         auth_data = parse_authenticator_data(raw["authData"])
-    except (WebAuthnException, ValueError, TypeError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     _flags(auth_data, rp_id)
     attested = auth_data.attested_credential_data
     if attested is None:
         raise _Fail(FailureReason.malformed)
     try:
-        decoded = decode_credential_public_key(attested.credential_public_key)
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
+        alg = int(decode_credential_public_key(attested.credential_public_key).alg)
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
-    if int(decoded.alg) not in ALGORITHMS:
+    if alg not in ALGORITHMS:
         raise _Fail(FailureReason.algorithm_refused)
+    _key(attested.credential_public_key)
     try:
         verified = verify_registration_response(
             credential=credential,
@@ -123,7 +147,7 @@ def _registration(rp_id: str, origin: str, challenge: bytes, response: Response)
             require_user_verification=True,
             supported_pub_key_algs=[COSEAlgorithmIdentifier(a) for a in ALGORITHMS],
         )
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
+    except Exception as error:  # the final gate: anything the own checks did not classify
         raise _Fail(FailureReason.library_rejected) from error
     transports = tuple(str(t.value) for t in (credential.response.transports or []))
     return RegisteredCredential(
@@ -147,14 +171,14 @@ def _authentication(
 ) -> Authenticated:
     try:
         credential: AuthenticationCredential = parse_authentication_credential_json(response)
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     client_raw = credential.response.client_data_json
     _client_data(client_raw, ClientDataType.WEBAUTHN_GET, challenge, origin)
     auth_raw = credential.response.authenticator_data
     try:
         auth_data = parse_authenticator_data(auth_raw)
-    except (WebAuthnException, ValueError, TypeError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     _flags(auth_data, rp_id)
     handle = credential.response.user_handle
@@ -162,21 +186,17 @@ def _authentication(
         raise _Fail(FailureReason.user_handle_missing)
     if not hmac.compare_digest(handle, expected_user_handle):
         raise _Fail(FailureReason.user_handle_mismatch)
-    try:
-        decoded = decode_credential_public_key(public_key)
-        key = decoded_public_key_to_cryptography(decoded)
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
-        raise _Fail(FailureReason.malformed) from error
+    alg, key = _key(public_key)
     try:
         verify_signature(
             public_key=key,
-            signature_alg=decoded.alg,
+            signature_alg=COSEAlgorithmIdentifier(alg),
             signature=credential.response.signature,
             data=auth_raw + hashlib.sha256(client_raw).digest(),
         )
     except InvalidSignature as error:
         raise _Fail(FailureReason.bad_signature) from error
-    except (WebAuthnException, ValueError, TypeError) as error:
+    except _PARSE_ERRORS as error:
         raise _Fail(FailureReason.malformed) from error
     new = auth_data.sign_count
     if (new > 0 or stored_count > 0) and new <= stored_count:
@@ -191,7 +211,7 @@ def _authentication(
             credential_current_sign_count=stored_count,
             require_user_verification=True,
         )
-    except (WebAuthnException, ValueError, TypeError, KeyError) as error:
+    except Exception as error:  # the final gate: anything the own checks did not classify
         raise _Fail(FailureReason.library_rejected) from error
     return Authenticated(
         credential_id=verified.credential_id,
@@ -207,6 +227,8 @@ def verify_registration(
         return _registration(rp_id, origin, challenge, response)
     except _Fail as failure:
         return failure.reason
+    except _PARSE_ERRORS:  # totality: a shape no own check anticipated is still malformed input
+        return FailureReason.malformed
 
 
 def verify_authentication(
@@ -224,3 +246,5 @@ def verify_authentication(
         )
     except _Fail as failure:
         return failure.reason
+    except _PARSE_ERRORS:  # totality: a shape no own check anticipated is still malformed input
+        return FailureReason.malformed

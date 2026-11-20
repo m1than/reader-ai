@@ -30,6 +30,13 @@ class Ctx:
     def session(self) -> str | None:
         return self.cookie(SESSION_COOKIE)
 
+    @property
+    def signed_in(self) -> SessionUser:
+        """The user of a `session` or `recent_session` route; the dispatcher guarantees one."""
+        if self.user is None:
+            raise LookupError("no session user on a session route")
+        return self.user
+
     async def json(self) -> Any:
         try:
             return await self.request.json()

@@ -97,9 +97,11 @@ class SoftAuthenticator:
         fmt: str = "none",
         alg: int = -7,
         credential_id: bytes | None = None,
+        cose_key: bytes | None = None,
     ) -> dict[str, Any]:
         cred_id = self.credential_id if credential_id is None else credential_id
-        attested = self.aaguid + struct.pack(">H", len(cred_id)) + cred_id + self.cose_public_key(alg)
+        key = self.cose_public_key(alg) if cose_key is None else cose_key
+        attested = self.aaguid + struct.pack(">H", len(cred_id)) + cred_id + key
         auth_data = (
             hashlib.sha256(rp_id.encode()).digest() + bytes([flags | AT]) + struct.pack(">I", sign_count)
         )

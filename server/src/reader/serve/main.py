@@ -2,17 +2,19 @@
 
 Every failure prints exactly one line, `reader-server: <code>`, and exits 1; no traceback and no value (the
 database password, a token) reaches stdout or stderr (INV-AUTH-5). Only `bootstrap-link` writes its link to
-stdout. Paths and the database endpoint default to the container's; the READER_* variables below override them
-(tests, and OPS-DEPLOY's static `READER_CONFIG`).
+stdout. Paths and the database endpoint default to the container's; the READER_* variables of FR-AUTH-1
+override them (tests, and OPS-DEPLOY's static `READER_CONFIG`).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import os
 import signal
 import sys
+import time
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -31,12 +33,19 @@ DEFAULT_SECRETS_ROOT: Final = "/run/secrets"
 DEFAULT_RUN_DIR: Final = "/tmp"  # noqa: S108 (a tmpfs in the container; holds only the api's bound address)
 DB_PASSWORD_REF: Final = "secret://file/run/secrets/db-password"  # noqa: S105 (a reference, not a value)
 API_ADDR_FILE: Final = "reader-api.addr"
+WORKER_ERROR_EVERY_S: Final = 30.0
+MAX_PORT: Final = 65535
 
 
 class Failure(Exception):
     def __init__(self, code: str) -> None:
         super().__init__(code)
         self.code = code
+
+
+def _line(code: str) -> None:
+    sys.stderr.write(f"reader-server: {code}\n")
+    sys.stderr.flush()
 
 
 @dataclass(frozen=True)
@@ -51,12 +60,15 @@ class Env:
 
     @classmethod
     def read(cls, environ: Mapping[str, str]) -> Env:
+        port = environ.get("READER_DB_PORT", "5432")
+        if not port.isdigit() or not 0 < int(port) <= MAX_PORT:
+            raise Failure("config_env_invalid")
         return cls(
             config=Path(environ.get("READER_CONFIG", DEFAULT_CONFIG)),
             secrets_root=Path(environ.get("READER_SECRETS_ROOT", DEFAULT_SECRETS_ROOT)),
             run_dir=Path(environ.get("READER_RUN_DIR", DEFAULT_RUN_DIR)),
             db_host=environ.get("READER_DB_HOST", "postgres"),
-            db_port=int(environ.get("READER_DB_PORT", "5432")),
+            db_port=int(port),
             db_user=environ.get("READER_DB_USER", "postgres"),
             db_name=environ.get("READER_DB_NAME", "postgres"),
         )
@@ -74,13 +86,21 @@ def _settings(env: Env) -> Settings:
 
 
 def _target(env: Env) -> DbTarget:
-    if not (env.secrets_root / "db-password").is_file():
-        raise Failure("secret_missing")
+    file = env.secrets_root / "db-password"
     try:
+        if not file.is_file() or file.stat().st_size == 0:
+            raise Failure("secret_missing")
         password = resolve(DB_PASSWORD_REF, container_registry(env.secrets_root))
-    except SecretResolutionError:
+    except SecretResolutionError, OSError:
         raise Failure("secret_missing") from None
     return DbTarget(env.db_host, env.db_port, env.db_user, env.db_name, password)
+
+
+def _bind(bind: str) -> tuple[str, int]:
+    host, sep, port = bind.rpartition(":")
+    if not sep or not host or not port.isdigit() or not 0 < int(port) <= MAX_PORT:
+        raise Failure("bind_invalid")
+    return host, int(port)
 
 
 async def _db[T](target: DbTarget, work: Callable[[AsyncEngine], Awaitable[T]]) -> T:
@@ -113,7 +133,7 @@ def _healthcheck(role: str, env: Env) -> None:
             with urllib.request.urlopen(f"http://{bound}/api/healthz", timeout=3) as r:
                 if r.status == 200:
                     return
-        except OSError:
+        except OSError, ValueError:
             pass
         raise Failure("api_unhealthy")
 
@@ -124,23 +144,30 @@ def _serve_api(bind: str, env: Env) -> None:
     from reader.api.app import create_app
     from reader.auth.store import prepare
 
-    host, _, port = bind.rpartition(":")
+    host, port = _bind(bind)
     settings = _settings(env)
     target = _target(env)
-    engine = make_engine(target)
 
     async def run() -> None:
+        engine = make_engine(target)
         try:
-            await migrate(engine)
-            await prepare(engine, settings)
-        except Exception:
-            await engine.dispose()
-            raise Failure("database_unreachable") from None
-        env.run_dir.mkdir(parents=True, exist_ok=True)
-        (env.run_dir / API_ADDR_FILE).write_text(bind, encoding="utf-8")
-        app = create_app(settings, engine)
-        server = uvicorn.Server(uvicorn.Config(app, host=host, port=int(port), proxy_headers=False))
-        try:
+            try:
+                await migrate(engine)
+                await prepare(engine, settings)
+            except Exception:
+                raise Failure("database_unreachable") from None
+            try:
+                env.run_dir.mkdir(parents=True, exist_ok=True)
+                (env.run_dir / API_ADDR_FILE).write_text(bind, encoding="utf-8")
+            except OSError:
+                raise Failure("run_dir_unwritable") from None
+            # Request-time logs (FR-AUTH-18 failure lines, database_unreachable) go to stderr, one line each.
+            handler = logging.StreamHandler(sys.stderr)
+            handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+            logging.getLogger("reader").addHandler(handler)
+            logging.getLogger("reader").setLevel(logging.INFO)
+            app = create_app(settings, engine)
+            server = uvicorn.Server(uvicorn.Config(app, host=host, port=port, proxy_headers=False))
             await server.serve()
         finally:
             await engine.dispose()
@@ -151,6 +178,13 @@ def _serve_api(bind: str, env: Env) -> None:
 def _run_worker(env: Env) -> None:
     _settings(env)
     target = _target(env)
+    last_report = [-WORKER_ERROR_EVERY_S]
+
+    def report() -> None:
+        now = time.monotonic()
+        if now - last_report[0] >= WORKER_ERROR_EVERY_S:
+            last_report[0] = now
+            _line("database_unreachable")
 
     async def run() -> None:
         stop = asyncio.Event()
@@ -159,7 +193,7 @@ def _run_worker(env: Env) -> None:
             loop.add_signal_handler(sig, stop.set)
         engine = make_engine(target)
         try:
-            await wait_for_heads(engine, stop)
+            await wait_for_heads(engine, stop, on_error=report)
             await stop.wait()  # jobs arrive with V.SRV-JOBS-min
         finally:
             await engine.dispose()
@@ -193,18 +227,19 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run(argv: list[str], environ: Mapping[str, str]) -> int:
-    env = Env.read(environ)
     if argv[:1] == ["bootstrap-link"]:
         sub = argparse.ArgumentParser(prog="reader-server bootstrap-link")
         sub.add_argument("--handle")
-        _bootstrap_link(sub.parse_args(argv[1:]).handle, env)
+        handle = sub.parse_args(argv[1:]).handle
+        _bootstrap_link(handle, Env.read(environ))
         return 0
     args = _parser().parse_args(argv)
     if args.role is None:
         _parser().error("--role is required")
     if args.role == "mcp":
-        sys.stderr.write("reader-server: mcp role arrives with SRV-MCP\n")
+        _line("mcp role arrives with SRV-MCP")
         return 2
+    env = Env.read(environ)
     if args.healthcheck:
         _healthcheck(args.role, env)
     elif args.role == "api":
@@ -215,10 +250,12 @@ def run(argv: list[str], environ: Mapping[str, str]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # No library log record may reach stderr through logging's last-resort handler: the output is one line.
+    logging.getLogger().addHandler(logging.NullHandler())
     try:
         return run(sys.argv[1:] if argv is None else argv, os.environ)
     except Failure as failure:
-        sys.stderr.write(f"reader-server: {failure.code}\n")
+        _line(failure.code)
         return 1
     except KeyboardInterrupt:
         return 130

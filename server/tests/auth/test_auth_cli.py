@@ -134,6 +134,100 @@ def test_worker_waits_without_migrating_and_stops_on_sigterm(pg: Pg, tmp_path: P
             worker.kill()
 
 
+def _worker_output(env: dict[str, str], seconds: float = 3.5) -> tuple[int, str]:
+    worker = subprocess.Popen(
+        server_cmd("--role", "worker"), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+    )
+    try:
+        time.sleep(seconds)
+        worker.send_signal(signal.SIGTERM)
+        out, err = worker.communicate(timeout=20)
+        return worker.returncode, out + err
+    finally:
+        if worker.poll() is None:
+            worker.kill()
+
+
+def test_worker_password_canary_connection_refused(tmp_path: Path) -> None:
+    code, output = _worker_output(_closed_db_env(tmp_path))
+    assert code == 0
+    assert output.splitlines() == ["reader-server: database_unreachable"]  # several polls, one line per 30 s
+    assert CANARY not in output
+
+
+def test_worker_password_canary_authentication_failed(pg: Pg, tmp_path: Path) -> None:
+    code, output = _worker_output(_env(pg, tmp_path, password=CANARY))
+    assert code == 0
+    assert output.splitlines() == ["reader-server: database_unreachable"]
+    assert CANARY not in output
+
+
+def test_empty_password_file_is_secret_missing(pg: Pg, tmp_path: Path) -> None:
+    env = _env(pg, tmp_path, password="")
+    for args in (["--role", "worker", "--healthcheck"], ["bootstrap-link"]):
+        r = _run(env, *args)
+        assert r.returncode == 1
+        assert _one_line(r) == "reader-server: secret_missing"
+
+
+@pytest.mark.parametrize("bind", ["localhost", "127.0.0.1:", "127.0.0.1:http", ":8000", "127.0.0.1:70000"])
+def test_invalid_bind_is_one_line(tmp_path: Path, bind: str) -> None:
+    r = _run(_closed_db_env(tmp_path), "--role", "api", "--bind", bind)
+    assert r.returncode == 1
+    assert _one_line(r) == "reader-server: bind_invalid"
+
+
+@pytest.mark.parametrize("args", [["--role", "worker", "--healthcheck"], ["bootstrap-link"]])
+def test_non_numeric_db_port_is_one_line(tmp_path: Path, args: list[str]) -> None:
+    env = {**_closed_db_env(tmp_path), "READER_DB_PORT": "five"}
+    r = _run(env, *args)
+    assert r.returncode == 1
+    assert _one_line(r) == "reader-server: config_env_invalid"
+
+
+def test_unwritable_run_dir_is_one_line(pg: Pg, tmp_path: Path) -> None:
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("", encoding="utf-8")
+    env = {**_env(pg, tmp_path), "READER_RUN_DIR": str(blocker / "run")}
+    r = _run(env, "--role", "api", "--bind", f"127.0.0.1:{_free_port()}")
+    assert r.returncode == 1
+    assert _one_line(r) == "reader-server: run_dir_unwritable"
+
+
+def test_database_failure_while_api_runs(pg_container: tuple[Pg, Any], pg: Pg, tmp_path: Path) -> None:
+    """The api's own role loses its login mid-run: requests answer 503, and no password or traceback leaks."""
+    _, container = pg_container
+    role = "r_" + pg.database
+    for sql in [
+        f"CREATE ROLE {role} LOGIN PASSWORD '{CANARY}'",
+        f"ALTER DATABASE {pg.database} OWNER TO {role}",
+    ]:
+        code, out = container.exec(["psql", "-U", "postgres", "-c", sql])
+        assert code == 0, out
+    env = _env(Pg(pg.host, pg.port, role, CANARY, pg.database), tmp_path)
+    server = ApiServer(env, _free_port())
+    try:
+        server.start()
+        for sql in [
+            f"ALTER ROLE {role} NOLOGIN",
+            f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '{role}'",
+        ]:
+            code, out = container.exec(["psql", "-U", "postgres", "-c", sql])
+            assert code == 0, out
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{server.port}/api/me", headers={"Cookie": "__Host-reader_session=x"}
+        )
+        with pytest.raises(urllib.error.HTTPError) as failed:
+            urllib.request.urlopen(req, timeout=10)  # noqa: S310
+        assert failed.value.code == 503
+        assert json.loads(failed.value.read()) == {"error": "unavailable"}
+    finally:
+        output = server.stop()
+    assert CANARY not in output
+    assert "Traceback" not in output
+    assert "database_unreachable /api/me" in output
+
+
 @pytest.fixture
 def api_server(pg: Pg, tmp_path: Path) -> Iterator[ApiServer]:
     env = _env(pg, tmp_path)

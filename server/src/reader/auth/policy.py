@@ -103,9 +103,17 @@ def _url_problem(url: str) -> str | None:
     host = parts.hostname or ""
     if _is_ip(host) or parts.netloc.startswith("["):
         return "instance_url_ip_host"
-    if not host.isascii() or host.endswith("."):
+    if not host.isascii() or host.endswith(".") or _ends_in_a_number(host):
         return "instance_url_host_form"
     return None
+
+
+def _ends_in_a_number(host: str) -> bool:
+    """WHATWG URL host parsing treats a host whose last label is a number as IPv4 (`127.1`, `0x7f.1`)."""
+    last = host.rsplit(".", 1)[-1].lower()
+    if last.isdigit():
+        return True
+    return last.startswith("0x") and all(c in "0123456789abcdef" for c in last[2:])
 
 
 def _origin(url: str) -> tuple[str, str]:

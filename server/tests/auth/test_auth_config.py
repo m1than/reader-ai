@@ -42,6 +42,10 @@ def test_config_error_codes_match_the_spec() -> None:
         ("https://[::1]", "instance_url_ip_host"),
         ("https://l" + chr(0x043E) + "calhost", "instance_url_host_form"),  # Cyrillic o: an IDN host
         ("https://localhost.", "instance_url_host_form"),
+        ("https://127.1", "instance_url_host_form"),  # browsers parse these as IPv4 (WHATWG URL)
+        ("https://1234", "instance_url_host_form"),
+        ("https://0x7f.1", "instance_url_host_form"),
+        ("https://reader.0x1F", "instance_url_host_form"),
     ],
 )
 def test_instance_url_errors(tmp_path: Path, url: str, code: str) -> None:
@@ -85,6 +89,8 @@ def test_first_error_in_table_order_wins(tmp_path: Path) -> None:
         ("https://LocalHost:443", "localhost", "https://localhost"),
         ("https://localhost:8443", "localhost", "https://localhost:8443"),
         ("https://Reader.Example.org", "reader.example.org", "https://reader.example.org"),
+        ("https://1x.example", "1x.example", "https://1x.example"),
+        ("https://host-2", "host-2", "https://host-2"),
     ],
 )
 def test_rp_id_and_origin(tmp_path: Path, url: str, rp_id: str, origin: str) -> None:

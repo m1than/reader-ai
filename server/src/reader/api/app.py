@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Final
 
 from fastapi import FastAPI
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
@@ -21,7 +22,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 from reader.api.http import Ctx, Route, error
 from reader.auth import store
-from reader.auth.policy import CLEANUP_INTERVAL_S, SESSION_COOKIE, Settings
+from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
 ROUTERS: Final = ("reader.api.routes", "reader.auth.routes")
 ROUTES: Final[tuple[Route, ...]] = tuple(
@@ -46,13 +47,16 @@ class CsrfGate:
         if scope["type"] not in ("http", "websocket") or not scope["path"].startswith("/api/"):
             await self.app(scope, receive, send)
             return
-        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in scope["headers"]}
+        pairs = [(k.decode("latin-1").lower(), v.decode("latin-1")) for k, v in scope["headers"]]
+        headers = dict(pairs)
+        origins = [v for k, v in pairs if k == "origin"]
         upgrade = scope["type"] == "websocket" or headers.get("upgrade", "").lower() == "websocket"
         method = scope.get("method", "GET")
-        if (upgrade or method not in _SAFE_METHODS) and headers.get("origin") != self.origin:
+        if (upgrade or method not in _SAFE_METHODS) and origins != [self.origin]:
             await self._refuse(scope, receive, send, error(403, "origin"))
             return
-        has_body = int(headers.get("content-length", "0") or 0) > 0 or "transfer-encoding" in headers
+        length = headers.get("content-length", "0").strip()
+        has_body = not length.isdigit() or int(length) > 0 or "transfer-encoding" in headers
         if (
             method not in _SAFE_METHODS
             and has_body
@@ -74,12 +78,23 @@ def _endpoint(
     route: Route, settings: Settings, engine: AsyncEngine
 ) -> Callable[[Request], Awaitable[Response]]:
     async def endpoint(request: Request) -> Response:
-        user = None
-        if route.auth != "public" or route.path == "/api/auth/signout":
-            user = await store.session_user(engine, request.cookies.get(SESSION_COOKIE))
-            if user is None and route.auth != "public":
-                return error(401, "unauthenticated")
-        return await route.handler(Ctx(request, settings, engine, user))
+        try:
+            user = None
+            if route.auth != "public" or route.path == "/api/auth/signout":
+                user = await store.session_user(engine, request.cookies.get(SESSION_COOKIE))
+                if user is None and route.auth != "public":
+                    return error(401, "unauthenticated")
+                if (
+                    user is not None
+                    and route.auth == "recent_session"
+                    and user.session_age_s >= RECENT_SESSION_S
+                ):
+                    return error(401, "reauth_required")
+            return await route.handler(Ctx(request, settings, engine, user))
+        except SQLAlchemyError, OSError:
+            # The database failed mid-request: one line, no detail (it could name the endpoint or the driver).
+            log.warning("database_unreachable %s", route.path)
+            return error(503, "unavailable")
 
     return endpoint
 

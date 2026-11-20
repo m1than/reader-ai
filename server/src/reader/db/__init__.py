@@ -8,6 +8,7 @@ namespace, to all heads of the history whose directories `VERSION_LOCATIONS` dec
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
@@ -18,7 +19,6 @@ from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 from sqlalchemy import Connection, text
 from sqlalchemy.engine import URL
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from reader.config import Secret
@@ -102,14 +102,23 @@ async def at_heads(engine: AsyncEngine) -> bool:
         return await conn.run_sync(_heads_reached)
 
 
-async def wait_for_heads(engine: AsyncEngine, stop: asyncio.Event, interval_s: float = 1.0) -> bool:
-    """Poll until the schema is at all heads or `stop` is set; never migrates (the worker role)."""
+async def wait_for_heads(
+    engine: AsyncEngine,
+    stop: asyncio.Event,
+    interval_s: float = 1.0,
+    on_error: Callable[[], None] | None = None,
+) -> bool:
+    """Poll until the schema is at all heads or `stop` is set; never migrates (the worker role).
+
+    A failed poll calls `on_error` (no argument: the error may carry driver detail) and polls again.
+    """
     while not stop.is_set():
         try:
             if await at_heads(engine):
                 return True
-        except OSError, SQLAlchemyError:
-            pass  # the database is not reachable yet; poll again
+        except Exception:  # any database failure: retry; the caller reports without detail
+            if on_error is not None:
+                on_error()
         try:
             await asyncio.wait_for(stop.wait(), timeout=interval_s)
         except TimeoutError:

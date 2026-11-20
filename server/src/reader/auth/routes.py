@@ -13,7 +13,6 @@ from reader.auth import store
 from reader.auth.policy import (
     CEREMONY_COOKIE,
     CHALLENGE_TTL_S,
-    RECENT_SESSION_S,
     SESSION_COOKIE,
     SESSION_TTL_S,
     FailureReason,
@@ -80,25 +79,21 @@ async def bootstrap_verify(ctx: Ctx) -> Response:
     return _session(result)
 
 
-def _recent(ctx: Ctx) -> Response | None:
-    if ctx.user is None:
-        return error(401, "unauthenticated")
-    if ctx.user.session_age_s >= RECENT_SESSION_S:
-        return error(401, "reauth_required")
-    return None
+# register/* are `recent_session` routes: the dispatcher (reader.api.app) has already enforced the session.
 
 
 async def register_options(ctx: Ctx) -> Response:
-    if (refused := _recent(ctx)) is not None or ctx.user is None:
-        return refused or error(401, "unauthenticated")
-    return _options(*await store.register_options(ctx.engine, ctx.settings, ctx.user))
+    return _options(*await store.register_options(ctx.engine, ctx.settings, ctx.signed_in))
 
 
 async def register_verify(ctx: Ctx) -> Response:
-    if (refused := _recent(ctx)) is not None or ctx.user is None:
-        return refused or error(401, "unauthenticated")
     result = await store.register_verify(
-        ctx.engine, ctx.settings, ctx.user, ctx.cookie(CEREMONY_COOKIE), await _credential(ctx), ctx.session
+        ctx.engine,
+        ctx.settings,
+        ctx.signed_in,
+        ctx.cookie(CEREMONY_COOKIE),
+        await _credential(ctx),
+        ctx.session,
     )
     if isinstance(result, FailureReason):
         return _failed(ctx, result, "register_failed")

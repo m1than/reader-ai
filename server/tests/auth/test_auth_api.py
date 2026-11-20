@@ -16,6 +16,7 @@ import anyio
 import httpx
 import pytest
 from auth_helpers import (
+    ORIGIN,
     bootstrap,
     bootstrap_token,
     client,
@@ -154,7 +155,20 @@ async def test_bootstrap_with_invalid_token(pg: Pg, tmp_path: Path) -> None:
     await engine.dispose()
 
 
-# INV-AUTH-7 ----------------------------------------------------------------------------------------------
+async def test_bootstrap_with_unencodable_or_non_string_token(pg: Pg, tmp_path: Path) -> None:
+    settings, engine = await _setup(pg, tmp_path)
+    async with client(settings, engine) as c:
+        for body in [b'{"token":"\\ud800"}', b'{"token":12}', b'{"token":null}', b"[]"]:
+            r = await c.post(
+                "/api/auth/bootstrap/options", content=body, headers={"Content-Type": "application/json"}
+            )
+            assert r.status_code == 400, body
+            assert r.json() == {"error": "bootstrap_failed"}
+    assert await scalar(engine, "SELECT count(*) FROM auth_failures WHERE reason = 'token_invalid'") == 4
+    await engine.dispose()
+
+
+# INV-AUTH-7----------------------------------------------------------------------------------------------
 
 
 async def test_token_revoked_after_options_fails(pg: Pg, tmp_path: Path) -> None:
@@ -217,8 +231,9 @@ async def test_concurrent_bootstraps_leave_exactly_one_credential(pg: Pg, tmp_pa
     async with anyio.create_task_group() as tg:
         for t in tokens:
             tg.start_soon(attempt, t)
-    assert results.count(200) <= 1
-    assert await scalar(engine, "SELECT count(*) FROM webauthn_credentials") <= 1
+    # The later link revoked the earlier token, so exactly one ceremony can succeed.
+    assert results.count(200) == 1
+    assert await scalar(engine, "SELECT count(*) FROM webauthn_credentials") == 1
     # One token, two ceremonies, two concurrent verifies: exactly one credential.
     await execute(engine, "DELETE FROM webauthn_credentials")
     t1 = await bootstrap_token(engine, settings)
@@ -365,8 +380,38 @@ async def test_finish_signin_updates_counter_conditionally(
     async with client(settings, engine) as c:
         auth, _ = await owner_with_passkey(c, engine, settings)
     await execute(engine, "UPDATE webauthn_credentials SET sign_count = :n", n=stored)
-    assert await finish_signin(engine, auth.credential_id, received, True) is ok
+    async with engine.begin() as conn:
+        assert await finish_signin(conn, auth.credential_id, received, True) is ok
     assert await scalar(engine, "SELECT sign_count FROM webauthn_credentials") == (received if ok else stored)
+    await engine.dispose()
+
+
+async def test_counter_race_has_one_winner(pg: Pg, tmp_path: Path) -> None:
+    """Two ceremonies, stored count 5, both assertions carry 6: one session, one `counter_regressed`."""
+    settings, engine = await _setup(pg, tmp_path)
+    async with client(settings, engine) as c:
+        auth, handle = await owner_with_passkey(c, engine, settings)
+    await execute(engine, "UPDATE webauthn_credentials SET sign_count = 5")
+    async with client(settings, engine) as c1, client(settings, engine) as c2:
+        challenges = []
+        for c in (c1, c2):
+            options = await c.post("/api/auth/signin/options", json={})
+            challenges.append(unb64url(options.json()["challenge"]))
+        statuses: list[int] = []
+
+        async def verify(c: httpx.AsyncClient, challenge: bytes) -> None:
+            r = await c.post(
+                "/api/auth/signin/verify",
+                json=auth.assertion(challenge=challenge, user_handle=handle, sign_count=6),
+            )
+            statuses.append(r.status_code)
+
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(verify, c1, challenges[0])
+            tg.start_soon(verify, c2, challenges[1])
+    assert sorted(statuses) == [200, 400]
+    assert await scalar(engine, "SELECT sign_count FROM webauthn_credentials") == 6
+    assert await scalar(engine, "SELECT count(*) FROM auth_failures WHERE reason = 'counter_regressed'") == 1
     await engine.dispose()
 
 
@@ -446,7 +491,7 @@ async def test_challenge_is_single_use(pg: Pg, tmp_path: Path) -> None:
         async with anyio.create_task_group() as tg:
             tg.start_soon(verify, 1)
             tg.start_soon(verify, 2)
-        assert statuses.count(200) <= 1
+        assert statuses.count(200) == 1
         again = await c.post(
             "/api/auth/signin/verify",
             json=auth.assertion(challenge=challenge, user_handle=handle, sign_count=9),
@@ -647,7 +692,22 @@ async def test_failure_limit(pg: Pg, tmp_path: Path) -> None:
     await engine.dispose()
 
 
-# FR-AUTH-12 ----------------------------------------------------------------------------------------------
+async def test_failure_limit_is_reached_through_the_routes(pg: Pg, tmp_path: Path) -> None:
+    settings, engine = await _setup(pg, tmp_path)
+    async with client(settings, engine) as c:
+        for _ in range(100):
+            r = await c.post("/api/auth/signin/verify", json={})  # no ceremony: ceremony_invalid
+            assert r.status_code == 400
+        assert await scalar(engine, "SELECT count(*) FROM auth_failures") == 100
+        blocked = await c.post("/api/auth/signin/verify", json={})
+        assert blocked.status_code == 429
+        assert int(blocked.headers["retry-after"]) > 3500
+        assert (await c.post("/api/auth/signin/options", json={})).status_code == 429
+    assert await scalar(engine, "SELECT count(*) FROM auth_failures") == 100
+    await engine.dispose()
+
+
+# FR-AUTH-12----------------------------------------------------------------------------------------------
 
 
 async def test_csrf_origin_and_content_type(pg: Pg, tmp_path: Path) -> None:
@@ -676,6 +736,54 @@ async def test_csrf_origin_and_content_type(pg: Pg, tmp_path: Path) -> None:
         assert ws.status_code == 403
     assert await scalar(engine, "SELECT count(*) FROM auth_challenges") == 1
     await engine.dispose()
+
+
+async def _through_gate(scope: dict[str, Any]) -> tuple[list[dict[str, Any]], bool]:
+    """One ASGI scope through the CSRF gate: the messages it sent, and whether the app was reached."""
+    from reader.api.app import CsrfGate
+
+    reached: list[bool] = []
+    sent: list[dict[str, Any]] = []
+
+    async def app(scope: Any, receive: Any, send: Any) -> None:
+        reached.append(True)
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "websocket.connect"} if scope["type"] == "websocket" else {"type": "http.request"}
+
+    async def send(message: dict[str, Any]) -> None:
+        sent.append(message)
+
+    await CsrfGate(app, ORIGIN)(scope, receive, send)
+    return sent, bool(reached)
+
+
+def _scope(kind: str, origins: list[str], method: str = "GET") -> dict[str, Any]:
+    scope: dict[str, Any] = {
+        "type": kind,
+        "path": "/api/kernels/ws",
+        "headers": [(b"origin", o.encode()) for o in origins],
+    }
+    if kind == "http":
+        scope["method"] = method
+    return scope
+
+
+async def test_websocket_scope_needs_the_exact_origin() -> None:
+    for origins in [[], ["https://evil.example"], [ORIGIN, ORIGIN], ["null"]]:
+        sent, reached = await _through_gate(_scope("websocket", origins))
+        assert not reached, origins
+        assert sent == [{"type": "websocket.close", "code": 1008}]
+    sent, reached = await _through_gate(_scope("websocket", [ORIGIN]))
+    assert reached and sent == []
+
+
+async def test_more_than_one_origin_header_is_refused() -> None:
+    sent, reached = await _through_gate(_scope("http", [ORIGIN, ORIGIN], method="POST"))
+    assert not reached
+    assert sent[0]["type"] == "http.response.start" and sent[0]["status"] == 403
+    _, reached = await _through_gate(_scope("http", [ORIGIN], method="POST"))
+    assert reached
 
 
 # FR-AUTH-13, FR-AUTH-14 ----------------------------------------------------------------------------------

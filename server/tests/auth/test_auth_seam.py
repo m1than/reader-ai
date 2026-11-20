@@ -8,10 +8,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import cbor2
 import pytest
 import softauthn
 from auth_helpers import FIXTURES
-from softauthn import BE, BS, UP, UV, SoftAuthenticator, unb64url
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+from softauthn import BE, BS, UP, UV, SoftAuthenticator, b64url, unb64url
 
 RP, ORIGIN = "localhost", "https://localhost"
 CHALLENGE = b"\x02" * 32
@@ -40,8 +43,9 @@ def _reason(name: str) -> Any:
 
 def test_failure_reasons_match_the_spec() -> None:
     from auth_helpers import SPEC
-    from reader.auth.policy import FailureReason
     from ruamel.yaml import YAML
+
+    from reader.auth.policy import FailureReason
 
     spec = YAML(typ="safe").load(SPEC.read_text(encoding="utf-8"))
     assert [r.value for r in FailureReason] == spec["failure_reasons"]
@@ -169,6 +173,101 @@ def test_wrong_public_key_is_bad_signature() -> None:
         RP, ORIGIN, CHALLENGE, signer.assertion(), other.cose_public_key(), 0, HANDLE
     )
     assert result == _reason("bad_signature")
+
+
+# Keys that can never verify are refused at registration; broken COSE is malformed at both ceremonies.
+
+_ONE = b"\x01" * 32
+UNUSABLE_KEYS = {
+    "off-curve EC2 point": cbor2.dumps({1: 2, 3: -7, -1: 1, -2: _ONE, -3: _ONE}),
+    "unknown curve 99": cbor2.dumps({1: 2, 3: -7, -1: 99, -2: _ONE, -3: _ONE}),
+    "short OKP": cbor2.dumps({1: 1, 3: -8, -1: 6, -2: b"\x01" * 5}),
+    "short RSA": cbor2.dumps({1: 3, 3: -257, -1: b"\xc3" * 64, -2: b"\x01\x00\x01"}),
+    "COSE alg is text": cbor2.dumps({1: 2, 3: "x", -1: 1, -2: _ONE, -3: _ONE}),
+    "COSE key is a list": cbor2.dumps([1]),
+    "not CBOR": b"\xff\xff",
+}
+
+
+@pytest.mark.parametrize("key", UNUSABLE_KEYS.values(), ids=UNUSABLE_KEYS.keys())
+def test_unusable_keys_are_malformed(key: bytes) -> None:
+    from reader.auth.webauthn import verify_authentication
+
+    auth = SoftAuthenticator()
+    assert _reg(auth.register(cose_key=key)) == _reason("malformed")
+    assert verify_authentication(RP, ORIGIN, CHALLENGE, auth.assertion(), key, 0, HANDLE) == _reason(
+        "malformed"
+    )
+
+
+# Totality: the seam returns for any input and never raises.
+
+_JSON = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(),
+    lambda inner: st.lists(inner, max_size=4) | st.dictionaries(st.text(max_size=12), inner, max_size=4),
+    max_leaves=12,
+)
+_CBOR = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.binary(max_size=40) | st.text(max_size=12),
+    lambda inner: (
+        st.lists(inner, max_size=4) | st.dictionaries(st.integers() | st.text(max_size=8), inner, max_size=5)
+    ),
+    max_leaves=12,
+)
+_B64 = st.binary(max_size=300).map(b64url)
+
+
+def _shaped(response_fields: dict[str, Any]) -> dict[str, Any]:
+    return {"id": "AAAA", "rawId": "AAAA", "type": "public-key", "response": response_fields}
+
+
+@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    raw=_JSON,
+    client=_B64,
+    att=st.one_of(_B64, _CBOR.map(lambda v: b64url(cbor2.dumps(v)))),
+    auth_data=st.binary(max_size=300),
+    key=st.one_of(st.binary(max_size=200), _CBOR.map(cbor2.dumps)),
+)
+def test_registration_never_raises(raw: Any, client: str, att: str, auth_data: bytes, key: bytes) -> None:
+    from reader.auth.webauthn import verify_registration
+
+    auth = SoftAuthenticator()
+    good = auth.register()
+    hostile_att = b64url(cbor2.dumps({"fmt": "none", "attStmt": {}, "authData": auth_data}))
+    for response in [
+        raw,
+        _shaped({"clientDataJSON": client, "attestationObject": att}),
+        {**good, "response": {**good["response"], "attestationObject": att}},
+        {**good, "response": {**good["response"], "attestationObject": hostile_att}},
+        auth.register(cose_key=key),
+    ]:
+        verify_registration(RP, ORIGIN, CHALLENGE, response)
+
+
+@settings(max_examples=300, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+@given(
+    raw=_JSON,
+    fields=st.fixed_dictionaries(
+        {},
+        optional={
+            "clientDataJSON": _B64,
+            "authenticatorData": _B64,
+            "signature": _B64,
+            "userHandle": _B64,
+        },
+    ),
+    key=st.one_of(st.binary(max_size=200), _CBOR.map(cbor2.dumps)),
+    stored=st.integers(min_value=0, max_value=2**32),
+)
+def test_authentication_never_raises(raw: Any, fields: dict[str, str], key: bytes, stored: int) -> None:
+    from reader.auth.webauthn import verify_authentication
+
+    auth = SoftAuthenticator()
+    good = auth.assertion()
+    for response in [raw, _shaped(fields), {**good, "response": {**good["response"], **fields}}]:
+        verify_authentication(RP, ORIGIN, CHALLENGE, response, key, stored, HANDLE)
+        verify_authentication(RP, ORIGIN, CHALLENGE, response, auth.cose_public_key(), stored, HANDLE)
 
 
 # INV-AUTH-6: counter_cases, one test per row -------------------------------------------------------------
