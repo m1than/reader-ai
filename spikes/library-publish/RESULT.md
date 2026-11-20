@@ -57,7 +57,7 @@ The render check uses the library's existing Playwright with its cached Chromium
 
 ### Bundle size (`results/sizes.json`, from `node consumer/sizes.mjs <library> <tarball>`)
 
-| What | gzip -9 | How |
+| What | gzip (Node zlib, level 9; system `gzip -9` differs by ≤ 21 B) | How |
 | --- | --- | --- |
 | **The 20 components as used in the gallery** (JS, shared chunks counted once; tree-shaken to the parts the gallery uses) | **56,538 B** (≈ 55 KiB) | Gallery `vite build` JS (124,206 B) minus a React-only build of the same config (67,668 B) |
 | Ceiling: all 20 entries in full, React external | ≈ 59,345 B | **The reviewer's independent figure** (one esbuild bundle of all 20 entries), not reproduced here |
