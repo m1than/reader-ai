@@ -28,4 +28,15 @@ for model in $MODELS; do
     jq -c '{model, container_wall_s, marks_s, text_deltas, answer_ok, total_cost_usd, is_error}' "results/$model-$n.json"
   done
 done
+# Sandbox check (owner, 2026-11-20: agents may run their tools in a Docker sandbox): the agent runs Bash
+# inside the container under the ADR-0014 limits. The CLI needs a writable home (tmpfs) and egress to the API.
+if [[ -z "${SKIP_TOOLS:-}" ]]; then
+  CLAUDE_CODE_OAUTH_TOKEN="$(security find-generic-password -s reader-ai -a claude-oauth-token -w)" \
+    docker run --rm --platform linux/arm64 -e CLAUDE_CODE_OAUTH_TOKEN \
+      --read-only --tmpfs /home/worker:uid=1000,size=256m --tmpfs /tmp:uid=1000,size=256m \
+      --cap-drop ALL --security-opt no-new-privileges \
+      --memory 2g --memory-swap 2g --cpus 2 --pids-limit 256 \
+      "$IMAGE" claude-haiku-5-5 tools > results/tools-sandbox-1.json
+  jq -c '{mode, marks_s, answer_ok, answer, total_cost_usd, is_error, num_turns}' results/tools-sandbox-1.json
+fi
 jq -s 'map(.total_cost_usd // 0) | add | "total_cost_usd=\(.)"' results/*.json

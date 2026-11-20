@@ -7,8 +7,14 @@
 
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
-  spent_usd: 0
-  ledger: []             # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
+  daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
+  spent_usd: 0.0558
+  ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
+    - { task: S0.spike.agent-sdk-container, usd: 0.0558, date: 2026-11-20,
+        what: "13 probe runs (haiku, sonnet) + 1 sandboxed tools run; per-run costs in spikes/agent-sdk-container/RESULT.md" }
+  secrets:
+    claude_oauth_token: "Keychain item reader-ai/claude-oauth-token (secret://keychain/reader-ai/claude-oauth-token), stored by the owner 2026-11-20.
+      Not visible in the agent's shell environment. The owner allowed spike runners to read it straight into `docker run -e`, never printed (2026-11-20)."
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -23,12 +29,12 @@ tasks:
       ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it" }
   - { id: S0.owner.machine, stage: 0, kind: owner, status: blocked, needs: [],
       reason: "bootstrap-mac.sh 2026-11-20 in the agent session, 8 FAIL. Fixed with the owner's consent: uv 0.13.7 and Python 3.13.18 installed, repo-local git identity set. Still open:
-        no access to m1than/ui-builder-lib-with-agents; CLAUDE_CODE_OAUTH_TOKEN not set in the agent's shell;
+        no access to m1than/ui-builder-lib-with-agents under the active gh account (m1than has it; the agent switches per push);
+        provider token: resolved through the Keychain (budget.secrets), the env check in bootstrap still fails in the agent's shell;
         Telegram token file missing at ~/Developer/.token_tg_bot (or READER_TG_TOKEN_FILE); Telegram chat not linked;
         no autoMode key in ~/.claude/settings.json; ADRs not accepted (S0.owner.adr-status).
         Telegram notifications cannot be sent until the token file and the chat link exist.",
-      ask: "gh auth refresh -s repo (library access);
-        export CLAUDE_CODE_OAUTH_TOKEN where Claude Code starts; put the bot token file in place (mode 600);
+      ask: "put the Telegram bot token file in place (mode 600);
         send /start to the bot, then node tools/agent/notify.mjs link; merge tools/agent/user-settings.json into ~/.claude/settings.json;
         rerun bash tools/agent/bootstrap-mac.sh" }
   - { id: S0.skeleton, stage: 0, kind: setup, status: done, needs: [], pr: "https://github.com/m1than/reader-ai/pull/4",
@@ -36,7 +42,11 @@ tasks:
       note: "server is `package = false` until OPS-CLI/OPS-DEPLOY claim server/src/reader and add the entry points;
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
   - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
-  - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: in_progress, needs: [S0.skeleton],
+      result: "PASS (spikes/agent-sdk-container/RESULT.md): SDK 0.2.186 with bundled CLI runs non-root in linux/arm64; streams; total_cost_usd reported.
+        Cold container 3.3–3.6 s (haiku) / 5.4–6.0 s (sonnet); first token 1.6–1.9 s / 3.5–3.9 s; ≈9.9k cached CLI system tokens per call.
+        Sandboxed Bash run under ADR-0014 limits passes (owner: agents may use a Docker sandbox); the agent sandbox needs a tmpfs home
+        and API-only egress (allowlist), unlike the kernel sandbox. Worker placement: container." }
   - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
       pr: "https://github.com/m1than/reader-ai/pull/5", review: "deep-reviewer (Fable): approve, round 2",
       result: "PASS (spikes/kernel-roundtrip/RESULT.md, results/*.json): python3/rust/deno start < 0.8 s and stream, internal network, no egress;
