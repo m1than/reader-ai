@@ -1,0 +1,31 @@
+# Variant (e/c): mechanism (c) with a dependent service. The consumer is healthy only once its file
+# exists; the dependent starts only when the consumer is healthy (depends_on: service_healthy).
+name: reader-spike-csro-ec
+services:
+  svc:
+    image: python:3.14-slim-trixie
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    mem_limit: 256m
+    memswap_limit: 256m
+    tmpfs:
+      - /tmp
+      - /run/secrets:uid=1000,gid=1000,mode=0700,size=64k
+    command: ["python", "-c", "import time; time.sleep(600)"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/run/secrets/tok') else 1)"]
+      interval: 1s
+      retries: 3
+      start_period: 0s
+  dependent:
+    image: python:3.14-slim-trixie
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    network_mode: none
+    command: ["python", "-c", "import time; time.sleep(600)"]
+    depends_on:
+      svc: { condition: service_healthy }

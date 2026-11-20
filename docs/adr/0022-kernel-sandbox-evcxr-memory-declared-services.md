@@ -1,7 +1,7 @@
 ---
 id: ADR-0022
 title: Kernel sandbox amendment — exec tmpfs and per-kernel evcxr cache with cleanup, enforced memory, a declared set of static kernel services with one principal or session each
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; routes match the declared set (api relay → kernel-<user>, kernel-pair-*; worker → kernel-verify, kernel-agent; nothing else); a session waits when the pair pool is exhausted; on a shared service (kernel-verify, kernel-agent, kernel-pair-*) a file in /home/lab and in /run/evcxr and a background process left by session 1 (including one that tries to survive the reset: detached, ignoring SIGTERM) are absent in session 2, also after a crashed worker or an abandoned session; the caller refuses a service whose start nonce did not change; two worker jobs for different users never hold kernel-agent or kernel-verify at the same time; no service mounts the Docker socket; all of it re-run on python:3.14-slim-trixie"
 revisit_when: "More than ≈ 12 concurrent Rust kernels are needed in one container (1,024 MiB tmpfs ÷ ≈ 85 MiB per kernel); or evcxr gains a read-only cache or an exec-free cell loader"

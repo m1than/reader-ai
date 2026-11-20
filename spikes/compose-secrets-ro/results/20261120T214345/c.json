@@ -1,0 +1,28 @@
+{
+  "variant": "c",
+  "delivery_exit": 0,
+  "consumer": {
+    "uid": 1000,
+    "file_uid": 1000,
+    "mode": "0o600",
+    "length": 39,
+    "canary_prefix": true
+  },
+  "found": {
+    "inspect": 0,
+    "config": 0,
+    "layer_paths_below_run_secrets": 0,
+    "export": 0,
+    "events": 0,
+    "desktop_log_files": 0,
+    "inspect_shows_source_path": false
+  },
+  "memory_swap_max": "0",
+  "root_without_caps_can_read": false,
+  "small_files_fitting_in_64k_tmpfs": 15,
+  "race_full_reads_of_20": {
+    "naive": 3,
+    "atomic": 20
+  },
+  "file_after_restart": false
+}

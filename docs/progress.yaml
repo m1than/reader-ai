@@ -8,13 +8,17 @@
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
-  spent_usd: 5.4518      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 5.4576      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+                         # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
     - { task: S0.spike.compile-cost, usd: 5.395, date: 2026-11-20,
         what: "2 full L02 compiles (6 stages each: draft, fact-check, review, revise, fact-check, review); cap $8.00 set by the owner;
           per stage in spikes/compile-cost/results/" }
+    - { task: S0.spike.trace-backend, usd: 0.0058, date: 2026-11-20,
+        what: "2 exploratory (hand-recorded) + 2 measured rounds of probe runs (3 haiku stages each); span replays without model calls;
+          breakdown in spikes/trace-backend/RESULT.md" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -135,7 +139,19 @@ tasks:
         Remaining: fix GitHub billing; merge library PR #1; tag v0.1.0 on the merged web3/material-parity and push it; note the
         release run's duration; tell the agent the version. Installing from GitHub Packages needs a read:packages token on the Mac,
         likely a classic PAT (to be verified). Until then reader-ai consumes the built-commit tarball (verified fallback)." }
-  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
+  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: done, needs: [S0.spike.agent-sdk-container],
+      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (recommendation wording), round 3 approve",
+      note: "The owner allowed Keychain use for this spike in chat (2026-11-20: 'allow keychain for compile-cost and trace-backend').
+        run.sh pipes the item reader-ai/claude-oauth-token to the probe on stdin; never printed, not in docker inspect.",
+      result: "PASS for both (spikes/trace-backend/RESULT.md): reader.stage → claude_code.interaction → llm_request nest via TRACEPARENT
+        (claude-agent-sdk 0.2.186 injects it from the active span); a score (Phoenix annotation / MLflow assessment) is visible on the
+        trace; the seeded failure is found by API (fetch 0.025–0.030 s + walk); human UI time not measured.
+        Memory comparable in MLflow's minimal configuration (--workers 1, job execution off): idle starts 2–3 MLflow 372 vs Phoenix
+        467 MiB (first starts 581/831), probe peak 491 vs 467 MiB, 498-span replay 441 vs 470 MiB, 10–16 vs 22–23 PIDs; MLflow default
+        config 2.4 GiB. The replay shows a lesson-sized trace is ingested (498/498), not memory over a minutes-long compile.
+        Recommendation: MLflow minimal, resting on the licence (Apache-2.0 vs Phoenix ELv2, owner-only). Unmeasured for SRV-OBS:
+        server-side scorers/evaluation need the job runner that the minimal config disables (with it, --workers 1 idled at 1.61 GiB,
+        reviewer); client-side evaluation; Postgres; concurrency; REST scores; MLflow auth (none; --allowed-hosts \"*\" in the spike)." }
   - { id: S0.exit, stage: 0, kind: live, status: in_progress,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
@@ -160,7 +176,23 @@ tasks:
         Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac
+  - { id: S1.spike.compose-secrets-ro, stage: 1, kind: spike, status: done, needs: [],
+      pr: "https://github.com/m1than/reader-ai/pull/22",
+      result: "spikes/compose-secrets-ro/RESULT.md, run results/20261120T214345/ (bash spikes/compose-secrets-ro/run.sh):
+        (a) env-sourced secret on a read-only service refused ('`file` is the sole supported option');
+        (b) writable root puts the value in the container layer (docker export finds it, also after stop);
+        (c) tmpfs /run/secrets + atomic `docker exec -i` delivery: 0600, 0 matches in inspect/config/export/events/Desktop logs,
+        nothing in the layer, memory.swap.max 0 with memswap_limit == mem_limit, lost on restart; naive delivery gave a full read
+        in 3 of 20 trials, atomic in 20 of 20; delivery after `up` fails `up` with health dependencies (exit 1), concurrent succeeds;
+        (d) file-sourced Compose secret: 0600, 0 value matches, source path in inspect, survives restart, works with `up`.
+        VM swaps to /var/lib/swap; tmpfs `noswap` rejected. ADR-0026 (proposed): A (= c) chosen by the owner on 2026-11-20;
+        C (= d) rejected. Status flip to accepted is the owner's. Proposed owner control: .claude/settings.json deny rules for the
+        agent's direct `docker exec`, `docker compose exec` and `docker run --pid container:`.",
+      review: "deep-reviewer (Fable): round 1 changes, round 2 changes, round 3 approve",
+      note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used. Task id S1.spike…; the branch is
+        named 0/S0.spike.compose-secrets-ro for historical reasons." }
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: done, needs: [S0.skeleton],
+      pr: "https://github.com/m1than/reader-ai/pull/21",
       review: "deep-reviewer (Fable): spec approve round 3; code approve round 3",
       history: "code review round 1: changes (URL parsing, number limits/too_deep, SecretRef constructor; fixed in 754c246);
         round 2: changes (lone surrogates let a Pydantic ValidationError escape load_config; fixed in 6f11d5d); round 3: approve,
@@ -177,11 +209,12 @@ tasks:
         Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved inside containers;
         ADR-0017 cross-user reference exposure is SRV-AGENT's; no spaces in keychain/1Password names." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
-      note: "Must use SRV-CONFIG's secret_file_name(ref) and secret_env_var(ref) (FR-CONFIG-14): for each non-file reference it
-        resolves the value on the host, passes it as <VAR> in the docker compose child's environment, and declares the Compose
-        secret <name>: { environment: <VAR> }. The names are hash-derived, so the CLI generates that secrets section in memory
-        (a compose override on stdin or generated config), never written to disk. Registers its hostfile/keychain/op resolvers
-        through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7)." }
+      note: "Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
+        watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
+        tmpfs /run/secrets/<secret_file_name(ref)> via `docker exec -i -u <uid>` over stdin (no Compose secrets). The DB password is
+        generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 Compose-secret wording and
+        secret_env_var are obsolete under ADR-0026 and need a paired spec+tests change before OPS-CLI relies on them.
+        Registers its hostfile/keychain/op resolvers through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7)." }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container],
       note: "compose.yaml must not hard-code provider secrets: OPS-CLI adds a generated, in-memory secrets section with

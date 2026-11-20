@@ -1,0 +1,19 @@
+# Variant (c): read-only root, no Compose secret. /run/secrets is a tmpfs owned by the service uid
+# (mode 0700). The host writes the value after start with `docker exec -i` over stdin, atomically
+# (temporary name, then rename). The consumer waits for the final name only. Swap is capped at the
+# memory limit (memswap_limit == mem_limit), so the container's pages, tmpfs included, cannot be swapped.
+name: reader-spike-csro-c
+services:
+  svc:
+    image: python:3.14-slim-trixie
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    mem_limit: 256m
+    memswap_limit: 256m
+    tmpfs:
+      - /tmp
+      - /run/secrets:uid=1000,gid=1000,mode=0700,size=64k
+    command: ["python", "-c", "import os,time\np='/run/secrets/tok'\nwhile not os.path.exists(p): time.sleep(0.05)\ns=os.stat(p); v=open(p).read()\nprint({'uid': os.getuid(), 'file_uid': s.st_uid, 'mode': oct(s.st_mode & 0o777), 'length': len(v), 'canary_prefix': v.startswith('CANARY-')}, flush=True)\ntime.sleep(600)"]
