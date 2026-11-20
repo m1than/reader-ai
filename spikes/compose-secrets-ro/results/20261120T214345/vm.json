@@ -1,0 +1,4 @@
+{
+  "vm_swaps": "/var/lib/swap size_kb=1780732 used_kb=890364",
+  "tmpfs_noswap_rejected": true
+}

@@ -1,0 +1,5 @@
+# Build-context exclusions for server.Dockerfile (OPS-DEPLOY FR-DEPLOY-2). BuildKit reads <Dockerfile>.dockerignore
+# next to the Dockerfile. A second guard beside the COPY allow-list: bytecode caches and any .env file never enter
+# the image, even under server/src.
+**/__pycache__
+**/.env*

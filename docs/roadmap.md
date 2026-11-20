@@ -68,6 +68,30 @@ Live checks follow the owner's preference: real requests against `reader up`, no
 
 Calendar days are hypotheses until stage 1 is measured. They assume the owner starts an agent session on most days and the Mac stays awake while the agent works.
 
+## Vertical slice first (owner, 2026-11-20)
+
+The owner wants a working full-stack product on the Mac as early as possible. After stage 1, the agent builds one thin end-to-end path through stages 2–6 before widening any stage:
+
+**Upload the Bashir PDF → ingest → search → compile one lesson (L02) → open it in the browser with running notebook cells → ask the tutor about it.**
+
+| Step | Task id | Minimal scope (the rest of each module comes later, in its own stage) | Built on |
+| --- | --- | --- | --- |
+| V1 | `V.SRV-JOBS-min` | A Postgres job table with claim/complete/retry (ADR-0006 queue shape), no outbox fan-out or SSE yet | S1.live |
+| V2 | `V.SRV-INGEST-min` | Native Docling converter per ADR-0021 (formula model on, code from the text layer); PDF only; the Bashir book into material spans | V1 |
+| V3 | `V.SRV-SEARCH-min` | `multilingual-e5-small` embeddings (spike embeddings-local) + Postgres full text; top-k spans with citations | V2 |
+| V4 | `V.SRV-LESSON-min` | ADR-0004 lesson notebook format: store, list, open one lesson | V1 |
+| V5 | `V.KERNEL-min` | OPS-SANDBOX + SRV-KERNEL for `python3` only, one `kernel-<user>` service (ADR-0022), the api WebSocket relay | S1.live |
+| V6 | `V.WEB-min` | WEB-UI + WEB-NOTEBOOK + WEB-RENDER: sign in, list lessons, open one, run cells; the library from the local build (spike library-publish) | V4, V5 |
+| V7 | `V.COMPILE-min` | SRV-AGENT + SRV-PIPELINE: draft → fact-check → review → revise for L02 through `agent-proxy` (ADR-0025); open findings go to G2 as open cells | V3, V4 |
+| V8 | `V.TUTOR-min` | SRV-TUTOR: questions about the open lesson, answered from V3's spans with citations | V3, V6, V7 |
+| V9 | `V.live` | `e2e/live/slice.sh`: the whole path above against `reader up`, plus the owner opens L02 in the browser | V1–V8 |
+
+**Rules for the slice:**
+- Every step is a real module spec with the same gates (H1–H3, review per AGENTS.md). "min" means fewer FRs, not weaker ones. Each spec lists what it defers, by item, to its full stage.
+- Accepted ADRs still bind. Where the slice needs something a later stage owns (events, notifications, observability), it uses the smallest form that the full module can replace without migration, and says so in the spec.
+- After V9, the stages resume in order and widen the slice: SRV-EVENTS/SRV-NOTIFY/SRV-OBS (stage 2), the rest of stages 3–6, then 7–9.
+- Risk: some slice code will be reshaped when the full stage lands. That is accepted in exchange for a usable product weeks earlier.
+
 ### Modules by track
 
 | Track | v1 specs (stage) | v2 groundwork inside them |
@@ -161,10 +185,50 @@ The library release workflow is work in the library's repository and follows its
 
 ```bash
 reader up
-check "health"          curl -fsS https://localhost/api/health | jq -e '.db=="ok" and .kernel=="ok"'
+check "health"          curl -fsS https://localhost/api/health | jq -e '.db=="ok"'
 check "anonymous 401"   test "$(curl -s -o /dev/null -w '%{http_code}' https://localhost/api/me)" = 401
-check "six healthy"     test "$(docker compose -f deploy/compose.yaml ps --format json | jq -s '[.[]|select(.Health=="healthy")]|length')" = 6
-check "no env secrets"  ! docker inspect $(docker compose -f deploy/compose.yaml ps -q) | grep -q "$READER_CANARY"
+# Four default-profile services (OPS-DEPLOY, owner 2026-11-20): caddy, api, worker, postgres. Not six: mcp arrives in
+# stage 7 (profile mcp), the kernel services in stage 4 (profile kernels), Rotel with SRV-OBS in stage 2.
+check "four healthy"    test "$(docker compose -f deploy/compose.yaml ps --format json | jq -s '[.[]|select(.Health=="healthy")]|length')" = 4
+# Secret checks (ADR-0026, OPS-DEPLOY FR-DEPLOY-10, INV-DEPLOY-2): one function per check, each looping per container,
+# so `check` sees the whole verdict and no pipe sits outside it.
+CONSUMERS="postgres api worker"   # mcp and agent-proxy join in later stages
+no_canary_in_inspect() { local c; for c in $(docker compose -f deploy/compose.yaml ps -q); do
+  docker inspect "$c" | grep -q "$READER_CANARY" && return 1; done; return 0; }
+no_secret_in_diff() { local c; for c in $(docker compose -f deploy/compose.yaml ps -q); do
+  docker diff "$c" | grep -q '^A /run/secrets/.' && return 1; done; return 0; }   # paths below the mount point only
+secret_files_ok() { local s uid; for s in $CONSUMERS; do
+  uid=$(docker compose -f deploy/compose.yaml exec -T "$s" id -u) || return 1
+  [ "$(docker compose -f deploy/compose.yaml exec -T "$s" stat -c '%a %u' /run/secrets/db-password)" = "600 $uid" ] || return 1
+  done; return 0; }
+# `reader up` above returned 0 with `depends_on: service_healthy` declared: delivery runs concurrently with `up` and the
+# watcher keeps running (ADR-0026; spikes/compose-secrets-ro case e). The watcher's stop command is fixed by OPS-CLI's
+# spec; `reader watcher stop` stands for it here.
+health_of() { docker inspect -f '{{.State.Health.Status}}' "$(docker compose -f deploy/compose.yaml ps -q "$1")"; }
+healthy_with_file_within() { local s="$1" n="$2"; for _ in $(seq "$n"); do
+  [ "$(health_of "$s")" = healthy ] && docker compose -f deploy/compose.yaml exec -T "$s" test -s /run/secrets/db-password \
+    && return 0; sleep 2; done; return 1; }
+redelivered_by_watcher() { docker compose -f deploy/compose.yaml restart api >/dev/null || return 1
+  healthy_with_file_within api 30; }                            # no second `reader up`
+fails_closed_without_watcher() { reader watcher stop || return 1
+  docker compose -f deploy/compose.yaml restart api >/dev/null || return 1
+  sleep 20; [ "$(health_of api)" != healthy ] || return 1      # no file, no watcher: stays unhealthy (FR-DEPLOY-10 d)
+  reader up >/dev/null || return 1; healthy_with_file_within api 30; }
+postgres_restarts_without_file() { reader watcher stop || return 1   # hypothesis of FR-DEPLOY-10 d: PGDATA initialised,
+  docker compose -f deploy/compose.yaml restart postgres >/dev/null || return 1   # so the wrapper does not need the file
+  for _ in $(seq 30); do [ "$(health_of postgres)" = healthy ] && { reader up >/dev/null; return $?; }; sleep 2; done
+  reader up >/dev/null; return 1; }
+record_consumer_peaks() { local s; for s in $CONSUMERS; do      # cgroup v2 high-water mark since container start
+  printf '%s memory.peak=%s\n' "$s" "$(docker compose -f deploy/compose.yaml exec -T "$s" cat /sys/fs/cgroup/memory.peak)" >&2 \
+    || return 1; done; return 0; }                              # FR-DEPLOY-9 limits are revised from these
+check "no env secrets"          no_canary_in_inspect
+check "no secret on disk"       no_secret_in_diff
+check "secret files 0600, owner = service uid" secret_files_ok
+check "re-delivered by the watcher after a restart" redelivered_by_watcher
+check "fails closed without the watcher" fails_closed_without_watcher
+check "postgres restarts without its file" postgres_restarts_without_file
+check "postgres hardened"       test "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}}' "$(docker compose -f deploy/compose.yaml ps -q postgres)")" = "999:999 true"
+check "consumer memory recorded" record_consumer_peaks
 check "doctor"          reader doctor --json | jq -e 'all(.[]; .ok)'
 # manual, once: open the bootstrap link in Safari, register a passkey, then:
 check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me | jq -e '.role=="owner"'
@@ -234,7 +298,14 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 
 **Design gate (owner, 2 sessions):** the owner reviews Calm in Storybook (`https://localhost/storybook`) and adjusts tokens live. The exported JSON patch becomes a PR. Nothing in 4b is marked implemented before this gate.
 
-**Live check** `e2e/live/stage-4.sh`: store fixture lesson F01; `/api/lessons/F01` validates; a Playwright run opens F01, executes the Nakamoto lab and sees the assert pass; a lab cell that tries `curl http://postgres:5432` fails; `/storybook` answers 200.
+**Live check** `e2e/live/stage-4.sh`:
+- `/api/health` reports `.kernel=="ok"` (moved from stage 1, owner 2026-11-20);
+- every kernel service of profile `kernels` is healthy;
+- store fixture lesson F01 and check that `/api/lessons/F01` validates;
+- a Playwright run opens F01, executes the Nakamoto lab and sees the assert pass;
+- a lab cell that tries `curl http://postgres:5432` fails;
+- a lab cell cannot connect to any port of its declared caller (api or worker), per OPS-DEPLOY FR-DEPLOY-4;
+- `/storybook` answers 200.
 
 **Exit:** all PASS; the owner opens F01, runs a lab and writes a note. The first real lesson arrives through the pipeline in stage 5.
 **Owner:** 6 spec reviews, design gate, 2 live checks.
