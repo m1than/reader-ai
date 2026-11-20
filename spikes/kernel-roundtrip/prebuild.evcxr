@@ -1,0 +1,7 @@
+:dep sha2 = "0.11"
+:dep hmac = "0.13"
+:dep pbkdf2 = "0.13"
+:dep aes-gcm = "0.11"
+:dep k256 = { version = "0.14", features = ["ecdsa"] }
+:dep hex = "0.4"
+println!("prebuilt");

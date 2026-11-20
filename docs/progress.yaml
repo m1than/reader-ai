@@ -37,7 +37,10 @@ tasks:
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
   - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
-  - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: in_progress, needs: [S0.skeleton],
+      result: "PASS (spikes/kernel-roundtrip/RESULT.md): python3/rust/deno start < 1 s and stream; pilot crates warm 1.0 s, cold 8.2 s;
+        image 1.91 GB; peak 0.52 GiB. Needs an exec tmpfs /run/evcxr (EVCXR_TMPDIR) and a writable copy of the evcxr cache
+        (proposed ADR-0014 amendment for S0.exit); crates vendored at image build (CARGO_NET_OFFLINE)." }
   - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
       note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml)" }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
