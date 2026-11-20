@@ -1,0 +1,58 @@
+# VEC-CONFIG-2: invalid configs, one problem each. Each case is the reader.yaml text and the expected error location.
+# `line` is 1-based within `yaml`. No secret values: the "literal" cases use obvious placeholders.
+cases:
+  - name: inline secret instead of a reference
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      users:
+        - handle: ivan
+          role: owner
+          providers:
+            - kind: anthropic-subscription
+              token: not-a-reference-placeholder
+    expect: { line: 8, path: users.0.providers.0.token }
+
+  - name: unknown secret scheme
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      users:
+        - handle: ivan
+          role: owner
+          providers:
+            - kind: anthropic-subscription
+              token: secret://vault/reader-ai/token
+    expect: { line: 8, path: users.0.providers.0.token }
+
+  - name: unsupported version
+    yaml: |
+      version: 2
+      instance: { url: https://reader.local, data_dir: ./data }
+    expect: { line: 1, path: version }
+
+  - name: unknown top-level key
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      telemetry: true
+    expect: { line: 3, path: telemetry }
+
+  - name: sha256 not 64 lowercase hex
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      materials:
+        - id: bashir-2025
+          file: ./materials/book.pdf
+          sha256: 61E8D4C3
+          license: personal-use
+          language: ru
+    expect: { line: 6, path: materials.0.sha256 }
+
+  - name: warn_at above 1
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      budgets: { monthly_usd: 200, warn_at: 1.5 }
+    expect: { line: 3, path: budgets.warn_at }
