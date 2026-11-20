@@ -37,7 +37,8 @@ tasks:
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
   - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
-  - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: in_progress, needs: [S0.skeleton],
+  - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
+      pr: "https://github.com/m1than/reader-ai/pull/5", review: "deep-reviewer (Fable): approve, round 2",
       result: "PASS (spikes/kernel-roundtrip/RESULT.md, results/*.json): python3/rust/deno start < 0.8 s and stream, internal network, no egress;
         pilot crates warm 1.0–1.17 s, cold 4.9 s (≈10 s for two kernels at once); image 1.91 GB; peak 1.0 GiB warm, 1.4 GiB cold.
         Needs an exec tmpfs /run/evcxr and a per-kernel copy of the evcxr cache via a launcher (shared cache breaks concurrent kernels);
