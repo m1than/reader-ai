@@ -298,8 +298,17 @@ tasks:
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
-  - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
-      note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
+  - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.SRV-JOBS-min],
+      branch: V/V.SRV-INGEST-min,
+      note: "spec drafted, awaits deep-reviewer. spec/modules/SRV-INGEST.yaml (slice revision): host command
+        `reader-ingest` runs the Docling converter natively as a sandbox-exec child (no network, read-only input and
+        models, writes only its work dir), streams the validated artifact over `docker exec -T worker python -I -m
+        reader.ingest.receive` stdin; the worker stores it on blobs and enqueues `ingest.import`. Transport differs from
+        ADR-0021 Decision 3 (loopback listener, unreachable from the worker's internal networks): ADR-0027 drafted as
+        proposed; the spec waits for the owner's decision on it. Cross-spec: SRV-EVENTS KINDS from a declared module
+        list; SRV-AUTH ROUTERS + version_locations add ingest. Spike before Green: spikes/ingest-confine (sandbox-exec
+        with Docling on Python 3.14; fallback a dedicated macOS user). Owner: browser upload deferred (reader.yaml +
+        host command instead)." }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
