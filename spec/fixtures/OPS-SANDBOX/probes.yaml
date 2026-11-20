@@ -20,4 +20,5 @@ probes:
   - { id: secrets-dir,    action: "os.path.exists('/run/secrets')",                expect: absent, level: [image, live] }
   - { id: docker-sock,    action: "os.path.exists('/var/run/docker.sock') or os.path.exists('/run/docker.sock')", expect: absent, level: [image, live] }
   - { id: env-names,      action: "sorted(os.environ)", expect: equals, level: [image, live],
+      scope: "kernels created without `env` (SRV-KERNEL's kernels); a cell-created kernel with KERNEL_* keys adds them",
       value: [CLICOLOR, CLICOLOR_FORCE, FORCE_COLOR, GIT_PAGER, HOME, HOSTNAME, JPY_PARENT_PID, KERNEL_GATEWAY, LANG, MPLBACKEND, PAGER, PATH, PYDEVD_USE_FRAME_EVAL, TERM] }

@@ -11,11 +11,13 @@
 # no redirects, capped bodies and messages, validated ids, messages rebuilt from known fields.
 #
 # Dependencies and cross-spec items:
-# - SRV-AUTH (stage 1, draft): the authenticated session and its user handle, and its CSRF rule for state-changing
-#   requests (FR-AUTH-12: JSON bodies with `Content-Type: application/json`). This spec uses only "the request's
-#   authenticated handle, or none, and whether that session is still valid". SRV-AUTH owns `server/src/reader/api/**`;
-#   this spec claims only `server/src/reader/api/routes_kernels.py`, and SRV-AUTH's app must include routers from a
-#   declared list that names it (cross-spec item for SRV-AUTH's review).
+# - SRV-AUTH (stage 1, draft): the authenticated session and its user handle, and its request rule FR-AUTH-12 (as
+#   summarised by deep-reviewer round 2: the Origin check covers state-changing requests and WebSocket upgrades;
+#   `Content-Type: application/json` is required only when a body is present). This spec uses only "the request's
+#   authenticated handle, or none, and whether that session is still valid".
+# - Cross-spec item: this module's router lives in `server/src/reader/kernels/routes.py` (covered by `kernels/**`).
+#   SRV-AUTH owns `server/src/reader/api/**`; its app factory must include routers from a declared list naming
+#   `reader.kernels.routes` (for SRV-AUTH's review).
 # - OPS-SANDBOX: Kernel Gateway on `kernel-user-<handle>:8888`, control endpoint on `:8889` (FR-SANDBOX-3..9).
 # - OPS-DEPLOY / OPS-CLI: the service and its network exist only when profile `kernels` runs (task V.OPS-CLI-kernels).
 # - SRV-CONFIG: `instance.url` gives the instance origin; `users[].handle` the handles.
@@ -44,7 +46,6 @@ adr: [ADR-0022, ADR-0014, ADR-0006, ADR-0012, ADR-0013, ADR-0024, ADR-0026]
 
 paths:
   - server/src/reader/kernels/**
-  - server/src/reader/api/routes_kernels.py
   - server/tests/kernels/**
   - spec/fixtures/SRV-KERNEL/**
 
@@ -97,16 +98,19 @@ requirements:
       `POST /api/kernel/sessions` with JSON `{"lesson_id": <1–128 chars of [A-Za-z0-9._-]>}` creates a python3 kernel
       with `POST http://kernel-user-<h>:8888/api/kernels` body `{"name": "python3"}` (no `env`, no `path`) and answers
       201 `{"session_id": <32 hex>, "lesson_id": ...}`. If the user already has a session for that lesson, it answers
-      200 with the existing one. The returned kernel id must match `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
+      200 with the existing one, after checking that `/control/state` still answers with the nonce recorded for the user
+      (FR-KERNEL-14); on a different nonce the FR-KERNEL-14 restart handling runs first and a new session is created.
+      The returned kernel id must match `^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`,
       otherwise the call counts as failed (FR-KERNEL-13). Session ids come from `secrets.token_hex(16)`; the kernel id
       never leaves the api. Sessions live in the api process's memory (single api replica, ADR-0012). [unit]
   - id: FR-KERNEL-3
     text: >-
       `GET /api/kernel/sessions` lists the caller's own sessions. `DELETE /api/kernel/sessions/{session_id}` deletes the
       kernel (`DELETE /api/kernels/<kid>`) and the session, closing its WebSocket connections with 1000; an upstream 404
-      also removes the session. Bodiless state-changing calls (`DELETE`, and `POST` for interrupt and reset) take the
-      body `{}` with `Content-Type: application/json`, which satisfies SRV-AUTH FR-AUTH-12; other bodies or types are
-      refused with 415 before any upstream call. [unit]
+      also removes the session. The state-changing calls without a payload (`DELETE`, and `POST` for interrupt and
+      reset) accept either no body or the body `{}` with `Content-Type: application/json` (SRV-AUTH FR-AUTH-12 requires
+      the type only when a body is present); any other body or type is refused with 415 before any upstream call.
+      [unit]
   - id: FR-KERNEL-4
     text: >-
       `POST /api/kernel/sessions/{session_id}/interrupt` calls `POST /api/kernels/<kid>/interrupt` and answers 204.
@@ -149,7 +153,9 @@ requirements:
       not copied. Browser → kernel: only text frames; each frame is one JSON object on channel `shell` with
       `header.msg_type` in {execute_request, kernel_info_request, complete_request, inspect_request,
       is_complete_request}; `header.msg_id` is a string of 1–128 characters and not equal to the msg_id of a request
-      still pending on that session; `parent_header` is `{}`; `buffers` is absent or empty. The relay overwrites
+      still pending on that session; at most 32 non-execute requests may be pending per session (a structural bound
+      on the relay's pending-id table; a completion or inspect request is answered in milliseconds), a 33rd gets
+      `reader_notice` `busy`; `parent_header` is `{}`; `buffers` is absent or empty. The relay overwrites
       `header.session` with the session id and `header.username` with the handle, sets `content.allow_stdin` false and
       `content.user_expressions` `{}` on execute_request, and checks content fields against REF-KERNEL-1 types. Any
       other frame is not forwarded and gets `reader_notice` `rejected` with its `msg_id` when one parses; a binary frame
@@ -211,11 +217,14 @@ requirements:
     text: >-
       Unplanned restarts: the api records the user's nonce at each successful reset and at the first use of the service
       after api start (FR-KERNEL-9's reset). When an upstream WebSocket closes or fails to connect, or a REST call for a
-      known kernel id answers 404, the api reads `/control/state`: if the nonce differs from the recorded one, the
-      container restarted outside a reset, so every session of that user is dropped with `kernel_reset` and close 1012
-      and the new nonce is recorded once its state is `up`; if the nonce is the same, only that session is dropped with
-      `kernel_dead` and close 1000; if the state cannot be read, every session of that user is dropped with
-      `kernel_unavailable` and close 1013. [unit]
+      known kernel id answers 404, the api reads `/control/state`: if the nonce differs from the recorded one, or is the
+      same with `gateway: exiting` (an exit is under way, e.g. a cell called `/control/exit`), the container restarted
+      or is restarting outside a reset, so every session of that user is dropped with `kernel_reset` and close 1012 and
+      the new nonce is recorded once its state is `up`; if the nonce is the same and the state is `up`, only that
+      session is dropped with `kernel_dead` and close 1000; if the state cannot be read, every session of that user is
+      dropped with `kernel_unavailable` and close 1013. Whenever a session is dropped with `kernel_dead` (here or in
+      FR-KERNEL-12), the api sends a best-effort `DELETE /api/kernels/<kid>` upstream and ignores its result, so the
+      kernel does not keep counting against `max_kernels`. [unit]
 
 invariants:
   - id: INV-KERNEL-1
@@ -242,9 +251,10 @@ invariants:
       session token, Authorization or other header, and no query string. [unit]
   - id: INV-KERNEL-5
     text: >-
-      No session outlives its nonce: a session is used only while the user's service answers with the nonce recorded
-      when the session was created; no session is created and no WebSocket is opened between a reset's step 2 and a
-      confirmed new nonce, nor while the service is marked unusable. [unit]
+      No session outlives its nonce: every session belongs to the nonce recorded when it was created or returned
+      (FR-KERNEL-2 compares the current nonce), and once the api observes a different nonce or `exiting` (FR-KERNEL-5,
+      FR-KERNEL-14) no session of the old nonce is used again; no session is created or returned and no WebSocket is
+      opened between a reset's step 2 and a confirmed new nonce, nor while the service is marked unusable. [unit]
   - id: INV-KERNEL-6
     text: >-
       Logs from this module carry route, handle, session id, message types, counts, sizes and notice codes only; never

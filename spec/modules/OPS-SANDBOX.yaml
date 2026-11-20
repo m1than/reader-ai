@@ -11,8 +11,8 @@
 # start nonce generated at boot and exposes a control endpoint on the kernel's own network. A caller asks it to exit;
 # PID 1 exiting ends every process in the container's PID namespace (REF-SANDBOX-5); `restart: always` (OPS-DEPLOY)
 # brings a fresh container with empty tmpfs; the caller confirms the new nonce (SRV-KERNEL FR-KERNEL-5). The supervisor
-# is fail-stop: anything unexpected ends PID 1, which is itself a full reset, so the only states a caller can observe
-# are "same container, same nonce" and "fresh container, new nonce".
+# is fail-stop: a gateway exit, an exception or SIGINT ends PID 1, which is itself a full reset, so the only states a
+# caller can observe are "same container, same nonce" and "fresh container, new nonce".
 #
 # Facts measured by deep-reviewer round 1 in throwaway containers under the template's settings (uid 1000, cap_drop
 # ALL, no-new-privileges, default seccomp), used below:
@@ -20,9 +20,11 @@
 #   `/proc/1/environ` and `/proc/1/fd` is denied once PID 1 is non-dumpable;
 # - binding 0.0.0.0:8889 while the supervisor holds it fails with EADDRINUSE;
 # - Kernel Gateway's traits are `JupyterWebsocketPersonality.env_whitelist` and `JupyterWebsocketPersonality.list_kernels`;
-#   only `KERNEL_*` keys of a kernel-creation request's `env` that are also whitelisted reach the kernel;
-# - the environment a python3 kernel sees, with the gateway started under the explicit environment of FR-SANDBOX-8, is
-#   VEC-SANDBOX-1 `env-names`.
+#   a key of a kernel-creation request's `env` reaches the kernel if it starts with `KERNEL_` **or** is in the
+#   whitelist. With the empty whitelist, `KERNEL_*` keys always pass and other keys never do (round 2, re-measured).
+#   Harmless here: SRV-KERNEL sends no `env`, and only a cell can call the gateway with one, into its own container;
+# - the environment a python3 kernel created without `env` sees, with the gateway started under the explicit
+#   environment of FR-SANDBOX-8, is VEC-SANDBOX-1 `env-names`.
 # Derived from REF-SANDBOX-4: the Docker restart delay doubles from 100 ms on each restart of a container that ran less
 # than 10 s, so the tenth reset in quick succession waits 51.2 s, longer than SRV-KERNEL's 30 s deadline.
 #
@@ -126,12 +128,13 @@ requirements:
       Kernel Gateway runs with: personality `kernel_gateway.jupyter_websocket`; ip 0.0.0.0, port 8888; `auth_token`
       empty (network-only reachability, header note); `JupyterWebsocketPersonality.list_kernels` false;
       `KernelGatewayApp.max_kernels` 4; `default_kernel_name` python3; no `allow_origin`;
-      `JupyterWebsocketPersonality.env_whitelist` empty. Only `KERNEL_*` keys of a kernel-creation request's `env` can
-      ever reach a kernel, and with the empty whitelist none does (SRV-KERNEL sends no `env`). `max_kernels` 4 is a
+      `JupyterWebsocketPersonality.env_whitelist` empty. A key of a kernel-creation request's `env` reaches the kernel
+      if it starts with `KERNEL_` or is whitelisted, so with the empty whitelist only `KERNEL_*` keys pass. This is
+      harmless: SRV-KERNEL sends no `env`, and only a cell can send one, into its own container. `max_kernels` 4 is a
       structural bound: one kernel per open lesson (SRV-KERNEL FR-KERNEL-6) with headroom under the 2 GiB limit; the
       [image] test records the memory of 4 idle python3 kernels and fails above 1 GiB. [image] A fifth
       `POST /api/kernels` is refused; a request with `env: {"KERNEL_X": "1", "OTHER": "1"}` yields a kernel whose
-      environment has neither.
+      environment has `KERNEL_X` and not `OTHER`.
 
   # Supervisor, start nonce, control endpoint
   - id: FR-SANDBOX-4
@@ -145,10 +148,15 @@ requirements:
       an explicit environment (FR-SANDBOX-8). [image]
   - id: FR-SANDBOX-5
     text: >-
-      Fail-stop: PID 1 calls `os._exit(1)` when the gateway child exits for any reason, on any catchable signal other
-      than SIGTERM, on any uncaught exception in any of its threads, and when its control loop ends for any reason.
-      SIGTERM runs the exit path of FR-SANDBOX-6 (b) and ends with `os._exit(0)`. PID 1 never closes its 8889 sockets
-      before it exits, the grace period included. [image]
+      Fail-stop: PID 1 calls `os._exit(1)` when the gateway child exits for any reason, on any uncaught exception in any
+      of its threads, and when its control loop ends for any reason. Signals: it handles exactly SIGTERM (the exit path
+      of FR-SANDBOX-6 (b), ending with `os._exit(0)`) and SIGINT (`os._exit(1)`); SIGPIPE stays ignored (Python's
+      default); every other signal keeps its default disposition, which for PID 1 inside its namespace means it is not
+      delivered (REF-SANDBOX-5). PID 1 reaps every child that exits, including orphans re-parented to it; only the
+      gateway child's exit ends PID 1. PID 1 never closes its 8889 sockets before it exits, the grace period included.
+      [image] Including the case: a cell starts a child, the child's parent exits so the child is re-parented to PID 1,
+      and the child exits; afterwards the nonce is unchanged, a /tmp marker file remains, and no zombie is left in
+      `/proc`.
   - id: FR-SANDBOX-6
     text: >-
       Control endpoint (HTTP/1.1, JSON, no authentication, reachable only on the kernel's network, header note):
@@ -171,7 +179,7 @@ requirements:
       The image declares no `ENV` beyond what the base image sets and PATH, LANG and HOME. The supervisor starts the
       gateway with exactly `{HOME=/home/lab, HOSTNAME=<its own>, LANG=C.UTF-8, PATH=<the image PATH>}` and nothing
       inherited, so base-image variables such as PYTHON_VERSION and PYTHON_SHA256 do not reach kernels. [image] Inside a
-      python3 kernel, the names in `os.environ` equal VEC-SANDBOX-1 `env-names` exactly (the four above plus the names
+      python3 kernel created without `env` (as SRV-KERNEL creates them), the names in `os.environ` equal VEC-SANDBOX-1 `env-names` exactly (the four above plus the names
       Kernel Gateway and ipykernel set at kernel start, as measured), and `/run/secrets` does not exist.
   - id: FR-SANDBOX-9
     text: >-
@@ -219,7 +227,8 @@ invariants:
       Kernel code cannot forge a reset or a non-reset: from a cell, (a) `ptrace(PTRACE_ATTACH, 1)` and
       `process_vm_readv` on PID 1 fail with EPERM; (b) opening `/proc/1/mem` for reading or writing is denied;
       (c) for every signal 1–64 sent to PID 1, afterwards either `/control/state` answers with the same nonce, or a real
-      restart happened: the nonce changed and a marker file written to /tmp before the signal is gone; (d) binding
+      restart happened: the nonce changed and a marker file written to /tmp before the signal is gone; SIGCHLD and
+      SIGPIPE must not cause a restart (same nonce, marker present); (d) binding
       8889 on 0.0.0.0 and on [::] fails (EADDRINUSE, or EADDRNOTAVAIL/EAFNOSUPPORT when the container has no IPv6).
       [image] (A cell may still call `POST /control/exit` itself; that resets its own principal's container only, which
       ADR-0022 permits.)

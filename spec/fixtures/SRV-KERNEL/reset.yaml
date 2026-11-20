@@ -49,10 +49,20 @@ unplanned:
     recorded_nonce: "00000000000000000000000000000001"
     state: { nonce: "00000000000000000000000000000009", gateway: up }
     expect: { dropped: all_sessions_of_user, notice: kernel_reset, close_code: 1012, recorded_nonce: "00000000000000000000000000000009" }
+  - id: exiting-same-nonce
+    note: "a cell called /control/exit itself"
+    recorded_nonce: "00000000000000000000000000000001"
+    state: { nonce: "00000000000000000000000000000001", gateway: exiting }
+    expect: { dropped: all_sessions_of_user, notice: kernel_reset, close_code: 1012, records: "the new nonce once up" }
   - id: kernel-died
     recorded_nonce: "00000000000000000000000000000001"
     state: { nonce: "00000000000000000000000000000001", gateway: up }
-    expect: { dropped: that_session, notice: kernel_dead, close_code: 1000 }
+    expect: { dropped: that_session, notice: kernel_dead, close_code: 1000, upstream_delete: best_effort }
+  - id: existing-session-new-nonce
+    call: "POST /api/kernel/sessions for a lesson that has a session"
+    recorded_nonce: "00000000000000000000000000000001"
+    state: { nonce: "00000000000000000000000000000005", gateway: up }
+    expect: { old_sessions_dropped: kernel_reset, response: "201 with a new session" }
   - id: state-unreadable
     recorded_nonce: "00000000000000000000000000000001"
     state: connection_refused
