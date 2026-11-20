@@ -1,4 +1,29 @@
 {
+  "permissions": {
+    "deny": [
+      "Read(~/Developer/.token_tg_bot)",
+      "Read(~/.config/reader-ai/**)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Bash(env)",
+      "Bash(env *)",
+      "Bash(printenv)",
+      "Bash(printenv *)",
+      "Bash(export -p)",
+      "Bash(set)",
+      "Bash(*token_tg_bot*)",
+      "Bash(*CLAUDE_CODE_OAUTH_TOKEN*)",
+      "Bash(security find-generic-password *)",
+      "Bash(security dump-keychain *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)",
+      "Bash(git push * --force*)",
+      "Bash(git push origin main*)",
+      "Bash(git push origin HEAD:main*)",
+      "Bash(npm publish *)",
+      "Bash(gh release create *)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -7,6 +32,26 @@
           {
             "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/tools/hooks/pre-write.mjs\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/tools/agent/notify.mjs\" --hook"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/tools/agent/notify.mjs\" --hook"
           }
         ]
       }

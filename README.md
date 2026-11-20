@@ -13,7 +13,7 @@ Self-hosted: Docker Compose behind Caddy, Postgres with pgvector, passkey sign-i
 
 ## Status
 
-Design phase. The decision package is in [docs/adr](docs/adr/) (18 ADRs) with an overview in [docs/architecture.md](docs/architecture.md) and the staged build plan in [docs/roadmap.md](docs/roadmap.md). ADR-0001 … 0016 are accepted by the owner (status flip pending his commit); 0017 and 0018 are proposed. Implementation starts with stage 0 of the roadmap.
+Design phase. The decision package is in [docs/adr](docs/adr/) (19 ADRs) with an overview in [docs/architecture.md](docs/architecture.md) and the staged build plan in [docs/roadmap.md](docs/roadmap.md). The owner has agreed to ADR-0001 … 0018; the status flip is his commit. ADR-0019 (autonomous agent mode) is proposed. Implementation starts with stage 0 of the roadmap, run by the agent.
 
 Users own what they build: the whole knowledge base can be downloaded at any time as an open archive (Markdown, `.ipynb`, JSON).
 
@@ -42,6 +42,7 @@ Plans (ADR-0017, v2):
 | [0016](docs/adr/0016-sharing-and-paired-programs.md) | Sharing, roles, paired programs |
 | [0017](docs/adr/0017-accounts-data-ownership-and-monetization.md) | Accounts, always-available export, monetization of transformation |
 | [0018](docs/adr/0018-agent-bus-traces-and-local-models.md) | Agent bus, run traces and quality signals (v1); evaluation, local models, tuning (v2) |
+| [0019](docs/adr/0019-autonomous-agent-mode.md) | Autonomous agent mode: the agent approves specs and merges; the owner reviews after |
 
 ## Pilot
 
@@ -55,9 +56,26 @@ The PDF is never committed.
 
 ## Development
 
+The build is run by an autonomous agent (ADR-0019) on the owner's Mac. Rules: [AGENTS.md](AGENTS.md) (shared) and [CLAUDE.md](CLAUDE.md) (Claude Code). Run state: [docs/progress.yaml](docs/progress.yaml).
+
+Owner, once:
+
+1. Merge the PR that adds ADR-0019, then set `status: accepted` in ADR-0001 … 0019 and merge that.
+2. Merge `tools/agent/user-settings.json` into `~/.claude/settings.json`. Check the result with `claude auto-mode config` and `claude auto-mode critique`.
+3. Send `/start` to the Telegram bot, then run `node tools/agent/notify.mjs link`.
+4. Run `bash tools/agent/bootstrap-mac.sh` (`--install` adds missing CLI tools) until every check passes.
+
+Start the agent from the repository root:
+
+```bash
+caffeinate -dimsu claude --permission-mode auto "$(cat tools/agent/kickoff.md)"
+```
+
+Tooling:
+
 ```bash
 npm ci --prefix tools
 node tools/trace/check.mjs      # T1–T8: spec ↔ tests ↔ code ↔ ADRs
 ```
 
-Agent rules: [CLAUDE.md](CLAUDE.md). Tooling: [tools/README.md](tools/README.md).
+Details: [tools/README.md](tools/README.md).

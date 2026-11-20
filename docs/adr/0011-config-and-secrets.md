@@ -21,12 +21,13 @@ A container cannot reach the host's Keychain, Credential Locker or Secret Servic
 
 | Scheme | Resolved by | Typical use |
 | --- | --- | --- |
-| `secret://env/NAME` | server, from the process environment | CI, quick local runs |
+| `secret://env/NAME` | host CLI, from the environment of the shell that runs `reader up`; inside containers, the server | Owner's shell profile, CI, quick local runs |
 | `secret://file/run/secrets/NAME` | server, from a mounted file | Compose secrets, servers |
+| `secret://hostfile/<absolute path>` | host CLI, from a file on the host; `reader doctor` refuses it unless the mode is 0600 and the file is outside every git work tree | A token kept in a private file on the owner's machine |
 | `secret://keychain/<service>/<account>` | host CLI through `keyring`: macOS Keychain, Windows Credential Locker, Linux Secret Service (GNOME Keyring, KWallet) | Owner's laptop |
 | `secret://op/<vault>/<item>/<field>` | host CLI through the 1Password CLI | Optional |
 
-**Host CLI `reader`** (Python, installed with `uv tool install`): `reader up` reads `reader.yaml`, resolves `keychain` and `op` references on the host, and starts `docker compose up` with the values only in that child process's environment. Compose maps them into containers as secrets (`secrets: <name>: environment: <VAR>`), which appear as files under `/run/secrets/`. Nothing is written to disk. `reader secrets set NAME` stores a value in the platform keyring.
+**Host CLI `reader`** (Python, installed with `uv tool install`): `reader up` reads `reader.yaml`, resolves `env`, `hostfile`, `keychain` and `op` references on the host, and starts `docker compose up` with the values only in that child process's environment. Compose maps them into containers as secrets (`secrets: <name>: environment: <VAR>`), which appear as files under `/run/secrets/`. Nothing is written to disk. `reader secrets set NAME` stores a value in the platform keyring.
 
 **`.env` fallback** for headless Linux servers: `deploy/.env` (gitignored, mode 0600 checked by `reader doctor`), referenced through `secret://env/...`.
 

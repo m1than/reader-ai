@@ -4,7 +4,7 @@
 //   H1 spec-first: an implementation file is writable only if an approved/implemented
 //      spec claims it through `paths` (spikes/ is outside the gate);
 //   H2 a test traced to an approved spec changes only together with the spec (P7);
-//   H3 spec approval and ADR acceptance are owner gates; the agent never raises status.
+//   H3 owner gates (ADR-0019): spec `implemented` and any ADR decision; the agent may approve specs.
 // Bash writes are invisible to this hook; CI (tools/trace) closes that gap.
 import { readFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -40,7 +40,8 @@ const dirty = () => {
   } catch { return []; }
 };
 
-const SPEC_GATE = /^status:\s*(approved|implemented)\b/m;
+// ADR-0019: the agent may approve specs; `implemented` stays the owner's gate after the live check.
+const SPEC_GATE = /^status:\s*implemented\b/m;
 const ADR_GATE = /^status:\s*(accepted|rejected|superseded)\b/m;
 const adrStatus = (text) => parseAdr(rel, text).meta?.status;
 
@@ -51,8 +52,9 @@ const checks = [
       && !claimsOf(loadRepo(root).specs, rel)
         .some((spec) => LOCKED_SPEC_STATUSES.includes(spec.doc.status)),
     why: () => `${rel} is an implementation file and no approved spec claims it (ADR-0001, spec-first). `
-      + 'Draft or extend a spec whose `paths` cover this file, write failing tests, and ask the owner '
-      + 'to approve the spec. Throwaway measurements go to spikes/.',
+      + 'Draft or extend a spec whose `paths` cover this file, review it against its ADRs, set '
+      + '`status: approved` with `approved_by: agent` (ADR-0019), then write failing tests. '
+      + 'Throwaway measurements go to spikes/.',
   },
   {
     id: 'H2',
@@ -65,17 +67,17 @@ const checks = [
       return locked.length > 0 && !locked.some((spec) => changed.includes(spec.file));
     },
     why: () => `${rel} is traced to an approved spec. Tests must not change unless the spec changes (specd P7): `
-      + 'propose the spec change to the owner first; once agreed, edit the spec, then the test.',
+      + 'edit the spec first (the requirement the test checks), then the test.',
   },
   {
     id: 'H3',
     when: () =>
       (isSpecFile(rel) && SPEC_GATE.test(incoming)
-        && !LOCKED_SPEC_STATUSES.includes(current ? statusOf(current) : undefined))
+        && (current ? statusOf(current) : undefined) !== 'implemented')
       || (isAdrFile(rel) && ADR_GATE.test(incoming)
         && adrStatus(current) !== incoming.match(ADR_GATE)[1]),
-    why: () => `${rel}: raising status (spec approval or ADR decision) is an owner gate. `
-      + 'Keep it draft/proposed and ask the owner to approve.',
+    why: () => `${rel}: \`implemented\` (spec) and ADR decisions are owner gates (ADR-0019). `
+      + 'Leave the status as is, record the request in docs/progress.yaml and notify the owner.',
   },
 ];
 

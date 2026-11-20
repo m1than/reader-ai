@@ -21,6 +21,8 @@ Two budget facts shape how the work is done:
 
 ## How every stage runs
 
+The agent runs this loop autonomously (ADR-0019, AGENTS.md); the run state is [docs/progress.yaml](progress.yaml). Owner time moves from approving specs before code to reviewing each stage after its live check, so the "Owner sessions" column below is now mostly stage-exit review.
+
 ```mermaid
 flowchart LR
   spike[Spikes: measure unknown numbers] --> draft[Agent drafts specs]
@@ -35,9 +37,9 @@ flowchart LR
 
 | Step | Who | Output | Check |
 | --- | --- | --- | --- |
-| Spikes | Agent | `spikes/<name>/RESULT.md` with numbers and the command that produced them | Owner reads the numbers, decides fallbacks |
+| Spikes | Agent | `spikes/<name>/RESULT.md` with numbers and the command that produced them | Numbers that change a decision become proposed ADR amendments |
 | Spec drafts | Agent | `spec/modules/*.yaml`, `status: draft`, `paths`, FR/INV/NFR/VEC | trace-check T1, T2, T7 |
-| Review | Owner | `status: approved` (his commit) or comments | — |
+| Review | Agent, by a fresh subagent (ADR-0019) | `status: approved`, `approved_by: agent` | The owner reviews after, at the stage live check |
 | Red | Agent | Tests that fail on assertions, one commit | trace-check T3–T5; the failure reason is the missing behaviour, not an import error |
 | Green | Agent | Code in the spec's `paths` only | Tests green; hook H1 and CI T8 |
 | Live check | Owner runs it (≈ 5 minutes) | `bash e2e/live/stage-N.sh` prints PASS/FAIL per check against the running stack with `curl` and `jq` | All PASS |
@@ -109,8 +111,8 @@ Rejected orders:
 | --- | --- | --- |
 | 1 | Set ADR-0001 … 0016 to `accepted` in one commit and merge PR #1 | H3: only the owner raises status |
 | 2 | Install Docker Desktop (Apple Silicon), `uv`, Node 22+, Claude Code | Toolchain for the stack and the agent |
-| 3 | `claude setup-token`, then store it: `security add-generic-password -s reader-ai -a claude-oauth-token -w` | Provider credential in the Keychain (ADR-0011) |
-| 4 | Create a Telegram bot with @BotFather; store its token as Keychain item `reader-ai/telegram-bot-token` | Notifier adapter (ADR-0010) |
+| 3 | ✅ 2026-11-20: `claude setup-token` done; token exported as `CLAUDE_CODE_OAUTH_TOKEN` in the owner's shell → `secret://env/CLAUDE_CODE_OAUTH_TOKEN` | Provider credential (ADR-0005, ADR-0011) |
+| 4 | ✅ 2026-11-20: Telegram bot created; token in a private file on the Mac → `secret://hostfile/<path>` (mode 0600, outside git work trees) | Notifier adapter (ADR-0010) |
 | 5 | Keep the Bashir PDF at a stable path, for example `~/reader-ai-data/materials/` | Ingestion input; never committed |
 | 6 | Optional: add the 30-minute review slot to the calendar | ADR-0010 applies to building too |
 

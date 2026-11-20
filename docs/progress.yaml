@@ -1,0 +1,102 @@
+# Run state of the roadmap (ADR-0019). The agent reads it to pick the next task and updates it in the
+# same PR as the work. Order follows docs/roadmap.md.
+#   status: todo | in_progress | blocked | done
+#   kind:   owner (only the owner can do it) | setup | spike | module (spec → Red → Green) | live (stage live check)
+#   needs:  task ids that must be done first
+#   blocked tasks carry `reason` and `ask` (what the owner must do); done tasks carry `pr` and, for spikes, `result`.
+
+budget:
+  live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
+  spent_usd: 0
+  ledger: []             # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
+
+owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
+  pending: []
+
+tasks:
+  # Stage 0 — groundwork and spikes
+  - { id: S0.owner.adr-status, stage: 0, kind: owner, status: todo, needs: [],
+      ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it" }
+  - { id: S0.owner.machine, stage: 0, kind: owner, status: in_progress, needs: [],
+      note: "CLAUDE_CODE_OAUTH_TOKEN exported and Telegram token file in place (2026-11-20); still: bootstrap-mac.sh green, auto mode rules, Telegram link" }
+  - { id: S0.skeleton, stage: 0, kind: setup, status: todo, needs: [],
+      what: "server/pyproject.toml (uv, ruff, mypy strict, pytest, anyio, hypothesis, testcontainers), web/package.json (Vite, React 19, Vitest, Storybook 10, Playwright), e2e/live/lib.sh" }
+  - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
+      note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml)" }
+  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
+      note: "spends Agent SDK credit; record in budget.ledger" }
+  - { id: S0.spike.library-publish, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
+      note: "release workflow is a branch in m1than/ui-builder-lib-with-agents; publishing is the owner's (block when ready)" }
+  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
+  - { id: S0.exit, stage: 0, kind: live, status: todo,
+      needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
+              S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
+      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions" }
+
+  # Stage 1 — stack on the Mac
+  - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }
+  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG] }
+  - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
+      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container] }
+  - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
+  - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
+      what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
+
+  # Stage 2 — event backbone and notifications
+  - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
+  - { id: S2.SRV-OBS, stage: 2, kind: module, track: engineering, status: todo, needs: [S2.SRV-EVENTS, S0.spike.trace-backend] }
+  - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
+  - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
+
+  # Stage 3 — ingestion and search
+  - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling] }
+  - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local] }
+  - { id: S3.live, stage: 3, kind: live, status: todo, needs: [S3.SRV-SEARCH] }
+
+  # Stage 4 — lessons and practice
+  - { id: S4.SRV-LESSON, stage: 4, kind: module, track: product, status: todo, needs: [S2.live] }
+  - { id: S4.OPS-SANDBOX, stage: 4, kind: module, track: engineering, status: todo, needs: [S1.live, S0.spike.kernel-roundtrip] }
+  - { id: S4.SRV-KERNEL, stage: 4, kind: module, track: engineering, status: todo, needs: [S4.OPS-SANDBOX] }
+  - { id: S4.WEB-UI, stage: 4, kind: module, track: engineering, status: todo, needs: [S1.live, S0.spike.library-publish] }
+  - { id: S4.WEB-RENDER, stage: 4, kind: module, track: engineering, status: todo, needs: [S4.WEB-UI] }
+  - { id: S4.WEB-NOTEBOOK, stage: 4, kind: module, track: product, status: todo,
+      needs: [S4.WEB-UI, S4.WEB-RENDER, S4.SRV-KERNEL, S4.SRV-LESSON] }
+  - { id: S4.live, stage: 4, kind: live, status: todo, needs: [S4.WEB-NOTEBOOK],
+      what: "e2e/live/stage-4.sh; the owner reviews the Calm theme in Storybook at this exit; re-plan checkpoint 2" }
+
+  # Stage 5 — agents and the compile pipeline
+  - { id: S5.SRV-AGENT, stage: 5, kind: module, track: ai, status: todo, needs: [S2.live, S0.spike.compile-cost] }
+  - { id: S5.SRV-PIPELINE, stage: 5, kind: module, track: ai, status: todo, needs: [S5.SRV-AGENT, S3.live, S4.live] }
+  - { id: S5.WEB-AUTHORING, stage: 5, kind: module, track: product, status: todo, needs: [S5.SRV-PIPELINE] }
+  - { id: S5.live, stage: 5, kind: live, status: todo, needs: [S5.WEB-AUTHORING],
+      what: "L02 compiled through G1/G2; spends credit (≤ $4.35)" }
+
+  # Stage 6 — daily study loop
+  - { id: S6.SRV-TUTOR, stage: 6, kind: module, track: ai, status: todo, needs: [S5.live] }
+  - { id: S6.SRV-RECALL, stage: 6, kind: module, track: product, status: todo, needs: [S4.live] }
+  - { id: S6.SRV-HABIT, stage: 6, kind: module, track: product, status: todo, needs: [S2.SRV-NOTIFY, S4.live] }
+  - { id: S6.WEB-SESSION, stage: 6, kind: module, track: product, status: todo, needs: [S6.SRV-TUTOR, S6.SRV-RECALL, S6.SRV-HABIT] }
+  - { id: S6.live, stage: 6, kind: live, status: todo, needs: [S6.WEB-SESSION],
+      what: "friction NFR in Playwright; then 7 days of real study by the owner (owner part)" }
+
+  # Stage 7 — knowledge base, export and MCP
+  - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live] }
+  - { id: S7.SRV-EXPORT, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB] }
+  - { id: S7.SRV-MCP, stage: 7, kind: module, track: ai, status: todo, needs: [S7.SRV-KB] }
+  - { id: S7.WEB-KB, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB, S4.WEB-UI] }
+  - { id: S7.live, stage: 7, kind: live, status: todo, needs: [S7.SRV-EXPORT, S7.SRV-MCP, S7.WEB-KB] }
+
+  # Stage 8 — sharing and paired programs
+  - { id: S8.SRV-SHARE, stage: 8, kind: module, track: product, status: todo, needs: [S7.live] }
+  - { id: S8.WEB-COHORT, stage: 8, kind: module, track: product, status: todo, needs: [S8.SRV-SHARE] }
+  - { id: S8.live, stage: 8, kind: live, status: todo, needs: [S8.WEB-COHORT] }
+
+  # Stage 9 — pilot rollout and load measurement
+  - { id: S9.rolling-compile, stage: 9, kind: setup, status: todo, needs: [S6.live],
+      what: "keep two plan stages of the Bashir course compiled ahead of the owner; spends credit per lesson (ledger)" }
+  - { id: S9.capacity, stage: 9, kind: live, status: todo, needs: [S8.live],
+      what: "two weeks of measurements → docs/capacity.md → proposed VPS ADR" }
