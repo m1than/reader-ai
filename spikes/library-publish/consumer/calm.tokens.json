@@ -1,0 +1,37 @@
+{
+  "$description": "Calm draft (ADR-0013): neutral paper-like surfaces, one muted accent, no gradients, no glass blur, no glow. Overrides the library's --acme-* colour tokens; spacing, radii and type stay the library's.",
+  "light": {
+    "canvas": { "$type": "color", "$value": "#f6f4ef" },
+    "surface": { "$type": "color", "$value": "#fbfaf7" },
+    "surface-raised": { "$type": "color", "$value": "#ffffff" },
+    "text": { "$type": "color", "$value": "#22211e" },
+    "text-muted": { "$type": "color", "$value": "#5e5a52" },
+    "border": { "$type": "color", "$value": "#e2ded5" },
+    "control-border": { "$type": "color", "$value": "#858074" },
+    "accent": { "$type": "color", "$value": "#3d6b6e" },
+    "on-tone": { "$type": "color", "$value": "#ffffff" },
+    "neutral": { "$type": "color", "$value": "#5e5a52" },
+    "success": { "$type": "color", "$value": "#2f6b43" },
+    "warning": { "$type": "color", "$value": "#85560f" },
+    "danger": { "$type": "color", "$value": "#a63a32" },
+    "info": { "$type": "color", "$value": "#2f5f86" },
+    "focus": { "$type": "color", "$value": "#3d6b6e" }
+  },
+  "dark": {
+    "canvas": { "$type": "color", "$value": "#1b1a18" },
+    "surface": { "$type": "color", "$value": "#222120" },
+    "surface-raised": { "$type": "color", "$value": "#2a2927" },
+    "text": { "$type": "color", "$value": "#ece9e2" },
+    "text-muted": { "$type": "color", "$value": "#a9a499" },
+    "border": { "$type": "color", "$value": "#3a3835" },
+    "control-border": { "$type": "color", "$value": "#7f7a70" },
+    "accent": { "$type": "color", "$value": "#8fb8b6" },
+    "on-tone": { "$type": "color", "$value": "#14211f" },
+    "neutral": { "$type": "color", "$value": "#a9a499" },
+    "success": { "$type": "color", "$value": "#8fc49d" },
+    "warning": { "$type": "color", "$value": "#d9b26a" },
+    "danger": { "$type": "color", "$value": "#e39a92" },
+    "info": { "$type": "color", "$value": "#93b6d6" },
+    "focus": { "$type": "color", "$value": "#8fb8b6" }
+  }
+}

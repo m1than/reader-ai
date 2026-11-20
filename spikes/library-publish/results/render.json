@@ -1,0 +1,39 @@
+{
+  "errors": [
+    "light console: Failed to load resource: the server responded with a status of 404 (Not Found) (http://127.0.0.1:4173/favicon.ico)"
+  ],
+  "results": {
+    "light": {
+      "canvas": "#f6f4ef",
+      "accent": "#3d6b6e",
+      "bodyBackground": "rgba(0, 0, 0, 0)",
+      "mainChildren": 20,
+      "tabs": 2,
+      "grid": 2,
+      "gridcells": 34,
+      "tree": 1,
+      "progressbar": 1,
+      "switch": 1,
+      "slider": 1,
+      "svg": 1,
+      "toast": 1,
+      "buttons": 11
+    },
+    "dark": {
+      "canvas": "#1b1a18",
+      "accent": "#8fb8b6",
+      "bodyBackground": "rgba(0, 0, 0, 0)",
+      "mainChildren": 20,
+      "tabs": 2,
+      "grid": 2,
+      "gridcells": 34,
+      "tree": 1,
+      "progressbar": 1,
+      "switch": 1,
+      "slider": 1,
+      "svg": 1,
+      "toast": 1,
+      "buttons": 11
+    }
+  }
+}
