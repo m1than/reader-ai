@@ -97,10 +97,16 @@ tasks:
         and note the release workflow's gates duration; then tell the agent the version. Installing from GitHub Packages needs a
         read:packages token on the Mac, likely a classic PAT (fine-grained tokens may not cover Packages; to be verified)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
-  - { id: S0.exit, stage: 0, kind: live, status: todo,
+  - { id: S0.exit, stage: 0, kind: live, status: in_progress,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
-      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions" }
+      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions",
+      note: "Drafts (status: proposed, branch 0/S0.exit-adr-drafts) from the finished spikes:
+        ADR-0021 ingestion (amends ADR-0008; its revisit_when triggered): native Docling with the formula model, code from the text layer, 20-page regression check;
+        ADR-0022 sandbox (amends ADR-0014): exec tmpfs and per-kernel evcxr cache with cleanup, memory-swap = memory, separate containers,
+        an agent sandbox with the credential out of reach of tools; ADR-0023 token delivery (amends ADR-0011/0005): Keychain store, /run/secrets only;
+        ADR-0024 local CA and passkeys (amends ADR-0012): localhost confirmed, -p ssl trust, untrust by hash, caddy_data as a secret.
+        Still to come from embeddings-local, compile-cost and trace-backend. Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }

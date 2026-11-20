@@ -7,6 +7,8 @@ verified_by: "OPS-SANDBOX tests run inside the kernel: cannot resolve postgres o
 revisit_when: "A lab legitimately needs a capability the sandbox denies, or a container escape CVE affects the runtime in use"
 ---
 
+> Proposed amendment: [ADR-0022](0022-sandbox-evcxr-memory-agent-sandbox.md) (2026-11-20) — exec tmpfs and per-kernel evcxr cache with cleanup, `--memory-swap` = `--memory`, separate containers for verification and pairs, and an agent sandbox that keeps the credential away from tools.
+
 ## Context
 
 The kernel runs code written by the learner and by the agent, and the agent's code is derived from uploaded material that may contain prompt injection. Some labs need the network: the wallet pilot talks to Bitcoin testnet4 and Ethereum Sepolia endpoints.

@@ -7,6 +7,8 @@ verified_by: "OPS-DEPLOY: `reader up` on a clean machine reaches a healthy stack
 revisit_when: "Moving from the owner's Mac to a VPS (planned after load measurement), more than 20 active users, or a host that cannot run Docker Compose"
 ---
 
+> Proposed amendment: [ADR-0024](0024-local-ca-trust-and-passkey-browsers.md) (2026-11-20) — `localhost` confirmed (Safari + Chromium via Apple Passwords, substitution accepted by the owner); trust with `-p ssl`, untrust by hash; `caddy_data` handled as a secret.
+
 ## Context
 
 Owner decision, 2026-11-20: start as containers, set up volumes properly, configure through Caddy, serve any UI as a self-hosted service. The owner works on macOS; macOS, Windows and Linux must be supported.

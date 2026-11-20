@@ -7,6 +7,8 @@ verified_by: "SRV-CONFIG tests: schema rejects inline secret values; resolver te
 revisit_when: "A deployment target cannot use any of the four reference schemes"
 ---
 
+> Proposed amendment: [ADR-0023](0023-provider-token-delivery.md) (2026-11-20) — never `docker run -e` or `environment:` for secrets; the entrypoint exports from `/run/secrets` just before exec.
+
 ## Context
 
 Owner decisions, 2026-11-20: configuration in YAML; secrets may live in the container's `.env` and in the macOS Keychain; macOS, Windows and Linux must all work.
