@@ -1,4 +1,4 @@
-"""`secret://` references: grammar (FR-CONFIG-5) and Compose secret names (FR-CONFIG-14)."""
+"""`secret://` references: grammar (FR-CONFIG-5) and /run/secrets file names (FR-CONFIG-14, ADR-0026)."""
 
 import hashlib
 import re
@@ -88,12 +88,6 @@ def _digest(ref: SecretRef | str) -> tuple[str, str]:
 
 
 def secret_file_name(ref: SecretRef | str) -> str:
-    """Compose secret name, mounted at /run/secrets/<name> (FR-CONFIG-14); shared with OPS-CLI."""
+    """File name under /run/secrets that OPS-CLI delivers the value to (FR-CONFIG-14, ADR-0026)."""
     scheme, digest = _digest(ref)
     return f"{scheme}-{digest}"
-
-
-def secret_env_var(ref: SecretRef | str) -> str:
-    """Environment variable that carries the value into `docker compose` (FR-CONFIG-14)."""
-    scheme, digest = _digest(ref)
-    return f"READER_SECRET_{scheme.upper()}_{digest.upper()}"
