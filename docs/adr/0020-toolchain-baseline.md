@@ -3,7 +3,7 @@ id: ADR-0020
 title: Toolchain baseline — Node 26 LTS, Python 3.14, Debian 13 for everything reader-ai builds
 status: proposed
 date: 2026-11-20
-verified_by: "CI on Node from web/.nvmrc; server CI on Python 3.14 once switched; spikes/agent-sdk-container results/20261120T180638 and 20261120T180949 (PR #6) run on python:3.14-slim-trixie; spikes/ingest-docling RESULT.md (OCR conversion on 3.14, pending); spikes/kernel-roundtrip re-run on 3.14 (pending)"
+verified_by: "CI on Node from web/.nvmrc; server CI on Python 3.14 once switched; spikes/agent-sdk-container results/20261120T180638 and 20261120T180949 (PR #6, merged) run on python:3.14-slim-trixie; spikes/ingest-docling RESULT.md (OCR conversion on 3.14, pending); spikes/kernel-roundtrip re-run on 3.14 (pending)"
 revisit_when: "A new Node LTS line is promoted (next: Node 28, about 2027-10); every server, worker, ingest and sandbox dependency installs and runs on a newer Python minor on linux/arm64; Debian stable changes"
 supersedes: []
 ---
