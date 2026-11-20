@@ -9,7 +9,8 @@ Date: 2026-11-20. Command: `bash spikes/agent-sdk-container/run.sh`. Each invoca
 | Results dir | Image | What |
 | --- | --- | --- |
 | `results/20261120T-r2-py313-bookworm/` | `python:3.13-slim-bookworm` | 3 fresh containers per model (haiku, sonnet) + 1 sandboxed tools run. All numbers in the tables below come from here |
-| `results/20261120T180638/` | `python:3.14-slim-trixie` (baseline of proposed ADR-0020) | Verification on the new base: 1 haiku text run + 1 tools run, both pass |
+| `results/20261120T180638/` | `python:3.14-slim-trixie`: the owner asked for the latest LTS/stable toolchain; proposed in ADR-0020 on branch `0/toolchain-baseline` | Verification on the new base: 1 haiku text run + 1 tools run, both pass ("works"; too few runs for timings) |
+| `results/20261120T180949/` | same | 1 haiku text run under the `timeout` entrypoint |
 
 ## Environment
 
@@ -36,7 +37,7 @@ Date: 2026-11-20. Command: `bash spikes/agent-sdk-container/run.sh`. Each invoca
 | `total_cost_usd` per call (prompt cache hit) | $0.00026 | $0.0018 |
 | Answer correct | 3 of 3 | 3 of 3 |
 
-The unattributed overhead covers the Keychain read, host Python launches, container create, interpreter start, SDK import, CLI shutdown and `--rm` teardown. None of them is measured separately.
+The unattributed overhead covers the Keychain read, host Python launches, container create, interpreter start, SDK import, CLI shutdown and `--rm` teardown. None of them is measured separately. The Keychain read is not the main part. The later haiku runs measure `docker_run_wall_s` after the secret is resolved, and still show 1.89 s (`20261120T180638`, text), 1.46 s (same, tools) and 2.33 s (`20261120T180949`) of overhead beyond the result mark.
 
 - **Cost is reported** on every `ResultMessage` (7 of 7 in round 2, 2 of 2 on trixie): `total_cost_usd` plus `usage` with cache fields. This is the CLI's own figure. It was not reconciled against the Agent SDK credit actually drawn, and `budget.spent_usd` inherits it. The run used the OAuth token by construction (the only credential passed, `setting_sources=[]`); `apiKeySource` from the init message was not recorded.
 - **Fixed overhead per call.** The CLI sends about 9.9k tokens of its own system prompt (`cache_read_input_tokens` 9852–9873; 11512 with Bash enabled). Fresh containers still hit the server-side prompt cache. The first call on a model writes the cache:
@@ -48,7 +49,7 @@ The unattributed overhead covers the Keychain read, host Python launches, contai
 One `claude-haiku-5-5` run must run Bash in the container. Applied: ADR-0014's process, capability and resource limits (`--read-only`; tmpfs `/home/worker` and `/tmp`, 256 MiB each; `--cap-drop ALL`; `no-new-privileges`; 2 CPUs; `--memory 2g --memory-swap 2g`; 256 PIDs). **Not applied:**
 - Network and egress: Docker's default bridge network, with internet.
 - Secrets: the provider token is in this container's environment.
-- Per-execution timeout: none in round 2. `run.sh` now caps each run at 120 s.
+- Per-execution timeout: none in the recorded tools runs. A first cap (host-side `perl alarm`) had no effect: the docker client forwards the signal into the container, where nothing handles it (found by the review). `run.sh` now runs `timeout -s KILL 120` as the container's entrypoint. Verified token-free: a 20 s `sleep` was killed at about 4 s, rc=137. The probe works under it (`results/20261120T180949/`).
 
 The flags were set but not verified from inside the container.
 
@@ -75,8 +76,9 @@ The flags were set but not verified from inside the container.
 | 6 text runs, round 1 | 0.0447 | printed, files overwritten |
 | 6 text runs + tools run, round 2 | 0.0090 | `results/20261120T-r2-py313-bookworm/` (sum 0.00897) |
 | Trixie verification, 2 runs | 0.00075 | `results/20261120T180638/` |
+| Timeout entrypoint verification, 1 run | 0.00026 | `results/20261120T180949/` |
 | Runs rejected with 401 | 0 | no model call |
-| **Total** | **0.0566** | 84% of it rests on printed output that was not kept |
+| **Total** | **0.0568** (unrounded rows: 0.05678) | 82% of it rests on printed output that was not kept |
 
 ## Hands to stage 1 (OPS-DEPLOY, OPS-CLI) and stage 5 (SRV-AGENT)
 

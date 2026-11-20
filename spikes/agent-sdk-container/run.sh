@@ -10,7 +10,11 @@
 # secret://keychain/reader-ai/claude-oauth-token) into `docker run -e`; it is never printed.
 # The owner allowed this read for this spike only (2026-11-20). Known exposure, unlike ADR-0011's
 # /run/secrets delivery: while a container runs, its Config.Env (and so the token) is visible to
-# `docker inspect`. Every run is capped at 120 s so a hung CLI cannot keep it there.
+# `docker inspect`. It also sits in a shell local until `unset`, so `bash -x run.sh` would print it.
+# Every run is capped at 120 s inside the container (`timeout -s KILL` as the entrypoint; the container
+# stops when it fires). A host-side alarm does not work: the docker client forwards the signal into the
+# container, where nothing handles it. Verified token-free:
+#   docker run --rm --network none --entrypoint timeout reader-spike-agent-sdk -s KILL 3 sleep 20   → rc=137 after 4 s
 set -euo pipefail
 cd "$(dirname "$0")"
 IMAGE=reader-spike-agent-sdk
@@ -22,7 +26,6 @@ mkdir -p "$OUT"
 docker build -q --platform linux/arm64 -t "$IMAGE" . >/dev/null
 docker image inspect "$IMAGE" --format 'image_bytes={{.Size}}'
 
-capped() { perl -e 'alarm shift; exec @ARGV' 120 "$@"; }   # macOS has no coreutils `timeout`
 now() { perl -MTime::HiRes=time -e 'printf "%.3f", time'; }
 
 probe() { # name, extra docker flags..., -- , probe args...
@@ -30,8 +33,8 @@ probe() { # name, extra docker flags..., -- , probe args...
   local flags=(); while [[ "$1" != -- ]]; do flags+=("$1"); shift; done; shift
   local token; token="$(security find-generic-password -s reader-ai -a claude-oauth-token -w)"
   local start; start=$(now)   # after the secret is resolved: the wall time is docker run only
-  CLAUDE_CODE_OAUTH_TOKEN="$token" capped docker run --rm --platform linux/arm64 -e CLAUDE_CODE_OAUTH_TOKEN \
-    ${flags[@]+"${flags[@]}"} "$IMAGE" "$@" > "$OUT/$name.json"
+  CLAUDE_CODE_OAUTH_TOKEN="$token" docker run --rm --platform linux/arm64 -e CLAUDE_CODE_OAUTH_TOKEN \
+    --entrypoint timeout ${flags[@]+"${flags[@]}"} "$IMAGE" -s KILL 120 python /probe.py "$@" > "$OUT/$name.json"
   unset token
   local wall; wall=$(perl -e "printf '%.2f', $(now) - $start")
   jq --argjson wall "$wall" '{docker_run_wall_s: $wall} + .' "$OUT/$name.json" > "$OUT/$name.tmp" && mv "$OUT/$name.tmp" "$OUT/$name.json"

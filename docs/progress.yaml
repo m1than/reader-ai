@@ -8,10 +8,10 @@
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
-  spent_usd: 0.0566      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 0.0568      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
-    - { task: S0.spike.agent-sdk-container, usd: 0.0566, date: 2026-11-20,
-        what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 2 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
+    - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
+        what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -28,8 +28,9 @@ tasks:
       reason: "bootstrap-mac.sh 2026-11-20 in the agent session, 8 FAIL. Fixed with the owner's consent: uv 0.13.7 and Python 3.13.18 installed, repo-local git identity set. Still open:
         the active gh account is igaifutdinov, which cannot push to m1than/reader-ai or read m1than/ui-builder-lib-with-agents.
         The owner approved switching gh to m1than (2026-11-20). It was later switched back, so the agent switches per push and restores igaifutdinov.
-        Provider token: the owner stored it in the Keychain item reader-ai/claude-oauth-token (2026-11-20). bootstrap's env check still fails
-        in the agent's shell, because the variable does not reach the agent's commands;
+        Provider token: the owner stored it in the Keychain item reader-ai/claude-oauth-token (2026-11-20). bootstrap's env check is
+        expected to keep failing in the agent's shell, because the variable does not reach the agent's commands. A FAIL there is not a
+        blocker; teaching bootstrap the Keychain path is a later change;
         Telegram token file missing at ~/Developer/.token_tg_bot (or READER_TG_TOKEN_FILE); Telegram chat not linked;
         no autoMode key in ~/.claude/settings.json; ADRs not accepted (S0.owner.adr-status).
         Telegram notifications cannot be sent until the token file and the chat link exist.",
