@@ -1,0 +1,264 @@
+# SRV-LESSON — lessons as nbformat v4 notebooks with reader-ai cell metadata (ADR-0004): validate, store as immutable
+# content-addressed revisions, list and open them, publish through gate G2 (ADR-0009). Slice subset (V.SRV-LESSON-min,
+# docs/roadmap.md "Vertical slice first", V4); the stage-4 SRV-LESSON row adds what `defers` lists.
+#
+# Scope of the slice:
+#   - the cell schema (ADR-0004 kinds) as data: spec/fixtures/SRV-LESSON/cell.schema.json, shipped byte-identical as
+#     server/src/reader/lessons/cell.schema.json (VEC-LESSON-1);
+#   - courses, lessons and revisions in Postgres; revision bytes as content-addressed blobs on the `blobs` volume
+#     (ADR-0007), through a minimal `reader.blobs` store this spec owns (SRV-INGEST reuses it for uploads);
+#   - the write path V.COMPILE-min calls (a Python function, no HTTP route), and the publish gate G2 as an owner route;
+#   - read routes for the signed-in user's own courses (ADR-0017: sharing arrives in stage 8);
+#   - a fixture loader that puts the synthetic fixture lesson F01 (VEC-LESSON-2) into a user's account for the UI and
+#     the live checks. F01 contains no text from any book.
+#
+# Decisions (agent, 2026-11-21):
+#   - Ids. Courses and lessons have UUID ids (text form, 36 chars), which fit SRV-KERNEL's `lesson_id` format
+#     ([A-Za-z0-9._-]{1,128}); a revision is named by the sha256 of its canonical bytes.
+#   - Canonical form = `nbformat.writes` of the validated notebook (1-space indent, sorted keys, UTF-8, trailing
+#     newline). Content addressing makes rewriting the same notebook a no-op (FR-LESSON-4) and gives ADR-0004's
+#     "round-trip read/write is byte-identical" by construction (INV-LESSON-2).
+#   - Learner state (progress, recall schedule, the text of a learner's notes) is not stored in the slice. What the slice
+#     guarantees is the key it will need: a new revision never drops a `notes` cell id of the previous revision
+#     (INV-LESSON-3), so learner notes keyed by cell id (ADR-0004) survive republishing once they exist.
+#   - The owner opens a draft revision directly; publishing (G2) is not needed to study L02 in the slice. Publishing
+#     enforces ADR-0009's three blockers (uncited claim, open blocking finding, unverified lab) with no override.
+#   - The `notes` cell text in a revision is a template; the pipeline owns every other cell (ADR-0004 consequences).
+#
+# Cross-spec requirements (paired changes, sent by the coordinator):
+#   - SRV-AUTH: `reader.api.app.ROUTERS` lists `reader.lessons.routes`; `reader.db`'s declared `version_locations`
+#     list includes `reader/lessons/migrations`.
+#   - OPS-DEPLOY: server.Dockerfile creates /var/lib/reader/blobs owned by 10001:10001 before `USER`, so the empty
+#     named volume `blobs` inherits that owner at first mount (today the mount point would be root-owned and every
+#     blob write would fail). The api and worker already mount `blobs` at /var/lib/reader/blobs (compose.yaml).
+#   - SRV-INGEST (V2, drafted in parallel): issues the opaque span ids that citations carry (`span_ref` in the
+#     schema) and reuses `reader.blobs` for uploads.
+#   - SRV-KERNEL: may call `reader.lessons.access.can_open` (FR-LESSON-11) when WEB-min wires lessons to kernels.
+#   - V.COMPILE-min: writes revisions only through FR-LESSON-4 and records provenance per FR-LESSON-5.
+#
+# Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
+
+id: SRV-LESSON
+title: Lesson notebooks (ADR-0004) — validate, store as content-addressed revisions, list, open, publish via G2 (slice subset)
+status: draft
+approved_by: null
+approved_at: null
+layer: server
+track: product
+adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
+slice: V.SRV-LESSON-min
+
+paths:
+  - server/src/reader/lessons/**
+  - server/src/reader/blobs/**
+  - server/tests/lessons/**
+  - spec/fixtures/SRV-LESSON/**
+
+normative:
+  - id: REF-LESSON-1
+    title: nbformat — The Notebook file format, v4 (cell ids from 4.5)
+    url: https://nbformat.readthedocs.io/en/latest/format_description.html
+  - id: REF-LESSON-2
+    title: JSON Schema 2020-12 — Core and Validation
+    url: https://json-schema.org/draft/2020-12
+  - id: REF-LESSON-3
+    title: RFC 6902 — JavaScript Object Notation (JSON) Patch (the mutation format of VEC-LESSON-3)
+    url: https://www.rfc-editor.org/rfc/rfc6902
+  - id: REF-LESSON-4
+    title: S. Nakamoto, Bitcoin — A Peer-to-Peer Electronic Cash System (2008), section 11 (the F01 lab's formula and values)
+    url: https://bitcoin.org/bitcoin.pdf
+  - id: REF-LESSON-5
+    title: docs/adr/0004-lesson-notebook-format.md and docs/adr/0009-compile-pipeline-and-verification.md (kinds, G2 blockers)
+    url: docs/adr/0004-lesson-notebook-format.md
+
+# Structural bounds (no measurement exists; each with its reason).
+bounds:
+  notebook_max_bytes: 8388608     # 8 MiB canonical: lessons are text plus small lab outputs; bounds api memory while parsing
+                                  # and validating one write; SRV-KERNEL caps one execution's output at 16 MiB, which a
+                                  # stored lesson never needs to hold whole.
+  cells_max: 1000                 # far above a 39-page chapter's lesson (the Chapter 1 pilot lesson had under 60 cells);
+                                  # bounds validation time per write.
+  title_max_chars: 200
+  revisions_listed: 100           # FR-LESSON-8 lists the newest 100; older revisions stay readable by sha256.
+  blobs_root: /var/lib/reader/blobs
+
+# Tables of this module's migration (branch label `lessons`, depends on SRV-AUTH's base revision for users.id).
+# Every table carries NOT NULL `owner_id` with a foreign key to users.id (INV-AUTH-8); for lessons and revisions it is
+# the course owner's id (INV-LESSON-7).
+tables:
+  courses: { owner_id: true, columns: "id uuid pk, title text CHECK (1..200 chars), material_sha256 text null CHECK (64 hex), created_at" }
+  lessons: { owner_id: true, columns: "id uuid pk, course_id uuid fk courses ON DELETE RESTRICT, ordinal int CHECK (>= 1), title text CHECK (1..200 chars), published_sha256 text null, created_at; UNIQUE (course_id, ordinal)" }
+  lesson_revisions: { owner_id: true, columns: "lesson_id uuid fk lessons, sha256 text CHECK (64 hex), byte_size int, cell_count int, provenance jsonb, created_at; PRIMARY KEY (lesson_id, sha256)" }
+
+# Fixed error codes. Write path (FR-LESSON-4) raises `LessonWriteError(code)`; routes answer JSON `{"error": code}`.
+write_errors: [not_utf8, not_nbformat, duplicate_cell_id, missing_reader_metadata, cell_schema, cell_type_mismatch,
+  too_large, too_many_cells, notes_cell_removed, not_owner, unknown_lesson]
+publish_errors: [uncited_claims, blocking_findings, lab_unverified, unknown_revision]
+
+requirements:
+  - id: FR-LESSON-1
+    text: >-
+      Validation, in this order, each failing with its code: the bytes decode as UTF-8 (`not_utf8`); they parse as a
+      JSON object with `nbformat` = 4 and `nbformat_minor` ≥ 5 (`not_nbformat`); every cell has an `id` and the ids are
+      unique (`duplicate_cell_id`); `nbformat.validate` accepts a deep copy of the document and leaves it unchanged
+      (`not_nbformat`; nbformat 5.11.1 silently rewrites duplicate ids and raises KeyError for version 3, which is why
+      the two checks above come first); notebook `metadata.reader.lesson_format` is 1 and every cell has
+      `metadata.reader` (`missing_reader_metadata`); each `metadata.reader` passes cell.schema.json under the JSON
+      Schema 2020-12 validator (`cell_schema`); each cell's `cell_type` equals the schema's `x-cell-type` for its kind
+      (`cell_type_mismatch`); canonical bytes ≤ `bounds.notebook_max_bytes` (`too_large`); cells ≤ `bounds.cells_max`
+      (`too_many_cells`). The schema and the kind → cell type map are read from cell.schema.json; no kind is
+      hard-coded in Python.
+  - id: FR-LESSON-2
+    text: >-
+      Canonical form. The canonical bytes of a valid notebook are `nbformat.writes(nb).encode("utf-8")` of the
+      validated document; its revision id is the lowercase hex sha256 of those bytes.
+  - id: FR-LESSON-3
+    text: >-
+      Blob store (`reader.blobs`). `put(root, data) -> sha256` writes `<root>/sha256/<first 2 hex>/<64 hex>` by creating
+      a temporary file in the same directory (mode 0600), writing, fsync, rename, and fsync of the directory; if the
+      final name exists it is not rewritten. `get(root, sha256) -> bytes` reads the file and raises `BlobCorrupt` if
+      the bytes do not hash to the name, `BlobMissing` if absent. `root` is a parameter: the app and worker pass
+      `bounds.blobs_root`, tests a temporary directory; no environment variable selects it. The sha256 argument must
+      match `^[0-9a-f]{64}$`, so no path can be built from other input.
+  - id: FR-LESSON-4
+    text: >-
+      Write path, `reader.lessons.store.write_revision(session, blobs_root, owner_id, lesson_id, data: bytes,
+      provenance) -> (sha256, created: bool)`: (1) the lesson exists and its course's owner is `owner_id`, else
+      `unknown_lesson` (the two cases are one code); (2) FR-LESSON-1 validation; (3) canonical bytes and sha256
+      (FR-LESSON-2); (4) if a revision row with that sha256 exists for the lesson, return `(sha256, False)` and change
+      nothing; (5) every `notes` cell id of the lesson's newest revision is present, still of kind `notes`, in the new
+      notebook, else `notes_cell_removed`; (6) `reader.blobs.put`, then insert the row (byte_size, cell_count,
+      provenance) in the caller's transaction; return `(sha256, True)`. A crash between the blob and the row leaves
+      an unreferenced blob, which is harmless (content-addressed) and collected by a later stage (`defers`).
+  - id: FR-LESSON-5
+    text: >-
+      Provenance passed to FR-LESSON-4 is a JSON object of at most 16 KiB with string keys; allowed keys are `stage`,
+      `input_sha256`, `prompt_version`, `model`, `cost_usd`, `duration_s`, `job_key`, `source` (anything else is
+      `cell_schema`, reused as the code for malformed metadata). No secret type is accepted: a `reader.config.Secret`
+      anywhere in it raises TypeError before any write.
+  - id: FR-LESSON-6
+    text: >-
+      Internal functions for the compile pipeline and the fixture loader: `create_course(session, owner_id, title,
+      material_sha256 | None) -> course_id` and `ensure_lesson(session, owner_id, course_id, ordinal, title) ->
+      lesson_id` (idempotent on (course_id, ordinal): an existing lesson is returned with its title unchanged; a
+      course of another owner is `not_owner`). Titles are 1..`bounds.title_max_chars` characters after stripping.
+  - id: FR-LESSON-7
+    text: >-
+      `GET /api/courses` (auth `session`) answers 200 with `{"courses": [{"id", "title", "lesson_count",
+      "created_at"}]}` for the courses whose owner is the signed-in user, newest first.
+  - id: FR-LESSON-8
+    text: >-
+      `GET /api/courses/{course_id}/lessons` answers 200 with `{"course": {"id", "title"}, "lessons": [{"id",
+      "ordinal", "title", "published_sha256", "latest_sha256"}]}` ordered by ordinal; `GET /api/lessons/{lesson_id}`
+      answers `{"lesson": {...same fields, "course_id"}, "revisions": [{"sha256", "byte_size", "cell_count",
+      "created_at", "stage"}]}` with the newest `bounds.revisions_listed` revisions first (`stage` copied from
+      provenance, nothing else of provenance is returned).
+  - id: FR-LESSON-9
+    text: >-
+      `GET /api/lessons/{lesson_id}/revisions/{sha256}` answers 200 with the canonical bytes, `Content-Type:
+      application/x-ipynb+json`, `ETag: "<sha256>"` and `Cache-Control: private, max-age=31536000, immutable`; a
+      matching `If-None-Match` answers 304. The bytes come from `reader.blobs.get`; `BlobCorrupt` or `BlobMissing`
+      answers 500 `{"error":"blob_unavailable"}` and logs the sha256 only.
+  - id: FR-LESSON-10
+    text: >-
+      Gate G2, `POST /api/lessons/{lesson_id}/publish` with JSON `{"sha256": <64 hex>}` (auth `session`; the
+      signed-in user must own the course): the revision must exist for that lesson (`unknown_revision`, 404); it is
+      refused with 409 and the first failing code of: `uncited_claims` (an `explain` claim, a `changed` cell or an
+      `erratum` cell with an empty `citations`), `blocking_findings` (an `open` cell with `finding.blocking` true and
+      `status` "open"), `lab_unverified` (a `lab` cell without `verified`, or with `runs` < 2, `passed` false,
+      `outputs_identical` false, or `input_sha256` ≠ sha256 of the cell's joined source). On success
+      `lessons.published_sha256` is set and 200 `{"published_sha256"}` is answered. Republishing an older revision is
+      allowed (rollback). The checks read the stored blob, not the request.
+  - id: FR-LESSON-11
+    text: >-
+      `reader.lessons.access.can_open(session, user_id, lesson_id) -> bool` is true exactly when the lesson exists and
+      its course's owner is `user_id` (stage 1: own courses only; ADR-0016 roles arrive in stage 8).
+  - id: FR-LESSON-12
+    text: >-
+      Not-found is uniform: a course, lesson or revision that does not exist and one owned by another user both answer
+      404 `{"error":"not_found"}` with the same body and headers; path ids that are not a UUID (or 64 lowercase hex for
+      sha256) answer the same 404 before any query.
+  - id: FR-LESSON-13
+    text: >-
+      Fixture loader `python -m reader.lessons.fixture load --handle <h>` (run inside the api container): for the user
+      with that handle it ensures a course titled "Fixture course (synthetic)" (one per user, found by title and
+      `material_sha256` null), lesson ordinal 1 "F01 — fixture lesson (synthetic)", and writes the packaged F01
+      (`server/src/reader/lessons/fixtures/F01.ipynb`, byte-identical to VEC-LESSON-2) with provenance `{"stage":
+      "fixture"}`; it prints one line `course=<id> lesson=<id> sha256=<hex>` and exits 0; an unknown handle exits 1
+      with `reader-lessons: unknown_handle`. Running it twice changes nothing.
+  - id: FR-LESSON-14
+    text: >-
+      Migration: one Alembic revision in `server/src/reader/lessons/migrations/` (branch label `lessons`,
+      `depends_on` SRV-AUTH's base revision) creates the three tables of `tables` with their checks and foreign keys;
+      its downgrade drops them. Routes are declared as data in `reader.lessons.routes` (method, path, auth) and reach
+      the app through SRV-AUTH's `ROUTERS` list.
+
+invariants:
+  - id: INV-LESSON-1
+    text: >-
+      Every blob referenced by a `lesson_revisions` row passes FR-LESSON-1 and hashes to its sha256. Property test:
+      for notebooks generated by Hypothesis from the schema's kinds (valid and mutated), `write_revision` either raises
+      one of `write_errors` and writes no blob and no row, or stores bytes that re-validate.
+  - id: INV-LESSON-2
+    text: >-
+      Round trip (ADR-0004): for every stored revision, validating its canonical bytes and producing canonical bytes
+      again yields the same bytes; writing the same notebook (any key order or indentation of the input) twice yields
+      one blob, one row and `created` false the second time.
+  - id: INV-LESSON-3
+    text: >-
+      For any sequence of successful writes to one lesson, the set of `notes` cell ids of each revision contains the
+      set of the revision before it (republishing never drops a learner-owned cell id).
+  - id: INV-LESSON-4
+    text: >-
+      Isolation: for two users A and B and any route of this module, a request by A about B's course, lesson or
+      revision gets a response byte-identical to the one for a random non-existent id of the same kind.
+  - id: INV-LESSON-5
+    text: >-
+      `lessons.published_sha256` only ever names a revision of that lesson for which every FR-LESSON-10 check passes;
+      every VEC-LESSON-3 case with a non-null `publish` code is refused with exactly that code.
+  - id: INV-LESSON-6
+    text: >-
+      Immutability: no code path updates or deletes a `lesson_revisions` row or rewrites an existing blob file; the only
+      updated column of the module is `lessons.published_sha256`.
+  - id: INV-LESSON-7
+    text: >-
+      `lessons.owner_id` and `lesson_revisions.owner_id` always equal the owning course's `owner_id` (checked after
+      every write in the property test of INV-LESSON-1 and by a schema-level test of the migration).
+
+nfr: []
+
+vectors:
+  - id: VEC-LESSON-1
+    source: "Written for this spec (2026-11-21) from ADR-0004's kind table; JSON Schema 2020-12"
+    file: spec/fixtures/SRV-LESSON/cell.schema.json
+    note: "The packaged copy server/src/reader/lessons/cell.schema.json must be byte-identical (test)."
+  - id: VEC-LESSON-2
+    source: "Synthetic fixture lesson F01, generated by spec/fixtures/SRV-LESSON/gen_f01.py (nbformat 5.11.1, jsonschema 4.26.0); lab values from REF-LESSON-4 section 11 and ADR-0009 (q = 0.3, z = 1: 0.628)"
+    file: spec/fixtures/SRV-LESSON/F01.ipynb
+    note: >-
+      One cell of every kind; canonical (FR-LESSON-2), sha256 c07ef1c495ead2e5421de13b3e853ce95e9c2c4bc515072ef25d360287698e98,
+      6990 bytes. Tests regenerate it with the generator and compare bytes; the lab's asserts run in a plain Python
+      process (the kernel run belongs to SRV-KERNEL). The packaged copy under server/src/reader/lessons/fixtures/ is
+      byte-identical.
+  - id: VEC-LESSON-3
+    source: "Mutations of VEC-LESSON-2 written for this spec (RFC 6902 operations), with the expected write and publish codes"
+    file: spec/fixtures/SRV-LESSON/invalid.yaml
+
+test_levels:
+  unit: "FR-LESSON-1, 2, 3, 5 and VEC-LESSON-1..3 without a database (blobs in a temporary directory)."
+  db: "FR-LESSON-4, 6..14 and every INV against Postgres via testcontainers on the pinned postgres:18-trixie digest, with SRV-AUTH's migrations applied; skipped without a Docker daemon. Routes are exercised in-process through SRV-AUTH's app factory with a session created through SRV-AUTH's internal session function (no WebAuthn ceremony needed)."
+  live: "S1/V live scripts: `docker compose exec api python -m reader.lessons.fixture load --handle live-check`, then `GET /api/courses` and the revision route with the live-check session (e2e/live/slice.sh)."
+
+defers:
+  - "Learner state keyed by cell id: progress, notes text, recall schedule (stage 4 SRV-LESSON, SRV-RECALL, WEB-NOTEBOOK)."
+  - "Course index notebook `index.ipynb` (ADR-0004); the slice lists courses and lessons from Postgres."
+  - "Kinds beyond the slice's lab settings: `kernel` rust and deno, `network: allowlist` (stage 4 with OPS-SANDBOX)."
+  - "Sharing and roles (viewer, learner, editor; ADR-0016), exports (SRV-EXPORT), KB sectors use (ADR-0015)."
+  - "Garbage collection of unreferenced blobs."
+  - "Migration of the Chapter 1 lesson from Claude Docs (ADR-0004 consequences)."
+  - "Per-lab timeout from cell metadata (SRV-KERNEL defers it here; stage 4)."
+  - "A `lessons.status` beyond published/unpublished (review states belong to SRV-PIPELINE)."
+
+owner_notes:
+  - "The owner opens L02 as a draft revision in the slice; publishing it (G2) needs zero uncited claims, zero open blocking findings and verified labs, with no override. If V.COMPILE-min ends with open blocking findings (compile-cost spike: 0 of 2 runs converged), L02 stays a draft you can still study."
+  - "cell.schema.json lives under spec/fixtures/SRV-LESSON/ (ADR-0004 named spec/fixtures/lesson/); ADR-0004 is proposed and its path was a placeholder ('to be drafted with SRV-LESSON')."

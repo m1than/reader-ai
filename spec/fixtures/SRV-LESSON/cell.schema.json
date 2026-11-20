@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reader-ai.local/schemas/lesson-cell-reader-metadata/1",
+  "title": "metadata.reader of a lesson cell (ADR-0004), slice V.SRV-LESSON-min",
+  "description": "Validates the `reader` key of one cell's metadata. The cell_type each kind requires is checked by FR-LESSON-1 from `x-cell-type`.",
+  "type": "object",
+  "required": ["kind", "sectors", "provenance"],
+  "properties": {
+    "kind": {
+      "enum": ["diagnostic", "route", "explain", "changed", "erratum", "tradeoff", "lab", "recall", "notes", "open"]
+    },
+    "sectors": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/slug" }
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "x-cell-type": {
+    "diagnostic": "markdown",
+    "route": "markdown",
+    "explain": "markdown",
+    "changed": "markdown",
+    "erratum": "markdown",
+    "tradeoff": "markdown",
+    "lab": "code",
+    "recall": "markdown",
+    "notes": "markdown",
+    "open": "markdown"
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "diagnostic" } } },
+      "then": {
+        "required": ["questions", "routes"],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": ["id", "text"],
+              "additionalProperties": false,
+              "properties": { "id": { "$ref": "#/$defs/slug" }, "text": { "$ref": "#/$defs/text" } }
+            }
+          },
+          "routes": {
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": { "$ref": "#/$defs/slug" },
+            "additionalProperties": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/slug" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "route" } } },
+      "then": {
+        "required": ["source_refs"],
+        "properties": {
+          "source_refs": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/source_ref" } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "explain" } } },
+      "then": {
+        "required": ["claims"],
+        "properties": {
+          "claims": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "required": ["id", "text", "citations"],
+              "additionalProperties": false,
+              "properties": {
+                "id": { "$ref": "#/$defs/slug" },
+                "text": { "$ref": "#/$defs/text" },
+                "citations": { "$ref": "#/$defs/citations" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "changed" } } },
+      "then": {
+        "required": ["as_of", "citations"],
+        "properties": {
+          "as_of": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+          "citations": { "$ref": "#/$defs/citations" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "erratum" } } },
+      "then": {
+        "required": ["source_ref", "correction", "citations"],
+        "properties": {
+          "source_ref": { "$ref": "#/$defs/source_ref" },
+          "correction": { "$ref": "#/$defs/text" },
+          "citations": { "$ref": "#/$defs/citations" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "tradeoff" } } },
+      "then": {
+        "required": ["options", "rejected_because"],
+        "properties": {
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": ["id", "name"],
+              "properties": { "id": { "$ref": "#/$defs/slug" }, "name": { "$ref": "#/$defs/text" } }
+            }
+          },
+          "rejected_because": {
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": { "$ref": "#/$defs/slug" },
+            "additionalProperties": { "$ref": "#/$defs/text" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "lab" } } },
+      "then": {
+        "required": ["kernel", "network", "asserts"],
+        "properties": {
+          "kernel": { "enum": ["python3"] },
+          "network": { "enum": ["none"] },
+          "asserts": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/text" } },
+          "expected_sha256": { "$ref": "#/$defs/sha256" },
+          "verified": {
+            "type": "object",
+            "required": ["runs", "passed", "outputs_identical", "input_sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "runs": { "type": "integer", "minimum": 0, "maximum": 10 },
+              "passed": { "type": "boolean" },
+              "outputs_identical": { "type": "boolean" },
+              "input_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "recall" } } },
+      "then": {
+        "required": ["front", "back"],
+        "properties": { "front": { "$ref": "#/$defs/text" }, "back": { "$ref": "#/$defs/text" } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "open" } } },
+      "then": {
+        "required": ["status", "finding"],
+        "properties": {
+          "status": { "enum": ["open", "answered", "wontfix"] },
+          "answer_ref": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/slug" }] },
+          "finding": {
+            "type": "object",
+            "required": ["stage", "blocking", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "stage": { "enum": ["fact_check", "lab_verification", "adversarial_review", "owner"] },
+              "blocking": { "type": "boolean" },
+              "text": { "$ref": "#/$defs/text" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "span_ref": {
+      "description": "Opaque span id issued by SRV-INGEST (ADR-0008: material sha256, page or line range, character offsets). SRV-LESSON never parses it.",
+      "type": "string",
+      "pattern": "^[A-Za-z0-9:._/-]{1,200}$"
+    },
+    "source_ref": {
+      "type": "object",
+      "required": ["material_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "material_sha256": { "$ref": "#/$defs/sha256" },
+        "page": { "type": "integer", "minimum": 1, "maximum": 100000 },
+        "span": { "$ref": "#/$defs/span_ref" }
+      }
+    },
+    "citation": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": ["span"],
+          "additionalProperties": false,
+          "properties": { "span": { "$ref": "#/$defs/span_ref" } }
+        },
+        {
+          "type": "object",
+          "required": ["url", "retrieved"],
+          "additionalProperties": false,
+          "properties": {
+            "url": { "type": "string", "pattern": "^https://[^\\s]{1,2000}$" },
+            "retrieved": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" }
+          }
+        }
+      ]
+    },
+    "citations": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/citation" } },
+    "provenance": {
+      "type": "object",
+      "required": ["stage"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "enum": ["template", "fixture", "draft", "fact_check", "lab_verification", "adversarial_review", "revise"] },
+        "input_sha256": { "$ref": "#/$defs/sha256" },
+        "prompt_version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$" },
+        "model": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$" }
+      }
+    }
+  }
+}
