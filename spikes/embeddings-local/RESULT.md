@@ -1,11 +1,12 @@
-# Spike: embeddings-local — RESULT (draft: benchmark not run yet)
+# Spike: embeddings-local — RESULT
 
 **Question (docs/roadmap.md 0.3):** Which local multilingual embedding model to use (no paid embedding API)?
 **Measure:** chunks/s on CPU; recall@10 on 30 pilot questions written by the agent and reviewed by the owner.
 **Pass:** recall@10 ≥ 0.8; full pilot embedded in ≤ 30 min. **Fallback:** a smaller model plus a larger rerank window.
-**Verdict:** pending. Only the functional smoke test has run (below). The full benchmark waits for two things:
-1. A free Docker VM. It is CPU-bound, and the ingest-docling measurement shares the VM.
-2. The owner's review of `questions.yaml` (`status: draft`).
+
+**Verdict, provisional:** `intfloat/multilingual-e5-small` is the only candidate that meets both criteria: 2.7 min for the full pilot, recall@10 1.0. The two bge-m3 models also reach recall@10 1.0 but take 32–37 min on the Docker VM's 4 CPUs. The verdict is provisional for two reasons:
+1. **The questions are still `status: draft`** and await the owner's review.
+2. **The question set does not discriminate.** recall@10 is 1.0 for all three models, and recall@1 is 0.733 for all three. The models differ only at ranks 2–6. A harder set (paraphrased questions without the book's keywords, more chapters) is needed before the choice is final.
 
 ## Candidates
 
@@ -30,27 +31,36 @@ The benchmark decides between them on this corpus. The model-card numbers are th
 
 `results/20261120T182846-smoke/intfloat__multilingual-e5-small.json`: pages 99–118 (44 chunks), 3 questions (q04, q05, q06). All 3 hit at rank 1. 13.9 chunks/s with 4 torch threads; a Docling build and other containers shared the 4-CPU Docker VM, so the speed is not a result. A 44-chunk corpus makes recall trivially high. The smoke test only proves that the chunking, embedding, ranking and scoring work end to end, offline.
 
-## Full benchmark (to run)
-
-On a quiet Docker VM (no other CPU-bound containers):
+## Full benchmark
 
 ```bash
 docker build --platform linux/arm64 -t reader-spike-embeddings spikes/embeddings-local && \
-  bash spikes/embeddings-local/run.sh "<path to the Bashir PDF>"
+  TAG=draft-questions bash spikes/embeddings-local/run.sh "<path to the Bashir PDF>"
 ```
 
-| Model | Chunks/s | Est. full pilot (min) | recall@10 (30 q) | Load (s) |
-| --- | --- | --- | --- | --- |
-| multilingual-e5-small | | | | |
-| USER-bge-m3 | | | | |
-| bge-m3 | | | | |
+Run 2026-11-20, 19:57–21:10, `results/20261120T195713-draft-questions/`: all 935 pages, 2285 chunks, 30 draft questions, 4 torch threads on the 4-CPU Docker VM. Other light containers ran on the same VM for part of the time (the trace-backend spike, pytest runs), so the times are upper bounds.
+
+| Model | Chunks/s | Full pilot (min) | recall@10 | recall@3 | recall@1 | MRR | Worst gold rank | Load (s) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| multilingual-e5-small | **14.35** | **2.7** | 1.0 | 0.900 | 0.733 | 0.822 | 6 | 1.43 |
+| USER-bge-m3 | 1.02 | 37.4 | 1.0 | 0.933 | 0.733 | 0.839 | 4 | 0.86 |
+| bge-m3 | 1.18 | 32.3 | 1.0 | 0.933 | 0.733 | 0.839 | 4 | 1.17 |
+
+recall@3, recall@1, MRR and the worst rank are computed from `per_question[].rank` in the same files, with the `jq` command in the commit message. recall@10 is the runner's own field.
 
 | Measure | Value |
 | --- | --- |
-| Image size (3 models) | |
+| Image size (3 models) | 9,162,791,837 bytes |
 | Docker VM CPUs | 4 |
-| Peak memory per model | not measured by the runner yet |
+| Peak memory per model | not measured by the runner |
+
+**Reading:**
+- On this question set, quality is practically equal: one question moves from rank ≤ 3 to rank 4–6 with e5-small, and MRR differs by 0.017.
+- e5-small is 12–14 times faster, and the only model under the 30-minute bound.
+- The bge-m3 models would fit only with more CPUs or natively on the host. Neither was measured here; it is the same open question as ADR-0021's M1.
+- The roadmap's fallback ("a smaller model plus a larger rerank window") is in effect the e5-small choice. A rerank stage was not measured.
 
 ## Needs the owner
 
 - Review `questions.yaml`: 30 questions in Russian over chapters 1–21, each with its gold pages. Chapters 22 and 23 have no question. Edit or replace questions; keep `gold_pages`.
+- Agree on a harder set (the agent can draft it): paraphrased questions that avoid the book's key terms, and questions whose answer spans several pages. The current set saturates recall@10 for every model. Then rerun the three models. The runner recomputes embeddings on every run, so a rerun takes about 75 min on the 4-CPU VM; caching the embeddings would cut that to seconds.
