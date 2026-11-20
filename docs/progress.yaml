@@ -254,7 +254,9 @@ tasks:
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: done, pr: 27,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S1.SRV-CONFIG],
       review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code review round 1 changes (applied),
-        round 2 changes (applied), round 3 approve (beaf360)",
+        round 2 changes (applied), round 3 approve (beaf360); paired change 2026-11-21: server.Dockerfile creates
+        /var/lib/reader/blobs owned by 10001 before USER (FR-DEPLOY-5; for SRV-LESSON and SRV-INGEST), with a [config]
+        order test and an [image] fresh-volume write test",
       note: "green locally. Code review round 2: round-1 blockers verified fixed; caddy_config back to backup=include
         (the exclude change contradicted ADR-0012 and ADR-0024, and its 'root-owned 0700' reason was not measured: the
         pinned image has /config 0755, /config/caddy 1777); deploy/images/server.Dockerfile.dockerignore excludes
