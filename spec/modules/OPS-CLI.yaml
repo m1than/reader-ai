@@ -21,6 +21,7 @@ title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bo
 status: draft
 approved_by: null
 approved_at: null
+review: "deep-reviewer (Fable), 2026-11-20. Round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid and caddy_config dropped, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Status stays draft until the Red tests (T5), which wait for OPS-DEPLOY's amended VEC-DEPLOY-3."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -97,8 +98,9 @@ requirements:
       (for SRV-AUTH and the other server roles) a read-only bind of the loaded reader.yaml,
       `{type: bind, source: <path>, target: /etc/reader/reader.yaml, read_only: true}`, and the environment entry
       `READER_CONFIG: /etc/reader/reader.yaml`; no other service gets either. `<path>` is the `--config` path after
-      `Path.resolve(strict=True)`; `up` refuses to start, naming the reason and not the path's contents, if that path is
-      not absolute or contains `$` (Compose would interpolate it). The override is the only route of this path into the
+      `Path.resolve(strict=True)` (always absolute); `up` refuses to start, naming the reason and not the path's
+      contents, if that path contains `$` (Compose would interpolate it). Relative paths inside reader.yaml then resolve
+      against `/etc/reader` in the containers (a note for the server modules). The override is the only route of this path into the
       containers: compose.yaml keeps no `$` (OPS-DEPLOY INV-DEPLOY-2). The override carries no secret (reader.yaml holds
       only `secret://` references) and reaches `docker compose` only on stdin.
   - id: FR-CLI-5
@@ -219,8 +221,9 @@ requirements:
       container; for every other named volume labelled `org.reader-ai.backup=include` except `caddy_config` (in stage 1:
       blobs), a tar from a one-off
       `docker run --rm --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
-      where `<uid>` is the rendered numeric `user` of the service that mounts the volume (blobs: api, 10001; with all
-      capabilities dropped, root could not read files it does not own) and `<server image>` is the `api` service's image
+      where `<uid>` is the rendered numeric `user` of the services that mount the volume (blobs: api and worker, 10001;
+      with all capabilities dropped, root could not read files it does not own); if those services disagree on the uid,
+      or one has no numeric `user`, backup and restore refuse naming the volume and `<server image>` is the `api` service's image
       in the rendered model; and `manifest.json` =
       `{"created": RFC 3339, "reader": version, "postgres": server version, "files": [{"name", "sha256", "bytes"}]}`.
       `caddy_data` (label `exclude`, ADR-0024) and `caddy_config` are never included: `caddy_config` holds only Caddy's
@@ -252,8 +255,9 @@ requirements:
       `reader bootstrap` (for SRV-AUTH's first-owner sign-up) works only while the stack is healthy (FR-CLI-13 exit 0;
       otherwise it exits non-zero with a fixed message and runs nothing else). It runs
       `docker compose -p <name> exec -T api reader-server bootstrap-link` with a 15 s timeout, captures stdout, and
-      accepts exactly one line that is `<instance.url>/api/auth/bootstrap#` (prefix built from reader.yaml's
-      `instance.url`) followed by `[A-Za-z0-9_-]+`. Exit 1 of `bootstrap-link` gives the fixed message "owner already has
+      accepts exactly one line that starts with the literal string `<instance.url>/api/auth/bootstrap#` (prefix built
+      from reader.yaml's `instance.url`, compared with `str.startswith`, not a regex) and whose remainder is a non-empty
+      run of `[A-Za-z0-9_-]`. Exit 1 of `bootstrap-link` gives the fixed message "owner already has
       a passkey"; any other non-zero exit, a timeout or any other output gives one fixed error message that quotes none
       of the captured output. The URL is passed only as the argument of macOS `open <url>`, with a 10 s timeout: `reader`
       never prints it, logs it or writes it to disk, and drops both children's stderr instead of relaying it. A failure
@@ -320,7 +324,7 @@ vectors:
     source: "A reader.yaml with two users and env, keychain, op and hostfile references (references only, no values)"
     file: spec/fixtures/OPS-CLI/config.yaml
   - id: VEC-CLI-2
-    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the reader.yaml bind plus READER_CONFIG on api, worker and mcp); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 as amended to the same shape"
+    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the reader.yaml bind plus READER_CONFIG on api, worker and mcp); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 as amended to the same shape and the same path, /tmp/reader-ai-test/reader.yaml"
     file: spec/fixtures/OPS-CLI/override-two-users.yaml
   - id: VEC-CLI-3
     source: "Rendered-model excerpts (project name, pgdata volume name, consumer uids) and the expected default-profile delivery plan; no values"
@@ -351,7 +355,11 @@ vectors:
 # - ADR-0012's backup folder "set in reader.yaml" is deferred: a future SRV-CONFIG task adds the field, and then
 #   `reader backup` may default to it.
 # - `caddy_config` is left out of backup and restore (FR-CLI-17), although OPS-DEPLOY labels it `include`: Caddy
-#   regenerates it at start (ADR-0024's reasoning). OPS-DEPLOY's label should become `exclude` at its next change.
+#   regenerates it at start (ADR-0024's reasoning). OPS-DEPLOY's label should become `exclude` at its next change; the
+#   exception stays here until it does.
+# - After editing reader.yaml, run `reader up` again, and `reader down` first if the edit touched nothing Compose
+#   renders: the single-file bind (FR-CLI-4) keeps the old inode, so running containers do not see an editor's
+#   replace-on-save, and `up -d` recreates only containers whose rendered configuration changed.
 # - The host codes `tool_missing`, `tool_failed`, `keychain_denied`, `keychain_locked` and `not_deliverable` should join
 #   SRV-CONFIG FR-CONFIG-8's list at its next change.
 # - `reader bootstrap` puts the short-lived bootstrap token in `open`'s argv (FR-CLI-21); the token's lifetime and

@@ -1,10 +1,11 @@
 # VEC-CLI-2: the override FR-CLI-4 must emit, in memory, for VEC-CLI-1 (users ivan and anna). The kernel service body is
 # the `x-kernel` field of deploy/compose.yaml's parsed source; this fixture repeats OPS-DEPLOY's VEC-DEPLOY-3 body, and
-# for `ivan` alone the expected override is VEC-DEPLOY-3 as OPS-DEPLOY amends it to the same shape. Comparison is
-# INV-DEPLOY-8's equality. The test loads VEC-CLI-1 from /tmp/reader-ai-test/reader.yaml (already absolute and resolved,
-# no `$`), so that path is the bind source on api, worker and mcp (FR-CLI-4). Further cases the test derives from this
-# fixture: a config path containing `$`, and one that is not absolute after resolution, make `up` refuse before any
-# `docker compose` call. No secrets.
+# for `ivan` alone the expected override is VEC-DEPLOY-3 as OPS-DEPLOY amends it to the same shape and the same path.
+# Comparison is INV-DEPLOY-8's equality. The test loads VEC-CLI-1 from /tmp/reader-ai-test/reader.yaml; the expected
+# bind source is that path after `Path.resolve(strict=True)` (on macOS /tmp is a symlink, so it becomes
+# /private/tmp/reader-ai-test/reader.yaml), and the test substitutes the resolved form for the literal below on api,
+# worker and mcp (FR-CLI-4). A further case: a config path containing `$` makes `up` refuse before any `docker compose`
+# call. No secrets.
 services:
   kernel-user-ivan:
     image: reader-kernel:local

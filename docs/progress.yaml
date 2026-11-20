@@ -223,8 +223,11 @@ tasks:
         ADR-0026, paired change, coordinator-scheduled). Tests 245 → 246 (secret_env_var assertions removed; one test added
         asserting the export is gone)." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S1.SRV-CONFIG, S1.OPS-DEPLOY],
-      note: "Spec draft revised after deep-reviewer rounds 1 (B1–B10) and 2 (five blocking points); awaits round 3 (full review
-        until approve: secrets, owner policy 2026-11-20). Delivery per ADR-0026 option A: `reader up` builds images, resolves,
+      note: "Spec reviewed (deep-reviewer, Fable, full review for secrets per owner policy 2026-11-20): round 1 changes (B1–B10),
+        round 2 changes (five blocking; reader bootstrap added), round 3 changes (backup uid, caddy_config dropped, bootstrap
+        token never in exceptions; reader.yaml bind into api/worker/mcp added), round 4 VERDICT: approve on 97b422e with
+        non-blocking items applied. Status stays draft: approval goes into the Red-tests commit (T5), and Red waits for
+        OPS-DEPLOY to merge with VEC-DEPLOY-3 amended (reader.yaml bind, path /tmp/reader-ai-test/reader.yaml). Delivery per ADR-0026 option A: `reader up` builds images, resolves,
         execs a watcher (python -m reader.cli.watcher), hands the values over fd 3 and waits ≤ 10 s for a readiness byte on
         fd 4; the watcher subscribes to docker events --since T0 (daemon time), reconciles, re-checks each event's own labels,
         delivers atomically over `docker exec -i -u <uid>` stdin; flock liveness, fail closed. Names from the rendered model;
