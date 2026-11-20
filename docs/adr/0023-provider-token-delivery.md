@@ -1,7 +1,7 @@
 ---
 id: ADR-0023
 title: Provider token delivery — the Keychain is the store; only the credential holder receives the token, through /run/secrets or a per-run subprocess environment
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "OPS-CLI invariant: while the stack runs, no container's `docker inspect` Config.Env holds a value resolved from a secret:// reference; an SRV-AGENT owner live check authenticates from the credential holder (ADR-0025) with the token delivered as specified here"
 revisit_when: "The CLI reads its OAuth token from a file natively; or `reader up` runs where no platform keyring exists"
