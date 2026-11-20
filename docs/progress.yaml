@@ -300,7 +300,10 @@ tasks:
         changes, 3 blocking (unencodable token 500, seam not total, three sign-in transactions) plus non-blocking,
         fixed with paired spec text; 151 auth tests incl. Hypothesis totality properties. Round 2: changes, 2
         blocking (deep JSON 500, root NullHandler hiding third-party errors) plus non-blocking, fixed with paired
-        spec text; 153 auth tests. Awaits code review round 3. Deps: fastapi 0.165.0, uvicorn 0.54.0, sqlalchemy 2.1.9, asyncpg 0.32.0, alembic 1.20.1,
+        spec text; 153 auth tests. Round 3: 1 blocking (asyncio's multi-line message carried exception text) fixed
+        with paired spec text: first line only, exception type plus innermost frame. Awaits code review round 4.
+        For SRV-KERNEL: plain `uvicorn` has no WebSocket implementation; the kernel relay needs `uvicorn[standard]`
+        or `websockets` added then. Deps: fastapi 0.165.0, uvicorn 0.54.0, sqlalchemy 2.1.9, asyncpg 0.32.0, alembic 1.20.1,
         webauthn 3.0.1; dev httpx 0.28.1. Also claims the stage-1 server skeleton (reader.db, reader.api,
         reader-server). Paired: compose.yaml sets READER_CONFIG statically; the override adds only the read-only bind
         of reader.yaml at /etc/reader/reader.yaml (FR-DEPLOY-5 amended); reader.example.yaml shows learner

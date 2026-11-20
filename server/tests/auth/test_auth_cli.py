@@ -9,8 +9,11 @@ READER_SECRETS_ROOT and READER_RUN_DIR; the defaults are the container paths (po
 
 from __future__ import annotations
 
+import asyncio
+import gc
 import json
 import logging
+import re
 import signal
 import socket
 import subprocess
@@ -362,20 +365,51 @@ def test_serving_logs_show_third_party_errors_without_stack_or_args(
 
     serving_logs()
     secret = "CANARY-arg-" + "y" * 12
-    try:
+
+    def fail() -> None:
         raise ValueError("CANARY-exc-detail")
+
+    try:
+        fail()
     except ValueError:
         logging.getLogger("sqlalchemy.pool.impl").error("Exception during reset %s", secret, exc_info=True)
         logging.getLogger("asyncio").error(ValueError(secret))
         logging.getLogger("reader.auth").warning("auth failure %s %s", "/api/x", "malformed", exc_info=True)
+        logging.getLogger("uvicorn.error").error("Exception in ASGI application\n", exc_info=True)
     logging.getLogger("uvicorn.error").info("Started server process")  # below WARNING: dropped
+    _unretrieved_task_exception("CANARY-task-" + "w" * 12)
     err = capsys.readouterr().err
-    lines = err.splitlines()
-    assert lines == [
-        "ERROR sqlalchemy.pool.impl: Exception during reset %s [ValueError]",
-        "ERROR asyncio: <ValueError>",
-        "WARNING reader.auth: auth failure /api/x malformed [ValueError]",
+    frame = re.escape(" [ValueError at test_auth_cli.py:") + r"\d+ fail\]"
+    patterns = [
+        re.escape("ERROR sqlalchemy.pool.impl: Exception during reset %s") + frame,
+        re.escape("ERROR asyncio: <ValueError>"),
+        re.escape("WARNING reader.auth: auth failure /api/x malformed") + frame,
+        re.escape("ERROR uvicorn.error: Exception in ASGI application") + frame,
+        re.escape("ERROR asyncio: Task exception was never retrieved")
+        + re.escape(" [ValueError at test_auth_cli.py:")
+        + r"\d+ boom\]",
     ]
+    lines = err.splitlines()
+    assert len(lines) == len(patterns), lines
+    for line, pattern in zip(lines, patterns, strict=True):
+        assert re.fullmatch(pattern, line), line
     assert "Traceback" not in err
-    assert secret not in err
-    assert "CANARY-exc-detail" not in err
+    for canary in (secret, "CANARY-exc-detail", "CANARY-task-"):
+        assert canary not in err
+
+
+def _unretrieved_task_exception(detail: str) -> None:
+    """asyncio's own record: the task repr, with the exception text, sits in record.msg after a newline."""
+
+    async def boom() -> None:
+        raise ValueError(detail)
+
+    loop = asyncio.new_event_loop()
+    try:
+        task = loop.create_task(boom())
+        loop.run_until_complete(asyncio.sleep(0.01))
+        assert task.done()
+        del task
+        gc.collect()
+    finally:
+        loop.close()

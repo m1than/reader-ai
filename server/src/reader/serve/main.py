@@ -252,28 +252,41 @@ def run(argv: list[str], environ: Mapping[str, str]) -> int:
 _QUIET: Final = logging.NullHandler()
 
 
-class SafeFormatter(logging.Formatter):
-    """Logger name, level and the message template; an exception shows as its type only.
+def _first_line(text: str) -> str:
+    lines = text.strip().splitlines()
+    return lines[0] if lines else ""
 
-    Third-party records may carry driver detail in their args or tracebacks, so neither is printed.
+
+def _exception(record: logging.LogRecord) -> str:
+    """` [Type at file:line function]`: the exception type and its innermost frame, no message, no locals."""
+    if not record.exc_info or record.exc_info[0] is None:
+        return ""
+    kind, tb = record.exc_info[0].__name__, record.exc_info[2]
+    if tb is None:
+        return f" [{kind}]"
+    while tb.tb_next is not None:
+        tb = tb.tb_next
+    code = tb.tb_frame.f_code
+    return f" [{kind} at {Path(code.co_filename).name}:{tb.tb_lineno} {code.co_name}]"
+
+
+class SafeFormatter(logging.Formatter):
+    """One line: level, logger name, the first line of the message template, the exception type and frame.
+
+    Third-party records may carry driver detail in their args, in later lines of a pre-formatted message
+    (asyncio puts the task repr, with the exception text, there) or in tracebacks; none of those is printed.
     """
 
     def format(self, record: logging.LogRecord) -> str:
         template = record.msg if isinstance(record.msg, str) else f"<{type(record.msg).__name__}>"
-        text = f"{record.levelname} {record.name}: {template}"
-        if record.exc_info and record.exc_info[0] is not None:
-            text += f" [{record.exc_info[0].__name__}]"
-        return text
+        return f"{record.levelname} {record.name}: {_first_line(template)}{_exception(record)}"
 
 
 class ReaderFormatter(logging.Formatter):
-    """reader.* records: our own messages and args (route, failure reason); never a traceback."""
+    """reader.* records: our own messages and args (route, failure reason), one line; never a traceback."""
 
     def format(self, record: logging.LogRecord) -> str:
-        text = f"{record.levelname} {record.name}: {record.getMessage()}"
-        if record.exc_info and record.exc_info[0] is not None:
-            text += f" [{record.exc_info[0].__name__}]"
-        return text
+        return f"{record.levelname} {record.name}: {_first_line(record.getMessage())}{_exception(record)}"
 
 
 def serving_logs() -> None:

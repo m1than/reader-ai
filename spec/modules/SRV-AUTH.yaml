@@ -180,8 +180,9 @@ requirements:
       arrives with SRV-MCP". Logging: the one-shot paths (`--healthcheck`, `bootstrap-link`, startup before
       serving) silence library records, so their output stays the one line. Once the api serves (and once the
       worker sees all heads), any logger's WARNING and above reaches stderr as one line with the logger name, the
-      level, the message template and the exception type, never the stack or the args; `reader.*` records add their
-      own args (route, failure reason) and never a stack.
+      level, the first line of the message template (asyncio puts the task repr, with the exception text, on later
+      lines), the exception type and its innermost frame as `file:line function` (no message, no locals), never the
+      stack or the args; `reader.*` records add their own args (route, failure reason), one line, never a stack.
   - id: FR-AUTH-3
     text: >-
       RP ID is the lower-cased host of `instance.url`; the only accepted origin is `scheme://host[:port]`, lower-cased,
