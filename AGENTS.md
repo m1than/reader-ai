@@ -40,6 +40,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - Every test file contains `@trace <ID>`; IDs come only from specs.
 - **Secrets never enter the repository, logs, traces, notebooks, prompts or your context.**
   - Never read `~/Developer/.token_tg_bot`, `.env` files or Keychain items.
+  - The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items (owner, 2026-11-20; ADR-0023).
   - Never print environment variables.
   - Reference secrets as `secret://…` (ADR-0011).
 - Copyrighted source material is never committed. Pilots reference it by sha256.
@@ -98,7 +99,7 @@ tools/                trace-check, guard-tests, hooks; tools/agent/ (bootstrap, 
 ## The owner's machine
 
 - macOS, Apple Silicon, Docker Desktop. v1 runs only here (ADR-0012).
-- Provider credential: `CLAUDE_CODE_OAUTH_TOKEN` in the environment, referenced as `secret://env/CLAUDE_CODE_OAUTH_TOKEN`.
+- Provider credential: the Keychain item `reader-ai/claude-oauth-token`, referenced as `secret://keychain/reader-ai/claude-oauth-token` (ADR-0023).
 - Telegram bot token: a private file on the host, referenced as `secret://hostfile/…`. Only `tools/agent/notify.mjs` and `reader up` read it.
 - Repositories: `m1than/reader-ai` and `m1than/ui-builder-lib-with-agents`. The library has its own rules: in that repository, follow its AGENTS.md, which forbids agents to push or publish. Prepare changes there as a branch, then block the task for the owner.
 
