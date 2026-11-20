@@ -8,10 +8,13 @@
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
-  spent_usd: 0.0568      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 5.4518      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
+    - { task: S0.spike.compile-cost, usd: 5.395, date: 2026-11-20,
+        what: "2 full L02 compiles (6 stages each: draft, fact-check, review, revise, fact-check, review); cap $8.00 set by the owner;
+          per stage in spikes/compile-cost/results/" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -77,8 +80,14 @@ tasks:
   - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
       note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml)" }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
-  - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
-      note: "spends Agent SDK credit; record in budget.ledger" }
+  - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: in_progress, needs: [S0.spike.agent-sdk-container],
+      note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
+        item reader-ai/claude-oauth-token (2026-11-20, 'allow keychain for compile-cost and trace-backend'); cap $8.00.",
+      result: "PASS for one review loop (spikes/compile-cost/RESULT.md): L02 (25 pages) in 6 stages (Opus draft/review/revise,
+        Sonnet fact-check) cost $2.97 and $2.42, 9.4 and 8.3 min. Not converged after one loop (2–3 blocking findings left);
+        3 loops would be ≈ $5.4–6.2/lesson (estimate, above $4.35). 23 lessons × one loop = $56–68.
+        Cost is dominated by uncached source (31–47k cache-write tokens per stage); source-first prompt layout should fix it
+        (unmeasured). First fact-check of run 1 rubber-stamped (87/87, no itemized checks)." }
   - { id: S0.spike.library-publish, stage: 0, kind: spike, status: blocked, needs: [S0.skeleton],
       review: "deep-reviewer (Fable) round 1: changes (prerelease dist-tag, composited contrast pairs); addressed",
       result: "PARTIAL (spikes/library-publish/RESULT.md, results/sizes.json, contrast.json, render.json).
