@@ -47,7 +47,9 @@ done
 
 # Sandbox check (owner, 2026-11-20: agents may use a Docker sandbox): the agent runs Bash inside the
 # container with the ADR-0014 process, capability and resource limits. NOT applied: network/egress
-# (default bridge), secrets (the token is in this container's environment), per-execution timeout.
+# (default bridge), secrets (the token is in this container's environment), ADR-0014's 60 s per-execution
+# timeout (only the 120 s cap per container applies). If the cap fires, set -e stops the script and leaves an
+# empty <name>.json in the run directory: delete it before committing a run.
 if [[ -z "${SKIP_TOOLS:-}" ]]; then
   probe tools-sandbox-1 --read-only --tmpfs /home/worker:uid=1000,size=256m --tmpfs /tmp:uid=1000,size=256m \
     --cap-drop ALL --security-opt no-new-privileges --memory 2g --memory-swap 2g --cpus 2 --pids-limit 256 \

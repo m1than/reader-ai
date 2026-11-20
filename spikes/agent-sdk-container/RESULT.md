@@ -39,7 +39,7 @@ Date: 2026-11-20. Command: `bash spikes/agent-sdk-container/run.sh`. Each invoca
 
 The unattributed overhead covers the Keychain read, host Python launches, container create, interpreter start, SDK import, CLI shutdown and `--rm` teardown. None of them is measured separately. The Keychain read is not the main part. The later haiku runs measure `docker_run_wall_s` after the secret is resolved, and still show 1.89 s (`20261120T180638`, text), 1.46 s (same, tools) and 2.33 s (`20261120T180949`) of overhead beyond the result mark.
 
-- **Cost is reported** on every `ResultMessage` (7 of 7 in round 2, 2 of 2 on trixie): `total_cost_usd` plus `usage` with cache fields. This is the CLI's own figure. It was not reconciled against the Agent SDK credit actually drawn, and `budget.spent_usd` inherits it. The run used the OAuth token by construction (the only credential passed, `setting_sources=[]`); `apiKeySource` from the init message was not recorded.
+- **Cost is reported** on every `ResultMessage` (7 of 7 in round 2, 3 of 3 on trixie): `total_cost_usd` plus `usage` with cache fields. This is the CLI's own figure. It was not reconciled against the Agent SDK credit actually drawn, and `budget.spent_usd` inherits it. The run used the OAuth token by construction (the only credential passed, `setting_sources=[]`); `apiKeySource` from the init message was not recorded.
 - **Fixed overhead per call.** The CLI sends about 9.9k tokens of its own system prompt (`cache_read_input_tokens` 9852–9873; 11512 with Bash enabled). Fresh containers still hit the server-side prompt cache. The first call on a model writes the cache:
   - The tools run in round 2 wrote 11,705 tokens (`cache_creation_input_tokens`) for $0.0027. The same run on trixie read them from cache for $0.00048. So $0.0027 is a first-call cost, not a steady-state one.
   - The first Sonnet call of round 1 cost about $0.04. Its cause was not recorded: the files were overwritten, which the current `run.sh` prevents. It is left to `compile-cost`.
@@ -49,7 +49,7 @@ The unattributed overhead covers the Keychain read, host Python launches, contai
 One `claude-haiku-5-5` run must run Bash in the container. Applied: ADR-0014's process, capability and resource limits (`--read-only`; tmpfs `/home/worker` and `/tmp`, 256 MiB each; `--cap-drop ALL`; `no-new-privileges`; 2 CPUs; `--memory 2g --memory-swap 2g`; 256 PIDs). **Not applied:**
 - Network and egress: Docker's default bridge network, with internet.
 - Secrets: the provider token is in this container's environment.
-- Per-execution timeout: none in the recorded tools runs. A first cap (host-side `perl alarm`) had no effect: the docker client forwards the signal into the container, where nothing handles it (found by the review). `run.sh` now runs `timeout -s KILL 120` as the container's entrypoint. Verified token-free: a 20 s `sleep` was killed at about 4 s, rc=137. The probe works under it (`results/20261120T180949/`).
+- Per-execution timeout: none in the recorded tools runs. A first cap (host-side `perl alarm`) had no effect: the docker client forwards the signal into the container, where nothing handles it (found by the review). `run.sh` now runs `timeout -s KILL 120` as the container's entrypoint. Verified token-free: a 20 s `sleep` with a 3 s cap was killed after 3.3–4 s, rc=137; the same happens when a Python parent has a lingering child (reviewer). The probe works under it (`results/20261120T180949/`).
 
 The flags were set but not verified from inside the container.
 
