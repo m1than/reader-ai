@@ -123,15 +123,18 @@ tasks:
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
       what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions",
       note: "Not all needs are done: embeddings-local, compile-cost and trace-backend are still open.
-        Drafts so far (status: proposed, branch 0/S0.exit-adr-drafts; deep-reviewer round 1 changes addressed):
+        Drafts so far (status: proposed, branch 0/S0.exit-adr-drafts; deep-reviewer round 2: 0023 and 0024 approved, round-2 points addressed):
         ADR-0021 ingestion (amends ADR-0008; revisit_when triggered): formula model on, code from the text layer, a deterministic
-        page-expectation check; Docker or native decided by measurement M1 (≤ 51 s per formula keeps Docker);
-        ADR-0022 kernel sandbox (amends ADR-0014): exec tmpfs (exec,nosuid,nodev,size=1g), per-kernel evcxr cache with a sweeping cleanup,
-        memory-swap = memory, one principal per kernel container, gateway not exposed;
+        page-expectation check incl. block order; Docker or native decided by M1 (≤ 51 s per formula, excl. load, keeps Docker);
+        native converter confined (own user or sandbox profile, loopback only, no secrets);
+        ADR-0022 kernel sandbox (amends ADR-0014): exec tmpfs (exec,nosuid,nodev,size=1g), per-kernel evcxr cache with a sweeping cleanup and
+        liveness marker, memory-swap = memory, a declared set of static kernel services (kernel-<user>, kernel-verify, kernel-agent,
+        kernel-pair-1..N) with one principal or session each;
         ADR-0023 token delivery (amends ADR-0011): Keychain store, delivery only to the credential holder;
-        ADR-0024 local CA (amends ADR-0012): localhost confirmed, -p ssl trust recorded and removed by hash, no CA-key backup in v1;
-        ADR-0025 agent sandbox (amends ADR-0014/0005/0012): a credential-injecting proxy, no code or filesystem tools where a secret lives.
-        Owner questions: M1 VM CPUs (0021); may the agent's `reader up` resolve the Keychain item (0023).
+        ADR-0024 local CA (amends ADR-0012): localhost confirmed, -p ssl owner-run trust recorded and removed by hash, caddy_data not backed up;
+        ADR-0025 agent sandbox (amends ADR-0014/0005/0012): a credential-injecting proxy reachable only by the worker with per-run per-user
+        handles, tools by allow-list checked against the CLI's init tool list.
+        Owner questions: M1 VM CPUs and the 30-min bound (0021); may the agent's `reader up` resolve the Keychain item (0023).
         Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac

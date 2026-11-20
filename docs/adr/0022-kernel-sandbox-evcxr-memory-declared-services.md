@@ -1,9 +1,9 @@
 ---
 id: ADR-0022
-title: Kernel sandbox amendment — exec tmpfs and per-kernel evcxr cache with cleanup, enforced memory, one principal per kernel container
+title: Kernel sandbox amendment — exec tmpfs and per-kernel evcxr cache with cleanup, enforced memory, a declared set of static kernel services with one principal or session each
 status: proposed
 date: 2026-11-20
-verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; the gateway is reachable only from the api relay; all of it re-run on python:3.14-slim-trixie"
+verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; routes match the declared set (api relay → kernel-<user>, kernel-pair-*; worker → kernel-verify, kernel-agent; nothing else); a session waits when the pair pool is exhausted; no service mounts the Docker socket; all of it re-run on python:3.14-slim-trixie"
 revisit_when: "More than ≈ 12 concurrent Rust kernels are needed in one container (1,024 MiB tmpfs ÷ ≈ 85 MiB per kernel); or evcxr gains a read-only cache or an exec-free cell loader"
 supersedes: []
 ---
@@ -40,13 +40,24 @@ This amends ADR-0014's "Process", "Resources" and "Network" rows.
   - Besides `/home/lab` and `/tmp` (`noexec`), one tmpfs `/run/evcxr` mounted with the options `exec,nosuid,nodev,size=1g` and owned by the kernel user.
   - A Rust kernel launcher (the kernelspec's argv) creates a private directory per kernel with a copy of the image's read-only cache, which is root-owned in the image.
   - **Before creating its own directory, the launcher sweeps the directories of kernels that are no longer running.** That covers every termination: normal exit, SIGKILL, OOM and a gateway restart.
+  - Each directory carries an atomic liveness marker, the kernel's PID written by rename after the cache copy completes, so the sweep never removes a directory whose launcher is still copying.
+  - Dead directories persist until the next Rust kernel starts in that container.
   - A kernel-start failure, such as a full tmpfs, is reported to the client as an error.
 - **Resources:**
   - `--memory-swap` equals `--memory`.
   - The tmpfs sizes count against the limit and must sum below it.
   - After an OOM kill, the kernel relay tells the learner the kernel restarted and its state is gone.
-- **Isolation invariant:** one principal or session per kernel container. Kernels in one container share a uid and can write each other's `/run/evcxr` directories. Lab verification (ADR-0009) and each pair session (ADR-0016) therefore get their own container, never a learner's.
-- **Network:** Kernel Gateway runs with an auth token, or is reachable only from the api relay on the sandbox network, never published.
+- **Declared kernel services:** a fixed, declared set of static services, which `reader up` generates from `reader.yaml`. There is no spawner and no Docker socket anywhere.
+  - `kernel-<user>`: one per configured user, for learner sessions;
+  - `kernel-verify`: lab verification (ADR-0009), used by the worker only;
+  - `kernel-agent`: agent tools under ADR-0025 option (a), used by the worker only;
+  - `kernel-pair-1..N`: a bounded pair pool (ADR-0016), N from config, default 1.
+- **Isolation invariant:** one principal or session per kernel container, from the declared set; a session waits when the pool is exhausted. Kernels in one container share a uid and can write each other's `/run/evcxr` directories, so they must never serve two principals.
+- **Routes:**
+  - the api relay reaches `kernel-<user>` and `kernel-pair-*`;
+  - the worker reaches only `kernel-verify` and `kernel-agent`;
+  - no other service reaches a kernel.
+- **Network:** Kernel Gateway runs with an auth token, or is reachable only from its declared caller on the sandbox network, never published.
 
 ## Rejected options — why (numbers)
 
@@ -60,7 +71,8 @@ This amends ADR-0014's "Process", "Resources" and "Network" rows.
   - the sweeping launcher frees every dead kernel's directory: measured by the `verified_by` tests;
   - the numbers hold on 3.14 and trixie: the re-run.
 - **Memory:** peak 1.0 GiB warm and 1.4 GiB cold with up to two Rust kernels (`results/*.json`). More concurrent Rust kernels need a larger limit, or fewer kernels per container.
-- **Agent sandbox:** the agent sandbox and the provider credential are decided separately, in ADR-0025.
+- **Agent sandbox:** the agent sandbox and the provider credential are decided separately, in ADR-0025. `kernel-agent` has no route to `agent-proxy`.
+- **ADR-0012 knock-on:** the Compose file gains the generated kernel services, and adding a user or pair slot means re-running `reader up`.
 
 ## Open questions
 

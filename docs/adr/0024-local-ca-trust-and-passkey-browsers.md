@@ -39,8 +39,10 @@ The spike ran on 2026-11-20 (RESULT.md on main, PRs #7 and #11; deep-reviewer ap
 This amends ADR-0012's TLS consequence and its volume table:
 - **Host name:** `localhost`, confirmed for stage 1. The passkey criterion is met by Safari and Chromium (Dia) via Apple Passwords, per the owner's acceptance. Google Chrome and Google Password Manager stay untested.
 - **Trust domain:** the user domain, the login keychain. `reader up` trusts the root with `-p ssl` (TLS only) and keeps a host copy of each trusted root together with its SHA-1, recorded at trust time.
+- **The trust step is owner-run:** `reader up` offers it interactively, and an agent-run `reader up` (stage live checks) skips it.
 - **Untrust:** `reader down --untrust` removes the trust and deletes the certificate by SHA-1 (with `-t`) for **every recorded root**, then verifies with a trust-settings export that none remains.
-- **Backup (option A):** in Mac-only v1, the internal CA key in `caddy_data` is not backed up. A restore costs one re-trust.
+- **`caddy_data`** is mounted only into the `caddy` service.
+- **Backup (option A):** in Mac-only v1, the whole `caddy_data` volume is excluded from backup. With an internal CA it holds nothing that a restart cannot regenerate: Caddy makes a new CA, and a restore costs one owner re-trust. `caddy_config` is unaffected.
 
 ## Rejected options — why
 
