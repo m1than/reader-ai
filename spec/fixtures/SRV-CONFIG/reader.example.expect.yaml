@@ -1,0 +1,17 @@
+# Expectations for VEC-CONFIG-1 (spec/fixtures/SRV-CONFIG/reader.example.yaml) and FR-CONFIG-9 path handling.
+# `{dir}` is the absolute directory that contains the loaded reader.yaml; the test substitutes it.
+example:
+  loads: true
+  instance.data_dir: "{dir}/data"
+  materials.0.file: "{dir}/materials/bashir-mastering-blockchain-ru-2025.pdf"
+  users.0.providers.0.token: "secret://keychain/reader-ai/claude-oauth-token"   # a reference, never resolved by load_config
+  budgets.monthly_usd: "200"     # Decimal, compared as its string form
+  budgets.warn_at: "0.8"
+
+# Lexical normalisation cases: data_dir as written → expected value, with the file loaded from {dir}/app/reader.yaml.
+paths:
+  - { data_dir: ./data, expect: "{dir}/app/data" }
+  - { data_dir: ../shared/data, expect: "{dir}/shared/data" }
+  - { data_dir: "a//b/./c/", expect: "{dir}/app/a/b/c" }
+  - { data_dir: /srv/reader/../data, expect: /srv/data }
+  - { data_dir: "~/data", expect: "{dir}/app/~/data" }   # no ~ expansion: a relative path whose first segment is "~"

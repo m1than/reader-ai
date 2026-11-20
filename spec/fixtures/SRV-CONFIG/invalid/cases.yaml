@@ -110,3 +110,64 @@ cases:
       - { line: 1, path: version, code: bad_version }
       - { line: 3, path: kernels, code: not_unique }
       - { line: 5, path: budgets.monthly_usd, code: out_of_range }
+
+  - name: open task key named by position, with a canary as the key
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      tasks:
+        draft: { model: opus }
+        CANARY-task-7f3a: { model: "" }
+    errors:
+      - { line: 5, path: "tasks.<key #2>.model", code: empty_string }
+
+  - name: empty task key
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      tasks:
+        "": { model: opus }
+    errors:
+      - { line: 4, path: "tasks.<key #1>", code: empty_key }
+
+  - name: instance.url not https
+    yaml: |
+      version: 1
+      instance: { url: http://reader.local, data_dir: ./data }
+    errors:
+      - { line: 2, path: instance.url, code: bad_url }
+
+  - name: empty string in a required string field
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: "" }
+    errors:
+      - { line: 2, path: instance.data_dir, code: empty_string }
+
+  - name: block style duplicate handle
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      users:
+        - handle: ivan
+          role: owner
+        - handle: ivan
+          role: viewer
+    errors:
+      - { line: 6, path: users.1.handle, code: not_unique }
+
+  - name: Decimal from a quoted string is not coerced
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      budgets: { monthly_usd: "200" }
+    errors:
+      - { line: 3, path: budgets.monthly_usd, code: wrong_type }
+
+  - name: Decimal from a boolean is not coerced
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      budgets: { monthly_usd: true }
+    errors:
+      - { line: 3, path: budgets.monthly_usd, code: wrong_type }

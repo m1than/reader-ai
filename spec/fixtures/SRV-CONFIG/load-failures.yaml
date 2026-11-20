@@ -1,10 +1,19 @@
-# VEC-CONFIG-4: load failures (FR-CONFIG-15). Each case gives the file content as `text` or as `bytes_b64`
-# (base64 of the exact bytes), or `missing: true` for a path that does not exist.
-# `line: null` means no line; `line: any` means a line must be present, taken from the parser's problem mark.
+# VEC-CONFIG-4: loader cases (FR-CONFIG-15).
+# `cases`: failures. Each gives the file content as `text` or as `bytes_b64` (base64 of the exact bytes), or
+# `missing: true` for a path that does not exist, or `mode: 0` for an existing file without read permission.
+# `line: null` means no line; `line: any` means a line must be present (from the parser's problem mark).
 # Canary cases: the literal CANARY-... must not appear in the error's str, repr or traceback (INV-CONFIG-3).
+# `scalars`: core-schema resolution (YAML 1.2.2 §10.3.2), observed through the opaque `sectors` mapping, which keeps
+# resolved values as they are.
 cases:
   - name: file does not exist
     missing: true
+    error: { code: file_unreadable, line: null }
+
+  - name: permission denied
+    text: |
+      version: 1
+    mode: 0
     error: { code: file_unreadable, line: null }
 
   - name: not UTF-8 (0xFF byte after a valid first line)
@@ -26,6 +35,13 @@ cases:
       ---
     error: { code: empty_document, line: null }
 
+  - name: two documents
+    text: |
+      version: 1
+      ---
+      version: 1
+    error: { code: multiple_documents, line: 2 }
+
   - name: top-level sequence
     text: |
       - version
@@ -43,6 +59,39 @@ cases:
       version: 1
     error: { code: duplicate_key, line: 2 }
 
+  - name: duplicate key whose values are canaries (the parser's own error text must not leak)
+    text: |
+      version: 1
+      instance: { url: CANARY-dup-a-7f3a, url: CANARY-dup-b-7f3a, data_dir: ./data }
+    error: { code: duplicate_key, line: 2 }
+
+  - name: non-string mapping key (core-schema int)
+    text: |
+      version: 1
+      1: one
+    error: { code: non_string_key, line: 2 }
+
+  - name: non-string mapping key (core-schema bool)
+    text: |
+      version: 1
+      true: yes
+    error: { code: non_string_key, line: 2 }
+
+  - name: anchor and alias
+    text: |
+      version: 1
+      instance: &inst { url: https://reader.local, data_dir: ./data }
+      sharing: *inst
+    error: { code: alias_not_allowed, line: 2 }
+
+  - name: merge key without an alias
+    text: |
+      version: 1
+      instance:
+        <<: { url: https://reader.local }
+        data_dir: ./data
+    error: { code: alias_not_allowed, line: 3 }
+
   - name: python object tag
     text: |
       version: !!python/object/apply:os.system ["true"]
@@ -58,3 +107,26 @@ cases:
     text: |
       version: !!int 1
     error: { code: tag_not_allowed, line: 1 }
+
+# Each scalar is written as `sectors.<key>: <plain scalar>` in an otherwise valid config; `expect` is the resolved value.
+scalars:
+  - { plain: "2026-11-20", expect: { str: "2026-11-20" } }          # date-like: a string under the core schema
+  - { plain: "2026-11-20T10:00:00Z", expect: { str: "2026-11-20T10:00:00Z" } }
+  - { plain: "1_000", expect: { str: "1_000" } }                    # underscores are not part of core-schema ints
+  - { plain: "yes", expect: { str: "yes" } }
+  - { plain: "no", expect: { str: "no" } }
+  - { plain: "on", expect: { str: "on" } }
+  - { plain: "true", expect: { bool: true } }
+  - { plain: "False", expect: { bool: false } }
+  - { plain: "TRUE", expect: { bool: true } }
+  - { plain: "~", expect: { "null": true } }
+  - { plain: "Null", expect: { "null": true } }
+  - { plain: "0x1F", expect: { int: 31 } }
+  - { plain: "0o17", expect: { int: 15 } }
+  - { plain: "017", expect: { int: 17 } }                           # not octal in YAML 1.2
+  - { plain: "-42", expect: { int: -42 } }
+  - { plain: "1e3", expect: { float: 1000.0 } }
+  - { plain: ".5", expect: { float: 0.5 } }
+  - { plain: ".inf", expect: { float: inf } }
+  - { plain: ".NaN", expect: { float: nan } }
+  - { plain: "0b101", expect: { str: "0b101" } }                   # binary is YAML 1.1 only

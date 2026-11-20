@@ -1,0 +1,40 @@
+# VEC-CONFIG-6: resolver cases (FR-CONFIG-6, FR-CONFIG-8, FR-CONFIG-13). The test builds `root` as a temporary
+# directory standing in for /run/secrets/, plus `outside` as a sibling directory, from the `tree` below. Values are
+# test placeholders, never real secrets. `content_b64` gives exact bytes. `mode` is an octal permission.
+# `size` creates a file of that many ASCII "x" bytes. `link` creates a symlink with that target.
+tree:
+  root:
+    claude_token: { content: "tok-123\n" }                  # one trailing newline is stripped
+    two_newlines: { content: "tok\n\n" }                    # only one is stripped
+    empty_file: { content: "" }
+    only_newline: { content: "\n" }
+    not_utf8: { content_b64: Q0FOQVJZLXV0ZjgtN2YzYf8= }   # "CANARY-utf8-7f3a" + 0xFF: the canary must not leak
+    locked: { content: "tok", mode: 0 }
+    a_dir: { dir: true }
+    at_bound: { size: 65536 }
+    over_bound: { size: 65537 }
+    link_inside: { link: claude_token }                     # symlink to a file inside the root
+    link_outside: { link: ../outside/secret }               # symlink whose target leaves the root
+    keychain-e35683c33bd94de8486a116f9c3efc47: { content: "kc-value" }   # host-resolved name of the keychain ref below
+  outside:
+    secret: { content: "outside-value" }
+
+cases:
+  - { registry: container, ref: "secret://file/run/secrets/claude_token", value: "tok-123" }
+  - { registry: container, ref: "secret://file/run/secrets/two_newlines", value: "tok\n" }
+  - { registry: container, ref: "secret://file/run/secrets/link_inside", value: "tok-123" }
+  - { registry: container, ref: "secret://file/run/secrets/at_bound", value_length: 65536 }
+  - { registry: container, ref: "secret://keychain/reader-ai/claude-oauth-token", value: "kc-value" }   # host-resolved
+  - { registry: container, ref: "secret://file/run/secrets/missing", code: not_found }
+  - { registry: container, ref: "secret://file/run/secrets/empty_file", code: empty }
+  - { registry: container, ref: "secret://file/run/secrets/only_newline", code: empty }
+  - { registry: container, ref: "secret://file/run/secrets/not_utf8", code: not_utf8 }
+  - { registry: container, ref: "secret://file/run/secrets/locked", code: unreadable }
+  - { registry: container, ref: "secret://file/run/secrets/a_dir", code: not_regular_file }
+  - { registry: container, ref: "secret://file/run/secrets/over_bound", code: too_large }
+  - { registry: container, ref: "secret://file/run/secrets/link_outside", code: outside_root }
+  - { registry: container, ref: "secret://op/Private/Anthropic/token", code: not_found }   # host-resolved, no such file
+  - { registry: host, env: { READER_TEST_TOKEN: "env-value" }, ref: "secret://env/READER_TEST_TOKEN", value: "env-value" }
+  - { registry: host, env: {}, ref: "secret://env/READER_TEST_UNSET", code: env_unset }
+  - { registry: host, ref: "secret://file/run/secrets/claude_token", code: no_resolver }
+  - { registry: host, ref: "secret://keychain/reader-ai/claude-oauth-token", code: no_resolver }   # no extra resolvers passed

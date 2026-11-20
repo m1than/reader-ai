@@ -125,17 +125,24 @@ tasks:
 
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S0.skeleton],
-      note: "spec drafted (spec/modules/SRV-CONFIG.yaml, status: draft; fixtures VEC-CONFIG-1..4 in spec/fixtures/SRV-CONFIG/).
-        deep-reviewer round 1: changes (B1–B7); revised: no input echo in ConfigError, Secret wrapper, per-scheme grammar,
-        file restricted to /run/secrets, container path via secret_file_name + host-resolved, field table, load failures (ruamel.yaml).
-        Awaits deep-reviewer round 2. Depends on SRV-OBS and SRV-EVENTS for redaction in the shared logger and event serializer.
-        Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved inside containers, the spec
-        routes containers through /run/secrets instead." }
+      note: "spec drafted (spec/modules/SRV-CONFIG.yaml, status: draft; fixtures VEC-CONFIG-1..6 in spec/fixtures/SRV-CONFIG/).
+        deep-reviewer round 1: changes (B1–B7); round 2: changes (B1–B6), revised: schema generator writes its file (--write);
+        secrets reach containers as Compose secrets sourced from the child's environment (secret_file_name + secret_env_var),
+        nothing on disk; open task keys by position; duplicate-key canary; loader = ruamel event parser + own core-schema
+        construction (aliases, merge keys, tags, extra documents, non-string keys rejected); realpath-based outside_root with
+        symlinks; unreadable code. Awaits deep-reviewer round 3. Depends on SRV-OBS and SRV-EVENTS for redaction in the shared
+        logger and event serializer. Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved
+        inside containers; ADR-0017 cross-user reference exposure is SRV-AGENT's." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
-      note: "Must use SRV-CONFIG's secret_file_name(ref) (FR-CONFIG-14) to name the /run/secrets files it writes on `reader up`,
-        and register its hostfile/keychain/op resolvers through SRV-CONFIG's ResolverRegistry (FR-CONFIG-7)." }
+      note: "Must use SRV-CONFIG's secret_file_name(ref) and secret_env_var(ref) (FR-CONFIG-14): for each non-file reference it
+        resolves the value on the host, passes it as <VAR> in the docker compose child's environment, and declares the Compose
+        secret <name>: { environment: <VAR> }. The names are hash-derived, so the CLI generates that secrets section in memory
+        (a compose override on stdin or generated config), never written to disk. Registers its hostfile/keychain/op resolvers
+        through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7)." }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
-      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container] }
+      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container],
+      note: "compose.yaml must not hard-code provider secrets: OPS-CLI adds a generated, in-memory secrets section with
+        hash-derived names (SRV-CONFIG FR-CONFIG-14); services that need a provider token reference those secrets." }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
