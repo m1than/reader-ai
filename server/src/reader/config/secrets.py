@@ -155,7 +155,7 @@ def file_resolver(root: Path = DEFAULT_ROOT) -> Resolver:
 
 
 def host_resolved_resolver(root: Path = DEFAULT_ROOT) -> Resolver:
-    """Inside a container: env/hostfile/keychain/op values that the host CLI passed as Compose secrets."""
+    """In a container: env/hostfile/keychain/op values OPS-CLI delivered to /run/secrets (ADR-0026)."""
     return lambda ref: _from_file(root, ref, secret_file_name(ref))
 
 

@@ -87,6 +87,39 @@ Commands:
 
 Native was about 17 times faster on page 128 (344 s per formula from B against 19.7 s). The runs differ in CPU count (18 against 4), OCR setting and environment. The share of each factor was not measured, and raising the Docker VM's CPU count was not tried.
 
+### M1 (ADR-0021): Docker at 4 VM CPUs, `do_ocr=False`, formula model on
+
+`bash spikes/ingest-docling/run.sh <pdf> m1 128,130,132,133,141` → `results/m1.json` (2026-11-20):
+
+| Page | Formulas decoded | Seconds |
+| --- | --- | --- |
+| 128 | 2 | 643.4 |
+| 130 | 1 | 214.7 |
+| 132 | 1 | 218.4 |
+| 133 | 1 | 402.6 |
+| 141 | 1 | 225.4 |
+| **Total** | **6** (0 placeholders) | **1,704.5 s → 284.1 s per formula** |
+
+- Model load: 3.3 s (separate from the per-page times).
+- Peak memory (sampled): 1,852 MiB.
+- **Against ADR-0021's bound of ≤ 51 s per formula, this is 5.6 times over: M1 at 4 CPUs fails.**
+- Turning OCR off did not close the gap (B, with OCR on, was ≈ 344 s per formula including model load), so the difference from native (19.7 s) comes mainly from the environment and CPU count.
+- Light containers from other spikes ran on the same VM for part of the run, so these are upper bounds.
+- Per ADR-0021, the next step is a second M1 run after the owner raises Docker Desktop's CPU count, before native is chosen.
+
+### M1, second run: Docker at 13 VM CPUs (owner raised the CPU limit, 2026-11-20)
+
+`results/m1-13cpu.json`: pages 128, 130, 132, 133 and 141 took 616.7, 208.0, 201.6, 366.1 and 203.5 s. That is **6 formulas in 1,595.9 s → 266.0 s per formula**. Model load 2.5 s; peak memory 2,812 MiB (sampled).
+
+| Docker VM CPUs | Seconds per formula | Against the 51 s bound |
+| --- | --- | --- |
+| 4 | 284.1 | 5.6 × over |
+| 13 | 266.0 | 5.2 × over |
+| Native host, 18 threads (configuration D) | 19.7 | within |
+
+- More than three times the CPUs bought 6%. The Docker cost is not CPU-bound in the way the bound assumed. The cause was not measured: candidates are thread use inside the container, or slower arm64 Linux CPU kernels than the macOS host build.
+- **Outcome under ADR-0021:** both Docker runs miss the bound, so **ingestion runs natively on the Mac**, under ADR-0021's confinement requirements: dedicated user or sandbox profile, read-only input and models, output-only writes, no secrets, loopback only, no network. This is ADR-0021's decision rule applied, not a new decision.
+
 ## OCR (10 pages rendered as images, Russian + English)
 
 **Method:** each page is rendered at 200 dpi with no text layer and converted with full-page EasyOCR (`ru`, `en`) in Docker.
