@@ -61,11 +61,14 @@ def test_resolver_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: d
     if "code" in case:
         with pytest.raises(SecretResolutionError) as caught:
             resolve(ref, registry)
+        # Render before any assert: pytest's assertion rewriting puts the assert's literals into this frame's
+        # locals, which a traceback with locals would otherwise show.
+        surfaces = rendered(caught.value) + rendered_with_locals(caught.value)
         assert caught.value.code == case["code"]
         assert caught.value.ref == ref
         assert caught.value.__cause__ is None
         assert caught.value.__context__ is None or caught.value.__suppress_context__
-        assert "CANARY-" not in rendered(caught.value) + rendered_with_locals(caught.value)
+        assert "CANARY-" not in surfaces
     elif "value_length" in case:
         assert len(resolve(ref, registry).reveal()) == case["value_length"]
     else:

@@ -46,6 +46,7 @@ ignore = []
 strict = true
 python_version = "3.14"
 mypy_path = "src"
+explicit_package_bases = true   # `reader` is a namespace package (no src/reader/__init__.py)
 warn_unreachable = true
 
 [tool.pytest.ini_options]

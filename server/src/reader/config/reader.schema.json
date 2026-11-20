@@ -1,0 +1,237 @@
+{
+  "$defs": {
+    "Budgets": {
+      "additionalProperties": false,
+      "properties": {
+        "monthly_usd": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Monthly Usd"
+        },
+        "warn_at": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Warn At"
+        }
+      },
+      "required": [
+        "monthly_usd"
+      ],
+      "title": "Budgets",
+      "type": "object"
+    },
+    "Instance": {
+      "additionalProperties": false,
+      "properties": {
+        "data_dir": {
+          "title": "Data Dir",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "data_dir"
+      ],
+      "title": "Instance",
+      "type": "object"
+    },
+    "Material": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "language": {
+          "title": "Language",
+          "type": "string"
+        },
+        "license": {
+          "title": "License",
+          "type": "string"
+        },
+        "sha256": {
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "file",
+        "sha256",
+        "license",
+        "language"
+      ],
+      "title": "Material",
+      "type": "object"
+    },
+    "Provider": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "title": "Kind",
+          "type": "string"
+        },
+        "token": {
+          "title": "Token",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "token"
+      ],
+      "title": "Provider",
+      "type": "object"
+    },
+    "Task": {
+      "additionalProperties": false,
+      "properties": {
+        "budget_usd_per_lesson": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Budget Usd Per Lesson"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "Task",
+      "type": "object"
+    },
+    "User": {
+      "additionalProperties": false,
+      "properties": {
+        "handle": {
+          "title": "Handle",
+          "type": "string"
+        },
+        "providers": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/Provider"
+          },
+          "title": "Providers",
+          "type": "array"
+        },
+        "role": {
+          "title": "Role",
+          "type": "string"
+        }
+      },
+      "required": [
+        "handle",
+        "role"
+      ],
+      "title": "User",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "budgets": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Budgets"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "instance": {
+      "$ref": "#/$defs/Instance"
+    },
+    "kernels": {
+      "default": [],
+      "items": {
+        "type": "string"
+      },
+      "title": "Kernels",
+      "type": "array"
+    },
+    "materials": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/Material"
+      },
+      "title": "Materials",
+      "type": "array"
+    },
+    "sectors": {
+      "additionalProperties": true,
+      "title": "Sectors",
+      "type": "object"
+    },
+    "sharing": {
+      "additionalProperties": true,
+      "title": "Sharing",
+      "type": "object"
+    },
+    "tasks": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Task"
+      },
+      "title": "Tasks",
+      "type": "object"
+    },
+    "users": {
+      "default": [],
+      "items": {
+        "$ref": "#/$defs/User"
+      },
+      "title": "Users",
+      "type": "array"
+    },
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "version",
+    "instance"
+  ],
+  "title": "ReaderConfig",
+  "type": "object"
+}
