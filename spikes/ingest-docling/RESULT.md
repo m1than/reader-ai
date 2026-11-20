@@ -107,6 +107,19 @@ Native was about 17 times faster on page 128 (344 s per formula from B against 1
 - Light containers from other spikes ran on the same VM for part of the run, so these are upper bounds.
 - Per ADR-0021, the next step is a second M1 run after the owner raises Docker Desktop's CPU count, before native is chosen.
 
+### M1, second run: Docker at 13 VM CPUs (owner raised the CPU limit, 2026-11-20)
+
+`results/m1-13cpu.json`: pages 128, 130, 132, 133 and 141 took 616.7, 208.0, 201.6, 366.1 and 203.5 s. That is **6 formulas in 1,595.9 s → 266.0 s per formula**. Model load 2.5 s; peak memory 2,812 MiB (sampled).
+
+| Docker VM CPUs | Seconds per formula | Against the 51 s bound |
+| --- | --- | --- |
+| 4 | 284.1 | 5.6 × over |
+| 13 | 266.0 | 5.2 × over |
+| Native host, 18 threads (configuration D) | 19.7 | within |
+
+- More than three times the CPUs bought 6%. The Docker cost is not CPU-bound in the way the bound assumed. The cause was not measured: candidates are thread use inside the container, or slower arm64 Linux CPU kernels than the macOS host build.
+- **Outcome under ADR-0021:** both Docker runs miss the bound, so **ingestion runs natively on the Mac**, under ADR-0021's confinement requirements: dedicated user or sandbox profile, read-only input and models, output-only writes, no secrets, loopback only, no network. This is ADR-0021's decision rule applied, not a new decision.
+
 ## OCR (10 pages rendered as images, Russian + English)
 
 **Method:** each page is rendered at 200 dpi with no text layer and converted with full-page EasyOCR (`ru`, `en`) in Docker.
