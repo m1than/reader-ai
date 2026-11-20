@@ -87,19 +87,22 @@ security remove-trusted-cert data/spikes/passkey-localhost/caddy-root.crt
 security delete-certificate -t -Z "$(openssl x509 -in data/spikes/passkey-localhost/caddy-root.crt -noout -fingerprint -sha1 | cut -d= -f2 | tr -d :)" ~/Library/Keychains/login.keychain-db
 ```
 
-The first command removes the stack and Caddy's CA volume, and with it the CA's private key. The second removes the trust setting you added in step 2. The third deletes the certificate by its SHA-1 hash, with `-t` for any trust left. Every CA from 2026 has the same name, so select by hash, not by name. Both are the owner's commands, like the trust itself.
+If the second command succeeds, the third may report that the certificate is not found; that is expected. The first command removes the stack and Caddy's CA volume, and with it the CA's private key. The second removes the trust setting you added in step 2. The third deletes the certificate by its SHA-1 hash, with `-t` for any trust left. Every CA from 2026 has the same name, so select by hash, not by name. Both are the owner's commands, like the trust itself.
 
 **State after the owner's run (2026-11-20):**
 - The owner ran `down -v` and `security delete-certificate -c "Caddy Local Authority - 2026 ECC Root"`. That was the earlier, weaker instruction: no `-t`, selected by name.
-- The agent then checked: `security dump-trust-settings` lists no Caddy entry, and `security find-certificate -a -c "Caddy Local Authority"` finds none in the login keychain.
-- The CA's private key was destroyed with the volume.
-- Nothing is left to remove. Passkeys created for `localhost` stay in iCloud Keychain or the Chrome profile. Delete them in System Settings → Passwords, or in Chrome → Password Manager, if you want.
+- The agent then checked by name: `security dump-trust-settings` lists no Caddy entry, and `security find-certificate -a -c "Caddy Local Authority"` finds none in the login keychain.
+- The name check misses orphans: `dump-trust-settings` resolves names through the certificate, which was already deleted. A stricter check, prompted by the review, found the leftover: `security trust-settings-export` (user domain) still contained the root's SHA-1 `9D060DB20AA489FEA1BF5654F580C5B590CC38CB`. That is an orphaned trust setting, left because `delete-certificate` ran without `-t`.
+- Risk: none in practice, because the CA's private key was destroyed with the volume, so nothing can be signed under that root again.
+- Removal is the owner's action: `security remove-trusted-cert data/spikes/passkey-localhost/caddy-root.crt`, then repeat the export check.
+- Owner's note: the agent ran these listing commands. They read trust settings and certificate names, no passwords or secrets. AGENTS.md says the agent never reads Keychain items, so whether such checks are allowed is the owner's call. Passkeys created for `localhost` stay in iCloud Keychain or the Chrome profile. Delete them in System Settings → Passwords, or in Chrome → Password Manager, if you want.
 
 ## Notes for OPS-DEPLOY and SRV-AUTH
 
 - `down -v` regenerates the CA, so every new CA needs trusting again. `reader up` should keep `caddy_data` (ADR-0012 already backs it up) and offer the trust step once.
 - The origin must match exactly: `https://localhost` on 443, or `https://localhost:<port>` otherwise. The app reads it from `READER_ORIGIN`.
-- The trust step is a one-time owner action per CA. The browsers needed nothing beyond the macOS login-keychain trust.
+- The trust step is a one-time owner action per CA. Chromium needed nothing beyond the macOS login-keychain trust (WebAuthn worked, so the chain was trusted). For Safari, whether a certificate warning appeared is unconfirmed.
+- Teardown must remove the trust **by hash, with `-t`**: deleting the certificate by name leaves an orphaned trust setting that `dump-trust-settings` no longer shows by name (seen in the owner's run).
 - **The trusted root can sign any host name.** `reader up` keeps and backs up `caddy_data` (ADR-0012), so whoever can read that volume or its backups can mint certificates the owner's Mac trusts. OPS-DEPLOY must:
   - offer the trust step with `-p ssl`;
   - protect `caddy_data` and its backups like a secret;
