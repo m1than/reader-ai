@@ -85,7 +85,8 @@ requirements:
     text: >-
       `load_config(path)` reads reader.yaml and returns an immutable `ReaderConfig` (Pydantic v2) with exactly the fields
       of the field table. Every key not in the table is rejected, except inside the opaque `sectors` and `sharing`, which
-      are kept as immutable trees of core-schema values.
+      are kept as immutable trees of core-schema values. A non-finite float (`.inf`, `.nan`) anywhere inside them is
+      rejected with `not_finite`, for consistency with the finite Decimals; keys inside them are named by position.
   - id: FR-CONFIG-2
     text: >-
       `version` must be a YAML int equal to 1. A quoted string, a float, a boolean or any other integer fails; there is
@@ -113,8 +114,9 @@ requirements:
       `secret://keychain/SERVICE/ACCOUNT`;
       `secret://op/VAULT/ITEM/FIELD`.
       A segment S, SERVICE, ACCOUNT, VAULT, ITEM or FIELD is one or more characters other than `/` and `%`, and is not
-      `.` or `..`. Any Unicode whitespace character or C0 control character anywhere in the string rejects it; that
-      includes a leading or trailing space, a tab, a newline and NUL. The prefix `secret://` and the scheme are
+      `.` or `..`. Any whitespace or control character anywhere in the string rejects it, defined as a character `c`
+      with Python `c.isspace()`, or a code point below 0x20, or 0x7F; that includes a leading or trailing space, a tab,
+      a newline, NUL and Unicode spaces such as U+00A0. The prefix `secret://` and the scheme are
       lowercase. Percent-encoding is not decoded; `%` is rejected.
   - id: FR-CONFIG-6
     text: >-
@@ -147,7 +149,9 @@ requirements:
       Value constraints of the field table hold. `materials[].sha256` is 64 lowercase hex characters. Decimal fields
       accept only a YAML int or float node: a quoted string or a boolean gives `wrong_type`. The Decimal is built from the
       scalar's source text, not via a binary float. Budgets are finite (`not_finite` for `.nan` and `.inf`) and greater
-      than 0; `warn_at` is in (0, 1]. Handles, material ids and kernels are unique within their list (`not_unique`).
+      than 0; `warn_at` is in (0, 1]. Handles, material ids and kernels are unique within their list: every repeated
+      occurrence after the first gives one `not_unique` at its own item path and line (`kernels.1`, `users.1.handle`),
+      so three equal items give two errors.
   - id: FR-CONFIG-11
     text: >-
       `ConfigError` never contains a scalar from the input file. Each problem carries only the file path, line, key path
@@ -194,6 +198,10 @@ requirements:
       `True`, `TRUE`, `false`, `False`, `FALSE` are booleans; core-schema int and float patterns are numbers; everything
       else, including date-like values, `yes`/`no` and `1_000`, is a string. Duplicate and non-string keys are detected
       during that construction. No parser exception text reaches `ConfigError`.
+      Precedence, one error per load failure: a syntax error anywhere in the stream first (the whole stream is parsed
+      before any check); then the first event-pass violation in stream order; then the first construction error
+      (`empty_document`, `not_mapping`, `duplicate_key`, `non_string_key`). A root that is empty, `~` or `null` is
+      `empty_document`. Only a plain `<<` key is a merge key; a quoted `"<<"` is an ordinary key.
   - id: FR-CONFIG-16
     text: >-
       This module's own log calls never include a resolved value or an input scalar; they log references, codes and key
@@ -264,3 +272,7 @@ vectors:
 #   This matches the stage-1 live check ("no env secrets") and should be reflected in ADR-0011 by the owner.
 # - ADR-0017 (multiple users): reader.yaml holds every user's provider references, and a registry resolves any of them.
 #   SRV-AGENT must resolve only the acting user's references; that cross-user exposure is outside this module.
+# - FR-CONFIG-5 forbids whitespace anywhere, so keychain service/account and 1Password vault/item/field names with
+#   spaces cannot be referenced. The owner names such items without spaces.
+# - Test note: the mode-0 (permission denied) cases are skipped when the tests run as uid 0, where permissions do not
+#   apply.

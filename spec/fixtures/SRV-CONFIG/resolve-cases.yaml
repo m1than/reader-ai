@@ -2,6 +2,7 @@
 # directory standing in for /run/secrets/, plus `outside` as a sibling directory, from the `tree` below. Values are
 # test placeholders, never real secrets. `content_b64` gives exact bytes. `mode` is an octal permission.
 # `size` creates a file of that many ASCII "x" bytes. `link` creates a symlink with that target.
+# Cases on a mode-0 file are skipped when the tests run as uid 0.
 tree:
   root:
     claude_token: { content: "tok-123\n" }                  # one trailing newline is stripped

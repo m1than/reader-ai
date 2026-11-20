@@ -108,7 +108,7 @@ cases:
         monthly_usd: -1
     errors:
       - { line: 1, path: version, code: bad_version }
-      - { line: 3, path: kernels, code: not_unique }
+      - { line: 3, path: kernels.1, code: not_unique }
       - { line: 5, path: budgets.monthly_usd, code: out_of_range }
 
   - name: open task key named by position, with a canary as the key
@@ -155,6 +155,26 @@ cases:
           role: viewer
     errors:
       - { line: 6, path: users.1.handle, code: not_unique }
+
+  - name: three equal kernels give two errors, each at its own item
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      kernels:
+        - python3
+        - python3
+        - python3
+    errors:
+      - { line: 5, path: kernels.1, code: not_unique }
+      - { line: 6, path: kernels.2, code: not_unique }
+
+  - name: non-finite float inside an opaque mapping, named by position
+    yaml: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { a: 1, CANARY-sector-7f3a: .inf }
+    errors:
+      - { line: 3, path: "sectors.<key #2>", code: not_finite }
 
   - name: Decimal from a quoted string is not coerced
     yaml: |
