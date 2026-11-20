@@ -341,9 +341,27 @@ tasks:
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
-  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
-      note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],
+  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+      note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
+        Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2
+        changes, round 3 approve. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
+        runs; connection-table veto by a cell) fixed: lock-free supervisor with a SIGTERM self-pipe, local 192 / remote
+        64 connection slots with eviction. Code review round 2 changes (a cell binding its eth0 address as source was
+        classed remote and could evict the api; closing an evicted socket in the same select batch crashed PID 1)
+        fixed: local = loopback destination or peer, an interface address, or peer == destination; idempotent close;
+        per-connection errors contained. 31 tests in server/tests/sandbox, all pass
+        (incl. 30 fresh containers with SIGTERM/SIGINT under a state flood: 30/30 real restarts; full table held from
+        inside: caller's state and exit served; stopped gateway killed 2.01 s after the 202 with 8889 held). Measured:
+        image 404,228,564 bytes (docker image inspect .Size; vs 1.91 GB for the spike's 3-kernel image); KG 3.0.1 +
+        ipykernel 7.4.0 run on python:3.14-slim-trixie (lock: 80 pinned packages, all binary wheels); 4 idle python3
+        kernels 248 MiB; reset round trip 1.12–1.20 s (3 resets, 11 s apart); exit with 50 idle connections held:
+        process gone 0.11 s after the 202. SRV-KERNEL stays draft until SRV-AUTH merges (its Red needs the app and
+        session layers). Cross-spec: SRV-AUTH's app factory includes routers from a declared list naming
+        reader.kernels.routes" }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
+      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
+        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels],
       note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
