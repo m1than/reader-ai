@@ -7,7 +7,7 @@ verified_by: "SRV-AGENT tests: provider credentials are bound to one user (INV);
 revisit_when: "Anthropic changes the subscription terms for the Agent SDK, or a second user needs a non-Anthropic model"
 ---
 
-> Proposed amendment: [ADR-0023](0023-provider-token-delivery.md) (2026-11-20) — the provider token's store is the Keychain on the owner's Mac, and it is delivered into containers only through `/run/secrets`.
+> Proposed amendment: [ADR-0025](0025-agent-sandbox-and-credential-separation.md) (2026-11-20) — the provider token lives only in a credential-injecting proxy; agent containers that hold any secret run with code and filesystem tools disabled.
 
 ## Context
 

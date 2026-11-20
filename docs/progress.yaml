@@ -122,12 +122,17 @@ tasks:
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
       what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions",
-      note: "Drafts (status: proposed, branch 0/S0.exit-adr-drafts) from the finished spikes:
-        ADR-0021 ingestion (amends ADR-0008; its revisit_when triggered): native Docling with the formula model, code from the text layer, 20-page regression check;
-        ADR-0022 sandbox (amends ADR-0014): exec tmpfs and per-kernel evcxr cache with cleanup, memory-swap = memory, separate containers,
-        an agent sandbox with the credential out of reach of tools; ADR-0023 token delivery (amends ADR-0011/0005): Keychain store, /run/secrets only;
-        ADR-0024 local CA and passkeys (amends ADR-0012): localhost confirmed, -p ssl trust, untrust by hash, caddy_data as a secret.
-        Still to come from embeddings-local, compile-cost and trace-backend. Status flips are the owner's (H3)." }
+      note: "Not all needs are done: embeddings-local, compile-cost and trace-backend are still open.
+        Drafts so far (status: proposed, branch 0/S0.exit-adr-drafts; deep-reviewer round 1 changes addressed):
+        ADR-0021 ingestion (amends ADR-0008; revisit_when triggered): formula model on, code from the text layer, a deterministic
+        page-expectation check; Docker or native decided by measurement M1 (≤ 51 s per formula keeps Docker);
+        ADR-0022 kernel sandbox (amends ADR-0014): exec tmpfs (exec,nosuid,nodev,size=1g), per-kernel evcxr cache with a sweeping cleanup,
+        memory-swap = memory, one principal per kernel container, gateway not exposed;
+        ADR-0023 token delivery (amends ADR-0011): Keychain store, delivery only to the credential holder;
+        ADR-0024 local CA (amends ADR-0012): localhost confirmed, -p ssl trust recorded and removed by hash, no CA-key backup in v1;
+        ADR-0025 agent sandbox (amends ADR-0014/0005/0012): a credential-injecting proxy, no code or filesystem tools where a secret lives.
+        Owner questions: M1 VM CPUs (0021); may the agent's `reader up` resolve the Keychain item (0023).
+        Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }

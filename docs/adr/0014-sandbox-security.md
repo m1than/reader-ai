@@ -7,7 +7,9 @@ verified_by: "OPS-SANDBOX tests run inside the kernel: cannot resolve postgres o
 revisit_when: "A lab legitimately needs a capability the sandbox denies, or a container escape CVE affects the runtime in use"
 ---
 
-> Proposed amendment: [ADR-0022](0022-sandbox-evcxr-memory-agent-sandbox.md) (2026-11-20) — exec tmpfs and per-kernel evcxr cache with cleanup, `--memory-swap` = `--memory`, separate containers for verification and pairs, and an agent sandbox that keeps the credential away from tools.
+> Proposed amendments (2026-11-20):
+> - [ADR-0022](0022-sandbox-evcxr-memory-agent-sandbox.md), the kernel sandbox: exec tmpfs `exec,nosuid,nodev`, a per-kernel evcxr cache with a sweeping cleanup, `--memory-swap` = `--memory`, one principal per kernel container.
+> - [ADR-0025](0025-agent-sandbox-and-credential-separation.md), the agent sandbox: a credential-injecting proxy; no code or filesystem tools where a secret lives.
 
 ## Context
 

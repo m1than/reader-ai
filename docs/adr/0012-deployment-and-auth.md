@@ -7,7 +7,10 @@ verified_by: "OPS-DEPLOY: `reader up` on a clean machine reaches a healthy stack
 revisit_when: "Moving from the owner's Mac to a VPS (planned after load measurement), more than 20 active users, or a host that cannot run Docker Compose"
 ---
 
-> Proposed amendment: [ADR-0024](0024-local-ca-trust-and-passkey-browsers.md) (2026-11-20) — `localhost` confirmed (Safari + Chromium via Apple Passwords, substitution accepted by the owner); trust with `-p ssl`, untrust by hash; `caddy_data` handled as a secret.
+> Proposed amendments (2026-11-20):
+> - [ADR-0024](0024-local-ca-trust-and-passkey-browsers.md): `localhost` confirmed; TLS-only trust recorded and removed by hash; no backup of the internal CA key in Mac-only v1.
+> - [ADR-0025](0025-agent-sandbox-and-credential-separation.md): adds the `agent-proxy` service.
+> - [ADR-0021](0021-ingestion-native-formulas-text-layer-code.md): may add a native converter on `127.0.0.1`.
 
 ## Context
 

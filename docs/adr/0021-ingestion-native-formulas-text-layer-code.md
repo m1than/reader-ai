@@ -1,66 +1,82 @@
 ---
 id: ADR-0021
-title: Ingestion amendment — native Docling with the formula model, code from the PDF text layer, a 20-page fidelity regression check
+title: Ingestion amendment — formula model on, code from the PDF text layer, a deterministic page-expectation check; Docker or native decided by one measurement
 status: proposed
 date: 2026-11-20
-verified_by: "SRV-INGEST fidelity regression on the 20 pilot pages of spikes/ingest-docling (rule B, at most 2 of 20 misread); a native full-book run recording time and peak memory"
-revisit_when: "Docling's formula or code model gains MPS support; the regression check misreads more than 2 of 20 pages; a material without a text layer becomes the main input"
+verified_by: "SRV-INGEST CI test against committed per-page expectations for the 20 pilot pages (counts and hashes only, no book text): code-block count, lines per block, sha256 of each block's text equal to the sha256 of the text layer inside its bounding box, decoded-formula count, table shape (rows × columns); plus measurement M1 below deciding Docker or native"
+revisit_when: "After SRV-INGEST is green: the owner's fidelity live check misreads more than 2 of the 20 pages (rule B); or a native or Docker full run with the formula model falls below 10 pages/min; or Docling's formula model gains MPS support"
 supersedes: []
 ---
 
 ## Context
 
-ADR-0008 chose Docling for content. Its `revisit_when` says: "misreads more than 2 of 20 sampled pages with formulas or tables". `spikes/ingest-docling` (2026-11-20, RESULT.md on branch `0/S0.spike.ingest-docling`, PR #13) triggered it.
+ADR-0008 chose Docling for content, with `revisit_when`: "misreads more than 2 of 20 sampled pages with formulas or tables". `spikes/ingest-docling` triggered it on 2026-11-20 (`spikes/ingest-docling/RESULT.md` on main, PR #13; deep-reviewer approve, round 2). ADR-0008 names the fallback "run the ingestion worker natively on macOS with the Apple GPU (MPS)". Its premise changed: Docling refuses MPS for the formula and code model ("Supported devices: cpu, cuda, xpu").
 
-Measured on the 935-page pilot PDF:
+The spike's configurations are lettered A–D in its RESULT.md. This ADR uses **S-A … S-D** for them, and **O1–O3** for its own options.
 
 | Fact | Number | Source |
 | --- | --- | --- |
-| Throughput, Docker, 4 VM CPUs, formula model off | 935 pages in 1,895 s = 29.6 pages/min; peak 5,005 MiB (sampled) | `results/full.json` |
-| Formula items detected in the whole book | 35 | grep of the full output, RESULT.md |
-| Fidelity, 20 pages, Docker, no formula model | 8 of 20 misread (rule A) | `results/sample-noformula.json`, RESULT.md |
-| Fidelity, native, formula + code models | 7 of 20; code text re-OCR'd from the image and corrupted on every code page | `results/sample-native.json` |
-| Fidelity, native, formula model on, code model off (D) | 3 of 20 under rule A, 7 of 20 under rule B; tables 11/11; display formulas 15/15 | `results/sample-native-nocode.json`, per-page table in RESULT.md |
-| Formula model cost | Docker at 4 VM CPUs: 689 s for one page with 2 formulas, including model load (one hand-recorded observation). Native, host CPU: 118.0 s for 6 formulas, about 19.7 s each | RESULT.md "Formula cost" |
-| MPS | Docling refuses MPS for the formula and code model ("Supported devices: cpu, cuda, xpu") | RESULT.md "Environment" |
-| OCR, 10 pages rendered as images | character accuracy mean 0.870 (0.678–0.970); word recall 0.607–0.900; 1.44 pages/min; text inside figures is lost | `results/ocr.json`, `results/ocr-words.json` |
+| Throughput, Docker at 4 VM CPUs, formula model off, `do_ocr=True` | 935 pages in 1,895 s = 29.6 pages/min; peak 5,005 MiB (sampled) | `results/full.json` |
+| Formula items in the whole book | 35 (*hand-counted* with grep over the full run's `formula-not-decoded` placeholders) | RESULT.md "Throughput" |
+| S-A: Docker, formula model off | 8 of 20 misread (rule A); 0 of 6 display formulas with real notation survive | `results/sample-noformula.json` |
+| S-C: native, formula + code models | 7 of 20; code text re-OCR'd from the image and corrupted on every code page | `results/sample-native.json` |
+| S-D: native, formula model on, code model off | 3 of 20 (rule A) / 7 of 20 (rule B); tables 11/11; display formulas 15/15 | `results/sample-native-nocode.json`; per-page table in RESULT.md |
+| Formula cost | Docker at 4 VM CPUs with `do_ocr=True`: 689 s for one page with 2 formulas, including model load (one *hand-recorded* observation). Native host CPU, `do_ocr=False`: 118.0 s for 6 formulas, ≈ 19.7 s each | RESULT.md "Formula cost" |
+| OCR, 10 rendered pages | character accuracy mean 0.870 (0.678–0.970); word recall 0.607–0.900; 1.44 pages/min; figure text lost | `results/ocr.json`, `results/ocr-words.json` |
 
-Rule A: a code block, command output or key flattened onto one line with exact characters is not a misread. Rule B: it always is. The remaining D misreads (pages 378, 461, 468) are all code blocks: one dropped as an image, two detached from their numbered-list steps.
+**Rules:** rule A says a code block flattened onto one line with exact characters is not a misread; rule B says it always is.
+
+**S-D's remaining misreads** are all code blocks:
+- page 378: a code block containing emoji glyphs is classified as an image and dropped;
+- pages 461 and 468: code blocks are detached from their numbered-list steps.
 
 ## Options
 
 | Option | Gives | Costs (numbers) |
 | --- | --- | --- |
-| **A. Native ingest, formula model on, code model off, code lines from the text layer** | 15/15 formulas; tables 11/11; exact code characters with line breaks restored (hypothesis) | Ingest runs outside Docker, on the host; the formula model costs about 19.7 s per formula (≈ 11 min for the book's 35) |
-| B. Docker with a larger VM, same pipeline | Keeps ingest in a container (ADR-0014 isolation for parsing) | Not measured; one page with 2 formulas took 689 s at 4 VM CPUs |
-| C. Docker as measured, formula model off | Simple; 29.6 pages/min | 8/20 misread; every display formula with real notation lost (0 of 6) |
-| D. Docling's code model on | Line breaks kept | 7/20 misread; plausible-looking corruption of commands, hashes and numbers |
+| **O1. Docker, formula model on, code model off, `do_ocr=False` for born-digital pages** | Keeps ingestion inside the container boundary (ADR-0014 isolation for parsing untrusted files) | Formula cost in Docker unmeasured with `do_ocr=False`; one page took 689 s with `do_ocr=True` at 4 VM CPUs |
+| **O2. Native host process, same pipeline** | ≈ 19.7 s per formula measured; the book's 35 formulas ≈ 11.5 min | Parses untrusted documents outside a container; an ADR-0012 knock-on (below) |
+| O3. Formula model off | Simplest; 29.6 pages/min | 8 of 20 misread; all real-notation formulas lost |
+
+In O1 and O2 alike, code lines come from the PDF text layer inside Docling's code-item boxes, and Docling's code model stays off.
 
 ## Decision
 
-This amends ADR-0008 "Decision" item 2 (Content), adding a rule:
-- **Formulas:** Docling runs with the formula model on. Ingestion runs natively on the owner's Mac (host CPU) unless a measured run shows a Docker VM size that brings the formula cost within 2 times the native cost (option B, one measurement first).
-- **Code:** Docling's code model stays off. Code items keep Docling's bounding boxes, and their lines are read from the PDF text layer inside those boxes, restoring line breaks and list position.
-- **Regression check:** the 20 pilot pages and their per-page verdicts in `spikes/ingest-docling/RESULT.md` become SRV-INGEST's fidelity regression test, with rule B as the target (at most 2 of 20 misread). It runs on every change to the ingest pipeline.
-- **OCR:** for pages without a text layer, OCR (EasyOCR, `ru` + `en`) is the fallback. Its word recall of 0.87–0.90 on clean pages is recorded as a known limit for full-text search, and figure-region text is not recovered.
+1. **Content pipeline** (amends ADR-0008 Decision item 2):
+   - The formula model is **on**, and the code model is **off**.
+   - Code blocks: their lines are read from the PDF text layer inside Docling's bounding boxes, keeping line breaks and order.
+   - Born-digital pages run with `do_ocr=False`; OCR (EasyOCR, `ru` + `en`) is the fallback only for pages without a text layer.
+2. **Where it runs, decided by measurement M1:**
+   - **M1 runs** S-D's five formula pages (128, 130, 132, 133, 141) in Docker with `do_ocr=False` and the formula model on. First at 4 VM CPUs; if needed, again after the owner raises Docker Desktop's CPU setting. The result is seconds per formula.
+   - **Bound:** the book's 35 formulas must take **≤ 30 min** in total, i.e. **≤ 51 s per formula**. Reason: the book takes 31.6 min without formulas in Docker, and an ingest of one course should finish within about one hour of the owner's time, the length of one study session (ADR-0010).
+   - **Rule:** if M1 is within the bound, ingestion stays in Docker (O1). Otherwise it runs natively (O2).
+3. **If native (O2), the ADR-0012 knock-on:**
+   - The native converter is a host process. It receives one PDF and returns the converted document over `127.0.0.1`, with no database access and no blob volume.
+   - The worker in Compose keeps the jobs, the spans and the storage.
+   - Requirement: **no network, models pre-fetched**.
+4. **Checks:**
+   - The **CI check** is the deterministic one in `verified_by`: committed per-page expectations, counts and hashes only, no book text.
+   - The agent-judged fidelity, with rules A and B and the 20 pages, becomes an **owner live check** with a judge and a budget per run, outside CI. Its target is rule B, at most 2 of 20.
 
 ## Rejected options — why (numbers)
 
-- **C (formula model off).** 8 of 20 misread; 0 of 6 display formulas with real math notation survive.
-- **D (code model on).** 7 of 20 misread; corrupted code is worse than flattened exact code, because errors look plausible (a value missing three zeros, altered hashes).
-- **B (larger Docker VM) is not rejected.** It is unmeasured, and one run with more VM CPUs decides between A and B. The 17-fold native speed-up on page 128 mixes CPU count (18 against 4), the OCR setting and the environment; their shares were not separated.
+- **O3 (formula model off).** 8 of 20 misread, and 0 of 6 display formulas with real notation survive.
+- **The code model on (S-C).** 7 of 20 misread, with plausible-looking corruption of commands, hashes and numbers; flattened exact text (S-D) is safer.
+- **O1 versus O2 is not decided here.** M1 decides it. The 17-fold native speed-up on page 128 mixes CPU count (18 against 4), the OCR setting and the environment, and their shares were not separated.
 
 ## Consequences
 
-- **Hypotheses, each with the check that measures it:**
-  - Code lines from the text layer fix rule-B flattening on pages 133, 141, 143 and 381: measured by the regression check.
-  - Re-attaching code blocks to their list steps fixes pages 461 and 468: the regression check.
-  - Detecting emoji-bearing code blocks fixes page 378: the regression check.
-  - Native full-book time and peak memory: one native full run in SRV-INGEST.
-- **Ingestion now runs on the host.** It parses untrusted documents outside the container boundary of ADR-0014, so OPS-SANDBOX and SRV-INGEST must state what limits the native worker gets: at least a separate user, no secrets in its environment, and read-only input.
-- **Throughput is not a constraint:** 29.6 pages/min in Docker; the book plus formulas is estimated at about 43 min (Docker throughput plus the native formula estimate; not a measured native run).
+**Hypotheses, each with its check:**
+- **Text-layer code lines** fix rule-B flattening on pages 133, 141, 143 and 381: measured by the deterministic check (lines per block, sha256 equal to the text layer).
+- **Re-attaching code blocks to list steps** fixes pages 461 and 468: the check's per-page block positions, in the owner's live check.
+- **Page 378:** there is no mechanism hypothesis yet. The block with emoji glyphs is classified as a picture by Docling's layout model, and why is not known. SRV-INGEST must investigate; until then it is a known miss.
+- **Native full run:** if O2 is chosen, a full-book run with the formula model must reach **≥ 10 pages/min**, with peak memory recorded.
+- **No network for the native converter:** macOS cannot easily deny a process network access. Enforcement is a hypothesis. The check runs the converter with the network disabled for its user, or under a sandbox profile, and verifies it still converts the 20 pages and fails any outbound connection attempt.
+
+**Other consequences:**
+- OCR's word recall of 0.87–0.90 on clean pages is a known limit for full-text search on scanned material. Figure-region text is not recovered by either path.
+- **ADR-0020's OCR row is closed:** Docling with EasyOCR runs on `python:3.14-slim-trixie` (the S-A sample and the 10-page OCR run, `results/ocr.json`).
 
 ## Open questions
 
-- Should a native ingest worker run under a dedicated macOS user, or inside a macOS sandbox profile?
-- Is one measured run with the Docker VM at more CPUs (option B) wanted before SRV-INGEST is specified?
+- If M1 at 4 VM CPUs misses the bound, may the owner raise Docker Desktop's CPU setting for a second M1 run before native is chosen?

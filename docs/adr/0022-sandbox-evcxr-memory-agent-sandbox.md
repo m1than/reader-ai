@@ -1,68 +1,67 @@
 ---
 id: ADR-0022
-title: Sandbox amendment — exec tmpfs and per-kernel cache for evcxr, enforced memory, separate containers, and an agent sandbox distinct from the kernel sandbox
+title: Kernel sandbox amendment — exec tmpfs and per-kernel evcxr cache with cleanup, enforced memory, one principal per kernel container
 status: proposed
 date: 2026-11-20
-verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; per-kernel dirs are removed on kernel exit (13+ kernels in one container); a 2.6 GB allocation kills the kernel and the user sees it; the agent's tool process cannot read the provider credential; the agent container reaches only the API host"
-revisit_when: "evcxr gains a read-only cache mode or an option to load cells without dlopen from a writable path; a kernel container hosts more than 12 Rust kernels in its lifetime"
+verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; the gateway is reachable only from the api relay; all of it re-run on python:3.14-slim-trixie"
+revisit_when: "More than ≈ 12 concurrent Rust kernels are needed in one container (1,024 MiB tmpfs ÷ ≈ 85 MiB per kernel); or evcxr gains a read-only cache or an exec-free cell loader"
 supersedes: []
 ---
 
 ## Context
 
-ADR-0014 fixed the sandbox controls. Two spikes ran under them on 2026-11-20:
-- `spikes/kernel-roundtrip`: RESULT.md and `results/warm-{1..5}.json`, `cold-1.json`; reviewed by deep-reviewer, approved in round 2.
-- `spikes/agent-sdk-container`: RESULT.md and `results/*`; approved in round 3.
+ADR-0014 fixed the sandbox controls. `spikes/kernel-roundtrip` ran under them on 2026-11-20 (RESULT.md and `results/warm-{1..5}.json`, `cold-1.json` on main; deep-reviewer approved in round 2). It measured `python:3.13-slim-bookworm`; the re-run on `python:3.14-slim-trixie` (ADR-0020) is pending.
 
 | Fact | Number | Source |
 | --- | --- | --- |
-| evcxr with `/tmp` `noexec` (Docker tmpfs default) | the Rust kernel never becomes usable (`dlopen failed`) | kernel-roundtrip finding 1 |
+| evcxr with `/tmp` `noexec` (Docker's tmpfs default) | the Rust kernel never becomes usable (`dlopen failed`) | RESULT.md finding 1 |
 | evcxr cache on the read-only root | every dependency build fails (`Failed to wrap rustc: Read-only file system`) | finding 2 |
-| Shared evcxr cache, two concurrent kernels | 4 of 14 concurrent pilot cells failed (*observed, not recorded*) | finding 2 |
+| Shared cache, two concurrent kernels | 4 of 14 concurrent pilot cells failed (*observed, not recorded*) | finding 2 |
 | Per-kernel cache copy | 10 of 10 concurrent pilot cells pass over 5 runs | `results/warm-*.json` |
-| Leak per Rust kernel | 86 MiB left in `/run/evcxr`; the 13th kernel fails (`No space left on device`), with no error to the client | finding 3, reviewer |
-| `--memory 2g` without `--memory-swap` | Docker allows 4 GiB; with `--memory-swap 2g` a 2.6 GB allocation is OOM-killed | RESULT.md controls table |
-| OOM inside the gateway | the kernel dies, the container keeps running, and the gateway restarts the kernel silently, with state lost | reviewer, RESULT.md |
-| Agent SDK in a container | the CLI writes `~/.claude`; a tmpfs home on a read-only root is enough; the agent's Bash ran under the process, capability and resource limits | agent-sdk-container "Sandboxed tools run" |
-| Agent egress | the agent container must reach the Anthropic API, unlike the kernel container | agent-sdk-container finding 4 |
-| Credential placement | the token sits in the environment of the container where the agent's Bash runs; whether the CLI strips it from tool processes was not tested | agent-sdk-container finding 1 |
+| Kernel directory after the kernel is deleted | ≈ 85–86 MiB each stays in `/run/evcxr`; the 13th kernel fails (`No space left on device`), with no error to the client (reviewer) | finding 3 |
+| `--memory 2g` without `--memory-swap` | Docker allows 4 GiB; with `--memory-swap 2g`, a 2.6 GB allocation is OOM-killed (*observed, not recorded*) | RESULT.md controls table |
+| OOM inside the gateway | the kernel dies, the container keeps running, and the gateway restarts the kernel silently, with state lost (reviewer, *observed, not recorded*) | RESULT.md controls table |
+| Kernel Gateway auth | `auth_token` empty; reachable only on the internal network in the spike | finding 6 |
+| Exec mount reach | `/run/evcxr` is writable and executable by uid 1000, i.e. every kernel; a python3 cell ran a dropped binary there (reviewer) | RESULT.md security section |
 
 ## Options
 
 | Option | Gives | Costs (numbers) |
 | --- | --- | --- |
-| **A. Exec tmpfs `/run/evcxr` + per-kernel cache copy with cleanup; separate containers; a distinct agent sandbox** | Rust labs work; concurrent kernels are isolated from each other's cache | One writable and executable path for every kernel (uid 1000); 86 MiB of memory per Rust kernel while it lives |
-| B. Shared writable cache | 86 MiB once | Concurrent builds break (4 of 14 observed) and one kernel can poison another's cache |
-| C. Drop the Rust kernel | Keeps "read-only root + noexec tmpfs" intact | The pilot's wallet core is Rust (ADR-0003) |
+| **A. One exec tmpfs for evcxr, per-kernel cache copy, cleanup by a sweeping launcher** | Rust labs work; concurrent kernels cannot break each other's builds | One writable and executable path for every kernel; ≈ 85 MiB of memory per live Rust kernel |
+| B. Shared writable cache | 86 MiB once | Concurrent builds break (4 of 14 observed); one kernel can poison the next one's cache |
+| C. No Rust kernel | Keeps "read-only root + noexec tmpfs" intact | ADR-0003's Rust wallet labs are lost |
 
 ## Decision
 
-This amends ADR-0014's "Process", "Resources", "Network" and "Secrets" rows, and adds an agent-sandbox row.
+This amends ADR-0014's "Process", "Resources" and "Network" rows.
 
-**Kernel sandbox:**
-- **Process:** besides `/home/lab` and `/tmp` (`noexec`), one tmpfs `/run/evcxr` mounted `exec`, used only by the Rust kernel launcher. The launcher gives each kernel a private directory and a copy of the read-only image cache (root-owned), and **removes that directory when the kernel exits**. This needs a launcher that forwards signals; the spike's `exec` launcher leaks.
-- **Resources:** `--memory-swap` equals `--memory`. The tmpfs sizes count against the limit and sum below it (spike: 256 + 256 + 1,024 MiB under 2 GiB). After an OOM kill, the kernel relay reports the restart to the learner, never silently.
-- **Isolation per purpose:** lab verification (ADR-0009) and pair sessions (ADR-0016) each run in their own kernel container, never next to a learner's kernels. All kernels in one container share a uid and can write each other's `/run/evcxr` directories.
-
-**Agent sandbox** (new; it differs from the kernel sandbox):
-- non-root user, read-only root, tmpfs home;
-- egress only to the API host, through an allowlist proxy;
-- **the provider credential is out of reach of tool execution:** tools (Bash, file edits) run in a separate container or process that does not hold the credential. Never in the container whose environment has it.
+- **Process:**
+  - Besides `/home/lab` and `/tmp` (`noexec`), one tmpfs `/run/evcxr` mounted with the options `exec,nosuid,nodev,size=1g` and owned by the kernel user.
+  - A Rust kernel launcher (the kernelspec's argv) creates a private directory per kernel with a copy of the image's read-only cache, which is root-owned in the image.
+  - **Before creating its own directory, the launcher sweeps the directories of kernels that are no longer running.** That covers every termination: normal exit, SIGKILL, OOM and a gateway restart.
+  - A kernel-start failure, such as a full tmpfs, is reported to the client as an error.
+- **Resources:**
+  - `--memory-swap` equals `--memory`.
+  - The tmpfs sizes count against the limit and must sum below it.
+  - After an OOM kill, the kernel relay tells the learner the kernel restarted and its state is gone.
+- **Isolation invariant:** one principal or session per kernel container. Kernels in one container share a uid and can write each other's `/run/evcxr` directories. Lab verification (ADR-0009) and each pair session (ADR-0016) therefore get their own container, never a learner's.
+- **Network:** Kernel Gateway runs with an auth token, or is reachable only from the api relay on the sandbox network, never published.
 
 ## Rejected options — why (numbers)
 
-- **B (shared cache).** 4 of 14 concurrent pilot cells failed (observed, not recorded); per-kernel copies passed 10 of 10.
-- **C (no Rust).** It removes the kernel that ADR-0003 chose for the pilot's Rust wallet labs.
+- **B.** 4 of 14 concurrent pilot cells failed (*observed, not recorded*); per-kernel copies passed 10 of 10.
+- **C.** It removes the kernel that ADR-0003 chose for the pilot's Rust labs.
 
 ## Consequences
 
-- **A deliberate weakening of ADR-0014:** a writable, executable path exists for every kernel, so dropping and running a native binary is possible. The practical loss is small, because rustc, cc, ld and Python's `ctypes` are in the image anyway, and caps, no-new-privileges and seccomp still hold (reviewer: `CapEff=0`, `NoNewPrivs=1`, `Seccomp=2`).
-- **Hypotheses with their checks:**
-  - signal-forwarding launcher cleanup holds over more than 12 kernels: OPS-SANDBOX test;
-  - the CLI cannot be kept from exposing the credential to tools unless tools run elsewhere: SRV-AGENT test;
-  - API-only egress through a proxy works with the SDK: OPS-SANDBOX test.
-- **Kernel container memory:** peak 1.0 GiB warm and 1.4 GiB cold with up to two Rust kernels (kernel-roundtrip). More concurrent Rust kernels need a bigger limit or one container per session.
+- **A deliberate weakening of ADR-0014:** any kernel can drop and run a native binary in `/run/evcxr`. The practical loss is small: rustc, cc, ld and Python's `ctypes` are in the image anyway, and caps, no-new-privileges and seccomp hold (reviewer: `CapEff=0`, `NoNewPrivs=1`, `Seccomp=2`).
+- **Hypotheses:**
+  - the sweeping launcher frees every dead kernel's directory: measured by the `verified_by` tests;
+  - the numbers hold on 3.14 and trixie: the re-run.
+- **Memory:** peak 1.0 GiB warm and 1.4 GiB cold with up to two Rust kernels (`results/*.json`). More concurrent Rust kernels need a larger limit, or fewer kernels per container.
+- **Agent sandbox:** the agent sandbox and the provider credential are decided separately, in ADR-0025.
 
 ## Open questions
 
-- Should pair sessions get one container per pair, or one per session?
+- None for the owner.

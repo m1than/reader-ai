@@ -7,7 +7,7 @@ verified_by: "VEC fixture: Bashir PDF bookmark outline (494 entries, 23 chapters
 revisit_when: "Docling processes the 935-page pilot slower than 10 pages per minute on the owner's machine, or misreads more than 2 of 20 sampled pages with formulas or tables"
 ---
 
-> Proposed amendment: [ADR-0021](0021-ingestion-native-formulas-text-layer-code.md) (2026-11-20) — `revisit_when` was triggered: native Docling with the formula model, code from the PDF text layer, and a 20-page fidelity regression check.
+> Proposed amendment: [ADR-0021](0021-ingestion-native-formulas-text-layer-code.md) (2026-11-20) — `revisit_when` was triggered. The amendment: formula model on, code from the PDF text layer, a deterministic page-expectation check; Docker or native decided by measurement M1.
 
 ## Context
 
