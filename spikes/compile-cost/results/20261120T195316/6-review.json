@@ -1,0 +1,51 @@
+{
+ "stage": "6-review",
+ "model": "claude-opus-5-5",
+ "max_budget_usd": 1.2,
+ "wall_s": 73.8,
+ "total_cost_usd": 0.5199412999999999,
+ "usage": {
+  "input_tokens": 2,
+  "cache_creation_input_tokens": 44981,
+  "cache_read_input_tokens": 6803,
+  "output_tokens": 7720,
+  "output_tokens_details": {
+   "thinking_tokens": 4008
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 44981,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 7720,
+    "cache_read_input_tokens": 6803,
+    "cache_creation_input_tokens": 44981,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 44981
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "num_turns": 1,
+ "duration_api_ms": 74721,
+ "subtype": "success",
+ "is_error": false,
+ "output_chars": 8512,
+ "json_ok": true,
+ "json_error": "",
+ "verdict": "fail",
+ "n_findings": 18,
+ "n_blocking": 3
+}
