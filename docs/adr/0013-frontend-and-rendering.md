@@ -69,4 +69,7 @@ What the library is (read 2026-11-20):
 ## Consequences
 
 - The library's tokens use the `acme` prefix on that branch; Calm overrides `--acme-*` variables. Renaming the prefix is a library change, not a reader-ai one.
-- Consuming the package: reader-ai's `web/` builds the pinned commit in a dedicated step (`npm run build` of the library) and installs its `dist/`. Publishing the library to GitHub Packages would replace that step; it is the library owner's decision.
+- **Consuming the package (owner, 2026-11-20):**
+  - The library is published to GitHub Packages from its own repository: a release workflow there runs its gates and publishes a versioned package. reader-ai pins an exact version.
+  - Changes reader-ai needs in the library (new components, new parts or props, fixes) are made in the library repository through its own spec → test → review workflow, then released. reader-ai never patches the package and never forks it.
+  - What is specific to reader-ai stays in reader-ai: the Calm tokens and product components composed from library parts.

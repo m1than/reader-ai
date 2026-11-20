@@ -15,7 +15,11 @@ Self-hosted: Docker Compose behind Caddy, Postgres with pgvector, passkey sign-i
 
 Design phase. The decision package is in [docs/adr](docs/adr/) (18 ADRs) with an overview in [docs/architecture.md](docs/architecture.md) and the staged build plan in [docs/roadmap.md](docs/roadmap.md). ADR-0001 … 0016 are accepted by the owner (status flip pending his commit); 0017 and 0018 are proposed. Implementation starts with stage 0 of the roadmap.
 
-Users own what they build: the whole knowledge base can be downloaded at any time as an open archive (Markdown, `.ipynb`, JSON). The product charges for the transformation, the work in which a person and the AI turn material into knowledge (ADR-0017).
+Users own what they build: the whole knowledge base can be downloaded at any time as an open archive (Markdown, `.ipynb`, JSON).
+
+Plans (ADR-0017, v2):
+- **Free:** the user's own Claude Code or Codex agent runs the pipeline over MCP.
+- **Pro and Max:** reader-ai runs the transformation on its own models, with credits sized in pages of material and a 70% spread over model cost.
 
 | ADR | Decision |
 | --- | --- |

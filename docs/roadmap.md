@@ -56,7 +56,7 @@ Live checks follow the owner's preference: real requests against `reader up`, no
 | 1 | Stack on the Mac | OPS-DEPLOY, OPS-CLI, SRV-CONFIG, SRV-AUTH | `reader up`, passkey sign-in, secrets from Keychain | 6 | 6–9 |
 | 2 | Event backbone and notifications | SRV-EVENTS, SRV-OBS, SRV-NOTIFY | Event stream, job queue, Telegram messages | 4 | 4–6 |
 | 3 | Ingestion and search | SRV-INGEST, SRV-SEARCH | Bashir PDF ingested; hybrid search with citations | 4 | 5–7 |
-| 4 | Lessons and practice | SRV-LESSON, OPS-SANDBOX, SRV-KERNEL, WEB-UI, WEB-NOTEBOOK, WEB-RENDER | L01 opens in the Calm UI, labs run in the sandbox | 11 | 10–14 |
+| 4 | Lessons and practice | SRV-LESSON, OPS-SANDBOX, SRV-KERNEL, WEB-UI, WEB-NOTEBOOK, WEB-RENDER | A fixture lesson opens in the Calm UI, labs run in the sandbox | 11 | 10–14 |
 | 5 | Agents and the compile pipeline | SRV-AGENT, SRV-PIPELINE, WEB-AUTHORING | L02 compiled end to end through gates G1 and G2 | 6 | 8–11 |
 | 6 | Daily study loop | SRV-TUTOR, SRV-RECALL, SRV-HABIT, WEB-SESSION | The owner studies Bashir in the app every day | 6 | 7–10 |
 | 7 | Knowledge base, export and MCP | SRV-KB, SRV-EXPORT, SRV-MCP, WEB-KB | Claude Code on the Mac queries the sectorized KB; the owner downloads his whole KB as an open archive | 5 | 6–8 |
@@ -133,9 +133,12 @@ Each spike is a folder in `spikes/` with a runnable script and `RESULT.md` (numb
 | `ingest-docling` | Docling on all 935 pages on CPU in Docker | Pages/min, peak RAM, fidelity on 20 pages (10 formulas, 10 tables), OCR on 10 pages rendered as images (Russian) | ≥ 10 pages/min; ≤ 2 of 20 misread | Run the ingestion worker natively on macOS with the Apple GPU (MPS) |
 | `embeddings-local` | Which local multilingual embedding model to use (no paid embedding API) | Chunks/s on CPU; recall@10 on 30 pilot questions written by the agent and reviewed by the owner | recall@10 ≥ 0.8; full pilot embedded in ≤ 30 min | A smaller model plus a larger rerank window |
 | `compile-cost` | What a full compile of one lesson costs (draft, fact-check, review) on the owner's subscription | Tokens, $, minutes for L02 | ≤ $4.35 and ≤ 45 min | Cheaper model per task; fewer review loops; ADR-0005 budget amendment |
-| `library-consume` | Build `ui-builder-lib-with-agents` at `acc9e4a`, consume `dist/` in Vite and Storybook 10, apply a draft Calm token file | Build time; bundle size of the 20 components reader-ai needs; contrast of Calm | Builds; Calm passes 4.5:1 and 3:1 | Pin another commit; ask the owner to cut a library release |
+| `library-publish` | Publish `ui-builder-lib-with-agents` (from `web3/material-parity`) to GitHub Packages through a release workflow in its repository that runs its gates; consume the version in Vite and Storybook 10; apply a draft Calm token file | Release time; bundle size of the 20 components reader-ai needs; contrast of Calm | Package installs by version; Calm passes 4.5:1 and 3:1 | Consume a built commit until the release workflow is green |
+| `trace-backend` | MLflow or Phoenix as the trace backend on the Mac, fed by an OTel Collector with our parent spans and the Agent SDK's native traces joined by `TRACEPARENT` | Memory at idle and under one lesson compile; minutes to find why a seeded failing stage failed; whether quality scores attach to the trace | Agent spans nest under our stage span; a score is visible on the trace | The other backend; Collector config is the only change |
 
-**Exit:** 7 RESULT.md files; any number that changes a decision becomes a proposed ADR amendment for the owner.
+The library release workflow is work in the library's repository and follows its own process (AGENTS.md there); reader-ai only consumes released versions (ADR-0013).
+
+**Exit:** 8 RESULT.md files; any number that changes a decision becomes a proposed ADR amendment for the owner.
 **Owner:** 1 session reading results, plus prerequisites.
 **Hands to stage 1:** passkey host name, worker placement (container or host), kernel set confirmed.
 
@@ -179,7 +182,7 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 | Spec | Paths | Key requirements |
 | --- | --- | --- |
 | `SRV-EVENTS` | `server/src/reader/events/**`, `server/src/reader/jobs/**` | FR: typed event registry; transactional outbox; SSE `/api/events` resumable by `Last-Event-ID`; procrastinate queue with idempotency key; TypeScript event types generated for `web/`. INV: state change and event commit together or not at all (property test with injected failures). INV: a job killed mid-run is retried and its effect happens once. NFR: event to SSE client p95 ≤ 200 ms on the Mac |
-| `SRV-OBS` | `server/src/reader/obs/**` | FR: structlog JSON with secret redaction; trace id on every request, job and event; OTLP export off by default; metrics registry where later stages declare their stage metrics (pass rate, loops, cost and latency percentiles). INV: canary secret never appears in a log line |
+| `SRV-OBS` | `server/src/reader/obs/**`, `deploy/otel/**` | FR: structlog JSON with secret redaction; trace id on every request, job and event; OTel Collector service and an optional `observability` Compose profile running the backend chosen in stage 0; metrics registry where later stages declare their stage metrics (pass rate, loops, cost and latency percentiles). INV: canary secret never appears in a log line or span attribute |
 | `SRV-NOTIFY` | `server/src/reader/notify/**` | FR: `Notifier` port with adapters declared in config; Telegram adapter with Bot API long polling; chat linking by one-time `/start <token>` deep link; per-user event filter and quiet hours; delivery as jobs with retry and idempotency per (user, event, channel). FR: adding a channel is one adapter class plus its config schema (tested with a fake webhook adapter) |
 
 **Live check** `e2e/live/stage-2.sh`: open an SSE stream with `curl -N`, post a dev ping, and see it arrive. Restart with `Last-Event-ID` and see no gap. Kill the worker during a sleep job and see it complete once. Link Telegram, call `POST /api/notifications/test`, and see the message on the phone.
@@ -209,13 +212,13 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 
 ## Stage 4 — Lessons and practice
 
-**Goal:** lesson L01 opens in the Calm UI, its labs run in the sandbox, and notes survive republishing. This is the largest stage, so it runs in two halves with their own live checks.
+**Goal:** a lesson opens in the Calm UI, its labs run in the sandbox, and notes survive republishing. This is the largest stage, so it runs in two halves with their own live checks.
 
 ### 4a — Backend and sandbox
 
 | Spec | Paths | Key requirements |
 | --- | --- | --- |
-| `SRV-LESSON` | `server/src/reader/lessons/**` | FR: cell schema (ADR-0004 kinds) as JSON Schema; lesson revisions as immutable blobs; learner state keyed by cell id; course index. FR: importer for the Claude Docs knowledge-base export (Markdown) → L01 notebook. INV: every stored lesson passes `nbformat.validate` and the cell schema. INV: write → read → write is byte-identical. INV: republishing never changes `notes` cells or learner state. VEC: imported L01 |
+| `SRV-LESSON` | `server/src/reader/lessons/**` | FR: cell schema (ADR-0004 kinds) as JSON Schema; lesson revisions as immutable blobs; learner state keyed by cell id; course index. INV: every stored lesson passes `nbformat.validate` and the cell schema. INV: write → read → write is byte-identical. INV: republishing never changes `notes` cells or learner state. VEC: fixture lesson `F01` (one cell of every kind, including the Nakamoto lab with its known values) |
 | `OPS-SANDBOX` | `sandbox/**` | FR: image with python3, evcxr and deno kernels and the pilot's pre-built crates; ADR-0014 hardening; egress proxy with per-lab allowlist. Tests run inside the kernel: cannot resolve `postgres` or `api`; no internet without an allowlist; `/run/secrets` absent; killed at memory, CPU and PID limits; allowlisted host reachable, others refused |
 | `SRV-KERNEL` | `server/src/reader/kernels/**` | FR: authenticated WebSocket relay to Kernel Gateway; one kernel per (user, lesson, language); idle culling; per-participant execution attribution (used by pair sessions in stage 8). NFR: cell execute-to-first-output p95 ≤ 500 ms for a trivial Python cell |
 
@@ -229,9 +232,9 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 
 **Design gate (owner, 2 sessions):** the owner reviews Calm in Storybook (`https://localhost/storybook`) and adjusts tokens live. The exported JSON patch becomes a PR. Nothing in 4b is marked implemented before this gate.
 
-**Live check** `e2e/live/stage-4.sh`: import the knowledge-base export → L01 exists; `/api/lessons/L01` validates; a Playwright run opens L01, executes the Nakamoto lab and sees the assert pass; a lab cell that tries `curl http://postgres:5432` fails; `/storybook` answers 200.
+**Live check** `e2e/live/stage-4.sh`: store fixture lesson F01; `/api/lessons/F01` validates; a Playwright run opens F01, executes the Nakamoto lab and sees the assert pass; a lab cell that tries `curl http://postgres:5432` fails; `/storybook` answers 200.
 
-**Exit:** all PASS; the owner opens L01, runs a lab and writes a note.
+**Exit:** all PASS; the owner opens F01, runs a lab and writes a note. The first real lesson arrives through the pipeline in stage 5.
 **Owner:** 6 spec reviews, design gate, 2 live checks.
 **Re-plan checkpoint 2:** stages 5–9 re-estimated from stages 1–4.
 **Hands to stage 5:** lesson format and storage, sandbox for lab verification, UI components for gate screens.
@@ -244,7 +247,7 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 
 | Spec | Paths | Key requirements |
 | --- | --- | --- |
-| `SRV-AGENT` | `server/src/reader/agent/**` | FR: `Provider` port; Agent SDK adapter for `anthropic-subscription`, `anthropic-api`, `bedrock`, `vertex`; model per task class from config; prompt files versioned and hashed into provenance; cost ledger row per SDK result, tagged with `transformation_kind` and `funding` (ADR-0017); budgets warn at 80% and stop new jobs at 100% with an event and a notification. FR: one `agent_runs` record and one OTel span tree with `gen_ai.*` attributes per run; content capture off for `personal-use` material (ADR-0018). INV: a request runs only with credentials owned by the user it is attributed to. Tests replay recorded transcripts; no live model in CI |
+| `SRV-AGENT` | `server/src/reader/agent/**` | FR: `Provider` port; Agent SDK adapter for `anthropic-subscription`, `anthropic-api`, `bedrock`, `vertex`; model per task class from config; prompt files versioned and hashed into provenance; cost ledger row per SDK result, tagged with `transformation_kind`, `funding` and pages of material processed (ADR-0017); budgets warn at 80% and stop new jobs at 100% with an event and a notification. FR: one `agent_runs` record and one OTel span tree with `gen_ai.*` attributes per run; content capture off for `personal-use` material (ADR-0018). INV: a request runs only with credentials owned by the user it is attributed to. Tests replay recorded transcripts; no live model in CI |
 | `SRV-PIPELINE` | `server/src/reader/pipeline/**` | FR: `stages.yaml` interpreter; stages ingest → plan (G1) → draft → fact-check → lab verification → adversarial review → publish (G2). The plan stage also proposes the top-level sector taxonomy for G1 (ADR-0015). Idempotent by `(lesson, stage, input_sha256)`; at most 3 loops back to draft, then the owner is asked. INV: a lesson with an uncited claim, a failing lab or an open blocking finding cannot reach G2. INV: the review stage starts with a fresh context that contains none of the draft conversation. INV: a stage starts only from a `stage.completed` event, never from a direct call (the bus, ADR-0018). FR: quality signals attach to runs: fact-check findings, lab failures, blocking review findings, G2 return reasons from a fixed list. NFR: compile cost per lesson ≤ $4.35 (verified_by: bench, live) |
 | `WEB-AUTHORING` | `web/src/authoring/**` | FR: G1 screen (plan, order, sessions, sector taxonomy) and G2 screen (lesson diff, findings, costs, approve/return); progress over SSE; Telegram notification when a gate waits |
 
@@ -281,7 +284,7 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 
 | Spec | Paths | Key requirements |
 | --- | --- | --- |
-| `SRV-KB` | `server/src/reader/kb/**` | FR: sectors top-down (taxonomy approved at G1, lower levels grow from findings); findings of 7 kinds with citations, sectors, origin and `verified`; links (supports, contradicts, supersedes, depends_on); review queue for proposed findings; data for the "book turned around" view (each source section → sectors × learner state). FR: migration of the Claude Docs knowledge base: decision journal → `decision`, glossary → `definition`, forks → `open_question`, chapter index → lesson status |
+| `SRV-KB` | `server/src/reader/kb/**` | FR: sectors top-down (taxonomy approved at G1, lower levels grow from findings); findings of 7 kinds with citations, sectors, origin and `verified`; links (supports, contradicts, supersedes, depends_on); review queue for proposed findings; data for the "book turned around" view (each source section → sectors × learner state). The Claude Docs knowledge base stays a raw snapshot in `pilot/bashir/kb/` in v1; turning it into findings is the v2 epic "Raw knowledge import" |
 | `SRV-MCP` | `server/src/reader/mcp/**` | FR: MCP 2026-07-28 over Streamable HTTP at `/mcp` and stdio; tools `list_sectors`, `get_sector`, `search`, `get_finding`, `get_lesson_outline`, `propose_finding`; resources mirroring the read tools; personal access tokens with scopes `kb:read` and `kb:write` (OAuth waits for the VPS); results filtered by course roles. INV: for `personal-use` material no citation carries more than 300 characters of source text |
 | `SRV-EXPORT` | `server/src/reader/export/**` | FR: on-demand export as the open archive of ADR-0017 (Markdown findings with frontmatter and wikilinks, `.ipynb` lessons, notes, recall CSVs, own transcripts, own uploads, `manifest.json` with sha256 per file); available on every plan and to read-only accounts; import of an archive into an empty instance. INV: export → import reproduces findings, sectors, links, lessons, notes and recall state. INV: material shared with the user under `personal-use` is listed, never included |
 | `WEB-KB` | `web/src/kb/**` | FR: sector map; finding pages with citations; review queue; the "book turned around" view for the Bashir pilot; "Download my knowledge" in account settings |
@@ -318,7 +321,7 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 **Goal:** the Bashir course is compiled ahead of the owner's study, the knowledge base has moved in, and the numbers for the VPS decision exist.
 
 - **Rolling compile.** Keep the next two plan stages (S01–S16) compiled and published ahead of where the owner studies. Each lesson costs one G2 review (≈ 10–15 minutes inside the 30-minute slot). At ≤ $4.35 per lesson, the 21 lessons after L01–L02 cost ≤ $92 of credit, spread over the months of study.
-- **Knowledge-base move.** All Claude Docs tabs (plan, decision journal, glossary, forks, chapter index, chapter 1) are imported by stage 4 and 7 importers; the Docs knowledge base becomes read-only.
+- **Knowledge-base snapshot.** The Claude Docs tabs (plan, decision journal, glossary, forks, chapter index, chapter 1) are already in `pilot/bashir/kb/` as raw Markdown (moved 2026-11-20); the owner reads them there while v1 runs. Turning them into findings, sectors and lessons is the v2 epic "Raw knowledge import".
 - **Load measurement** on the Mac for two weeks of real use: jobs per hour and queue latency, kernel memory per session, ingestion CPU minutes per 100 pages, concurrent tutor streams, Postgres size growth. Written to `docs/capacity.md`; a new ADR sizes the VPS from these numbers.
 
 **Exit:** two plan stages compiled ahead; `docs/capacity.md` with two weeks of measurements; VPS ADR proposed.
@@ -333,9 +336,12 @@ v2 starts after stage 9 delivers capacity numbers. Its items are epics; each bec
 | --- | --- | --- | --- | --- |
 | VPS deployment | engineering | Production host sized from `docs/capacity.md`; public TLS; off-site backups; Telegram webhooks; MCP OAuth | Stage 9 measurements | ADR-0012 |
 | Open registration | product | Self-service sign-up, email or passkey onboarding, provider connection wizard | `owner_id` everywhere, sign-up flag (SRV-AUTH) | ADR-0017 |
-| Plans and billing | product | `plans.yaml`, platform fee per transformation for BYOK users, managed credits on the reader-ai API key with margin, invoices, usage page | Ledger with `transformation_kind` and `funding` (SRV-AGENT) | ADR-0017 |
+| Bring your own agent (Free) | product | The pipeline as MCP tools, prompts and a skill pack for Claude Code and Codex; reader-ai validates every stage's output and runs labs in its sandbox; free-tier quotas | SRV-MCP, SRV-PIPELINE stages as data | ADR-0017 |
+| Plans and billing (Pro, Max) | product | `plans.yaml` with credits in pages and tutor sessions; CI check that every price ≥ measured cost × 1.7; managed runs on reader-ai API keys; invoices, usage page | Ledger with `transformation_kind`, `funding`, pages (SRV-AGENT) | ADR-0017 |
 | Agent bus platform | engineering | Agents as subscribers with typed topic contracts, topic replay into a new agent version, dead letters, per-agent concurrency and budgets | Event-driven stages (SRV-PIPELINE, SRV-EVENTS) | ADR-0018 |
-| Trace backend and dashboards | engineering | Self-hosted OTLP trace store and UI (spike: Langfuse, Phoenix, Grafana Tempo); stage-quality dashboards | `agent_runs`, GenAI spans, stage metrics (SRV-AGENT, SRV-OBS) | ADR-0018 |
+| Custom agent pipeline with per-agent control | ai | Each agent declared with its own model, provider, prompt version, tools, budget, switch and history, controlled one by one in the UI; Claude Agent SDK is the first integration behind it | Model per task as data, `agent_runs` (SRV-AGENT) | ADR-0018 |
+| Raw knowledge import | ai | Pipeline stages that transpile raw knowledge (the Claude Docs snapshot, notes, exports of other tools) into findings, sectors, links and lessons, with the same fact-check and owner review as compiled material | Raw snapshot in `pilot/bashir/kb/`; SRV-KB model; pipeline stages | ADR-0009, ADR-0015 |
+| Trace dashboards | engineering | Stage-quality dashboards on the backend chosen in stage 0 | `agent_runs`, spans, stage metrics (SRV-AGENT, SRV-OBS) | ADR-0018 |
 | Evaluation harness | ai | Eval sets from labelled runs; regression gate on prompt or model changes; side-by-side comparisons | Quality signals (SRV-PIPELINE, SRV-TUTOR, SRV-RECALL) | ADR-0018 |
 | Local inference | ai | `openai-compatible` provider; GX10 endpoint (spike: vLLM, SGLang, llama.cpp); MLX on the Mac for embeddings and classification | Model per task as data (SRV-AGENT) | ADR-0018 |
 | Agent loop for local models | ai | Tool-using agent runtime for non-Claude models | Provider port (SRV-AGENT) | ADR-0018 |
