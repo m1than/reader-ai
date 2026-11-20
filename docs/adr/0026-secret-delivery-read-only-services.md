@@ -52,7 +52,7 @@ Why A over C. Neither option stops a process running as the owner's user from re
 
 A's other costs are operational: a long-running `reader up`, and a stack that needs `reader up` after a restart. On the owner's single Mac, `reader up` already drives the stack.
 
-**Proposed enforced control, which the owner adds because settings are the owner's:** a deny rule in `.claude/settings.json` for direct `docker exec` by the agent. Claude Code's permission rules match the agent's own Bash command, not the `docker exec` that `reader up` runs internally, so `reader up` keeps working. Without that rule, agents are kept from reading consumer files only by AGENTS.md.
+**Proposed enforced control, which the owner adds because settings are the owner's:** deny rules in `.claude/settings.json` covering every read path listed above that the agent could run directly: `docker exec`, `docker compose exec`, and `docker run` with `--pid container:`. Claude Code's permission rules match the agent's own Bash command, not the `docker exec` that `reader up` runs internally, so `reader up` keeps working. Without that rule, agents are kept from reading consumer files only by AGENTS.md.
 
 Under A:
 - Each consumer mounts a tmpfs `/run/secrets` (owner = the service uid, mode 0700, size ≥ 256 KiB) and sets a `mem_limit` with `memswap_limit == mem_limit`. OPS-DEPLOY must source the `mem_limit` numbers. It has no Compose `secrets:` entries, and no secret in `environment:`, `env_file:`, labels, command or healthcheck.
