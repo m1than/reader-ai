@@ -70,8 +70,17 @@ tasks:
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
       note: "spends Agent SDK credit; record in budget.ledger" }
-  - { id: S0.spike.library-publish, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
-      note: "release workflow is a branch in m1than/ui-builder-lib-with-agents; publishing is the owner's (block when ready)" }
+  - { id: S0.spike.library-publish, stage: 0, kind: spike, status: blocked, needs: [S0.skeleton],
+      result: "PARTIAL (spikes/library-publish/RESULT.md). Release workflow + decision record 0045 on local library branch
+        release/github-packages (6355fe67): gates job runs `npm run gates`, publish job renames @acme/ui → @<owner>/ui in its checkout,
+        GITHUB_TOKEN with packages: write; npm run check and actionlint pass; not run. Fallback works: built-commit tarball installs in a
+        Vite 8 + React 19 + Storybook 10 consumer on Node 26; 20 ADR-0013 components typecheck, build and render in Chromium without
+        page errors; 20 components together 56.5 KB gzip JS (React excluded), styles.css 30.2 KB gzip. Draft Calm tokens: 62/62
+        contrast pairs pass (lowest text 5.42:1, non-text 3.41:1).",
+      reason: "Publishing is the owner's: the library's AGENTS.md forbids agents to push or publish. Install-by-version and release
+        time are therefore unmeasured.",
+      ask: "Review and push library branch release/github-packages (6355fe67), merge it, push tag v0.1.0 and note the release
+        workflow's duration; then tell the agent the version (installing from GitHub Packages needs a read:packages token on the Mac)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
   - { id: S0.exit, stage: 0, kind: live, status: todo,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
