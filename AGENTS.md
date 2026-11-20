@@ -98,7 +98,7 @@ tools/                trace-check, guard-tests, hooks; tools/agent/ (bootstrap, 
 ## The owner's machine
 
 - macOS, Apple Silicon, Docker Desktop. v1 runs only here (ADR-0012).
-- Provider credential: `CLAUDE_CODE_OAUTH_TOKEN` in the environment, referenced as `secret://env/CLAUDE_CODE_OAUTH_TOKEN`.
+- Provider credential: the Keychain item `reader-ai/claude-oauth-token`, referenced as `secret://keychain/reader-ai/claude-oauth-token` (ADR-0023).
 - Telegram bot token: a private file on the host, referenced as `secret://hostfile/…`. Only `tools/agent/notify.mjs` and `reader up` read it.
 - Repositories: `m1than/reader-ai` and `m1than/ui-builder-lib-with-agents`. The library has its own rules: in that repository, follow its AGENTS.md, which forbids agents to push or publish. Prepare changes there as a branch, then block the task for the owner.
 

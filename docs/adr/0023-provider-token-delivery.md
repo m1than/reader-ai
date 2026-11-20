@@ -52,6 +52,6 @@ The roadmap (docs/roadmap.md, "Two budget facts", item 2, line 20) says CI has n
 
 ## Open questions
 
-- **For the owner:** may `reader up` run by the agent, for stage live checks, resolve the Keychain item? Today AGENTS.md says the agent never reads Keychain items, and the provider token is read only by `reader up`. If yes, AGENTS.md needs these edits:
-  - a new rule: "The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items."
-  - "The owner's machine", the "Provider credential" line, which today reads "`CLAUDE_CODE_OAUTH_TOKEN` in the environment, referenced as `secret://env/CLAUDE_CODE_OAUTH_TOKEN`", becomes: "Provider credential: the Keychain item `reader-ai/claude-oauth-token`, referenced as `secret://keychain/reader-ai/claude-oauth-token`."
+- None. The owner answered on 2026-11-20, in chat: **yes**, an agent-run `reader up` may resolve the Keychain item for stage live checks, and the agent itself never reads it. Two AGENTS.md edits follow:
+  - **Applied** on branch `0/S0.exit-adr-drafts`: "The owner's machine", the provider credential is the Keychain item `reader-ai/claude-oauth-token`, referenced as `secret://keychain/reader-ai/claude-oauth-token`.
+  - **Pending, the owner's edit:** a new line under "Secrets": "The agent may run `reader up`, which resolves `secret://keychain/…` references without printing them; the agent itself never reads Keychain items." The agent's own edit of this secrets rule was refused by the auto-mode classifier ("Undermining Oversight"), so the owner applies it.

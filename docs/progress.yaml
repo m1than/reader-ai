@@ -134,7 +134,11 @@ tasks:
         ADR-0024 local CA (amends ADR-0012): localhost confirmed, -p ssl owner-run trust recorded and removed by hash, caddy_data not backed up;
         ADR-0025 agent sandbox (amends ADR-0014/0005/0012): a credential-injecting proxy reachable only by the worker with per-run per-user
         handles, tools by allow-list checked against the CLI's init tool list.
-        Owner questions: M1 VM CPUs and the 30-min bound (0021); may the agent's `reader up` resolve the Keychain item (0023).
+        Owner answers, 2026-11-20 in chat:
+        - 0021: the 30-min bound is agreed; if M1 at 4 VM CPUs misses, the owner raises Docker Desktop's CPUs for a second M1 run before native.
+        - 0023: an agent-run `reader up` may resolve the Keychain item; the agent never reads it. The AGENTS.md provider-credential line is
+          updated. The new secrets rule must be added by the owner: the auto-mode classifier refused the agent's edit.
+        deep-reviewer round 3: 0021, 0023, 0024 and 0025 approve; the 0022 blocker (shared kernel services) is addressed in this commit.
         Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac

@@ -34,6 +34,7 @@ An egress allowlist alone does not stop exfiltration: a stolen token can be sent
 **(c) for the credential, combined with (a) for tools:**
 - Agent stages that need code execution use `kernel-agent` through its relay.
 - **(b)** is the fallback if the relay cannot serve agent tools.
+- `kernel-agent` follows ADR-0022's rule for shared services: one run at a time, and a fresh container between runs.
 
 **Rules:**
 1. **Caller control.**
@@ -46,7 +47,9 @@ An egress allowlist alone does not stop exfiltration: a stolen token can be sent
    - examples the allow-list excludes unless declared: Bash, Read, Write, Edit, Glob, Grep, NotebookEdit, WebFetch, subagent tools and background-shell tools.
 
    A test reads the tool list the CLI reports at session start (the init `SystemMessage`) and asserts that it equals the declared set, so the rule fails closed when the SDK adds tools.
-3. **Process controls for the worker** (the agent-running container): non-root, read-only root, tmpfs home, cap-drop ALL, no-new-privileges.
+3. **Process controls:**
+   - the worker (the agent-running container): non-root, read-only root, tmpfs home, cap-drop ALL, no-new-privileges;
+   - `agent-proxy`: non-root, read-only root, cap-drop ALL, no-new-privileges.
 4. **Compose services:**
    - `agent-proxy`: holds the provider tokens;
    - `worker`: runs agent stages; holds the DB DSN; tools by allow-list;

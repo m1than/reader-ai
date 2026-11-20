@@ -3,7 +3,7 @@ id: ADR-0021
 title: Ingestion amendment — formula model on, code from the PDF text layer, a deterministic page-expectation check; Docker or native decided by one measurement
 status: proposed
 date: 2026-11-20
-verified_by: "SRV-INGEST test against committed per-page expectations for the 20 pilot pages (counts and hashes only, no book text, expected hashes computed independently of the pipeline): code-block count, lines per block, sha256 of each block's text equal to the committed sha256 of the text layer inside its box, block order relative to list items (block index before or after a list-item index; pages 461, 468), decoded-formula count, table shape (rows × columns). It runs only where the sha256-matched PDF is present; a missing PDF is reported as a skip, never as a pass. Plus measurement M1 deciding Docker or native, and, if native, the confinement check in Consequences"
+verified_by: "SRV-INGEST local check on the owner's Mac against committed per-page expectations for the 20 pilot pages (counts and hashes only, no book text, expected hashes computed independently of the pipeline): code-block count, lines per block, sha256 of each block's text equal to the committed sha256 of the text layer inside its box, block order relative to list items (block index before or after a list-item index; pages 461, 468), decoded-formula count, table shape (rows × columns). It runs only where the sha256-matched PDF is present; a missing PDF is reported as a skip, never as a pass. Plus measurement M1 deciding Docker or native, and, if native, the confinement check in Consequences"
 revisit_when: "After SRV-INGEST is green: the owner's fidelity live check misreads more than 2 of the 20 pages (rule B); or a native or Docker full run with the formula model falls below 10 pages/min; or Docling's formula model gains MPS support"
 supersedes: []
 ---
@@ -49,10 +49,16 @@ In O1 and O2 alike, code lines come from the PDF text layer inside Docling's cod
    - Code blocks: their lines are read from the PDF text layer inside Docling's bounding boxes, keeping line breaks and order.
    - Born-digital pages run with `do_ocr=False`; OCR (EasyOCR, `ru` + `en`) is the fallback only for pages without a text layer.
 2. **Where it runs, decided by measurement M1:**
-   - **M1 runs** S-D's five formula pages (128, 130, 132, 133, 141) in Docker with `do_ocr=False` and the formula model on. First at 4 VM CPUs; if needed, again after the owner raises Docker Desktop's CPU setting.
+   - **M1 runs** S-D's five formula pages (128, 130, 132, 133, 141) in Docker with `do_ocr=False` and the formula model on, first at 4 VM CPUs.
    - M1 records seconds per formula **excluding model load**, the same basis as the native 19.7 s, and records peak memory.
-   - **Bound:** the book's 35 formulas must take **≤ 30 min** in total, i.e. **≤ 51 s per formula**. This is a choice, proposed for the owner's agreement: the book takes 31.6 min without formulas in Docker, and with the bound a whole course ingest stays near one hour. (ADR-0010 gives the owner 60 minutes of study a day; that is context for the choice, not ADR-0010's number for this.)
-   - **Rule:** if M1 is within the bound, ingestion stays in Docker (O1). Otherwise it runs natively (O2).
+   - **Bound:** the book's 35 formulas must take **≤ 30 min** in total, i.e. **≤ 51 s per formula**.
+     - The owner agreed to this bound (2026-11-20, in chat).
+     - Reasoning: the book takes 31.6 min without formulas in Docker, so with the bound a whole course ingest stays near one hour.
+     - It is a choice, not a number from ADR-0010, which gives the owner 60 minutes of study a day.
+   - **Rule:**
+     - if M1 at 4 VM CPUs is within the bound, ingestion stays in Docker (O1);
+     - if it misses, the owner raises Docker Desktop's CPU count and M1 runs again (decided by the owner, 2026-11-20);
+     - only if that second run also misses does ingestion run natively (O2).
 3. **If native (O2), the ADR-0012 knock-on:**
    - The native converter is a host process. It receives one PDF and returns the converted document over `127.0.0.1`, with no database access and no blob volume.
    - The worker in Compose keeps the jobs, the spans and the storage.
@@ -60,7 +66,7 @@ In O1 and O2 alike, code lines come from the PDF text layer inside Docling's cod
    - **Confinement:** the converter runs as a dedicated macOS user or under a sandbox profile. It reads only its input and the models, writes only its output, has no secrets in its environment, and listens on loopback only.
    - Note for the spec: any local process can submit to a loopback listener, so SRV-INGEST must authenticate the worker's requests or accept that local processes can use the converter.
 4. **Checks:**
-   - The **CI check** is the deterministic one in `verified_by`: committed per-page expectations, counts and hashes only, no book text.
+   - The **local check on the owner's Mac** is the deterministic one in `verified_by`: committed per-page expectations, counts and hashes only, no book text. It needs the sha256-matched PDF, which never leaves the owner's Mac.
    - The agent-judged fidelity, with rules A and B and the 20 pages, becomes an **owner live check** with a judge and a budget per run, outside CI. Its target is rule B, at most 2 of 20.
 
 ## Rejected options — why (numbers)
@@ -90,5 +96,6 @@ In O1 and O2 alike, code lines come from the PDF text layer inside Docling's cod
 
 ## Open questions
 
-- If M1 at 4 VM CPUs misses the bound, may the owner raise Docker Desktop's CPU setting for a second M1 run before native is chosen?
-- Does the owner agree to the bound of ≤ 30 min for the book's formulas (≤ 51 s per formula)?
+- None. The owner answered both questions on 2026-11-20 (recorded in the Decision):
+  - the 30-minute bound is agreed;
+  - a second M1 run with more VM CPUs comes before native is chosen.

@@ -3,7 +3,7 @@ id: ADR-0022
 title: Kernel sandbox amendment — exec tmpfs and per-kernel evcxr cache with cleanup, enforced memory, a declared set of static kernel services with one principal or session each
 status: proposed
 date: 2026-11-20
-verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; routes match the declared set (api relay → kernel-<user>, kernel-pair-*; worker → kernel-verify, kernel-agent; nothing else); a session waits when the pair pool is exhausted; no service mounts the Docker socket; all of it re-run on python:3.14-slim-trixie"
+verified_by: "OPS-SANDBOX tests: two concurrent Rust kernels each pass the pilot-crates cell; kernel dirs are removed after normal exit, SIGKILL, OOM and a gateway restart (launcher sweep), so a container starts more than 12 Rust kernels in sequence; a kernel-start failure (e.g. tmpfs full) reaches the client as an error; a 2.6 GB allocation kills the kernel and the client is told; routes match the declared set (api relay → kernel-<user>, kernel-pair-*; worker → kernel-verify, kernel-agent; nothing else); a session waits when the pair pool is exhausted; on a shared service (kernel-verify, kernel-agent, kernel-pair-*) a file in /home/lab and in /run/evcxr and a background process left by session 1 are absent in session 2; two worker jobs for different users never hold kernel-agent or kernel-verify at the same time; no service mounts the Docker socket; all of it re-run on python:3.14-slim-trixie"
 revisit_when: "More than ≈ 12 concurrent Rust kernels are needed in one container (1,024 MiB tmpfs ÷ ≈ 85 MiB per kernel); or evcxr gains a read-only cache or an exec-free cell loader"
 supersedes: []
 ---
@@ -53,6 +53,12 @@ This amends ADR-0014's "Process", "Resources" and "Network" rows.
   - `kernel-agent`: agent tools under ADR-0025 option (a), used by the worker only;
   - `kernel-pair-1..N`: a bounded pair pool (ADR-0016), N from config, default 1.
 - **Isolation invariant:** one principal or session per kernel container, from the declared set; a session waits when the pool is exhausted. Kernels in one container share a uid and can write each other's `/run/evcxr` directories, so they must never serve two principals.
+- **Shared services:** `kernel-verify`, `kernel-agent` and each `kernel-pair-*` serve exactly one run or session at a time; other runs and sessions wait.
+- **Reset between principals, without a Docker socket:**
+  - At the end of a run or session, the gateway process exits.
+  - The service's restart policy brings up a fresh container: empty tmpfs (`/home/lab`, `/tmp`, `/run/evcxr`) and no leftover processes.
+  - The worker or the api relay waits for the restarted service to report healthy before handing it to the next principal.
+- **Memory budget:** each `kernel-<user>` carries its own 2 GiB limit, against the Docker VM's 11.6 GiB. Limits are not reservations. The expected count is the owner plus a few partners.
 - **Routes:**
   - the api relay reaches `kernel-<user>` and `kernel-pair-*`;
   - the worker reaches only `kernel-verify` and `kernel-agent`;
