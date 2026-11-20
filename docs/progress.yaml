@@ -139,8 +139,8 @@ tasks:
         Remaining: fix GitHub billing; merge library PR #1; tag v0.1.0 on the merged web3/material-parity and push it; note the
         release run's duration; tell the agent the version. Installing from GitHub Packages needs a read:packages token on the Mac,
         likely a classic PAT (to be verified). Until then reader-ai consumes the built-commit tarball (verified fallback)." }
-  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: in_progress, needs: [S0.spike.agent-sdk-container],
-      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (recommendation wording)",
+  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: done, needs: [S0.spike.agent-sdk-container],
+      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (recommendation wording), round 3 approve",
       note: "The owner allowed Keychain use for this spike in chat (2026-11-20: 'allow keychain for compile-cost and trace-backend').
         run.sh pipes the item reader-ai/claude-oauth-token to the probe on stdin; never printed, not in docker inspect.",
       result: "PASS for both (spikes/trace-backend/RESULT.md): reader.stage → claude_code.interaction → llm_request nest via TRACEPARENT

@@ -1,7 +1,7 @@
 # Spike: trace-backend — RESULT
 
 **Question (docs/roadmap.md 0.3; ADR-0018):** MLflow or Phoenix as the trace backend on the Mac, fed through Rotel with our parent spans and the Agent SDK's native traces joined by `TRACEPARENT`.
-**Measures:** memory at idle and under load; time to find why a seeded failing stage failed; whether quality scores attach to the trace.
+**Measures:** memory at idle and under one lesson compile (here: a lesson-sized synthetic replay, see Load); time to find why a seeded failing stage failed; whether quality scores attach to the trace.
 **Pass criterion:** agent spans nest under our stage span; a score is visible on the trace.
 
 **Verdict: PASS for both backends.**
