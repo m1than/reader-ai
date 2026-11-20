@@ -8,7 +8,7 @@
 #   - kind: why_how marks conceptual questions; the rest are lookup questions;
 #   - gold pages found through the text layer and checked by reading a short snippet of each (2026-11-20);
 #   - the agent's own wording; nothing is quoted from the book.
-status: draft, needs owner skim
+status: accepted (owner 2026-11-21 delegated the review to the agent; check_questions.py: 40 questions, 0 issues)
 source_sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
 language: ru
 questions:
