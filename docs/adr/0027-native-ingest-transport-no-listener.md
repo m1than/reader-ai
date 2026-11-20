@@ -1,7 +1,7 @@
 ---
 id: ADR-0027
 title: Native ingestion transport — the confined converter is a child of a host command with no listener; its artifact enters the stack over `docker exec` stdin into the worker (amends ADR-0021 Decision item 3)
-status: proposed
+status: accepted
 date: 2026-11-21
 verified_by: "SRV-INGEST [local] confinement check on the owner's Mac. The converter child under its sandbox profile converts the 20 pilot pages, and these attempts are refused: outbound TCP, loopback TCP, `host.docker.internal`, every Unix-socket connect or bind (the Docker socket included), mach lookups, exec of other binaries, reads outside its input copy, models and runtime, and writes outside its work directory. Its environment equals the allow-list, and it holds no listening socket. SRV-INGEST receive tests: malformed artifacts write nothing and enqueue nothing"
 revisit_when: "Ingestion moves into Docker (a Docker run meets ADR-0021's 51 s per formula bound); or materials must be ingested from the browser without a host command; or macOS removes sandbox-exec"
