@@ -69,6 +69,8 @@ Complex work is always done with Claude Fable, through the `deep-reviewer` and `
 
 ## Checks before every PR
 
+`bash tools/ci-local.sh` runs the first four lines below, the same jobs as `.github/workflows/ci.yml`. While GitHub Actions cannot run on the owner's account, its PASS is the gate (owner, 2026-11-20).
+
 ```bash
 node tools/trace/check.mjs                              # T1–T9 (T9: docs/progress.yaml parses and is consistent)
 node tools/trace/guard-tests.mjs --base origin/main     # P7
