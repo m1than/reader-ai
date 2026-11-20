@@ -1,7 +1,0 @@
-# VEC-DEPLOY-1: expectations for deploy/reader.example.yaml (FR-DEPLOY-12). The file itself is an implementation
-# file under deploy/** and is written in Green; this vector states what the [config] test asserts about it.
-file: deploy/reader.example.yaml
-loads_with: reader.config.load_config   # SRV-CONFIG; must raise no ConfigError
-covers_top_level_sections: [version, instance, users, tasks, budgets, kernels, materials]
-secret_fields_are_references: true       # every SecretRef field holds a secret:// reference, no literal
-instance_url: https://localhost          # ADR-0024 host name for stage 1

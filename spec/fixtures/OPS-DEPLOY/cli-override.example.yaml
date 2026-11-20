@@ -1,25 +1,30 @@
-# VEC-DEPLOY-3: a sample of the in-memory Compose override that OPS-CLI builds at `reader up`.
-# OPS-CLI never writes this to disk (SRV-CONFIG FR-CONFIG-14, ADR-0011); the [config] tests pass this fixture with
-# `-f` and export canary values for the referenced variables, e.g.
-#   READER_SECRET_KEYCHAIN_E35683C33BD94DE8486A116F9C3EFC47=CANARY-provider-token
-#   READER_DB_PASSWORD=CANARY-db-password
-# Names: secret_file_name / secret_env_var of secret://keychain/reader-ai/claude-oauth-token, computed with sha256
-# (prefix e35683c33bd94de8486a116f9c3efc47). The db-password source is OPS-CLI's open decision (spec owner note).
-secrets:
-  keychain-e35683c33bd94de8486a116f9c3efc47:
-    environment: READER_SECRET_KEYCHAIN_E35683C33BD94DE8486A116F9C3EFC47
-  db-password:
-    environment: READER_DB_PASSWORD
-
+# VEC-DEPLOY-3: the override OPS-CLI must emit, in memory, for one configured user (handle `ivan`).
+# It carries no secrets: FR-DEPLOY-10 delivers them after start over `docker exec -i` (spikes/compose-secrets-ro).
+# kernel-user-ivan is fully expanded: every key equals the base file's rendered `x-kernel` (FR-DEPLOY-8), and only
+# `networks` differs. INV-DEPLOY-8 compares field by field; there is no merge step in the test.
 services:
-  agent-proxy:
-    secrets: [keychain-e35683c33bd94de8486a116f9c3efc47]
   kernel-user-ivan:
-    # OPS-CLI copies every key of the base file's `x-kernel` template here (FR-DEPLOY-7); the [config] test merges
-    # x-kernel into this service before asserting INV-DEPLOY-8.
+    image: reader-kernel:local
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /home/lab:noexec,size=256m,uid=1000
+      - /tmp:noexec,size=256m,uid=1000
+      - /run/evcxr:exec,nosuid,nodev,size=1g,uid=1000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    restart: always
+    profiles: [kernels]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/reader-kernel-health"]
     networks: [sb-user-ivan]
   api:
-    networks: [sb-user-ivan]
+    networks:
+      sb-user-ivan: {}
 
 networks:
   sb-user-ivan:

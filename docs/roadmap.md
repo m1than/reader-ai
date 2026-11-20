@@ -161,10 +161,13 @@ The library release workflow is work in the library's repository and follows its
 
 ```bash
 reader up
-check "health"          curl -fsS https://localhost/api/health | jq -e '.db=="ok" and .kernel=="ok"'
+check "health"          curl -fsS https://localhost/api/health | jq -e '.db=="ok"'
 check "anonymous 401"   test "$(curl -s -o /dev/null -w '%{http_code}' https://localhost/api/me)" = 401
-check "six healthy"     test "$(docker compose -f deploy/compose.yaml ps --format json | jq -s '[.[]|select(.Health=="healthy")]|length')" = 6
+# Four default-profile services (OPS-DEPLOY, owner 2026-11-20): caddy, api, worker, postgres. Not six: mcp arrives in
+# stage 7 (profile mcp), the kernel services in stage 4 (profile kernels), Rotel with SRV-OBS in stage 2.
+check "four healthy"    test "$(docker compose -f deploy/compose.yaml ps --format json | jq -s '[.[]|select(.Health=="healthy")]|length')" = 4
 check "no env secrets"  ! docker inspect $(docker compose -f deploy/compose.yaml ps -q) | grep -q "$READER_CANARY"
+check "no secret on disk" ! docker diff $(docker compose -f deploy/compose.yaml ps -q) | grep -q '/run/secrets/'
 check "doctor"          reader doctor --json | jq -e 'all(.[]; .ok)'
 # manual, once: open the bootstrap link in Safari, register a passkey, then:
 check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me | jq -e '.role=="owner"'
@@ -234,7 +237,14 @@ check "signed in"       curl -fsS -b ~/.reader/cookie https://localhost/api/me |
 
 **Design gate (owner, 2 sessions):** the owner reviews Calm in Storybook (`https://localhost/storybook`) and adjusts tokens live. The exported JSON patch becomes a PR. Nothing in 4b is marked implemented before this gate.
 
-**Live check** `e2e/live/stage-4.sh`: store fixture lesson F01; `/api/lessons/F01` validates; a Playwright run opens F01, executes the Nakamoto lab and sees the assert pass; a lab cell that tries `curl http://postgres:5432` fails; `/storybook` answers 200.
+**Live check** `e2e/live/stage-4.sh`:
+- `/api/health` reports `.kernel=="ok"` (moved from stage 1, owner 2026-11-20);
+- every kernel service of profile `kernels` is healthy;
+- store fixture lesson F01 and check that `/api/lessons/F01` validates;
+- a Playwright run opens F01, executes the Nakamoto lab and sees the assert pass;
+- a lab cell that tries `curl http://postgres:5432` fails;
+- a lab cell cannot connect to any port of its declared caller (api or worker), per OPS-DEPLOY FR-DEPLOY-4;
+- `/storybook` answers 200.
 
 **Exit:** all PASS; the owner opens F01, runs a lab and writes a note. The first real lesson arrives through the pipeline in stage 5.
 **Owner:** 6 spec reviews, design gate, 2 live checks.
