@@ -1,0 +1,29 @@
+# reader-ai example configuration (OPS-DEPLOY FR-DEPLOY-12; schema: SRV-CONFIG). Secrets are references only:
+# `reader up` resolves them on the host and delivers them into the consuming containers (ADR-0011, ADR-0026).
+version: 1
+instance: { url: https://localhost, data_dir: ./data }
+users:
+  - handle: ivan
+    role: owner
+    providers:
+      - kind: anthropic-subscription
+        token: secret://keychain/reader-ai/claude-oauth-token
+  - handle: live-check   # learner for the stage-1 live check (SRV-AUTH): passkey from a virtual authenticator
+    role: learner
+tasks:
+  draft:      { model: opus,   budget_usd_per_lesson: 2.0 }
+  fact_check: { model: sonnet, budget_usd_per_lesson: 1.0 }
+  review:     { model: opus,   budget_usd_per_lesson: 1.2 }
+  tutor:      { model: sonnet }
+budgets: { monthly_usd: 200, warn_at: 0.8 }
+kernels: [python3, rust, deno]
+materials:
+  - id: bashir-2025
+    file: ./materials/bashir-mastering-blockchain-ru-2025.pdf
+    sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
+    license: personal-use
+    language: ru
+sectors:
+  blockchain: { title: Blockchain }
+sharing:
+  invitations: false

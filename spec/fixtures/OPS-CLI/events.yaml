@@ -1,0 +1,46 @@
+# VEC-CLI-4: `docker events --format '{{json .}}'` lines (trimmed to the fields FR-CLI-9 reads) for project `reader-vec`
+# with VEC-CLI-3's default-profile consumers (postgres, api, worker), and the deliveries each must cause. The label
+# filter is only a pre-selection; the watcher re-checks each event's own Actor.Attributes. No values.
+project: reader-vec
+consumers: [api, postgres, worker]
+cases:
+  - id: own-consumer
+    event:
+      Type: container
+      Action: start
+      Actor:
+        ID: c0ffee01
+        Attributes: { com.docker.compose.project: reader-vec, com.docker.compose.oneoff: "False", com.docker.compose.service: api }
+    deliveries: [{ container: c0ffee01, uid: 10001, name: db-password }]
+  - id: foreign-project
+    event:
+      Type: container
+      Action: start
+      Actor:
+        ID: c0ffee02
+        Attributes: { com.docker.compose.project: other, com.docker.compose.oneoff: "False", com.docker.compose.service: api }
+    deliveries: []
+  - id: one-off
+    event:
+      Type: container
+      Action: start
+      Actor:
+        ID: c0ffee03
+        Attributes: { com.docker.compose.project: reader-vec, com.docker.compose.oneoff: "True", com.docker.compose.service: api }
+    deliveries: []
+  - id: not-a-consumer
+    event:
+      Type: container
+      Action: start
+      Actor:
+        ID: c0ffee04
+        Attributes: { com.docker.compose.project: reader-vec, com.docker.compose.oneoff: "False", com.docker.compose.service: kernel-user-ivan }
+    deliveries: []
+  - id: labels-missing
+    event:
+      Type: container
+      Action: start
+      Actor:
+        ID: c0ffee05
+        Attributes: { com.docker.compose.service: api }
+    deliveries: []

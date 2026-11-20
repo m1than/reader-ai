@@ -1,0 +1,39 @@
+# Pilot retrieval questions for spike embeddings-local (roadmap 0.3: recall@10 on 30 pilot questions written by the
+# agent and reviewed by the owner). Questions are the agent's own wording; nothing is quoted from the book.
+# gold_pages: printed-PDF page numbers (1-based, as in pilot/bashir/plan.yaml) where the answer is explained,
+# found through the text layer and checked by reading a snippet of each page (2026-11-20).
+# A retrieval hit = any of the top-10 chunks comes from a gold page.
+status: draft, needs owner review
+source_sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
+language: ru
+questions:
+  - { id: q01, chapter: 1, gold_pages: [31, 32], question: "Как задача византийских генералов соотносится с узлами распределённой сети и каналом связи между ними?" }
+  - { id: q02, chapter: 1, gold_pages: [33, 34, 35], question: "Какие три свойства распределённой системы нельзя обеспечить одновременно согласно теореме CAP?" }
+  - { id: q03, chapter: 2, gold_pages: [76], question: "Что представлял собой проект The DAO и сколько денег он собрал при краудфандинге?" }
+  - { id: q04, chapter: 3, gold_pages: [111, 112], question: "Сколько раундов шифрования выполняет AES при ключах длиной 128, 192 и 256 бит?" }
+  - { id: q05, chapter: 3, gold_pages: [104, 105], question: "Как работает код аутентификации сообщения на основе хеш-функции (HMAC)?" }
+  - { id: q06, chapter: 3, gold_pages: [99, 100], question: "Зачем в блокчейне нужны деревья Меркла и как они помогают проверить, что транзакция входит в блок?" }
+  - { id: q07, chapter: 4, gold_pages: [118, 119], question: "Чем различаются открытый и закрытый ключи в криптографии с открытым ключом?" }
+  - { id: q08, chapter: 4, gold_pages: [140, 141, 142], question: "Как на практике сгенерировать и проверить подпись ECDSA с помощью OpenSSL?" }
+  - { id: q09, chapter: 5, gold_pages: [170, 171], question: "Почему протокол Raft считают более понятным алгоритмом устойчивости к сбоям, чем Paxos?" }
+  - { id: q10, chapter: 5, gold_pages: [177, 178], question: "Сколько подтверждений должна собрать реплика в PBFT, чтобы контрольная точка считалась стабильной?" }
+  - { id: q11, chapter: 6, gold_pages: [216], question: "Что такое неизрасходованный выход транзакции (UTXO) в биткойне?" }
+  - { id: q12, chapter: 6, gold_pages: [231], question: "Как майнер ищет подходящее значение nonce при доказательстве работы?" }
+  - { id: q13, chapter: 7, gold_pages: [267, 268, 269, 270, 271], question: "Как запустить биткойн-узел в режиме regtest и отправлять ему команды через bitcoin-cli?" }
+  - { id: q14, chapter: 8, gold_pages: [282, 284, 285], question: "Что такое рикардианский контракт и чем он отличается от обычного смарт-контракта?" }
+  - { id: q15, chapter: 8, gold_pages: [295, 296, 297], question: "В чём суть проблемы оракулов для смарт-контрактов?" }
+  - { id: q16, chapter: 9, gold_pages: [323, 324, 325], question: "Как в Ethereum вычисляется плата за транзакцию из лимита газа и цены газа?" }
+  - { id: q17, chapter: 10, gold_pages: [384, 385, 390], question: "Как развернуть и вызвать смарт-контракт в среде разработки Remix?" }
+  - { id: q18, chapter: 11, gold_pages: [411], question: "Для чего разработчику смарт-контрактов нужен локальный блокчейн Ganache?" }
+  - { id: q19, chapter: 12, gold_pages: [448, 449], question: "Как веб-страница обращается к смарт-контракту через библиотеку web3.js?" }
+  - { id: q20, chapter: 13, gold_pages: [481], question: "Что такое слешинг и какое наказание грозит недобросовестному валидатору Ethereum?" }
+  - { id: q21, chapter: 14, gold_pages: [540, 541], question: "Какую роль играет служба упорядочивания в потоке транзакций Hyperledger Fabric?" }
+  - { id: q22, chapter: 15, gold_pages: [561, 562], question: "Чем стандарт невзаимозаменяемых токенов ERC-721 отличается от ERC-20?" }
+  - { id: q23, chapter: 16, gold_pages: [621, 622], question: "Какие механизмы консенсуса поддерживает корпоративная платформа Quorum?" }
+  - { id: q24, chapter: 17, gold_pages: [657, 658, 659], question: "Как работают оптимистичные роллапы и в чём их преимущества?" }
+  - { id: q25, chapter: 17, gold_pages: [645], question: "Что такое шардинг как способ масштабирования блокчейна?" }
+  - { id: q26, chapter: 18, gold_pages: [693], question: "Как кольцевые подписи помогают скрыть, кто именно подписал транзакцию?" }
+  - { id: q27, chapter: 19, gold_pages: [732], question: "Что такое атака 51 % и когда она становится возможной?" }
+  - { id: q28, chapter: 19, gold_pages: [735], question: "Что такое уязвимость повторного входа (reentrancy) в смарт-контрактах?" }
+  - { id: q29, chapter: 20, gold_pages: [783, 784], question: "Какие операции с децентрализованными идентификаторами описывает спецификация метода DID?" }
+  - { id: q30, chapter: 21, gold_pages: [834], question: "Что такое Uniswap и как пользователи обменивают на ней токены?" }

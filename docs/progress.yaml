@@ -105,7 +105,27 @@ tasks:
         Docling refuses MPS for it; more VM CPUs not tried. OCR on 10 rendered pages: char accuracy mean 0.870 (0.678–0.970),
         word recall 0.607–0.900 (low pages lose figure text), 1.44 pages/min. Triggers ADR-0008 revisit_when;
         proposed amendment for S0.exit: native ingest (or a larger Docker VM, untested), formula model on, code from the PDF text layer." }
-  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.ingest-confine, stage: 0, kind: spike, status: done, needs: [S0.spike.ingest-docling],
+      result: "Docling configuration D (formula on, code off, OCR off, CPU, models via artifacts_path, offline) runs under a
+        deny-default sandbox-exec profile (spikes/ingest-confine/converter.sb): no mach-lookup, iokit, network, ipc-posix or
+        signal; writes only under WORK. Same 20 pages, same counts (6 formulas, 11 tables). Confined 15.69 / 15.85 pages/min
+        vs unconfined 15.85 / 16.57 (no measurable cost); ≈ 11.5 s per formula, 0.2–0.7 s per other page; model load 1.9 s.
+        Extra allowances: read of '/' (dyld), /private/etc/apache2/mime.types (stdlib mimetypes), exec of the resolved
+        interpreter; cwd must be in WORK; -D params must be realpaths. POSIX semaphores and shm not needed. All negative probes
+        denied (TCP, Unix connect/bind incl. docker socket, Keychain Mach service, exec of security/docker/sh, signal to
+        parent, /dev/tty, home reads, writes outside WORK); socketpair, symlink and mkfifo inside WORK allowed (parent must
+        not trust WORK). Book estimate ≈ 12.7 min (not measured). Input for SRV-INGEST review B1/B2." }
+  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: done, pr: 28, needs: [S0.skeleton],
+      decision: "owner 2026-11-21: BAAI/bge-m3 confirmed; questions-v2.yaml left to the agent ('do themself with the most
+        appropriate'), accepted as the retrieval acceptance set",
+      result: "Provisional (spikes/embeddings-local/RESULT.md, results/20261120T195713-draft-questions/): full pilot 2285 chunks on 4 CPUs.
+        multilingual-e5-small 14.35 chunks/s, 2.7 min; USER-bge-m3 1.02 chunks/s, 37.4 min; bge-m3 1.18 chunks/s, 32.3 min.
+        recall@10 1.0 for all three, recall@1 0.733 for all three, MRR 0.822 / 0.839 / 0.839: the draft question set does not
+        discriminate. e5-small is the only model within 30 min.
+        v2 (40 harder questions, results/20261120T232835-v2/, 13 CPUs, dense only): recall@10 e5-small 0.400, USER-bge-m3 0.750,
+        bge-m3 0.675; MRR 0.230 / 0.409 / 0.413; full pilot 1.2 / 15.1 / 14.1 min. e5-small rejected on recall; the bge-m3 pair is
+        within noise. Agent recommends BAAI/bge-m3 (general multilingual, best recall@1 and MRR, MIT); V.SRV-SEARCH-min uses it
+        and measures the hybrid on v2 as its acceptance number." }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
       review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
@@ -222,17 +242,94 @@ tasks:
       note: "green locally; deep-reviewer next. Branch 1/S1.SRV-CONFIG-adr26; spec stays approved (review field: amended for
         ADR-0026, paired change, coordinator-scheduled). Tests 245 → 246 (secret_env_var assertions removed; one test added
         asserting the export is gone)." }
-  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
-      note: "Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
+  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: done, pr: 31, needs: [S1.SRV-CONFIG, S1.OPS-DEPLOY],
+      review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve (97b422e), caddy_config delta confirmed (5c15d21);
+        code review round 1 changes on 294b245 (3 blocking, all applied with paired spec and tests; both test edits after
+        Red confirmed as pure test-bug fixes), round 2 approve (51a8afc)",
+      note: "Spec approved (approved_by: agent, 2026-11-20) with the Red tests: 196 tests in server/tests/cli/ (8 files),
+        196/196 failing on AssertionError inside their bodies (a last meta-path finder in tests/cli/conftest.py turns a
+        missing reader.cli module into an assertion). Paired at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4),
+        exact pg_dump/pg_restore/psql argv (role and database `postgres`), learner `live-check` in deploy/reader.example.yaml
+        (no OPS-DEPLOY test pins the example's users). keyring==25.7.0 added with Red (tests use keyring.errors).
+        Green: server/src/reader/cli/ (9 modules: app, commands, maintenance, watcher, stack, resolve, runner, log,
+        errors), console script `reader = reader.cli.app:main`; 196/196 CLI tests pass, server suite 503 passed,
+        1 skipped (registry); ruff, mypy --strict and tools/ci-local.sh PASS. Test edits after Red (test defects, for
+        the PR description): test_runner timeout case used `/bin/sleep 5 CANARY` (sleep exits at once on the extra
+        operand) → `/bin/sh -c 'sleep 5' CANARY`; test_stack file-scheme case used `secret://file/tok`, which
+        SRV-CONFIG rejects → `secret://file/run/secrets/tok`; import sorting and one ruff-format wrap. Not run: `reader
+        up` for real (the stage-1 live check). Code review round 1 fixes: backup/restore one-offs get
+        `--entrypoint ''` (the server image's wait-for-secret entrypoint hung them; measured by the reviewer), timeouts
+        600 s (pg_dump/pg_restore) and 120 s (tar/untar/find one-offs, psql), stops inside the try so writers always
+        restart; event_ignored at INFO with the failing label name; no retry after SIGTERM (waits end on stop);
+        `op read` 120 s; keychain_unavailable replaces keychain_denied/keychain_locked; a failed reconcile is a failed
+        subscription; resubscribe keeps T0; a stream living over 4 s resets the failure count; SIGKILL escalation in
+        terminate() and a 5 s wait after SIGKILL; coded errors for spawn, Compose JSON, manifest, non-UTF-8 stdin;
+        restore ignores alembic_version. CLI tests 196 → 216. Lock probe: kept flock; a starting watcher retries a
+        contended lock for 1 s instead of an F_GETLK probe (measured by the reviewer: macOS F_GETLK sees a flock lock
+        but reports l_pid -1; POSIX locks cannot be tested in-process). Remaining limits: backup/restore hold each archive in memory (the runner returns
+        bytes); planned: stream to `<file>.tmp` and rename. `docker compose -p <name> exec|stop|start|down` relies on
+        Compose's project-by-name mode; an empty user trust domain makes `security trust-settings-export` exit
+        non-zero ('No Trust Settings'), read as 'none remain'. Earlier context: Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
         watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
         tmpfs /run/secrets/<secret_file_name(ref)> via `docker exec -i -u <uid>` over stdin (no Compose secrets). The DB password is
-        generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 Compose-secret wording and
-        secret_env_var are obsolete under ADR-0026 and need a paired spec+tests change before OPS-CLI relies on them.
-        Registers its hostfile/keychain/op resolvers through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7)." }
-  - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
-      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container],
-      note: "compose.yaml must not hard-code provider secrets: OPS-CLI adds a generated, in-memory secrets section with
-        hash-derived names (SRV-CONFIG FR-CONFIG-14); services that need a provider token reference those secrets." }
+        generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 now names /run/secrets files
+        and secret_env_var is gone (#26). From OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3: the in-memory override binds
+        the owner's reader.yaml read-only at /etc/reader/reader.yaml (create_host_path false) into api, worker and mcp
+        only; compose.yaml sets READER_CONFIG statically. caddy_config stays backup=include (ADR-0012, ADR-0024), so
+        OPS-CLI's backup must read it: in the pinned caddy image /config is 0755 and /config/caddy 1777 (code review).
+        Registers its hostfile/keychain/op resolvers through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7).
+        From OPS-DEPLOY: each write is `docker exec -i -u <service uid>` with `umask 077; cat > /run/secrets/.<name>.tmp &&
+        mv … <name>`, exit code checked, value on stdin only. OPS-CLI decides whether `reader up` daemonises once the stack
+        is healthy (the live-check scripts call `reader up` and continue), fixes the watcher's stop command (the roadmap's
+        stage-1 script uses the placeholder `reader watcher stop`), stops the watcher on `reader down`, and guarantees that
+        with the watcher dead a restarted consumer stays unhealthy (fail closed) until the next `reader up`. The DB password
+        is set in the cluster only at initdb, so it is never regenerated while `pgdata` exists, and a restore needs the same
+        Keychain item. ADR-0026's `verified_by` items that are OPS-CLI's: no value in `docker export`, in `docker events`
+        since `reader up`, or in the Docker Desktop logs. OPS-CLI also emits the in-memory override of OPS-DEPLOY
+        VEC-DEPLOY-3 (fully expanded kernel-<user> services, their networks, api attachments)." }
+  - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: done, pr: 27,
+      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S1.SRV-CONFIG],
+      review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code review round 1 changes (applied),
+        round 2 changes (applied), round 3 approve (beaf360); paired change 2026-11-21: server.Dockerfile creates
+        /var/lib/reader/blobs owned by 10001 before USER (FR-DEPLOY-5; for SRV-LESSON and SRV-INGEST), with a [config]
+        order test and an [image] fresh-volume write test",
+      note: "green locally. Code review round 2: round-1 blockers verified fixed; caddy_config back to backup=include
+        (the exclude change contradicted ADR-0012 and ADR-0024, and its 'root-owned 0700' reason was not measured: the
+        pinned image has /config 0755, /config/caddy 1777); deploy/images/server.Dockerfile.dockerignore excludes
+        **/__pycache__ and **/.env*. Code review round 1 (applied with paired spec
+        wording, H2): caddy healthcheck on 127.0.0.1:2019 (localhost never passed: admin is IPv4-only, busybox wget tries
+        ::1 first); server.Dockerfile copies only server/pyproject.toml and server/src (COPY layers 16 kB + 205 kB instead
+        of the whole server/ tree; allow-list test over every Dockerfile under deploy/**, no ADD); SIGTERM traps in both
+        wait wrappers; postgres pg_isready over TCP 127.0.0.1; health timing 2s/2s/3/60s for postgres and the server roles;
+        front ip_range 10.230.1.128/25; caddy:2-alpine tag beside its digest; stricter tests (Caddy path → upstream map,
+        exact kernel key set, legacy seccomp:/apparmor: forms, recursive Dockerfile glob). For SRV-AUTH (FR-DEPLOY-5):
+        compose.yaml sets READER_CONFIG=/etc/reader/reader.yaml statically on api, worker and mcp; the reader.yaml bind
+        (read-only, create_host_path false) comes only from OPS-CLI's override (VEC-DEPLOY-3), so compose.yaml keeps no
+        interpolation (INV-DEPLOY-2 unchanged). Later, not now: install server dependencies from uv.lock (pinned) when the
+        `reader-server` entry point lands; today pip resolves pyproject ranges at build time. Spec approved (approved_by: agent, 2026-11-20). Red: 55 tests in
+        server/tests/deploy/ (6 files), 55/55 failing on assertions inside their bodies; Green: 55/55 passing once, with
+        READER_TEST_REGISTRY=1 ([config] via `docker compose config` for all 8 profile combinations with and without the
+        override; [image] via the daemon: `caddy adapt`, postgres uid 999; [image: registry]: arm64 manifests). Correction
+        to commit 0ba4a4b: that commit claimed a passing gate, but its local gate failed on the registry test with Docker
+        Hub HTTP 429. That test now carries the pytest marker `registry` and runs only with READER_TEST_REGISTRY=1 (in CI
+        and on request); the local gate gives 54 passed, 1 skipped. [config] tests skip without the docker CLI, [image]
+        tests without a reachable daemon. Images pinned by index digest, each with linux/arm64/v8 (docker buildx imagetools
+        inspect, 2026-11-20): python:3.14-slim-trixie@sha256:9aaa4740…802f, postgres:18-trixie@sha256:eb63372c…e1a (18.7),
+        caddy:2-alpine@sha256:003a9780…36f0. Built locally (not started): reader-server:local, reader-postgres:local; images
+        owned elsewhere: reader-kernel:local (OPS-SANDBOX), reader-agent-proxy:local (SRV-AGENT). Fold-in at approval: Caddyfile
+        read-only bind in caddy (FR-DEPLOY-5), postgres as a derived image with the initdb-only wait (FR-DEPLOY-9), `{env.` rule.
+        Remaining for the stage-1 live check ([live] items): no canary in docker inspect, nothing below /run/secrets in docker
+        diff, secret files 0600 owned by the service uid, watcher re-delivery after restart, fail-closed without the watcher,
+        postgres restart without its file (hypothesis on the official entrypoint), postgres starting with cap-drop ALL and a
+        read-only root as uid 999, consumer memory.peak (worker 2g revisited in stage 3), the api healthcheck on its bound
+        address, kernel probes in stage 4. Not started: the stack waits for OPS-CLI.
+        Aligned with ADR-0026 option A (owner, 2026-11-20; merged in #22). Depends on OPS-CLI (the watching `reader up`,
+        atomic delivery, the kernel-<user> override, db-password), OPS-SANDBOX (kernel image and health command, stage 4),
+        SRV-AGENT (agent-proxy image and provider egress allowlist, stage 5), SRV-OBS (Rotel and the trace backend, stage 2),
+        server modules (role health commands, api --bind, worker without a listener). Owner answers 2026-11-20: stage-1 live
+        check covers the four default-profile services (roadmap edited in this branch); DB password from Keychain item
+        reader-ai/postgres. Open owner items: ADR-0014 verified_by / roadmap line 224 rewording for
+        per-kernel networks; the proposed .claude/settings.json deny rules (ADR-0026); caddy without cap-drop ALL." }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
@@ -247,11 +344,29 @@ tasks:
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
-      note: "multilingual-e5-small (spike embeddings-local; v2 benchmark pending)" }
+      note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
-  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
-      note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],
+  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+      note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
+        Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2
+        changes, round 3 approve. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
+        runs; connection-table veto by a cell) fixed: lock-free supervisor with a SIGTERM self-pipe, local 192 / remote
+        64 connection slots with eviction. Code review round 2 changes (a cell binding its eth0 address as source was
+        classed remote and could evict the api; closing an evicted socket in the same select batch crashed PID 1)
+        fixed: local = loopback destination or peer, an interface address, or peer == destination; idempotent close;
+        per-connection errors contained. 31 tests in server/tests/sandbox, all pass
+        (incl. 30 fresh containers with SIGTERM/SIGINT under a state flood: 30/30 real restarts; full table held from
+        inside: caller's state and exit served; stopped gateway killed 2.01 s after the 202 with 8889 held). Measured:
+        image 404,228,564 bytes (docker image inspect .Size; vs 1.91 GB for the spike's 3-kernel image); KG 3.0.1 +
+        ipykernel 7.4.0 run on python:3.14-slim-trixie (lock: 80 pinned packages, all binary wheels); 4 idle python3
+        kernels 248 MiB; reset round trip 1.12–1.20 s (3 resets, 11 s apart); exit with 50 idle connections held:
+        process gone 0.11 s after the 202. SRV-KERNEL stays draft until SRV-AUTH merges (its Red needs the app and
+        session layers). Cross-spec: SRV-AUTH's app factory includes routers from a declared list naming
+        reader.kernels.routes" }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
+      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
+        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels],
       note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
