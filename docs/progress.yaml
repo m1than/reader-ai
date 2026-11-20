@@ -226,7 +226,21 @@ tasks:
         VEC-DEPLOY-3 (fully expanded kernel-<user> services, their networks, api attachments)." }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: in_progress,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S1.SRV-CONFIG],
-      note: "spec draft, round 5 after deep-reviewer rounds 1–3 (spec/modules/OPS-DEPLOY.yaml, branch 1/S1.OPS-DEPLOY).
+      review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code review next",
+      note: "green locally; deep-reviewer code review next. Spec approved (approved_by: agent, 2026-11-20). Red: 55 tests in
+        server/tests/deploy/ (6 files), 55/55 failing on assertions inside their bodies; Green: 55/55 passing (about 24 s,
+        [config] via `docker compose config` for all 8 profile combinations with and without the override; [image] via the
+        daemon: arm64 manifests, `caddy adapt`, postgres uid 999). [config] tests skip without the docker CLI, [image] tests
+        without a reachable daemon. Images pinned by index digest, each with linux/arm64/v8 (docker buildx imagetools
+        inspect, 2026-11-20): python:3.14-slim-trixie@sha256:9aaa4740…802f, postgres:18-trixie@sha256:eb63372c…e1a (18.7),
+        caddy:2-alpine@sha256:003a9780…36f0. Built locally (not started): reader-server:local, reader-postgres:local; images
+        owned elsewhere: reader-kernel:local (OPS-SANDBOX), reader-agent-proxy:local (SRV-AGENT). Fold-in at approval: Caddyfile
+        read-only bind in caddy (FR-DEPLOY-5), postgres as a derived image with the initdb-only wait (FR-DEPLOY-9), `{env.` rule.
+        Remaining for the stage-1 live check ([live] items): no canary in docker inspect, nothing below /run/secrets in docker
+        diff, secret files 0600 owned by the service uid, watcher re-delivery after restart, fail-closed without the watcher,
+        postgres restart without its file (hypothesis on the official entrypoint), postgres starting with cap-drop ALL and a
+        read-only root as uid 999, consumer memory.peak (worker 2g revisited in stage 3), the api healthcheck on its bound
+        address, kernel probes in stage 4. Not started: the stack waits for OPS-CLI.
         Aligned with ADR-0026 option A (owner, 2026-11-20; merged in #22). Depends on OPS-CLI (the watching `reader up`,
         atomic delivery, the kernel-<user> override, db-password), OPS-SANDBOX (kernel image and health command, stage 4),
         SRV-AGENT (agent-proxy image and provider egress allowlist, stage 5), SRV-OBS (Rotel and the trace backend, stage 2),
