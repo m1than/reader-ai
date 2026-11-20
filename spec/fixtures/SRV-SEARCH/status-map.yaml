@@ -15,4 +15,5 @@ rows:
   - { job: queued,    embeds_row: true,  status: ready }
   - { job: running,   embeds_row: true,  status: ready }
   - { job: dead,      embeds_row: true,  status: ready }
-# A "deferred" end (embed service not healthy yet, FR-SEARCH-5 step 2) re-enqueues the key, so it shows as queued.
+# An embed service that stays unhealthy (FR-SEARCH-5 step 2) spends attempts: queued between retries, dead after the
+# third, when `reader.search.ensure` requeues it.

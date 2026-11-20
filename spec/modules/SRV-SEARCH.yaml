@@ -23,9 +23,7 @@
 #   - SRV-AUTH: `reader.api.app.ROUTERS` adds `reader.search.routes`; the declared `version_locations` adds
 #     `reader/search/migrations` (branch label `search`, depends_on the ingest branch head); the engine is created with
 #     `hide_parameters=True`, so SQL errors never log bound parameters such as a query text.
-#   - SRV-EVENTS: the declared kind-module list adds `reader.search.jobs`; a handler may end with a declared
-#     "deferred" result that re-enqueues the same key with `schedule_in` without counting an attempt (used by FR-SEARCH-5
-#     while the embed service is starting).
+#   - SRV-EVENTS: the declared kind-module list adds `reader.search.jobs`.
 #   - SRV-INGEST: after a successful `ingest.import`, the import handler enqueues `search.embed` for that ingest
 #     (FR-SEARCH-5's key); enqueue is idempotent.
 #   - V.COMPILE-min: SRV-EVENTS runs the worker at concurrency 1, so a full-pilot embed job (about 14 min) holds the only
@@ -176,8 +174,10 @@ requirements:
       **The handler:**
       1. resolves the material's frozen ingest (SRV-INGEST FR-INGEST-17) by `material_sha256`; if there is none, or it
          is not `args.ingest_id`, it raises `IngestNotReady`;
-      2. waits for embed `/health` up to 300 s; if it is still not 200, it ends with SRV-EVENTS' "deferred" result
-         (re-enqueue in 60 s, no attempt counted);
+      2. waits for embed `/health` up to 300 s; if it is still not 200, it raises `EmbedUnavailable`, a declared
+         transient, which spends an attempt. With 3 attempts that tolerates about 15 minutes of an unavailable embed
+         service (3 × 300 s plus SRV-EVENTS' backoff); after that the key is dead and `reader.search.ensure` requeues it
+         (FR-SEARCH-9);
       3. chunks the spans (FR-SEARCH-3), sends passage batches of 8 (30 s each), and in the run session inserts every
          chunk, then the `search_embeds` row, as the run transaction's last statements (SRV-EVENTS FR-EVENTS-4).
       [db] with a fake embed service, including an ingest that is aborted between enqueue and run (IngestNotReady, then
