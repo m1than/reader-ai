@@ -99,7 +99,7 @@ tasks:
         proposed amendment for S0.exit: native ingest (or a larger Docker VM, untested), formula model on, code from the PDF text layer." }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
-      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), fixed; round 3 pending",
+      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
         item reader-ai/claude-oauth-token (2026-11-20, 'allow keychain for compile-cost and trace-backend'); cap $8.00.",
       result: "PASS for draft + fact-check + review with one revision loop (spikes/compile-cost/RESULT.md): L02 (25 PDF pages),
