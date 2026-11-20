@@ -1,0 +1,52 @@
+# VEC-RENDER-1: the ADR-0013 rendering matrix as cases. Each case is an nbformat output (or a markdown/latex snippet)
+# with the treatment WEB-RENDER must apply. Synthetic content written for this fixture.
+# treatment:
+#   text      — rendered as text nodes (no HTML parsing), ANSI escape sequences removed
+#   image     — <img> with a blob: URL created from the decoded base64; revoked when the output unmounts
+#   json      — pretty-printed with 2-space indentation as text
+#   markdown  — the markdown pipeline (FR-RENDER-2), sanitised
+#   latex     — KaTeX with trust false (FR-RENDER-3)
+#   frame     — the sandboxed frame (FR-RENDER-5); never parsed or inserted into the app document
+#   dropped   — not rendered; the output shows "unsupported output type" with the MIME type as text
+# Preference order when an output carries several MIME types (FR-RENDER-1):
+preference: [application/json, image/png, image/jpeg, image/svg+xml, text/html, text/markdown, text/latex, text/plain]
+cases:
+  - id: plain
+    output: {output_type: stream, name: stdout, text: "ba7816bf\n"}
+    treatment: text
+  - id: ansi-traceback
+    output: {output_type: error, ename: ZeroDivisionError, evalue: "division by zero",
+             traceback: ["\u001b[0;31mZeroDivisionError\u001b[0m: division by zero"]}
+    treatment: text
+    expect_text: "ZeroDivisionError: division by zero"
+  - id: png
+    output: {output_type: display_data, data: {image/png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", text/plain: "<Figure>"}, metadata: {}}
+    treatment: image
+  - id: json
+    output: {output_type: execute_result, execution_count: 1, data: {application/json: {a: 1}, text/plain: "{'a': 1}"}, metadata: {}}
+    treatment: json
+  - id: markdown-hostile
+    output: {output_type: display_data, data: {text/markdown: "**ok** <script>alert(1)</script> [x](javascript:alert(2)) <img src=x onerror=alert(3)>"}, metadata: {}}
+    treatment: markdown
+    expect_absent: ["<script", "javascript:", "onerror"]
+  - id: latex
+    output: {output_type: display_data, data: {text/latex: "$$\\href{javascript:alert(1)}{x} + 2^{n/2}$$"}, metadata: {}}
+    treatment: latex
+    expect_absent: ["javascript:"]
+  - id: html-cookie-probe
+    output: {output_type: display_data, data: {text/html: "<p id=p>probe</p><script>try{parent.postMessage({probe:document.cookie},'*')}catch(e){parent.postMessage({probe:'blocked'},'*')}</script>"}, metadata: {}}
+    treatment: frame
+    expect_frame: {sandbox: allow-scripts, cookie_readable: false, api_requests: 0}
+  - id: svg-script
+    output: {output_type: display_data, data: {image/svg+xml: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script><circle r='4'/></svg>"}, metadata: {}}
+    treatment: frame
+  - id: html-and-plain
+    output: {output_type: execute_result, execution_count: 2, data: {text/html: "<b>x</b>", text/plain: "x"}, metadata: {}}
+    treatment: frame
+  - id: widget-view
+    output: {output_type: display_data, data: {application/vnd.jupyter.widget-view+json: {model_id: "m1", version_major: 2, version_minor: 0}, text/plain: "IntSlider(value=0)"}, metadata: {}}
+    treatment: text
+    note: "widgets are deferred; the text/plain fallback renders"
+  - id: unknown-only
+    output: {output_type: display_data, data: {application/x-unknown: "?"}, metadata: {}}
+    treatment: dropped

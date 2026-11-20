@@ -1,0 +1,191 @@
+# WEB-UI — the app shell: the owner's component library consumed from a pinned build, the Calm tokens, routing,
+# the API client, sign-in and sign-out, the lesson list and Storybook (vertical slice V6, `V.WEB-min`; full module in
+# stage 4b).
+#
+# Scope (slice): a signed-in learner sees their lessons and opens one; the lesson view itself is WEB-NOTEBOOK, output
+# rendering is WEB-RENDER. Sign-in uses SRV-AUTH's own pages (FR-AUTH-14), which WEB-UI replaces only in stage 4.
+#
+# Library consumption (ADR-0013, spike library-publish): the owner tagged `v0.1.0` on the library's
+# `web3/material-parity` line (commit eae463bc, merge of the release workflow); its GitHub Packages release has not run
+# (Actions billing). Until it has, reader-ai consumes a tarball built from that tag by a committed script, checked in
+# with its sha256 (FR-UI-1). The script only clones, builds and packs locally; it never pushes, tags or publishes in the
+# library repository (the library's AGENTS.md). When the registry release exists, a paired change switches the
+# dependency to `@m1than/ui@0.1.0` and the imports from `@acme/ui/*` to `@m1than/ui/*` (spike finding 1).
+#
+# Declared deviations from proposed ADR-0013, for the owner:
+# - API client: hand-written typed wrappers with runtime validation for the slice's few routes, not a client generated
+#   from the server's OpenAPI. Generation comes in stage 4 when the API surface grows (it needs an exported
+#   openapi.json, a SRV-AUTH `reader-server` change).
+# - Storybook's live token editor and the library gallery under Calm are deferred to stage 4b; the slice builds
+#   Storybook with stories for its own components only. The owner's design gate (roadmap 4b) is still required before
+#   anything in 4b is marked implemented.
+#
+# Content Security Policy: the app runs under OPS-DEPLOY's Caddy CSP. This spec's code never sets `innerHTML` and never
+# injects `<style>` or `<script>` at run time (INV-UI-2), so the app needs no 'unsafe-inline'. The CSP changes the slice
+# needs are listed as cross-spec items in WEB-RENDER's header (one place).
+#
+# Cross-spec items:
+# - SRV-LESSON (V4, being drafted): `GET /api/lessons` → `{"lessons": [{lesson_id, title, updated_at}]}` and
+#   `GET /api/lessons/{lesson_id}` → the lesson notebook (ADR-0004 nbformat JSON). This spec codes against that shape;
+#   SRV-LESSON's spec decides it, and a mismatch is resolved by a paired change here.
+# - SRV-AUTH (approved): `GET /api/me`, `POST /api/auth/signout`, the sign-in page `GET /api/auth/signin`, the
+#   `Origin` and Content-Type rule (FR-AUTH-12), the session cookie (HttpOnly; the SPA never reads it).
+# - OPS-DEPLOY: Caddy serves the built SPA. Today `/srv/spa` is a placeholder; the built `web/dist` must reach it (a
+#   derived caddy image that copies `web/dist`, or a read-only bind added by OPS-CLI's override), and Caddy needs an
+#   SPA fallback (`try_files {path} /index.html`) for deep links such as `/lessons/w01`. OPS-DEPLOY decides how.
+#
+# Test levels: [unit] Vitest in jsdom; [story] the story builds in `npm run build-storybook` (ci-local); [browser]
+# Playwright against `vite preview` behind a committed test server that sets the production CSP headers, run on
+# request and in the slice live check (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh`
+# against `reader up`, signed in with the S1 `live-check` learner through a Chromium virtual authenticator.
+
+id: WEB-UI
+title: App shell — pinned library build, Calm tokens, routing, API client, sign-in redirect and lesson list
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: product
+adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
+
+paths:
+  - web/src/ui/**
+  - web/src/app/**
+  - web/src/main.tsx
+  - web/.storybook/**
+  - web/scripts/**
+  - web/vendor/**
+  - web/index.html
+  - web/package.json
+  - web/package-lock.json
+  - web/vite.config.ts
+  - web/tsconfig.json
+  - web/test-server/**
+  - e2e/web/ui/**
+  - spec/fixtures/WEB-UI/**
+
+defers:
+  - "registry package `@m1than/ui` from GitHub Packages (needs the release run and a read:packages token): when the release workflow has run"
+  - "client generated from the server's OpenAPI: stage 4"
+  - "own passkey ceremony pages in the SPA (replacing SRV-AUTH FR-AUTH-14): stage 4b"
+  - "Storybook live token editor, library gallery under Calm, Storybook served at /storybook, the owner's design gate: stage 4b"
+  - "course index, lesson status and progress: stage 6"
+  - "sharing, cohorts, KB, export, habits, recall views: stages 6–8"
+  - "mobile layout polish below 360 px width: stage 9"
+
+normative:
+  - id: REF-UI-1
+    title: ADR-0013 — Frontend and rendering (React 19, Vite, TanStack Router and Query, the library, Calm, Storybook 10)
+    url: docs/adr/0013-frontend-and-rendering.md
+  - id: REF-UI-2
+    title: spikes/library-publish/RESULT.md — consuming a built commit; Calm draft; 218 contrast pairs
+    url: spikes/library-publish/RESULT.md
+  - id: REF-UI-3
+    title: W3C Design Tokens Format Module (community group draft)
+    url: https://tr.designtokens.org/format/
+  - id: REF-UI-4
+    title: WCAG 2.2 — 1.4.3 Contrast (Minimum) and 1.4.11 Non-text Contrast; relative luminance
+    url: https://www.w3.org/TR/WCAG22/
+  - id: REF-UI-5
+    title: SRV-AUTH — /api/me, /api/auth/signout, the sign-in page, FR-AUTH-12
+    url: spec/modules/SRV-AUTH.yaml
+
+requirements:
+  - id: FR-UI-1
+    text: >-
+      The library is the npm dependency `"@acme/ui": "file:vendor/acme-ui-0.1.0.tgz"`. `web/vendor/acme-ui.lock.json`
+      records `{tag: "v0.1.0", commit: <40-hex sha of the tag's commit>, tarball: "acme-ui-0.1.0.tgz", sha256}`.
+      `web/scripts/vendor-ui.mjs <library checkout>` checks out the recorded commit in a temporary clone, runs the
+      library's own `npm ci && npm run build && npm pack`, writes the tarball to `web/vendor/` and rewrites the lock
+      file; it runs no git command that writes to a remote. A unit test hashes the committed tarball and compares it
+      with the lock file. Imports use one entry per component (`@acme/ui/<entry>`), plus `@acme/ui/styles.css`.
+      The slice uses these entries only: button, toast, progress, skeleton, tooltip, dialog, chip, divider, link,
+      typography, stack, container, app-bar, list-view, alert. [unit]
+  - id: FR-UI-2
+    text: >-
+      Calm tokens are data: `web/src/ui/tokens/calm.tokens.json` (W3C Design Tokens, light and dark, starting from the
+      spike's adjusted draft), compiled by `web/src/ui/tokens/build.mjs` into `calm.css`, which overrides the
+      library's `--acme-*` variables unlayered, maps holo, glass and glow to flat values, and sets every duration to 0
+      under `prefers-reduced-motion: reduce`. The generator is deterministic (same input, byte-identical output) and the
+      committed `calm.css` equals its output (test). The app shell paints `--acme-canvas` on `html` (spike finding 4)
+      and follows `prefers-color-scheme`. [unit]
+  - id: FR-UI-3
+    text: >-
+      Routes (TanStack Router, declared as one route table): `/` the lesson list; `/lessons/$lessonId` the lesson view
+      (WEB-NOTEBOOK); anything else a not-found view with a link to `/`. `$lessonId` must match the SRV-KERNEL lesson
+      id pattern `^[A-Za-z0-9._-]{1,128}$`, otherwise the not-found view renders and no request is made. [unit]
+  - id: FR-UI-4
+    text: >-
+      API client: one module with a typed function per route the slice calls (`me`, `signOut`, `listLessons`,
+      `getLesson`, and the kernel session routes used by WEB-NOTEBOOK). Every request is same-origin with
+      `credentials: "same-origin"`; a request with a body sends JSON with `Content-Type: application/json`; bodiless
+      POST and DELETE send no body (SRV-AUTH FR-AUTH-12, SRV-KERNEL FR-KERNEL-3). Every response body is validated
+      at run time against its declared shape; a mismatch is an error `bad_response`, never a partially typed value.
+      Server state is cached by TanStack Query with a stale time of 30 s (a structural choice: lessons change only on
+      republish). [unit]
+  - id: FR-UI-5
+    text: >-
+      Authentication: on app start and on every 401 from the API client, the app navigates the whole page to
+      `/api/auth/signin` (SRV-AUTH FR-AUTH-14, which returns to `/` on success). The header shows the signed-in
+      `display_name` from `GET /api/me` and a Sign out button that calls `POST /api/auth/signout`, clears the query
+      cache and then navigates to `/api/auth/signin`. The SPA never reads, stores or logs the session cookie, and keeps
+      no credential in `localStorage`, `sessionStorage` or IndexedDB. [unit]
+  - id: FR-UI-6
+    text: >-
+      Lesson list: `GET /api/lessons` rendered as a list of links to `/lessons/<lesson_id>` with title and updated
+      date, sorted by title in the user's locale. States: loading (skeleton), empty ("No lessons yet"), error (a
+      calm message with Retry). [unit] [story]
+  - id: FR-UI-7
+    text: >-
+      Notices: one toast region for app-level messages (sign-out failure, network loss, the notebook's kernel notices
+      handed over by WEB-NOTEBOOK). At most 3 toasts are visible (a structural bound for a calm screen); older ones
+      collapse. Every message is plain text from a fixed catalogue keyed by code; no server text is shown as HTML.
+      [unit] [story]
+  - id: FR-UI-8
+    text: >-
+      Storybook 10 builds stories for every component in `web/src/ui/` and `web/src/app/` (and, through their own
+      specs, WEB-NOTEBOOK and WEB-RENDER), each in light and dark under Calm. `npm run build-storybook` is part of the
+      local gate. [story]
+
+invariants:
+  - id: INV-UI-1
+    text: >-
+      Contrast: under the committed Calm tokens every pair of VEC-UI-1 meets its minimum (text 4.5:1, UI 3:1) in light
+      and dark, computing composited backgrounds as the spike does (alpha composite, sRGB and Oklab `color-mix`). The
+      test is an independent re-implementation, checked against the spike's 218 ratios to ±0.01. [unit]
+  - id: INV-UI-2
+    text: >-
+      No HTML string ever reaches the app document: no source file under `web/src/` uses `dangerouslySetInnerHTML`,
+      `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `eval`, `new Function` or a string
+      `setTimeout`, except `web/src/render/frame/**`, which runs only inside the sandboxed frame (WEB-RENDER). A source
+      scan test enforces it. [unit]
+  - id: INV-UI-3
+    text: >-
+      No gradients, glass or glow: the built CSS (`vite build` output plus `calm.css` overrides as applied) contains no
+      `linear-gradient`, `radial-gradient`, `conic-gradient` or `backdrop-filter` in rules that apply under Calm, and
+      no `box-shadow` with a blur over 12 px. A CSS scan test enforces it on the build output. [unit]
+  - id: INV-UI-4
+    text: >-
+      Under the production CSP (the test server's headers, equal to OPS-DEPLOY's Caddyfile as amended) loading `/` and
+      `/lessons/w01` raises zero `securitypolicyviolation` events. [browser]
+
+nfr:
+  - id: NFR-UI-1
+    metric: >-
+      gzip size in bytes of the JavaScript loaded for the lesson-list route (`vite build`, initial chunks only;
+      markdown, math, highlighting and the frame are lazy chunks). Budget from the spike's measured React baseline
+      (67,668 B) plus the 20-component gallery (56,538 B), rounded up with room for the router, query and app code.
+    threshold: 250000
+    verified_by: ci
+
+vectors:
+  - id: VEC-UI-1
+    source: >-
+      spikes/library-publish results/contrast.json — 218 contrast pairs (flat, on-tone, soft button, outline and ghost
+      hover, hover border, toast, chip) with the spike's computed ratios for the adjusted Calm draft
+    file: spec/fixtures/WEB-UI/contrast-pairs.json
+
+# Owner notes:
+# - The design gate of stage 4b still applies: the owner reviews Calm in Storybook before 4b is marked implemented.
+#   The slice uses the spike's adjusted Calm draft as is.
+# - The library tarball in web/vendor/ is built from the owner's tag v0.1.0 locally; nothing is pushed to the library.

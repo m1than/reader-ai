@@ -1,0 +1,147 @@
+# WEB-RENDER — rendering of lesson content and notebook outputs per ADR-0013's matrix: markdown, math, code, the
+# safe output types, and untrusted HTML and SVG only in a sandboxed frame (vertical slice V6, `V.WEB-min`; full module
+# in stage 4b).
+#
+# Threat model: lesson markdown comes from the compile pipeline (agent output over a copyrighted source) and outputs
+# come from code the learner runs; both are untrusted. The app document holds the learner's session (an HttpOnly
+# cookie) and can call the api, so no untrusted markup may run or be parsed in it.
+#
+# Design:
+# - Everything shown in the app document is built as React elements from a syntax tree (remark → rehype → sanitised
+#   hast → `hast-util-to-jsx-runtime`); no HTML string is ever inserted (WEB-UI INV-UI-2). Inline styles produced by
+#   KaTeX and Shiki become React style objects, which the browser applies through the CSSOM, so the app needs no
+#   `style-src 'unsafe-inline'` (CSP does not govern CSSOM writes; checked by WEB-UI INV-UI-4 in a browser).
+# - Math: KaTeX (ADR-0013), through `rehype-katex` with `trust: false`, `strict: "ignore"` and output `htmlAndMathml`;
+#   fonts are bundled (same origin). KaTeX over MathJax: ADR-0013 names it, it renders synchronously into the tree
+#   above, and its output needs no run-time script; MathJax would inject its own styles at run time.
+# - Code: Shiki with its JavaScript regex engine (no WebAssembly, so no `wasm-unsafe-eval`), only the python grammar
+#   and a Calm theme, loaded lazily.
+# - `text/html` and `image/svg+xml` outputs render in an iframe with `sandbox="allow-scripts"` (no
+#   `allow-same-origin`, so its origin is opaque: it cannot read the app's cookies or storage, and its requests carry
+#   `Origin: null`, which SRV-AUTH FR-AUTH-12 refuses). The frame is a page of its own, `/sandbox/frame.html`, built by
+#   Vite as a second entry; it receives the output by `postMessage` and writes it into its own document. It is served
+#   with its own CSP (below), so inline scripts in outputs may run inside it but cannot fetch, connect or navigate the
+#   parent.
+#
+# Cross-spec items (OPS-DEPLOY's Caddyfile; listed here once for V6):
+# - App CSP: keep `default-src 'self'` and `frame-ancestors 'none'`; add `img-src 'self' blob:` (image outputs as blob:
+#   URLs), `frame-src 'self'` (explicit), `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`. WebSocket
+#   `wss://localhost` is covered by `'self'` (CSP Level 3).
+# - Frame CSP on `/sandbox/*` only: `default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';
+#   img-src data: blob:; font-src data:; connect-src 'none'; form-action 'none'; base-uri 'none';
+#   frame-ancestors 'self'` (replacing, not adding to, the app CSP for that path).
+# - The SPA fallback must not catch `/sandbox/*`.
+#
+# Test levels: [unit] Vitest in jsdom on the hast and React output; [story] stories per output type and for VEC-RENDER-1;
+# [browser] Playwright (Chromium and WebKit) against `vite preview` behind the committed test server with both CSPs
+# (WEB-UI `web/test-server/**`), run on request and in the slice live check.
+
+id: WEB-RENDER
+title: Rendering — sanitised markdown, KaTeX, Shiki, safe output types, and untrusted HTML/SVG in a sandboxed frame
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: engineering
+adr: [ADR-0013, ADR-0024]
+
+paths:
+  - web/src/render/**
+  - web/sandbox/**
+  - e2e/web/render/**
+  - spec/fixtures/WEB-RENDER/**
+
+defers:
+  - "Mermaid diagrams: stage 4b"
+  - "ipywidgets rendering (html-manager): stage 4b"
+  - "text/html outputs that load external scripts (no egress in the frame CSP): not planned for v1"
+  - "binary output buffers: with SRV-KERNEL in stage 4a"
+
+normative:
+  - id: REF-RENDER-1
+    title: ADR-0013 — rendering matrix and safety column
+    url: docs/adr/0013-frontend-and-rendering.md
+  - id: REF-RENDER-2
+    title: HTML Living Standard — the iframe sandbox attribute and opaque origins
+    url: https://html.spec.whatwg.org/multipage/iframe-embed-object.html#attr-iframe-sandbox
+  - id: REF-RENDER-3
+    title: Content Security Policy Level 3
+    url: https://www.w3.org/TR/CSP3/
+  - id: REF-RENDER-4
+    title: KaTeX options (trust, strict, output)
+    url: https://katex.org/docs/options
+  - id: REF-RENDER-5
+    title: rehype-sanitize and hast-util-sanitize default schema (GitHub's)
+    url: https://github.com/rehypejs/rehype-sanitize
+  - id: REF-RENDER-6
+    title: Jupyter nbformat — output types and MIME bundles
+    url: https://nbformat.readthedocs.io/en/latest/format_description.html#code-cell-outputs
+
+requirements:
+  - id: FR-RENDER-1
+    text: >-
+      Output dispatch: an output with several MIME types renders exactly one, the first present in VEC-RENDER-1's
+      `preference` list; `stream` and `error` outputs render as text; an output with none of the listed types shows
+      "unsupported output type: <type>" as text. [unit]
+  - id: FR-RENDER-2
+    text: >-
+      Markdown (cell sources and `text/markdown` outputs): remark with GFM, then rehype with `rehype-sanitize` using the
+      default (GitHub) schema extended only by KaTeX's element and class names; raw HTML in markdown is parsed and then
+      sanitised (no `<script>`, `<style>`, `<iframe>`, event attributes, or `javascript:`/`data:` URLs survive); links get
+      `rel="noopener noreferrer"` and, when absolute, `target="_blank"`; images keep only relative URLs. The result is
+      rendered with `hast-util-to-jsx-runtime`. [unit]
+  - id: FR-RENDER-3
+    text: >-
+      Math (`$…$`, `$$…$$` in markdown, and `text/latex` outputs): KaTeX with `trust: false`, `strict: "ignore"`,
+      `throwOnError: false` (a parse error renders the source in the error colour) and output `htmlAndMathml`, fonts
+      bundled. `\href`, `\url`, `\includegraphics` and `\htmlId`-style commands render as text, never as links or
+      attributes. [unit]
+  - id: FR-RENDER-4
+    text: >-
+      Code: Shiki with the JavaScript regex engine, the python grammar and one Calm theme per colour scheme, loaded as
+      a lazy chunk; tokens become React elements. Until the chunk loads, and for any other language, code renders as
+      plain monospace text. [unit]
+  - id: FR-RENDER-5
+    text: >-
+      Sandboxed frame for `text/html` and `image/svg+xml`: an `<iframe sandbox="allow-scripts" src="/sandbox/frame.html"
+      referrerpolicy="no-referrer">` per output. After the frame's `ready` message the parent posts `{type: "render",
+      mime, data}`; the frame writes it into its own document (`text/html` through `document.open/write/close`,
+      `image/svg+xml` as the document's only content) and reports its content height. The parent accepts messages only
+      when `event.source` is that frame's `contentWindow` and the payload is `{type: "ready"}` or `{type: "height",
+      value: <finite number>}`; it sets the frame height to min(value, 2000) px (a structural bound; taller content
+      scrolls inside the frame). The parent posts to `"*"` because an opaque origin cannot be named; the data posted is
+      the output itself, which came from the same kernel. At most 32 frames are live per lesson view (a structural bound
+      on memory); further HTML outputs show "Show output" and mount on click. [unit] [browser]
+  - id: FR-RENDER-6
+    text: >-
+      Safe types: `text/plain` and stream text render as text nodes in a monospace block with ANSI escape sequences
+      removed (colours dropped in the slice); `image/png` and `image/jpeg` decode base64 into a Blob and render as
+      `<img>` with a `blob:` URL that is revoked when the output unmounts, with `alt` from the output's `text/plain` when
+      present; `application/json` renders pretty-printed with 2-space indentation as text. A single text output longer
+      than 1 MiB is cut at 1 MiB with a "truncated" note (a structural bound on DOM size; SRV-KERNEL already caps an
+      execution at 16 MiB). [unit]
+
+invariants:
+  - id: INV-RENDER-1
+    text: >-
+      For any markdown or `text/markdown` input, the rendered React tree contains no `script`, `style`, `iframe`,
+      `object`, `embed`, `form` or `base` element, no attribute starting with `on`, and no `href`/`src` whose scheme is
+      not http, https, mailto or relative. [unit, property-based with fast-check over generated markup plus
+      VEC-RENDER-1's hostile cases]
+  - id: INV-RENDER-2
+    text: >-
+      `text/html` and `image/svg+xml` content is never parsed or inserted in the app document; it exists only inside a
+      frame whose `sandbox` attribute is exactly `allow-scripts`. [unit]
+  - id: INV-RENDER-3
+    text: >-
+      A script in an HTML or SVG output cannot read `document.cookie` of the app, cannot read `parent.document`, and
+      causes no request to `/api/*` (counted at the test server). [browser]
+
+nfr: []
+
+vectors:
+  - id: VEC-RENDER-1
+    source: >-
+      ADR-0013 rendering matrix as cases (one per output type, plus hostile markdown, LaTeX and HTML probes), written
+      for this spec
+    file: spec/fixtures/WEB-RENDER/outputs.yaml

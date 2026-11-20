@@ -1,0 +1,164 @@
+# WEB-NOTEBOOK — the lesson view: ADR-0004 cells rendered by kind, citations as references, G2 open findings
+# visible, and running lab cells over SRV-KERNEL's authenticated relay (vertical slice V6, `V.WEB-min`; full module in
+# stage 4b).
+#
+# Scope (slice): read a lesson; edit a lab cell's code in memory; run, run all, interrupt and reset; stream outputs;
+# show kernel notices. Learner state (edited code, notes) is not persisted in the slice.
+#
+# Declared deviation from proposed ADR-0013, for the owner: the kernel client is a small typed client over the relay's
+# WebSocket, not `@jupyterlab/services`. The relay is not a Jupyter Server API (its routes are
+# `/api/kernel/sessions…`, it adds the `reader` channel and private close codes), so `@jupyterlab/services` would need
+# an adapter larger than the client. The reason for that package in ADR-0013 is ipywidgets
+# (`@jupyter-widgets/html-manager`), which the slice defers with SRV-KERNEL; stage 4b revisits it.
+#
+# Cross-spec items:
+# - SRV-KERNEL (review approved, round 3; on branch V/V.KERNEL-min): session routes, the relay wire format, notices and close codes
+#   (1000, 1003, 1009, 1012, 1013, 4401). This spec relies on its message rebuild (FR-KERNEL-8) and on one execute in
+#   flight per session (FR-KERNEL-10); the client also sends one at a time, so the relay queue normally stays empty.
+# - SRV-LESSON (V4): the lesson JSON (ADR-0004) from `GET /api/lessons/{id}`; cell kinds and `metadata.reader`
+#   fields as in ADR-0004; the cell JSON Schema is SRV-LESSON's. Unknown kinds render as plain markdown or code.
+# - V.COMPILE-min: G2 open findings arrive as `open` cells (`metadata.reader.status`, `finding`).
+# - WEB-RENDER: markdown, math, code and every output go through WEB-RENDER's components.
+# - WEB-UI: route `/lessons/$lessonId`, the API client, the toast region.
+#
+# Test levels: [unit] Vitest in jsdom against a fake relay (an in-process WebSocket double that replays VEC-NOTEBOOK-2);
+# [story] stories per cell kind with VEC-NOTEBOOK-1 cells; [live] `e2e/live/slice.sh` and `e2e/web/notebook/**`
+# (Playwright, Chromium with a virtual authenticator) against `reader up`: open the compiled lesson L02, run its lab,
+# see the output.
+
+id: WEB-NOTEBOOK
+title: Lesson view — cells by kind, citations, open findings, and running labs over the kernel relay
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: product
+adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
+
+paths:
+  - web/src/notebook/**
+  - e2e/web/notebook/**
+  - spec/fixtures/WEB-NOTEBOOK/**
+
+defers:
+  - "persisted learner state: edited lab code, editable notes cells, progress (SRV-LESSON learner state): stage 4b"
+  - "ipywidgets (controls, output) and @jupyterlab/services: stage 4b with SRV-KERNEL's comm support"
+  - "lab self-verification UI (expected hash, asserts shown as checks): stage 4b"
+  - "diagnostic routing and recall card review flow: stages 4b and 6"
+  - "a code editor with highlighting while typing (CodeMirror or similar): stage 4b"
+  - "keyboard navigation between cells beyond Tab order and Shift+Enter: stage 4b"
+  - "rust and deno kernels: stage 4a/4b"
+
+normative:
+  - id: REF-NOTEBOOK-1
+    title: ADR-0004 — Lesson notebook format (nbformat v4, metadata.reader kinds)
+    url: docs/adr/0004-lesson-notebook-format.md
+  - id: REF-NOTEBOOK-2
+    title: Jupyter messaging protocol 5.x (execute_request/reply, iopub stream, display_data, update_display_data, clear_output, error, status)
+    url: https://jupyter-client.readthedocs.io/en/stable/messaging.html
+  - id: REF-NOTEBOOK-3
+    title: nbformat v4.5 — notebook and cell structure, cell ids, outputs
+    url: https://nbformat.readthedocs.io/en/latest/format_description.html
+  - id: REF-NOTEBOOK-4
+    title: SRV-KERNEL — sessions, relay wire format, notices, close codes
+    url: spec/modules/SRV-KERNEL.yaml
+  - id: REF-NOTEBOOK-5
+    title: RFC 6455 — WebSocket close codes
+    url: https://www.rfc-editor.org/rfc/rfc6455
+
+requirements:
+  - id: FR-NOTEBOOK-1
+    text: >-
+      The lesson view loads `GET /api/lessons/{lesson_id}` and renders the cells in order. Each cell shows its kind as
+      a quiet label (diagnostic, reading route, explanation, what changed, erratum, trade-off, lab, recall, notes, open
+      question) and its source: markdown cells through WEB-RENDER's markdown component, code cells as highlighted code
+      (WEB-RENDER). A cell without `metadata.reader.kind`, or with an unknown kind, renders as a plain markdown or code
+      cell without a label. Stored outputs of code cells render through WEB-RENDER. [unit] [story]
+  - id: FR-NOTEBOOK-2
+    text: >-
+      Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`
+      and `citations[]` is shown in a numbered reference list under the cell, deduplicated, in order of first use:
+      a material citation as "material <material_id>, p. <page>" (or span); a URL citation as an external link (text is
+      the URL's host and path; `rel="noopener noreferrer"`, `target="_blank"`) with its retrieved date. `route` cells
+      list their `source_refs` the same way. `erratum` cells also show the correction. [unit] [story]
+  - id: FR-NOTEBOOK-3
+    text: >-
+      Open findings: an `open` cell whose `status` is not `answered` is shown with a visible "open" marker, its status,
+      and, when `finding.gate` is `G2`, the text "not yet confirmed" and the finding's reason as plain text. The lesson
+      header shows the count of such cells and links to the first one. [unit] [story]
+  - id: FR-NOTEBOOK-4
+    text: >-
+      Kernel session: opening a lesson with at least one `lab` cell does not start a kernel; the first Run creates the
+      session (`POST /api/kernel/sessions` with `{"lesson_id"}`) and opens
+      `wss://<host>/api/kernel/sessions/<session_id>/channels`. One session and one WebSocket per open lesson view; leaving
+      the view closes the WebSocket with 1000 (the session stays until reset or deletion).
+      [unit]
+  - id: FR-NOTEBOOK-5
+    text: >-
+      Execution: Run on a lab cell sends one `execute_request` (`channel: shell`, `content: {code, silent: false,
+      store_history: true, user_expressions: {}, allow_stdin: false, stop_on_error: true}`, `header.msg_id` from
+      `crypto.randomUUID()` without dashes, `header.version` "5.3"). The client keeps its own FIFO and has at most one
+      execute_request in flight per session; other Run requests show the cell as `queued`. Shift+Enter runs the focused
+      lab cell. Run all queues every lab cell in order; an `execute_reply` with status `error` cancels the cells still
+      queued from the same Run all (they return to `idle`). Cell states and transitions follow VEC-NOTEBOOK-2. [unit]
+  - id: FR-NOTEBOOK-6
+    text: >-
+      Outputs: messages are routed to a cell by `parent_header.msg_id`. `stream` text appends to the last output of the
+      same stream name; `display_data` and `execute_result` add an output; `update_display_data` replaces every output
+      with the same `transient.display_id` in any cell of the lesson; `clear_output` clears at once, or with `wait: true`
+      at the next output; `error` adds an error output; `execute_reply` sets the execution count and the final state.
+      Running a cell clears its previous outputs first. Messages whose parent is unknown are ignored. [unit]
+  - id: FR-NOTEBOOK-7
+    text: >-
+      Controls: Interrupt (while a cell runs) calls `POST /api/kernel/sessions/{id}/interrupt`; Reset kernel asks for
+      confirmation in a dialog that says it clears every open lesson's kernel state (SRV-KERNEL owner note), then calls
+      `POST /api/kernel/reset`. While a reset runs, Run is disabled. [unit] [story]
+  - id: FR-NOTEBOOK-8
+    text: >-
+      Notices and closes, per VEC-NOTEBOOK-2: `timeout` marks the cell `timed_out`; `kernel_restarted` and
+      `kernel_reset` mark running and queued cells `lost` and keep their outputs; `output_truncated` adds a note to the
+      cell; `busy` and `rejected` re-queue nothing and show a notice; close 1012 creates the session again and
+      reconnects once; close 1013 or `kernel_unavailable` shows "kernel unavailable" with Retry and no automatic
+      reconnect; close 4401 navigates to `/api/auth/signin`; close 1006 or 1011 retries after 1, 2 and 4 s (structural:
+      three tries cover a Docker container restart, measured 0.2–3.3 s by SRV-KERNEL's review) and then shows Retry.
+      Every notice text comes from WEB-UI's fixed catalogue. [unit]
+  - id: FR-NOTEBOOK-9
+    text: >-
+      Lab code is editable in a plain monospace text area (Tab inserts four spaces; the edited source lives in memory
+      for the open view and is what Run sends); a Revert control restores the lesson's source. A cell shows its
+      execution count `[n]` after a reply. [unit] [story]
+
+invariants:
+  - id: INV-NOTEBOOK-1
+    text: >-
+      For any sequence of relay messages and closes (including unknown parents, duplicate replies, replies after a
+      close and notices for unknown cells), the client never has more than one execute_request in flight per session,
+      never sends a message on channel other than `shell`, never sends `allow_stdin: true`, and every cell ends in one of
+      the states of VEC-NOTEBOOK-2. [unit, property-based with fast-check]
+  - id: INV-NOTEBOOK-2
+    text: >-
+      Output text from the kernel, error tracebacks and notice parameters are only ever rendered through WEB-RENDER's
+      components (never as HTML in the app document): a canary `<img src=x onerror=...>` in stream text, `evalue` and
+      `traceback` appears as literal text. [unit]
+  - id: INV-NOTEBOOK-3
+    text: >-
+      The client never sends a cookie value, token or header of its own on the WebSocket: the browser's handshake
+      carries the session cookie and Origin; the client adds no subprotocol and no query string. [unit]
+
+nfr: []
+
+vectors:
+  - id: VEC-NOTEBOOK-1
+    source: >-
+      Synthetic fixture lesson W01 written for this spec: one cell of every ADR-0004 kind, citations of both forms, a
+      G2 open finding, a lab cell, and hostile markdown for WEB-RENDER's sanitiser; no source material quoted
+    file: spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb
+  - id: VEC-NOTEBOOK-2
+    source: >-
+      Relay message sequences derived from Jupyter messaging 5.x (REF-NOTEBOOK-2) and SRV-KERNEL FR-KERNEL-8/10/11/12/14
+      (notices and close codes), with the expected cell states
+    file: spec/fixtures/WEB-NOTEBOOK/session.yaml
+
+# Owner notes:
+# - In the slice, edits to lab code and notes are lost when the page reloads; persistence arrives with stage 4b.
+# - Reset kernel clears every open lesson's Python state at once (the slice's reset is per user, SRV-KERNEL).

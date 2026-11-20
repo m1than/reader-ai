@@ -305,8 +305,15 @@ tasks:
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
       note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],
-      note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: in_progress, needs: [V.SRV-LESSON-min, V.KERNEL-min],
+      branch: V/V.WEB-min,
+      note: "spec drafted, awaits deep-reviewer. Three specs: WEB-UI (shell, vendored library tarball from tag v0.1.0
+        built by web/scripts/vendor-ui.mjs, Calm tokens, routes, API client, sign-in via SRV-AUTH's page, lesson list),
+        WEB-NOTEBOOK (cells by kind, citations, G2 open cells, own typed relay client), WEB-RENDER (sanitised
+        markdown → React, KaTeX, Shiki JS engine, HTML/SVG in a sandbox=allow-scripts frame page with its own CSP).
+        Cross-spec: OPS-DEPLOY Caddyfile CSP additions and /sandbox/* CSP, SPA dist into caddy plus SPA fallback;
+        SRV-LESSON list/get shape. Declared deviations from proposed ADR-0013: hand-written API client;
+        no @jupyterlab/services (widgets deferred)." }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
         spends credit, ledger" }

@@ -1,0 +1,67 @@
+# VEC-NOTEBOOK-2: relay message sequences (SRV-KERNEL wire format, Jupyter messaging 5.x plus channel `reader`) and the
+# cell state the notebook must show after each step. `send` is what the client sends; `recv` is a frame from the relay;
+# `close` is a WebSocket close code. Cell states: idle | queued | running | done | error | interrupted | timed_out | lost.
+# msg ids are fixed here; the client generates uuid4 hex in practice.
+sequences:
+  - id: run-ok
+    steps:
+      - {send: {channel: shell, msg_type: execute_request, msg_id: e1, cell: c1}, cell_state: {c1: running}}
+      - {recv: {channel: iopub, msg_type: status, parent: e1, content: {execution_state: busy}}}
+      - {recv: {channel: iopub, msg_type: execute_input, parent: e1, content: {code: "print(1)", execution_count: 1}}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "1\n"}}, outputs: {c1: ["1\n"]}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: done}, execution_count: {c1: 1}}
+      - {recv: {channel: iopub, msg_type: status, parent: e1, content: {execution_state: idle}}}
+  - id: queue-two
+    note: "the client sends one execute_request at a time per session (FR-NOTEBOOK-5)"
+    steps:
+      - {user: run, cell: c1, cell_state: {c1: running}, sent: [e1]}
+      - {user: run, cell: c2, cell_state: {c1: running, c2: queued}, sent: [e1]}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: done, c2: running}, sent: [e1, e2]}
+  - id: error
+    steps:
+      - {send: {channel: shell, msg_type: execute_request, msg_id: e1, cell: c1}}
+      - {recv: {channel: iopub, msg_type: error, parent: e1, content: {ename: ValueError, evalue: "bad", traceback: ["ValueError: bad"]}}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: ValueError, evalue: "bad"}}, cell_state: {c1: error}}
+  - id: error-stops-queue
+    note: "a failed cell cancels the cells queued after it in the same run-all (FR-NOTEBOOK-5)"
+    steps:
+      - {user: run_all, cells: [c1, c2, c3], cell_state: {c1: running, c2: queued, c3: queued}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: E, evalue: ""}}, cell_state: {c1: error, c2: idle, c3: idle}}
+  - id: clear-output-wait
+    steps:
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "a"}}, outputs: {c1: ["a"]}}
+      - {recv: {channel: iopub, msg_type: clear_output, parent: e1, content: {wait: true}}, outputs: {c1: ["a"]}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "b"}}, outputs: {c1: ["b"]}}
+  - id: update-display
+    steps:
+      - {recv: {channel: iopub, msg_type: display_data, parent: e1, content: {data: {text/plain: "10%"}, metadata: {}, transient: {display_id: d1}}}, outputs: {c1: ["10%"]}}
+      - {recv: {channel: iopub, msg_type: update_display_data, parent: e2, content: {data: {text/plain: "90%"}, metadata: {}, transient: {display_id: d1}}}, outputs: {c1: ["90%"]}}
+  - id: timeout
+    steps:
+      - {send: {channel: shell, msg_type: execute_request, msg_id: e1, cell: c1}}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, cell_state: {c1: timed_out}, notice: timeout}
+  - id: interrupted
+    steps:
+      - {user: interrupt, request: "POST /api/kernel/sessions/{sid}/interrupt"}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: interrupted}}
+  - id: restarted-by-kernel
+    steps:
+      - {recv: {channel: iopub, msg_type: status, parent: null, content: {execution_state: restarting}}}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_restarted, parent_msg_id: null}}, cell_state: {c1: lost}, notice: kernel_restarted}
+  - id: reset-close-1012
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_reset, parent_msg_id: null}}}
+      - {close: 1012, cell_state: {c1: lost}, notice: kernel_reset, action: "create the session again (POST /api/kernel/sessions), then reconnect once"}
+  - id: unavailable-1013
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_unavailable, parent_msg_id: null}}}
+      - {close: 1013, notice: kernel_unavailable, action: "no automatic reconnect; show Retry"}
+  - id: signed-out-4401
+    steps:
+      - {close: 4401, action: "navigate to /api/auth/signin"}
+  - id: truncated
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: output_truncated, parent_msg_id: e1}}, notice: output_truncated}
+  - id: network-drop
+    steps:
+      - {close: 1006, action: "reconnect after 1 s, 2 s, 4 s; then show Retry; running cells become lost"}
