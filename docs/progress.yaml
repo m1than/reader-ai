@@ -105,7 +105,17 @@ tasks:
         Docling refuses MPS for it; more VM CPUs not tried. OCR on 10 rendered pages: char accuracy mean 0.870 (0.678–0.970),
         word recall 0.607–0.900 (low pages lose figure text), 1.44 pages/min. Triggers ADR-0008 revisit_when;
         proposed amendment for S0.exit: native ingest (or a larger Docker VM, untested), formula model on, code from the PDF text layer." }
-  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: done, pr: 28, needs: [S0.skeleton],
+      decision: "owner 2026-11-21: BAAI/bge-m3 confirmed; questions-v2.yaml left to the agent ('do themself with the most
+        appropriate'), accepted as the retrieval acceptance set",
+      result: "Provisional (spikes/embeddings-local/RESULT.md, results/20261120T195713-draft-questions/): full pilot 2285 chunks on 4 CPUs.
+        multilingual-e5-small 14.35 chunks/s, 2.7 min; USER-bge-m3 1.02 chunks/s, 37.4 min; bge-m3 1.18 chunks/s, 32.3 min.
+        recall@10 1.0 for all three, recall@1 0.733 for all three, MRR 0.822 / 0.839 / 0.839: the draft question set does not
+        discriminate. e5-small is the only model within 30 min.
+        v2 (40 harder questions, results/20261120T232835-v2/, 13 CPUs, dense only): recall@10 e5-small 0.400, USER-bge-m3 0.750,
+        bge-m3 0.675; MRR 0.230 / 0.409 / 0.413; full pilot 1.2 / 15.1 / 14.1 min. e5-small rejected on recall; the bge-m3 pair is
+        within noise. Agent recommends BAAI/bge-m3 (general multilingual, best recall@1 and MRR, MIT); V.SRV-SEARCH-min uses it
+        and measures the hybrid on v2 as its acceptance number." }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
       review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
@@ -291,7 +301,7 @@ tasks:
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
-      note: "multilingual-e5-small (spike embeddings-local; v2 benchmark pending)" }
+      note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
       note: "Branch V/V.KERNEL-min. Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21).
