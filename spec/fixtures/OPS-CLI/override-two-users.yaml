@@ -1,0 +1,71 @@
+# VEC-CLI-2: the override FR-CLI-4 must emit, in memory, for VEC-CLI-1 (users ivan and anna). The kernel service body is
+# the `x-kernel` field of deploy/compose.yaml's parsed source; this fixture repeats OPS-DEPLOY's VEC-DEPLOY-3 body, and
+# for `ivan` alone the expected override is VEC-DEPLOY-3 as OPS-DEPLOY amends it to the same shape and the same path.
+# Comparison is INV-DEPLOY-8's equality. The test writes VEC-CLI-1 as reader.yaml into a per-test temporary directory
+# and compares with that directory's resolved path (`Path.resolve(strict=True)`) substituted for /tmp/reader-ai-test in
+# the bind source below on api, worker and mcp (FR-CLI-4). The swap is general, not macOS-specific. Only the bind is added: compose.yaml sets READER_CONFIG statically (OPS-DEPLOY FR-DEPLOY-5).
+# The `x-reader-config` anchor mirrors VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065); the comparison covers `services`
+# and `networks`, after YAML alias expansion, and ignores top-level `x-` fields. A further case: a config path
+# containing `$` makes `up` refuse before any `docker compose` call. No secrets.
+x-reader-config: &reader-config
+  type: bind
+  source: /tmp/reader-ai-test/reader.yaml # equal to OPS-DEPLOY's VEC-DEPLOY-3
+  target: /etc/reader/reader.yaml
+  read_only: true
+  bind:
+    create_host_path: false
+
+services:
+  kernel-user-ivan:
+    image: reader-kernel:local
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /home/lab:noexec,size=256m,uid=1000
+      - /tmp:noexec,size=256m,uid=1000
+      - /run/evcxr:exec,nosuid,nodev,size=1g,uid=1000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    restart: always
+    profiles: [kernels]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/reader-kernel-health"]
+    networks: [sb-user-ivan]
+  kernel-user-anna:
+    image: reader-kernel:local
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /home/lab:noexec,size=256m,uid=1000
+      - /tmp:noexec,size=256m,uid=1000
+      - /run/evcxr:exec,nosuid,nodev,size=1g,uid=1000
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2
+    pids_limit: 256
+    restart: always
+    profiles: [kernels]
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/reader-kernel-health"]
+    networks: [sb-user-anna]
+  api:
+    networks:
+      sb-user-ivan: {}
+      sb-user-anna: {}
+    volumes: [*reader-config]
+  worker:
+    volumes: [*reader-config]
+  mcp:
+    volumes: [*reader-config]
+
+networks:
+  sb-user-ivan:
+    internal: true
+  sb-user-anna:
+    internal: true

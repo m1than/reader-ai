@@ -1,0 +1,10 @@
+# VEC-KERNEL-3 — handle → upstream service (SRV-KERNEL FR-KERNEL-1, INV-KERNEL-1).
+# Source: FR-KERNEL-1; OPS-DEPLOY VEC-DEPLOY-3 and OPS-CLI FR-CLI-4 (`kernel-user-<handle>`), and OPS-DEPLOY's pool
+# services kernel-pair-<n>, kernel-verify and kernel-agent, which a handle must never reach.
+
+cases:
+  - { handle: ivan,   service: kernel-user-ivan,   gateway: "http://kernel-user-ivan:8888",   control: "http://kernel-user-ivan:8889" }
+  - { handle: anna,   service: kernel-user-anna,   gateway: "http://kernel-user-anna:8888",   control: "http://kernel-user-anna:8889" }
+  - { handle: pair-1, service: kernel-user-pair-1, never: kernel-pair-1 }
+  - { handle: verify, service: kernel-user-verify, never: kernel-verify }
+  - { handle: agent,  service: kernel-user-agent,  never: kernel-agent }

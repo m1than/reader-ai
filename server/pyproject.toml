@@ -4,6 +4,7 @@ version = "0.0.0"
 description = "reader-ai server: api, worker, mcp and the host CLI `reader`"
 requires-python = ">=3.14,<3.15"
 dependencies = [
+  "keyring==25.7.0",           # OPS-CLI: macOS Keychain backend only, pinned in code (REF-CLI-5)
   "pydantic>=2.14.4,<3",       # SRV-CONFIG: typed settings and JSON Schema (REF-CONFIG-2)
   "ruamel.yaml==0.19.1",       # SRV-CONFIG: YAML 1.2 event parser with source marks (REF-CONFIG-5)
   "fastapi>=0.165.0,<0.166",   # SRV-AUTH: HTTP app (ADR-0006)
@@ -15,9 +16,10 @@ dependencies = [
 ]
 
 [project.scripts]
+reader = "reader.cli.app:main"   # OPS-CLI FR-CLI-1
 reader-server = "reader.serve.main:main"   # SRV-AUTH: roles api|worker|mcp, bootstrap-link (FR-DEPLOY-11)
 
-# The entry point `reader` (host CLI) is added with OPS-CLI. The project is built (editable) so that `python -m reader.…`
+# The project is built (editable) so that `python -m reader.…`
 # works outside pytest (SRV-CONFIG FR-CONFIG-4). `reader` is a namespace package: no spec claims
 # src/reader/__init__.py, so each claimed subpackage (reader.config, …) carries its own __init__.py.
 

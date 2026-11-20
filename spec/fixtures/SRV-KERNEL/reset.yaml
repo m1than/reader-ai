@@ -1,0 +1,72 @@
+# VEC-KERNEL-2 — reset and unplanned-restart sequences against a fake control endpoint (SRV-KERNEL FR-KERNEL-5/14,
+# INV-KERNEL-5).
+# Source: FR-KERNEL-5, FR-KERNEL-14 and ADR-0022 "Reset between principals" (fail closed unless the start nonce changed).
+# polls: what the fake /control/state answers on successive polls after POST /control/exit (250 ms apart, fake clock).
+# Sessions are dropped (kernel_reset, close 1012) at step 2, right after the exit is accepted, in every reset case.
+
+resets:
+  - id: changes
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: [{ nonce: "00000000000000000000000000000001", gateway: exiting }, connection_refused, connection_refused,
+            { nonce: "00000000000000000000000000000002", gateway: starting }, { nonce: "00000000000000000000000000000002", gateway: up }]
+    expect: { result: ok, sessions_dropped_at: step2, notice: kernel_reset, close_code: 1012, recorded_nonce: "00000000000000000000000000000002" }
+  - id: same-nonce-up
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: ["{ nonce: ...0001, gateway: up } on every poll until 30 s"]
+    expect: { result: kernel_unavailable, fails_at: "30 s after step 2", http: 503, service_usable: false, sessions_dropped_at: step2 }
+  - id: deadline
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: ["connection_refused until 30 s"]
+    expect: { result: kernel_unavailable, fails_at: "30 s after step 2", http: 503, service_usable: false }
+  - id: new-nonce-not-up-yet
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 202
+    polls: [{ nonce: "00000000000000000000000000000002", gateway: starting }, "... starting until 30 s"]
+    expect: { result: kernel_unavailable, fails_at: "30 s after step 2" }
+  - id: state-unreachable
+    before: connection_refused
+    expect: { result: kernel_unavailable, http: 503, service_usable: false, exit_called: false, sessions_dropped: true }
+  - id: exit-refused
+    before: { nonce: "00000000000000000000000000000001", gateway: up }
+    exit: 500
+    expect: { result: kernel_unavailable, http: 503, service_usable: false, sessions_dropped: true }
+  - id: coalesced
+    note: "a second POST /api/kernel/reset while the first polls"
+    expect: { exit_calls: 1, both_requests_get: "the first reset's result" }
+  - id: recovery-after-failure
+    precondition: { service_usable: false }
+    before: { nonce: "00000000000000000000000000000003", gateway: up }
+    exit: 202
+    polls: [{ nonce: "00000000000000000000000000000004", gateway: up }]
+    expect: { result: ok, service_usable: true }
+
+unplanned:
+  # FR-KERNEL-14: the upstream WebSocket closed, failed to connect, or a REST call for a known kernel id answered 404
+  - id: container-restarted
+    recorded_nonce: "00000000000000000000000000000001"
+    state: { nonce: "00000000000000000000000000000009", gateway: up }
+    expect: { dropped: all_sessions_of_user, notice: kernel_reset, close_code: 1012, recorded_nonce: "00000000000000000000000000000009" }
+  - id: exiting-same-nonce
+    note: "a cell called /control/exit itself"
+    recorded_nonce: "00000000000000000000000000000001"
+    state: { nonce: "00000000000000000000000000000001", gateway: exiting }
+    expect: { dropped: all_sessions_of_user, notice: kernel_reset, close_code: 1012, records: "the new nonce once up" }
+  - id: kernel-died
+    recorded_nonce: "00000000000000000000000000000001"
+    state: { nonce: "00000000000000000000000000000001", gateway: up }
+    expect: { dropped: that_session, notice: kernel_dead, close_code: 1000, upstream_delete: best_effort }
+  - id: existing-session-new-nonce
+    call: "POST /api/kernel/sessions for a lesson that has a session"
+    recorded_nonce: "00000000000000000000000000000001"
+    state: { nonce: "00000000000000000000000000000005", gateway: up }
+    expect: { old_sessions_dropped: kernel_reset, response: "201 with a new session" }
+  - id: state-unreadable
+    recorded_nonce: "00000000000000000000000000000001"
+    state: connection_refused
+    expect: { dropped: all_sessions_of_user, notice: kernel_unavailable, close_code: 1013 }
+  - id: delete-upstream-404
+    call: "DELETE /api/kernels/<kid> answers 404"
+    expect: { session_removed: true }
