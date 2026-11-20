@@ -24,7 +24,7 @@ Date: 2026-11-20. Command: `bash spikes/compile-cost/run.sh`.
 | Runtime | `claude-agent-sdk` 0.2.186 (bundled CLI) on `python:3.14-slim-trixie`; non-root, read-only root, tmpfs home, cap-drop ALL, `no-new-privileges`, 2 GiB, 256 PIDs; `setting_sources=[]`, `max_turns=3` |
 | Credential | Keychain item `reader-ai/claude-oauth-token` (owner allowed it for this spike, 2026-11-20). It is piped to the container **on stdin** and exported inside only, so unlike `spikes/agent-sdk-container` it is not in `docker inspect`. Never printed |
 | Spend cap | A running-total check before each stage against $8.00 minus every recorded stage (`results/*/[0-9]*.json`), so overshoot is bounded by one stage (≤ ≈ $1.5 here). Plus the SDK's per-stage `max_budget_usd` = min(ADR-0011 budget of the task class, what is left), which no stage reached, so its stop is **untested**. The container has `timeout -s KILL 3000` |
-| Tools | The recorded runs used a denylist of 11 built-in tool names (`disallowed_tools`) and `allowed_tools=[]`. Evidence that no tool ran: `num_turns` is 1 in all 12 stages, `server_tool_use` (`web_search_requests`, `web_fetch_requests`) is 0 in all 12, and the container has no network beyond the API and no writable root. `pipeline.py` now also sets `tools=[]` (`ClaudeAgentOptions.tools`, present in 0.2.186), added after the runs and not exercised by a model call |
+| Tools | The recorded runs used a denylist of 11 built-in tool names (`disallowed_tools`) and `allowed_tools=[]`. Evidence that no tool ran: `num_turns` is 1 in all 12 stages, `server_tool_use` (`web_search_requests`, `web_fetch_requests`) is 0 in all 12, and the container has no writable root. Egress was not restricted: `run.sh` uses Docker's default bridge network. `pipeline.py` now also sets `tools=[]` (`ClaudeAgentOptions.tools`, present in 0.2.186), added after the runs and not exercised by a model call |
 | Models | ADR-0011's example config: draft `claude-opus-5-5` ($2.00), fact_check `claude-sonnet-5-5` ($1.00), review `claude-opus-5-5` ($1.20); revise uses the draft task class |
 
 Stages (ADR-0009), each a separate SDK query with a fresh context; prompts are in `prompts.py`:
@@ -106,9 +106,9 @@ Left out, either because they cost no tokens here or because they don't apply:
 - All loop figures use the unrounded stage sums (0.9489, 1.4747, 1.3377, 1.6337); with the rounded values shown, run 1's 2-loop figure reads 4.60.
 - **Course, one loop each, at L02's size:** 23 × $2.42–2.97 = **$56–68**.
 - **Course scaled to the book's chapter size.** The book has 890 pages over 23 chapters, 39 pages on average (ADR-0009), against L02's 25. Factor 39/25 = 1.56.
-  - **Source input only.** Assume about 29,900 source tokens per stage (the draft's 31,370 prompt tokens minus about 1,500 of instructions). Extra per lesson at the inferred rates:
-    - run 1 (6 cold writes): 0.56 × 29,900 × 6 × $8.0/M ≈ $0.80 → $3.77 per lesson → **≈ $87** for 23;
-    - run 2 (5 writes, 1 read): 0.56 × 29,900 × (5 × $8.0 + 1 × $0.40)/M ≈ $0.67 → $3.10 per lesson → **≈ $71**.
+  - **Source input only.** Assume about 23,900 source tokens per stage: the draft's 31,370 prompt tokens, minus the CLI's 6,803-token system prompt (which does not scale with pages), minus about 650 tokens of instructions. Cross-check (reviewer): with 23,900, run 1's fact-check prompt of 46,774 leaves about 15.7k tokens for the notebook, against the 16.2k non-thinking output tokens the draft produced. Extra per lesson at the inferred rates:
+    - run 1 (6 cold writes): 0.56 × 23,900 × 6 × $8.0/M ≈ $0.64 → $3.61 per lesson → **≈ $83** for 23;
+    - run 2 (5 writes, 1 read): 0.56 × 23,900 × (5 × $8.0 + 1 × $0.40)/M ≈ $0.54 → $2.96 per lesson → **≈ $68**. Run 2 starts from the warm draft; from its cold-equivalent ($2.66) the result is ≈ $3.20 per lesson, ≈ $74 for 23.
   - **All cost scaled:** 890 / 25 × $2.42–2.97 = **$86–106**.
 - **Against ADR-0005's $100,** with one loop per lesson: from about $56 at L02's size to about $106 when everything scales with page count. The single-loop compile fits only if costs do not scale fully with chapter size. Any second loop, web verification of `changed` cells, or labs push it further. The caching levers in finding 1 work in the other direction.
 

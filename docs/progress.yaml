@@ -99,7 +99,7 @@ tasks:
         proposed amendment for S0.exit: native ingest (or a larger Docker VM, untested), formula model on, code from the PDF text layer." }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
-      review: "deep-reviewer (Fable): round 1 changes",
+      review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), fixed; round 3 pending",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
         item reader-ai/claude-oauth-token (2026-11-20, 'allow keychain for compile-cost and trace-backend'); cap $8.00.",
       result: "PASS for draft + fact-check + review with one revision loop (spikes/compile-cost/RESULT.md): L02 (25 PDF pages),
@@ -108,7 +108,7 @@ tasks:
         converged (second review 3 and 3 blocking; second fact-check 2 unsupported + 1 contradicted, and 4 unsupported;
         nothing decreased after the revision). Projected over $4.35 at 3 loops ($5.37–6.24) and, for run 1, already at
         2 loops (0.95 + 2 × 1.47 ≈ 3.90; 1.34 + 2 × 1.63 ≈ 4.61, unrounded stage sums). Course estimates: 23 × one loop $56–68; scaled to 39-page
-        chapters $71–87 (source input only) to $86–106 (all cost) against ADR-0005's $100.",
+        chapters ≈ $68–83 (source input only) to $86–106 (all cost) against ADR-0005's $100.",
       reason: "Non-convergence is structural (new findings each review, several against the book's own statements; revise turns
         findings into open cells) and the L01/L02 sample choice affects the number; both are owner decisions.",
       ask: "(a) Non-convergence policy: more loops, open findings handed to G2, or a revised review bar; this triggers the roadmap
