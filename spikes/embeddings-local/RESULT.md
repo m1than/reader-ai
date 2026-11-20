@@ -112,9 +112,7 @@ The first run embeds and caches the full pilot for each model and is the timed r
 
 The full-text half of the hybrid search (Postgres FTS) is expected to raise recall on term-heavy questions. V.SRV-SEARCH-min should measure the hybrid on this same v2 set as its acceptance number.
 
-## Needs the owner
+## Owner decisions (2026-11-21)
 
-- Confirm the model choice: `BAAI/bge-m3` (recommended) or `deepvk/USER-bge-m3`. Until then the slice uses bge-m3.
-
-- Skim `questions-v2.yaml` (40 questions, all chapters). Rewording is fine; keep `gold_pages`, and rerun `check_questions.py` after editing.
-- v1 `questions.yaml` (30 questions, chapters 1–21) remains for comparison and needs no further review if v2 replaces it.
+- Model: `BAAI/bge-m3` confirmed.
+- `questions-v2.yaml`: the owner left the review to the agent. It is accepted as is (lint clean) and becomes the retrieval acceptance set for V.SRV-SEARCH-min. v1 stays for comparison only.
