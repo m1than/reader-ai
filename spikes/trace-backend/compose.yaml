@@ -1,5 +1,6 @@
 # Spike trace-backend (never shipped): Rotel → Phoenix or MLflow, one backend per run (profile).
-# Only Rotel's exporter settings change between backends (ROTEL_* from run.sh).
+# For ingest, only Rotel's exporter settings change between backends (ROTEL_* from run.sh); score writing and
+# querying are backend-specific (query.py). No volumes: Phoenix and MLflow keep SQLite inside the container.
 name: reader-spike-trace
 
 services:
@@ -27,8 +28,11 @@ services:
   mlflow:
     profiles: [mlflow]
     image: ghcr.io/mlflow/mlflow:v3.18.0
+    # Minimal configuration (review round 1): one worker, no background job execution.
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
     command: >-
-      mlflow server --host 0.0.0.0 --port 5000
+      mlflow server --host 0.0.0.0 --port 5000 --workers 1
       --backend-store-uri sqlite:////tmp/mlflow.db --default-artifact-root /tmp/artifacts
       --allowed-hosts "*"
     ports: ["127.0.0.1:5000:5000"]

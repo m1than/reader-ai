@@ -53,6 +53,7 @@ async def run_stage(name: str, model: str, prompt: str) -> dict[str, object]:
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, row["error"]))
         row["seconds"] = round(time.monotonic() - t0, 2)
+    print(json.dumps({"stage_row": row}), flush=True)   # emitted at once: a killed run's spend is still counted
     return row
 
 

@@ -1,39 +1,60 @@
 # Spike: trace-backend — RESULT
 
 **Question (docs/roadmap.md 0.3; ADR-0018):** MLflow or Phoenix as the trace backend on the Mac, fed through Rotel with our parent spans and the Agent SDK's native traces joined by `TRACEPARENT`.
-Measures: memory at idle and under one lesson compile; time to find why a seeded failing stage failed; whether quality scores attach to the trace.
+**Measures:** memory at idle and under load; time to find why a seeded failing stage failed; whether quality scores attach to the trace.
 **Pass criterion:** agent spans nest under our stage span; a score is visible on the trace.
-**Verdict: PASS for both backends.** Recommendation: **Phoenix** for v1 on the Mac (see "Recommendation"). Switching backends changed only Rotel's three exporter variables, so the fallback costs one Compose change, as ADR-0018 assumed.
 
-Date: 2026-11-20. Command: `bash spikes/trace-backend/run.sh` (both backends in sequence). Raw data: `results/20261120T201622/{phoenix,mlflow}.json`.
+**Verdict: PASS for both backends.**
+- **Recommendation: MLflow** in its minimal configuration (`--workers 1`, `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`), re-derived from the round-2 numbers (see "Recommendation").
+- **Switching:** for ingest, it changed only Rotel's three exporter variables. Writing scores and querying traces are backend-specific (`query.py`).
+
+Date: 2026-11-20.
+- **Command:** `bash spikes/trace-backend/run.sh`.
+- **Measured run (round 2):** `results/20261120T205810/{phoenix,mlflow}.json`.
+- **Round 1, kept for comparison:** `results/20261120T201622/`, MLflow in its default configuration.
 
 ## Setup
 
 | Part | Version | Role |
 | --- | --- | --- |
-| Probe (ours) | `python:3.14-slim-trixie`, `claude-agent-sdk` 0.2.186, `opentelemetry-sdk` and `-exporter-otlp-proto-http` 1.45.2 | Opens `reader.job` → `reader.stage <name>` spans and runs one Agent SDK query inside each stage. Exports OTLP/HTTP to Rotel |
-| Agent SDK → CLI | bundled Claude Code CLI | The SDK injects `TRACEPARENT`/`TRACESTATE` from the active OTel span into the CLI's environment (`claude_agent_sdk/_internal/transport/subprocess_cli.py`, the block commented "Propagate active OTEL trace context to the CLI"). The CLI exports its beta traces with `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_TRACES_EXPORTER=otlp`; metrics and logs off |
-| Collector | Rotel `streamfold/rotel:v0.2.7` | OTLP in (gRPC 4317, HTTP 4318); one OTLP exporter configured by `ROTEL_OTLP_EXPORTER_ENDPOINT`, `_PROTOCOL`, `_CUSTOM_HEADERS` |
-| Backend A | Phoenix `arizephoenix/phoenix:version-22.0.0` | Rotel → `phoenix:4317` (gRPC). Auth disabled for this local spike (see findings) |
-| Backend B | MLflow `ghcr.io/mlflow/mlflow:v3.18.0` (`mlflow server`, SQLite in the container) | Rotel → `http://mlflow:5000` (HTTP, `/v1/traces`) with header `x-mlflow-experiment-id=0` |
+| Probe (ours) | `python:3.14-slim-trixie`, `claude-agent-sdk` 0.2.186, `opentelemetry-sdk` and `-exporter-otlp-proto-http` 1.45.2 | Opens `reader.job` → `reader.stage <name>` spans and runs one Agent SDK query inside each stage. OTLP/HTTP to Rotel |
+| Agent SDK → CLI | bundled Claude Code CLI | `claude-agent-sdk` 0.2.186, `_internal/transport/subprocess_cli.py` lines 782–804: if an OTel span is active, the SDK injects `TRACEPARENT`/`TRACESTATE` into the CLI's environment. The CLI exports its beta traces with `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_TRACES_EXPORTER=otlp`; metrics and logs are off |
+| Collector | Rotel `streamfold/rotel:v0.2.7` | OTLP in (gRPC 4317, HTTP 4318); one OTLP exporter set by `ROTEL_OTLP_EXPORTER_ENDPOINT`, `_PROTOCOL`, `_CUSTOM_HEADERS` |
+| Backend A | Phoenix `arizephoenix/phoenix:version-22.0.0` | Rotel → `phoenix:4317` (gRPC). `PHOENIX_ENABLE_AUTH=false` for this local spike (see findings) |
+| Backend B | MLflow `ghcr.io/mlflow/mlflow:v3.18.0`: `mlflow server --workers 1`, `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` | Rotel → `http://mlflow:5000` (HTTP, `/v1/traces`) with header `x-mlflow-experiment-id=0` |
 
-**Load:** one probe run of 3 stages on `claude-haiku-5-5`: `draft`, `fact_check` (seeded failure: model `claude-nonexistent-0-0`) and `review`, each a one-turn query without tools. This is far smaller than a real lesson compile; memory "under load" below is for this load only.
+Both backends keep SQLite inside their container, with no volume; each `down -v` starts empty. Persistence for v1 (a Phoenix volume, or MLflow on Postgres per ADR-0018) was not measured.
 
-## Results
+**Host:** the Mac has 36 GiB, but containers run in the Docker Desktop VM with 4 CPUs and 11.62 GiB, which is the budget that matters here. The images were pulled before the run, so "ready" below is container start to API answer, not a cold image pull.
 
-| Measure | Phoenix | MLflow |
+**Load:**
+1. **Probe:** 3 stages on `claude-haiku-5-5`: `draft`, `fact_check` (seeded failure: model `claude-nonexistent-0-0`) and `review`, each one turn without tools. 11–12 spans.
+2. **Synthetic replay** (`replay.py`, no model calls): one lesson-sized trace of **498 spans**. That is 1 job span plus 7 stages × 10 interactions × (1 interaction + 3 `llm_request` + `tool` with 2 children), with `gen_ai.*` token attributes. It matches ADR-0018's estimate of about 7 stages × ~70 spans per lesson.
+
+## Results (round 2)
+
+| Measure | Phoenix 22.0.0 | MLflow 3.18.0, minimal |
 | --- | --- | --- |
-| Agent spans nest under our stage span | **yes**: 3 of 3 `claude_code.interaction` spans have a `reader.stage` parent; 4 `claude_code.llm_request` under interactions | **yes**: 3 of 3; 5 `llm_request` under interactions |
-| Score visible on the trace | **yes**: `POST /v1/span_annotations` → `GET …/span_annotations?span_ids=` returns `reader.quality` 0.8 on the `review` stage span | **yes**: `mlflow.log_feedback(…, span_id=…)` → `get_trace().info.assessments` returns `reader.quality` 0.8 on the `draft` stage span |
-| Seeded failure found | `reader.stage fact_check` (ERROR, SDK `ResultError`) → child `claude_code.llm_request` (ERROR, `model: claude-nonexistent-0-0`) | the same two error spans, same message |
-| Time to find the cause via API | 0.07 s (one REST call for the project's spans, filter by trace, walk from the deepest error span to its stage) | 2.17 s (same procedure through the MLflow Python client in the server container; includes Python start) |
-| Ready after `compose up` (cold) | 24 s | 8 s |
-| Memory, idle (backend / Rotel) | 832 MiB / 15 MiB | 2,445 MiB / 8 MiB |
-| Memory, peak during the probe run (sampled each 1 s) | 833 MiB / 17 MiB | 2,454 MiB / 28 MiB |
-| Image size | 1,433 MB (Rotel 345 MB) | 1,369 MB |
-| Spans in the trace | 11 (the probe's `review` call made one `llm_request`) | 12 |
+| Agent spans nest under our stage span | **yes**: 3 of 3 `claude_code.interaction` under a `reader.stage`; 4 `llm_request` under interactions | **yes**: 3 of 3; 5 `llm_request` |
+| Score visible on the trace | **yes**: `POST /v1/span_annotations` → `GET …/span_annotations?span_ids=` returns `reader.quality` 0.8 | **yes**: `mlflow.log_feedback(…, span_id=…)` → `get_trace().info.assessments` returns `reader.quality` 0.8 |
+| Seeded failure | `reader.stage fact_check` (ERROR) → `claude_code.llm_request` (ERROR, `model: claude-nonexistent-0-0`) | the same |
+| Triage by API: span fetch + tree walk | fetch 0.025 s (REST, paged), walk < 0.001 s | fetch 0.030 s (`get_trace` timed inside the container), walk < 0.001 s |
+| Idle memory over 3 starts | **467–831 MiB** (831, 467, 467) | **372–581 MiB** (581, 372, 372) |
+| Idle processes (PIDs) | 22 | 10 |
+| Peak during the probe run | 467 MiB, 22 PIDs | 491 MiB, 16 PIDs |
+| Peak during the 498-span replay | 470 MiB, 23 PIDs | 441 MiB, 16 PIDs |
+| After the replay | 469 MiB, 23 PIDs | 390 MiB, 12 PIDs |
+| Spans replayed / ingested | 498 / 498 | 498 / 498 |
+| Rotel (both runs) | 8–41 MiB idle, ≤ 10 MiB under load, 7–8 PIDs | same |
+| Ready after `compose up` | 15–19 s | 5–6 s |
+| Image | 1,433 MB | 1,369 MB |
+| Token in `docker inspect` of the probe container | 0 entries | 0 entries |
 
-Span tree, identical in both (ids in the results files under `query.nesting.edges`):
+- **First start:** the first of the three starts used more memory for both backends: 831 against 467 MiB for Phoenix, 581 against 372 MiB for MLflow. Starts 2 and 3 agree. The cause was not investigated.
+- **MLflow default configuration:** round 1, without `--workers 1` and with job execution on, idled at 2,445 MiB (`results/20261120T201622/mlflow.json`). The two settings cut idle memory by about 4–6×.
+- **Human triage time not measured.** No browser was used, so how many minutes a person needs in either UI is unknown. The timings above are the API procedure only: fetch the trace's spans, then walk from the deepest error span up to its stage. Both backends are equivalent on it; the cause sits two hops from the stage span and names the failing stage.
+
+Span tree, identical in both backends (ids under `query.nesting.edges` in the result files):
 
 ```
 reader.job lesson-compile-spike
@@ -42,38 +63,46 @@ reader.job lesson-compile-spike
 └── reader.stage review       → claude_code.interaction → claude_code.llm_request ×1–2
 ```
 
-**"Minutes to find the failure" is not measured for a human in a UI.** No browser was used. The figures above are an API procedure, the same one an agent or a CLI script would use. In both backends the cause is two hops from the stage span, and it names the failing stage directly. An earlier exploratory Phoenix run measured 487 MiB idle (not kept); the kept run measured 832 MiB, so Phoenix idle memory varies by about 350 MiB between starts.
-
 ## Findings
 
-1. **`TRACEPARENT` works without glue code.** Opening our span and calling `query()` inside it is enough. The SDK reads the active OTel context and passes it to the CLI. No `ClaudeAgentOptions.env` handling was needed.
-2. **The CLI's error lands on its own span.** The `llm_request` span carries status ERROR and the reason (`model: …`), separate from our stage span's exception. Triage reads the CLI span; our span only records that the stage failed.
-3. **Phoenix 22 enables auth by default in Docker** (since v21, the image binds `::`). The spike set `PHOENIX_ENABLE_AUTH=false`. A deployment needs an API key, which Rotel can send with `ROTEL_OTLP_EXPORTER_CUSTOM_HEADERS`, and the key becomes a secret (ADR-0011).
-4. **MLflow needs the experiment id as a header.** Without `x-mlflow-experiment-id`, OTLP ingest has no target. MLflow's trace id is `tr-` plus the OTel trace id, so our ids map directly.
-5. **MLflow's footprint is about 3× Phoenix's at idle** (2.4 GiB against 0.5–0.8 GiB) in this configuration, with SQLite in the container. ADR-0018 plans MLflow on our Postgres, which was not measured.
-6. **Scores:** Phoenix takes annotations over plain REST. MLflow was exercised through its Python client; its REST API for assessments exists but was not tested here.
-7. **Content capture stayed off** (`OTEL_LOG_*` unset). The spans hold names, models, tokens and status, but no prompt text.
+1. **`TRACEPARENT` works without glue code.** Opening our span and calling `query()` inside it is enough (SDK lines cited above).
+2. **The CLI's error lands on its own span** (`llm_request`, status ERROR, `model: …`), separate from our stage span's exception. Triage reads the CLI span.
+3. **Phoenix 22 enables auth by default in Docker** (since v21). A deployment needs an API key, which Rotel would send with `ROTEL_OTLP_EXPORTER_CUSTOM_HEADERS`; the key becomes a secret (ADR-0011).
+4. **MLflow needs `x-mlflow-experiment-id` on ingest.** Its trace id is `tr-` plus the OTel trace id, so our ids map directly.
+5. **MLflow's default server is heavy** (2.4 GiB idle). The minimal configuration is required, and it belongs in the Compose file.
+6. **Scores:** Phoenix takes annotations over plain REST. MLflow was driven through its Python client in the server container; its REST API for assessments exists but was not tested.
 
 ## Recommendation (for S0.exit; the decision is the owner's)
 
-**Phoenix** for v1 on the Mac:
-- 3× lower memory at idle, on a 36 GiB machine that also runs the kernel sandbox, Docling and the stack;
-- annotations and spans over plain REST from any process, without an extra client library;
-- an equal result on nesting, scores and triage.
+**MLflow, minimal configuration**, re-derived from round 2:
+- **Resources:** it is now lighter than Phoenix at idle (372–581 against 467–831 MiB), under the replay (441 against 470 MiB) and in process count (10–16 against 22–23). The VM has 11.62 GiB and also runs the kernel sandbox, Docling and the stack.
+- **Licence:** Apache-2.0. Phoenix's Elastic License 2.0 keeps the trace backend owner-only (ADR-0018), which constrains the v2 VPS and sharing plans (ADR-0016, ADR-0017).
+- **No mandatory API key** on the local network. Phoenix's Docker image requires one by default.
+- **v2:** MLflow's evaluation and model registry are the ones ADR-0018 plans for tuning.
 
-Costs to accept:
-- **License:** Elastic License 2.0. ADR-0018 already records this: Phoenix stays owner-only and is not offered to third parties as a hosted service.
-- **Auth:** an API key has to be managed (finding 3).
+What stays unmeasured for MLflow, and should be checked in SRV-OBS before relying on it:
+- **Postgres:** it was measured on SQLite inside the container, while ADR-0018 plans our Postgres.
+- **Concurrency:** one worker was not tested under concurrent ingest.
+- **Scores over REST:** scores were written through the Python client only.
 
-MLflow (Apache-2.0) stays the fallback, and the v2 choice if its evaluation and registry features are needed. The switch is Rotel's three exporter variables.
+Phoenix remains a valid fallback, with an equal result on nesting, scores and triage.
 
 ## Spend
 
-| Run | USD |
-| --- | --- |
-| Exploratory Phoenix run (kept stack, not in `results/`) | 0.003082 |
-| Exploratory MLflow run (not in `results/`) | 0.000587 |
-| Measured run, both backends (`results/20261120T201622/spent.txt`) | 0.001073 |
-| **Total** | **0.004742** (cap $2.00, enforced per probe run and per spike in `run.sh`) |
+| Run | USD | Evidence |
+| --- | --- | --- |
+| Exploratory Phoenix run | 0.003082 | *Hand-recorded*: printed, result dir not kept. Higher than later runs because its `draft` call wrote the prompt cache ($0.0022 against $0.0001–0.0003 later) |
+| Exploratory MLflow run | 0.000587 | *Hand-recorded*, same |
+| Round 1, both backends | 0.001073 | `results/20261120T201622/spent.txt` |
+| Round 2, both backends | 0.001052 | `results/20261120T205810/spent.txt` |
+| Replays | 0 | no model calls |
+| **Total** | **0.005794** | cap $2.00 |
 
-Token: Keychain item `reader-ai/claude-oauth-token` → `docker run -e`, read only inside `run.sh`. The owner allowed this for trace-backend on 2026-11-20. While a probe runs, the token is visible to `docker inspect`, as in agent-sdk-container. All containers and volumes were removed after the run (`docker compose down -v`).
+**Cap enforcement:** `run.sh` sums every `results/*/spent.txt` plus the hand-recorded exploratory runs before each probe. It counts a probe's spend from per-stage lines, so a killed probe's finished stages still count. `probe.py` checks the remaining cap between stages only: a stage that has started always finishes.
+
+**Token:** the owner allowed Keychain use for this spike in chat on 2026-11-20 ("allow keychain for compile-cost and trace-backend").
+- `run.sh` pipes the item `reader-ai/claude-oauth-token` to the probe on stdin.
+- The token is exported only inside the container and is never printed.
+- It is absent from `docker inspect`: `token_keys_in_docker_inspect` is 0 in both result files.
+
+**Cleanup:** a `trap` removes the probe and replay containers and runs `docker compose down -v` on exit. After the run, 0 containers and 0 volumes were left.

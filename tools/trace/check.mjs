@@ -18,6 +18,10 @@ const duplicates = (ids) => ids.filter((id, i) => ids.indexOf(id) !== i);
 const adrIds = new Set(repo.adrs.map((a) => a.meta?.id).filter(Boolean));
 
 const rules = {
+  // T0: every spec and ADR front matter parses as YAML
+  'T0 parses': ({ specs, adrs }) =>
+    [...specs, ...adrs].filter((f) => f.parseError).map((f) => `${f.file}: does not parse: ${f.parseError}`),
+
   // T1: module spec is well-formed
   'T1 spec-shape': ({ specs }) =>
     specs.flatMap(({ file, doc, items }) => [

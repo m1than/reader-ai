@@ -76,19 +76,27 @@ export const traceIds = (text) =>
 
 const SPEC_SECTIONS = ['normative', 'requirements', 'invariants', 'nfr', 'vectors'];
 
-export const parseSpec = (rel, text) => {
-  const doc = parseYaml(text) ?? {};
-  const items = SPEC_SECTIONS.flatMap((section) =>
-    (doc[section] ?? []).map((item) => ({ ...item, section })),
-  );
-  return { file: rel, doc, items };
+// A file that does not parse is reported by trace-check (T0), not thrown: one bad file must not hide the rest.
+const safeYaml = (text) => {
+  try { return { value: parseYaml(text) ?? {}, error: null }; }
+  catch (e) { return { value: {}, error: e.message.split('\n')[0] }; }
 };
 
-export const statusOf = (text) => (parseYaml(text) ?? {}).status;
+export const parseSpec = (rel, text) => {
+  const { value: doc, error } = safeYaml(text);
+  const items = SPEC_SECTIONS.flatMap((section) =>
+    (Array.isArray(doc[section]) ? doc[section] : []).map((item) => ({ ...item, section })),
+  );
+  return { file: rel, doc, items, parseError: error };
+};
+
+export const statusOf = (text) => safeYaml(text).value.status;
 
 export const parseAdr = (rel, text) => {
   const front = text.match(/^---\n([\s\S]*?)\n---/);
-  return { file: rel, meta: front ? parseYaml(front[1]) ?? {} : null };
+  if (!front) return { file: rel, meta: null, parseError: null };
+  const { value, error } = safeYaml(front[1]);
+  return { file: rel, meta: value, parseError: error };
 };
 
 export const loadRepo = (root) => {
