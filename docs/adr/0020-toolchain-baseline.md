@@ -1,10 +1,10 @@
 ---
 id: ADR-0020
-title: Toolchain baseline — newest Node LTS, newest Python the whole stack supports, current Debian stable
+title: Toolchain baseline — Node 26 LTS, Python 3.14, Debian 13 for everything reader-ai builds
 status: proposed
 date: 2026-11-20
-verified_by: "CI on the baseline (Node from .nvmrc, Python from server/.python-version); spike images on the baseline image build and pass (spikes/agent-sdk-container results/20261120T180638, spikes/ingest-docling)"
-revisit_when: "A new Node LTS line is promoted; a new Python minor has stable linux/arm64 wheels for every server and worker dependency (today blocked by scikit-image for 3.15); Debian stable changes"
+verified_by: "CI on Node from web/.nvmrc; server CI on Python 3.14 once switched; spikes/agent-sdk-container results/20261120T180638 and 20261120T180949 (PR #6) run on python:3.14-slim-trixie; spikes/ingest-docling RESULT.md (OCR conversion on 3.14, pending); spikes/kernel-roundtrip re-run on 3.14 (pending)"
+revisit_when: "A new Node LTS line is promoted (next: Node 28, about 2027-10); every server, worker, ingest and sandbox dependency installs and runs on a newer Python minor on linux/arm64; Debian stable changes"
 supersedes: []
 ---
 
@@ -12,48 +12,84 @@ supersedes: []
 
 Owner decision, 2026-11-20: "Use latest LTS versions of libs etc."
 
-ADR-0006 fixes the server runtime at Python 3.13. The roadmap asks for Node 22+, and the spike images used `python:3.13-slim-bookworm`. State on 2026-11-20:
+ADR-0006 (itself proposed) states the server runtime as Python 3.13. The roadmap asks for Node 22+. The merged spike `spikes/kernel-roundtrip` uses `python:3.13-slim-bookworm`.
 
-| Runtime | Newest | Support | Source |
+**Scope:** runtimes and base images only, meaning Node, Python and the Debian base of every image reader-ai builds. Library versions, Rust, Deno, Postgres and third-party images (Caddy, Postgres) are out of scope. Libraries follow their own pins in lockfiles.
+
+State on 2026-11-20 (endoflife.date API; nodejs.org/dist/index.json):
+
+| Runtime | Version | Active / security support until | End of life |
 | --- | --- | --- | --- |
-| Node.js | 26.13.1, LTS "Lithium" (26.13.0 in Homebrew `node@26`) | LTS line | nodejs.org/dist/index.json |
-| Python | 3.15.2; 3.14.10; 3.13.18 | EOL 2031-10, 2030-10, 2029-10 | endoflife.date/api/python.json |
-| Debian | 13 "trixie"; 12 "bookworm" | EOL 2030-06, 2028-06 | endoflife.date/api/debian.json |
+| Node.js 26 "Lithium" | 26.13.1 (Homebrew `node@26`: 26.13.0) | LTS since 2026-10-28; active until 2027-10-27 | 2029-04-30 |
+| Node.js 24 | 24.22.3 | active support ended 2026-10-20 | 2028-04-30 |
+| Python 3.15 | 3.15.2 | 2028-10-09 | 2031-10-31 |
+| Python 3.14 | 3.14.10 | 2027-10-01 | 2030-10-31 |
+| Python 3.13 | 3.13.18 | security fixes only since 2026-10-01 | 2029-10-31 |
+| Debian 13 trixie | — | 2028-08-09 | 2030-06-30 (LTS) |
+| Debian 12 bookworm | — | regular support ended 2026-07-11 | 2028-06-30 (LTS) |
 
-Python has no LTS line, so "latest LTS" for Python means the newest minor that the stack can actually use.
+Python has no LTS line. "Latest LTS" for Python therefore means the newest minor that the whole stack can install and run.
 
-Measured on 2026-11-20 (PyPI JSON API, newest release of each package):
+### Python 3.15 vs 3.14 (PyPI JSON API, newest release of each package, 2026-11-20)
 
-- Python 3.15 has wheels (cp315 or universal) for torch, docling, pydantic-core, numpy, opencv-python-headless, pyzmq, claude-agent-sdk, jupyter-kernel-gateway, sqlalchemy, asyncpg, procrastinate, fastapi, uvicorn, pydantic, mypy, ruff, structlog, opentelemetry-sdk, psycopg, testcontainers, hypothesis and keyring.
-- **scikit-image** (a dependency of EasyOCR, the OCR engine in `spikes/ingest-docling`) has no stable cp315 linux/arm64 wheel. Only 0.27.0rc1 has one. The `docling[easyocr]` image on `python:3.15-slim-trixie` fails to build: pip falls back to the sdist, which needs a C compiler.
-- scikit-image 0.26.0 has a cp314 manylinux aarch64 wheel. The Docling image builds on `python:3.14-slim-trixie`.
-- The Agent SDK image runs on `python:3.14-slim-trixie`: 1 text and 1 sandboxed tools run pass.
+- **No cp315 linux/arm64 wheel** (pip would build from source or fail):
+  - scikit-image 0.26.0, through EasyOCR; only 0.27.0rc1 (2026-10-27) has one;
+  - pyclipper 1.4.0, a hard EasyOCR dependency;
+  - onnxruntime 1.32.0, which has no sdist either;
+  - tree-sitter 0.26.1;
+  - PyYAML 6.0.3.
+
+  Each has a cp314 aarch64 wheel. The `docling[easyocr]` image on `python:3.15-slim-trixie` failed to build: pip fell back to the scikit-image sdist, which needs a C compiler.
+- **Installable on 3.15** (a cp315, abi3 or `py3-none` wheel; installs, not run): torch, docling, pydantic-core, numpy, opencv-python-headless (abi3), pyzmq, claude-agent-sdk, jupyter-kernel-gateway, sqlalchemy, asyncpg, procrastinate, fastapi, uvicorn, pydantic, mypy, ruff, structlog, opentelemetry-sdk, psycopg, testcontainers, hypothesis, keyring.
+  - Several declare classifiers only up to 3.13 (claude-agent-sdk 0.2.186) or 3.14 (docling, pydantic-core, asyncpg, uvicorn, opentelemetry-sdk, testcontainers, opencv).
+  - Several declare none (procrastinate, keyring, pyzmq).
+  - jupyter-kernel-gateway 3.0.1 (2024-03) and easyocr 1.7.2 (2024-09) predate Python 3.14.
+
+### What has been run on 3.14 / trixie
+
+| Image | Evidence | Status |
+| --- | --- | --- |
+| Agent SDK worker (`claude-agent-sdk` 0.2.186) | `spikes/agent-sdk-container/results/20261120T180638/` and `20261120T180949/` (PR #6): 3 text runs and 1 sandboxed tools run pass | measured (runs) |
+| Docling + EasyOCR ingest | image builds on `python:3.14-slim-trixie` (branch `0/S0.spike.ingest-docling`) | build only; an OCR conversion is pending in `spikes/ingest-docling/RESULT.md` (hypothesis until then) |
+| Kernel sandbox (Kernel Gateway 3.0.1, ipykernel, evcxr, deno) | none; `spikes/kernel-roundtrip` measured `python:3.13-slim-bookworm` | not measured (hypothesis); re-run on 3.14 pending |
 
 ## Options
 
 | Option | Gives | Costs (numbers) |
 | --- | --- | --- |
-| **A. Node 26 LTS, Python 3.14, Debian 13** | Newest LTS / stable where the whole stack has stable wheels; 1 more year of Python support than 3.13 | One minor behind the newest Python |
-| B. Node 26 LTS, Python 3.15, Debian 13 | Newest everything | OCR path does not build without a compiler or a release-candidate scikit-image |
-| C. Keep Node 22, Python 3.13, Debian 12 | No change | Against the owner's instruction; Debian 12 ends 2 years earlier (2028-06 vs 2030-06) |
+| **A. Node 26 LTS, Python 3.14, Debian 13** | Newest Node LTS and Debian stable; newest Python where every measured dependency has an aarch64 wheel; 1 more year of Python support than 3.13 (EOL 2030-10 vs 2029-10) | One minor behind the newest Python; kernel and OCR images not yet run on 3.14 |
+| B. Node 26 LTS, Python 3.15, Debian 13 | Newest everything | 5 measured dependencies have no cp315 aarch64 wheel; the ingest image does not build |
+| C. Keep Node 22, Python 3.13, Debian 12 | No change | Against the owner's instruction. Debian 12 regular support already ended (2026-07-11); Python 3.13 is security-only (since 2026-10-01) |
 
 ## Decision
 
-Node 26 LTS for `web/` and tooling, Python 3.14 for `server/`, `sandbox/` and all images, and Debian 13 trixie as the base of every image (`python:3.14-slim-trixie`). This replaces the "Runtime" row of ADR-0006 (Python 3.13 → 3.14) and the roadmap's "Node 22+".
+- **Node 26 LTS** for `web/`. The major is pinned in `web/.nvmrc`, and CI reads that file (`node-version-file`), so a new LTS line is adopted only by changing the file, never by `lts/*` floating.
+- **Python 3.14** for `server/`, the worker, the ingest image and the sandbox image.
+- **Debian 13 trixie** as the base of every image reader-ai builds (`python:3.14-slim-trixie`).
+
+This replaces the "Runtime" row of ADR-0006 (Python 3.13 → 3.14) and the roadmap's "Node 22+". For the kernel sandbox and the OCR path, the decision holds only after their pending runs pass (see the table above). If either fails on 3.14, that image stays on 3.13/trixie until it is fixed, and this ADR is amended.
 
 ## Rejected options — why (numbers)
 
-- **B (Python 3.15).** 1 of the measured dependencies (scikit-image, through EasyOCR) has no stable cp315 linux/arm64 wheel, so the ingest image fails to build. Building it from source would add a compiler toolchain to the image (size not measured), and the release candidate is not a stable release.
-- **C (no change).** It contradicts the owner's decision of 2026-11-20. Debian 12's EOL is 2028-06, against 2030-06 for Debian 13.
+- **B (Python 3.15).** 5 measured dependencies (scikit-image, pyclipper, onnxruntime, tree-sitter, PyYAML) have no cp315 linux/arm64 wheel, and the ingest image fails to build. Compiling from source would add a compiler toolchain to images (size not measured). onnxruntime has no sdist at all.
+- **C (no change).** It contradicts the owner's decision of 2026-11-20. Debian 12 left regular security support on 2026-07-11, and Python 3.13 has been security-only since 2026-10-01.
 
 ## Consequences
 
-- `web/` declares `engines.node >= 26` and `.nvmrc` = 26; CI's `lts/*` already resolves to 26.
-- `server/.python-version` and `requires-python` move to 3.14 once this ADR is accepted. Until then they stay at 3.13 (ADR-0006).
-- Spike images already use `python:3.14-slim-trixie`. Spikes are outside the spec gate and measure on the target runtime.
-- The owner's Mac keeps its default `node` (22). `node@26` is installed as a separate Homebrew keg and used for this repository only, so other projects are not affected.
-- Moving to Python 3.15 is a revisit trigger: it happens when every server and worker dependency has a stable cp315 linux/arm64 wheel.
+- `web/package.json`: `engines.node` `>=26 <27`, plus `web/.nvmrc` = 26. CI's web job reads `web/.nvmrc`.
+- The tooling in `tools/` (hooks, trace-check) keeps `engines >=20` and runs on whatever `node` the owner's shell provides, 22 today. It is not part of this baseline.
+- On acceptance, these 3.13 pins move to 3.14 in one PR:
+  - `server/.python-version`;
+  - `server/pyproject.toml` `requires-python`, `[tool.ruff] target-version`, `[tool.mypy] python_version`;
+  - `server/uv.lock`;
+  - `AGENTS.md` (repository map);
+  - `docs/roadmap.md` (0.2 skeleton);
+  - an "Amended by ADR-0020" note in ADR-0006's Runtime row, following the ADR-0019 precedent.
+- Spikes started after 2026-11-20 use `python:3.14-slim-trixie`. Spikes are outside the spec gate and measure on the target runtime.
+- **Image pinning.** Spikes use floating tags (`python:3.14-slim-trixie`). Images that ship (`sandbox/`, `deploy/`) pin the base by digest (`@sha256:…`), updated deliberately. The host's uv-managed Python may run a different 3.14 patch than the images.
+- The owner's Mac keeps its default `node` (22). `node@26` is installed as a separate Homebrew keg and used for `web/` only.
 
 ## Open questions
 
-- Should `uv` pin the exact patch (3.14.10) or the minor (3.14)? Proposed: the minor in `.python-version`, with the patch coming from the image tag digest.
+- Should the shipped images pin by digest (proposed above) or by full version tag (`3.14.10-slim-trixie`)?
+- Should `tools/` also move to Node 26 (`engines`, hooks run with `node@26`)?

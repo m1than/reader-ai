@@ -36,10 +36,11 @@ tasks:
       note: "server is `package = false` until OPS-CLI/OPS-DEPLOY claim server/src/reader and add the entry points;
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
   - { id: S0.toolchain-baseline, stage: 0, kind: setup, status: in_progress, needs: [],
-      what: "owner 2026-11-20: use the latest LTS versions. Proposed ADR-0020: Node 26 LTS, Python 3.14 (3.15 blocked by scikit-image wheels), Debian 13 trixie",
-      note: "Done now: web/ engines >=26 and .nvmrc (typecheck, vitest and storybook green on node 26.13.0); node@26 installed as a separate Homebrew keg
-        (the Mac's default node stays 22); spike images on python:3.14-slim-trixie.
-        Waits for the owner to accept ADR-0020: server/.python-version and requires-python 3.13 → 3.14, then uv lock." }
+      what: "owner 2026-11-20: use the latest LTS versions. Proposed ADR-0020: Node 26 LTS, Python 3.14 (3.15: 5 dependencies lack cp315 aarch64 wheels), Debian 13 trixie",
+      note: "Done in this branch: web/ engines >=26 <27 and .nvmrc; CI reads web/.nvmrc (typecheck, vitest, storybook green on node 26.13.0).
+        node@26 is installed as a separate Homebrew keg (the Mac's default node stays 22). New spikes use python:3.14-slim-trixie
+        (agent-sdk-container measured, PR #6). Pending evidence: OCR conversion on 3.14 (ingest-docling) and a kernel-roundtrip re-run on 3.14.
+        On acceptance by the owner: move the 3.13 pins listed in ADR-0020 Consequences in one PR. This PR carries an ADR, so it waits for the owner." }
   - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
