@@ -1,0 +1,45 @@
+# Module spec template (specd-lite, ADR-0001).
+# Copy to spec/modules/<layer>-<name>.yaml and fill in.
+# The spec is the source of truth: tests are derived from it, code is written only for approved specs.
+
+id: SRV-EXAMPLE             # <SRV|WEB|OPS>-<NAME>
+title: Example module
+status: draft               # draft -> approved (owner gate) -> implemented (owner gate)
+layer: server               # server | web | ops
+track: product              # product (user-facing features) | ai (agents, models, evaluation) | engineering (platform, performance, optimization)
+adr: [ADR-0006]             # ADRs this module implements or depends on
+
+# Files this module owns. Implementation outside approved specs is blocked (hook H1, CI T8).
+# Glob subset: ** any depth, * one path segment.
+paths:
+  - server/src/reader/example/**
+
+# A normative source is mandatory: an RFC, a format spec, an API reference, a book chapter.
+normative:
+  - id: REF-EXAMPLE-1
+    title: nbformat — The Notebook file format, v4
+    url: https://nbformat.readthedocs.io/en/latest/format_description.html
+
+# What the module must do. One testable statement per requirement.
+requirements:
+  - id: FR-EXAMPLE-1
+    text: Writes a notebook that `nbformat.validate` accepts.
+
+# What must hold for every input (candidates for property-based tests, Hypothesis / fast-check).
+invariants:
+  - id: INV-EXAMPLE-1
+    text: Reading a written notebook and writing it again yields byte-identical output.
+
+# Only where the number changes a decision.
+# threshold is a number; verified_by is one of: test | bench | ci.
+nfr: []
+#  - id: NFR-EXAMPLE-1
+#    metric: p95 time to first streamed token in tutor chat, ms
+#    threshold: 1500
+#    verified_by: bench
+
+# Fixed inputs with known outputs, stored under spec/fixtures/<module>/ with their source.
+vectors: []
+#  - id: VEC-EXAMPLE-1
+#    source: Bashir 2025 PDF bookmark outline (494 entries)
+#    file: spec/fixtures/example/outline.json

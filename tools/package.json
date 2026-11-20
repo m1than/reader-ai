@@ -1,0 +1,16 @@
+{
+  "name": "web3-noncustody-tools",
+  "private": true,
+  "type": "module",
+  "description": "specd-lite tooling: trace-check, guard-tests, Claude Code hooks",
+  "scripts": {
+    "trace": "node trace/check.mjs ..",
+    "guard": "node trace/guard-tests.mjs --base origin/main"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "yaml": "^2.9.1"
+  }
+}
