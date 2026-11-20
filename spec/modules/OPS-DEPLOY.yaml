@@ -1,0 +1,196 @@
+# OPS-DEPLOY — the Compose stack that `reader up` starts on the owner's Mac (stage 1).
+#
+# Scope: deploy/** only. The base file deploy/compose.yaml renders on its own; OPS-CLI adds an in-memory override
+# at `reader up` (the secrets section with hash-derived names, SRV-CONFIG FR-CONFIG-14, and one kernel-<user>
+# service per configured user from the x-kernel template). The kernel image is OPS-SANDBOX's (sandbox/**, stage 4);
+# the agent-proxy image is SRV-AGENT's (stage 5); the server roles' health endpoints are the server modules'.
+# Those dependencies are named in the requirements that rely on them, not specified here.
+
+id: OPS-DEPLOY
+title: Compose stack, networks, volumes, Caddy and telemetry wiring for the Mac
+status: draft
+approved_by: null
+approved_at: null
+layer: ops
+track: engineering
+adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0018, ADR-0020, ADR-0021, ADR-0022, ADR-0023, ADR-0024, ADR-0025]
+
+paths:
+  - deploy/**
+  - server/tests/deploy/**
+  - spec/fixtures/OPS-DEPLOY/**
+
+normative:
+  - id: REF-DEPLOY-1
+    title: Compose Specification (services, networks with `internal`, volumes, secrets, profiles, extension fields `x-`)
+    url: https://github.com/compose-spec/compose-spec/blob/main/spec.md
+  - id: REF-DEPLOY-2
+    title: Docker Compose — `docker compose config` (canonical rendered model, `--format json`)
+    url: https://docs.docker.com/reference/cli/docker/compose/config/
+  - id: REF-DEPLOY-3
+    title: Caddy — `tls internal` and the local certificate authority
+    url: https://caddyserver.com/docs/caddyfile/directives/tls
+  - id: REF-DEPLOY-4
+    title: ADR-0022 kernel service template numbers (tmpfs sizes, limits) and the kernel-roundtrip spike
+    url: docs/adr/0022-kernel-sandbox-evcxr-memory-declared-services.md
+  - id: REF-DEPLOY-5
+    title: OpenTelemetry Protocol (OTLP) — the wire format Rotel receives and exports
+    url: https://opentelemetry.io/docs/specs/otlp/
+
+# Test levels used below:
+#   [config]  pytest under server/tests/deploy/ over `docker compose -f deploy/compose.yaml [-f <fixture>] config --format json`
+#             (needs the docker CLI, not a running daemon); static and deterministic.
+#   [live]    e2e/live/stage-1.sh against a running stack (`docker inspect`, probes run inside containers).
+requirements:
+  - id: FR-DEPLOY-1
+    text: >-
+      `deploy/compose.yaml` declares the services of ADR-0012 as amended by ADR-0022 and ADR-0025, grouped into Compose
+      profiles so that each stage starts only what exists: default (no profile) `caddy`, `api`, `worker`, `postgres`,
+      `rotel`; profile `kernels` `kernel-verify`, `kernel-agent`, `kernel-pair-1` (more pair slots and `kernel-<user>`
+      come from OPS-CLI's override); profile `agents` `agent-proxy`; profile `mcp` `mcp`; profiles `traces-mlflow` and
+      `traces-phoenix` the trace backend (exactly one may be active; the choice is the owner's, ADR-0018). [config]
+  - id: FR-DEPLOY-2
+    text: >-
+      `api`, `worker` and `mcp` run one image built from `deploy/images/server.Dockerfile` with the command
+      `reader-server --role <role>` (the entry point is OPS-CLI/OPS-DEPLOY's per the server pyproject note). Every
+      `FROM` line in `deploy/**` Dockerfiles and every third-party `image:` in compose.yaml is pinned by digest
+      (`@sha256:<64 hex>`), and every image is available for `linux/arm64` (ADR-0012, ADR-0020). [config]
+  - id: FR-DEPLOY-3
+    text: >-
+      Networks: `edge` (caddy only; `internal: false`, because Docker publishes ports only from a non-internal
+      network), `front` (caddy, api, mcp; internal), `core` (api, worker, mcp, postgres; internal), `otel`
+      (api, worker, mcp, rotel and the active trace backend; internal), `agentnet` (worker, agent-proxy; internal),
+      `egress` (agent-proxy only; not internal, the only route to provider hosts, ADR-0025), and one internal network
+      per kernel service shared only with that kernel's declared caller: `sb-verify` and `sb-agent` with `worker`,
+      `sb-pair-<n>` and `sb-user-<handle>` with `api` (ADR-0022 routes). [config]
+  - id: FR-DEPLOY-4
+    text: >-
+      Volumes: `pgdata` (postgres only), `blobs` (api and worker), `caddy_data` and `caddy_config` (caddy only,
+      ADR-0024), and a volume for the trace backend's store. Kernel services have no volumes, only tmpfs
+      (FR-DEPLOY-7). Backup and restore are OPS-CLI's; `caddy_data` is marked with the label
+      `org.reader-ai.backup=exclude` (ADR-0024) and every other volume with `org.reader-ai.backup=include`. [config]
+  - id: FR-DEPLOY-5
+    text: >-
+      Published ports bind to 127.0.0.1 only: caddy `127.0.0.1:443:443`, and the active trace backend's UI on a
+      127.0.0.1 port (owner-only, ADR-0018). No other service publishes a port. [config]
+  - id: FR-DEPLOY-6
+    text: >-
+      `deploy/Caddyfile` serves `localhost` with `tls internal` (ADR-0024), routes `/api/*` to api, `/mcp` to mcp and
+      `/` to the SPA files, and sets the headers Strict-Transport-Security, Content-Security-Policy with
+      `frame-ancestors 'none'`, X-Content-Type-Options `nosniff` and Referrer-Policy `no-referrer` on every
+      response. The CA trust step is OPS-CLI's (`reader up`, owner-run, ADR-0024). [config: Caddyfile parsed with
+      `caddy adapt` in the pinned caddy image; live: response headers]
+  - id: FR-DEPLOY-7
+    text: >-
+      An extension field `x-kernel` is the single template for every kernel service (the static ones here and the
+      `kernel-<user>` services OPS-CLI generates): image from OPS-SANDBOX; non-root user; `read_only: true`; tmpfs
+      `/home/lab` and `/tmp` with `noexec,size=256m` and `/run/evcxr` with `exec,nosuid,nodev,size=1g` (ADR-0022,
+      sizes from the kernel-roundtrip spike); `cap_drop: [ALL]`; `security_opt: [no-new-privileges:true]`;
+      `mem_limit: 2g` and `memswap_limit: 2g` (ADR-0022: swap equals memory); `cpus: 2`; `pids_limit: 256`
+      (ADR-0014); `restart: always`, which is the fresh-container reset after the gateway exits (ADR-0022); no
+      `secrets`, no `volumes`, no published ports. [config]
+  - id: FR-DEPLOY-8
+    text: >-
+      `worker` and `agent-proxy` run with a non-root user, `read_only: true`, a tmpfs home, `cap_drop: [ALL]` and
+      `no-new-privileges` (ADR-0025 rule 3); `api` and `mcp` share the server image and get the same controls.
+      [config]
+  - id: FR-DEPLOY-9
+    text: >-
+      Secrets: compose.yaml declares no provider secret. Services consume secrets only from files under
+      `/run/secrets/` that OPS-CLI's in-memory override declares as `<secret_file_name(ref)>: { environment:
+      <secret_env_var(ref)> }` (SRV-CONFIG FR-CONFIG-14, ADR-0011, ADR-0023). The provider tokens are granted only to
+      `agent-proxy`. The database password is a secret named `db-password`, granted to postgres
+      (`POSTGRES_PASSWORD_FILE`) and to api, worker and mcp, and to no other service. [config with the
+      fixture override]
+  - id: FR-DEPLOY-10
+    text: >-
+      Every service declares a `healthcheck`. `rotel` and the trace backends use their own probes; postgres uses
+      `pg_isready`; caddy probes its admin endpoint inside the container; the server roles call
+      `reader-server --role <role> --healthcheck` (implemented by the server modules); kernel services probe the
+      gateway and the start-nonce file `/run/reader/start-nonce` written at container boot (ADR-0022). [config]
+  - id: FR-DEPLOY-11
+    text: >-
+      `deploy/rotel/` holds Rotel's configuration: OTLP receivers on the `otel` network only, and an exporter whose
+      target is selected by the active trace profile; with no trace profile active, Rotel exports nowhere and drops
+      after its buffer (ADR-0018). The MLflow profile runs MLflow with `--workers 1` and
+      `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` (trace-backend spike); the Phoenix profile receives its API key as
+      a Compose secret. [config]
+  - id: FR-DEPLOY-12
+    text: >-
+      `deploy/reader.example.yaml` is the documented example configuration: it loads through SRV-CONFIG's
+      `load_config` without errors, holds secret references only, and covers every top-level section of the
+      SRV-CONFIG field table at least once. [config, VEC-DEPLOY-1]
+
+invariants:
+  - id: INV-DEPLOY-1
+    text: >-
+      No service in the rendered model (base alone, and base plus the fixture override) mounts the Docker socket or
+      any path under `/var/run/docker` or `/run/docker`, by bind mount, volume or `devices`. [config]
+  - id: INV-DEPLOY-2
+    text: >-
+      No `environment:` or `env_file:` entry of any service carries a secret: with the fixture override's canary
+      values exported for `docker compose config`, no canary appears anywhere in the rendered model except under the
+      top-level `secrets` section, and no service has `env_file`. [config] After `reader up`, `docker inspect` of every
+      running container contains no canary. [live, the stage-1 check "no env secrets"]
+  - id: INV-DEPLOY-3
+    text: >-
+      `caddy_data` and `caddy_config` are mounted by `caddy` and by no other service. [config]
+  - id: INV-DEPLOY-4
+    text: >-
+      The service-to-service reachability graph (two services can connect if they share a network) equals the
+      allowed matrix in VEC-DEPLOY-2 exactly. In particular: no kernel service shares a network with `postgres`,
+      `agent-proxy`, `rotel`, another kernel service or any service other than its declared caller; only `worker`
+      shares a network with `agent-proxy`. [config] Probes from inside a kernel container cannot resolve or connect to
+      `postgres`, `api`, `agent-proxy` or another kernel. [live, from stage 4 when the kernel image exists]
+  - id: INV-DEPLOY-5
+    text: >-
+      Only `edge` and `egress` have `internal: false`; `edge` has exactly one member, caddy, and `egress` exactly one,
+      agent-proxy. Every other network, including every per-kernel network, is internal, so no other service has a
+      route to the internet. [config]
+  - id: INV-DEPLOY-6
+    text: Every published port has host IP 127.0.0.1. [config]
+  - id: INV-DEPLOY-7
+    text: >-
+      Every third-party `image:` and every Dockerfile `FROM` under deploy/** carries a `@sha256:` digest; no `latest`
+      tag appears. [config]
+  - id: INV-DEPLOY-8
+    text: >-
+      Every kernel service in the rendered model (static ones and those in the fixture override) has exactly the
+      `x-kernel` hardening of FR-DEPLOY-7, no `secrets`, no `volumes` and no `ports`. [config]
+  - id: INV-DEPLOY-9
+    text: >-
+      `docker compose -f deploy/compose.yaml config` succeeds for the base file alone and for every profile
+      combination allowed by FR-DEPLOY-1 (at most one `traces-*` profile), with and without the fixture override.
+      [config]
+
+nfr:
+  - id: NFR-DEPLOY-1
+    metric: seconds from `reader up` to all services of the default profile healthy, images already built
+    threshold: 120
+    verified_by: bench
+    # Source: docs/roadmap.md stage-1 table (owner's plan), not a spike measurement. Spike context: Kernel Gateway
+    # kernels start in < 0.8 s, the trace backends are ready in 5–19 s (kernel-roundtrip, trace-backend).
+
+vectors:
+  - id: VEC-DEPLOY-1
+    source: The documented example configuration (FR-DEPLOY-12); loads through SRV-CONFIG load_config
+    file: spec/fixtures/OPS-DEPLOY/example-config-ref.yaml
+  - id: VEC-DEPLOY-2
+    source: Allowed service-to-service reachability, derived from ADR-0012, ADR-0022 (routes) and ADR-0025 (routes and egress)
+    file: spec/fixtures/OPS-DEPLOY/reachability.yaml
+  - id: VEC-DEPLOY-3
+    source: >-
+      A sample of OPS-CLI's in-memory override (one kernel-<user>, one provider secret, db-password, canary values),
+      used by the [config] tests; names computed with SRV-CONFIG's secret_file_name and secret_env_var
+    file: spec/fixtures/OPS-DEPLOY/cli-override.example.yaml
+
+# Owner notes (not requirements):
+# - The roadmap's stage-1 live check counts "six healthy" and expects `.kernel=="ok"`. With ADR-0022 and ADR-0025
+#   the stack has more services, and the kernel image arrives with OPS-SANDBOX in stage 4. This spec proposes:
+#   stage 1 checks "all services of the default profile healthy" (five: caddy, api, worker, postgres, rotel), and
+#   the kernel health check moves to stage 4's live check. Needs the owner's agreement and a roadmap edit.
+# - The database password has no field in reader.yaml (SRV-CONFIG's field table). FR-DEPLOY-9 names the Compose
+#   secret `db-password`; where its value comes from (generated once by OPS-CLI and kept in the Keychain, or a new
+#   reader.yaml field) is an OPS-CLI decision to make before OPS-CLI's spec is approved.
+# - ADR-0021: if measurement M1 sends ingestion native, the converter is a host process on 127.0.0.1 outside this
+#   stack; the worker then needs a route to the host, which this spec does not add until that decision is made.

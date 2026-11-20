@@ -162,8 +162,13 @@ tasks:
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG] }
-  - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
-      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container] }
+  - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: in_progress,
+      needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container],
+      note: "spec drafted, awaits deep-reviewer (spec/modules/OPS-DEPLOY.yaml, branch 1/S1.OPS-DEPLOY). Depends on OPS-CLI
+        (in-memory override: secrets with SRV-CONFIG FR-CONFIG-14 names, kernel-<user> from x-kernel; db-password source),
+        OPS-SANDBOX (kernel image, stage 4), SRV-AGENT (agent-proxy image, stage 5), server modules (role health endpoints).
+        Owner items: the stage-1 live check's 'six healthy' and '.kernel==ok' (proposal: default profile of five; kernel
+        health moves to stage 4); trace backend profile choice at S0.exit." }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }

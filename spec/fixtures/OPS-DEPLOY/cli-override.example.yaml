@@ -1,0 +1,26 @@
+# VEC-DEPLOY-3: a sample of the in-memory Compose override that OPS-CLI builds at `reader up`.
+# OPS-CLI never writes this to disk (SRV-CONFIG FR-CONFIG-14, ADR-0011); the [config] tests pass this fixture with
+# `-f` and export canary values for the referenced variables, e.g.
+#   READER_SECRET_KEYCHAIN_E35683C33BD94DE8486A116F9C3EFC47=CANARY-provider-token
+#   READER_DB_PASSWORD=CANARY-db-password
+# Names: secret_file_name / secret_env_var of secret://keychain/reader-ai/claude-oauth-token, computed with sha256
+# (prefix e35683c33bd94de8486a116f9c3efc47). The db-password source is OPS-CLI's open decision (spec owner note).
+secrets:
+  keychain-e35683c33bd94de8486a116f9c3efc47:
+    environment: READER_SECRET_KEYCHAIN_E35683C33BD94DE8486A116F9C3EFC47
+  db-password:
+    environment: READER_DB_PASSWORD
+
+services:
+  agent-proxy:
+    secrets: [keychain-e35683c33bd94de8486a116f9c3efc47]
+  kernel-user-ivan:
+    # OPS-CLI copies every key of the base file's `x-kernel` template here (FR-DEPLOY-7); the [config] test merges
+    # x-kernel into this service before asserting INV-DEPLOY-8.
+    networks: [sb-user-ivan]
+  api:
+    networks: [sb-user-ivan]
+
+networks:
+  sb-user-ivan:
+    internal: true
