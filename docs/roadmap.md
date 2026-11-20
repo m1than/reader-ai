@@ -118,7 +118,7 @@ Rejected orders:
 
 ### 0.2 Repository skeleton (agent; outside the spec gate)
 
-- `server/pyproject.toml`: Python 3.13, uv lockfile, ruff, mypy `--strict`, pytest, anyio, Hypothesis, testcontainers. Package `reader` with entrypoints `reader` (host CLI) and `reader-server --role api|worker|mcp`.
+- `server/pyproject.toml`: Python 3.14 (ADR-0020), uv lockfile, ruff, mypy `--strict`, pytest, anyio, Hypothesis, testcontainers. Package `reader` with entrypoints `reader` (host CLI) and `reader-server --role api|worker|mcp`.
 - `web/package.json`: Vite, React 19, TypeScript strict, Vitest, Storybook 10, Playwright.
 - CI `layers` job turns on as soon as these manifests exist (already wired).
 - `e2e/live/lib.sh`: helpers `check "<name>" <command>` and the PASS/FAIL summary used by every stage script.
