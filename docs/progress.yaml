@@ -17,6 +17,8 @@ owner_review:            # stage exits waiting for the owner's live check and `i
   pending: []
   merge_gate: "2026-11-20: a Claude Code PreToolUse hook on the owner's machine forbids `gh pr merge` for the agent,
     contrary to AGENTS.md step 6. Until the owner removes it or changes AGENTS.md, every PR waits for the owner's merge."
+  ci_gate: "owner 2026-11-20: GitHub Actions may fail for now; a red CI run is not a blocker. The agent still runs the local checks
+    (trace-check, guard-tests, layer checks) before every PR and records any red CI run in the PR description."
 
 tasks:
   # Stage 0 — groundwork and spikes
@@ -93,9 +95,12 @@ tasks:
         Library size gate fails 5 entries by 1–19 B under Node 26 but passes under Node 22 (its CI runtime).",
       reason: "Publishing is the owner's: the library's AGENTS.md forbids agents to push or publish. Install-by-version and release
         time are therefore unmeasured.",
-      ask: "Review and push library branch release/github-packages (dbb932cb), merge it into web3/material-parity, push tag v0.1.0
-        and note the release workflow's gates duration; then tell the agent the version. Installing from GitHub Packages needs a
-        read:packages token on the Mac, likely a classic PAT (fine-grained tokens may not cover Packages; to be verified)." }
+      ask: "State 2026-11-20: the owner pushed release/github-packages and opened library PR #1. GitHub Actions do not start on the
+        owner's account ('recent account payments have failed or your spending limit needs to be increased'), so the PR's CI and any
+        release run are refused. A tag v0.1.0 was pushed on acc9e4af (before the merge, without release.yml) and then deleted by the owner.
+        Remaining: fix GitHub billing; merge library PR #1; tag v0.1.0 on the merged web3/material-parity and push it; note the
+        release run's duration; tell the agent the version. Installing from GitHub Packages needs a read:packages token on the Mac,
+        likely a classic PAT (to be verified). Until then reader-ai consumes the built-commit tarball (verified fallback)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
   - { id: S0.exit, stage: 0, kind: live, status: todo,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
