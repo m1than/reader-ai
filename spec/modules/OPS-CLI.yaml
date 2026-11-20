@@ -156,7 +156,9 @@ requirements:
       (after images are built), else non-zero, and leaves the watcher running, so live-check scripts can call
       `reader up` and continue. 180 s is a structural bound: NFR-DEPLOY-1's 120 s covers a restart with an initialised
       pgdata; the first start adds initdb, which NFR-DEPLOY-1 reports without a threshold. A second `reader up` while a
-      watcher runs stops that watcher first; FR-CLI-7's lock keeps two watchers from overlapping.
+      watcher runs stops that watcher after its own resolution (FR-CLI-8 step 3) succeeds and before it starts the new
+      one, so a failed resolution leaves the running watcher in place; FR-CLI-7's lock keeps two watchers from
+      overlapping.
   - id: FR-CLI-11
     text: >-
       Every subprocess `reader` starts (docker, op, security, open, the watcher) gets an explicit allow-listed
@@ -208,18 +210,24 @@ requirements:
       `reader backup DIR` (DIR required in stage 1) refuses a DIR inside a git work tree and refuses unless the watcher
       runs (the services it restarts need delivery). With api, worker and mcp stopped it writes, each file created by the
       host with mode 0600 from a stdout stream: `db.dump` from `pg_dump -Fc` run with `docker exec` in the postgres
-      container; for every other named volume labelled `org.reader-ai.backup=include` (blobs, caddy_config), a tar from
-      a one-off `docker run --rm --network none --read-only --cap-drop ALL -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
-      where `<server image>` is the `api` service's image in the rendered model; and `manifest.json` =
+      container; for every other named volume labelled `org.reader-ai.backup=include` except `caddy_config` (in stage 1:
+      blobs), a tar from a one-off
+      `docker run --rm --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
+      where `<uid>` is the rendered numeric `user` of the service that mounts the volume (blobs: api, 10001; with all
+      capabilities dropped, root could not read files it does not own) and `<server image>` is the `api` service's image
+      in the rendered model; and `manifest.json` =
       `{"created": RFC 3339, "reader": version, "postgres": server version, "files": [{"name", "sha256", "bytes"}]}`.
-      `caddy_data` (label `exclude`, ADR-0024) is never included. Afterwards the stopped services start again.
+      `caddy_data` (label `exclude`, ADR-0024) and `caddy_config` are never included: `caddy_config` holds only Caddy's
+      autosaved configuration, which Caddy regenerates from the Caddyfile at start, and ADR-0024 already accepts that a
+      restart regenerates Caddy's state; it is also root-owned 0700, unreadable to the hardened one-off. Afterwards the
+      stopped services start again.
   - id: FR-CLI-18
     text: >-
       `reader restore DIR` refuses unless the watcher runs, then verifies every sha256 in the manifest. Precondition: no
       application table holds a row and the blobs volume is empty; otherwise it refuses and changes nothing. It stops
       api, worker and mcp, runs `pg_restore --clean --if-exists` inside the postgres container, untars each volume
-      through a one-off container hardened as in FR-CLI-17 (volume mounted read-write, archive on stdin; caddy stopped
-      while caddy_config is replaced), and starts the services again. Why both: the row check is the safety rule (a
+      through a one-off container hardened as in FR-CLI-17, with the same `--user <uid>` (volume mounted read-write,
+      archive on stdin), and starts the services again. `caddy_config` is neither restored nor touched (FR-CLI-17). Why both: the row check is the safety rule (a
       restore never discards data), and `--clean --if-exists` lets the archive replace the empty schema that migrations
       created at first start instead of failing on existing objects. The `-Fc` archive holds one database and no roles or
       passwords; the restored database is served by the target's postgres with the target machine's own FR-CLI-14 item.
@@ -237,11 +245,17 @@ requirements:
     text: >-
       `reader bootstrap` (for SRV-AUTH's first-owner sign-up) works only while the stack is healthy (FR-CLI-13 exit 0;
       otherwise it exits non-zero with a fixed message and runs nothing else). It runs
-      `docker compose -p <name> exec -T api reader-server bootstrap-link`, captures stdout, and accepts exactly one line
-      matching `https://localhost/api/auth/bootstrap#[A-Za-z0-9_-]+`; anything else, or a non-zero exit, gives a fixed
-      error message that quotes none of the captured output. The URL is passed only as the argument of macOS
-      `open <url>`: `reader` never prints it, logs it or writes it to disk, and drops the child's stderr instead of
-      relaying it. Carve-out from INV-CLI-2's spirit, stated: the bootstrap token travels in `open`'s argv (visible to
+      `docker compose -p <name> exec -T api reader-server bootstrap-link` with a 15 s timeout, captures stdout, and
+      accepts exactly one line that is `<instance.url>/api/auth/bootstrap#` (prefix built from reader.yaml's
+      `instance.url`) followed by `[A-Za-z0-9_-]+`. Exit 1 of `bootstrap-link` gives the fixed message "owner already has
+      a passkey"; any other non-zero exit, a timeout or any other output gives one fixed error message that quotes none
+      of the captured output. The URL is passed only as the argument of macOS `open <url>`, with a 10 s timeout: `reader`
+      never prints it, logs it or writes it to disk, and drops both children's stderr instead of relaying it. A failure
+      of either call (non-zero exit, `CalledProcessError`, `TimeoutExpired`, `OSError`) is caught inside the call site
+      and reported with a fixed message only; the exception, which carries the argv, is discarded and never rendered,
+      logged or chained. Bounds are structural, not measured: 15 s covers a `docker compose exec` into a healthy
+      container plus one database write; 10 s covers handing a URL to LaunchServices, which returns without waiting
+      for the browser. Carve-out from INV-CLI-2's spirit, stated: the bootstrap token travels in `open`'s argv (visible to
       local processes of the same user for the call's duration) because it is a short-lived, single-use token minted by
       SRV-AUTH, not a long-lived secret, and the browser needs the URL; it is not a resolved value, so INV-CLI-2 does not
       cover it.
@@ -257,8 +271,10 @@ invariants:
       A resolved value appears only on the watcher hand-off descriptor (FR-CLI-8, fd 3) and on the stdin of FR-CLI-6's
       delivery calls: never in the argv or environment of a subprocess, on stdout or stderr, on the readiness pipe, or
       in a log. Unit: a fake process runner records the argv, env, stdin and extra descriptors of every call; `env` is
-      never None and holds no resolved value and no variable that a `secret://env/` reference names. Scope: resolved
-      `secret://` values only; FR-CLI-21's bootstrap token is carved out there, with INV-CLI-9 instead.
+      never None and holds no resolved value and no variable that a `secret://env/` reference names. Scope: every
+      resolved `secret://` value, the DB password generated by FR-CLI-14 (which reaches the Keychain only through
+      `keyring.set_password`), and the value read by `secrets set` (FR-CLI-12, which reaches the Keychain the same way);
+      FR-CLI-21's bootstrap token is carved out there, with INV-CLI-9 instead.
   - id: INV-CLI-3
     text: >-
       Every write under /run/secrets uses FR-CLI-6's constant script with a name matching its pattern. A consumer sees
@@ -288,7 +304,8 @@ invariants:
       The bootstrap token never appears on `reader`'s stdout or stderr, in a log or in a file; its only destination is
       the argv of one `open` call. Unit: the fake runner returns a canary URL from `bootstrap-link`; the test asserts the
       canary is absent from captured stdout, stderr and logs, present in `open`'s argv, and that no `open` runs for
-      malformed output or an unhealthy stack.
+      malformed output, `bootstrap-link` exit 1 or an unhealthy stack. Further cases: `open` exits non-zero, and `open`
+      times out; in each the canary is absent from stdout, stderr and logs, and the message is the fixed one.
 
 nfr: []
 
@@ -313,7 +330,8 @@ vectors:
 # against `reader up` on the owner's Mac. Live items: FR-CLI-8/10 (re-delivery after `docker compose restart api`;
 # `reader up` returning with health), FR-CLI-7 (fail closed after `reader watcher stop`, which the roadmap's stage-1
 # script uses), FR-CLI-16 (trust and `down --untrust`: owner-run, needs the owner's password), FR-CLI-17/18 (the
-# backup-restore drill, the stage-1 exit), and the ADR-0026 verified_by items OPS-CLI owns: no value in
+# backup-restore drill, the stage-1 exit: back up, restore onto a fresh pgdata and empty blobs, and check that the
+# one-off containers read and write the 10001-owned blobs with `--user`), and the ADR-0026 verified_by items OPS-CLI owns: no value in
 # `docker inspect`, `docker export`, `docker events` since `reader up`, the Docker Desktop logs, or argv.
 #
 # Owner notes:
@@ -326,6 +344,10 @@ vectors:
 # - Backups are unencrypted (FR-CLI-17); the directory is the owner's choice (ADR-0012), for example an encrypted volume.
 # - ADR-0012's backup folder "set in reader.yaml" is deferred: a future SRV-CONFIG task adds the field, and then
 #   `reader backup` may default to it.
+# - `caddy_config` is left out of backup and restore (FR-CLI-17), although OPS-DEPLOY labels it `include`: Caddy
+#   regenerates it at start (ADR-0024's reasoning). OPS-DEPLOY's label should become `exclude` at its next change.
+# - The host codes `tool_missing`, `tool_failed`, `keychain_denied`, `keychain_locked` and `not_deliverable` should join
+#   SRV-CONFIG FR-CONFIG-8's list at its next change.
 # - `reader bootstrap` puts the short-lived bootstrap token in `open`'s argv (FR-CLI-21); the token's lifetime and
 #   single use are SRV-AUTH's.
 # - The pair-pool size is not a reader.yaml field; v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
