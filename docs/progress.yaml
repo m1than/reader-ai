@@ -8,10 +8,13 @@
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
-  spent_usd: 0.0568      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 0.0615      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+                         # (this branch only; compile-cost records its own spend on its branch)
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
+    - { task: S0.spike.trace-backend, usd: 0.0047, date: 2026-11-20,
+        what: "2 exploratory + 2 measured probe runs (3 haiku stages each); breakdown in spikes/trace-backend/RESULT.md" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -96,7 +99,14 @@ tasks:
       ask: "Review and push library branch release/github-packages (dbb932cb), merge it into web3/material-parity, push tag v0.1.0
         and note the release workflow's gates duration; then tell the agent the version. Installing from GitHub Packages needs a
         read:packages token on the Mac, likely a classic PAT (fine-grained tokens may not cover Packages; to be verified)." }
-  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
+  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: in_progress, needs: [S0.spike.agent-sdk-container],
+      note: "The owner allowed spikes/trace-backend/run.sh to read the Keychain item reader-ai/claude-oauth-token into docker run -e,
+        never printed (2026-11-20: 'allow keychain for compile-cost and trace-backend').",
+      result: "PASS for both (spikes/trace-backend/RESULT.md): our reader.stage spans → claude_code.interaction → llm_request nest via
+        TRACEPARENT (SDK injects it from the active OTel span); a score (Phoenix span annotation / MLflow assessment) is visible on the
+        trace; the seeded failure (invalid model) is found via API from the deepest ERROR span in 0.07 s (Phoenix) / 2.17 s (MLflow).
+        Memory idle: Phoenix 0.5–0.8 GiB, MLflow 2.4 GiB (SQLite); Rotel 8–28 MiB. Recommendation: Phoenix for v1 (ELv2, owner-only;
+        Docker auth on by default → API key via Rotel header). Backend switch = 3 Rotel env vars. Human UI triage not measured." }
   - { id: S0.exit, stage: 0, kind: live, status: todo,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
