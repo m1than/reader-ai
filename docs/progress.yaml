@@ -35,6 +35,11 @@ tasks:
       what: "server/pyproject.toml (uv, ruff, mypy strict, pytest, anyio, hypothesis, testcontainers), web/package.json (Vite, React 19, Vitest, Storybook 10, Playwright), e2e/live/lib.sh",
       note: "server is `package = false` until OPS-CLI/OPS-DEPLOY claim server/src/reader and add the entry points;
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
+  - { id: S0.toolchain-baseline, stage: 0, kind: setup, status: in_progress, needs: [],
+      what: "owner 2026-11-20: use the latest LTS versions. Proposed ADR-0020: Node 26 LTS, Python 3.14 (3.15 blocked by scikit-image wheels), Debian 13 trixie",
+      note: "Done now: web/ engines >=26 and .nvmrc (typecheck, vitest and storybook green on node 26.13.0); node@26 installed as a separate Homebrew keg
+        (the Mac's default node stays 22); spike images on python:3.14-slim-trixie.
+        Waits for the owner to accept ADR-0020: server/.python-version and requires-python 3.13 → 3.14, then uv lock." }
   - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
