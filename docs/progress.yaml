@@ -223,7 +223,11 @@ tasks:
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container],
       note: "compose.yaml must not hard-code provider secrets: OPS-CLI adds a generated, in-memory secrets section with
         hash-derived names (SRV-CONFIG FR-CONFIG-14); services that need a provider token reference those secrets." }
-  - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
+  - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: in_progress, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG],
+      branch: 1/S1.SRV-AUTH,
+      note: "spec drafted, awaits deep-reviewer. Also claims the stage-1 server skeleton (reader.db, reader.api,
+        reader-server entrypoint). Needs from OPS-DEPLOY: READER_CONFIG plus a read-only reader.yaml mount for api and
+        worker; from OPS-CLI: `reader bootstrap` opens the bootstrap link without printing it." }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
 

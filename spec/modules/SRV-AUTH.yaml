@@ -1,0 +1,227 @@
+# SRV-AUTH — passkey sign-in, server-side sessions, the owner bootstrap, and the stage-1 server skeleton (ADR-0012).
+#
+# Scope. docs/roadmap.md stage 1 hands "database, api skeleton, auth middleware" to stage 2, and SRV-AUTH is the only
+# stage-1 server module that needs them, so this spec also owns:
+#   - `reader.db`: the async engine, the Alembic environment and the first migration (ADR-0006);
+#   - `reader.api`: the FastAPI app factory, routes declared as data, `/api/healthz`, `/api/me`;
+#   - `reader.serve`: the `reader-server --role api|worker|mcp [--bind] [--healthcheck]` entrypoint that
+#     OPS-DEPLOY's compose.yaml runs (FR-DEPLOY-11). The worker role is an idle process in stage 1; jobs arrive with
+#     V.SRV-JOBS-min. The mcp role exits with code 2 until SRV-MCP (stage 7); it is not in the default profile.
+# Later modules add their routes and tables to these packages under their own specs (paths overlap by design: the
+# file that registers a route belongs to the spec that adds it).
+#
+# Out of scope: invitations beyond a stub table (stage 8, ADR-0016); MCP OAuth and personal access tokens (SRV-MCP,
+# ADR-0015); the web UI (WEB-UI, stage 4) — until then the api serves two minimal pages (FR-AUTH-14).
+#
+# Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
+
+id: SRV-AUTH
+title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skeleton (db, api, reader-server)
+status: draft
+approved_by: null
+approved_at: null
+layer: server
+track: product
+adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
+
+paths:
+  - server/src/reader/auth/**
+  - server/src/reader/db/**
+  - server/src/reader/api/**
+  - server/src/reader/serve/**
+  - server/tests/auth/**
+  - spec/fixtures/SRV-AUTH/**
+
+normative:
+  - id: REF-AUTH-1
+    title: W3C Web Authentication Level 3 — §7.1 Registering a new credential, §7.2 Verifying an authentication assertion
+    url: https://www.w3.org/TR/webauthn-3/
+  - id: REF-AUTH-2
+    title: py_webauthn 3.0.1 — generate/verify registration and authentication (Duo Labs, BSD-3-Clause)
+    url: https://github.com/duo-labs/py_webauthn
+  - id: REF-AUTH-3
+    title: RFC 6265bis — cookie prefixes `__Host-`, SameSite (draft-ietf-httpbis-rfc6265bis)
+    url: https://datatracker.ietf.org/doc/draft-ietf-httpbis-rfc6265bis/
+  - id: REF-AUTH-4
+    title: OWASP Cheat Sheet — Session Management; Cross-Site Request Forgery Prevention (Origin verification)
+    url: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+  - id: REF-AUTH-5
+    title: spikes/passkey-localhost/RESULT.md — RP ID `localhost`, origin `https://localhost`, synced passkeys report sign count 0, gaps for the product
+    url: spikes/passkey-localhost/RESULT.md
+  - id: REF-AUTH-6
+    title: ADR-0006 — FastAPI, SQLAlchemy 2 async with asyncpg, Alembic
+    url: docs/adr/0006-backend-architecture.md
+
+# Policy values (not measurements; changing one is a spec change). Durations are server-side; clocks are the
+# database's `now()`.
+policy:
+  challenge_bytes: 32
+  challenge_ttl_s: 300
+  bootstrap_token_bytes: 32
+  bootstrap_token_ttl_s: 900
+  session_id_bytes: 32
+  session_absolute_ttl_s: 1209600      # 14 days; no sliding renewal
+  rate_limit:
+    per_client_failures: { max: 10, window_s: 60 }
+    global_failures: { max: 100, window_s: 3600 }
+  algorithms: [-7, -8, -257]            # ES256, EdDSA, RS256
+  cookies:
+    session: __Host-reader_session
+    ceremony: __Host-reader_ceremony
+
+# Tables of the first migration. `owner_id` is NOT NULL with a foreign key to users.id. System tables carry no
+# user-owned content and are listed here; INV-AUTH-8 checks every other table.
+tables:
+  users: { system: true, columns: "id uuid pk, handle text unique, role text (owner|learner), webauthn_user_id bytea(64) unique, display_name text, consent_evaluation bool, consent_tuning bool, created_at" }
+  webauthn_credentials: { owner_id: true, columns: "credential_id bytea pk, public_key bytea, sign_count bigint, transports text[], aaguid uuid, backed_up bool, created_at, last_used_at" }
+  sessions: { owner_id: true, columns: "id_sha256 bytea pk, created_at, expires_at, revoked_at" }
+  auth_challenges: { system: true, columns: "ceremony_sha256 bytea pk, kind text (register|authenticate|bootstrap|signup), challenge bytea, user_id uuid null, expires_at, consumed_at" }
+  bootstrap_tokens: { system: true, columns: "token_sha256 bytea pk, user_id uuid, expires_at, consumed_at" }
+  auth_failures: { system: true, columns: "id bigserial, client text, at timestamptz" }
+  invitations: { owner_id: true, columns: "id uuid pk, created_at (stub; stage 8)" }
+
+requirements:
+  - id: FR-AUTH-1
+    text: >-
+      `reader-server --role api --bind <ip:port>` loads the configuration through SRV-CONFIG's `load_config` from the
+      path in `READER_CONFIG`, reads the database password from `secret://file/run/secrets/db-password`, applies
+      Alembic migrations to head under a Postgres advisory lock, ensures a `users` row for every `users[]` entry of the
+      configuration (handle, role; existing rows keep their id and webauthn_user_id), and serves the app with Uvicorn.
+  - id: FR-AUTH-2
+    text: >-
+      `reader-server --role <role> --healthcheck` exits 0 only when `/run/secrets/db-password` exists, the database
+      answers `SELECT 1`, the schema is at the Alembic head and, for `api`, `GET /api/healthz` on the bound address
+      returns 200; otherwise it exits 1 and prints one line naming the failed check (no values). `--role worker` without
+      `--healthcheck` runs until SIGTERM and exits 0. `--role mcp` exits 2 with "mcp role arrives with SRV-MCP".
+  - id: FR-AUTH-3
+    text: >-
+      RP ID is the host of `instance.url` and the only accepted origin is `instance.url` without a trailing slash
+      (`https://localhost` for the example config). Registration options: `residentKey: required`,
+      `userVerification: required`, `attestation: none`, the algorithms of `policy.algorithms`, `excludeCredentials`
+      listing the user's credentials, `user.id` = the user's `webauthn_user_id` (64 random bytes, created once).
+      Authentication options: `userVerification: required`, empty `allowCredentials` (discoverable sign-in).
+  - id: FR-AUTH-4
+    text: >-
+      Bootstrap. `reader-server bootstrap-link` (run inside the api container by OPS-CLI's `reader bootstrap`) succeeds
+      only while the owner user (the `users[]` entry with role `owner`) has no credential: it stores the SHA-256 of a
+      fresh `policy.bootstrap_token_bytes` token valid for `bootstrap_token_ttl_s`, revokes earlier unconsumed tokens,
+      and writes `<instance.url>/api/auth/bootstrap#<token>` to stdout only. Otherwise it exits 1 with
+      "owner already has a passkey".
+  - id: FR-AUTH-5
+    text: >-
+      `POST /api/auth/bootstrap/options` with `{token}` returns registration options for the owner and sets the
+      ceremony cookie when the token is valid, unconsumed and unexpired; `POST /api/auth/bootstrap/verify` verifies the
+      registration against that ceremony's challenge, stores the credential, consumes the token and the challenge in
+      the same transaction, and starts a session (FR-AUTH-8). Any invalid token or verification answers 400 with a
+      fixed error code and counts as a failure (FR-AUTH-11).
+  - id: FR-AUTH-6
+    text: >-
+      `POST /api/auth/register/options` and `/register/verify` add a passkey to the signed-in user (session required;
+      401 otherwise), with the same checks as FR-AUTH-5 and the ceremony bound to that user.
+  - id: FR-AUTH-7
+    text: >-
+      `POST /api/auth/signin/options` returns authentication options and sets the ceremony cookie;
+      `POST /api/auth/signin/verify` looks up the credential by its raw id, verifies the assertion with py_webauthn
+      against the ceremony's challenge, the expected origin and RP ID, `require_user_verification=True` and the stored
+      public key, checks that `response.userHandle` equals the owner's `webauthn_user_id`, updates `sign_count`,
+      `last_used_at` and `backed_up`, and starts a session. An unknown credential, a failed check or a missing ceremony
+      answers 400 `signin_failed` (one code for all, no detail) and counts as a failure.
+  - id: FR-AUTH-8
+    text: >-
+      Starting a session creates a random `session_id_bytes` id, stores its SHA-256 with `expires_at = now() +
+      session_absolute_ttl_s`, revokes the session presented in the request (if any), and sets
+      `__Host-reader_session=<id>; Path=/; Secure; HttpOnly; SameSite=Lax; Max-Age=<ttl>` with no Domain.
+  - id: FR-AUTH-9
+    text: >-
+      `POST /api/auth/signout` revokes the current session and clears the cookie (`Max-Age=0`, same attributes); it
+      answers 204 with or without a session. `GET /api/me` answers 200 `{id, handle, role, display_name, consent:
+      {evaluation, tuning}}` for a valid session and 401 `{"error":"unauthenticated"}` otherwise.
+  - id: FR-AUTH-10
+    text: >-
+      A request is authenticated only by a session cookie whose SHA-256 matches a row that is not revoked and not
+      expired. Routes are declared as data with `auth: public | session`; `public` are exactly `/api/healthz`, the
+      bootstrap and sign-in ceremonies, the signup routes and the two pages of FR-AUTH-14.
+  - id: FR-AUTH-11
+    text: >-
+      Rate limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row keyed
+      by the client. The client is the peer address, or, when the peer is in the `front` subnet (Caddy), the last
+      `X-Forwarded-For` entry. When a client has `per_client_failures.max` failures within its window, or all clients
+      together `global_failures.max` within theirs, the `/options` and `/verify` routes of FR-AUTH-5..7 answer 429 with
+      `Retry-After` until the window passes. Successful ceremonies are not counted.
+  - id: FR-AUTH-12
+    text: >-
+      CSRF. Every non-GET `/api/*` request must carry `Origin` equal to the configured origin and `Content-Type:
+      application/json` (except signout, which has no body); otherwise 403 `{"error":"origin"}` before any handler
+      or database write.
+  - id: FR-AUTH-13
+    text: >-
+      Groundwork (ADR-0017, ADR-0018). `users.consent_evaluation` defaults to true for role owner and false otherwise;
+      `consent_tuning` defaults to false. Self-service sign-up routes `POST /api/auth/signup/{options,verify}` exist
+      behind the configuration key `sharing.signup` (default false); while false they answer 404 like unknown routes.
+      The `invitations` table exists; no route uses it in stage 1.
+  - id: FR-AUTH-14
+    text: >-
+      `GET /api/auth/bootstrap` and `GET /api/auth/signin` serve static HTML pages with one same-origin script
+      (`/api/auth/static/passkey.js`, no inline script, so a `script-src 'self'` CSP holds) that read the token from
+      the URL fragment, call the ceremonies with `PublicKeyCredential.parse*OptionsFromJSON` and `toJSON()`, and on
+      success navigate to `/`. WEB-UI replaces them in stage 4.
+
+invariants:
+  - id: INV-AUTH-1
+    text: >-
+      A challenge is used at most once: concurrent or repeated verifies of one ceremony yield at most one success
+      (consume is a single `UPDATE … WHERE consumed_at IS NULL AND expires_at > now() RETURNING`). An expired, consumed,
+      unknown or other-kind ceremony never verifies, and a ceremony created for one user never registers a credential
+      for another.
+  - id: INV-AUTH-2
+    text: >-
+      No session row is created and no session cookie is set except by a successful bootstrap, registration (signup)
+      or sign-in verification in the same request.
+  - id: INV-AUTH-3
+    text: >-
+      A response that sets the session cookie always sets `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, the
+      `__Host-` prefix and no `Domain`; the ceremony cookie has the same attributes and `Max-Age=challenge_ttl_s`.
+  - id: INV-AUTH-4
+    text: >-
+      Verification fails for every mutation of a valid recorded response in: origin, RP ID hash, challenge, the UV
+      flag cleared, the signature, the userHandle, and the credential id.
+  - id: INV-AUTH-5
+    text: >-
+      Session ids, ceremony ids and bootstrap tokens are stored only as SHA-256, and they never appear in any log
+      record, any error body or any exception message (canary test over captured logging, Uvicorn access logs and
+      responses). Challenges are public by design and stored raw.
+  - id: INV-AUTH-6
+    text: >-
+      A stored `sign_count` never decreases; an assertion whose counter is non-zero and not greater than a non-zero
+      stored counter fails (synced passkeys report 0 and pass, REF-AUTH-5).
+  - id: INV-AUTH-7
+    text: >-
+      A bootstrap token registers at most one credential, and no bootstrap succeeds once the owner has a credential.
+  - id: INV-AUTH-8
+    text: >-
+      Every table in the migrated schema except those marked `system: true` in this spec has a NOT NULL `owner_id`
+      column with a foreign key to `users.id` (checked against the live schema after `alembic upgrade head`).
+
+nfr: []
+
+vectors:
+  - id: VEC-AUTH-1
+    source: >-
+      Software authenticator in server/tests/auth/softauthn.py (ES256 key fixed in the fixture, `none` attestation,
+      flags UP|UV|BE|BS, sign count 0, the shape the spike recorded for Apple Passwords); generator committed, output
+      committed
+    file: spec/fixtures/SRV-AUTH/softauthn-es256.json
+  - id: VEC-AUTH-2
+    source: >-
+      py_webauthn 3.0.1 test vectors (BSD-3-Clause, copied with attribution): a `none`-attestation registration and an
+      authentication response with their expected challenge, origin and RP ID
+    file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json
+
+# Cross-spec needs (resolve before approval):
+# - OPS-DEPLOY: api and worker need READER_CONFIG and a read-only mount of reader.yaml (it holds secret references
+#   only, ADR-0011) — not in the OPS-DEPLOY branch today. The database user and name are the image defaults
+#   (`postgres`/`postgres`); a dedicated `reader` role is a later hardening.
+# - OPS-CLI: `reader bootstrap` runs `docker compose exec api reader-server bootstrap-link` and opens the link in the
+#   default browser without printing it, so the token stays out of terminals and agent context.
+# Dependencies added to server/pyproject.toml with Green: fastapi, uvicorn, sqlalchemy[asyncio], asyncpg, alembic,
+# webauthn==3.0.1; test-only: testcontainers Postgres (already in dev), httpx.
