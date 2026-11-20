@@ -87,6 +87,26 @@ Commands:
 
 Native was about 17 times faster on page 128 (344 s per formula from B against 19.7 s). The runs differ in CPU count (18 against 4), OCR setting and environment. The share of each factor was not measured, and raising the Docker VM's CPU count was not tried.
 
+### M1 (ADR-0021): Docker at 4 VM CPUs, `do_ocr=False`, formula model on
+
+`bash spikes/ingest-docling/run.sh <pdf> m1 128,130,132,133,141` → `results/m1.json` (2026-11-20):
+
+| Page | Formulas decoded | Seconds |
+| --- | --- | --- |
+| 128 | 2 | 643.4 |
+| 130 | 1 | 214.7 |
+| 132 | 1 | 218.4 |
+| 133 | 1 | 402.6 |
+| 141 | 1 | 225.4 |
+| **Total** | **6** (0 placeholders) | **1,704.5 s → 284.1 s per formula** |
+
+- Model load: 3.3 s (separate from the per-page times).
+- Peak memory (sampled): 1,852 MiB.
+- **Against ADR-0021's bound of ≤ 51 s per formula, this is 5.6 times over: M1 at 4 CPUs fails.**
+- Turning OCR off did not close the gap (B, with OCR on, was ≈ 344 s per formula including model load), so the difference from native (19.7 s) comes mainly from the environment and CPU count.
+- Light containers from other spikes ran on the same VM for part of the run, so these are upper bounds.
+- Per ADR-0021, the next step is a second M1 run after the owner raises Docker Desktop's CPU count, before native is chosen.
+
 ## OCR (10 pages rendered as images, Russian + English)
 
 **Method:** each page is rendered at 200 dpi with no text layer and converted with full-page EasyOCR (`ru`, `en`) in Docker.

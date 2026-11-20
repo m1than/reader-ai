@@ -1,0 +1,44 @@
+{
+  "exit_code": 0,
+  "peak_mem_mib": 1852.42,
+  "docker_vm_cpus": 4,
+  "mode": "m1",
+  "do_ocr": false,
+  "formula_enrichment": true,
+  "model_load_s": 3.3,
+  "seconds_total": 1704.5,
+  "formulas_decoded": 6,
+  "seconds_per_formula": 284.1,
+  "pages": [
+    {
+      "page": 128,
+      "seconds": 643.4,
+      "formulas_decoded": 2,
+      "not_decoded": 0
+    },
+    {
+      "page": 130,
+      "seconds": 214.7,
+      "formulas_decoded": 1,
+      "not_decoded": 0
+    },
+    {
+      "page": 132,
+      "seconds": 218.4,
+      "formulas_decoded": 1,
+      "not_decoded": 0
+    },
+    {
+      "page": 133,
+      "seconds": 402.6,
+      "formulas_decoded": 1,
+      "not_decoded": 0
+    },
+    {
+      "page": 141,
+      "seconds": 225.4,
+      "formulas_decoded": 1,
+      "not_decoded": 0
+    }
+  ]
+}
