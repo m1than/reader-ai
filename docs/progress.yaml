@@ -17,8 +17,9 @@ owner_review:            # stage exits waiting for the owner's live check and `i
 
 tasks:
   # Stage 0 — groundwork and spikes
-  - { id: S0.owner.adr-status, stage: 0, kind: owner, status: blocked, needs: [],
-      reason: "bootstrap-mac.sh 2026-11-20: ADR-0001…0019 still status: proposed",
+  - { id: S0.owner.adr-status, stage: 0, kind: owner, status: done, needs: [],
+      note: "owner 2026-11-20: treat as resolved and proceed; work follows ADR-0001…0019 as if accepted.
+        The status flip in docs/adr/*.md is still the owner's commit (H3); bootstrap-mac.sh keeps reporting it until then.",
       ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it" }
   - { id: S0.owner.machine, stage: 0, kind: owner, status: blocked, needs: [],
       reason: "bootstrap-mac.sh 2026-11-20 in the agent session, 8 FAIL. Fixed with the owner's consent: uv 0.13.7 and Python 3.13.18 installed, repo-local git identity set. Still open:
