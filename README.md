@@ -58,18 +58,22 @@ The PDF is never committed.
 
 The build is run by an autonomous agent (ADR-0019) on the owner's Mac. Rules: [AGENTS.md](AGENTS.md) (shared) and [CLAUDE.md](CLAUDE.md) (Claude Code). Run state: [docs/progress.yaml](docs/progress.yaml).
 
-Owner, once:
-
-1. Merge the PR that adds ADR-0019, then set `status: accepted` in ADR-0001 … 0019 and merge that.
-2. Merge `tools/agent/user-settings.json` into `~/.claude/settings.json`. Check the result with `claude auto-mode config` and `claude auto-mode critique`.
-3. Send `/start` to the Telegram bot, then run `node tools/agent/notify.mjs link`.
-4. Run `bash tools/agent/bootstrap-mac.sh` (`--install` adds missing CLI tools) until every check passes.
-
-Start the agent from the repository root:
+Owner, one command (first time it clones; afterwards just the last part):
 
 ```bash
-caffeinate -dimsu claude --permission-mode auto "$(cat tools/agent/kickoff.md)"
+mkdir -p ~/Developer && cd ~/Developer && (test -d reader-ai || git clone https://github.com/m1than/reader-ai.git) && cd reader-ai && bash tools/agent/start.sh
 ```
+
+`tools/agent/start.sh` is idempotent and runs these steps in order:
+1. installs missing CLI tools;
+2. pulls `main`;
+3. asks before accepting ADR-0001 … 0019, an owner gate that needs your "y";
+4. merges the auto mode rules into `~/.claude/settings.json`, keeping a backup;
+5. links Telegram;
+6. runs `tools/agent/bootstrap-mac.sh --install`;
+7. starts `caffeinate -dimsu claude --permission-mode auto` with `tools/agent/kickoff.md`.
+
+Run it again after any stop: the agent resumes from `docs/progress.yaml`.
 
 Tooling:
 

@@ -14,6 +14,7 @@ node tools/trace/guard-tests.mjs --base origin/main  # P7: tests change only wit
 | `trace/check.mjs` | Rules T1–T8, CI job `trace` |
 | `trace/guard-tests.mjs` | Rule P7 on pull requests; escape hatch: commit trailer `Spec-Neutral: <reason>` |
 | `hooks/pre-write.mjs` | Claude Code PreToolUse hook: H1–H3, wired in `.claude/settings.json` |
+| `agent/start.sh` | The owner's one command: tools, `main`, ADR gate (asks), auto mode rules, Telegram link, readiness checks, then starts the agent; idempotent |
 | `agent/kickoff.md` | The prompt the owner starts the autonomous run with (ADR-0019) |
 | `agent/bootstrap-mac.sh` | Readiness checks of the owner's Mac; `--install` adds missing CLI tools with Homebrew; never prints secrets |
 | `agent/notify.mjs` | Telegram messages to the owner; Stop and Notification hook; `link` stores the chat id |
