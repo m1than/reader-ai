@@ -12,15 +12,29 @@ budget:
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
+  merge_gate: "2026-11-20: a Claude Code PreToolUse hook on the owner's machine forbids `gh pr merge` for the agent,
+    contrary to AGENTS.md step 6. Until the owner removes it or changes AGENTS.md, every PR waits for the owner's merge."
 
 tasks:
   # Stage 0 — groundwork and spikes
-  - { id: S0.owner.adr-status, stage: 0, kind: owner, status: todo, needs: [],
+  - { id: S0.owner.adr-status, stage: 0, kind: owner, status: done, needs: [],
+      note: "owner 2026-11-20: treat as resolved and proceed; work follows ADR-0001…0019 as if accepted.
+        The status flip in docs/adr/*.md is still the owner's commit (H3); bootstrap-mac.sh keeps reporting it until then.",
       ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it" }
-  - { id: S0.owner.machine, stage: 0, kind: owner, status: in_progress, needs: [],
-      note: "CLAUDE_CODE_OAUTH_TOKEN exported and Telegram token file in place (2026-11-20); still: bootstrap-mac.sh green, auto mode rules, Telegram link" }
-  - { id: S0.skeleton, stage: 0, kind: setup, status: todo, needs: [],
-      what: "server/pyproject.toml (uv, ruff, mypy strict, pytest, anyio, hypothesis, testcontainers), web/package.json (Vite, React 19, Vitest, Storybook 10, Playwright), e2e/live/lib.sh" }
+  - { id: S0.owner.machine, stage: 0, kind: owner, status: blocked, needs: [],
+      reason: "bootstrap-mac.sh 2026-11-20 in the agent session, 8 FAIL. Fixed with the owner's consent: uv 0.13.7 and Python 3.13.18 installed, repo-local git identity set. Still open:
+        no access to m1than/ui-builder-lib-with-agents; CLAUDE_CODE_OAUTH_TOKEN not set in the agent's shell;
+        Telegram token file missing at ~/Developer/.token_tg_bot (or READER_TG_TOKEN_FILE); Telegram chat not linked;
+        no autoMode key in ~/.claude/settings.json; ADRs not accepted (S0.owner.adr-status).
+        Telegram notifications cannot be sent until the token file and the chat link exist.",
+      ask: "gh auth refresh -s repo (library access);
+        export CLAUDE_CODE_OAUTH_TOKEN where Claude Code starts; put the bot token file in place (mode 600);
+        send /start to the bot, then node tools/agent/notify.mjs link; merge tools/agent/user-settings.json into ~/.claude/settings.json;
+        rerun bash tools/agent/bootstrap-mac.sh" }
+  - { id: S0.skeleton, stage: 0, kind: setup, status: done, needs: [], pr: "https://github.com/m1than/reader-ai/pull/4",
+      what: "server/pyproject.toml (uv, ruff, mypy strict, pytest, anyio, hypothesis, testcontainers), web/package.json (Vite, React 19, Vitest, Storybook 10, Playwright), e2e/live/lib.sh",
+      note: "server is `package = false` until OPS-CLI/OPS-DEPLOY claim server/src/reader and add the entry points;
+        CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
   - { id: S0.spike.passkey-localhost, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }

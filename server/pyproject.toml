@@ -1,0 +1,45 @@
+[project]
+name = "reader"
+version = "0.0.0"
+description = "reader-ai server: api, worker, mcp and the host CLI `reader`"
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+# Entry points `reader` (host CLI) and `reader-server --role api|worker|mcp` are added with the
+# specs that claim server/src/reader (OPS-CLI, OPS-DEPLOY). Until then the project is not built.
+
+[dependency-groups]
+dev = [
+  "anyio>=4.16",
+  "hypothesis>=6.170",
+  "mypy>=2.4",
+  "pytest>=9.2",
+  "ruff>=0.17",
+  "testcontainers>=4.15",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 110
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PT", "TID"]
+ignore = []
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+mypy_path = "src"
+warn_unreachable = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["--strict-markers", "--strict-config", "-ra"]
