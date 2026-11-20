@@ -208,13 +208,20 @@ tasks:
         a namespace package. Depends on SRV-OBS and SRV-EVENTS for redaction in the shared logger and event serializer.
         Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved inside containers;
         ADR-0017 cross-user reference exposure is SRV-AGENT's; no spaces in keychain/1Password names." }
-  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
-      note: "Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
-        watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
-        tmpfs /run/secrets/<secret_file_name(ref)> via `docker exec -i -u <uid>` over stdin (no Compose secrets). The DB password is
-        generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 Compose-secret wording and
-        secret_env_var are obsolete under ADR-0026 and need a paired spec+tests change before OPS-CLI relies on them.
-        Registers its hostfile/keychain/op resolvers through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7)." }
+  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S1.SRV-CONFIG, S1.OPS-DEPLOY],
+      note: "Spec drafted (spec/modules/OPS-CLI.yaml, branch 1/S1.OPS-CLI), awaits deep-reviewer. Delivery per ADR-0026 option A:
+        a detached watcher started by `reader up` (docker events start → atomic `docker exec -i -u <uid>` over stdin into tmpfs
+        /run/secrets), `reader watcher stop|status`, fail closed; DB password generated once into Keychain reader-ai/postgres,
+        never while pgdata exists; override in memory on stdin; doctor, secrets set, trust/untrust (owner-run), backup/restore.
+        Does not use SRV-CONFIG's secret_env_var. VEC-CLI-2 is OPS-DEPLOY's VEC-DEPLOY-3 fixture, so OPS-CLI's Red needs
+        OPS-DEPLOY merged first. Registers hostfile/keychain/op resolvers through host_registry(extra) (FR-CONFIG-6/7)." }
+  - { id: S1.SRV-CONFIG-adr26, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
+      what: "Paired SRV-CONFIG change after ADR-0026 (H2: spec, fixtures, tests and code in one commit, then a deep-reviewer pass):
+        FR-CONFIG-14 drops the Compose-secret wording (`<name>: { environment: <VAR> }`, 'Compose mounts the value') and says
+        OPS-CLI writes /run/secrets/<name> over docker exec (ADR-0026); remove secret_env_var from FR-CONFIG-14 and INV-CONFIG-6;
+        VEC-CONFIG-5 (spec/fixtures/SRV-CONFIG/secret-names.yaml) drops the env-var column; REF-CONFIG-7 (Compose secrets docs)
+        replaced by ADR-0026; tests server/tests/config/test_names.py and test_secret_ref.py drop secret_env_var cases;
+        code: remove secret_env_var from server/src/reader/config/refs.py and __init__.py exports. OPS-CLI does not depend on it." }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container],
       note: "compose.yaml must not hard-code provider secrets: OPS-CLI adds a generated, in-memory secrets section with

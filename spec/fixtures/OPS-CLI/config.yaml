@@ -1,0 +1,19 @@
+# VEC-CLI-1: a reader.yaml (SRV-CONFIG field table) with two users and keychain, op and hostfile references.
+# References only; no secret values. The hostfile path is a placeholder the tests replace with a temporary file.
+version: 1
+instance:
+  url: https://localhost
+  data_dir: ./data
+users:
+  - handle: ivan
+    role: owner
+    providers:
+      - kind: claude-subscription
+        token: secret://keychain/reader-ai/claude-oauth-token
+  - handle: anna
+    role: learner
+    providers:
+      - kind: claude-subscription
+        token: secret://op/Private/anna-claude/token
+      - kind: api-key
+        token: secret://hostfile/tmp/reader-ai-test/anna-api-key
