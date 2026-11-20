@@ -1,9 +1,9 @@
-# Spike: passkey-localhost — RESULT (draft: browser part pending the owner)
+# Spike: passkey-localhost — RESULT
 
 **Question (docs/roadmap.md 0.3):** Do passkeys register and sign in on `https://localhost` behind Caddy's internal CA?
 **Pass criterion:** Safari and Chrome on the owner's Mac both register and authenticate.
 **Fallback if it fails:** an `mkcert` certificate for `reader.test` in `/etc/hosts`.
-**Verdict:** pending. The browser-free part passes (12 of 12); the browser part needs the owner (about 5 minutes).
+**Verdict: PASS, with one substitution.** Safari 27.2 and a Chromium browser both registered and signed in on `https://localhost` behind Caddy's internal CA, once the owner trusted that CA. The Chromium browser was **Dia** (user agent `Chrome/157.0.0.0`), not Google Chrome: Google Chrome would not launch on the owner's Mac (`open -a "Google Chrome"`: "Unable to find application"; `/Applications/Google Chrome.app` exists, but Spotlight reports no bundle identifier for it, so Launch Services does not resolve it by name; not investigated further). The `mkcert` fallback is not needed. Host name for stage 1: `localhost`.
 
 ## What is here
 
@@ -57,12 +57,18 @@ From the repository root:
    ```
 6. **Fill in the table below**, or paste the log output to the agent.
 
-### Results (owner to fill)
+### Results (owner's run, 2026-11-20)
 
-| Browser (version) | Register | Sign in | Authenticator (iCloud Keychain / Chrome profile / other) | Errors |
+The owner ran steps 1–4 through Claude Code's `!` prompt. The table comes from `data/spikes/passkey-localhost/log.jsonl` (gitignored): the events with a browser user agent, in order. The certificate-warning check and the authenticator dialog were not reported in words. Both are inferred: the page loaded without a TLS failure in either browser (the requests reached the app), and the credential flags are shown below.
+
+| Browser (user agent) | Register | Sign in | Credential flags (from the verified response) | Errors |
 | --- | --- | --- | --- | --- |
-| Safari |  |  |  |  |
-| Chrome |  |  |  |  |
+| Safari (`Version/27.2 Safari/605.1.15`) | `register.ok` | `login.ok` | `MULTI_DEVICE`, backed up, UV true | none |
+| Dia, Chromium (`Chrome/157.0.0.0 Safari/537.36`) | `register.ok` | `login.ok` | `MULTI_DEVICE`, backed up, UV true | none |
+
+- Both credentials are multi-device and backed up, which points to a synced passkey provider (iCloud Keychain or the browser's own sync). Which provider each browser offered was not recorded.
+- User verification was true on every registration and sign-in, as required.
+- Not tested: Google Chrome itself (see the verdict), and Firefox.
 
 ## Teardown
 
@@ -77,3 +83,5 @@ The first command removes the stack and Caddy's CA volume. The second removes th
 
 - `down -v` regenerates the CA, so every new CA needs trusting again. `reader up` should keep `caddy_data` (ADR-0012 already backs it up) and offer the trust step once.
 - The origin must match exactly: `https://localhost` on 443, or `https://localhost:<port>` otherwise. The app reads it from `READER_ORIGIN`.
+- The trust step is a one-time owner action per CA. The browsers needed nothing beyond the macOS login-keychain trust.
+- `log.jsonl` events without a user agent (curl) break a naive `jq` `capture` on `.ua`. Use `(.ua // "")`.
