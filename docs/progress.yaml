@@ -304,16 +304,28 @@ tasks:
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
-      note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: in_progress, needs: [V.SRV-LESSON-min, V.KERNEL-min],
-      branch: V/V.WEB-min,
-      note: "spec drafted, awaits deep-reviewer. Three specs: WEB-UI (shell, vendored library tarball from tag v0.1.0
-        built by web/scripts/vendor-ui.mjs, Calm tokens, routes, API client, sign-in via SRV-AUTH's page, lesson list),
-        WEB-NOTEBOOK (cells by kind, citations, G2 open cells, own typed relay client), WEB-RENDER (sanitised
-        markdown → React, KaTeX, Shiki JS engine, HTML/SVG in a sandbox=allow-scripts frame page with its own CSP).
-        Cross-spec: OPS-DEPLOY Caddyfile CSP additions and /sandbox/* CSP, SPA dist into caddy plus SPA fallback;
-        SRV-LESSON list/get shape. Declared deviations from proposed ADR-0013: hand-written API client;
-        no @jupyterlab/services (widgets deferred)." }
+      note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022). Item from the WEB review for SRV-KERNEL: on
+        kernel_restarted (iopub status restarting) the relay should free its in-flight execute slot and drop its queue,
+        since no execute_reply will come; otherwise the next execute waits for the 60 s timeout." }
+  - { id: V.OPS-DEPLOY-web, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-DEPLOY],
+      note: "Paired OPS-DEPLOY change for V.WEB-min (WEB-UI header): Caddyfile app CSP additions (img-src 'self' blob:,
+        connect-src 'self' wss://localhost, frame-src 'none', object-src 'none', base-uri 'none', form-action 'self'; no
+        data:); the built web/dist served at /srv/spa (derived caddy image or OPS-CLI bind, OPS-DEPLOY decides); SPA
+        fallback try_files {path} /index.html outside /api/* and /mcp*. No /sandbox/* (frame deferred to 4b)." }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: in_progress,
+      needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-DEPLOY-web], branch: V/V.WEB-min,
+      review: "deep-reviewer (Fable), single round (outside the complex areas): changes, 9 blockers (B1–B3 the sandboxed
+        frame, incl. a one-click session takeover via the frame page opened top-level, reproduced in Chromium; B4
+        sanitiser order and schema; B5 reconnect and notice table; B6 gradient check; B7 story coverage; B8 bundle
+        budget; B9 contrast fixture as recipes); applied per coordinator decisions, no second round",
+      note: "specs revised after the review, folding in the SRV-LESSON API (list with course and latest_sha256; notebook
+        only from the immutable revision route; span citations). Three specs: WEB-UI (shell, vendored library tarball
+        from tag v0.1.0 via web/scripts/vendor-ui.mjs with tag→commit check, Calm tokens, routes, API client, sign-in
+        via SRV-AUTH's page, lesson list by course), WEB-NOTEBOOK (cells by kind, span/URL citations, G2 open cells,
+        own typed relay client with one reconnect procedure and the full notice/close table), WEB-RENDER (sanitise →
+        KaTeX → Shiki as React, no rehype-raw, no markdown images; HTML as text, SVG as blob: img; the sandboxed frame
+        deferred to 4b with the review's findings). Declared deviations from proposed ADR-0013: hand-written API
+        client; no @jupyterlab/services (widgets deferred). Record the Chromium [browser] run in the PR." }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
         spends credit, ledger" }
