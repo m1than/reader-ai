@@ -30,7 +30,7 @@ External facts:
 | --- | --- | --- |
 | **The bus** | The event log (ADR-0006) is the bus. Pipeline stages are consumers: `stage.completed` enqueues the next stage, so no stage calls another directly. Every agent invocation is a job with an input event and an output event | SRV-EVENTS, SRV-PIPELINE |
 | **Run records** | One `agent_runs` row per run: parent run, task class, prompt file hash, model, provider, input references (hashes and span ids, not raw text), output reference, tokens, cost, latency, status | SRV-AGENT |
-| **Traces** | reader-ai opens a parent span per stage, job and tutor turn, with `gen_ai.*` and `reader.*` attributes kept in one mapping module so a convention change is one edit. The Agent SDK's own OpenTelemetry export (traces beta, metrics, log events) nests the agent's model, tool and subagent spans under that parent through `TRACEPARENT`. An OTel Collector in Compose routes all spans to the trace backend. Content capture is opt-in and always off for `personal-use` material. Details and alternatives: [docs/research/agent-tracing-2026-11.md](../research/agent-tracing-2026-11.md) | SRV-AGENT, SRV-OBS |
+| **Traces** | reader-ai opens a parent span per stage, job and tutor turn, with `gen_ai.*` and `reader.*` attributes kept in one mapping module so a convention change is one edit. The Agent SDK's own OpenTelemetry export (traces beta, metrics, log events) nests the agent's model, tool and subagent spans under that parent through `TRACEPARENT`. Rotel, an OpenTelemetry collector written in Rust (Apache-2.0), runs in Compose. It buffers all spans and routes them to the trace backend. Content capture is opt-in and always off for `personal-use` material. Details and alternatives: [docs/research/agent-tracing-2026-11.md](../research/agent-tracing-2026-11.md) | SRV-AGENT, SRV-OBS |
 | **Quality signals** | Evaluation events attached to runs: fact-check findings per lesson, lab failures, blocking review findings, G2 return reasons (owner labels from a fixed list), tutor answer feedback (useful / wrong / unclear), recall accuracy on cards the tutor explained, learner edits of generated cells | SRV-PIPELINE, SRV-TUTOR, SRV-RECALL |
 | **Stage metrics** | Per stage and task class: pass rate on first attempt, loops back to draft, cost and latency percentiles, owner return rate at G2 | SRV-OBS |
 | **Model per task as data** | Task → provider + model in `reader.yaml` (ADR-0005), so a local model is a config change once its adapter exists | SRV-AGENT |
@@ -65,7 +65,8 @@ The owner asked whether ready tools exist or whether reader-ai should extend Ope
 
 - **Ready, and used as is:**
   - the Agent SDK's native OTel export;
-  - the OTel SDK and Collector;
+  - the OTel SDK;
+  - Rotel as the collector;
   - a trace backend.
 - **Ours, and small:**
   - parent spans and `reader.*` attributes;
@@ -79,7 +80,27 @@ Backend options for the owner's Mac:
 - **Langfuse** (MIT core) is rejected for v1: 6 services with production minimums of 9 CPU and 21.5 GiB next to reader-ai.
 - **Writing our own backend** is rejected: it duplicates whole products.
 
-The trace backend moves from v2 into v1 as an optional Compose profile, chosen by a one-day spike (MLflow vs Phoenix) in stage 0.
+The trace backend moves from v2 into v1 as an optional Compose profile, chosen by a one-day spike (MLflow vs Phoenix) in stage 0 (owner, 2026-11-20).
+
+## The performance path in Rust (owner, 2026-11-20)
+
+The telemetry buffering and routing path is Rust: Rotel replaces the Go OpenTelemetry Collector.
+
+| Number | Value | Source |
+| --- | --- | --- |
+| Python OTel SDK throughput, in process, 12 attributes per span, 2 vCPU | 36,919 spans/s | Measured 2026-11-20 (200,000 spans, BatchSpanProcessor) |
+| reader-ai v1 telemetry load (hypothesis) | ≈ 3 spans/s even when a whole 23-lesson book compiles in one hour (≈ 11,000 spans) | 23 lessons × 7 stages × ≈ 70 spans |
+| Rotel vs OTel Collector, Kafka → ClickHouse benchmark | 462,000 vs 137,000 spans/s per core | ClickHouse/Streamfold benchmark |
+
+At v1 load neither choice is the bottleneck: the headroom is about 10,000× in Python alone. Rust is chosen for what it gives later:
+- the v2 SaaS (ADR-0017) multiplies the load by the number of users;
+- Rotel takes custom processors written in Rust (and Python) for redaction, sampling and enrichment.
+
+Own Rust code starts as the first such processor, with its own spec. Tooling then adds the Rust layer patterns (`telemetry/**`, tests in `telemetry/tests/`).
+
+Two rules hold whatever carries the telemetry:
+1. **The ledger and `agent_runs` never come from telemetry.** They are written by the worker in the job's own database transaction, from the Agent SDK's result message. Telemetry is lossy by design: the CLI drops spans silently when an export fails.
+2. **The collector is replaceable.** Rotel and the Go OTel Collector both speak OTLP, so falling back is a Compose change. Rotel's Python embedding is still a pre-release, so reader-ai runs Rotel as a standalone container, not embedded.
 
 ## Options
 

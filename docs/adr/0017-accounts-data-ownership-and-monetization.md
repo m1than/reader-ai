@@ -3,7 +3,7 @@ id: ADR-0017
 title: Accounts, data ownership with an always-available export, and freemium with paid managed transformation
 status: proposed
 date: 2026-11-20
-verified_by: "SRV-EXPORT tests: export → import into an empty instance reproduces the user's knowledge base; export works on every tier and for read-only accounts. SRV-AGENT ledger tags every run with transformation kind and funding. Pricing check: plans.yaml prices ≥ measured cost × 1.7 for every transformation kind"
+verified_by: "SRV-EXPORT tests: export → import into an empty instance reproduces the user's knowledge base; export works on every tier and for read-only accounts. SRV-AGENT ledger tags every run with transformation kind and funding. Pricing check: plans.yaml prices ≥ measured cost ÷ 0.3 (70% gross margin) for every transformation kind"
 revisit_when: "Before open registration and billing go live with the VPS (v2); when measured cost per page moves by more than 20%; if a jurisdiction the product sells into requires a different export format"
 ---
 
@@ -14,7 +14,7 @@ Owner decisions, 2026-11-20:
 - Users register so that they can always download the knowledge base they built.
 - Revenue comes from the **transformation**: the work in which a person and the AI together turn material into knowledge (compiled lessons, verified findings, sector structure, tutoring).
 - **Freemium:** a free user connects their own Claude or Codex agent, and that agent effectively runs the reader-ai pipeline.
-- **Pro and Max:** reader-ai runs the transformation on its own models. Each plan includes token credits sized to an approximate amount of material, priced so that reader-ai keeps a 70% spread on top of model cost. Paid plans also get custom models, local models and the rest of the model zoo (ADR-0018).
+- **Pro and Max:** reader-ai runs the transformation on its own models. Each plan includes token credits sized to an approximate amount of material, priced for a 70% gross margin over model cost (owner, 2026-11-20). Paid plans also get custom models, local models and the rest of the model zoo (ADR-0018).
 - v1 lays the foundation; open registration, plans and payment ship in v2 together with the VPS.
 - Export is an open archive that opens without reader-ai.
 
@@ -40,6 +40,7 @@ Constraints:
 | Credits | — | Monthly allowance sized in pages of material plus tutor sessions | Larger allowance, priority queue |
 | Models | Whatever the user's agent runs | Claude models | Claude models, plus custom and local models, routing and per-agent control (v2 zoo, ADR-0018) |
 | Export | Always | Always | Always |
+| Pages shared with people outside the platform | Read-only for the recipient | Read-only for the recipient | Read-only for the recipient |
 | Platform limits (our infrastructure cost) | Quotas on ingestion pages, sandbox minutes and storage | Higher | Highest |
 
 Free still costs reader-ai infrastructure: ingestion CPU, sandbox minutes, storage and the verification runs. Those are bounded by quotas, not by credits.
@@ -49,18 +50,18 @@ Free still costs reader-ai infrastructure: ingestion CPU, sandbox minutes, stora
 Prices are data in `plans.yaml`. The rule that every price must satisfy:
 
 ```
-price(transformation) ≥ model_cost(transformation) × (1 + spread),   spread = 0.70
+price(transformation) ≥ model_cost(transformation) ÷ (1 − margin),   margin = 0.70
 ```
 
-`model_cost` comes from the ledger: the measured average cost of that transformation kind, compile per page of material or tutor per session. CI checks every plan against the latest measured costs. A price that falls below the rule fails the check.
+This is a 70% gross margin of revenue: price = cost × 3.33, so 30% of every paid credit covers the model and 70% stays with reader-ai (owner, 2026-11-20). `model_cost` comes from the ledger: the measured average cost of that transformation kind, compile per page of material or tutor per session. CI checks every plan against the latest measured costs. A price that falls below the rule fails the check.
 
-**Interpretation to confirm.** "A 70% spread on top of cost" is read as a markup: price = cost × 1.7, which is a gross margin of 41% of revenue. If the owner means a 70% gross margin, then price = cost ÷ 0.3, which is cost × 3.33.
+| Example (hypothesis until `compile-cost` measures it) | Model cost | Price at 70% margin |
+| --- | --- | --- |
+| One compiled lesson at the pilot ceiling | $4.35 | $14.50 |
+| Per page of material (≈ 39 pages per lesson) | ≈ $0.11 | ≈ $0.37 |
+| The whole Bashir book (890 pages, 23 lessons) | ≤ $100 | ≤ $333 |
 
-| Example (hypothesis until `compile-cost` measures it) | Model cost | Price at markup 1.7 | Price at margin 70% |
-| --- | --- | --- | --- |
-| One compiled lesson at the pilot ceiling | $4.35 | $7.40 | $14.50 |
-| Per page of material (≈ 39 pages per lesson) | ≈ $0.11 | ≈ $0.19 | ≈ $0.37 |
-| The whole Bashir book (890 pages, 23 lessons) | ≤ $100 | ≤ $170 | ≤ $333 |
+Platform costs that do not scale with model use (hosting, sandbox, storage, payment fees) come out of the 70%. Their real share is known after the VPS capacity numbers (stage 9).
 
 Credits are denominated in what the user understands, pages of material and tutor sessions, not in tokens. Tokens stay an internal unit in the ledger.
 
@@ -109,7 +110,6 @@ Invariant: importing an export into an empty instance reproduces the user's know
 
 ## Open questions
 
-1. Spread: markup (price = cost × 1.7) or margin (price = cost ÷ 0.3)? See the table above.
-2. Free-tier quotas: pages ingested per month, sandbox minutes, storage. Proposed: set them from stage 9 capacity numbers.
-3. Plan allowances and prices for Pro and Max, once `compile-cost` and stage 5 have measured real costs.
-4. Seller entity and payment provider (merchant of record or direct payments), which depends on where the product sells.
+1. Free-tier quotas: pages ingested per month, sandbox minutes, storage. Proposed: set them from stage 9 capacity numbers.
+2. Plan allowances and prices for Pro and Max, once `compile-cost` and stage 5 have measured real costs.
+3. Seller entity and payment provider (merchant of record or direct payments), which depends on where the product sells.

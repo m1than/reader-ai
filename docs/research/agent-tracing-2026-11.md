@@ -69,7 +69,15 @@ A full trace backend (storage, query, UI, scoring, datasets) is the whole produc
 2. **CLI environment per run**: exporter endpoint, `OTEL_RESOURCE_ATTRIBUTES` with `enduser.id` and course/lesson, and content-capture flags off for `personal-use` material.
 3. **A span processor** that writes the run summary into `agent_runs`, our data of record for the ledger, export and datasets, so reader-ai never depends on a tracing vendor for billing or tuning data.
 4. **Quality signals** written both as our rows and as OTel events or scores on the trace, so any backend shows them.
-5. **An OTel Collector** in Compose as the router: our spans and the CLI's spans go to the backend of choice. A backend change is collector config.
+5. **A collector** in Compose as the router: our spans and the CLI's spans go to the backend of choice. A backend change is collector config. The collector is Rotel (Finding 6).
+
+## Finding 6: load, and where Rust fits
+
+- **Measured 2026-11-20:** the Python OTel SDK with a BatchSpanProcessor and an in-memory exporter recorded 200,000 spans with 12 attributes each in 5.42 s on 2 vCPU, which is 36,919 spans/s.
+- **Expected v1 load:** ≈ 11,000 spans for a whole 23-lesson book (23 × 7 stages × ≈ 70 spans). Even if that compile ran in one hour, it would be ≈ 3 spans/s, about 10,000× below the measured ceiling.
+- **Rotel**, an Apache-2.0 OpenTelemetry collector in Rust, measured 462,000 spans/s per core against 137,000 for the Go OTel Collector in the ClickHouse/Streamfold benchmark. It has OTLP, ClickHouse, Kafka and other exporters, plus processor SDKs in Rust and Python. Its embedded Python package is a pre-release.
+
+Decision (owner, 2026-11-20): Rotel replaces the Go collector in v1, standalone in Compose. Own Rust code starts with the first custom processor. The data of record (`agent_runs`, ledger) stays in the job's database transaction, because telemetry can be dropped.
 
 ## Options
 

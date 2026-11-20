@@ -19,7 +19,8 @@ Users own what they build: the whole knowledge base can be downloaded at any tim
 
 Plans (ADR-0017, v2):
 - **Free:** the user's own Claude Code or Codex agent runs the pipeline over MCP.
-- **Pro and Max:** reader-ai runs the transformation on its own models, with credits sized in pages of material and a 70% spread over model cost.
+- **Pro and Max:** reader-ai runs the transformation on its own models, with credits sized in pages of material and a 70% gross margin over model cost.
+- Pages shared by link with people who were not invited and have no plan or provider are read-only.
 
 | ADR | Decision |
 | --- | --- |

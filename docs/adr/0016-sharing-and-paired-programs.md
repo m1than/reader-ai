@@ -33,6 +33,8 @@ Constraints:
 
 **Own materials, own provider.** Every invited person connects their own materials and their own provider (ADR-0005). Every agent action (tutor, lab hints, compiling their own materials) runs on the credentials of the person it acts for. A person with no provider connected is a **viewer** whatever role the invitation carried: they can read and follow, but no agent runs for them. Connecting a provider upgrades them to the invited role.
 
+**Shared pages are read-only by default (owner, 2026-11-20).** A page shared from the platform by link reaches a person who was not invited, has no plan of their own and has connected no provider. That person is a viewer: they read the page, and nothing runs for them (no tutor, no labs, no compile). Getting more requires an invitation plus either a purchase or a connected provider.
+
 **Mentors follow stages.** A mentor sees each learner's position in the plan, gate status of the learner's own courses, recall accuracy (if the learner opts in) and missed days.
 
 **Paired program** = a cohort on one course with a schedule:
