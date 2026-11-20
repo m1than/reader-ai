@@ -1,5 +1,6 @@
 # @trace FR-DEPLOY-2, FR-DEPLOY-7, FR-DEPLOY-9
-"""OPS-DEPLOY [config] Caddyfile text and [image] checks: arm64 manifests, `caddy adapt`, postgres uid."""
+"""OPS-DEPLOY [config] Caddyfile text, [image] checks (`caddy adapt`, postgres uid) and the [image: registry]
+check (arm64 manifests; only with READER_TEST_REGISTRY=1)."""
 
 import json
 from typing import Any
@@ -8,9 +9,11 @@ from .conftest import (
     CADDYFILE,
     DEPLOY,
     PROFILES,
+    registry,
     render,
     requires_docker_cli,
     requires_docker_daemon,
+    requires_registry_opt_in,
     run_ok,
 )
 
@@ -38,6 +41,8 @@ def _pinned_refs() -> set[str]:
     return refs
 
 
+@registry
+@requires_registry_opt_in
 @requires_docker_daemon
 def test_pinned_images_offer_arm64() -> None:
     refs = _pinned_refs()

@@ -62,7 +62,10 @@ normative:
 #   [config]  pytest in server/tests/deploy/ over the source text of deploy/** and over `docker compose -f
 #             deploy/compose.yaml [-f <fixture>] [--profile …] config --format json`. Needs only the docker CLI: no
 #             daemon, no registry, no sandbox/ directory, no secret variable set.
-#   [image]   needs a daemon and pulled images (digest existence, arm64 manifests, `caddy adapt`, /etc/passwd of images).
+#   [image]   needs a daemon and pulled images (`caddy adapt`, /etc/passwd of images); pulls an image at most once.
+#   [image: registry]  queries the remote registry on every run (digest existence, arm64 manifests). pytest marker
+#             `registry`; runs only with READER_TEST_REGISTRY=1, in CI and on request, not in every local gate, because
+#             Docker Hub rate-limits anonymous requests (HTTP 429 seen on 2026-11-20 after repeated runs).
 #   [live]    e2e/live/stage-N.sh against a running stack (`docker inspect`, `docker diff`, probes inside containers).
 requirements:
   - id: FR-DEPLOY-1
@@ -75,7 +78,7 @@ requirements:
       `api`, `worker` and `mcp` run one image built from `deploy/images/server.Dockerfile`, command
       `reader-server --role <role>`. Every Dockerfile `FROM` under deploy/** and every third-party `image:` carries a
       `@sha256:` digest (ADR-0020); images built by reader-ai carry a local tag. [config] Every pinned image resolves
-      and offers `linux/arm64` (ADR-0012). [image]
+      and offers `linux/arm64` (ADR-0012). [image: registry]
   - id: FR-DEPLOY-3
     text: >-
       Networks: `edge` (caddy only; `internal: false`); `front` (caddy, api, mcp; internal; ipam subnet 10.230.1.0/24,

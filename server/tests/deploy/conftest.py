@@ -44,6 +44,14 @@ def _daemon_up() -> bool:
 
 requires_docker_daemon = pytest.mark.skipif(not _daemon_up(), reason="docker daemon not reachable")
 
+# [image: registry]: queries the remote registry on every run; CI and on request only
+# (Docker Hub rate-limits anonymous requests; HTTP 429 seen on 2026-11-20).
+registry = pytest.mark.registry
+requires_registry_opt_in = pytest.mark.skipif(
+    os.environ.get("READER_TEST_REGISTRY") != "1",
+    reason="registry check; set READER_TEST_REGISTRY=1 to run",
+)
+
 
 def load_yaml(path: Path) -> Any:
     assert path.exists(), f"{path} does not exist"
