@@ -235,11 +235,12 @@ tasks:
         hash-derived names (SRV-CONFIG FR-CONFIG-14); services that need a provider token reference those secrets." }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: in_progress, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG],
       branch: 1/S1.SRV-AUTH,
-      note: "spec round 1 changes (B1–B10, non-blocking, multi-head Alembic for SRV-EVENTS) applied; awaits
-        deep-reviewer round 2. Also claims the stage-1 server skeleton (reader.db, reader.api, reader-server).
-        Paired: OPS-DEPLOY FR-DEPLOY-5 allows OPS-CLI's override bind of reader.yaml at /etc/reader/reader.yaml plus
-        READER_CONFIG; OPS-CLI `reader bootstrap [--handle]` opens the link without printing it. S1.live:
-        software-authenticator learner `live-check` plus a manual owner check in Safari." }
+      note: "spec rounds 1–2 changes applied (B1–B10, N1–N4, non-blocking, multi-head Alembic through asyncpg);
+        awaits deep-reviewer round 3. Also claims the stage-1 server skeleton (reader.db, reader.api, reader-server).
+        Paired: compose.yaml sets READER_CONFIG statically; the override adds only the read-only bind of reader.yaml
+        at /etc/reader/reader.yaml (FR-DEPLOY-5 amended); reader.example.yaml shows learner `live-check`; OPS-CLI
+        `reader bootstrap [--handle]` opens the link without printing it. S1.live: learner `live-check` reset through
+        psql each run, software authenticator with a per-run key, plus a manual owner check in Safari." }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
 

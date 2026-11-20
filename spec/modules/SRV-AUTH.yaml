@@ -22,10 +22,11 @@
 # stage-8 target. No ADR status changes.
 #
 # Cross-spec requirements (paired changes sent by the coordinator, 2026-11-20):
-#   - OPS-DEPLOY FR-DEPLOY-5 is amended to allow exactly one override bind: OPS-CLI's in-memory Compose override (the
-#     one that already declares kernel networks) adds a read-only bind of the owner's reader.yaml at
-#     `/etc/reader/reader.yaml` and `READER_CONFIG=/etc/reader/reader.yaml` to api, worker and mcp. compose.yaml keeps
-#     no `$` interpolation. reader.yaml holds secret references only (ADR-0011), so the bind carries no secret.
+#   - OPS-DEPLOY: compose.yaml sets `READER_CONFIG=/etc/reader/reader.yaml` statically for api, worker and mcp (no `$`
+#     interpolation); FR-DEPLOY-5 is amended to allow exactly one override bind: OPS-CLI's in-memory Compose override
+#     (the one that already declares kernel networks) adds only the read-only bind of the owner's reader.yaml at
+#     `/etc/reader/reader.yaml`. reader.yaml holds secret references only (ADR-0011), so the bind carries no secret.
+#   - OPS-DEPLOY: deploy/reader.example.yaml shows the learner `live-check` (stage-1 live check, end of this file).
 #   - OPS-CLI: `reader bootstrap [--handle <h>]` runs `docker compose exec -T api reader-server bootstrap-link
 #     [--handle <h>]`, captures stdout, and opens the link with `open` without printing it.
 #
@@ -37,6 +38,8 @@
 #      rule on `docker exec`/`docker compose exec` against the api is the owner's decision, not this spec's.
 #   2. The server connects as the `postgres` superuser (image default) until a dedicated least-privilege role arrives
 #      in stage 9 (hardening).
+#   3. The global failure limit (FR-AUTH-11) is also a lockout lever: anyone who can reach the ceremony routes can fill
+#      it and block every user's sign-in for up to an hour. Harmless on `localhost`; revisit before the VPS.
 #
 # Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
 
@@ -45,7 +48,7 @@ title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skele
 status: draft
 approved_by: null
 approved_at: null
-review: "deep-reviewer (Fable) round 1: changes (B1–B10 plus non-blocking); revised 2026-11-20"
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); revised 2026-11-20"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
@@ -103,7 +106,7 @@ policy:
 # Tables of the first migration. `owner_id` is NOT NULL with a foreign key to users.id. System tables carry no
 # user-owned content; INV-AUTH-8 checks every other table.
 tables:
-  users: { system: true, columns: "id uuid pk, handle text unique, role text CHECK (role IN ('owner','learner')), webauthn_user_id bytea unique CHECK (octet_length = 64), display_name text, consent_evaluation bool, consent_tuning bool, created_at" }
+  users: { system: true, columns: "id uuid pk, handle text unique, role text CHECK (role IN ('owner','learner')), webauthn_user_id bytea unique CHECK (octet_length = 64), display_name text, consent_evaluation bool, consent_tuning bool, disabled_at timestamptz null, created_at" }
   webauthn_credentials: { owner_id: true, columns: "credential_id bytea pk, public_key bytea, sign_count bigint CHECK (>= 0), transports text[], aaguid uuid, backed_up bool, created_at, last_used_at" }
   sessions: { owner_id: true, columns: "id_sha256 bytea pk, created_at, expires_at, revoked_at" }
   auth_challenges: { system: true, columns: "ceremony_sha256 bytea pk, kind text CHECK (kind IN ('register','authenticate','bootstrap')), challenge bytea, user_id uuid null, bootstrap_token_sha256 bytea null, expires_at, consumed_at" }
@@ -116,7 +119,7 @@ tables:
 failure_reasons: [malformed, wrong_type, unknown_credential, challenge_mismatch, origin_mismatch, rp_id_mismatch,
   user_present_missing, user_verified_missing, bad_signature, user_handle_missing, user_handle_mismatch,
   counter_regressed, attestation_format_refused, algorithm_refused, credential_id_taken, ceremony_invalid,
-  token_invalid, owner_has_credential]
+  token_invalid, owner_has_credential, user_disabled, library_rejected]
 
 # Signature counter rule (REF-AUTH-1 §6.1.1 as py_webauthn 3.0.1 applies it; stored m, received n).
 counter_cases:
@@ -131,6 +134,7 @@ config_errors:
   - { code: instance_url_query, when: "instance.url has a query or fragment" }
   - { code: instance_url_userinfo, when: "instance.url has userinfo" }
   - { code: instance_url_ip_host, when: "instance.url host is an IPv4 or IPv6 literal (WebAuthn RP IDs are domains)" }
+  - { code: instance_url_host_form, when: "instance.url host has a non-ASCII (IDN) character or a trailing dot" }
   - { code: owner_count, when: "the number of users[] entries with role owner is not 1" }
   - { code: unknown_role, when: "a users[] role is not owner or learner" }
   - { code: signup_not_supported, when: "sharing.signup is present and not boolean false" }
@@ -142,17 +146,17 @@ requirements:
       `READER_CONFIG`, validates it (FR-AUTH-16), reads the database password from
       `secret://file/run/secrets/db-password`, connects with the password passed as a separate connect parameter (the
       DSN string never contains it), migrates (below), deletes expired rows (FR-AUTH-17), ensures a `users` row for
-      every `users[]` entry (handle, role; existing rows keep their id and webauthn_user_id), and serves the app with
-      Uvicorn. Migration: `alembic upgrade heads` (the history has several heads: SRV-EVENTS adds procrastinate's
-      shipped chain, branch label `procrastinate`), under `pg_advisory_lock(<namespace>, 1)` in the two-key form with a
-      fixed migration namespace constant declared in `reader.db`, distinct from SRV-EVENTS's job-key namespace.
-      `version_locations` is computed in `env.py`, because Alembic does not glob: `reader/db/migrations/versions`,
-      every existing `reader/*/migrations` directory, and the installed `procrastinate/contrib/alembic/versions` when
-      that package is importable. Alembic runs on a synchronous psycopg 3 engine (the app keeps asyncpg): third-party
-      revisions such as procrastinate's call `op.execute` with multi-statement SQL that this repository cannot rewrite,
-      asyncpg refuses multi-statement prepared statements, and psycopg sends parameterless statements through the
-      simple query protocol, which accepts them. The psycopg connection also gets the password as a separate
-      parameter. "At the head" in FR-AUTH-2 means at every head.
+      every `users[]` entry (handle, role; existing rows keep their id and webauthn_user_id; a disabled user named
+      again is re-enabled), disables every user row whose handle is no longer in `users[]` (sets `disabled_at`,
+      revokes its sessions, keeps its rows; INV-AUTH-9), and serves the app with Uvicorn. Migration: `alembic upgrade
+      heads` (the history has several heads: SRV-EVENTS adds procrastinate's shipped chain, branch label
+      `procrastinate`), under `pg_advisory_lock(<namespace>, 1)` in the two-key form with a fixed migration namespace
+      constant declared in `reader.db`, distinct from SRV-EVENTS's job-key namespace. Alembic runs through the app's
+      asyncpg engine (`run_sync` in env.py; procrastinate 3.12.0's `execute_script` has its own asyncpg path through the
+      raw driver connection for multi-statement SQL). `reader.db` sets `version_locations` on the programmatic Alembic
+      `Config` before `command.upgrade`, from a declared list of directories (Alembic does not glob; no scan): in stage
+      1 only `reader/db/migrations/versions`; SRV-EVENTS appends its own directory and the installed
+      `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
   - id: FR-AUTH-2
     text: >-
       `reader-server --role <role> --healthcheck` exits 0 only when `/run/secrets/db-password` exists, the database
@@ -181,21 +185,26 @@ requirements:
       SHA-256. `POST /api/auth/bootstrap/verify`, in one transaction: locks the user's row `FOR UPDATE`; re-checks that
       the user has no credential; consumes the token with `UPDATE … WHERE consumed_at IS NULL AND revoked_at IS NULL AND
       expires_at > now() RETURNING`; consumes the challenge (INV-AUTH-1); verifies through the seam (FR-AUTH-15); stores
-      the credential; starts a session (FR-AUTH-8). Any failure answers 400 `bootstrap_failed`.
+      the credential; starts a session (FR-AUTH-8). On any failure that transaction rolls back, so the token and the
+      challenge stay usable until they expire; the `auth_failures` row is inserted in a separate committed transaction;
+      the answer is 400 `bootstrap_failed`.
   - id: FR-AUTH-6
     text: >-
       `POST /api/auth/register/{options,verify}` add a passkey to the signed-in user. Both require a session created
       less than `recent_session_s` ago (401 `reauth_required` otherwise), because a stolen long-lived cookie must not be
       able to plant a persistent credential. The ceremony is bound to that user; verify runs the FR-AUTH-15 checks and,
-      on success, rotates the session (FR-AUTH-8).
+      on success, rotates the session (FR-AUTH-8). On failure the ceremony transaction rolls back (the challenge stays
+      usable until it expires) and the `auth_failures` row is inserted in a separate committed transaction.
   - id: FR-AUTH-7
     text: >-
       `POST /api/auth/signin/options` returns authentication options and sets the ceremony cookie.
       `POST /api/auth/signin/verify` consumes the challenge and, on failure, records an `auth_failures` row, both in a
       transaction that commits even when verification fails; it looks up the credential by raw id and verifies through
       the seam with the stored public key, the stored counter and the `webauthn_user_id` of the credential's
-      `owner_id`; on success it updates `sign_count`, `last_used_at`, `backed_up` and starts a session in a second
-      transaction. Every failure answers 400 `signin_failed` with no detail.
+      `owner_id`; a credential of a disabled user fails `user_disabled`. On success, in a second transaction, it updates
+      `sign_count` conditionally (`WHERE credential_id = :id AND (sign_count < :n OR (sign_count = 0 AND :n = 0))`;
+      zero rows updated is `counter_regressed`), `last_used_at` and `backed_up`, and starts a session. Every failure
+      answers 400 `signin_failed` with no detail.
   - id: FR-AUTH-8
     text: >-
       Starting a session creates a random `session_id_bytes` id, stores its SHA-256 with `expires_at = now() +
@@ -209,7 +218,7 @@ requirements:
   - id: FR-AUTH-10
     text: >-
       A request is authenticated only by a session cookie whose SHA-256 matches a row that is not revoked and not
-      expired. Routes are declared as data with `auth: public | session | recent_session` and `method`; `public` are
+      expired and whose user is not disabled. Routes are declared as data with `auth: public | session | recent_session` and `method`; `public` are
       exactly `/api/healthz`, the bootstrap and sign-in ceremonies, `/api/auth/signout`, and the pages and script of
       FR-AUTH-14. No GET route writes to the database.
   - id: FR-AUTH-11
@@ -242,10 +251,13 @@ requirements:
       Verify seam. `reader.auth.webauthn.verify_registration(rp_id, origin, challenge, response)` and
       `verify_authentication(rp_id, origin, challenge, response, public_key, stored_count, expected_user_handle)` are
       pure functions over py_webauthn 3.0.1 that return either the verified data or one `failure_reasons` member. They
-      refuse attestation formats outside `policy.attestation_formats` and algorithms outside `policy.algorithms`, apply
+      classify with their own checks, in a fixed order, over the library's parsers (`parse_registration_credential_json`,
+      `parse_authentication_credential_json`, the parsed clientDataJSON, authenticatorData and attestation object),
+      then call the library's `verify_*` as the final gate; an error from that gate that the own checks did not
+      classify maps to `library_rejected`. Classification never matches exception message strings. They refuse attestation formats outside `policy.attestation_formats` and algorithms outside `policy.algorithms`, apply
       `counter_cases`, and fail `user_handle_missing` when the assertion has no userHandle. The route layer adds the
       database checks: `credential_id_taken` (a registration whose credential id exists, for any user),
-      `unknown_credential`, `ceremony_invalid`, `token_invalid`, `owner_has_credential`.
+      `unknown_credential`, `ceremony_invalid`, `token_invalid`, `owner_has_credential`, `user_disabled`.
   - id: FR-AUTH-16
     text: >-
       Startup validation. `reader-server --role api|worker` exits 1 with exactly one `config_errors` code (the first in
@@ -295,14 +307,23 @@ invariants:
       A stored `sign_count` never decreases, and each row of `counter_cases` holds (one test per row).
   - id: INV-AUTH-7
     text: >-
-      For one user, at most one bootstrap ever registers a credential: a token revoked after its options fails; a token
-      expiring between options and verify fails; two concurrent `bootstrap-link` runs followed by two concurrent verifies
-      (one per token) leave exactly one credential.
+      No bootstrap registers a credential while the user has a credential, so at most one bootstrap succeeds until the
+      user's credentials are deleted (owner note 1): a token revoked after its options fails; a token expiring between
+      options and verify fails; two concurrent `bootstrap-link` runs followed by two concurrent verifies (one per
+      token) leave exactly one credential; a bad response with a valid token, then a good one with the same token,
+      succeeds and leaves exactly one `auth_failures` row (FR-AUTH-5 failure path; likewise for add-passkey with its
+      challenge, FR-AUTH-6).
   - id: INV-AUTH-8
     text: >-
-      Every table in the migrated schema except those marked `system: true` in this spec has a NOT NULL `owner_id`
-      column with a foreign key to `users.id` (checked against the live schema after `alembic upgrade heads`). Tables of
-      third-party chains (procrastinate's) are system tables of their owning spec, SRV-EVENTS, and listed there.
+      Every table in the migrated schema has a NOT NULL `owner_id` column with a foreign key to `users.id`, except the
+      system tables declared by any spec (checked against the live schema after `alembic upgrade heads`; the test reads
+      the `tables` entries with `system: true` from every spec in spec/modules/, and a `procrastinate_*` prefix entry
+      covers every table it matches). Here: users, auth_challenges, bootstrap_tokens, auth_failures; SRV-EVENTS
+      declares job_keys, job_outcomes and procrastinate_*.
+  - id: INV-AUTH-9
+    text: >-
+      A user whose handle is removed from `users[]` is disabled at the next api startup: its sessions are revoked, its
+      session cookies no longer authenticate, its sign-in fails, and all its rows remain.
 
 nfr: []
 
@@ -318,18 +339,24 @@ vectors:
     file: spec/fixtures/SRV-AUTH/softauthn-es256.json
   - id: VEC-AUTH-2
     source: >-
-      py_webauthn 3.0.1 test vectors (BSD-3-Clause, copied with attribution in the file): a `none`-attestation
-      registration and an authentication response with their expected challenge, origin and RP ID. They exercise only
-      the verify seam (FR-AUTH-15).
+      py_webauthn 3.0.1 test vectors (BSD-3-Clause, copied with attribution in the file, each with its upstream test
+      name, challenge, origin and RP ID), run through the verify seam only (FR-AUTH-15), with expected results: the
+      `none`-attestation registration vector of tests/test_verify_registration_response.py passes; the RSA
+      authentication vector of tests/test_verify_authentication_response.py passes; its EC2 and OKP authentication
+      vectors fail with `user_verified_missing` (recorded without UV; this module requires UV).
     file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json
 
-# Stage-1 live check (S1.live; e2e/live/stage-1.sh is written in that task). Choice: the automated part uses the
-# software authenticator against `https://localhost` for a learner `live-check` that the live-check configuration
-# declares: `reader-server bootstrap-link --handle live-check` (through `docker compose exec`), a registration, `GET
-# /api/me` → role learner, sign-out → 401, a sign-in, `GET /api/me` → 200. The cookie jar is a mktemp file with mode
-# 0600, deleted on exit; the authenticator key is ephemeral, so the leftover credential cannot be used. The owner part
-# is manual: the owner registers in Safari through `reader bootstrap`, then the script asks the owner to open
-# `https://localhost/api/me` and confirm `"role":"owner"`. The roadmap's `curl -b ~/.reader/cookie` line changes with it.
+# Stage-1 live check (S1.live; e2e/live/stage-1.sh is written in that task). The automated part uses the software
+# authenticator against `https://localhost` for the learner `live-check`, declared in the owner's reader.yaml and shown
+# in deploy/reader.example.yaml. Each run first deletes `live-check`'s credentials and sessions through `docker compose
+# exec postgres psql` (owner note 1's procedure), then: `reader-server bootstrap-link --handle live-check` (through
+# `docker compose exec`), a registration with a key generated for this run (no key is committed), `GET /api/me` →
+# role learner, sign-out → 401, a sign-in, `GET /api/me` → 200. The cookie jar is a mktemp file with mode 0600, deleted
+# on exit. This gives a standing learner account with no usable credential between runs (each run's key is
+# discarded); its `kernel-live-check` service exists only in the `kernels` profile, so it does not start by default.
+# The owner part is manual: the owner registers in Safari through `reader bootstrap`, then the script asks the owner to
+# open `https://localhost/api/me` and confirm `"role":"owner"`. The roadmap's `curl -b ~/.reader/cookie` line changes
+# with it.
 #
 # Dependencies added to server/pyproject.toml with Green: fastapi, uvicorn, sqlalchemy[asyncio], asyncpg, alembic,
-# psycopg[binary] 3 (migrations only), webauthn==3.0.1; test-only: httpx (testcontainers Postgres is already in dev).
+# webauthn==3.0.1; test-only: httpx (testcontainers Postgres is already in dev).
