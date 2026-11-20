@@ -1,0 +1,27 @@
+{
+  "exit_code": 0,
+  "peak_mem_mib": 5660.67,
+  "docker_vm_cpus": 4,
+  "mode": "ocr",
+  "dpi": 200,
+  "lang": [
+    "ru",
+    "en"
+  ],
+  "pages": [
+    {
+      "page": 30,
+      "seconds": 35.2,
+      "chars": 2718,
+      "char_accuracy": 0.9628
+    },
+    {
+      "page": 95,
+      "seconds": 27.8,
+      "chars": 1312,
+      "char_accuracy": 0.6784
+    }
+  ],
+  "char_accuracy_mean": 0.8206,
+  "char_accuracy_min": 0.6784
+}
