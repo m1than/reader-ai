@@ -8,6 +8,8 @@ revisit_when: "The CLI reads its OAuth token from a file natively; or `reader up
 supersedes: []
 ---
 
+> Proposed amendment: [ADR-0026](0026-secret-delivery-read-only-services.md) (2026-11-20) — "through a Compose secret under `/run/secrets`" is not possible for the read-only holder (Compose refuses environment-sourced secrets there). The holder receives the token through a tmpfs `/run/secrets` filled by a watching `reader up` over `docker exec` stdin (option A, chosen by the owner on 2026-11-20).
+
 ## Context
 
 ADR-0011 already says:

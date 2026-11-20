@@ -1,0 +1,34 @@
+# Variant (e/d): mechanism (d) with the same dependent service and healthcheck as e/c.
+name: reader-spike-csro-ed
+services:
+  svc:
+    image: python:3.14-slim-trixie
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    tmpfs: [/tmp]
+    secrets:
+      - source: tok
+        uid: "1000"
+        gid: "1000"
+        mode: 0400
+    command: ["python", "-c", "import time; time.sleep(600)"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os,sys; sys.exit(0 if os.path.exists('/run/secrets/tok') else 1)"]
+      interval: 1s
+      retries: 3
+      start_period: 0s
+  dependent:
+    image: python:3.14-slim-trixie
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    network_mode: none
+    command: ["python", "-c", "import time; time.sleep(600)"]
+    depends_on:
+      svc: { condition: service_healthy }
+secrets:
+  tok:
+    file: ${SPIKE_SECRET_FILE:?set by run.sh}

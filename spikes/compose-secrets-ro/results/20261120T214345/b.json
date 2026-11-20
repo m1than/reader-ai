@@ -1,0 +1,21 @@
+{
+  "variant": "b",
+  "consumer": {
+    "uid": 1000,
+    "file_uid": 0,
+    "mode": "0o444",
+    "length": 39,
+    "canary_prefix": true
+  },
+  "found": {
+    "inspect": 0,
+    "config": 0,
+    "layer_paths_below_run_secrets": 1,
+    "export": 1,
+    "events": 0,
+    "desktop_log_files": 0,
+    "inspect_shows_source_path": false
+  },
+  "export_after_stop": 1,
+  "file_after_restart": true
+}
