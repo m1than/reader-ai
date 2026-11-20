@@ -1,7 +1,9 @@
 # VEC-DEPLOY-3: the override OPS-CLI must emit, in memory, for one configured user (handle `ivan`).
 # It carries no secrets: FR-DEPLOY-10 delivers them after start over `docker exec -i` (spikes/compose-secrets-ro).
-# kernel-user-ivan is fully expanded: every key equals the base file's rendered `x-kernel` (FR-DEPLOY-8), and only
-# `networks` differs. INV-DEPLOY-8 compares field by field; there is no merge step in the test.
+# kernel-user-ivan is fully expanded with FR-DEPLOY-8's literal values. INV-DEPLOY-8 asserts that all rendered kernel
+# services (the base's static ones and this one) are equal to each other on every key except `networks`, and that one
+# of them equals FR-DEPLOY-8's literals after size normalisation (Compose renders 2g as 2147483648; tmpfs options are
+# compared as sets). There is no merge step in the test.
 services:
   kernel-user-ivan:
     image: reader-kernel:local

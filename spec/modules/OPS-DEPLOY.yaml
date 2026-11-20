@@ -49,12 +49,12 @@ normative:
     title: ADR-0022 kernel service rules (tmpfs sizes, limits, declared services, reset) and the kernel-roundtrip spike
     url: docs/adr/0022-kernel-sandbox-evcxr-memory-declared-services.md
   - id: REF-DEPLOY-5
-    title: Postgres image — `POSTGRES_PASSWORD_FILE`, read by the entrypoint on every start; postgres:18-trixie (18.7) user postgres is uid 999
+    title: >-
+      Postgres image — `POSTGRES_PASSWORD_FILE` sets the cluster password at initdb (whether the entrypoint also reads it
+      on every start is a hypothesis, FR-DEPLOY-10 d); postgres:18-trixie (18.7) user postgres is uid 999
     url: https://hub.docker.com/_/postgres
   - id: REF-DEPLOY-6
-    title: >-
-      spikes/compose-secrets-ro RESULT.md and ADR-0026 — secrets in read-only, non-root, cap-drop services (on branch
-      0/S0.spike.compose-secrets-ro until merged)
+    title: spikes/compose-secrets-ro RESULT.md (merged in #22) and ADR-0026 — secrets in read-only, non-root, cap-drop services
     url: spikes/compose-secrets-ro/RESULT.md
 
 # Test levels:
@@ -122,15 +122,14 @@ requirements:
       digest; checked against the pinned image's /etc/passwd [image]), with `cap_drop: [ALL]`, `no-new-privileges`,
       `read_only: true` and tmpfs `/var/run/postgresql` and `/tmp`. Exceptions: none declared; whether postgres starts
       with cap-drop ALL and a read-only root as uid 999 is unmeasured and is a stage-1 live check, and any exception
-      found there is added here with its reason. `caddy` keeps the image's user with `cap_drop: [ALL]`,
-      `no-new-privileges` and no `cap_add`; binding 443 then relies on Docker setting
-      `net.ipv4.ip_unprivileged_port_start=0` in container namespaces, which is unmeasured here and is a stage-1 live
-      check. Memory: every secret consumer sets `mem_limit` and `memswap_limit` equal (ADR-0026: with them equal the
+      found there is added here with its reason. `caddy` keeps the image's user and its default capabilities, with
+      `no-new-privileges` and no `cap_add`; dropping all its capabilities is left out (owner note). Memory: every secret consumer sets `mem_limit` and `memswap_limit` equal (ADR-0026: with them equal the
       cgroup's `memory.swap.max` is 0, measured in spikes/compose-secrets-ro, so the tmpfs value is not swapped to the
       VM disk). Values: postgres 1g, api 1g, mcp 1g, worker 2g, agent-proxy 256m. These are structural bounds, not
       measurements: no spike recorded a peak for these services (agent-sdk-container ran the agent container under a
-      2 GiB limit without recording its peak). The stage-1 live check records each consumer's peak (`docker stats`), and
-      the values are revised from it. [config]
+      2 GiB limit without recording its peak). The stage-1 live check records each consumer's peak from its cgroup's
+      `memory.peak`, and the values are revised from it; the worker's 2g is revisited in stage 3, when it runs ingestion.
+      [config]
   - id: FR-DEPLOY-10
     text: >-
       Secrets follow ADR-0026 (REF-DEPLOY-6):
@@ -162,8 +161,9 @@ requirements:
     text: >-
       Every service declares a `healthcheck`: postgres `pg_isready`; caddy a request to its localhost admin endpoint;
       server roles `reader-server --role <role> --healthcheck` (implemented by the server modules); kernels per
-      FR-DEPLOY-8; agent-proxy an image-provided command (SRV-AGENT). A secret consumer reports healthy only after its
-      file exists (FR-DEPLOY-10 d). [config]
+      FR-DEPLOY-8; agent-proxy an image-provided command (SRV-AGENT). [config] api, worker, mcp and agent-proxy report
+      healthy only after their secret file exists; postgres needs its file only while PGDATA is empty
+      (FR-DEPLOY-10 d). [live]
   - id: FR-DEPLOY-12
     text: >-
       `deploy/reader.example.yaml` is the single documented example configuration: it loads through SRV-CONFIG's
@@ -181,11 +181,12 @@ invariants:
       Secrets stay out of every Compose surface. (1) The rendered model (same sets as INV-DEPLOY-1) has no top-level
       `secrets`, no service `secrets` and no `env_file`, and the tmpfs `/run/secrets` (service uid, 0700, 256k) is on
       exactly the consumers of FR-DEPLOY-10 (b), each of which has `memswap_limit` equal to `mem_limit` (FR-DEPLOY-9).
-      [config] (2) The source text of every file under deploy/** contains no
-      `${…}` interpolation outside the allow-list of non-secret variables, which is empty for stage 1 (so any `${` fails),
-      under any key: environment, env_file, labels, command, entrypoint, healthcheck or elsewhere. [config]
-      (3) After `reader up` and delivery, `docker inspect` of every container contains no canary, and `docker diff` of
-      every container lists nothing under `/run/secrets`. [live]
+      [config] (2) The source text of `deploy/compose.yaml` contains no `$` that is not followed by another `$`
+      (which rejects `${NAME}` and unbraced `$NAME` under any key, and allows only the escape `$$`); the allow-list of
+      non-secret variables is empty for stage 1. Dockerfiles and scripts under `deploy/images/**` are out of this rule's
+      scope. [config] (3) `deploy/Caddyfile` contains no `{$` environment placeholder. [config] (4) After `reader up` and
+      delivery, `docker inspect` of every container contains no canary, and `docker diff` of every container lists no
+      path below `/run/secrets/`. [live]
   - id: INV-DEPLOY-3
     text: '`caddy_data` and `caddy_config` are mounted by `caddy` and by no other service. [config]'
   - id: INV-DEPLOY-4
@@ -249,6 +250,10 @@ vectors:
 # - The proposed `.claude/settings.json` deny rules of ADR-0026 (`docker exec`, `docker compose exec`, `docker run`
 #   with `--pid container:`) are the owner's to add; this spec does not depend on them. The stage-1 live check uses
 #   `docker compose exec` for its file checks, so once the rules exist it runs with the owner's permissions.
+# - Caddy without `cap_drop: [ALL]`: the official caddy image ships a binary with a file capability for binding ports.
+#   Dropping all capabilities would need a derived image that strips that file capability and binds 443 through
+#   Docker's `ip_unprivileged_port_start=0`; that image is not specified here. Owner's call whether to add it later.
+# - `reader watcher stop` in the roadmap's stage-1 script is a placeholder until OPS-CLI's spec names the command.
 # - Stage-1 live check (owner, 2026-11-20): it checks the four default-profile services; `.kernel=="ok"` and the
 #   kernel probes move to stage 4. docs/roadmap.md is edited in this branch.
 # - ADR-0014 `verified_by` says the kernel "cannot resolve postgres or api", and roadmap line 224 (OPS-SANDBOX) repeats

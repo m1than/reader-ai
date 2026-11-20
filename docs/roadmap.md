@@ -172,7 +172,7 @@ CONSUMERS="postgres api worker"   # mcp and agent-proxy join in later stages
 no_canary_in_inspect() { local c; for c in $(docker compose -f deploy/compose.yaml ps -q); do
   docker inspect "$c" | grep -q "$READER_CANARY" && return 1; done; return 0; }
 no_secret_in_diff() { local c; for c in $(docker compose -f deploy/compose.yaml ps -q); do
-  docker diff "$c" | grep -q '/run/secrets' && return 1; done; return 0; }
+  docker diff "$c" | grep -q '^A /run/secrets/.' && return 1; done; return 0; }   # paths below the mount point only
 secret_files_ok() { local s uid; for s in $CONSUMERS; do
   uid=$(docker compose -f deploy/compose.yaml exec -T "$s" id -u) || return 1
   [ "$(docker compose -f deploy/compose.yaml exec -T "$s" stat -c '%a %u' /run/secrets/db-password)" = "600 $uid" ] || return 1
@@ -194,8 +194,9 @@ postgres_restarts_without_file() { reader watcher stop || return 1   # hypothesi
   docker compose -f deploy/compose.yaml restart postgres >/dev/null || return 1   # so the wrapper does not need the file
   for _ in $(seq 30); do [ "$(health_of postgres)" = healthy ] && { reader up >/dev/null; return $?; }; sleep 2; done
   reader up >/dev/null; return 1; }
-record_consumer_peaks() { docker stats --no-stream --format '{{.Name}} {{.MemUsage}}' \
-  $(docker compose -f deploy/compose.yaml ps -q $CONSUMERS) >&2; }   # FR-DEPLOY-9 limits are revised from these
+record_consumer_peaks() { local s; for s in $CONSUMERS; do      # cgroup v2 high-water mark since container start
+  printf '%s memory.peak=%s\n' "$s" "$(docker compose -f deploy/compose.yaml exec -T "$s" cat /sys/fs/cgroup/memory.peak)" >&2 \
+    || return 1; done; return 0; }                              # FR-DEPLOY-9 limits are revised from these
 check "no env secrets"          no_canary_in_inspect
 check "no secret on disk"       no_secret_in_diff
 check "secret files 0600, owner = service uid" secret_files_ok
