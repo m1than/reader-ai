@@ -219,6 +219,21 @@ def test_secrets_set_needs_no_config(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert _main(world, "secrets", "set", "k") == 0
 
 
+class _NotUtf8:
+    def read(self, *_args: Any) -> str:
+        raise UnicodeDecodeError("utf-8", (CANARY + "\udcff").encode("utf-8", "surrogateescape"), 0, 1, "bad")
+
+
+def test_secrets_set_non_utf8_stdin_is_not_utf8(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+    world.ctx.stdin = _NotUtf8()
+    assert _main(world, "secrets", "set", "k") == 1
+    assert "not_utf8" in world.err
+    assert "Traceback" not in world.err
+    assert CANARY not in world.out + world.err
+    assert world.keyring.sets == []
+
+
 # FR-CLI-15: doctor ----------------------------------------------------------------------------------------
 
 

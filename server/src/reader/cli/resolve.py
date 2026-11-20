@@ -24,6 +24,9 @@ from reader.config.refs import SCHEMES
 
 SYSTEM_SERVICE: Final = "reader-ai-system"
 USER_SERVICE: Final = "reader-ai"
+OP_TIMEOUT: Final = (
+    120  # s: room for the 1Password unlock prompt; a hung `op` cannot stall `reader up` (FR-CLI-2)
+)
 
 
 class Keyring(Protocol):
@@ -80,10 +83,9 @@ def keychain_resolver(store: Keyring) -> Resolver:
         value: str | None = None
         try:
             value = store.get_password(service, account)
-        except keyring.errors.KeyringLocked:  # the macOS backend maps "locked" and "access denied" here
-            code = "keychain_locked"
-        except keyring.errors.KeyringError:  # any other Security framework error, a cancelled prompt included
-            code = "keychain_denied"
+        except keyring.errors.KeyringError:
+            # Locked, denied and a cancelled prompt are not told apart by the macOS backend: one code.
+            code = "keychain_unavailable"
         if code is not None:
             _fail(ref, code)
         if value is None:
@@ -98,7 +100,7 @@ def op_resolver(runner: Runner, env: Mapping[str, str]) -> Resolver:
         code: str | None = None
         result = None
         try:
-            result = runner.run(["op", "read", "op://" + "/".join(ref.parts)], env=env)
+            result = runner.run(["op", "read", "op://" + "/".join(ref.parts)], env=env, timeout=OP_TIMEOUT)
         except CommandFailed:
             code = "tool_missing"
         except CommandTimeout:

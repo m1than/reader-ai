@@ -21,7 +21,7 @@ title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bo
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`)."
+review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20)."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -72,15 +72,18 @@ requirements:
     text: >-
       Host resolvers, registered through SRV-CONFIG's `host_registry(extra)`: `keychain` reads
       `secret://keychain/<service>/<account>` with `keyring.get_password` on the macOS backend, and any other configured
-      backend (file and null backends included) is refused with `no_resolver`; `op` runs `op read <reference>` and takes
-      the value from the stdout pipe, with exactly one trailing newline removed; `hostfile` opens the path with
+      backend (file and null backends included) is refused with `no_resolver`; `op` runs `op read <reference>` with a
+      120 s timeout (structural: long enough for the 1Password desktop app's unlock prompt, short enough that a hung
+      `op` cannot stall `reader up` indefinitely) and takes the value from the stdout pipe, with exactly one trailing
+      newline removed; `hostfile` opens the path with
       `O_RDONLY | O_NOFOLLOW` and checks on that descriptor (`fstat`) that it is a regular file, mode 0600 and owned by
       the invoking user, and checks that no ancestor directory of the path contains `.git`. Failures raise SRV-CONFIG's
       `SecretResolutionError` (raised `from None`, no underlying text) with FR-CONFIG-8's codes where they apply
       (`not_found` for an absent item or file, `unreadable`, `not_regular_file`, `outside_root` for a hostfile inside a
       git work tree or with a wrong mode or owner) and these host codes: `tool_missing` (no `op` binary on PATH),
-      `tool_failed` (`op` exits non-zero), `keychain_denied` (access denied or the user cancelled the prompt),
-      `keychain_locked` (the keychain is locked and was not unlocked). Every resolved value, whatever its scheme, is then
+      `tool_failed` (`op` exits non-zero or times out), `keychain_unavailable` (the keychain is locked, access is denied
+      or the prompt was cancelled: the macOS keyring backend raises the same error for these, so one code covers them).
+      Every resolved value, whatever its scheme, is then
       checked on the host: at most `SECRET_MAX_BYTES` (65,536) bytes (`too_large`), valid UTF-8 (`not_utf8`), non-empty
       (`empty`).
   - id: FR-CLI-3
@@ -130,10 +133,14 @@ requirements:
     text: >-
       Runtime directory `~/Library/Application Support/reader-ai/run/`, mode 0700, created by `reader`. The watcher
       takes an exclusive `flock` on `run/watcher.lock`, then writes its pid into that file, and holds the lock for its
-      whole lifetime; a second watcher cannot start while the lock is held. `reader watcher status` prints `running`
-      (exit 0) while the lock is held, else `stopped` (exit 3). `reader watcher stop` signals only the pid recorded in
-      the lock file, and only after verifying that the lock is held: SIGTERM, then SIGKILL if the lock is still held
-      after 15 s (longer than FR-CLI-6's 10 s call timeout, so an in-flight delivery can finish). `reader down` runs
+      whole lifetime; a second watcher cannot start while the lock is held. Probing the lock (a non-blocking shared
+      `flock`, released at once) must not make a starting watcher fail, so the watcher retries a contended lock for up
+      to 1 s before it gives up (structural: a probe holds the lock for microseconds). `reader watcher status` prints
+      `running` (exit 0) while the lock is held, else `stopped` (exit 3). `reader watcher stop` signals only the pid
+      recorded in the lock file, and only after verifying that the lock is held: SIGTERM, then SIGKILL if the lock is
+      still held after 15 s (longer than FR-CLI-6's 10 s call timeout, so an in-flight delivery can finish), then it
+      waits up to 5 s for the lock to be released. `reader up` stops a watcher it spawned that never became ready the
+      same way: SIGTERM, then SIGKILL after 15 s. `reader down` runs
       `watcher stop`, then `docker compose -p <name> down --remove-orphans` without removing volumes; `<name>` is
       FR-CLI-3's project name or, without a valid config, the one `up` recorded in `run/project`.
   - id: FR-CLI-8
@@ -151,8 +158,10 @@ requirements:
       exits non-zero without starting any container; (7) only then does it run `docker compose … up -d`. Because the
       subscription replays every event since T0, no start between T0 and the subscription is missed. 10 s is a
       structural bound, not measured: step (5) is two local daemon calls, the same order of work as one FR-CLI-6 call.
-      If the event stream exits, the watcher resubscribes with a backoff of 1 s, 2 s and 4 s and reconciles again;
-      after 3 consecutive failures it logs the failure and exits non-zero, so consumers fail closed. If `up` fails after
+      If the event stream exits, or the reconcile that follows a subscription fails, that subscription has failed: the
+      watcher resubscribes with the same `--since <T0>` (deliveries are idempotent) after a backoff of 1 s, 2 s and
+      4 s and reconciles again; after 3 consecutive failures it logs the failure and exits non-zero, so consumers fail
+      closed. A stream that lived longer than 4 s (the longest backoff) resets the count. If `up` fails after
       step (4), `reader up` stops the watcher.
   - id: FR-CLI-9
     text: >-
@@ -160,7 +169,8 @@ requirements:
       Before any delivery the watcher checks the event's own `Actor.Attributes` (and, in reconcile, each listed
       container's labels): `com.docker.compose.project` equals the project name, `com.docker.compose.oneoff` equals
       `False`, and `com.docker.compose.service` is in the consumer set. An event or container failing any check is
-      ignored and logged (container id and the failing label, no value); no `docker exec` runs for it.
+      ignored and logged at INFO (container id and the name of the first failing label, never a label value); no
+      `docker exec` runs for it.
   - id: FR-CLI-10
     text: >-
       `reader up` exits 0 when every default-profile service is healthy within 180 s, counted from step (7) of FR-CLI-8
@@ -219,14 +229,18 @@ requirements:
   - id: FR-CLI-17
     text: >-
       `reader backup DIR` (DIR required in stage 1) refuses a DIR inside a git work tree and refuses unless the watcher
-      runs (the services it restarts need delivery). With api, worker and mcp stopped it writes, each file created by the
+      runs (the services it restarts need delivery). It stops api, worker and mcp inside the same `try` whose `finally`
+      starts them again, so a failure or a partial stop always ends with the services started. It writes, each file
+      created by the
       host with mode 0600 from a stdout stream: `db.dump` from
       `docker compose -p <name> exec -T postgres pg_dump -Fc -U postgres postgres` (pgdata; the official image's default
       role and database, which compose.yaml leaves unchanged); for every other named volume labelled
       `org.reader-ai.backup=include` (in stage 1: blobs and caddy_config, ADR-0012), `<key>.tar` from a one-off, where
       `<volume>` is the rendered `.volumes.<key>.name`:
-      `docker run --rm --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
-      where `<server image>` is the `api` service's image in the rendered model and `<uid>` comes from the rendered
+      `docker run --rm --entrypoint "" --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v:ro <server image> tar -C /v -cf - .`,
+      where `<server image>` is the `api` service's image in the rendered model (`--entrypoint ""` because that image's
+      entrypoint waits for /run/secrets/db-password, which a one-off never gets: measured, without it the one-off
+      hangs, with it tar and the find check exit 0) and `<uid>` comes from the rendered
       `user` of the services that mount the volume: their common `user` (blobs: api and worker, `10001:10001`), or
       `0:0` when none declares one (caddy_config: caddy). The reason: with all capabilities dropped, root still reads and
       writes files it owns, but not files owned by another uid without DAC_OVERRIDE, so such files need their owner's
@@ -234,19 +248,25 @@ requirements:
       naming the volume. `manifest.json` =
       `{"created": RFC 3339, "reader": version, "postgres": server version, "files": [{"name", "sha256", "bytes"}]}`.
       Volumes labelled `exclude` are never included (stage 1: `caddy_data`, ADR-0024). Afterwards the stopped services
-      start again.
+      start again. Timeouts, structural bounds so that a hang can never leave the writers stopped: 600 s for
+      `pg_dump` and `pg_restore` (a pilot-sized database, revised from the live drill), 120 s for each tar, untar and
+      find one-off and each `psql` query (local volume and socket work). A timeout is a failure with a fixed message.
+      The archives are held in memory before the 0600 file is written (stage-1 limit; streaming to `<file>.tmp` plus
+      rename is planned).
   - id: FR-CLI-18
     text: >-
       `reader restore DIR` refuses unless the watcher runs, then verifies every sha256 in the manifest. Precondition: no
       application table holds a row (one `psql -U postgres -d postgres -At` query summing exact `count(*)` over every
-      table outside `pg_catalog` and `information_schema`) and the blobs volume is empty (a one-off as below running
-      `find /v -mindepth 1 -print -quit` prints nothing); otherwise it refuses and changes nothing. It stops
-      api, worker, mcp and caddy, runs
+      table outside `pg_catalog` and `information_schema`, except the declared system tables, which migrations fill at
+      first start: `alembic_version`) and the blobs volume is empty (a read-only one-off as in FR-CLI-17 running
+      `sh -c 'find /v -mindepth 1 -print -quit'` prints nothing); otherwise it refuses and changes nothing; a failed
+      check reports `restore_failed`. It stops api, worker, mcp and caddy (inside the `try` whose `finally` starts
+      them again, as in FR-CLI-17), runs
       `docker compose -p <name> exec -T postgres pg_restore --clean --if-exists -U postgres -d postgres` with `db.dump`
       on stdin, and for each tar
       in the manifest runs a one-off container hardened as in FR-CLI-17, with the same `--user` and with `-i` to take the
       archive on stdin, the volume mounted read-write:
-      `docker run --rm -i --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v <server image> sh -c 'find /v -mindepth 1 -delete && tar -C /v -xf -'`,
+      `docker run --rm -i --entrypoint "" --network none --read-only --cap-drop ALL --user <uid> -v <volume>:/v <server image> sh -c 'find /v -mindepth 1 -delete && tar -C /v -xf -'`,
       which empties the volume and untars into it; then it starts the services again.
       caddy_config may be non-empty (Caddy autosaves its configuration at start) and is replaced; it holds no user data.
       Why both: the row check is the safety rule (a
@@ -261,8 +281,10 @@ requirements:
   - id: FR-CLI-20
     text: >-
       Watcher hardening: RLIMIT_CORE is 0, the working directory is the runtime directory, the umask is 077. On SIGTERM
-      the watcher starts no new delivery and no new retry, finishes in-flight calls (each bounded by FR-CLI-6's 10 s
-      timeout), then exits.
+      the watcher starts no new delivery and no new retry (its waits between retries and resubscriptions end at once,
+      and it re-checks after each wait), finishes in-flight calls (each bounded by FR-CLI-6's 10 s timeout), then
+      exits. Unexpected input (a failed spawn, unparsable Compose JSON, a malformed manifest, non-UTF-8 input to
+      `secrets set`) ends a command with a fixed coded one-line message, never a traceback.
   - id: FR-CLI-21
     text: >-
       `reader bootstrap [--handle H]` (for SRV-AUTH's sign-up links, FR-AUTH-4) works only while the stack is healthy
@@ -373,7 +395,7 @@ vectors:
 # - After editing reader.yaml, run `reader up` again, and `reader down` first if the edit touched nothing Compose
 #   renders: the single-file bind (FR-CLI-4) keeps the old inode, so running containers do not see an editor's
 #   replace-on-save, and `up -d` recreates only containers whose rendered configuration changed.
-# - The host codes `tool_missing`, `tool_failed`, `keychain_denied`, `keychain_locked` and `not_deliverable` should join
+# - The host codes `tool_missing`, `tool_failed`, `keychain_unavailable` and `not_deliverable` should join
 #   SRV-CONFIG FR-CONFIG-8's list at its next change.
 # - `reader bootstrap` puts the short-lived bootstrap token in `open`'s argv (FR-CLI-21); the token's lifetime and
 #   single use are SRV-AUTH's.

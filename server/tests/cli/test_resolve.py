@@ -51,8 +51,8 @@ def test_keychain_returns_the_item_as_a_secret() -> None:
     ("error", "code"),
     [
         (None, "not_found"),
-        (keyring.errors.KeyringLocked("locked"), "keychain_locked"),
-        (keyring.errors.KeyringError("denied"), "keychain_denied"),
+        (keyring.errors.KeyringLocked("locked"), "keychain_unavailable"),
+        (keyring.errors.KeyringError("denied"), "keychain_unavailable"),
     ],
 )
 def test_keychain_failures_have_codes(error: BaseException | None, code: str) -> None:
@@ -64,6 +64,7 @@ def test_keychain_failures_have_codes(error: BaseException | None, code: str) ->
 
 def test_keyring_backend_is_pinned_to_the_macos_keychain(monkeypatch: pytest.MonkeyPatch) -> None:
     import keyring as keyring_module
+
     from reader.cli.resolve import macos_keyring
 
     monkeypatch.setattr(keyring_module, "get_keyring", lambda: pytest.fail("configured backend consulted"))
@@ -95,6 +96,17 @@ def test_op_read_strips_exactly_one_trailing_newline(out: bytes, value: str) -> 
     assert secret.reveal() == value
     (call,) = runner.calls
     assert call.argv == ["op", "read", "op://Private/anna-claude/token"]
+    assert call.timeout == 120
+
+
+def test_op_timeout_is_tool_failed() -> None:
+    from reader.cli.runner import CommandTimeout
+
+    def hang(_call: Any) -> Any:
+        raise CommandTimeout()
+
+    runner = FakeRunner().on("op", "read", handler=hang)
+    assert _code(lambda: _op(runner)(_ref("secret://op/Private/anna-claude/token"))) == "tool_failed"
 
 
 def test_op_runs_with_the_allow_listed_environment() -> None:
@@ -204,7 +216,6 @@ def test_value_at_the_size_bound_passes() -> None:
 
 def test_every_scheme_goes_through_the_checks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from reader.cli.resolve import host_resolvers
-
     from reader.config import resolve
 
     monkeypatch.setenv("READER_TEST_TOKEN", "x" * 70000)

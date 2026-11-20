@@ -233,7 +233,9 @@ tasks:
         ADR-0026, paired change, coordinator-scheduled). Tests 245 → 246 (secret_env_var assertions removed; one test added
         asserting the export is gone)." }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S1.SRV-CONFIG, S1.OPS-DEPLOY],
-      review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve (97b422e), caddy_config delta confirmed (5c15d21)",
+      review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve (97b422e), caddy_config delta confirmed (5c15d21);
+        code review round 1 changes on 294b245 (3 blocking, all applied with paired spec and tests; both test edits after
+        Red confirmed as pure test-bug fixes)",
       note: "Spec approved (approved_by: agent, 2026-11-20) with the Red tests: 196 tests in server/tests/cli/ (8 files),
         196/196 failing on AssertionError inside their bodies (a last meta-path finder in tests/cli/conftest.py turns a
         missing reader.cli module into an assertion). Paired at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4),
@@ -245,11 +247,19 @@ tasks:
         the PR description): test_runner timeout case used `/bin/sleep 5 CANARY` (sleep exits at once on the extra
         operand) → `/bin/sh -c 'sleep 5' CANARY`; test_stack file-scheme case used `secret://file/tok`, which
         SRV-CONFIG rejects → `secret://file/run/secrets/tok`; import sorting and one ruff-format wrap. Not run: `reader
-        up` for real (the stage-1 live check). Known limits for code review: backup/restore hold each archive in
-        memory (the runner returns bytes) instead of streaming to the 0600 file; `op read` has no timeout (the spec
-        sets none); `docker compose -p <name> exec|stop|start|down` relies on Compose's project-by-name mode; an
-        empty user trust domain makes `security trust-settings-export` exit non-zero ('No Trust Settings'), read as
-        'none remain'. Earlier context: Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
+        up` for real (the stage-1 live check). Code review round 1 fixes: backup/restore one-offs get
+        `--entrypoint ''` (the server image's wait-for-secret entrypoint hung them; measured by the reviewer), timeouts
+        600 s (pg_dump/pg_restore) and 120 s (tar/untar/find one-offs, psql), stops inside the try so writers always
+        restart; event_ignored at INFO with the failing label name; no retry after SIGTERM (waits end on stop);
+        `op read` 120 s; keychain_unavailable replaces keychain_denied/keychain_locked; a failed reconcile is a failed
+        subscription; resubscribe keeps T0; a stream living over 4 s resets the failure count; SIGKILL escalation in
+        terminate() and a 5 s wait after SIGKILL; coded errors for spawn, Compose JSON, manifest, non-UTF-8 stdin;
+        restore ignores alembic_version. CLI tests 196 → 216. Lock probe: kept flock; a starting watcher retries a
+        contended lock for 1 s instead of an F_GETLK probe (macOS F_GETLK does not see flock locks, and POSIX locks
+        cannot be tested in-process). Remaining limits: backup/restore hold each archive in memory (the runner returns
+        bytes); planned: stream to `<file>.tmp` and rename. `docker compose -p <name> exec|stop|start|down` relies on
+        Compose's project-by-name mode; an empty user trust domain makes `security trust-settings-export` exit
+        non-zero ('No Trust Settings'), read as 'none remain'. Earlier context: Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
         watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
         tmpfs /run/secrets/<secret_file_name(ref)> via `docker exec -i -u <uid>` over stdin (no Compose secrets). The DB password is
         generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 now names /run/secrets files

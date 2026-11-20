@@ -142,6 +142,8 @@ def _tar_argv(user: str, volume: str) -> list[str]:
         "docker",
         "run",
         "--rm",
+        "--entrypoint",
+        "",
         "--network",
         "none",
         "--read-only",
@@ -197,6 +199,36 @@ def test_backup_writes_dump_tars_and_manifest(tmp_path: Path) -> None:
     assert _tar_argv("10001:10001", "reader-vec_blobs") in world.runner.argvs("docker", "run")
     assert _tar_argv("0:0", "reader-vec_caddy_config") in world.runner.argvs("docker", "run")
     assert not any("caddy_data" in " ".join(c.argv) for c in world.runner.calls)
+    timeouts = {
+        c.argv[7] if c.argv[1] == "compose" else c.argv[-6]: c.timeout
+        for c in world.runner.calls
+        if "pg_dump" in c.argv or "tar" in c.argv or "psql" in c.argv
+    }
+    assert timeouts == {"pg_dump": 600, "tar": 120, "psql": 120}
+
+
+def test_backup_restarts_the_writers_after_a_partial_stop(tmp_path: Path) -> None:
+    world, config = _backup_world(tmp_path)
+    world.runner.on("docker", "compose", "stop", result=(1, b"", b"worker: timeout"))
+    with held_lock(world.ctx.run_dir):
+        assert _main(world, "backup", str(tmp_path / "b"), "--config", str(config)) != 0
+    (start,) = world.runner.argvs("start")
+    assert set(start[5:]) == {"api", "worker"}
+    assert world.runner.argvs("pg_dump") == []
+
+
+def test_backup_restarts_the_writers_after_a_hung_dump(tmp_path: Path) -> None:
+    from reader.cli.runner import CommandTimeout
+
+    def hang(_call: Any) -> Any:
+        raise CommandTimeout()
+
+    world, config = _backup_world(tmp_path)
+    world.runner.on("pg_dump", handler=hang)
+    with held_lock(world.ctx.run_dir):
+        assert _main(world, "backup", str(tmp_path / "b"), "--config", str(config)) != 0
+    assert len(world.runner.argvs("start")) == 1
+    assert "backup_failed" in world.err
 
 
 def test_backup_stops_and_restarts_the_writers(tmp_path: Path) -> None:
@@ -248,6 +280,7 @@ def _archive(directory: Path, files: dict[str, bytes], *, corrupt: str | None = 
 
 FILES = {"db.dump": b"DUMP", "blobs.tar": b"TAR-blobs", "caddy_config.tar": b"TAR-caddy"}
 RESTORE_SCRIPT = "find /v -mindepth 1 -delete && tar -C /v -xf -"
+EMPTY_CHECK = "find /v -mindepth 1 -print -quit"
 
 
 def _restore_world(tmp_path: Path, *, rows: bytes = b"0\n", blobs: bytes = b"") -> tuple[World, Path]:
@@ -288,6 +321,8 @@ def test_restore_argv_and_stdin(tmp_path: Path) -> None:
         "run",
         "--rm",
         "-i",
+        "--entrypoint",
+        "",
         "--network",
         "none",
         "--read-only",
@@ -305,8 +340,69 @@ def test_restore_argv_and_stdin(tmp_path: Path) -> None:
     assert untar["reader-vec_blobs:/v"].stdin == b"TAR-blobs"
     assert untar["reader-vec_caddy_config:/v"].stdin == b"TAR-caddy"
     assert "0:0" in untar["reader-vec_caddy_config:/v"].argv
+    assert pg.timeout == 600
+    assert {c.timeout for c in untar.values()} == {120}
     (stop,) = world.runner.argvs("stop")
     assert set(stop[5:]) == {"api", "worker", "caddy"}
+    (check,) = [c for c in world.runner.calls if EMPTY_CHECK in c.argv]
+    assert check.argv == [
+        "docker",
+        "run",
+        "--rm",
+        "--entrypoint",
+        "",
+        "--network",
+        "none",
+        "--read-only",
+        "--cap-drop",
+        "ALL",
+        "--user",
+        "10001:10001",
+        "-v",
+        "reader-vec_blobs:/v:ro",
+        IMAGE,
+        "sh",
+        "-c",
+        EMPTY_CHECK,
+    ]
+    assert check.timeout == 120
+    (rows,) = [c for c in world.runner.calls if "psql" in c.argv]
+    assert rows.timeout == 120
+    assert "'alembic_version'" in rows.argv[-1]
+    assert "information_schema" in rows.argv[-1]
+
+
+def test_restore_restarts_the_services_after_a_failed_pg_restore(tmp_path: Path) -> None:
+    world, config = _restore_world(tmp_path)
+    world.runner.on("pg_restore", result=(1, b"", b"error"))
+    archive = _archive(tmp_path / "b", FILES)
+    with held_lock(world.ctx.run_dir):
+        assert _main(world, "restore", str(archive), "--config", str(config)) != 0
+    (start,) = world.runner.argvs("start")
+    assert set(start[5:]) == {"api", "worker", "caddy"}
+    assert "restore_failed" in world.err
+
+
+def test_restore_failed_check_reports_restore_failed(tmp_path: Path) -> None:
+    world, config = _restore_world(tmp_path)
+    world.runner.on("psql", result=(2, b"", b"psql: error"))
+    archive = _archive(tmp_path / "b", FILES)
+    with held_lock(world.ctx.run_dir):
+        assert _main(world, "restore", str(archive), "--config", str(config)) == 1
+    assert "restore_failed" in world.err
+    assert world.runner.argvs("stop") == []
+
+
+@pytest.mark.parametrize("manifest", ["not json", '{"files": [{"name": "db.dump"}]}', '{"files": 3}', "[]"])
+def test_restore_malformed_manifest_is_bad_backup(tmp_path: Path, manifest: str) -> None:
+    world, config = _restore_world(tmp_path)
+    archive = _archive(tmp_path / "b", FILES)
+    (archive / "manifest.json").write_text(manifest)
+    with held_lock(world.ctx.run_dir):
+        assert _main(world, "restore", str(archive), "--config", str(config)) == 1
+    assert "bad_backup" in world.err
+    assert "Traceback" not in world.err
+    assert world.runner.argvs("stop") == []
 
 
 @pytest.mark.parametrize("problem", ["sha", "rows", "blobs", "watcher"])

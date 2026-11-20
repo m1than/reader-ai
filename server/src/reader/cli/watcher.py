@@ -48,6 +48,10 @@ RETRY_DELAY: Final = 1  # s
 BACKOFF: Final = (1, 2, 4)  # s between event-stream resubscriptions (FR-CLI-8)
 STOP_GRACE: Final = 15  # s before SIGKILL; longer than EXEC_TIMEOUT (FR-CLI-7)
 STOP_POLL: Final = 0.25  # s
+KILL_WAIT: Final = 5  # s for the lock to be released after SIGKILL (FR-CLI-7)
+LOCK_RETRY: Final = (
+    1  # s a starting watcher retries a contended lock; a status probe holds it for microseconds
+)
 PROJECT: Final = "com.docker.compose.project"
 ONEOFF: Final = "com.docker.compose.oneoff"
 SERVICE: Final = "com.docker.compose.service"
@@ -99,25 +103,37 @@ def decode_bundle(data: bytes) -> dict[str, Secret]:
 # Event trust (FR-CLI-9) -----------------------------------------------------------------------------------
 
 
-def event_target(event: object, project: str, consumers: Collection[str]) -> tuple[str, str] | None:
-    """(container id, service) when the event's own labels name a consumer of this project, else None."""
-    if not isinstance(event, Mapping) or event.get("Type") != "container" or event.get("Action") != "start":
+def _is_start(event: object) -> bool:
+    return isinstance(event, Mapping) and event.get("Type") == "container" and event.get("Action") == "start"
+
+
+def rejected_label(event: object, project: str, consumers: Collection[str]) -> str | None:
+    """For a container start event: the name of the first check that fails (never a value), else None."""
+    if not isinstance(event, Mapping) or not _is_start(event):
         return None
     actor = event.get("Actor")
     attributes = actor.get("Attributes") if isinstance(actor, Mapping) else None
     if not isinstance(actor, Mapping) or not isinstance(attributes, Mapping):
+        return "Actor.Attributes"
+    service = attributes.get(SERVICE)
+    if attributes.get(PROJECT) != project:
+        return PROJECT
+    if attributes.get(ONEOFF) != "False":
+        return ONEOFF
+    if not isinstance(service, str) or service not in consumers:
+        return SERVICE
+    container = actor.get("ID")
+    if not isinstance(container, str) or not container:
+        return "Actor.ID"
+    return None
+
+
+def event_target(event: object, project: str, consumers: Collection[str]) -> tuple[str, str] | None:
+    """(container id, service) when the event's own labels name a consumer of this project, else None."""
+    if not isinstance(event, Mapping) or not _is_start(event) or rejected_label(event, project, consumers):
         return None
-    container, service = actor.get("ID"), attributes.get(SERVICE)
-    if attributes.get(PROJECT) != project or attributes.get(ONEOFF) != "False":
-        return None
-    if (
-        not isinstance(container, str)
-        or not container
-        or not isinstance(service, str)
-        or service not in consumers
-    ):
-        return None
-    return container, service
+    actor = event["Actor"]
+    return str(actor["ID"]), str(actor["Attributes"][SERVICE])
 
 
 def events_argv(project: str, since: str) -> list[str]:
@@ -146,18 +162,21 @@ class Watcher:
         project: str,
         deliveries: Sequence[Delivery],
         values: Mapping[str, Secret],
-        sleep: Callable[[float], None],
+        sleep: Callable[[float], object] | None = None,
         submit: Callable[[Job], Any] | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
     ) -> None:
         self.runner = runner
         self.env = dict(env)
         self.project = project
         self.values = dict(values)
-        self.sleep = sleep
+        self.monotonic = monotonic
         self.by_service: dict[str, list[Delivery]] = {}
         for delivery in deliveries:
             self.by_service.setdefault(delivery.service, []).append(delivery)
         self._stopping = threading.Event()
+        # By default every wait ends at once on stop(); a test passes a fake clock instead.
+        self.sleep: Callable[[float], object] = sleep if sleep is not None else self._stopping.wait
         self._guard = threading.Lock()
         self._containers: dict[str, threading.Lock] = {}
         self._stream: Stream | None = None
@@ -218,6 +237,8 @@ class Watcher:
                 if self._stopping.is_set():
                     return
                 self.sleep(RETRY_DELAY)
+                if self._stopping.is_set():  # stopped during the wait: no new retry
+                    return
             try:
                 outcome = self.runner.run(argv, env=self.env, stdin=data, timeout=EXEC_TIMEOUT).code
             except CommandTimeout:
@@ -268,23 +289,29 @@ class Watcher:
             event = json.loads(line)
         except ValueError:
             return
-        target = event_target(event, self.project, self.by_service.keys())
-        if target is None:
-            if isinstance(event, Mapping) and event.get("Type") == "container":
-                actor = event.get("Actor")
-                container = actor.get("ID") if isinstance(actor, Mapping) else None
-                log_event(LOGGER, "event_ignored", logging.DEBUG, container=str(container)[:12])
+        label = rejected_label(event, self.project, self.by_service.keys())
+        if label is not None:
+            actor = event.get("Actor") if isinstance(event, Mapping) else None
+            container = actor.get("ID") if isinstance(actor, Mapping) else None
+            log_event(LOGGER, "event_ignored", logging.INFO, container=str(container)[:12], label=label)
             return
-        self.submit(self._job(*target))
+        target = event_target(event, self.project, self.by_service.keys())
+        if target is not None:
+            self.submit(self._job(*target))
 
-    def reconcile(self) -> None:
+    def reconcile(self) -> bool:
+        """Deliver to every running consumer whose own labels pass; False when listing them failed."""
         listed = self._quiet(
             ["docker", "ps", "-q", "--no-trunc", "--filter", f"label={PROJECT}={self.project}"]
         )
-        ids = listed.split() if listed else []
+        if listed is None:
+            return False
+        ids = listed.split()
         if not ids:
-            return
-        labels = self._quiet(["docker", "inspect", "--format", "{{.Id}} {{json .Config.Labels}}", *ids]) or ""
+            return True
+        labels = self._quiet(["docker", "inspect", "--format", "{{.Id}} {{json .Config.Labels}}", *ids])
+        if labels is None:
+            return False
         for line in labels.splitlines():
             container, _, raw = line.partition(" ")
             try:
@@ -300,6 +327,7 @@ class Watcher:
                     }
                 )
             )
+        return True
 
     def _quiet(self, argv: list[str]) -> str | None:
         try:
@@ -311,31 +339,41 @@ class Watcher:
     def run(self, ready: Callable[[], None], since: str) -> int:
         """Subscribe, reconcile, signal readiness once, follow events; resubscribe; fail closed."""
         # The subscription replays every event since `since`, so no start before it is established is lost.
+        # Every resubscription keeps the same `since` (deliveries are idempotent).
         failures = 0
         signalled = False
         while not self._stopping.is_set():
+            stream: Stream | None = None
             try:
-                stream: Stream | None = self.runner.stream(events_argv(self.project, since), env=self.env)
+                stream = self.runner.stream(events_argv(self.project, since), env=self.env)
             except CommandFailed:
                 stream = None
+            lived = 0.0
             if stream is not None:
                 self._stream = stream
-                self.reconcile()
-                if not signalled:
-                    ready()
-                    signalled = True
-                for line in stream:
-                    failures = 0
-                    self.handle_line(line)
+                if self._stopping.is_set():  # stop() ran before the stream was visible to it
+                    stream.close()
+                    break
+                if self.reconcile():
+                    if not signalled:
+                        ready()
+                        signalled = True
+                    started = self.monotonic()
+                    for line in stream:
+                        self.handle_line(line)
+                    lived = self.monotonic() - started
+                else:
+                    stream.close()  # a failed reconcile is a failed subscription
             if self._stopping.is_set():
                 break
+            if lived > BACKOFF[-1]:
+                failures = 0
             failures += 1
             if failures > len(BACKOFF):
                 log_event(LOGGER, "events_failed", logging.ERROR, attempts=failures)
                 return 1
             log_event(LOGGER, "events_resubscribe", logging.WARNING, attempt=failures)
             self.sleep(BACKOFF[failures - 1])
-            since = (self._quiet(["docker", "info", "--format", "{{.SystemTime}}"]) or since).strip() or since
         return 0
 
 
@@ -343,13 +381,21 @@ class Watcher:
 
 
 def acquire_lock(path: Path) -> int:
+    """Exclusive flock, retried for up to LOCK_RETRY so a status probe's momentary shared lock cannot make a
+    starting watcher fail (FR-CLI-7)."""
     fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
-    held = False
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        held = True
-    if held:
+    deadline = time.monotonic() + LOCK_RETRY
+    locked = False
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            locked = True
+        except BlockingIOError:
+            locked = False
+        if locked or time.monotonic() >= deadline:
+            break
+        time.sleep(0.01)
+    if not locked:
         os.close(fd)
         raise CliError("watcher_running", "another watcher holds the lock")
     os.ftruncate(fd, 0)
@@ -385,12 +431,19 @@ def stop_watcher(ctx: Ctx) -> bool:
         ctx.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
         return True
-    deadline = ctx.monotonic() + STOP_GRACE
+    if _wait_released(ctx, lock, STOP_GRACE):
+        return True
+    with contextlib.suppress(ProcessLookupError):
+        ctx.kill(pid, signal.SIGKILL)
+    _wait_released(ctx, lock, KILL_WAIT)
+    return True
+
+
+def _wait_released(ctx: Ctx, lock: Path, seconds: float) -> bool:
+    deadline = ctx.monotonic() + seconds
     while lock_holder(lock) is not None:
         if ctx.monotonic() >= deadline:
-            with contextlib.suppress(ProcessLookupError):
-                ctx.kill(pid, signal.SIGKILL)
-            break
+            return False
         ctx.sleep(STOP_POLL)
     return True
 
@@ -435,8 +488,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         project=args.project,
         deliveries=deliveries,
         values=values,
-        sleep=time.sleep,
-    )
+    )  # default sleep: waits that end at once on SIGTERM (FR-CLI-20)
     signal.signal(signal.SIGTERM, lambda _signum, _frame: watcher.stop())
     log_event(
         LOGGER,

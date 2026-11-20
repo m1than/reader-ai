@@ -6,12 +6,14 @@ import os
 import select
 import signal
 import subprocess
+import time
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Protocol
 
 ENV_ALLOW: Final = ("PATH", "HOME", "LANG", "DOCKER_HOST", "DOCKER_CONTEXT")
 READY: Final = b"1"
+TERMINATE_GRACE: Final = 15  # s before SIGKILL; longer than a delivery call's 10 s timeout (FR-CLI-7)
 BUNDLE_FD: Final = 3
 READY_FD: Final = 4
 _HIGH_FD: Final = 10  # spawn sources are moved above fds 0-4 so the dup2 actions cannot overwrite each other
@@ -162,11 +164,21 @@ class _Spawned:
             os.close(fd)
 
     def terminate(self) -> None:
-        try:
-            os.kill(self.pid, signal.SIGTERM)
-            os.waitpid(self.pid, os.WNOHANG)
-        except ProcessLookupError, ChildProcessError:
-            pass
+        """SIGTERM, then SIGKILL if the child has not exited after TERMINATE_GRACE (FR-CLI-7)."""
+        for sig, grace in ((signal.SIGTERM, TERMINATE_GRACE), (signal.SIGKILL, TERMINATE_GRACE)):
+            try:
+                os.kill(self.pid, sig)
+            except ProcessLookupError:
+                return
+            deadline = time.monotonic() + grace
+            while time.monotonic() < deadline:
+                try:
+                    reaped, _ = os.waitpid(self.pid, os.WNOHANG)
+                except ChildProcessError:
+                    return
+                if reaped:
+                    return
+                time.sleep(0.05)
 
 
 def _high(fd: int) -> int:
@@ -191,11 +203,18 @@ class PosixSpawner:
             (os.POSIX_SPAWN_DUP2, bundle_r, BUNDLE_FD),
             (os.POSIX_SPAWN_DUP2, ready_w, READY_FD),
         ]
+        pid: int | None = None
         try:
             pid = os.posix_spawn(argv[0], list(argv), dict(env), file_actions=actions, setsid=True)
+        except OSError:
+            pid = None
         finally:
             for fd in (bundle_r, ready_w, devnull):
                 os.close(fd)
+        if pid is None:
+            os.close(bundle_w)
+            os.close(ready_r)
+            raise CommandFailed()
         try:
             view = memoryview(bundle)
             while view:

@@ -31,11 +31,15 @@ BACKUP_LABEL: Final = "org.reader-ai.backup"
 WRITERS: Final = ("api", "worker", "mcp")
 RESTORE_SCRIPT: Final = "find /v -mindepth 1 -delete && tar -C /v -xf -"
 EMPTY_CHECK: Final = "find /v -mindepth 1 -print -quit"
+# Exact row count over every application table. Declared system tables, filled by migrations at first start,
+# are excluded (FR-CLI-18): alembic_version. A constant: nothing user-supplied enters the query.
 ROWS_SQL: Final = (
     "SELECT coalesce(sum((xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', "
     "schemaname, tablename), false, true, '')))[1]::text::bigint), 0) FROM pg_tables "
-    "WHERE schemaname NOT IN ('pg_catalog', 'information_schema')"
+    "WHERE schemaname NOT IN ('pg_catalog', 'information_schema') AND tablename NOT IN ('alembic_version')"
 )
+DUMP_TIMEOUT: Final = 600  # s, pg_dump / pg_restore: a pilot-sized database; revised from the live drill
+ONE_OFF_TIMEOUT: Final = 120  # s, each tar, untar, find one-off and psql query: local volume and socket work
 _MAJOR: Final = re.compile(r"v?(\d+)\.\d+")
 
 
@@ -238,6 +242,8 @@ def _volume_name(model: Rendered, key: str) -> str:
 
 
 def _one_off(image: str, user: str, volume: str, *command: str, read_only: bool = True) -> list[str]:
+    """A hardened one-off on one volume. `--entrypoint ""`: the server image's entrypoint waits for
+    /run/secrets/db-password, which a one-off never gets (measured: it hangs without this flag)."""
     mount = f"{volume}:/v:ro" if read_only else f"{volume}:/v"
     interactive = [] if read_only else ["-i"]
     return [
@@ -245,6 +251,8 @@ def _one_off(image: str, user: str, volume: str, *command: str, read_only: bool 
         "run",
         "--rm",
         *interactive,
+        "--entrypoint",
+        "",
         "--network",
         "none",
         "--read-only",
@@ -267,10 +275,12 @@ def _psql(project: str, sql: str) -> list[str]:
     return _postgres(project, "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", sql)
 
 
-def _capture(ctx: Ctx, argv: list[str], what: str, stdin: bytes | None = None) -> bytes:
-    result = docker(ctx, *argv, stdin=stdin)
+def _capture(
+    ctx: Ctx, argv: list[str], what: str, code: str, timeout: float, stdin: bytes | None = None
+) -> bytes:
+    result = docker(ctx, *argv, stdin=stdin, timeout=timeout)
     if result is None or result.code != 0:
-        raise CliError("backup_failed" if stdin is None else "restore_failed", f"{what} failed")
+        raise CliError(code, f"{what} failed or timed out")
     return result.out
 
 
@@ -313,18 +323,21 @@ def cmd_backup(ctx: Ctx, config_path: Path, directory: Path) -> int:
     image = model.image("api")
     writers = [s for s in WRITERS if s in model.services]
     files: dict[str, bytes] = {}
-    _services(ctx, model.name, "stop", writers)
+    failed = "backup_failed"
     try:
-        files["db.dump"] = _capture(
-            ctx, _postgres(model.name, "pg_dump", "-Fc", "-U", "postgres", "postgres"), "pg_dump"
-        )
+        _services(ctx, model.name, "stop", writers)
+        dump = _postgres(model.name, "pg_dump", "-Fc", "-U", "postgres", "postgres")
+        files["db.dump"] = _capture(ctx, dump, "pg_dump", failed, DUMP_TIMEOUT)
         for key in keys:
             files[f"{key}.tar"] = _capture(
                 ctx,
                 _one_off(image, users[key], _volume_name(model, key), "tar", "-C", "/v", "-cf", "-", "."),
                 f"tar of {key}",
+                failed,
+                ONE_OFF_TIMEOUT,
             )
-        server = _capture(ctx, _psql(model.name, "SHOW server_version"), "postgres version").decode().strip()
+        version_sql = _psql(model.name, "SHOW server_version")
+        server = _capture(ctx, version_sql, "postgres version", failed, ONE_OFF_TIMEOUT).decode().strip()
     finally:
         _services(ctx, model.name, "start", writers)
     dest.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -343,6 +356,30 @@ def cmd_backup(ctx: Ctx, config_path: Path, directory: Path) -> int:
     return 0
 
 
+def _read_backup(source: Path) -> dict[str, bytes]:
+    """The manifest's files, each verified by sha256; anything malformed is `bad_backup`."""
+    files: dict[str, bytes] = {}
+    mismatch: str | None = None
+    try:
+        manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
+        for entry in manifest["files"]:
+            name, digest = str(entry["name"]), str(entry["sha256"])
+            if "/" in name or name.startswith("."):
+                raise ValueError(name)
+            data = (source / name).read_bytes()
+            if hashlib.sha256(data).hexdigest() != digest:
+                mismatch = name
+                break
+            files[name] = data
+    except OSError, ValueError, KeyError, TypeError:
+        files = {}
+    if mismatch is not None:
+        raise CliError("checksum_mismatch", f"{mismatch} does not match the manifest")
+    if "db.dump" not in files:
+        raise CliError("bad_backup", "the backup's manifest or files are missing or malformed")
+    return files
+
+
 @guarded
 def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
     project = load(ctx, config_path)
@@ -350,40 +387,31 @@ def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
     if not watcher_running(ctx):
         raise CliError("watcher_stopped", "the watcher is not running; run `reader up` first")
     source = Path(directory)
-    manifest = json.loads((source / "manifest.json").read_text(encoding="utf-8"))
-    files: dict[str, bytes] = {}
-    for entry in manifest.get("files", []):
-        data = (source / entry["name"]).read_bytes()
-        if hashlib.sha256(data).hexdigest() != entry["sha256"]:
-            raise CliError("checksum_mismatch", f"{entry['name']} does not match the manifest")
-        files[entry["name"]] = data
-    if "db.dump" not in files:
-        raise CliError("bad_backup", "the backup has no db.dump")
+    files = _read_backup(source)
     keys = [k for k in backup_volumes(model) if f"{k}.tar" in files]
     users = {key: volume_user(model, key) for key in keys}
     image = model.image("api")
-    rows = _capture(ctx, _psql(model.name, ROWS_SQL), "row count").decode().strip()
+    failed = "restore_failed"
+    rows = _capture(ctx, _psql(model.name, ROWS_SQL), "row count", failed, ONE_OFF_TIMEOUT).decode().strip()
     if rows != "0":
         raise CliError(
             "database_not_empty", "the database holds rows; restore needs a freshly initialised pgdata"
         )
     if "blobs" in model.volumes:
-        listing = _capture(
-            ctx,
-            _one_off(
-                image, volume_user(model, "blobs"), _volume_name(model, "blobs"), "sh", "-c", EMPTY_CHECK
-            ),
-            "blobs check",
+        empty_check = _one_off(
+            image, volume_user(model, "blobs"), _volume_name(model, "blobs"), "sh", "-c", EMPTY_CHECK
         )
-        if listing.strip():
+        if _capture(ctx, empty_check, "blobs check", failed, ONE_OFF_TIMEOUT).strip():
             raise CliError("blobs_not_empty", "the blobs volume is not empty")
     stopped = [s for s in (*WRITERS, "caddy") if s in model.services]
-    _services(ctx, model.name, "stop", stopped)
     try:
+        _services(ctx, model.name, "stop", stopped)
         _capture(
             ctx,
             _postgres(model.name, "pg_restore", "--clean", "--if-exists", "-U", "postgres", "-d", "postgres"),
             "pg_restore",
+            failed,
+            DUMP_TIMEOUT,
             stdin=files["db.dump"],
         )
         for key in keys:
@@ -393,6 +421,8 @@ def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
                     image, users[key], _volume_name(model, key), "sh", "-c", RESTORE_SCRIPT, read_only=False
                 ),
                 f"untar of {key}",
+                failed,
+                ONE_OFF_TIMEOUT,
                 stdin=files[f"{key}.tar"],
             )
     finally:

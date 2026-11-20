@@ -212,6 +212,26 @@ def test_config_error_exits_2(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert world.runner.calls == []
 
 
+def test_spawn_failure_is_a_coded_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    world = _world(tmp_path, monkeypatch)
+
+    def broken(*_args: Any, **_kwargs: Any) -> Any:
+        raise OSError("posix_spawn failed")
+
+    world.spawner.spawn = broken  # type: ignore[method-assign]
+    assert _up(world, _config(tmp_path)) == 1
+    assert "spawn_failed" in world.err
+    assert world.runner.argvs("up", "-d") == []
+
+
+def test_unparsable_compose_json_is_a_coded_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    world = _world(tmp_path, monkeypatch)
+    world.runner.on("docker", "compose", "config", result=b"not json")
+    assert _up(world, _config(tmp_path)) == 1
+    assert "bad_model" in world.err
+    assert "Traceback" not in world.err
+
+
 # FR-CLI-10: health bound, second up -----------------------------------------------------------------------
 
 

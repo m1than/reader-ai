@@ -23,7 +23,7 @@ from reader.cli.resolve import (
     host_resolvers,
     resolve_values,
 )
-from reader.cli.runner import CommandFailed, CommandTimeout, Result, Runner, Spawner
+from reader.cli.runner import CommandFailed, CommandTimeout, Result, Runner, Spawner, WatcherProcess
 from reader.cli.stack import (
     Plan,
     Rendered,
@@ -111,7 +111,14 @@ def load(ctx: Ctx, config_path: Path) -> Project:
     override = build_override(load_compose_source(ctx.compose_file), [u.handle for u in config.users], path)
     data = json.dumps(override).encode()
     rendered = _checked(ctx, lambda: compose(ctx, data, "config", "--format", "json"), "compose_config")
-    return Project(config, data, Rendered.parse(json.loads(rendered.out)))
+    parsed: Any = None
+    try:
+        parsed = json.loads(rendered.out)
+    except ValueError:
+        parsed = None
+    if not isinstance(parsed, dict):
+        raise CliError("bad_model", "docker compose config did not return a JSON object")
+    return Project(config, data, Rendered.parse(parsed))
 
 
 def _checked(ctx: Ctx, call: Callable[[], Result], code: str) -> Result:
@@ -330,10 +337,16 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     plan = make_plan(model, project.config)
     values = resolve_values(plan, host_resolvers(ctx.keyring, ctx.runner, ctx.env), db_password)
     stop_watcher(ctx)  # after resolution succeeded, so a failed `up` leaves the running watcher in place
-    process = ctx.spawner.spawn(
-        watcher_argv(ctx, model.name, since, plan), env=ctx.env, bundle=encode_bundle(values)
-    )
+    process: WatcherProcess | None = None
+    try:
+        process = ctx.spawner.spawn(
+            watcher_argv(ctx, model.name, since, plan), env=ctx.env, bundle=encode_bundle(values)
+        )
+    except CommandFailed, OSError:
+        process = None
     del values
+    if process is None:
+        raise CliError("spawn_failed", "the watcher could not be started; no container was started")
     if not process.wait_ready(READY_TIMEOUT):
         process.terminate()
         raise CliError("watcher_not_ready", "the watcher did not signal readiness; no container was started")
@@ -393,18 +406,23 @@ def cmd_secrets_set(ctx: Ctx, name: str) -> int:
             file=ctx.err,
         )
         return 2
+    value: str | None = None
     if ctx.is_tty:
         value = ctx.getpass(f"value for {name}: ")
     else:
-        raw = ctx.stdin.read()
-        value = raw[:-1] if raw.endswith("\n") else raw
+        try:
+            raw = ctx.stdin.read()
+            value = raw[:-1] if raw.endswith("\n") else raw
+        except UnicodeDecodeError:  # the error holds the bytes: dropped here, never chained or printed
+            value = None
     ref = SecretRef(f"secret://keychain/{USER_SERVICE}/{name}")
-    code: str | None = None
+    code: str | None = "not_utf8"
     secret: Secret | None = None
-    try:
-        secret = check_value(ref, value)
-    except SecretResolutionError as error:
-        code = error.code
+    if value is not None:
+        try:
+            secret = check_value(ref, value)
+        except SecretResolutionError as error:
+            code = error.code
     del value
     if secret is None:
         print(f"error: the value is not accepted: {code}", file=ctx.err)
