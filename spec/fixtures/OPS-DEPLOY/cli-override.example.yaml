@@ -5,11 +5,12 @@
 # of them equals FR-DEPLOY-8's literals after size normalisation (Compose renders 2g as 2147483648; tmpfs options are
 # compared as sets). There is no merge step in the test.
 # The override also binds the owner's reader.yaml read-only into api, worker and mcp, and only those (FR-DEPLOY-5);
-# compose.yaml sets READER_CONFIG to the target path. The source path is illustrative: OPS-CLI writes the real one.
+# compose.yaml sets READER_CONFIG to the target path. The source path is the test path of OPS-CLI's VEC-CLI-2;
+# at `reader up` OPS-CLI writes the owner's real path.
 # `create_host_path: false`: a missing file fails the start instead of Docker creating a directory in its place.
 x-reader-config: &reader-config
   type: bind
-  source: /Users/ivan/.config/reader-ai/reader.yaml
+  source: /tmp/reader-ai-test/reader.yaml # equal to OPS-CLI's VEC-CLI-2, so the two fixtures stay equal
   target: /etc/reader/reader.yaml
   read_only: true
   bind:

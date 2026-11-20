@@ -274,8 +274,8 @@ vectors:
   - id: VEC-DEPLOY-3
     source: >-
       The override OPS-CLI must emit for one configured user: the fully expanded kernel-<user> service, its network and
-      api's attachment to it, and the read-only reader.yaml bind on api, worker and mcp (FR-DEPLOY-5; its source path
-      is illustrative). Merged with compose.yaml it shows that bind on exactly those three services and nowhere else.
+      api's attachment to it, and the read-only reader.yaml bind on api, worker and mcp (FR-DEPLOY-5; source
+      `/tmp/reader-ai-test/reader.yaml`, equal to OPS-CLI's VEC-CLI-2 so the two fixtures stay equal). Merged with compose.yaml it shows that bind on exactly those three services and nowhere else.
       It carries no secrets (FR-DEPLOY-10 delivers them over docker exec)
     file: spec/fixtures/OPS-DEPLOY/cli-override.example.yaml
 

@@ -131,7 +131,7 @@ def test_volumes_and_mounts() -> None:
 
 CONFIG_BIND = {
     "type": "bind",
-    "source": "/Users/ivan/.config/reader-ai/reader.yaml",  # the fixture's illustrative path
+    "source": "/tmp/reader-ai-test/reader.yaml",  # noqa: S108 - the fixture's path, equal to OPS-CLI VEC-CLI-2
     "target": "/etc/reader/reader.yaml",
     "read_only": True,
     "bind": {"create_host_path": False},
