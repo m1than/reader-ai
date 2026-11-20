@@ -300,8 +300,15 @@ tasks:
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
-  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
-      note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
+  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
+      branch: V/V.SRV-SEARCH-min,
+      note: "spec drafted, awaits deep-reviewer. BAAI/bge-m3 (owner-confirmed 2026-11-21) in a dedicated internal `embed`
+        service (core network, no egress, no secrets, model baked at build from a pinned revision with sha256s): fp32
+        weights 2.27 GB exceed the worker's 2g and the api's 1g. Its mem_limit comes from spike spikes/embed-service
+        (to run before approval). pgvector 0.8.7 (PGDG) added to reader-postgres; HNSW plus GIN tsvector (russian /
+        english / simple by materials[].language); RRF k=60; acceptance NFR-SEARCH-1 hybrid recall@10 on questions-v2
+        ≥ 0.675 (dense measured). Paired changes: OPS-DEPLOY (embed service and image, pgvector), SRV-AUTH (ROUTERS,
+        version_locations), SRV-EVENTS (kind module), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
       note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
