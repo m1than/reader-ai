@@ -1,0 +1,28 @@
+# reader-ai edge (OPS-DEPLOY FR-DEPLOY-7). Internal CA for localhost (ADR-0024); no environment placeholders.
+{
+	admin localhost:2019
+}
+
+localhost {
+	tls internal
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'self'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	handle /api/* {
+		reverse_proxy 10.230.1.10:8000
+	}
+
+	handle /mcp {
+		reverse_proxy mcp:8001
+	}
+
+	handle {
+		root * /srv/spa
+		file_server
+	}
+}
