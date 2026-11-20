@@ -81,8 +81,14 @@ tasks:
         Needs an exec tmpfs /run/evcxr and a per-kernel copy of the evcxr cache via a launcher (shared cache breaks concurrent kernels);
         per-kernel dirs leak 86 MiB each (13th kernel fails) (cleanup open for OPS-SANDBOX); --memory-swap must equal --memory.
         Proposed ADR-0014 amendment (exec tmpfs, writable cache, verification in its own container) goes to S0.exit." }
-  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
-      note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml)" }
+  - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: in_progress, needs: [S0.skeleton],
+      note: "input: the Bashir PDF on the owner's Mac (owner gave the path 2026-11-20; sha256 matches pilot/bashir/plan.yaml)",
+      result: "Throughput PASS, fidelity FAIL (spikes/ingest-docling/RESULT.md). Docker CPU, 935 pages: 29.6 pages/min, peak 5.0 GiB;
+        67 tables, 35 display formulas. Fidelity on 20 pages: 8/20 misread without the formula model; 7/20 with formula + code models;
+        best 3/20 (formula model on, code model off; derived), all remaining failures are code blocks (378, 461, 468). Tables 11/11.
+        Formula model: ≈ 5 min/formula in Docker, ≈ 19 s natively (Docling refuses MPS for it; the gain is host CPU threads).
+        OCR on 10 rendered pages: mean char accuracy 0.870 (0.678–0.970), ≈ 1.3 pages/min. Triggers ADR-0008 revisit_when;
+        proposed amendment for S0.exit: native ingest, formula model on, code from the PDF text layer." }
   - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
       note: "spends Agent SDK credit; record in budget.ledger" }
