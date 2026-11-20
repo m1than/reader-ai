@@ -1,0 +1,22 @@
+# Spike stack (never shipped). Run from this directory:
+#   docker compose up -d --build          (PORT=8443 docker compose up -d --build if 443 is taken)
+#   docker compose down -v                teardown, including Caddy's CA volume
+name: reader-spike-passkey
+services:
+  caddy:
+    image: caddy:2.11.9-alpine
+    ports:
+      - "127.0.0.1:${PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on: [app]
+  app:
+    build: ./app
+    environment:
+      # The browser's origin. The default port 443 is omitted from origins; other ports must be included.
+      READER_ORIGIN: "https://localhost${ORIGIN_PORT_SUFFIX:-}"
+    volumes:
+      - ../../data/spikes/passkey-localhost:/data
+volumes:
+  caddy_data:
