@@ -302,13 +302,17 @@ tasks:
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
-  - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: in_progress, needs: [V.SRV-JOBS-min],
+  - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: in_progress, needs: [S1.live],
       branch: V/V.SRV-LESSON-min,
-      note: "spec drafted, awaits deep-reviewer. spec/modules/SRV-LESSON.yaml (slice subset) with cell.schema.json, the synthetic
-        fixture lesson F01 (generator spec/fixtures/SRV-LESSON/gen_f01.py; Nakamoto lab) and invalid.yaml (27 cases). Code
-        depends on SRV-AUTH (reader.db, ROUTERS), not on jobs. Cross-spec: SRV-AUTH ROUTERS + version_locations; OPS-DEPLOY
-        server.Dockerfile must create /var/lib/reader/blobs owned by 10001 (else blob writes fail on the fresh volume);
-        SRV-INGEST issues span ids and reuses reader.blobs." }
+      review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas;
+        applied with coordinator decisions (G2 publish deferred to SRV-PIPELINE; stage records per revision; seq; single
+        /api/lessons API; span id form <material_sha256>:<seq>); coordinator checks the diff",
+      note: "spec revised after review, awaits the coordinator's diff check. spec/modules/SRV-LESSON.yaml (slice subset) with
+        cell.schema.json, the synthetic fixture lesson F01 (generator spec/fixtures/SRV-LESSON/gen_f01.py; Nakamoto lab) and
+        invalid.yaml (write cases plus g2 cases for SRV-PIPELINE). Code depends on SRV-AUTH (reader.db, ROUTERS), not on jobs.
+        Cross-spec: SRV-AUTH ROUTERS + declared version_locations entry; OPS-DEPLOY server.Dockerfile must create
+        /var/lib/reader/blobs owned by 10001 (else blob writes fail on the fresh volume); SRV-INGEST issues span ids as
+        <material_sha256>:<seq> and reuses reader.blobs; SRV-PIPELINE owns G2." }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
       note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
   - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],

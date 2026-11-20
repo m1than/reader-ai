@@ -1,34 +1,69 @@
-# VEC-LESSON-3 — write-path and publish-gate cases, each a mutation of F01.ipynb (VEC-LESSON-2).
+# VEC-LESSON-3 — write-path cases, each a mutation of F01.ipynb (VEC-LESSON-2).
 # A mutation is applied with RFC 6902 operations to the JSON document of the file (`json.loads` of its bytes, where
 # `source` is a list of lines), and the result is serialised with `json.dumps(…, ensure_ascii=False)` before the write;
-# `raw` / `raw_hex` cases replace the bytes instead. Measured with nbformat 5.11.1: `nbformat.validate` silently rewrites
-# a duplicate cell id (it warns `DuplicateCellId` and mutates the notebook), and raises KeyError for nbformat 3 — so
-# FR-LESSON-1 checks the version and the cell ids itself before calling it.
-# `write` is the error code FR-LESSON-4 raises (null: the write succeeds); `publish` is the code FR-LESSON-10 answers
-# for that revision (null: publishing succeeds). Codes are fixed strings (FR-LESSON-4, FR-LESSON-10).
+# `raw` (UTF-8 text) / `raw_hex` cases replace the bytes instead. Measured with nbformat 5.11.1: `nbformat.validate`
+# silently rewrites a duplicate cell id (it warns `DuplicateCellId` and mutates the notebook), and raises KeyError for
+# nbformat 3 — so FR-LESSON-1 checks the structure, the version and the cell ids itself before calling it.
+# `write` is the error code FR-LESSON-4 raises (null: the write succeeds). Publishing (G2) is deferred to SRV-PIPELINE;
+# the cases marked `g2` are inputs it must refuse later, and here they must write successfully.
 source: F01.ipynb
 cases:
   - id: f01-unchanged
     ops: []
     write: null
-    publish: null
   - id: not-json
     raw: "{\"cells\": ["
     write: not_nbformat
   - id: not-utf8
     raw_hex: "ff fe 7b 7d"
     write: not_utf8
+  - id: json-array
+    raw: "[]"
+    write: not_nbformat
+  - id: nan-number
+    note: "Python's json accepts NaN by default; FR-LESSON-1 parses with a `parse_constant` that refuses NaN, Infinity and -Infinity"
+    ops: [{ op: add, path: /metadata/reader/score, value: "__NaN__" }]
+    replace_text: { "\"__NaN__\"": "NaN" }
+    write: not_nbformat
+  - id: nbformat-as-string
+    ops: [{ op: replace, path: /nbformat, value: "4" }]
+    write: not_nbformat
+  - id: nbformat-as-float
+    ops: [{ op: replace, path: /nbformat_minor, value: 5.0 }]
+    write: not_nbformat
+  - id: nbformat-as-bool
+    note: "True == 1 in Python; the type check refuses bool"
+    ops: [{ op: replace, path: /nbformat, value: true }]
+    write: not_nbformat
   - id: nbformat-3
     ops: [{ op: replace, path: /nbformat, value: 3 }]
     write: not_nbformat
   - id: minor-without-cell-ids
     ops: [{ op: replace, path: /nbformat_minor, value: 4 }, { op: remove, path: /cells/0/id }]
     write: not_nbformat
+  - id: cells-not-a-list
+    ops: [{ op: replace, path: /cells, value: { a: 1 } }]
+    write: not_nbformat
+  - id: cell-not-an-object
+    ops: [{ op: add, path: /cells/0, value: "not a cell" }]
+    write: not_nbformat
+  - id: nbformat-validate-fails
+    note: "a stream output on a markdown cell: structural checks pass, nbformat.validate raises; any exception from it is not_nbformat"
+    ops: [{ op: add, path: /cells/0/outputs, value: [] }]
+    write: not_nbformat
   - id: duplicate-cell-id
     ops: [{ op: replace, path: /cells/1/id, value: f01-diagnostic }]
     write: duplicate_cell_id
+  - id: lone-surrogate
+    note: "valid JSON (escaped) whose string cannot be encoded as UTF-8 for the canonical bytes"
+    ops: [{ op: replace, path: /cells/7/metadata/reader/back, value: "__SURROGATE__" }]
+    replace_text: { "\"__SURROGATE__\"": "\"\\ud800\"" }
+    write: not_utf8
   - id: missing-reader-metadata
     ops: [{ op: remove, path: /cells/2/metadata/reader }]
+    write: missing_reader_metadata
+  - id: missing-lesson-format
+    ops: [{ op: remove, path: /metadata/reader/lesson_format }]
     write: missing_reader_metadata
   - id: unknown-kind
     ops: [{ op: replace, path: /cells/2/metadata/reader/kind, value: summary }]
@@ -36,17 +71,38 @@ cases:
   - id: explain-without-claims
     ops: [{ op: remove, path: /cells/2/metadata/reader/claims }]
     write: cell_schema
+  - id: property-of-another-kind
+    note: "unevaluatedProperties: `front` belongs to recall, not explain"
+    ops: [{ op: add, path: /cells/2/metadata/reader/front, value: "x" }]
+    write: cell_schema
   - id: lab-network-allowlist
     ops: [{ op: replace, path: /cells/6/metadata/reader/network, value: allowlist }]
     write: cell_schema
   - id: lab-kernel-rust
     ops: [{ op: replace, path: /cells/6/metadata/reader/kernel, value: rust }]
     write: cell_schema
+  - id: lab-expected-sha256
+    note: "hidden expected values are deferred; the key is refused"
+    ops: [{ op: add, path: /cells/6/metadata/reader/expected_sha256, value: "0000000000000000000000000000000000000000000000000000000000000000" }]
+    write: cell_schema
   - id: citation-http
     ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/0/url, value: "http://bitcoin.org/bitcoin.pdf" }]
     write: cell_schema
-  - id: span-with-space
-    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "fixture F01" }]
+  - id: citation-ip-host
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/0/url, value: "https://10.0.0.1/x" }]
+    write: cell_schema
+  - id: citation-userinfo
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/0/url, value: "https://a@bitcoin.org/x" }]
+    write: cell_schema
+  - id: span-old-form
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "fixture:F01:p1:0-120" }]
+    write: cell_schema
+  - id: span-uppercase-hex
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "BFAF5F84EC26D5D046B23C32827FF917C72A94707EF23407D77031429D53F1A1:1" }]
+    write: cell_schema
+  - id: date-not-a-date
+    note: "matches the pattern, fails the format checker"
+    ops: [{ op: replace, path: /cells/3/metadata/reader/as_of, value: "2026-02-30" }]
     write: cell_schema
   - id: lab-as-markdown
     ops: [{ op: replace, path: /cells/6/cell_type, value: markdown }, { op: remove, path: /cells/6/outputs }, { op: remove, path: /cells/6/execution_count }]
@@ -54,42 +110,21 @@ cases:
   - id: explain-as-code
     ops: [{ op: replace, path: /cells/2/cell_type, value: code }, { op: add, path: /cells/2/outputs, value: [] }, { op: add, path: /cells/2/execution_count, value: null }]
     write: cell_type_mismatch
-  - id: missing-lesson-format
-    ops: [{ op: remove, path: /metadata/reader/lesson_format }]
-    write: missing_reader_metadata
-  - id: oversized
-    note: "the source of cell f01-notes is padded with ASCII 'x' until the canonical bytes exceed `bounds.notebook_max_bytes`"
+  - id: oversized-canonical
+    note: "the source of cell f01-notes is padded with ASCII 'x' until the canonical bytes exceed `bounds.notebook_max_bytes`; the input stays under `bounds.input_max_bytes`"
     pad_to_bytes: 8388609
     write: too_large
-  - id: uncited-claim
-    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations, value: [] }]
+  - id: oversized-input
+    note: "more than `bounds.input_max_bytes` bytes of input are refused before parsing"
+    raw_len: 16777217
+    write: too_large
+  - id: open-without-finding
+    ops: [{ op: remove, path: /cells/9/metadata/reader/finding }]
     write: null
-    publish: uncited_claims
-  - id: changed-without-citation
-    ops: [{ op: replace, path: /cells/3/metadata/reader/citations, value: [] }]
-    write: null
-    publish: uncited_claims
-  - id: blocking-open-finding
-    ops: [{ op: replace, path: /cells/9/metadata/reader/finding/blocking, value: true }]
-    write: null
-    publish: blocking_findings
-  - id: blocking-finding-answered
-    ops: [{ op: replace, path: /cells/9/metadata/reader/finding/blocking, value: true }, { op: replace, path: /cells/9/metadata/reader/status, value: answered }]
-    write: null
-    publish: null
-  - id: lab-not-verified
-    ops: [{ op: remove, path: /cells/6/metadata/reader/verified }]
-    write: null
-    publish: lab_unverified
-  - id: lab-verified-once
-    ops: [{ op: replace, path: /cells/6/metadata/reader/verified/runs, value: 1 }]
-    write: null
-    publish: lab_unverified
-  - id: lab-verified-stale-input
-    note: "the lab source changed after verification, so verified.input_sha256 no longer equals sha256 of the source"
-    ops: [{ op: add, path: /cells/6/source/-, value: "# edited after verification\n" }]
-    write: null
-    publish: lab_unverified
+  # Inputs SRV-PIPELINE's G2 must refuse later (defers); here they write successfully.
+  - { id: g2-uncited-claim, ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations, value: [] }], write: null, g2: uncited_claims }
+  - { id: g2-blocking-open-finding, ops: [{ op: replace, path: /cells/9/metadata/reader/finding/blocking, value: true }], write: null, g2: blocking_findings }
+  - { id: g2-lab-not-verified, ops: [{ op: remove, path: /cells/6/metadata/reader/verified }], write: null, g2: lab_unverified }
 # Previous-revision cases (FR-LESSON-4 step 5): written as a second revision after F01 itself.
 successor_cases:
   - id: notes-cell-removed
@@ -99,5 +134,5 @@ successor_cases:
     ops: [{ op: move, from: /cells/8, path: /cells/0 }]
     write: null
   - id: notes-cell-kind-changed
-    ops: [{ op: replace, path: /cells/8/metadata/reader/kind, value: open }, { op: add, path: /cells/8/metadata/reader/status, value: open }, { op: add, path: /cells/8/metadata/reader/finding, value: { stage: owner, blocking: false, text: "x" } }]
+    ops: [{ op: replace, path: /cells/8/metadata/reader/kind, value: open }, { op: add, path: /cells/8/metadata/reader/status, value: open }]
     write: notes_cell_removed

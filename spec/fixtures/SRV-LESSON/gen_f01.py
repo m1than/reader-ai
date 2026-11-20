@@ -5,7 +5,8 @@
 """Generator of VEC-LESSON-2: the synthetic fixture lesson F01 (one cell of every ADR-0004 kind).
 
 Run: `uv run --script spec/fixtures/SRV-LESSON/gen_f01.py` — writes F01.ipynb next to this file in the canonical form
-of FR-LESSON-2 (`nbformat.writes`), after validating it against nbformat and cell.schema.json, checking each kind's
+of FR-LESSON-2 (`nbformat.writes`, UTF-8, no trailing newline), after validating it against nbformat and
+cell.schema.json (with the format checker), checking each kind's
 cell type, and running the lab's asserts. Every text is written for this fixture; nothing is quoted from any book.
 The lab implements the catch-up formula of Nakamoto (2008), section 11; its expected values are that paper's table
 (q = 0.1, z = 5: 0.0009137; q = 0.3, z = 5: 0.1773523) and ADR-0009's recomputed 62.8 % for q = 0.3, z = 1.
@@ -21,6 +22,9 @@ from nbformat.v4 import new_code_cell, new_markdown_cell, new_notebook
 
 HERE = Path(__file__).resolve().parent
 MATERIAL = hashlib.sha256(b"reader-ai synthetic material F01").hexdigest()
+SPAN_1 = f"{MATERIAL}:1"   # span id form `<material_sha256>:<seq>` (cell.schema.json span_ref)
+SPAN_7 = f"{MATERIAL}:7"
+MATERIAL_TITLE = "Synthetic material F01"
 CITE_PAPER = {"url": "https://bitcoin.org/bitcoin.pdf", "retrieved": "2026-11-21"}
 
 LAB = '''import math
@@ -67,14 +71,14 @@ def build() -> nbformat.NotebookNode:
         md("## Reading route\n\nRead the synthetic section 1, then section 2.", id="f01-route", metadata=reader(
             "route",
             source_refs=[
-                {"material_sha256": MATERIAL, "page": 1, "span": "fixture:F01:p1:0-120"},
+                {"material_sha256": MATERIAL, "page": 1, "span": SPAN_1},
                 {"material_sha256": MATERIAL, "page": 2},
             ])),
         md("## Catching up\n\nAn attacker who is z blocks behind catches up with a probability that falls exponentially in"
            " z while q < 0.5.", id="f01-explain", metadata=reader(
             "explain",
             claims=[{"id": "c1", "text": "The catch-up probability falls exponentially in z while q < 0.5.",
-                     "citations": [CITE_PAPER, {"span": "fixture:F01:p1:0-120"}]}])),
+                     "citations": [CITE_PAPER, {"span": SPAN_1, "page": 1, "material_title": MATERIAL_TITLE}]}])),
         md("## What changed\n\nA synthetic note that a parameter changed after the material was written.",
            id="f01-changed", metadata=reader(
             "changed", as_of="2026-11-21",
@@ -82,7 +86,7 @@ def build() -> nbformat.NotebookNode:
         md("## Erratum\n\nThe synthetic material rounds 0.6277 to 63.4%; the correct value is 62.8%.",
            id="f01-erratum", metadata=reader(
             "erratum",
-            source_ref={"material_sha256": MATERIAL, "page": 2, "span": "fixture:F01:p2:10-40"},
+            source_ref={"material_sha256": MATERIAL, "page": 2, "span": SPAN_7},
             correction="q = 0.3, z = 1 gives 0.628, not 0.634.",
             citations=[CITE_PAPER])),
         md("## Trade-off\n\n| Confirmations | Wait | Risk at q = 0.1 |\n| --- | --- | --- |\n| 1 | short | 0.2046 |\n"
@@ -115,7 +119,8 @@ def build() -> nbformat.NotebookNode:
 def check(nb: nbformat.NotebookNode) -> None:
     nbformat.validate(nb)
     schema = json.loads((HERE / "cell.schema.json").read_text(encoding="utf-8"))
-    validator = jsonschema.Draft202012Validator(schema)
+    jsonschema.Draft202012Validator.check_schema(schema)
+    validator = jsonschema.Draft202012Validator(schema, format_checker=jsonschema.Draft202012Validator.FORMAT_CHECKER)
     for cell in nb.cells:
         meta = cell.metadata["reader"]
         validator.validate(meta)
