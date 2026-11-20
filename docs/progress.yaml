@@ -229,7 +229,8 @@ tasks:
         generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 now names /run/secrets files
         and secret_env_var is gone (#26). From OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3: the in-memory override binds
         the owner's reader.yaml read-only at /etc/reader/reader.yaml (create_host_path false) into api, worker and mcp
-        only; compose.yaml sets READER_CONFIG statically. caddy_config is labelled backup=exclude, matching OPS-CLI.
+        only; compose.yaml sets READER_CONFIG statically. caddy_config stays backup=include (ADR-0012, ADR-0024), so
+        OPS-CLI's backup must read it: in the pinned caddy image /config is 0755 and /config/caddy 1777 (code review).
         Registers its hostfile/keychain/op resolvers through SRV-CONFIG's host_registry(extra) (FR-CONFIG-6, FR-CONFIG-7).
         From OPS-DEPLOY: each write is `docker exec -i -u <service uid>` with `umask 077; cat > /run/secrets/.<name>.tmp &&
         mv … <name>`, exit code checked, value on stdin only. OPS-CLI decides whether `reader up` daemonises once the stack
@@ -243,8 +244,11 @@ tasks:
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: in_progress,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S1.SRV-CONFIG],
       review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code review round 1 changes (applied),
-        round 2 next",
-      note: "green locally; deep-reviewer code review round 2 next. Code review round 1 (applied with paired spec
+        round 2 changes (applied)",
+      note: "green locally. Code review round 2: round-1 blockers verified fixed; caddy_config back to backup=include
+        (the exclude change contradicted ADR-0012 and ADR-0024, and its 'root-owned 0700' reason was not measured: the
+        pinned image has /config 0755, /config/caddy 1777); deploy/images/server.Dockerfile.dockerignore excludes
+        **/__pycache__ and **/.env*. Code review round 1 (applied with paired spec
         wording, H2): caddy healthcheck on 127.0.0.1:2019 (localhost never passed: admin is IPv4-only, busybox wget tries
         ::1 first); server.Dockerfile copies only server/pyproject.toml and server/src (COPY layers 16 kB + 205 kB instead
         of the whole server/ tree; allow-list test over every Dockerfile under deploy/**, no ADD); SIGTERM traps in both
@@ -253,8 +257,7 @@ tasks:
         exact kernel key set, legacy seccomp:/apparmor: forms, recursive Dockerfile glob). For SRV-AUTH (FR-DEPLOY-5):
         compose.yaml sets READER_CONFIG=/etc/reader/reader.yaml statically on api, worker and mcp; the reader.yaml bind
         (read-only, create_host_path false) comes only from OPS-CLI's override (VEC-DEPLOY-3), so compose.yaml keeps no
-        interpolation (INV-DEPLOY-2 unchanged). caddy_config backup label include → exclude (root-owned 0700, unreadable
-        by OPS-CLI's hardened backup container; Caddy regenerates its autosave, ADR-0024). Later, not now: install server dependencies from uv.lock (pinned) when the
+        interpolation (INV-DEPLOY-2 unchanged). Later, not now: install server dependencies from uv.lock (pinned) when the
         `reader-server` entry point lands; today pip resolves pyproject ranges at build time. Spec approved (approved_by: agent, 2026-11-20). Red: 55 tests in
         server/tests/deploy/ (6 files), 55/55 failing on assertions inside their bodies; Green: 55/55 passing once, with
         READER_TEST_REGISTRY=1 ([config] via `docker compose config` for all 8 profile combinations with and without the

@@ -82,7 +82,9 @@ requirements:
       copies exactly `server/pyproject.toml`, `server/src` and `deploy/images/wait-for-secret.sh`, and
       `postgres.Dockerfile` exactly `reader-postgres-entrypoint.sh`; no Dockerfile under deploy/** uses `ADD`. Copying
       a whole directory such as `server/` would bake `.venv`, caches, tests and any `.env` into the image (code review,
-      129 MB measured). [config] Every pinned image resolves and offers `linux/arm64` (ADR-0012). [image: registry]
+      129 MB measured). As a second guard, `deploy/images/server.Dockerfile.dockerignore` (read by BuildKit next to the
+      Dockerfile) excludes at least `**/__pycache__` and `**/.env*`, which the allow-listed `server/src` could
+      otherwise carry. [config] Every pinned image resolves and offers `linux/arm64` (ADR-0012). [image: registry]
   - id: FR-DEPLOY-3
     text: >-
       Networks: `edge` (caddy only; `internal: false`); `front` (caddy, api, mcp; internal; ipam subnet 10.230.1.0/24,
@@ -110,10 +112,8 @@ requirements:
       `bind.create_host_path: false` (a missing file fails the start instead of Docker creating a directory there).
       reader.yaml holds only `secret://` references (SRV-CONFIG, ADR-0011), so the bind carries no secret, and
       compose.yaml needs no interpolation for it (INV-DEPLOY-2). Kernel services have only tmpfs (FR-DEPLOY-8).
-      `caddy_data` and `caddy_config` carry the label `org.reader-ai.backup=exclude`: `caddy_data` by ADR-0024;
-      `caddy_config` because it is root-owned 0700, so OPS-CLI's hardened one-off backup container cannot read it, and
-      Caddy regenerates its autosave at start (ADR-0024 accepts that). Every other named volume carries
-      `org.reader-ai.backup=include`. Backup and restore are OPS-CLI's. [config, VEC-DEPLOY-3 for the override]
+      `caddy_data` carries the label `org.reader-ai.backup=exclude` (ADR-0024); every other named volume, `caddy_config`
+      included (ADR-0012 backs it up; ADR-0024 leaves it unaffected), carries `org.reader-ai.backup=include`. Backup and restore are OPS-CLI's. [config, VEC-DEPLOY-3 for the override]
   - id: FR-DEPLOY-6
     text: Caddy publishes `127.0.0.1:443:443`; no other service publishes a port. [config]
   - id: FR-DEPLOY-7

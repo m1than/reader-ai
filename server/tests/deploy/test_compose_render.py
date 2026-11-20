@@ -104,6 +104,13 @@ def test_dockerfile_build_inputs_are_an_allow_list() -> None:
         assert sources == COPY_ALLOW_LIST[path.name], (path.name, sources)
 
 
+def test_server_dockerignore_excludes_caches_and_env_files() -> None:
+    path = DEPLOY / "images" / "server.Dockerfile.dockerignore"
+    assert path.exists(), path
+    patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+    assert {"**/__pycache__", "**/.env*"} <= patterns, patterns
+
+
 def _mounts(model: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
     return {name: svc.get("volumes") or [] for name, svc in model["services"].items()}
 
@@ -125,7 +132,7 @@ def test_volumes_and_mounts() -> None:
         name: (v.get("labels") or {}).get("org.reader-ai.backup") for name, v in model["volumes"].items()
     }
     assert labels == {
-        "pgdata": "include", "blobs": "include", "caddy_data": "exclude", "caddy_config": "exclude",
+        "pgdata": "include", "blobs": "include", "caddy_data": "exclude", "caddy_config": "include",
     }
 
 

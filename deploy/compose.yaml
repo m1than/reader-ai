@@ -180,6 +180,4 @@ volumes:
   pgdata: { labels: { org.reader-ai.backup: include } }
   blobs: { labels: { org.reader-ai.backup: include } }
   caddy_data: { labels: { org.reader-ai.backup: exclude } }
-  # Excluded: root-owned 0700, unreadable by OPS-CLI's hardened backup container; Caddy regenerates its autosave at
-  # start (ADR-0024).
-  caddy_config: { labels: { org.reader-ai.backup: exclude } }
+  caddy_config: { labels: { org.reader-ai.backup: include } }
