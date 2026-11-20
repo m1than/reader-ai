@@ -89,13 +89,20 @@ for _ in range(400):
     except OSError as e:
         error = type(e).__name__
         break
+import urllib.request
+try:
+    with urllib.request.urlopen("http://127.0.0.1:8889/control/state", timeout=3) as r:
+        during = json.loads(r.read())
+except OSError as e:
+    during = {"error": type(e).__name__}
 for p in procs:
     p.kill()
     p.wait()
-print(json.dumps({"started": len(procs), "error": error}))
+print(json.dumps({"started": len(procs), "error": error, "during": during}))
 ''', timeout=120))
     assert out["error"] is not None, out
     assert out["started"] < 256
+    assert out["during"].get("nonce") == nonce, out["during"]
     time.sleep(1)
     state = sandbox.state()
     assert state.get("nonce") == nonce

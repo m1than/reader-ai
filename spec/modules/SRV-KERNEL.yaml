@@ -122,7 +122,9 @@ requirements:
       (1) read `GET http://kernel-user-<h>:8889/control/state` and keep its nonce N0; (2) `POST /control/exit`, then at
       once drop every session of the user, sending `reader_notice` `kernel_reset` on each of their WebSockets and closing
       them with 1012; (3) poll `/control/state` every 250 ms; the reset succeeds on the first answer with a nonce
-      different from N0 and `gateway: up`, and records that nonce for the user (FR-KERNEL-14); answers with N0, with
+      different from N0 and `gateway: up` (OPS-SANDBOX's `up` means the gateway answered once since that start, not
+      that it is responsive now; a later failure surfaces through FR-KERNEL-13/14), and records that nonce for the user
+      (FR-KERNEL-14); answers with N0, with
       `exiting` or `starting`, and connection errors keep polling. The reset fails only when 30 s pass from step 2, or
       when step 1 or step 2 fails; then it answers 503 `kernel_unavailable`, drops any sessions not yet dropped, and
       marks the service unusable: every later session request or upgrade for that user is refused per FR-KERNEL-11

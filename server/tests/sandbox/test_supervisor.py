@@ -5,9 +5,20 @@ inside the container (`docker exec` as uid 1000), never by `docker stop` or `doc
 
 import json
 import time
+import uuid
 from datetime import datetime
 
-from .conftest import IMAGE, NONCE, RESET_DEADLINE_S, SANDBOX, Sandbox, docker, requires_docker_daemon
+from .conftest import (
+    IMAGE,
+    LABEL,
+    NONCE,
+    RESET_DEADLINE_S,
+    SANDBOX,
+    Build,
+    Sandbox,
+    docker,
+    requires_docker_daemon,
+)
 
 SHEBANG = "#!/usr/local/bin/python3 -I"
 
@@ -159,7 +170,7 @@ def test_sigterm_exits_zero_and_gateway_exit_ends_pid1(sandbox: Sandbox) -> None
     sandbox.exec(r'''
 import os, signal
 for pid in os.listdir("/proc"):
-    if pid.isdigit() and pid != "1":
+    if pid.isdigit() and pid not in ("1", str(os.getpid())):
         try:
             cmd = open(f"/proc/{pid}/cmdline", "rb").read()
         except OSError:
@@ -238,3 +249,173 @@ def test_health_command(sandbox: Sandbox) -> None:
     proc = sandbox.run("/usr/local/bin/reader-kernel-health")
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "up"
+
+
+STAND_IN = r'''
+import http.server, json
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = json.dumps({"nonce": "0" * 32, "gateway": "starting"}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+http.server.HTTPServer(("127.0.0.1", 8889), H).serve_forever()
+'''
+
+
+@requires_docker_daemon
+def test_health_command_exit_one_cases(image: Build) -> None:
+    assert image.ok, image.log
+    proc = docker("run", "--rm", "--label", LABEL, "--network", "none", "--entrypoint",
+                  "/usr/local/bin/reader-kernel-health", IMAGE)
+    assert proc.returncode == 1
+    assert proc.stdout.strip() == "unreachable"
+    name = f"rk-standin-{uuid.uuid4().hex[:8]}"
+    started = docker("run", "-d", "--name", name, "--label", LABEL, "--network", "none", "--entrypoint",
+                     "python3", IMAGE, "-I", "-c", STAND_IN)
+    assert started.returncode == 0, started.stderr
+    try:
+        time.sleep(2)
+        proc = docker("exec", name, "/usr/local/bin/reader-kernel-health")
+        assert proc.returncode == 1
+        assert proc.stdout.strip() == "starting"
+    finally:
+        docker("rm", "-f", name)
+
+
+FLOOD_AND_SIGNAL = r'''
+import os, socket, sys, threading, time
+REQ = b"GET /control/state HTTP/1.1\r\nHost: x\r\n\r\n"
+def flood():
+    while True:
+        try:
+            s = socket.create_connection(("127.0.0.1", 8889), timeout=1)
+            s.sendall(REQ)
+            s.recv(300)
+            s.close()
+        except OSError:
+            pass
+for _ in range(6):
+    threading.Thread(target=flood, daemon=True).start()
+time.sleep(0.4)
+os.kill(1, int(sys.argv[1]))
+time.sleep(60)
+'''
+
+
+@requires_docker_daemon
+def test_signals_under_state_flood_always_restart(image: Build) -> None:
+    """The reviewer's SIGTERM race (PID 1 hung in 4 of 40 runs) and SIGINT, on 30 fresh containers."""
+    failures = []
+    for i in range(30):
+        sb = Sandbox(image)
+        try:
+            nonce = sb.start()["nonce"]
+            sig = "15" if i % 2 == 0 else "2"
+            docker("exec", "-d", "-u", "1000:1000", sb.name, "python3", "-I", "-c", FLOOD_AND_SIGNAL, sig)
+            try:
+                sb.wait_state(lambda s, n=nonce: s.get("nonce") not in (None, n), timeout=10)
+            except AssertionError as e:
+                failures.append((i, sig, str(e)))
+        finally:
+            sb.cleanup()
+    assert failures == []
+
+
+HOLD_TABLE = r'''
+import select, socket, time
+conns = []
+end = time.time() + 25
+while time.time() < end:
+    alive = []
+    for s in conns:
+        r, _, _ = select.select([s], [], [], 0)
+        if r:
+            try:
+                if s.recv(1) == b"":
+                    s.close()
+                    continue
+            except OSError:
+                s.close()
+                continue
+        alive.append(s)
+    conns = alive
+    for _ in range(400 - len(conns)):
+        try:
+            conns.append(socket.create_connection(("127.0.0.1", 8889), timeout=0.2))
+        except OSError:
+            break
+    time.sleep(0.05)
+'''
+
+
+@requires_docker_daemon
+def test_full_table_from_inside_does_not_block_the_caller(sandbox: Sandbox) -> None:
+    nonce = sandbox.start()["nonce"]
+    docker("exec", "-d", "-u", "1000:1000", sandbox.name, "python3", "-I", "-c", HOLD_TABLE)
+    time.sleep(3)
+    t0 = time.monotonic()
+    state = sandbox.http("GET", 8889, "/control/state")
+    assert state["status"] == 200
+    assert json.loads(state["body"])["nonce"] == nonce
+    exit_resp = sandbox.http("POST", 8889, "/control/exit")
+    assert exit_resp["status"] == 202
+    assert time.monotonic() - t0 <= 10.0
+    sandbox.wait_state(lambda s: s.get("nonce") not in (None, nonce) and s.get("gateway") == "up")
+
+
+@requires_docker_daemon
+def test_idle_connection_closed_after_read_timeout(sandbox: Sandbox) -> None:
+    sandbox.start()
+    out = json.loads(sandbox.exec_ok(r'''
+import json, socket, time
+s = socket.create_connection(("127.0.0.1", 8889))
+t = time.monotonic()
+s.settimeout(15)
+data = s.recv(10)
+print(json.dumps({"after": time.monotonic() - t, "data": data.decode()}))
+'''))
+    assert out["data"] == ""
+    assert 5.0 <= out["after"] <= 7.0, out
+
+
+@requires_docker_daemon
+def test_grace_kills_stopped_gateway_and_keeps_port(sandbox: Sandbox) -> None:
+    sandbox.start()
+    proc = sandbox.exec(r'''
+import errno, json, os, signal, socket, time, urllib.request
+gw = None
+for pid in os.listdir("/proc"):
+    if pid.isdigit() and pid not in ("1", str(os.getpid())):
+        try:
+            cmd = open(f"/proc/{pid}/cmdline", "rb").read()
+        except OSError:
+            continue
+        if b"jupyter-kernelgateway" in cmd:
+            gw = int(pid)
+os.kill(gw, signal.SIGSTOP)
+req = urllib.request.Request("http://127.0.0.1:8889/control/exit", data=b"", method="POST")
+with urllib.request.urlopen(req, timeout=5) as r:
+    status = r.status
+t = time.time()
+binds = []
+while time.time() - t < 1.5:
+    s = socket.socket()
+    try:
+        s.bind(("0.0.0.0", 8889))
+        binds.append("bound")
+    except OSError as e:
+        binds.append(errno.errorcode.get(e.errno, "?"))
+    s.close()
+    time.sleep(0.05)
+print(json.dumps({"status": status, "t": t, "binds": sorted(set(binds))}), flush=True)
+time.sleep(30)
+''', timeout=60)
+    result = json.loads(proc.stdout.strip().splitlines()[0])
+    assert result["status"] == 202
+    assert result["binds"] == ["EADDRINUSE"]
+    sandbox.wait_state(lambda s: s.get("gateway") == "up" and "nonce" in s)
+    gone_after = _ts(sandbox.inspect()["State"]["FinishedAt"]) - float(result["t"])
+    print(f"stopped gateway: process gone {gone_after:.2f} s after the 202")
+    assert 2.0 <= gone_after <= 3.0

@@ -40,6 +40,7 @@ def test_dockerfile_pins_base_and_forbids_fetch_and_volume() -> None:
     pip_lines = [ln for ln in text.splitlines() if "pip install" in ln]
     assert pip_lines
     for ln in pip_lines:
+        assert "--only-binary=:all:" in ln
         assert "--require-hashes" in ln
         assert "--no-deps" in ln
         assert "requirements.lock" in ln
@@ -134,9 +135,14 @@ def test_image_env_and_kernel_env(sandbox: Sandbox) -> None:
     base_names = {e.split("=", 1)[0] for e in base["Config"]["Env"]}
     assert names <= base_names | {"PATH", "LANG", "HOME"}, names - base_names
     expected = next(p for p in load_yaml(PROBES)["probes"] if p["id"] == "env-names")["value"]
-    code = "import os, json; print(json.dumps([sorted(os.environ), os.path.exists('/run/secrets')]))"
+    code = (
+        "import os, json\n"
+        "print(json.dumps([sorted(os.environ), os.path.exists('/run/secrets'), os.environ['PATH']]))"
+    )
     res = sandbox.cell(code)
     assert res["status"] == "ok", res
-    env_names, secrets = json.loads(res["stdout"])
+    env_names, secrets, path = json.loads(res["stdout"])
     assert env_names == sorted(expected)
     assert secrets is False
+    entries = path.split(":")
+    assert len(entries) == len(set(entries)), path

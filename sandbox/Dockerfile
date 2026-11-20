@@ -19,7 +19,8 @@ COPY --chmod=0755 reader_kernel_health.py /usr/local/bin/reader-kernel-health
 RUN test "$(ls /usr/local/share/jupyter/kernels)" = "python3" \
  && chown -R root:root /usr/local && chmod -R go-w /usr/local
 
-ENV HOME=/home/lab LANG=C.UTF-8
+# PATH without the base image's duplicate /usr/local/bin (FR-SANDBOX-8).
+ENV HOME=/home/lab LANG=C.UTF-8 PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /home/lab
 USER 1000:1000
 EXPOSE 8888 8889

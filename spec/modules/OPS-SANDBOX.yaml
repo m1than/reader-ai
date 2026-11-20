@@ -58,7 +58,7 @@ title: Kernel image (python3), fail-stop in-container supervisor with start nonc
 status: approved
 approved_by: agent
 approved_at: 2026-11-21
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed"
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests"
 layer: ops
 track: engineering
 adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
@@ -152,11 +152,15 @@ requirements:
       of its threads, and when its control loop ends for any reason. Signals: it handles exactly SIGTERM (the exit path
       of FR-SANDBOX-6 (b), ending with `os._exit(0)`) and SIGINT (`os._exit(1)`); SIGPIPE stays ignored (Python's
       default); every other signal keeps its default disposition, which for PID 1 inside its namespace means it is not
-      delivered (REF-SANDBOX-5). PID 1 reaps every child that exits, including orphans re-parented to it; only the
+      delivered (REF-SANDBOX-5). No signal handler takes a lock or changes state: the SIGTERM handler only writes one
+      byte to a self-pipe that the control loop watches, and the loop runs the exit path in normal context. The
+      supervisor holds no lock at all; each state attribute has exactly one writing thread, and the reaper never waits
+      on anything but `waitpid`. PID 1 reaps every child that exits, including orphans re-parented to it; only the
       gateway child's exit ends PID 1. PID 1 never closes its 8889 sockets before it exits, the grace period included.
-      [image] Including the case: a cell starts a child, the child's parent exits so the child is re-parented to PID 1,
-      and the child exits; afterwards the nonce is unchanged, a /tmp marker file remains, and no zombie is left in
-      `/proc`.
+      [image] Including the cases: a cell starts a child, the child's parent exits so the child is re-parented to PID 1,
+      and the child exits, after which the nonce is unchanged, a /tmp marker file remains, and no zombie is left in
+      `/proc`; and 30 fresh containers in a row, each receiving SIGTERM or SIGINT from a cell while 6 threads flood
+      `GET /control/state`, each restart for real (new nonce) within 10 s.
   - id: FR-SANDBOX-6
     text: >-
       Control endpoint (HTTP/1.1, JSON, no authentication, reachable only on the kernel's network, header note):
@@ -167,17 +171,29 @@ requirements:
       SIGKILL to the group and calls `os._exit(0)`, from a timer that depends neither on the control loop nor on open
       client connections. The process is gone within 2 s plus a 1 s margin for scheduling under the 2-CPU limit.
       (c) Any other method or path answers 404; a request body over 1 KiB is refused with 413 (the endpoint takes no
-      body); each connection gets a 5 s read timeout so idle connections cannot hold the loop. [image] Including the
-      case of 50 idle connections held open by a cell while `/control/exit` completes on time.
+      body); each connection gets a 5 s read timeout so idle connections cannot hold the loop. (d) Connection table: a
+      connection whose peer is a loopback address or one of the container's own addresses (anything a cell can open)
+      counts against 192 local slots, and further local connections are closed at once; a connection from any other
+      peer (the caller) takes one of 64 slots the cell cannot consume, and when those are full the oldest of them is
+      closed to admit it. A cell therefore cannot keep the caller from reading the state or requesting an exit. (The
+      split 192/64 is a structural bound: the caller makes one request at a time per reset.) [image] Including: 50
+      idle connections held open by a cell while `/control/exit` completes on time; the table held full from inside
+      while a probe container's `GET /control/state` and `POST /control/exit` both succeed within 10 s; an idle
+      connection is closed by the supervisor between 5 and 7 s after it opened; with the gateway stopped (SIGSTOP from
+      a cell, so it cannot act on SIGTERM), the process is gone between 2 and 3 s after the 202 and a cell's attempts to
+      bind 8889 during that window all fail; and `GET /control/state` answers while a cell holds the PID limit
+      exhausted.
   - id: FR-SANDBOX-7
     text: >-
       `/usr/local/bin/reader-kernel-health` (the command OPS-DEPLOY's template names), run as `python -I`, exits 0 only
       when `GET http://127.0.0.1:8889/control/state` answers `gateway: up` within 2 s, and 1 otherwise. It prints nothing
-      but a one-word state. [image]
+      but a one-word state. [image] Exit 0 with `up`; exit 1 with `starting` (a stand-in endpoint answering
+      `starting`) and with `unreachable` (no supervisor running).
   - id: FR-SANDBOX-8
     text: >-
       The image declares no `ENV` beyond what the base image sets and PATH, LANG and HOME. The supervisor starts the
-      gateway with exactly `{HOME=/home/lab, HOSTNAME=<its own>, LANG=C.UTF-8, PATH=<the image PATH>}` and nothing
+      gateway with exactly `{HOME=/home/lab, HOSTNAME=<its own>, LANG=C.UTF-8, PATH=<the image PATH, each entry once>}`
+      and nothing
       inherited, so base-image variables such as PYTHON_VERSION and PYTHON_SHA256 do not reach kernels. [image] Inside a
       python3 kernel created without `env` (as SRV-KERNEL creates them), the names in `os.environ` equal VEC-SANDBOX-1 `env-names` exactly (the four above plus the names
       Kernel Gateway and ipykernel set at kernel start, as measured), and `/run/secrets` does not exist.

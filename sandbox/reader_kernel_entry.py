@@ -5,10 +5,16 @@ It holds a start nonce in memory, starts Kernel Gateway as its child and serves 
 `GET /control/state` and `POST /control/exit`. It is fail-stop: a gateway exit, an uncaught exception, SIGINT or the
 end of its control loop ends PID 1, which ends every process in the container; `restart: always` then brings a fresh
 container with a new nonce (ADR-0022 reset without a Docker socket). Standard library only.
+
+Concurrency rules (FR-SANDBOX-5): no lock exists. Each piece of state is a single attribute written by exactly one
+thread (`exiting` by the main thread, `gateway_seen` by the monitor) and read by others. Signal handlers never touch
+state: SIGTERM writes one byte to a self-pipe that the control loop watches, and the loop runs the exit path in normal
+context; SIGINT calls `os._exit(1)`.
 """
 
 import ctypes
 import errno
+import ipaddress
 import json
 import os
 import selectors
@@ -23,11 +29,12 @@ import urllib.request
 GATEWAY = "/usr/local/bin/jupyter-kernelgateway"
 GATEWAY_PORT = 8888
 CONTROL_PORT = 8889
-GRACE_S = 2.0          # FR-SANDBOX-6 (b)
-READ_TIMEOUT_S = 5.0   # FR-SANDBOX-6 (c)
-MAX_BODY = 1024        # FR-SANDBOX-6 (c)
+GRACE_S = 2.0           # FR-SANDBOX-6 (b)
+READ_TIMEOUT_S = 5.0    # FR-SANDBOX-6 (c)
+MAX_BODY = 1024         # FR-SANDBOX-6 (c)
 MAX_HEADER = 8192
-MAX_CONNECTIONS = 256  # beyond this, new connections are closed at once; the loop never blocks on them
+LOCAL_SLOTS = 192       # FR-SANDBOX-6 (d): connections from inside the container
+REMOTE_SLOTS = 64       # FR-SANDBOX-6 (d): reserved for the caller; the oldest is evicted when full
 PR_SET_DUMPABLE = 4
 NO_IPV6 = {errno.EAFNOSUPPORT, errno.EADDRNOTAVAIL, errno.EPROTONOSUPPORT}
 REASONS = {200: "OK", 202: "Accepted", 404: "Not Found", 413: "Content Too Large"}
@@ -37,28 +44,56 @@ def die(code: int) -> None:
     os._exit(code)
 
 
+def is_local(conn: socket.socket, peer: str) -> bool:
+    """A peer is local when it is a loopback address or one of the container's own addresses."""
+    ip = ipaddress.ip_address(peer.split("%", 1)[0])
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    if ip.is_loopback:
+        return True
+    try:
+        own = str(conn.getsockname()[0]).split("%", 1)[0]
+    except OSError:
+        return True
+    return peer.split("%", 1)[0] == own or str(ip) == own
+
+
 class Supervisor:
     def __init__(self) -> None:
         self.nonce = os.urandom(16).hex()
-        self.state = "starting"
-        self.lock = threading.Lock()
+        self.exiting = False          # written only by the main thread
+        self.gateway_seen = False     # written only by the monitor thread
         self.exit_armed = threading.Event()
         self.gateway: subprocess.Popen[bytes] | None = None
+        self.wake_r, self.wake_w = os.pipe()
+        os.set_blocking(self.wake_r, False)
+        os.set_blocking(self.wake_w, False)
 
-    # -- exit path (FR-SANDBOX-6 b) --------------------------------------------------------------------------
-    def mark_exiting(self) -> None:
-        with self.lock:
-            self.state = "exiting"
+    @property
+    def state(self) -> str:
+        if self.exiting:
+            return "exiting"
+        return "up" if self.gateway_seen else "starting"
 
+    # -- signals (FR-SANDBOX-5) ------------------------------------------------------------------------------
+    def on_sigterm(self, *_: object) -> None:
+        """Signal context: only wake the control loop."""
+        try:
+            os.write(self.wake_w, b"T")
+        except OSError:
+            pass
+
+    # -- exit path (FR-SANDBOX-6 b), main thread only ----------------------------------------------------------
     def begin_exit(self) -> None:
-        self.mark_exiting()
+        self.exiting = True
         if self.gateway is None:
             die(0)
-        try:
-            os.killpg(self.gateway.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        self.exit_armed.set()
+        if not self.exit_armed.is_set():
+            try:
+                os.killpg(self.gateway.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            self.exit_armed.set()
 
     def watchdog(self) -> None:
         """Unconditional exit GRACE_S after an exit is accepted; independent of the control loop."""
@@ -73,7 +108,7 @@ class Supervisor:
 
     # -- children (FR-SANDBOX-5) -----------------------------------------------------------------------------
     def reaper(self) -> None:
-        """Reap every child, orphans included; only the gateway's exit ends PID 1."""
+        """Reap every child, orphans included; only the gateway's exit ends PID 1. Takes no lock."""
         while True:
             try:
                 pid, _ = os.waitpid(-1, 0)
@@ -83,34 +118,28 @@ class Supervisor:
             except InterruptedError:
                 continue
             if self.gateway is not None and pid == self.gateway.pid:
-                with self.lock:
-                    exiting = self.state == "exiting"
-                die(0 if exiting else 1)
+                die(0 if self.exiting else 1)
 
     def monitor(self) -> None:
         """`up` once the gateway's GET /api answered 200 since this start (FR-SANDBOX-6 a)."""
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-        while True:
-            with self.lock:
-                if self.state != "starting":
-                    return
+        while not self.exiting:
             try:
                 with opener.open(f"http://127.0.0.1:{GATEWAY_PORT}/api", timeout=1) as resp:
                     if resp.status == 200:
-                        with self.lock:
-                            if self.state == "starting":
-                                self.state = "up"
+                        self.gateway_seen = True
                         return
             except OSError:
                 pass
             time.sleep(0.2)
 
     def start_gateway(self) -> None:
+        path = os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin")
         env = {
             "HOME": "/home/lab",
             "HOSTNAME": os.environ.get("HOSTNAME") or socket.gethostname(),
             "LANG": "C.UTF-8",
-            "PATH": os.environ.get("PATH", "/usr/local/bin:/usr/bin:/bin"),
+            "PATH": ":".join(dict.fromkeys(p for p in path.split(":") if p)),
         }
         argv = [
             GATEWAY,
@@ -129,8 +158,7 @@ class Supervisor:
 
     # -- control endpoint (FR-SANDBOX-6) ---------------------------------------------------------------------
     def state_body(self) -> bytes:
-        with self.lock:
-            return json.dumps({"nonce": self.nonce, "gateway": self.state}).encode()
+        return json.dumps({"nonce": self.nonce, "gateway": self.state}).encode()
 
     @staticmethod
     def respond(conn: socket.socket, code: int, body: bytes = b"") -> None:
@@ -174,7 +202,7 @@ class Supervisor:
         if method == b"GET" and path == b"/control/state":
             self.respond(conn, 200, self.state_body())
         elif method == b"POST" and path == b"/control/exit":
-            self.mark_exiting()
+            self.exiting = True
             self.respond(conn, 202)
             self.begin_exit()
         else:
@@ -185,31 +213,51 @@ class Supervisor:
         sel = selectors.DefaultSelector()
         for lst in listeners:
             lst.setblocking(False)
-            sel.register(lst, selectors.EVENT_READ, None)
-        conns: dict[socket.socket, tuple[bytearray, float]] = {}
+            sel.register(lst, selectors.EVENT_READ, "listen")
+        sel.register(self.wake_r, selectors.EVENT_READ, "wake")
+        # conn -> (buffer, deadline, local, accepted_at)
+        conns: dict[socket.socket, tuple[bytearray, float, bool, float]] = {}
 
         def close(conn: socket.socket) -> None:
             sel.unregister(conn)
             conns.pop(conn, None)
             conn.close()
 
+        def admit(conn: socket.socket, peer: str) -> bool:
+            local = is_local(conn, peer)
+            same = [c for c, v in conns.items() if v[2] == local]
+            if local and len(same) >= LOCAL_SLOTS:
+                return False
+            if not local and len(same) >= REMOTE_SLOTS:
+                close(min(same, key=lambda c: conns[c][3]))
+            now = time.monotonic()
+            conns[conn] = (bytearray(), now + READ_TIMEOUT_S, local, now)
+            sel.register(conn, selectors.EVENT_READ, "conn")
+            return True
+
         while True:
             now = time.monotonic()
-            nearest = min((deadline for _, deadline in conns.values()), default=now + 1.0)
+            nearest = min((v[1] for v in conns.values()), default=now + 1.0)
             for key, _ in sel.select(timeout=max(0.0, min(nearest - now, 1.0))):
-                sock = key.fileobj
-                assert isinstance(sock, socket.socket)
-                if key.data is None:
+                if key.data == "wake":
                     try:
-                        conn, _ = sock.accept()
+                        os.read(self.wake_r, 64)
+                    except BlockingIOError:
+                        pass
+                    self.begin_exit()
+                    continue
+                sock = key.fileobj
+                if not isinstance(sock, socket.socket):
+                    die(1)
+                    return
+                if key.data == "listen":
+                    try:
+                        conn, addr = sock.accept()
                     except OSError:
                         continue
-                    if len(conns) >= MAX_CONNECTIONS:
-                        conn.close()
-                        continue
                     conn.setblocking(False)
-                    conns[conn] = (bytearray(), time.monotonic() + READ_TIMEOUT_S)
-                    sel.register(conn, selectors.EVENT_READ, "conn")
+                    if not admit(conn, str(addr[0])):
+                        conn.close()
                     continue
                 try:
                     data = sock.recv(4096)
@@ -221,12 +269,12 @@ class Supervisor:
                 if not data:
                     close(sock)
                     continue
-                buf, deadline = conns[sock]
+                buf = conns[sock][0]
                 buf += data
                 if self.handle(sock, buf):
                     close(sock)
             now = time.monotonic()
-            for conn in [c for c, (_, deadline) in conns.items() if deadline <= now]:
+            for conn in [c for c, v in conns.items() if v[1] <= now]:
                 close(conn)
 
 
@@ -234,13 +282,13 @@ def listeners() -> list[socket.socket]:
     """0.0.0.0:8889, and [::]:8889 (IPV6_V6ONLY) whenever the container has IPv6 at all (FR-SANDBOX-4 c)."""
     v4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     v4.bind(("0.0.0.0", CONTROL_PORT))  # noqa: S104 - reachable only on the kernel's own network (header note)
-    v4.listen(128)
+    v4.listen(512)
     out = [v4]
     try:
         v6 = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
         v6.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
         v6.bind(("::", CONTROL_PORT))
-        v6.listen(128)
+        v6.listen(512)
         out.append(v6)
     except OSError as e:
         if e.errno not in NO_IPV6:
@@ -255,7 +303,7 @@ def main() -> None:
     sys.excepthook = lambda *_: die(1)
     threading.excepthook = lambda _: die(1)
     sup = Supervisor()
-    signal.signal(signal.SIGTERM, lambda *_: sup.begin_exit())
+    signal.signal(signal.SIGTERM, sup.on_sigterm)
     signal.signal(signal.SIGINT, lambda *_: die(1))
     socks = listeners()
     sup.start_gateway()
