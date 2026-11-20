@@ -66,3 +66,6 @@ warn_unreachable = true
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
+markers = [
+  "registry: queries a remote image registry on every run; runs only with READER_TEST_REGISTRY=1 (OPS-DEPLOY [image: registry])",
+]
