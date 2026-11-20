@@ -160,6 +160,13 @@ tasks:
         Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac
+  - { id: S1.spike.compose-secrets-ro, stage: 1, kind: spike, status: in_progress, needs: [],
+      result: "spikes/compose-secrets-ro/RESULT.md: Compose refuses environment-sourced secrets in read-only services
+        ('`file` is the sole supported option'); with a writable root the value is copied into the container layer (VM disk);
+        read-only + tmpfs /run/secrets (0700, service uid) + value via `docker exec -i` over stdin keeps every constraint
+        (0600, not in docker inspect, not on disk) but is lost on restart and must be re-delivered by `reader up`.
+        Needs a proposed amendment of ADR-0011/0023's delivery text (owner).",
+      note: "Raised by deep-reviewer on the OPS-DEPLOY spec (B7). Canary only; no real secret used." }
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }
   - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG] }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,

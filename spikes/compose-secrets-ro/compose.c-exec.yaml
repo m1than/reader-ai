@@ -1,0 +1,16 @@
+# Variant (c): read-only root, no Compose secret. /run/secrets is a tmpfs owned by the service uid
+# (mode 0700). The host CLI writes the value into it after start with `docker exec -i … ` over stdin;
+# the process waits for the file. The value never appears in the compose file, environment or argv.
+name: reader-spike-csro-c
+services:
+  svc:
+    image: python:3.14-slim-trixie
+    user: "1000:1000"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    network_mode: none
+    tmpfs:
+      - /tmp
+      - /run/secrets:uid=1000,gid=1000,mode=0700,size=64k
+    command: ["python", "-c", "import os,time; p='/run/secrets/tok'\nwhile not os.path.exists(p): time.sleep(0.2)\ntime.sleep(0.3); s=os.stat(p); v=open(p).read(); print({'uid': os.getuid(), 'file_uid': s.st_uid, 'mode': oct(s.st_mode & 0o777), 'length': len(v), 'canary_prefix': v.startswith('CANARY-')}, flush=True); time.sleep(120)"]
