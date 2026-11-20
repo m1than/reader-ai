@@ -12,6 +12,8 @@ budget:
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
+  merge_gate: "2026-11-20: a Claude Code PreToolUse hook on the owner's machine forbids `gh pr merge` for the agent,
+    contrary to AGENTS.md step 6. Until the owner removes it or changes AGENTS.md, every PR waits for the owner's merge."
 
 tasks:
   # Stage 0 — groundwork and spikes
@@ -28,7 +30,7 @@ tasks:
         export CLAUDE_CODE_OAUTH_TOKEN where Claude Code starts; put the bot token file in place (mode 600);
         send /start to the bot, then node tools/agent/notify.mjs link; merge tools/agent/user-settings.json into ~/.claude/settings.json;
         rerun bash tools/agent/bootstrap-mac.sh" }
-  - { id: S0.skeleton, stage: 0, kind: setup, status: done, needs: [],
+  - { id: S0.skeleton, stage: 0, kind: setup, status: done, needs: [], pr: "https://github.com/m1than/reader-ai/pull/4",
       what: "server/pyproject.toml (uv, ruff, mypy strict, pytest, anyio, hypothesis, testcontainers), web/package.json (Vite, React 19, Vitest, Storybook 10, Playwright), e2e/live/lib.sh",
       note: "server is `package = false` until OPS-CLI/OPS-DEPLOY claim server/src/reader and add the entry points;
         CI runs mypy/pytest only once server/src and server/tests exist. Local node 22.22.1 is below some packages' engines (^22.22.2); CI uses lts/*." }
