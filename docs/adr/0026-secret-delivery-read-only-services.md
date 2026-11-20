@@ -1,7 +1,7 @@
 ---
 id: ADR-0026
 title: Secret delivery to read-only services — tmpfs /run/secrets filled by a watching `reader up` over `docker exec` stdin (A, chosen by the owner); file-sourced Compose secret (C) rejected
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "OPS-DEPLOY config check: no top-level Compose `secrets`; a tmpfs /run/secrets with the service uid and 0700 on exactly the consumers; a `mem_limit` and `memswap_limit == mem_limit` on every consumer; no `${…}` of a secret variable anywhere in compose.yaml. Stage-1 live check: each consumer's file is 0600 and owned by the service uid; for every container, `docker inspect`, `docker export`, `docker events` since `reader up` started, and the Docker Desktop logs contain no value; no path below /run/secrets/ in `docker diff`; after `docker compose restart <svc>` the file is re-delivered atomically before the service reports healthy; `up` succeeds with health dependencies; after the watcher stops, a restarted consumer stays unhealthy"
 revisit_when: "Compose supports environment-sourced secrets on read-only services; or a host RAM-disk source is measured; or the stack must keep running across Docker restarts without `reader up`"
