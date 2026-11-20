@@ -40,7 +40,7 @@ select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PT", "TID"
 ignore = []
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
+"tests/**" = ["S101", "PT011"]   # PT011: tests assert exception types and codes, not message texts
 
 [tool.mypy]
 strict = true

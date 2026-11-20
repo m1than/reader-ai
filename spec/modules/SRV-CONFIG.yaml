@@ -14,9 +14,10 @@
 
 id: SRV-CONFIG
 title: reader.yaml settings, JSON Schema export, secret references and the container secret path
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-20
+review: deep-reviewer (Fable) round 3 approve
 layer: server
 track: engineering
 adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020]
