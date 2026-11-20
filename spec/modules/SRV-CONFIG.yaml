@@ -307,3 +307,8 @@ vectors:
 #   Write secret files without BOM and with LF (or no) line endings.
 # - ruamel.yaml's scanner treats U+0085, U+2028 and U+2029 as line breaks (a YAML 1.1 behaviour; YAML 1.2 does not).
 #   Such characters in reader.yaml shift the reported line numbers.
+# - A character outside the Basic Multilingual Plane written as a surrogate pair of two `\u` escapes
+#   ("😀") gives `not_utf8_encodable`; write it as `\U0001F600` or as the literal character.
+# - An empty port (`https://x:`) is accepted as a URL without a port; this is harmless.
+# - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
+#   1+0j), matching the loader.

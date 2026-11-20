@@ -124,13 +124,13 @@ tasks:
       what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions" }
 
   # Stage 1 — stack on the Mac
-  - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S0.skeleton],
-      review: "spec: deep-reviewer (Fable) round 3 approve (rounds 1 and 2: changes). Code review round 1: changes (3 blocking:
-        URL parsing, number limits/too_deep, SecretRef constructor), fixed in 754c246. Code review round 2: changes (1 blocking:
-        lone surrogates let a Pydantic ValidationError escape load_config and echo input), fixed with not_utf8_encodable and
-        model_rule_mismatch; awaits code review round 3",
+  - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: done, needs: [S0.skeleton],
+      review: "deep-reviewer (Fable): spec approve round 3; code approve round 3",
+      history: "code review round 1: changes (URL parsing, number limits/too_deep, SecretRef constructor; fixed in 754c246);
+        round 2: changes (lone surrogates let a Pydantic ValidationError escape load_config; fixed in 6f11d5d); round 3: approve,
+        non-blocking items applied in the final commit",
       note: "green locally. Spec approved (approved_by: agent; amended after code review rounds 1 and 2, H2: spec, fixtures,
-        tests and code in one commit each). Fixtures VEC-CONFIG-1..6. 243 tests in server/tests/config/ (6 files), all passing;
+        tests and code in one commit each). Fixtures VEC-CONFIG-1..6. Final: 245 tests in server/tests/config/ (6 files), all passing;
         three runs 1.36–1.72 s on the owner's Mac (the 3,000-deep nesting vector cost 3.9 s in ruamel and is now 1,100 deep).
         Red phase (181 tests) failed 181/181 inside their bodies. One test edit after Red, for the PR description:
         test_resolver_cases renders leak surfaces before its asserts (pytest assertion rewriting put the assert's 'CANARY-'

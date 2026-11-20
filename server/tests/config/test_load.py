@@ -151,7 +151,7 @@ _GOOD: dict[str, Any] = {"version": 1, "instance": {"url": "https://reader.local
 
 
 @pytest.mark.parametrize("change", [
-    {"version": True}, {"version": "1"}, {"version": 2},
+    {"version": True}, {"version": "1"}, {"version": 2}, {"version": 1.0}, {"version": Decimal(1)},
     {"instance": {"url": "http://reader.local", "data_dir": "/d"}},
     {"instance": {"url": "https://@", "data_dir": "/d"}},
     {"instance": {"url": "https://reader.local", "data_dir": ""}},

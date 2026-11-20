@@ -37,9 +37,9 @@ def _in_context(value: Decimal) -> Decimal:
     return value
 
 
-def _not_bool(value: object) -> object:
-    """Literal[1] accepts True (True == 1); the version must be the integer 1."""
-    if isinstance(value, bool):
+def _exact_int(value: object) -> object:
+    """Literal[1] accepts anything equal to 1 (True, 1.0, Decimal(1), 1+0j); the version must be the int 1."""
+    if type(value) is not int:
         raise ValueError("wrong_type")
     return value
 
@@ -104,7 +104,7 @@ class Material(BaseModel):
 
 class ReaderConfig(BaseModel):
     model_config = _FROZEN
-    version: Annotated[Literal[1], BeforeValidator(_not_bool)]  # schema keeps "const": 1
+    version: Annotated[Literal[1], BeforeValidator(_exact_int)]  # schema keeps "const": 1
     instance: Instance
     users: tuple[User, ...] = ()
     # Mappings are FrozenDict (immutable, yet copyable, picklable, dumpable); defaults come from factories.
