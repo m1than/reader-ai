@@ -60,7 +60,43 @@ recall@3, recall@1, MRR and the worst rank are computed from `per_question[].ran
 - The bge-m3 models would fit only with more CPUs or natively on the host. Neither was measured here; it is the same open question as ADR-0021's M1.
 - The roadmap's fallback ("a smaller model plus a larger rerank window") is in effect the e5-small choice. A rerank stage was not measured.
 
+## Harder set v2 (owner, 2026-11-20: "the agent drafts a harder set")
+
+`questions-v2.yaml`, `status: draft, needs owner skim`. v1 (`questions.yaml`) stays unchanged for comparison.
+
+| Property | v2 |
+| --- | --- |
+| Questions | 40, covering all 23 chapters (1–3 per chapter) |
+| Multi-page answers | 37 of 40 list 2–5 gold pages; a hit = any gold page in the top-k |
+| Conceptual (`kind: why_how`) | 12 |
+| Shared stems with covering headings or bold words on gold pages | 0. Checked by `check_questions.py`, which reads the outline and pdfium font weights and prints only the shared stems. The only allowed stem is the subject word «блокчейн» |
+| Proper names | removed: products, companies and authors are described, not named |
+| Gold pages | found through the text layer, each checked with a short snippet; all inside the stated chapter (also checked by `check_questions.py`) |
+
+Lint: `uv run --script spikes/embeddings-local/check_questions.py "<path to the Bashir PDF>" spikes/embeddings-local/questions-v2.yaml` gives `questions=40 with_issues=0`.
+
+**Runner changes:**
+- **Embedding cache:** chunk vectors are cached per (model, corpus sha256, chunking parameters, page range) in the gitignored `data/spikes/embeddings-local/cache/`. The cache holds vectors and page numbers only, never text. A cache hit reports the speed measured when the vectors were made (`"cache": "hit"`, `embed_measured_at`). `NOCACHE=1` forces a fresh, timed embedding.
+- **Metrics in the JSON:** recall@1, recall@3, recall@10, MRR and the worst rank, computed over the full ranking rather than capped at k.
+
+**Functional check, not a measurement** (`results/*-v2-functional-1/`, `results/*-v2-functional-2/`): e5-small on pages 140–159 (50 chunks), with the 2 v2 questions whose gold pages fall there. Run 1 missed the cache and embedded (19 s wall). Run 2 hit the cache (8 s wall, mostly container start and model load). Both questions rank 1, which is expected on a 50-chunk corpus.
+
+**Full v2 benchmark** (waits for a quiet Docker VM):
+
+```bash
+docker build --platform linux/arm64 -t reader-spike-embeddings spikes/embeddings-local && \
+  QUESTIONS=questions-v2.yaml TAG=v2 bash spikes/embeddings-local/run.sh "<path to the Bashir PDF>"
+```
+
+The first run embeds and caches the full pilot for each model. It takes about 2.7 + 37 + 32 min on the 4-CPU VM and is the timed run. Later runs on any question set (v1, edits to v2) take seconds per model.
+
+| Model | Chunks/s | Full pilot (min) | recall@10 | recall@3 | recall@1 | MRR | Worst gold rank |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| multilingual-e5-small | | | | | | | |
+| USER-bge-m3 | | | | | | | |
+| bge-m3 | | | | | | | |
+
 ## Needs the owner
 
-- Review `questions.yaml`: 30 questions in Russian over chapters 1–21, each with its gold pages. Chapters 22 and 23 have no question. Edit or replace questions; keep `gold_pages`.
-- Agree on a harder set (the agent can draft it): paraphrased questions that avoid the book's key terms, and questions whose answer spans several pages. The current set saturates recall@10 for every model. Then rerun the three models. The runner recomputes embeddings on every run, so a rerun takes about 75 min on the 4-CPU VM; caching the embeddings would cut that to seconds.
+- Skim `questions-v2.yaml` (40 questions, all chapters). Rewording is fine; keep `gold_pages`, and rerun `check_questions.py` after editing.
+- v1 `questions.yaml` (30 questions, chapters 1–21) remains for comparison and needs no further review if v2 replaces it.
