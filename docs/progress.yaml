@@ -80,16 +80,22 @@ tasks:
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
       note: "spends Agent SDK credit; record in budget.ledger" }
   - { id: S0.spike.library-publish, stage: 0, kind: spike, status: blocked, needs: [S0.skeleton],
-      result: "PARTIAL (spikes/library-publish/RESULT.md). Release workflow + decision record 0045 on local library branch
-        release/github-packages (6355fe67): gates job runs `npm run gates`, publish job renames @acme/ui → @<owner>/ui in its checkout,
-        GITHUB_TOKEN with packages: write; npm run check and actionlint pass; not run. Fallback works: built-commit tarball installs in a
-        Vite 8 + React 19 + Storybook 10 consumer on Node 26; 20 ADR-0013 components typecheck, build and render in Chromium without
-        page errors; 20 components together 56.5 KB gzip JS (React excluded), styles.css 30.2 KB gzip. Draft Calm tokens: 62/62
-        contrast pairs pass (lowest text 5.42:1, non-text 3.41:1).",
+      review: "deep-reviewer (Fable) round 1: changes (prerelease dist-tag, composited contrast pairs); addressed",
+      result: "PARTIAL (spikes/library-publish/RESULT.md, results/sizes.json, contrast.json, render.json).
+        Release workflow + decision record 0045 on local library branch release/github-packages (6355fe67, dbb932cb): tag check first,
+        `npm run gates`, publish renames @acme/ui → @<owner>/ui in its checkout, prereleases to dist-tag next, GITHUB_TOKEN with
+        packages: write, no persisted credentials; actionlint and npm run check pass; not run.
+        Fallback works: built-commit tarball installs in a Vite 8 + React 19 + Storybook 10 consumer on Node 26.13.0; the 20 ADR-0013
+        components typecheck, build and render in Chromium without page errors; as used in the gallery 56.5 KB gzip JS (React excluded;
+        reviewer's full-entry ceiling ≈ 59.3 KB), styles.css 30.2 KB gzip.
+        Draft Calm tokens: 218/218 contrast pairs pass, including composited tints (soft buttons, hover overlays, toasts, chips) after a
+        lightness-only adjustment (before: 198/218; lowest 3.75:1 text, 2.96:1 UI). Lowest now: text 4.57:1, UI 3.25:1.
+        Library size gate fails 5 entries by 1–19 B under Node 26 but passes under Node 22 (its CI runtime).",
       reason: "Publishing is the owner's: the library's AGENTS.md forbids agents to push or publish. Install-by-version and release
         time are therefore unmeasured.",
-      ask: "Review and push library branch release/github-packages (6355fe67), merge it, push tag v0.1.0 and note the release
-        workflow's duration; then tell the agent the version (installing from GitHub Packages needs a read:packages token on the Mac)." }
+      ask: "Review and push library branch release/github-packages (dbb932cb), merge it into web3/material-parity, push tag v0.1.0
+        and note the release workflow's gates duration; then tell the agent the version. Installing from GitHub Packages needs a
+        read:packages token on the Mac, likely a classic PAT (fine-grained tokens may not cover Packages; to be verified)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
   - { id: S0.exit, stage: 0, kind: live, status: todo,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,

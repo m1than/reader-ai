@@ -1,0 +1,117 @@
+{
+  "commands": {
+    "gallery": "vite build (consumer/, Node 26.13.0 from /opt/homebrew/opt/node@26/bin)",
+    "baseline": "vite build --mode baseline (React 19 + ReactDOM only, same config)",
+    "perEntry": "node scripts/check-size.mjs in the library checkout (min + gzip -9 per entry, React external, shared layers and Floating UI counted in every entry)",
+    "this": "node consumer/sizes.mjs <library> <tarball>"
+  },
+  "galleryJs": {
+    "file": "dist/assets/index-D05Pz_av.js",
+    "raw": 400414,
+    "gzip9": 124206
+  },
+  "galleryCss": {
+    "file": "dist/assets/index-Df5RL7ex.css",
+    "raw": 229758,
+    "gzip9": 30172
+  },
+  "baselineJs": {
+    "file": "dist-baseline/assets/baseline-BKaSD2T-.js",
+    "raw": 219472,
+    "gzip9": 67668
+  },
+  "libraryShareJsGzip9": 56538,
+  "tarball": {
+    "file": "acme-ui-0.0.0.tgz",
+    "bytes": 353801,
+    "sha256": "14425dfe1e426384b19fd03339946e7c43a9bfbf3e4908059350921e4e74afca"
+  },
+  "perEntryRuntime": {
+    "node": "v22.22.1",
+    "sizeGateExit": 0,
+    "sizeGateFailures": []
+  },
+  "perEntry": {
+    "avatar": {
+      "gzip9": 2332,
+      "budget": 2420
+    },
+    "charts": {
+      "gzip9": 16726,
+      "budget": 16730
+    },
+    "chip": {
+      "gzip9": 2625,
+      "budget": 2750
+    },
+    "data-grid": {
+      "gzip9": 9998,
+      "budget": 9998
+    },
+    "date-calendar": {
+      "gzip9": 6401,
+      "budget": 6430
+    },
+    "dialog": {
+      "gzip9": 4943,
+      "budget": 4970
+    },
+    "drawer": {
+      "gzip9": 5390,
+      "budget": 5390
+    },
+    "menu": {
+      "gzip9": 17203,
+      "budget": 17210
+    },
+    "popover": {
+      "gzip9": 13038,
+      "budget": 13360
+    },
+    "progress": {
+      "gzip9": 2523,
+      "budget": 2640
+    },
+    "scroll-area": {
+      "gzip9": 3879,
+      "budget": 4010
+    },
+    "select": {
+      "gzip9": 16607,
+      "budget": 16610
+    },
+    "skeleton": {
+      "gzip9": 1393,
+      "budget": 1460
+    },
+    "slider": {
+      "gzip9": 4801,
+      "budget": 5040
+    },
+    "switch": {
+      "gzip9": 2273,
+      "budget": 2380
+    },
+    "tabs": {
+      "gzip9": 4358,
+      "budget": 4520
+    },
+    "text-field": {
+      "gzip9": 3029,
+      "budget": 3180
+    },
+    "toast": {
+      "gzip9": 5642,
+      "budget": 5650
+    },
+    "tooltip": {
+      "gzip9": 13136,
+      "budget": 13350
+    },
+    "tree-view": {
+      "gzip9": 8074,
+      "budget": 8074
+    }
+  },
+  "perEntrySum": 144371
+}
