@@ -1,0 +1,6 @@
+import '@acme/ui/styles.css';
+import '../calm.css';
+import { createRoot } from 'react-dom/client';
+import { Gallery } from './Gallery';
+
+createRoot(document.getElementById('root')!).render(<Gallery />);

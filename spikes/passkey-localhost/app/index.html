@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>reader-ai · passkey spike</title>
+  <style>body { font: 16px system-ui; max-width: 40rem; margin: 3rem auto; } button { font-size: 1rem; margin-right: 1rem; }
+    pre { background: #f4f4f4; padding: 1rem; white-space: pre-wrap; }</style>
+</head>
+<body>
+  <h1>Passkey spike</h1>
+  <p>RP ID <code>localhost</code>. Register once, then sign in.</p>
+  <p><label>User name <input id="user" value="owner"></label></p>
+  <button id="register">Register</button>
+  <button id="login">Sign in</button>
+  <pre id="out">Ready. PublicKeyCredential: <span id="pkc"></span></pre>
+  <script>
+    const out = document.getElementById('out');
+    const ok = typeof PublicKeyCredential !== 'undefined' && 'parseCreationOptionsFromJSON' in PublicKeyCredential;
+    document.getElementById('pkc').textContent = ok ? 'JSON helpers available' : 'MISSING JSON helpers (browser too old)';
+    const show = (label, data) => { out.textContent = `${label}\n${JSON.stringify(data, null, 2)}`; };
+    const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body) }).then((r) => r.json());
+
+    document.getElementById('register').onclick = async () => {
+      const user = document.getElementById('user').value;
+      try {
+        const { flow, publicKey } = await post('/register/options', { user });
+        const cred = await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(publicKey) });
+        show('Register →', await post('/register/verify', { flow, user, credential: cred.toJSON() }));
+      } catch (e) { show('Register failed in the browser', { name: e.name, message: e.message }); }
+    };
+
+    document.getElementById('login').onclick = async () => {
+      try {
+        const { flow, publicKey } = await post('/login/options', {});
+        const cred = await navigator.credentials.get({ publicKey: PublicKeyCredential.parseRequestOptionsFromJSON(publicKey) });
+        show('Sign in →', await post('/login/verify', { flow, credential: cred.toJSON() }));
+      } catch (e) { show('Sign in failed in the browser', { name: e.name, message: e.message }); }
+    };
+  </script>
+</body>
+</html>

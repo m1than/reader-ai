@@ -70,7 +70,7 @@ Complex work is always done with Claude Fable, through the `deep-reviewer` and `
 ## Checks before every PR
 
 ```bash
-node tools/trace/check.mjs                              # T1–T8
+node tools/trace/check.mjs                              # T1–T9 (T9: docs/progress.yaml parses and is consistent)
 node tools/trace/guard-tests.mjs --base origin/main     # P7
 (cd server && uv run ruff check . && uv run mypy src && uv run pytest)    # once server/ exists
 (cd web && npm run typecheck && npm test && npm run build-storybook)      # once web/ exists

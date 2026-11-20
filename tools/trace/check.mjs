@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // trace-check: end-to-end traceability spec ↔ tests ↔ code ↔ ADRs (ADR-0001).
 // Each rule is a function repo -> list of errors. All empty = green CI.
-import { resolve } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import {
   loadRepo, isImplFile, claimsOf, MODULE_ID, ITEM_ID, ADR_ID,
   SPEC_STATUSES, LOCKED_SPEC_STATUSES, ADR_STATUSES, TRACKS,
 } from '../lib/repo.mjs';
+
+const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'done'];
 
 const root = resolve(process.argv[2] ?? '.');
 const repo = loadRepo(root);
@@ -83,6 +87,27 @@ const rules = {
           ? []
           : [`${file}: owned by ${owners.map((s) => s.doc.id).join(', ')}, none approved`];
     }),
+
+  // T9: run state (ADR-0019) — docs/progress.yaml parses, task ids are unique, statuses are known,
+  // every `needs` names a task, blocked tasks say why and what the owner must do
+  'T9 progress-state': () => {
+    const file = 'docs/progress.yaml';
+    const path = join(root, file);
+    if (!existsSync(path)) return [];
+    let doc;
+    try { doc = parseYaml(readFileSync(path, 'utf8')); } catch (e) { return [`${file}: does not parse: ${e.message.split('\n')[0]}`]; }
+    const tasks = doc?.tasks ?? [];
+    const ids = tasks.map((t) => t.id);
+    const known = new Set(ids);
+    return [
+      ...duplicates(ids).map((id) => `${file}: duplicate task id ${id}`),
+      ...tasks.flatMap((t) => [
+        ...(TASK_STATUSES.includes(t.status) ? [] : [`${file}: ${t.id}: status "${t.status}" is not one of ${TASK_STATUSES.join('|')}`]),
+        ...(t.needs ?? []).filter((n) => !known.has(n)).map((n) => `${file}: ${t.id}: needs unknown task ${n}`),
+        ...(t.status === 'blocked' && !(t.reason && t.ask) ? [`${file}: ${t.id}: blocked without reason and ask`] : []),
+      ]),
+    ];
+  },
 };
 
 const report = Object.entries(rules)
