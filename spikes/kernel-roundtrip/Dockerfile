@@ -35,8 +35,12 @@ RUN evcxr < /opt/evcxr-prebuild.evcxr 2>&1 | tail -5 && du -sh /opt/evcxr-cache 
 
 WORKDIR /home/lab
 EXPOSE 8888
-# evcxr's rustc wrapper writes to its cache, and the root filesystem is read-only at runtime (ADR-0014):
-# copy the pre-built cache into the exec tmpfs at /run/evcxr once, at container start.
-ENTRYPOINT ["sh", "-c", "cp -r /opt/evcxr-cache /run/evcxr/cache && XDG_CACHE_HOME=/run/evcxr/cache exec \"$@\"", "--"]
+# The rust kernelspec starts evcxr through a launcher that gives each kernel a private work dir and
+# cache copy in the exec tmpfs /run/evcxr (see evcxr-kernel.sh).
+USER root
+COPY evcxr-kernel.sh /usr/local/bin/evcxr-kernel
+RUN chmod 755 /usr/local/bin/evcxr-kernel && python -c "import json; p='/usr/local/share/jupyter/kernels/rust/kernel.json'; \
+k=json.load(open(p)); k['argv'][0]='/usr/local/bin/evcxr-kernel'; json.dump(k, open(p, 'w'))"
+USER lab
 CMD ["jupyter", "kernelgateway", "--KernelGatewayApp.ip=0.0.0.0", "--KernelGatewayApp.port=8888", \
      "--KernelGatewayApp.api=kernel_gateway.jupyter_websocket", "--KernelGatewayApp.auth_token="]
