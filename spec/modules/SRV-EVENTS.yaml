@@ -1,0 +1,205 @@
+# SRV-EVENTS — the job queue; vertical-slice subset V1 (`V.SRV-JOBS-min`, docs/roadmap.md "Vertical slice first").
+#
+# The roadmap gives SRV-EVENTS both `server/src/reader/events/**` and `server/src/reader/jobs/**`. This revision
+# specifies only the jobs half, the part the slice needs (ingest, compile and embedding jobs). The stage-2 revision
+# of this same spec adds the event half (see `defers`) without a data migration of the job tables: the job tables
+# here are procrastinate's own schema plus one table of this module, `job_outcomes`, and stage 2 only adds tables.
+#
+# Queue: procrastinate (ADR-0006: "Postgres queue (FOR UPDATE SKIP LOCKED, LISTEN/NOTIFY wake-up) through
+# procrastinate"). Claim, lease and wake-up are procrastinate's: a worker fetches with FOR UPDATE SKIP LOCKED
+# (procrastinate_fetch_job_v2), heartbeats every 10 s, and is stalled after 30 s without one (REF-EVENTS-2, -3).
+# This module does not re-implement them. It adds what procrastinate lacks:
+#   - idempotency across completion: procrastinate's `queueing_lock` is unique only among `todo` jobs and its `lock`
+#     only among `doing` jobs (REF-EVENTS-4), so neither stops a second run after success. `job_outcomes` does.
+#   - a declared job registry, payload validation and the "no secret in a payload" rule;
+#   - stalled-job recovery as a declared periodic job, and the dead state as a queryable outcome.
+#
+# Drivers: ADR-0006 names SQLAlchemy 2 async with asyncpg; procrastinate's async connector is psycopg 3. In this
+# revision procrastinate keeps its own psycopg pool, and job handlers write through the SQLAlchemy session. Enqueue is
+# therefore NOT atomic with a caller's own state change (FR-EVENTS-3 says what holds instead). Atomic enqueue needs one
+# driver for both; that choice is an owner question and lands with the stage-2 outbox (see `defers`).
+#
+# Dependencies on specs not yet approved (none of their files are claimed here):
+#   - the DB engine, session factory and Alembic environment (`server/src/reader/db/**`), drafted in SRV-AUTH;
+#   - the `reader-server --role worker` dispatch, owned by the server-skeleton spec (drafted in SRV-AUTH). That
+#     dispatch calls `reader.jobs.worker.run(...)` (FR-EVENTS-9) and nothing else.
+#
+# Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
+
+id: SRV-EVENTS
+title: Job queue on procrastinate with idempotent outcomes, declared job kinds and stalled-job recovery (slice subset)
+status: draft
+approved_by: null
+approved_at: null
+layer: server
+track: engineering
+adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
+slice: V.SRV-JOBS-min
+
+paths:
+  - server/src/reader/jobs/**
+  - server/src/reader/db/migrations/versions/*_jobs_*.py
+  - server/tests/jobs/**
+
+normative:
+  - id: REF-EVENTS-1
+    title: "ADR-0006 — Backend: event log with transactional outbox, Postgres job queue through procrastinate"
+    url: docs/adr/0006-backend-architecture.md
+  - id: REF-EVENTS-2
+    title: "procrastinate 3.12.0 (PyPI; requires Python >= 3.11; async connector on psycopg 3)"
+    url: https://pypi.org/project/procrastinate/3.12.0/
+  - id: REF-EVENTS-3
+    title: procrastinate — Retry stalled jobs (heartbeat every 10 s; stalled after 30 s without one; get_stalled_jobs, retry_job)
+    url: https://procrastinate.readthedocs.io/en/stable/howto/production/retry_stalled_jobs.html
+  - id: REF-EVENTS-4
+    title: "procrastinate schema.sql — partial unique indexes: queueing_lock WHERE status = 'todo'; lock WHERE status = 'doing'"
+    url: https://github.com/procrastinate-org/procrastinate/blob/main/procrastinate/sql/schema.sql
+  - id: REF-EVENTS-5
+    title: procrastinate — RetryStrategy (max_attempts, exponential_wait, retry_exceptions)
+    url: https://procrastinate.readthedocs.io/en/stable/reference.html#procrastinate.RetryStrategy
+  - id: REF-EVENTS-6
+    title: PostgreSQL 18 — SELECT … FOR UPDATE SKIP LOCKED; pg_advisory_xact_lock
+    url: https://www.postgresql.org/docs/18/functions-admin.html#FUNCTIONS-ADVISORY-LOCKS
+
+# Numbers used below, each with its kind. "structural" = chosen to bound behaviour, with the reason; not measured.
+bounds:
+  - { name: heartbeat interval, value: "10 s", kind: "library default (REF-EVENTS-3), not tuned" }
+  - { name: stalled after, value: "30 s without heartbeat", kind: "library default (REF-EVENTS-3), not tuned" }
+  - { name: stalled sweep period, value: "every minute", kind: "structural: cron granularity; worst-case recovery 30 s + 60 s is small against stages that run for minutes (compile-cost spike)" }
+  - { name: default max_attempts, value: 3, kind: "structural: retries are for transient faults only (FR-EVENTS-6); a deterministic failure retried more only repeats spend (compile-cost spike: 0 of 2 runs converged, so failures are frequent)" }
+  - { name: default backoff, value: "exponential_wait 5 s → 5, 25 s", kind: "structural: two retries span about 30 s, longer than a provider 429 window is assumed to be; flagged for SRV-AGENT to replace with the provider's Retry-After" }
+  - { name: worker concurrency, value: 1, kind: "structural: ADR-0006 load profile < 1 job/s; one compile stage at a time keeps spend serial against budget.live_runs_usd" }
+
+requirements:
+  - id: FR-EVENTS-1
+    text: >-
+      Job kinds are declared as data: a `JobKind` record has `name` (`^[a-z][a-z0-9_.]{2,63}$`), `queue`, `args`
+      (a Pydantic model with `extra="forbid"`), `key` (the ordered list of `args` field names that form the
+      idempotency key), `retry` (`max_attempts`, `exponential_wait`, `transient`: a tuple of exception types), and
+      `timeout_s`. `reader.jobs.catalog.KINDS` is the one tuple of kinds the worker serves; building it rejects a
+      duplicate name, a `key` field missing from `args`, and an `args` model that fails FR-EVENTS-10.
+  - id: FR-EVENTS-2
+    text: >-
+      The idempotency key of a job is `sha256` over the canonical JSON (sorted keys, separators `,` and `:`, non-ASCII unescaped, encoded UTF-8) of the
+      `key` fields' values, prefixed by the kind name: `<kind>:<hex64>`. For compile stages the fields are
+      `(lesson, stage, input_sha256)` (ADR-0006).
+  - id: FR-EVENTS-3
+    text: >-
+      `enqueue(kind, args)` validates `args` against the kind's model, then returns exactly one of:
+      `queued(job_id)` after deferring a procrastinate job with `queueing_lock` and `lock` both set to the
+      idempotency key; `already_queued` when procrastinate raises `AlreadyEnqueued`; `already_done(job_id)` when
+      `job_outcomes` holds `succeeded` for the key; `dead(job_id)` when it holds `dead`. Enqueue runs in its own
+      transaction: a caller that changes state first and crashes before enqueue leaves no job, and recovers by
+      enqueueing again, which the idempotency key makes safe.
+  - id: FR-EVENTS-4
+    text: >-
+      A worker runs each job inside one SQLAlchemy transaction that first takes `pg_advisory_xact_lock` on the
+      idempotency key, then reads `job_outcomes` for the key. If it holds `succeeded`, the job returns without
+      calling the handler. Otherwise the handler runs with that session, and the `succeeded` outcome row is written
+      in the same transaction as the handler's database writes.
+  - id: FR-EVENTS-5
+    text: >-
+      A handler gets the validated `args` model, the session and a context with `job_id`, `attempt` and the key.
+      Effects outside the database (blob writes, provider calls) must be idempotent per key; blobs are written
+      content-addressed (ADR-0007), so a repeated write is a no-op. The handler's return value is not stored.
+  - id: FR-EVENTS-6
+    text: >-
+      A handler exception whose type is in the kind's `transient` tuple is retried by procrastinate's
+      `RetryStrategy(max_attempts, exponential_wait, retry_exceptions=transient)`. Any other exception, a
+      `timeout_s` overrun (`asyncio.timeout`), and the last failed attempt end the job: the worker writes outcome
+      `dead` with `error_code` (the exception's class name, or `timeout`) and `attempts`, never the message or args.
+  - id: FR-EVENTS-7
+    text: >-
+      Stalled-job recovery is a declared periodic job, `jobs.retry_stalled`, run every minute with its own
+      `queueing_lock`. It retries each job that `get_stalled_jobs()` returns when that job's attempts are below its
+      kind's `max_attempts`, and otherwise writes outcome `dead` with `error_code` `stalled` and marks the
+      procrastinate job failed. A stalled retry counts as an attempt.
+  - id: FR-EVENTS-8
+    text: >-
+      `requeue_dead(kind, key)` deletes a `dead` outcome and enqueues again with the stored args; for any other
+      outcome it changes nothing and returns the current result of FR-EVENTS-3. It is the only way out of `dead`.
+  - id: FR-EVENTS-9
+    text: >-
+      `reader.jobs.worker.run(settings)` opens the procrastinate app on the DB settings from SRV-CONFIG, serves the
+      queues of every kind in `KINDS` plus the periodic job, with `concurrency=1` and LISTEN/NOTIFY on, and stops
+      on SIGTERM after the running job ends (procrastinate's graceful shutdown). It returns exit code 0 after a
+      graceful stop and 1 when the database is unreachable at start.
+  - id: FR-EVENTS-10
+    text: >-
+      No job payload carries a secret: an `args` model must not contain a field of type `reader.config.Secret`, at any
+      depth, and `enqueue` rejects any value that is a `Secret` instance before validation, with error code
+      `secret_in_payload` and no part of the value in the error.
+  - id: FR-EVENTS-11
+    text: >-
+      The migration `<rev>_jobs_*.py` creates procrastinate's schema (the SQL shipped with the pinned version) and
+      `job_outcomes(kind text, key text, job_id bigint, status text check in ('succeeded','dead'), args jsonb,
+      error_code text null, attempts int, finished_at timestamptz, primary key (kind, key))`. Its downgrade drops both.
+  - id: FR-EVENTS-12
+    text: >-
+      Job state is observable read-only: `job_status(kind, key)` returns one of `none`, `queued`, `running`,
+      `succeeded`, `dead`, derived from `job_outcomes` first and procrastinate's job status second.
+
+invariants:
+  - id: INV-EVENTS-1
+    text: At most one job per idempotency key is in procrastinate status `doing` at any moment (the `lock` index), and at most one is in `todo` (the `queueing_lock` index).
+  - id: INV-EVENTS-2
+    text: For every idempotency key, `job_outcomes` has at most one row, and the handler's committed database effect happens at most once, under any interleaving of enqueue, worker crash, stalled retry and requeue.
+  - id: INV-EVENTS-3
+    text: A key with outcome `succeeded` is never handed to its handler again; enqueue returns `already_done` and the worker skips it.
+  - id: INV-EVENTS-4
+    text: A job whose worker stopped heartbeating is reclaimed by the next sweep after 30 s, until its attempts reach `max_attempts`, after which its outcome is `dead`; no job stays `doing` forever.
+  - id: INV-EVENTS-5
+    text: No `Secret` value, and no byte string equal to a canary secret's value, appears in `procrastinate_jobs.args`, `job_outcomes`, or any log record the module emits.
+  - id: INV-EVENTS-6
+    text: The state transition function over (state, event) is total, matches VEC-EVENTS-1 exactly, and maps every pair not listed there to `invalid` with no state change; `succeeded` and `dead` are terminal except for `requeue` from `dead`.
+
+nfr: []
+
+vectors:
+  - id: VEC-EVENTS-1
+    source: "Hand-derived from FR-EVENTS-3, -4, -6, -7, -8 and procrastinate's statuses (REF-EVENTS-3, -4); one row per (state, event)"
+    file: spec/fixtures/SRV-EVENTS/transitions.yaml
+  - id: VEC-EVENTS-2
+    source: "Idempotency keys computed with Python hashlib.sha256 over the canonical JSON of FR-EVENTS-2"
+    file: spec/fixtures/SRV-EVENTS/keys.yaml
+
+# Test levels.
+#   [unit]  pure functions: the transition table, key derivation, registry building, payload checks. Hypothesis
+#           stateful testing (RuleBasedStateMachine) drives random event sequences against VEC-EVENTS-1.
+#   [db]    a real Postgres from testcontainers (ADR-0006 names testcontainers), image pinned to the same index
+#           digest OPS-DEPLOY pins, `postgres:18-trixie@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a`,
+#           which has a linux/arm64/v8 manifest (verified in OPS-DEPLOY). Skips when no Docker daemon is reachable.
+#           Covers INV-EVENTS-1..4 with concurrent workers in one process and a worker killed mid-job (task
+#           cancelled without graceful stop, heartbeat stopped), and FR-EVENTS-11 upgrade and downgrade.
+#   [live]  none in this revision; V.live (`e2e/live/slice.sh`) runs ingest and compile jobs through the stack.
+test_levels:
+  FR-EVENTS-1: unit
+  FR-EVENTS-2: unit
+  FR-EVENTS-3: db
+  FR-EVENTS-4: db
+  FR-EVENTS-5: db
+  FR-EVENTS-6: db
+  FR-EVENTS-7: db
+  FR-EVENTS-8: db
+  FR-EVENTS-9: db
+  FR-EVENTS-10: unit
+  FR-EVENTS-11: db
+  FR-EVENTS-12: db
+  INV-EVENTS-1: db
+  INV-EVENTS-2: db
+  INV-EVENTS-3: db
+  INV-EVENTS-4: db
+  INV-EVENTS-5: "unit + db"
+  INV-EVENTS-6: unit
+
+# What the full stage-2 revision of SRV-EVENTS adds (docs/roadmap.md stage 2, SRV-EVENTS row).
+defers:
+  - "Typed event registry and the `events` table written in the same transaction as the state change (transactional outbox, ADR-0006)."
+  - "Atomic enqueue with the caller's state change: one driver for SQLAlchemy and procrastinate (owner question below)."
+  - "SSE `/api/events` resumable by `Last-Event-ID`; event to SSE client p95 ≤ 200 ms."
+  - "TypeScript event types generated for `web/`."
+  - "Event-driven pipeline consumers (`stage.completed` enqueues the next stage, ADR-0018)."
+  - "Notifications (SRV-NOTIFY) and metrics (SRV-OBS) on job outcomes."
+
+owner_questions:
+  - "Driver: ADR-0006 names asyncpg for SQLAlchemy, and procrastinate needs psycopg 3. One driver (SQLAlchemy on `postgresql+psycopg`) makes enqueue atomic with state today; two drivers keep ADR-0006's text. This revision keeps two and defers atomicity to stage 2."

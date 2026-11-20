@@ -1,0 +1,40 @@
+# VEC-EVENTS-1 — job state transitions per idempotency key (FR-EVENTS-3, -4, -6, -7, -8; INV-EVENTS-6).
+# Source: hand-derived from the FRs above and procrastinate's statuses (todo, doing, succeeded, failed).
+# States are this module's view (FR-EVENTS-12): none, queued, running, succeeded, dead.
+# Events:
+#   enqueue            FR-EVENTS-3
+#   claim              a worker fetches the job (procrastinate todo -> doing)
+#   ok                 the handler returns; outcome succeeded committed with its effect (FR-EVENTS-4)
+#   fail_transient     a transient exception with attempts left (FR-EVENTS-6)
+#   fail_last          a transient exception on the last attempt (FR-EVENTS-6)
+#   fail_permanent     a non-transient exception or timeout (FR-EVENTS-6)
+#   stall              the sweep finds the job stalled with attempts left (FR-EVENTS-7)
+#   stall_last         the sweep finds the job stalled with no attempts left (FR-EVENTS-7)
+#   requeue            requeue_dead (FR-EVENTS-8)
+# `result` is enqueue's / requeue's return value; `-` means the event returns nothing to a caller.
+# `effect` counts handler database effects committed by the event (INV-EVENTS-2). `invalid` rows cannot occur and
+# the implementation must ignore them without a state change (a claim with no queued job, for example).
+# Every (state, event) pair not listed below is `invalid` with no state change (ok and fail_* outside `running`).
+rows:
+  - { state: none,      event: enqueue,        next: queued,    result: queued,       effect: 0 }
+  - { state: none,      event: claim,          next: none,      result: invalid,      effect: 0 }
+  - { state: none,      event: requeue,        next: none,      result: none,         effect: 0 }
+  - { state: queued,    event: enqueue,        next: queued,    result: already_queued, effect: 0 }
+  - { state: queued,    event: claim,          next: running,   result: "-",          effect: 0 }
+  - { state: queued,    event: requeue,        next: queued,    result: already_queued, effect: 0 }
+  - { state: running,   event: enqueue,        next: running,   result: queued,       effect: 0,
+      note: "procrastinate allows one todo beside one doing (REF-EVENTS-4); the second job runs after the first and is skipped by FR-EVENTS-4 if the first succeeded" }
+  - { state: running,   event: ok,             next: succeeded, result: "-",          effect: 1 }
+  - { state: running,   event: fail_transient, next: queued,    result: "-",          effect: 0 }
+  - { state: running,   event: fail_last,      next: dead,      result: "-",          effect: 0 }
+  - { state: running,   event: fail_permanent, next: dead,      result: "-",          effect: 0 }
+  - { state: running,   event: stall,          next: queued,    result: "-",          effect: 0 }
+  - { state: running,   event: stall_last,     next: dead,      result: "-",          effect: 0 }
+  - { state: running,   event: requeue,        next: running,   result: running,      effect: 0 }
+  - { state: succeeded, event: enqueue,        next: succeeded, result: already_done, effect: 0 }
+  - { state: succeeded, event: claim,          next: succeeded, result: skipped,      effect: 0,
+      note: "a job queued behind a running one, claimed after it succeeded: FR-EVENTS-4 skips the handler" }
+  - { state: succeeded, event: requeue,        next: succeeded, result: already_done, effect: 0 }
+  - { state: dead,      event: enqueue,        next: dead,      result: dead,         effect: 0 }
+  - { state: dead,      event: claim,          next: dead,      result: invalid,      effect: 0 }
+  - { state: dead,      event: requeue,        next: queued,    result: queued,       effect: 0 }

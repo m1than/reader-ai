@@ -238,7 +238,9 @@ tasks:
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
-  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
+  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+      note: "spec drafted, awaits deep-reviewer (spec/modules/SRV-EVENTS.yaml, jobs half; procrastinate per ADR-0006;
+        complex area: full review). Depends on the db/Alembic and reader-server skeleton drafted in S1.SRV-AUTH" }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
