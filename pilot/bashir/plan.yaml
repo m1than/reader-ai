@@ -1,0 +1,49 @@
+# Bashir pilot: study plan (hand-maintained data).
+# Source: the blockchain study plan in the Claude Docs knowledge base, 2026-11-06.
+# budget_sessions = round((theory_h + code_h) * 1.2): one 60-minute session per hour, with a 20% buffer.
+# code_h already includes the 1.7x Rust coefficient where the stage writes Rust.
+# build_course.py joins this plan with the PDF bookmark outline into course.yaml.
+
+material:
+  id: bashir-2025
+  title: "Башир И. Блокчейн. Исчерпывающее руководство. ДМК Пресс, 2025"
+  original: "Imran Bashir, Mastering Blockchain, 4th ed., Packt, 2023"
+  language: ru
+  license: personal-use
+  pages: 935
+  page_offset: 1            # pdf_page = book_page + 1
+  sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
+
+stages:
+  - { id: S01,  title: Orientation,                              chapters: [1, 2],      theory_h: 3,   code_h: 0 }
+  - { id: S02a, title: Hashes and symmetric cryptography,        chapters: [3],         theory_h: 4,   code_h: 44,
+      wallet_output: "SHA-256, HMAC, PBKDF2 and AES-GCM in the Rust core" }
+  - { id: S02b, title: Elliptic curves and signatures,           chapters: [4],         theory_h: 7.5, code_h: 34,
+      wallet_output: "secp256k1 arithmetic, ECDSA (RFC 6979) and Schnorr (BIP-340)" }
+  - { id: S03,  title: Bitcoin,                                  chapters: [6, 7],      theory_h: 5,   code_h: 31.4,
+      wallet_output: "BIP-32/39/84 keys, bech32 addresses, a signed testnet4 transaction" }
+  - { id: S04,  title: Consensus,                                chapters: [5],         theory_h: 6,   code_h: 0 }
+  - { id: S05,  title: Ethereum core,                            chapters: [8, 9, 10],  theory_h: 10,  code_h: 31.4,
+      wallet_output: "Keccak-256, RLP, an EIP-1559 transaction signed for Sepolia" }
+  - { id: S06,  title: Solidity, Web3 and wallet connections,    chapters: [11, 12],    theory_h: 5,   code_h: 33,
+      wallet_output: "EIP-1193 provider, external wallets, WalletConnect" }
+  - { id: S07,  title: Proof of stake after The Merge,           chapters: [13],        theory_h: 4,   code_h: 0 }
+  - { id: S08,  title: Tokens,                                   chapters: [15],        theory_h: 2.5, code_h: 8,
+      wallet_output: "ERC-20 balances and transfers" }
+  - { id: S09,  title: Scalability and L2,                       chapters: [17],        theory_h: 4,   code_h: 4,
+      wallet_output: "L2 network support" }
+  - { id: S10,  title: Security,                                 chapters: [19],        theory_h: 4,   code_h: 8,
+      wallet_output: "Key-at-rest encryption review and threat model" }
+  - { id: S11,  title: Privacy,                                  chapters: [18],        theory_h: 6,   code_h: 0 }
+  - { id: S12,  title: Identity and account abstraction,         chapters: [20],        theory_h: 3,   code_h: 12,
+      wallet_output: "ERC-4337 smart account" }
+  - { id: S13,  title: DeFi,                                     chapters: [21],        theory_h: 3.5, code_h: 4,
+      wallet_output: "Token approvals and allowance management" }
+  - { id: S14,  title: Enterprise blockchain,                    chapters: [14, 16],    theory_h: 6.5, code_h: 0 }
+  - { id: S15,  title: Future,                                   chapters: [22],        theory_h: 3,   code_h: 0 }
+  # Chapter 23 was missing from the 2026-11-06 plan (found while building this manifest, 2026-11-20).
+  # Budget is an open question for the owner; null keeps it out of totals.
+  - { id: S16,  title: Alternative blockchains,                  chapters: [23],        theory_h: null, code_h: 0 }
+
+# Lessons whose content already exists (migrated from the Claude Docs knowledge base).
+drafted: [1]
