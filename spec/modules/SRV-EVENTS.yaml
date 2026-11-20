@@ -17,10 +17,14 @@
 # Drivers: ADR-0006 names SQLAlchemy 2 async with asyncpg; procrastinate's async connector is psycopg 3. In this
 # revision procrastinate keeps its own psycopg pool, and job handlers write through the SQLAlchemy session. Enqueue is
 # therefore NOT atomic with a caller's own state change (FR-EVENTS-3 says what holds instead). Atomic enqueue needs one
-# driver for both; that choice is an owner question and lands with the stage-2 outbox (see `defers`).
+# driver for both, which would contradict ADR-0006's text; atomic enqueue lands with the stage-2 outbox instead
+# (see `defers` and `owner_notes`).
 #
 # Dependencies on specs not yet approved (none of their files are claimed here):
-#   - the DB engine, session factory and Alembic environment (`server/src/reader/db/**`), drafted in SRV-AUTH;
+#   - the DB engine, session factory and Alembic environment (`server/src/reader/db/**`), drafted in SRV-AUTH.
+#     Cross-spec requirement on SRV-AUTH: the Alembic environment lists every `server/src/reader/*/migrations`
+#     directory in `version_locations`, so this module's revisions live under its own `jobs/migrations/`
+#     (branch label `jobs`) and no module writes into `db/`;
 #   - the `reader-server --role worker` dispatch, owned by the server-skeleton spec (drafted in SRV-AUTH). That
 #     dispatch calls `reader.jobs.worker.run(...)` (FR-EVENTS-9) and nothing else.
 #
@@ -38,7 +42,6 @@ slice: V.SRV-JOBS-min
 
 paths:
   - server/src/reader/jobs/**
-  - server/src/reader/db/migrations/versions/*_jobs_*.py
   - server/tests/jobs/**
 
 normative:
@@ -131,7 +134,9 @@ requirements:
       `secret_in_payload` and no part of the value in the error.
   - id: FR-EVENTS-11
     text: >-
-      The migration `<rev>_jobs_*.py` creates procrastinate's schema (the SQL shipped with the pinned version) and
+      One Alembic revision under `server/src/reader/jobs/migrations/`, with branch label `jobs` and `depends_on` set
+      to SRV-AUTH's base revision only if that base creates objects this revision uses (none in this revision),
+      creates procrastinate's schema (the SQL shipped with the pinned version) and
       `job_outcomes(kind text, key text, job_id bigint, status text check in ('succeeded','dead'), args jsonb,
       error_code text null, attempts int, finished_at timestamptz, primary key (kind, key))`. Its downgrade drops both.
   - id: FR-EVENTS-12
@@ -195,11 +200,12 @@ test_levels:
 # What the full stage-2 revision of SRV-EVENTS adds (docs/roadmap.md stage 2, SRV-EVENTS row).
 defers:
   - "Typed event registry and the `events` table written in the same transaction as the state change (transactional outbox, ADR-0006)."
-  - "Atomic enqueue with the caller's state change: one driver for SQLAlchemy and procrastinate (owner question below)."
+  - "Atomic enqueue with the caller's state change, through the stage-2 outbox (drivers stay two; see `owner_notes`)."
   - "SSE `/api/events` resumable by `Last-Event-ID`; event to SSE client p95 ≤ 200 ms."
   - "TypeScript event types generated for `web/`."
   - "Event-driven pipeline consumers (`stage.completed` enqueues the next stage, ADR-0018)."
   - "Notifications (SRV-NOTIFY) and metrics (SRV-OBS) on job outcomes."
 
-owner_questions:
-  - "Driver: ADR-0006 names asyncpg for SQLAlchemy, and procrastinate needs psycopg 3. One driver (SQLAlchemy on `postgresql+psycopg`) makes enqueue atomic with state today; two drivers keep ADR-0006's text. This revision keeps two and defers atomicity to stage 2."
+owner_notes:
+  - "Driver (coordinator decision, 2026-11-20): two drivers. asyncpg stays for SQLAlchemy as ADR-0006 says; psycopg 3 is used only inside procrastinate. One psycopg driver would make enqueue atomic with state now, but contradicts ADR-0006's text and would need a new ADR; atomic enqueue lands with the stage-2 outbox instead."
+  - "Migrations: each module keeps its Alembic revisions in its own `reader/<module>/migrations/` with a branch label; SRV-AUTH's environment lists them all in `version_locations`."
