@@ -48,7 +48,7 @@ layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer round 1 (2026-11-20): changes (procrastinate seams); round 2: changes (seams the revision added) — revised per coordinator decisions 1–6: single-shot procrastinate jobs, per-key reconcile, non-blocking enqueue, one table"
+review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Status stays draft until Red; Red/Green waits for SRV-AUTH (Alembic env, reader.db)"
 
 paths:
   - server/src/reader/jobs/**
@@ -160,9 +160,10 @@ requirements:
       is not in `KINDS` gets `dead` (`error_code` `unknown_kind`) when its key row exists, and is finished `failed`.
       For a known kind it uses `pg_try_advisory_xact_lock` on the key: when the lock is held, a live session runs the
       key and the job is left alone this round. With the lock: if the key has an outcome, the job is finished
-      (`succeeded` for `succeeded`, `failed` for `dead`); otherwise the attempt count is incremented (a stall counts),
-      or, if FR-EVENTS-14 now says exhausted, `dead` is written (`error_code` `stalled`), and that transaction
-      commits. In this order: commit the increment or outcome, then (when not exhausted) enqueue the key through
+      (`succeeded` for `succeeded`, `failed` for `dead`); otherwise the attempt count is always incremented (a stall
+      counts), and when the incremented count is exhausted by FR-EVENTS-14, `dead` (`error_code` `stalled`) is
+      written in the same transaction, which then commits. In this order: commit the increment (with `dead` when
+      exhausted), then (when not exhausted) enqueue the key through
       FR-EVENTS-3 at once, then finish the stalled job `failed`. The sweep never holds an uncommitted key-row write
       across an enqueue call.
   - id: FR-EVENTS-8
@@ -172,7 +173,8 @@ requirements:
       count to 0, commits, then enqueues through FR-EVENTS-3 and returns its result (`queued(job_id)`). A crash between
       the commit and the defer leaves a key with no outcome, no todo or doing job and the dead run's `failed` job as
       its newest; after 60 s the sweep treats it like a stall (FR-EVENTS-15): it counts one attempt and re-enqueues,
-      so the gap costs one attempt. When the key has no outcome it
+      so the gap costs one attempt. With `max_attempts = 1` that is the only attempt: the key goes `dead` with
+      `error_code` `orphaned` and must be requeued again. When the key has no outcome it
       returns FR-EVENTS-3's result for the stored args (`already_queued` or `queued`). It returns `already_done(job_id)`
       for `succeeded` and `unknown_key` when no row exists. It is the only way out of `dead`.
   - id: FR-EVENTS-9
@@ -232,8 +234,9 @@ requirements:
       none (a crash between FR-EVENTS-3's key commit and its defer) or `aborted`: enqueue through FR-EVENTS-3 without
       counting an attempt;
       `failed` or `succeeded` (a lost re-enqueue in FR-EVENTS-6, or `requeue_dead`'s crash gap): treated like a stall,
-      the uniform rule: increment the attempt count and commit, then enqueue through FR-EVENTS-3, or, when
-      FR-EVENTS-14 says exhausted, write `dead` with `error_code` `orphaned`;
+      the uniform rule: always increment the attempt count, and when the incremented count is exhausted by
+      FR-EVENTS-14, write `dead` with `error_code` `orphaned` in the same transaction; commit; then, when not
+      exhausted, enqueue through FR-EVENTS-3;
       `cancelled`: no action (an operator cancel).
       Each key-row write commits before any enqueue call. Because a re-deferred key has a `todo` job, a key is
       re-deferred at most once per abort or lost run. Separately, each sweep
@@ -245,9 +248,11 @@ requirements:
       after that. Chosen over `logging.setLogRecordFactory` because procrastinate passes the job as `extra`, which
       `Logger.makeRecord` applies after the factory has built the record, so a factory cannot see it; chosen over
       logger-level filters because those do not see records propagated from child loggers. For records from the
-      `procrastinate` hierarchy it deletes `record.job["task_kwargs"]` and `record.job["call_string"]` (REF-EVENTS-5)
-      and replaces any occurrence of the call string in the message with `<task_name>[<job_id>]`. The module's own
-      records carry kind, key, job id, attempt count and error code only.
+      `procrastinate` hierarchy it first takes the call string (`record.job.get("call_string")`), then removes
+      `task_kwargs` and `call_string` with `pop(…, None)` (REF-EVENTS-5), and replaces any occurrence of the taken call
+      string in the message with `<task_name>[<job_id>]`. The filter is idempotent: a record passing it twice (it is
+      on several handlers) is left as the first pass left it. The module's own records carry kind, key, job id,
+      attempt count and error code only.
 
 invariants:
   - id: INV-EVENTS-1
