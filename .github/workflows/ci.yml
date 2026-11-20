@@ -19,7 +19,7 @@ jobs:
           cache: npm
           cache-dependency-path: tools/package-lock.json
       - run: npm ci --prefix tools
-      - name: T1–T8 trace-check
+      - name: T1–T9 trace-check
         run: node tools/trace/check.mjs
       - name: P7 tests change only with their spec
         if: github.event_name == 'pull_request'
