@@ -122,7 +122,6 @@ def test_rendered_names_come_from_the_model(case: dict[str, Any]) -> None:
 @pytest.mark.parametrize("case", PLAN["cases"], ids=lambda c: c["id"])
 def test_delivery_plan_equals_vec_cli_3(case: dict[str, Any]) -> None:
     from reader.cli.stack import Rendered, make_plan
-
     from reader.config import load_config
 
     plan = make_plan(Rendered.parse(case["rendered"]), load_config(FIXTURES / "config.yaml"))
@@ -141,7 +140,6 @@ def test_delivery_script_is_the_fixture_constant() -> None:
 def test_consumer_without_numeric_uid_stops_naming_the_service() -> None:
     from reader.cli.errors import CliError
     from reader.cli.stack import Rendered, make_plan
-
     from reader.config import load_config
 
     data = PLAN["cases"][0]["rendered"]
@@ -155,11 +153,12 @@ def test_consumer_without_numeric_uid_stops_naming_the_service() -> None:
 def test_file_scheme_provider_token_is_not_deliverable(tmp_path: Path) -> None:
     from reader.cli.errors import CliError
     from reader.cli.stack import Rendered, make_plan
-
     from reader.config import load_config
 
     text = (
-        (FIXTURES / "config.yaml").read_text().replace("secret://env/READER_TEST_TOKEN", "secret://file/tok")
+        (FIXTURES / "config.yaml")
+        .read_text()
+        .replace("secret://env/READER_TEST_TOKEN", "secret://file/run/secrets/tok")
     )
     config = load_config(write_config(tmp_path, text))
     with pytest.raises(CliError) as caught:

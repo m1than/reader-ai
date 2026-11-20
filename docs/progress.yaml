@@ -229,7 +229,17 @@ tasks:
         missing reader.cli module into an assertion). Paired at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4),
         exact pg_dump/pg_restore/psql argv (role and database `postgres`), learner `live-check` in deploy/reader.example.yaml
         (no OPS-DEPLOY test pins the example's users). keyring==25.7.0 added with Red (tests use keyring.errors).
-        Earlier context: Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
+        Green: server/src/reader/cli/ (9 modules: app, commands, maintenance, watcher, stack, resolve, runner, log,
+        errors), console script `reader = reader.cli.app:main`; 196/196 CLI tests pass, server suite 503 passed,
+        1 skipped (registry); ruff, mypy --strict and tools/ci-local.sh PASS. Test edits after Red (test defects, for
+        the PR description): test_runner timeout case used `/bin/sleep 5 CANARY` (sleep exits at once on the extra
+        operand) → `/bin/sh -c 'sleep 5' CANARY`; test_stack file-scheme case used `secret://file/tok`, which
+        SRV-CONFIG rejects → `secret://file/run/secrets/tok`; import sorting and one ruff-format wrap. Not run: `reader
+        up` for real (the stage-1 live check). Known limits for code review: backup/restore hold each archive in
+        memory (the runner returns bytes) instead of streaming to the 0600 file; `op read` has no timeout (the spec
+        sets none); `docker compose -p <name> exec|stop|start|down` relies on Compose's project-by-name mode; an
+        empty user trust domain makes `security trust-settings-export` exit non-zero ('No Trust Settings'), read as
+        'none remain'. Earlier context: Secret delivery per ADR-0026 option A (owner's choice): `reader up` resolves each reference on the host and, as a
         watcher concurrent with `docker compose up` and on every observed container start, writes it atomically into the consumer's
         tmpfs /run/secrets/<secret_file_name(ref)> via `docker exec -i -u <uid>` over stdin (no Compose secrets). The DB password is
         generated once into the Keychain item reader-ai/postgres. SRV-CONFIG's FR-CONFIG-14 now names /run/secrets files

@@ -62,7 +62,7 @@ def test_timeout_raises_an_argv_free_error() -> None:
     from reader.cli.runner import CommandTimeout, SubprocessRunner
 
     with pytest.raises(CommandTimeout) as caught:
-        SubprocessRunner().run(["/bin/sleep", "5", CANARY], env={"PATH": "/bin"}, timeout=0.2)
+        SubprocessRunner().run(["/bin/sh", "-c", "sleep 5", CANARY], env={"PATH": "/bin"}, timeout=0.2)
     assert CANARY not in _surfaces(caught.value)
     assert caught.value.__cause__ is None
     assert caught.value.__context__ is None
