@@ -1,0 +1,314 @@
+# SRV-CONFIG — reader.yaml: typed settings, JSON Schema, secret references, the container secret path (ADR-0011).
+#
+# Scope split with OPS-CLI (docs/roadmap.md stage 1): this module parses every `secret://` scheme, defines the resolver
+# registry and its two builders, the `Secret` value type, and the one function that names a reference's Compose secret.
+# It provides the `env`, `file` and `host-resolved` resolvers. OPS-CLI resolves `hostfile`, `keychain` and `op` on the
+# host, passes each value to `docker compose` as an environment variable of the child process, declares the matching
+# Compose secret (in memory, never on disk), and owns `reader doctor`.
+#
+# Dependencies: redaction of secrets in the shared logger and the event serializer belongs to SRV-OBS and SRV-EVENTS.
+# This module only guarantees that its own objects, errors and log calls never carry a secret or an input scalar.
+#
+# Red phase: tests import the module inside each test body, so that each test fails on its own assertion, not on a
+# collection-time ImportError.
+
+id: SRV-CONFIG
+title: reader.yaml settings, JSON Schema export, secret references and the container secret path
+status: approved
+approved_by: agent
+approved_at: 2026-11-20
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording"
+layer: server
+track: engineering
+adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020]
+
+paths:
+  - server/src/reader/config/**
+  - server/tests/config/**
+
+normative:
+  - id: REF-CONFIG-1
+    title: ADR-0011 — Declarative reader.yaml with secret references resolved per platform
+    url: docs/adr/0011-config-and-secrets.md
+  - id: REF-CONFIG-2
+    title: Pydantic v2 — JSON Schema generation (model_json_schema)
+    url: https://docs.pydantic.dev/latest/concepts/json_schema/
+  - id: REF-CONFIG-3
+    title: JSON Schema, draft 2020-12 (the dialect Pydantic v2 emits)
+    url: https://json-schema.org/draft/2020-12
+  - id: REF-CONFIG-4
+    title: YAML 1.2.2 specification, section 10.3 Core Schema (tag resolution for plain scalars)
+    url: https://yaml.org/spec/1.2.2/#103-core-schema
+  - id: REF-CONFIG-5
+    title: "ruamel.yaml 0.19.1 — YAML 1.2 parser; its event stream carries start/end marks (PyPI, released 2026-01-02, Python 3.14 classifier)"
+    url: https://pypi.org/project/ruamel.yaml/
+  - id: REF-CONFIG-6
+    title: "ADR-0020 — Toolchain baseline, Python 3.14 (accepted on main)"
+    url: docs/adr/0020-toolchain-baseline.md
+  - id: REF-CONFIG-7
+    title: Docker Compose — secrets with `environment` as source, mounted at /run/secrets/<name>
+    url: https://docs.docker.com/reference/compose-file/secrets/
+
+# Field table for reader.yaml v1. Paths use `.` for mapping keys and `[]` for list items. "Required" is within the parent.
+# A missing required key is reported at the line where its parent mapping node starts (its first key in block style,
+# its `{` in flow style). Keys under `tasks` are open: errors name them by position (`tasks.<key #k>`), not by text.
+# `sectors` and `sharing` are opaque mappings of core-schema values; they are outside INV-CONFIG-1.
+fields:
+  - { path: version, type: "int (YAML int only)", required: true, constraint: "== 1" }
+  - { path: instance, type: mapping, required: true, constraint: "keys: url, data_dir" }
+  - { path: instance.url, type: str, required: true, constraint: "absolute https URL with a host; no whitespace" }
+  - { path: instance.data_dir, type: path, required: true, constraint: "non-empty; lexical, see FR-CONFIG-9" }
+  - { path: users, type: "list of mapping", required: false, constraint: "handles unique" }
+  - { path: "users[].handle", type: str, required: true, constraint: "non-empty" }
+  - { path: "users[].role", type: str, required: true, constraint: "non-empty, open set" }
+  - { path: "users[].providers", type: "list of mapping", required: false, constraint: "" }
+  - { path: "users[].providers[].kind", type: str, required: true, constraint: "non-empty, open set" }
+  - { path: "users[].providers[].token", type: SecretRef, required: true, constraint: "FR-CONFIG-5" }
+  - { path: tasks, type: "mapping of open keys to mapping", required: false, constraint: "keys non-empty strings" }
+  - { path: "tasks.*.model", type: str, required: true, constraint: "non-empty, open set" }
+  - { path: "tasks.*.budget_usd_per_lesson", type: Decimal, required: false, constraint: "YAML number only; finite, > 0" }
+  - { path: budgets, type: mapping, required: false, constraint: "" }
+  - { path: budgets.monthly_usd, type: Decimal, required: true, constraint: "YAML number only; finite, > 0" }
+  - { path: budgets.warn_at, type: Decimal, required: false, constraint: "YAML number only; finite, 0 < x <= 1" }
+  - { path: kernels, type: "list of str", required: false, constraint: "non-empty items, unique" }
+  - { path: materials, type: "list of mapping", required: false, constraint: "ids unique" }
+  - { path: "materials[].id", type: str, required: true, constraint: "non-empty" }
+  - { path: "materials[].file", type: path, required: true, constraint: "non-empty; lexical, see FR-CONFIG-9" }
+  - { path: "materials[].sha256", type: str, required: true, constraint: "64 lowercase hex characters" }
+  - { path: "materials[].license", type: str, required: true, constraint: "non-empty" }
+  - { path: "materials[].language", type: str, required: true, constraint: "non-empty, open set" }
+  - { path: sectors, type: "opaque mapping", required: false, constraint: "any core-schema value; schema owned by later specs (ADR-0016/0017)" }
+  - { path: sharing, type: "opaque mapping", required: false, constraint: "any core-schema value; schema owned by later specs (ADR-0016)" }
+
+requirements:
+  # Loading and validation
+  - id: FR-CONFIG-1
+    text: >-
+      `load_config(path)` reads reader.yaml and returns an immutable `ReaderConfig` (Pydantic v2) with exactly the fields
+      of the field table. Every key not in the table is rejected, except inside the opaque `sectors` and `sharing`, which
+      are kept as immutable trees of core-schema values. A non-finite float (`.inf`, `.nan`) anywhere inside them is
+      rejected with `not_finite`, for consistency with the finite Decimals; keys inside them are named by position.
+      The Pydantic models enforce the same field constraints, so `ReaderConfig.model_validate` cannot construct a
+      config that `load_config` would reject, with two stated exceptions: the models accept a relative `data_dir` or
+      `file` (only the loader joins paths), and `model_copy(update=...)` skips validation by Pydantic's design.
+      Mappings are frozen dict subclasses and sequences are tuples, so `model_dump`, `model_dump_json`,
+      `copy.deepcopy` and `pickle` of a `ReaderConfig` work and round-trip to an equal value. Should the loader's rules
+      and the models ever disagree, `load_config` raises `ConfigError` with the code `model_rule_mismatch` at the
+      root (no line, empty key path), `from None`; no Pydantic `ValidationError` leaves `load_config`.
+  - id: FR-CONFIG-2
+    text: >-
+      `version` must be a YAML int equal to 1. A quoted string, a float, a boolean or any other integer fails; there is
+      no coercion.
+  - id: FR-CONFIG-3
+    text: >-
+      Validation failures raise one `ConfigError` holding the list of all problems, ordered by line, then by key path.
+      Each problem is (file, line, key path, code) and renders as `<file>:<line>: <key.path>: <code>: <fixed message>`.
+      The line comes from the YAML source positions. A missing required key uses the line where its parent mapping node
+      starts. The validation codes are exactly: `unknown_key`, `missing_key`, `wrong_type`, `bad_version`,
+      `not_secret_ref`, `bad_sha256`, `bad_url`, `empty_string`, `empty_key` (an empty task key), `out_of_range`,
+      `not_finite`, `not_unique`, and `model_rule_mismatch` (FR-CONFIG-1). The load codes are in FR-CONFIG-15.
+      `bad_url`: the value contains whitespace, a control character or a backslash; `urlsplit` raises `ValueError`
+      (for example an unbalanced or invalid `[` host), or reading its `port` does (a non-numeric or out-of-range port);
+      the scheme is not `https`; or there is no host name (`https://@`, `https://:443`).
+  - id: FR-CONFIG-4
+    text: >-
+      `export_json_schema()` returns the JSON Schema of `ReaderConfig` generated by Pydantic. The generator writes the
+      committed copy itself: `uv run python -m reader.config.schema --write` (run in server/) writes
+      `server/src/reader/config/reader.schema.json`. A test parses both and compares them as JSON values.
+  - id: FR-CONFIG-5
+    text: >-
+      `SecretRef` accepts a string if and only if it fully matches the grammar of exactly one scheme:
+      `secret://env/NAME` with NAME `[A-Za-z_][A-Za-z0-9_]*`;
+      `secret://file/run/secrets/NAME` with NAME `[A-Za-z0-9._-]+` other than `.` and `..`, meaning the absolute path
+      `/run/secrets/NAME`;
+      `secret://hostfile/S1/.../Sn` with n >= 1, meaning the absolute path `/S1/.../Sn`;
+      `secret://keychain/SERVICE/ACCOUNT`;
+      `secret://op/VAULT/ITEM/FIELD`.
+      A segment S, SERVICE, ACCOUNT, VAULT, ITEM or FIELD is one or more characters other than `/` and `%`, and is not
+      `.` or `..`. Any whitespace or control character anywhere in the string rejects it, defined as a character `c`
+      with Python `c.isspace()`, or a code point below 0x20, or 0x7F; that includes a leading or trailing space, a tab,
+      a newline, NUL and Unicode spaces such as U+00A0. The prefix `secret://` and the scheme are
+      lowercase. Percent-encoding is not decoded; `%` is rejected. Constructing `SecretRef(text)` validates the same
+      way as `SecretRef.parse(text)` and raises `ValueError` for invalid text, so no invalid reference object exists.
+  - id: FR-CONFIG-6
+    text: >-
+      `resolve(ref, registry)` returns a `Secret` for a `SecretRef` through the resolver registered for its scheme.
+      This module provides three resolvers. `env` reads the calling process's environment; it serves the host CLI and
+      tests, not containers. `file` reads `/run/secrets/NAME` under FR-CONFIG-13. `host-resolved` is one resolver,
+      registered under the four schemes `env`, `hostfile`, `keychain` and `op`; it reads
+      `/run/secrets/<secret_file_name(ref)>` under FR-CONFIG-13. Two builders live in `server/src/reader/config/`:
+      `container_registry(root)` registers `file` and `host-resolved`; `host_registry(extra)` registers `env` plus the
+      resolvers OPS-CLI passes in `extra`. A scheme with no registered resolver fails with `SecretResolutionError`, code
+      `no_resolver`.
+  - id: FR-CONFIG-7
+    text: >-
+      `ResolverRegistry` is built once from a sequence of (scheme, resolver) pairs and is immutable afterwards. A scheme
+      outside the five ADR-0011 schemes, or a scheme given twice in the pairs, raises `ValueError`.
+  - id: FR-CONFIG-8
+    text: >-
+      Resolution failures raise `SecretResolutionError(ref, code)` with a fixed code: `no_resolver`, `env_unset`,
+      `not_found`, `unreadable` (permission denied), `not_regular_file`, `outside_root`, `too_large`, `not_utf8` or
+      `empty`. It is raised `from None`, carries neither the underlying exception text nor any byte of the value, and no
+      chained exception is rendered.
+  - id: FR-CONFIG-9
+    text: >-
+      Relative paths in `instance.data_dir` and `materials[].file` are joined to the directory of the reader.yaml file
+      and normalised lexically: `.` and `..` segments are collapsed and redundant separators removed (POSIX `normpath`
+      semantics). There is no `~` expansion, no existence check, no symlink resolution and no filesystem access.
+      Absolute paths are only normalised.
+  - id: FR-CONFIG-10
+    text: >-
+      Value constraints of the field table hold. `materials[].sha256` is 64 lowercase hex characters. Decimal fields
+      accept only a YAML int or float node: a quoted string or a boolean gives `wrong_type`. The Decimal is built from the
+      scalar's source text, not via a binary float. Budgets are finite (`not_finite` for `.nan` and `.inf`) and greater
+      than 0; `warn_at` is in (0, 1]. Handles, material ids and kernels are unique within their list: every repeated
+      occurrence after the first gives one `not_unique` at its own item path and line (`kernels.1`, `users.1.handle`),
+      so three equal items give two errors. Items that already failed their own type or emptiness check do not take
+      part in the uniqueness check. Numbers that cannot be represented are `out_of_range` at the key's line and path:
+      an integer in any base (decimal, `0o`, `0x`) whose absolute value is at least 10^4300 (decided by value, which for
+      decimal matches Python's 4,300-digit conversion limit), and a Decimal field value that raises
+      `decimal.InvalidOperation` or whose adjusted exponent lies outside the default decimal context
+      (-999999 to 999999).
+  - id: FR-CONFIG-11
+    text: >-
+      `ConfigError` never contains a scalar from the input file. Each problem carries only the file path, line, key path
+      and a fixed code with its fixed message. A key that comes from the input is named by its 1-based position k in its
+      mapping, never by its text: unknown keys as `<parent>.<unknown key #k>` (top level: `<unknown key #k>`), open task
+      keys as `tasks.<key #k>`. The error is raised `from None`; no parser or Pydantic exception, message or object is
+      chained or embedded.
+  - id: FR-CONFIG-12
+    text: >-
+      `Secret` wraps a resolved value. `__repr__`, `__str__` and `__format__` (any format spec) render a fixed mask.
+      `json.dumps`, `pickle.dumps`, `copy.copy` and `copy.deepcopy` either raise `TypeError` or produce the mask, never
+      the value. `reveal()` is the only accessor that returns the plaintext. `__getstate__` and `__reduce_ex__` raise
+      `TypeError`.
+  - id: FR-CONFIG-13
+    text: >-
+      The `file` and `host-resolved` resolvers read only below a root, `/run/secrets/` by default and injectable for
+      tests. `outside_root` is decided on real paths: the realpath of the target must lie under the realpath of the root.
+      A symlink inside the root whose target is inside the root is allowed; one whose target leaves the root fails. The
+      target must be a regular file (`not_regular_file`) and readable (`unreadable`). At most `SECRET_MAX_BYTES` + 1
+      bytes are read; more than `SECRET_MAX_BYTES` gives `too_large`. Content must be UTF-8 (`not_utf8`) and non-empty
+      after stripping one trailing newline (`empty`). `SECRET_MAX_BYTES` = 65536 is a structural bound for a bounded
+      read, not a measured limit. The file is opened with `O_RDONLY | O_NOFOLLOW | O_NONBLOCK`, and the regular-file
+      check runs on the open descriptor (`fstat`). `O_NOFOLLOW` guards only the last path component: a final component
+      swapped for a symlink after the realpath check, or a symlink loop, fails the open with ELOOP and gives
+      `unreadable`. Directories above it are not re-checked at open time; the root is expected to be a mount that only
+      the container runtime writes (Compose secrets at /run/secrets).
+  - id: FR-CONFIG-14
+    text: >-
+      `secret_file_name(ref)` is the single, deterministic map from an `env`, `hostfile`, `keychain` or `op` reference to
+      its Compose secret name: `<scheme>-<first 32 hex characters of sha256(UTF-8 bytes of the reference)>`, so
+      Compose mounts the value at `/run/secrets/<name>`. `secret_env_var(ref)` maps the same reference to the
+      environment variable that carries the value into `docker compose`:
+      `READER_SECRET_<SCHEME in upper case>_<the same 32 hex characters in upper case>`, because a hyphen is not valid in
+      an environment variable name. Both are shared with OPS-CLI, which declares one Compose secret per reference,
+      `<name>: { environment: <VAR> }` (ADR-0011), in memory: nothing is written to disk. For a `file` reference both
+      raise `ValueError`, because that reference already names its file.
+  - id: FR-CONFIG-15
+    text: >-
+      Load failures raise `ConfigError` with a fixed code, plus `file:line` where a line exists:
+      missing file (`file_unreadable`); permission denied (`file_unreadable`); content not UTF-8 (`not_utf8`); YAML syntax
+      error (`yaml_syntax`); empty document (`empty_document`); a second document (`multiple_documents`); top-level node
+      not a mapping (`not_mapping`); duplicate key (`duplicate_key`); a non-string mapping key (`non_string_key`); any
+      anchor, alias or merge key `<<` (`alias_not_allowed`); any explicit tag, including spelled-out core tags
+      (`tag_not_allowed`); collections nested deeper than `MAX_DEPTH` = 64 (`too_deep`, at the line of the first
+      collection beyond the bound; a structural bound that keeps construction and validation within a fixed
+      recursion depth, not a measured limit). Depth counts the root mapping as 1. A scalar or key that is not
+      encodable as UTF-8 (a lone surrogate such as `"\ud800"` from a double-quoted escape) gives `not_utf8_encodable`
+      at its line, during construction, so no such text reaches validation, Pydantic or JSON output.
+      Loader design: ruamel.yaml 0.19.1 is used only as a YAML 1.2 parser to an event stream with start marks. A
+      validation pass over the events enforces the rules above by inspection (an anchor on any node, any alias event,
+      a tag on any node, a second document start, nesting depth). The loader then constructs plain values itself, resolving plain
+      scalars by the YAML 1.2.2 core schema (REF-CONFIG-4): `null`, `Null`, `NULL`, `~` and empty are null; only `true`,
+      `True`, `TRUE`, `false`, `False`, `FALSE` are booleans; core-schema int and float patterns are numbers; everything
+      else, including date-like values, `yes`/`no` and `1_000`, is a string. Duplicate and non-string keys are detected
+      during that construction. No parser exception text reaches `ConfigError`.
+      Precedence, one error per load failure: a syntax error anywhere in the stream first (the whole stream is parsed
+      before any check); then the first event-pass violation in stream order; then the first construction error
+      (`empty_document`, `not_mapping`, `duplicate_key`, `non_string_key`). A root that is empty, `~` or `null` is
+      `empty_document`. Only a plain `<<` key is a merge key; a quoted `"<<"` is an ordinary key.
+  - id: FR-CONFIG-16
+    text: >-
+      This module's own log calls never include a resolved value or an input scalar; they log references, codes and key
+      paths only. Redaction in the shared logger and event serializer is a dependency on SRV-OBS and SRV-EVENTS.
+
+invariants:
+  - id: INV-CONFIG-1
+    text: >-
+      `SecretRef` accepts a string if and only if FR-CONFIG-5's grammar fully matches it. Property test over arbitrary
+      text and over near-misses generated from valid references: case changes, inserted or removed `/`, empty, `.` and
+      `..` segments, Unicode whitespace and C0 characters at any position, `%`, extra and missing segments. Excludes the
+      opaque `sectors` and `sharing`.
+  - id: INV-CONFIG-2
+    text: >-
+      A resolved secret never leaks. A unique canary value is resolved through each resolver, and the canary is absent
+      from:
+      `str`, `repr` and `format` of every `Secret`, config, registry and error object;
+      `traceback.format_exception` of every error;
+      a traceback rendered with locals (`traceback.TracebackException(..., capture_locals=True)`), including a failure
+      raised after the value was read, and a `file` secret with invalid UTF-8 that contains the canary;
+      JSON, pickle and copy outputs of a `Secret`;
+      log records emitted by this module.
+  - id: INV-CONFIG-3
+    text: >-
+      An input scalar never leaks. A canary planted (a) in a `SecretRef` field, (b) as an unknown key, (c) on a
+      syntactically broken line, (d) as both values of a duplicate key, and (e) as an open task key is absent from `str`,
+      `repr` and `traceback.format_exception` of the resulting `ConfigError`. Its `__cause__` and `__context__` render
+      nothing.
+  - id: INV-CONFIG-4
+    text: >-
+      `load_config` never resolves secrets: it performs no environment, keyring or network access, and reads no file
+      other than the reader.yaml it was given. The test observes file opens through an audit hook and environment
+      access through a recording `os.environ`.
+  - id: INV-CONFIG-5
+    text: >-
+      Loading is idempotent. Loading the same valid reader.yaml twice yields equal `ReaderConfig` values (property test
+      over generated valid configs).
+  - id: INV-CONFIG-6
+    text: >-
+      `secret_file_name` and `secret_env_var` are deterministic, depend only on the reference string, and always match
+      `(env|hostfile|keychain|op)-[0-9a-f]{32}` and `READER_SECRET_(ENV|HOSTFILE|KEYCHAIN|OP)_[0-9A-F]{32}`.
+
+nfr: []
+
+vectors:
+  - id: VEC-CONFIG-1
+    source: "ADR-0011 example reader.yaml; expected values and FR-CONFIG-9 path cases in spec/fixtures/SRV-CONFIG/reader.example.expect.yaml"
+    file: spec/fixtures/SRV-CONFIG/reader.example.yaml
+  - id: VEC-CONFIG-2
+    source: "Hand-written invalid configs with the exact expected error list (line, key path, code)"
+    file: spec/fixtures/SRV-CONFIG/invalid/cases.yaml
+  - id: VEC-CONFIG-3
+    source: "Hand-written SecretRef grammar cases, accept or reject (FR-CONFIG-5)"
+    file: spec/fixtures/SRV-CONFIG/secret-refs.yaml
+  - id: VEC-CONFIG-4
+    source: "Hand-written loader cases (FR-CONFIG-15): failures with codes, and core-schema scalar resolution"
+    file: spec/fixtures/SRV-CONFIG/load-failures.yaml
+  - id: VEC-CONFIG-5
+    source: "Fixed reference → secret_file_name and secret_env_var values (FR-CONFIG-14), computed with sha256"
+    file: spec/fixtures/SRV-CONFIG/secret-names.yaml
+  - id: VEC-CONFIG-6
+    source: "Resolver cases over a test root (FR-CONFIG-6, 8, 13): values, codes, symlinks, permissions, size bound"
+    file: spec/fixtures/SRV-CONFIG/resolve-cases.yaml
+
+# Owner notes (not requirements):
+# - ADR-0011's revisit_when says "any of the four reference schemes"; its table lists five. Wording fix for the owner.
+# - ADR-0011's table lists `env` as resolved "inside containers, the server". This spec routes every non-`file` secret
+#   into containers through Compose secrets at /run/secrets/ (`host-resolved`), and `env` serves the host CLI and tests.
+#   This matches the stage-1 live check ("no env secrets") and should be reflected in ADR-0011 by the owner.
+# - ADR-0017 (multiple users): reader.yaml holds every user's provider references, and a registry resolves any of them.
+#   SRV-AGENT must resolve only the acting user's references; that cross-user exposure is outside this module.
+# - FR-CONFIG-5 forbids whitespace anywhere, so keychain service/account and 1Password vault/item/field names with
+#   spaces cannot be referenced. The owner names such items without spaces.
+# - Test note: the mode-0 (permission denied) cases are skipped when the tests run as uid 0, where permissions do not
+#   apply.
+# - Secret files: only one trailing "\n" is stripped. A CRLF ending leaves "\r", and a UTF-8 BOM stays as U+FEFF.
+#   Write secret files without BOM and with LF (or no) line endings.
+# - ruamel.yaml's scanner treats U+0085, U+2028 and U+2029 as line breaks (a YAML 1.1 behaviour; YAML 1.2 does not).
+#   Such characters in reader.yaml shift the reported line numbers.
+# - A character outside the Basic Multilingual Plane written as a surrogate pair of two `\u` escapes
+#   ("😀") gives `not_utf8_encodable`; write it as `\U0001F600` or as the literal character.
+# - An empty port (`https://x:`) is accepted as a URL without a port; this is harmless.
+# - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
+#   1+0j), matching the loader.

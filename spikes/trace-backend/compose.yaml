@@ -1,0 +1,42 @@
+# Spike trace-backend (never shipped): Rotel → Phoenix or MLflow, one backend per run (profile).
+# For ingest, only Rotel's exporter settings change between backends (ROTEL_* from run.sh); score writing and
+# querying are backend-specific (query.py). No volumes: Phoenix and MLflow keep SQLite inside the container.
+name: reader-spike-trace
+
+services:
+  rotel:
+    image: streamfold/rotel:v0.2.7
+    environment:
+      ROTEL_OTLP_GRPC_ENDPOINT: 0.0.0.0:4317
+      ROTEL_OTLP_HTTP_ENDPOINT: 0.0.0.0:4318
+      ROTEL_EXPORTER: otlp
+      ROTEL_OTLP_EXPORTER_ENDPOINT: ${EXPORT_ENDPOINT:?}
+      ROTEL_OTLP_EXPORTER_PROTOCOL: ${EXPORT_PROTOCOL:?}
+      ROTEL_OTLP_EXPORTER_CUSTOM_HEADERS: ${EXPORT_HEADERS:-}
+    networks: [traces]
+
+  phoenix:
+    profiles: [phoenix]
+    image: arizephoenix/phoenix:version-22.0.0
+    # Since v21 the Docker image enables auth by default (PHOENIX_HOST=::). Off for this local spike only;
+    # a deployment needs an API key, sent by Rotel via ROTEL_OTLP_EXPORTER_CUSTOM_HEADERS.
+    environment:
+      PHOENIX_ENABLE_AUTH: "false"
+    ports: ["127.0.0.1:6006:6006"]
+    networks: [traces]
+
+  mlflow:
+    profiles: [mlflow]
+    image: ghcr.io/mlflow/mlflow:v3.18.0
+    # Minimal configuration (review round 1): one worker, no background job execution.
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+    command: >-
+      mlflow server --host 0.0.0.0 --port 5000 --workers 1
+      --backend-store-uri sqlite:////tmp/mlflow.db --default-artifact-root /tmp/artifacts
+      --allowed-hosts "*"
+    ports: ["127.0.0.1:5000:5000"]
+    networks: [traces]
+
+networks:
+  traces: {}

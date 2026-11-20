@@ -1,0 +1,226 @@
+{
+ "backend": "mlflow",
+ "idle": [
+  {
+   "start": 1,
+   "ready_s": 6,
+   "stats": {
+    "reader-spike-trace-rotel-1": {
+     "mib": 17.5,
+     "pids": 7
+    },
+    "reader-spike-trace-mlflow-1": {
+     "mib": 581.4,
+     "pids": 10
+    }
+   }
+  },
+  {
+   "start": 2,
+   "ready_s": 5,
+   "stats": {
+    "reader-spike-trace-rotel-1": {
+     "mib": 13.8,
+     "pids": 7
+    },
+    "reader-spike-trace-mlflow-1": {
+     "mib": 372.2,
+     "pids": 10
+    }
+   }
+  },
+  {
+   "start": 3,
+   "ready_s": 6,
+   "stats": {
+    "reader-spike-trace-rotel-1": {
+     "mib": 7.9,
+     "pids": 7
+    },
+    "reader-spike-trace-mlflow-1": {
+     "mib": 372.3,
+     "pids": 10
+    }
+   }
+  }
+ ],
+ "probe": {
+  "spent_usd": 0.000587,
+  "token_keys_in_docker_inspect": 0,
+  "stages": [
+   {
+    "stage": "draft",
+    "model": "claude-haiku-5-5",
+    "span_id": "65f047b9255dd7f5",
+    "cost_usd": 0.00027324,
+    "is_error": false,
+    "seconds": 3.15
+   },
+   {
+    "stage": "fact_check",
+    "model": "claude-nonexistent-0-0",
+    "span_id": "a4d2d9a227e6a0e2",
+    "cost_usd": 0.0,
+    "is_error": true,
+    "error": "ResultError: Claude Code returned an error result: There's an issue with the selected model (claude-nonexistent-0-0). It may not exist or you may not have access to it. (exit code: 1)",
+    "seconds": 2.05
+   },
+   {
+    "stage": "review",
+    "model": "claude-haiku-5-5",
+    "span_id": "ce46efec18001bac",
+    "cost_usd": 0.00031406,
+    "is_error": false,
+    "seconds": 3.04
+   }
+  ],
+  "trace_id": "ca2644ff05809cbef48ae3cd285e3b60",
+  "peak": {
+   "reader-spike-trace-rotel-1": {
+    "mib": 9.0,
+    "pids": 8
+   },
+   "reader-spike-trace-mlflow-1": {
+    "mib": 491.1,
+    "pids": 16
+   }
+  }
+ },
+ "query": {
+  "span_count": 12,
+  "nesting": {
+   "interactions": 3,
+   "interactions_under_stage": 3,
+   "llm_requests_under_interaction": 5,
+   "edges": [
+    {
+     "span": "reader.job lesson-compile-spike",
+     "span_id": "3be7c40a0e64e9ef",
+     "parent": null,
+     "parent_id": null
+    },
+    {
+     "span": "reader.stage draft",
+     "span_id": "65f047b9255dd7f5",
+     "parent": "reader.job lesson-compile-spike",
+     "parent_id": "3be7c40a0e64e9ef"
+    },
+    {
+     "span": "claude_code.interaction",
+     "span_id": "99b5c39ffc27a7c3",
+     "parent": "reader.stage draft",
+     "parent_id": "65f047b9255dd7f5"
+    },
+    {
+     "span": "claude_code.llm_request",
+     "span_id": "7bd045f17a67dc35",
+     "parent": "claude_code.interaction",
+     "parent_id": "99b5c39ffc27a7c3"
+    },
+    {
+     "span": "claude_code.llm_request",
+     "span_id": "083d2b5a27f01ec2",
+     "parent": "claude_code.interaction",
+     "parent_id": "99b5c39ffc27a7c3"
+    },
+    {
+     "span": "reader.stage fact_check",
+     "span_id": "a4d2d9a227e6a0e2",
+     "parent": "reader.job lesson-compile-spike",
+     "parent_id": "3be7c40a0e64e9ef"
+    },
+    {
+     "span": "claude_code.interaction",
+     "span_id": "01ed3ddc68ffe098",
+     "parent": "reader.stage fact_check",
+     "parent_id": "a4d2d9a227e6a0e2"
+    },
+    {
+     "span": "claude_code.llm_request",
+     "span_id": "30ee5c9eccbd7fcc",
+     "parent": "claude_code.interaction",
+     "parent_id": "01ed3ddc68ffe098"
+    },
+    {
+     "span": "reader.stage review",
+     "span_id": "ce46efec18001bac",
+     "parent": "reader.job lesson-compile-spike",
+     "parent_id": "3be7c40a0e64e9ef"
+    },
+    {
+     "span": "claude_code.interaction",
+     "span_id": "a0251d10f22eb803",
+     "parent": "reader.stage review",
+     "parent_id": "ce46efec18001bac"
+    },
+    {
+     "span": "claude_code.llm_request",
+     "span_id": "3b82447cfcf17893",
+     "parent": "claude_code.interaction",
+     "parent_id": "a0251d10f22eb803"
+    },
+    {
+     "span": "claude_code.llm_request",
+     "span_id": "e83ff760b7924ec8",
+     "parent": "claude_code.interaction",
+     "parent_id": "a0251d10f22eb803"
+    }
+   ]
+  },
+  "triage": {
+   "fetch_s": 0.03,
+   "walk_s": 1.3e-05,
+   "error_spans": [
+    {
+     "name": "reader.stage fact_check",
+     "message": "ResultError: Claude Code returned an error result: There's an issue with the selected model (claude-nonexistent-0-0). It may not exist or you may not have access to it. (exit code: 1)"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "message": "model: claude-nonexistent-0-0"
+    }
+   ],
+   "cause": "model: claude-nonexistent-0-0",
+   "stage": "reader.stage fact_check"
+  },
+  "score": {
+   "span_id": "65f047b9255dd7f5",
+   "read_back": [
+    [
+     "reader.quality",
+     0.8,
+     "65f047b9255dd7f5"
+    ]
+   ],
+   "visible": true
+  }
+ },
+ "replay": {
+  "trace_id": "ab2dc343d5f354ee757e78a94cb86532",
+  "spans": 498,
+  "ingested": {
+   "span_count": 498,
+   "fetch_s": 0.086
+  },
+  "peak": {
+   "reader-spike-trace-rotel-1": {
+    "mib": 9.5,
+    "pids": 8
+   },
+   "reader-spike-trace-mlflow-1": {
+    "mib": 441.1,
+    "pids": 16
+   }
+  },
+  "after": {
+   "reader-spike-trace-rotel-1": {
+    "mib": 9.3,
+    "pids": 7
+   },
+   "reader-spike-trace-mlflow-1": {
+    "mib": 390.0,
+    "pids": 12
+   }
+  }
+ }
+}

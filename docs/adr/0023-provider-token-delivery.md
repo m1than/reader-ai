@@ -1,12 +1,14 @@
 ---
 id: ADR-0023
 title: Provider token delivery — the Keychain is the store; only the credential holder receives the token, through /run/secrets or a per-run subprocess environment
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "OPS-CLI invariant: while the stack runs, no container's `docker inspect` Config.Env holds a value resolved from a secret:// reference; an SRV-AGENT owner live check authenticates from the credential holder (ADR-0025) with the token delivered as specified here"
 revisit_when: "The CLI reads its OAuth token from a file natively; or `reader up` runs where no platform keyring exists"
 supersedes: []
 ---
+
+> Proposed amendment: [ADR-0026](0026-secret-delivery-read-only-services.md) (2026-11-20) — "through a Compose secret under `/run/secrets`" is not possible for the read-only holder (Compose refuses environment-sourced secrets there). The holder receives the token through a tmpfs `/run/secrets` filled by a watching `reader up` over `docker exec` stdin (option A, chosen by the owner on 2026-11-20).
 
 ## Context
 
