@@ -7,6 +7,8 @@ verified_by: "SRV-AGENT tests: provider credentials are bound to one user (INV);
 revisit_when: "Anthropic changes the subscription terms for the Agent SDK, or a second user needs a non-Anthropic model"
 ---
 
+> Proposed amendment: [ADR-0025](0025-agent-sandbox-and-credential-separation.md) (2026-11-20) — the provider token lives only in a credential-injecting proxy; agent containers that hold any secret run with code and filesystem tools disabled.
+
 ## Context
 
 Owner decision, 2026-11-20: only the owner's $200 subscription, no API spending here; "not everyone fits this, then different providers must be configurable".

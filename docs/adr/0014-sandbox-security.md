@@ -7,6 +7,10 @@ verified_by: "OPS-SANDBOX tests run inside the kernel: cannot resolve postgres o
 revisit_when: "A lab legitimately needs a capability the sandbox denies, or a container escape CVE affects the runtime in use"
 ---
 
+> Proposed amendments (2026-11-20):
+> - [ADR-0022](0022-kernel-sandbox-evcxr-memory-declared-services.md), the kernel sandbox: exec tmpfs `exec,nosuid,nodev`, a per-kernel evcxr cache with a sweeping cleanup, `--memory-swap` = `--memory`, one principal or session per kernel container from a declared set of static services.
+> - [ADR-0025](0025-agent-sandbox-and-credential-separation.md), the agent sandbox: a credential-injecting proxy; no code or filesystem tools where a secret lives.
+
 ## Context
 
 The kernel runs code written by the learner and by the agent, and the agent's code is derived from uploaded material that may contain prompt injection. Some labs need the network: the wallet pilot talks to Bitcoin testnet4 and Ethereum Sepolia endpoints.

@@ -136,10 +136,28 @@ tasks:
         release run's duration; tell the agent the version. Installing from GitHub Packages needs a read:packages token on the Mac,
         likely a classic PAT (to be verified). Until then reader-ai consumes the built-commit tarball (verified fallback)." }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
-  - { id: S0.exit, stage: 0, kind: live, status: todo,
+  - { id: S0.exit, stage: 0, kind: live, status: in_progress,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
-      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions" }
+      what: "8 RESULT.md summarised; proposed ADR amendments for numbers that change decisions",
+      note: "Not all needs are done: embeddings-local and trace-backend are still open (compile-cost landed on main, #17).
+        Drafts (status: proposed, branch 0/S0.exit-adr-drafts; deep-reviewer round 4: approve for all five, non-blocking items applied):
+        ADR-0021 ingestion (amends ADR-0008; revisit_when triggered): formula model on, code from the text layer, a deterministic
+        page-expectation check incl. block order; Docker or native decided by M1 (≤ 51 s per formula, excl. load, keeps Docker);
+        native converter confined (own user or sandbox profile, loopback only, no secrets);
+        ADR-0022 kernel sandbox (amends ADR-0014): exec tmpfs (exec,nosuid,nodev,size=1g), per-kernel evcxr cache with a sweeping cleanup and
+        liveness marker, memory-swap = memory, a declared set of static kernel services (kernel-<user>, kernel-verify, kernel-agent,
+        kernel-pair-1..N) with one principal or session each; shared services reset between principals by gateway exit and restart policy,
+        with a changed start nonce confirmed on every hand-off;
+        ADR-0023 token delivery (amends ADR-0011): Keychain store, delivery only to the credential holder;
+        ADR-0024 local CA (amends ADR-0012): localhost confirmed, -p ssl owner-run trust recorded and removed by hash, caddy_data not backed up;
+        ADR-0025 agent sandbox (amends ADR-0014/0005/0012): a credential-injecting proxy reachable only by the worker with per-run per-user
+        handles, tools by allow-list checked against the CLI's init tool list.
+        Owner answers, 2026-11-20 in chat:
+        - 0021: the 30-min bound is agreed; if M1 at 4 VM CPUs misses, the owner raises Docker Desktop's CPUs for a second M1 run before native.
+        - 0023: an agent-run `reader up` may resolve the Keychain item; the agent never reads it. The AGENTS.md provider-credential line is
+          updated; the new secrets rule was added by the owner, 2026-11-20 (the auto-mode classifier had refused the agent's edit).
+        Status flips are the owner's (H3)." }
 
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: todo, needs: [S0.skeleton] }
