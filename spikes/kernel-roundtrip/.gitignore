@@ -1,0 +1,4 @@
+gateway.log
+mem.samples
+client.json
+results/*.log

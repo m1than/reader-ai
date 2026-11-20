@@ -1,0 +1,207 @@
+{
+  "mode": "warm",
+  "run": 4,
+  "build_s": 1,
+  "image_bytes": 1905968091,
+  "idle_mem_mib": 53.5,
+  "peak_mem_mib": 579,
+  "evcxr_tmpfs_after_mib": 256,
+  "kernelspecs": [
+    "deno",
+    "python3",
+    "rust"
+  ],
+  "results": [
+    {
+      "kernel": "python3",
+      "cells": [
+        {
+          "cell": "sha256",
+          "total_s": 0.05,
+          "first_output_s": 0.01,
+          "output_times_s": [
+            0.007
+          ],
+          "ok": true,
+          "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        {
+          "cell": "stream",
+          "total_s": 1.51,
+          "first_output_s": 0.04,
+          "output_times_s": [
+            0.044,
+            0.306,
+            0.607,
+            0.908,
+            1.21
+          ],
+          "ok": true,
+          "output": "0\n1\n2\n3\n4"
+        },
+        {
+          "cell": "egress",
+          "total_s": 0.06,
+          "first_output_s": 0.02,
+          "output_times_s": [
+            0.017
+          ],
+          "ok": true,
+          "output": "egress-blocked URLError"
+        }
+      ],
+      "start_s": 0.77
+    },
+    {
+      "kernel": "rust",
+      "cells": [
+        {
+          "cell": "trivial",
+          "total_s": 0.09,
+          "first_output_s": 0.09,
+          "output_times_s": [
+            0.09
+          ],
+          "ok": true,
+          "output": "42"
+        },
+        {
+          "cell": "pilot-crates",
+          "total_s": 1.17,
+          "first_output_s": 1.17,
+          "output_times_s": [
+            1.166
+          ],
+          "ok": true,
+          "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        {
+          "cell": "after-deps",
+          "total_s": 0.1,
+          "first_output_s": 0.1,
+          "output_times_s": [
+            0.096
+          ],
+          "ok": true,
+          "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        {
+          "cell": "stream",
+          "total_s": 1.64,
+          "first_output_s": 0.13,
+          "output_times_s": [
+            0.13,
+            0.432,
+            0.732,
+            1.036,
+            1.335,
+            1.636
+          ],
+          "ok": true,
+          "output": "0\n1\n2\n3\n4\n{\"text/plain\": \"()\"}"
+        }
+      ],
+      "start_s": 0.52
+    },
+    {
+      "kernel": "deno",
+      "cells": [
+        {
+          "cell": "sha256",
+          "total_s": 0.04,
+          "first_output_s": 0.0,
+          "output_times_s": [
+            0.003
+          ],
+          "ok": true,
+          "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        {
+          "cell": "stream",
+          "total_s": 1.52,
+          "first_output_s": 0.04,
+          "output_times_s": [
+            0.043,
+            0.313,
+            0.615,
+            0.921,
+            1.222
+          ],
+          "ok": true,
+          "output": "0\n1\n2\n3\n4"
+        }
+      ],
+      "start_s": 0.18
+    }
+  ],
+  "concurrent_rust": [
+    {
+      "kernel": "rust",
+      "cells": [
+        {
+          "cell": "set-tag",
+          "total_s": 0.14,
+          "first_output_s": null,
+          "output_times_s": [],
+          "ok": true,
+          "output": ""
+        },
+        {
+          "cell": "pilot-crates",
+          "total_s": 1.43,
+          "first_output_s": 1.43,
+          "output_times_s": [
+            1.43
+          ],
+          "ok": true,
+          "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        {
+          "cell": "own-tag",
+          "total_s": 0.18,
+          "first_output_s": 0.18,
+          "output_times_s": [
+            0.175
+          ],
+          "ok": true,
+          "output": "tag=A"
+        }
+      ],
+      "start_s": 0.39
+    },
+    {
+      "kernel": "rust",
+      "cells": [
+        {
+          "cell": "set-tag",
+          "total_s": 0.14,
+          "first_output_s": null,
+          "output_times_s": [],
+          "ok": true,
+          "output": ""
+        },
+        {
+          "cell": "pilot-crates",
+          "total_s": 1.39,
+          "first_output_s": 1.39,
+          "output_times_s": [
+            1.393
+          ],
+          "ok": true,
+          "output": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        },
+        {
+          "cell": "own-tag",
+          "total_s": 0.17,
+          "first_output_s": 0.17,
+          "output_times_s": [
+            0.166
+          ],
+          "ok": true,
+          "output": "tag=B"
+        }
+      ],
+      "start_s": 0.39
+    }
+  ]
+}
