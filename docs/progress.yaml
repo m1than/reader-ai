@@ -27,6 +27,10 @@ owner_review:            # stage exits waiting for the owner's live check and `i
   ci_gate: "owner 2026-11-20: GitHub Actions may fail for now; a red CI run is not a blocker. The agent still runs the local checks
     (trace-check, guard-tests, layer checks) before every PR and records any red CI run in the PR description."
 
+priority: "owner 2026-11-20: vertical slice first (docs/roadmap.md 'Vertical slice first'). After S1.live, pick ready V.* tasks
+  before any task of stages 2–9; stages resume in order after V.live. Review depth (AGENTS.md): full review until approve in the
+  complex areas, one deep-reviewer round elsewhere."
+
 tasks:
   # Stage 0 — groundwork and spikes
   - { id: S0.owner.adr-status, stage: 0, kind: owner, status: done, needs: [],
@@ -222,6 +226,25 @@ tasks:
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
   - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
+
+  # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
+  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
+  - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
+      note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
+  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
+      note: "multilingual-e5-small (spike embeddings-local; v2 benchmark pending)" }
+  - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
+  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
+      note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min],
+      note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
+  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
+      note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
+        spends credit, ledger" }
+  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min] }
+  - { id: V.live, stage: V, kind: live, status: todo,
+      needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
+      what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
