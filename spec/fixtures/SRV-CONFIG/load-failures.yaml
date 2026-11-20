@@ -1,0 +1,237 @@
+# VEC-CONFIG-4: loader cases (FR-CONFIG-15).
+# `cases`: failures. Each gives the file content as `text` or as `bytes_b64` (base64 of the exact bytes), or
+# `missing: true` for a path that does not exist, or `mode: 0` for an existing file without read permission
+# (skipped when the tests run as uid 0).
+# `line: null` means no line; `line: any` means a line must be present (from the parser's problem mark).
+# Canary cases: the literal CANARY-... must not appear in the error's str, repr or traceback (INV-CONFIG-3).
+# `scalars`: core-schema resolution (YAML 1.2.2 §10.3.2), observed through the opaque `sectors` mapping, which keeps
+# resolved values as they are.
+cases:
+  - name: file does not exist
+    missing: true
+    error: { code: file_unreadable, line: null }
+
+  - name: permission denied
+    text: |
+      version: 1
+    mode: 0
+    error: { code: file_unreadable, line: null }
+
+  - name: not UTF-8 (0xFF byte after a valid first line)
+    bytes_b64: dmVyc2lvbjogMQr/Cg==        # "version: 1\n" + 0xFF + "\n"
+    error: { code: not_utf8, line: null }
+
+  - name: YAML syntax error, unclosed flow mapping, with a canary on the broken line
+    text: |
+      version: 1
+      instance: { url: CANARY-broken-line-7f3a
+    error: { code: yaml_syntax, line: any }
+
+  - name: empty document
+    text: ""
+    error: { code: empty_document, line: null }
+
+  - name: document with only a marker
+    text: |
+      ---
+    error: { code: empty_document, line: null }
+
+  - name: root is an explicit null (~)
+    text: |
+      ~
+    error: { code: empty_document, line: null }
+
+  - name: root is an explicit null (null)
+    text: |
+      null
+    error: { code: empty_document, line: null }
+
+  - name: syntax error wins over an earlier anchor (whole stream parsed first)
+    text: |
+      version: 1
+      instance: &a { url: https://reader.local, data_dir: ./data }
+      sharing: { broken
+    error: { code: yaml_syntax, line: any }
+
+  - name: first event-pass violation in stream order (tag on line 2 before anchor on line 3)
+    text: |
+      version: 1
+      instance: !custom { url: https://reader.local, data_dir: ./data }
+      sharing: &x { a: 1 }
+    error: { code: tag_not_allowed, line: 2 }
+
+  - name: two documents
+    text: |
+      version: 1
+      ---
+      version: 1
+    error: { code: multiple_documents, line: 2 }
+
+  - name: top-level sequence
+    text: |
+      - version
+      - 1
+    error: { code: not_mapping, line: 1 }
+
+  - name: top-level scalar
+    text: |
+      reader
+    error: { code: not_mapping, line: 1 }
+
+  - name: duplicate key
+    text: |
+      version: 1
+      version: 1
+    error: { code: duplicate_key, line: 2 }
+
+  - name: duplicate key whose values are canaries (the parser's own error text must not leak)
+    text: |
+      version: 1
+      instance: { url: CANARY-dup-a-7f3a, url: CANARY-dup-b-7f3a, data_dir: ./data }
+    error: { code: duplicate_key, line: 2 }
+
+  - name: non-string mapping key (core-schema int)
+    text: |
+      version: 1
+      1: one
+    error: { code: non_string_key, line: 2 }
+
+  - name: non-string mapping key (core-schema bool)
+    text: |
+      version: 1
+      true: yes
+    error: { code: non_string_key, line: 2 }
+
+  - name: anchor and alias
+    text: |
+      version: 1
+      instance: &inst { url: https://reader.local, data_dir: ./data }
+      sharing: *inst
+    error: { code: alias_not_allowed, line: 2 }
+
+  - name: merge key without an alias
+    text: |
+      version: 1
+      instance:
+        <<: { url: https://reader.local }
+        data_dir: ./data
+    error: { code: alias_not_allowed, line: 3 }
+
+  - name: python object tag
+    text: |
+      version: !!python/object/apply:os.system ["true"]
+    error: { code: tag_not_allowed, line: 1 }
+
+  - name: custom local tag
+    text: |
+      version: 1
+      instance: !custom { url: https://reader.local, data_dir: ./data }
+    error: { code: tag_not_allowed, line: 2 }
+
+  - name: core tag spelled out is still an explicit tag
+    text: |
+      version: !!int 1
+    error: { code: tag_not_allowed, line: 1 }
+
+  # `nest: N` replaces `{nest}` with N nested flow sequences. Depth: root 1, sectors 2, so N sequences give 2 + N.
+  # 1,100 levels: above Python's default recursion limit (1,000), without ruamel's quadratic cost at 3,000 (3.9 s).
+  - name: nesting 1,100 levels deep
+    nest: 1100
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { a: {nest} }
+    error: { code: too_deep, line: 3 }
+
+  # Lone surrogates from double-quoted escapes (the fixture keeps the backslash escapes literally).
+  - name: lone surrogate in a handle, with a canary
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      users: [{ handle: "\ud800CANARY-surrogate-7f3a", role: r }]
+    error: { code: not_utf8_encodable, line: 3 }
+
+  - name: lone surrogate as a kernel
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      kernels: ["\ud800"]
+    error: { code: not_utf8_encodable, line: 3 }
+
+  - name: lone surrogate in data_dir, with a canary
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: "\ud800CANARY-surrogate-7f3a" }
+    error: { code: not_utf8_encodable, line: 2 }
+
+  - name: lone surrogate in a material licence
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      materials:
+        - id: m
+          file: ./f.pdf
+          sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
+          license: "\udfff"
+          language: ru
+    error: { code: not_utf8_encodable, line: 7 }
+
+  - name: lone surrogate in the url path
+    text: |
+      version: 1
+      instance: { url: "https://x/\ud800", data_dir: ./data }
+    error: { code: not_utf8_encodable, line: 2 }
+
+  - name: lone surrogates as an opaque key and value
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { "\ud800": "\udfff" }
+    error: { code: not_utf8_encodable, line: 3 }
+
+  - name: depth 65, one beyond MAX_DEPTH
+    nest: 63
+    text: |
+      version: 1
+      instance: { url: https://reader.local, data_dir: ./data }
+      sectors: { a: {nest} }
+    error: { code: too_deep, line: 3 }
+
+# Depth exactly MAX_DEPTH (64 = 2 + 62 nested sequences) loads.
+depth_ok:
+  nest: 62
+  text: |
+    version: 1
+    instance: { url: https://reader.local, data_dir: ./data }
+    sectors: { a: {nest} }
+
+# Each scalar is written as `sectors.<key>: <plain scalar>` in an otherwise valid config; `expect` is the resolved value.
+scalars:
+  - { plain: "2026-11-20", expect: { str: "2026-11-20" } }          # date-like: a string under the core schema
+  - { plain: "2026-11-20T10:00:00Z", expect: { str: "2026-11-20T10:00:00Z" } }
+  - { plain: "1_000", expect: { str: "1_000" } }                    # underscores are not part of core-schema ints
+  - { plain: "yes", expect: { str: "yes" } }
+  - { plain: "no", expect: { str: "no" } }
+  - { plain: "on", expect: { str: "on" } }
+  - { plain: "true", expect: { bool: true } }
+  - { plain: "False", expect: { bool: false } }
+  - { plain: "TRUE", expect: { bool: true } }
+  - { plain: "~", expect: { "null": true } }
+  - { plain: "Null", expect: { "null": true } }
+  - { plain: "0x1F", expect: { int: 31 } }
+  - { plain: "0o17", expect: { int: 15 } }
+  - { plain: "017", expect: { int: 17 } }                           # not octal in YAML 1.2
+  - { plain: "-42", expect: { int: -42 } }
+  - { plain: "1e3", expect: { float: 1000.0 } }
+  - { plain: ".5", expect: { float: 0.5 } }
+  - { plain: ".inf", expect: { error: not_finite } }               # non-finite floats are rejected (FR-CONFIG-1)
+  - { plain: ".NaN", expect: { error: not_finite } }
+  - { plain: "0b101", expect: { str: "0b101" } }                   # binary is YAML 1.1 only
+
+# A quoted "<<" key is an ordinary key, kept in the opaque mapping.
+quoted_merge_key:
+  text: |
+    version: 1
+    instance: { url: https://reader.local, data_dir: ./data }
+    sectors: { "<<": 1 }
+  expect: { "<<": 1 }

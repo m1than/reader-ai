@@ -1,0 +1,272 @@
+"""reader.yaml loading and validation.
+
+@trace FR-CONFIG-1, FR-CONFIG-2, FR-CONFIG-3, FR-CONFIG-9, FR-CONFIG-10, FR-CONFIG-11
+@trace VEC-CONFIG-1, VEC-CONFIG-2, INV-CONFIG-3, INV-CONFIG-4, INV-CONFIG-5
+"""
+
+import copy
+import json
+import os
+import pickle
+import sys
+from collections.abc import Iterator, MutableMapping
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+from conftest import canaries, load_fixture, rendered, write_config
+from hypothesis import given, settings
+from hypothesis import strategies as st
+
+VALID_HEAD = "version: 1\ninstance: { url: https://reader.local, data_dir: ./data }\n"
+INVALID_CASES = load_fixture("invalid/cases.yaml")["cases"]
+EXPECT = load_fixture("reader.example.expect.yaml")
+
+
+def _text(case: dict[str, Any]) -> str:
+    """The case's YAML with `expand` placeholders filled (inputs too long to store in the fixture)."""
+    text: str = case["yaml"]
+    for name, spec in case.get("expand", {}).items():
+        text = text.replace("{" + name + "}", str(spec["char"]) * int(spec["count"]))
+    return text
+
+
+def test_example_loads_with_expected_values(tmp_path: Path) -> None:
+    from reader.config import load_config
+
+    example = Path(__file__).resolve().parents[3] / "spec/fixtures/SRV-CONFIG/reader.example.yaml"
+    text = example.read_text(encoding="utf-8")
+    config = load_config(write_config(tmp_path, text))
+    d = str(tmp_path)
+    expect = EXPECT["example"]
+    assert config.instance.data_dir == expect["instance.data_dir"].format(dir=d)
+    assert config.materials[0].file == expect["materials.0.file"].format(dir=d)
+    assert str(config.users[0].providers[0].token) == expect["users.0.providers.0.token"]
+    assert config.budgets is not None
+    assert str(config.budgets.monthly_usd) == expect["budgets.monthly_usd"]
+    assert str(config.budgets.warn_at) == expect["budgets.warn_at"]
+    assert isinstance(config.budgets.monthly_usd, Decimal)
+
+
+@pytest.mark.parametrize("case", EXPECT["paths"], ids=lambda c: str(c["data_dir"]))
+def test_paths_are_joined_and_normalised_lexically(tmp_path: Path, case: dict[str, str]) -> None:
+    from reader.config import load_config
+
+    data_dir = json.dumps(case["data_dir"])
+    text = f"version: 1\ninstance: {{ url: https://reader.local, data_dir: {data_dir} }}\n"
+    config = load_config(write_config(tmp_path / "app", text))
+    assert config.instance.data_dir == case["expect"].format(dir=str(tmp_path))
+
+
+@pytest.mark.parametrize("case", INVALID_CASES, ids=[c["name"] for c in INVALID_CASES])
+def test_invalid_configs_give_the_exact_error_list(tmp_path: Path, case: dict[str, Any]) -> None:
+    from reader.config import ConfigError, load_config
+
+    path = write_config(tmp_path, _text(case))
+    with pytest.raises(ConfigError) as caught:
+        load_config(path)
+    got = [(p.line, p.path, p.code) for p in caught.value.problems]
+    assert got == [(e["line"], e["path"], e["code"]) for e in case["errors"]]
+
+
+@pytest.mark.parametrize("case", INVALID_CASES, ids=[c["name"] for c in INVALID_CASES])
+def test_errors_render_file_line_path_code_and_never_input(tmp_path: Path, case: dict[str, Any]) -> None:
+    from reader.config import ConfigError, load_config
+
+    path = write_config(tmp_path, _text(case))
+    with pytest.raises(ConfigError) as caught:
+        load_config(path)
+    error = caught.value
+    lines = str(error).splitlines()
+    for problem in error.problems:
+        prefix = f"{path}:{problem.line}: {problem.path}: {problem.code}: "
+        assert any(line.startswith(prefix) for line in lines)
+    text = rendered(error)
+    for canary in canaries(case["yaml"]):
+        assert canary not in text
+    assert error.__cause__ is None
+    assert error.__context__ is None or error.__suppress_context__
+
+
+@pytest.mark.parametrize("bad", ["1.0", "true", '"1"', "2", "0"])
+def test_version_is_a_strict_int_equal_to_one(tmp_path: Path, bad: str) -> None:
+    from reader.config import ConfigError, load_config
+
+    text = f"version: {bad}\ninstance: {{ url: https://reader.local, data_dir: ./d }}\n"
+    with pytest.raises(ConfigError) as caught:
+        load_config(write_config(tmp_path, text))
+    assert [p.path for p in caught.value.problems] == ["version"]
+
+
+def test_config_is_immutable(tmp_path: Path) -> None:
+    from reader.config import load_config
+
+    config = load_config(write_config(tmp_path, VALID_HEAD + "sectors: { a: [1, 2] }\n"))
+    with pytest.raises(Exception):  # noqa: B017 - Pydantic raises its own ValidationError for frozen models
+        config.version = 2  # type: ignore[misc]
+    with pytest.raises(TypeError):
+        config.sectors["a"] = 3  # type: ignore[index]
+    assert config.sectors == {"a": (1, 2)}
+
+
+def test_config_dumps_copies_and_pickles(tmp_path: Path) -> None:
+    from reader.config import ReaderConfig, load_config
+
+    text = (Path(__file__).resolve().parents[3] / "spec/fixtures/SRV-CONFIG/reader.example.yaml").read_text()
+    config = load_config(write_config(tmp_path, text + "sectors: { a: [1, { b: x }] }\n"))
+    assert ReaderConfig.model_validate(config.model_dump()) == config
+    assert copy.deepcopy(config) == config
+    assert pickle.loads(pickle.dumps(config)) == config  # noqa: S301 - our own bytes
+    assert json.loads(config.model_dump_json())["sectors"] == {"a": [1, {"b": "x"}]}
+
+
+def test_no_pydantic_error_leaves_load_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A forced disagreement between loader rules and models: fixed code, no echo, nothing chained."""
+    from pydantic import ValidationError
+
+    from reader.config import ConfigError, ReaderConfig, load, load_config
+
+    canary = "CANARY-model-mismatch-7f3a"
+
+    class Diverging:
+        @staticmethod
+        def model_validate(values: object) -> ReaderConfig:
+            return ReaderConfig.model_validate({"version": canary, "instance": {"url": canary}})
+
+    with pytest.raises(ValidationError) as real:  # the Pydantic error itself would quote the input
+        Diverging.model_validate({})
+    assert canary in str(real.value)
+    monkeypatch.setattr(load, "ReaderConfig", Diverging)
+    with pytest.raises(ConfigError) as caught:
+        load_config(write_config(tmp_path, VALID_HEAD))
+    surfaces = rendered(caught.value)
+    assert [(p.line, p.path, p.code) for p in caught.value.problems] == [(None, "", "model_rule_mismatch")]
+    assert canary not in surfaces
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None or caught.value.__suppress_context__
+
+
+_GOOD: dict[str, Any] = {"version": 1, "instance": {"url": "https://reader.local", "data_dir": "/d"}}
+
+
+@pytest.mark.parametrize("change", [
+    {"version": True}, {"version": "1"}, {"version": 2}, {"version": 1.0}, {"version": Decimal(1)},
+    {"instance": {"url": "http://reader.local", "data_dir": "/d"}},
+    {"instance": {"url": "https://@", "data_dir": "/d"}},
+    {"instance": {"url": "https://reader.local", "data_dir": ""}},
+    {"users": ({"handle": "a", "role": "r"}, {"handle": "a", "role": "r"})},
+    {"users": ({"handle": "", "role": "r"},)},
+    {"users": ({"handle": "a", "role": "r", "providers": ({"kind": "k", "token": "literal"},)},)},
+    {"kernels": ("python3", "python3")},
+    {"tasks": {"": {"model": "opus"}}},
+    {"budgets": {"monthly_usd": Decimal("NaN")}},
+    {"budgets": {"monthly_usd": Decimal(0)}},
+    {"budgets": {"monthly_usd": Decimal(1), "warn_at": Decimal("1.5")}},
+    {"materials": ({"id": "m", "file": "/f", "sha256": "ABC", "license": "l", "language": "ru"},)},
+    {"sectors": {"a": float("inf")}},
+    {"sectors": {1: "x"}},
+    {"unknown": 1},
+], ids=lambda change: next(iter(change)))
+def test_models_reject_what_the_loader_rejects(change: dict[str, Any]) -> None:
+    from pydantic import ValidationError
+
+    from reader.config import ReaderConfig
+
+    ReaderConfig.model_validate(_GOOD)
+    with pytest.raises(ValidationError):
+        ReaderConfig.model_validate({**_GOOD, **change})
+
+
+def test_load_config_reads_only_the_given_file_and_no_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reader.config import load_config
+
+    text = VALID_HEAD + (
+        "users:\n  - handle: ivan\n    role: owner\n    providers:\n"
+        "      - { kind: anthropic-subscription, token: secret://env/READER_NEVER_SET_X }\n"
+        "      - { kind: other, token: secret://keychain/reader-ai/x }\n"
+        "      - { kind: other, token: secret://file/run/secrets/never_there }\n"
+    )
+    warm = write_config(tmp_path / "warm", text)
+    load_config(warm)  # import everything lazily loaded before watching
+    path = write_config(tmp_path / "watched", text)
+    opened: list[str] = []
+    watching = True
+
+    def hook(event: str, args: tuple[Any, ...]) -> None:
+        if watching and event == "open" and args and isinstance(args[0], (str, bytes, Path)):
+            opened.append(str(args[0]))
+
+    sys.addaudithook(hook)
+    recording = _RecordingEnviron(os.environ)
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "environ", recording)  # every os.getenv and os.environ[...] goes through it
+        try:
+            load_config(path)
+        finally:
+            watching = False
+    assert {Path(p).resolve() for p in opened} <= {path.resolve()}
+    assert recording.accessed == []
+
+
+class _RecordingEnviron(MutableMapping[str, str]):
+    """Stands in for os.environ and records every access (INV-CONFIG-4)."""
+
+    def __init__(self, real: MutableMapping[str, str]) -> None:
+        self.real = real
+        self.accessed: list[str] = []
+
+    def __getitem__(self, key: str) -> str:
+        self.accessed.append(key)
+        return self.real[key]
+
+    def __setitem__(self, key: str, value: str) -> None:
+        self.accessed.append(key)
+        self.real[key] = value
+
+    def __delitem__(self, key: str) -> None:
+        self.accessed.append(key)
+        del self.real[key]
+
+    def __iter__(self) -> Iterator[str]:
+        self.accessed.append("<iter>")
+        return iter(self.real)
+
+    def __len__(self) -> int:
+        self.accessed.append("<len>")
+        return len(self.real)
+
+    def __contains__(self, key: object) -> bool:
+        self.accessed.append(str(key))
+        return key in self.real
+
+
+_segment = st.text(alphabet="abcdefghij", min_size=1, max_size=6)
+
+
+@st.composite
+def _valid_config(draw: st.DrawFn) -> str:
+    config: dict[str, Any] = {
+        "version": 1,
+        "instance": {"url": "https://reader.local", "data_dir": "./" + draw(_segment)},
+        "users": [
+            {"handle": h, "role": draw(_segment),
+             "providers": [{"kind": draw(_segment), "token": f"secret://keychain/{draw(_segment)}/{h}"}]}
+            for h in draw(st.lists(_segment, unique=True, max_size=3))
+        ],
+        "kernels": draw(st.lists(_segment, unique=True, max_size=3)),
+        "budgets": {"monthly_usd": draw(st.integers(1, 10_000)), "warn_at": 0.5},
+        "sectors": {k: draw(st.integers()) for k in draw(st.lists(_segment, unique=True, max_size=3))},
+    }
+    return json.dumps(config)  # JSON is valid YAML 1.2
+
+
+@settings(max_examples=50, deadline=None)
+@given(text=_valid_config())
+def test_loading_is_idempotent(tmp_path_factory: pytest.TempPathFactory, text: str) -> None:
+    from reader.config import load_config
+
+    path = write_config(tmp_path_factory.mktemp("idem"), text)
+    assert load_config(path) == load_config(path)
