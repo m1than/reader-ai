@@ -104,10 +104,15 @@ tasks:
 
   # Stage 1 — stack on the Mac
   - { id: S1.SRV-CONFIG, stage: 1, kind: module, track: engineering, status: in_progress, needs: [S0.skeleton],
-      note: "spec drafted (spec/modules/SRV-CONFIG.yaml, status: draft; fixtures in spec/fixtures/SRV-CONFIG/), awaits deep-reviewer.
-        Scope follows the roadmap split: this module parses all five secret:// schemes and resolves env and file; hostfile, keychain,
-        op and `reader doctor` belong to OPS-CLI through the resolver registry (FR-CONFIG-7)." }
-  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG] }
+      note: "spec drafted (spec/modules/SRV-CONFIG.yaml, status: draft; fixtures VEC-CONFIG-1..4 in spec/fixtures/SRV-CONFIG/).
+        deep-reviewer round 1: changes (B1–B7); revised: no input echo in ConfigError, Secret wrapper, per-scheme grammar,
+        file restricted to /run/secrets, container path via secret_file_name + host-resolved, field table, load failures (ruamel.yaml).
+        Awaits deep-reviewer round 2. Depends on SRV-OBS and SRV-EVENTS for redaction in the shared logger and event serializer.
+        Owner notes in the spec: ADR-0011 'four schemes' typo; ADR-0011 table lists env as resolved inside containers, the spec
+        routes containers through /run/secrets instead." }
+  - { id: S1.OPS-CLI, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.SRV-CONFIG],
+      note: "Must use SRV-CONFIG's secret_file_name(ref) (FR-CONFIG-14) to name the /run/secrets files it writes on `reader up`,
+        and register its hostfile/keychain/op resolvers through SRV-CONFIG's ResolverRegistry (FR-CONFIG-7)." }
   - { id: S1.OPS-DEPLOY, stage: 1, kind: module, track: engineering, status: todo,
       needs: [S0.skeleton, S0.spike.passkey-localhost, S0.spike.agent-sdk-container] }
   - { id: S1.SRV-AUTH, stage: 1, kind: module, track: product, status: todo, needs: [S1.OPS-DEPLOY, S1.SRV-CONFIG] }
