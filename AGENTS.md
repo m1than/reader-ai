@@ -65,6 +65,7 @@ Complex work is always done with Claude Fable, through the `deep-reviewer` and `
 
 **Rules:**
 - `deep-reviewer` must return `VERDICT: approve` before you set a spec to `approved` or merge a change in one of the areas above. Record the verdict in the PR description.
+- Outside those areas (owner, 2026-11-20): one `deep-reviewer` round per spec and per code change. Fix its blocking findings without a second round, and list each finding with its fix in the PR description.
 - Use `investigator` for root causes and for subtle behaviour. Act on its FIX and TEST; do not keep guessing.
 - If Fable is unavailable in the session, use the strongest available model, note `review_model: <model>` in docs/progress.yaml for that task, and notify the owner once.
 
