@@ -63,7 +63,6 @@ tasks:
         ≈9.9k cached CLI system tokens per call. Sandboxed Bash run under ADR-0014's process, capability and resource limits passes
         (network, secrets and timeout rows not applied). Open for SRV-AGENT/OPS-SANDBOX: the token sits inside the tool sandbox;
         docker run -e exposes it to docker inspect (ADR-0011 wants /run/secrets, untested); API-only egress untested. Worker placement: container." }
->>>>>>> origin/main
   - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: done, needs: [S0.skeleton],
       pr: "https://github.com/m1than/reader-ai/pull/5", review: "deep-reviewer (Fable): approve, round 2",
       result: "PASS (spikes/kernel-roundtrip/RESULT.md, results/*.json): python3/rust/deno start < 0.8 s and stream, internal network, no egress;
