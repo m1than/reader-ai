@@ -3,7 +3,7 @@
 # for `ivan` alone the expected override is VEC-DEPLOY-3 as OPS-DEPLOY amends it to the same shape and the same path.
 # Comparison is INV-DEPLOY-8's equality. The test writes VEC-CLI-1 as reader.yaml into a per-test temporary directory
 # and compares with that directory's resolved path (`Path.resolve(strict=True)`) substituted for /tmp/reader-ai-test in
-# the bind source below on api, worker and mcp (FR-CLI-4). The swap is general, not macOS-specific. Only the bind is added: compose.yaml sets READER_CONFIG statically (OPS-DEPLOY FR-DEPLOY-5).
+# the bind source below on api, worker, mcp and agent-proxy (FR-CLI-4). The swap is general, not macOS-specific. Only the bind is added: compose.yaml sets READER_CONFIG statically (OPS-DEPLOY FR-DEPLOY-5).
 # The `x-reader-config` anchor mirrors VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065); the comparison covers `services`
 # and `networks`, after YAML alias expansion, and ignores top-level `x-` fields. A further case: a config path
 # containing `$` makes `up` refuse before any `docker compose` call. No secrets.
@@ -62,6 +62,8 @@ services:
   worker:
     volumes: [*reader-config]
   mcp:
+    volumes: [*reader-config]
+  agent-proxy:
     volumes: [*reader-config]
 
 networks:

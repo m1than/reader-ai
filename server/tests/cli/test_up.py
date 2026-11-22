@@ -86,7 +86,7 @@ def test_up_order_build_t0_resolve_watcher_ready_then_up(
     world = _world(tmp_path, monkeypatch)
     assert _up(world, _config(tmp_path)) == 0
     j = world.journal
-    build = _index(j, "run", "docker", "compose", "-f", str(world.ctx.compose_file), "-f", "-", "build")
+    build = next(i for i, e in enumerate(j) if e[:3] == ("run", "docker", "compose") and e[-1] == "build")
     info = _index(j, "run", "docker", "info")
     resolve = _index(j, "keyring.get", "reader-ai", "claude-oauth-token")
     spawn = _index(j, "spawn")
