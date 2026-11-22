@@ -38,7 +38,10 @@ ARTIFACT_OK_ID = (FIXTURES / "artifact-ok.id").read_text().strip()
 SRC = REPO / "server" / "src"
 ORIGIN = "https://localhost"
 SESSION_COOKIE = "__Host-reader_session"
-PG_IMAGE = "postgres:18-trixie@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a"
+# postgres:18-trixie plus pgvector 0.8.7: the heads include SRV-SEARCH's migration (CREATE EXTENSION vector).
+PG_IMAGE = (
+    "pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa"
+)
 MATERIAL_SHA = "a" * 64
 PILOT_SHA = "61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2"
 CANARY = "QUOKKAZEBRA"
