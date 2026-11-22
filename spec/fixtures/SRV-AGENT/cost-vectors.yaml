@@ -1,29 +1,48 @@
-# VEC-AGENT-1: cost recomputed from usage with spec/fixtures/SRV-AGENT/pricing.yaml (FR-AGENT-8).
-# usd = sum(tokens_k * rate_k) / 1e6, rounded to 6 decimals; computed with Python on 2026-11-22.
-# The first two cases reuse token counts of spikes/compile-cost run 1 (results/*/1-draft.json, 2-fact-check.json);
-# the SDK reported $0.605 and $0.237 for them, within the 5 % cross-check tolerance of FR-AGENT-8 (0.3 % and 1.6 %).
-# `input` for the draft is the ~650 instruction tokens outside the cached prefix (RESULT.md); for the fact-check it
-# is unknown and set to 0, which explains most of its 1.6 % gap.
+# VEC-AGENT-1: cost recomputed from SDK usage with spec/fixtures/SRV-AGENT/pricing.yaml (FR-AGENT-8).
+#
+# Usage mapping (the five fields FR-AGENT-8 prices, from ResultMessage.usage; keys measured in
+# spikes/agent-proxy-handshake and spikes/compile-cost):
+#   input          = usage.input_tokens
+#   output         = usage.output_tokens            (includes output_tokens_details.thinking_tokens)
+#   cache_write_5m = usage.cache_creation.ephemeral_5m_input_tokens
+#   cache_write_1h = usage.cache_creation.ephemeral_1h_input_tokens
+#   cache_read     = usage.cache_read_input_tokens
+# A missing key counts 0; a missing `cache_creation` breakdown with a non-zero cache_creation_input_tokens is
+# `usage_unmapped` (refused, never guessed).
+# usd = sum(tokens_k * rate_k) / 1e6, rounded to 6 decimals.
+#
+# The 12 `spike-*` cases are every stage of spikes/compile-cost (results/20261120T195316 = run 1,
+# results/20261120T200303 = run 2) with their exact token counts and the SDK-reported cost. Recomputed on 2026-11-22.
+# The SDK cost exceeds the recomputed one by a near-fixed $0.0023–0.0043 per stage (0.38–1.78 %). Unexplained by the
+# five priced fields; spikes/agent-proxy-handshake found that the CLI sends one auxiliary model request per query unless
+# CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, which is a plausible source (hypothesis, not measured against real usage).
+# FR-AGENT-8's tolerance max(5 %, $0.005) covers it.
+tolerance: { relative: 0.05, absolute_usd: 0.005 }
 cases:
-  - name: opus-draft-cold
-    model: claude-opus-5-5
-    usage: { input: 650, output: 17591, cache_write_5m: 0, cache_write_1h: 31370, cache_read: 6803 }
-    usd: 0.606741
-    sdk_reported_usd: 0.605
-  - name: sonnet-factcheck
-    model: claude-sonnet-5-5
-    usage: { input: 0, output: 4601, cache_write_5m: 0, cache_write_1h: 46774, cache_read: 0 }
-    usd: 0.233106
-    sdk_reported_usd: 0.237
-  - name: opus-review-source-prefix-read
-    model: claude-opus-5-5
-    usage: { input: 1200, output: 8517, cache_write_5m: 0, cache_write_1h: 0, cache_read: 40022 }
-    usd: 0.183144
-  - name: zero
-    model: claude-sonnet-5-5
+  - { name: spike-r1-draft,       model: claude-opus-5-5,   usage: { input: 2, output: 17591, cache_write_5m: 0, cache_write_1h: 31370, cache_read: 0 },    usd: 0.602788, sdk_usd: 0.6050707 }
+  - { name: spike-r1-fact_check,  model: claude-sonnet-5-5, usage: { input: 2, output: 4601,  cache_write_5m: 0, cache_write_1h: 46774, cache_read: 0 },    usd: 0.23311,  sdk_usd: 0.2369327 }
+  - { name: spike-r1-review,      model: claude-opus-5-5,   usage: { input: 2, output: 8517,  cache_write_5m: 0, cache_write_1h: 40022, cache_read: 6803 }, usd: 0.491885, sdk_usd: 0.4957134 }
+  - { name: spike-r1-revise,      model: claude-opus-5-5,   usage: { input: 2, output: 25825, cache_write_5m: 0, cache_write_1h: 43658, cache_read: 6803 }, usd: 0.867133, sdk_usd: 0.8713239 }
+  - { name: spike-r1-fact_check2, model: claude-sonnet-5-5, usage: { input: 2, output: 5997,  cache_write_5m: 0, cache_write_1h: 44379, cache_read: 6803 }, usd: 0.23817,  sdk_usd: 0.2424338 }
+  - { name: spike-r1-review2,     model: claude-opus-5-5,   usage: { input: 2, output: 7720,  cache_write_5m: 0, cache_write_1h: 44981, cache_read: 6803 }, usd: 0.515617, sdk_usd: 0.5199413 }
+  - { name: spike-r2-draft,       model: claude-opus-5-5,   usage: { input: 2, output: 14374, cache_write_5m: 0, cache_write_1h: 0,     cache_read: 31370 }, usd: 0.293762, sdk_usd: 0.2960417 }
+  - { name: spike-r2-fact_check,  model: claude-sonnet-5-5, usage: { input: 2, output: 4703,  cache_write_5m: 0, cache_write_1h: 37562, cache_read: 6803 }, usd: 0.197962, sdk_usd: 0.2015441 }
+  - { name: spike-r2-review,      model: claude-opus-5-5,   usage: { input: 2, output: 7171,  cache_write_5m: 0, cache_write_1h: 37859, cache_read: 6803 }, usd: 0.447661, sdk_usd: 0.4512731 }
+  - { name: spike-r2-revise,      model: claude-opus-5-5,   usage: { input: 2, output: 20214, cache_write_5m: 0, cache_write_1h: 41106, cache_read: 6803 }, usd: 0.734497, sdk_usd: 0.7384332 }
+  - { name: spike-r2-fact_check2, model: claude-sonnet-5-5, usage: { input: 2, output: 6617,  cache_write_5m: 0, cache_write_1h: 41025, cache_read: 6803 }, usd: 0.230954, sdk_usd: 0.2348824 }
+  - { name: spike-r2-review2,     model: claude-opus-5-5,   usage: { input: 2, output: 8027,  cache_write_5m: 0, cache_write_1h: 41936, cache_read: 6803 }, usd: 0.497397, sdk_usd: 0.5014173 }
+  - { name: five-minute-writes,   model: claude-sonnet-5-5, usage: { input: 1000, output: 2000, cache_write_5m: 40000, cache_write_1h: 0, cache_read: 0 }, usd: 0.122 }
+  - { name: zero,                 model: claude-sonnet-5-5, usage: { input: 0, output: 0, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }, usd: 0.0 }
+  - { name: unknown-model,        model: claude-opus-9,     usage: { input: 1, output: 1, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }, error: unknown_model }
+sdk_usage_mapping:
+  - name: sdk-shape-spike-r1-draft
+    sdk_usage: { input_tokens: 2, output_tokens: 17591, cache_creation_input_tokens: 31370, cache_read_input_tokens: 0,
+                 cache_creation: { ephemeral_1h_input_tokens: 31370, ephemeral_5m_input_tokens: 0 },
+                 output_tokens_details: { thinking_tokens: 1353 }, service_tier: standard }
+    usage: { input: 2, output: 17591, cache_write_5m: 0, cache_write_1h: 31370, cache_read: 0 }
+  - name: sdk-shape-zero
+    sdk_usage: { input_tokens: 0, output_tokens: 0 }
     usage: { input: 0, output: 0, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }
-    usd: 0.0
-  - name: unknown-model
-    model: claude-opus-9
-    usage: { input: 1, output: 1, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }
-    error: unknown_model
+  - name: sdk-shape-unmapped
+    sdk_usage: { input_tokens: 5, output_tokens: 5, cache_creation_input_tokens: 100 }
+    error: usage_unmapped

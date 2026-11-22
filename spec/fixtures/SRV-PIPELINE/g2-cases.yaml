@@ -1,0 +1,39 @@
+# VEC-PIPELINE-3: the G2 report (FR-PIPELINE-8) on SRV-LESSON's deferred `g2` cases plus cases this spec adds.
+# Base notebook: spec/fixtures/SRV-LESSON/F01.ipynb (synthetic; lab verified, all claims cited) with stage records for
+# fact_check, adversarial_review and lab_verification on its sha256 and an empty `findings` delta.
+# `ops` are JSON Patch operations on F01 (same paths as spec/fixtures/SRV-LESSON/invalid.yaml); `records` overrides
+# the stage records present on the last model-written revision. Expected: publishable and the failing checks, in
+# report order (labs, claims, stages, deltas).
+source: spec/fixtures/SRV-LESSON/F01.ipynb
+cases:
+  - { id: f01-clean, ops: [], publishable: true, failing: [] }
+  # SRV-LESSON invalid.yaml `g2` cases (its defers (a)–(c)):
+  - { id: g2-uncited-claim, from: SRV-LESSON/g2-uncited-claim, publishable: false, failing: [claims.uncited] }
+  - { id: g2-blocking-open-finding, from: SRV-LESSON/g2-blocking-open-finding, publishable: false, failing: [claims.blocking] }
+  - { id: g2-lab-not-verified, from: SRV-LESSON/g2-lab-not-verified, publishable: false, failing: [labs.unverified] }
+  # Added by this spec:
+  - id: lab-assert-edited-after-verification
+    ops: [{ op: add, path: /cells/6/metadata/reader/asserts/-, value: "assert True" }]
+    publishable: false
+    failing: [labs.binding]          # the ordered (id, source, asserts, kernel, network) hash no longer matches
+  - id: labs-swapped
+    ops: [{ op: move, from: /cells/6, path: /cells/1 }]
+    publishable: false
+    failing: [labs.binding]
+  - id: explain-without-claims
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims, value: [] }]
+    publishable: false
+    failing: [claims.uncited]
+  - id: blocking-wontfix-still-blocks
+    ops: [{ op: replace, path: /cells/9/metadata/reader/finding/blocking, value: true },
+          { op: add, path: /cells/9/metadata/reader/status, value: wontfix }]
+    publishable: false
+    failing: [claims.blocking]
+  - id: no-review-record
+    records: [fact_check, lab_verification]
+    publishable: false
+    failing: [stages.missing_adversarial_review]
+  - id: delta-not-reproducible       # the final revision differs from apply(findings, lab stamp)(last model revision)
+    tamper: final_revision_extra_cell
+    publishable: false
+    failing: [deltas.mismatch]
