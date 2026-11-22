@@ -441,7 +441,14 @@ tasks:
         chapter, and review/revise are A/B-measured with retrieved spans + the lesson; the draft keeps the full chapter
         (coverage: dense recall@10 is 0.675, so top-k alone would drop topics). Each variant is kept only if G2 and the
         fact-check verdict agreement on the fixture set do not regress, with tokens and $ per stage before and after.
-        Quality gates must not regress (G2 report, search recall on questions-v2). Cost math is a complex area: full review." }
+        Quality gates must not regress (G2 report, search recall on questions-v2). Cost math is a complex area: full review.
+        Research (docs/research/cost-per-page.md on V/research-cost-per-page, 2026-11-22): baseline $0.097–0.119/page;
+        56% of run 1 is 1-hour cache writes nobody re-reads, 44% output. Ranked levers (estimates, not measured):
+        L1 identical per-model system prefix + 5-min TTL (CLAUDE_CODE_PROMPT_CACHE_TTL=5m) −$0.96–1.02/lesson;
+        L2 gate the revise loop on source-confirmed blocking findings ≈ −$0.75; L3 fact-check on Haiku 5.5 with
+        escalation + 10% Sonnet audit −$0.26 after L1; L4 patch-only revise −$0.12–0.34; L5 review on Sonnet/lower effort
+        −$0.20–0.26. Stack ≈ $0.035–0.047/page (−50–60%). RAG (lever 7) saves < $0.001/page after L1 but is tested for
+        quality (LaRA). Batch API not reachable via the Agent SDK (would need an ADR). Plan E0–E6 ≈ $14.5 of the test budget." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
