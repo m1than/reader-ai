@@ -532,8 +532,14 @@ tasks:
         full text 14, hybrid 24 (recall@1 0.225, @3 0.425, MRR 0.338, 0 empty full-text lists); questions-v1: dense
         30, full text 26, hybrid 29 of 30. NFR-SEARCH-1 FAILS: hybrid 24 < dense-only 27 and < 27; NFR-SEARCH-2
         (0.967 ≥ 0.8), -3 (17.18 ≤ 60) and -4 (0 truncated) pass. Dense reproduces the spike's 0.675 exactly, so the
-        embed path is right; equal-weight RRF with the weak OR full-text list (14/40) costs 3 hits. Fusion is not
-        tuned against the acceptance set; decision needed (coordinator/owner).",
+        embed path is right; equal-weight RRF with the weak OR full-text list (14/40) costs 3 hits.
+        Coordinator decision (dev/test protocol): weighted RRF, w_dense chosen on v1 only from {1, 1.5, 2, 3, 5}
+        (max recall@10, then MRR, then smallest w). v1 grid hits 29/29/29/30/30, MRR 0.756/0.771/0.796/0.822/0.824,
+        so w = 5 (results/fusion-weight-v1.json). One v2 test with w 5: dense 27, full text 14, hybrid 24 of 40
+        (results/fusion-test-v2.json). Hybrid stays below dense-only, so the slice's search() serves the dense order
+        (params.HYBRID false; full text only when degraded) — a measured negative result for V.cost-optimize / stage
+        3. NFR-SEARCH-1 on the served order: 27 ≥ 27 and ≥ dense-only (pass); v1 dense 30/30. Re-measure on
+        SRV-INGEST's real spans (9,463, V/SRV-INGEST-impl) in the integration run. Awaits code review.",
       note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
         ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
         ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at

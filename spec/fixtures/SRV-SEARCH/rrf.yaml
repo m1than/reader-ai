@@ -37,3 +37,18 @@ cases:
     fts: [m]
     expected:
       - { id: m, score: 0.016393443 }
+  # Weighted (FR-SEARCH-7): score = w_dense/(k + dense rank) + 1/(k + fts rank).
+  - name: weighted-swaps-a-tie-free-pair
+    w_dense: 2
+    dense: [a, b]
+    fts: [b, a]
+    expected:
+      - { id: a, score: 0.048915918 }   # 2/61 + 1/62
+      - { id: b, score: 0.048651507 }   # 2/62 + 1/61
+  - name: weighted-dense-outranks-fts-first
+    w_dense: 1.5
+    dense: [x]
+    fts: [y, x]
+    expected:
+      - { id: x, score: 0.040719196 }   # 1.5/61 + 1/62
+      - { id: y, score: 0.016393443 }   # 1/61

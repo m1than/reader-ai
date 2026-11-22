@@ -242,8 +242,23 @@ async def test_hybrid_search_returns_cited_chunks(w: World) -> None:
     assert top.page == 2
     assert top.span_id == f"{MAT_RU}:2"
     assert top.span_ids == [f"{MAT_RU}:2"]
-    assert top.dense_rank == 1 and top.fts_rank == 1
+    assert top.dense_rank == 1
+    # FR-SEARCH-7: the slice serves the dense order (hybrid measured below dense-only on v2), so no fts rank
+    params = need("reader.search.params")
+    assert params.HYBRID is False
+    assert all(r.fts_rank is None for r in result.results)
+    assert [r.dense_rank for r in result.results] == list(range(1, len(result.results) + 1))
     assert len(top.snippet) <= 300
+
+
+def test_fusion_weight_is_the_dev_set_choice() -> None:
+    import json
+
+    from .conftest import FIXTURES
+
+    params = need("reader.search.params")
+    chosen = json.loads((FIXTURES / "results" / "fusion-weight-v1.json").read_text())["chosen_w_dense"]
+    assert chosen == params.W_DENSE
 
 
 async def test_search_is_owner_isolated(w: World) -> None:

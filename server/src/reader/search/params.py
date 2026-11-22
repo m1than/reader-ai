@@ -24,6 +24,12 @@ CHUNK_OVERLAP: Final = 200
 CHUNK_MIN: Final = 80
 PASSAGE_BATCH: Final = MAX_TEXTS  # 8: the worst batch the 3g limit is sized for
 CANDIDATES: Final = 50  # structural: 5 times the default k and 2.2 % of the pilot's chunks
+# FR-SEARCH-7: weighted RRF; chosen on v1 (the dev set):
+# spec/fixtures/SRV-SEARCH/results/fusion-weight-v1.json
+W_DENSE: Final = 5.0
+# FR-SEARCH-7: False because the one v2 test left hybrid below dense-only (24 vs 27 of 40 with w 5;
+# results/fusion-test-v2.json): the slice serves the dense order, full text only when degraded.
+HYBRID: Final = False
 K_DEFAULT: Final = 10
 K_MAX: Final = 50
 Q_MAX: Final = MAX_QUERY_CHARS

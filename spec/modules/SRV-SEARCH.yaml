@@ -137,6 +137,9 @@ normative:
 #   candidates per list 50 — structural: RRF needs the lists deep enough that a chunk ranked well by one method and
 #     poorly by the other still meets; 50 is 5× the default k (10) and 2.2 % of the pilot's chunks.
 #   rrf_k 60 — REF-SEARCH-4.
+#   w_dense — chosen on v1 (the dev set) by NFR-SEARCH-1's protocol; value and grid in
+#     spec/fixtures/SRV-SEARCH/results/fusion-weight-v1.json. `params.W_DENSE` must equal the file's choice (a test
+#     checks it).
 #   k default 10, max 50 — structural: 10 is the acceptance metric's depth; 50 is the candidate depth.
 #   q 1–1000 characters — structural: a question, not a document; equals the embed query limit.
 #   snippet 300 characters — structural: a result line, not the chunk.
@@ -249,8 +252,16 @@ requirements:
          doubled, and the result is wrapped in single quotes. The quoted lexemes are joined with ` | ` and cast to
          `tsquery`, so no operator is ever parsed from user text and a chunk matches when it shares any lexeme (OR). Rows `WHERE fts @@ tsq` are ordered by `ts_rank_cd(fts, tsq) DESC, id`, top 50; lists of several
          configurations merge by the same order. A query with no lexemes gives an empty list.
-      4. **fusion:** reciprocal rank fusion with k = 60 (VEC-SEARCH-1): score = Σ 1/(60 + rank); on equal scores the
-         chunk with the better dense rank wins, where a missing dense rank counts as worse than any present one.
+      4. **fusion:** weighted reciprocal rank fusion with k = 60 (VEC-SEARCH-1): score = w_dense/(60 + dense rank) +
+         1/(60 + full-text rank), a missing rank contributing 0; w_dense is the bound chosen on the dev set (bounds,
+         NFR-SEARCH-1 protocol). On equal scores the chunk with the better dense rank wins, where a missing dense rank
+         counts as worse than any present one. If the one test-set evaluation (NFR-SEARCH-1) leaves hybrid below
+         dense-only, the slice's `search()` orders by the dense list alone and uses the full-text list only when the
+         dense list is unavailable (`degraded`); the hybrid result is then recorded as a measured negative result for
+         V.cost-optimize / stage 3. **Measured (2026-11-22): that is the case.** With w_dense 5 (chosen on v1), v2
+         gave hybrid 24/40 against dense-only 27/40 (results/fusion-test-v2.json), so the slice serves the dense order
+         (`params.HYBRID` false): results carry `dense_rank` and no `fts_rank` unless degraded. The weighted fusion
+         stays implemented and tested for stage 3's revisit.
       5. returns the top k as `{chunk_id, material_sha256, page, span_id: "<material_sha256>:<primary_seq>", span_ids,
          snippet, score, dense_rank, fts_rank}`. `snippet` is the chunk text cut to 300 characters at the last whitespace
          at or before 300, or hard at 300 when there is none.
@@ -316,13 +327,21 @@ invariants:
 
 nfr:
   - id: NFR-SEARCH-1
-    metric: hybrid hits at 10 on the 40 owner-accepted v2 pilot questions (VEC-SEARCH-3), a hit = any gold page among the top 10 results' pages
+    metric: hits at 10 of the order search() serves on the 40 owner-accepted v2 pilot questions (VEC-SEARCH-3), a hit = any gold page among the top 10 results' pages
     threshold: 27
     verified_by: bench
     note: "Two conditions, both in the same [local] run on the same chunks: hybrid hits ≥ dense-only hits, and hybrid hits
       ≥ 27 of 40 (0.675, the spike's dense-only bge-m3 result on the raw text layer). The run reports three numbers:
       dense-only, full-text-only and hybrid hits at 10 (plus recall@1, recall@3, MRR and the count of questions whose
-      full-text list was empty), and the hybrid result against ADR-0007's 0.8 revisit trigger."
+      full-text list was empty), and the hybrid result against ADR-0007's 0.8 revisit trigger.
+      Dev/test protocol (coordinator decision 2026-11-22, after the first bench gave hybrid 24 < dense 27 with
+      equal weights): v1 (30 questions) is the dev set and v2 (40) the test set. w_dense is chosen from the grid
+      {1, 1.5, 2, 3, 5} on v1 only, maximising v1 recall@10, then v1 MRR, then the smallest w; the [local] grid phase
+      (READER_BENCH_PHASE=grid) reads no v2 question. The chosen w is then evaluated once on v2. Results:
+      spec/fixtures/SRV-SEARCH/results/fusion-weight-v1.json (grid) and results/fusion-test-v2.json (the one test).
+      Measured: v1 grid hits 29, 29, 29, 30, 30 and MRR 0.756, 0.771, 0.796, 0.822, 0.824 for w 1, 1.5, 2, 3, 5, so
+      w = 5; v2 with w 5: dense 27, full text 14, hybrid 24 of 40. Hybrid stays below dense-only, so search() serves the
+      dense order (FR-SEARCH-7) and the conditions apply to it: 27 ≥ 27 and 27 ≥ dense-only 27 (pass)."
   - id: NFR-SEARCH-2
     metric: hybrid recall@10 on the 30 v1 pilot questions (spikes/embeddings-local/questions.yaml)
     threshold: 0.8
@@ -344,7 +363,7 @@ nfr:
 
 vectors:
   - id: VEC-SEARCH-1
-    source: hand-computed reciprocal rank fusion, k = 60 (REF-SEARCH-4)
+    source: hand-computed (weighted) reciprocal rank fusion, k = 60 (REF-SEARCH-4); cases without `w_dense` use 1
     file: spec/fixtures/SRV-SEARCH/rrf.yaml
   - id: VEC-SEARCH-2
     source: synthetic spans; windows computed by hand with small parameters (algorithm of spikes/embeddings-local/bench.py chunk_pages over spans)
@@ -380,4 +399,4 @@ owner_notes:
   - "While the full pilot embeds (about 22–36 min at 8 CPUs), the worker's single job slot is busy; compile stages wait."
   - "After changing a material's `language` in reader.yaml, run `reader.search.ensure <material>`: search keeps using the old chunks until the new key is embedded, and nothing re-embeds automatically."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Owner accepted ADR-0028 (2026-11-22). spikes/embed-service landed (559bc35): ≤ 8 texts per call, mem_limit 3g, query timeout 30 s. Review complete (one round plus the D1 delta). Approved by agent 2026-11-22 with the Red tests (one round per policy, D1 fixed, spike numbers: 2,410 MiB for 8 texts at cap 1,024 → mem_limit 3g; worst batch of 8 11–13 s at 8 CPUs → query timeout 30 s). At approval: the ingest dependency, the test image and the dev-environment typing are declared deviations (header). Green, 2026-11-22: test-data correction, no requirement changed — VEC-SEARCH-5's texts and the [db] tests' synthetic spans were shorter than CHUNK_MIN (80), so they made no chunk; lengthened with filler words that share no lexeme with the queries. VEC-SEARCH-3's `status:` value is quoted (the unquoted `: ` inside it made the copy invalid YAML), as in the fixed source on V/owner-housekeeping; no question changed."
+review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Owner accepted ADR-0028 (2026-11-22). spikes/embed-service landed (559bc35): ≤ 8 texts per call, mem_limit 3g, query timeout 30 s. Review complete (one round plus the D1 delta). Approved by agent 2026-11-22 with the Red tests (one round per policy, D1 fixed, spike numbers: 2,410 MiB for 8 texts at cap 1,024 → mem_limit 3g; worst batch of 8 11–13 s at 8 CPUs → query timeout 30 s). At approval: the ingest dependency, the test image and the dev-environment typing are declared deviations (header). Green, 2026-11-22: test-data correction, no requirement changed — VEC-SEARCH-5's texts and the [db] tests' synthetic spans were shorter than CHUNK_MIN (80), so they made no chunk; lengthened with filler words that share no lexeme with the queries. VEC-SEARCH-3's `status:` value is quoted (the unquoted `: ` inside it made the copy invalid YAML), as in the fixed source on V/owner-housekeeping; no question changed. Paired change after the first bench (coordinator decision 2026-11-22): weighted RRF with w_dense chosen on v1 only (dev/test protocol, NFR-SEARCH-1), evaluated once on v2; hybrid stayed below dense-only (24 vs 27), so the slice serves the dense order (FR-SEARCH-7, measured negative result for stage 3); VEC-SEARCH-1 gains two weighted cases; the [db] hybrid test expects the dense order without an fts rank."

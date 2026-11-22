@@ -147,7 +147,8 @@ async def search(
     k: int = params.K_DEFAULT,
     material_sha256: str | None = None,
 ) -> SearchResult:
-    """FR-SEARCH-7: hybrid top k; with the embed service down, the full-text list alone, `degraded`."""
+    """FR-SEARCH-7: weighted-RRF top k (or the dense order alone when params.HYBRID is off); with the embed
+    service down, the full-text list alone, `degraded`."""
     degraded = False
     try:
         vector: list[float] | None = await embed_query(query)
@@ -156,8 +157,9 @@ async def search(
         vector, degraded = None, True
     async with engine.connect() as conn:
         dense = await dense_list(conn, owner_id, vector, material_sha256) if vector is not None else []
-        fts = await fts_list(conn, owner_id, query, material_sha256)
-        fused = rrf(dense, fts)[:k]
+        use_fts = params.HYBRID or vector is None
+        fts = await fts_list(conn, owner_id, query, material_sha256) if use_fts else []
+        fused = rrf(dense, fts, w_dense=params.W_DENSE)[:k]
         if not fused:
             return SearchResult([], degraded)
         rows = await conn.execute(

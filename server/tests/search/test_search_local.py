@@ -80,39 +80,54 @@ def _truncated(cid: str, texts: list[str]) -> int:
     return int(out.stdout.strip())
 
 
-async def _hits(w: World, questions: list[dict[str, Any]], store: Any) -> dict[str, Any]:
+GRID = (1, 1.5, 2, 3, 5)  # NFR-SEARCH-1's dev/test protocol
+RESULTS = FIXTURES / "results"
+PHASE = os.environ.get("READER_BENCH_PHASE", "test")  # grid: v1 only; test: the one v2 evaluation
+
+
+async def _lists(w: World, questions: list[dict[str, Any]], store: Any) -> list[dict[str, Any]]:
+    """Per question: gold pages, the dense and the full-text candidate lists (w-independent), chunk → page."""
     owner = w.users["ivan"]
-    counts = {"dense": 0, "fts": 0, "hybrid": 0}
-    r1 = r3 = 0
-    mrr = 0.0
-    empty_fts = 0
+    out = []
     for q in questions:
-        gold = set(q["gold_pages"])
         vector = await store.embed_query(q["question"])
         async with w.engine.connect() as conn:
-            dense_ids = (await store.dense_list(conn, owner, vector, None))[:10]
-            fts_ids = await store.fts_list(conn, owner, q["question"], None)
-            empty_fts += not fts_ids
-            fts_ids = fts_ids[:10]
-            dense_pages = [await store.page_of(conn, i) for i in dense_ids]
-            fts_pages = [await store.page_of(conn, i) for i in fts_ids]
-        hybrid = await store.search(w.engine, owner, q["question"], k=10)
-        pages = [h.page for h in hybrid.results]
-        counts["dense"] += bool(gold & set(dense_pages))
-        counts["fts"] += bool(gold & set(fts_pages))
-        counts["hybrid"] += bool(gold & set(pages))
-        rank = next((i + 1 for i, p in enumerate(pages) if p in gold), None)
+            dense = await store.dense_list(conn, owner, vector, None)
+            fts = await store.fts_list(conn, owner, q["question"], None)
+            pages = {i: await store.page_of(conn, i) for i in {*dense, *fts}}
+        out.append({"gold": set(q["gold_pages"]), "dense": dense, "fts": fts, "pages": pages})
+    return out
+
+
+def _metrics(lists: list[dict[str, Any]], order: Any) -> dict[str, Any]:
+    """Hits at 10, recall@1/3 and MRR for the ranking `order(item)` gives each question."""
+    hits = r1 = r3 = 0
+    mrr = 0.0
+    for item in lists:
+        pages = [item["pages"][cid] for cid in order(item)[:10]]
+        rank = next((i + 1 for i, p in enumerate(pages) if p in item["gold"]), None)
+        hits += rank is not None
         r1 += rank == 1
         r3 += rank is not None and rank <= 3
         mrr += 1 / rank if rank else 0.0
-    n = len(questions)
-    return {
-        **counts, "n": n, "recall_at_1": r1 / n, "recall_at_3": r3 / n, "mrr": round(mrr / n, 3),
-        "empty_fts_lists": empty_fts,
-    }
+    n = len(lists)
+    return {"hits": hits, "n": n, "recall_at_10": hits / n, "recall_at_1": r1 / n, "recall_at_3": r3 / n,
+            "mrr": round(mrr / n, 4)}
 
 
-def _report(result: dict[str, Any]) -> None:
+def _fused(w_dense: float) -> Any:
+    fusion = need("reader.search.fusion")
+    return lambda item: [f.id for f in fusion.rrf(item["dense"], item["fts"], w_dense=w_dense)]
+
+
+def _choose(grid: dict[str, dict[str, Any]]) -> float:
+    """Max v1 recall@10, then MRR, then the smallest w (NFR-SEARCH-1)."""
+    return min(GRID, key=lambda w: (-grid[str(w)]["recall_at_10"], -grid[str(w)]["mrr"], w))
+
+
+def _write(name: str, result: dict[str, Any]) -> None:
+    RESULTS.mkdir(exist_ok=True)
+    (RESULTS / name).write_text(json.dumps(result, indent=2) + "\n")
     out = Path(os.environ.get("READER_BENCH_OUT") or tempfile.mktemp(suffix=".json"))  # noqa: S306
     out.write_text(json.dumps(result, indent=2))
     print(json.dumps(result))
@@ -121,6 +136,7 @@ def _report(result: dict[str, Any]) -> None:
 async def test_pilot_bench(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = need("reader.search.store")
     jobs = need("reader.search.jobs")
+    params = need("reader.search.params")
     from sqlalchemy import text
 
     from reader.jobs.model import JobContext
@@ -138,22 +154,50 @@ async def test_pilot_bench(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPat
             await jobs.handle_embed(args, conn, JobContext(1, "bench", 0))
         embed_min = (time.monotonic() - started) / 60
         chunks = await scalar(w.engine, "SELECT count(*) FROM search_chunks")
+        base = {
+            "pdf_sha256": pdf_sha,
+            "spans": "pypdfium2 text layer, one span per page (no SRV-INGEST artifact yet)",
+            "chunks": chunks, "embed_job_min": round(embed_min, 2),
+        }
+        v1 = await _lists(w, _questions(V1), store)
+        if PHASE == "grid":  # the dev set only; no v2 question is read in this phase
+            grid = {str(wd): _metrics(v1, _fused(wd)) for wd in GRID}
+            chosen = _choose(grid)
+            rule = "max recall@10, then MRR, then smallest w"
+            dev = {**base, "set": "v1 (dev)", "grid": grid, "chosen_w_dense": chosen, "rule": rule}
+            _write("fusion-weight-v1.json", dev)
+            await w.engine.dispose()
+            return
         async with w.engine.connect() as conn:
             texts = [r[0] for r in await conn.execute(text("SELECT text FROM search_chunks ORDER BY id"))]
         truncated = _truncated(cid, texts)
-        v2 = await _hits(w, _questions(FIXTURES / "pilot-questions-v2.yaml"), store)
-        v1 = await _hits(w, _questions(V1), store)
-        _report({
-            "pdf_sha256": pdf_sha,
-            "spans": "pypdfium2 text layer, one span per page (no SRV-INGEST artifact yet)",
-            "chunks": chunks, "embed_job_min": round(embed_min, 2), "truncated_chunks": truncated,
-            "questions_v2": v2, "questions_v1": v1,
-        })
+        chosen = json.loads((RESULTS / "fusion-weight-v1.json").read_text())["chosen_w_dense"]
+        assert chosen == params.W_DENSE
+        v2 = await _lists(w, _questions(FIXTURES / "pilot-questions-v2.yaml"), store)
+        result = {
+            **base, "truncated_chunks": truncated, "w_dense": chosen,
+            "v2_test": {
+                "dense": _metrics(v2, lambda i: i["dense"]), "fts": _metrics(v2, lambda i: i["fts"]),
+                "hybrid": _metrics(v2, _fused(chosen)),
+                "empty_fts_lists": sum(not i["fts"] for i in v2),
+            },
+            "v1_dev": {
+                "dense": _metrics(v1, lambda i: i["dense"]), "fts": _metrics(v1, lambda i: i["fts"]),
+                "hybrid": _metrics(v1, _fused(chosen)),
+            },
+        }
+        served = await store.search(w.engine, w.users["ivan"], _questions(V1)[0]["question"], k=10)
+        result["search_mode"] = "hybrid" if params.HYBRID else "dense-only (hybrid below dense on v2)"
+        result["search_served_results"] = len(served.results)
+        _write("fusion-test-v2.json", result)
         await w.engine.dispose()
     finally:
         subprocess.run(["docker", "rm", "-f", cid], capture_output=True, check=False)  # noqa: ASYNC221
+    v2t, v1d = result["v2_test"], result["v1_dev"]
+    served_mode = "hybrid" if params.HYBRID else "dense"
     assert truncated == 0  # NFR-SEARCH-4
-    assert v2["hybrid"] >= v2["dense"]  # NFR-SEARCH-1, first condition
-    assert v2["hybrid"] >= 27  # NFR-SEARCH-1, second condition
-    assert v1["hybrid"] / v1["n"] >= 0.8  # NFR-SEARCH-2
+    # NFR-SEARCH-1, first condition, for what search() serves
+    assert v2t[served_mode]["hits"] >= v2t["dense"]["hits"]
+    assert v2t[served_mode]["hits"] >= 27  # NFR-SEARCH-1, second condition
+    assert v1d[served_mode]["recall_at_10"] >= 0.8  # NFR-SEARCH-2
     assert embed_min <= 60  # NFR-SEARCH-3

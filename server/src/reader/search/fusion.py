@@ -18,8 +18,11 @@ class Fused[T: Hashable]:
     fts_rank: int | None
 
 
-def rrf[T: Hashable](dense: Sequence[T], fts: Sequence[T], k: int = RRF_K) -> list[Fused[T]]:
-    """score = Σ 1/(k + rank); equal scores: the better dense rank wins, a missing one counts as worst.
+def rrf[T: Hashable](
+    dense: Sequence[T], fts: Sequence[T], k: int = RRF_K, w_dense: float = 1.0
+) -> list[Fused[T]]:
+    """score = w_dense/(k + dense rank) + 1/(k + fts rank); equal scores: the better dense rank wins, a
+    missing one counts as worst.
 
     The last key, the position in the input lists, only makes the order total; it is never reached for two
     distinct ids with equal scores and equal dense ranks (the spec's tie rule is complete)."""
@@ -29,7 +32,7 @@ def rrf[T: Hashable](dense: Sequence[T], fts: Sequence[T], k: int = RRF_K) -> li
     fused = [
         Fused(
             cid,
-            (1 / (k + dense_rank[cid]) if cid in dense_rank else 0.0)
+            (w_dense / (k + dense_rank[cid]) if cid in dense_rank else 0.0)
             + (1 / (k + fts_rank[cid]) if cid in fts_rank else 0.0),
             dense_rank.get(cid),
             fts_rank.get(cid),

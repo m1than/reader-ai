@@ -78,7 +78,7 @@ def test_rrf_matches_the_fixture() -> None:
     fusion = need("reader.search.fusion")
     data = fixture("rrf.yaml")
     for case in data["cases"]:
-        fused = fusion.rrf(case["dense"], case["fts"], k=data["k"])
+        fused = fusion.rrf(case["dense"], case["fts"], k=data["k"], w_dense=case.get("w_dense", 1))
         got = [{"id": f.id, "score": round(f.score, 9)} for f in fused]
         assert got == case["expected"], case["name"]
 
@@ -86,13 +86,14 @@ def test_rrf_matches_the_fixture() -> None:
 @given(
     st.lists(st.integers(0, 40), unique=True, max_size=15),
     st.lists(st.integers(0, 40), unique=True, max_size=15),
+    st.sampled_from([1, 1.5, 2, 3, 5]),
 )
-def test_rrf_is_the_formula_and_tie_rule(dense: list[int], fts: list[int]) -> None:
+def test_rrf_is_the_formula_and_tie_rule(dense: list[int], fts: list[int], w: float) -> None:
     fusion = need("reader.search.fusion")
-    fused = fusion.rrf(dense, fts, k=60)
+    fused = fusion.rrf(dense, fts, k=60, w_dense=w)
     assert {f.id for f in fused} == set(dense) | set(fts)
     for f in fused:
-        expected = (1 / (60 + dense.index(f.id) + 1) if f.id in dense else 0.0) + (
+        expected = (w / (60 + dense.index(f.id) + 1) if f.id in dense else 0.0) + (
             1 / (60 + fts.index(f.id) + 1) if f.id in fts else 0.0
         )
         assert f.score == pytest.approx(expected, abs=1e-12)
