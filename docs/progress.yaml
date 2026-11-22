@@ -144,6 +144,14 @@ tasks:
         bge-m3 0.675; MRR 0.230 / 0.409 / 0.413; full pilot 1.2 / 15.1 / 14.1 min. e5-small rejected on recall; the bge-m3 pair is
         within noise. Agent recommends BAAI/bge-m3 (general multilingual, best recall@1 and MRR, MIT); V.SRV-SEARCH-min uses it
         and measures the hybrid on v2 as its acceptance number." }
+  - { id: S0.spike.embed-service, stage: 0, kind: spike, status: done, needs: [S0.spike.embeddings-local],
+      result: "spikes/embed-service/RESULT.md: bge-m3 (rev 5617a9f…, baked, image 5.6 GB), fp32, torch 2.15.0+cpu,
+        sentence-transformers 6.3.0, under the OPS-DEPLOY hardening flags. Cap 1,024, worst admitted request (32 texts at
+        1,024 tokens): peak RSS 3,644 MiB, memory.peak 2,289–2,415 MiB; worst batch of 8 alone: RSS 2,410, memory.peak 1,137.
+        8 CPUs: idle query 0.5–0.9 s, worst batch of 8 11–13 s, worst batch of 32 62 s, prose 1.05–1.72 chunks/s (±40 % run
+        variance). Cap 512 comparison: RSS 2,956, memory.peak 1,626. bf16 on CPU rejected (higher memory, 9–30× slower).
+        torch.load(weights_only=True) of pytorch_model.bin works. Recommended embed mem_limit 4.5 GiB (RSS × 1.25);
+        3.0 GiB if calls were limited to 8 texts." }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
       review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
@@ -584,22 +592,40 @@ tasks:
         origin/V/V.SRV-SEARCH-min holds only its spec and origin/V/SRV-SEARCH-impl does not exist; once OPS-DEPLOY adds it
         with a build section, `reader up` builds and starts it with no OPS-CLI change; it is not a secret consumer." }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
-      branch: V/V.SRV-SEARCH-min,
-      note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 approved by
-        deep-reviewer and accepted by the owner (2026-11-22). BAAI/bge-m3
-        (owner-confirmed 2026-11-21) in service `embed` on its own internal network (api, worker, embed), no secrets,
-        model baked from a pinned revision; one encode at a time, passage batches of 8, query timeout 10 s,
-        max_seq_length 1,024 (reviewer-measured: prose 266, Rust 603, hex 740, LaTeX 887 tokens per 1,200 chars). Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
-        lexemes, RRF k=60, total orders. Acceptance: hybrid hits ≥ dense-only hits in the same run and ≥ 27/40 on
-        questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
-        VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
-        module only; an unhealthy embed service raises EmbedUnavailable, a transient that spends an attempt), SRV-INGEST (enqueue search.embed after import)." }
+      branch: V/SRV-SEARCH-impl,
+      impl: "Spec approved by agent (6e37914, with Red). Green 1890712, 740b548: reader.search (embed service, chunking,
+        RRF, OR full text, search(), POST /api/search, search.embed job, ensure, migration search_0001), embed image
+        (hash-locked wheels, model verified by sha256 at build, 5.6 GB), pgvector 0.8.7 in reader-postgres, compose
+        embed service on its own network; paired SRV-AUTH (ROUTERS, VERSION_LOCATIONS, hide_parameters) and OPS-DEPLOY
+        (FR-1/2/3/9/11, VEC-DEPLOY-2) changes; module tests run Postgres from pgvector/pgvector:0.8.7-pg18-trixie.
+        Tests: search 57 passed (unit + db), [image] 4 passed (build, offline embed, no text in logs, weights_only
+        refuses a non-allow-listed global, real checkpoint loads); ci-local PASS. [local] bench 2026-11-22 (pilot
+        PDF, pypdfium2 page text as spans because no SRV-INGEST artifact exists yet; real embed image, batches of 8):
+        2,285 chunks (= the spike's), embed job 17.18 min, 0 truncated chunks. questions-v2 hits at 10: dense 27,
+        full text 14, hybrid 24 (recall@1 0.225, @3 0.425, MRR 0.338, 0 empty full-text lists); questions-v1: dense
+        30, full text 26, hybrid 29 of 30. NFR-SEARCH-1 FAILS: hybrid 24 < dense-only 27 and < 27; NFR-SEARCH-2
+        (0.967 ≥ 0.8), -3 (17.18 ≤ 60) and -4 (0 truncated) pass. Dense reproduces the spike's 0.675 exactly, so the
+        embed path is right; equal-weight RRF with the weak OR full-text list (14/40) costs 3 hits. Fusion is not
+        tuned against the acceptance set; decision needed (coordinator/owner).",
+      note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
+        ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
+        ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at
+        cap 1,024, peak RSS 2,410 MiB for the worst 8-text request, so the service admits ≤ 8 texts per call and its
+        mem_limit is 3g; at 8 CPUs a worst batch of 8 takes 11–13 s, so the query timeout is 30 s (chosen over a batch
+        of 4); full pilot about 22–36 min. Status stays draft: approval goes in the Red commit (T5), which the
+        coordinator schedules after the integration branch lands. Design: service `embed` on its own internal network
+        (api, worker, embed), no secrets, model baked from revision 5617a9f6; one encode at a time; exact dense scan
+        (HNSW deferred); OR full text from the query's lexemes; RRF k=60; total orders. Acceptance: hybrid hits ≥
+        dense-only hits in the same run and ≥ 27/40 on questions-v2. Paired changes: OPS-DEPLOY (embed service 3g,
+        network, VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters),
+        SRV-EVENTS (kind module), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
-      branch: V/V.TUTOR-min,
+      branch: V/SRV-TUTOR-impl,
       note: "spec round 1 (bfb7047): changes; round 2 (410314b): changes; round 3 (30890d8): approve. Implementation on
-        V/SRV-TUTOR-impl. Question as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off,
-        byte-based reserve with ≈ 410 measured CLI overhead tokens; caps $0.30 per question and $3 per day; about $0.048
-        per L02-shaped question (VEC-TUTOR-3)." }
+        V/SRV-TUTOR-impl (merges V/V.TUTOR-min, V/V.COMPILE-min, V/SRV-INGEST-impl, V/SRV-SEARCH-impl). Question as a
+        job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off, byte-based reserve with ≈ 410
+        measured CLI overhead tokens; caps $0.30 per question and $3 per day; about $0.048 per L02-shaped question
+        (VEC-TUTOR-3)." }
   - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token

@@ -5,28 +5,39 @@
 # returns the owner's top-k chunks, each with its span ids and page, for the api route and for the internal callers
 # V.COMPILE-min and V.TUTOR-min.
 #
-# Where embedding runs: ADR-0028 (proposed; the owner sets its status). A dedicated service `embed` on its own internal
+# Where embedding runs: ADR-0028 (accepted by the owner 2026-11-22). A dedicated service `embed` on its own internal
 # network `embed` (members api, worker, embed only; no route to postgres, mcp, agent-proxy, kernels or the internet),
-# no secrets, model baked into the image from a pinned revision. Its mem_limit comes from spikes/embed-service, which
-# measures peak RSS for the worst admitted request (FR-SEARCH-1 limits). Measured speed: 2.71 chunks/s with 13 torch
-# threads in the Docker VM; the full pilot of 2,285 chunks in 841.74 s = 14.03 min
-# (spikes/embeddings-local/results/20261120T232835-v2/BAAI__bge-m3.json).
+# no secrets, model baked into the image from a pinned revision. spikes/embed-service measured it (fp32, cap 1,024,
+# worst-case texts): peak RSS 877 MiB after load, 2,410 MiB for the worst request of 8 texts, 3,644 MiB for 32; at
+# 8 CPUs an idle query takes 0.5–0.9 s, a worst batch of 8 takes 11–13 s, and the full pilot about 22–36 min. The
+# service admits at most 8 texts per call, so its mem_limit is 3g (2,410 × 1.25, rounded). The embeddings-local spike's
+# 14.03 min (13 threads, batch 32, raw text layer) is the earlier reference.
 #
 # Cross-spec items (paired changes in their own specs):
-#   - OPS-DEPLOY: service `embed` and network `embed` (internal: true; api, worker, embed), `deploy/images/embed.Dockerfile`
-#     (HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 as ENV; the server package installed with the `embed` extra), new
+#   - OPS-DEPLOY: service `embed` (mem_limit 3g, memswap_limit 3g, from spikes/embed-service; no cpus limit in the
+#     slice) and network `embed` (internal: true; api, worker, embed), `deploy/images/embed.Dockerfile`
+#     (HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 as ENV; dependencies installed from the hash-locked
+#     `deploy/images/embed.requirements.lock` with `--require-hashes`; only the files `reader/search/__init__.py`,
+#     `embed_service.py`, `fetch_model.py` and `models.lock.json` copied into site-packages, so the image carries no
+#     config, db or api code; healthcheck `["CMD", "python", "-I", "-m", "reader.search.embed_service",
+#     "--healthcheck"]`), new
 #     VEC-DEPLOY-2 reachability pairs (api→embed, worker→embed allowed; embed→postgres, embed→mcp, embed→agent-proxy,
 #     embed→kernel-*, embed→internet refused); no `depends_on: embed` anywhere; and the reader-postgres image installs
 #     `postgresql-18-pgvector` 0.8.7-1.pgdg13+2 from the image's PGDG apt source (measured 2026-11-21 with
 #     `apt-cache policy` in the pinned postgres:18-trixie digest; the official image ships no pgvector). If PGDG drops
 #     that exact version, the fallback is building pgvector from its v0.8.7 source tag in the same Dockerfile.
 #   - SRV-AUTH: `reader.api.app.ROUTERS` adds `reader.search.routes`; the declared `version_locations` adds
-#     `reader/search/migrations` (branch label `search`, depends_on the ingest branch head); the engine is created with
-#     `hide_parameters=True`, so SQL errors never log bound parameters such as a query text.
+#     `reader/search/migrations` (branch label `search`, down_revision SRV-AUTH's `0001_auth`; see FR-SEARCH-4 for the
+#     ingest dependency); the engine is created with `hide_parameters=True`, so SQL errors never log bound parameters
+#     such as a query text.
+#   - Tests of every module that migrates to heads (auth, jobs, lessons, kernels, search) run Postgres from the pinned
+#     image `pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa`
+#     (the official postgres:18-trixie plus pgvector 0.8.7, the version reader-postgres installs), because this
+#     module's migration is one of the heads and needs the `vector` extension. The conftests change, not the tests.
 #   - SRV-EVENTS: the declared kind-module list adds `reader.search.jobs`.
 #   - SRV-INGEST: after a successful `ingest.import`, the import handler enqueues `search.embed` for that ingest
 #     (FR-SEARCH-5's key); enqueue is idempotent.
-#   - V.COMPILE-min: SRV-EVENTS runs the worker at concurrency 1, so a full-pilot embed job (about 14 min) holds the only
+#   - V.COMPILE-min: SRV-EVENTS runs the worker at concurrency 1, so a full-pilot embed job (about 22–36 min at 8 CPUs) holds the only
 #     job slot; compile stages queue behind it.
 #
 # Declared deviations:
@@ -46,12 +57,22 @@
 #     build reads it.
 #   - REF URLs: the pgvector README is pinned to the v0.8.7 tag (the PGDG package version); the bge-m3 card is read at
 #     the revision recorded in models.lock.json.
+#   - SRV-INGEST's code and migration are not on the integration branch yet (built in parallel). So this module's
+#     migration branches off `0001_auth`, `ingest_id` is a plain uuid column without a foreign key, and the [db] tests
+#     create the three SRV-INGEST tables they read (`materials`, `ingests`, `material_spans`, columns as in
+#     SRV-INGEST FR-INGEST-14) through a test-only helper in server/tests/search/. When SRV-INGEST's migration lands, a
+#     follow-up revision (task V.SRV-SEARCH-fk) re-parents this branch onto the ingest head and adds the foreign keys.
+#   - torch and sentence-transformers are not installed in the dev environment (several GB); the module that imports
+#     them (`embed_service`) keeps them behind a typed `Encoder` protocol and mypy treats the two packages as untyped
+#     (`ignore_missing_imports`), so `mypy --strict` still covers every line of reader.search. The real model is
+#     exercised only by the [image] tests and the [local] bench.
+#   - Job kinds are exported as `JOB_KINDS` (SRV-EVENTS' catalog contract), not `KINDS`.
 
 id: SRV-SEARCH
 title: Search (slice) — bge-m3 chunks and Postgres full text, fused by reciprocal rank, with span citations
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: ai
 slice: V.SRV-SEARCH-min
@@ -64,7 +85,7 @@ paths:
 
 normative:
   - id: REF-SEARCH-1
-    title: "ADR-0028 — the embed service on its own internal network (proposed)"
+    title: "ADR-0028 — the embed service on its own internal network (accepted 2026-11-22)"
     url: docs/adr/0028-embed-service.md
   - id: REF-SEARCH-2
     title: "Spike embeddings-local — model choice (BAAI/bge-m3, owner-confirmed 2026-11-21), chunking, v2 results"
@@ -84,6 +105,9 @@ normative:
   - id: REF-SEARCH-7
     title: "SRV-INGEST (slice) — material_spans, span id <material_sha256>:<seq>, frozen converter_version"
     url: spec/modules/SRV-INGEST.yaml
+  - id: REF-SEARCH-9
+    title: "Spike embed-service — bge-m3 fp32 at cap 1,024 in the hardened service image: peak RSS, speed by CPU count, bf16 rejected, weights_only load"
+    url: spikes/embed-service/RESULT.md
   - id: REF-SEARCH-8
     title: "ADR-0007 — Postgres with pgvector; hybrid full text + vectors by reciprocal rank fusion; vectors carry the model id"
     url: docs/adr/0007-storage.md
@@ -95,17 +119,21 @@ normative:
 #   max_seq_length 1,024 tokens — measured by the reviewer with bge-m3's tokenizer on 1,200-character texts: Russian
 #     prose 266, Rust code 603, hex 740, LaTeX 887 tokens. 1,024 covers all four kinds, so code and formula chunks are
 #     not cut, and keeps the attention cost (quadratic in length) and the peak RSS bounded well below the model's 8192.
-#     The [local] bench reports how many chunks the cap truncated; spikes/embed-service measures memory at this cap.
-#   embed request: at most 32 texts; a passage at most 1,200 characters, a query at most 1,000 — the callers' own
-#     limits, so nothing larger is ever sent; 32 is the spike's batch (bench.py --batch default).
-#   embed body cap 256 KiB — structural: 32 × 1,200 characters × 6 bytes (a \uXXXX JSON escape, the worst case) is
-#     230,400 bytes plus framing.
-#   passage batch 8 — structural: at the measured 2.71 chunks/s a batch takes about 3 s, which is the longest a query
-#     waits behind passage work (FR-SEARCH-1, one encode at a time).
-#   timeouts: query call 10 s (one passage batch ≈ 3 s + the query's own encode, about 3× margin); passage batch call
-#     30 s (10× a batch); embed /health wait before the first batch 300 s (model load from the image; the spike's load_s
-#     is 1.38 s in a warm container, so 300 s covers a cold first start of a multi-GB image with wide margin).
-#   job timeout 3600 s — structural: 4.3 × the measured 14.03 min full-pilot embed.
+#     The [local] bench reports how many chunks the cap truncated; spikes/embed-service measured memory at this cap.
+#   embed request: at most 8 texts; a passage at most 1,200 characters, a query at most 1,000 — 8 is the job's batch,
+#     and the memory limit is sized for exactly this worst request (spikes/embed-service: 2,410 MiB peak RSS; 32 texts
+#     would need 3,644 MiB).
+#   embed mem_limit 3g — spikes/embed-service: 2,410 MiB × 1.25, rounded.
+#   embed body cap 64 KiB — structural: 8 × 1,200 characters × 6 bytes (a \uXXXX JSON escape, the worst case) is
+#     57,600 bytes plus framing.
+#   passage batch 8 — measured worst 11–13 s at 8 CPUs (spikes/embed-service); that is the longest a query waits behind
+#     passage work (FR-SEARCH-1, one encode at a time).
+#   timeouts: query call 30 s — structural from the spike: one worst batch of 8 (13.29 s at 8 CPUs) plus the query's
+#     own encode (0.93 s), about 2× margin. Chosen over shrinking the batch to 4, because the memory limit and the
+#     measured numbers are for batch 8. Passage batch call 60 s (4.5× the worst batch of 13.29 s). Embed /health wait
+#     before the first batch 300 s (load measured at 0.88–1.41 s warm; 300 s covers a cold first start of a 5.6 GB image
+#     with wide margin).
+#   job timeout 3600 s — structural: 1.7× the upper end of the measured full-pilot estimate, 22–36 min at 8 CPUs.
 #   candidates per list 50 — structural: RRF needs the lists deep enough that a chunk ranked well by one method and
 #     poorly by the other still meets; 50 is 5× the default k (10) and 2.2 % of the pilot's chunks.
 #   rrf_k 60 — REF-SEARCH-4.
@@ -122,22 +150,31 @@ requirements:
       - `POST /embed` with JSON `{"kind": "passage" | "query", "texts": [str, …]}` returns
         `{"model": "BAAI/bge-m3@<revision>", "dimensions": 1024, "vectors": [[float × 1024], …]}`, one L2-normalised
         vector per text (`normalize_embeddings=True`), no prefix or instruction for either kind (REF-SEARCH-3).
-        Limits: 1–32 texts; each text non-empty; a passage ≤ 1,200 characters, a query ≤ 1,000. A body over 256 KiB is
+        Limits: 1–8 texts; each text non-empty; a passage ≤ 1,200 characters, a query ≤ 1,000. A body over 64 KiB is
         refused before parsing (413). Violations answer 400 with a fixed code (`too_many_texts`, `text_too_long`,
         `bad_request`).
       - **One encode at a time.** Requests wait in one FIFO queue and are encoded one by one, so a query that arrives
         during a passage batch waits at most for that batch.
       - `GET /health` answers 200 `{"model": …}` once the model is loaded, 503 before.
+        `python -I -m reader.search.embed_service --healthcheck` exits 0 when `http://127.0.0.1:8100/health` answers
+        200 within 2 s, else 1 (the compose healthcheck).
       - It logs counts and durations only, never a text.
-      - The module imports neither `reader.config` nor `reader.db`. torch and sentence-transformers come only from the
-        server package's optional extra `embed`, installed in the embed image and in the dev environment (so mypy
-        `--strict` covers the module), not in the api/worker image.
+      - Before handing the directory to sentence-transformers it loads `pytorch_model.bin` itself with
+        `torch.load(path, map_location="cpu", weights_only=True)` through `load_checkpoint()`; a pickle with a global
+        outside torch's allow-list is refused there, and the service exits 1 with code `unsafe_checkpoint`.
+      - The module imports neither `reader.config` nor `reader.db` (nor anything else from `reader` but
+        `reader.search`), and its only third-party imports are torch and sentence-transformers, loaded inside the
+        encoder factory; the HTTP server is the standard library's. torch and sentence-transformers are not in the
+        api/worker image (declared deviation on the dev environment above).
       [unit] with a fake encoder for the protocol, limits and FIFO; [image] for the real model.
   - id: FR-SEARCH-2
     text: >-
-      **Model pinning.** `server/src/reader/search/models.lock.json` names the repo `BAAI/bge-m3`, a commit revision,
-      and the sha256 of exactly the files the service loads (the config, tokenizer and `pytorch_model.bin` files), plus
-      hash-pinned versions of the embed extra (torch 2.15.0+cpu, sentence-transformers 6.3.0, as measured in the spike).
+      **Model pinning.** `server/src/reader/search/models.lock.json` names the repo `BAAI/bge-m3`, the commit revision
+      `5617a9f61b028005a4858fdac845db406aefb181` (the one spikes/embed-service measured; `pytorch_model.bin` is
+      2,271,145,830 bytes), and the sha256 of exactly the files the service loads (the config, tokenizer and
+      `pytorch_model.bin` files), plus hash-pinned versions of the embed extra (torch 2.15.0+cpu, transformers 5.23.0,
+      sentence-transformers 6.3.0, as measured in the spike). The service runs fp32 (bf16 measured and rejected: more
+      memory and 9–30× slower).
       The image build downloads exactly those files, verifies each hash, and fails on a mismatch. The model id used
       everywhere is `BAAI/bge-m3@<revision>`. [unit] for the lock's shape; [image] for the build check.
   - id: FR-SEARCH-3
@@ -149,24 +186,25 @@ requirements:
       the first such span on a tie. The function is pure and deterministic. [unit]
   - id: FR-SEARCH-4
     text: >-
-      **Tables.** Migration `reader/search/migrations/<rev>_search.py` (branch label `search`, depends_on the ingest
-      branch head) runs `CREATE EXTENSION IF NOT EXISTS vector` (migrations run as the postgres superuser, SRV-AUTH owner
+      **Tables.** Migration `reader/search/migrations/0001_search.py` (revision `search_0001`, branch label `search`,
+      down_revision `0001_auth`; the ingest dependency is the declared deviation above) runs `CREATE EXTENSION IF NOT EXISTS vector` (migrations run as the postgres superuser, SRV-AUTH owner
       note; a later dedicated role needs the extension created beforehand) and creates, each with
       `owner_id uuid NOT NULL` referencing `users.id`:
-      - `search_chunks(id bigint generated always as identity pk, owner_id, ingest_id fk → ingests, material_sha256 text,
+      - `search_chunks(id bigint generated always as identity pk, owner_id, ingest_id uuid (fk → ingests once
+        V.SRV-SEARCH-fk lands), material_sha256 text,
         model text, params_sha256 text, fts_config text CHECK in ('russian','english','simple'), page int, chunk_no int,
         char_start int, char_stop int, span_seqs int[], primary_seq int, text text, fts tsvector generated always as
         (to_tsvector(CASE fts_config WHEN 'russian' THEN 'russian'::regconfig WHEN 'english' THEN 'english'::regconfig
         ELSE 'simple'::regconfig END, text)) stored, embedding vector(1024) NOT NULL)`, unique
         (ingest_id, model, params_sha256, chunk_no), plus `USING gin (fts)`. `fts_config` is text, not `regconfig`,
         because pg_upgrade refuses user tables with reg* columns other than regclass, regrole and regtype.
-      - `search_embeds(owner_id, ingest_id fk, model text, params_sha256 text, chunk_count int, embedded_at)`, pk
+      - `search_embeds(owner_id, ingest_id uuid, model text, params_sha256 text, chunk_count int, embedded_at)`, pk
         (ingest_id, model, params_sha256).
       No vector index (declared deviation). Foreign keys are ON DELETE RESTRICT. The downgrade drops these two tables
       only, not the extension. [db]
   - id: FR-SEARCH-5
     text: >-
-      **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.KINDS`:
+      **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.JOB_KINDS`:
       - **args:** `{material_sha256, ingest_id, model, params_sha256}`; **key:** `[ingest_id, model, params_sha256]`.
         `params_sha256` is the sha256 of the canonical JSON of `{chunk_size, chunk_overlap, chunk_min, max_seq_length,
         model, fts_config}`, so a model, chunking or language change is a new key.
@@ -189,7 +227,7 @@ requirements:
          transient, which spends an attempt. With 3 attempts that tolerates about 15 minutes of an unavailable embed
          service (3 × 300 s plus SRV-EVENTS' backoff); after that the key is dead and `reader.search.ensure` requeues it
          (FR-SEARCH-9);
-      3. chunks the spans (FR-SEARCH-3), sends passage batches of 8 (30 s each), and in the run session inserts every
+      3. chunks the spans (FR-SEARCH-3), sends passage batches of 8 (60 s each), and in the run session inserts every
          chunk, then the `search_embeds` row, as the run transaction's last statements (SRV-EVENTS FR-EVENTS-4).
       [db] with a fake embed service, including an ingest that is aborted between enqueue and run (IngestNotReady after
       the 120 s poll, then success once the import commits), a superseded ingest (`ingest_superseded`), and a
@@ -204,7 +242,7 @@ requirements:
     text: >-
       **Hybrid ranking.** `search(owner_id, query, k, material_sha256=None)` searches only chunks whose `model` and
       `params_sha256` are the current ones for their ingest:
-      1. embeds the query (kind `query`, 10 s);
+      1. embeds the query (kind `query`, 30 s);
       2. **dense list:** an exact scan, `ORDER BY embedding <=> $q, id`, top 50, over the owner's (and material's) chunks;
       3. **full-text list:** the query's lexemes come from `tsvector_to_array(to_tsvector(cfg, query))` for each
          configuration present. Each lexeme is quoted for tsquery input explicitly: every `'` is doubled, every `\` is
@@ -217,7 +255,11 @@ requirements:
          snippet, score, dense_rank, fts_rank}`. `snippet` is the chunk text cut to 300 characters at the last whitespace
          at or before 300, or hard at 300 when there is none.
       If the embed call fails, the result is the full-text list alone, fused the same way, with `degraded: true`; if
-      both fail, the error propagates. [db] with a fake embed service.
+      both fail, the error propagates. "Current" means the newest `search_embeds` row of the lock's model for each
+      ingest (`ensure` makes a new one after a language change; until then the older chunks are used, owner note).
+      The api and the worker reach the service at `http://embed:8100`; `READER_EMBED_URL` overrides it (tests and the
+      [local] bench, as SRV-AUTH's READER_DB_* variables; the bench publishes the service on 127.0.0.1 for its run
+      only). [db] with a fake embed service.
   - id: FR-SEARCH-8
     text: >-
       **The route.** `POST /api/search` with JSON `{"q": str, "k": int?, "material": str?}` (a body, so the query never
@@ -296,8 +338,9 @@ nfr:
     metric: full-pilot embed job wall time, minutes
     threshold: 60
     verified_by: bench
-    note: "Measured reference 14.03 min (841.74 s, 13 threads, batch 32, spike v2); the service uses batch 8. The job
-      timeout is 60 min; this records that the job fits it. [local]."
+    note: "spikes/embed-service estimates 22–36 min at 8 CPUs with batch 8 (1.05–1.72 prose chunks/s, ±40 % run to run);
+      the embeddings-local spike measured 14.03 min at 13 threads with batch 32. The job timeout is 60 min; this
+      records that the job fits it. [local]."
 
 vectors:
   - id: VEC-SEARCH-1
@@ -331,10 +374,10 @@ defers:
   - "Search across lessons and the knowledge base (SRV-KB)."
 
 owner_notes:
-  - "ADR-0028 (proposed): a new internal service `embed` (no egress, no secrets, its own network with api and worker only) runs the 2.27 GB bge-m3 model; its image is several GB because the model is baked in. Its memory limit comes from spikes/embed-service."
+  - "ADR-0028 (accepted 2026-11-22): a new internal service `embed` (no egress, no secrets, its own network with api and worker only) runs the 2.27 GB bge-m3 model; its image is about 5.6 GB because the model is baked in. Memory limit 3g (spikes/embed-service), with at most 8 texts per call."
   - "The pgvector extension is added to the reader-postgres image (PGDG package 0.8.7)."
   - "ADR-0007's revisit trigger says 'below 0.8 on the pilot question set'. Does that mean v1 (30 questions, dense 1.0) or v2 (40 harder questions, dense 0.675)? The slice reports both."
-  - "While the full pilot embeds (about 14 min), the worker's single job slot is busy; compile stages wait."
+  - "While the full pilot embeds (about 22–36 min at 8 CPUs), the worker's single job slot is busy; compile stages wait."
   - "After changing a material's `language` in reader.yaml, run `reader.search.ensure <material>`: search keeps using the old chunks until the new key is embedded, and nothing re-embeds automatically."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Awaits spikes/embed-service for mem_limit at that cap before approval."
+review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Owner accepted ADR-0028 (2026-11-22). spikes/embed-service landed (559bc35): ≤ 8 texts per call, mem_limit 3g, query timeout 30 s. Review complete (one round plus the D1 delta). Approved by agent 2026-11-22 with the Red tests (one round per policy, D1 fixed, spike numbers: 2,410 MiB for 8 texts at cap 1,024 → mem_limit 3g; worst batch of 8 11–13 s at 8 CPUs → query timeout 30 s). At approval: the ingest dependency, the test image and the dev-environment typing are declared deviations (header). Green, 2026-11-22: test-data correction, no requirement changed — VEC-SEARCH-5's texts and the [db] tests' synthetic spans were shorter than CHUNK_MIN (80), so they made no chunk; lengthened with filler words that share no lexeme with the queries. VEC-SEARCH-3's `status:` value is quoted (the unquoted `: ` inside it made the copy invalid YAML), as in the fixed source on V/owner-housekeeping; no question changed."

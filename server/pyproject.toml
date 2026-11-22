@@ -19,13 +19,17 @@ dependencies = [
   "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
   "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
   "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
-  "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy's upstream client and the worker's agent-proxy client
+  "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy's upstream client and the worker's agent-proxy client;
+                               # SRV-SEARCH: the api's and worker's client of the embed service (FR-SEARCH-5, -7)
 ]
 
 [project.optional-dependencies]
 # SRV-AGENT: the Agent SDK (bundled CLI) for the worker's provider adapter; installed in reader-server:local, not in
 # reader-agent-proxy:local (OPS-DEPLOY).
 agent = ["claude-agent-sdk==0.2.187"]
+# SRV-SEARCH / ADR-0028: the embed service's model runtime, only in the reader-embed image, which installs it from the
+# hash lock deploy/images/embed.requirements.lock (torch from the PyTorch CPU index there: 2.15.0+cpu).
+embed = ["torch==2.15.0", "transformers==5.23.0", "sentence-transformers==6.3.0"]
 
 [project.scripts]
 reader = "reader.cli.app:main"   # OPS-CLI FR-CLI-1
@@ -56,6 +60,7 @@ dev = [
   "types-jsonschema>=4.26",   # SRV-LESSON: mypy --strict over reader.lessons.schema
   "reportlab==5.1.0",         # SRV-INGEST: VEC-INGEST-2 fixture generator (invariant mode)
   "matplotlib==3.11.2",       # SRV-INGEST: only for its bundled DejaVu TTFs (Cyrillic in the VEC-INGEST-2 PDF)
+  "pypdfium2>=5",             # SRV-SEARCH: the [local] bench reads the pilot's text layer (no SRV-INGEST artifact yet)
 ]
 
 [tool.ruff]
@@ -89,6 +94,9 @@ known-first-party = ["reader"]
 # subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
 # Russian text on purpose (Cyrillic letters that look Latin).
 "tests/ingest/**" = ["S101", "PT018", "S603", "S108", "RUF001"]
+# SRV-SEARCH: the tests talk to a local HTTP server (S310), run docker and python subprocesses (S603, S607), and
+# build SQL for assertions from fixed names (S608); RUF001: the synthetic corpus is Russian text on purpose.
+"tests/search/**" = ["S101", "S310", "S603", "S607", "S608", "PT018", "RUF001"]
 
 [tool.mypy]
 strict = true
@@ -101,6 +109,12 @@ warn_unreachable = true
 # server environment; asyncpg ships no type information.
 [[tool.mypy.overrides]]
 module = ["docling.*", "docling_core.*", "pypdfium2.*", "huggingface_hub.*", "asyncpg.*"]
+ignore_missing_imports = true
+
+# SRV-SEARCH: torch and sentence-transformers live only in the reader-embed image (extra `embed`), not in the dev
+# environment; embed_service keeps them behind a typed Encoder protocol (declared deviation in the spec).
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "sentence_transformers", "sentence_transformers.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -21,17 +21,26 @@ def test_version_locations_are_a_declared_list() -> None:
 
     ours, theirs = db.VERSION_LOCATIONS[:-1], db.VERSION_LOCATIONS[-1:]
     relative = [p.as_posix().split("/reader/", 1)[1] for p in ours]
-    # SRV-LESSON, SRV-EVENTS, SRV-INGEST, SRV-AGENT and SRV-PIPELINE paired changes (FR-AUTH-1 note)
+    # Paired changes of SRV-LESSON, -EVENTS, -INGEST, -SEARCH, -AGENT and -PIPELINE (FR-AUTH-1 notes)
     assert relative == [
         "db/migrations/versions",
         "lessons/migrations",
         "jobs/migrations",
         "ingest/migrations",
+        "search/migrations",
         "agent/migrations",
         "pipeline/migrations",
     ]
     assert [p.as_posix().rsplit("/procrastinate/", 1)[1] for p in theirs] == ["contrib/alembic/versions"]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)
+
+
+def test_engine_hides_bound_parameters(pg: Pg) -> None:
+    # Paired SRV-SEARCH change (FR-AUTH-1 note): SQL errors never log bound parameters.
+    from reader.db import make_engine
+
+    engine = make_engine(target(pg))
+    assert engine.sync_engine.hide_parameters is True
 
 
 def test_migration_lock_namespace_is_fixed() -> None:
