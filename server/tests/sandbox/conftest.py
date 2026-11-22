@@ -262,7 +262,12 @@ class Sandbox:
         return docker("exec", "-u", "1000:1000", self.name, *argv)
 
     def state(self) -> dict[str, Any]:
-        proc = self.exec(STATE, timeout=30)
+        # A `docker exec` into a container that is being restarted can hang on Docker Desktop: that is one
+        # failed poll, not a test error. 5 s covers the in-container 2 s request with margin.
+        try:
+            proc = self.exec(STATE, timeout=5)
+        except subprocess.TimeoutExpired:
+            return {"error": "exec-timeout"}
         if proc.returncode != 0 or not proc.stdout.strip():
             return {"error": "exec"}
         result: dict[str, Any] = json.loads(proc.stdout)

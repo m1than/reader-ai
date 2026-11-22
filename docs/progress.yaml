@@ -407,7 +407,19 @@ tasks:
         (e2e/live/slice.sh). Cross-spec still open: SRV-INGEST issues span ids as <material_sha256>:<seq> and reuses
         reader.blobs; SRV-PIPELINE owns G2." }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
+      note: "SRV-KERNEL code review approve (round 1 changes, round 2 approve; 71 kernel tests); PR after the
+        OPS-SANDBOX flaky-test fix (investigator) so the full gate can pass. OPS-SANDBOX done (code review approve,
+        PR #34). SRV-KERNEL approved 2026-11-22 on branch V/V.SRV-KERNEL. At green: 57 tests in server/tests/kernels (protocol and
+        VEC-KERNEL-1 table with Hypothesis properties; service and VEC-KERNEL-2 reset sequences with a fake clock;
+        relay against an in-memory upstream; upstream client against local servers; routes through the app on
+        Postgres; [image]: first-use reset and print(1) on reader-kernel:local, interrupted sleep and busy loop reply
+        1.49 s after a 1 s test timeout). Paired SRV-AUTH change: ROUTERS adds reader.kernels.routes, Route DELETE,
+        WS_ROUTES, websockets 17.4; three auth-test import blocks re-sorted (ruff 0.17.6 failed them on main too).
+        Local gate 2026-11-22: two runs FAIL on one OPS-SANDBOX timing test each (own_address, then signals race;
+        765 passed otherwise), with 12 other workloads' containers on the shared Docker VM; own_address passes 3/3
+        alone; the signals race failed once alone (state polls via docker exec failing for 10 s) while a direct
+        replay of 8 flood+signal cases restarted in 0–2 s by docker inspect. Needs an investigator before merge.
+        Earlier: Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2
         changes, round 3 approve. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
         runs; connection-table veto by a cell) fixed: lock-free supervisor with a SIGTERM self-pipe, local 192 / remote

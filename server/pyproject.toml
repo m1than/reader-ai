@@ -18,6 +18,7 @@ dependencies = [
   "nbformat==5.11.1",          # SRV-LESSON: notebook validation and canonical form (REF-LESSON-1)
   "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
   "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
+  "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
 ]
 
 [project.scripts]

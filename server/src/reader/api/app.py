@@ -19,14 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.websockets import WebSocket
 
-from reader.api.http import Ctx, Route, error
+from reader.api.http import Ctx, Route, WsRoute, error
 from reader.auth import store
 from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
-ROUTERS: Final = ("reader.api.routes", "reader.auth.routes", "reader.lessons.routes")
+ROUTERS: Final = ("reader.api.routes", "reader.auth.routes", "reader.lessons.routes", "reader.kernels.routes")
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
+)
+WS_ROUTES: Final[tuple[WsRoute, ...]] = tuple(
+    route for module in ROUTERS for route in getattr(importlib.import_module(module), "WS_ROUTES", ())
 )
 
 log = logging.getLogger("reader.api")
@@ -99,6 +103,15 @@ def _endpoint(
     return endpoint
 
 
+def _ws_endpoint(
+    route: WsRoute, settings: Settings, engine: AsyncEngine
+) -> Callable[[WebSocket], Awaitable[None]]:
+    async def endpoint(websocket: WebSocket) -> None:
+        await route.handler(websocket, settings, engine)
+
+    return endpoint
+
+
 async def _cleanup_forever(engine: AsyncEngine, interval_s: float) -> None:
     while True:
         try:
@@ -125,6 +138,9 @@ def create_app(settings: Settings, engine: AsyncEngine, *, run_cleanup_task: boo
         app.add_api_route(
             route.path, _endpoint(route, settings, engine), methods=[route.method], include_in_schema=False
         )
+
+    for ws_route in WS_ROUTES:
+        app.router.add_websocket_route(ws_route.path, _ws_endpoint(ws_route, settings, engine))
 
     @app.exception_handler(404)
     async def not_found(_: Request, __: Exception) -> JSONResponse:
