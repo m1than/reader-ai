@@ -46,6 +46,16 @@ VERSION_LOCATIONS: Final[list[Path]] = [
 MIGRATION_LOCK_NAMESPACE: Final = 0x52444D47
 MIGRATION_LOCK_KEY: Final = 1
 MIGRATION_LOCK_POLL_S: Final = 0.2  # structural: a waiter retries the try-lock; migrations take seconds
+# structural: far above a full upgrade from empty (seconds in the tests); a holder stuck longer is a fault
+MIGRATION_LOCK_WAIT_S: Final = 300.0
+
+
+class MigrationError(RuntimeError):
+    """A migration lock failure; `code` is fixed text."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
 
 
 @dataclass(frozen=True)
@@ -105,18 +115,24 @@ async def migrate(engine: AsyncEngine) -> None:
     `pg_advisory_lock`.
     """
     lock = {"ns": MIGRATION_LOCK_NAMESPACE, "key": MIGRATION_LOCK_KEY}
+    loop = asyncio.get_running_loop()
+    give_up = loop.time() + MIGRATION_LOCK_WAIT_S
     async with engine.connect() as raw:
         holder = await raw.execution_options(isolation_level="AUTOCOMMIT")
-        for _ in iter(int, 1):  # poll until the lock is ours (it lives in Postgres, not in this process)
+        while True:  # the lock lives in Postgres, so it is polled, not awaited as an event
             if (await holder.execute(text("SELECT pg_try_advisory_lock(:ns, :key)"), lock)).scalar():
                 break
+            if loop.time() >= give_up:
+                raise MigrationError("migration_lock_timeout")
             await asyncio.sleep(MIGRATION_LOCK_POLL_S)
         try:
             async with engine.connect() as conn:
                 await conn.run_sync(_upgrade)
                 await conn.commit()
         finally:
-            await holder.execute(text("SELECT pg_advisory_unlock(:ns, :key)"), lock)
+            released = (await holder.execute(text("SELECT pg_advisory_unlock(:ns, :key)"), lock)).scalar()
+            if not released:
+                raise MigrationError("migration_unlock_failed")
 
 
 async def at_heads(engine: AsyncEngine) -> bool:

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Iterable
 from typing import Final
 
 import procrastinate
@@ -44,9 +45,18 @@ def make_app(target: DbTarget) -> procrastinate.App:
 
 
 async def run(
-    engine: AsyncEngine, target: DbTarget, stop: asyncio.Event, catalog: Catalog | None = None
+    engine: AsyncEngine,
+    target: DbTarget,
+    stop: asyncio.Event,
+    catalog: Catalog | None = None,
+    secret_values: Iterable[str] = (),
 ) -> int:
-    """Serve jobs until `stop` is set. Returns 0 after a stop, 1 when the database is unreachable at start."""
+    """Serve jobs until `stop` is set. Returns 0 after a stop, 1 when the database is unreachable at start.
+
+    `secret_values` are every resolved secret the calling process holds (FR-EVENTS-10); the database
+    password is always among them.
+    """
+    install_log_filter()  # before procrastinate logs anything
     try:
         async with engine.connect() as conn:  # fails at once; psycopg's pool would wait to fill
             await conn.execute(text("SELECT 1"))
@@ -56,8 +66,8 @@ async def run(
         log.warning("jobs: database unreachable at start")
         return 1
     try:
-        jobs = Jobs(engine, app, catalog if catalog is not None else load_kinds(), [target.password.reveal()])
-        install_log_filter()
+        kinds = catalog if catalog is not None else load_kinds()
+        jobs = Jobs(engine, app, kinds, [target.password.reveal(), *secret_values])
         await jobs.sweep()
         worker = asyncio.create_task(
             app.run_worker_async(

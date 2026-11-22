@@ -196,7 +196,9 @@ def _run_worker(env: Env) -> None:
                 serving_logs()
                 from reader.jobs.worker import run as run_jobs  # SRV-EVENTS FR-EVENTS-9
 
-                if await run_jobs(engine, target, stop) != 0:
+                # Every resolved secret this process holds: the worker role holds only the database password.
+                held = (target.password.reveal(),)
+                if await run_jobs(engine, target, stop, secret_values=held) != 0:
                     raise Failure("database_unreachable")
         finally:
             await engine.dispose()

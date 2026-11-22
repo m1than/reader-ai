@@ -56,6 +56,36 @@ async def test_migrate_reaches_all_heads_and_is_idempotent(pg: Pg) -> None:
     await engine.dispose()
 
 
+async def test_not_at_heads_when_one_branch_is_missing(pg: Pg) -> None:
+    """Auth applied, jobs missing: readiness compares every effective head, not just one branch."""
+    from reader.db import at_heads, make_engine, migrate
+
+    engine = make_engine(target(pg))
+    await migrate(engine)
+    await execute(engine, "DELETE FROM alembic_version WHERE version_num = 'jobs_0001'")
+    assert await at_heads(engine) is False
+    await engine.dispose()
+
+
+async def test_migration_lock_wait_is_bounded(pg: Pg, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy import text
+
+    import reader.db as db
+
+    engine = db.make_engine(target(pg))
+    monkeypatch.setattr(db, "MIGRATION_LOCK_WAIT_S", 0.5)
+    lock = {"ns": db.MIGRATION_LOCK_NAMESPACE, "key": db.MIGRATION_LOCK_KEY}
+    async with engine.connect() as holder:
+        await holder.execute(text("SELECT pg_advisory_lock(:ns, :key)"), lock)
+        await holder.commit()
+        with pytest.raises(db.MigrationError) as caught:
+            await db.migrate(engine)
+        assert caught.value.code == "migration_lock_timeout"
+        await holder.execute(text("SELECT pg_advisory_unlock(:ns, :key)"), lock)
+        await holder.commit()
+    await engine.dispose()
+
+
 async def test_concurrent_migrations_serialize(pg: Pg) -> None:
     import anyio
 

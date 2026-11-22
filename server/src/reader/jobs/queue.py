@@ -8,6 +8,7 @@ runs under the key's advisory transaction lock; `enqueue` never takes it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Callable, Iterable, Mapping
@@ -19,6 +20,7 @@ from procrastinate import exceptions as pexc
 from procrastinate.jobs import Status
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from reader.jobs.catalog import Catalog
@@ -239,47 +241,81 @@ class Jobs:
         job_id = context.job.id
         assert job_id is not None  # noqa: S101
         key = idempotency_key(kind, payload)
-        failure: BaseException | None = None
-        attempts = 0
-        async with self.engine.connect() as conn:
-            await conn.execute(text("SET idle_in_transaction_session_timeout = 0"))
-            await conn.commit()
-            async with conn.begin() as tx:
-                await _lock(conn, key)
-                row = await _row(conn, kind.name, key)
-                if row is None:
-                    log.warning("job without key row: kind=%s job_id=%s", kind.name, job_id)
-                    raise JobFailed("no_key_row") from None
-                if row["outcome"] is not None:
-                    log.info("job skipped: kind=%s job_id=%s outcome=%s", kind.name, job_id, row["outcome"])
-                    return
-                attempts = int(row["attempts"])
-                if attempts >= kind.max_attempts:
-                    await _set_outcome(conn, kind.name, key, "dead", "exhausted", job_id)
-                    await tx.commit()
-                    raise JobFailed("exhausted") from None
-                try:
-                    model = kind.args.model_validate(payload)
-                    async with asyncio.timeout(kind.timeout_s):
-                        await kind.handler(model, conn, JobContext(job_id, key, attempts))
-                    if not await _set_outcome(conn, kind.name, key, "succeeded", None, job_id):
-                        await tx.rollback()
-                        log.warning("outcome_lost: kind=%s job_id=%s", kind.name, job_id)
-                        return
-                    await tx.commit()
-                    return
-                except asyncio.CancelledError:
+        try:
+            failure = await self._attempt(kind, key, payload, job_id)
+            if failure is not None:
+                error, timed_out, lost = failure
+                # A deadline overrun is judged even when cancelling the statement invalidated the session:
+                # the cause is the run itself. Taking the key lock again in _judge serializes with the sweep.
+                if lost and not timed_out:
+                    log.warning("job session lost: kind=%s job_id=%s", kind.name, job_id)
+                    raise JobFailed("session_lost")
+                await self._judge(kind, key, payload, job_id, error, timed_out)
+        except JobFailed, asyncio.CancelledError:
+            raise  # JobFailed carries only a code; cancellation is a shutdown abort (procrastinate: aborted)
+        except Exception:  # a database or wrapper failure: never let its message or args out
+            log.warning("job wrapper failed: kind=%s job_id=%s", kind.name, job_id)
+            raise JobFailed("wrapper_error") from None
+
+    async def _attempt(
+        self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int
+    ) -> tuple[BaseException, bool, bool] | None:
+        """One run under the key lock: None when done, else (exception, deadline expired, session lost)."""
+        async with self.engine.connect() as conn, conn.begin() as tx:
+            await conn.execute(text("SET LOCAL idle_in_transaction_session_timeout = 0"))
+            await _lock(conn, key)
+            row = await _row(conn, kind.name, key)
+            if row is None:
+                log.warning("job without key row: kind=%s job_id=%s", kind.name, job_id)
+                raise JobFailed("no_key_row")
+            if row["outcome"] is not None:
+                log.info("job skipped: kind=%s job_id=%s outcome=%s", kind.name, job_id, row["outcome"])
+                return None
+            attempts = int(row["attempts"])
+            if attempts >= kind.max_attempts:
+                await _set_outcome(conn, kind.name, key, "dead", "exhausted", job_id)
+                await tx.commit()
+                raise JobFailed("exhausted")
+            deadline = asyncio.timeout(kind.timeout_s)
+            try:
+                model = kind.args.model_validate(payload)
+                async with deadline:
+                    await kind.handler(model, conn, JobContext(job_id, key, attempts))
+                if not await _set_outcome(conn, kind.name, key, "succeeded", None, job_id):
+                    winner = await _row(conn, kind.name, key)
                     await tx.rollback()
-                    raise
-                except Exception as error:  # every handler failure is judged below, never logged as is
+                    log.warning(
+                        "outcome_lost: kind=%s job_id=%s winner=%s",
+                        kind.name,
+                        job_id,
+                        winner["outcome"] if winner else None,
+                    )
+                    return None
+                await tx.commit()
+                return None
+            except asyncio.CancelledError:
+                with contextlib.suppress(Exception):
                     await tx.rollback()
-                    failure = error
-        await self._judge(kind, key, payload, job_id, failure)
+                raise
+            except Exception as error:  # every handler failure is judged by _judge, never logged as is
+                # The run's own session died (network cut, backend terminated): the key lock went with it, so
+                # the sweep owns the key now and counts the lost run once (FR-EVENTS-7, -15). Not judged here.
+                lost = conn.invalidated or (isinstance(error, DBAPIError) and error.connection_invalidated)
+                with contextlib.suppress(Exception):
+                    await tx.rollback()
+                return error, deadline.expired(), lost
 
     async def _judge(
-        self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int, failure: BaseException | None
+        self,
+        kind: JobKind,
+        key: str,
+        payload: dict[str, Any],
+        job_id: int,
+        failure: BaseException,
+        timed_out: bool,
     ) -> None:
-        if isinstance(failure, TimeoutError):
+        # Only the run's own deadline is a timeout; a handler's own TimeoutError is judged by `transient`.
+        if timed_out:
             code, transient = "timeout", False
         else:
             code = type(failure).__name__
@@ -368,6 +404,9 @@ class Jobs:
             if kind is None or key is None:
                 if key is not None:
                     async with self.engine.begin() as conn:
+                        if not await _try_lock(conn, key):  # a live session (another worker version) runs it
+                            report.skipped_live.append(key)
+                            continue
                         await _set_outcome(conn, job.task_name, key, "dead", "unknown_kind", job_id)
                 if await self._finish(job, Status.FAILED):
                     report.finished.append(job_id)

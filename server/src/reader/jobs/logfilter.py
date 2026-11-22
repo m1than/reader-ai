@@ -2,13 +2,45 @@
 
 procrastinate passes the job as `extra={"job": {...}}`, which `Logger.makeRecord` applies after the
 record factory has built the record, so the scrubber is a filter on the root logger's handlers,
-installed after logging is configured.
+installed after logging is configured and before the procrastinate app opens. Some records carry the
+call string only in their message (the shutdown line "Waiting for job to finish: worker: <call>"), so
+every call string `name[id](...)` is also masked by pattern, with its parentheses matched.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any
+import re
+from typing import Any, Final
+
+_CALL_START: Final = re.compile(r"([a-z][a-z0-9_.]*)\[(\d+)\]\(")
+
+
+def mask_call_strings(message: str) -> str:
+    """Replace every `name[id](...)` with `name[id]`, matching parentheses and skipping quoted text."""
+    out: list[str] = []
+    pos = 0
+    while (match := _CALL_START.search(message, pos)) is not None:
+        out.append(message[pos : match.start()])
+        out.append(f"{match.group(1)}[{match.group(2)}]")
+        depth, i, quote = 1, match.end(), ""
+        while i < len(message) and depth:
+            ch = message[i]
+            if quote:
+                if ch == "\\":
+                    i += 1
+                elif ch == quote:
+                    quote = ""
+            elif ch in "'\"":
+                quote = ch
+            elif ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            i += 1
+        pos = i
+    out.append(message[pos:])
+    return "".join(out)
 
 
 class JobRecordScrubber(logging.Filter):
@@ -17,15 +49,13 @@ class JobRecordScrubber(logging.Filter):
             return True
         job: Any = getattr(record, "job", None)
         if isinstance(job, dict):
-            call_string = job.get("call_string")
             job.pop("task_kwargs", None)
             job.pop("call_string", None)
-            if isinstance(call_string, str) and call_string:
-                label = f"{job.get('task_name', '?')}[{job.get('id', '?')}]"
-                message = record.getMessage()
-                if call_string in message:
-                    record.msg = message.replace(call_string, label)
-                    record.args = None
+        message = record.getMessage()
+        masked = mask_call_strings(message)
+        if masked != message:
+            record.msg = masked
+            record.args = None
         return True
 
 

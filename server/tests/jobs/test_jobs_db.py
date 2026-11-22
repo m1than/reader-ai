@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from pathlib import Path
 from typing import Any
 
 import anyio
@@ -18,6 +19,9 @@ import pytest
 from .conftest import HANDLER_SECRET, KIND, Pg, jobs_env, require_jobs, target
 
 pytestmark = pytest.mark.anyio
+
+HERE = Path(__file__).resolve().parent  # kill_worker.py and conftest.py, for the real worker process
+SRC = HERE.parents[1] / "src"
 
 _TABLES = "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
 _TODO_DELAY = (
@@ -155,6 +159,49 @@ async def test_permanent_failure_and_timeout_are_dead_at_once(pg: Pg) -> None:
         assert await env.effects("slow") == 0
 
 
+async def test_handler_timeouterror_is_judged_by_transient(pg: Pg) -> None:
+    import dataclasses
+
+    from .conftest import effect_kind
+
+    async def raises_timeout(args: Any, conn: Any, ctx: Any) -> None:
+        raise TimeoutError("provider read timed out")
+
+    base = effect_kind()
+    transient = dataclasses.replace(base, handler=raises_timeout, transient=(TimeoutError,))
+    async with jobs_env(pg, kinds=[transient]) as env:
+        env.jobs.retry_delay = lambda _attempts: 3600
+        await env.jobs.enqueue(KIND, {"name": "t1"})
+        await env.work()
+        row = await env.key_row("t1")
+        assert (row.attempts, row.outcome) == (1, None)  # counted, retried later, not `timeout`
+        assert await env.job_statuses("t1") == ["failed", "todo"]
+    permanent = dataclasses.replace(base, handler=raises_timeout, transient=())
+    async with jobs_env(pg, kinds=[permanent]) as env:
+        await env.jobs.enqueue(KIND, {"name": "t2"})
+        await env.work()
+        row = await env.key_row("t2")
+        assert (row.attempts, row.outcome, row.error_code) == (1, "dead", "TimeoutError")
+
+
+async def test_deadline_overrun_is_timeout(pg: Pg) -> None:
+    import dataclasses
+
+    from sqlalchemy import text
+
+    from .conftest import effect_kind
+
+    async def sleeps_in_sql(args: Any, conn: Any, ctx: Any) -> None:
+        await conn.execute(text("SELECT pg_sleep(5)"))
+
+    kind = dataclasses.replace(effect_kind(), handler=sleeps_in_sql, timeout_s=0.5, transient=(TimeoutError,))
+    async with jobs_env(pg, kinds=[kind]) as env:
+        await env.jobs.enqueue(KIND, {"name": "dl"})
+        await env.work()
+        row = await env.key_row("dl")
+        assert (row.attempts, row.outcome, row.error_code) == (1, "dead", "timeout")
+
+
 # ---- FR-EVENTS-7, -15: stalls and the sweep
 
 
@@ -214,6 +261,115 @@ async def test_stale_heartbeat_lock_held_is_skipped(pg: Pg) -> None:
         assert env.key("live") in report.skipped_live
         assert (await env.key_row("live")).attempts == 0
         assert await env.job_statuses("live") == ["doing"]
+
+
+async def test_unknown_kind_stalled_while_lock_held(pg: Pg) -> None:
+    from sqlalchemy import text
+
+    async with jobs_env(pg) as env:
+        jobs = require_jobs()
+        from reader.jobs.queue import Jobs
+        from reader.jobs.worker import make_app
+
+        await env.jobs.enqueue(KIND, {"name": "uk"})
+        await env.stall_next()
+        other = make_app(target(pg))
+        await other.open_async()
+        try:
+            old = Jobs(env.engine, other, jobs.Catalog([]))  # a worker whose catalog lacks the kind
+            async with env.engine.connect() as holder:
+                await holder.execute(text(_LOCK), {"k": jobs.lock_id(env.key("uk"))})
+                report = await old.sweep()
+                await holder.rollback()
+        finally:
+            await other.close_async()
+        assert env.key("uk") in report.skipped_live
+        assert (await env.key_row("uk")).outcome is None
+        assert await env.job_statuses("uk") == ["doing"]
+
+
+async def test_real_run_holds_the_lock_then_sigkill(pg: Pg) -> None:
+    import json
+    import os
+    import signal
+    import subprocess
+    import sys
+
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "live", "sleep_s": 600})
+        child_env = dict(
+            os.environ, PYTHONPATH=f"{HERE}{os.pathsep}{SRC}", PYTHONDONTWRITEBYTECODE="1"
+        )
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            str(HERE / "kill_worker.py"),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            env=child_env,
+        )
+        try:
+            assert proc.stdin is not None
+            spec = {"host": pg.host, "port": pg.port, "user": pg.user, "database": pg.database}
+            proc.stdin.write((json.dumps({**spec, "password": pg.password}) + "\n").encode())
+            await proc.stdin.drain()
+            proc.stdin.close()
+            for _ in range(300):
+                if await env.job_statuses("live") == ["doing"]:
+                    break
+                await asyncio.sleep(0.1)
+            assert await env.job_statuses("live") == ["doing"]
+            await asyncio.sleep(1.0)  # the wrapper takes the key lock, the handler inserts and sleeps
+            live = await env.jobs.sweep(stalled_after_s=0)  # "stalled" by definition; the session is alive
+            assert env.key("live") in live.skipped_live
+            assert (await env.key_row("live")).attempts == 0
+            assert (await env.jobs.requeue_dead(KIND, env.key("live"))).kind == "running"
+            proc.send_signal(signal.SIGKILL)
+            await proc.wait()
+            after = None
+            for _ in range(200):
+                after = await env.jobs.sweep(stalled_after_s=0)
+                if env.key("live") in after.reenqueued:
+                    break
+                await asyncio.sleep(0.1)
+            assert after is not None
+            assert env.key("live") in after.reenqueued
+            assert (await env.key_row("live")).attempts == 1
+            assert await env.effects("live") == 0  # the killed run's insert rolled back with its session
+            assert await env.job_statuses("live") == ["failed", "todo"]
+        finally:
+            if proc.returncode is None:
+                proc.kill()
+                await proc.wait()
+
+
+async def test_session_cut_mid_run_then_sweep(pg: Pg) -> None:
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "cut", "sleep_s": 2})
+        worker = asyncio.create_task(env.work())
+        for _ in range(100):
+            if await env.job_statuses("cut") == ["doing"]:
+                break
+            await asyncio.sleep(0.05)
+        await asyncio.sleep(0.3)  # the handler holds the key lock and sleeps
+        # The worker's session dies (a network cut, a backend crash) while the worker process lives on.
+        await env.execute(
+            "SELECT pg_terminate_backend(pid) FROM pg_locks"
+            " WHERE locktype = 'advisory' AND granted AND pid <> pg_backend_pid()"
+            " AND database = (SELECT oid FROM pg_database WHERE datname = current_database())"
+        )
+        report = await env.jobs.sweep(stalled_after_s=0)
+        assert env.key("cut") in report.reenqueued
+        # The worker wakes, its run fails on the dead session, and its finish of a job the sweep already
+        # finished fails inside procrastinate's own task. procrastinate reports that itself (an unretrieved
+        # task exception or an error record); this test tolerates it and checks only the key's state.
+        # The same in-process worker then runs the job the sweep re-enqueued, which succeeds.
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(worker, timeout=20)
+        row = await env.key_row("cut")
+        assert (row.attempts, row.outcome) == (1, "succeeded")  # the lost run was counted once, not judged
+        assert await env.effects("cut") == 1  # the cut run's insert died with its session
+        assert env.runs("cut") == 2
 
 
 async def test_reclaim_after_success_skips(pg: Pg) -> None:
@@ -416,6 +572,44 @@ async def test_worker_run_returns_0_after_stop_and_1_when_unreachable(pg: Pg) ->
             assert await run(engine, bad, asyncio.Event()) == 1
     finally:
         await engine.dispose()
+
+
+async def test_worker_run_stop_with_running_job(pg: Pg) -> None:
+    import time
+
+    require_jobs()
+    from reader.jobs.worker import run
+
+    capture = _Capture()
+    root = logging.getLogger()
+    level = root.level
+    root.addHandler(capture)
+    root.setLevel(logging.DEBUG)
+    try:
+        async with jobs_env(pg) as env:
+            await env.jobs.enqueue(KIND, {"name": "stopme", "sleep_s": 60})
+            stop = asyncio.Event()
+            task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog))
+            for _ in range(200):
+                if await env.job_statuses("stopme") == ["doing"]:
+                    break
+                await asyncio.sleep(0.05)
+            assert await env.job_statuses("stopme") == ["doing"]
+            started = time.monotonic()
+            stop.set()
+            with anyio.fail_after(20):
+                code = await task
+            elapsed = time.monotonic() - started
+            assert code == 0
+            assert elapsed < 10  # graceful 8 s, then abort: inside Compose's 10 s stop timeout
+            assert await env.job_statuses("stopme") == ["aborted"]
+            assert (await env.key_row("stopme")).attempts == 0
+    finally:
+        root.removeHandler(capture)
+        root.setLevel(level)
+    lines = [r for r in capture.records if r.startswith("procrastinate")]
+    assert any("Waiting for job to finish" in r for r in lines)
+    assert all("stopme" not in r for r in lines)  # the payload never reaches a procrastinate record
 
 
 # ---- INV-EVENTS-5, FR-EVENTS-10, -16: secrets and logs

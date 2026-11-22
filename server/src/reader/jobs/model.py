@@ -83,7 +83,7 @@ def lock_id(key: str) -> int:
 
 
 def _mentions_secret(annotation: Any, seen: set[int]) -> bool:
-    if annotation is Secret:
+    if isinstance(annotation, type) and issubclass(annotation, Secret):
         return True
     if isinstance(annotation, type) and issubclass(annotation, BaseModel):
         if id(annotation) in seen:

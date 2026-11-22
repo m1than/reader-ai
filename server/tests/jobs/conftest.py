@@ -249,7 +249,7 @@ async def jobs_env(
         catalog = jobs.Catalog(kinds if kinds is not None else [kind])
         runtime = Jobs(engine, env_app, catalog, secret_values, retry_delay=lambda _attempts: 0)
         env = Env(pg, engine, env_app, runtime, kind)
-        await env.execute("CREATE TABLE t_effects (key text NOT NULL, job_id bigint NOT NULL)")
+        await env.execute("CREATE TABLE IF NOT EXISTS t_effects (key text NOT NULL, job_id bigint NOT NULL)")
         yield env
     finally:
         await env_app.close_async()

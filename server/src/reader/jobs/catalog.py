@@ -26,6 +26,8 @@ class Catalog(Mapping[str, JobKind]):
                 raise JobError("kind_name_reserved")
             if kind.name in by_name:
                 raise JobError("kind_name_duplicate")
+            if kind.args.model_config.get("extra") != "forbid":
+                raise JobError("kind_args_not_forbid")
             if not kind.key or any(f not in kind.args.model_fields for f in kind.key):
                 raise JobError("kind_key_field_missing")
             if model_has_secret_field(kind.args):

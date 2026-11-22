@@ -295,6 +295,52 @@ def test_log_filter_scrubs_procrastinate_records_and_is_idempotent() -> None:
     assert other.job == {"task_kwargs": 1}
 
 
+def test_log_filter_masks_call_strings_without_a_job_extra() -> None:
+    require_jobs()
+    from reader.jobs.logfilter import JobRecordScrubber, mask_call_strings
+
+    marker = "PAYLOAD-MARKER-" + "s" * 6
+    call = f"test.effect[42](payload={{'name': '{marker} (x)', 'q': \")\"}})"
+    line = f"Waiting for job to finish: worker: {call} (started 1.234 s ago)"
+    record = logging.LogRecord("procrastinate.worker", logging.INFO, __file__, 1, line, None, None)
+    JobRecordScrubber().filter(record)
+    assert record.getMessage() == "Waiting for job to finish: worker: test.effect[42] (started 1.234 s ago)"
+    assert mask_call_strings(f"a {call} b {call}") == "a test.effect[42] b test.effect[42]"
+    assert mask_call_strings("no call here (x)") == "no call here (x)"
+
+
+def test_catalog_rejects_args_without_extra_forbid_and_secret_subclasses() -> None:
+    from pydantic import BaseModel, ConfigDict
+
+    from reader.config import Secret
+
+    jobs = require_jobs()
+
+    class Loose(BaseModel):
+        name: str
+
+    async def handler(*_: Any) -> None:
+        return None
+
+    loose = jobs.JobKind(name="loose.kind", queue="q", args=Loose, key=("name",), handler=handler)
+    with pytest.raises(jobs.JobError) as caught:
+        jobs.Catalog([loose])
+    assert caught.value.code == "kind_args_not_forbid"
+
+    class Token(Secret):
+        pass
+
+    class WithToken(BaseModel):
+        model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+        name: str
+        token: Token | None = None
+
+    subclass = jobs.JobKind(name="tok.kind", queue="q", args=WithToken, key=("name",), handler=handler)
+    with pytest.raises(jobs.JobError) as secret:
+        jobs.Catalog([subclass])
+    assert secret.value.code == "secret_in_payload"
+
+
 def test_install_log_filter_targets_root_handlers() -> None:
     require_jobs()
     from reader.jobs.logfilter import JobRecordScrubber, install_log_filter
