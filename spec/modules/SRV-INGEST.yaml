@@ -70,9 +70,9 @@
 
 id: SRV-INGEST
 title: Ingestion (slice) — native confined Docling conversion of a declared PDF into ordered spans and an outline
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: engineering
 slice: V.SRV-INGEST-min
@@ -654,4 +654,4 @@ owner_notes:
   - "4. `reader-ingest --setup` creates a separate converter venv (Docling 2.151.1 with torch, several GB) and fetches 1.2 GB of models under `<data_dir>`."
   - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Status stays draft: approval goes with Red, which waits for SRV-AUTH (PR #33), SRV-EVENTS Red/Green and the owner's ADR-0027 status flip."
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner)."
