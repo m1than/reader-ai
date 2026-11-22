@@ -104,7 +104,7 @@ bounds:
   stage_max_attempts: 3      # SRV-EVENTS default; each attempt reserves and settles its own spend
 
 tables:
-  course_plans: { owner_id: true, columns: "owner_id, plan_course_id text, plan_lesson_id text, lesson_id uuid → lessons, material_sha256, pdf_first int, pdf_last int, g1_at timestamptz; unique (owner_id, plan_course_id, plan_lesson_id)" }
+  course_plans: { owner_id: true, columns: "owner_id, plan_course_id text, plan_lesson_id text, lesson_id uuid → lessons, material_sha256, pdf_first int, pdf_last int, g1_at timestamptz; unique (owner_id, plan_course_id, plan_lesson_id); unique (lesson_id)" }
   compile_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, cap_usd numeric(8,2), task_budgets jsonb (snapshot of the tasks' budget_usd_per_lesson at start), budget_refused text null (the first refusal code), loops int, base_sha256 text null, last_model_sha256 text null, final_sha256 text null, g2 jsonb null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id)" }
   compile_steps: { owner_id: true, columns: "id bigint identity pk, owner_id, run_id → compile_runs, step int, stage text, input_sha256 text, output_sha256 text null, report jsonb null, reused_from bigint null → compile_steps, model text null, cost_usd numeric(12,6), duration_s numeric, created_at; unique (run_id, step); index (owner_id, stage, input_sha256)" }
 
@@ -119,7 +119,10 @@ requirements:
       `pages.pdf` ranges with first ≤ last), refuses `no_material` unless the caller has an imported material with that
       sha256 (SRV-INGEST), and upserts one `course_plans` row per lesson by (owner, plan course id, plan lesson id),
       creating the SRV-LESSON course and lesson on first sight (FR-LESSON-6) and keeping the same lesson uuid on every
-      later import. The POST is the owner's G1 approval; `g1_at` is set on each row it creates or changes.
+      later import. Lessons map by plan lesson id, never by position: a lesson new to the plan (even inserted mid-plan)
+      gets a new SRV-LESSON lesson at the next free ordinal of the course, and `course_plans.lesson_id` is unique
+      (code review S5). The POST is the owner's G1 approval; `g1_at` is set on each row it creates or changes. A plan
+      lesson's `material_title` in citations is the course title (as SRV-TUTOR shows it).
   - id: FR-PIPELINE-2
     text: >-
       Source assembly. For a lesson, the source is the material's spans whose page lies in its `course_plans` page
@@ -141,7 +144,8 @@ requirements:
       notebook output is the compact form `{"cells": [{id, kind, source, sectors?, <kind fields>}]}` with citations as
       `{"span": "s<k>"}` or `{"url", "retrieved"}`; code builds the nbformat 4.5 notebook from it (kernelspec python3,
       `metadata.reader` with `lesson_format` 1 and the lesson title) and stamps each cell's provenance `{stage,
-      prompt_version, model}`.
+      prompt_version, model}`; a `provenance` or `verified` the model writes is dropped (code review S3: only code
+      writes them).
   - id: FR-PIPELINE-4
     text: >-
       Report schemas (VEC-PIPELINE-4). Fact report: exactly one verdict per claim of the notebook, keyed by (cell id,
@@ -160,8 +164,8 @@ requirements:
       `timeout_s` = `bounds.stage_job_timeout_s`, or `bounds.verify_job_timeout_s` for lab verification, which runs as a
       second kind `pipeline.verify` because a kind has one timeout (same args, key and handler); transient set per
       SRV-AGENT FR-AGENT-10 plus `verify_unavailable` and `input_not_ready`). A handler: reads its input (absent →
-      `input_not_ready`, transient); reuses an earlier completed step with the same `input_sha256` for this lesson if one
-      exists (no provider call, `cost_usd` 0, `reused_from` set); otherwise runs the stage; writes its effect; enqueues
+      `input_not_ready`, transient); reuses an earlier completed step with the same `input_sha256` for this lesson, in
+      this run or an earlier one, if one exists (no provider call, `cost_usd` 0, `reused_from` set); otherwise runs the stage; writes its effect; enqueues
       the next step; returns. A budget refusal before a model step (SRV-AGENT FR-AGENT-9: run cap, task budget or month)
       sets `budget_refused` and skips the remaining model steps: the run continues with `findings` and
       `lab_verification`. One run per lesson at a time (`compile_running`).
@@ -177,8 +181,9 @@ requirements:
   - id: FR-PIPELINE-7
     text: >-
       Citations. The model cites span aliases; code expands each to its span id, removes citations naming an alias not
-      in the source (and forces that claim's verdict to `unsupported`, VEC-PIPELINE-4), and fills `page` and
-      `material_title` from the span and material (the model never writes them). In the slice, every `changed` cell and
+      in the source (and forces the verdict of that claim, or of that `changed` or `erratum` cell, to `unsupported`,
+      VEC-PIPELINE-4; code review S2), and fills `page` and `material_title` from the span and the course title (the
+      model never writes them). In the slice, every `changed` cell and
       every URL citation also becomes an open cell (`url_citation_unchecked`, `changed_unchecked`; `finding.stage`
       `fact_check`), since there is no web fact-check yet.
   - id: FR-PIPELINE-8
@@ -198,13 +203,14 @@ requirements:
       Lab verification (`reader.pipeline.verify`). The worker-side client talks to `kernel-verify` through the SRV-KERNEL
       upstream client (no browser relay): reset per OPS-SANDBOX (exit, new nonce, `up`) before each run, then for each
       `lab` cell in notebook order execute its source and then each assert, each with `bounds.lab_exec_timeout_s`,
-      collecting outputs within SRV-KERNEL's relay byte budgets. The list runs `bounds.lab_runs` times. "Outputs
+      collecting outputs within SRV-KERNEL's relay byte budgets: at most `EXEC_OUTPUT_MAX` (16 MiB) of text in all per
+      run, beyond which the lab producing it fails (code review S4). The list runs `bounds.lab_runs` times. "Outputs
       identical" compares, per cell, the normalised `text/plain` of stream and execute_result outputs (CRLF → LF,
       trailing whitespace stripped). A lab passes when every assert passes on every run and outputs are identical; the
       result is written into each cell's `verified` by the `lab_verification` step. An assert failure or an execution
       timeout fails that lab (a blocking open cell, `finding.stage` `lab_verification`); a failed reset or an unreachable
-      `kernel-verify` is `verify_unavailable` (transient). If (Σ over labs of (1 + asserts)) × `lab_exec_timeout_s` ×
-      `lab_runs` exceeds `bounds.verify_job_timeout_s`, the labs are not run and one blocking open cell
+      `kernel-verify` is `verify_unavailable` (transient). If (Σ over labs of (1 + asserts)) × (`lab_exec_timeout_s` +
+      the 5 s interrupt grace) × `lab_runs` + `lab_runs` × the 30 s reset deadline exceeds `bounds.verify_job_timeout_s`, the labs are not run and one blocking open cell
       `labs_unverifiable` is added. No labs is a pass (L02 has none).
   - id: FR-PIPELINE-10
     text: >-
@@ -213,12 +219,14 @@ requirements:
       (`fact_check`, blocking), every finding of the last review (`adversarial_review`, its blocking flag), and the slice's
       `changed_unchecked` and `url_citation_unchecked` items (`fact_check`, non-blocking). The open cell id is `f-` + the
       first 16 hex of sha256(finding kind, target cell id, claim id or "", text); problems with the same id collapse into
-      one cell (blocking if any of them is), so a rerun neither duplicates nor renumbers them; `notes` cells are never
-      touched (SRV-LESSON INV-LESSON-3).
+      one cell (blocking if any of them is), so a rerun neither duplicates nor renumbers them; an id already taken by a
+      cell that is not the same open finding gets a `-1`, `-2`, ... suffix instead of being dropped; `notes` cells are
+      never touched (SRV-LESSON INV-LESSON-3).
   - id: FR-PIPELINE-11
     text: >-
       Routes (owner role only; others get 404). `POST /api/lessons/{lesson_id}/compile` with optional `{"cap_usd": x}`
-      (0 < x ≤ `bounds.run_cap_usd`, at most two decimals, else 400 `cap_invalid`) creates a new run and enqueues its first
+      (0 < x ≤ `bounds.run_cap_usd`, at most two decimals, else 400 `cap_invalid`; no body at all means the default
+      cap) creates a new run and enqueues its first
       step; 409 `compile_running` while a run of that lesson is `running` or `stalled`. `POST
       /api/compiles/{run_id}/resume` on a `stage_failed` run requeues its dead key (SRV-EVENTS `requeue_dead`) and calls
       `ensure`. A recompile is always a new run (reusing unchanged steps, FR-PIPELINE-5). `GET /api/compiles/{run_id}` and

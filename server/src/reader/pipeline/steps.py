@@ -135,7 +135,7 @@ async def _model_step(
         )
         return (
             built.notebook,
-            {"stripped": sorted([c, k] for c, k in built.stripped)},
+            {"stripped": [[c, k] for c, k in sorted(built.stripped, key=lambda ck: (ck[0], ck[1] or ""))]},
             result.model,
             result.sdk_usd,
         )
@@ -180,10 +180,10 @@ async def _reusable(conn: AsyncConnection, run: RunRow, stage: str, input_sha: s
             text(
                 "SELECT s.id, s.step, s.stage, s.input_sha256, s.output_sha256, s.report, s.reused_from,"
                 " s.model FROM compile_steps s JOIN compile_runs r ON r.id = s.run_id WHERE r.lesson_id = :l"
-                " AND s.owner_id = :o AND s.stage = :s AND s.input_sha256 = :h AND s.run_id <> :run"
+                " AND s.owner_id = :o AND s.stage = :s AND s.input_sha256 = :h"  # this run or an earlier one
                 " ORDER BY s.id LIMIT 1"
             ),
-            {"l": run.lesson_id, "o": run.owner_id, "s": stage, "h": input_sha, "run": run.id},
+            {"l": run.lesson_id, "o": run.owner_id, "s": stage, "h": input_sha},
         )
     ).first()
     if row is None:

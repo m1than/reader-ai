@@ -111,16 +111,17 @@ async def load_lesson(
     plan = (
         await conn.execute(
             text(
-                "SELECT p.material_sha256, p.pdf_first, p.pdf_last, l.title FROM course_plans p"
-                " JOIN lessons l ON l.id = p.lesson_id WHERE p.lesson_id = :l AND p.owner_id = :o"
+                "SELECT p.material_sha256, p.pdf_first, p.pdf_last, l.title, c.title FROM course_plans p"
+                " JOIN lessons l ON l.id = p.lesson_id JOIN courses c ON c.id = l.course_id"
+                " WHERE p.lesson_id = :l AND p.owner_id = :o"
             ),
             {"l": lesson_id, "o": owner_id},
         )
     ).first()
     if plan is None:
         raise PipelineError("lesson_unknown")
-    spans, material_title = await rt.spans.load(conn, owner_id, plan[0], plan[1], plan[2])
-    return Lesson(render(spans), str(plan[3]), material_title)
+    spans, _ = await rt.spans.load(conn, owner_id, plan[0], plan[1], plan[2])
+    return Lesson(render(spans), str(plan[3]), str(plan[4]))  # citations name the course title (as SRV-TUTOR)
 
 
 def done_list(steps: Sequence[StepRow]) -> list[Done]:

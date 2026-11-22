@@ -303,3 +303,93 @@ def test_revise_keeps_notes_cells() -> None:
         previous=first.notebook,
     )
     assert [c["id"] for c in second.notebook["cells"]] == ["e1", "notes"]
+
+
+def _build(cells: list[dict[str, Any]]) -> Any:
+    notebook = need("reader.pipeline.notebook")
+    return notebook.build(
+        {"cells": cells},
+        title="L",
+        aliases=_aliases(),
+        material_title="Course title",
+        stage="draft",
+        prompt_version="v1",
+        model="m",
+        previous=None,
+    )
+
+
+def test_unknown_alias_on_changed_and_erratum_cells_forces_unsupported() -> None:
+    """Code review S2: the cell is recorded as stripped, and the fact check forces its verdict."""
+    reports = need("reader.pipeline.reports")
+    built = _build(
+        [
+            {
+                "id": "ch1",
+                "kind": "changed",
+                "source": "x",
+                "as_of": "2026-11-01",
+                "citations": [{"span": "s99"}],
+            },
+            {
+                "id": "er1",
+                "kind": "erratum",
+                "source": "x",
+                "source_ref": {"span": "s1"},
+                "correction": "c",
+                "citations": [{"span": "s2"}],
+            },
+        ]
+    )
+    assert built.stripped == frozenset({("ch1", None)})
+    verdicts = reports.validate_fact_report(
+        {
+            "verdicts": [
+                {"cell": "ch1", "verdict": "supported", "spans": ["s1"], "note": ""},
+                {"cell": "er1", "verdict": "supported", "spans": ["s2"], "note": ""},
+            ]
+        },
+        built.notebook,
+        _aliases(),
+        stripped=built.stripped,
+    )
+    assert [(v.cell, v.verdict, v.forced) for v in verdicts] == [
+        ("ch1", "unsupported", "citation_unknown_span"),
+        ("er1", "supported", None),
+    ]
+
+
+def test_model_written_provenance_and_verified_are_dropped() -> None:
+    """Code review S3: only code writes provenance and lab verification results."""
+    built = _build(
+        [
+            {
+                "id": "lab1",
+                "kind": "lab",
+                "source": "x = 1",
+                "kernel": "python3",
+                "network": "none",
+                "asserts": ["x"],
+                "verified": {"runs": 2, "passed": True, "outputs_identical": True, "input_sha256": "0" * 64},
+                "provenance": {"stage": "fixture"},
+            },
+        ]
+    )
+    reader = built.notebook["cells"][0]["metadata"]["reader"]
+    assert "verified" not in reader
+    assert reader["provenance"] == {"stage": "draft", "prompt_version": "v1", "model": "m"}
+
+
+def test_material_title_comes_from_the_caller() -> None:
+    built = _build(
+        [
+            {
+                "id": "e1",
+                "kind": "explain",
+                "source": "x",
+                "claims": [{"id": "c1", "text": "t", "citations": [{"span": "s1"}]}],
+            }
+        ]
+    )
+    citation = built.notebook["cells"][0]["metadata"]["reader"]["claims"][0]["citations"][0]
+    assert citation["material_title"] == "Course title"

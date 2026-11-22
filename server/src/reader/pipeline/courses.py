@@ -105,7 +105,15 @@ async def import_plan(conn: AsyncConnection, owner_id: uuid.UUID, raw: Any) -> d
     else:
         course_id = await store.create_course(conn, owner_id, plan.title, plan.material_sha256)
     out = []
-    for ordinal, lesson in enumerate(plan.lessons, start=1):
+    # S5: lessons map by plan lesson id; a new one takes the next free ordinal, never an existing lesson's.
+    next_ordinal = int(
+        (
+            await conn.execute(
+                text("SELECT coalesce(max(ordinal), 0) FROM lessons WHERE course_id = :c"), {"c": course_id}
+            )
+        ).scalar_one()
+    )
+    for lesson in plan.lessons:
         if lesson.id in known:
             lesson_id, first, last = known[lesson.id]
             if (first, last) != (lesson.first, lesson.last):
@@ -117,7 +125,8 @@ async def import_plan(conn: AsyncConnection, owner_id: uuid.UUID, raw: Any) -> d
                     {"f": lesson.first, "t": lesson.last, "o": owner_id, "c": plan.course_id, "p": lesson.id},
                 )
         else:
-            lesson_id = await store.ensure_lesson(conn, owner_id, course_id, ordinal, lesson.title)
+            next_ordinal += 1
+            lesson_id = await store.ensure_lesson(conn, owner_id, course_id, next_ordinal, lesson.title)
             await conn.execute(
                 text(
                     "INSERT INTO course_plans (owner_id, plan_course_id, plan_lesson_id, lesson_id,"

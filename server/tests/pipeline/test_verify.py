@@ -70,6 +70,119 @@ async def test_unreachable_kernel_is_verify_unavailable() -> None:
         await verify.VerifyClient(http=down, ws=down).run(_lab_nb(["True"]))
 
 
+class _Reply:
+    def __init__(self, status: int, data: Any) -> None:
+        self.status, self._data = status, data
+
+    def json(self) -> Any:
+        return self._data
+
+
+class FakeKernel:
+    """Kernel Gateway and the control endpoint in memory: each run's source execution prints `outputs[run]`."""
+
+    def __init__(self, outputs: list[str], chunk: int = 1) -> None:
+        self.outputs, self.chunk = outputs, chunk
+        self.run = -1
+        self.nonce = 0
+
+    async def http(self, method: str, host: str, port: int, path: str, body: Any = None) -> Any:
+        if path == "/control/state":
+            return _Reply(200, {"nonce": f"n{self.nonce}", "gateway": "up"})
+        if path == "/control/exit":
+            self.nonce += 1
+            self.run += 1
+            return _Reply(202, {})
+        if path == "/api/kernels":
+            return _Reply(201, {"id": "k"})
+        return _Reply(204, {})
+
+    async def ws(self, endpoint: Any, kernel: str) -> Any:
+        return _Ws(self)
+
+
+class _Ws:
+    def __init__(self, kernel: FakeKernel) -> None:
+        self.kernel, self.queue = kernel, []  # type: ignore[var-annotated]
+
+    async def send(self, frame: str) -> None:
+        request = json.loads(frame)
+        parent = {"msg_id": request["header"]["msg_id"]}
+        code = request["content"]["code"]
+        if not code.startswith("assert"):
+            text = self.kernel.outputs[self.kernel.run]
+            pieces = [
+                text[i : i + len(text) // self.kernel.chunk + 1]
+                for i in range(0, len(text), len(text) // self.kernel.chunk + 1)
+            ]
+            for piece in pieces:
+                self.queue.append(
+                    {"parent_header": parent, "header": {"msg_type": "stream"}, "content": {"text": piece}}
+                )
+        self.queue.append(
+            {"parent_header": parent, "header": {"msg_type": "execute_reply"}, "content": {"status": "ok"}}
+        )
+        self.queue.append(
+            {
+                "parent_header": parent,
+                "header": {"msg_type": "status"},
+                "content": {"execution_state": "idle"},
+            }
+        )
+
+    async def recv(self) -> str:
+        return json.dumps(self.queue.pop(0))
+
+    async def close(self) -> None:
+        return None
+
+
+async def test_outputs_are_normalised_then_compared() -> None:
+    """CRLF → LF and trailing whitespace do not count; any other difference fails the lab."""
+    verify = need("reader.pipeline.verify")
+    nb = _lab_nb(["True"])
+    same = FakeKernel(["42\r\n", "42   \n\n"])
+    report = await verify.VerifyClient(http=same.http, ws=same.ws).run(nb)
+    assert report.results["f01-lab"]["outputs_identical"] is True
+    assert report.results["f01-lab"]["passed"] is True
+    differ = FakeKernel(["42\n", "43\n"])
+    report = await verify.VerifyClient(http=differ.http, ws=differ.ws).run(nb)
+    assert report.results["f01-lab"] == {
+        "runs": 2,
+        "passed": False,
+        "outputs_identical": False,
+        "input_sha256": report.results["f01-lab"]["input_sha256"],
+    }
+    assert [p.kind for p in report.problems] == ["lab_failed"]
+
+
+async def test_lab_output_is_capped(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Code review S4: past EXEC_OUTPUT_MAX of text in a run the lab fails and nothing more is kept."""
+    verify = need("reader.pipeline.verify")
+    assert verify.OUTPUT_MAX == need("reader.kernels.protocol").EXEC_OUTPUT_MAX
+    monkeypatch.setattr(verify, "OUTPUT_MAX", 1000)
+    big = "y" * 5000
+    kernel = FakeKernel([big, big], chunk=10)
+    report = await verify.VerifyClient(http=kernel.http, ws=kernel.ws).run(_lab_nb(["True"]))
+    assert report.results["f01-lab"]["passed"] is False
+    small = FakeKernel(["ok\n", "ok\n"])
+    assert (await verify.VerifyClient(http=small.http, ws=small.ws).run(_lab_nb(["True"]))).problems == []
+
+
+async def test_time_budget_counts_interrupt_grace_and_resets() -> None:
+    """sum(steps) * (timeout + 5 s grace) * runs + runs * 30 s reset: `fits` one-step labs run, one more not."""
+    verify = need("reader.pipeline.verify")
+    b = spec_bounds()
+    one_step = (b["lab_exec_timeout_s"] + 5) * b["lab_runs"]
+    fixed = b["lab_runs"] * 30
+    fits = int((b["verify_job_timeout_s"] - fixed) // one_step)
+    assert fits * b["lab_exec_timeout_s"] * b["lab_runs"] < b["verify_job_timeout_s"] - one_step  # tighter
+    for n, unverifiable in ((fits, False), (fits + 1, True)):
+        kernel = FakeKernel(["1\n", "1\n"])
+        report = await verify.VerifyClient(http=kernel.http, ws=kernel.ws).run(_lab_nb([], n=n))
+        assert ([p.kind for p in report.problems] == ["labs_unverifiable"]) is unverifiable, n
+
+
 # --- [image] -------------------------------------------------------------------------------------------------------
 
 

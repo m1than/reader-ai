@@ -128,3 +128,46 @@ def test_final_revision_is_the_deterministic_deltas() -> None:
     tampered = copy.deepcopy(final)
     tampered["cells"][0]["source"] = "changed by hand"
     assert not g2.deltas_ok(tampered, m, problems, report)
+
+
+def _report(nb: dict[str, Any], verdicts: dict[Any, str] | None = None) -> dict[str, Any]:
+    g2 = need("reader.pipeline.g2")
+    findings = need("reader.pipeline.findings")
+    verify = need("reader.pipeline.verify")
+    lab = verify.LabReport(findings.labs_sha256(nb), {}, [])
+    given = verdicts if verdicts is not None else _all_supported(nb)
+    result: dict[str, Any] = g2.report(nb, {"fact_check", "adversarial_review"}, lab, given, True)
+    return result
+
+
+def test_verified_must_bind_the_cell_source() -> None:
+    """A `verified` stamped on other source (input_sha256 mismatch), failed, or with differing outputs fails."""
+    for change in ({"input_sha256": "0" * 64}, {"passed": False}, {"outputs_identical": False}):
+        nb = json.loads(F01)
+        lab = next(c for c in nb["cells"] if c["id"] == "f01-lab")
+        lab["metadata"]["reader"]["verified"] |= change
+        assert _report(nb)["failing"] == ["labs.unverified"], change
+
+
+def test_changed_and_erratum_cells_need_a_supported_verdict() -> None:
+    nb = json.loads(F01)
+    for cell_id in ("f01-changed", "f01-erratum"):
+        verdicts = _all_supported(nb)
+        verdicts[(cell_id, None)] = "contradicted"
+        assert _report(nb, verdicts)["failing"] == ["claims.unsupported"]
+        del verdicts[(cell_id, None)]
+        assert _report(nb, verdicts)["failing"] == ["claims.unsupported"]
+
+
+def test_a_taken_finding_id_is_suffixed_not_dropped() -> None:
+    findings = need("reader.pipeline.findings")
+    p = findings.Problem("adversarial_review", None, None, "collides", "adversarial_review", True)
+    nb = json.loads(F01)
+    squatter = copy.deepcopy(nb["cells"][0])
+    squatter["id"] = findings.open_cell_id(p)  # a model-written cell took the id
+    nb["cells"].append(squatter)
+    out = findings.append_findings(nb, [p])
+    added = out["cells"][-1]
+    assert added["id"] == f"{findings.open_cell_id(p)}-1"
+    assert added["metadata"]["reader"]["finding"]["text"] == "collides"
+    assert findings.append_findings(out, [p]) == out  # and a rerun still adds nothing

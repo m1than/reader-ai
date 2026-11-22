@@ -114,14 +114,29 @@ def _open_cell(cid: str, problem: Problem, blocking: bool, stage: str) -> dict[s
     }
 
 
+def _same_finding(cell: Mapping[str, Any], problem: Problem) -> bool:
+    reader = cell.get("metadata", {}).get("reader", {})
+    finding = reader.get("finding")
+    return (
+        reader.get("kind") == "open"
+        and isinstance(finding, dict)
+        and finding.get("text") == problem.text[:TEXT_MAX]
+        and finding.get("stage") == problem.stage
+    )
+
+
 def _append(notebook: Mapping[str, Any], problems: Sequence[Problem], stage: str) -> dict[str, Any]:
     out = copy.deepcopy(dict(notebook))
-    present = {c["id"] for c in out["cells"]}
+    cells = {c["id"]: c for c in out["cells"]}
     order: list[str] = []
     merged: dict[str, tuple[Problem, bool]] = {}
     for p in problems:
-        cid = open_cell_id(p)
-        if cid in present:
+        base = open_cell_id(p)
+        cid, n = base, 0
+        while cid in cells and not _same_finding(cells[cid], p):  # a taken id: suffix, never drop
+            n += 1
+            cid = f"{base}-{n}"
+        if cid in cells:  # this finding is already in the notebook (a rerun)
             continue
         if cid in merged:
             first, blocking = merged[cid]

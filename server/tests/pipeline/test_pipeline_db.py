@@ -143,7 +143,7 @@ async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path
                         if "span" in citation:
                             span = spans[citation["span"]]
                             assert citation["page"] == span.page
-                            assert citation["material_title"] == env.spans.title
+                            assert citation["material_title"] == "Synthetic course"  # the course title
         assert status["g2"]["publishable"] is False
         assert status["spent_usd"] == str(await _spent(env, run))
         assert status["task_budgets"] == {"draft": "4.0", "fact_check": "2.0", "review": "4.0"}
@@ -213,6 +213,45 @@ async def test_one_run_per_lesson(pg: Pg, tmp_path: Path) -> None:
         with pytest.raises(errors.PipelineError) as refused:
             await env.compile()
         assert refused.value.code == "compile_running"
+
+
+async def test_status_is_filtered_by_owner(pg: Pg, tmp_path: Path) -> None:
+    """The owner filter on its own (the routes' role check is tested in test_routes_db)."""
+    errors = need("reader.pipeline.errors")
+    runs = need("reader.pipeline.runs")
+    async with pipeline_env(pg, tmp_path) as env:
+        await env.import_plan()
+        run = await env.compile()
+        with pytest.raises(errors.PipelineError) as refused:
+            await runs.status(env.engine, env.jobs, env.users["anna"], run)
+        assert refused.value.code == "not_found"
+
+
+async def test_reuse_lookup_includes_the_same_run(pg: Pg, tmp_path: Path) -> None:
+    """A step of this run with the same input_sha256 is reusable too, not only earlier runs' steps."""
+    steps = need("reader.pipeline.steps")
+    runs = need("reader.pipeline.runs")
+    case = BY_NAME["clean-first-pass"]
+    async with pipeline_env(pg, tmp_path, **_env_kwargs(case)) as env:
+        run, _ = await _run_case(env, case)
+        async with env.engine.connect() as conn:
+            row = await runs.load_run(conn, run)
+            done = await runs.load_steps(conn, run)
+            fact = next(s for s in done if s.stage == "fact_check")
+            found = await steps._reusable(conn, row, "fact_check", fact.input_sha256)
+        assert found is not None
+        assert found.id == fact.id
+
+
+def test_wontfix_still_blocks_in_the_derived_state() -> None:
+    steps = need("reader.pipeline.steps")
+    nb = json.loads((FIXTURES.parent / "SRV-LESSON" / "F01.ipynb").read_text())
+    opened = next(c for c in nb["cells"] if c["metadata"]["reader"]["kind"] == "open")
+    assert steps._blocking_open(nb) == 0
+    opened["metadata"]["reader"]["finding"]["blocking"] = True
+    for status, blocking in (("open", 1), ("wontfix", 1), ("answered", 0)):
+        opened["metadata"]["reader"]["status"] = status
+        assert steps._blocking_open(nb) == blocking, status
 
 
 async def test_source_comes_from_the_lessons_page_range(pg: Pg, tmp_path: Path) -> None:

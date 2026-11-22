@@ -23,6 +23,9 @@ from reader.pipeline.source import Span
 
 CELL_ID: Final = re.compile(r"[A-Za-z0-9_-]{1,64}")
 BASE_KEYS: Final = frozenset({"id", "kind", "source", "sectors"})
+CODE_KEYS: Final = frozenset(
+    {"provenance", "verified"}
+)  # written by code only; dropped from model output (S3)
 CITING_KINDS: Final = frozenset({"explain", "changed", "erratum"})
 
 
@@ -55,7 +58,7 @@ def _reader(
     kind = cell["kind"]
     reader: dict[str, Any] = {"kind": kind, "sectors": cell.get("sectors", []), "provenance": provenance}
     for key, value in cell.items():
-        if key not in BASE_KEYS and key != "verified":  # `verified` is written by lab verification only
+        if key not in BASE_KEYS and key not in CODE_KEYS:
             reader[key] = copy.deepcopy(value)
     if kind == "explain":
         for claim in reader.get("claims", []):
@@ -67,6 +70,8 @@ def _reader(
                 stripped.add((str(cell["id"]), str(claim.get("id"))))
     elif kind in CITING_KINDS:
         reader["citations"], dropped = expand_citations(reader.get("citations", []), aliases, title)
+        if dropped:  # S2: a `changed` or `erratum` cell citing an unknown alias is forced unsupported too
+            stripped.add((str(cell["id"]), None))
     if kind == "erratum":
         reader["source_ref"] = _ref(reader.get("source_ref"), aliases)
     if kind == "route":
