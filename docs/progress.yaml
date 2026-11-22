@@ -524,7 +524,12 @@ tasks:
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
         spends credit, ledger" }
-  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min] }
+  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
+      branch: V/V.TUTOR-min,
+      note: "spec drafted, awaits deep-reviewer (cost and auth: full review). spec/modules/SRV-TUTOR.yaml: question as a
+        job (api cannot reach agent-proxy, ADR-0025), polling instead of SSE (answers validated whole before display),
+        grounding enforced by code (span ids outside the retrieved set removed, unsupported blocks marked), Sonnet 5.5,
+        per-question cap $0.20, daily $3; typical ≈ $0.026 warm / $0.053 cold per question (VEC-TUTOR-3)." }
   - { id: V.live, stage: V, kind: live, status: todo,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
       what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }
