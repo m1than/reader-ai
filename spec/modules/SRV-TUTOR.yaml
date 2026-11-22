@@ -28,7 +28,7 @@
 #     below are owned by SRV-AGENT's author and land there as paired changes.
 #
 # Cross-spec requirements (paired changes):
-#   - SRV-AGENT (amendments sent to its owner): (a) a per-user daily scope for task `tutor` (`spent(user, task=tutor,
+#   - SRV-AGENT (landed as FR-AGENT-12 and FR-AGENT-13 on V/V.COMPILE-min, dca70a2): (a) a per-user daily scope for task `tutor` (`spent(user, task=tutor,
 #     UTC day)`) refused before the reserve row with `daily_budget_exhausted`, besides the run cap (`run_id` = question
 #     id, cap `question_cap_usd`, refusal `budget_exhausted`); (b) extended thinking off per task (`MAX_THINKING_TOKENS=0`
 #     in the CLI environment for task `tutor`); (c) a caller `system_prompt` option (with it the CLI sends no system
@@ -36,10 +36,11 @@
 #     permanent code `output_truncated`; (e) the CLI's `api_retry` messages exposed and a per-call deadline accepted, so
 #     the tutor can abort on the first retry (FR-TUTOR-7). The tutor passes its own byte-based worst case
 #     (VEC-TUTOR-3) as the reserve floor `floor_usd` and logs `reserve_exceeded` itself when a settlement exceeds it.
-#   - SRV-EVENTS: KIND_MODULES lists `reader.tutor.jobs`; job kinds may declare a `priority` (FR-EVENTS-1 amendment),
-#     used by `tutor.answer` to run before queued compile stages.
+#   - SRV-EVENTS: KIND_MODULES lists `reader.tutor.jobs`; job kinds may declare a `priority` (FR-EVENTS-1 amendment,
+#     2026-11-23), used by `tutor.answer` to run before queued compile stages.
 #   - SRV-AUTH: ROUTERS lists `reader.tutor.routes`; VERSION_LOCATIONS lists `reader/tutor/migrations`;
-#     `tutor_questions` is a non-system table for INV-AUTH-8.
+#     `tutor_questions` is a non-system table for INV-AUTH-8; the api role holds one SRV-EVENTS `Jobs` on
+#     `app.state.jobs` (FR-AUTH-10 note from SRV-PIPELINE), which FR-TUTOR-1 enqueues through.
 #   - WEB-NOTEBOOK: the lesson view mounts `web/src/tutor/AskPanel` and passes the focused cell id.
 #   - SRV-INGEST: read helper `spans_by_ids(conn, owner_id, span_ids)`; until it exists this module reads
 #     `material_spans` directly (read-only).
@@ -49,9 +50,9 @@
 
 id: SRV-TUTOR
 title: Tutor (slice) — questions about the open lesson, answered by one model call from retrieved spans, citations and quotes checked by code
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
 layer: server
 track: ai
 slice: V.TUTOR-min
@@ -136,8 +137,10 @@ requirements:
       (default: the lesson's current sha256, SRV-LESSON) must be a revision of this lesson, else 400 `unknown_revision`;
       `cell_id`, when present, a cell of that revision, else 400 `cell_unknown`. The busy check (FR-TUTOR-10) finds a
       live queued question → 409 `tutor_busy`. Daily pre-check: spent(user, tutor, UTC day) + the worst-case reserve >
-      `daily_cap_usd` → 429 `daily_budget_exhausted`. Otherwise it commits the row (state `queued`), then enqueues job
-      `tutor.answer` with key `[question_id]`; an enqueue error sets the row `failed` / `tutor_failed`. It answers 202
+      `daily_cap_usd` → 429 `daily_budget_exhausted` (spent read with the ledger's FR-AGENT-12 daily query, the
+      reserve at the bounds' maximum, VEC-TUTOR-3). Otherwise it commits the row (state `queued`), then enqueues job
+      `tutor.answer` with key `[question_id]` through the api's SRV-EVENTS `Jobs` (`app.state.jobs`, SRV-AUTH
+      FR-AUTH-10 note); an enqueue error, or no `Jobs` on the app, sets the row `failed` / `tutor_failed`. It answers 202
       `{"question_id": uuid}` and logs route, question length and outcome code, never the text. [db]
   - id: FR-TUTOR-2
     text: >-
@@ -149,12 +152,15 @@ requirements:
   - id: FR-TUTOR-3
     text: >-
       Job kind `tutor.answer` (SRV-EVENTS FR-EVENTS-1, `reader.tutor.jobs.JOB_KINDS`): args `{question_id}` (extra
-      forbidden), key `[question_id]`, `max_attempts = attempts_max`, `timeout_s = job_timeout_s`, priority above
-      compile stages (SRV-EVENTS amendment). Transient: `provider_unavailable`, `rate_limited`, `output_invalid`. The
+      forbidden), key `[question_id]`, `max_attempts = attempts_max`, `timeout_s = job_timeout_s`, `priority = 100`
+      (SRV-EVENTS FR-EVENTS-1 amendment; compile stages keep the default 0, so a question runs before queued compile
+      stages). Transient: `provider_unavailable`, `rate_limited`, `output_invalid`. The
       handler never leaves a row `queued`: it catches every permanent error, every budget refusal and a transient error
       on the last attempt, writes `failed` (code) or `refused` (`budget_exhausted` / `daily_budget_exhausted`), and
       returns normally; only a transient error before the last attempt is re-raised for a retry. `monthly_budget_exhausted`
-      (SRV-AGENT FR-AGENT-9) also ends `refused`; `provider_missing` ends `failed` with its own message. Every row
+      (SRV-AGENT FR-AGENT-9) also ends `refused`, and SRV-AGENT's `task_budget_exhausted` (its per-run task budget,
+      here per question) ends `refused` / `budget_exhausted`; `provider_missing` ends `failed` with its own message;
+      any other SRV-AGENT code (`tools_mismatch`, `sdk_error`, `unknown_model`, …) ends `failed` / `tutor_failed`. Every row
       transition, in the api and the worker, is `UPDATE … WHERE state = 'queued'`; the handler first checks that the
       row is still `queued` and exits without a model call when it is not. [db]
   - id: FR-TUTOR-4
@@ -166,7 +172,9 @@ requirements:
       Retrieval. The handler loads the revision and the course's `material_sha256`. With none, or when
       `search(owner_id, question, k = retrieve_k, material_sha256)` (SRV-SEARCH FR-SEARCH-7) returns no result, the row
       is `failed` / `sources_unavailable` and no model is called. Otherwise each result's primary span is loaded
-      (text, page) and cut to `span_bytes_max`; a `degraded` search is used and recorded. [db] with a fake search
+      (text, page) and cut to `span_bytes_max`; a `degraded` search is used and recorded. The focused cell (id, kind
+      `metadata.reader.kind`, source text) is read from the revision's notebook blob (SRV-LESSON). [db] with a fake
+      search
   - id: FR-TUTOR-6
     text: >-
       Prompt. The system prompt is the versioned file `reader/tutor/prompts/answer-v1.md` (≤ `system_bytes_max`);
@@ -184,13 +192,18 @@ requirements:
       `task` = `tutor`, thinking off, `max_output_tokens`, run cap `question_cap_usd`, the daily scope (cross-spec). No
       tool is offered; agent-proxy refuses a request carrying tools (SRV-AGENT FR-AGENT-4, FR-AGENT-7). No other code
       path calls a model. Fast failure: on 429, 529 or 500 the CLI retries about 10 times over about 3 minutes
-      (REF-TUTOR-8), which NFR-TUTOR-1 cannot afford, so the tutor adapter aborts the call on the first `api_retry`
-      message or when `call_deadline_s` passes, whichever comes first. The attempt then ends `rate_limited` (after a 429
-      or 529) or `provider_unavailable` (after a 500, a connect failure or the deadline), and settles per SRV-AGENT
-      FR-AGENT-9 (its reserve keeps counting until a settlement or the SDK's reported cost replaces it); the next attempt
-      follows FR-TUTOR-3. The tutor passes its byte-based worst case (VEC-TUTOR-3) as the reserve floor `floor_usd` and
-      logs WARNING `reserve_exceeded` when a settlement exceeds it. [unit] with a fake provider that emits `api_retry`,
-      and stalled providers that stop before any 2xx and after a 2xx has started streaming
+      (REF-TUTOR-8), which NFR-TUTOR-1 cannot afford, so the call sets SRV-AGENT's `abort_on_retry` and `deadline_s =
+      call_deadline_s` (FR-AGENT-13 d, e): the first `api_retry` message or the deadline, whichever comes first, ends
+      the attempt with SRV-AGENT's transient `upstream_retry` or `deadline_exceeded`, which the tutor records as
+      `provider_unavailable` (SRV-AGENT does not report which status was being retried); SRV-AGENT's own
+      `rate_limited` and `provider_unavailable` pass through unchanged. Such an attempt settles exactly as FR-AGENT-9
+      and FR-AGENT-13 say: no upstream 2xx → $0; a 2xx without an SDK cost → the reserve; an unknown upstream record →
+      the reserve. The next attempt follows FR-TUTOR-3. A `max_tokens` stop reason (FR-AGENT-13 c) is the permanent
+      `output_truncated`. The tutor passes its byte-based worst case (VEC-TUTOR-3, computed from the bytes actually
+      sent) as the reserve floor `floor_usd` and logs WARNING `reserve_exceeded` when the SDK's reported cost exceeds
+      it. [unit] with a fake provider that emits `api_retry`; [db] two stalled providers through the real SRV-AGENT
+      adapter (a fake CLI and agent-proxy client): one stalls before any 2xx and settles $0, one stalls after a 2xx
+      has started streaming and settles the reserve
   - id: FR-TUTOR-8
     text: >-
       Answer validation. The model's text, after removing one optional surrounding ```json fence, must be one JSON
@@ -296,7 +309,10 @@ nfr:
     threshold: 0.06
     verified_by: bench
   - id: NFR-TUTOR-3
-    metric: share of NFR-TUTOR-1 answers with grounded = true
+    metric: >-
+      share of NFR-TUTOR-1 answers with grounded = true. No spike measured it (REF-TUTOR-7 used synthetic sources):
+      the first bench run is its measurement, and a miss there reopens the prompt (answer-v1.md) before the slice's
+      live check, not the threshold
     threshold: 0.8
     verified_by: bench
 
@@ -324,7 +340,9 @@ vectors:
       bench questions: one question per `explain` cell of the compiled L02 revision, in cell order, the first
       min(20, explain cells), generated at run time as "Explain in your own words: <cell title>" (the cell titles are
       not committed; only the generator `e2e/web/tutor/bench_questions.py` is), plus questions-v2 `v03` (the only
-      accepted question on L02's pages 60–84)
+      accepted question on L02's pages 60–84). The generator reads the explain cells and their titles (the first
+      markdown heading of the cell source) from the compiled revision under test and stops with an error, before any
+      question is asked, when there is no explain cell or a selected cell has no title
     file: spec/fixtures/SRV-TUTOR/bench.yaml
 
 defers:
@@ -344,4 +362,4 @@ owner_notes:
   - "While a lesson compile stage runs, a question waits for it (one worker); after 10 minutes it expires instead of being answered late."
   - "An answer says when it is not grounded in the book instead of hiding it."
 
-review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 next."
+review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 (30890d8): approve. Approved by agent with Red (2026-11-23), the round-3 notes folded in: FR-TUTOR-7's stalled-provider outcomes stated exactly as FR-AGENT-9/-13 settle them, with two [db] tests through the real adapter, and SRV-AGENT's `upstream_retry` / `deadline_exceeded` recorded as `provider_unavailable`; NFR-TUTOR-3's first bench run is its measurement; the bench generator confirms explain-cell titles on the compiled revision. Also: SRV-AGENT's remaining codes mapped (FR-TUTOR-3), priority 100 through the SRV-EVENTS amendment, enqueue through `app.state.jobs`."

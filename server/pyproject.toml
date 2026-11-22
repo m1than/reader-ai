@@ -97,6 +97,10 @@ known-first-party = ["reader"]
 # SRV-SEARCH: the tests talk to a local HTTP server (S310), run docker and python subprocesses (S603, S607), and
 # build SQL for assertions from fixed names (S608); RUF001: the synthetic corpus is Russian text on purpose.
 "tests/search/**" = ["S101", "S310", "S603", "S607", "S608", "PT018", "RUF001"]
+# SRV-TUTOR: PT018 compound expectations on one result; S603/S607 the [live] test runs docker; E501 long SQL and
+# @trace lines stay whole; SIM300 bounds compare module constants (UPPER_CASE) to spec values; PT017 the parse
+# property asserts the code of the one exception type it allows.
+"tests/tutor/**" = ["S101", "PT018", "S603", "S607", "E501", "SIM300", "PT017"]
 
 [tool.mypy]
 strict = true

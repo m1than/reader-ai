@@ -55,7 +55,7 @@ layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); no behaviour of this module changed"
+review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review"
 
 paths:
   - server/src/reader/jobs/**
@@ -106,12 +106,17 @@ requirements:
     text: >-
       Job kinds are declared as data: a `JobKind` record has `name` (`^[a-z][a-z0-9_.]{2,63}$`), `queue`, `args`
       (a Pydantic model with `extra="forbid"`), `key` (the ordered list of `args` field names that form the
-      idempotency key), `max_attempts` (≥ 1 counted runs per key), `transient` (a tuple of exception types) and
-      `timeout_s`. The worker serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared
-      module list `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST and SRV-SEARCH add theirs); building
-      a `Catalog` rejects a duplicate name (`kind_name_duplicate`), the reserved name `jobs.sweep`, an `args` model
+      idempotency key), `max_attempts` (≥ 1 counted runs per key), `transient` (a tuple of exception types),
+      `timeout_s`, and `priority` (an int, default 0; amended 2026-11-23 for SRV-TUTOR): every defer of the kind —
+      first enqueue, retry, requeue and sweep re-enqueue alike — passes it to procrastinate as the job's priority, and
+      the worker fetches higher-priority `todo` jobs first (procrastinate orders by priority, then id), so a short
+      interactive kind runs before queued jobs of lower priority, never in the middle of a running one. The worker
+      serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared module list
+      `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST, SRV-SEARCH and SRV-TUTOR add theirs); building a
+      `Catalog` rejects a duplicate name (`kind_name_duplicate`), the reserved name `jobs.sweep`, an `args` model
       whose `model_config` does not set `extra="forbid"` (`kind_args_not_forbid`), a `key` field missing from
-      `args`, and an `args` model that fails FR-EVENTS-10 (a field typed `Secret` or any subclass of it). Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
+      `args`, a `priority` outside 0 ≤ priority < the sweep's 1,000,000 (`kind_bounds_invalid`), and an `args` model
+      that fails FR-EVENTS-10 (a field typed `Secret` or any subclass of it). Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
       cancellation flag between steps, because `timeout_s` cannot interrupt blocking synchronous code.
   - id: FR-EVENTS-2
     text: >-
