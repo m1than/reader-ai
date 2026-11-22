@@ -37,6 +37,7 @@ from reader.cli.watcher import encode_bundle, lock_holder, stop_watcher
 from reader.config import ConfigError, ReaderConfig, Secret, SecretRef, SecretResolutionError, load_config
 
 READY_TIMEOUT: Final = 10  # s for the watcher's readiness byte (FR-CLI-8): two local daemon calls
+AGENT_PROXY_IMAGE: Final = "reader-agent-proxy:local"
 HEALTH_TIMEOUT: Final = 180  # s from `up -d` (FR-CLI-10)
 HEALTH_POLL: Final = 2  # s, the services' own healthcheck interval (compose.yaml x-health)
 LINK_TIMEOUT: Final = 15  # s, FR-CLI-21
@@ -96,21 +97,54 @@ class Project:
     config: ReaderConfig
     override: bytes
     model: Rendered
+    profiles: tuple[str, ...] = ()
 
 
-def compose(ctx: Ctx, override: bytes, *args: str) -> Result:
-    """`docker compose -f deploy/compose.yaml -f - …` with the override on stdin only (INV-CLI-6)."""
-    return ctx.runner.run(
-        ["docker", "compose", "-f", str(ctx.compose_file), "-f", "-", *args], env=ctx.env, stdin=override
-    )
+ACTIVE_PROFILES: tuple[str, ...] = ("kernels",)  # FR-CLI-5: the default profile plus these, always
+OPTIONAL_PROFILES: tuple[str, ...] = ("agents",)  # FR-CLI-5: chosen by `reader up`, recorded in run/profiles
 
 
-def load(ctx: Ctx, config_path: Path) -> Project:
+def compose_argv(ctx: Ctx, *args: str, extra: Sequence[str] = ()) -> list[str]:
+    """`docker compose --profile … -f deploy/compose.yaml -f - …` (FR-CLI-5; override on stdin, INV-CLI-6)."""
+    names = sorted({*ACTIVE_PROFILES, *extra})
+    profiles = [flag for p in names for flag in ("--profile", p)]
+    return ["docker", "compose", *profiles, "-f", str(ctx.compose_file), "-f", "-", *args]
+
+
+def compose(ctx: Ctx, override: bytes, *args: str, extra: Sequence[str] = ()) -> Result:
+    return ctx.runner.run(compose_argv(ctx, *args, extra=extra), env=ctx.env, stdin=override)
+
+
+def recorded_profiles(ctx: Ctx) -> tuple[str, ...]:
+    """The optional profiles the last `reader up` activated (FR-CLI-5), or none."""
+    try:
+        names = (ctx.run_dir / "profiles").read_text(encoding="utf-8").split()
+    except OSError:
+        return ()
+    return tuple(sorted(n for n in names if n in OPTIONAL_PROFILES))
+
+
+def choose_profiles(ctx: Ctx, config: ReaderConfig) -> tuple[str, ...]:
+    """FR-CLI-5: `agents` when a provider is configured and the agent-proxy image exists; otherwise it stays
+    off with one line on stderr and `up` continues."""
+    if not any(u.providers for u in config.users):
+        return ()
+    found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
+    if found is not None and found.code == 0:
+        return ("agents",)
+    print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
+    return ()
+
+
+def load(ctx: Ctx, config_path: Path, profiles: Sequence[str] | None = None) -> Project:
     config = load_config(config_path)
+    active = tuple(sorted(profiles)) if profiles is not None else recorded_profiles(ctx)
     path = check_config_path(config_path)
     override = build_override(load_compose_source(ctx.compose_file), [u.handle for u in config.users], path)
     data = json.dumps(override).encode()
-    rendered = _checked(ctx, lambda: compose(ctx, data, "config", "--format", "json"), "compose_config")
+    rendered = _checked(
+        ctx, lambda: compose(ctx, data, "config", "--format", "json", extra=active), "compose_config"
+    )
     parsed: Any = None
     try:
         parsed = json.loads(rendered.out)
@@ -118,7 +152,7 @@ def load(ctx: Ctx, config_path: Path) -> Project:
         parsed = None
     if not isinstance(parsed, dict):
         raise CliError("bad_model", "docker compose config did not return a JSON object")
-    return Project(config, data, Rendered.parse(parsed))
+    return Project(config, data, Rendered.parse(parsed), active)
 
 
 def _checked(ctx: Ctx, call: Callable[[], Result], code: str) -> Result:
@@ -319,11 +353,14 @@ def offer_trust(ctx: Ctx, project: str) -> None:
 
 @guarded
 def cmd_up(ctx: Ctx, config_path: Path) -> int:
-    project = load(ctx, config_path)
+    config = load_config(config_path)  # a configuration error exits 2 before any docker call
+    check_config_path(config_path)
+    project = load(ctx, config_path, choose_profiles(ctx, config))
     model = project.model
     ensure_run_dir(ctx)
     (ctx.run_dir / "project").write_text(model.name + "\n", encoding="utf-8")
-    _checked(ctx, lambda: compose(ctx, project.override, "build"), "build_failed")
+    (ctx.run_dir / "profiles").write_text("".join(p + "\n" for p in project.profiles), encoding="utf-8")
+    _checked(ctx, lambda: compose(ctx, project.override, "build", extra=project.profiles), "build_failed")
     since = (
         _checked(
             ctx,
@@ -350,9 +387,7 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     if not process.wait_ready(READY_TIMEOUT):
         process.terminate()
         raise CliError("watcher_not_ready", "the watcher did not signal readiness; no container was started")
-    started = docker(
-        ctx, "docker", "compose", "-f", str(ctx.compose_file), "-f", "-", "up", "-d", stdin=project.override
-    )
+    started = docker(ctx, *compose_argv(ctx, "up", "-d", extra=project.profiles), stdin=project.override)
     if started is None or started.code != 0:
         process.terminate()
         raise CliError("up_failed", "docker compose up failed; the watcher was stopped")

@@ -6,7 +6,8 @@ import { load } from './testing/load';
 
 type Fixture = { list: { lessons: unknown[] }; lesson: unknown; bad_ids: string[] };
 const fx = () => readJson<Fixture>('spec/fixtures/WEB-UI/lessons.json');
-const me = { id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
+// SRV-AUTH FR-AUTH-9: `id` is the user's UUID as a string (the live run found the client expecting a number).
+const me = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
 
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

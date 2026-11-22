@@ -7,7 +7,7 @@ import { load } from '../app/testing/load';
 afterEach(cleanup);
 
 const notebook = () => readJson<Record<string, unknown>>('spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb');
-const lessons = () => readJson<{ lesson: Record<string, unknown> }>('spec/fixtures/WEB-UI/lessons.json');
+const lessons = () => readJson<{ lesson: { lesson: Record<string, unknown> } }>('spec/fixtures/WEB-UI/lessons.json');
 
 const fakeController = (overrides: Record<string, unknown> = {}) => {
   const listeners = new Set<() => void>();
@@ -39,13 +39,13 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
   it('loads metadata, then the latest revision, and renders every cell with its kind label', async () => {
     const { AppRoot } = await load(() => import('../app/AppRoot'));
     expect(AppRoot).toBeTypeOf('function');
-    const sha = String(lessons().lesson.latest_sha256);
+    const sha = String(lessons().lesson.lesson.latest_sha256);
     const urls: string[] = [];
     const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'Content-Type': 'application/json' } });
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       urls.push(url);
-      if (url === '/api/me') return json({ id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
+      if (url === '/api/me') return json({ id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
       if (url === '/api/lessons/w01') return json(lessons().lesson);
       if (url === `/api/lessons/w01/revisions/${sha}`) return json(notebook());
       return new Response(null, { status: 404 });
@@ -67,8 +67,8 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       urls.push(url);
-      if (url === '/api/me') return json({ id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
-      return json({ ...lessons().lesson, lesson_id: 'w02', latest_sha256: null, revisions: [] });
+      if (url === '/api/me') return json({ id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
+      return json({ lesson: { ...lessons().lesson.lesson, lesson_id: 'w02', latest_sha256: null }, revisions: [] });
     });
     await act(async () => {
       render(<AppRoot initialPath="/lessons/w02" fetch={fetchFn as unknown as typeof fetch} navigateAway={vi.fn()} />);

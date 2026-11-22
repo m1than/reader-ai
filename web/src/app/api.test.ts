@@ -33,7 +33,8 @@ describe('API client (FR-UI-4)', () => {
     expect(list.lessons).toHaveLength(3);
     expect(list.lessons[1]?.latest_sha256).toBeNull();
     const lesson = await api.getLesson('w01');
-    expect(lesson.latest_sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(lesson.lesson.latest_sha256).toMatch(/^[0-9a-f]{64}$/); // nested, as SRV-LESSON FR-LESSON-8
+    expect(lesson.revisions[0]?.stages).toEqual(['fixture']);
   });
 
   it('rejects a response that does not match its shape with bad_response', async () => {

@@ -123,7 +123,8 @@ requirements:
       configuration (SRV-AUTH needs `instance.url` and `users`): compose.yaml sets
       `environment: { READER_CONFIG: /etc/reader/reader.yaml }` statically on `api`, `worker` and `mcp`, and on no other
       service (not a secret: a fixed path), and OPS-CLI's in-memory override (VEC-DEPLOY-3) adds to exactly those three
-      services one bind of the owner's reader.yaml: type `bind`, target `/etc/reader/reader.yaml`, `read_only: true`,
+      services and `agent-proxy` (it maps users to their provider files, SRV-AGENT; amended 2026-11-22 with OPS-CLI
+      FR-CLI-4) one bind of the owner's reader.yaml: type `bind`, target `/etc/reader/reader.yaml`, `read_only: true`,
       `bind.create_host_path: false` (a missing file fails the start instead of Docker creating a directory there).
       reader.yaml holds only `secret://` references (SRV-CONFIG, ADR-0011), so the bind carries no secret, and
       compose.yaml needs no interpolation for it (INV-DEPLOY-2). Kernel services have only tmpfs (FR-DEPLOY-8).

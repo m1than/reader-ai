@@ -21,7 +21,7 @@ HANDLE_MAX: Final = 50  # `kernel-user-` (12) + 50 stays within a 63-character D
 DB_PASSWORD: Final = "db-password"  # noqa: S105 - a file name under /run/secrets, not a password
 DB_CONSUMERS: Final = ("postgres", "api", "worker", "mcp")  # FR-DEPLOY-10 (b)
 TOKEN_CONSUMER: Final = "agent-proxy"  # noqa: S105 - a service name
-CONFIG_ROLES: Final = ("api", "worker", "mcp")
+CONFIG_ROLES: Final = ("api", "worker", "mcp", "agent-proxy")  # FR-CLI-4: the reader.yaml bind
 CONFIG_TARGET: Final = "/etc/reader/reader.yaml"
 _USER: Final = re.compile(r"(\d+)(?::\d+)?")
 

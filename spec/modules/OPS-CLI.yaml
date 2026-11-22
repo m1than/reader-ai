@@ -14,6 +14,12 @@
 # `name`, the `x-kernel` template, FR-DEPLOY-10 b's consumers, the backup labels, VEC-DEPLOY-3); SRV-AUTH (approved,
 # branch 1/S1.SRV-AUTH: `reader-server bootstrap-link [--handle H]` and the bootstrap URL that `reader bootstrap` opens).
 #
+# Cross-spec item (open, V.OPS-CLI-kernels/agents, 2026-11-22): the `embed` service (SRV-SEARCH, ADR-0028) is not in
+# deploy/compose.yaml yet: origin/V/V.SRV-SEARCH-min holds only its spec, and the coordinator's source branch
+# origin/V/SRV-SEARCH-impl is not pushed. When OPS-DEPLOY adds it (default profile, own build), `reader up` builds
+# and starts it with no OPS-CLI code change (step 1 builds every service with a build section); it is not a secret
+# consumer (FR-CLI-5).
+#
 # Review policy (owner, 2026-11-20): this module handles secrets, so it keeps full deep-reviewer review until approve.
 
 id: OPS-CLI
@@ -21,7 +27,7 @@ title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bo
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20)."
+review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20). Amended 2026-11-22 for V.OPS-CLI-kernels and V.OPS-CLI-agents (FR-CLI-4 bind to agent-proxy, FR-CLI-5 profiles, FR-CLI-8 step 0; paired with OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3); deep-reviewer review pending (secrets: full)."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -98,12 +104,13 @@ requirements:
       `profiles: [kernels]` and the network `sb-user-<handle>`, declares that network `internal: true`, and attaches it
       to `api`. Equality is INV-DEPLOY-8's (all kernel services equal on every key except `networks`). A handle longer
       than 50 characters or not matching `[a-z0-9][a-z0-9-]*` stops `up` with an error naming the handle: 50 keeps
-      `kernel-user-<handle>` within a 63-character DNS label. The override also gives exactly `api`, `worker` and `mcp`
-      (for SRV-AUTH and the other server roles) a read-only bind of the loaded reader.yaml,
+      `kernel-user-<handle>` within a 63-character DNS label. The override also gives exactly `api`, `worker`, `mcp`
+      (for SRV-AUTH and the other server roles) and `agent-proxy` (it maps each user to that user's provider file,
+      SRV-AGENT) a read-only bind of the loaded reader.yaml,
       `{type: bind, source: <path>, target: /etc/reader/reader.yaml, read_only: true, bind: {create_host_path: false}}`
       (a missing file fails the start instead of Docker creating a directory in its place); no other service gets it.
       The override adds no environment entry: compose.yaml sets `READER_CONFIG=/etc/reader/reader.yaml` statically on
-      those three services (OPS-DEPLOY FR-DEPLOY-5). `<path>` is the `--config` path after
+      the three server roles (OPS-DEPLOY FR-DEPLOY-5). `<path>` is the `--config` path after
       `Path.resolve(strict=True)` (always absolute); `up` refuses to start, naming the reason and not the path's
       contents, if that path contains `$` (Compose would interpolate it). Relative paths inside reader.yaml then resolve
       against `/etc/reader` in the containers (a note for the server modules). The override is the only route of this path into the
@@ -111,13 +118,26 @@ requirements:
       only `secret://` references) and reaches `docker compose` only on stdin.
   - id: FR-CLI-5
     text: >-
-      Active profiles: in stage 1 `reader up` activates the default profile only and takes no `--profile` flag; a later
-      stage adds profiles by amending this requirement. The consumer set is FR-DEPLOY-10 (b)'s, restricted to services
+      Active profiles: `reader up` activates the default profile plus `kernels` (task V.OPS-CLI-kernels, vertical slice:
+      the notebook needs `kernel-user-<handle>`, OPS-DEPLOY FR-DEPLOY-8) and takes no `--profile` flag; every
+      `docker compose -f … -f -` call of `reader up` (config, build, up) carries `--profile kernels` before `-f`.
+      With `kernels`, the override's `kernel-user-<handle>` for every configured user (FR-CLI-4) and the pool services
+      `kernel-verify`, `kernel-agent` and `kernel-pair-1` start. `reader up` also activates `agents` (task
+      V.OPS-CLI-agents) when at least one `users[].providers[]` entry is configured and
+      `docker image inspect reader-agent-proxy:local` exits 0 (nothing in this repository builds that image yet;
+      SRV-AGENT owns it); otherwise `agents` stays off with one line on stderr naming the reason, and `up` continues.
+      The active profiles go as `--profile <p>` flags, sorted, before `-f`; `reader up` records `agents` in
+      `run/profiles`, and the commands that render the model without running `up` (status, down, bootstrap, doctor,
+      trust, backup, restore) use `kernels` plus the recorded profiles. A later stage adds profiles by amending this
+      requirement. The consumer set is FR-DEPLOY-10 (b)'s, restricted to services
       present in the rendered active model; each consumer's uid is the numeric `user` of its rendered service, and a
       consumer without one stops `up` naming the service. `reader up` resolves and hands over only the values whose
       consumer is in that set: `db-password` for postgres, api, worker and mcp; for agent-proxy, one file per
       `users[].providers[].token`, named `secret_file_name(ref)`. A provider token with the `file` scheme (resolved inside
-      a container, not on the host) stops `up` with code `not_deliverable`. Kernel services receive nothing.
+      a container, not on the host) stops `up` with code `not_deliverable`. Provider tokens go to agent-proxy only
+      (ADR-0023, ADR-0025): no other service receives one, and without agent-proxy in the active model no provider
+      reference is resolved at all. The watcher's consumer set is the plan's services, so it gains agent-proxy exactly
+      when `agents` is active. Kernel services and the `embed` service (SRV-SEARCH) receive nothing.
   - id: FR-CLI-6
     text: >-
       Delivery protocol (ADR-0026): for one (container, uid, name, value) the watcher runs
@@ -145,7 +165,8 @@ requirements:
       FR-CLI-3's project name or, without a valid config, the one `up` recorded in `run/project`.
   - id: FR-CLI-8
     text: >-
-      Start order of `reader up`: (1) `docker compose … build` as its own step; (2) T0 = the daemon's clock,
+      Start order of `reader up`: (0) the agent-proxy image check of FR-CLI-5, then the
+      render with the chosen profiles; (1) `docker compose … build` as its own step; (2) T0 = the daemon's clock,
       `docker info --format '{{.SystemTime}}'`; (3) resolve every value of FR-CLI-5, and any failure stops `up` before a
       container starts; (4) start the watcher as a new program (`python -m reader.cli.watcher`, `start_new_session`,
       never a fork without exec, for the macOS keyring's fork safety), stream a bundle of length-prefixed (name, value)
@@ -173,7 +194,7 @@ requirements:
       `docker exec` runs for it.
   - id: FR-CLI-10
     text: >-
-      `reader up` exits 0 when every default-profile service is healthy within 180 s, counted from step (7) of FR-CLI-8
+      `reader up` exits 0 when every service of the active profiles (FR-CLI-5) is healthy within 180 s, counted from step (7) of FR-CLI-8
       (after images are built), else non-zero, and leaves the watcher running, so live-check scripts can call
       `reader up` and continue. 180 s is a structural bound: NFR-DEPLOY-1's 120 s covers a restart with an initialised
       pgdata; the first start adds initdb, which NFR-DEPLOY-1 reports without a threshold. A second `reader up` while a
@@ -198,7 +219,7 @@ requirements:
       `reader status` prints each service's health and the watcher state; `--json` prints
       `{"project": str, "watcher": "running"|"stopped", "services": [{"name": str, "state": str, "health": str|null}]}`.
       It needs no config: the project name is FR-CLI-3's when the config is valid, else `run/project`. The exit code is a
-      bit set covering every combination: bit 1 when a default-profile service is not running or not healthy, bit 2 when
+      bit set covering every combination: bit 1 when a service of the recorded active profiles is not running or not healthy, bit 2 when
       the watcher is stopped; so 0 = all healthy with the watcher running, 1, 2, or 3 = both. Exit 4 when docker is
       unreachable or no project name is known.
   - id: FR-CLI-14
@@ -215,7 +236,8 @@ requirements:
       reports major version ≥ 2 (the delivery mechanism was measured on Compose 5.6.1, REF-CLI-7); the keyring backend is
       the macOS Keychain and answers a lookup; reader.yaml loads; every reference of FR-CLI-5 resolves (the value is
       discarded at once, and `detail` holds only the code on failure); every `hostfile` reference passes FR-CLI-2's
-      checks; the Keychain item `reader-ai-system/postgres` exists or the pgdata volume does not; the watcher runs while
+      checks; the Keychain item `reader-ai-system/postgres` exists or the pgdata volume does not (detail: `item present`,
+      `not generated yet (fresh install)`, or `volume exists without the item`); the watcher runs while
       the stack runs; every root recorded by `reader trust` is still trusted. No check prints a value.
   - id: FR-CLI-16
     text: >-
