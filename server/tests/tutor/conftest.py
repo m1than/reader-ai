@@ -7,6 +7,7 @@ each test (Red) instead of the collection.
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import secrets
 import shutil
@@ -309,7 +310,7 @@ class FakeProvider:
 def deps(w: World, provider: Any, search: Any | None = None) -> Any:
     jobs = need("reader.tutor.jobs")
     return jobs.Deps(
-        provider=lambda _engine: provider,
+        provider=lambda _engine: contextlib.nullcontext(provider),
         search=search or FakeSearch(),
         blobs_root=w.blobs,
         config=lambda: w.config,

@@ -92,11 +92,11 @@ async def _revision_ok(conn: AsyncConnection, lesson: uuid.UUID, revision: objec
 
 async def ask(ctx: Ctx) -> Response:
     user = ctx.signed_in.id
+    body = await ctx.json()  # read before any database connection is taken (a slow client holds none)
     async with ctx.engine.connect() as conn:
         lesson = await _openable(ctx, conn)
         if lesson is None:
             return _not_found()
-        body = await ctx.json()
         question = valid_question(body.get("question") if isinstance(body, dict) else None)
         if question is None:
             log.info("tutor_ask lesson=%s outcome=question_invalid", lesson)
@@ -106,22 +106,22 @@ async def ask(ctx: Ctx) -> Response:
             revision = await current_sha256(conn, lesson)
         if not await _revision_ok(conn, lesson, revision):
             return error(400, "unknown_revision")
-        cell_id = body.get("cell_id")
-        if cell_id is not None:
-            root: Path = getattr(ctx.request.app.state, "blobs_root", blobs.DEFAULT_ROOT)
-            try:
-                cells = await anyio.to_thread.run_sync(_cells, root, revision)
-            except (blobs.BlobMissing, blobs.BlobCorrupt, ValueError):
-                log.warning("tutor_ask lesson=%s outcome=blob_unavailable", lesson)
-                return error(500, "tutor_failed")
-            if not isinstance(cell_id, str) or cell_id not in cells:
-                return error(400, "cell_unknown")
+    cell_id = body.get("cell_id")
+    if cell_id is not None:
+        root: Path = getattr(ctx.request.app.state, "blobs_root", blobs.DEFAULT_ROOT)
+        try:
+            cells = await anyio.to_thread.run_sync(_cells, root, revision)
+        except (blobs.BlobMissing, blobs.BlobCorrupt, ValueError):
+            log.warning("tutor_ask lesson=%s outcome=blob_unavailable", lesson)
+            return error(500, "tutor_failed")
+        if not isinstance(cell_id, str) or cell_id not in cells:
+            return error(400, "cell_unknown")
     await finalize_stale(ctx, user)
     async with ctx.engine.connect() as conn:
         if await store.queued_of(conn, user):
             log.info("tutor_ask lesson=%s outcome=tutor_busy", lesson)
             return error(409, "tutor_busy")
-        today = await ledger._spent(conn, owner_id=user, task=params.TASK, day=True)  # FR-AGENT-12's scope
+    today = await ledger.spent(ctx.engine, owner_id=user, task=params.TASK, day=True)  # FR-AGENT-12's scope
     if today + max_reserve_usd(PRECHECK_MODEL) > params.DAILY_CAP_USD:
         log.info("tutor_ask lesson=%s outcome=daily_budget_exhausted", lesson)
         return error(429, "daily_budget_exhausted")

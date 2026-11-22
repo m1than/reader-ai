@@ -14,7 +14,8 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final, Protocol
@@ -63,7 +64,7 @@ Search = Callable[[AsyncEngine, uuid.UUID, str, int, str | None], Awaitable[Foun
 class Deps:
     """What the handler reaches outside its connection; tests pass fakes."""
 
-    provider: Callable[[AsyncEngine], Provider]
+    provider: Callable[[AsyncEngine], AbstractAsyncContextManager[Provider]]  # closed after the one call
     search: Search
     blobs_root: Path
     config: Callable[[], ReaderConfig]
@@ -74,10 +75,15 @@ def _config() -> ReaderConfig:
     return load_config(Path(os.environ.get("READER_CONFIG", DEFAULT_CONFIG)))
 
 
-def _agent_provider(engine: AsyncEngine) -> Provider:
+@asynccontextmanager
+async def _agent_provider(engine: AsyncEngine) -> AsyncIterator[Provider]:
     from reader.agent.provider import AgentProvider, HttpProxyClient
 
-    return AgentProvider(engine, _config(), HttpProxyClient())
+    proxy = HttpProxyClient()
+    try:
+        yield AgentProvider(engine, _config(), proxy)
+    finally:
+        await proxy.aclose()
 
 
 async def _search(
@@ -140,7 +146,8 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
         abort_on_retry=True,
         deadline_s=deps.deadline_s,
     )
-    result = await deps.provider(engine).run(call)
+    async with deps.provider(engine) as provider:
+        result = await provider.run(call)
     if result.sdk_usd > floor:
         log.warning("reserve_exceeded question=%s floor=%s sdk_usd=%s", q.id, floor, result.sdk_usd)
     if result.stop_reason == "max_tokens":
@@ -176,8 +183,8 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
         log.info("tutor_skip question=%s state=%s", args.question_id, q.state if q else None)
         return
     if q.age_s > params.QUESTION_TTL_S:  # FR-TUTOR-4: before any reservation
-        await store.finish(conn, q.id, "expired", error_code="expired")
-        log.info("tutor_answer question=%s state=expired", q.id)
+        written = await store.finish(conn, q.id, "expired", error_code="expired")
+        log.info("tutor_answer question=%s state=expired written=%s", q.id, written)
         return
     last = ctx.attempts + 1 >= params.ATTEMPTS_MAX
     code: str | None = None
@@ -204,19 +211,20 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
         raise TutorTransient(stored)
     if code is not None:
         state, stored = outcome(code)
-        await store.finish(conn, q.id, state, error_code=stored)
+        written = await store.finish(conn, q.id, state, error_code=stored)
         log.info(
-            "tutor_answer question=%s attempt=%s state=%s code=%s spent=%s seconds=%.1f",
-            q.id, ctx.attempts + 1, state, stored, spent, seconds,
+            "tutor_answer question=%s attempt=%s state=%s code=%s written=%s spent=%s seconds=%.1f",
+            q.id, ctx.attempts + 1, state, stored, written, spent, seconds,
         )
         return
-    await store.finish(
+    # False when the row left `queued` during the call (expired or finalised by a read): not overwritten.
+    written = await store.finish(
         conn, q.id, "answered", answer=fields["answer"], grounded=fields["grounded"], model=fields["model"]
     )
     log.info(
-        "tutor_answer question=%s attempt=%s state=answered model=%s sources=%s blocks=%s grounded=%s"
-        " retrieval=%s spent=%s seconds=%.1f",
-        q.id, ctx.attempts + 1, fields["model"], fields["sources"], len(fields["answer"]["blocks"]),
+        "tutor_answer question=%s attempt=%s state=answered written=%s model=%s sources=%s blocks=%s"
+        " grounded=%s retrieval=%s spent=%s seconds=%.1f",
+        q.id, ctx.attempts + 1, written, fields["model"], fields["sources"], len(fields["answer"]["blocks"]),
         fields["grounded"], fields["answer"]["retrieval"], spent, seconds,
     )
 

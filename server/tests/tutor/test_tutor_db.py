@@ -7,6 +7,7 @@ SRV-AGENT adapter, the routes, isolation, stale rows, spend bounds and logs.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import uuid
@@ -205,7 +206,7 @@ def _real(w: Any, scripts: list[Any], tmp: Path, deadline_s: float = 0.3) -> tup
     cli = FakeCli(scripts)
     provider = AgentProvider(w.engine, w.config, FakeProxyClient(cli), cli=cli, home_root=tmp)
     d = jobs.Deps(
-        provider=lambda _engine: provider,
+        provider=lambda _engine: contextlib.nullcontext(provider),
         search=FakeSearch(),
         blobs_root=w.blobs,
         config=lambda: w.config,
