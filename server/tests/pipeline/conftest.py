@@ -361,16 +361,19 @@ async def import_material(engine: Any, owner: uuid.UUID, spans: list[Any], sha: 
         iid = (
             await conn.execute(
                 text(
-                    "INSERT INTO ingests (owner_id, material_id, converter_version) VALUES (:o, :m, 'v1') RETURNING id"
+                    "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                    " outline_count, outline_source, pages_without_text)"
+                    " VALUES (:o, :m, 'v1', :a, :n, 0, 'headings', '{}') RETURNING id"
                 ),
-                {"o": owner, "m": mid},
+                {"o": owner, "m": mid, "a": "d" * 64, "n": len(spans)},
             )
         ).scalar_one()
         for s in spans:
             seq = int(s.span_id.split(":")[1])
             await conn.execute(
                 text(
-                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text) VALUES (:i, :o, :q, :p, :k, :t)"
+                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                    " VALUES (:i, :o, :q, :p, :k, :t, 0, 0, 1, 1)"
                 ),
                 {"i": iid, "o": owner, "q": seq, "p": s.page, "k": s.kind, "t": s.text},
             )
