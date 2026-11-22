@@ -13,6 +13,7 @@ dependencies = [
   "asyncpg>=0.32.0,<0.33",     # SRV-AUTH: Postgres driver (ADR-0006)
   "alembic>=1.20.1,<1.21",     # SRV-AUTH: migrations (ADR-0006)
   "webauthn==3.0.1",           # SRV-AUTH: passkey ceremonies (REF-AUTH-2)
+  "websockets==17.4",
 ]
 
 [project.scripts]

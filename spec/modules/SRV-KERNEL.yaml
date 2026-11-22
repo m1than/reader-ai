@@ -36,10 +36,10 @@
 
 id: SRV-KERNEL
 title: Kernel sessions and the authenticated WebSocket relay to Kernel Gateway, with message filtering, timeouts, caps and reset
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Stays draft until SRV-AUTH merges (its Red needs the app and session layers)"
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Approved 2026-11-22 after SRV-AUTH merged, with FR-KERNEL-10's kernel_restarted rule (from WEB) added at approval"
 layer: server
 track: engineering
 adr: [ADR-0022, ADR-0014, ADR-0006, ADR-0012, ADR-0013, ADR-0024, ADR-0026]
@@ -185,8 +185,11 @@ requirements:
       not arrived 5 s after the interrupt, the relay runs a reset (FR-KERNEL-5). The 5 s is a structural bound: an
       interrupted python3 cell replies promptly unless it ignores SIGINT or sits in C code; the [image] test measures
       `time.sleep(600)` and a busy loop. The timeout is a usability control; the container limits are the security
-      boundary (OPS-SANDBOX header). [unit] with a fake clock, including a queued request whose own 60 s start only
-      when it is forwarded; [image]
+      boundary (OPS-SANDBOX header). When the kernel restarts or dies under the relay (`kernel_restarted` or
+      `kernel_dead`, FR-KERNEL-11), the relay frees the in-flight slot (its timeout is cancelled) and drops every queued
+      request without forwarding it; the browser has the notice, and its next execute_request is forwarded at once.
+      [unit] with a fake clock, including a queued request whose own 60 s start only when it is forwarded, and the
+      slot freed and the queue dropped on `kernel_restarted`; [image]
   - id: FR-KERNEL-11
     text: >-
       Relay notices are messages `{"channel": "reader", "header": {"msg_type": "reader_notice", "msg_id": <uuid4 hex>},
