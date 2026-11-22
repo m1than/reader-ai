@@ -12,7 +12,7 @@ import time
 from typing import Any, Final
 from uuid import UUID
 
-import asyncpg  # type: ignore[import-untyped]  # asyncpg ships no type information
+import asyncpg  # no type information: the mypy override for asyncpg.* (pyproject, SRV-INGEST)
 import httpx
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
