@@ -504,9 +504,10 @@ tasks:
         fine: 480/480 restarts within 4.0 s under load. Fix on branch V/OPS-SANDBOX-test-isolation: per-run label
         org.reader-ai.test.sandbox-run=<pid>.<random>, end sweep of own objects, start sweep of dead pids only;
         test_session_sweep_spares_other_runs. Old-label orphans left for the owner" }
-  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
-      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
-        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-CLI],
+      note: "FR-CLI-5 amended (spec, test, code paired, branch V/live-e2e): `reader up` always activates `kernels`
+        besides the default profile (config, build and up all carry `--profile kernels`); compose builds the kernel image.
+        The profile also starts kernel-verify, kernel-agent and kernel-pair-1 from the same image. CLI tests 216 pass" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
       branch: V/V.SRV-SEARCH-min,
       note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 approved by

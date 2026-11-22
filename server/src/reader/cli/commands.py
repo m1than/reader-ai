@@ -98,11 +98,17 @@ class Project:
     model: Rendered
 
 
+ACTIVE_PROFILES: tuple[str, ...] = ("kernels",)  # FR-CLI-5: the default profile plus these
+
+
+def compose_argv(ctx: Ctx, *args: str) -> list[str]:
+    """`docker compose --profile … -f deploy/compose.yaml -f - …` (FR-CLI-5; override on stdin, INV-CLI-6)."""
+    profiles = [flag for p in ACTIVE_PROFILES for flag in ("--profile", p)]
+    return ["docker", "compose", *profiles, "-f", str(ctx.compose_file), "-f", "-", *args]
+
+
 def compose(ctx: Ctx, override: bytes, *args: str) -> Result:
-    """`docker compose -f deploy/compose.yaml -f - …` with the override on stdin only (INV-CLI-6)."""
-    return ctx.runner.run(
-        ["docker", "compose", "-f", str(ctx.compose_file), "-f", "-", *args], env=ctx.env, stdin=override
-    )
+    return ctx.runner.run(compose_argv(ctx, *args), env=ctx.env, stdin=override)
 
 
 def load(ctx: Ctx, config_path: Path) -> Project:
@@ -350,9 +356,7 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     if not process.wait_ready(READY_TIMEOUT):
         process.terminate()
         raise CliError("watcher_not_ready", "the watcher did not signal readiness; no container was started")
-    started = docker(
-        ctx, "docker", "compose", "-f", str(ctx.compose_file), "-f", "-", "up", "-d", stdin=project.override
-    )
+    started = docker(ctx, *compose_argv(ctx, "up", "-d"), stdin=project.override)
     if started is None or started.code != 0:
         process.terminate()
         raise CliError("up_failed", "docker compose up failed; the watcher was stopped")
