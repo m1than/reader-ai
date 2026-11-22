@@ -1,75 +1,74 @@
-"""SRV-TUTOR VEC-TUTOR-7: the bench question set, generated at run time from the compiled lesson revision.
+"""SRV-TUTOR bench on the running stack (NFR-TUTOR-1..3, VEC-TUTOR-7).
 
-`python bench_questions.py <revision.ipynb>` prints the questions as JSON on stdout for the bench driver. The cell
-titles come from the book, so the output is never committed: the bench writes only ids, counts, flags, timings
-and costs. The generator stops before any question is asked when the revision has no explain cell or a selected
-explain cell has no title (its first markdown heading).
+    uv run --project server python e2e/web/tutor/bench_questions.py [--lesson-ordinal 2]
+
+Runs `reader.tutor.bench` in the worker container (the generator `questions` and the driver live there and are
+re-exported here), passes the fixed question questions-v2 `v03`, and writes the numbers-only report to
+`e2e/web/tutor/results/<UTC time>.json`. Spends up to n x question_cap_usd from budget.test_budget_usd; one run
+per UTC day fits the normal daily cap. Prints the summary and exits 1 when an NFR misses.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
-import math
+import subprocess
 import sys
-from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final
 
-CELL_KIND: Final = "explain"
-TAKE: Final = 20
-TEMPLATE: Final = "Explain in your own words: {cell_title}"
+from ruamel.yaml import YAML
 
+from reader.tutor.bench import CELL_KIND, TAKE, TEMPLATE, BenchError, p95, questions, title_of
 
-class BenchError(Exception):
-    pass
+__all__ = ["CELL_KIND", "TAKE", "TEMPLATE", "BenchError", "p95", "questions", "title_of"]
 
-
-def _source(cell: dict[str, Any]) -> str:
-    source = cell.get("source", "")
-    return "".join(source) if isinstance(source, list) else str(source)
+REPO = Path(__file__).resolve().parents[3]
+FIXED = REPO / "spikes" / "embeddings-local" / "questions-v2.yaml"
+RESULTS = Path(__file__).resolve().parent / "results"
 
 
-def title_of(cell: dict[str, Any]) -> str | None:
-    for line in _source(cell).splitlines():
-        if line.startswith("#"):
-            return line.lstrip("#").strip() or None
-    return None
+def _fixed() -> list[dict[str, str]]:
+    data = YAML(typ="safe").load(FIXED.read_text(encoding="utf-8"))
+    found = next(q for q in data["questions"] if q["id"] == "v03")
+    return [{"id": "v03", "question": str(found["question"])}]
 
 
-def questions(notebook: dict[str, Any]) -> list[tuple[str, str]]:
-    """(cell id, question) for the first TAKE explain cells, in notebook order."""
-    cells = [
-        c
-        for c in notebook.get("cells", [])
-        if ((c.get("metadata") or {}).get("reader") or {}).get("kind") == CELL_KIND
-    ][:TAKE]
-    if not cells:
-        raise BenchError("no explain cell in the revision")
-    out = []
-    for cell in cells:
-        title = title_of(cell)
-        if title is None or not isinstance(cell.get("id"), str):
-            raise BenchError(f"explain cell without a title or id: {cell.get('id')!r}")
-        out.append((cell["id"], TEMPLATE.format(cell_title=title)))
-    return out
+def _worker() -> str:
+    out = subprocess.run(
+        ["docker", "ps", "-q", "--filter", "label=com.docker.compose.service=worker"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.split()
+    if not out:
+        raise SystemExit("worker is not running (reader up)")
+    return out[0]
 
 
-def p95(samples: Sequence[float]) -> float:
-    """NFR-TUTOR-1: nearest rank, rank ceil(0.95 × n) of the samples sorted ascending."""
-    ordered = sorted(samples)
-    return ordered[math.ceil(0.95 * len(ordered)) - 1]
-
-
-def main(argv: Sequence[str]) -> int:
-    notebook = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-    try:
-        found = questions(notebook)
-    except BenchError as error:
-        sys.stderr.write(f"bench: {error}\n")
-        return 1
-    sys.stdout.write(json.dumps([{"cell_id": c, "question": q} for c, q in found], ensure_ascii=False) + "\n")
-    return 0
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--lesson-ordinal", type=int, default=2)  # L02 of the Bashir pilot
+    args = parser.parse_args(argv)
+    spec = {"lesson_ordinal": args.lesson_ordinal, "fixed": _fixed()}
+    run = subprocess.run(
+        ["docker", "exec", "-i", _worker(), "python", "-I", "-m", "reader.tutor.bench"],
+        input=json.dumps(spec),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60 * 60,
+    )
+    if run.returncode != 0:
+        sys.stderr.write(run.stderr[-2000:])
+        return run.returncode
+    report = json.loads(run.stdout)
+    RESULTS.mkdir(exist_ok=True)
+    path = RESULTS / (datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ") + ".json")
+    path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    sys.stdout.write(json.dumps(report["summary"]) + f"\nwritten: {path.relative_to(REPO)}\n")
+    return 0 if all(report["summary"]["pass"].values()) else 1
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main(sys.argv[1:]))
