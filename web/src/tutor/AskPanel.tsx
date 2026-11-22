@@ -3,6 +3,7 @@
 import { Button } from '@acme/ui/button';
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { ApiError } from '../app/api';
+import { formatCitation } from '../notebook/citations';
 import type { AnswerBlock, AskBody, HistoryItem, QuestionState, TutorApi } from './api';
 import { messageFor } from './messages';
 import { TutorText } from './TutorText';
@@ -33,7 +34,7 @@ function Block({ block }: { block: AnswerBlock }) {
           {block.citations.map((c, i) => (
             <span key={i}>
               {i > 0 ? '; ' : ''}
-              {`${c.material_title}, p. ${c.page}`}
+              {formatCitation(c).text /* span citations are text only (WEB-NOTEBOOK FR-NOTEBOOK-2) */}
             </span>
           ))}
         </p>
