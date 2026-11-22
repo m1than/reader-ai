@@ -432,7 +432,12 @@ tasks:
         cached source (spike: every stage re-wrote 31–47k tokens, the largest cost); (2) model per stage where quality
         holds on the fact-check fixture set (cheaper model for fact-check/revise only if verdict agreement ≥ the baseline);
         (3) cap output tokens per stage; (4) tutor: retrieval top-k and answer length budgets, cache the lesson context;
-        (5) ingest/embed: reuse embeddings by content hash, batch sizes from the embed spike; (6) web: lazy chunks.
+        (5) ingest/embed: reuse embeddings by content hash, batch sizes from the embed spike; (6) web: lazy chunks;
+        (7) RAG in the compile pipeline (owner 2026-11-22: 'use RAG via the embeddings of the whole PDF'): fact-check
+        retrieves the spans behind each claim from the whole-book index (SRV-SEARCH) instead of re-sending the full
+        chapter, and review/revise are A/B-measured with retrieved spans + the lesson; the draft keeps the full chapter
+        (coverage: dense recall@10 is 0.675, so top-k alone would drop topics). Each variant is kept only if G2 and the
+        fact-check verdict agreement on the fixture set do not regress, with tokens and $ per stage before and after.
         Quality gates must not regress (G2 report, search recall on questions-v2). Cost math is a complex area: full review." }
 
   # Stage 2 — event backbone and notifications
