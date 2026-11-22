@@ -640,7 +640,10 @@ tasks:
         the first bench run is NFR-TUTOR-3's measurement). Code review round 1 (25a5920): changes — five untested
         rules (owner filter on span reads, the ledger's per-user lock, the finish guard, the first kept source and
         NFC, the job key through the real queue), all pinned by tests checked against mutants; non-blocking applied,
-        including the runnable bench driver (reader.tutor.bench, e2e/web/tutor/bench_questions.py). Round 2 next." }
+        including the runnable bench driver (reader.tutor.bench, e2e/web/tutor/bench_questions.py). Round 2:
+        approve. Its non-blocking items applied: thinking tokens on SRV-AGENT's settle rows (agent_0002) and in the
+        bench; an empty assertion removed. Next: the [live] check and the first bench run (test budget).",
+      review: "code review by deep-reviewer (Fable): round 1 (25a5920) changes, round 2 approve (2026-11-23)" }
   - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
