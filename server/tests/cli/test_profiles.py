@@ -1,5 +1,5 @@
-"""`reader up` profiles for the vertical slice: kernels when the kernel image builds, agents when a provider is
-configured and the agent-proxy image exists; tokens go to agent-proxy only.
+"""`reader up` profiles for the vertical slice: kernels when the kernel image builds, agents when a provider
+is configured and the agent-proxy image exists; tokens go to agent-proxy only.
 
 @trace FR-CLI-4, FR-CLI-5, FR-CLI-8, VEC-CLI-2
 """
@@ -38,8 +38,13 @@ def _config(tmp_path: Path, text: str | None = None) -> Path:
     secret.write_text("CANARY-prof-hf")
     secret.chmod(0o600)
     if text is None:
-        text = (FIXTURES / "config.yaml").read_text().replace(
-            "secret://hostfile/tmp/reader-ai-test/anna-api-key", "secret://hostfile" + str(secret.resolve())
+        text = (
+            (FIXTURES / "config.yaml")
+            .read_text()
+            .replace(
+                "secret://hostfile/tmp/reader-ai-test/anna-api-key",
+                "secret://hostfile" + str(secret.resolve()),
+            )
         )
     return write_config(tmp_path / "cfg", text)
 

@@ -507,9 +507,28 @@ tasks:
         fine: 480/480 restarts within 4.0 s under load. Fix on branch V/OPS-SANDBOX-test-isolation: per-run label
         org.reader-ai.test.sandbox-run=<pid>.<random>, end sweep of own objects, start sweep of dead pids only;
         test_session_sweep_spares_other_runs. Old-label orphans left for the owner" }
-  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
-      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
-        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.OPS-CLI],
+      branch: V/OPS-CLI-profiles,
+      note: "Done on branch V/OPS-CLI-profiles together with V.OPS-CLI-agents (one final PR, owner); awaits deep-reviewer
+        code review (secrets: full). OPS-CLI FR-CLI-5 amended: `reader up` runs `docker build --platform linux/arm64 -t
+        reader-kernel:local -f sandbox/Dockerfile sandbox` (1800 s) and activates `kernels` when it exits 0, else leaves it
+        off with a stderr note and continues; profiles go as sorted `--profile` flags to every compose -f call (config,
+        build, up -d) and are recorded in run/profiles for status, down, bootstrap, doctor, trust, backup and restore. With
+        kernels, kernel-user-<handle> for every user plus kernel-verify, kernel-agent and kernel-pair-1 start and count for
+        the 180 s health wait. CLI tests 216 -> 224 (tests/cli/test_profiles.py); ruff, mypy --strict, tools/ci-local.sh
+        PASS. Not run for real (no `reader up`)." }
+  - { id: V.OPS-CLI-agents, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.OPS-CLI],
+      branch: V/OPS-CLI-profiles,
+      note: "With V.OPS-CLI-kernels (same branch, same review). `agents` is active when a user has a provider configured
+        AND `docker image inspect reader-agent-proxy:local` exits 0: nothing in the repository builds that image yet
+        (SRV-AGENT), and starting the profile without it would fail `up -d`; otherwise a stderr note. Provider tokens go
+        to agent-proxy only (ADR-0023/0025), named secret_file_name(ref); without agent-proxy in the active model no
+        provider reference is resolved (tested). The watcher's consumer set is the plan's services, so it gains
+        agent-proxy with the profile. Paired OPS-DEPLOY change (FR-DEPLOY-5, VEC-DEPLOY-3, test_compose_render): the
+        override's read-only reader.yaml bind also on agent-proxy (SRV-AGENT B6), no READER_CONFIG env on it (SRV-AGENT
+        decides). Open cross-spec item: the `embed` service (SRV-SEARCH, ADR-0028) is not in deploy/compose.yaml:
+        origin/V/V.SRV-SEARCH-min holds only its spec and origin/V/SRV-SEARCH-impl does not exist; once OPS-DEPLOY adds it
+        with a build section, `reader up` builds and starts it with no OPS-CLI change; it is not a secret consumer." }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
       branch: V/V.SRV-SEARCH-min,
       note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 approved by

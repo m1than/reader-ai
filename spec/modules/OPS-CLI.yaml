@@ -194,7 +194,7 @@ requirements:
       `docker exec` runs for it.
   - id: FR-CLI-10
     text: >-
-      `reader up` exits 0 when every default-profile service is healthy within 180 s, counted from step (7) of FR-CLI-8
+      `reader up` exits 0 when every service of the active profiles (FR-CLI-5) is healthy within 180 s, counted from step (7) of FR-CLI-8
       (after images are built), else non-zero, and leaves the watcher running, so live-check scripts can call
       `reader up` and continue. 180 s is a structural bound: NFR-DEPLOY-1's 120 s covers a restart with an initialised
       pgdata; the first start adds initdb, which NFR-DEPLOY-1 reports without a threshold. A second `reader up` while a
@@ -219,7 +219,7 @@ requirements:
       `reader status` prints each service's health and the watcher state; `--json` prints
       `{"project": str, "watcher": "running"|"stopped", "services": [{"name": str, "state": str, "health": str|null}]}`.
       It needs no config: the project name is FR-CLI-3's when the config is valid, else `run/project`. The exit code is a
-      bit set covering every combination: bit 1 when a default-profile service is not running or not healthy, bit 2 when
+      bit set covering every combination: bit 1 when a service of the recorded active profiles is not running or not healthy, bit 2 when
       the watcher is stopped; so 0 = all healthy with the watcher running, 1, 2, or 3 = both. Exit 4 when docker is
       unreachable or no project name is known.
   - id: FR-CLI-14
