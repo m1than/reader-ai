@@ -12,11 +12,14 @@
 #     carries a verbatim quote that must occur in the first named source. The model cannot forge an id (it never sees
 #     one) or a quote (code checks it). Entailment (does the quote support the block's claim?) is not checked in the
 #     slice (`defers`).
-#   - Thinking: the compile spike's Sonnet stages printed 113–2,134 characters but spent 4,601–6,617 output tokens
-#     (REF-TUTOR-6), so extended thinking dominates output by default. The tutor turns thinking off (cross-spec
-#     SRV-AGENT) and caps output at a provisional 2,000 tokens until spikes/tutor-call measures it (REF-TUTOR-7).
-#   - Spend: reserves count every byte sent (tokens ≤ UTF-8 bytes) plus the CLI's own system prompt; caps derive from
-#     that worst case (VEC-TUTOR-3, computed by the test, not pinned).
+#   - Thinking and output (REF-TUTOR-7, measured 2026-11-22, 10 calls, $0.038): tutor-shaped calls used 0 thinking
+#     tokens with thinking off and with the CLI default, 92–310 output tokens, 1.5–3.5 s, valid JSON 10/10. The long
+#     compile stages' 4.6–6.6k output tokens (REF-TUTOR-6) do not apply to this shape. The tutor still turns thinking
+#     off (cross-spec SRV-AGENT) and caps output at 2,000 tokens (6.5× the measured maximum).
+#   - Spend: a custom `system_prompt` replaces the CLI's own 6,803-token prompt (measured: 745–867 prompt tokens in
+#     total, ≈ 410 of them fixed overhead). Reserves count `cli_overhead_tokens` + every byte sent (measured 0.3–0.5
+#     tokens per byte, so one token per byte is an upper bound); caps derive from that worst case (VEC-TUTOR-3,
+#     computed by the test, not pinned).
 #   - Model: reader.yaml `tasks.tutor.model` (example: `sonnet`), resolved to a full id by SRV-AGENT before any spend.
 #   - Citation display: page and span id come from `material_spans`; `material_title` is the lesson's course title
 #     (SRV-LESSON `courses.title`, the course bound by `courses.material_sha256`), because materials have no title
@@ -28,8 +31,10 @@
 #   - SRV-AGENT: (a) the Provider port takes the caller's cap scope — `run_id` = question id with run cap
 #     `question_cap_usd`, and a per-user daily scope for task `tutor` (`spent(user, task=tutor, UTC day)`), refused
 #     before the reserve row with `budget_exhausted` / `daily_budget_exhausted`; (b) the port can turn extended thinking
-#     off per task (`MAX_THINKING_TOKENS=0` in the CLI environment for task `tutor`); (c) the reserve counts the system
-#     prompt plus the user prompt, in UTF-8 bytes as an upper bound on tokens; (d) a `max_tokens` stop reason maps to
+#     off per task (`MAX_THINKING_TOKENS=0` in the CLI environment for task `tutor`); (c) the reserve counts a fixed
+#     CLI overhead plus the system prompt plus the user prompt, in UTF-8 bytes as an upper bound on tokens; with a
+#     caller `system_prompt` the CLI's own 6,803-token prompt is not sent (REF-TUTOR-7), so `cli_system_tokens` applies
+#     only to calls that use the CLI default prompt; (d) a `max_tokens` stop reason maps to
 #     the permanent code `output_truncated`; (e) a settlement above its reserve logs WARNING `reserve_exceeded`;
 #     (f) the adapter exposes the CLI's `api_retry` messages and accepts a per-call deadline, so the tutor can abort on
 #     the first retry (FR-TUTOR-7); an aborted call with no 2xx settles at $0.
@@ -80,7 +85,7 @@ normative:
     title: "Spike compile-cost: Sonnet fact-check stages, output tokens vs printed characters"
     url: spikes/compile-cost/RESULT.md
   - id: REF-TUTOR-7
-    title: "Spike tutor-call: tutor-shaped calls, thinking off vs default (runner ready; not run yet)"
+    title: "Spike tutor-call: 10 tutor-shaped Sonnet calls, thinking off vs default (2026-11-22, $0.038)"
     url: spikes/tutor-call/RESULT.md
   - id: REF-TUTOR-8
     title: "Spike agent-proxy-handshake round 2 (V/V.COMPILE-min): the CLI retries 429/529/500 about 10 times over ~3 min, emitting api_retry"
@@ -98,10 +103,10 @@ bounds:
   spans_per_block_max: 3        # structural
   blocks_max: 20                # structural
   block_chars_max: 4000         # structural
-  max_output_tokens: 2000       # PROVISIONAL until spikes/tutor-call (thinking off); fallback 8000 if thinking cannot
-                                # be turned off (REF-TUTOR-6 measured 4.6–6.6k output tokens with thinking on)
+  max_output_tokens: 2000       # REF-TUTOR-7: measured 92–310 output tokens, 0 thinking; 2000 is 6.5× the maximum
+  cli_overhead_tokens: 1000     # REF-TUTOR-7: ≈ 410 fixed tokens beyond our bytes with a custom system_prompt; 2.4×
   attempts_max: 2               # one retry for transient provider errors
-  question_cap_usd: 0.35        # derived by VEC-TUTOR-3: ≥ attempts_max × worst-case reserve (2 × 0.1592), rounded up
+  question_cap_usd: 0.30        # derived by VEC-TUTOR-3: ≥ attempts_max × worst-case reserve (2 × 0.136), rounded up
   daily_cap_usd: 3.00           # structural, per user per UTC day for task tutor; the api pre-checks it
   question_ttl_s: 600           # a question older than this is expired, never answered (covers a wait behind one
                                 # running compile stage; REF-TUTOR-6 stages took ≤ 190 s each)
@@ -269,12 +274,14 @@ nfr:
   - id: NFR-TUTOR-1
     metric: >-
       p95 (nearest rank, 21 samples) seconds from Ask to the answer shown, idle worker, on the bench questions
-      (VEC-TUTOR-7) against L02 ([live]); bench spend ≤ 21 × question_cap_usd = $7.35, from budget.test_budget_usd,
+      (VEC-TUTOR-7) against L02 ([live]); bench spend ≤ 21 × question_cap_usd = $6.30 (expected ≈ $1), from budget.test_budget_usd,
       with the daily cap raised for the run only
     threshold: 30
     verified_by: bench
   - id: NFR-TUTOR-2
-    metric: mean USD per question over the NFR-TUTOR-1 run (ledger spent(run)); PROVISIONAL until spikes/tutor-call
+    metric: >-
+      mean USD per question over the NFR-TUTOR-1 run (ledger spent(run)); expected ≈ 0.044–0.048 for L02-shaped
+      prompts (VEC-TUTOR-3, extrapolated from REF-TUTOR-7's measured rates)
     threshold: 0.06
     verified_by: bench
   - id: NFR-TUTOR-3
@@ -321,8 +328,9 @@ defers:
   - "findings from tutor sessions into the knowledge base: stage 7"
 
 owner_notes:
-  - "Cost (provisional, VEC-TUTOR-3): typical ≈ $0.028 warm / $0.055 cold per question with Sonnet 5.5; worst-case reserve ≈ $0.16 per attempt; caps $0.35 per question and $3 per user per day. spikes/tutor-call (≈ $0.25–0.60 of the $30 test budget) replaces these numbers; it needs the Keychain token, so the owner runs `bash spikes/tutor-call/run.sh` or extends the spike Keychain permission to it."
+  - "Cost (VEC-TUTOR-3, from spikes/tutor-call on 2026-11-22: 10 calls, $0.038): ≈ $0.044–0.048 per L02-shaped question with Sonnet 5.5 (measured short calls cost $0.001–0.006); worst-case reserve $0.136 per attempt; caps $0.30 per question and $3 per user per day (≈ 63 typical questions)."
+  - "Cost lever for V.cost-optimize (REF-TUTOR-7): the CLI writes each one-shot prompt to the 1-hour cache at 2× the input price; an uncached send would roughly halve the tutor's input cost, if the CLI allows it."
   - "While a lesson compile stage runs, a question waits for it (one worker); after 10 minutes it expires instead of being answered late."
   - "An answer says when it is not grounded in the book instead of hiding it."
 
-review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call written, not run: Keychain permission), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s, settle at $0. Round 2 next; approval waits for SRV-AGENT's."
+review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s, settle at $0. Round 2 next; approval waits for SRV-AGENT's."

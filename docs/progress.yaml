@@ -20,8 +20,9 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 5.4576      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 5.4959      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
+                         #   + tutor-call 0.0383 (from test_budget_usd)
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
@@ -31,6 +32,9 @@ budget:
     - { task: S0.spike.trace-backend, usd: 0.0058, date: 2026-11-20,
         what: "2 exploratory (hand-recorded) + 2 measured rounds of probe runs (3 haiku stages each); span replays without model calls;
           breakdown in spikes/trace-backend/RESULT.md" }
+    - { task: S0.spike.tutor-call, usd: 0.0383, date: 2026-11-22, funding: test_budget_usd,
+        what: "10 tutor-shaped Sonnet 5.5 calls (5 synthetic questions × thinking off/default), cap $0.60; per call in
+          spikes/tutor-call/results/" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -535,16 +539,15 @@ tasks:
         spends credit, ledger" }
   - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
       branch: V/V.TUTOR-min,
-      note: "spec round 1 (bfb7047): changes; revision applied, awaits round 2; approval waits for SRV-AGENT's. Question
-        as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off (cross-spec SRV-AGENT),
-        byte-based reserve; provisional caps $0.35 per question and $3 per day, typical ≈ $0.028 warm / $0.055 cold
-        (VEC-TUTOR-3). spikes/tutor-call is written but NOT run: its runner reads the Keychain token, which the owner
-        allowed only for three named spikes (2026-11-20); the owner runs `bash spikes/tutor-call/run.sh` (≈ $0.25–0.60
-        of the $30 test budget) or extends that permission, then the numbers replace the provisional bounds." }
-  - { id: S0.spike.tutor-call, stage: V, kind: spike, status: blocked, needs: [],
-      reason: "The runner reads the Keychain item reader-ai/claude-oauth-token; the owner allowed that only for
-        agent-sdk-container, compile-cost and trace-backend, and `security find-generic-password` is denied for the agent.",
-      ask: "Run `bash spikes/tutor-call/run.sh` once (cap $0.60 from the $30 test budget), or allow the agent to run it." }
+      note: "spec round 1 (bfb7047): changes; revision applied with spikes/tutor-call's numbers, awaits round 2; approval
+        waits for SRV-AGENT's. Question as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking
+        off, byte-based reserve with ≈ 410 measured CLI overhead tokens; caps $0.30 per question and $3 per day; typical
+        ≈ $0.044–0.048 per L02-shaped question (VEC-TUTOR-3)." }
+  - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
+      result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
+        in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
+        prompt (745–867 prompt tokens in total, ≈ 410 fixed); prices recompute within $0.000004; the CLI writes one-shot
+        prompts to the 1-hour cache at 2× input. spikes/tutor-call/RESULT.md." }
   - { id: V.live, stage: V, kind: live, status: todo,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
       what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }
