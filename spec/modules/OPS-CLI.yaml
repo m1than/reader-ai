@@ -126,9 +126,15 @@ requirements:
       V.OPS-CLI-agents) when at least one `users[].providers[]` entry is configured and
       `docker image inspect reader-agent-proxy:local` exits 0 (nothing in this repository builds that image yet;
       SRV-AGENT owns it); otherwise `agents` stays off with one line on stderr naming the reason, and `up` continues.
-      The active profiles go as `--profile <p>` flags, sorted, before `-f`; `reader up` records `agents` in
-      `run/profiles`, and the commands that render the model without running `up` (status, down, bootstrap, doctor,
-      trust, backup, restore) use `kernels` plus the recorded profiles. A later stage adds profiles by amending this
+      The active profiles go as `--profile <p>` flags, sorted, before `-f`. `reader up` writes `run/profiles`
+      (the chosen optional profiles) immediately before `up -d`, after resolution and readiness, so a failed `up`
+      leaves the previous record. When a profile recorded as active is no longer chosen (its image is gone or no
+      provider remains), `reader up`, before `up -d`, runs `docker compose -p <name> rm -sf <services>` for the
+      services of that profile in compose.yaml's source (agents: `agent-proxy`), so the withdrawn profile's provider
+      tokens leave tmpfs; a failure stops `up` and stops the new watcher. The commands that render the model without
+      running `up` (status, down, bootstrap, trust, backup, restore) use `kernels` plus the recorded profiles;
+      `reader doctor` uses the profiles `reader up` would choose now, so provider references are checked before the
+      first `up` with `agents`. A later stage adds profiles by amending this
       requirement. The consumer set is FR-DEPLOY-10 (b)'s, restricted to services
       present in the rendered active model; each consumer's uid is the numeric `user` of its rendered service, and a
       consumer without one stops `up` naming the service. `reader up` resolves and hands over only the values whose

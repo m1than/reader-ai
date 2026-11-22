@@ -140,6 +140,96 @@ def test_status_renders_with_the_recorded_profiles(tmp_path: Path, monkeypatch: 
     assert _profiles(render) == ["agents", "kernels"]
 
 
+def _record(world: World, text: str) -> None:
+    world.ctx.run_dir.mkdir(parents=True, exist_ok=True)
+    (world.ctx.run_dir / "profiles").write_text(text)
+
+
+def test_failed_up_leaves_the_previous_profile_record(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, agents_in_model=False)
+    world.runner.on("docker", "image", "inspect", result=(1, b"", b"No such image"))
+    world.spawner.ready = False
+    _record(world, "agents\n")
+    assert _up(world, _config(tmp_path)) != 0
+    assert (world.ctx.run_dir / "profiles").read_text() == "agents\n"
+    assert world.runner.argvs("rm", "-sf") == []
+
+
+def test_profiles_are_recorded_after_readiness_just_before_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, agents_in_model=True)
+    written: list[int] = []
+    original = Path.write_text
+
+    def spy(self: Path, data: str, *args: Any, **kwargs: Any) -> int:
+        if self.name == "profiles":
+            written.append(len(world.journal))
+        return original(self, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", spy)
+    assert _up(world, _config(tmp_path)) == 0
+    ready = next(i for i, e in enumerate(world.journal) if e[0] == "ready")
+    up = next(i for i, e in enumerate(world.journal) if e[0] == "run" and e[-2:] == ("up", "-d"))
+    assert len(written) == 1
+    assert ready < written[0] <= up
+
+
+def test_withdrawn_agents_profile_removes_agent_proxy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = _world(tmp_path, monkeypatch, agents_in_model=False)
+    world.runner.on("docker", "image", "inspect", result=(1, b"", b"No such image"))
+    _record(world, "agents\n")
+    assert _up(world, _config(tmp_path)) == 0
+    (rm,) = world.runner.argvs("rm", "-sf")
+    assert rm == ["docker", "compose", "-p", "reader-vec", "rm", "-sf", "agent-proxy"]
+    calls = [c.argv for c in world.runner.calls]
+    up = next(i for i, a in enumerate(calls) if a[-2:] == ["up", "-d"])
+    assert calls.index(rm) < up
+    assert (world.ctx.run_dir / "profiles").read_text().split() == []
+
+
+def test_provider_removed_withdraws_agents(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    world = _world(tmp_path, monkeypatch, agents_in_model=False)
+    _record(world, "agents\n")
+    assert _up(world, _config(tmp_path, NO_PROVIDERS)) == 0
+    assert world.runner.argvs("rm", "-sf") == [
+        ["docker", "compose", "-p", "reader-vec", "rm", "-sf", "agent-proxy"]
+    ]
+
+
+def test_no_withdrawal_when_the_profile_stays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    world = _world(tmp_path, monkeypatch, agents_in_model=True)
+    _record(world, "agents\n")
+    assert _up(world, _config(tmp_path)) == 0
+    assert world.runner.argvs("rm", "-sf") == []
+
+
+def test_failed_withdrawal_stops_up(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    world = _world(tmp_path, monkeypatch, agents_in_model=False)
+    world.runner.on("docker", "image", "inspect", result=(1, b"", b"No such image"))
+    world.runner.on("rm", "-sf", result=(1, b"", b"daemon error"))
+    _record(world, "agents\n")
+    assert _up(world, _config(tmp_path)) != 0
+    assert world.runner.argvs("up", "-d") == []
+    assert world.spawner.procs[0].terminated
+
+
+def test_doctor_checks_with_the_profiles_up_would_choose(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reader.cli.maintenance import cmd_doctor
+
+    world = _world(tmp_path, monkeypatch, agents_in_model=True)
+    cmd_doctor(world.ctx, _config(tmp_path), True)
+    (render,) = [c.argv for c in world.runner.calls if c.argv[-3:] == ["config", "--format", "json"]]
+    assert _profiles(render) == ["agents", "kernels"]
+    assert world.runner.argvs("op", "read")  # provider references checked before any `up` with agents
+
+
 def test_override_renders_kernel_user_services_for_every_user(tmp_path: Path) -> None:
     from reader.cli.stack import build_override, load_compose_source
 

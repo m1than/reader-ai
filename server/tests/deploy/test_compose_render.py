@@ -44,6 +44,12 @@ def test_services_by_profile(profiles: tuple[str, ...], expected: set[str]) -> N
     assert set(render(profiles)["services"]) == expected
 
 
+def test_agent_proxy_never_pulls() -> None:
+    services = render(("agents",))["services"]
+    assert services["agent-proxy"]["pull_policy"] == "never"
+    assert all("pull_policy" not in body for name, body in services.items() if name != "agent-proxy")
+
+
 def test_server_roles_share_one_built_image() -> None:
     services = render(("mcp",))["services"]
     for role in ("api", "worker", "mcp"):

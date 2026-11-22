@@ -14,6 +14,7 @@ from typing import Any, Final
 from reader.cli.commands import (
     Ctx,
     Project,
+    choose_profiles,
     docker,
     ensure_run_dir,
     guarded,
@@ -167,7 +168,9 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     check("keyring", lookup and backend == "keyring.backends.macOS", f"backend {backend}")
     project: Project | None = None
     try:
-        project = load(ctx, config_path)
+        # FR-CLI-5: the profiles `reader up` would choose now, so provider references are checked before
+        # the first `up` with agents.
+        project = load(ctx, config_path, choose_profiles(ctx, config), config)
     except (CliError, OSError) as error:
         check("config", False, error.code if isinstance(error, CliError) else "unreadable")
     if project is not None:

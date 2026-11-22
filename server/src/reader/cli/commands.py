@@ -136,8 +136,20 @@ def choose_profiles(ctx: Ctx, config: ReaderConfig) -> tuple[str, ...]:
     return ()
 
 
-def load(ctx: Ctx, config_path: Path, profiles: Sequence[str] | None = None) -> Project:
-    config = load_config(config_path)
+def profile_services(ctx: Ctx, profile: str) -> list[str]:
+    """The services of `profile` in compose.yaml's source (FR-CLI-5 withdrawal)."""
+    services = load_compose_source(ctx.compose_file).get("services") or {}
+    return sorted(
+        name
+        for name, body in services.items()
+        if isinstance(body, dict) and profile in (body.get("profiles") or [])
+    )
+
+
+def load(
+    ctx: Ctx, config_path: Path, profiles: Sequence[str] | None = None, config: ReaderConfig | None = None
+) -> Project:
+    config = config if config is not None else load_config(config_path)
     active = tuple(sorted(profiles)) if profiles is not None else recorded_profiles(ctx)
     path = check_config_path(config_path)
     override = build_override(load_compose_source(ctx.compose_file), [u.handle for u in config.users], path)
@@ -355,11 +367,11 @@ def offer_trust(ctx: Ctx, project: str) -> None:
 def cmd_up(ctx: Ctx, config_path: Path) -> int:
     config = load_config(config_path)  # a configuration error exits 2 before any docker call
     check_config_path(config_path)
-    project = load(ctx, config_path, choose_profiles(ctx, config))
+    previous = recorded_profiles(ctx)
+    project = load(ctx, config_path, choose_profiles(ctx, config), config)
     model = project.model
     ensure_run_dir(ctx)
     (ctx.run_dir / "project").write_text(model.name + "\n", encoding="utf-8")
-    (ctx.run_dir / "profiles").write_text("".join(p + "\n" for p in project.profiles), encoding="utf-8")
     _checked(ctx, lambda: compose(ctx, project.override, "build", extra=project.profiles), "build_failed")
     since = (
         _checked(
@@ -387,6 +399,16 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     if not process.wait_ready(READY_TIMEOUT):
         process.terminate()
         raise CliError("watcher_not_ready", "the watcher did not signal readiness; no container was started")
+    withdrawn = [s for p in previous if p not in project.profiles for s in profile_services(ctx, p)]
+    if withdrawn:  # FR-CLI-5: the withdrawn profile's provider tokens leave tmpfs with its containers
+        removed = docker(ctx, "docker", "compose", "-p", model.name, "rm", "-sf", *withdrawn)
+        if removed is None or removed.code != 0:
+            process.terminate()
+            raise CliError(
+                "withdraw_failed", f"could not remove {', '.join(withdrawn)}; the watcher was stopped"
+            )
+    # Recorded only now, after resolution and readiness: a failed `up` leaves the previous record.
+    (ctx.run_dir / "profiles").write_text("".join(p + "\n" for p in project.profiles), encoding="utf-8")
     started = docker(ctx, *compose_argv(ctx, "up", "-d", extra=project.profiles), stdin=project.override)
     if started is None or started.code != 0:
         process.terminate()

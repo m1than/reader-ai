@@ -518,10 +518,13 @@ tasks:
         The profile also starts kernel-verify, kernel-agent and kernel-pair-1 from the same image. CLI tests 216 pass" }
   - { id: V.OPS-CLI-agents, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.OPS-CLI],
       branch: V/OPS-CLI-profiles,
-      note: "Branch V/OPS-CLI-profiles (merged origin/V/live-e2e; its kernels change kept); awaits deep-reviewer code
-        review (secrets: full); one final PR (owner), none opened. FR-CLI-5: profile flags sorted before -f; `agents`
-        recorded in run/profiles, so status, down, bootstrap, doctor, trust, backup and restore render with kernels plus
-        the recorded agents. CLI tests 224 after the merge (7 in tests/cli/test_profiles.py). `agents` is active when a user has a provider configured
+      review: "deep-reviewer (Fable) code review of 04f6d7a: approve; its five items applied (spec, tests, code)",
+      note: "Branch V/OPS-CLI-profiles (merged origin/V/live-e2e; its kernels change kept); one final PR (owner), none
+        opened. FR-CLI-5: profile flags sorted before -f; `agents` recorded in run/profiles immediately before `up -d`
+        (a failed up keeps the old record), used by status, down, bootstrap, trust, backup and restore; doctor uses the
+        profiles up would choose now. A profile recorded but no longer chosen is withdrawn before `up -d` with
+        `docker compose -p <name> rm -sf agent-proxy`, so its tokens leave tmpfs. compose.yaml: agent-proxy
+        `pull_policy: never` (OPS-DEPLOY FR-DEPLOY-1). CLI tests 231 (14 in tests/cli/test_profiles.py). `agents` is active when a user has a provider configured
         AND `docker image inspect reader-agent-proxy:local` exits 0: nothing in the repository builds that image yet
         (SRV-AGENT), and starting the profile without it would fail `up -d`; otherwise a stderr note. Provider tokens go
         to agent-proxy only (ADR-0023/0025), named secret_file_name(ref); without agent-proxy in the active model no

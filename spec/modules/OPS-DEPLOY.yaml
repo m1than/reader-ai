@@ -76,7 +76,10 @@ requirements:
     text: >-
       `deploy/compose.yaml` declares, by profile: default (no profile) `caddy`, `api`, `worker`, `postgres`; profile
       `kernels` `kernel-verify`, `kernel-agent`, `kernel-pair-1`; profile `agents` `agent-proxy`; profile `mcp` `mcp`.
-      Further `kernel-pair-<n>` and every `kernel-<user>` come only from OPS-CLI's override. [config]
+      Further `kernel-pair-<n>` and every `kernel-<user>` come only from OPS-CLI's override. `agent-proxy` carries
+      `pull_policy: never` (amended 2026-11-22 with OPS-CLI FR-CLI-5): its image `reader-agent-proxy:local` is built
+      locally (SRV-AGENT), and a missing image must fail the start rather than pull a same-named image from a
+      registry. [config]
   - id: FR-DEPLOY-2
     text: >-
       `api`, `worker` and `mcp` run one image built from `deploy/images/server.Dockerfile`, command
