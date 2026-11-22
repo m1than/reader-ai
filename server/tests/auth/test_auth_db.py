@@ -19,7 +19,9 @@ pytestmark = pytest.mark.anyio
 def test_version_locations_are_a_declared_list() -> None:
     import reader.db as db
 
-    assert [p.as_posix().split("/reader/", 1)[1] for p in db.VERSION_LOCATIONS] == ["db/migrations/versions"]
+    ours, theirs = db.VERSION_LOCATIONS[:2], db.VERSION_LOCATIONS[2:]
+    assert [p.as_posix().split("/reader/", 1)[1] for p in ours] == ["db/migrations/versions", "jobs/migrations"]
+    assert [p.as_posix().rsplit("/procrastinate/", 1)[1] for p in theirs] == ["contrib/alembic/versions"]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)
 
 

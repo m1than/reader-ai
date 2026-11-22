@@ -35,24 +35,36 @@
 #   - SRV-AUTH's owner_id invariant exempts the system tables other specs declare: `job_keys` and procrastinate's
 #     `procrastinate_*` tables (jobs are server work, not user data; a job's owner, when one exists, is a field of its
 #     `args`).
-#   - `reader-server --role worker` calls `reader.jobs.worker.run(settings)` (FR-EVENTS-9) and nothing else.
+#   - `reader-server --role worker` calls `reader.jobs.worker.run(engine, target, stop)` (FR-EVENTS-9) once the
+#     schema is at all heads, and nothing else.
+#   - Readiness ("at all heads") compares the version table with the effective heads (`get_revisions("heads")`):
+#     `procrastinate_0043` is reached through `jobs_0001`'s `depends_on` and is not kept in the version table.
+#   - The migration lock is taken by polling `pg_try_advisory_lock` on its own autocommit connection: procrastinate's
+#     chain runs `CREATE INDEX CONCURRENTLY`, which waits for every open transaction, so a migrator blocked inside
+#     `pg_advisory_lock` with an open transaction deadlocks against it (measured: SRV-AUTH's concurrent-migration
+#     test deadlocked until this change).
 #
 # Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
 
 id: SRV-EVENTS
 title: Job queue on procrastinate with per-key attempts and outcomes, declared job kinds and a reconciling sweep (slice subset)
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Status stays draft until Red; Red/Green waits for SRV-AUTH (Alembic env, reader.db)"
+review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22)"
 
 paths:
   - server/src/reader/jobs/**
   - server/tests/jobs/**
+
+# System tables (SRV-AUTH INV-AUTH-8 reads `system: true` entries from every spec; a `*` entry is a prefix match).
+tables:
+  job_keys: { system: true, columns: "kind text, key text, args jsonb, attempts int, outcome text null, error_code text null, job_id bigint null, created_at, updated_at, finished_at null; pk (kind, key)" }
+  "procrastinate_*": { system: true, columns: "procrastinate 3.12.0's own schema (its shipped Alembic chain)" }
 
 normative:
   - id: REF-EVENTS-1
@@ -95,8 +107,9 @@ requirements:
       Job kinds are declared as data: a `JobKind` record has `name` (`^[a-z][a-z0-9_.]{2,63}$`), `queue`, `args`
       (a Pydantic model with `extra="forbid"`), `key` (the ordered list of `args` field names that form the
       idempotency key), `max_attempts` (≥ 1 counted runs per key), `transient` (a tuple of exception types) and
-      `timeout_s`. `reader.jobs.catalog.KINDS` is the one tuple of kinds the worker serves; building it rejects a
-      duplicate name, the reserved name `jobs.sweep`, a `key` field missing from `args`, and an `args` model that
+      `timeout_s`. The worker serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared
+      module list `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST and SRV-SEARCH add theirs); building
+      a `Catalog` rejects a duplicate name, the reserved name `jobs.sweep`, a `key` field missing from `args`, and an `args` model that
       fails FR-EVENTS-10. Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
       cancellation flag between steps, because `timeout_s` cannot interrupt blocking synchronous code.
   - id: FR-EVENTS-2
@@ -179,8 +192,9 @@ requirements:
       for `succeeded` and `unknown_key` when no row exists. It is the only way out of `dead`.
   - id: FR-EVENTS-9
     text: >-
-      `reader.jobs.worker.run(settings)` opens the procrastinate app on the DB settings from SRV-CONFIG, runs the
-      start sweep, then serves the queues of every kind in `KINDS` plus `jobs.sweep`, with `concurrency=1`,
+      `reader.jobs.worker.run(engine, target, stop)` opens the procrastinate app on `reader.db`'s `DbTarget` (the
+      password as a psycopg connect argument, never in a conninfo string), runs the start sweep, then serves the
+      queues of every kind in the catalog plus `jobs.sweep`, with `concurrency=1`,
       LISTEN/NOTIFY on and `shutdown_graceful_timeout=8`. On SIGTERM it stops fetching, waits up to 8 s, then
       procrastinate aborts the running job (status `aborted`; the job's transaction rolls back). It returns 0 after
       a stop and 1 when the database is unreachable at start.

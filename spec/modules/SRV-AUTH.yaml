@@ -159,6 +159,11 @@ requirements:
       `Config` before `command.upgrade`, from a declared list of directories (Alembic does not glob; no scan): in stage
       1 only `reader/db/migrations/versions`; SRV-EVENTS appends its own directory and the installed
       `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
+      Since SRV-EVENTS (2026-11-22, paired change): the list is `reader/db/migrations/versions`,
+      `reader/jobs/migrations` and procrastinate's versions directory; "all heads" are the effective heads
+      (`get_revisions("heads")`, so `procrastinate_0043`, reached through `jobs_0001`'s `depends_on`, is not compared);
+      and the lock is taken by polling `pg_try_advisory_lock` on a dedicated autocommit connection, because
+      procrastinate's `CREATE INDEX CONCURRENTLY` deadlocks against a waiter holding an open transaction.
       procrastinate's `autocommit_block` path on asyncpg is tested by SRV-EVENTS against Postgres, not here.
       Paths and endpoints default to the container's and may be overridden by six variables (tests, and OPS-DEPLOY's
       static `READER_CONFIG`): `READER_CONFIG` (default `/etc/reader/reader.yaml`), `READER_SECRETS_ROOT`
@@ -367,7 +372,7 @@ invariants:
       system tables declared by any spec (checked against the live schema after `alembic upgrade heads`; the test reads
       the `tables` entries with `system: true` from every spec in spec/modules/, and a `procrastinate_*` prefix entry
       covers every table it matches). Here: users, auth_challenges, bootstrap_tokens, auth_failures; SRV-EVENTS
-      declares job_keys, job_outcomes and procrastinate_*.
+      declares job_keys and procrastinate_*.
   - id: INV-AUTH-9
     text: >-
       A user whose handle is removed from `users[]` is disabled at the next api startup: its sessions are revoked, its
