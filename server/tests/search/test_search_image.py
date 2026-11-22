@@ -128,7 +128,8 @@ def test_service_start_runs_the_precheck_and_caps_the_length(built: str) -> None
 # FR-SEARCH-1 / OPS-DEPLOY FR-DEPLOY-9: a real service start plus the worst admitted request (8 texts of 1,200
 # characters that each reach the 1,024-token cap) under compose's 3g limit. The limit is sized on anonymous
 # memory (memory.stat anon, sampled every 20 ms through the batch for its maximum): the mmap'd weights are
-# file cache, which the kernel may reclaim at the limit, so memory.peak and memory.events max are reported only.
+# file cache, which the kernel may reclaim at the limit, so memory.peak and memory.events max are only
+# reported.
 MEMORY = """
 import json, random, threading, time, urllib.request
 from reader.search import embed_service as m
