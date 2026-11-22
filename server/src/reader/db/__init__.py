@@ -25,8 +25,9 @@ from reader.config import Secret
 
 _HERE: Final = Path(__file__).resolve().parent
 SCRIPT_LOCATION: Final = _HERE / "migrations"
-# Declared list of version directories (no scan). SRV-EVENTS appends its own and procrastinate's.
-VERSION_LOCATIONS: Final[list[Path]] = [SCRIPT_LOCATION / "versions"]
+# Declared list of version directories (no scan). SRV-LESSON adds its own; SRV-EVENTS appends its own and
+# procrastinate's.
+VERSION_LOCATIONS: Final[list[Path]] = [SCRIPT_LOCATION / "versions", _HERE.parent / "lessons" / "migrations"]
 # pg_advisory_lock(namespace, key): this namespace is for migrations only ("RDMG"); SRV-EVENTS uses another.
 MIGRATION_LOCK_NAMESPACE: Final = 0x52444D47
 MIGRATION_LOCK_KEY: Final = 1

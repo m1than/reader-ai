@@ -101,7 +101,7 @@ bounds:
                                   # holds ids, hashes and numbers, never content.
   blobs_root: /var/lib/reader/blobs
 
-# Tables of this module's migration (branch label `lessons`, depends on SRV-AUTH's base revision for users.id).
+# Tables of this module's migration (branch label `lessons`, a branch off SRV-AUTH's base revision for users.id).
 # Every table carries NOT NULL `owner_id` with a direct foreign key to users.id (INV-AUTH-8 checks exactly that); for
 # lessons, revisions and stage records it is also the course owner's id, enforced by composite foreign keys
 # (INV-LESSON-7). Every foreign key is
@@ -227,8 +227,11 @@ requirements:
   - id: FR-LESSON-14
     text: >-
       Migration: one Alembic revision in `server/src/reader/lessons/migrations/` (branch label `lessons`,
-      `depends_on` SRV-AUTH's base revision) creates the four tables of `tables` with their checks, composite foreign
-      keys, the partial unique index and the immutability trigger; its downgrade drops them. Routes are declared as
+      `down_revision` SRV-AUTH's base revision `0001_auth`, so the history has no extra head: with `depends_on`,
+      `0001_auth` stays a script head while `alembic_version` records only the lessons revision, and SRV-AUTH's
+      "at all heads" check fails — measured in Green) creates the four tables of `tables` with their checks, composite
+      foreign keys, the partial unique index and the immutability trigger; `alembic downgrade lessons@-1` drops them
+      and leaves SRV-AUTH's tables. Routes are declared as
       data in `reader.lessons.routes` (method, path, auth) and reach the app through SRV-AUTH's `ROUTERS` list.
 
 invariants:

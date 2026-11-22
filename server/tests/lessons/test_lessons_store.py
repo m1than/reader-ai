@@ -281,7 +281,7 @@ async def test_migration_creates_and_drops_the_tables(pg: Pg, tmp_path: Path) ->
     def downgrade(connection: Any) -> None:
         config = alembic_config()
         config.attributes["connection"] = connection
-        command.downgrade(config, "lessons@base")
+        command.downgrade(config, "lessons@-1")
 
     async with w.engine.connect() as conn:
         await conn.run_sync(downgrade)

@@ -364,13 +364,21 @@ tasks:
       branch: V/V.SRV-LESSON-min,
       review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas;
         applied with coordinator decisions (G2 publish deferred to SRV-PIPELINE; stage records per revision; seq; single
-        /api/lessons API; span id form <material_sha256>:<seq>); coordinator checks the diff",
-      note: "spec revised after review, awaits the coordinator's diff check. spec/modules/SRV-LESSON.yaml (slice subset) with
-        cell.schema.json, the synthetic fixture lesson F01 (generator spec/fixtures/SRV-LESSON/gen_f01.py; Nakamoto lab) and
-        invalid.yaml (write cases plus g2 cases for SRV-PIPELINE). Code depends on SRV-AUTH (reader.db, ROUTERS), not on jobs.
-        Cross-spec: SRV-AUTH ROUTERS + declared version_locations entry; OPS-DEPLOY server.Dockerfile must create
-        /var/lib/reader/blobs owned by 10001 (else blob writes fail on the fresh volume); SRV-INGEST issues span ids as
-        <material_sha256>:<seq> and reuses reader.blobs; SRV-PIPELINE owns G2." }
+        /api/lessons API; span id form <material_sha256>:<seq>); coordinator diff check passed; spec approved (agent,
+        2026-11-22) with Red",
+      note: "green locally; awaits one code-review round. Red 231092a: 126 tests in server/tests/lessons, all failing on
+        assertions (missing modules surface through need() as AssertionError), plus the paired SRV-AUTH tests for ROUTERS and
+        version_locations (spec notes in FR-AUTH-1/FR-AUTH-10; three import-order fixes in SRV-AUTH tests that ruff 0.17.6
+        flags on main). Green: reader.blobs, reader.lessons.{schema,store,access,routes,fixture}, migration lessons_0001
+        (branch lessons, down_revision 0001_auth; composite FKs, immutability trigger); ROUTERS and VERSION_LOCATIONS wired.
+        Found in Green: with `depends_on` 0001_auth the history kept 0001_auth as a head that alembic_version never records,
+        so SRV-AUTH's at_heads failed; switched to down_revision with a paired FR-LESSON-14 + downgrade-test change
+        (lessons@-1). SRV-EVENTS's `depends_on = procrastinate_0043` will hit the same check: note for its Green;
+        packaged cell.schema.json and F01.ipynb written by the committed generator (spec/fixtures/SRV-LESSON/gen_f01.py now
+        also writes them). Deps: nbformat 5.11.1, jsonschema 4.26.0; dev types-jsonschema. 126/126 lessons tests pass
+        against Postgres 18 (pinned digest, testcontainers). Live item left: fixture load on a fresh blobs volume
+        (e2e/live/slice.sh). Cross-spec still open: SRV-INGEST issues span ids as <material_sha256>:<seq> and reuses
+        reader.blobs; SRV-PIPELINE owns G2." }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
       note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2

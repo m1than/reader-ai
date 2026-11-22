@@ -7,7 +7,9 @@
 Run: `uv run --script spec/fixtures/SRV-LESSON/gen_f01.py` — writes F01.ipynb next to this file in the canonical form
 of FR-LESSON-2 (`nbformat.writes`, UTF-8, no trailing newline), after validating it against nbformat and
 cell.schema.json (with the format checker), checking each kind's
-cell type, and running the lab's asserts. Every text is written for this fixture; nothing is quoted from any book.
+cell type, and running the lab's asserts. It also writes the byte-identical packaged copies the server ships
+(server/src/reader/lessons/fixtures/F01.ipynb and server/src/reader/lessons/cell.schema.json; VEC-LESSON-1/2).
+Every text is written for this fixture; nothing is quoted from any book.
 The lab implements the catch-up formula of Nakamoto (2008), section 11; its expected values are that paper's table
 (q = 0.1, z = 5: 0.0009137; q = 0.3, z = 5: 0.1773523) and ADR-0009's recomputed 62.8 % for q = 0.3, z = 1.
 """
@@ -21,6 +23,7 @@ import nbformat
 from nbformat.v4 import new_code_cell, new_markdown_cell, new_notebook
 
 HERE = Path(__file__).resolve().parent
+PACKAGE = HERE.parents[2] / "server" / "src" / "reader" / "lessons"
 MATERIAL = hashlib.sha256(b"reader-ai synthetic material F01").hexdigest()
 SPAN_1 = f"{MATERIAL}:1"   # span id form `<material_sha256>:<seq>` (cell.schema.json span_ref)
 SPAN_7 = f"{MATERIAL}:7"
@@ -135,4 +138,8 @@ def check(nb: nbformat.NotebookNode) -> None:
 if __name__ == "__main__":
     notebook = build()
     check(notebook)
-    (HERE / "F01.ipynb").write_text(nbformat.writes(notebook), encoding="utf-8")
+    data = nbformat.writes(notebook).encode("utf-8")
+    (HERE / "F01.ipynb").write_bytes(data)
+    (PACKAGE / "fixtures").mkdir(parents=True, exist_ok=True)
+    (PACKAGE / "fixtures" / "F01.ipynb").write_bytes(data)
+    (PACKAGE / "cell.schema.json").write_bytes((HERE / "cell.schema.json").read_bytes())

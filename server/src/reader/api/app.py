@@ -1,7 +1,7 @@
 """App factory: routers from a declared list, the CSRF gate, the session lookup, the cleanup task.
 
 ROUTERS names the modules whose `ROUTES` the app serves (FR-AUTH-10). Stage 1 lists the api and auth routers;
-SRV-KERNEL adds `reader.kernels.routes` in its own paired change.
+SRV-LESSON adds `reader.lessons.routes`; SRV-KERNEL adds `reader.kernels.routes` in its own paired change.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from reader.api.http import Ctx, Route, error
 from reader.auth import store
 from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
-ROUTERS: Final = ("reader.api.routes", "reader.auth.routes")
+ROUTERS: Final = ("reader.api.routes", "reader.auth.routes", "reader.lessons.routes")
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
 )

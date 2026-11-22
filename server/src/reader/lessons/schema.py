@@ -1,0 +1,162 @@
+"""Validation and canonical form of a lesson notebook (SRV-LESSON FR-LESSON-1, FR-LESSON-2; ADR-0004).
+
+The kinds, their fields and the cell type each kind needs are data in cell.schema.json; nothing here names a
+kind.
+"""
+
+from __future__ import annotations
+
+import copy
+import hashlib
+import json
+import math
+import warnings
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Final
+
+import jsonschema
+import nbformat
+
+# Structural bounds of the spec (`bounds`), each with its reason there.
+INPUT_MAX_BYTES: Final = 16 * 1024 * 1024
+NOTEBOOK_MAX_BYTES: Final = 8 * 1024 * 1024
+CELLS_MAX: Final = 1000
+LESSON_FORMAT: Final = 1
+NBFORMAT: Final = 4
+NBFORMAT_MINOR_MIN: Final = 5  # cell ids (nbformat 4.5)
+
+SCHEMA: Final[dict[str, Any]] = json.loads(
+    (Path(__file__).parent / "cell.schema.json").read_text(encoding="utf-8")
+)
+CELL_TYPES: Final[dict[str, str]] = SCHEMA["x-cell-type"]
+STAGES: Final[frozenset[str]] = frozenset(SCHEMA["$defs"]["provenance"]["properties"]["stage"]["enum"])
+_VALIDATOR: Final = jsonschema.Draft202012Validator(
+    SCHEMA, format_checker=jsonschema.Draft202012Validator.FORMAT_CHECKER
+)
+
+
+class LessonWriteError(Exception):
+    """A refused write; `code` is one of the spec's `write_errors`."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+@dataclass(frozen=True)
+class Validated:
+    notebook: dict[str, Any]
+    canonical: bytes
+    sha256: str
+    cell_count: int
+
+
+def _refuse_constant(name: str) -> Any:
+    raise ValueError(f"non-finite number {name}")
+
+
+def _finite_float(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError("non-finite number")
+    return value
+
+
+def _is_int(value: object) -> bool:
+    return type(value) is int
+
+
+def _parse(data: bytes) -> dict[str, Any]:
+    if len(data) > INPUT_MAX_BYTES:
+        raise LessonWriteError("too_large")
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        raise LessonWriteError("not_utf8") from None
+    try:
+        doc = json.loads(text, parse_constant=_refuse_constant, parse_float=_finite_float)
+    except ValueError, RecursionError:
+        raise LessonWriteError("not_nbformat") from None
+    if not isinstance(doc, dict):
+        raise LessonWriteError("not_nbformat")
+    major, minor, cells = doc.get("nbformat"), doc.get("nbformat_minor"), doc.get("cells")
+    if not (isinstance(major, int) and _is_int(major) and major == NBFORMAT):
+        raise LessonWriteError("not_nbformat")
+    if not (isinstance(minor, int) and _is_int(minor) and minor >= NBFORMAT_MINOR_MIN):
+        raise LessonWriteError("not_nbformat")
+    if not isinstance(cells, list) or not all(isinstance(cell, dict) for cell in cells):
+        raise LessonWriteError("not_nbformat")
+    return doc
+
+
+def _check_ids(cells: list[dict[str, Any]]) -> None:
+    ids = [cell.get("id") for cell in cells]
+    if not all(isinstance(i, str) for i in ids):
+        raise LessonWriteError("not_nbformat")
+    if len(set(ids)) != len(ids):
+        raise LessonWriteError("duplicate_cell_id")
+
+
+def _nbformat_valid(doc: dict[str, Any]) -> Any:
+    """nbformat.validate on a copy; any exception, warning-driven repair or mutation is a refusal."""
+    node: Any = nbformat.from_dict(copy.deepcopy(doc))  # type: ignore[no-untyped-call]
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            nbformat.validate(node)
+    except Exception:
+        raise LessonWriteError("not_nbformat") from None
+    if node != doc:
+        raise LessonWriteError("not_nbformat")
+    return node
+
+
+def _reader(meta: object) -> dict[str, Any] | None:
+    if not isinstance(meta, dict):
+        return None
+    value = meta.get("reader")
+    return value if isinstance(value, dict) else None
+
+
+def _check_cells(doc: dict[str, Any]) -> None:
+    notebook_reader = _reader(doc.get("metadata"))
+    lesson_format = None if notebook_reader is None else notebook_reader.get("lesson_format")
+    if not (_is_int(lesson_format) and lesson_format == LESSON_FORMAT):
+        raise LessonWriteError("missing_reader_metadata")
+    metas = [_reader(cell.get("metadata")) for cell in doc["cells"]]
+    if any(meta is None for meta in metas):
+        raise LessonWriteError("missing_reader_metadata")
+    for meta in metas:
+        if not _VALIDATOR.is_valid(meta):
+            raise LessonWriteError("cell_schema")
+    for cell, meta in zip(doc["cells"], metas, strict=True):
+        if meta is None or CELL_TYPES[meta["kind"]] != cell.get("cell_type"):
+            raise LessonWriteError("cell_type_mismatch")
+
+
+def validate(data: bytes) -> Validated:
+    """FR-LESSON-1 in order, then the canonical bytes and their sha256 (FR-LESSON-2)."""
+    doc = _parse(data)
+    _check_ids(doc["cells"])
+    node = _nbformat_valid(doc)
+    _check_cells(doc)
+    try:
+        written: str = nbformat.writes(node)  # type: ignore[no-untyped-call]
+        canonical = written.encode("utf-8")
+    except UnicodeEncodeError:
+        raise LessonWriteError("not_utf8") from None
+    if len(canonical) > NOTEBOOK_MAX_BYTES:
+        raise LessonWriteError("too_large")
+    if len(doc["cells"]) > CELLS_MAX:
+        raise LessonWriteError("too_many_cells")
+    return Validated(doc, canonical, hashlib.sha256(canonical).hexdigest(), len(doc["cells"]))
+
+
+def notes_ids(notebook: dict[str, Any]) -> set[str]:
+    """Ids of the cells whose kind is `notes` (learner-owned, INV-LESSON-3)."""
+    return {
+        cell["id"]
+        for cell in notebook["cells"]
+        if (_reader(cell.get("metadata")) or {}).get("kind") == "notes"
+    }

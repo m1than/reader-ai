@@ -41,12 +41,15 @@ dev = [
   "pytest>=9.2",
   "ruff>=0.17",
   "testcontainers>=4.15",
+  "types-jsonschema>=4.26",   # SRV-LESSON: mypy --strict over reader.lessons.schema
 ]
 
 [tool.ruff]
 line-length = 110
 target-version = "py314"
 src = ["src", "tests"]
+# Packaged lesson fixtures are generated data (spec/fixtures/SRV-LESSON/gen_f01.py), not source.
+extend-exclude = ["src/reader/lessons/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PT", "TID"]
