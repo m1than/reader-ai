@@ -22,7 +22,7 @@ export const cspFromCaddyfile = (text) => {
 const CSP = cspFromCaddyfile(readFileSync(join(repo, 'deploy/Caddyfile'), 'utf8'));
 const fixtures = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-UI/lessons.json'), 'utf8'));
 const notebook = readFileSync(join(repo, 'spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb'), 'utf8');
-const me = { id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
+const me = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
@@ -36,7 +36,11 @@ const api = (method, path) => {
   const lesson = /^\/api\/lessons\/([^/]+)$/.exec(path);
   if (method === 'GET' && lesson) {
     const s = fixtures.list.lessons.find((l) => l.lesson_id === decodeURIComponent(lesson[1]));
-    return s ? [200, { ...s, revisions: s.latest_sha256 ? [{ sha256: s.latest_sha256, created_at: s.updated_at }] : [] }] : [404, { error: 'not_found' }];
+    // SRV-LESSON FR-LESSON-8: metadata nested under `lesson`.
+    const revisions = s?.latest_sha256
+      ? [{ sha256: s.latest_sha256, byte_size: 1, cell_count: 1, created_at: s.updated_at, stages: ['fixture'] }]
+      : [];
+    return s ? [200, { lesson: s, revisions }] : [404, { error: 'not_found' }];
   }
   const rev = /^\/api\/lessons\/([^/]+)\/revisions\/([0-9a-f]{64})$/.exec(path);
   if (method === 'GET' && rev) return [200, JSON.parse(notebook)];

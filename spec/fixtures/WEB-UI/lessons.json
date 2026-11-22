@@ -8,10 +8,12 @@
     ]
   },
   "lesson": {
-    "lesson_id": "w01", "course_id": "c-fixture", "course_title": "Fixture course", "ordinal": 1,
-    "title": "Fixture lesson W01: one cell of every kind", "updated_at": "2026-11-21T09:00:00Z",
-    "latest_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
-    "revisions": [{"sha256": "1111111111111111111111111111111111111111111111111111111111111111", "created_at": "2026-11-21T09:00:00Z"}]
+    "lesson": {
+      "lesson_id": "w01", "course_id": "c-fixture", "course_title": "Fixture course", "ordinal": 1,
+      "title": "Fixture lesson W01: one cell of every kind", "updated_at": "2026-11-21T09:00:00Z",
+      "latest_sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    },
+    "revisions": [{"sha256": "1111111111111111111111111111111111111111111111111111111111111111", "byte_size": 6990, "cell_count": 10, "created_at": "2026-11-21T09:00:00Z", "stages": ["fixture"]}]
   },
   "bad_ids": [".", "..", "", "a/b", "x%2F", "<script>", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]
 }

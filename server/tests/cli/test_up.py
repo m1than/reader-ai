@@ -86,7 +86,19 @@ def test_up_order_build_t0_resolve_watcher_ready_then_up(
     world = _world(tmp_path, monkeypatch)
     assert _up(world, _config(tmp_path)) == 0
     j = world.journal
-    build = _index(j, "run", "docker", "compose", "-f", str(world.ctx.compose_file), "-f", "-", "build")
+    build = _index(
+        j,
+        "run",
+        "docker",
+        "compose",
+        "--profile",
+        "kernels",
+        "-f",
+        str(world.ctx.compose_file),
+        "-f",
+        "-",
+        "build",
+    )
     info = _index(j, "run", "docker", "info")
     resolve = _index(j, "keyring.get", "reader-ai", "claude-oauth-token")
     spawn = _index(j, "spawn")
@@ -125,7 +137,17 @@ def test_compose_calls_take_the_override_on_stdin(tmp_path: Path, monkeypatch: p
     for tokens in (("config",), ("build",), ("up", "-d")):
         (argv,) = world.runner.argvs("docker", "compose", *tokens)
         call = next(c for c in world.runner.calls if c.argv == argv)
-        assert argv[:6] == ["docker", "compose", "-f", str(world.ctx.compose_file), "-f", "-"]
+        # FR-CLI-5: the default profile plus `kernels` (V.OPS-CLI-kernels).
+        assert argv[:8] == [
+            "docker",
+            "compose",
+            "--profile",
+            "kernels",
+            "-f",
+            str(world.ctx.compose_file),
+            "-f",
+            "-",
+        ]
         override = json.loads(call.stdin or b"")
         assert "kernel-user-ivan" in override["services"]
 
