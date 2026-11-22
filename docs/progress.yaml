@@ -20,8 +20,9 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 5.4576      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 5.4959      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
+                         #   + tutor-call 0.0383 (from test_budget_usd)
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
@@ -31,6 +32,9 @@ budget:
     - { task: S0.spike.trace-backend, usd: 0.0058, date: 2026-11-20,
         what: "2 exploratory (hand-recorded) + 2 measured rounds of probe runs (3 haiku stages each); span replays without model calls;
           breakdown in spikes/trace-backend/RESULT.md" }
+    - { task: S0.spike.tutor-call, usd: 0.0383, date: 2026-11-22, funding: test_budget_usd,
+        what: "10 tutor-shaped Sonnet 5.5 calls (5 synthetic questions × thinking off/default), cap $0.60; per call in
+          spikes/tutor-call/results/" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -553,10 +557,15 @@ tasks:
         module only; an unhealthy embed service raises EmbedUnavailable, a transient that spends an attempt), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
       branch: V/V.TUTOR-min,
-      note: "spec drafted, awaits deep-reviewer (cost and auth: full review). spec/modules/SRV-TUTOR.yaml: question as a
-        job (api cannot reach agent-proxy, ADR-0025), polling instead of SSE (answers validated whole before display),
-        grounding enforced by code (span ids outside the retrieved set removed, unsupported blocks marked), Sonnet 5.5,
-        per-question cap $0.20, daily $3; typical ≈ $0.026 warm / $0.053 cold per question (VEC-TUTOR-3)." }
+      note: "spec round 1 (bfb7047): changes; round 2 (410314b): changes; round 3 (30890d8): approve. Implementation on
+        V/SRV-TUTOR-impl. Question as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off,
+        byte-based reserve with ≈ 410 measured CLI overhead tokens; caps $0.30 per question and $3 per day; about $0.048
+        per L02-shaped question (VEC-TUTOR-3)." }
+  - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
+      result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
+        in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
+        prompt (745–867 prompt tokens in total, ≈ 410 fixed); prices recompute within $0.000004; the CLI writes one-shot
+        prompts to the 1-hour cache at 2× input. spikes/tutor-call/RESULT.md." }
   - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
       result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
         placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with

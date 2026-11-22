@@ -1,0 +1,17 @@
+# VEC-TUTOR-4 — question state as read by GET and the busy check (SRV-TUTOR FR-TUTOR-10). Input: the row's stored
+# state, the SRV-EVENTS job status for key [question_id] (with its outcome code when dead), the row's age.
+# ttl = bounds.question_ttl_s (600), stale = bounds.stale_without_job_s (60).
+cases:
+  - {row: answered, job: succeeded, age_s: 5,   expect: {state: answered}}
+  - {row: failed,   job: succeeded, age_s: 5,   expect: {state: failed}}          # the handler wrote it and returned
+  - {row: refused,  job: succeeded, age_s: 5,   expect: {state: refused}}
+  - {row: expired,  job: succeeded, age_s: 700, expect: {state: expired}}
+  - {row: queued,   job: queued,    age_s: 5,   expect: {state: queued, busy: true}}
+  - {row: queued,   job: running,   age_s: 30,  expect: {state: queued, busy: true}}
+  - {row: queued,   job: none,      age_s: 30,  expect: {state: queued, busy: true}}  # enqueue may still be in flight
+  - {row: queued,   job: none,      age_s: 61,  expect: {state: failed, error_code: lost, busy: false}}
+  - {row: queued,   job: dead, outcome: exhausted, age_s: 200, expect: {state: failed, error_code: tutor_failed, busy: false}}
+  - {row: queued,   job: dead, outcome: timeout,   age_s: 200, expect: {state: failed, error_code: tutor_failed, busy: false}}
+  - {row: queued,   job: dead, outcome: stalled,   age_s: 200, expect: {state: failed, error_code: tutor_failed, busy: false}}
+  - {row: queued,   job: queued,    age_s: 601, expect: {state: expired, busy: false}}   # TTL wins over a waiting job
+  - {row: queued,   job: running,   age_s: 601, expect: {state: queued, busy: true}}     # a running call finishes or the job dies

@@ -1,0 +1,15 @@
+{"questions": [
+ {"id": "q1", "question": "Why does adding a block require proof of work?", "cell": null, "sources": [
+  {"id": "s1", "page": 12, "text": "Each block carries a nonce. Miners vary the nonce until the hash of the block header is below a target. Producing such a hash takes many attempts, while checking it takes one, so rewriting history would require redoing all that work."},
+  {"id": "s2", "page": 13, "text": "The target is adjusted every 2016 blocks so that, on average, one block is found about every ten minutes regardless of the total hashing power."}]},
+ {"id": "q2", "question": "What happens if two miners find a block at the same time?", "cell": null, "sources": [
+  {"id": "s1", "page": 20, "text": "Nodes always consider the chain with the most accumulated work to be the correct one and keep extending it. If two blocks arrive at nearly the same time, nodes work on the first one they received but keep the other branch in case it becomes longer."},
+  {"id": "s2", "page": 21, "text": "The tie is broken when the next block is found and one branch becomes longer; nodes on the other branch then switch to it."}]},
+ {"id": "q3", "question": "Почему транзакцию считают надёжной только после нескольких подтверждений?", "cell": null, "sources": [
+  {"id": "s1", "page": 31, "text": "Каждый новый блок поверх блока с транзакцией увеличивает объём работы, который злоумышленнику пришлось бы повторить, чтобы переписать историю. Вероятность успешной атаки быстро падает с числом подтверждений."},
+  {"id": "s2", "page": 32, "text": "Поэтому получатели обычно ждут шести подтверждений перед тем, как считать крупный платёж окончательным."}]},
+ {"id": "q4", "question": "What does the Merkle root in the header commit to?", "cell": {"id": "c-merkle", "kind": "explain", "text": "The header stores a single hash that summarises every transaction in the block."}, "sources": [
+  {"id": "s1", "page": 40, "text": "Transactions are hashed in pairs, and the pair hashes are hashed again, until a single root remains. Changing any transaction changes the root, so the header commits to the whole set."}]},
+ {"id": "q5", "question": "Who invented the Lightning Network?", "cell": null, "sources": [
+  {"id": "s1", "page": 50, "text": "Payment channels let two parties exchange many signed updates off-chain and settle only the final balance on-chain."}]}
+]}
