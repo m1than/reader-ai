@@ -1,6 +1,8 @@
 """Helpers for the OPS-SANDBOX [image] tests (spec/modules/OPS-SANDBOX.yaml).
 
-The image `reader-kernel:local` is built once per session from sandbox/. Each test starts its own kernel
+The image is built once per session from sandbox/ under this session's own tag
+`reader-kernel:test-<pid>.<random>` (the stack's `reader-kernel:local` is never built, tagged or removed by
+tests; a shared tag was retagged by concurrent sessions mid-run). Each test starts its own kernel
 container with `docker run` flags equal to OPS-DEPLOY's `x-kernel` template (read from the source of
 deploy/compose.yaml) plus `--restart always`, on a throwaway `--internal` network under the alias `kernel`.
 "From inside the container" means `docker exec` as uid 1000 (the same uid, namespaces, capabilities and
@@ -9,8 +11,8 @@ network. Everything a test creates carries this session's own label
 `org.reader-ai.test.sandbox-run=<pid>.<random>` and is removed after the test. The Docker daemon is shared
 with concurrent sessions (other worktrees, other gates), so the session finalizer removes only objects with
 this session's value, and the session start removes only objects whose pid is no longer alive (a killed
-session runs no finalizer). Another live session's objects are never touched (OPS-SANDBOX header, test
-isolation).
+session runs no finalizer). The same holds for image tags. Another live session's objects are never touched
+(OPS-SANDBOX header, test isolation and test image).
 
 Inputs that do not exist yet (sandbox/Dockerfile, the image) make a test fail on an assertion inside its
 body.
@@ -38,11 +40,14 @@ LOCK = SANDBOX / "requirements.lock"
 COMPOSE = REPO / "deploy" / "compose.yaml"
 SERVER_DOCKERFILE = REPO / "deploy" / "images" / "server.Dockerfile"
 PROBES = REPO / "spec" / "fixtures" / "OPS-SANDBOX" / "probes.yaml"
-IMAGE = "reader-kernel:local"
-# One label per pytest process: `<key>=<pid>.<random>`. Concurrent sessions share the Docker daemon, so a
-# session removes only what carries its own value, plus what a dead pytest process left behind.
+# One run id per pytest process, `<pid>.<random>`, for the label and the image tag. Concurrent sessions share
+# the Docker daemon, so a session removes only what carries its own id, plus what a dead pytest process left.
+RUN_ID = f"{os.getpid()}.{uuid.uuid4().hex[:8]}"
 RUN_KEY = "org.reader-ai.test.sandbox-run"
-LABEL = f"{RUN_KEY}={os.getpid()}.{uuid.uuid4().hex[:8]}"
+LABEL = f"{RUN_KEY}={RUN_ID}"
+IMAGE_REPO = "reader-kernel"
+TAG_PREFIX = "test-"
+IMAGE = f"{IMAGE_REPO}:{TAG_PREFIX}{RUN_ID}"
 NONCE = re.compile(r"^[0-9a-f]{32}$")
 RESET_DEADLINE_S = 30.0  # SRV-KERNEL FR-KERNEL-5
 
@@ -101,7 +106,7 @@ def image() -> Iterator[Build]:
         proc = docker("build", "--platform", "linux/arm64", "-t", IMAGE, "-f", str(DOCKERFILE), str(SANDBOX),
                       timeout=1800)
         yield Build(proc.returncode == 0, (proc.stdout + proc.stderr)[-6000:])
-    sweep(lambda value: value == LABEL.split("=", 1)[1])
+    sweep(lambda value: value == RUN_ID)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -131,6 +136,11 @@ def sweep(mine: Any) -> None:
     for r in rows:
         if len(r.split()) == 2 and mine(r.split()[1]):
             docker("network", "rm", r.split()[0])
+    # Image tags last: untag only (`image rm` of a tag never deletes layers another tag still uses).
+    tags = docker("image", "ls", IMAGE_REPO, "--format", "{{.Tag}}").stdout.split()
+    for tag in tags:
+        if tag.startswith(TAG_PREFIX) and mine(tag[len(TAG_PREFIX):]):
+            docker("image", "rm", f"{IMAGE_REPO}:{tag}")
 
 
 # A minimal Jupyter client run in a probe container: creates a kernel over REST (optionally with `env`),
@@ -231,7 +241,7 @@ class Sandbox:
         return self.network
 
     def start(self, wait_up: bool = True) -> dict[str, Any]:
-        assert self.build.ok, f"image reader-kernel:local did not build:\n{self.build.log}"
+        assert self.build.ok, f"image {IMAGE} did not build:\n{self.build.log}"
         net = self._net()
         proc = docker("run", "-d", "--name", self.name, "--label", LABEL, "--network", net,
                       "--network-alias", "kernel", *template_flags(), IMAGE)

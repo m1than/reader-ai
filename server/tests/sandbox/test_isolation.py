@@ -55,3 +55,37 @@ def test_session_sweep_spares_other_runs(image: Build) -> None:
         for name, net in (foreign, dead, own):
             docker("rm", "-f", name)
             docker("network", "rm", net)
+
+
+def _image_id(ref: str) -> str | None:
+    proc = docker("image", "inspect", "--format", "{{.Id}}", ref)
+    return proc.stdout.strip() if proc.returncode == 0 else None
+
+
+@requires_docker_daemon
+def test_session_sweep_spares_other_runs_tags(image: Build) -> None:
+    """The image tag is per run: a concurrent session's tag survives this session's sweeps, a dead session's
+    tag is removed, and `reader-kernel:local` is never touched."""
+    assert image.ok, image.log
+    run_id = conftest.LABEL.split("=", 1)[1]
+    assert run_id == f"{os.getpid()}.{run_id.split('.', 1)[1]}"
+    expected = f"reader-kernel:test-{run_id}"
+    assert expected == IMAGE
+    local_before = _image_id("reader-kernel:local")
+    foreign = f"reader-kernel:test-{os.getppid()}.{uuid.uuid4().hex[:8]}"   # a live session, not this one
+    dead = f"reader-kernel:test-{_dead_pid()}.{uuid.uuid4().hex[:8]}"
+    ended = f"reader-kernel:test-{os.getpid()}.{uuid.uuid4().hex[:8]}"     # stands in for a run's end sweep
+    for ref in (foreign, dead, ended):
+        tagged = docker("tag", IMAGE, ref)
+        assert tagged.returncode == 0, tagged.stderr
+    try:
+        conftest.sweep(conftest._stale)                                         # the start-of-session sweep
+        conftest.sweep(lambda value: value == ended.split("test-", 1)[1])       # an end-of-session sweep
+        assert _image_id(foreign) is not None
+        assert _image_id(dead) is None
+        assert _image_id(ended) is None
+        assert _image_id(IMAGE) is not None          # this run's own tag is still in use
+        assert _image_id("reader-kernel:local") == local_before
+    finally:
+        for ref in (foreign, dead, ended):
+            docker("image", "rm", ref)
