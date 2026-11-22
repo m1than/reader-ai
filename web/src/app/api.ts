@@ -36,9 +36,12 @@ const LessonSummary = v.object({
 
 const LessonList = v.object({ lessons: v.array(LessonSummary) });
 
+// SRV-LESSON FR-LESSON-8: the metadata is nested under `lesson`.
 const Lesson = v.object({
-  ...LessonSummary.entries,
-  revisions: v.array(v.object({ sha256: sha, created_at: v.string() })),
+  lesson: LessonSummary,
+  revisions: v.array(
+    v.object({ sha256: sha, byte_size: v.number(), cell_count: v.number(), created_at: v.string(), stages: v.array(v.string()) }),
+  ),
 });
 
 const Notebook = v.looseObject({

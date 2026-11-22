@@ -36,7 +36,11 @@ const api = (method, path) => {
   const lesson = /^\/api\/lessons\/([^/]+)$/.exec(path);
   if (method === 'GET' && lesson) {
     const s = fixtures.list.lessons.find((l) => l.lesson_id === decodeURIComponent(lesson[1]));
-    return s ? [200, { ...s, revisions: s.latest_sha256 ? [{ sha256: s.latest_sha256, created_at: s.updated_at }] : [] }] : [404, { error: 'not_found' }];
+    // SRV-LESSON FR-LESSON-8: metadata nested under `lesson`.
+    const revisions = s?.latest_sha256
+      ? [{ sha256: s.latest_sha256, byte_size: 1, cell_count: 1, created_at: s.updated_at, stages: ['fixture'] }]
+      : [];
+    return s ? [200, { lesson: s, revisions }] : [404, { error: 'not_found' }];
   }
   const rev = /^\/api\/lessons\/([^/]+)\/revisions\/([0-9a-f]{64})$/.exec(path);
   if (method === 'GET' && rev) return [200, JSON.parse(notebook)];

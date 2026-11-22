@@ -24,6 +24,8 @@ while (($#)); do
   esac
 done
 [[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "usage: $0 --config PATH  (reader.yaml not found)" >&2; exit 2; }
+# The project's own `reader` (server/.venv, created by `uv sync`) when none is installed globally; stage-1.sh inherits it.
+command -v reader >/dev/null || { [[ -x "$ROOT/server/.venv/bin/reader" ]] && export PATH="$ROOT/server/.venv/bin:$PATH"; }
 for tool in reader docker jq curl uv; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
 done
@@ -55,7 +57,8 @@ RESULTS="$OUT/results.txt"
 t0=$SECONDS
 bash "$ROOT/e2e/live/stage-1.sh" --config "$CONFIG" 2>&1 | strip >"$OUT/stage-1.log" || true
 stage1_s=$((SECONDS - t0))
-grep -E '^\s+(PASS|FAIL) ' "$OUT/stage-1.log" | sed -E 's/^\s+//; s/^(PASS|FAIL) /\1 stage-1: /' >>"$RESULTS" || true
+# POSIX classes, not \s: macOS grep and sed do not know \s.
+grep -E '^[[:space:]]+(PASS|FAIL) ' "$OUT/stage-1.log" | sed -E 's/^[[:space:]]+//; s/^(PASS|FAIL) /\1 stage-1: /' >>"$RESULTS" || true
 grep -q '^STAGE 1: PASS' "$OUT/stage-1.log" || grep -q '^STAGE 1:' "$OUT/stage-1.log" \
   || echo "FAIL stage-1: script did not finish (see out/stage-1.log)" >>"$RESULTS"
 

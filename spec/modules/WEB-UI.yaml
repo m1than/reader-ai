@@ -33,7 +33,9 @@
 #   every other path outside `/api/*` and `/mcp`, so deep links such as `/lessons/w01` load.
 # - SRV-LESSON (V4; API fixed by the coordinator 2026-11-21): `GET /api/lessons` →
 #   `{"lessons": [{lesson_id, course_id, course_title, ordinal, title, updated_at, latest_sha256}]}` (VEC-UI-2);
-#   `GET /api/lessons/{lesson_id}` → metadata plus revisions; the notebook only from
+#   `GET /api/lessons/{lesson_id}` → `{"lesson": {…the list fields}, "revisions": [{sha256, byte_size, cell_count,
+#   created_at, stages}]}` exactly as SRV-LESSON FR-LESSON-8 (nested; the live run of 2026-11-22 found the client and
+#   VEC-UI-2 expecting the fields flat, so every lesson page failed); the notebook only from
 #   `GET /api/lessons/{lesson_id}/revisions/{sha256}` (immutable, ETag).
 # - SRV-AUTH (approved): `GET /api/me`, `POST /api/auth/signout`, the sign-in page `GET /api/auth/signin`, the
 #   `Origin` and Content-Type rule (FR-AUTH-12), the session cookie (HttpOnly; the SPA never reads it).

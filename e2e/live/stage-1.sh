@@ -71,13 +71,16 @@ reader_up() { reader up --config "$CONFIG" </dev/null >/dev/null 2>&1; }   # std
 
 # --- Stack ------------------------------------------------------------------------------------------------------
 section "Stack (OPS-DEPLOY, OPS-CLI)"
+# Every listed service running and healthy, and the four default-profile services among them (the `kernels` profile,
+# FR-CLI-5, adds kernel-user-<handle>, kernel-verify, kernel-agent and kernel-pair-*).
 four_healthy_and_watcher() {
   reader status --config "$CONFIG" --json | jq -e '
     .watcher == "running"
-    and ([.services[] | select(.state == "running" and .health == "healthy") | .name] | sort) == ["api","caddy","postgres","worker"]'
+    and all(.services[]; .state == "running" and .health == "healthy")
+    and ([.services[].name] | contains(["api","caddy","postgres","worker"]))'
 }
 doctor_ok() { reader doctor --config "$CONFIG" --json | jq -e 'all(.[]; .ok)'; }
-check "four services healthy, watcher running" four_healthy_and_watcher
+check "all services healthy (four default plus kernels), watcher running" four_healthy_and_watcher
 check "reader doctor: all ok"                  doctor_ok
 
 # --- Edge -------------------------------------------------------------------------------------------------------
@@ -90,7 +93,7 @@ check "GET /api/healthz is ok"   healthz_ok
 check "anonymous /api/me is 401" test "$("${CURL[@]}" -o /dev/null -w '%{http_code}' "$READER_URL/api/me")" = 401
 headers_ok() { local h; h="$("${CURL[@]}" -D - -o /dev/null "$READER_URL/api/healthz" | tr -d '\r' | tr '[:upper:]' '[:lower:]')"
   grep -q '^strict-transport-security: max-age=31536000' <<<"$h" \
-  && grep -q "^content-security-policy: default-src 'self'; frame-ancestors 'none'" <<<"$h" \
+  && grep -q "^content-security-policy: default-src 'self';.*frame-ancestors 'none'" <<<"$h" \
   && grep -q '^x-content-type-options: nosniff' <<<"$h" \
   && grep -q '^referrer-policy: no-referrer' <<<"$h"; }
 check "security headers and CSP" headers_ok

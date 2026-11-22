@@ -34,14 +34,14 @@ export function LessonPage({ lessonId }: { lessonId: string }) {
   const { api } = useServices();
   const q = queries(api);
   const meta = useQuery(q.lesson(lessonId));
-  const sha = meta.data?.latest_sha256 ?? null;
+  const sha = meta.data?.lesson.latest_sha256 ?? null;
   const rev = useQuery({ ...q.revision(lessonId, sha ?? ''), enabled: sha !== null });
   if (meta.isPending) return <p className="page muted">Loading…</p>;
   if (meta.isError) return <p className="page">The lesson could not be loaded.</p>;
   if (sha === null)
     return (
       <main className="page">
-        <h1>{meta.data.title}</h1>
+        <h1>{meta.data.lesson.title}</h1>
         <p className="muted">This lesson is not published yet.</p>
       </main>
     );

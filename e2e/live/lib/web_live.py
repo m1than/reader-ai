@@ -54,14 +54,25 @@ def node_path() -> str:
     return f"{preferred}:{os.environ.get('PATH', '')}" if Path(preferred).is_dir() else os.environ.get("PATH", "")
 
 
+def _spki(pem: bytes) -> str:
+    key = x509.load_pem_x509_certificate(pem).public_key()
+    return base64.b64encode(hashlib.sha256(key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)).digest()).decode()
+
+
 def fetch_root(project: str, dest: Path) -> str | None:
-    done = compose(project, "exec", "-T", "caddy", "cat", "/data/caddy/pki/authorities/local/root.crt")
-    if done.returncode != 0 or not done.stdout.strip():
-        return None
-    dest.write_bytes(done.stdout)
-    cert = x509.load_pem_x509_certificate(done.stdout)
-    spki = cert.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
-    return base64.b64encode(hashlib.sha256(spki).digest()).decode()
+    """SPKI hashes of Caddy's local root and intermediate (public certificates), comma-separated.
+
+    Chromium matches --ignore-certificate-errors-spki-list against the chain the server sends, which holds the leaf
+    and the intermediate but not the root; the root's hash alone was not enough (measured: ERR_CERT_AUTHORITY_INVALID).
+    """
+    pems: list[bytes] = []
+    for name in ("root", "intermediate"):
+        done = compose(project, "exec", "-T", "caddy", "cat", f"/data/caddy/pki/authorities/local/{name}.crt")
+        if done.returncode != 0 or not done.stdout.strip():
+            return None
+        pems.append(done.stdout)
+    dest.write_bytes(pems[0])  # the root, for Node's verifier (NODE_EXTRA_CA_CERTS)
+    return ",".join(_spki(p) for p in pems)
 
 
 def load_fixture(project: str) -> bool:
