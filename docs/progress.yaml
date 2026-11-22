@@ -514,7 +514,10 @@ tasks:
         live objects (caught twice with pid attribution; shared label fails, per-run labels pass). The supervisor was
         fine: 480/480 restarts within 4.0 s under load. Fix on branch V/OPS-SANDBOX-test-isolation: per-run label
         org.reader-ai.test.sandbox-run=<pid>.<random>, end sweep of own objects, start sweep of dead pids only;
-        test_session_sweep_spares_other_runs. Old-label orphans left for the owner" }
+        test_session_sweep_spares_other_runs. Old-label orphans left for the owner. Second fix (2026-11-23, branch
+        V/OPS-SANDBOX-test-image): the shared image tag reader-kernel:local was rebuilt by every session, so a
+        concurrent session retagged it mid-run; each session now builds and uses reader-kernel:test-<run id> and sweeps
+        tags like labels (test_session_sweep_spares_other_runs_tags). Tests never touch reader-kernel:local" }
   - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-CLI],
       note: "FR-CLI-5 amended (spec, test, code paired, branch V/live-e2e): `reader up` always activates `kernels`
         besides the default profile (config, build and up all carry `--profile kernels`); compose builds the kernel image.
