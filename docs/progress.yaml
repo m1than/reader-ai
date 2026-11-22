@@ -17,6 +17,9 @@ budget:
     itself (allow rules in .claude/settings.json). Those scripts docker-exec internally only to fetch the test user's
     one-time bootstrap link and reset the test user; they never print or store a secret, and the agent still never runs
     docker exec directly. Changes to e2e/live/** therefore get a deep-reviewer pass for secret handling."
+  tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
+    the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
+    compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
   spent_usd: 5.4576      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
