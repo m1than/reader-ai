@@ -325,27 +325,11 @@ def config_text(task_budgets: dict[str, float] | None = None) -> str:
         """)
 
 
-# SRV-INGEST's tables (its FR-INGEST-14), created by the test where SRV-INGEST's migration is not merged yet.
-INGEST_DDL = (
-    """CREATE TABLE IF NOT EXISTS materials (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        owner_id uuid NOT NULL REFERENCES users (id), sha256 text NOT NULL, config_id text, page_count int,
-        created_at timestamptz NOT NULL DEFAULT now(), UNIQUE (owner_id, sha256))""",
-    """CREATE TABLE IF NOT EXISTS ingests (id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        owner_id uuid NOT NULL REFERENCES users (id), material_id uuid NOT NULL REFERENCES materials (id),
-        converter_version text, artifact_id text, span_count int, outline_count int, outline_source text,
-        pages_without_text int[], imported_at timestamptz NOT NULL DEFAULT now(), UNIQUE (material_id))""",
-    """CREATE TABLE IF NOT EXISTS material_spans (ingest_id uuid NOT NULL REFERENCES ingests (id),
-        owner_id uuid NOT NULL REFERENCES users (id), seq int NOT NULL, page int NOT NULL, kind text NOT NULL,
-        level int, decoded bool, text text NOT NULL, x0 real, y0 real, x1 real, y1 real, PRIMARY KEY (ingest_id, seq))""",
-)
-
-
 async def import_material(engine: Any, owner: uuid.UUID, spans: list[Any], sha: str = MATERIAL) -> None:
+    """Rows in SRV-INGEST's tables (migration ingest_0001), satisfying its NOT NULL and CHECK constraints."""
     from sqlalchemy import text
 
     async with engine.begin() as conn:
-        for ddl in INGEST_DDL:
-            await conn.execute(text(ddl))
         mid = (
             await conn.execute(
                 text(
@@ -358,16 +342,19 @@ async def import_material(engine: Any, owner: uuid.UUID, spans: list[Any], sha: 
         iid = (
             await conn.execute(
                 text(
-                    "INSERT INTO ingests (owner_id, material_id, converter_version) VALUES (:o, :m, 'v1') RETURNING id"
+                    "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                    " outline_count, outline_source, pages_without_text)"
+                    " VALUES (:o, :m, 'v1', :a, :n, 0, 'headings', '{}') RETURNING id"
                 ),
-                {"o": owner, "m": mid},
+                {"o": owner, "m": mid, "a": "0" * 64, "n": len(spans)},
             )
         ).scalar_one()
         for s in spans:
             seq = int(s.span_id.split(":")[1])
             await conn.execute(
                 text(
-                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text) VALUES (:i, :o, :q, :p, :k, :t)"
+                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                    " VALUES (:i, :o, :q, :p, :k, :t, 0, 0, 0, 0)"
                 ),
                 {"i": iid, "o": owner, "q": seq, "p": s.page, "k": s.kind, "t": s.text},
             )

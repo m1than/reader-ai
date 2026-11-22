@@ -130,7 +130,9 @@ requirements:
       and code expands aliases to span ids. Each span renders as the line `⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧`
       followed by the span text in which `⟦` and `⟧` are replaced by `[` and `]` (VEC-PIPELINE-5). No spans gives
       `no_source_spans`; more than `bounds.source_max_chars` gives `source_too_large`. Rendering is deterministic, so the
-      source has a stable sha256.
+      source has a stable sha256. The spans are read from SRV-INGEST's tables (`materials`, `ingests`,
+      `material_spans`), created by its migration `ingest_0001`; the [db] tests insert rows that satisfy that schema
+      and create no tables of their own (integration on V/slice-integration, 2026-11-23).
   - id: FR-PIPELINE-3
     text: >-
       Stage prompts. A model stage's system prompt is the rendered source followed by a fixed instruction that text
