@@ -4,6 +4,7 @@ import { Button } from '@acme/ui/button';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ServicesContext, useServices, type Services } from './context';
 import { NoticeRegion, type Notice } from './notices';
@@ -73,11 +74,11 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
     setNotices((ns) => [...ns, { id, code }]);
   }, []);
   const services = useMemo<Services>(() => {
-    const api = createApi({
+    const deps = {
       fetch: fetchFn ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a)),
       onUnauthorized: () => navigateAway(SIGN_IN_URL),
-    });
-    return { api, notify, navigateAway };
+    };
+    return { api: createApi(deps), tutor: createTutorApi(deps), notify, navigateAway };
   }, [fetchFn, navigateAway, notify]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');

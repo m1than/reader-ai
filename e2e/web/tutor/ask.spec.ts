@@ -1,5 +1,5 @@
 // @trace FR-TUTOR-11
-// [browser] Run on request: `cd web && npm run build && npx playwright test tutor/`. The test server serves the
+// [browser] Run on request: `cd web && npm run build && npm run e2e -- tutor/`. The test server serves the
 // WEB-NOTEBOOK lesson fixture; the tutor routes are stubbed here, so no model is called.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';

@@ -92,20 +92,57 @@ const fragmentLinks = () => (tree: Root) => {
   rewrite(tree);
 };
 
-const processor = unified()
-  .use(remarkParse)
-  .use(remarkGfm)
-  .use(remarkMath)
-  .use(rawHtmlAsText)
-  // No prefix here: rehype-sanitize adds its clobber prefix once (footnote ids and their links stay in step).
-  .use(remarkRehype, { clobberPrefix: '' })
-  .use(rehypeSanitize, SANITIZE_SCHEMA)
-  .use(fragmentLinks)
-  .use(rehypeKatex, KATEX_OPTIONS)
-  .use(dropAnnotations)
-  .use(linkAttributes);
+type MdNode = { type: string; value?: string; url?: string; alt?: string | null; children?: MdNode[] };
+const plain = (node: MdNode): string =>
+  node.type === 'text' || node.type === 'inlineCode' || node.type === 'inlineMath'
+    ? (node.value ?? '')
+    : (node.children ?? []).map(plain).join('');
 
-export const markdownToHast = (source: string): Root => processor.runSync(processor.parse(source)) as Root;
+/**
+ * remark plugin (option `linksAsText`, SRV-TUTOR VEC-TUTOR-6): a link becomes "label (url)" and an image its alt
+ * text, as plain text, so nothing is linked or fetched. References and definitions are dropped the same way.
+ */
+const linksToText = () => (tree: MdRoot) => {
+  const visit = (node: MdNode) => {
+    if (!Array.isArray(node.children)) return;
+    node.children = node.children.flatMap((child): MdNode[] => {
+      if (child.type === 'link') {
+        const label = plain(child);
+        const url = child.url ?? '';
+        return [{ type: 'text', value: label === url || label === '' ? url : `${label} (${url})` }];
+      }
+      if (child.type === 'linkReference') return [{ type: 'text', value: plain(child) }];
+      if (child.type === 'image' || child.type === 'imageReference') return [{ type: 'text', value: child.alt ?? '' }];
+      if (child.type === 'definition') return [];
+      return [child];
+    });
+    for (const child of node.children) visit(child);
+  };
+  visit(tree as unknown as MdNode);
+};
+
+const makeProcessor = (linksAsText: boolean) =>
+  unified()
+    .use(remarkParse)
+    .use(remarkGfm)
+    .use(remarkMath)
+    .use(rawHtmlAsText)
+    .use(linksAsText ? linksToText : () => undefined)
+    // No prefix here: rehype-sanitize adds its clobber prefix once (footnote ids and their links stay in step).
+    .use(remarkRehype, { clobberPrefix: '' })
+    .use(rehypeSanitize, SANITIZE_SCHEMA)
+    .use(fragmentLinks)
+    .use(rehypeKatex, KATEX_OPTIONS)
+    .use(dropAnnotations)
+    .use(linkAttributes);
+
+const processor = makeProcessor(false);
+const textProcessor = makeProcessor(true);
+
+export const markdownToHast = (source: string, linksAsText = false): Root => {
+  const p = linksAsText ? textProcessor : processor;
+  return p.runSync(p.parse(source)) as Root;
+};
 
 const textOf = (nodes: ElementContent[]): string =>
   nodes.map((n) => (n.type === 'text' ? n.value : n.type === 'element' ? textOf(n.children) : '')).join('');
@@ -119,6 +156,6 @@ const Pre = (props: { node?: Element; children?: React.ReactNode }) => {
   return <pre>{props.children}</pre>;
 };
 
-export function Markdown({ source }: { source: string }) {
-  return <div data-markdown="">{hastToReact(markdownToHast(source), { pre: Pre as never })}</div>;
+export function Markdown({ source, linksAsText = false }: { source: string; linksAsText?: boolean }) {
+  return <div data-markdown="">{hastToReact(markdownToHast(source, linksAsText), { pre: Pre as never })}</div>;
 }

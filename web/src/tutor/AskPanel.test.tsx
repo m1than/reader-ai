@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../app/api';
 import { readYaml } from '../app/testing/fixtures';
 import { AskPanel, POLL_BACKOFF_MS, POLL_DEADLINE_S, QUESTION_CHARS_MAX } from './AskPanel';
-import type { HistoryItem, QuestionState, TutorApi } from './api';
+import type { AskBody, HistoryItem, QuestionState, TutorApi } from './api';
 import { messageFor } from './messages';
 import { TutorText } from './TutorText';
 
@@ -42,8 +42,8 @@ const fakeApi = (states: Array<QuestionState | Error>, history: HistoryItem[] = 
   const api: Fake = {
     asked: [],
     gets: [],
-    ask: vi.fn(async (lessonId: string, body: Record<string, unknown>) => {
-      api.asked.push({ lessonId, body });
+    ask: vi.fn(async (lessonId: string, body: AskBody) => {
+      api.asked.push({ lessonId, body: { ...body } });
       return { question_id: QID };
     }),
     getQuestion: vi.fn(async () => {
@@ -97,15 +97,15 @@ describe('AskPanel (FR-TUTOR-11)', () => {
     render(<AskPanel lessonId={LESSON} revision={REV} cellId={null} api={fakeApi([answered])} />);
     await flush();
     const box = screen.getByLabelText('Ask the tutor');
-    const button = screen.getByRole('button', { name: 'Ask' });
-    expect(button).toBeDisabled();
+    const button = screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
     fireEvent.change(box, { target: { value: '   ' } });
-    expect(button).toBeDisabled();
+    expect(button.disabled).toBe(true);
     fireEvent.change(box, { target: { value: 'abc' } });
     expect(screen.getByText('3 / 1000')).toBeTruthy();
-    expect(button).not.toBeDisabled();
+    expect(button.disabled).toBe(false);
     fireEvent.change(box, { target: { value: 'x'.repeat(1001) } });
-    expect(button).toBeDisabled();
+    expect(button.disabled).toBe(true);
     expect(screen.getByText('1001 / 1000')).toBeTruthy();
   });
 
