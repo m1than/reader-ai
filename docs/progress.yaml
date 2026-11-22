@@ -137,6 +137,14 @@ tasks:
         bge-m3 0.675; MRR 0.230 / 0.409 / 0.413; full pilot 1.2 / 15.1 / 14.1 min. e5-small rejected on recall; the bge-m3 pair is
         within noise. Agent recommends BAAI/bge-m3 (general multilingual, best recall@1 and MRR, MIT); V.SRV-SEARCH-min uses it
         and measures the hybrid on v2 as its acceptance number." }
+  - { id: S0.spike.embed-service, stage: 0, kind: spike, status: done, needs: [S0.spike.embeddings-local],
+      result: "spikes/embed-service/RESULT.md: bge-m3 (rev 5617a9f…, baked, image 5.6 GB), fp32, torch 2.15.0+cpu,
+        sentence-transformers 6.3.0, under the OPS-DEPLOY hardening flags. Cap 1,024, worst admitted request (32 texts at
+        1,024 tokens): peak RSS 3,644 MiB, memory.peak 2,289–2,415 MiB; worst batch of 8 alone: RSS 2,410, memory.peak 1,137.
+        8 CPUs: idle query 0.5–0.9 s, worst batch of 8 11–13 s, worst batch of 32 62 s, prose 1.05–1.72 chunks/s (±40 % run
+        variance). Cap 512 comparison: RSS 2,956, memory.peak 1,626. bf16 on CPU rejected (higher memory, 9–30× slower).
+        torch.load(weights_only=True) of pytorch_model.bin works. Recommended embed mem_limit 4.5 GiB (RSS × 1.25);
+        3.0 GiB if calls were limited to 8 texts." }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
       review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
@@ -512,15 +520,18 @@ tasks:
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
       branch: V/V.SRV-SEARCH-min,
-      note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 approved by
-        deep-reviewer and accepted by the owner (2026-11-22). BAAI/bge-m3
-        (owner-confirmed 2026-11-21) in service `embed` on its own internal network (api, worker, embed), no secrets,
-        model baked from a pinned revision; one encode at a time, passage batches of 8, query timeout 10 s,
-        max_seq_length 1,024 (reviewer-measured: prose 266, Rust 603, hex 740, LaTeX 887 tokens per 1,200 chars). Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
-        lexemes, RRF k=60, total orders. Acceptance: hybrid hits ≥ dense-only hits in the same run and ≥ 27/40 on
-        questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
-        VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
-        module only; an unhealthy embed service raises EmbedUnavailable, a transient that spends an attempt), SRV-INGEST (enqueue search.embed after import)." }
+      note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
+        ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
+        ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at
+        cap 1,024, peak RSS 2,410 MiB for the worst 8-text request, so the service admits ≤ 8 texts per call and its
+        mem_limit is 3g; at 8 CPUs a worst batch of 8 takes 11–13 s, so the query timeout is 30 s (chosen over a batch
+        of 4); full pilot about 22–36 min. Status stays draft: approval goes in the Red commit (T5), which the
+        coordinator schedules after the integration branch lands. Design: service `embed` on its own internal network
+        (api, worker, embed), no secrets, model baked from revision 5617a9f6; one encode at a time; exact dense scan
+        (HNSW deferred); OR full text from the query's lexemes; RRF k=60; total orders. Acceptance: hybrid hits ≥
+        dense-only hits in the same run and ≥ 27/40 on questions-v2. Paired changes: OPS-DEPLOY (embed service 3g,
+        network, VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters),
+        SRV-EVENTS (kind module), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
         spends credit, ledger" }
