@@ -1,0 +1,84 @@
+# VEC-PIPELINE-2: the compile loop as a decision table (FR-PIPELINE-5, -6, -9). A fake provider returns the listed
+# results in order. Each case fixes the reserve per model stage (`reserves`) so the table does not depend on the
+# estimator; `cost` is each stage's reported cost. "clean" = 0 unsupported/contradicted verdicts and 0 blocking findings.
+# `findings` and `lab_verification` run after the last model stage whenever a notebook exists; the terminal state is
+# decided after lab verification (FR-PIPELINE-6). `open_cells` counts the cells the findings step appends.
+defaults:
+  reserves: { draft: 0.94, fact_check: 0.38, adversarial_review: 0.75, revise: 1.14 }
+cases:
+  - name: clean-first-pass
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 2 }
+    labs: pass
+    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
+    expect_state: converged
+    expect_open_cells: { blocking: 0, nonblocking: 2 }
+  - name: one-loop-converges
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 2, nonblocking: 3 }
+      - { stage: revise, cost: 0.87 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.52, blocking: 0, nonblocking: 1 }
+    labs: pass
+    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review, findings, lab_verification]
+    expect_state: converged
+    expect_open_cells: { blocking: 0, nonblocking: 1 }   # only the last review's findings count
+  - name: not-converged-after-loop   # the measured outcome of both spike runs (spikes/compile-cost)
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 3, nonblocking: 13 }
+      - { stage: revise, cost: 0.87 }
+      - { stage: fact_check, cost: 0.24, unsupported: 2, contradicted: 1 }
+      - { stage: adversarial_review, cost: 0.52, blocking: 3, nonblocking: 15 }
+    labs: pass
+    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review, findings, lab_verification]
+    expect_state: open_findings
+    expect_open_cells: { blocking: 6, nonblocking: 15 }   # 3 review + 3 fact-check (blocking) + 15 non-blocking
+  - name: lab-fails-after-clean-review
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 0 }
+    labs: assert_fails
+    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
+    expect_state: open_findings          # decided after lab verification
+    expect_open_cells: { blocking: 1, nonblocking: 0 }
+  - name: budget-stops-before-revise
+    cap: 2.4
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 1, nonblocking: 0 }
+    # spent 1.34 settled; revise reserve 1.14 → 2.48 > 2.4: refused before the call, no reservation row
+    labs: pass
+    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
+    expect_state: budget_exhausted
+    expect_open_cells: { blocking: 2, nonblocking: 0 }
+  - name: budget-stops-before-draft
+    cap: 0.5
+    results: []
+    labs: none
+    expect_stages: []                    # no notebook exists, so findings and lab_verification do not run
+    expect_state: budget_exhausted
+    expect_open_cells: { blocking: 0, nonblocking: 0 }
+  - name: invalid-fact-report-exhausts-attempts   # spike finding 2: a summary without per-claim verdicts, 3 times
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, invalid: summary_only }
+      - { stage: fact_check, cost: 0.24, invalid: summary_only }
+      - { stage: fact_check, cost: 0.24, invalid: summary_only }
+    labs: none
+    expect_stages: [draft, fact_check]   # fact_check's job reaches `dead` after max_attempts 3
+    expect_state: stage_failed
+    expect_open_cells: { blocking: 0, nonblocking: 0 }
+    expect_spent: 1.32                   # every attempt's spend is settled in the ledger
