@@ -1,31 +1,33 @@
 """Courses, lessons and revisions (SRV-LESSON FR-LESSON-4..6).
 
-Every function takes an `AsyncConnection` inside the caller's transaction and never commits.
+Every function takes an `AsyncConnection` inside the caller's transaction and never commits. Blob IO runs in a
+worker thread. A lesson's current revision is the sha256 of its most recent stage record (highest id).
 """
 
 from __future__ import annotations
 
 import json
 import math
-import re
 import uuid
+from pathlib import Path
 from typing import Any, Final
 
+import anyio.to_thread
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader import blobs
 from reader.config import Secret
+from reader.lessons.access import lesson_uuid
 from reader.lessons.schema import STAGES, LessonWriteError, notes_ids, validate
 
-__all__ = ["LessonWriteError", "create_course", "ensure_lesson", "write_revision"]
+__all__ = ["LessonWriteError", "create_course", "current_sha256", "ensure_lesson", "write_revision"]
 
 TITLE_MAX_CHARS: Final = 200
 PROVENANCE_MAX_BYTES: Final = 16384
 PROVENANCE_KEYS: Final = frozenset(
     {"input_sha256", "prompt_version", "model", "cost_usd", "duration_s", "job_key", "source"}
 )
-_SHA256: Final = re.compile(r"[0-9a-f]{64}")
 
 
 def _title(title: str) -> str:
@@ -48,7 +50,9 @@ def _contains_secret(value: object) -> bool:
 def _scalar(value: object) -> bool:
     if isinstance(value, float):
         return math.isfinite(value)
-    return value is None or isinstance(value, (str, int, bool))
+    if isinstance(value, str):
+        return "\x00" not in value  # Postgres jsonb cannot hold U+0000
+    return value is None or isinstance(value, (int, bool))
 
 
 def _provenance_json(stage: str, provenance: object) -> str:
@@ -59,25 +63,20 @@ def _provenance_json(stage: str, provenance: object) -> str:
         raise LessonWriteError("bad_provenance")
     if not all(_scalar(v) for v in provenance.values()):
         raise LessonWriteError("bad_provenance")
-    compact = json.dumps(provenance, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-    if len(compact.encode("utf-8")) > PROVENANCE_MAX_BYTES:
+    try:
+        compact = json.dumps(provenance, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+        size = len(compact.encode("utf-8"))
+    except ValueError, UnicodeEncodeError:  # a huge int (str conversion limit), a lone surrogate
+        raise LessonWriteError("bad_provenance") from None
+    if size > PROVENANCE_MAX_BYTES:
         raise LessonWriteError("bad_provenance")
     return compact
-
-
-def _uuid(value: object) -> uuid.UUID | None:
-    if isinstance(value, uuid.UUID):
-        return value
-    try:
-        return uuid.UUID(str(value))
-    except ValueError:
-        return None
 
 
 async def create_course(
     conn: AsyncConnection, owner_id: uuid.UUID, title: str, material_sha256: str | None
 ) -> uuid.UUID:
-    if material_sha256 is not None and _SHA256.fullmatch(material_sha256) is None:
+    if material_sha256 is not None and not blobs.is_sha256(material_sha256):
         raise ValueError("material_sha256 must be 64 lowercase hex characters")
     row = await conn.execute(
         text("INSERT INTO courses (owner_id, title, material_sha256) VALUES (:o, :t, :m) RETURNING id"),
@@ -114,21 +113,21 @@ async def ensure_lesson(
     return lesson_id
 
 
-async def _newest_notes(conn: AsyncConnection, blobs_root: Any, lesson_id: uuid.UUID) -> set[str]:
-    newest = (
-        await conn.execute(
-            text("SELECT sha256 FROM lesson_revisions WHERE lesson_id = :l ORDER BY seq DESC LIMIT 1"),
-            {"l": lesson_id},
-        )
-    ).scalar()
-    if newest is None:
-        return set()
-    return notes_ids(json.loads(blobs.get(blobs_root, newest)))
+async def current_sha256(conn: AsyncConnection, lesson_id: uuid.UUID) -> str | None:
+    """The lesson's current revision: the sha256 of its most recent stage record (FR-LESSON-4)."""
+    row = await conn.execute(
+        text(
+            "SELECT sha256 FROM lesson_revision_stages WHERE lesson_id = :l ORDER BY id DESC LIMIT 1"
+        ),
+        {"l": lesson_id},
+    )
+    sha256: str | None = row.scalar()
+    return sha256
 
 
 async def write_revision(
     conn: AsyncConnection,
-    blobs_root: Any,
+    blobs_root: Path,
     owner_id: uuid.UUID,
     lesson_id: uuid.UUID | str,
     data: bytes,
@@ -138,7 +137,7 @@ async def write_revision(
     """FR-LESSON-4: validate, store, and record the stage; returns (sha256, created)."""
     if _contains_secret(provenance):
         raise TypeError("a Secret cannot be stored in lesson provenance")
-    lesson = _uuid(lesson_id)
+    lesson = lesson_id if isinstance(lesson_id, uuid.UUID) else lesson_uuid(lesson_id)
     locked = None
     if lesson is not None:
         locked = (
@@ -151,17 +150,20 @@ async def write_revision(
         raise LessonWriteError("unknown_lesson")
     validated = validate(data)
     stage_json = _provenance_json(stage, provenance)
+    current = await current_sha256(conn, lesson)
+    if current is not None and current != validated.sha256:
+        # Fails closed: a missing or corrupt current blob refuses every other write until it is healed
+        # (rewriting the current revision itself skips this read and heals the blob).
+        previous = json.loads(await anyio.to_thread.run_sync(blobs.get, blobs_root, current))
+        if not notes_ids(previous) <= notes_ids(validated.notebook):
+            raise LessonWriteError("notes_cell_removed")
     exists = (
         await conn.execute(
             text("SELECT 1 FROM lesson_revisions WHERE lesson_id = :l AND sha256 = :s"),
             {"l": lesson, "s": validated.sha256},
         )
     ).scalar() is not None
-    if not exists:
-        previous = await _newest_notes(conn, blobs_root, lesson)
-        if not previous <= notes_ids(validated.notebook):
-            raise LessonWriteError("notes_cell_removed")
-    blobs.put(blobs_root, validated.canonical)
+    await anyio.to_thread.run_sync(blobs.put, blobs_root, validated.canonical)
     if not exists:
         await conn.execute(
             text(
@@ -176,7 +178,7 @@ async def write_revision(
                 "c": validated.cell_count,
             },
         )
-        await conn.execute(text("UPDATE lessons SET updated_at = now() WHERE id = :l"), {"l": lesson})
+    await conn.execute(text("UPDATE lessons SET updated_at = now() WHERE id = :l"), {"l": lesson})
     await conn.execute(
         text(
             "INSERT INTO lesson_revision_stages (owner_id, lesson_id, sha256, stage, provenance)"

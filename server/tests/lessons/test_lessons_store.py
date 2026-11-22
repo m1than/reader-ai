@@ -116,13 +116,105 @@ async def test_successor_cases(pg: Pg, tmp_path: Path, case: dict[str, Any]) -> 
         ("draft", {"model": {"nested": 1}}),
         ("draft", {"model": [1]}),
         ("draft", {"source": "x" * 16400}),
+        ("draft", {"source": "\ud800"}),  # lone surrogate: not encodable as UTF-8
+        ("draft", {"cost_usd": 10**5000}),  # past Python's int-to-str limit
+        ("draft", {"source": "a\x00b"}),  # Postgres jsonb cannot hold U+0000
     ],
+    ids=["stage", "key", "nested", "list", "size", "surrogate", "huge-int", "nul"],
 )
 async def test_bad_provenance(pg: Pg, tmp_path: Path, stage: str, provenance: dict[str, Any]) -> None:
     w = await world(pg, tmp_path)
     _, lesson = await course_and_lesson(w)
     assert await refusal(write(w, "ivan", lesson, stage=stage, provenance=provenance)) == "bad_provenance"
     assert await _counts(w) == (0, 0)
+    assert not any(p.is_file() for p in w.blobs.rglob("*")), "refused before any blob is written"
+    await w.engine.dispose()
+
+
+def _variant(n: int, extra_notes: str | None = None) -> bytes:
+    doc = json.loads(F01)
+    doc["cells"][0]["source"] = [f"variant {n}"]
+    if extra_notes:
+        extra = json.loads(json.dumps(doc["cells"][8]))
+        extra["id"] = extra_notes
+        doc["cells"].append(extra)
+    return json.dumps(doc).encode()
+
+
+async def test_notes_check_uses_the_current_revision(pg: Pg, tmp_path: Path) -> None:
+    """A, then B (adds n2), then A again: A is an existing revision, but it drops B's n2."""
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w)
+    await write(w, "ivan", lesson)
+    await write(w, "ivan", lesson, _variant(1, "n2"))
+    assert await refusal(write(w, "ivan", lesson)) == "notes_cell_removed"
+    assert await _counts(w) == (2, 2)
+    await w.engine.dispose()
+
+
+async def test_a_stage_can_make_an_earlier_revision_current(pg: Pg, tmp_path: Path) -> None:
+    store = need("reader.lessons.store")
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w)
+    a, _ = await write(w, "ivan", lesson)
+    b, _ = await write(w, "ivan", lesson, _variant(1))
+    async with w.engine.connect() as conn:
+        assert await store.current_sha256(conn, lesson) == b
+    assert await write(w, "ivan", lesson, stage="revise") == (a, False)
+    async with w.engine.connect() as conn:
+        assert await store.current_sha256(conn, lesson) == a
+    await w.engine.dispose()
+
+
+async def test_missing_current_blob_fails_closed_until_healed(pg: Pg, tmp_path: Path) -> None:
+    blobs = need("reader.blobs")
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w)
+    a, _ = await write(w, "ivan", lesson)
+    (w.blobs / "sha256" / a[:2] / a).unlink()
+    with pytest.raises(blobs.BlobMissing):
+        await write(w, "ivan", lesson, _variant(1))
+    assert await _counts(w) == (1, 1)
+    assert await write(w, "ivan", lesson) == (a, False)  # rewriting the current revision heals it
+    assert (await write(w, "ivan", lesson, _variant(1)))[1] is True
+    await w.engine.dispose()
+
+
+async def test_key_order_does_not_change_the_revision(pg: Pg, tmp_path: Path) -> None:
+    def reverse(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: reverse(value[k]) for k in reversed(list(value))}
+        if isinstance(value, list):
+            return [reverse(v) for v in value]
+        return value
+
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w)
+    reordered = json.dumps(reverse(json.loads(F01))).encode()
+    assert reordered != F01
+    assert await write(w, "ivan", lesson, reordered) == (F01_SHA, True)
+    assert await write(w, "ivan", lesson) == (F01_SHA, False)
+    await w.engine.dispose()
+
+
+@pytest.mark.parametrize("form", ["upper", "braces", "hex32", "urn"])
+async def test_only_canonical_lesson_ids_are_accepted(pg: Pg, tmp_path: Path, form: str) -> None:
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w)
+    text_id = {
+        "upper": str(lesson).upper(),
+        "braces": "{" + str(lesson) + "}",
+        "hex32": lesson.hex,
+        "urn": lesson.urn,
+    }[form]
+    store = need("reader.lessons.store")
+
+    async def attempt() -> None:
+        async with w.engine.begin() as conn:
+            await store.write_revision(conn, w.blobs, w.users["ivan"], text_id, F01, "draft", {})
+
+    assert await refusal(attempt()) == "unknown_lesson"
+    assert (await write(w, "ivan", str(lesson)))[1] is True  # type: ignore[arg-type]
     await w.engine.dispose()
 
 
@@ -217,7 +309,8 @@ async def test_concurrent_writers_never_drop_notes(pg: Pg, tmp_path: Path) -> No
     from sqlalchemy import text
 
     async with w.engine.connect() as conn:
-        rows = (await conn.execute(text("SELECT sha256 FROM lesson_revisions ORDER BY seq"))).scalars().all()
+        result = await conn.execute(text("SELECT sha256 FROM lesson_revision_stages ORDER BY id"))
+        rows = result.scalars().all()
     previous: set[str] = set()
     for sha in rows:
         doc = json.loads((w.blobs / "sha256" / sha[:2] / sha).read_bytes())
@@ -239,6 +332,8 @@ async def test_revisions_and_stage_records_are_immutable(pg: Pg, tmp_path: Path)
         "DELETE FROM lesson_revisions",
         "UPDATE lesson_revision_stages SET stage = 'draft'",
         "DELETE FROM lesson_revision_stages",
+        "TRUNCATE lesson_revision_stages",
+        "TRUNCATE lesson_revisions CASCADE",
     ):
         with pytest.raises(DBAPIError, match="immutable"):
             async with w.engine.begin() as conn:

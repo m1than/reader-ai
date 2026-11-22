@@ -8,20 +8,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
+import anyio.to_thread
 from sqlalchemy import text
 from starlette.responses import JSONResponse, Response
 
 from reader import blobs
 from reader.api.http import Ctx, Route, error
-from reader.lessons.access import is_sha256, lesson_uuid
+from reader.lessons.access import lesson_uuid
 
-BLOBS_ROOT: Final = Path("/var/lib/reader/blobs")
 REVISIONS_LISTED: Final = 100
 log = logging.getLogger("reader.lessons")
 
+# latest_sha256 is the current revision: the sha256 of the most recent stage record (FR-LESSON-7).
 _LESSON_COLUMNS: Final = (
     "SELECT l.id, l.course_id, c.title, l.ordinal, l.title, l.updated_at,"
-    " (SELECT r.sha256 FROM lesson_revisions r WHERE r.lesson_id = l.id ORDER BY r.seq DESC LIMIT 1)"
+    " (SELECT s.sha256 FROM lesson_revision_stages s WHERE s.lesson_id = l.id ORDER BY s.id DESC LIMIT 1)"
     " FROM lessons l JOIN courses c ON c.id = l.course_id WHERE c.owner_id = :u"
 )
 
@@ -109,7 +110,7 @@ def _matches(if_none_match: str, etag: str) -> bool:
 async def get_revision(ctx: Ctx) -> Response:
     lesson = lesson_uuid(ctx.request.path_params["lesson_id"])
     sha256 = ctx.request.path_params["sha256"]
-    if lesson is None or not is_sha256(sha256):
+    if lesson is None or not blobs.is_sha256(sha256):
         return _not_found()
     async with ctx.engine.connect() as conn:
         if await _own_lesson(ctx, conn, lesson) is None:
@@ -128,9 +129,9 @@ async def get_revision(ctx: Ctx) -> Response:
     }
     if _matches(ctx.request.headers.get("if-none-match", ""), etag):
         return Response(status_code=304, headers=headers)
-    root = getattr(ctx.request.app.state, "blobs_root", BLOBS_ROOT)
+    root: Path = getattr(ctx.request.app.state, "blobs_root", blobs.DEFAULT_ROOT)
     try:
-        data = blobs.get(root, sha256)
+        data = await anyio.to_thread.run_sync(blobs.get, root, sha256)
     except (blobs.BlobMissing, blobs.BlobCorrupt) as failure:
         log.warning("blob_unavailable lesson=%s sha256=%s %s", lesson, sha256, type(failure).__name__)
         return error(500, "blob_unavailable")

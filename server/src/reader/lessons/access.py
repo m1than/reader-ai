@@ -10,16 +10,11 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
-_SHA256: Final = re.compile(r"[0-9a-f]{64}")
 
 
-def lesson_uuid(value: str) -> uuid.UUID | None:
+def lesson_uuid(value: object) -> uuid.UUID | None:
     """The lesson id of a lowercase canonical UUID string, else None (checked before any query)."""
     return uuid.UUID(value) if isinstance(value, str) and _UUID.fullmatch(value) else None
-
-
-def is_sha256(value: str) -> bool:
-    return isinstance(value, str) and _SHA256.fullmatch(value) is not None
 
 
 async def can_open(conn: AsyncConnection, user_id: uuid.UUID, lesson_id: str) -> bool:

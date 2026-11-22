@@ -365,7 +365,11 @@ tasks:
       review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas;
         applied with coordinator decisions (G2 publish deferred to SRV-PIPELINE; stage records per revision; seq; single
         /api/lessons API; span id form <material_sha256>:<seq>); coordinator diff check passed; spec approved (agent,
-        2026-11-22) with Red",
+        2026-11-22) with Red. Code review (one round) on bdb4eff: 4 blocking (deep nesting → not_nbformat; provenance
+        surrogate/huge int/NUL → bad_provenance before any blob; notes check skipped only for the current revision;
+        trailing newline accepted by `$` patterns → single_line schema guard and fullmatch cell ids) plus non-blocking,
+        all applied with paired spec and tests; current revision = most recent stage record (coordinator decision);
+        176 lessons tests and 153 auth tests pass",
       note: "green locally; awaits one code-review round. Red 231092a: 126 tests in server/tests/lessons, all failing on
         assertions (missing modules surface through need() as AssertionError), plus the paired SRV-AUTH tests for ROUTERS and
         version_locations (spec notes in FR-AUTH-1/FR-AUTH-10; three import-order fixes in SRV-AUTH tests that ruff 0.17.6

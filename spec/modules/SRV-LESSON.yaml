@@ -121,21 +121,27 @@ requirements:
   - id: FR-LESSON-1
     text: >-
       Validation, in this order, each failing with its code: (1) input length ≤ `bounds.input_max_bytes`, checked
-      before parsing (`too_large`); (2) the bytes decode as UTF-8 (`not_utf8`); (3) they parse with `json.loads` and a
-      `parse_constant` that refuses `NaN`, `Infinity` and `-Infinity`, into an object whose `nbformat` is the JSON
+      before parsing (`too_large`); (2) the bytes decode as UTF-8 (`not_utf8`); (3) they parse with `json.loads`, a
+      `parse_constant` and `parse_float` that refuse `NaN`, `Infinity`, `-Infinity` and overflowing floats, and an
+      `object_pairs_hook` that refuses a key repeated in one object, into an object whose `nbformat` is the JSON
       integer 4 and `nbformat_minor` a JSON integer ≥ 5 (`bool` and float are refused) and whose `cells` is a list of
-      objects (`not_nbformat`); (4) every cell has a string `id` and the ids are unique (`duplicate_cell_id`); (5)
-      `nbformat.validate` accepts a deep copy of the document and leaves it equal to the original; any exception it
-      raises, of any type, is `not_nbformat` (nbformat 5.11.1 silently rewrites duplicate ids and raises KeyError for
-      version 3, which is why steps 3–4 come first); (6) notebook `metadata.reader.lesson_format` is 1 and every cell
+      objects (`not_nbformat`); (4) every cell has an `id` that is a string matching `re.fullmatch(r"[A-Za-z0-9_-]{1,64}")`
+      (a missing, non-string or malformed id, a trailing newline included, is `not_nbformat`), and the ids are unique
+      (`duplicate_cell_id`); (5) `nbformat.validate` accepts a deep copy of the document and leaves it equal to the
+      original; any exception it raises, of any type, is `not_nbformat` (nbformat 5.11.1 silently rewrites duplicate ids
+      and raises KeyError for version 3, which is why steps 3–4 come first); (6) notebook `metadata.reader.lesson_format` is 1 and every cell
       has `metadata.reader` (`missing_reader_metadata`); (7) each `metadata.reader` passes cell.schema.json under
       jsonschema's Draft 2020-12 validator with its built-in FormatChecker (`cell_schema`); (8) each cell's `cell_type`
       equals the schema's `x-cell-type` for its kind (`cell_type_mismatch`); (9) the canonical bytes (FR-LESSON-2)
       encode as UTF-8 (`not_utf8`, e.g. an escaped lone surrogate) and are ≤ `bounds.notebook_max_bytes` (`too_large`);
       (10) cells ≤ `bounds.cells_max` (`too_many_cells`). The schema and the kind → cell type map are read from
-      cell.schema.json; no kind is hard-coded in Python. Interface: `reader.lessons.schema.validate(data: bytes) ->
-      Validated` (fields `notebook` (the parsed document), `canonical` (bytes), `sha256`, `cell_count`), raising
-      `reader.lessons.schema.LessonWriteError` whose `code` is one of `write_errors`.
+      cell.schema.json; no kind is hard-coded in Python. A `RecursionError` at any step (deep copy, `nbformat.validate`,
+      the schema pass, `nbformat.writes`) is `not_nbformat`; every identifier pattern in code uses `re.fullmatch`, and the
+      schema guards every anchored pattern against a trailing newline (`single_line`). Interface:
+      `reader.lessons.schema.validate(data: bytes) -> Validated` (fields `notebook` (the document parsed back from the
+      canonical bytes, so the transient keys nbformat strips on write — notebook `signature`, `orig_nbformat`,
+      `orig_nbformat_minor`, cell `trusted` — are absent), `canonical` (bytes),
+      `sha256`, `cell_count`), raising `reader.lessons.schema.LessonWriteError` whose `code` is one of `write_errors`.
   - id: FR-LESSON-2
     text: >-
       Canonical form. The canonical bytes of a valid notebook are `nbformat.writes(nb).encode("utf-8")` of the
@@ -144,7 +150,9 @@ requirements:
     text: >-
       Blob store (`reader.blobs`). `put(root, data) -> sha256` writes `<root>/sha256/<first 2 hex>/<64 hex>` through a
       temporary file in the same directory named `.tmp-<random hex>` (mode 0600): write, fsync, rename onto the final
-      name, fsync the directory. If the final name already exists with the right bytes it is left as is; if it exists
+      name, fsync the directory; every directory `put` creates (`sha256/`, `<2 hex>/`) is followed by an fsync of its
+      parent. Async callers run `put` and `get` in a worker thread (`anyio.to_thread`). If the final name already
+      exists with the right bytes it is left as is; if it exists
       with wrong bytes it is replaced the same way. `get(root, sha256) -> bytes` reads the final name and raises
       `BlobCorrupt` if the bytes do not hash to it, `BlobMissing` if absent; names that are not 64 lowercase hex (such as
       temporary files) are never read. Every sha256 argument must `re.fullmatch` `[0-9a-f]{64}`, so no path is built
@@ -154,13 +162,18 @@ requirements:
     text: >-
       Write path, `reader.lessons.store.write_revision(conn, blobs_root, owner_id, lesson_id, data: bytes, stage,
       provenance) -> (sha256, created: bool)`, where `conn` is an SQLAlchemy `AsyncConnection` inside the caller's
-      transaction (the module's functions never commit): (1) `SELECT … FOR UPDATE` the lesson row;
-      it must exist with `owner_id`, else `unknown_lesson` (missing and foreign are one code), which serialises
+      transaction (the module's functions never commit). The lesson's current revision is the sha256 of its most
+      recent stage record (highest `lesson_revision_stages.id`), so a stage that reproduces an earlier revision makes it
+      current again (`reader.lessons.store.current_sha256`). (1) `lesson_id` must be a `uuid.UUID` or a lowercase
+      canonical UUID string, and `SELECT … FOR UPDATE` the lesson row;
+      it must exist with `owner_id`, else `unknown_lesson` (missing, foreign and malformed are one code), which serialises
       concurrent writes to one lesson; (2) FR-LESSON-1 validation; (3) canonical bytes and sha256 (FR-LESSON-2); (4)
-      FR-LESSON-5 checks on `stage` and `provenance` (`bad_provenance`); (5) every `notes` cell id of the lesson's
-      newest revision (highest `seq`) is present, still of kind `notes`, in the new notebook, else
-      `notes_cell_removed`; (6) `reader.blobs.put` (always, so a missing blob is healed even when the row exists); if no
-      revision row with that sha256 exists for the lesson, insert it (byte_size, cell_count) and set
+      FR-LESSON-5 checks on `stage` and `provenance` (`bad_provenance`); (5) unless the new sha256 equals the current
+      revision's, every `notes` cell id of the current revision is present, still of kind `notes`, in the new notebook,
+      else `notes_cell_removed`; reading the current revision's blob fails closed: a missing or corrupt current blob
+      raises `BlobMissing`/`BlobCorrupt` and refuses every other write until a rewrite of the current revision itself
+      heals it; (6) `reader.blobs.put` (always, so a missing blob is healed even when the row exists); if no
+      revision row with that sha256 exists for the lesson, insert it (byte_size, cell_count); set
       `lessons.updated_at`; (7) append a `lesson_revision_stages` row (sha256, stage, provenance) in every successful
       call, including when the revision already existed; return `(sha256, created)` where `created` says whether step 6
       inserted the row. A crash after the blob and before commit leaves an unreferenced blob, which is harmless
@@ -169,8 +182,10 @@ requirements:
     text: >-
       `stage` is one of the schema's provenance stages. `provenance` is a JSON object whose compact UTF-8 serialisation
       is ≤ `bounds.provenance_max_bytes`, with only the keys `input_sha256`, `prompt_version`, `model`, `cost_usd`,
-      `duration_s`, `job_key`, `source` and JSON scalar values; otherwise `bad_provenance`. A `reader.config.Secret`
-      anywhere in it raises TypeError before any write.
+      `duration_s`, `job_key`, `source` and JSON scalar values (finite numbers; strings without U+0000, which jsonb
+      cannot hold); a value that cannot be serialised (an integer past Python's int-to-str limit) or encoded (a lone
+      surrogate) is also `bad_provenance`; all before any blob is written. A `reader.config.Secret` anywhere in it
+      raises TypeError before any write.
   - id: FR-LESSON-6
     text: >-
       Internal functions for the compile pipeline and the fixture loader, in `reader.lessons.store`:
@@ -182,8 +197,8 @@ requirements:
     text: >-
       `GET /api/lessons` (auth `session`) answers 200 with `{"lessons": [{"lesson_id", "course_id", "course_title",
       "ordinal", "title", "updated_at", "latest_sha256"}]}` for every lesson whose course the signed-in user owns,
-      ordered by course `created_at` descending, then course id, then ordinal; `latest_sha256` is the revision with
-      the highest `seq`, or null.
+      ordered by course `created_at` descending, then course id, then ordinal; `latest_sha256` is the current revision
+      (FR-LESSON-4: the sha256 of the most recent stage record), or null.
   - id: FR-LESSON-8
     text: >-
       `GET /api/lessons/{lesson_id}` answers 200 with `{"lesson": {"lesson_id", "course_id", "course_title", "ordinal",
@@ -222,8 +237,9 @@ requirements:
       packaged F01 (`server/src/reader/lessons/fixtures/F01.ipynb`, byte-identical to VEC-LESSON-2) with stage
       `fixture`; it prints one line `course=<id> lesson=<id> sha256=<hex>` and exits 0. An unknown handle exits 1
       with `reader-lessons: unknown_handle`; a disabled user (SRV-AUTH `users.disabled_at`) exits 1 with
-      `reader-lessons: user_disabled`. A second run creates no course, lesson or revision (it appends one stage
-      record, FR-LESSON-4 step 7).
+      `reader-lessons: user_disabled`; a blob root that cannot be written or read (OSError, `BlobMissing`,
+      `BlobCorrupt` from the write path) exits 1 with `reader-lessons: blobs_unwritable`. A second run creates no
+      course, lesson or revision (it appends one stage record, FR-LESSON-4 step 7).
   - id: FR-LESSON-14
     text: >-
       Migration: one Alembic revision in `server/src/reader/lessons/migrations/` (branch label `lessons`,
@@ -247,18 +263,20 @@ invariants:
       one blob, one revision row, two stage records and `created` false the second time.
   - id: INV-LESSON-3
     text: >-
-      For any sequence of successful writes to one lesson, ordered by `seq`, the set of `notes` cell ids of each
-      revision contains the set of the revision before it (republishing never drops a learner-owned cell id). Holds
-      under concurrent writers to one lesson (FR-LESSON-4 step 1; tested with two connections).
+      For any sequence of successful writes to one lesson, taken in stage-record order (id), the set of `notes` cell
+      ids of each recorded revision contains the set of the one recorded before it (republishing never drops a
+      learner-owned cell id, also when a stage makes an earlier revision current again). Holds under concurrent
+      writers to one lesson (FR-LESSON-4 step 1; tested with two connections) and for Hypothesis-generated write
+      sequences.
   - id: INV-LESSON-4
     text: >-
       Isolation: for two users A and B and every route of this module, a request by A about B's lesson or revision
       gets the same response (FR-LESSON-12's definition) as one for a random non-existent lowercase UUID.
   - id: INV-LESSON-6
     text: >-
-      Immutability: rows of `lesson_revisions` and `lesson_revision_stages` are never updated or deleted (the database
-      trigger refuses it; a test attempts both), and `reader.blobs.put` never changes the bytes at a final name whose
-      bytes already hash to it.
+      Immutability: rows of `lesson_revisions` and `lesson_revision_stages` are never updated, deleted or truncated
+      (row triggers refuse UPDATE and DELETE, a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger refuses TRUNCATE; a test
+      attempts each), and `reader.blobs.put` never changes the bytes at a final name whose bytes already hash to it.
   - id: INV-LESSON-7
     text: >-
       `owner_id` of lessons, revisions and stage records always equals the owning course's `owner_id` (composite

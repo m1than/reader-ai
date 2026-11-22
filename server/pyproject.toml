@@ -15,6 +15,7 @@ dependencies = [
   "webauthn==3.0.1",           # SRV-AUTH: passkey ceremonies (REF-AUTH-2)
   "nbformat==5.11.1",          # SRV-LESSON: notebook validation and canonical form (REF-LESSON-1)
   "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
+  "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
 ]
 
 [project.scripts]

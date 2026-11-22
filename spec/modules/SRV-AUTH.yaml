@@ -48,7 +48,7 @@ title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skele
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20)"
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20). Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]

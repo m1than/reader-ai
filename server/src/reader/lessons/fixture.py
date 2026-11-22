@@ -18,6 +18,7 @@ from typing import Final
 
 from sqlalchemy import text
 
+from reader import blobs
 from reader.db import make_engine
 from reader.lessons import store
 from reader.serve.main import Env, _target
@@ -25,7 +26,6 @@ from reader.serve.main import Env, _target
 COURSE_TITLE: Final = "Fixture course (synthetic)"
 LESSON_TITLE: Final = "F01 — fixture lesson (synthetic)"
 F01: Final = Path(__file__).parent / "fixtures" / "F01.ipynb"
-BLOBS_ROOT: Final = Path("/var/lib/reader/blobs")
 
 
 class _Refused(Exception):
@@ -58,9 +58,13 @@ async def _load(handle: str, blobs_root: Path) -> str:
             if course is None:
                 course = await store.create_course(conn, owner, COURSE_TITLE, None)
             lesson = await store.ensure_lesson(conn, owner, course, 1, LESSON_TITLE)
-            sha256, _ = await store.write_revision(
-                conn, blobs_root, owner, lesson, F01.read_bytes(), "fixture", {}
-            )
+            try:
+                sha256, _ = await store.write_revision(
+                    conn, blobs_root, owner, lesson, F01.read_bytes(), "fixture", {}
+                )
+            except (OSError, blobs.BlobMissing, blobs.BlobCorrupt):
+                # The connection is already open here, so an OSError is the blob volume's, not the database's.
+                raise _Refused("blobs_unwritable") from None
         return f"course={course} lesson={lesson} sha256={sha256}\n"
     finally:
         await engine.dispose()
@@ -71,7 +75,7 @@ def main(argv: list[str] | None = None) -> int:
     commands = parser.add_subparsers(dest="command", required=True)
     load = commands.add_parser("load")
     load.add_argument("--handle", required=True)
-    load.add_argument("--blobs-root", type=Path, default=BLOBS_ROOT)
+    load.add_argument("--blobs-root", type=Path, default=blobs.DEFAULT_ROOT)
     args = parser.parse_args(argv)
     try:
         line = asyncio.run(_load(args.handle, args.blobs_root))

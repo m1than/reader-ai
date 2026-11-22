@@ -75,6 +75,37 @@ def test_f01_validates_to_itself() -> None:
     assert validated.notebook["cells"][6]["id"] == "f01-lab"
 
 
+def test_validated_notebook_is_the_stored_one() -> None:
+    """`notebook` is parsed back from the canonical bytes: the transient keys nbformat strips on write
+    (notebook `signature`, `orig_nbformat`; cell `trusted`) are absent from both."""
+    schema = need("reader.lessons.schema")
+    doc = json.loads(F01)
+    doc["metadata"]["signature"] = "sha256:abc"
+    doc["metadata"]["orig_nbformat"] = 4
+    doc["cells"][6]["metadata"]["trusted"] = True
+    validated = schema.validate(json.dumps(doc).encode())
+    assert "signature" not in validated.notebook["metadata"]
+    assert "orig_nbformat" not in validated.notebook["metadata"]
+    assert "trusted" not in validated.notebook["cells"][6]["metadata"]
+    assert validated.canonical == F01
+    assert validated.notebook == json.loads(validated.canonical)
+
+
+def test_key_order_permutation_has_the_same_revision() -> None:
+    schema = need("reader.lessons.schema")
+
+    def reverse(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {k: reverse(value[k]) for k in reversed(list(value))}
+        if isinstance(value, list):
+            return [reverse(v) for v in value]
+        return value
+
+    permuted = json.dumps(reverse(json.loads(F01))).encode()
+    assert permuted != F01
+    assert schema.validate(permuted).canonical == F01
+
+
 def test_f01_lab_asserts_hold() -> None:
     doc = json.loads(F01)
     lab = next(c for c in doc["cells"] if c["metadata"]["reader"]["kind"] == "lab")

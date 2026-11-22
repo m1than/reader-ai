@@ -82,6 +82,10 @@ UPGRADE = (
         FOR EACH ROW EXECUTE FUNCTION lessons_immutable()""",
     """CREATE TRIGGER lesson_revision_stages_immutable BEFORE UPDATE OR DELETE ON lesson_revision_stages
         FOR EACH ROW EXECUTE FUNCTION lessons_immutable()""",
+    """CREATE TRIGGER lesson_revisions_no_truncate BEFORE TRUNCATE ON lesson_revisions
+        FOR EACH STATEMENT EXECUTE FUNCTION lessons_immutable()""",
+    """CREATE TRIGGER lesson_revision_stages_no_truncate BEFORE TRUNCATE ON lesson_revision_stages
+        FOR EACH STATEMENT EXECUTE FUNCTION lessons_immutable()""",
 )
 
 DOWNGRADE = (

@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import math
+import re
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,8 @@ CELLS_MAX: Final = 1000
 LESSON_FORMAT: Final = 1
 NBFORMAT: Final = 4
 NBFORMAT_MINOR_MIN: Final = 5  # cell ids (nbformat 4.5)
+# nbformat 4.5's cell id pattern, matched in full (its JSON Schema `$` would also accept a trailing newline).
+CELL_ID_RE: Final = re.compile(r"[A-Za-z0-9_-]{1,64}")
 
 SCHEMA: Final[dict[str, Any]] = json.loads(
     (Path(__file__).parent / "cell.schema.json").read_text(encoding="utf-8")
@@ -63,6 +66,13 @@ def _finite_float(text: str) -> float:
     return value
 
 
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result = dict(pairs)
+    if len(result) != len(pairs):
+        raise ValueError("duplicate JSON object key")
+    return result
+
+
 def _is_int(value: object) -> bool:
     return type(value) is int
 
@@ -75,7 +85,12 @@ def _parse(data: bytes) -> dict[str, Any]:
     except UnicodeDecodeError:
         raise LessonWriteError("not_utf8") from None
     try:
-        doc = json.loads(text, parse_constant=_refuse_constant, parse_float=_finite_float)
+        doc = json.loads(
+            text,
+            parse_constant=_refuse_constant,
+            parse_float=_finite_float,
+            object_pairs_hook=_unique_keys,
+        )
     except ValueError, RecursionError:
         raise LessonWriteError("not_nbformat") from None
     if not isinstance(doc, dict):
@@ -92,22 +107,24 @@ def _parse(data: bytes) -> dict[str, Any]:
 
 def _check_ids(cells: list[dict[str, Any]]) -> None:
     ids = [cell.get("id") for cell in cells]
-    if not all(isinstance(i, str) for i in ids):
+    if not all(isinstance(i, str) and CELL_ID_RE.fullmatch(i) for i in ids):
         raise LessonWriteError("not_nbformat")
     if len(set(ids)) != len(ids):
         raise LessonWriteError("duplicate_cell_id")
 
 
 def _nbformat_valid(doc: dict[str, Any]) -> Any:
-    """nbformat.validate on a copy; any exception, warning-driven repair or mutation is a refusal."""
-    node: Any = nbformat.from_dict(copy.deepcopy(doc))  # type: ignore[no-untyped-call]
+    """nbformat.validate on a copy; any exception (RecursionError included), warning-driven repair or mutation
+    is a refusal."""
     try:
+        node: Any = nbformat.from_dict(copy.deepcopy(doc))  # type: ignore[no-untyped-call]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             nbformat.validate(node)
+        unchanged = node == doc
     except Exception:
         raise LessonWriteError("not_nbformat") from None
-    if node != doc:
+    if not unchanged:
         raise LessonWriteError("not_nbformat")
     return node
 
@@ -128,7 +145,11 @@ def _check_cells(doc: dict[str, Any]) -> None:
     if any(meta is None for meta in metas):
         raise LessonWriteError("missing_reader_metadata")
     for meta in metas:
-        if not _VALIDATOR.is_valid(meta):
+        try:
+            valid = _VALIDATOR.is_valid(meta)
+        except RecursionError:
+            raise LessonWriteError("not_nbformat") from None
+        if not valid:
             raise LessonWriteError("cell_schema")
     for cell, meta in zip(doc["cells"], metas, strict=True):
         if meta is None or CELL_TYPES[meta["kind"]] != cell.get("cell_type"):
@@ -143,6 +164,9 @@ def validate(data: bytes) -> Validated:
     _check_cells(doc)
     try:
         written: str = nbformat.writes(node)  # type: ignore[no-untyped-call]
+    except RecursionError:
+        raise LessonWriteError("not_nbformat") from None
+    try:
         canonical = written.encode("utf-8")
     except UnicodeEncodeError:
         raise LessonWriteError("not_utf8") from None
@@ -150,7 +174,9 @@ def validate(data: bytes) -> Validated:
         raise LessonWriteError("too_large")
     if len(doc["cells"]) > CELLS_MAX:
         raise LessonWriteError("too_many_cells")
-    return Validated(doc, canonical, hashlib.sha256(canonical).hexdigest(), len(doc["cells"]))
+    # The notebook as stored: parsed from the canonical bytes, so keys nbformat drops on write are gone too.
+    stored: dict[str, Any] = json.loads(canonical)
+    return Validated(stored, canonical, hashlib.sha256(canonical).hexdigest(), len(doc["cells"]))
 
 
 def notes_ids(notebook: dict[str, Any]) -> set[str]:

@@ -47,6 +47,32 @@ cases:
   - id: cell-not-an-object
     ops: [{ op: add, path: /cells/0, value: "not a cell" }]
     write: not_nbformat
+  - id: duplicate-json-key
+    note: "the same key twice in one object (json.loads keeps the last by default); refused by object_pairs_hook"
+    ops: []
+    replace_text: { "\"lesson_format\": 1": "\"lesson_format\": 1, \"lesson_format\": 1" }
+    write: not_nbformat
+  - id: deep-nesting
+    note: "notebook metadata `deep` nested 600 lists deep: JSON parses, deepcopy / validate / write recurse past the limit"
+    ops: []
+    deep_nesting: 600
+    write: not_nbformat
+  - id: cell-id-missing
+    ops: [{ op: remove, path: /cells/3/id }]
+    write: not_nbformat
+  - id: cell-id-not-a-string
+    ops: [{ op: replace, path: /cells/3/id, value: 7 }]
+    write: not_nbformat
+  - id: cell-id-trailing-newline
+    note: "nbformat's own pattern uses `$`, which also matches before a final newline; FR-LESSON-1 uses fullmatch"
+    ops: [{ op: replace, path: /cells/3/id, value: "f01-changed\n" }]
+    write: not_nbformat
+  - id: cell-id-bad-character
+    ops: [{ op: replace, path: /cells/3/id, value: "f01 changed" }]
+    write: not_nbformat
+  - id: cell-id-too-long
+    ops: [{ op: replace, path: /cells/3/id, value: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }]
+    write: not_nbformat
   - id: nbformat-validate-fails
     note: "a stream output on a markdown cell: structural checks pass, nbformat.validate raises; any exception from it is not_nbformat"
     ops: [{ op: add, path: /cells/0/outputs, value: [] }]
@@ -99,6 +125,35 @@ cases:
     write: cell_schema
   - id: span-uppercase-hex
     ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "BFAF5F84EC26D5D046B23C32827FF917C72A94707EF23407D77031429D53F1A1:1" }]
+    write: cell_schema
+  # Trailing newlines: `^…$` patterns accept them in Python's re; the schema's `single_line` guard refuses them.
+  - id: span-trailing-newline
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:1\n" }]
+    write: cell_schema
+  - id: sector-trailing-newline
+    ops: [{ op: replace, path: /cells/0/metadata/reader/sectors/0, value: "consensus\n" }]
+    write: cell_schema
+  - id: material-sha256-trailing-newline
+    ops: [{ op: replace, path: /cells/1/metadata/reader/source_refs/1/material_sha256, value: "bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1\n" }]
+    write: cell_schema
+  - id: date-trailing-newline
+    ops: [{ op: replace, path: /cells/3/metadata/reader/as_of, value: "2026-11-21\n" }]
+    write: cell_schema
+  - id: url-trailing-newline
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/0/url, value: "https://bitcoin.org/bitcoin.pdf\n" }]
+    write: cell_schema
+  - id: lab-input-sha256-trailing-newline
+    ops: [{ op: replace, path: /cells/6/metadata/reader/verified/input_sha256, value: "c8a4b60985f18030eb772b2f62e3f12f0b761861de420733d6420dbc47695b6e\n" }]
+    write: cell_schema
+  # Pinned order of FR-LESSON-1: with several faults, the earliest step's code wins.
+  - id: multi-fault-duplicate-id-first
+    ops: [{ op: replace, path: /cells/1/id, value: f01-diagnostic }, { op: replace, path: /cells/2/metadata/reader/kind, value: summary }, { op: replace, path: /cells/6/cell_type, value: markdown }]
+    write: duplicate_cell_id
+  - id: multi-fault-reader-metadata-before-schema
+    ops: [{ op: remove, path: /metadata/reader/lesson_format }, { op: replace, path: /cells/2/metadata/reader/kind, value: summary }]
+    write: missing_reader_metadata
+  - id: multi-fault-schema-before-cell-type
+    ops: [{ op: replace, path: /cells/0/metadata/reader/sectors, value: "nope" }, { op: replace, path: /cells/2/cell_type, value: code }, { op: add, path: /cells/2/outputs, value: [] }, { op: add, path: /cells/2/execution_count, value: null }]
     write: cell_schema
   - id: date-not-a-date
     note: "matches the pattern, fails the format checker"

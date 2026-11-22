@@ -115,6 +115,11 @@ def case_bytes(case: dict[str, Any], base: bytes = F01) -> bytes:
     if "raw_len" in case:
         return b" " * int(case["raw_len"])
     doc = apply_ops(json.loads(base), case.get("ops") or [])
+    if "deep_nesting" in case:
+        deep: list[Any] = []
+        for _ in range(int(case["deep_nesting"]) - 1):
+            deep = [deep]
+        doc["metadata"]["deep"] = deep
     if "pad_to_bytes" in case:
         target = int(case["pad_to_bytes"])
         notes = next(c for c in doc["cells"] if c["id"] == "f01-notes")

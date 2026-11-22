@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +21,23 @@ from .conftest import F01, Pg, client, course_and_lesson, need, spec_data, world
 
 pytestmark = pytest.mark.anyio
 F01_SHA = hashlib.sha256(F01).hexdigest()
+
+
+@contextlib.contextmanager
+def _statements(engine: Any) -> Iterator[list[str]]:
+    """Every SQL statement the engine sends while the block runs (query counter)."""
+    from sqlalchemy import event
+
+    seen: list[str] = []
+
+    def record(_conn: Any, _cursor: Any, statement: str, *_: Any) -> None:
+        seen.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record)
+    try:
+        yield seen
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record)
 
 
 def _variant(n: int) -> bytes:
@@ -124,6 +143,8 @@ async def test_revision_bytes_and_headers(pg: Pg, tmp_path: Path) -> None:
             assert cached.status_code == 304, value
             assert cached.content == b""
             assert cached.headers["etag"] == f'"{F01_SHA}"'
+            assert cached.headers["cache-control"] == "private, max-age=31536000, immutable"
+            assert cached.headers["x-content-type-options"] == "nosniff"
         assert (await c.get(url, headers={"If-None-Match": '"other"'})).status_code == 200
         unknown = await c.get(f"/api/lessons/{lesson}/revisions/{'0' * 64}")
         assert (unknown.status_code, unknown.json()) == (404, {"error": "unknown_revision"})
@@ -205,8 +226,39 @@ async def test_can_open(pg: Pg, tmp_path: Path) -> None:
         assert await access.can_open(conn, w.users["ivan"], str(lesson)) is True
         assert await access.can_open(conn, w.users["anna"], str(lesson)) is False
         assert await access.can_open(conn, w.users["ivan"], str(uuid.uuid4())) is False
-        for bad in (str(lesson).upper(), "x", "", f"{lesson} ", "1; DROP TABLE lessons"):
-            assert await access.can_open(conn, w.users["ivan"], bad) is False
+        with _statements(w.engine) as seen:
+            for bad in (str(lesson).upper(), "x", "", f"{lesson} ", f"{lesson}\n", "1; DROP TABLE lessons"):
+                assert await access.can_open(conn, w.users["ivan"], bad) is False
+        assert seen == [], "malformed ids are refused without a query"
+    await w.engine.dispose()
+
+
+async def test_malformed_path_ids_issue_no_lesson_query(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w, "ivan")
+    async with client(w, "ivan") as c:
+        with _statements(w.engine) as seen:
+            for path in (
+                f"/api/lessons/{str(lesson).upper()}",
+                "/api/lessons/not-a-uuid",
+                f"/api/lessons/{lesson}/revisions/{F01_SHA.upper()}",
+                f"/api/lessons/{lesson}/revisions/xyz",
+            ):
+                assert (await c.get(path)).status_code == 404
+    assert [s for s in seen if "lesson" in s] == [], "only the session lookup may query"
+    await w.engine.dispose()
+
+
+async def test_current_revision_follows_the_latest_stage_record(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    _, lesson = await course_and_lesson(w)
+    a, _ = await write(w, "ivan", lesson)
+    b, _ = await write(w, "ivan", lesson, _variant(1))
+    async with client(w, "ivan") as c:
+        assert (await c.get(f"/api/lessons/{lesson}")).json()["lesson"]["latest_sha256"] == b
+        await write(w, "ivan", lesson, stage="revise")
+        assert (await c.get("/api/lessons")).json()["lessons"][0]["latest_sha256"] == a
+        assert (await c.get(f"/api/lessons/{lesson}")).json()["lesson"]["latest_sha256"] == a
     await w.engine.dispose()
 
 

@@ -81,6 +81,18 @@ async def test_unknown_and_disabled_users(pg: Pg, tmp_path: Path) -> None:
     await w.engine.dispose()
 
 
+async def test_unwritable_blob_root(pg: Pg, tmp_path: Path) -> None:
+    need("reader.lessons.fixture")
+    w = await world(pg, tmp_path)
+    cli = tmp_path / "cli"
+    cli.mkdir()
+    (cli / "blobs").write_text("a file where the blob root should be", encoding="utf-8")
+    result = _load(pg, cli, "ivan")
+    assert (result.returncode, result.stdout, result.stderr) == (1, "", "reader-lessons: blobs_unwritable\n")
+    assert await scalar(w.engine, "SELECT count(*) FROM lessons") == 0, "the transaction rolled back"
+    await w.engine.dispose()
+
+
 def test_database_unreachable(tmp_path: Path) -> None:
     need("reader.lessons.fixture")
     unreachable = Pg("127.0.0.1", 1, "postgres", "canary-pw-91c2", "postgres")
