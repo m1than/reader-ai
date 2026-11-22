@@ -365,7 +365,12 @@ tasks:
         done, stage-1.sh refuses --drill. Found by the S1.live script author, 2026-11-22." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
-      note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
+      note: "2026-11-22 automated live run (agent, branch V/live-e2e, a6e622b): bash e2e/live/verify-all.sh — 53 of 53
+        PASS (stage-1 31, browser 22 incl. CDP virtual passkey, lesson, notebook cells, sandbox probes, CSP, token canary;
+        axe: no serious/critical). Found and fixed: WEB-UI /api/me id string, WEB-UI nested lesson metadata, OPS-CLI
+        kernels profile, doctor detail. Remaining owner step: own passkey in Safari (reader bootstrap). Follow-up: F01
+        references show raw span ids and one empty item (WEB-NOTEBOOK skip empty refs; fixture titles).
+        --drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
         e2e/live/lib/{passkey_check,secret_scan}.py (outside the spec gate). Non-destructive by default (≈ 5 min; restarts
         api and postgres, stops and restarts the watcher). --drill deletes and recreates the pgdata and blobs volumes
         after a backup. Known risk for --drill: the api seeds users rows from reader.yaml at startup, so OPS-CLI's restore
