@@ -13,6 +13,8 @@ dependencies = [
   "asyncpg>=0.32.0,<0.33",     # SRV-AUTH: Postgres driver (ADR-0006)
   "alembic>=1.20.1,<1.21",     # SRV-AUTH: migrations (ADR-0006)
   "webauthn==3.0.1",           # SRV-AUTH: passkey ceremonies (REF-AUTH-2)
+  "procrastinate[alembic]==3.12.0",   # SRV-EVENTS: job queue and its shipped Alembic chain (REF-EVENTS-2)
+  "psycopg[binary,pool]==3.3.9",      # SRV-EVENTS: procrastinate's async driver (cp314 wheels for macOS and Linux arm64)
 ]
 
 [project.scripts]

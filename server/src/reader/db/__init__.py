@@ -8,6 +8,7 @@ namespace, to all heads of the history whose directories `VERSION_LOCATIONS` dec
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,11 +26,26 @@ from reader.config import Secret
 
 _HERE: Final = Path(__file__).resolve().parent
 SCRIPT_LOCATION: Final = _HERE / "migrations"
-# Declared list of version directories (no scan). SRV-EVENTS appends its own and procrastinate's.
-VERSION_LOCATIONS: Final[list[Path]] = [SCRIPT_LOCATION / "versions"]
+
+
+def _procrastinate_versions() -> Path:
+    """procrastinate's shipped Alembic revisions (branch `procrastinate`), in the installed package."""
+    spec = importlib.util.find_spec("procrastinate")
+    if spec is None or spec.origin is None:
+        raise RuntimeError("procrastinate is not installed")
+    return Path(spec.origin).resolve().parent / "contrib" / "alembic" / "versions"
+
+
+# Declared list of version directories (no scan): SRV-AUTH's, SRV-EVENTS's own, and procrastinate's chain.
+VERSION_LOCATIONS: Final[list[Path]] = [
+    SCRIPT_LOCATION / "versions",
+    _HERE.parent / "jobs" / "migrations",
+    _procrastinate_versions(),
+]
 # pg_advisory_lock(namespace, key): this namespace is for migrations only ("RDMG"); SRV-EVENTS uses another.
 MIGRATION_LOCK_NAMESPACE: Final = 0x52444D47
 MIGRATION_LOCK_KEY: Final = 1
+MIGRATION_LOCK_POLL_S: Final = 0.2  # structural: a waiter retries the try-lock; migrations take seconds
 
 
 @dataclass(frozen=True)
@@ -75,26 +91,32 @@ def _upgrade(connection: Connection) -> None:
 def _heads_reached(connection: Connection) -> bool:
     script = ScriptDirectory.from_config(alembic_config())
     current = set(MigrationContext.configure(connection).get_current_heads())
-    return current == set(script.get_heads())
+    # Effective heads: a head reached only as another revision's `depends_on` (procrastinate_0043 under
+    # jobs_0001) is not kept in the version table, so it is not compared.
+    return current == {r.revision for r in script.get_revisions("heads") if r is not None}
 
 
 async def migrate(engine: AsyncEngine) -> None:
-    """`alembic upgrade heads` under the migration advisory lock."""
-    async with engine.connect() as conn:
-        await conn.execute(
-            text("SELECT pg_advisory_lock(:ns, :key)"),
-            {"ns": MIGRATION_LOCK_NAMESPACE, "key": MIGRATION_LOCK_KEY},
-        )
+    """`alembic upgrade heads` under the migration advisory lock.
+
+    The session lock is held on its own autocommit connection and taken by polling `pg_try_advisory_lock`,
+    so a waiting migrator never holds an open transaction: procrastinate's chain runs `CREATE INDEX
+    CONCURRENTLY`, which waits for every open transaction and would deadlock against a waiter blocked in
+    `pg_advisory_lock`.
+    """
+    lock = {"ns": MIGRATION_LOCK_NAMESPACE, "key": MIGRATION_LOCK_KEY}
+    async with engine.connect() as raw:
+        holder = await raw.execution_options(isolation_level="AUTOCOMMIT")
+        for _ in iter(int, 1):  # poll until the lock is ours (it lives in Postgres, not in this process)
+            if (await holder.execute(text("SELECT pg_try_advisory_lock(:ns, :key)"), lock)).scalar():
+                break
+            await asyncio.sleep(MIGRATION_LOCK_POLL_S)
         try:
-            await conn.commit()
-            await conn.run_sync(_upgrade)
-            await conn.commit()
+            async with engine.connect() as conn:
+                await conn.run_sync(_upgrade)
+                await conn.commit()
         finally:
-            await conn.execute(
-                text("SELECT pg_advisory_unlock(:ns, :key)"),
-                {"ns": MIGRATION_LOCK_NAMESPACE, "key": MIGRATION_LOCK_KEY},
-            )
-            await conn.commit()
+            await holder.execute(text("SELECT pg_advisory_unlock(:ns, :key)"), lock)
 
 
 async def at_heads(engine: AsyncEngine) -> bool:
