@@ -1,0 +1,32 @@
+(version 1)
+; Spike ingest-confine: deny-default profile for the native Docling converter (ADR-0021 confinement).
+; Parameters (realpaths, passed with -D): PYROOT (the CPython install the venv links to), VENV, MODELS,
+; SCRIPTS (the directory holding the converter script), WORK (the only writable tree; also the cwd).
+; No mach-lookup, iokit-open, network, ipc-posix or signal rule: all of them stay denied.
+(deny default)
+
+; Program and runtime: read and map, never write.
+(allow file-read* file-map-executable
+  (subpath (param "PYROOT"))
+  (subpath (param "VENV"))
+  (subpath (param "SCRIPTS"))
+  (subpath "/usr/lib")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld"))
+(allow file-read* (subpath (param "MODELS")))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/null"))
+(allow file-read* (literal "/"))                                ; added: dyld aborts in CacheFinder without it
+(allow file-read* (literal "/private/etc/apache2/mime.types"))  ; added: stdlib mimetypes opens it on import
+(allow file-read-metadata)
+
+; The only writable tree.
+(allow file-read* file-write* (subpath (param "WORK")))
+(allow file-write-data (literal "/dev/null"))
+
+; Processes: the venv python (a symlink) and the interpreter it resolves to; nothing else can be executed.
+(allow process-exec
+  (literal (string-append (param "VENV") "/bin/python"))
+  (literal (string-append (param "PYROOT") "/bin/python3.14")))   ; added: exec checks the resolved target
+(allow process-fork)
+(allow sysctl-read)
