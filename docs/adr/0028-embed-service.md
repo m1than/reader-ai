@@ -1,7 +1,7 @@
 ---
 id: ADR-0028
 title: Embedding service — bge-m3 in a dedicated internal `embed` service on its own internal network (api, worker, embed only); model baked into the image at build
-status: proposed
+status: accepted
 date: 2026-11-21
 verified_by: "OPS-DEPLOY config check: service `embed` joins only network `embed` (internal: true), whose members are exactly api, worker and embed; embed is not a /run/secrets consumer and has no secret in its environment; read-only root, cap_drop ALL, no-new-privileges, non-root, mem_limit == memswap_limit from spikes/embed-service; VEC-DEPLOY-2's reachability pairs include api→embed and worker→embed and exclude embed→postgres, embed→mcp, embed→agent-proxy, embed→any kernel and embed→internet. SRV-SEARCH [image] tests: the image build fails on a model-file hash mismatch; the service starts with HF_HUB_OFFLINE=1 and no network; loading a pickle with a non-allow-listed global through the service's loader is refused (weights_only=True is behavioural, not just a flag)"
 revisit_when: "A second embedding consumer outside api and worker appears; or the model no longer fits a bounded container on the owner's Mac; or local models move to the GX10 or MLX per ADR-0018"
