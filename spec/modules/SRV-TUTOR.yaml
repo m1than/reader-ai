@@ -1,42 +1,58 @@
-# SRV-TUTOR — answer a learner's question about the open lesson from the material's spans, with checked citations.
-# Slice subset (V.TUTOR-min, docs/roadmap.md "Vertical slice first", V8); the stage-6 SRV-TUTOR row adds what
-# `defers` lists. Covers the server module and the web Ask panel (one spec: the panel has no life of its own).
+# SRV-TUTOR — answer a learner's question about the open lesson from the material's spans, with citations checked by
+# code. Slice subset (V.TUTOR-min, docs/roadmap.md "Vertical slice first", V8); the stage-6 SRV-TUTOR row adds what
+# `defers` lists. One spec for the server module and the web Ask panel.
 #
-# Design (agent, 2026-11-22):
-#   - The api cannot reach agent-proxy (ADR-0025: only the worker does). A question is therefore a job:
-#     `POST /api/lessons/{lesson_id}/ask` stores the question and enqueues `tutor.answer`; the worker retrieves, calls
-#     the SRV-AGENT Provider port once, validates and stores the answer; the browser polls
-#     `GET /api/lessons/{lesson_id}/questions/{question_id}`.
-#   - No SSE in the slice. The Provider port (SRV-AGENT FR-AGENT-6) returns the whole result of one CLI turn, and the
-#     answer is validated as a whole (citations are checked by code before anything is shown, INV-TUTOR-2), so a token
-#     stream would show unchecked text. Polling a stored, validated answer is simpler and keeps INV-TUTOR-2 true. The
-#     roadmap's SSE and first-token p95 ≤ 3 s go to `defers` (stage 6).
-#   - Grounding is enforced by code, not by the prompt: the model answers in a JSON schema of blocks, each with the span
-#     ids it rests on; ids outside the retrieved set are removed and a block left without ids is marked unsupported; an
-#     answer with any unsupported block is `grounded: false` and the panel says so.
-#   - Model: reader.yaml `tasks.tutor.model` (example config: `sonnet`), resolved to a full id by SRV-AGENT before any
-#     spend.
-#   - `material_title` shown in citations is the title of the lesson's course (SRV-LESSON `courses.title`, the course
-#     bound to the material by `courses.material_sha256`); materials have no title column (SRV-INGEST, SRV-CONFIG).
-#   - ADR-0010's "asks before it tells" and difficulty calibration are stage 6 (`defers`): the slice answers questions.
-#   - ADR-0005, ADR-0010 and ADR-0017 are `status: proposed`; SRV-AGENT is a draft in review (V/V.COMPILE-min); this
-#     spec follows them as written and repeats their numbers only by reference.
+# Design (agent, 2026-11-22; deep-reviewer round 1 applied):
+#   - The api cannot reach agent-proxy (ADR-0025: only the worker does). A question is a job: the api commits a
+#     `tutor_questions` row, then enqueues `tutor.answer`; the worker retrieves, calls the SRV-AGENT Provider port once,
+#     validates and stores the answer; the browser polls.
+#   - No SSE in the slice: the answer is validated as a whole (quotes and ids checked by code, INV-TUTOR-2) before
+#     anything is shown, so a token stream would show unchecked text. SSE and first-token p95 ≤ 3 s are in `defers`.
+#   - Grounding is enforced by code: each block names short source aliases (s1…s8, mapped by code to span ids) and
+#     carries a verbatim quote that must occur in the first named source. The model cannot forge an id (it never sees
+#     one) or a quote (code checks it). Entailment (does the quote support the block's claim?) is not checked in the
+#     slice (`defers`).
+#   - Thinking and output (REF-TUTOR-7, measured 2026-11-22, 10 calls, $0.038): tutor-shaped calls used 0 thinking
+#     tokens with thinking off and with the CLI default, 92–310 output tokens, 1.5–3.5 s, valid JSON 10/10. The long
+#     compile stages' 4.6–6.6k output tokens (REF-TUTOR-6) do not apply to this shape. The tutor still turns thinking
+#     off (cross-spec SRV-AGENT) and caps output at 2,000 tokens (6.5× the measured maximum).
+#   - Spend: a custom `system_prompt` replaces the CLI's own 6,803-token prompt (measured: 745–867 prompt tokens in
+#     total, ≈ 410 of them fixed overhead). Reserves count `cli_overhead_tokens` + every byte sent (measured 0.3–0.5
+#     tokens per byte, so one token per byte is an upper bound); caps derive from that worst case (VEC-TUTOR-3,
+#     computed by the test, not pinned).
+#   - Model: reader.yaml `tasks.tutor.model` (example: `sonnet`), resolved to a full id by SRV-AGENT before any spend.
+#   - Citation display: page and span id come from `material_spans`; `material_title` is the lesson's course title
+#     (SRV-LESSON `courses.title`, the course bound by `courses.material_sha256`), because materials have no title
+#     column (SRV-INGEST, SRV-CONFIG). Nothing in a citation comes from model text.
+#   - ADR-0005, ADR-0010 and ADR-0017 are `status: proposed`; SRV-AGENT is approved (V/V.COMPILE-min); the amendments
+#     below are owned by SRV-AGENT's author and land there as paired changes.
 #
 # Cross-spec requirements (paired changes):
-#   - SRV-AGENT: the Provider port takes the caller's cap scope: `run_id` = the question id with a run cap of
-#     `bounds.question_cap_usd`, plus a per-user daily scope for task `tutor` (`spent(user, task=tutor, UTC day)`), so
-#     FR-AGENT-9 refuses before the reserve row with `budget_exhausted` / `daily_budget_exhausted`.
-#   - SRV-EVENTS: KIND_MODULES lists `reader.tutor.jobs`.
-#   - SRV-AUTH: ROUTERS lists `reader.tutor.routes`; VERSION_LOCATIONS lists `reader/tutor/migrations`.
-#   - WEB-NOTEBOOK: the lesson view mounts `web/src/tutor/AskPanel` (one mount point; the panel owns everything else).
-#   - SRV-INGEST: `reader.ingest.spans_by_ids(conn, owner_id, span_ids) -> [Span]` (read-only helper) or this spec reads
-#     `material_spans` directly; the implementation uses SRV-INGEST's helper when it exists.
+#   - SRV-AGENT (landed as FR-AGENT-12 and FR-AGENT-13 on V/V.COMPILE-min, dca70a2): (a) a per-user daily scope for task `tutor` (`spent(user, task=tutor,
+#     UTC day)`) refused before the reserve row with `daily_budget_exhausted`, besides the run cap (`run_id` = question
+#     id, cap `question_cap_usd`, refusal `budget_exhausted`); (b) extended thinking off per task (`MAX_THINKING_TOKENS=0`
+#     in the CLI environment for task `tutor`); (c) a caller `system_prompt` option (with it the CLI sends no system
+#     prompt of its own, REF-TUTOR-7); (d) the stop reason in `StageResult`, a `max_tokens` stop mapping to the
+#     permanent code `output_truncated`; (e) the CLI's `api_retry` messages exposed and a per-call deadline accepted, so
+#     the tutor can abort on the first retry (FR-TUTOR-7). The tutor passes its own byte-based worst case
+#     (VEC-TUTOR-3) as the reserve floor `floor_usd` and logs `reserve_exceeded` itself when a settlement exceeds it.
+#   - SRV-EVENTS: KIND_MODULES lists `reader.tutor.jobs`; job kinds may declare a `priority` (FR-EVENTS-1 amendment,
+#     2026-11-23), used by `tutor.answer` to run before queued compile stages.
+#   - SRV-AUTH: ROUTERS lists `reader.tutor.routes`; VERSION_LOCATIONS lists `reader/tutor/migrations`;
+#     `tutor_questions` is a non-system table for INV-AUTH-8; the api role holds one SRV-EVENTS `Jobs` on
+#     `app.state.jobs` (FR-AUTH-10 note from SRV-PIPELINE), which FR-TUTOR-1 enqueues through.
+#   - WEB-NOTEBOOK: the lesson view mounts `web/src/tutor/AskPanel` and passes the focused cell id.
+#   - SRV-INGEST: read helper `spans_by_ids(conn, owner_id, span_ids)`; until it exists this module reads
+#     `material_spans` directly (read-only).
+#   - V.cost-optimize: the tutor's prompt cache shape and output caps are inputs to that task's measurements. With a
+#     custom `system_prompt` there is no CLI system prompt, and the fixed part is not cached separately: the CLI
+#     writes the whole prompt (system + user) to the 1-hour cache at 2× input on every new question (REF-TUTOR-7).
 
 id: SRV-TUTOR
-title: Tutor (slice) — questions about the open lesson, answered by one model call from retrieved spans, citations checked by code
-status: draft
-approved_by: null
-approved_at: null
+title: Tutor (slice) — questions about the open lesson, answered by one model call from retrieved spans, citations and quotes checked by code
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
 layer: server
 track: ai
 slice: V.TUTOR-min
@@ -54,10 +70,10 @@ normative:
     title: "ADR-0010 — learning loop; the tutor is bound to the cell and every factual answer cites a source span"
     url: docs/adr/0010-learning-loop.md
   - id: REF-TUTOR-2
-    title: "ADR-0025 — agent-proxy: only the worker reaches it; credentials injected per run"
+    title: "ADR-0025 — agent sandbox and credential separation: only the worker reaches agent-proxy"
     url: docs/adr/0025-agent-sandbox-and-credential-separation.md
   - id: REF-TUTOR-3
-    title: "SRV-AGENT (draft, V/V.COMPILE-min) — Provider port, run_token, reservation/settlement ledger, pricing table"
+    title: "SRV-AGENT (approved, V/V.COMPILE-min) — Provider port, run_token, reservation/settlement ledger, pricing table"
     url: spec/modules/SRV-AGENT.yaml
   - id: REF-TUTOR-4
     title: "SRV-SEARCH — search(owner_id, query, k, material_sha256) with span ids"
@@ -65,175 +81,290 @@ normative:
   - id: REF-TUTOR-5
     title: "Anthropic API pricing (SRV-AGENT pricing table, as_of 2026-11-03)"
     url: https://platform.claude.com/docs/en/about-claude/pricing
+  - id: REF-TUTOR-6
+    title: "Spike compile-cost: Sonnet fact-check stages, output tokens vs printed characters"
+    url: spikes/compile-cost/RESULT.md
+  - id: REF-TUTOR-7
+    title: "Spike tutor-call: 10 tutor-shaped Sonnet calls, thinking off vs default (2026-11-22, $0.038)"
+    url: spikes/tutor-call/RESULT.md
+  - id: REF-TUTOR-8
+    title: "Spike agent-proxy-handshake round 2 (V/V.COMPILE-min): the CLI retries 429/529/500 about 10 times over ~3 min, emitting api_retry"
+    url: spikes/agent-proxy-handshake/RESULT.md
 
 bounds:
   question_chars_max: 1000      # structural: one question; the same bound as SRV-SEARCH's q
-  retrieve_k: 8                 # structural: 8 spans × span_chars_max fit the context budget below
-  span_chars_max: 1500          # structural: a span's text is cut at the last whitespace ≤ 1500
-  cell_context_chars_max: 4000  # structural: the cell the question is asked on (source text), cut the same way
-  prompt_chars_max: 20000       # structural: instructions + question + cell context + spans + delimiters
-  max_output_tokens: 1200       # structural: about 600–900 words; enough for an explanation with citations
-  question_cap_usd: 0.20        # derived (VEC-TUTOR-3): worst-case reserve 0.0792 per attempt × 2 attempts + margin
-  daily_cap_usd: 3.00           # structural, per user per UTC day for task tutor: ~100 typical questions (VEC-TUTOR-3)
-  attempts_max: 2               # one retry for transient provider errors; both attempts fit question_cap_usd
-  job_timeout_s: 120            # structural: one CLI turn; SRV-AGENT measured stages of 30–190 s with far larger outputs
-  poll_interval_ms: 1000        # web: structural
-  poll_deadline_s: 600          # web: covers a wait behind one running compile stage (worker concurrency 1)
-  inflight_per_user: 1          # structural: one pending question per user
+  question_bytes_max: 3000      # UTF-8 bytes; 1000 characters of Cyrillic are ≤ 2000 bytes, emoji ≤ 4 bytes each
+  retrieve_k: 8                 # structural: 8 sources fit prompt_bytes_max with span_bytes_max each
+  span_bytes_max: 2000          # structural: a span's text cut at the last whitespace within 2000 bytes, hard cut if none
+  cell_bytes_max: 4000          # structural: the focused cell's source text, cut the same way
+  prompt_bytes_max: 24000       # user prompt: question + cell + 8 sources + JSON overhead (3000 + 4000 + 16000 + 1000)
+  system_bytes_max: 4000        # the versioned system prompt file; a test asserts its size
+  quote_words: [5, 30]          # structural: a verifiable excerpt, short enough not to copy the source wholesale
+  spans_per_block_max: 3        # structural
+  blocks_max: 20                # structural
+  block_chars_max: 4000         # structural
+  max_output_tokens: 2000       # REF-TUTOR-7: measured 92–310 output tokens, 0 thinking; 2000 is 6.5× the maximum
+  cli_overhead_tokens: 1000     # REF-TUTOR-7: ≈ 410 fixed tokens beyond our bytes with a custom system_prompt; 2.4×
+  attempts_max: 2               # one retry for transient provider errors
+  question_cap_usd: 0.30        # derived by VEC-TUTOR-3: ≥ attempts_max × worst-case reserve (2 × 0.136), rounded up
+  daily_cap_usd: 3.00           # structural, per user per UTC day for task tutor; the api pre-checks it
+  question_ttl_s: 600           # a question older than this is expired, never answered (covers a wait behind one
+                                # running compile stage; REF-TUTOR-6 stages took ≤ 190 s each)
+  stale_without_job_s: 60       # a queued row with no job for this long is finalised `lost`
+  call_deadline_s: 20           # structural: bounds a stuck or retrying call far below the CLI's ~3 min of retries
+                                # (REF-TUTOR-8); one healthy attempt fits NFR-TUTOR-1's 30 s p95. At the measured
+                                # 1.5–3.5 s for ≤ 310 tokens it is effectively the output cap as well
+  job_timeout_s: 120            # structural: one CLI turn of ≤ 2000 output tokens
+  poll_backoff_ms: [1000, 2000, 5000]  # web: then 5000 until a terminal state or the deadline
+  poll_deadline_s: 630          # question_ttl_s + 30 s
+  history_max: 50               # list size
 
 tables:
-  tutor_questions: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, revision_sha256 text, cell_id text null, question text CHECK (1..1000 chars), state text CHECK in (queued, answered, failed, refused), answer jsonb null, grounded bool null, error_code text null, model text null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id); index (owner_id, lesson_id, created_at)" }
+  tutor_questions: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, revision_sha256 text, cell_id text null, question text CHECK (1..1000 chars), state text CHECK in (queued, answered, failed, refused, expired), answer jsonb null, grounded bool null, error_code text null, model text null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id); FK (lesson_id, revision_sha256) → lesson_revisions (lesson_id, sha256); UNIQUE (owner_id) WHERE state = 'queued'; index (owner_id, lesson_id, created_at)" }
+
+errors:                         # fixed catalogue, shared by api, worker and web (VEC-TUTOR-5); unknown codes → tutor_failed
+  [question_invalid, cell_unknown, unknown_revision, not_found, tutor_busy, daily_budget_exhausted, budget_exhausted,
+   monthly_budget_exhausted, provider_missing, sources_unavailable, output_invalid, output_truncated,
+   provider_unavailable, rate_limited, expired, lost, tutor_failed]
 
 requirements:
   - id: FR-TUTOR-1
     text: >-
-      `POST /api/lessons/{lesson_id}/ask` with JSON `{"question": str, "cell_id": str?, "revision": str?}`, `auth:
-      session`. `can_open(user, lesson_id)` (SRV-LESSON FR-LESSON-11) false → 404 `not_found` (same body as a missing
-      lesson). `question` trimmed is 1..`question_chars_max` characters, else 400 `question_invalid`; `cell_id` when
-      present must be a cell id of the revision, else 400 `cell_unknown`; `revision` defaults to the lesson's current
-      sha256. A pending question of the same user → 409 `tutor_busy`. Otherwise it inserts a `tutor_questions` row
-      (state `queued`) and enqueues job `tutor.answer` with key `[question_id]` in the same request, and answers 202
-      `{"question_id": uuid}`. It logs the route, the question length and the outcome code, never the question text.
-      [db]
+      Ask. `POST /api/lessons/{lesson_id}/ask` with JSON `{"question": str, "cell_id": str?, "revision": str?}`, `auth:
+      session`, body cap per SRV-AUTH FR-AUTH-12. `can_open(user, lesson_id)` false → 404 `not_found` (the body of a
+      missing lesson). `question` trimmed must be 1..`question_chars_max` characters and ≤ `question_bytes_max` UTF-8
+      bytes, with no NUL and no C0 control other than newline and tab, else 400 `question_invalid`. `revision`
+      (default: the lesson's current sha256, SRV-LESSON) must be a revision of this lesson, else 400 `unknown_revision`;
+      `cell_id`, when present, a cell of that revision, else 400 `cell_unknown`. The busy check (FR-TUTOR-10) finds a
+      live queued question → 409 `tutor_busy`. Daily pre-check: spent(user, tutor, UTC day) + the worst-case reserve >
+      `daily_cap_usd` → 429 `daily_budget_exhausted` (spent read with the ledger's FR-AGENT-12 daily query, the
+      reserve at the bounds' maximum, VEC-TUTOR-3). Otherwise it commits the row (state `queued`), then enqueues job
+      `tutor.answer` with key `[question_id]` through the api's SRV-EVENTS `Jobs` (`app.state.jobs`, SRV-AUTH
+      FR-AUTH-10 note); an enqueue error, or no `Jobs` on the app, sets the row `failed` / `tutor_failed`. It answers 202
+      `{"question_id": uuid}` and logs route, question length and outcome code, never the text. [db]
   - id: FR-TUTOR-2
     text: >-
-      `GET /api/lessons/{lesson_id}/questions/{question_id}` (`auth: session`) returns the row as `{"state",
-      "answer"?, "grounded"?, "error_code"?}` for its owner; anything else (foreign, unknown, malformed id) → 404
-      `not_found`. `GET /api/lessons/{lesson_id}/questions` returns the user's last 50 rows for that lesson, newest
-      first. [db]
+      Read. `GET /api/lessons/{lesson_id}/questions/{question_id}` returns `{"state", "answer"?, "grounded"?,
+      "error_code"?}` for a row of that user and that lesson; another user's row, a row of another lesson, an unknown or
+      malformed id → 404 `not_found`. `GET /api/lessons/{lesson_id}/questions` returns at most `history_max` items
+      `{"question_id", "question", "cell_id", "state", "grounded", "error_code", "created_at"}`, newest first. Both
+      first finalise a stale row (FR-TUTOR-10). [db]
   - id: FR-TUTOR-3
     text: >-
-      Job kind `tutor.answer` (SRV-EVENTS FR-EVENTS-1, declared in `reader.tutor.jobs.JOB_KINDS`): args `{question_id}`
-      (extra forbidden), key `[question_id]`, `max_attempts = bounds.attempts_max`, `timeout_s = bounds.job_timeout_s`,
-      priority above compile stages and below `jobs.sweep`; transient: SRV-AGENT `provider_unavailable`,
-      `rate_limited`, `output_invalid`; permanent: everything else. A permanent failure or exhaustion sets the row to
-      `failed` with the error code; a budget refusal sets `refused` with the refusal code (not a failure). [db]
+      Job kind `tutor.answer` (SRV-EVENTS FR-EVENTS-1, `reader.tutor.jobs.JOB_KINDS`): args `{question_id}` (extra
+      forbidden), key `[question_id]`, `max_attempts = attempts_max`, `timeout_s = job_timeout_s`, `priority = 100`
+      (SRV-EVENTS FR-EVENTS-1 amendment; compile stages keep the default 0, so a question runs before queued compile
+      stages). Transient: `provider_unavailable`, `rate_limited`, `output_invalid`. The
+      handler never leaves a row `queued`: it catches every permanent error, every budget refusal and a transient error
+      on the last attempt, writes `failed` (code) or `refused` (`budget_exhausted` / `daily_budget_exhausted`), and
+      returns normally; only a transient error before the last attempt is re-raised for a retry. `monthly_budget_exhausted`
+      (SRV-AGENT FR-AGENT-9) also ends `refused`, and SRV-AGENT's `task_budget_exhausted` (its per-run task budget,
+      here per question) ends `refused` / `budget_exhausted`; `provider_missing` ends `failed` with its own message;
+      any other SRV-AGENT code (`tools_mismatch`, `sdk_error`, `unknown_model`, …) ends `failed` / `tutor_failed`. Every row
+      transition, in the api and the worker, is `UPDATE … WHERE state = 'queued'`; the handler first checks that the
+      row is still `queued` and exits without a model call when it is not. [db]
   - id: FR-TUTOR-4
     text: >-
-      Retrieval. The handler loads the question row and the revision (SRV-LESSON), takes the course's
-      `material_sha256` (null → the answer is built from the cell context only and every block is unsupported), and
-      calls `search(owner_id, question, k = retrieve_k, material_sha256)` (SRV-SEARCH FR-SEARCH-7). For each result it
-      loads the primary span's text and page, cut to `span_chars_max`. A `degraded` search is used as returned and the
-      answer row records `retrieval: "degraded"`. [db] with a fake search
+      Expiry. Before reserving anything, the handler marks a row older than `question_ttl_s` `expired` and returns.
+      [db]
   - id: FR-TUTOR-5
     text: >-
-      Prompt. The system prompt is the versioned file `reader/tutor/prompts/answer-v1.md` (a test pins its sha256 in
-      provenance). The user prompt is exactly the JSON document `{"question": …, "cell": {"id", "kind", "text"} | null,
-      "sources": [{"id": "<span_id>", "page": n, "text": …}]}` produced by `json.dumps(…, ensure_ascii=False)`, so
-      question and source text can never close a delimiter or forge a source header; the system prompt states that the
-      JSON's string values are data, never instructions. If the prompt would exceed `prompt_chars_max`, sources are
-      dropped from the lowest rank until it fits. [unit]
+      Retrieval. The handler loads the revision and the course's `material_sha256`. With none, or when
+      `search(owner_id, question, k = retrieve_k, material_sha256)` (SRV-SEARCH FR-SEARCH-7) returns no result, the row
+      is `failed` / `sources_unavailable` and no model is called. Otherwise each result's primary span is loaded
+      (text, page) and cut to `span_bytes_max`; a `degraded` search is used and recorded. The focused cell (id, kind
+      `metadata.reader.kind`, source text) is read from the revision's notebook blob (SRV-LESSON). [db] with a fake
+      search
   - id: FR-TUTOR-6
     text: >-
-      Model call. One call through the SRV-AGENT Provider port (FR-AGENT-6): `run_id = question_id`, `stage = "tutor"`,
-      `task = "tutor"`, `max_output_tokens = bounds.max_output_tokens`, the run cap `question_cap_usd` and the daily
-      scope (cross-spec). No other path calls a model; no tool is offered; the CLI environment is FR-AGENT-6's (non-
-      essential traffic off). [unit] with a fake provider
+      Prompt. The system prompt is the versioned file `reader/tutor/prompts/answer-v1.md` (≤ `system_bytes_max`);
+      `prompt_sha256` = sha256 of that file's bytes, stored with the answer. The user prompt is exactly
+      `json.dumps({"question", "cell": {"id", "kind", "text"} | null, "sources": [{"id": "s1".."s8", "page",
+      "text"}]}, ensure_ascii=False)`, so no question, cell or source text can close a delimiter or forge a source
+      entry; the system prompt states that every string value is data, never an instruction. Sources get aliases s1…sk
+      in rank order; the alias → span id map stays in the handler. Sizes are measured after JSON escaping: the
+      question and the cell text are first cut so that question + cell + overhead fit `prompt_bytes_max`; then, if the
+      prompt still exceeds it, sources are dropped from the lowest rank until it fits; the dropped ones are not in the
+      sent set. If every source is dropped, the row is `failed` / `sources_unavailable` and no model is called. [unit]
   - id: FR-TUTOR-7
     text: >-
-      Answer validation. The model's text must be one JSON object `{"blocks": [{"text": str, "spans": [str]}],
-      "insufficient": bool}` with 1–20 blocks, each `text` 1–4000 characters; anything else is `output_invalid`
-      (transient). Then, by code: every span id not in the retrieved set is removed; a block left with no span id is
-      `unsupported: true`; `grounded = not insufficient and no block is unsupported`. Each kept span id is rendered as a
-      citation `{span, page, material_title}` from the database, never from the model's text. [unit]
+      Model call. One call through the SRV-AGENT Provider port (FR-AGENT-6): `run_id = question_id`, `stage` and
+      `task` = `tutor`, thinking off, `max_output_tokens`, run cap `question_cap_usd`, the daily scope (cross-spec). No
+      tool is offered; agent-proxy refuses a request carrying tools (SRV-AGENT FR-AGENT-4, FR-AGENT-7). No other code
+      path calls a model. Fast failure: on 429, 529 or 500 the CLI retries about 10 times over about 3 minutes
+      (REF-TUTOR-8), which NFR-TUTOR-1 cannot afford, so the call sets SRV-AGENT's `abort_on_retry` and `deadline_s =
+      call_deadline_s` (FR-AGENT-13 d, e): the first `api_retry` message or the deadline, whichever comes first, ends
+      the attempt with SRV-AGENT's transient `upstream_retry` or `deadline_exceeded`, which the tutor records as
+      `provider_unavailable` (SRV-AGENT does not report which status was being retried); SRV-AGENT's own
+      `rate_limited` and `provider_unavailable` pass through unchanged. Such an attempt settles exactly as FR-AGENT-9
+      and FR-AGENT-13 say: no upstream 2xx → $0; a 2xx without an SDK cost → the reserve; an unknown upstream record →
+      the reserve. The next attempt follows FR-TUTOR-3. A `max_tokens` stop reason (FR-AGENT-13 c) is the permanent
+      `output_truncated` (not yet observed on a real truncated reply: the first live run that truncates records the
+      SDK's stop reason in docs/progress.yaml). The tutor passes its byte-based worst case (VEC-TUTOR-3, computed from the bytes actually
+      sent) as the reserve floor `floor_usd` and logs WARNING `reserve_exceeded` when the SDK's reported cost exceeds
+      it. [unit] with a fake provider that emits `api_retry`; [db] two stalled providers through the real SRV-AGENT
+      adapter (a fake CLI and agent-proxy client): one stalls before any 2xx and settles $0, one stalls after a 2xx
+      has started streaming and settles the reserve
   - id: FR-TUTOR-8
     text: >-
-      Storage. On success the row becomes `answered` with `answer = {"blocks": [{"text", "unsupported",
-      "citations"}], "retrieval": "ok" | "degraded", "prompt_sha256", "model"}` and `grounded`; the SRV-AGENT ledger
-      rows carry `run_id = question_id`, so cost per question is `spent(run)`. The row update is the handler's last
-      statement (SRV-EVENTS FR-EVENTS-4). [db]
+      Answer validation. The model's text, after removing one optional surrounding ```json fence, must be one JSON
+      object `{"blocks": [{"text": str, "spans": [alias], "quote": str}], "insufficient": bool}` with no other keys at
+      any level, 1–`blocks_max` blocks, `text` 1–`block_chars_max` characters, ≤ `spans_per_block_max` aliases; anything
+      else is `output_invalid` (transient). Then, by code: aliases outside the sent set are removed and duplicates
+      collapsed; a block is supported iff it keeps ≥ 1 alias and its `quote` has `quote_words` words and, after
+      collapsing whitespace and NFC, is a substring of its first kept source's text as sent; otherwise the block is
+      `unsupported`. `grounded` is true iff `insufficient` is false and every block is supported. Each kept alias is
+      rendered as a citation `{span, page, material_title}` read from the database (FR-TUTOR-9). [unit]
   - id: FR-TUTOR-9
     text: >-
-      Web Ask panel (`web/src/tutor/AskPanel.tsx`), mounted in the lesson view: a text area (1..1000 chars, the counter
-      shown), Ask, and the history list (FR-TUTOR-2). On Ask it sends `{question, cell_id}` of the focused cell, then
-      polls every `poll_interval_ms` until `answered | failed | refused` or `poll_deadline_s`. Block text is rendered
-      through WEB-RENDER's markdown pipeline (sanitised, no raw HTML); citations render as "material_title, p. N" via
-      WEB-NOTEBOOK's citation formatter; an unsupported block is marked "not supported by the source"; `grounded:
-      false` shows "This answer is not fully grounded in the book." Codes map to fixed catalogue messages
-      (`tutor_busy`, `budget_exhausted`, `daily_budget_exhausted`, `provider_unavailable`, timeout). [unit] Vitest,
-      [browser] Playwright
+      Storage. On success the row becomes `answered` with `answer = {"blocks": [{"text", "supported", "quote",
+      "citations"}], "insufficient", "retrieval": "ok" | "degraded", "prompt_sha256", "model"}` and `grounded`, written
+      as the handler's last statement (SRV-EVENTS FR-EVENTS-4). Ledger rows carry `run_id = question_id`, so a
+      question's cost is spent(run). [db]
   - id: FR-TUTOR-10
     text: >-
-      Logging. The worker and api log ids, lengths, codes, model, `spent(run)` and timings only; never question,
-      cell, source or answer text, and never a run_token (SRV-AGENT FR-AGENT-5). [db]
+      Stale rows. The busy check and FR-TUTOR-2 derive a queued row's state from the job: job `dead` → the row becomes
+      `failed` with the mapped code (VEC-TUTOR-4); no job and older than `stale_without_job_s` → `failed` / `lost`;
+      older than `question_ttl_s` → `expired`. The finalised row no longer blocks `UNIQUE (owner_id) WHERE state =
+      'queued'`; an insert that violates that index (a concurrent ask) answers 409 `tutor_busy`. [db]
   - id: FR-TUTOR-11
     text: >-
-      DoD hook (feeds V.DOD-index): the operation `ask_tutor` is declared as data in
-      `reader/tutor/dod.yaml` with criteria and the tests that prove them — functional (FR-TUTOR-1..8), grounding
-      (INV-TUTOR-2), cost (NFR-TUTOR-2), latency (NFR-TUTOR-1), security (INV-TUTOR-1, INV-TUTOR-3, INV-TUTOR-4),
-      accessibility (axe smoke on the panel). [unit] the file lists only existing test ids
+      Web Ask panel (`web/src/tutor/AskPanel.tsx`) in the lesson view: a labelled text area (counter, 1..1000
+      characters), Ask (also Ctrl/Cmd+Enter), the history list, and an `aria-live="polite"` region for the answer.
+      After Ask it polls with `poll_backoff_ms` until a terminal state, `poll_deadline_s`, a 401 (sign-in) or a 404
+      (stop); polling pauses while the page is hidden and resumes when visible; on load, a `queued` history item
+      resumes polling. Block text renders through WEB-RENDER's markdown pipeline with links rendered as plain text
+      (VEC-TUTOR-6); citations render as "material_title, p. N"; an unsupported block is marked "not supported by the
+      source"; `grounded: false` shows "This answer is not fully grounded in the book."; every code maps to a fixed
+      catalogue message, unknown codes to `tutor_failed`'s. [unit] Vitest, [browser] Playwright with axe (no serious or
+      critical issue in the panel)
   - id: FR-TUTOR-12
     text: >-
-      Live: on the stack with L02 compiled and its material embedded, a learner asks a question about a lesson cell
-      in Chromium; the answer arrives within `poll_deadline_s`, has ≥ 1 citation rendered "material_title, p. N" whose
-      span exists, and its ledger cost is ≤ `question_cap_usd`. Spends from `budget.test_budget_usd`. [live]
+      Logging. api and worker log ids, lengths, codes, model, spent(run) and timings; never question, cell, source,
+      quote or answer text, and never a run_token (SRV-AGENT FR-AGENT-5). [db]
+  - id: FR-TUTOR-13
+    text: >-
+      DoD hook (V.DOD-index): operation `ask_tutor` declared in `reader/tutor/dod.yaml` with criteria and the test ids
+      that prove each — functional (FR-TUTOR-1..10), grounding (INV-TUTOR-2), injection (INV-TUTOR-3), isolation
+      (INV-TUTOR-1), cost (INV-TUTOR-5, NFR-TUTOR-2), latency (NFR-TUTOR-1), accessibility (FR-TUTOR-11's axe check).
+      [unit] every listed test id exists
+  - id: FR-TUTOR-14
+    text: >-
+      Live: on the stack with L02 compiled and its material embedded, a learner asks a question about an L02 cell in
+      Chromium; within `poll_deadline_s` the answer shows ≥ 1 citation "material_title, p. N" whose span exists and
+      whose quote is verified, and its ledger cost is ≤ `question_cap_usd`. Spends from `budget.test_budget_usd`. The
+      live check and the bench never write answer, quote or question text (it holds book quotes) to committed files:
+      committed outputs carry ids, counts, flags, timings and costs only. [live]
 
 invariants:
   - id: INV-TUTOR-1
     text: >-
-      Isolation: a user can ask about, read and list questions only for lessons `can_open` allows; a foreign or
-      unknown lesson or question answers exactly like a missing one (same status, body and header set). [db]
+      Isolation: a user can ask about, read and list questions only for lessons `can_open` allows; a foreign or unknown
+      lesson, a foreign question and a question of another lesson answer exactly like a missing one (status, body,
+      header set). [db]
   - id: INV-TUTOR-2
     text: >-
-      Grounding by code: for any model output (Hypothesis-generated JSON, including invented span ids, ids of other
-      users' materials and malformed shapes), every citation stored or shown is a span id from the retrieved set of
-      that question, with page and title read from the database; a block without one is marked unsupported. [unit]
+      Grounding by code: for any model output (Hypothesis-generated JSON and text: invented aliases, real span ids,
+      ids of other users' materials, quotes absent from the source, malformed shapes), every stored or shown citation
+      names a span of the sent set, its page and title come from the database, and a block is supported only with a
+      verified quote. [unit]
   - id: INV-TUTOR-3
     text: >-
-      Injection: for the fixtures of VEC-TUTOR-2 (question or source text that asks to cite unretrieved ids, close the
-      JSON, change the instructions or call a tool), the stored answer obeys INV-TUTOR-2, no tool request leaves the
-      proxy (FR-AGENT-4), and the prompt JSON round-trips to the same values. [unit]
+      Injection (VEC-TUTOR-2, each case with a model output): question, cell or source text that asks to cite unsent or
+      sent ids, closes the JSON, rewrites the instructions or requests a tool cannot produce a citation INV-TUTOR-2
+      rejects, the prompt JSON round-trips to the same values, and the request carries no tools (asserted at the fake
+      Provider; the proxy-side refusal is SRV-AGENT's test). [unit]
   - id: INV-TUTOR-4
     text: >-
       No text leaks: a canary planted in a question, a cell and a span appears in no log record of api or worker (all
-      loggers) and no job args (args carry only the question id). [db]
+      loggers) and in no job args. [db]
   - id: INV-TUTOR-5
     text: >-
-      Spend bound: for any sequence of attempts, timeouts and aborts, `spent(question) ≤ question_cap_usd` and
-      `spent(user, tutor, UTC day) ≤ daily_cap_usd` plus at most one in-flight reserve (SRV-AGENT FR-AGENT-9). [db]
-      with a fake provider
+      Spend bound: for any sequence of attempts, timeouts, kills and aborts, spent(question) ≤ `question_cap_usd` and
+      spent(user, tutor, UTC day) ≤ `daily_cap_usd` plus one in-flight reserve; a settlement above its reserve is
+      logged `reserve_exceeded` (a generated case covers it). [db] with a fake provider
   - id: INV-TUTOR-6
     text: >-
-      `tutor_questions.owner_id` equals the lesson's owner for every row (composite FK); the table is listed for
-      INV-AUTH-8. [db]
+      No question stays `queued`: after a timeout, a kill mid-run, a crash between insert and enqueue, or exhaustion,
+      the next read or busy check returns a terminal state (FR-TUTOR-10), and a new question can be asked. [db]
+  - id: INV-TUTOR-7
+    text: >-
+      `tutor_questions.owner_id` equals the lesson's owner and `revision_sha256` names a revision of that lesson for
+      every row (composite FKs). [db]
 
 nfr:
   - id: NFR-TUTOR-1
-    metric: p95 seconds from Ask to the answer shown, idle worker, 20 questions on L02 ([live])
+    metric: >-
+      p95 by nearest rank, rank ceil(0.95 × n), over the n bench samples (VEC-TUTOR-7; n = min(20, explain cells) + 1),
+      seconds from Ask to the answer shown, idle worker, against L02 ([live]). Bench spend ≤ n × question_cap_usd
+      (≤ $6.30; expected ≈ $1) from budget.test_budget_usd, inside the normal daily cap: one bench run per UTC day; a
+      second run on the same day may be refused with daily_budget_exhausted. The bench also records thinking tokens per
+      call and the share of blocks with a verified quote
     threshold: 30
     verified_by: bench
   - id: NFR-TUTOR-2
-    metric: mean USD per question over the NFR-TUTOR-1 run (ledger spent(run))
+    metric: >-
+      mean USD per question over the NFR-TUTOR-1 run (ledger spent(run)); expected about $0.048 for an L02-shaped
+      prompt (VEC-TUTOR-3, extrapolated from REF-TUTOR-7's measured rates; every new question writes its whole prompt
+      to the 1-hour cache)
     threshold: 0.06
     verified_by: bench
   - id: NFR-TUTOR-3
-    metric: share of NFR-TUTOR-1 answers with grounded = true and ≥ 1 citation
+    metric: >-
+      share of NFR-TUTOR-1 answers with grounded = true. No spike measured it (REF-TUTOR-7 used synthetic sources):
+      the first bench run is its measurement, and a miss there reopens the prompt (answer-v1.md) before the slice's
+      live check, not the threshold
     threshold: 0.8
     verified_by: bench
 
 vectors:
   - id: VEC-TUTOR-1
-    source: hand-written model outputs and the retrieved set; expected kept citations, unsupported flags and grounded
+    source: hand-written model outputs over a sent set of aliases; expected kept citations, quote checks, supported flags, grounded
     file: spec/fixtures/SRV-TUTOR/answers.yaml
   - id: VEC-TUTOR-2
-    source: hand-written injection attempts in the question, the cell and a source span
+    source: hand-written injection attempts in the question, the cell and a source span, each with a model output
     file: spec/fixtures/SRV-TUTOR/injection.yaml
   - id: VEC-TUTOR-3
-    source: reserve and typical cost from the SRV-AGENT pricing table (Sonnet 5.5) and the bounds above
+    source: cost inputs (SRV-AGENT pricing table, bounds); the test derives reserve, caps and typical cost from them
     file: spec/fixtures/SRV-TUTOR/cost.yaml
+  - id: VEC-TUTOR-4
+    source: job and row state → question state and error code
+    file: spec/fixtures/SRV-TUTOR/status-map.yaml
+  - id: VEC-TUTOR-5
+    source: the error catalogue with the web messages
+    file: spec/fixtures/SRV-TUTOR/errors.yaml
+  - id: VEC-TUTOR-6
+    source: answer block text with markdown links, raw HTML and images; expected rendering (links and images as text)
+    file: spec/fixtures/SRV-TUTOR/render.yaml
+  - id: VEC-TUTOR-7
+    source: >-
+      bench questions: one question per `explain` cell of the compiled L02 revision, in cell order, the first
+      min(20, explain cells), generated at run time as "Explain in your own words: <cell title>" (the cell titles are
+      not committed; only the generator `e2e/web/tutor/bench_questions.py` is), plus questions-v2 `v03` (the only
+      accepted question on L02's pages 60–84). The generator reads the explain cells and their titles (the first
+      markdown heading of the cell source) from the compiled revision under test and stops with an error, before any
+      question is asked, when there is no explain cell or a selected cell has no title. The generator and the bench
+      driver are `reader/tutor/bench.py` (run in the worker: each question is inserted and enqueued in turn, and its
+      seconds are measured from the insert to the terminal state, polled every 0.5 s); `e2e/web/tutor/bench_questions.py`
+      runs it on the stack and writes only numbers to `e2e/web/tutor/results/`
+    file: spec/fixtures/SRV-TUTOR/bench.yaml
 
 defers:
   - "SSE token streaming and first-token p95 ≤ 3 s (roadmap stage-6 row): needs a streaming Provider port and per-block validation"
+  - "entailment: checking that a verified quote supports the block's claim (an NLI check or a second model pass): stage 6"
   - "ADR-0010 'asks before it tells' (diagnostic first) and 85 % difficulty calibration: stage 6 with SRV-RECALL"
   - "learner notes in the context (no learner state in the slice, SRV-LESSON)"
   - "one-tap answer feedback (useful / wrong / unclear) as a quality signal on the run: stage 6"
   - "URL citations and web search: stage 6+"
-  - "a dedicated tutor worker lane so answers never wait behind a running compile stage (worker concurrency 1 today)"
+  - "a dedicated tutor worker lane so answers never wait behind a running compile stage (worker concurrency 1)"
+  - "retention and export of tutor history (ADR-0017 data ownership; SRV-EXPORT stage 7)"
   - "findings from tutor sessions into the knowledge base: stage 7"
 
 owner_notes:
-  - "Cost: typical ≈ $0.02–0.05 per question with Sonnet 5.5, worst case reserve $0.079 per attempt; per-question cap $0.20, daily cap $3 (VEC-TUTOR-3). Live checks spend from the owner-approved $30 test budget (2026-11-22)."
-  - "While a lesson compile stage runs, a question waits for it (one worker); poll_deadline_s covers that."
-  - "The answer says when it is not grounded in the book instead of hiding it."
+  - "Cost (VEC-TUTOR-3, from spikes/tutor-call on 2026-11-22: 10 calls, $0.038): about $0.048 per L02-shaped question with Sonnet 5.5 (measured short calls cost $0.001–0.006); worst-case reserve $0.136 per attempt; caps $0.30 per question and $3 per user per day (about 63 questions)."
+  - "Cost lever for V.cost-optimize (REF-TUTOR-7): the CLI writes each one-shot prompt to the 1-hour cache at 2× the input price; an uncached send would roughly halve the tutor's input cost, if the CLI allows it."
+  - "While a lesson compile stage runs, a question waits for it (one worker); after 10 minutes it expires instead of being answered late."
+  - "An answer says when it is not grounded in the book instead of hiding it."
+  - "Model choice: with Opus 5.5 as `tasks.tutor.model` the worst-case reserve is $0.272 per attempt (8.00 and 20.00 per million tokens), so a second attempt no longer fits the $0.30 question cap (it is refused as budget_exhausted) and the $3 daily cap allows about 11 questions; Sonnet 5.5 is the example's choice."
 
-review: "draft 2026-11-22, awaits deep-reviewer (cost and auth: full review)."
+review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 (30890d8): approve. Approved by agent with Red (2026-11-23), the round-3 notes folded in: FR-TUTOR-7's stalled-provider outcomes stated exactly as FR-AGENT-9/-13 settle them, with two [db] tests through the real adapter, and SRV-AGENT's `upstream_retry` / `deadline_exceeded` recorded as `provider_unavailable`; NFR-TUTOR-3's first bench run is its measurement; the bench generator confirms explain-cell titles on the compiled revision. Also: SRV-AGENT's remaining codes mapped (FR-TUTOR-3), priority 100 through the SRV-EVENTS amendment, enqueue through `app.state.jobs`. Green (2026-11-23): test corrections, no oracle weakened — the stale-row test's history order follows FR-TUTOR-2's newest-first; the Ask panel test reads the button's DOM `disabled` property (the web tests have no jest-dom matchers). Code review round 1 (25a5920): changes — five untested rules, all now pinned by tests: (1) span reads filter by owner (two owners with different text and page at one span id each see only their own); (2) SRV-AGENT's per-user lock (concurrent reserves, tests/agent); (3) the `finish` guard (a finished row refuses `answered`; a row flipped during the call is not overwritten); (4) VEC-TUTOR-1 cases for the first kept source and NFC; (5) the job key through the real SRV-EVENTS `Jobs`. Non-blocking applied: the Opus owner note, `ledger.spent(day=True)`, an insert-race 409 test, the handler logs the real `finish` outcome, the agent-proxy client closed after each call, VEC-TUTOR-4's queued + succeeded row, canary tests on the output_invalid and search-failure paths, the bench driver, citations through WEB-NOTEBOOK's formatter, the ask body read before a database connection, the stop-reason note. The new [db] tests are in server/tests/tutor/test_tutor_review_db.py; the Provider fakes became async context managers (Deps.provider). Code review round 2: approve (deep-reviewer, Fable); its non-blocking items applied: the bench records thinking tokens from SRV-AGENT's settle rows (`agent_spend.thinking`, paired SRV-AGENT change), and an empty assertion was removed from the search-failure canary test."

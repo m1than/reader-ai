@@ -1,7 +1,7 @@
 """SRV-EVENTS [db]: enqueue, the worker wrapper, the sweep, requeue and status against Postgres.
 
-@trace FR-EVENTS-3 FR-EVENTS-4 FR-EVENTS-5 FR-EVENTS-6 FR-EVENTS-7 FR-EVENTS-8 FR-EVENTS-9 FR-EVENTS-11
-@trace FR-EVENTS-12 FR-EVENTS-13 FR-EVENTS-14 FR-EVENTS-15 FR-EVENTS-10 FR-EVENTS-16
+@trace FR-EVENTS-1 FR-EVENTS-3 FR-EVENTS-4 FR-EVENTS-5 FR-EVENTS-6 FR-EVENTS-7 FR-EVENTS-8 FR-EVENTS-9
+@trace FR-EVENTS-11 FR-EVENTS-12 FR-EVENTS-13 FR-EVENTS-14 FR-EVENTS-15 FR-EVENTS-10 FR-EVENTS-16
 @trace INV-EVENTS-1 INV-EVENTS-2 INV-EVENTS-3 INV-EVENTS-4 INV-EVENTS-5 INV-EVENTS-7
 """
 
@@ -115,6 +115,37 @@ async def test_enqueue_never_waits_for_a_key_lock(pg: Pg) -> None:
             assert result.kind == "queued"
             assert (await env.jobs.requeue_dead(KIND, env.key("held"))).kind == "running"
             await holder.rollback()
+
+
+# ---- FR-EVENTS-1 (SRV-TUTOR amendment): priority
+
+
+async def test_priority_is_passed_at_every_defer_and_orders_fetch(pg: Pg) -> None:
+    import dataclasses
+
+    from .conftest import HANDLER_RUNS, effect_kind
+
+    jobs = require_jobs()
+    low = effect_kind()
+    high = dataclasses.replace(low, name="test.high", priority=100)
+    async with jobs_env(pg, kinds=[low, high]) as env:
+        HANDLER_RUNS.clear()
+        assert (await env.jobs.enqueue(KIND, {"name": "first"})).kind == "queued"
+        assert (await env.jobs.enqueue("test.high", {"name": "second"})).kind == "queued"
+        assert (await env.jobs.enqueue("test.high", {"name": "flaky", "mode": "transient"})).kind == "queued"
+        low_key = jobs.idempotency_key(low, {"name": "first"})
+        high_key = jobs.idempotency_key(high, {"name": "second"})
+        flaky_key = jobs.idempotency_key(high, {"name": "flaky"})
+        sql = "SELECT lock, priority FROM procrastinate_jobs WHERE lock IN (:a, :b)"
+        stored = {r[0]: r[1] for r in await env.rows(sql, a=low_key, b=high_key)}
+        assert stored == {low_key: 0, high_key: 100}
+        await env.work()
+        # The later, higher-priority job ran first; the transient one was deferred again with its priority.
+        assert HANDLER_RUNS.index(high_key) < HANDLER_RUNS.index(low_key)
+        sql = "SELECT priority FROM procrastinate_jobs WHERE lock = :k ORDER BY id"
+        priorities = await env.rows(sql, k=flaky_key)
+        assert len(priorities) >= 2
+        assert {p[0] for p in priorities} == {100}
 
 
 # ---- FR-EVENTS-6, -14: failures, retries, exhaustion

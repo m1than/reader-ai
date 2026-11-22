@@ -6,10 +6,11 @@ import { SIGN_IN_URL } from '../app/api';
 import { useServices } from '../app/context';
 import { queries } from '../app/queries';
 import { browserSocketFactory, createKernelController } from './kernel';
+import { AskPanel } from '../tutor/AskPanel';
 import { LessonView, type Notebook } from './LessonView';
 
-function Lesson({ lessonId, notebook }: { lessonId: string; notebook: Notebook }) {
-  const { api, notify, navigateAway } = useServices();
+function Lesson({ lessonId, notebook, revision }: { lessonId: string; notebook: Notebook; revision: string }) {
+  const { api, notify, navigateAway, tutor } = useServices();
   const controller = useMemo(
     () =>
       createKernelController({
@@ -27,7 +28,11 @@ function Lesson({ lessonId, notebook }: { lessonId: string; notebook: Notebook }
     [lessonId, api, notify, navigateAway],
   );
   useEffect(() => () => controller.dispose(), [controller]);
-  return <LessonView notebook={notebook} controller={controller} />;
+  // SRV-TUTOR FR-TUTOR-11: the Ask panel after the cells, bound to the revision on screen and the focused cell.
+  const aside = tutor
+    ? (cellId: string | null) => <AskPanel lessonId={lessonId} revision={revision} cellId={cellId} api={tutor} />
+    : undefined;
+  return <LessonView notebook={notebook} controller={controller} aside={aside} />;
 }
 
 export function LessonPage({ lessonId }: { lessonId: string }) {
@@ -47,5 +52,5 @@ export function LessonPage({ lessonId }: { lessonId: string }) {
     );
   if (rev.isPending) return <p className="page muted">Loading…</p>;
   if (rev.isError) return <p className="page">The lesson could not be loaded.</p>;
-  return <Lesson lessonId={lessonId} notebook={rev.data as unknown as Notebook} />;
+  return <Lesson lessonId={lessonId} notebook={rev.data as unknown as Notebook} revision={sha} />;
 }

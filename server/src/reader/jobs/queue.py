@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
-from reader.jobs.catalog import Catalog
+from reader.jobs.catalog import SWEEP_PRIORITY, Catalog
 from reader.jobs.model import (
     SWEEP_TASK,
     JobContext,
@@ -44,7 +44,6 @@ STALLED_AFTER_S: Final = 30.0
 RECONCILE_AGE_S: Final = 60.0
 FIRST_RETRY_DELAY_S: Final = 5
 RETRY_DELAY_FACTOR: Final = 5
-SWEEP_PRIORITY: Final = 1_000_000
 LIVE_STATUSES: Final = ("todo", "doing", "aborting")
 
 
@@ -233,6 +232,7 @@ class Jobs:
             "queueing_lock": key,
             "lock_mode": "ordered",
             "queue": kind.queue,
+            "priority": kind.priority,
         }
         if schedule_in > 0:
             options["schedule_in"] = {"seconds": schedule_in}

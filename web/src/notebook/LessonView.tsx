@@ -3,7 +3,7 @@
 import { Button } from '@acme/ui/button';
 import { Chip } from '@acme/ui/chip';
 import { Dialog } from '@acme/ui/dialog';
-import { useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import { useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from 'react';
 import { Code } from '../render/code';
 import { Markdown } from '../render/markdown';
 import { Output, type NbOutput } from '../render/outputs';
@@ -177,9 +177,23 @@ function CellView({ cell, index, run, controller, resetting }: CellProps & { ind
   );
 }
 
-export function LessonView({ notebook, controller }: { notebook: Notebook; controller: KernelController }) {
+export function LessonView({
+  notebook,
+  controller,
+  aside,
+}: {
+  notebook: Notebook;
+  controller: KernelController;
+  /** Shown after the cells with the focused cell's id (SRV-TUTOR's Ask panel, FR-TUTOR-11). */
+  aside?: ((focusedCellId: string | null) => ReactNode) | undefined;
+}) {
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const [confirm, setConfirm] = useState(false);
+  const [focused, setFocused] = useState<string | null>(null);
+  const focusFrom = (target: EventTarget) => {
+    const id = target instanceof Element ? target.closest('[data-cell-id]')?.getAttribute('data-cell-id') : null;
+    if (id) setFocused(id);
+  };
   const labs = notebook.cells.map((c, i) => ({ c, id: cellId(c, i) })).filter(({ c }) => reader(c).kind === 'lab');
   const open = notebook.cells.map((c, i) => ({ c, id: cellId(c, i) })).filter(({ c }) => isOpenFinding(c));
   const title = notebook.metadata?.reader && typeof notebook.metadata.reader === 'object' ? (notebook.metadata.reader as { title?: unknown }).title : undefined;
@@ -213,9 +227,12 @@ export function LessonView({ notebook, controller }: { notebook: Notebook; contr
           )}
         </div>
       </header>
-      {notebook.cells.map((c, i) => (
-        <CellView key={cellId(c, i)} cell={c} index={i} run={state.cells[cellId(c, i)]} controller={controller} resetting={state.resetting} />
-      ))}
+      <div className="cells" onFocusCapture={(e) => focusFrom(e.target)} onClickCapture={(e) => focusFrom(e.target)}>
+        {notebook.cells.map((c, i) => (
+          <CellView key={cellId(c, i)} cell={c} index={i} run={state.cells[cellId(c, i)]} controller={controller} resetting={state.resetting} />
+        ))}
+      </div>
+      {aside?.(focused)}
       <Dialog.Root open={confirm} onOpenChange={setConfirm}>
         <Dialog.Portal>
           <Dialog.Backdrop />

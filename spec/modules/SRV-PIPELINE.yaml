@@ -46,6 +46,9 @@
 # deviation). Approval items folded in: the prompt file's content hash in input_sha256, the live check's zero task-budget
 # refusals, the `fresh` flag and source-bound defers, the ADR-0005 owner note. Added at approval: the lab binding
 # includes each lab's cell index (VEC-PIPELINE-3 `labs-swapped` moves the only lab, which an index-free list misses).
+# Integration (V/SRV-TUTOR-impl, 2026-11-23): with SRV-INGEST's migration in the heads, the test fixture
+# `import_material` fills the real tables' NOT NULL columns (ingests.artifact_id, span_count, outline_count,
+# outline_source, pages_without_text; material_spans boxes); no oracle changed.
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).

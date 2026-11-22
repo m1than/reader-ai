@@ -31,7 +31,10 @@ from ruamel.yaml import YAML
 REPO = Path(__file__).resolve().parents[3]
 FIXTURES = REPO / "spec" / "fixtures" / "SRV-AGENT"
 SPEC = REPO / "spec" / "modules" / "SRV-AGENT.yaml"
-PG_IMAGE = "postgres:18-trixie@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a"
+# postgres:18-trixie plus pgvector 0.8.7: the heads include SRV-SEARCH's migration (CREATE EXTENSION vector).
+PG_IMAGE = (
+    "pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa"
+)
 
 
 def load_yaml(path: Path) -> Any:

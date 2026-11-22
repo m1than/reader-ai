@@ -19,7 +19,8 @@ dependencies = [
   "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
   "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
   "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
-  "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy clients; SRV-SEARCH: the embed service client (FR-SEARCH-5, -7)
+  "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy's upstream client and the worker's agent-proxy client;
+                               # SRV-SEARCH: the api's and worker's client of the embed service (FR-SEARCH-5, -7)
 ]
 
 [project.optional-dependencies]
@@ -84,18 +85,22 @@ known-first-party = ["reader"]
 # SRV-AUTH: PT018 compound status-and-body assertions read as one HTTP expectation; S603/S608 the tests run the
 # entrypoint as a subprocess and build SQL from fixed table names; ASYNC110 polling the database is the point.
 "tests/auth/**" = ["S101", "PT018", "S603", "S608", "ASYNC110"]
-# SRV-INGEST: PT018 compound expectations on one result; S603 the [host] tests run the converter and probes as
-# subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
-# Russian text on purpose (Cyrillic letters that look Latin).
-"tests/ingest/**" = ["S101", "PT018", "S603", "S108", "RUF001"]
 # SRV-AGENT / SRV-PIPELINE: PT018 compound expectations on one result; S603/S607 docker and the void CLI run as
 # subprocesses; S108 fixed /tmp paths are option values, never opened; E501 the formatter keeps long docstrings,
 # SQL and @trace lines whole.
 "tests/agent/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
 "tests/pipeline/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+# SRV-INGEST: PT018 compound expectations on one result; S603 the [host] tests run the converter and probes as
+# subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
+# Russian text on purpose (Cyrillic letters that look Latin).
+"tests/ingest/**" = ["S101", "PT018", "S603", "S108", "RUF001"]
 # SRV-SEARCH: the tests talk to a local HTTP server (S310), run docker and python subprocesses (S603, S607), and
 # build SQL for assertions from fixed names (S608); RUF001: the synthetic corpus is Russian text on purpose.
 "tests/search/**" = ["S101", "S310", "S603", "S607", "S608", "PT018", "RUF001"]
+# SRV-TUTOR: PT018 compound expectations on one result; S603/S607 the [live] test runs docker; E501 long SQL and
+# @trace lines stay whole; SIM300 bounds compare module constants (UPPER_CASE) to spec values; PT017 the parse
+# property asserts the code of the one exception type it allows.
+"tests/tutor/**" = ["S101", "PT018", "S603", "S607", "E501", "SIM300", "PT017"]
 
 [tool.mypy]
 strict = true

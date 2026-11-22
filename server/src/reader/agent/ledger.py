@@ -172,9 +172,11 @@ async def spent(
     task: str | None = None,
     owner_id: uuid.UUID | None = None,
     month: bool = False,
+    day: bool = False,
 ) -> Decimal:
+    """`day=True`: the owner's spend on `task` this UTC calendar day (FR-AGENT-12's scope)."""
     async with engine.connect() as conn:
-        return await _spent(conn, run_id=run_id, task=task, owner_id=owner_id, month=month)
+        return await _spent(conn, run_id=run_id, task=task, owner_id=owner_id, month=month, day=day)
 
 
 async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, caps: Caps) -> int:
@@ -230,10 +232,12 @@ async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, c
 
 _CLOSE = (
     "INSERT INTO agent_spend (owner_id, run_id, lesson_id, stage, task, attempt, kind, reservation_id, model,"
-    " usd, sdk_usd, settled_usd, upstream, input, output, cache_write_5m, cache_write_1h, cache_read)"
+    " usd, sdk_usd, settled_usd, upstream, input, output, cache_write_5m, cache_write_1h, cache_read,"
+    " thinking)"
     " SELECT owner_id, run_id, lesson_id, stage, task, attempt, CAST(:kind AS text), id, model,"
     " CAST(:usd AS numeric), CAST(:sdk AS numeric), CAST(:settled AS numeric), CAST(:upstream AS jsonb),"
-    " CAST(:i AS bigint), CAST(:out AS bigint), CAST(:w5 AS bigint), CAST(:w1 AS bigint), CAST(:cr AS bigint)"
+    " CAST(:i AS bigint), CAST(:out AS bigint), CAST(:w5 AS bigint), CAST(:w1 AS bigint),"
+    " CAST(:cr AS bigint), CAST(:th AS bigint)"
     " FROM agent_spend WHERE id = :rid AND kind = 'reserve'"
 )
 
@@ -260,6 +264,7 @@ async def settle(
         "w5": counts.get("cache_write_5m"),
         "w1": counts.get("cache_write_1h"),
         "cr": counts.get("cache_read"),
+        "th": counts.get("thinking"),
     }
     try:
         async with engine.begin() as conn:
@@ -284,6 +289,7 @@ async def void(engine: AsyncEngine, reservation_id: int) -> None:
         "w5": None,
         "w1": None,
         "cr": None,
+        "th": None,
     }
     try:
         async with engine.begin() as conn:

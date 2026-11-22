@@ -36,9 +36,11 @@ class Usage:
     cache_write_5m: int
     cache_write_1h: int
     cache_read: int
+    thinking: int | None = None  # output_tokens_details.thinking_tokens: inside `output`, not priced
 
     def as_dict(self) -> dict[str, int]:
-        return {f.name: int(getattr(self, f.name)) for f in fields(self)}
+        """The priced counts (and `thinking` when the SDK gave it)."""
+        return {f.name: int(getattr(self, f.name)) for f in fields(self) if getattr(self, f.name) is not None}
 
 
 @dataclass(frozen=True)
@@ -102,12 +104,15 @@ def map_usage(sdk_usage: Mapping[str, Any]) -> Usage:
         breakdown = {}
     if not isinstance(breakdown, Mapping):
         raise agent_error("usage_unmapped")
+    details = sdk_usage.get("output_tokens_details")
+    thinking = details.get("thinking_tokens") if isinstance(details, Mapping) else None
     return Usage(
         input=_count(sdk_usage.get("input_tokens")),
         output=_count(sdk_usage.get("output_tokens")),
         cache_write_5m=_count(breakdown.get("ephemeral_5m_input_tokens")),
         cache_write_1h=_count(breakdown.get("ephemeral_1h_input_tokens")),
         cache_read=_count(sdk_usage.get("cache_read_input_tokens")),
+        thinking=None if thinking is None else _count(thinking),
     )
 
 

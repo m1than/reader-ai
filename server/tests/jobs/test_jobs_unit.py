@@ -91,13 +91,37 @@ def test_catalog_rejects_missing_key_field_and_secret_fields() -> None:
     assert deep.value.code == "secret_in_payload"
 
 
+@pytest.mark.parametrize(
+    ("priority", "ok"), [(0, True), (100, True), (999_999, True), (-1, False), (1_000_000, False)]
+)
+def test_catalog_bounds_priority_below_the_sweep(priority: int, ok: bool) -> None:
+    import dataclasses
+
+    from reader.jobs.queue import SWEEP_PRIORITY
+
+    jobs = require_jobs()
+    assert SWEEP_PRIORITY == 1_000_000
+    kind = _kind_named("pri.kind")
+    assert kind.priority == 0  # the default
+    if ok:
+        assert jobs.Catalog([dataclasses.replace(kind, priority=priority)])["pri.kind"].priority == priority
+        return
+    with pytest.raises(jobs.JobError) as caught:
+        jobs.Catalog([dataclasses.replace(kind, priority=priority)])
+    assert caught.value.code == "kind_bounds_invalid"
+
+
 def test_kind_modules_are_a_declared_list() -> None:
     jobs = require_jobs()
     assert isinstance(jobs.KIND_MODULES, tuple)
     assert len(jobs.load_kinds(())) == 0
-    # SRV-INGEST, SRV-PIPELINE and SRV-SEARCH paired changes (FR-EVENTS-1 note)
-    assert jobs.KIND_MODULES == ("reader.ingest.jobs", "reader.pipeline.jobs", "reader.search.jobs")
-    assert list(jobs.load_kinds()) == ["ingest.import", "pipeline.stage", "pipeline.verify", "search.embed"]
+    # SRV-INGEST, SRV-SEARCH, SRV-PIPELINE and SRV-TUTOR paired changes (FR-EVENTS-1 note)
+    assert jobs.KIND_MODULES == (
+        "reader.ingest.jobs", "reader.search.jobs", "reader.pipeline.jobs", "reader.tutor.jobs"
+    )
+    assert list(jobs.load_kinds()) == [
+        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer"
+    ]
 
 
 # ---- FR-EVENTS-2, -13: keys and lock ids

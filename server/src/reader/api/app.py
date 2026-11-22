@@ -32,8 +32,9 @@ ROUTERS: Final = (
     "reader.lessons.routes",
     "reader.kernels.routes",
     "reader.ingest.routes",  # SRV-INGEST paired change (FR-AUTH-10 note)
-    "reader.pipeline.routes",
     "reader.search.routes",
+    "reader.pipeline.routes",
+    "reader.tutor.routes",  # SRV-TUTOR paired change (FR-AUTH-10 note)
 )
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
@@ -133,6 +134,7 @@ async def _cleanup_forever(engine: AsyncEngine, interval_s: float) -> None:
 def create_app(
     settings: Settings, engine: AsyncEngine, *, run_cleanup_task: bool = True, jobs: object | None = None
 ) -> FastAPI:
+    """`jobs`: the api's SRV-EVENTS `Jobs` (FR-AUTH-10 note), on `app.state.jobs` for routes that enqueue."""
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(_cleanup_forever(engine, CLEANUP_INTERVAL_S)) if run_cleanup_task else None
@@ -145,7 +147,7 @@ def create_app(
                     await task
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.jobs = jobs  # SRV-PIPELINE routes enqueue through it (paired change)
+    app.state.jobs = jobs  # SRV-PIPELINE and SRV-TUTOR routes enqueue through it (paired changes)
     for route in ROUTES:
         app.add_api_route(
             route.path, _endpoint(route, settings, engine), methods=[route.method], include_in_schema=False

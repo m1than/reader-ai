@@ -1,0 +1,46 @@
+# SRV-TUTOR FR-TUTOR-13: the Definition-of-Done hook for operation `ask_tutor` (V.DOD-index reads it). Each
+# criterion names what it proves and the tests that prove it; a unit test checks every test id exists.
+operation: ask_tutor
+spec: SRV-TUTOR
+criteria:
+  - name: functional
+    proves: "FR-TUTOR-1..10: ask, read, the job and its outcomes, expiry, retrieval, prompt, call, validation, storage, stale rows"
+    tests:
+      - test_ask_queues_a_question_and_enqueues_its_job
+      - test_invalid_questions
+      - test_revision_and_cell_checks
+      - test_busy_while_a_question_is_live
+      - test_daily_pre_check
+      - test_answer_is_validated_and_stored_with_citations_from_the_database
+      - test_no_source_fails_without_a_model_call
+      - test_expired_and_finished_rows_are_never_answered
+      - test_permanent_outcomes_end_the_row_on_the_first_attempt
+      - test_transient_retries_once_then_fails
+      - test_stale_rows_are_finalised_by_reads_and_the_busy_check
+      - test_prompt_fits_after_escaping_and_drops_lowest_rank_first
+  - name: grounding
+    proves: "INV-TUTOR-2: every citation names a sent span, page and title from the database, quotes verified"
+    tests: [test_answer_vectors, test_grounding_property, test_quote_words_bound]
+  - name: injection
+    proves: "INV-TUTOR-3: injected text cannot produce a rejected citation; the prompt JSON round-trips; no tools"
+    tests: [test_injection_vectors, test_forged_source_in_span_text_gets_no_alias]
+  - name: isolation
+    proves: "INV-TUTOR-1, -7: foreign, unknown and malformed ids answer like missing ones; composite foreign keys"
+    tests: [test_foreign_unknown_and_malformed_ids_answer_like_missing, test_rows_belong_to_the_lessons_owner_and_revision]
+  - name: cost
+    proves: "INV-TUTOR-5, NFR-TUTOR-2 inputs: reserve and caps derived; stalled calls settle per FR-AGENT-9; spend ≤ cap"
+    tests:
+      - test_cost_derivation
+      - test_stall_before_any_2xx_settles_zero
+      - test_stall_after_a_2xx_settles_the_reserve
+      - test_settlement_above_the_floor_is_logged
+  - name: latency
+    proves: "NFR-TUTOR-1: fast failure on the first api_retry or the deadline; the live answer within the poll deadline"
+    tests:
+      - test_api_retry_aborts_the_call
+      - test_one_question_is_answered_with_a_verified_citation_within_the_caps
+      - test_p95_is_nearest_rank
+  - name: accessibility
+    proves: "FR-TUTOR-11: no serious or critical axe issue in the Ask panel"
+    tests:
+      - "the Ask panel asks, shows a checked answer and has no serious or critical axe issue"

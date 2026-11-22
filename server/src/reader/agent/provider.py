@@ -143,6 +143,9 @@ class HttpProxyClient:
         except httpx.HTTPError, ValueError:
             return None
 
+    async def aclose(self) -> None:
+        await self.client.aclose()
+
 
 def cli_env(env: Mapping[str, str]) -> dict[str, str]:
     """The SDK merges the worker's own environment into the CLI's: blank every variable not passed (S1)."""

@@ -37,7 +37,11 @@ approved_by: agent
 approved_at: 2026-11-22
 review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. 2026-11-22: the
   lesson tests' /api/me stub now carries a UUID string `id` (SRV-AUTH FR-AUTH-9, WEB-UI FR-UI-5), found by the live run;
-  the lesson metadata stub is nested `{lesson, revisions}` as SRV-LESSON FR-LESSON-8 (VEC-UI-2 corrected the same day)"
+  the lesson metadata stub is nested `{lesson, revisions}` as SRV-LESSON FR-LESSON-8 (VEC-UI-2 corrected the same day).
+  Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): the lesson view tracks
+  the focused cell (the last cell focused or clicked) and takes an optional `aside(focusedCellId)` render prop shown
+  after the cells; the lesson route passes the tutor's Ask panel there with the lesson id and the revision sha256; no
+  cell rendering changed"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
