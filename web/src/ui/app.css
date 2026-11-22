@@ -125,11 +125,19 @@ pre.shiki {
   max-width: 100%;
 }
 
+/* Inline math stays within a few lines of text: its box is capped and its painting clipped, so a \raisebox or
+   \rule cannot spill over the page (FR-RENDER-3). */
 [data-markdown] .katex {
   display: inline-block;
   max-width: 100%;
+  max-height: 4em;
   overflow: hidden;
+  contain: paint;
   vertical-align: middle;
+}
+
+[data-markdown] .katex-display > .katex {
+  max-height: none;
 }
 
 .notices {

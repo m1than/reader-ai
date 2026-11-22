@@ -112,8 +112,10 @@ requirements:
       keeps its own FIFO and has at most one execute_request in flight per session (the slot); other Run requests show
       the cell as `queued`. Only the matching `execute_reply` or a lost event (FR-NOTEBOOK-8) frees the slot.
       Shift+Enter runs the focused lab cell. Run all queues every lab cell in order; an `execute_reply` with status
-      `error` returns the cells still queued from the same Run all to `idle`; status `aborted` sets the cell to
-      `not_run`. Cell states and transitions follow VEC-NOTEBOOK-2. [unit]
+      `error` returns the cells still queued from the same Run all to `idle`, whatever the cell's final label (error,
+      interrupted or timed_out; code review); status `aborted` sets the cell to `not_run`. Output messages are checked
+      and coerced to nbformat shapes before they are stored; a malformed one is dropped. Cell states and transitions
+      follow VEC-NOTEBOOK-2. [unit]
   - id: FR-NOTEBOOK-6
     text: >-
       Outputs: messages are routed to a cell by `parent_header.msg_id`; messages with an unknown parent, and replies for
@@ -127,7 +129,9 @@ requirements:
     text: >-
       Controls: Interrupt (while a cell runs) calls `POST /api/kernel/sessions/{id}/interrupt` with no body; Reset
       kernel asks for confirmation in a dialog that says it clears every open lesson's kernel state (SRV-KERNEL owner
-      note), then calls `POST /api/kernel/reset` with no body. While a reset runs, Run is disabled. [unit] [story]
+      note), then calls `POST /api/kernel/reset` with no body. While a reset runs, Run (button and Shift+Enter) and
+      Run all are disabled. A reset that fails (503 or any error other than 401) leaves a "Retry reset" control that
+      calls the reset again. [unit] [story]
   - id: FR-NOTEBOOK-8
     text: >-
       Notices, closes and the single reconnect procedure (VEC-NOTEBOOK-2 has a case for each row).
@@ -144,8 +148,10 @@ requirements:
       automatic reconnect); 1006, 1011 and any other code, and a socket that fails before opening: reconnect after 1, 2
       and 4 s (structural: three tries cover a container restart, measured 0.2–3.3 s by SRV-KERNEL's review), where each
       try first calls `POST /api/kernel/sessions` for the lesson (idempotent: it returns the existing session, or creates
-      a new one after an api restart) and then opens the WebSocket of the session it returns; after the third failed try,
-      state `disconnected` with Retry, which runs the same procedure. The `disconnected` notice says the lesson may be
+      a new one after an api restart) and then opens the WebSocket of the session it returns; after the third failed try
+      (a failed POST counts), a lost event, then state `disconnected` with Retry, which runs the same procedure (Retry
+      after `unavailable` too); a 401 from a try's POST is a lost event and navigates to sign-in, with no further try
+      (a Run queued during the reconnect returns to `idle` in both cases). The `disconnected` notice says the lesson may be
       open in other tabs (SRV-KERNEL refuses a third connection, which a browser sees as a failed connection).
       HTTP results — `POST /api/kernel/sessions` (on Run and in every reconnect try): 401 navigates to
       `/api/auth/signin` (an expired session at the WebSocket upgrade shows only as 1006, so this call is how the client
@@ -171,7 +177,10 @@ invariants:
       not_run or lost) and never leaves it; no event of a non-current socket changes any state; nothing is sent on a
       socket that is not open; every sent message is on channel `shell` with `allow_stdin: false` and the header shape
       of FR-NOTEBOOK-5; and every cell is always in one of VEC-NOTEBOOK-2's states. [unit, property-based with
-      fast-check, model-checked against a reference state machine]
+      fast-check: after every step the client's cell states equal those of a reference model of FR-NOTEBOOK-5 and
+      FR-NOTEBOOK-8 (FIFO order, Run-all groups cancelled on any error reply, lost events), over actions that include
+      failures of the session POST (401, 409, 502, 503) on Run and in reconnect tries and an interrupt answered 404;
+      the fake socket throws on any send before it opened or after it closed]
   - id: INV-NOTEBOOK-2
     text: >-
       Output text from the kernel, error tracebacks, citation fields and notice parameters are only ever rendered as

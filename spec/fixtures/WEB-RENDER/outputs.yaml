@@ -1,8 +1,10 @@
 # VEC-RENDER-1: the ADR-0013 rendering matrix as cases, as the slice renders them (the sandboxed frame is deferred to
-# stage 4b, so text/html renders its plain-text alternative or its source as text). Synthetic content.
+# stage 4b, so text/html and image/svg+xml render their plain-text alternative or their source as text; an SVG blob
+# opened top-level would run its script in the app origin). Synthetic content.
 # treatment:
 #   text      — text nodes only (no HTML parsing), ANSI escape sequences removed
-#   image     — <img> with a blob: URL from the decoded base64 (or, for SVG, from the SVG text); revoked on unmount
+#   image     — <img> with a blob: URL from the decoded base64 (PNG, JPEG, GIF only); revoked once loaded or failed,
+#               and on unmount
 #   json      — pretty-printed with 2-space indentation, as text
 #   markdown  — the markdown pipeline (FR-RENDER-2)
 #   latex     — KaTeX (FR-RENDER-3), outer delimiters stripped first
@@ -52,8 +54,13 @@ cases:
     expect_text: "<p onclick=alert(1)>probe</p>"
   - id: svg-script
     output: {output_type: display_data, data: {image/svg+xml: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script><circle r='4'/></svg>"}, metadata: {}}
-    treatment: image
-    note: "an SVG loaded as an image runs no script and loads nothing external"
+    treatment: text
+    expect_text: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script><circle r='4'/></svg>"
+    note: "no SVG blob is created: an image/svg+xml blob URL opened top-level runs its script with the session (code review, Chromium)"
+  - id: svg-with-plain
+    output: {output_type: display_data, data: {image/svg+xml: "<svg xmlns='http://www.w3.org/2000/svg'/>", text/plain: "<Figure size 1x1>"}, metadata: {}}
+    treatment: text
+    expect_text: "<Figure size 1x1>"
   - id: widget-view
     output: {output_type: display_data, data: {application/vnd.jupyter.widget-view+json: {model_id: "m1", version_major: 2, version_minor: 0}, text/plain: "IntSlider(value=0)"}, metadata: {}}
     treatment: text

@@ -75,7 +75,15 @@ function References({ refs }: { refs: Reference[] }) {
   );
 }
 
-function LabCell({ cell, id, run, controller }: { cell: NbCell; id: string; run: CellRun | undefined; controller: KernelController }) {
+interface CellProps {
+  cell: NbCell;
+  run: CellRun | undefined;
+  controller: KernelController;
+  /** A kernel reset is running: Run is disabled (FR-NOTEBOOK-7). */
+  resetting: boolean;
+}
+
+function LabCell({ cell, id, run, controller, resetting }: CellProps & { id: string }) {
   const original = text(cell.source);
   const [code, setCode] = useState(original);
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -89,7 +97,7 @@ function LabCell({ cell, id, run, controller }: { cell: NbCell; id: string; run:
       el.setSelectionRange(s + 4, s + 4);
     } else if (e.key === 'Enter' && e.shiftKey) {
       e.preventDefault();
-      controller.run(id, e.currentTarget.value);
+      if (!resetting) controller.run(id, e.currentTarget.value);
     }
   };
   const outputs = (run ? run.outputs : (cell.outputs ?? [])) as NbOutput[];
@@ -99,7 +107,7 @@ function LabCell({ cell, id, run, controller }: { cell: NbCell; id: string; run:
     <div className="lab">
       <textarea aria-label="Lab code" spellCheck={false} value={code} onChange={(e) => setCode(e.target.value)} onKeyDown={onKey} rows={Math.min(24, code.split('\n').length + 1)} />
       <div className="lab-controls">
-        <Button size="sm" onClick={() => controller.run(id, code)}>
+        <Button size="sm" disabled={resetting} onClick={() => controller.run(id, code)}>
           Run
         </Button>
         {running && (
@@ -124,7 +132,7 @@ function LabCell({ cell, id, run, controller }: { cell: NbCell; id: string; run:
   );
 }
 
-function CellView({ cell, index, run, controller }: { cell: NbCell; index: number; run: CellRun | undefined; controller: KernelController }) {
+function CellView({ cell, index, run, controller, resetting }: CellProps & { index: number }) {
   const id = cellId(cell, index);
   const r = reader(cell);
   const kind = typeof r.kind === 'string' ? r.kind : undefined;
@@ -150,7 +158,7 @@ function CellView({ cell, index, run, controller }: { cell: NbCell; index: numbe
       )}
       {kind === 'lab' || (cell.cell_type === 'code' && kind === undefined) ? (
         kind === 'lab' ? (
-          <LabCell cell={cell} id={id} run={run} controller={controller} />
+          <LabCell cell={cell} id={id} run={run} controller={controller} resetting={resetting} />
         ) : (
           <Code code={text(cell.source)} language="python" />
         )
@@ -198,10 +206,15 @@ export function LessonView({ notebook, controller }: { notebook: Notebook; contr
               Retry
             </Button>
           )}
+          {state.resetFailed && !state.resetting && (
+            <Button size="sm" variant="outline" color="danger" onClick={() => controller.reset()}>
+              Retry reset
+            </Button>
+          )}
         </div>
       </header>
       {notebook.cells.map((c, i) => (
-        <CellView key={cellId(c, i)} cell={c} index={i} run={state.cells[cellId(c, i)]} controller={controller} />
+        <CellView key={cellId(c, i)} cell={c} index={i} run={state.cells[cellId(c, i)]} controller={controller} resetting={state.resetting} />
       ))}
       <Dialog.Root open={confirm} onOpenChange={setConfirm}>
         <Dialog.Portal>

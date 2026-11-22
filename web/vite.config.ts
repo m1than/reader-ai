@@ -15,6 +15,12 @@ export default defineConfig({
         find: /^hast-util-from-html-isomorphic$/,
         replacement: fileURLToPath(new URL('./node_modules/hast-util-from-html-isomorphic/index.js', import.meta.url)),
       },
+      // micromark decodes named character references; its browser build sets `innerHTML` on a detached element.
+      // Its default build uses a lookup table: no HTML string reaches the DOM (WEB-UI INV-UI-2).
+      {
+        find: /^decode-named-character-reference$/,
+        replacement: fileURLToPath(new URL('./node_modules/decode-named-character-reference/index.js', import.meta.url)),
+      },
     ],
   },
   // WEB-UI FR-UI-9: fonts and images are files, never inlined as data: URLs (the app CSP allows none).

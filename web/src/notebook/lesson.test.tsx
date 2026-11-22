@@ -9,14 +9,15 @@ afterEach(cleanup);
 const notebook = () => readJson<Record<string, unknown>>('spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb');
 const lessons = () => readJson<{ lesson: Record<string, unknown> }>('spec/fixtures/WEB-UI/lessons.json');
 
-const fakeController = () => {
+const fakeController = (overrides: Record<string, unknown> = {}) => {
   const listeners = new Set<() => void>();
-  const state = { cells: {} as Record<string, unknown>, slot: null, session: null, connection: 'none', resetting: false };
+  const state = { cells: {} as Record<string, unknown>, slot: null, session: null, connection: 'none', resetting: false, resetFailed: false, ...overrides };
   return {
     run: vi.fn(),
     runAll: vi.fn(),
     interrupt: vi.fn(),
     reset: vi.fn(),
+    retry: vi.fn(),
     dispose: vi.fn(),
     getState: () => state,
     subscribe: (fn: () => void) => {
@@ -26,10 +27,10 @@ const fakeController = () => {
   };
 };
 
-const view = async (nb = notebook()) => {
+const view = async (nb = notebook(), overrides: Record<string, unknown> = {}) => {
   const { LessonView } = await load(() => import('./LessonView'));
   expect(LessonView).toBeTypeOf('function');
-  const controller = fakeController();
+  const controller = fakeController(overrides);
   render(<LessonView notebook={nb as never} controller={controller as never} />);
   return controller;
 };
@@ -137,6 +138,20 @@ describe('controls and editing (FR-NOTEBOOK-7, FR-NOTEBOOK-9)', () => {
     expect(dialog.textContent).toMatch(/every open lesson/i);
     expect(controller.reset).not.toHaveBeenCalled();
     fireEvent.click(within(dialog).getByRole('button', { name: /^reset$/i }));
+    expect(controller.reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables Run, Shift+Enter and Run all while a reset runs', async () => {
+    const controller = await view(notebook(), { resetting: true });
+    expect((screen.getByRole('button', { name: /^run$/i }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: /run all/i }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.keyDown(screen.getByRole('textbox', { name: /lab code/i }), { key: 'Enter', shiftKey: true });
+    expect(controller.run).not.toHaveBeenCalled();
+  });
+
+  it('offers Retry reset after a failed reset', async () => {
+    const controller = await view(notebook(), { resetFailed: true });
+    fireEvent.click(screen.getByRole('button', { name: /retry reset/i }));
     expect(controller.reset).toHaveBeenCalledTimes(1);
   });
 });

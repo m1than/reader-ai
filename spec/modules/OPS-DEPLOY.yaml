@@ -87,7 +87,9 @@ requirements:
       `postgres.Dockerfile` exactly `reader-postgres-entrypoint.sh`, and `caddy.Dockerfile` (image
       `reader-caddy:local`, V.OPS-DEPLOY-web) exactly `web/package.json`, `web/package-lock.json`, `web/vendor`,
       `web/index.html`, `web/vite.config.ts`, `web/tsconfig.json` and `web/src` into a pinned node build stage, then
-      the built `/web/dist` into the pinned caddy image at `/srv/spa`; no Dockerfile under deploy/** uses `ADD`.
+      the built `/web/dist` into the pinned caddy image at `/srv/spa`; no Dockerfile under deploy/** uses `ADD`, and
+      every `COPY --from=<x>` names a build stage of the same Dockerfile (`FROM … AS <x>`), never an external image.
+      The node stage installs with `npm ci --ignore-scripts` (no package install script runs in the build).
       `deploy/images/caddy.Dockerfile.dockerignore` excludes at least `**/node_modules`, `**/dist`,
       `**/storybook-static` and `**/.env*`. A build of `reader-caddy:local` contains `/srv/spa/index.html` and no
       `.env` file [image: build; opt-in with READER_TEST_IMAGE_BUILD=1, because the node stage runs `npm ci` and
@@ -137,9 +139,10 @@ requirements:
   - id: FR-DEPLOY-7
     text: >-
       `deploy/Caddyfile`: site `localhost` with `tls internal` (ADR-0024); routes `/api/*` → `api` at
-      `10.230.1.10:8000`, `/mcp` → `mcp:8001`, `/` → static files from `/srv/spa` (WEB-UI's SPA in the
-      `reader-caddy:local` image) with `try_files {path} /index.html`, so every other path falls back to the SPA index
-      (deep links such as `/lessons/w01`); headers Strict-Transport-Security, Content-Security-Policy exactly
+      `10.230.1.10:8000`, the exact path `/mcp` → `mcp:8001`, `/assets/*` → files from `/srv/spa/assets` only (a missing
+      asset is a 404, never the SPA index), and every other path → static files from `/srv/spa` (WEB-UI's SPA in the
+      `reader-caddy:local` image) with `try_files {path} /index.html`, so it falls back to the SPA index (deep links such
+      as `/lessons/w01`); headers Strict-Transport-Security, Content-Security-Policy exactly
       `default-src 'self'; img-src 'self' blob:; connect-src 'self' wss://localhost; frame-src 'none'; object-src 'none';
       base-uri 'none'; form-action 'self'; frame-ancestors 'none'` (WEB-UI header; no `data:` and no `'unsafe-inline'`),
       X-Content-Type-Options `nosniff`, Referrer-Policy `no-referrer` on every response;

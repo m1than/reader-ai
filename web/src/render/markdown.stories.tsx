@@ -15,3 +15,5 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Light: Story = { decorators: [themed('light')] };
 export const Dark: Story = { decorators: [themed('dark')] };
+/** Inline math that tries to paint far below its line: clipped (FR-RENDER-3 [browser]). */
+export const RaiseBox: Story = { args: { source: 'before $\\raisebox{-500em}{X}$ after' }, decorators: [themed('light')] };

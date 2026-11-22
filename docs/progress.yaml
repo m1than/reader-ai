@@ -393,7 +393,16 @@ tasks:
         gradient, glass or glow in any story, light and dark). Library vendored from tag v0.1.0 (eae463bc) as
         web/vendor/acme-ui-v0.1.0.tgz, sha256 a1f228e1…8e88, Node 26.13.0, npm 11.20.0; nothing pushed to the
         library. Owner notes: the library's styles.css carries a data: mask URL for the table sort indicator (FR-UI-9
-        note; blocked by the CSP if a table were rendered)." }
+        note; blocked by the CSP if a table were rendered). Code review (fca75a1, single round, 2026-11-22): 3 blockers
+        fixed — SVG renders as text and never becomes a blob (an SVG blob opened top-level ran its script in the app
+        origin, Chromium); a Run all stops on any error reply whatever the label; giving up a reconnect and a 401 in
+        a reconnect POST are lost events. Non-blocking applied: retry() runs the reconnect; INV-NOTEBOOK-1 checked
+        against a reference model with HTTP failures and a socket that rejects early sends; output coercion; Retry
+        reset; inline-math clipping; protocols spread, // links absolute, footnote links via clobberPrefix '' plus a
+        fragment rewrite; decode-named-character-reference aliased to its table build; raster blob URLs revoked on
+        load/error; caddy build with npm ci --ignore-scripts; /assets/* 404 instead of the SPA; COPY --from stage
+        check; one distinct data: URL pinned; NFR-UI-1 110,139 B (threshold 121,153). After the fixes: Vitest 122/122,
+        Playwright Chromium 5/5, tests/deploy 67 passed (incl. the image build), tests/sandbox skipped as asked." }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
       note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2

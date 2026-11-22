@@ -20,6 +20,28 @@ export const Json: Story = {
   args: { output: { output_type: 'execute_result', execution_count: 1, data: { 'application/json': { digest_bits: 256 } }, metadata: {} } },
   decorators: [themed('light')],
 };
+/** VEC-RENDER-1 `svg-script`: renders as text; the [browser] test checks no blob and no script ran. */
+export const SvgScript: Story = {
+  args: {
+    output: {
+      output_type: 'display_data',
+      data: { 'image/svg+xml': "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script><circle r='4'/></svg>" },
+      metadata: {},
+    },
+  },
+  decorators: [themed('light')],
+};
+/** A 1×1 PNG through a short-lived blob: URL. */
+export const Png: Story = {
+  args: {
+    output: {
+      output_type: 'display_data',
+      data: { 'image/png': 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'text/plain': '<Figure>' },
+      metadata: {},
+    },
+  },
+  decorators: [themed('light')],
+};
 export const HtmlAsText: Story = {
   args: { output: { output_type: 'display_data', data: { 'text/html': '<b>bold</b>', 'text/plain': 'bold' }, metadata: {} } },
   decorators: [themed('light')],

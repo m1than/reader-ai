@@ -8,8 +8,10 @@
 # Slice decision (coordinator, after deep-reviewer, 2026-11-21): the sandboxed frame for `text/html` and
 # `image/svg+xml` is deferred to stage 4b. The review reproduced in Chromium a one-click session takeover through a
 # frame page opened top-level, plus two more frame defects; the findings are recorded in `defers` for 4b. In the slice,
-# `text/html` renders its `text/plain` alternative (or its source as text) and `image/svg+xml` renders as an image
-# (an SVG loaded through `<img>` runs no script and loads nothing external). Nothing under `/sandbox/` exists.
+# `text/html` and `image/svg+xml` render their `text/plain` alternative (or their source as text). No SVG blob is
+# ever created: the code review measured in Chromium that an `image/svg+xml` blob URL, opened top-level (a new tab
+# from the image), runs its script in the app origin with the session. Raster images (PNG, JPEG, GIF) keep blob: URLs,
+# revoked as soon as the image has loaded or failed. Nothing under `/sandbox/` exists.
 #
 # Design:
 # - Everything shown in the app document is built as React elements from a syntax tree: remark (GFM, math) → rehype →
@@ -98,22 +100,27 @@ requirements:
   - id: FR-RENDER-2
     text: >-
       Markdown (cell sources and `text/markdown` outputs): remark with GFM and math, then rehype without `rehype-raw`
-      (raw HTML stays text), then `rehype-sanitize` with a schema derived from the default one that: allows on `code`
-      only the classes `language-*`, `math-inline` and `math-display` and on no other element any class; allows no
-      `style`, `srcset` or event attribute and keeps the default `id`/`name` clobber prefix; limits `href` to the
-      protocols http, https and mailto plus relative URLs; and removes `img`, `picture`, `source`, `video`, `audio`,
-      `iframe`, `object`, `embed`, `form`, `input`, `button`, `base` and `style` elements (markdown images are not
-      rendered in the slice). Then `rehype-katex` (FR-RENDER-3), then Shiki on `code` elements with
-      `language-python` (FR-RENDER-4). Links get `rel="noopener noreferrer"` and, when absolute, `target="_blank"`.
-      The tree is rendered with `hast-util-to-jsx-runtime`. [unit]
+      (raw HTML stays text; remark-rehype with `clobberPrefix: ''`, so the sanitiser adds its prefix once, and an
+      in-page link `#x` is then pointed at `#user-content-x` when that id exists, so footnotes work), then
+      `rehype-sanitize` with a schema derived from the default one that: allows on `code` only the classes
+      `language-*`, `math-inline` and `math-display` and on no other element any class; allows no `style`, `srcset` or
+      event attribute and keeps the default `id`/`name` clobber prefix; keeps the default protocol rules of every URL
+      attribute and narrows `href` to http, https and mailto plus relative URLs; and removes `img`, `picture`, `source`,
+      `video`, `audio`, `iframe`, `object`, `embed`, `form`, `input`, `button`, `base` and `style` elements (markdown
+      images are not rendered in the slice). Then `rehype-katex` (FR-RENDER-3), then Shiki on `code` elements with
+      `language-python` (FR-RENDER-4). Links get `rel="noopener noreferrer"` and, when absolute (a scheme, or a
+      protocol-relative `//host`), `target="_blank"`. The tree is rendered with `hast-util-to-jsx-runtime`. [unit]
   - id: FR-RENDER-3
     text: >-
       Math (`$…$` and `$$…$$` in markdown, and `text/latex` outputs): KaTeX with `trust: false`, `strict: "ignore"`,
       `throwOnError: false` (a parse error renders the source in the error colour), `maxSize: 10` (em; a structural
       bound on rule and box sizes), `maxExpand: 1000` and output `htmlAndMathml`. Display math sits in a container with
-      horizontal scrolling and clipped overflow; inline math is clipped to its line box. For `text/latex` outputs one
+      horizontal scrolling and clipped overflow; inline math is an inline block of at most 4em height with
+      `overflow: hidden` and `contain: paint`, so a `\raisebox` or `\rule` cannot paint or lay out outside it (code
+      review; a [browser] check renders `$\raisebox{-500em}{X}$` and the page stays short). For `text/latex` outputs one
       outer delimiter pair (`$$…$$`, `$…$`, `\[…\]`, `\(…\)`) is removed before rendering, and the output renders in
       display mode. `\href`, `\url` and `\includegraphics` render as text, never as links or attributes. [unit]
+      [browser]
   - id: FR-RENDER-4
     text: >-
       Code: Shiki with the JavaScript regex engine, the python grammar and one Calm theme per colour scheme, loaded as
@@ -122,9 +129,11 @@ requirements:
   - id: FR-RENDER-5
     text: >-
       Safe types: `text/plain`, stream and error text render as text nodes in a monospace block with ANSI escape
-      sequences removed; `image/png`, `image/jpeg` and `image/gif` decode base64 into a Blob, and `image/svg+xml` turns
-      its text into a Blob of that type; each renders as `<img>` with a `blob:` URL revoked when the output unmounts and
-      `alt` from the output's `text/plain` when present. `application/json` renders pretty-printed with 2-space
+      sequences removed; `image/png`, `image/jpeg` and `image/gif` decode base64 into a Blob and render as `<img>` with a
+      `blob:` URL that is revoked as soon as the image has loaded or failed (and on unmount), with `alt` from the
+      output's `text/plain` when present; `image/svg+xml` renders as text like `text/html` (its `text/plain`, or its
+      source) and never becomes a blob. A malformed output (a traceback that is not a list of strings, a bundle that is
+      not an object) is coerced, never thrown. `application/json` renders pretty-printed with 2-space
       indentation as text. A single text output longer than 1 MiB is cut at 1 MiB with a "truncated" note (a
       structural bound on DOM size; SRV-KERNEL caps an execution at 16 MiB). [unit]
 
@@ -139,9 +148,10 @@ invariants:
       cases and VEC-NOTEBOOK-1's explain cell]
   - id: INV-RENDER-2
     text: >-
-      Output content of type `text/html` is never parsed as HTML in the app document: for any HTML string, the
-      rendered output is a text node whose text equals the `text/plain` alternative or the HTML source. `image/svg+xml`
-      content is only ever referenced through an `<img src="blob:…">`. [unit, property-based]
+      Output content of type `text/html` or `image/svg+xml` is never parsed or loaded in the app document: for any
+      such string, the rendered output is a text node whose text equals the `text/plain` alternative or the source, and
+      no blob is created for it. [unit, property-based] [browser: VEC-RENDER-1 `svg-script` yields no
+      `img[src^="blob:"]` and runs no script]
 
 nfr: []
 

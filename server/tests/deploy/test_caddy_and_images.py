@@ -39,6 +39,10 @@ def test_caddyfile_text() -> None:
     assert "data:" not in text
     assert "unsafe-inline" not in text
     assert "try_files {path} /index.html" in text
+    # Assets are files only: their handler has a file server and no fallback to the SPA index.
+    assets = text.split("handle /assets/* {", 1)[1].split("}", 1)[0] if "handle /assets/* {" in text else ""
+    assert "file_server" in assets
+    assert "try_files" not in assets
 
 
 # WEB-UI's app CSP (V.OPS-DEPLOY-web, FR-DEPLOY-7).
@@ -157,9 +161,11 @@ def test_caddy_adapt_in_pinned_image() -> None:
     proxies = [n for n in nodes if n.get("handler") == "reverse_proxy"]
     upstreams = {u["dial"] for n in proxies for u in n.get("upstreams", [])}
     assert upstreams == {"10.230.1.10:8000", "mcp:8001"}
-    assert _path_upstreams(nodes) == {"/api/*": {"10.230.1.10:8000"}, "/mcp": {"mcp:8001"}}
+    proxied = {path: ups for path, ups in _path_upstreams(nodes).items() if ups}
+    assert proxied == {"/api/*": {"10.230.1.10:8000"}, "/mcp": {"mcp:8001"}}
     assert any(n.get("handler") == "file_server" for n in nodes)
     assert "/index.html" in json.dumps(config), "SPA fallback (try_files) missing"
+    assert '"/assets/*"' in json.dumps(config), "assets route missing"
     issuers = {i.get("module") for n in nodes for i in n.get("issuers", []) if isinstance(i, dict)}
     assert "internal" in issuers
 

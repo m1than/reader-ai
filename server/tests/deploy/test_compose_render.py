@@ -108,6 +108,19 @@ def test_dockerfile_build_inputs_are_an_allow_list() -> None:
         assert not _instructions(path, "ADD"), path
         sources = {src for args in _instructions(path, "COPY") for src in args[:-1]}
         assert sources == COPY_ALLOW_LIST[path.name], (path.name, sources)
+        # COPY --from=<x> must name a stage of this Dockerfile, never an external image.
+        lines = [ln.split() for ln in path.read_text().splitlines() if ln.split()]
+        stages = {ln[3] for ln in lines if ln[0].upper() == "FROM" and len(ln) >= 4 and ln[2].upper() == "AS"}
+        copies = [ln[1:] for ln in lines if ln[0].upper() == "COPY"]
+        froms = [arg.split("=", 1)[1] for args in copies for arg in args if arg.startswith("--from=")]
+        assert all(f in stages for f in froms), (path.name, froms, stages)
+
+
+def test_caddy_build_runs_no_install_scripts() -> None:
+    text = (DEPLOY / "images" / "caddy.Dockerfile").read_text()
+    installs = [ln for ln in text.splitlines() if ln.strip().startswith("RUN") and "npm ci" in ln]
+    assert installs, "caddy.Dockerfile runs no npm ci"
+    assert all("--ignore-scripts" in ln for ln in installs), installs
 
 
 def test_server_dockerignore_excludes_caches_and_env_files() -> None:

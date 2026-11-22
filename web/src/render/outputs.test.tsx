@@ -57,10 +57,48 @@ describe('safe types (FR-RENDER-5)', () => {
     const json = render(<Output output={{ output_type: 'execute_result', execution_count: 1, data: { 'application/json': { a: [1] } }, metadata: {} }} />);
     expect(json.container.textContent).toBe('{\n  "a": [\n    1\n  ]\n}');
     json.unmount();
-    const svg = render(<Output output={{ output_type: 'display_data', data: { 'image/svg+xml': '<svg/>' }, metadata: {} }} />);
-    expect(created[0]?.type).toBe('image/svg+xml');
-    svg.unmount();
+    const png = render(<Output output={{ output_type: 'display_data', data: { 'image/png': 'iVBORw0KGgo=' }, metadata: {} }} />);
+    expect(created[0]?.type).toBe('image/png');
+    png.unmount();
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:test/1');
+  });
+
+  it('revokes a raster blob URL as soon as the image loads or fails', async () => {
+    const { Output } = await load(() => import('./outputs'));
+    expect(Output).toBeTypeOf('function');
+    for (const event of ['load', 'error'] as const) {
+      vi.mocked(URL.revokeObjectURL).mockClear();
+      const { container, unmount } = render(<Output output={{ output_type: 'display_data', data: { 'image/jpeg': '/9j/4AAQ' }, metadata: {} }} />);
+      const img = container.querySelector('img')!;
+      const src = img.getAttribute('src');
+      expect(src).toMatch(/^blob:/);
+      img.dispatchEvent(new Event(event));
+      expect(URL.revokeObjectURL).toHaveBeenCalledWith(src);
+      unmount();
+      expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('never creates a blob for SVG', async () => {
+    const { Output } = await load(() => import('./outputs'));
+    expect(Output).toBeTypeOf('function');
+    const { container } = render(<Output output={{ output_type: 'display_data', data: { 'image/svg+xml': '<svg/>' }, metadata: {} }} />);
+    expect(created).toEqual([]);
+    expect(container.querySelector('img')).toBeNull();
+    expect(container.querySelector('pre')?.textContent).toBe('<svg/>');
+  });
+
+  it('coerces malformed outputs instead of failing', async () => {
+    const { Output } = await load(() => import('./outputs'));
+    expect(Output).toBeTypeOf('function');
+    for (const bad of [
+      { output_type: 'error', ename: 1, evalue: null, traceback: 'not a list' },
+      { output_type: 'display_data', data: 'not a bundle' },
+      { output_type: 'stream', name: 'stdout', text: ['a', 'b'] },
+    ]) {
+      const { unmount } = render(<Output output={bad as never} />);
+      unmount();
+    }
   });
 
   it('cuts a text output at 1 MiB with a note', async () => {
@@ -73,7 +111,7 @@ describe('safe types (FR-RENDER-5)', () => {
 });
 
 describe('HTML never parsed (INV-RENDER-2)', () => {
-  it('any text/html renders as text equal to text/plain or the source; SVG only via blob img', async () => {
+  it('any text/html or image/svg+xml renders as text equal to text/plain or the source', async () => {
     const { Output } = await load(() => import('./outputs'));
     expect(Output).toBeTypeOf('function');
     await fc.assert(
@@ -89,8 +127,19 @@ describe('HTML never parsed (INV-RENDER-2)', () => {
       }),
       { numRuns: 100 },
     );
-    const { container } = render(<Output output={{ output_type: 'display_data', data: { 'image/svg+xml': '<svg><script>x</script></svg>' }, metadata: {} }} />);
-    expect(container.querySelector('svg, script')).toBeNull();
-    expect(container.querySelector('img')?.getAttribute('src')).toMatch(/^blob:/);
+    await fc.assert(
+      fc.property(fc.string(), fc.option(fc.string(), { nil: undefined }), (svg, plain) => {
+        const data: Record<string, string> = { 'image/svg+xml': `<svg><script>${svg}</script></svg>` };
+        if (plain !== undefined) data['text/plain'] = plain;
+        const { container, unmount } = render(<Output output={{ output_type: 'display_data', data, metadata: {} }} />);
+        const ok =
+          container.querySelector('svg, script, img') === null &&
+          container.querySelector('pre')?.textContent === (plain ?? data['image/svg+xml']);
+        unmount();
+        return ok;
+      }),
+      { numRuns: 100 },
+    );
+    expect(created).toEqual([]);
   });
 });

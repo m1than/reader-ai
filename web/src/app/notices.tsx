@@ -21,7 +21,8 @@ const CATALOGUE: Record<string, string> = {
 
 export const MAX_VISIBLE_NOTICES = 3;
 
-export const noticeText = (code: string): string => CATALOGUE[code] ?? CATALOGUE.unknown!;
+// Own properties only: a code such as `constructor` or `__proto__` must not reach Object.prototype.
+export const noticeText = (code: string): string => (Object.hasOwn(CATALOGUE, code) ? CATALOGUE[code]! : CATALOGUE.unknown!);
 
 export interface Notice {
   id: number;

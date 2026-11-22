@@ -28,9 +28,9 @@
 #   (image outputs as blob: URLs), `connect-src 'self' wss://localhost` (explicit, for engines where 'self' does not
 #   cover wss), `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`. No data: anywhere
 #   (FR-UI-9).
-# - Serving: the built `web/dist` reaches `/srv/spa` (a derived caddy image that copies `web/dist`, or a read-only bind
-#   from OPS-CLI's override; OPS-DEPLOY decides), and an SPA fallback (`try_files {path} /index.html`) for every path
-#   outside `/api/*` and `/mcp*`, so deep links such as `/lessons/w01` load.
+# - Serving (done in V.OPS-DEPLOY-web: the derived image `reader-caddy:local`): the built `web/dist` at `/srv/spa`;
+#   `/assets/*` served as files only (a missing asset is a 404); an SPA fallback (`try_files {path} /index.html`) for
+#   every other path outside `/api/*` and `/mcp`, so deep links such as `/lessons/w01` load.
 # - SRV-LESSON (V4; API fixed by the coordinator 2026-11-21): `GET /api/lessons` →
 #   `{"lessons": [{lesson_id, course_id, course_title, ordinal, title, updated_at, latest_sha256}]}` (VEC-UI-2);
 #   `GET /api/lessons/{lesson_id}` → metadata plus revisions; the notebook only from
@@ -169,10 +169,12 @@ requirements:
     text: >-
       Build: Vite with `build.assetsInlineLimit: 0`, so fonts and images are emitted as files and never inlined as
       `data:` URLs (the app CSP allows none); markdown, math, code highlighting and the lesson view are lazy chunks.
-      [unit] by inspecting the build output for `data:` URLs. The only `data:` URLs allowed in the output are literals
-      that the vendored library's own stylesheet carries (at v0.1.0, one `mask: url("data:image/svg+xml,…")` for the
-      table sort indicator, a component the slice does not render; under the app CSP that mask would be blocked, so it
-      is an owner note for a library change, not an inlined asset).
+      [unit] by inspecting the build output for `data:` URLs. The only `data:` URL allowed in the output is the one
+      literal that the vendored library's own stylesheet carries at v0.1.0 (a `mask: url("data:image/svg+xml,…")` for
+      the table sort indicator, a component the slice does not render; under the app CSP that mask would be blocked, so
+      it is an owner note for a library change, not an inlined asset). The test pins the number of distinct `data:`
+      URLs at exactly 1 (the minifier repeats it for `-webkit-mask`), so a new library literal fails the build check
+      until it is reviewed.
 
 invariants:
   - id: INV-UI-1
@@ -185,7 +187,10 @@ invariants:
     text: >-
       No HTML string ever reaches the app document: no source file under `web/src/` uses `dangerouslySetInnerHTML`,
       `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `DOMParser`, `createContextualFragment`, `eval`,
-      `new Function` or a string `setTimeout`/`setInterval`. A source scan test enforces it. [unit]
+      `new Function` or a string `setTimeout`/`setInterval`. A source scan test enforces it. Dependencies whose browser
+      build parses HTML with the DOM are resolved to their JavaScript builds by `web/vite.config.ts` aliases
+      (`hast-util-from-html-isomorphic` → its parse5 build; `decode-named-character-reference` → its table build); a
+      test checks both aliases. [unit]
   - id: INV-UI-3
     text: >-
       No gradients, glass or glow: no value in the committed Calm token file contains `gradient`, and every story of
@@ -202,14 +207,13 @@ nfr:
   - id: NFR-UI-1
     metric: >-
       gzip size in bytes (Node zlib, level 9) of the initial JavaScript chunks of the lesson-list route in the `vite
-      build` output (lazy chunks excluded), production mode. Measured at Green (2026-11-22, Vite 8.3.8, Node 26.13.0):
-      one initial chunk, 349,994 B raw, 110,131 B gzip (React 19 + ReactDOM, TanStack Router and Query, valibot, the
-      library parts used, the app shell); threshold = measured + 10 %. Lazy chunks, for the record: the lesson view
-      with markdown, KaTeX and the notebook 139,795 B gzip, 187,603 B after the parse5 alias of the [browser] run
-      (vite.config.ts: KaTeX's HTML parsed in JavaScript, not by the DOM, so the app CSP holds; the initial chunk is
-      unchanged at 110,088 B); Shiki core and engine 47,285 B; the python grammar 9,012 B.
-      For comparison, the spike's React-plus-20-component gallery measured 124,206 B (REF-UI-2).
-    threshold: 121144
+      build` output (lazy chunks excluded), production mode. Measured after the code review (2026-11-22, Vite 8.3.8,
+      Node 26.13.0): one initial chunk, 350,012 B raw, 110,139 B gzip (React 19 + ReactDOM, TanStack Router and Query,
+      valibot, the library parts used, the app shell); threshold = measured + 10 %. Lazy chunks, for the record, from
+      the same build: the lesson view with markdown, KaTeX (parsed by parse5) and the notebook 199,283 B; Shiki core and
+      engine 47,284 B; the python grammar 9,012 B. For comparison, the spike's React-plus-20-component gallery measured
+      124,206 B (REF-UI-2).
+    threshold: 121153
     verified_by: test
 
 vectors:

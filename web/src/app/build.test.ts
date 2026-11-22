@@ -34,6 +34,10 @@ describe('build (FR-UI-9)', () => {
     // The vendored library's stylesheet carries data: URLs as literals of its own (FR-UI-9 note); nothing else may.
     const dataUrls = (s: string) => [...s.matchAll(/url\(\s*["']?(data:[^"')]*)/g)].map((m) => m[1]!.replace(/\s+/g, ''));
     const library = new Set(dataUrls(readFileSync(`${webRoot}node_modules/@acme/ui/dist/styles.css`, 'utf8')));
+    // Exactly one library literal (the table sort mask at v0.1.0): a new one fails here until it is reviewed.
+    expect(library.size).toBe(1);
+    // Distinct URLs: the minifier may repeat the literal for a vendor-prefixed property (-webkit-mask).
+    expect(new Set(text.flatMap(dataUrls)).size).toBe(1);
     expect(text.flatMap(dataUrls).filter((u) => !library.has(u))).toEqual([]);
     const withoutLibrary = text.map((t) => [...library].reduce((s, u) => s.split(u).join(''), t.replace(/\s+/g, '')));
     expect(withoutLibrary.flatMap((t) => t.match(/["'`]data:(image|font)\/[^"'`]{0,40}/g) ?? [])).toEqual([]);

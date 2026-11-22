@@ -52,7 +52,7 @@ export const withServices =
 
 /** A kernel controller that holds a fixed state and does nothing. */
 export const staticController = (cells: KernelState['cells'] = {}): KernelController => {
-  const state: KernelState = { cells, slot: null, session: null, connection: 'none', resetting: false };
+  const state: KernelState = { cells, slot: null, session: null, connection: 'none', resetting: false, resetFailed: false };
   return {
     run: () => undefined,
     runAll: () => undefined,

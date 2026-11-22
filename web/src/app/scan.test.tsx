@@ -1,7 +1,9 @@
 // @trace INV-UI-2 FR-UI-8
+import { readFileSync } from 'node:fs';
 import { cleanup, render } from '@testing-library/react';
 import type * as React from 'react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { webRoot } from './testing/fixtures';
 import { load } from './testing/load';
 
 afterEach(cleanup);
@@ -22,6 +24,14 @@ describe('no HTML strings in the app document (INV-UI-2)', () => {
       'eval(x)', 'new Function(x)', "setTimeout('x()', 1)", 'setInterval("x()", 1)',
     ]) expect(findForbidden(snippet)).not.toEqual([]);
     expect(findForbidden('const a = 1;')).toEqual([]);
+  });
+
+  it('the build resolves DOM-parsing dependency builds to their JavaScript builds', () => {
+    const config = readFileSync(`${webRoot}vite.config.ts`, 'utf8');
+    expect(config).toContain("find: /^hast-util-from-html-isomorphic$/");
+    expect(config).toContain('./node_modules/hast-util-from-html-isomorphic/index.js');
+    expect(config).toContain("find: /^decode-named-character-reference$/");
+    expect(config).toContain('./node_modules/decode-named-character-reference/index.js');
   });
 });
 

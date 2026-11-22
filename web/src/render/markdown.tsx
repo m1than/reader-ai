@@ -34,7 +34,8 @@ export const SANITIZE_SCHEMA: SanitizeSchema = {
     ),
     code: [['className', /^language-[\w-]+$/, 'math-inline', 'math-display']],
   },
-  protocols: { href: ['http', 'https', 'mailto'] },
+  // Keep the default protocol rules for every other URL attribute; narrow only href.
+  protocols: { ...defaultSchema.protocols, href: ['http', 'https', 'mailto'] },
 };
 
 /** remark plugin: raw HTML in markdown stays visible as text (no rehype-raw). */
@@ -56,7 +57,8 @@ const linkAttributes = () => (tree: Root) => {
       if (child.type !== 'element') continue;
       if (child.tagName === 'a') {
         child.properties.rel = ['noopener', 'noreferrer'];
-        if (/^[a-z][a-z0-9+.-]*:/i.test(String(child.properties.href ?? ''))) child.properties.target = '_blank';
+        // A scheme, or a protocol-relative `//host`, leaves the app.
+        if (/^([a-z][a-z0-9+.-]*:|\/\/)/i.test(String(child.properties.href ?? ''))) child.properties.target = '_blank';
       }
       visit(child);
     }
@@ -64,13 +66,41 @@ const linkAttributes = () => (tree: Root) => {
   visit(tree);
 };
 
+/**
+ * rehype plugin after sanitising: the sanitiser prefixes every `id` with `user-content-` (DOM clobbering guard), so
+ * an in-page link `#x` (footnotes) is pointed at `#user-content-x` when that id exists — what GitHub does in script.
+ */
+const fragmentLinks = () => (tree: Root) => {
+  const ids = new Set<string>();
+  const collect = (node: Root | Element) => {
+    for (const child of node.children) {
+      if (child.type !== 'element') continue;
+      if (typeof child.properties.id === 'string') ids.add(child.properties.id);
+      collect(child);
+    }
+  };
+  const rewrite = (node: Root | Element) => {
+    for (const child of node.children) {
+      if (child.type !== 'element') continue;
+      const href = child.properties.href;
+      if (child.tagName === 'a' && typeof href === 'string' && href.startsWith('#') && ids.has(`user-content-${href.slice(1)}`))
+        child.properties.href = `#user-content-${href.slice(1)}`;
+      rewrite(child);
+    }
+  };
+  collect(tree);
+  rewrite(tree);
+};
+
 const processor = unified()
   .use(remarkParse)
   .use(remarkGfm)
   .use(remarkMath)
   .use(rawHtmlAsText)
-  .use(remarkRehype)
+  // No prefix here: rehype-sanitize adds its clobber prefix once (footnote ids and their links stay in step).
+  .use(remarkRehype, { clobberPrefix: '' })
   .use(rehypeSanitize, SANITIZE_SCHEMA)
+  .use(fragmentLinks)
   .use(rehypeKatex, KATEX_OPTIONS)
   .use(dropAnnotations)
   .use(linkAttributes);

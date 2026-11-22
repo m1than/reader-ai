@@ -7,7 +7,8 @@ WORKDIR /web
 # storybook-static and any .env out of the context.
 COPY web/package.json web/package-lock.json /web/
 COPY web/vendor /web/vendor
-RUN npm ci --no-audit --no-fund
+# No package install scripts run in the build (supply-chain guard); the build needs none.
+RUN npm ci --no-audit --no-fund --ignore-scripts
 COPY web/index.html web/vite.config.ts web/tsconfig.json /web/
 COPY web/src /web/src
 RUN npx vite build

@@ -155,3 +155,32 @@ sequences:
     steps:
       - {close: 1006, cell_state: {c1: lost}}
       - {recv_on_old_socket: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: lost}}
+  - id: interrupt-during-run-all
+    note: "an execute_reply with status error stops the rest of its Run all, whatever the final label"
+    steps:
+      - {user: run_all, cells: [c1, c2, c3], sent: [e1], cell_state: {c1: running, c2: queued, c3: queued}}
+      - {user: interrupt, request: "POST /api/kernel/sessions/{sid}/interrupt"}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: interrupted, c2: idle, c3: idle}, slot: null, sent: [e1]}
+  - id: timeout-then-error-in-run-all
+    steps:
+      - {user: run_all, cells: [c1, c2], sent: [e1], cell_state: {c1: running, c2: queued}}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, cell_marker: {c1: timed_out}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: timed_out, c2: idle}, slot: null, sent: [e1]}
+  - id: reconnect-post-fails
+    note: "every reconnect try fails at the session POST; giving up is a lost event, so a Run queued meanwhile returns to idle"
+    steps:
+      - {close: 1006, cell_state: {c1: lost}}
+      - {user: run, cell: c2, cell_state: {c2: queued}}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 503, body: {error: kernel_unavailable}}, cell_state: {c2: queued}}
+      - {reconnect_try: 2, http: {request: "POST /api/kernel/sessions", status: 502, body: {error: kernel_upstream}}, cell_state: {c2: queued}}
+      - {reconnect_try: 3, http: {request: "POST /api/kernel/sessions", status: 503, body: {error: kernel_unavailable}}, cell_state: {c2: idle}, session: disconnected, notice: connect_failed}
+  - id: reconnect-post-401-with-queued-run
+    steps:
+      - {close: 1011, cell_state: {c1: lost}}
+      - {user: run, cell: c2, cell_state: {c2: queued}}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 401}, cell_state: {c2: idle}, slot: null, action: "navigate to /api/auth/signin; no further tries"}
+  - id: retry-runs-the-reconnect-procedure
+    steps:
+      - {close: 1013, session: unavailable}
+      - {user: retry, cell_state: {c1: lost}}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 201, body: {session_id: s5}}, result: open, session: s5}

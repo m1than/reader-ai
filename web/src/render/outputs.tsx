@@ -1,6 +1,6 @@
-// Notebook outputs (WEB-RENDER FR-RENDER-1, FR-RENDER-5, INV-RENDER-2). text/html is never parsed: it renders its
-// text/plain alternative or its source as text; SVG renders only as an image through a blob: URL.
-import { useEffect, useState } from 'react';
+// Notebook outputs (WEB-RENDER FR-RENDER-1, FR-RENDER-5, INV-RENDER-2). text/html and image/svg+xml are never parsed
+// or loaded: they render their text/plain alternative or their source as text. Raster images use short-lived blob: URLs.
+import { useEffect, useRef, useState } from 'react';
 import { Latex } from './latex';
 import { Markdown } from './markdown';
 
@@ -44,33 +44,48 @@ const decode = (b64: string): Uint8Array => {
   return out;
 };
 
+/**
+ * A raster image (PNG, JPEG, GIF) from base64 through a blob: URL. The URL is revoked as soon as the image has loaded
+ * or failed, and on unmount, so it cannot be opened later. SVG never comes here: an SVG blob opened top-level runs its
+ * script in the app origin (code review, measured in Chromium), so SVG renders as text (FR-RENDER-5).
+ */
 function BlobImage({ mime, payload, alt }: { mime: string; payload: string; alt: string | undefined }) {
   const [src, setSrc] = useState<string | null>(null);
+  const live = useRef<string | null>(null);
+  const revoke = () => {
+    if (live.current) URL.revokeObjectURL(live.current);
+    live.current = null;
+  };
   useEffect(() => {
-    let url: string | null = null;
     try {
-      const bytes = mime === 'image/svg+xml' ? new TextEncoder().encode(payload) : decode(payload);
-      url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+      const url = URL.createObjectURL(new Blob([decode(payload) as BlobPart], { type: mime }));
+      live.current = url;
       setSrc(url);
     } catch {
       setSrc(null);
     }
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
+    return revoke;
   }, [mime, payload]);
-  return <div data-output="image">{src && <img src={src} alt={alt ?? ''} />}</div>;
+  return <div data-output="image">{src && <img src={src} alt={alt ?? ''} onLoad={revoke} onError={revoke} />}</div>;
 }
 
+const isBundle = (v: unknown): v is MimeBundle => !!v && typeof v === 'object' && !Array.isArray(v);
+
 export function Output({ output }: { output: NbOutput }) {
-  if (output.output_type === 'stream') return <Text text={stripAnsi(joined(output.text))} />;
-  if (output.output_type === 'error') return <Text text={stripAnsi((output.traceback ?? []).join('\n'))} />;
-  const data = output.data ?? {};
+  if (output.output_type === 'stream') return <Text text={stripAnsi(joined(output.text ?? ''))} />;
+  if (output.output_type === 'error') {
+    const tb = Array.isArray(output.traceback) ? output.traceback.map((l) => (typeof l === 'string' ? l : '')) : [];
+    return <Text text={stripAnsi(tb.join('\n'))} />;
+  }
+  const data: MimeBundle = isBundle((output as { data?: unknown }).data) ? output.data : {};
   const mime = pickMime(data);
   const plain = Object.hasOwn(data, 'text/plain') ? stripAnsi(joined(data['text/plain'])) : undefined;
   switch (mime) {
+    // HTML and SVG are never parsed or loaded in the slice: their text/plain alternative, or their source, as text.
     case 'text/html':
       return <Text text={plain ?? joined(data['text/html'])} />;
+    case 'image/svg+xml':
+      return <Text text={plain ?? joined(data['image/svg+xml'])} />;
     case 'text/markdown':
       return (
         <div data-output="markdown">
@@ -83,7 +98,6 @@ export function Output({ output }: { output: NbOutput }) {
           <Latex source={joined(data['text/latex'])} />
         </div>
       );
-    case 'image/svg+xml':
     case 'image/png':
     case 'image/jpeg':
     case 'image/gif':

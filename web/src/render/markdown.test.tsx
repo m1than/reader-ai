@@ -53,6 +53,18 @@ describe('markdown pipeline (FR-RENDER-2)', () => {
     expect(container.querySelector('a[href="/lessons/w01"]')?.getAttribute('target')).toBeNull();
   });
 
+  it('treats a protocol-relative link as absolute and keeps footnote ids and links in step', async () => {
+    const { Markdown } = await load(() => import('./markdown'));
+    expect(Markdown).toBeTypeOf('function');
+    const { container } = render(<Markdown source={'[p](//example.com/x) note[^1]\n\n[^1]: the note'} />);
+    expect(container.querySelector('a[href="//example.com/x"]')?.getAttribute('target')).toBe('_blank');
+    const ref = container.querySelector('a[data-footnote-ref]') ?? container.querySelector('sup a');
+    const target = ref?.getAttribute('href')?.slice(1) ?? '';
+    expect(target).not.toBe('');
+    expect(container.querySelector(`[id="${target}"]`)).not.toBeNull();
+    expect(target).not.toMatch(/user-content-user-content-/);
+  });
+
   it('keeps raw HTML as text and drops markdown images', async () => {
     const { Markdown } = await load(() => import('./markdown'));
     expect(Markdown).toBeTypeOf('function');

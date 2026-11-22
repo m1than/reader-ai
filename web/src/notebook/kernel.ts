@@ -22,6 +22,8 @@ export interface KernelState {
   session: string | null;
   connection: Connection;
   resetting: boolean;
+  /** The last reset failed (e.g. 503); the view offers it again. */
+  resetFailed: boolean;
 }
 
 export interface SocketLike {
@@ -87,7 +89,7 @@ const obj = (v: unknown): Record<string, unknown> => (v && typeof v === 'object'
 const emptyRun = (): CellRun => ({ state: 'idle', outputs: [], executionCount: null, marker: null, notes: [] });
 
 export const createKernelController = (deps: KernelDeps): KernelController => {
-  let state: KernelState = { cells: {}, slot: null, session: null, connection: 'none', resetting: false };
+  let state: KernelState = { cells: {}, slot: null, session: null, connection: 'none', resetting: false, resetFailed: false };
   const listeners = new Set<() => void>();
   let fifo: Array<{ cellId: string; code: string; group: number | null }> = [];
   const groups = new Map<string, number | null>();
@@ -204,6 +206,7 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
   const nextTry = () => {
     if (disposed) return;
     if (tries >= RECONNECT_DELAYS_MS.length) {
+      lost();
       state.connection = 'disconnected';
       state.session = null;
       deps.notify('connect_failed');
@@ -219,7 +222,9 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
         (e: unknown) => {
           if (disposed) return;
           if (statusOf(e) === 401) {
+            lost();
             state.connection = 'none';
+            state.session = null;
             deps.navigateToSignIn();
             emit();
             return;
@@ -266,6 +271,35 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
       return;
     }
     startReconnect();
+  };
+
+  /** An iopub output message as an nbformat output, with its fields checked and coerced; null when malformed. */
+  const toOutput = (type: string, c: Record<string, unknown>): KernelOutput | null => {
+    const str = (v: unknown): string | null => (typeof v === 'string' ? v : Array.isArray(v) && v.every((x) => typeof x === 'string') ? v.join('') : null);
+    const bundle = (v: unknown): Record<string, unknown> | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
+    switch (type) {
+      case 'stream': {
+        const text = str(c.text);
+        const name = c.name === 'stderr' ? 'stderr' : 'stdout';
+        return text === null ? null : { output_type: 'stream', name, text };
+      }
+      case 'display_data':
+      case 'execute_result': {
+        const data = bundle(c.data);
+        if (!data) return null;
+        const out: KernelOutput = { output_type: type, data, metadata: bundle(c.metadata) ?? {} };
+        const transient = bundle(c.transient);
+        if (transient && typeof transient.display_id === 'string') out.transient = { display_id: transient.display_id };
+        if (type === 'execute_result') out.execution_count = typeof c.execution_count === 'number' ? c.execution_count : null;
+        return out;
+      }
+      case 'error': {
+        const tb = Array.isArray(c.traceback) ? c.traceback.filter((x): x is string => typeof x === 'string') : [];
+        return { output_type: 'error', ename: str(c.ename) ?? '', evalue: str(c.evalue) ?? '', traceback: tb };
+      }
+      default:
+        return null;
+    }
   };
 
   const addOutput = (cellId: string, out: KernelOutput) => {
@@ -320,7 +354,8 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
       else final = 'error';
       const count = typeof content.execution_count === 'number' ? content.execution_count : null;
       patch(slot.cellId, { state: final, executionCount: count });
-      if (final === 'error') cancelGroup(groups.get(slot.msgId) ?? null);
+      // Any failed execution stops the rest of its Run all, whatever its final label (error, interrupted, timed out).
+      if (status === 'error') cancelGroup(groups.get(slot.msgId) ?? null);
       state.slot = null;
       interruptFor = null;
       emit();
@@ -345,17 +380,14 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
     const cellId = slot.cellId;
     switch (type) {
       case 'stream':
-        addOutput(cellId, { output_type: 'stream', name: content.name, text: content.text });
-        break;
       case 'display_data':
-        addOutput(cellId, { output_type: 'display_data', data: content.data, metadata: content.metadata, transient: content.transient });
-        break;
       case 'execute_result':
-        addOutput(cellId, { output_type: 'execute_result', data: content.data, metadata: content.metadata, execution_count: content.execution_count });
+      case 'error': {
+        const out = toOutput(type, content);
+        if (!out) return;
+        addOutput(cellId, out);
         break;
-      case 'error':
-        addOutput(cellId, { output_type: 'error', ename: content.ename, evalue: content.evalue, traceback: content.traceback });
-        break;
+      }
       case 'clear_output':
         if (content.wait === true) pendingClear.add(cellId);
         else patch(cellId, { outputs: [] });
@@ -405,12 +437,18 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
     reset: () => {
       if (state.resetting) return;
       state.resetting = true;
+      state.resetFailed = false;
       emit();
       deps.api
         .resetKernel()
         .catch((e: unknown) => {
-          if (statusOf(e) === 401) deps.navigateToSignIn();
-          else deps.notify(statusOf(e) === 503 ? 'kernel_unavailable' : codeOf(e));
+          if (statusOf(e) === 401) {
+            deps.navigateToSignIn();
+            return;
+          }
+          // The reset did not complete: offer it again (FR-NOTEBOOK-8, reset 503 → Retry).
+          state.resetFailed = true;
+          deps.notify(statusOf(e) === 503 ? 'kernel_unavailable' : codeOf(e));
         })
         .finally(() => {
           state.resetting = false;
@@ -419,10 +457,8 @@ export const createKernelController = (deps: KernelDeps): KernelController => {
     },
     retry: () => {
       if (disposed) return;
-      if (state.connection === 'disconnected' || state.connection === 'unavailable') {
-        state.connection = 'none';
-        emit();
-      }
+      // Retry after `disconnected` or `unavailable` runs the reconnect procedure itself (FR-NOTEBOOK-8).
+      if (state.connection === 'disconnected' || state.connection === 'unavailable') startReconnect();
     },
     dispose: () => {
       disposed = true;
