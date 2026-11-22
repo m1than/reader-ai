@@ -1,0 +1,357 @@
+# VEC-DOD-1 — Definition-of-Done index of every user operation (OPS-DOD).
+# Written for this spec on 2026-11-22 from the specs on V/slice-integration, SRV-AGENT/SRV-PIPELINE on
+# V/V.COMPILE-min (draft) and e2e/live/stage-1.sh + e2e/live/lib/passkey_check.py. SRV-TUTOR is not drafted on any
+# branch yet, so `tutor.ask` is all MISSING.
+#
+# A cell (operation × criterion) is exactly one of:
+#   items:   [spec item IDs]        evidence = the tests that @trace those IDs (FR-DOD-5)
+#   live:    [<script>:<label>]     evidence = PASS/FAIL lines of e2e/live scripts (FR-DOD-4)
+#   na:      reason                 criterion does not apply (allowed only per FR-DOD-2)
+#   waived:  {reason, by, date}     owner sign-off; by must be "owner"
+#   missing: what check is needed   a known gap (FR-DOD-3: an error only for operations with gate: enforced)
+# `items` and `live` may appear together. `budget` (latency and cost) carries sourced numbers or `structural`.
+# Every operation starts at gate: tracked; V.DOD-index done = every operation enforced with 0 missing (FR-DOD-3).
+
+version: 1
+
+# Approved specs that no user operation names (FR-DOD-3), with the reason.
+not_user_facing:
+  - { spec: OPS-DOD, reason: "tooling: this index and its verifier" }
+
+criteria:
+  functional:    the operation does what its spec says, end to end where a live check exists
+  security:      authentication, authorisation, isolation, CSRF and hardening hold for this operation
+  privacy:       no secret, token, book text, prompt or model output reaches a log, an artifact or a response it does not belong to
+  a11y:          the web surface passes the axe-core serious/critical checks (web operations only)
+  latency:       p50/p95 within a sourced or structural budget
+  cost:          provider $ and tokens within a sourced budget (operations that call a model only)
+  observability: the operation leaves a structured log line or metric an owner can find it by
+  recovery:      the failure path is defined and tested (fail closed, retry, resume or a clear message)
+
+operations:
+  - id: auth.bootstrap
+    title: Register the first passkey from a one-time bootstrap link
+    surface: [cli, web]
+    specs: [SRV-AUTH, OPS-CLI]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-4, FR-AUTH-5, FR-AUTH-14, FR-CLI-21, INV-AUTH-7]
+        live: ["passkey:bootstrap link issued for live-check (not printed)", "passkey:bootstrap options",
+               "passkey:registration with a per-run software passkey"]
+      security:
+        items: [INV-AUTH-1, INV-AUTH-4, INV-AUTH-7, FR-AUTH-11, FR-AUTH-12]
+        live: ["stage-1:POST without Origin is refused (403)"]
+      privacy: { items: [INV-AUTH-5, INV-CLI-9] }
+      a11y: { missing: "axe-core on /api/auth/bootstrap in the Playwright live suite (V/live-e2e)" }
+      latency: { missing: "no sourced budget; measure bootstrap ceremony p50/p95 in the live suite" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-18] }
+      recovery: { items: [FR-AUTH-5, FR-AUTH-11] }
+
+  - id: auth.signin
+    title: Sign in with a passkey
+    surface: [web]
+    specs: [SRV-AUTH, WEB-UI]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-7, FR-AUTH-8, FR-AUTH-14, FR-UI-5]
+        live: ["passkey:sign-in options", "passkey:sign-in with the same passkey", "passkey:signed in again: /api/me is 200"]
+      security:
+        items: [INV-AUTH-1, INV-AUTH-2, INV-AUTH-3, INV-AUTH-4, INV-AUTH-6, FR-AUTH-10, FR-AUTH-12]
+        live: ["stage-1:anonymous /api/me is 401"]
+      privacy: { items: [INV-AUTH-5] }
+      a11y: { missing: "axe-core on /api/auth/signin in the Playwright live suite" }
+      latency: { missing: "no sourced budget; measure sign-in ceremony p50/p95 in the live suite" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-18] }
+      recovery: { items: [FR-AUTH-11, INV-AUTH-9] }
+
+  - id: auth.signout
+    title: Sign out
+    surface: [web]
+    specs: [SRV-AUTH, WEB-UI]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-9, FR-UI-5]
+        live: ["passkey:signed out: /api/me is 401"]
+      security: { items: [INV-AUTH-3, FR-AUTH-12] }
+      privacy: { items: [INV-AUTH-5] }
+      a11y: { missing: "axe-core on the sign-out control in the Playwright live suite" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for sign-out (FR-AUTH-18 covers failures only)" }
+      recovery: { items: [FR-UI-7] }
+
+  - id: material.ingest
+    title: Add a material to reader.yaml and ingest it (reader-ingest, confined native converter, import job)
+    surface: [cli]
+    specs: [SRV-INGEST, SRV-EVENTS]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-1, FR-INGEST-5, FR-INGEST-6, FR-INGEST-7, FR-INGEST-8, FR-INGEST-9, FR-INGEST-10, FR-INGEST-13, VEC-INGEST-2, VEC-INGEST-3] }
+      security: { items: [FR-INGEST-4, INV-INGEST-3, INV-INGEST-4, INV-INGEST-6] }
+      privacy: { items: [INV-INGEST-5] }
+      a11y: { na: no web surface in the slice (host command; browser upload deferred, owner 2026-11-21) }
+      latency:
+        items: [NFR-INGEST-1]
+        budget: { throughput_pages_per_min_min: 10, source: "ADR-0021 revisit_when; measured 15.69–15.85 confined (spikes/ingest-confine)" }
+      cost: { na: no provider call (local converter) }
+      observability: { items: [FR-INGEST-12, FR-INGEST-15] }
+      recovery: { items: [FR-INGEST-11, FR-INGEST-16, INV-INGEST-2] }
+
+  - id: search.query
+    title: Search the owner's materials (hybrid dense + full text)
+    surface: [api]
+    specs: [SRV-SEARCH]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-SEARCH-7, FR-SEARCH-8, VEC-SEARCH-1, NFR-SEARCH-1] }
+      security: { items: [INV-SEARCH-1, INV-SEARCH-7, FR-AUTH-12] }
+      privacy: { items: [INV-SEARCH-5] }
+      a11y: { na: no web search surface in the slice (api for compile and tutor) }
+      latency:
+        items: [FR-SEARCH-1, INV-SEARCH-8]
+        budget: { p95_ms_max: 30000, source: "structural query timeout FR-SEARCH-1 (one worst batch of 8 = 13.29 s + query 0.93 s, ×2; spikes/embed-service)" }
+      cost: { na: local embedding model, no provider spend }
+      observability: { missing: "no spec requires a search request log line (route, k, result count, duration)" }
+      recovery: { items: [FR-SEARCH-7] }
+
+  - id: lesson.list
+    title: List my lessons
+    surface: [web]
+    specs: [SRV-LESSON, WEB-UI]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-LESSON-7, FR-UI-6, VEC-UI-2] }
+      security: { items: [INV-LESSON-4, FR-LESSON-12] }
+      privacy: { missing: "canary: lesson titles and text never reach api logs" }
+      a11y: { items: [INV-UI-1], missing: "axe-core on / in the Playwright live suite" }
+      latency: { missing: "no sourced budget (NFR-UI-1 bounds bundle bytes, not time)" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for lesson reads" }
+      recovery: { items: [FR-UI-6] }
+
+  - id: lesson.open
+    title: Open a lesson and read it (markdown, math, code, citations, open findings)
+    surface: [web]
+    specs: [SRV-LESSON, WEB-NOTEBOOK, WEB-RENDER, WEB-UI]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-LESSON-8, FR-LESSON-9, FR-NOTEBOOK-1, FR-NOTEBOOK-2, FR-NOTEBOOK-3, FR-RENDER-1, FR-RENDER-2, FR-RENDER-3, FR-RENDER-4, VEC-NOTEBOOK-1] }
+      security: { items: [INV-LESSON-4, INV-RENDER-1, INV-RENDER-2, INV-UI-2, INV-UI-4, INV-NOTEBOOK-2] }
+      privacy: { missing: "canary: lesson cell text never reaches api logs" }
+      a11y: { items: [INV-UI-1, INV-UI-3], missing: "axe-core on /lessons/<id> in the Playwright live suite" }
+      latency: { missing: "no sourced budget for time to first render of a lesson" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for lesson reads" }
+      recovery: { items: [FR-LESSON-9, FR-NOTEBOOK-1] }
+
+  - id: cell.run
+    title: Run a lab cell
+    surface: [web]
+    specs: [SRV-KERNEL, OPS-SANDBOX, WEB-NOTEBOOK]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-KERNEL-2, FR-KERNEL-7, FR-KERNEL-10, FR-NOTEBOOK-4, FR-NOTEBOOK-5, FR-NOTEBOOK-6, FR-SANDBOX-3, VEC-KERNEL-1] }
+      security: { items: [INV-KERNEL-1, INV-KERNEL-2, INV-KERNEL-3, INV-KERNEL-4, INV-SANDBOX-1, INV-SANDBOX-3, INV-SANDBOX-4, FR-KERNEL-8, FR-KERNEL-12] }
+      privacy: { items: [INV-KERNEL-6, INV-SANDBOX-2] }
+      a11y: { missing: "axe-core on a lesson with a run cell and its output in the Playwright live suite" }
+      latency:
+        items: [NFR-KERNEL-1]
+        budget: { p95_ms_max: 500, source: "roadmap SRV-KERNEL row; measured 47 ms median, 51 ms p95 direct to the gateway" }
+      cost: { na: no provider call }
+      observability: { items: [FR-KERNEL-11, INV-KERNEL-6] }
+      recovery: { items: [FR-KERNEL-14, FR-NOTEBOOK-8, INV-NOTEBOOK-1] }
+
+  - id: cell.interrupt
+    title: Interrupt a running cell
+    surface: [web]
+    specs: [SRV-KERNEL, WEB-NOTEBOOK]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-KERNEL-4, FR-NOTEBOOK-7] }
+      security: { items: [INV-KERNEL-1, FR-AUTH-12] }
+      privacy: { items: [INV-KERNEL-6] }
+      a11y: { missing: "axe-core on the Interrupt control in the Playwright live suite" }
+      latency: { missing: "no sourced budget for interrupt-to-idle" }
+      cost: { na: no provider call }
+      observability: { items: [FR-KERNEL-11] }
+      recovery: { items: [FR-KERNEL-10, FR-NOTEBOOK-8] }
+
+  - id: cell.reset
+    title: Reset the notebook kernel (fresh container)
+    surface: [web]
+    specs: [SRV-KERNEL, OPS-SANDBOX, WEB-NOTEBOOK]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-KERNEL-5, FR-SANDBOX-9, FR-NOTEBOOK-7, VEC-KERNEL-2] }
+      security: { items: [INV-SANDBOX-5, INV-SANDBOX-6, INV-KERNEL-5] }
+      privacy: { items: [INV-KERNEL-6] }
+      a11y: { missing: "axe-core on the Reset confirmation in the Playwright live suite" }
+      latency:
+        items: [FR-KERNEL-5, FR-SANDBOX-9]
+        budget: { p95_ms_max: 30000, source: "structural reset deadline FR-KERNEL-5; measured 1.12–1.46 s round trips (OPS-SANDBOX code review)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-KERNEL-11] }
+      recovery: { items: [FR-KERNEL-5, FR-KERNEL-14] }
+
+  - id: cell.run_all
+    title: Run all cells of a lesson
+    surface: [web]
+    specs: [WEB-NOTEBOOK, SRV-KERNEL]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-NOTEBOOK-5, FR-KERNEL-10] }
+      security: { items: [INV-KERNEL-2, FR-KERNEL-10] }
+      privacy: { items: [INV-KERNEL-6] }
+      a11y: { missing: "axe-core on the Run all control in the Playwright live suite" }
+      latency: { missing: "no sourced budget (bounded per cell by FR-KERNEL-10's 60 s timeout)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-KERNEL-11] }
+      recovery: { items: [FR-NOTEBOOK-5, INV-NOTEBOOK-1] }
+
+  - id: lesson.compile
+    title: Compile a lesson with agents (draft, fact-check, review, revise, labs, G2 report)
+    surface: [api]
+    specs: [SRV-PIPELINE, SRV-AGENT, SRV-EVENTS, SRV-LESSON]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-5, FR-PIPELINE-7, FR-PIPELINE-11, FR-PIPELINE-12, FR-AGENT-6, FR-PIPELINE-13] }
+      security: { items: [INV-AGENT-1, INV-AGENT-2, INV-AGENT-3, FR-AGENT-4, FR-AGENT-7] }
+      privacy: { items: [INV-PIPELINE-4, INV-AGENT-5] }
+      a11y: { na: no web surface in the slice (owner route, no compile UI) }
+      latency:
+        items: [NFR-PIPELINE-1]
+        budget: { p95_ms_max: 2700000, source: "45 min per lesson, ADR-0005 / spikes/compile-cost pass criterion; measured 8.3–9.4 min for L02" }
+      cost:
+        items: [FR-AGENT-8, FR-AGENT-9, INV-AGENT-4, VEC-AGENT-1]
+        budget: { usd_per_run_max: 4.35, source: "ADR-0005 per-lesson target (SRV-AGENT run cap); measured $2.42–2.97 for L02" }
+      observability: { items: [FR-AGENT-5, FR-PIPELINE-6] }
+      recovery: { items: [FR-PIPELINE-6, INV-PIPELINE-2, VEC-PIPELINE-2, FR-AGENT-10] }
+
+  - id: lesson.findings
+    title: Read open findings and the G2 report of a compiled lesson
+    surface: [web, api]
+    specs: [SRV-PIPELINE, WEB-NOTEBOOK]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-PIPELINE-8, FR-PIPELINE-10, FR-NOTEBOOK-3, VEC-PIPELINE-3] }
+      security: { items: [INV-PIPELINE-3, INV-PIPELINE-5, INV-LESSON-4] }
+      privacy: { items: [INV-PIPELINE-4] }
+      a11y: { missing: "axe-core on a lesson with open cells in the Playwright live suite" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call (the findings step is deterministic) }
+      observability: { missing: "no spec requires a log line for reading the G2 report" }
+      recovery: { missing: "no defined behaviour when the G2 report is absent or the run is still running" }
+
+  - id: tutor.ask
+    title: Ask the tutor about the open lesson
+    surface: [web]
+    specs: []
+    gate: tracked
+    criteria:
+      functional: { missing: "SRV-TUTOR not drafted (V.TUTOR-min)" }
+      security: { missing: "SRV-TUTOR not drafted" }
+      privacy: { missing: "SRV-TUTOR not drafted" }
+      a11y: { missing: "SRV-TUTOR / WEB tutor surface not drafted" }
+      latency: { missing: "SRV-TUTOR not drafted" }
+      cost: { missing: "SRV-TUTOR not drafted (provider spend per question)" }
+      observability: { missing: "SRV-TUTOR not drafted" }
+      recovery: { missing: "SRV-TUTOR not drafted" }
+
+  - id: stack.backup
+    title: Back up the stack (reader backup DIR)
+    surface: [cli]
+    specs: [OPS-CLI]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-17]
+        live: ["stage-1:reader backup"]
+      security:
+        items: [FR-CLI-17]
+        live: ["stage-1:backup files are 0600"]
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (FR-CLI-17 bounds pg_dump at 600 s, structural)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery: { items: [FR-CLI-17] }
+
+  - id: stack.restore
+    title: Restore the stack from a backup (reader restore DIR)
+    surface: [cli]
+    specs: [OPS-CLI]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-18]
+        live: ["stage-1:reader restore onto the fresh stack", "stage-1:restored database holds this run's live-check passkey"]
+      security: { items: [FR-CLI-18] }
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (FR-CLI-18 bounds pg_restore at 600 s, structural)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery:
+        items: [FR-CLI-18]
+        missing: "stage-1.sh --drill is disabled until S1.OPS-CLI-restore-seed lands"
+
+  - id: stack.up
+    title: Start the stack (reader up)
+    surface: [cli]
+    specs: [OPS-CLI, OPS-DEPLOY, SRV-CONFIG]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-8, FR-CLI-10, FR-DEPLOY-1, FR-DEPLOY-11, VEC-CLI-3]
+        live: ["stage-1:four services healthy, watcher running", "stage-1:reader doctor: all ok", "stage-1:GET /api/healthz is ok"]
+      security:
+        items: [INV-CLI-8, INV-DEPLOY-2, INV-DEPLOY-10, FR-DEPLOY-9]
+        live: ["stage-1:api and worker run as 10001, read-only, cap-drop ALL", "stage-1:postgres runs as 999 with a read-only root",
+               "stage-1:secret files 0600, owned by the service uid", "stage-1:nothing below /run/secrets in docker diff",
+               "stage-1:security headers and CSP"]
+      privacy: { items: [INV-CLI-1, INV-CLI-2, INV-CONFIG-2] }
+      a11y: { na: no web surface }
+      latency:
+        items: [NFR-DEPLOY-1, FR-CLI-10]
+        budget: { p95_ms_max: 180000, source: "FR-CLI-10 health deadline (structural; NFR-DEPLOY-1 120 s plus initdb)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-13, FR-CLI-19] }
+      recovery:
+        items: [INV-CLI-4]
+        live: ["stage-1:re-delivered by the watcher after an api restart", "stage-1:fails closed without the watcher, then reader up restores",
+               "stage-1:postgres restarts without its secret file"]
+
+  - id: stack.down
+    title: Stop the stack (reader down)
+    surface: [cli]
+    specs: [OPS-CLI]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-CLI-1, FR-CLI-7] }
+      security: { items: [INV-CLI-7] }
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (watcher SIGKILL at 15 s is the only bound)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery: { items: [FR-CLI-20] }
+
+  - id: stack.status
+    title: Show stack health (reader status)
+    surface: [cli]
+    specs: [OPS-CLI]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-CLI-13, FR-CLI-15] }
+      security: { items: [FR-CLI-11] }
+      privacy: { items: [INV-CLI-2] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-13] }
+      recovery: { items: [FR-CLI-13] }

@@ -1,0 +1,189 @@
+# OPS-DOD — Definition-of-Done index of every user operation, with automated verification and a per-operation
+# cost and latency report (task V.DOD-index, owner 2026-11-22; it feeds V.cost-optimize).
+#
+# Scope:
+# - The index is data (VEC-DOD-1, spec/fixtures/OPS-DOD/operations.yaml): every user operation × eight fixed criteria,
+#   each cell pointing at spec items (whose traced tests are the evidence), e2e/live check labels, a budget, or an
+#   explicit `na`, `waived` or `missing`.
+# - trace-check gains rule T10 (FR-DOD-3): the index is well-formed, every reference exists, and an operation with
+#   `gate: enforced` has no `missing` cell. Every operation starts `tracked`; V.DOD-index is done when every operation
+#   is `enforced` (0 missing) — the remaining gaps are new checks in their own modules, not in this one.
+# - A verifier, `tools/dod/report.mjs` (FR-DOD-5), reads test and live results plus the cost ledger and timings, and
+#   writes docs/dod/INDEX.md and docs/dod/report.json. `e2e/live/verify-all.sh` calls it last (FR-DOD-10).
+#
+# Initial index (2026-11-22, written from the specs on V/slice-integration and the V/V.COMPILE-min drafts):
+# 19 operations × 8 criteria = 152 cells; 25 `na`, 39 `missing`. Missing per operation: tutor.ask 8 (SRV-TUTOR not
+# drafted); lesson.list 4; lesson.open 4; lesson.findings 4; auth.signout 3; auth.bootstrap 2; auth.signin 2;
+# cell.interrupt 2; cell.run_all 2; stack.restore 2; search.query 1; cell.run 1; cell.reset 1; stack.backup 1;
+# stack.down 1; stack.status 1; material.ingest 0; lesson.compile 0; stack.up 0. By criterion the gaps are mostly
+# a11y (axe-core in the Playwright live suite), latency (no sourced budget), observability (no required log line)
+# and lesson-text privacy canaries.
+#
+# Gate placement: everything here is tooling outside the spec gate (tools/** and docs/** are neither implementation
+# nor tests to tools/lib/repo.mjs). This spec still owns them through `paths` so changes go through it. The one
+# paired tools change it needs: tools/lib/repo.mjs TEST_PATTERNS gains `^tools/dod/.+\.test\.mjs$` (node:test), so
+# these tests carry @trace and count for T3–T5, and tools/ci-local.sh plus .github/workflows/ci.yml run
+# `node --test tools/dod/`. The pattern is limited to tools/dod/ so the existing untraced tools/hooks test is not
+# swept into T3.
+#
+# Evidence granularity: @trace is per file (repo.mjs `traceIds`), so an item's evidence is every test case in every
+# file that traces it; one failing case in such a file fails the item (FR-DOD-6). This is coarse on purpose:
+# it never reports PASS for an item whose file has a failure.
+
+id: OPS-DOD
+title: Definition-of-Done index of user operations — data, trace-check T10, verifier and cost/latency report
+status: draft
+approved_by: null
+approved_at: null
+layer: ops
+track: engineering
+adr: [ADR-0001, ADR-0019, ADR-0005]
+
+paths:
+  - tools/dod/**
+  - docs/dod/**
+  - spec/fixtures/OPS-DOD/**
+
+normative:
+  - id: REF-DOD-1
+    title: pytest — JUnit XML output (`--junitxml`), testcase classname/name/file and failure/error/skipped children
+    url: https://docs.pytest.org/en/stable/how-to/output.html#creating-junitxml-format-files
+  - id: REF-DOD-2
+    title: Vitest — JSON reporter (`--reporter=json`), Jest-compatible assertionResults with status
+    url: https://vitest.dev/guide/reporters.html#json-reporter
+  - id: REF-DOD-3
+    title: Playwright — JSON reporter (`--reporter=json`), suites/specs/tests/results with status and annotations
+    url: https://playwright.dev/docs/test-reporters#json-reporter
+  - id: REF-DOD-4
+    title: axe-core rule impacts (minor, moderate, serious, critical)
+    url: https://github.com/dequelabs/axe-core/blob/develop/doc/API.md#results-object
+
+requirements:
+  - id: FR-DOD-1
+    text: >-
+      The index is spec/fixtures/OPS-DOD/operations.yaml with `version: 1`, a `criteria` map whose keys are exactly
+      functional, security, privacy, a11y, latency, cost, observability, recovery (each with a one-line definition),
+      and `operations`, a list of {id `^[a-z]+\.[a-z_]+$` unique, title, surface ⊆ {web, api, cli}, specs (module
+      ids), gate ∈ {tracked, enforced}, criteria}. `criteria` has an entry for each of the eight keys. An entry is a
+      map with any of: `items` (spec item ids), `live` (labels `<script>:<label>`), `budget`, `na` (a reason),
+      `waived` ({reason, by: owner, date YYYY-MM-DD}), `missing` (what check is needed). An entry has at least one
+      of items, live, na, waived or missing; `na` and `waived` exclude every other key.
+  - id: FR-DOD-2
+    text: >-
+      `na` is allowed only for a11y when `web` is not in the operation's surface, and for cost when the operation
+      makes no provider call (its reason says so). `budget` is allowed only on latency (`p95_ms_max` and/or
+      `p50_ms_max`, or `throughput_pages_per_min_min`) and cost (`usd_per_run_max`, `tokens_per_run_max`), and
+      carries `source`: a spec item, an ADR, a spike result, or the word `structural` followed by its reason. A
+      latency or cost cell without `budget` and not `na`/`waived` must be `missing`.
+  - id: FR-DOD-3
+    text: >-
+      trace-check rule T10 (tools/trace/check.mjs, using tools/dod/index.mjs) reports an error when: the index does
+      not parse or breaks FR-DOD-1/2; an `items` id is not declared in any spec (same namespace as T4); a `live`
+      label does not occur as a check label in its script (`stage-1` = `check "<label>"` in e2e/live/stage-1.sh,
+      `passkey` = `report("<label>"` in e2e/live/lib/passkey_check.py, `slice` = e2e/live/slice.sh when it exists;
+      the script map is data in index.mjs); an `items` id belongs to a draft spec while the operation is
+      `enforced`; an operation with `gate: enforced` has a `missing` cell or an applicable cell with neither items,
+      live nor waived; an approved spec is named by no operation's `specs` and is not listed in the index's
+      `not_user_facing` list with a reason. T10 prints the missing count per operation as information for tracked
+      operations.
+  - id: FR-DOD-4
+    text: >-
+      Result inputs, all under one directory (default e2e/live/out/results/): `pytest.xml` (pytest --junitxml,
+      REF-DOD-1), `vitest.json` (REF-DOD-2), `playwright.json` (REF-DOD-3), `live.log` (the PASS/FAIL lines of the
+      live scripts, each prefixed by its script key, e.g. `stage-1 PASS <label>`), `axe.json` (per page: url and
+      the count of violations by impact), `timings.jsonl` (one object per measurement: {operation, ms, run}), and
+      `ledger.jsonl` (one object per settled provider call: {operation, run_id, model, input_tokens, output_tokens,
+      cache_write_tokens, cache_read_tokens, usd}, exported from SRV-AGENT's settlements by a read-only query in the
+      live script). A missing input file means its evidence is absent, not failed.
+  - id: FR-DOD-5
+    text: >-
+      `node tools/dod/report.mjs --index <yaml> --results <dir> --out <dir>` writes INDEX.md and report.json. Cell
+      status, in this order: `na` → NA; `waived` → WAIVED; any mapped item's evidence or live label FAIL → FAIL; a
+      budget exceeded → FAIL; a11y with any serious or critical axe violation on the operation's pages → FAIL;
+      `missing` present, or a mapped item or label with no evidence in the inputs → MISSING; otherwise PASS. An
+      operation's status is the worst of its cells by FAIL > MISSING > PASS > WAIVED > NA.
+  - id: FR-DOD-6
+    text: >-
+      Item evidence: the test files whose @trace names the item (repo.mjs `loadRepo`), joined to result entries by
+      file path (pytest testcase `file`, Vitest `name` path, Playwright `file`). An item is FAIL when any joined
+      case failed or errored, PASS when at least one joined case passed and none failed, otherwise no evidence.
+      Skipped cases count as no evidence.
+  - id: FR-DOD-7
+    text: >-
+      Cost and latency columns per operation in report.json: samples n; wall ms p50 and p95 (nearest-rank over the
+      operation's timings); input, output, cache-write and cache-read tokens and usd as sum and per-run maximum over
+      `ledger.jsonl` rows of that operation; the budget and its source. INDEX.md shows the same per operation in one
+      table. These columns are V.cost-optimize's baseline.
+  - id: FR-DOD-8
+    text: >-
+      Determinism: operations in index order, criteria in the fixed order of FR-DOD-1, evidence lists sorted, JSON
+      with sorted keys and two-space indent, numbers with fixed precision (ms integer, usd 4 decimals), and no clock
+      or host values except the run ids found in the inputs. The same inputs give byte-identical outputs.
+  - id: FR-DOD-9
+    text: >-
+      Privacy: the report copies only ids, labels from the index, file paths, test names, statuses, counts,
+      durations, token counts and usd. It never copies failure messages, captured output, log text or axe node
+      HTML from the inputs. A `ledger.jsonl` or `timings.jsonl` object with a key outside FR-DOD-4's list stops the
+      report with exit 2 and a fixed message naming the file and key.
+  - id: FR-DOD-10
+    text: >-
+      `e2e/live/verify-all.sh` writes the FR-DOD-4 inputs, runs `report.mjs` last into docs/dod/, prints one line
+      per operation `<status> <id> (<missing> missing, <fail> failed)`, and exits non-zero when any `enforced`
+      operation is FAIL or MISSING. docs/dod/INDEX.md and report.json are committed with the final PR as the
+      evidence of the run that produced them.
+  - id: FR-DOD-11
+    text: >-
+      INDEX.md lists, after the matrix, every MISSING cell as `operation × criterion — what is needed` (from the
+      index's `missing` text or "no evidence in this run for <item/label>"), grouped by operation, so the gap list
+      is the work list.
+
+invariants:
+  - id: INV-DOD-1
+    text: >-
+      For any results inputs, running the report twice gives byte-identical INDEX.md and report.json, and
+      permuting the lines of `live.log`, `timings.jsonl` and `ledger.jsonl` or the order of test cases does not
+      change the outputs (property test).
+  - id: INV-DOD-2
+    text: >-
+      No input text reaches the outputs: with a canary string planted in every free-text field of every input
+      (failure messages, stdout, axe node HTML, Playwright attachments' names), the canary is absent from INDEX.md
+      and report.json (property test).
+  - id: INV-DOD-3
+    text: >-
+      Monotone status: adding a failing result for any mapped item or label never turns a cell from FAIL into
+      anything else, and PASS requires every mapped item and label to have evidence and none to fail (property
+      test over generated indexes and results).
+  - id: INV-DOD-4
+    text: >-
+      T10 accepts exactly the indexes that satisfy FR-DOD-1–3: every VEC-DOD-3 case gives its expected error list,
+      and the committed operations.yaml passes with gate tracked everywhere.
+
+nfr:
+  - id: NFR-DOD-1
+    metric: report.mjs wall time on the full results of one live run (19 operations, ~900 test cases), seconds
+    threshold: 5
+    verified_by: test
+    source: structural — a bound that keeps the report off the critical path of verify-all.sh; checked on VEC-DOD-2 scaled ×10
+
+vectors:
+  - id: VEC-DOD-1
+    source: The initial Definition-of-Done index written for this spec (2026-11-22) from the current specs and live scripts
+    file: spec/fixtures/OPS-DOD/operations.yaml
+  - id: VEC-DOD-2
+    source: >-
+      Synthetic results for a three-operation index (pytest XML, Vitest and Playwright JSON, live.log, axe.json,
+      timings and ledger) with the expected INDEX.md and report.json, written in Red
+    file: spec/fixtures/OPS-DOD/results/
+  - id: VEC-DOD-3
+    source: Hand-written invalid and edge-case indexes with the expected T10 errors (written in Red)
+    file: spec/fixtures/OPS-DOD/t10-cases.yaml
+
+defers:
+  - The new checks that close the 39 missing cells live in their own modules (axe in the Playwright live suite,
+    latency budgets, log lines, lesson-text canaries, SRV-TUTOR); this spec only indexes and verifies them.
+  - V.cost-optimize consumes report.json's cost and latency columns; optimisation itself is not here.
+  - Per-test-case (rather than per-file) traceability would need @trace on test functions; not in v1.
+
+owner_notes:
+  - "The index is the Definition of Done: an operation is done when it is `enforced` and PASS in the latest live run."
+  - "`waived` needs the owner (by: owner) and a date; the agent never writes `by: owner` on its own."
