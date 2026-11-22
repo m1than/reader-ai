@@ -48,6 +48,26 @@ def test_postgres_hardened() -> None:
     assert {"/var/run/postgresql", "/tmp"} <= set(tmpfs_map(pg))  # noqa: S108 - container paths
 
 
+def test_embed_hardened_and_not_a_consumer() -> None:
+    # Paired SRV-SEARCH change (FR-DEPLOY-9, ADR-0028): non-root, read-only, no capabilities, no secrets, 3g.
+    for model in all_renders():
+        embed = model["services"]["embed"]
+        assert embed["image"] == "reader-embed:local"
+        assert embed["build"]["dockerfile"] == "deploy/images/embed.Dockerfile"
+        assert embed["user"] == "10003:10003"
+        assert embed.get("read_only") is True
+        assert embed.get("cap_drop") == ["ALL"]
+        assert NNP in (embed.get("security_opt") or [])
+        assert set(tmpfs_map(embed)) == {"/tmp"}  # noqa: S108 - container path
+        assert int(embed["mem_limit"]) == 3 * GIB
+        assert embed["memswap_limit"] == embed["mem_limit"]
+        assert not embed.get("environment")
+        assert not embed.get("volumes")
+        assert "depends_on" not in embed
+        for name, svc in model["services"].items():
+            assert "embed" not in (svc.get("depends_on") or {}), name
+
+
 def test_caddy_keeps_capabilities_without_additions() -> None:
     caddy = full_render()["services"]["caddy"]
     assert not caddy.get("cap_add")
@@ -119,10 +139,11 @@ def test_every_service_has_a_healthcheck() -> None:
     expected = {
         "postgres": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
         "caddy": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"],
+        "embed": ["CMD", "python", "-I", "-m", "reader.search.embed_service", "--healthcheck"],
     } | {role: ["CMD", "reader-server", "--role", role, "--healthcheck"] for role in SERVER_ROLES}
     for name, test in expected.items():
         assert services[name]["healthcheck"]["test"] == test, name
-    for name in ("postgres", *SERVER_ROLES):
+    for name in ("postgres", "embed", *SERVER_ROLES):
         health = services[name]["healthcheck"]
         assert {k: health.get(k) for k in HEALTH_TIMING} == HEALTH_TIMING, name
 

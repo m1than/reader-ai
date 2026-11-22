@@ -27,7 +27,11 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   adds the blobs mount point owned by 10001 in server.Dockerfile; measured by the SRV-LESSON reviewer (a 10001-owned
   image dir gives a fresh volume 10001:10001 755, writable under --cap-drop ALL --read-only).
   Paired change 2026-11-22 (V.OPS-DEPLOY-web, for WEB-UI): reader-caddy:local derived image with the built SPA,
-  the app CSP of WEB-UI's header, the SPA fallback; the placeholder directory removed."
+  the app CSP of WEB-UI's header, the SPA fallback; the placeholder directory removed.
+  Paired change 2026-11-22 (coordinator-scheduled, for SRV-SEARCH, ADR-0028 accepted by the owner): service `embed`
+  (reader-embed:local, hash-locked dependencies, model baked at a pinned revision, uid 10003, read-only, mem 3g from
+  spikes/embed-service) on its own internal network `embed` with api and worker; pgvector 0.8.7 in reader-postgres;
+  VEC-DEPLOY-2 gains api–embed and worker–embed and the embed negatives (FR-DEPLOY-1, -2, -3, -9, -11)."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -74,7 +78,8 @@ normative:
 requirements:
   - id: FR-DEPLOY-1
     text: >-
-      `deploy/compose.yaml` declares, by profile: default (no profile) `caddy`, `api`, `worker`, `postgres`; profile
+      `deploy/compose.yaml` declares, by profile: default (no profile) `caddy`, `api`, `worker`, `postgres`, `embed`
+      (paired SRV-SEARCH change, ADR-0028); profile
       `kernels` `kernel-verify`, `kernel-agent`, `kernel-pair-1`; profile `agents` `agent-proxy`; profile `mcp` `mcp`.
       Further `kernel-pair-<n>` and every `kernel-<user>` come only from OPS-CLI's override. [config]
   - id: FR-DEPLOY-2
@@ -98,6 +103,20 @@ requirements:
       129 MB measured). As a second guard, `deploy/images/server.Dockerfile.dockerignore` (read by BuildKit next to the
       Dockerfile) excludes at least `**/__pycache__` and `**/.env*`, which the allow-listed `server/src` could
       otherwise carry. [config] Every pinned image resolves and offers `linux/arm64` (ADR-0012). [image: registry]
+      Paired SRV-SEARCH change (ADR-0028, 2026-11-22): `embed` runs `reader-embed:local`, built from
+      `deploy/images/embed.Dockerfile` (context the repository root) `FROM` the pinned python:3.14-slim-trixie digest; it
+      installs its Python dependencies only from `deploy/images/embed.requirements.lock` with `--require-hashes
+      --only-binary :all:` (torch 2.15.0+cpu from the PyTorch CPU index, transformers 5.23.0, sentence-transformers
+      6.3.0 and their closure), copies exactly `deploy/images/embed.requirements.lock`,
+      `server/src/reader/search/__init__.py`, `server/src/reader/search/embed_service.py`,
+      `server/src/reader/search/fetch_model.py` and `server/src/reader/search/models.lock.json` (into site-packages, so
+      `python -I` finds them), runs `fetch_model.py` at build time to download the model files named in
+      models.lock.json at its pinned revision and verify their sha256 (a mismatch fails the build), sets
+      `HF_HUB_OFFLINE=1` and `TRANSFORMERS_OFFLINE=1` as `ENV`, and runs as uid 10003. Its
+      `embed.Dockerfile.dockerignore` excludes at least `**/__pycache__` and `**/.env*`. `postgres.Dockerfile` installs
+      `postgresql-18-pgvector=0.8.7-1.pgdg13+2` from the base image's own PGDG apt source (no new source, no key).
+      A build of `reader-embed:local` starts with `--network none` and answers `/health` [image: build; opt-in with
+      READER_TEST_IMAGE_BUILD=1, because the build downloads about 5 GB].
   - id: FR-DEPLOY-3
     text: >-
       Networks: `edge` (caddy only; `internal: false`); `front` (caddy, api, mcp; internal; ipam subnet 10.230.1.0/24,
@@ -106,6 +125,9 @@ requirements:
       `core` (api, worker, mcp, postgres; internal); `agentnet` (worker, agent-proxy; internal); `egress` (agent-proxy
       only; `internal: false`); per kernel service one internal network shared only with its declared caller (ADR-0022
       routes): `sb-verify` and `sb-agent` with `worker`, `sb-pair-<n>` and `sb-user-<handle>` with `api`. [config]
+      Paired SRV-SEARCH change (ADR-0028): network `embed` (internal) with exactly `api`, `worker` and `embed`; `embed`
+      joins no other network, so it has no route to postgres, mcp, agent-proxy, any kernel or the internet. No service
+      `depends_on` embed (callers wait for its `/health`, SRV-SEARCH FR-SEARCH-5).
   - id: FR-DEPLOY-4
     text: >-
       Compensating control for the kernel networks: `api` serves HTTP only on its `front` address (its command carries
@@ -176,7 +198,11 @@ requirements:
       measurements: no spike recorded a peak for these services (agent-sdk-container ran the agent container under a
       2 GiB limit without recording its peak). The stage-1 live check records each consumer's peak from its cgroup's
       `memory.peak`, and the values are revised from it; the worker's 2g is revisited in stage 3, when it runs ingestion.
-      [config]
+      [config] Paired SRV-SEARCH change (ADR-0028): `embed` runs as `user: "10003:10003"`, `read_only: true`, tmpfs
+      `/tmp` (`size=64m,uid=10003`, the image's HOME), `cap_drop: [ALL]`, `no-new-privileges`, `restart:
+      unless-stopped`, and `mem_limit: 3g` with `memswap_limit: 3g`. 3g is measured, not structural:
+      spikes/embed-service peak RSS 2,410 MiB for the worst admitted request of 8 texts at max_seq_length 1,024, × 1.25.
+      It is not a secret consumer: no `/run/secrets` tmpfs, no `environment`. [config]
   - id: FR-DEPLOY-10
     text: >-
       Secrets follow ADR-0026 (REF-DEPLOY-6):
@@ -213,7 +239,9 @@ requirements:
       server never looks healthy); caddy `["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]`
       (the admin endpoint listens on IPv4 loopback only and busybox wget tries ::1 first for `localhost`; rc=0
       measured in code review); server roles `["CMD", "reader-server", "--role", "<role>", "--healthcheck"]`
-      (implemented by the server modules); kernels per FR-DEPLOY-8; agent-proxy an image-provided command (SRV-AGENT).
+      (implemented by the server modules); kernels per FR-DEPLOY-8; agent-proxy an image-provided command (SRV-AGENT);
+      embed `["CMD", "python", "-I", "-m", "reader.search.embed_service", "--healthcheck"]` with the same timing as the
+      server roles (paired SRV-SEARCH change).
       postgres and the server roles share the timing `interval: 2s`, `timeout: 2s`, `retries: 3`, `start_period: 60s`:
       Docker's default 30 s interval would add up to 30 s per `service_healthy` hop against NFR-DEPLOY-1, and the 60 s
       start period covers initdb on the first start and the wait for delivery. These are structural values, revised

@@ -19,6 +19,8 @@ allowed:
   - [worker, kernel-verify]    # sb-verify
   - [worker, kernel-agent]     # sb-agent
   - [mcp, postgres]            # core
+  - [api, embed]               # embed (ADR-0028)
+  - [worker, embed]            # embed (ADR-0028)
 internet_egress: [caddy, agent-proxy]   # members of the only non-internal networks (edge, egress)
 never:
   # explicit negatives, also implied by `allowed` being exact
@@ -29,3 +31,11 @@ never:
   - [api, agent-proxy]
   - [caddy, postgres]
   - [caddy, worker]
+  - [embed, postgres]          # ADR-0028: embed reaches no store
+  - [embed, mcp]
+  - [embed, agent-proxy]
+  - [embed, caddy]
+  - [embed, kernel-user-ivan]
+  - [embed, kernel-pair-1]
+  - [embed, kernel-verify]
+  - [embed, kernel-agent]

@@ -21,6 +21,11 @@ dependencies = [
   "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
 ]
 
+[project.optional-dependencies]
+# SRV-SEARCH / ADR-0028: the embed service's model runtime, only in the reader-embed image, which installs it from the
+# hash lock deploy/images/embed.requirements.lock (torch from the PyTorch CPU index there: 2.15.0+cpu).
+embed = ["torch==2.15.0", "transformers==5.23.0", "sentence-transformers==6.3.0"]
+
 [project.scripts]
 reader = "reader.cli.app:main"   # OPS-CLI FR-CLI-1
 reader-server = "reader.serve.main:main"   # SRV-AUTH: roles api|worker|mcp, bootstrap-link (FR-DEPLOY-11)
@@ -46,6 +51,7 @@ dev = [
   "ruff>=0.17",
   "testcontainers>=4.15",
   "types-jsonschema>=4.26",   # SRV-LESSON: mypy --strict over reader.lessons.schema
+  "pypdfium2>=5",             # SRV-SEARCH: the [local] bench reads the pilot's text layer (no SRV-INGEST artifact yet)
 ]
 
 [tool.ruff]
@@ -70,6 +76,9 @@ known-first-party = ["reader"]
 # SRV-AUTH: PT018 compound status-and-body assertions read as one HTTP expectation; S603/S608 the tests run the
 # entrypoint as a subprocess and build SQL from fixed table names; ASYNC110 polling the database is the point.
 "tests/auth/**" = ["S101", "PT018", "S603", "S608", "ASYNC110"]
+# SRV-SEARCH: the tests talk to a local HTTP server (S310), run docker and python subprocesses (S603, S607), and
+# build SQL for assertions from fixed names (S608).
+"tests/search/**" = ["S101", "S310", "S603", "S607", "S608", "PT018"]
 
 [tool.mypy]
 strict = true
@@ -77,6 +86,12 @@ python_version = "3.14"
 mypy_path = "src"
 explicit_package_bases = true   # `reader` is a namespace package (no src/reader/__init__.py)
 warn_unreachable = true
+
+# SRV-SEARCH: torch and sentence-transformers live only in the reader-embed image (extra `embed`), not in the dev
+# environment; embed_service keeps them behind a typed Encoder protocol (declared deviation in the spec).
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

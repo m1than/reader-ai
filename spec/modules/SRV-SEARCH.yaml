@@ -16,15 +16,24 @@
 # Cross-spec items (paired changes in their own specs):
 #   - OPS-DEPLOY: service `embed` (mem_limit 3g, memswap_limit 3g, from spikes/embed-service; no cpus limit in the
 #     slice) and network `embed` (internal: true; api, worker, embed), `deploy/images/embed.Dockerfile`
-#     (HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 as ENV; the server package installed with the `embed` extra), new
+#     (HF_HUB_OFFLINE=1 and TRANSFORMERS_OFFLINE=1 as ENV; dependencies installed from the hash-locked
+#     `deploy/images/embed.requirements.lock` with `--require-hashes`; only the files `reader/search/__init__.py`,
+#     `embed_service.py`, `fetch_model.py` and `models.lock.json` copied into site-packages, so the image carries no
+#     config, db or api code; healthcheck `["CMD", "python", "-I", "-m", "reader.search.embed_service",
+#     "--healthcheck"]`), new
 #     VEC-DEPLOY-2 reachability pairs (api→embed, worker→embed allowed; embed→postgres, embed→mcp, embed→agent-proxy,
 #     embed→kernel-*, embed→internet refused); no `depends_on: embed` anywhere; and the reader-postgres image installs
 #     `postgresql-18-pgvector` 0.8.7-1.pgdg13+2 from the image's PGDG apt source (measured 2026-11-21 with
 #     `apt-cache policy` in the pinned postgres:18-trixie digest; the official image ships no pgvector). If PGDG drops
 #     that exact version, the fallback is building pgvector from its v0.8.7 source tag in the same Dockerfile.
 #   - SRV-AUTH: `reader.api.app.ROUTERS` adds `reader.search.routes`; the declared `version_locations` adds
-#     `reader/search/migrations` (branch label `search`, depends_on the ingest branch head); the engine is created with
-#     `hide_parameters=True`, so SQL errors never log bound parameters such as a query text.
+#     `reader/search/migrations` (branch label `search`, down_revision SRV-AUTH's `0001_auth`; see FR-SEARCH-4 for the
+#     ingest dependency); the engine is created with `hide_parameters=True`, so SQL errors never log bound parameters
+#     such as a query text.
+#   - Tests of every module that migrates to heads (auth, jobs, lessons, kernels, search) run Postgres from the pinned
+#     image `pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa`
+#     (the official postgres:18-trixie plus pgvector 0.8.7, the version reader-postgres installs), because this
+#     module's migration is one of the heads and needs the `vector` extension. The conftests change, not the tests.
 #   - SRV-EVENTS: the declared kind-module list adds `reader.search.jobs`.
 #   - SRV-INGEST: after a successful `ingest.import`, the import handler enqueues `search.embed` for that ingest
 #     (FR-SEARCH-5's key); enqueue is idempotent.
@@ -48,12 +57,22 @@
 #     build reads it.
 #   - REF URLs: the pgvector README is pinned to the v0.8.7 tag (the PGDG package version); the bge-m3 card is read at
 #     the revision recorded in models.lock.json.
+#   - SRV-INGEST's code and migration are not on the integration branch yet (built in parallel). So this module's
+#     migration branches off `0001_auth`, `ingest_id` is a plain uuid column without a foreign key, and the [db] tests
+#     create the three SRV-INGEST tables they read (`materials`, `ingests`, `material_spans`, columns as in
+#     SRV-INGEST FR-INGEST-14) through a test-only helper in server/tests/search/. When SRV-INGEST's migration lands, a
+#     follow-up revision (task V.SRV-SEARCH-fk) re-parents this branch onto the ingest head and adds the foreign keys.
+#   - torch and sentence-transformers are not installed in the dev environment (several GB); the module that imports
+#     them (`embed_service`) keeps them behind a typed `Encoder` protocol and mypy treats the two packages as untyped
+#     (`ignore_missing_imports`), so `mypy --strict` still covers every line of reader.search. The real model is
+#     exercised only by the [image] tests and the [local] bench.
+#   - Job kinds are exported as `JOB_KINDS` (SRV-EVENTS' catalog contract), not `KINDS`.
 
 id: SRV-SEARCH
 title: Search (slice) — bge-m3 chunks and Postgres full text, fused by reciprocal rank, with span citations
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: ai
 slice: V.SRV-SEARCH-min
@@ -137,10 +156,16 @@ requirements:
       - **One encode at a time.** Requests wait in one FIFO queue and are encoded one by one, so a query that arrives
         during a passage batch waits at most for that batch.
       - `GET /health` answers 200 `{"model": …}` once the model is loaded, 503 before.
+        `python -I -m reader.search.embed_service --healthcheck` exits 0 when `http://127.0.0.1:8100/health` answers
+        200 within 2 s, else 1 (the compose healthcheck).
       - It logs counts and durations only, never a text.
-      - The module imports neither `reader.config` nor `reader.db`. torch and sentence-transformers come only from the
-        server package's optional extra `embed`, installed in the embed image and in the dev environment (so mypy
-        `--strict` covers the module), not in the api/worker image.
+      - Before handing the directory to sentence-transformers it loads `pytorch_model.bin` itself with
+        `torch.load(path, map_location="cpu", weights_only=True)` through `load_checkpoint()`; a pickle with a global
+        outside torch's allow-list is refused there, and the service exits 1 with code `unsafe_checkpoint`.
+      - The module imports neither `reader.config` nor `reader.db` (nor anything else from `reader` but
+        `reader.search`), and its only third-party imports are torch and sentence-transformers, loaded inside the
+        encoder factory; the HTTP server is the standard library's. torch and sentence-transformers are not in the
+        api/worker image (declared deviation on the dev environment above).
       [unit] with a fake encoder for the protocol, limits and FIFO; [image] for the real model.
   - id: FR-SEARCH-2
     text: >-
@@ -161,24 +186,25 @@ requirements:
       the first such span on a tie. The function is pure and deterministic. [unit]
   - id: FR-SEARCH-4
     text: >-
-      **Tables.** Migration `reader/search/migrations/<rev>_search.py` (branch label `search`, depends_on the ingest
-      branch head) runs `CREATE EXTENSION IF NOT EXISTS vector` (migrations run as the postgres superuser, SRV-AUTH owner
+      **Tables.** Migration `reader/search/migrations/0001_search.py` (revision `search_0001`, branch label `search`,
+      down_revision `0001_auth`; the ingest dependency is the declared deviation above) runs `CREATE EXTENSION IF NOT EXISTS vector` (migrations run as the postgres superuser, SRV-AUTH owner
       note; a later dedicated role needs the extension created beforehand) and creates, each with
       `owner_id uuid NOT NULL` referencing `users.id`:
-      - `search_chunks(id bigint generated always as identity pk, owner_id, ingest_id fk → ingests, material_sha256 text,
+      - `search_chunks(id bigint generated always as identity pk, owner_id, ingest_id uuid (fk → ingests once
+        V.SRV-SEARCH-fk lands), material_sha256 text,
         model text, params_sha256 text, fts_config text CHECK in ('russian','english','simple'), page int, chunk_no int,
         char_start int, char_stop int, span_seqs int[], primary_seq int, text text, fts tsvector generated always as
         (to_tsvector(CASE fts_config WHEN 'russian' THEN 'russian'::regconfig WHEN 'english' THEN 'english'::regconfig
         ELSE 'simple'::regconfig END, text)) stored, embedding vector(1024) NOT NULL)`, unique
         (ingest_id, model, params_sha256, chunk_no), plus `USING gin (fts)`. `fts_config` is text, not `regconfig`,
         because pg_upgrade refuses user tables with reg* columns other than regclass, regrole and regtype.
-      - `search_embeds(owner_id, ingest_id fk, model text, params_sha256 text, chunk_count int, embedded_at)`, pk
+      - `search_embeds(owner_id, ingest_id uuid, model text, params_sha256 text, chunk_count int, embedded_at)`, pk
         (ingest_id, model, params_sha256).
       No vector index (declared deviation). Foreign keys are ON DELETE RESTRICT. The downgrade drops these two tables
       only, not the extension. [db]
   - id: FR-SEARCH-5
     text: >-
-      **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.KINDS`:
+      **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.JOB_KINDS`:
       - **args:** `{material_sha256, ingest_id, model, params_sha256}`; **key:** `[ingest_id, model, params_sha256]`.
         `params_sha256` is the sha256 of the canonical JSON of `{chunk_size, chunk_overlap, chunk_min, max_seq_length,
         model, fts_config}`, so a model, chunking or language change is a new key.
@@ -229,7 +255,11 @@ requirements:
          snippet, score, dense_rank, fts_rank}`. `snippet` is the chunk text cut to 300 characters at the last whitespace
          at or before 300, or hard at 300 when there is none.
       If the embed call fails, the result is the full-text list alone, fused the same way, with `degraded: true`; if
-      both fail, the error propagates. [db] with a fake embed service.
+      both fail, the error propagates. "Current" means the newest `search_embeds` row of the lock's model for each
+      ingest (`ensure` makes a new one after a language change; until then the older chunks are used, owner note).
+      The api and the worker reach the service at `http://embed:8100`; `READER_EMBED_URL` overrides it (tests and the
+      [local] bench, as SRV-AUTH's READER_DB_* variables; the bench publishes the service on 127.0.0.1 for its run
+      only). [db] with a fake embed service.
   - id: FR-SEARCH-8
     text: >-
       **The route.** `POST /api/search` with JSON `{"q": str, "k": int?, "material": str?}` (a body, so the query never
@@ -350,4 +380,4 @@ owner_notes:
   - "While the full pilot embeds (about 22–36 min at 8 CPUs), the worker's single job slot is busy; compile stages wait."
   - "After changing a material's `language` in reader.yaml, run `reader.search.ensure <material>`: search keeps using the old chunks until the new key is embedded, and nothing re-embeds automatically."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Owner accepted ADR-0028 (2026-11-22). spikes/embed-service landed (559bc35): ≤ 8 texts per call, mem_limit 3g, query timeout 30 s. Review complete (one round plus the D1 delta); approval (approved_by: agent) goes in the Red commit."
+review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for the embed service, B2 limits, B3 concurrency, B4 key and transient classes, B5 ingest resolution, B6 health wait / ensure / status map, B7 OR full text, B8 acceptance bar, B9 exact scan, B10 total orders) — all applied with the non-blocking items; one round per policy (track ai, outside the complex areas), ADR-0028 gets its own review. Delta check (d273ca7): B1–B10 closed except D1 (512 tokens cut code and formula chunks: measured 266 / 603 / 740 / 887 tokens for prose / Rust / hex / LaTeX), fixed by max_seq_length 1,024; ADR-0028 approved as a proposed draft, its status is the owner's. Owner accepted ADR-0028 (2026-11-22). spikes/embed-service landed (559bc35): ≤ 8 texts per call, mem_limit 3g, query timeout 30 s. Review complete (one round plus the D1 delta). Approved by agent 2026-11-22 with the Red tests (one round per policy, D1 fixed, spike numbers: 2,410 MiB for 8 texts at cap 1,024 → mem_limit 3g; worst batch of 8 11–13 s at 8 CPUs → query timeout 30 s). At approval: the ingest dependency, the test image and the dev-environment typing are declared deviations (header)."

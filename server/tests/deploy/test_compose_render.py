@@ -26,9 +26,9 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 TAGGED_DIGEST = re.compile(r"^[^@:]+:[^@:/]+@sha256:[0-9a-f]{64}$")
 LOCAL_IMAGES = {
     "reader-server:local", "reader-postgres:local", "reader-kernel:local", "reader-agent-proxy:local",
-    "reader-caddy:local",
+    "reader-caddy:local", "reader-embed:local",
 }
-BASE = {"caddy", "api", "worker", "postgres"}
+BASE = {"caddy", "api", "worker", "postgres", "embed"}  # embed: paired SRV-SEARCH change (FR-DEPLOY-1)
 
 
 @pytest.mark.parametrize(
@@ -98,6 +98,12 @@ COPY_ALLOW_LIST = {
         "web/package.json", "web/package-lock.json", "web/vendor", "web/index.html", "web/vite.config.ts",
         "web/tsconfig.json", "web/src", "/web/dist",
     },
+    # Paired SRV-SEARCH change (FR-DEPLOY-2, ADR-0028): only the embed module files and the hash lock.
+    "embed.Dockerfile": {
+        "deploy/images/embed.requirements.lock", "server/src/reader/search/__init__.py",
+        "server/src/reader/search/embed_service.py", "server/src/reader/search/fetch_model.py",
+        "server/src/reader/search/models.lock.json",
+    },
 }
 
 
@@ -128,6 +134,41 @@ def test_server_dockerignore_excludes_caches_and_env_files() -> None:
     assert path.exists(), path
     patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
     assert {"**/__pycache__", "**/.env*"} <= patterns, patterns
+
+
+def test_embed_dockerignore_excludes_caches_and_env_files() -> None:
+    path = DEPLOY / "images" / "embed.Dockerfile.dockerignore"
+    assert path.exists(), path
+    patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+    assert {"**/__pycache__", "**/.env*"} <= patterns, patterns
+
+
+def test_embed_dockerfile_installs_only_hashed_binaries_and_pins_the_model() -> None:
+    # Paired SRV-SEARCH change (FR-DEPLOY-2): hash-locked wheels only; the model fetched, verified at build.
+    text = (DEPLOY / "images" / "embed.Dockerfile").read_text()
+    installs = [ln for ln in text.splitlines() if "pip install" in ln]
+    assert installs, "embed.Dockerfile installs nothing"
+    for line in installs:
+        assert "--require-hashes" in line, line
+        assert "--only-binary" in line, line
+        assert "embed.requirements.lock" in line, line
+    assert "fetch_model" in text
+    assert "HF_HUB_OFFLINE=1" in text
+    assert "TRANSFORMERS_OFFLINE=1" in text
+    users = [ln.split()[1] for ln in text.splitlines() if ln.split()[:1] == ["USER"]]
+    assert users == ["10003:10003"], users
+    lock = (DEPLOY / "images" / "embed.requirements.lock").read_text()
+    for pin in ("torch==2.15.0", "transformers==5.23.0", "sentence-transformers==6.3.0"):
+        assert pin in lock, pin
+    reqs = [ln for ln in lock.splitlines() if ln and not ln.startswith((" ", "#", "-"))]
+    assert reqs
+    assert all("==" in ln for ln in reqs), reqs
+
+
+def test_postgres_image_installs_pinned_pgvector() -> None:
+    # Paired SRV-SEARCH change (FR-DEPLOY-2): pgvector from the base image's PGDG source, exact version.
+    text = (DEPLOY / "images" / "postgres.Dockerfile").read_text()
+    assert "postgresql-18-pgvector=0.8.7-1.pgdg13+2" in text
 
 
 def test_caddy_dockerignore_excludes_build_outputs_and_env_files() -> None:
