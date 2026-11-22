@@ -539,7 +539,11 @@ tasks:
         (results/fusion-test-v2.json). Hybrid stays below dense-only, so the slice's search() serves the dense order
         (params.HYBRID false; full text only when degraded) — a measured negative result for V.cost-optimize / stage
         3. NFR-SEARCH-1 on the served order: 27 ≥ 27 and ≥ dense-only (pass); v1 dense 30/30. Re-measure on
-        SRV-INGEST's real spans (9,463, V/SRV-INGEST-impl) in the integration run. Awaits code review.",
+        SRV-INGEST's real spans (9,463, V/SRV-INGEST-impl) in the integration run.
+        Code review of dd364ba: changes, fixed in 891d71a (B1) and 428913e (B2–B7, non-blocking). Embed memory with
+        the precheck on mmap, compose's 3g, real start + worst 8-text batch: memory.peak 2,114 MiB cold, 1,153 warm,
+        1,928 in the [image] test, memory.events max 0 (before: 3,459 MiB, max 2,870); 3g kept, ADR-0028 measurement
+        note. Tests: search 71 passed + [image] 6 passed; ci-local PASS.",
       note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
         ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
         ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at
