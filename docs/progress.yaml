@@ -362,7 +362,14 @@ tasks:
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
+      note: "OPS-SANDBOX done (code review approve, PR #34). SRV-KERNEL approved 2026-11-22, green locally on branch
+        V/V.SRV-KERNEL, code review next (complex area, full review): 57 tests in server/tests/kernels (protocol and
+        VEC-KERNEL-1 table with Hypothesis properties; service and VEC-KERNEL-2 reset sequences with a fake clock;
+        relay against an in-memory upstream; upstream client against local servers; routes through the app on
+        Postgres; [image]: first-use reset and print(1) on reader-kernel:local, interrupted sleep and busy loop reply
+        1.49 s after a 1 s test timeout). Paired SRV-AUTH change: ROUTERS adds reader.kernels.routes, Route DELETE,
+        WS_ROUTES, websockets 17.4; three auth-test import blocks re-sorted (ruff 0.17.6 failed them on main too).
+        Earlier: Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2
         changes, round 3 approve. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
         runs; connection-table veto by a cell) fixed: lock-free supervisor with a SIGTERM self-pipe, local 192 / remote

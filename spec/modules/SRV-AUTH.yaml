@@ -247,7 +247,10 @@ requirements:
       for a `recent_session` route with an older session); `public` are exactly `/api/healthz`, the bootstrap and sign-in ceremonies,
       `/api/auth/signout`, and the pages and script of FR-AUTH-14. No GET route writes to the database. The app
       factory includes routers from a declared list, `reader.api.app.ROUTERS`; stage 1 lists only the api and auth
-      routers (SRV-KERNEL adds `reader.kernels.routes` in its own paired change).
+      routers (SRV-KERNEL adds `reader.kernels.routes` in its own paired change). Paired SRV-KERNEL change
+      (2026-11-22): ROUTERS adds `reader.kernels.routes`; a route's `method` may also be `DELETE`; a router module may
+      export `WS_ROUTES` (WebSocket routes, registered under the same CSRF gate, whose handlers authenticate through
+      `store.session_user` themselves); the server dependency `websockets` gives Uvicorn its WebSocket support.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

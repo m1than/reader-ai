@@ -1,0 +1,183 @@
+"""Kernel routes as data (SRV-KERNEL FR-KERNEL-1..7, -11, -13); included through reader.api.app.ROUTERS.
+
+HTTP routes go through SRV-AUTH's dispatcher (`auth: session`). The WebSocket route authenticates itself
+through `store.session_user`, after SRV-AUTH's CSRF gate has checked the Origin (FR-AUTH-12).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncEngine
+from starlette.applications import Starlette
+from starlette.responses import JSONResponse, Response
+from starlette.websockets import WebSocket
+
+from reader.api.http import Ctx, Route, WsRoute, error
+from reader.auth import store
+from reader.auth.policy import SESSION_COOKIE, Settings
+from reader.kernels.protocol import notice
+from reader.kernels.relay import MAX_CONNECTIONS, Hub
+from reader.kernels.service import KernelService, ServiceError
+
+_START_WAIT_S = 10.0
+
+
+def service_of(app: Starlette) -> KernelService:
+    """The process-wide kernel service; tests may install one with an injected resolver first."""
+    svc = getattr(app.state, "kernel_service", None)
+    if not isinstance(svc, KernelService):
+        svc = KernelService()
+        app.state.kernel_service = svc
+    return svc
+
+
+def _err(e: ServiceError) -> Response:
+    return error(e.status, e.code)
+
+
+async def _no_payload(ctx: Ctx) -> bool:
+    """FR-KERNEL-3: no body, or the body `{}` (its JSON type is checked by the CSRF gate)."""
+    body = await ctx.request.body()
+    if not body:
+        return True
+    try:
+        return bool(json.loads(body) == {})
+    except ValueError:
+        return False
+
+
+async def create(ctx: Ctx) -> Response:
+    data = await ctx.json()
+    lesson_id = data.get("lesson_id") if isinstance(data, dict) else None
+    try:
+        status, session = await service_of(ctx.request.app).create(ctx.signed_in.handle, lesson_id)
+    except ServiceError as e:
+        return _err(e)
+    return JSONResponse({"session_id": session.id, "lesson_id": session.lesson_id}, status_code=status)
+
+
+async def list_sessions(ctx: Ctx) -> Response:
+    return JSONResponse({"sessions": service_of(ctx.request.app).list(ctx.signed_in.handle)})
+
+
+async def delete(ctx: Ctx) -> Response:
+    if not await _no_payload(ctx):
+        return error(415, "content_type")
+    try:
+        await service_of(ctx.request.app).delete(ctx.signed_in.handle, ctx.request.path_params["session_id"])
+    except ServiceError as e:
+        return _err(e)
+    return Response(status_code=204)
+
+
+async def interrupt(ctx: Ctx) -> Response:
+    if not await _no_payload(ctx):
+        return error(415, "content_type")
+    try:
+        session_id = ctx.request.path_params["session_id"]
+        await service_of(ctx.request.app).interrupt(ctx.signed_in.handle, session_id)
+    except ServiceError as e:
+        return _err(e)
+    return Response(status_code=204)
+
+
+async def reset(ctx: Ctx) -> Response:
+    if not await _no_payload(ctx):
+        return error(415, "content_type")
+    try:
+        await service_of(ctx.request.app).reset(ctx.signed_in.handle)
+    except ServiceError as e:
+        return _err(e)
+    return Response(status_code=204)
+
+
+ROUTES: tuple[Route, ...] = (
+    Route("POST", "/api/kernel/sessions", "session", create),
+    Route("GET", "/api/kernel/sessions", "session", list_sessions),
+    Route("DELETE", "/api/kernel/sessions/{session_id}", "session", delete),
+    Route("POST", "/api/kernel/sessions/{session_id}/interrupt", "session", interrupt),
+    Route("POST", "/api/kernel/reset", "session", reset),
+)
+
+
+class _Conn:
+    """A Starlette WebSocket as the relay's BrowserConn."""
+
+    def __init__(self, ws: WebSocket) -> None:
+        self.ws = ws
+
+    async def receive(self) -> str | bytes | None:
+        message = await self.ws.receive()
+        if message["type"] == "websocket.disconnect":
+            return None
+        if message.get("text") is not None:
+            return str(message["text"])
+        if message.get("bytes") is not None:
+            return bytes(message["bytes"])
+        return None
+
+    async def send_text(self, text: str) -> None:
+        await self.ws.send_text(text)
+
+    async def close(self, code: int) -> None:
+        await self.ws.close(code)
+
+
+async def _deny(ws: WebSocket, status: int, code: str) -> None:
+    if "websocket.http.response" in ws.scope.get("extensions", {}):
+        await ws.send_denial_response(error(status, code))
+    else:
+        await ws.close(1008)
+
+
+async def channels(ws: WebSocket, settings: Settings, engine: AsyncEngine) -> None:
+    """FR-KERNEL-7: authenticate, find the caller's own session, attach to its relay hub."""
+    if [v for k, v in ws.headers.items() if k == "origin"] != [settings.origin]:
+        await _deny(ws, 403, "origin")
+        return
+    cookie = ws.cookies.get(SESSION_COOKIE)
+    try:
+        user = await store.session_user(engine, cookie)
+    except (SQLAlchemyError, OSError):
+        await _deny(ws, 503, "unavailable")
+        return
+    if user is None:
+        await _deny(ws, 401, "unauthenticated")
+        return
+    svc = service_of(ws.app)
+    try:
+        session = svc.get(user.handle, ws.path_params["session_id"])
+    except ServiceError as e:
+        await _deny(ws, e.status, e.code)
+        return
+    if not svc.user(user.handle).usable:
+        await ws.accept()
+        await ws.send_text(json.dumps(notice("kernel_unavailable")))
+        await ws.close(1013)
+        return
+    current = session.hub
+    fresh = current is None or current.closing
+    hub = Hub(svc, session) if current is None or current.closing else current
+    session.hub = hub
+    if len(hub.attached) >= MAX_CONNECTIONS:
+        await _deny(ws, 409, "too_many_connections")
+        return
+    await ws.accept()
+
+    async def recheck() -> bool:
+        return (await store.session_user(engine, cookie)) is not None
+
+    att = hub.attach(_Conn(ws), recheck)
+    if fresh:
+        await hub.start()
+    else:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(hub.started.wait(), _START_WAIT_S)
+    await hub.serve(att)
+
+
+WS_ROUTES: tuple[WsRoute, ...] = (WsRoute("/api/kernel/sessions/{session_id}/channels", channels),)
