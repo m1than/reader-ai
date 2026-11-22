@@ -5,14 +5,19 @@ container with `docker run` flags equal to OPS-DEPLOY's `x-kernel` template (rea
 deploy/compose.yaml) plus `--restart always`, on a throwaway `--internal` network under the alias `kernel`.
 "From inside the container" means `docker exec` as uid 1000 (the same uid, namespaces, capabilities and
 seccomp as a cell) or a cell run through Kernel Gateway. "The caller" is a probe container on the same
-network. Everything a test creates carries the label `org.reader-ai.test=sandbox` and is removed after the
-test; a session finalizer removes leftovers.
+network. Everything a test creates carries this session's own label
+`org.reader-ai.test.sandbox-run=<pid>.<random>` and is removed after the test. The Docker daemon is shared
+with concurrent sessions (other worktrees, other gates), so the session finalizer removes only objects with
+this session's value, and the session start removes only objects whose pid is no longer alive (a killed
+session runs no finalizer). Another live session's objects are never touched (OPS-SANDBOX header, test
+isolation).
 
 Inputs that do not exist yet (sandbox/Dockerfile, the image) make a test fail on an assertion inside its
 body.
 """
 
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -34,7 +39,10 @@ COMPOSE = REPO / "deploy" / "compose.yaml"
 SERVER_DOCKERFILE = REPO / "deploy" / "images" / "server.Dockerfile"
 PROBES = REPO / "spec" / "fixtures" / "OPS-SANDBOX" / "probes.yaml"
 IMAGE = "reader-kernel:local"
-LABEL = "org.reader-ai.test=sandbox"
+# One label per pytest process: `<key>=<pid>.<random>`. Concurrent sessions share the Docker daemon, so a
+# session removes only what carries its own value, plus what a dead pytest process left behind.
+RUN_KEY = "org.reader-ai.test.sandbox-run"
+LABEL = f"{RUN_KEY}={os.getpid()}.{uuid.uuid4().hex[:8]}"
 NONCE = re.compile(r"^[0-9a-f]{32}$")
 RESET_DEADLINE_S = 30.0  # SRV-KERNEL FR-KERNEL-5
 
@@ -86,17 +94,43 @@ class Build:
 
 @pytest.fixture(scope="session")
 def image() -> Iterator[Build]:
+    sweep(_stale)
     if not DOCKERFILE.exists():
         yield Build(False, "sandbox/Dockerfile does not exist")
     else:
         proc = docker("build", "--platform", "linux/arm64", "-t", IMAGE, "-f", str(DOCKERFILE), str(SANDBOX),
                       timeout=1800)
         yield Build(proc.returncode == 0, (proc.stdout + proc.stderr)[-6000:])
-    leftovers = docker("ps", "-aq", "--filter", f"label={LABEL}").stdout.split()
-    if leftovers:
-        docker("rm", "-f", *leftovers)
-    for net in docker("network", "ls", "-q", "--filter", f"label={LABEL}").stdout.split():
-        docker("network", "rm", net)
+    sweep(lambda value: value == LABEL.split("=", 1)[1])
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _stale(value: str) -> bool:
+    """A run label whose pytest process no longer exists on this host (a killed session runs no finalizer)."""
+    pid = value.split(".", 1)[0]
+    return not (pid.isdigit() and _pid_alive(int(pid)))
+
+
+def sweep(mine: Any) -> None:
+    """Remove the labelled containers, then networks, whose run value satisfies `mine`."""
+    fmt = '{{.ID}} {{.Label "' + RUN_KEY + '"}}'
+    rows = docker("ps", "-a", "--filter", f"label={RUN_KEY}", "--format", fmt).stdout.splitlines()
+    ids = [r.split()[0] for r in rows if len(r.split()) == 2 and mine(r.split()[1])]
+    if ids:
+        docker("rm", "-f", *ids)
+    rows = docker("network", "ls", "--filter", f"label={RUN_KEY}", "--format", fmt).stdout.splitlines()
+    for r in rows:
+        if len(r.split()) == 2 and mine(r.split()[1]):
+            docker("network", "rm", r.split()[0])
 
 
 # A minimal Jupyter client run in a probe container: creates a kernel over REST (optionally with `env`),

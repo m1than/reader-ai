@@ -52,13 +52,20 @@
 # attacks are triggered from inside the container (a cell or `docker exec` as uid 1000), never by `docker stop`/`kill`.
 # [live] runs in `e2e/live/slice.sh` against `reader up`: it signs in with the stage-1 `live-check` software-
 # authenticator session (SRV-AUTH), opens a kernel session through SRV-KERNEL and runs the probe cells there.
+#
+# Test isolation ([image]; 2026-11-22): the Docker daemon is shared by concurrent test sessions (other worktrees,
+# other gates). Each pytest session labels every container and network it creates with
+# `org.reader-ai.test.sandbox-run=<pid>.<random>`, removes only objects carrying its own value at the end, and at the
+# start removes only objects whose `<pid>` is no longer a live process on this host (a killed session runs no
+# finalizer). It never removes another live session's objects. Checked by `test_session_sweep_spares_other_runs`
+# (traced to FR-SANDBOX-9, whose reset round trip the shared-label sweep broke).
 
 id: OPS-SANDBOX
 title: Kernel image (python3), fail-stop in-container supervisor with start nonce and control endpoint, sandbox probes
 status: approved
 approved_by: agent
 approved_at: 2026-11-21
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests. Code review round 2 changes (own-address source classed remote; double close crashed PID 1): FR-SANDBOX-6 (d) classification by destination, peer and interface addresses, idempotent close, per-connection errors contained, with tests. Code review round 3 approve (2026-11-21); applied its notes: own-address test asserts more than 64 open, begin_exit runs outside the contained block"
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21). Green: INV-SANDBOX-5's survivor scan excludes the scanning process itself (its own command line holds the marker); no requirement changed. Code review round 1 changes (SIGTERM deadlock, connection-table veto): paired amendments to FR-SANDBOX-5 (no lock, self-pipe), FR-SANDBOX-6 (d) (local/remote slots), FR-SANDBOX-7 and FR-SANDBOX-8 (PATH without duplicates), with tests. Code review round 2 changes (own-address source classed remote; double close crashed PID 1): FR-SANDBOX-6 (d) classification by destination, peer and interface addresses, idempotent close, per-connection errors contained, with tests. Code review round 3 approve (2026-11-21); applied its notes: own-address test asserts more than 64 open, begin_exit runs outside the contained block. Test-infrastructure fix (2026-11-22, after the investigator's root cause of the load flakes: the session finalizer removed every object with the shared label `org.reader-ai.test=sandbox`, killing concurrent sessions' live containers; supervisor restarts measured 480/480 within 4.0 s under load): per-run labels and scoped sweeps (header note), with a test"
 layer: ops
 track: engineering
 adr: [ADR-0014, ADR-0020, ADR-0022, ADR-0026, ADR-0012]
