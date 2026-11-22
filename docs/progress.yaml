@@ -396,8 +396,6 @@ tasks:
         KINDS from a declared module list; SRV-AUTH ROUTERS + version_locations add ingest; OPS-DEPLOY creates
         /var/lib/reader/blobs owned by 10001 (paired change scheduled). Owner: browser upload deferred (reader.yaml +
         host command instead)." }
-  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
-      note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: in_progress, needs: [S1.live],
       branch: V/V.SRV-LESSON-min,
       review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas;
@@ -503,6 +501,17 @@ tasks:
   - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
       note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
+      branch: V/V.SRV-SEARCH-min,
+      note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 approved by
+        deep-reviewer and accepted by the owner (2026-11-22). BAAI/bge-m3
+        (owner-confirmed 2026-11-21) in service `embed` on its own internal network (api, worker, embed), no secrets,
+        model baked from a pinned revision; one encode at a time, passage batches of 8, query timeout 10 s,
+        max_seq_length 1,024 (reviewer-measured: prose 266, Rust 603, hex 740, LaTeX 887 tokens per 1,200 chars). Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
+        lexemes, RRF k=60, total orders. Acceptance: hybrid hits ≥ dense-only hits in the same run and ≥ 27/40 on
+        questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
+        VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
+        module only; an unhealthy embed service raises EmbedUnavailable, a transient that spends an attempt), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
         spends credit, ledger" }
