@@ -215,7 +215,14 @@ def _doctor_stack(ctx: Ctx, model: Rendered, check: Any) -> None:
         item = False
     volume = docker(ctx, "docker", "volume", "inspect", model.pgdata_volume)
     exists = volume is not None and volume.code == 0
-    check("db-password", item or not exists, "item present" if item else "volume exists without the item")
+    detail = (
+        "item present"
+        if item
+        else "volume exists without the item"
+        if exists
+        else "not generated yet (fresh install)"
+    )
+    check("db-password", item or not exists, detail)
     services = ps(ctx, model.name) or []
     running = any(s.get("State") == "running" for s in services)
     check("watcher", watcher_running(ctx) or not running, "running" if watcher_running(ctx) else "stopped")

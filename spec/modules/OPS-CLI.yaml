@@ -217,7 +217,8 @@ requirements:
       reports major version ≥ 2 (the delivery mechanism was measured on Compose 5.6.1, REF-CLI-7); the keyring backend is
       the macOS Keychain and answers a lookup; reader.yaml loads; every reference of FR-CLI-5 resolves (the value is
       discarded at once, and `detail` holds only the code on failure); every `hostfile` reference passes FR-CLI-2's
-      checks; the Keychain item `reader-ai-system/postgres` exists or the pgdata volume does not; the watcher runs while
+      checks; the Keychain item `reader-ai-system/postgres` exists or the pgdata volume does not (detail: `item present`,
+      `not generated yet (fresh install)`, or `volume exists without the item`); the watcher runs while
       the stack runs; every root recorded by `reader trust` is still trusted. No check prints a value.
   - id: FR-CLI-16
     text: >-
