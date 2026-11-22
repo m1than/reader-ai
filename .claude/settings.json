@@ -5,7 +5,8 @@
       "Bash(bash e2e/live/verify-all.sh *)",
       "Bash(bash e2e/live/verify-all.sh)",
       "Bash(bash spikes/tutor-call/run.sh)",
-      "Bash(bash spikes/tutor-call/run.sh *)"
+      "Bash(bash spikes/tutor-call/run.sh *)",
+      "Bash(bash /Users/m1than/Developer/reader-ai-tutor/spikes/tutor-call/run.sh)"
     ],
     "deny": [
       "Read(~/Developer/.token_tg_bot)",
