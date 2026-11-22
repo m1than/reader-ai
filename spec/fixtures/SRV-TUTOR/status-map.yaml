@@ -13,5 +13,6 @@ cases:
   - {row: queued,   job: dead, outcome: exhausted, age_s: 200, expect: {state: failed, error_code: tutor_failed, busy: false}}
   - {row: queued,   job: dead, outcome: timeout,   age_s: 200, expect: {state: failed, error_code: tutor_failed, busy: false}}
   - {row: queued,   job: dead, outcome: stalled,   age_s: 200, expect: {state: failed, error_code: tutor_failed, busy: false}}
+  - {row: queued,   job: succeeded, age_s: 30,  expect: {state: failed, error_code: tutor_failed, busy: false}}  # the job ended, the row did not
   - {row: queued,   job: queued,    age_s: 601, expect: {state: expired, busy: false}}   # TTL wins over a waiting job
   - {row: queued,   job: running,   age_s: 601, expect: {state: queued, busy: true}}     # a running call finishes or the job dies

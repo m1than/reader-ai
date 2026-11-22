@@ -4,6 +4,8 @@
 sent:
   s1: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:1", text: "Each block carries a nonce. Miners vary the nonce until the hash of the block header is below a target."}
   s2: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:7", text: "The target is adjusted every 2016 blocks so that one block is found about every ten minutes."}
+  # s3 is in decomposed form (й = и + U+0306, ё = е + U+0308); synthetic Russian, as the pilot's material.
+  s3: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:9", text: "Каждый майнер перебирает её до нахождения хеша."}
 cases:
   - name: supported
     output: {blocks: [{text: "Miners search for a nonce.", spans: [s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
@@ -17,6 +19,15 @@ cases:
   - name: quote-checked-against-first-kept-alias
     output: {blocks: [{text: "x", spans: [s9, s2], quote: "adjusted every 2016 blocks so that"}], insufficient: false}
     expect: {blocks: [{kept: [s2], supported: true}], grounded: true}
+  - name: s1-quote-with-s2-first-is-unsupported
+    output: {blocks: [{text: "x", spans: [s2, s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [s2, s1], supported: false}], grounded: false}
+  - name: s1-quote-cited-to-s2-only-is-unsupported
+    output: {blocks: [{text: "x", spans: [s2], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [s2], supported: false}], grounded: false}
+  - name: nfc-decomposed-source-composed-quote
+    output: {blocks: [{text: "x", spans: [s3], quote: "майнер перебирает её до нахождения хеша"}], insufficient: false}
+    expect: {blocks: [{kept: [s3], supported: true}], grounded: true}
   - name: quote-too-short
     output: {blocks: [{text: "x", spans: [s1], quote: "a nonce"}], insufficient: false}
     expect: {blocks: [{kept: [s1], supported: false}], grounded: false}
