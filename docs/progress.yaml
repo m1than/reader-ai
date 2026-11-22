@@ -519,7 +519,21 @@ tasks:
       note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
-      branch: V/V.SRV-SEARCH-min,
+      branch: V/SRV-SEARCH-impl,
+      impl: "Spec approved by agent (6e37914, with Red). Green 1890712, 740b548: reader.search (embed service, chunking,
+        RRF, OR full text, search(), POST /api/search, search.embed job, ensure, migration search_0001), embed image
+        (hash-locked wheels, model verified by sha256 at build, 5.6 GB), pgvector 0.8.7 in reader-postgres, compose
+        embed service on its own network; paired SRV-AUTH (ROUTERS, VERSION_LOCATIONS, hide_parameters) and OPS-DEPLOY
+        (FR-1/2/3/9/11, VEC-DEPLOY-2) changes; module tests run Postgres from pgvector/pgvector:0.8.7-pg18-trixie.
+        Tests: search 57 passed (unit + db), [image] 4 passed (build, offline embed, no text in logs, weights_only
+        refuses a non-allow-listed global, real checkpoint loads); ci-local PASS. [local] bench 2026-11-22 (pilot
+        PDF, pypdfium2 page text as spans because no SRV-INGEST artifact exists yet; real embed image, batches of 8):
+        2,285 chunks (= the spike's), embed job 17.18 min, 0 truncated chunks. questions-v2 hits at 10: dense 27,
+        full text 14, hybrid 24 (recall@1 0.225, @3 0.425, MRR 0.338, 0 empty full-text lists); questions-v1: dense
+        30, full text 26, hybrid 29 of 30. NFR-SEARCH-1 FAILS: hybrid 24 < dense-only 27 and < 27; NFR-SEARCH-2
+        (0.967 ≥ 0.8), -3 (17.18 ≤ 60) and -4 (0 truncated) pass. Dense reproduces the spike's 0.675 exactly, so the
+        embed path is right; equal-weight RRF with the weak OR full-text list (14/40) costs 3 hits. Fusion is not
+        tuned against the acceptance set; decision needed (coordinator/owner).",
       note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
         ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
         ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at
