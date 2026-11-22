@@ -1,0 +1,21 @@
+{
+  "name": "reader-live-e2e",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Live browser checks against the running stack (`reader up`), driven by e2e/live/verify-all.sh. Outside the spec gate, like e2e/live.",
+  "engines": {
+    "node": ">=26 <27"
+  },
+  "scripts": {
+    "test": "playwright test -c playwright.live.config.ts",
+    "list": "playwright test -c playwright.live.config.ts --list",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@playwright/test": "1.65.1",
+    "@types/node": "^26.6.6",
+    "typescript": "^7.0.2"
+  }
+}

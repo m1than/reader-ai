@@ -44,6 +44,12 @@ def test_services_by_profile(profiles: tuple[str, ...], expected: set[str]) -> N
     assert set(render(profiles)["services"]) == expected
 
 
+def test_agent_proxy_never_pulls() -> None:
+    services = render(("agents",))["services"]
+    assert services["agent-proxy"]["pull_policy"] == "never"
+    assert all("pull_policy" not in body for name, body in services.items() if name != "agent-proxy")
+
+
 def test_server_roles_share_one_built_image() -> None:
     services = render(("mcp",))["services"]
     for role in ("api", "worker", "mcp"):
@@ -151,7 +157,8 @@ def test_volumes_and_mounts() -> None:
     assert named["postgres"] == {"pgdata"}
     assert {n for n, vols in named.items() if "pgdata" in vols} == {"postgres"}
     assert {n for n, vols in named.items() if "blobs" in vols} == {"api", "worker"}
-    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES}  # server roles: the override's bind
+    # server roles and agent-proxy: the override's reader.yaml bind
+    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES, "agent-proxy"}
     caddy_binds = {(m["target"], m.get("read_only", False)) for m in binds["caddy"]}
     assert caddy_binds == {("/etc/caddy/Caddyfile", True)}  # the SPA is in the reader-caddy image
     labels = {
@@ -181,16 +188,18 @@ def test_base_has_no_bind_on_server_roles() -> None:
         assert not any(_binds(services[r]) for r in SERVER_ROLES if r in services), profiles
 
 
-def test_override_binds_the_config_file_into_server_roles_only() -> None:
+def test_override_binds_the_config_file_into_server_roles_and_agent_proxy_only() -> None:
     services = render(PROFILES, override=True)["services"]
     with_config = {
         name for name, svc in services.items()
         if any(m["target"] == CONFIG_BIND["target"] for m in svc.get("volumes") or [])
     }
-    assert with_config == set(SERVER_ROLES)
-    for role in SERVER_ROLES:
+    assert with_config == {*SERVER_ROLES, "agent-proxy"}
+    for role in (*SERVER_ROLES, "agent-proxy"):
         assert _binds(services[role]) == [CONFIG_BIND], role
+    for role in SERVER_ROLES:
         assert services[role]["environment"] == {"READER_CONFIG": CONFIG_BIND["target"]}, role
+    assert not services["agent-proxy"].get("environment")
 
 
 def test_caddy_volumes_only_in_caddy() -> None:
