@@ -1,0 +1,195 @@
+"""Browser part of the live checks: prepares the learner `live-check`, runs the Playwright suite, guards the artifacts.
+
+Run by e2e/live/verify-all.sh through the server environment (`uv run --project server`). Prints one
+`PASS name (Ns)` / `FAIL name` / `SKIP name` line per check and exits with the number of failures.
+
+Steps:
+  1. Caddy's local root (public) is fetched, and its SPKI hash computed so Chromium trusts it without certificate
+     errors (WebAuthn refuses pages with certificate errors).
+  2. live-check is reset (credentials and sessions) and the fixture lesson F01 loaded into its account.
+  3. A bootstrap token is issued inside the api container (as passkey_check.py does) and handed to the Playwright
+     process through its environment only; the full environment of this process is never passed on.
+  4. After the run, every artifact is scanned for the token (zip members included). Any hit is scrubbed and is a FAIL.
+     Cookie and session-cookie values in the trace are redacted.
+"""
+
+from __future__ import annotations
+
+import argparse
+import base64
+import hashlib
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+import zipfile
+from pathlib import Path
+
+from cryptography import x509
+from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from passkey_check import EXISTS_SQL, RESET_SQL, bootstrap_token, compose, psql  # noqa: E402
+
+HANDLE = "live-check"
+PLAYWRIGHT_TIMEOUT_S = 20 * 60  # whole browser suite; each step inside is bounded by its own timeout
+COOKIE_RES = [
+    re.compile(rb'("name"\s*:\s*"(?:[Cc]ookie|[Ss]et-[Cc]ookie)"\s*,\s*"value"\s*:\s*")[^"]*'),
+    re.compile(rb'("name"\s*:\s*"__Host-[^"]*"\s*,\s*"value"\s*:\s*")[^"]*'),
+]
+failures = 0
+
+
+def line(status: str, name: str, extra: str = "") -> None:
+    global failures
+    if status == "FAIL":
+        failures += 1
+    print(f"{status} {name}" + (f" {extra}" if extra else ""), flush=True)
+
+
+def node_path() -> str:
+    preferred = "/opt/homebrew/opt/node@26/bin"
+    return f"{preferred}:{os.environ.get('PATH', '')}" if Path(preferred).is_dir() else os.environ.get("PATH", "")
+
+
+def fetch_root(project: str, dest: Path) -> str | None:
+    done = compose(project, "exec", "-T", "caddy", "cat", "/data/caddy/pki/authorities/local/root.crt")
+    if done.returncode != 0 or not done.stdout.strip():
+        return None
+    dest.write_bytes(done.stdout)
+    cert = x509.load_pem_x509_certificate(done.stdout)
+    spki = cert.public_key().public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
+    return base64.b64encode(hashlib.sha256(spki).digest()).decode()
+
+
+def load_fixture(project: str) -> bool:
+    done = compose(project, "exec", "-T", "api", "python", "-I", "-m", "reader.lessons.fixture", "load",
+                   "--handle", HANDLE, timeout=120)
+    return done.returncode == 0
+
+
+def redact_cookies(path: Path) -> None:
+    """Rewrite a trace zip with Cookie / Set-Cookie / __Host-* values blanked."""
+    tmp = path.with_suffix(".tmp")
+    with zipfile.ZipFile(path) as src, zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            if info.filename.endswith((".trace", ".network", ".json", ".jsonl")):
+                for pattern in COOKIE_RES:
+                    data = pattern.sub(rb"\1[redacted]", data)
+            dst.writestr(info, data)
+    tmp.replace(path)
+
+
+def scrub_token(out: Path, token: bytes) -> list[str]:
+    """Paths (or zip members) that contained the token; text files are scrubbed in place, the rest deleted."""
+    hits: list[str] = []
+    for f in sorted(p for p in out.rglob("*") if p.is_file()):
+        raw = f.read_bytes()
+        if zipfile.is_zipfile(f):
+            with zipfile.ZipFile(f) as z:
+                if any(token in z.read(m) for m in z.namelist()):
+                    hits.append(str(f.relative_to(out)))
+                    f.unlink()
+            continue
+        if token in raw:
+            hits.append(str(f.relative_to(out)))
+            if f.suffix in {".log", ".json", ".txt", ".md"}:
+                f.write_bytes(raw.replace(token, b"[redacted]"))
+            else:
+                f.unlink()
+    return hits
+
+
+def walk_results(node: dict[str, object], prefix: str = "") -> list[tuple[str, str, float]]:
+    found: list[tuple[str, str, float]] = []
+    for spec in node.get("specs", []):  # type: ignore[union-attr]
+        title = str(spec["title"])  # type: ignore[index]
+        for t in spec["tests"]:  # type: ignore[index]
+            results = t.get("results") or [{}]
+            r = results[-1]
+            status = {"passed": "PASS", "skipped": "SKIP"}.get(str(r.get("status", t.get("status"))), "FAIL")
+            found.append((status, prefix + title, float(r.get("duration", 0)) / 1000))
+    for suite in node.get("suites", []):  # type: ignore[union-attr]
+        found += walk_results(suite)  # type: ignore[arg-type]
+    return found
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--project", required=True)
+    parser.add_argument("--url", default="https://localhost")
+    parser.add_argument("--out", required=True)
+    parser.add_argument("--suite", required=True, help="e2e/web/live")
+    args = parser.parse_args()
+    out = Path(args.out)
+    suite = Path(args.suite)
+    out.mkdir(parents=True, exist_ok=True)
+
+    root_pem = out / "caddy-root.crt"  # public certificate
+    spki = fetch_root(args.project, root_pem)
+    line("PASS" if spki else "FAIL", "browser: Caddy local root fetched, SPKI pinned for Chromium")
+    if not spki:
+        return failures
+
+    code, count = psql(args.project, EXISTS_SQL)
+    if code != 0 or count != "1":
+        line("FAIL", "browser: live-check is a configured learner")
+        return failures
+    code, _ = psql(args.project, RESET_SQL)
+    line("PASS" if code == 0 else "FAIL", "browser: live-check reset for a fresh passkey")
+    line("PASS" if load_fixture(args.project) else "FAIL", "browser: fixture lesson F01 loaded for live-check")
+
+    token = bootstrap_token(args.project, args.url)
+    line("PASS" if token else "FAIL", "browser: bootstrap link issued (not printed)")
+    if not token:
+        return failures
+    token_bytes = token.encode()
+
+    env = {
+        "PATH": node_path(),
+        "HOME": os.environ.get("HOME", ""),
+        "LANG": os.environ.get("LANG", "C.UTF-8"),
+        "READER_URL": args.url,
+        "READER_LIVE_OUT": str(out.resolve()),
+        "READER_CA_SPKI": spki,
+        "NODE_EXTRA_CA_CERTS": str(root_pem.resolve()),
+        "READER_BOOTSTRAP_TOKEN": token,
+    }
+    del token
+    started = time.monotonic()
+    with (out / "playwright.log").open("wb") as log:
+        try:
+            done = subprocess.run(["npx", "playwright", "test", "-c", "playwright.live.config.ts"], cwd=suite,
+                                  env=env, stdout=log, stderr=subprocess.STDOUT, timeout=PLAYWRIGHT_TIMEOUT_S,
+                                  check=False)
+            rc = done.returncode
+        except subprocess.TimeoutExpired:
+            rc = -1
+    env.pop("READER_BOOTSTRAP_TOKEN")
+    elapsed = time.monotonic() - started
+
+    trace = out / "trace.zip"
+    if trace.exists():
+        redact_cookies(trace)
+    hits = scrub_token(out, token_bytes)
+    del token_bytes
+    line("FAIL" if hits else "PASS", "browser: bootstrap token appears in no artifact",
+         f"(found and removed in: {', '.join(hits)})" if hits else "")
+
+    report = out / "playwright.json"
+    if not report.exists():
+        line("FAIL", f"browser: Playwright produced no report (exit {rc}, {elapsed:.0f}s)")
+        return failures
+    data = json.loads(report.read_text("utf-8"))
+    for status, title, seconds in walk_results(data):
+        line(status, f"browser: {title}", f"({seconds:.1f}s)")
+    if rc == -1:
+        line("FAIL", f"browser: suite exceeded {PLAYWRIGHT_TIMEOUT_S}s")
+    return failures
+
+
+if __name__ == "__main__":
+    sys.exit(main())
