@@ -138,8 +138,13 @@ requirements:
       `JobFailed` (or the cancellation of a shutdown abort) leaves the wrapper: any other failure of the wrapper or
       the database becomes `JobFailed("wrapper_error")` `from None`, and every rollback in it is guarded. When the
       run's own session is lost (its connection invalidated: a network cut, a terminated backend), the key lock
-      went with it and the sweep owns the key: the run is not judged by FR-EVENTS-6 and ends
-      `JobFailed("session_lost")`; FR-EVENTS-7 or -15 counts it once. A deadline overrun that invalidated the
+      went with it: the run is not judged by FR-EVENTS-6. The worker opens a fresh connection and takes the key
+      lock; if this job is still `doing` and the key has no outcome, no sweep has counted the run, so it counts it
+      itself like a stall (`error_code` `session_lost`; `dead` when exhausted, otherwise enqueued again through
+      FR-EVENTS-3 at once); if the job is no longer `doing`, the sweep already counted it and nothing is done.
+      Either way the run ends `JobFailed("session_lost")`. A `wrapper_error` is counted the same way (`error_code`
+      `wrapper_error`). If the fresh connection fails too, nothing is counted by the worker: the job ends
+      `failed` with no outcome and FR-EVENTS-15 counts it after 60 s. A deadline overrun that invalidated the
       session while cancelling a statement is still judged as `timeout`. With no `job_keys` row, the job is finished `failed`,
       logged with its job id, and gets no outcome. With any outcome, the job returns without calling the handler and
       procrastinate finishes it `succeeded`. Otherwise, if FR-EVENTS-14 says the key is exhausted, it writes `dead`
@@ -279,7 +284,8 @@ requirements:
       logger-level filters because those do not see records propagated from child loggers. For records from the
       `procrastinate` hierarchy it removes `task_kwargs` and `call_string` from `record.job` with `pop(…, None)`
       (REF-EVENTS-5), and masks every call string in the message by pattern: `<task_name>[<job_id>](…)` becomes
-      `<task_name>[<job_id>]`, with parentheses matched and quoted text skipped. The pattern covers records that
+      `<task_name>[<job_id>]`, where `<job_id>` is digits or `None` (a job logged before it has an id, on defer),
+      with parentheses matched and quoted text skipped. The pattern covers records that
       carry the call string only in their message, without a `job` extra (procrastinate's shutdown line "Waiting
       for job to finish: worker: <call string>"). The filter is idempotent: a record passing it twice (it is on
       several handlers) is left as the first pass left it. The module's own records carry kind, key, job id,
@@ -352,6 +358,11 @@ vectors:
 #     fails inside procrastinate's own task (procrastinate reports it as an unretrieved task exception or an
 #     error record, which the test tolerates). The same worker then runs the re-enqueued job: attempts 1,
 #     outcome `succeeded`, one committed effect, two handler calls [FR-EVENTS-4, -7, INV-EVENTS-2].
+#   - test_self_terminating_handler_is_bounded (real): a handler that terminates its own backend, re-enqueued
+#     after every run, ends `dead`/`session_lost` with attempts 3 and at most 3 handler runs, with no sweep
+#     involved [FR-EVENTS-4, -14, INV-EVENTS-4].
+#   - test_exhausted_at_claim_never_runs: a key already at max_attempts when claimed ends `(3, dead, exhausted)`
+#     with 0 handler runs [FR-EVENTS-4, -14].
 #   - test_worker_run_stop_with_running_job (real): `worker.run` stopped while a job runs returns 0 in under 10 s,
 #     the job is `aborted`, attempts 0, and no procrastinate record carries the payload [FR-EVENTS-9, -14, -16].
 #   - test_handler_timeouterror_is_judged_by_transient and test_deadline_overrun_is_timeout: a handler's own

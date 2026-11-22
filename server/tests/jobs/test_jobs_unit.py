@@ -307,6 +307,8 @@ def test_log_filter_masks_call_strings_without_a_job_extra() -> None:
     assert record.getMessage() == "Waiting for job to finish: worker: test.effect[42] (started 1.234 s ago)"
     assert mask_call_strings(f"a {call} b {call}") == "a test.effect[42] b test.effect[42]"
     assert mask_call_strings("no call here (x)") == "no call here (x)"
+    deferring = f"About to defer job test.effect[None](payload={{'name': '{marker}'}})"
+    assert mask_call_strings(deferring) == "About to defer job test.effect[None]"
 
 
 def test_catalog_rejects_args_without_extra_forbid_and_secret_subclasses() -> None:

@@ -249,13 +249,44 @@ class Jobs:
                 # the cause is the run itself. Taking the key lock again in _judge serializes with the sweep.
                 if lost and not timed_out:
                     log.warning("job session lost: kind=%s job_id=%s", kind.name, job_id)
+                    await self._count_lost_run(kind, key, payload, job_id, "session_lost")
                     raise JobFailed("session_lost")
                 await self._judge(kind, key, payload, job_id, error, timed_out)
         except JobFailed, asyncio.CancelledError:
             raise  # JobFailed carries only a code; cancellation is a shutdown abort (procrastinate: aborted)
         except Exception:  # a database or wrapper failure: never let its message or args out
             log.warning("job wrapper failed: kind=%s job_id=%s", kind.name, job_id)
+            await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
             raise JobFailed("wrapper_error") from None
+
+    async def _count_lost_run(
+        self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int, code: str
+    ) -> None:
+        """Count a run that ended without a judged outcome, unless the sweep already counted it.
+
+        On a fresh connection, under the key lock: while this job is still `doing` and the key has no outcome,
+        no one else has counted the run (the sweep finishes the jobs it counts), so it is counted here like a
+        stall (dead when exhausted, else enqueued again at once). When that connection fails too, nothing is
+        counted here; the job ends `failed` and FR-EVENTS-15 counts it after 60 s.
+        """
+        try:
+            enqueue = False
+            async with self.engine.begin() as conn:
+                await _lock(conn, key)
+                status = (
+                    await conn.execute(
+                        text("SELECT status::text FROM procrastinate_jobs WHERE id = :id"), {"id": job_id}
+                    )
+                ).scalar()
+                row = await _row(conn, kind.name, key)
+                if status != "doing" or row is None or row["outcome"] is not None:
+                    return
+                counted = await _count(conn, kind, key, code, job_id)
+                enqueue = counted is not None and not counted[1]
+            if enqueue:
+                await self._defer(kind, key, payload, {"outcome": None, "job_id": None}, 0)
+        except Exception:  # the database is unreachable again: FR-EVENTS-15 counts the run later
+            log.warning("lost run not counted: kind=%s job_id=%s", kind.name, job_id)
 
     async def _attempt(
         self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int

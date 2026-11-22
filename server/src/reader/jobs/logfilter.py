@@ -13,7 +13,8 @@ import logging
 import re
 from typing import Any, Final
 
-_CALL_START: Final = re.compile(r"([a-z][a-z0-9_.]*)\[(\d+)\]\(")
+# `[None]`: procrastinate logs a job's call string before the job has an id (on defer).
+_CALL_START: Final = re.compile(r"([a-z][a-z0-9_.]*)\[(\d+|None)\]\(")
 
 
 def mask_call_strings(message: str) -> str:

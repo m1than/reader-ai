@@ -343,6 +343,40 @@ async def test_real_run_holds_the_lock_then_sigkill(pg: Pg) -> None:
                 await proc.wait()
 
 
+async def test_self_terminating_handler_is_bounded(pg: Pg) -> None:
+    """A handler that kills its own session, re-enqueued after every run, still ends dead (FR-EVENTS-14)."""
+    import dataclasses
+
+    from sqlalchemy import text
+
+    from .conftest import HANDLER_RUNS, effect_kind
+
+    async def kills_own_session(args: Any, conn: Any, ctx: Any) -> None:
+        HANDLER_RUNS.append(ctx.key)
+        await conn.execute(text("SELECT pg_terminate_backend(pg_backend_pid())"))
+
+    kind = dataclasses.replace(effect_kind(), handler=kills_own_session)
+    async with jobs_env(pg, kinds=[kind]) as env:
+        results = []
+        for _ in range(6):
+            results.append((await env.jobs.enqueue(KIND, {"name": "self"})).kind)
+            await env.work()
+        row = await env.key_row("self")
+        assert (row.attempts, row.outcome, row.error_code) == (3, "dead", "session_lost")
+        assert env.runs("self") <= 3
+        assert results[-1] == "dead"
+
+
+async def test_exhausted_at_claim_never_runs(pg: Pg) -> None:
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "ex"})
+        await env.execute("UPDATE job_keys SET attempts = 3 WHERE key = :k", k=env.key("ex"))
+        await env.work()
+        row = await env.key_row("ex")
+        assert (row.attempts, row.outcome, row.error_code) == (3, "dead", "exhausted")
+        assert env.runs("ex") == 0
+
+
 async def test_session_cut_mid_run_then_sweep(pg: Pg) -> None:
     async with jobs_env(pg) as env:
         await env.jobs.enqueue(KIND, {"name": "cut", "sleep_s": 2})
