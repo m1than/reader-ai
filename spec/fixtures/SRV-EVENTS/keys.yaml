@@ -1,0 +1,20 @@
+# VEC-EVENTS-2 — idempotency keys (FR-EVENTS-2).
+# Source: Python hashlib.sha256 over json.dumps(fields, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8"),
+# prefixed by "<kind>:". Cases 1 and 2 differ only in field order and must give the same key.
+cases:
+  - kind: compile.stage
+    fields: { lesson: L02, stage: draft, input_sha256: "0000000000000000000000000000000000000000000000000000000000000000" }
+    canonical: '{"input_sha256":"0000000000000000000000000000000000000000000000000000000000000000","lesson":"L02","stage":"draft"}'
+    key: "compile.stage:02d4aac5021ccb7c699ef97ad8fa15699539a0803b162b2fa4246dcc26a323c4"
+  - kind: compile.stage
+    fields: { stage: draft, lesson: L02, input_sha256: "0000000000000000000000000000000000000000000000000000000000000000" }
+    canonical: '{"input_sha256":"0000000000000000000000000000000000000000000000000000000000000000","lesson":"L02","stage":"draft"}'
+    key: "compile.stage:02d4aac5021ccb7c699ef97ad8fa15699539a0803b162b2fa4246dcc26a323c4"
+  - kind: ingest.material
+    fields: { material_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+    canonical: '{"material_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+    key: "ingest.material:86fcbff3148c1c0bddd0f6682d79c61505e8cbe51dfa370e93412620b02d4375"
+  - kind: ingest.material
+    fields: { material_sha256: "Блокчейн" }
+    canonical: '{"material_sha256":"Блокчейн"}'
+    key: "ingest.material:2ffa2335bf7c9d081cc26427f61f74cdd9a7e5c1cb210bbafe615a76bd0d40f7"

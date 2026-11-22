@@ -48,7 +48,7 @@ title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skele
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change"
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
@@ -159,6 +159,13 @@ requirements:
       `Config` before `command.upgrade`, from a declared list of directories (Alembic does not glob; no scan): in stage
       1 only `reader/db/migrations/versions`; SRV-EVENTS appends its own directory and the installed
       `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
+      Since SRV-EVENTS (2026-11-22, paired change): the list is `reader/db/migrations/versions`,
+      `reader/jobs/migrations` and procrastinate's versions directory; "all heads" are the effective heads
+      (`get_revisions("heads")`, so `procrastinate_0043`, reached through `jobs_0001`'s `depends_on`, is not compared);
+      and the lock is taken by polling `pg_try_advisory_lock` on a dedicated autocommit connection, because
+      procrastinate's `CREATE INDEX CONCURRENTLY` deadlocks against a waiter holding an open transaction. The poll
+      gives up after 300 s (structural: far above a full upgrade, which takes seconds) with `MigrationError`
+      `migration_lock_timeout`, and an unlock that returns false raises `migration_unlock_failed`.
       procrastinate's `autocommit_block` path on asyncpg is tested by SRV-EVENTS against Postgres, not here.
       Paths and endpoints default to the container's and may be overridden by six variables (tests, and OPS-DEPLOY's
       static `READER_CONFIG`): `READER_CONFIG` (default `/etc/reader/reader.yaml`), `READER_SECRETS_ROOT`
@@ -367,7 +374,7 @@ invariants:
       system tables declared by any spec (checked against the live schema after `alembic upgrade heads`; the test reads
       the `tables` entries with `system: true` from every spec in spec/modules/, and a `procrastinate_*` prefix entry
       covers every table it matches). Here: users, auth_challenges, bootstrap_tokens, auth_failures; SRV-EVENTS
-      declares job_keys, job_outcomes and procrastinate_*.
+      declares job_keys and procrastinate_*.
   - id: INV-AUTH-9
     text: >-
       A user whose handle is removed from `users[]` is disabled at the next api startup: its sessions are revoked, its

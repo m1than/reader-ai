@@ -355,14 +355,6 @@ tasks:
       what: "Paired OPS-CLI change: restore's precondition ignores rows the api seeds from reader.yaml at start (users
         without credentials or sessions) and other declared system tables; --clean --if-exists then replaces them. Until
         done, stage-1.sh refuses --drill. Found by the S1.live script author, 2026-11-22." }
-  - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: module, track: engineering, status: todo, needs: [],
-      what: "tests/sandbox/test_supervisor.py::test_own_address_source_counts_as_local failed once in the full local gate
-        while other Docker workloads ran (embed spike at 8 CPUs, SRV-KERNEL tests), and passed alone in 17.9 s (2026-11-22).
-        Make its timing robust under load (longer settle or polling with a bound), paired OPS-SANDBOX spec note (H2).
-        Also seen during concurrent gates: test_signals_under_state_flood_always_restart and
-        test_full_table_from_inside_does_not_block_the_caller failed, one with `network rk-net-… not found`. Likely cause:
-        the session sweep removes every test-labelled container and network, including another concurrent run's. Fix:
-        label resources with a per-run id and sweep only this run's." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
       note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
@@ -374,7 +366,17 @@ tasks:
         dry-run only (no stack)." }
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
-  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
+  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+      note: "green locally; code review next (complex area: full review). Spec SRV-EVENTS approved with Red (deep-reviewer
+        rounds 1–3 changes, round 4 approve). 41 tests (21 unit incl. a Hypothesis state machine, 20 db on testcontainers
+        Postgres with the OPS-DEPLOY digest); all 41 failed on their own assertion at Red; two mutations (exhaustion
+        off-by-one, removed skip) are caught. procrastinate 3.12.0 + psycopg[binary,pool] 3.3.9 (cp314 wheels for macOS
+        and Linux arm64). Paired SRV-AUTH changes in reader.db, found by its tests: version_locations gains
+        jobs/migrations and procrastinate's chain; readiness compares effective heads (procrastinate_0043 sits behind
+        jobs_0001's depends_on); the migration lock is a polled try-lock on its own autocommit connection, because
+        procrastinate's CREATE INDEX CONCURRENTLY deadlocked the concurrent-migration test. reader-server --role worker
+        now runs reader.jobs.worker.run. Merged origin/1/ruff-import-order (3 pre-existing import-order errors on main).
+        KIND_MODULES is empty until V.SRV-INGEST-min / V.SRV-SEARCH-min add theirs" }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],

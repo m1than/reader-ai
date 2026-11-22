@@ -1,0 +1,34 @@
+# VEC-EVENTS-3 — the key's deciding procrastinate job x the key's outcome -> job_status (FR-EVENTS-12) and the
+# reconcile action of the sweep (FR-EVENTS-15).
+# Source: hand-derived over procrastinate 3.12.0's seven statuses (REF-EVENTS-4: `aborting` is legacy, unused since 3.0).
+# Deciding job, by precedence: a `doing` job (`aborting` counts as doing) > a `todo` job > the newest job by id
+# (terminal: succeeded, failed, cancelled, aborted) > absent (no procrastinate job for the key).
+# `reconcile`: what FR-EVENTS-15 does for a key with no outcome, updated_at older than 60 s and no todo/doing job;
+# `-` = not reconciled (the key has an outcome, or a todo/doing job). Stalled `doing` jobs are FR-EVENTS-7's, not
+# reconciliation's.
+rows:
+  - { deciding: doing,     outcome: none,      job_status: running,   reconcile: "-" }
+  - { deciding: doing,     outcome: succeeded, job_status: succeeded, reconcile: "-", note: "the job skips or the sweep finishes it when stalled" }
+  - { deciding: doing,     outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: aborting,  outcome: none,      job_status: running,   reconcile: "-", note: "legacy status, treated as doing" }
+  - { deciding: aborting,  outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: aborting,  outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: todo,      outcome: none,      job_status: queued,    reconcile: "-" }
+  - { deciding: todo,      outcome: succeeded, job_status: succeeded, reconcile: "-", note: "skips when claimed (FR-EVENTS-4)" }
+  - { deciding: todo,      outcome: dead,      job_status: dead,      reconcile: "-", note: "skips when claimed" }
+  - { deciding: succeeded, outcome: none,      job_status: queued,    reconcile: "stall-like: count an attempt, then enqueue again; dead `orphaned` if exhausted (FR-EVENTS-14)" }
+  - { deciding: succeeded, outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: succeeded, outcome: dead,      job_status: dead,      reconcile: "-", note: "a job queued behind a dead run skipped and finished succeeded" }
+  - { deciding: failed,    outcome: none,      job_status: queued,    reconcile: "stall-like: count an attempt, then enqueue again; dead `orphaned` if exhausted (FR-EVENTS-14)", note: "covers requeue_dead's crash gap (the newest job is the old failed one) and a re-enqueue in FR-EVENTS-6 that raised" }
+  - { deciding: failed,    outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: failed,    outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: cancelled, outcome: none,      job_status: none,      reconcile: "no action (operator cancel); enqueue again is allowed" }
+  - { deciding: cancelled, outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: cancelled, outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: aborted,   outcome: none,      job_status: queued,    reconcile: "enqueue again, attempts unchanged; the new todo job stops a second re-defer" }
+  - { deciding: aborted,   outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: aborted,   outcome: dead,      job_status: dead,      reconcile: "-" }
+  - { deciding: absent,    outcome: none,      key_row: present, job_status: queued, reconcile: "enqueue, attempts unchanged (a crash between FR-EVENTS-3's key commit and its defer)" }
+  - { deciding: absent,    outcome: none,      key_row: absent,  job_status: none,   reconcile: "- (never enqueued; nothing to reconcile)" }
+  - { deciding: absent,    outcome: succeeded, job_status: succeeded, reconcile: "-" }
+  - { deciding: absent,    outcome: dead,      job_status: dead,      reconcile: "-" }
