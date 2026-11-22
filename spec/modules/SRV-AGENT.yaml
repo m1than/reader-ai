@@ -47,13 +47,21 @@
 #   - SRV-EVENTS: an amendment allowing a handler to append spend rows (append-only, no outcome effect) on a separate
 #     connection outside the run transaction (FR-EVENTS-4/5).
 #   - SRV-AUTH: VERSION_LOCATIONS adds `reader/agent/migrations`. No route module in the slice (/api/spend deferred).
-#   - server/pyproject.toml: an optional extra `agent` with `claude-agent-sdk==0.2.187`, installed in the worker image only.
+#   - SRV-CONFIG: a note that `tasks.<name>.budget_usd_per_lesson` is spent per compile run (FR-AGENT-9); the field
+#     name stays for compatibility.
+#   - server/pyproject.toml: `httpx` as a dependency (agent-proxy's upstream client); an optional extra `agent` with
+#     `claude-agent-sdk==0.2.187`, also in the dev group (tests, mypy). OPS-DEPLOY: `server.Dockerfile` installs the extra
+#     (api, worker and mcp share one image); `agent-proxy.Dockerfile` does not. Only `reader.agent.provider` imports
+#     the SDK, and the api never imports that module.
+#
+# Review: deep-reviewer (Fable) rounds 1 and 2 changes, round 3 approve (2026-11-22); the approval items (unknown or
+# evicted upstream record, multiple 2xx, INV-AGENT-4 wording, agent-proxy's config path) are folded in.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: ai
 adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017]
@@ -118,7 +126,8 @@ requirements:
       healthy-idle), 1 otherwise. Only allow-listed COPY inputs (OPS-DEPLOY's allow-list test).
   - id: FR-AGENT-2
     text: >-
-      Token loading. agent-proxy reads reader.yaml (READER_CONFIG, read-only bind) to map each user to the reference of
+      Token loading. agent-proxy reads reader.yaml at the fixed path `/etc/reader/reader.yaml`, where OPS-CLI's override
+      binds it read-only (OPS-DEPLOY sets no environment on agent-proxy, so no READER_CONFIG), to map each user to the reference of
       their `anthropic-subscription` provider, and reads the token from `/run/secrets/<secret_file_name(ref)>` (SRV-CONFIG
       FR-CONFIG-14) with SRV-CONFIG's host-resolved checks (O_NOFOLLOW, regular file, mode, size, UTF-8, non-empty). A
       missing file means that user has no provider until it appears (re-read on each run_token request); never another
@@ -130,7 +139,8 @@ requirements:
       /run-tokens/revoke {"run_token": "..."}` revokes it (in the body, never in a path, so it appears in no URL) and
       returns the token's upstream record `{"requests": k, "statuses": [...], "any_2xx": bool, "refused": [...]}`: every
       upstream response status seen for it in order, and the codes of the proxy's own refusals (FR-AGENT-4), which never
-      reach upstream. At most `bounds.run_tokens_max` live tokens; the oldest is revoked when
+      reach upstream. Revoking an unknown token (never issued, already revoked, or evicted) answers 404 `run_token_unknown`
+      and no record. At most `bounds.run_tokens_max` live tokens; the oldest is revoked when
       exceeded. Only the worker reaches the port (agentnet). A user without a loaded token gets 409 `provider_missing`.
       Tokens are stored only as sha256 digests and compared in constant time.
   - id: FR-AGENT-4
@@ -152,8 +162,9 @@ requirements:
       handle; never a header value, body, query string, token or run_token. The HTTP server's own access log is off.
   - id: FR-AGENT-6
     text: >-
-      Provider port. `reader.agent.Provider.run(owner_id, run_id, lesson_id, stage, task, attempt, system, prompt,
-      max_output_tokens) -> StageResult(text, usage, sdk_usd, model)` is the only way SRV-PIPELINE calls a model. Model
+      Provider port. `reader.agent.Provider.run(StageCall(owner_id, handle, run_id, lesson_id, stage, task, attempt,
+      system, prompt, max_output_tokens, floor_usd, run_cap_usd)) -> StageResult(text, usage, sdk_usd, model)` is the only
+      way SRV-PIPELINE calls a model. Model
       resolution happens first: the task's `model` from reader.yaml is resolved to a full model id (aliases `opus` →
       `claude-opus-5-5`, `sonnet` → `claude-sonnet-5-5`, as data next to the pricing table); a model not in the pricing
       table raises `unknown_model` before any reservation or call. The Agent SDK adapter then: takes a reservation
@@ -196,8 +207,10 @@ requirements:
       spent(user, UTC calendar month) + reserve > `budgets.monthly_usd`, with a WARNING `budget_warn` once when it first
       passes `budgets.warn_at` (ADR-0005; a log line, not yet an event — SRV-EVENTS stage 2). After the call it appends a
       `settle` row from the SDK cost and usage and the run_token's upstream record (FR-AGENT-3): no upstream 2xx → $0
-      (nothing was billed; a non-zero SDK cost is logged as `settle_mismatch`); a 2xx with an SDK cost → that cost; a 2xx
-      without an SDK cost (a crash or exception after the response) → the reserve. A reservation without a settlement (the
+      (nothing was billed; a non-zero SDK cost is logged as `settle_mismatch`); exactly one 2xx with an SDK cost → that
+      cost; one 2xx without an SDK cost (a crash or exception after the response) → the reserve; more than one 2xx →
+      max(SDK cost, reserve), logged as `multiple_2xx` (one turn should make one request); an unknown or evicted record
+      (the revoke answered 404 or failed) → the reserve, since the upstream outcome is not known. A reservation without a settlement (the
       worker died) keeps counting at its reserve, so overshoot of any cap is bounded by the call in flight; the owner can
       void it with `python -I -m reader.agent.void <reservation_id>`, which appends a logged `void` row that removes it
       from spent and is refused for a reservation that has a settlement. `max_budget_usd` passed to the SDK is a second,
@@ -230,9 +243,10 @@ invariants:
       forwards only allow-listed headers (property test over methods, paths, queries and header sets against a stub).
   - id: INV-AGENT-4
     text: >-
-      For every run, task and month: spent counts every reservation until it is settled, settled spend equals the sum of
-      SDK-reported costs, and no scope's spent exceeds its cap by more than one call's reserve (property test over
-      reserve/settle/crash sequences).
+      For every run, task and month: spent counts every reservation until it is settled or voided, settled spend equals
+      the sum of `settled_usd` (each computed by FR-AGENT-9's rule from the SDK cost, the reserve and the upstream
+      record), and no scope's spent exceeds its cap by more than one call's reserve (property test over
+      reserve/settle/void/crash sequences).
   - id: INV-AGENT-5
     text: No log line from agent-proxy or the adapter contains a token, a run_token, a prompt or model output (canary test).
 

@@ -19,7 +19,13 @@ dependencies = [
   "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
   "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
   "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
+  "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy's upstream client and the worker's agent-proxy client
 ]
+
+[project.optional-dependencies]
+# SRV-AGENT: the Agent SDK (bundled CLI) for the worker's provider adapter; installed in reader-server:local, not in
+# reader-agent-proxy:local (OPS-DEPLOY).
+agent = ["claude-agent-sdk==0.2.187"]
 
 [project.scripts]
 reader = "reader.cli.app:main"   # OPS-CLI FR-CLI-1
@@ -39,6 +45,7 @@ packages = ["src/reader"]
 [dependency-groups]
 dev = [
   "anyio>=4.16",
+  "claude-agent-sdk==0.2.187",   # SRV-AGENT: mypy and the adapter's option tests (the `agent` extra)
   "httpx>=0.28.1",
   "hypothesis>=6.170",
   "mypy>=2.4",
@@ -70,6 +77,11 @@ known-first-party = ["reader"]
 # SRV-AUTH: PT018 compound status-and-body assertions read as one HTTP expectation; S603/S608 the tests run the
 # entrypoint as a subprocess and build SQL from fixed table names; ASYNC110 polling the database is the point.
 "tests/auth/**" = ["S101", "PT018", "S603", "S608", "ASYNC110"]
+# SRV-AGENT / SRV-PIPELINE: PT018 compound expectations on one result; S603/S607 docker and the void CLI run as
+# subprocesses; S108 fixed /tmp paths are option values, never opened; E501 the formatter keeps long docstrings,
+# SQL and @trace lines whole.
+"tests/agent/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+"tests/pipeline/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
 
 [tool.mypy]
 strict = true

@@ -35,8 +35,17 @@
 # SRV-INGEST (origin/V/V.SRV-INGEST-min), SRV-KERNEL and OPS-SANDBOX (origin/V/V.SRV-KERNEL, main), all approved in review.
 #
 # Cross-spec (paired changes in their own specs):
-#   - SRV-EVENTS: KIND_MODULES adds `reader.pipeline.jobs`; the separate-connection rule for spend rows (SRV-AGENT).
-#   - SRV-AUTH: ROUTERS adds `reader.pipeline.routes`; VERSION_LOCATIONS adds `reader/pipeline/migrations`.
+#   - SRV-EVENTS: KIND_MODULES adds `reader.pipeline.jobs`; the separate-connection rule for spend rows (SRV-AGENT);
+#     `reader.jobs.running()` returns the worker's `Jobs` so a handler can enqueue the next step; a kind module may
+#     export `on_worker_start(jobs)`, called once after the start sweep (FR-PIPELINE-6's ensure).
+#   - SRV-AUTH: ROUTERS adds `reader.pipeline.routes`; VERSION_LOCATIONS adds `reader/pipeline/migrations` and
+#     `reader/agent/migrations`; the api role builds a `Jobs` (same catalog, procrastinate app from its DbTarget) on
+#     `app.state.jobs` so routes can enqueue.
+#
+# Review: deep-reviewer (Fable) rounds 1 and 2 changes, round 3 approve (2026-11-22; the $8 cap accepted as a declared
+# deviation). Approval items folded in: the prompt file's content hash in input_sha256, the live check's zero task-budget
+# refusals, the `fresh` flag and source-bound defers, the ADR-0005 owner note. Added at approval: the lab binding
+# includes each lab's cell index (VEC-PIPELINE-3 `labs-swapped` moves the only lab, which an index-free list misses).
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).
@@ -49,9 +58,9 @@
 
 id: SRV-PIPELINE
 title: Compile pipeline — stages as data, one revise loop, budgeted agent stages, findings as open cells, lab verification, G2 report (slice)
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: ai
 adr: [ADR-0009, ADR-0004, ADR-0005, ADR-0006, ADR-0008, ADR-0022, ADR-0025, ADR-0017]
@@ -85,7 +94,8 @@ bounds:
   items_max_per_report: 400  # structural: L02 drafts had 59–94 claims; 400 bounds a 39-page chapter at 4× L02's density
   source_max_chars: 300000   # 2.2× the largest pilot chapter (135,935 characters, ADR-0005); at the 2.0 chars/token
                              # floor ≤ 150k tokens; with a 32k-token notebook, reports and 32k output it stays under
-                             # 25 % of the 1M-token context (REF-PIPELINE-5)
+                             # 25 % of the 1M-token context (REF-PIPELINE-5); applied to L02 until a chapter of
+                             # this size is measured (defers)
   lab_runs: 2                # ADR-0009 stage 5: each lab list runs twice
   lab_exec_timeout_s: 60     # SRV-KERNEL FR-KERNEL-10's execution timeout, per cell and per assert
   verify_job_timeout_s: 3600 # structural: a notebook whose labs need more (FR-PIPELINE-9) is not verified
@@ -125,8 +135,13 @@ requirements:
       `server/src/reader/pipeline/prompts/<stage>.<prompt_version>.md`. The user prompt carries the stage input (the
       current notebook with span aliases; for revise also the last fact and review reports). Output is JSON validated
       against the stage's schema (notebook: SRV-LESSON's cell schema after alias expansion; reports: FR-PIPELINE-4);
-      otherwise `output_invalid` (transient, SRV-AGENT FR-AGENT-10). `input_sha256` = sha256 over (source sha256, stage
-      input sha256, prompt_version, resolved model id).
+      otherwise `output_invalid` (transient, SRV-AGENT FR-AGENT-10). `input_sha256` = sha256 over the canonical JSON of
+      (stage, source sha256, the stage input's sha256s, prompt_version, the sha256 of the stage's prompt file content,
+      resolved model id), so editing a prompt file changes the hash even when `prompt_version` is not bumped. The model's
+      notebook output is the compact form `{"cells": [{id, kind, source, sectors?, <kind fields>}]}` with citations as
+      `{"span": "s<k>"}` or `{"url", "retrieved"}`; code builds the nbformat 4.5 notebook from it (kernelspec python3,
+      `metadata.reader` with `lesson_format` 1 and the lesson title) and stamps each cell's provenance `{stage,
+      prompt_version, model}`.
   - id: FR-PIPELINE-4
     text: >-
       Report schemas (VEC-PIPELINE-4). Fact report: exactly one verdict per claim of the notebook, keyed by (cell id,
@@ -169,7 +184,9 @@ requirements:
     text: >-
       G2 report (VEC-PIPELINE-3), computed after lab verification and stored on the run; no publish in the slice. For the
       final revision F and the last model-written revision M: (a) labs — the sha256 over the ordered list of F's lab cells
-      as `(id, source, asserts, kernel, network)` and whether lab verification passed on exactly that list; (b) claims —
+      as `(cell index, id, source, asserts, kernel, network)` (`labs.binding` when it differs from the list lab
+      verification ran), and whether every lab carries a passing `verified` whose `input_sha256` matches its source
+      (`labs.unverified` otherwise); (b) claims —
       uncited claims, where an `explain` cell with no claims counts as uncited, plus `changed` and `erratum` cells without
       a supported verdict, and blocking open cells, where `wontfix` still counts as blocking; (c) stages — whether
       `fact_check` and `adversarial_review` stage records exist on M; (d) deltas — F equals the deterministic function
@@ -214,7 +231,8 @@ requirements:
   - id: FR-PIPELINE-13
     text: >-
       Live compile of L02 on the Bashir pilot: one run ends in `converged`, `open_findings` or `budget_exhausted` within
-      the cap; its settled ledger sum equals the SDK-reported total; the owner opens the revision in the browser. Spends
+      the cap with zero task-budget refusals (the example budgets fit two worst-case calls per task, so a refusal means
+      the sizing is wrong); its settled ledger sum equals the SDK-reported total; the owner opens the revision in the browser. Spends
       credit within the owner's test budget; the spike's $2.4–3.0 for one loop is a lower guide, not a bound. [live]
 
 invariants:
@@ -269,8 +287,11 @@ defers:
   - "Independent expected values for labs (ADR-0009 stage 5 'independent path'): in the slice, asserts are the drafter's; L02 has no labs."
   - "Prompt caching levers (TTL choice and measured savings); reserves assume no cache sharing."
   - "WEB-AUTHORING (trigger, progress and G2 in the browser); the slice uses the routes."
+  - "A `fresh` flag on the compile route that skips cross-run reuse (FR-PIPELINE-5), for a recompile meant to resample the model."
+  - "Raising `source_max_chars` beyond L02 use: the 300,000-character bound is applied to L02 only until a chapter of that size is measured."
 
 owner_notes:
+  - "Declared deviation from ADR-0005: 23 lessons × $8.00 = $184, above ADR-0005's $100 for the course. The $200 monthly budget (budgets.monthly_usd) is the remaining guard; an ADR-0005 amendment (status proposed) is drafted when the full pipeline lands with measured per-lesson costs."
   - "A compile is capped at your $8.00 compile_cap_usd and runs under your $30 test budget (budget.test_budget_usd, approved 2026-11-22), which covers live L02 compiles without further consent; every spend goes to the ledger. The spike measured $2.4–3.0 for one loop on L02 without span ids; a recompile reuses unchanged steps and spends only where inputs changed."
   - "With one loop the measured outcome is open findings: the lesson is studyable as a draft, with unresolved points as open cells. More loops or a revised review bar is still your call (compile-cost ask a)."
   - "L01 vs L02 (compile-cost ask b): the slice compiles L02 as the roadmap says; L01 (larger) is measured when the full pipeline lands."

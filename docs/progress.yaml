@@ -524,9 +524,12 @@ tasks:
       branch: V/V.COMPILE-min,
       review: "deep-reviewer (Fable) round 1: changes (B1–B11 plus non-blocking), addressed in 2526267; round 2: changes
         (R2-B1 per-run task budgets and cross-run reuse, R2-B2 settle $0 without upstream 2xx, R2-B3 in-handler enqueue
-        and `stalled`, R2-B4 output cap bound to the run_token, plus non-blocking), all addressed; round 3 pending.
-        Run cap raised to the owner's compile_cap_usd $8.00 (was ADR-0005's $4.35 target)",
-      note: "spec drafted, awaits deep-reviewer round 2. SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
+        and `stalled`, R2-B4 output cap bound to the run_token, plus non-blocking), all addressed; round 3: approve
+        (3c10698). Run cap = the owner's compile_cap_usd $8.00, a declared deviation from ADR-0005's $4.35 target
+        (23 × $8 = $184 > $100; the $200 monthly budget is the guard; ADR-0005 amendment when the pipeline lands)",
+      note: "SRV-AGENT and SRV-PIPELINE approved (agent, 2026-11-22) with the round-3 items folded in; Red tests in
+        server/tests/agent and server/tests/pipeline; Green next, no live compile until the coordinator schedules it.
+        SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
         bearer placeholder, POST /v1/messages?beta=true and header allow-lists, body tools check; no-tool Agent SDK
         provider with model ids resolved and priced before spend; reservation/settlement ledger with run, task and
         monthly caps; pricing table recomputes all 12 spike stages within 0.38–1.78 %. SRV-PIPELINE: steps as jobs keyed

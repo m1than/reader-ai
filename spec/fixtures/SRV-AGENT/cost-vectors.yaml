@@ -56,4 +56,10 @@ settlements:
   - { name: retried-then-ok,     reserve: 0.94, upstream: { statuses: [529, 200], any_2xx: true },  sdk_usd: 0.6,  settled_usd: 0.6 }
   - { name: proxy-refused,       reserve: 0.94, upstream: { statuses: [], any_2xx: false, refused: [output_cap] }, sdk_usd: 0, settled_usd: 0, error: sdk_error }
   - { name: crash-after-2xx,     reserve: 0.94, upstream: { statuses: [200], any_2xx: true },  sdk_usd: null, settled_usd: 0.94, error: sdk_error }
-  - { name: no-2xx-but-sdk-cost, reserve: 0.94, upstream: { statuses: [500], any_2xx: false }, sdk_usd: 0.01, settled_usd: 0, log: settle_mismatch, error: provider_unavailable }
+  - { name: no-2xx-but-sdk-cost, reserve: 0.94, upstream: { statuses: [500], any_2xx: false }, sdk_usd: 0.01, sdk_error: server_error, settled_usd: 0, log: settle_mismatch, error: provider_unavailable }
+  - { name: unknown-record,      reserve: 0.94, upstream: null, sdk_usd: 0.6,  settled_usd: 0.94 }   # revoke answered 404 or failed: outcome unknown
+  - { name: unknown-record-crash, reserve: 0.94, upstream: null, sdk_usd: null, settled_usd: 0.94, error: sdk_error }
+  - { name: multiple-2xx,        reserve: 0.94, upstream: { statuses: [200, 200], any_2xx: true }, sdk_usd: 0.6, settled_usd: 0.94, log: multiple_2xx }
+  - { name: multiple-2xx-above,  reserve: 0.94, upstream: { statuses: [200, 200], any_2xx: true }, sdk_usd: 1.1, settled_usd: 1.1, log: multiple_2xx }
+# Columns: `sdk_error` is AssistantMessage.error (absent: none); `error` is the adapter's classification (absent: the
+# call succeeded); `log` is a WARNING code the settlement logs.

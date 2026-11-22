@@ -69,8 +69,10 @@ Anthropic-shaped error body; 429 adds `retry-after: 1`):
 | 500 (`results/…213629-500/`) | 11 | 0, 0.5, 1.7, 3.8, 8.3, 17.6, 36.8, 71.1, 108.3, 141.2, 173.6 | 10 | `server_error` | same | `ResultError` ("API Error: 500 …") | 174.1 s |
 
 Each `api_retry` SystemMessage carries `attempt`, `error`, `error_status`, `max_retries`, `retry_delay_ms`. The CLI's
-own retry budget is 10 retries with exponential backoff capped near 35–40 s, about 3 minutes in all; the 429
-`retry-after: 1` did not shorten it.
+own retry budget is 10 retries with exponential backoff capped near 35–40 s, about 3 minutes in all. With
+`retry-after: 1` the 429 delays matched the 529 and 500 delays, so a short `retry-after` did not shorten the backoff; it
+may act as a floor. Longer `retry-after` values were not tested, so a server asking for minutes could stretch one
+attempt beyond 3 minutes (the stage job timeout, 1,200 s, still bounds it).
 
 ## Hands to SRV-AGENT (round 2)
 
