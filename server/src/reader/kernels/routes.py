@@ -16,7 +16,7 @@ from starlette.applications import Starlette
 from starlette.responses import JSONResponse, Response
 from starlette.websockets import WebSocket
 
-from reader.api.http import Ctx, Route, WsRoute, error
+from reader.api.http import MAX_BODY_BYTES, Ctx, Route, WsRoute, error
 from reader.auth import store
 from reader.auth.policy import SESSION_COOKIE, Settings
 from reader.kernels.protocol import notice
@@ -40,13 +40,18 @@ def _err(e: ServiceError) -> Response:
 
 
 async def _no_payload(ctx: Ctx) -> bool:
-    """FR-KERNEL-3: no body, or the body `{}` (its JSON type is checked by the CSRF gate)."""
-    body = await ctx.request.body()
+    """FR-KERNEL-3: no body, or the body `{}` (its JSON type is checked by the CSRF gate). Reads at most
+    MAX_BODY_BYTES; anything larger, unparseable or nested too deeply is not `{}`."""
+    body = bytearray()
+    async for chunk in ctx.request.stream():
+        body += chunk
+        if len(body) > MAX_BODY_BYTES:
+            return False
     if not body:
         return True
     try:
         return bool(json.loads(body) == {})
-    except ValueError:
+    except (ValueError, RecursionError):
         return False
 
 
@@ -149,16 +154,20 @@ async def channels(ws: WebSocket, settings: Settings, engine: AsyncEngine) -> No
         await _deny(ws, 401, "unauthenticated")
         return
     svc = service_of(ws.app)
+    if not svc.user(user.handle).usable:
+        # FR-KERNEL-11: a failed reset dropped every session, so this check comes before the lookup.
+        await _close_with(ws, "kernel_unavailable", 1013)
+        return
     try:
         session = svc.get(user.handle, ws.path_params["session_id"])
     except ServiceError as e:
         await _deny(ws, e.status, e.code)
         return
-    if not svc.user(user.handle).usable:
-        await ws.accept()
-        await ws.send_text(json.dumps(notice("kernel_unavailable")))
-        await ws.close(1013)
-        return
+
+    async def recheck() -> bool:
+        return (await store.session_user(engine, cookie)) is not None
+
+    # Reserve the slot before the first await, so the limit of 2 holds under concurrent upgrades.
     current = session.hub
     fresh = current is None or current.closing
     hub = Hub(svc, session) if current is None or current.closing else current
@@ -166,18 +175,32 @@ async def channels(ws: WebSocket, settings: Settings, engine: AsyncEngine) -> No
     if len(hub.attached) >= MAX_CONNECTIONS:
         await _deny(ws, 409, "too_many_connections")
         return
-    await ws.accept()
-
-    async def recheck() -> bool:
-        return (await store.session_user(engine, cookie)) is not None
-
     att = hub.attach(_Conn(ws), recheck)
+    try:
+        await ws.accept()
+    except Exception:
+        hub.detach(att)
+        raise
+    # The session may have been dropped while the handshake completed.
+    if svc.user(user.handle).sessions.get(session.id) is not session or hub.closing or att.closed:
+        hub.detach(att)
+        await _close_with(ws, "kernel_reset", 1012)
+        return
     if fresh:
         await hub.start()
     else:
         with contextlib.suppress(TimeoutError):
             await asyncio.wait_for(hub.started.wait(), _START_WAIT_S)
     await hub.serve(att)
+
+
+async def _close_with(ws: WebSocket, code: str, close_code: int) -> None:
+    """Accept if needed, send one notice and close (the browser cannot read a refused upgrade's status)."""
+    if ws.client_state.name == "CONNECTING":
+        await ws.accept()
+    with contextlib.suppress(Exception):
+        await ws.send_text(json.dumps(notice(code)))
+        await ws.close(close_code)
 
 
 WS_ROUTES: tuple[WsRoute, ...] = (WsRoute("/api/kernel/sessions/{session_id}/channels", channels),)

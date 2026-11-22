@@ -136,6 +136,28 @@ def test_kernel_frames_that_are_not_messages() -> None:
     assert protocol.message_type("nope") == "unparseable"
 
 
+def test_deep_nesting_and_non_string_types_never_raise() -> None:
+    protocol = load("reader.kernels.protocol")
+    for depth in (500, 1500, 50000, 200000):
+        nested = "[" * depth + "]" * depth
+        frame = '{"channel":"iopub","header":{"msg_type":"stream"},"content":{"a":' + nested + "}}"
+        out = protocol.outbound(frame)
+        assert out is None or isinstance(out, dict)
+        head = '{"channel":"shell","header":{"msg_id":"a","msg_type":"execute_request"},"content":'
+        browser = head + nested + "}"
+        _rejected(browser)
+    for mt in ([], {}, ["status"], 1, None):
+        for ch in ("shell", "iopub"):
+            assert protocol.outbound(json.dumps({"channel": ch, "header": {"msg_type": mt}})) is None
+            label = protocol.message_type(json.dumps({"channel": ch, "header": {"msg_type": mt}}))
+            assert label == f"{ch}:other"
+        r = _rejected({"channel": "shell", "header": {"msg_id": "a", "msg_type": mt}, "parent_header": {},
+                       "content": {}})
+        assert r.msg_id == "a"
+    forged = json.dumps({"channel": "evil\nline", "header": {"msg_type": "x"}})
+    assert protocol.message_type(forged) == "?:other"
+
+
 def test_notice_shape() -> None:
     protocol = load("reader.kernels.protocol")
     codes = {"rejected", "busy", "timeout", "output_truncated", "kernel_restarted", "kernel_dead",
@@ -163,16 +185,16 @@ REQUEST_TYPES = ["execute_request", "kernel_info_request", "complete_request", "
 
 @settings(max_examples=300, deadline=None)
 @given(
-    channel=st.sampled_from(["shell", "control", "stdin", "iopub", "x"]),
-    msg_type=st.sampled_from(REQUEST_TYPES),
-    msg_id=st.text(min_size=0, max_size=140),
+    channel=st.one_of(st.sampled_from(["shell", "control", "stdin", "iopub", "x"]), json_values),
+    msg_type=st.one_of(st.sampled_from(REQUEST_TYPES), json_values),
+    msg_id=st.one_of(st.text(min_size=0, max_size=140), json_values),
     parent=st.one_of(st.just({}), json_values),
     content=st.dictionaries(st.sampled_from(CONTENT_KEYS), json_values, max_size=5),
     extra=st.dictionaries(st.sampled_from(["buffers", "signature", "idents", "msg_id"]), json_values,
                           max_size=2),
 )
 def test_inbound_property(
-    channel: str, msg_type: str, msg_id: str, parent: Any, content: Any, extra: Any
+    channel: Any, msg_type: Any, msg_id: Any, parent: Any, content: Any, extra: Any
 ) -> None:
     protocol = load("reader.kernels.protocol")
     frame = {"channel": channel, "header": {"msg_id": msg_id, "msg_type": msg_type, "session": "spoof",
@@ -198,12 +220,12 @@ def test_inbound_property(
 
 @settings(max_examples=300, deadline=None)
 @given(
-    channel=st.sampled_from(["shell", "control", "stdin", "iopub", "reader", "x"]),
-    msg_type=st.sampled_from(REPLY_TYPES),
+    channel=st.one_of(st.sampled_from(["shell", "control", "stdin", "iopub", "reader", "x"]), json_values),
+    msg_type=st.one_of(st.sampled_from(REPLY_TYPES), json_values),
     extra=st.dictionaries(st.sampled_from(["buffers", "signature", "idents"]), json_values, max_size=2),
     as_bytes=st.booleans(),
 )
-def test_outbound_property(channel: str, msg_type: str, extra: Any, as_bytes: bool) -> None:
+def test_outbound_property(channel: Any, msg_type: Any, extra: Any, as_bytes: bool) -> None:
     protocol = load("reader.kernels.protocol")
     msg = kernel_msg(channel, msg_type, "p", {"x": 1}, **extra)
     frame: str | bytes = json.dumps(msg)
@@ -214,6 +236,7 @@ def test_outbound_property(channel: str, msg_type: str, extra: Any, as_bytes: bo
         return
     assert not as_bytes
     assert set(out) == KEYS
+    assert isinstance(msg_type, str)
     assert msg_type not in {"comm_open", "comm_msg", "comm_close", "input_request"}
     assert (out["channel"], out["header"]["msg_type"]) in {("shell", t) for t in protocol.SHELL_REPLIES} | {
         ("iopub", t) for t in protocol.IOPUB_TYPES

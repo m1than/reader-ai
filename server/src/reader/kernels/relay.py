@@ -2,8 +2,10 @@
 
 One Hub per session holds the upstream WebSocket, the execution queue (one execute_request in flight, up to 8
 queued), the pending non-execute ids, per-execution output budgets and the timers. Each attached browser
-connection has its own writer with a bounded send buffer. Logs carry types, counts, sizes and codes only
-(INV-KERNEL-6).
+connection has its own writer with a bounded send buffer. The hub outlives its last browser while an execute
+is in flight, so the timeout and its escalation still run (FR-KERNEL-10). Any error while handling one frame
+drops that frame (or answers `rejected`); it never ends the relay. Logs carry closed-set labels, counts, sizes
+and codes only (INV-KERNEL-6).
 """
 
 from __future__ import annotations
@@ -48,6 +50,11 @@ TICK_S: Final = 0.25
 RECHECK_S: Final = 60.0          # FR-KERNEL-7
 
 
+def nbytes(frame: str | bytes) -> int:
+    """Budgets and caps count bytes (FR-KERNEL-12)."""
+    return len(frame) if isinstance(frame, bytes) else len(frame.encode("utf-8", "surrogatepass"))
+
+
 class BrowserConn(Protocol):
     async def receive(self) -> str | bytes | None: ...
     async def send_text(self, text: str) -> None: ...
@@ -68,6 +75,7 @@ class Attached:
 class InFlight:
     msg_id: str
     started: float
+    interrupting: bool = False
     interrupted_at: float | None = None
     escalated: bool = False
 
@@ -89,16 +97,27 @@ class Hub:
 
     # Lifecycle
     async def start(self) -> bool:
-        """Open the upstream WebSocket (FR-KERNEL-7); on failure run FR-KERNEL-14 and report False."""
+        """Open the upstream WebSocket (FR-KERNEL-7); on failure run FR-KERNEL-14 and report False.
+        A closing hub never starts."""
+        if self.closing:
+            return False
         endpoint = self.service.resolve(self.session.handle)
         try:
-            self.upstream = await self.service.ws(endpoint, self.session.kernel_id)
+            upstream = await self.service.ws(endpoint, self.session.kernel_id)
         except UpstreamError:
             self.service.spawn(self.service.upstream_lost(self.session))
             return False
+        if self.is_closing():   # dropped while connecting
+            self.service.spawn(upstream.close())
+            return False
+        self.upstream = upstream
         self.tasks = [asyncio.ensure_future(self._pump()), asyncio.ensure_future(self._timer())]
         self.started.set()
         return True
+
+    def is_closing(self) -> bool:
+        """Read through a method: `closing` may change across an await."""
+        return self.closing
 
     def terminate(self, code: str | None, close_code: int) -> None:
         """End every browser connection (notice first, when given) and the upstream; never blocks."""
@@ -129,11 +148,19 @@ class Hub:
     def detach(self, att: Attached) -> None:
         if att in self.attached:
             self.attached.remove(att)
-        if not self.attached and not self.closing:
-            self.closing = True
-            if self.session.hub is self:
-                self.session.hub = None
-            self._stop()
+        if not self.attached:
+            # Nobody to see queued results; an in-flight execute keeps the hub (and its timer) alive.
+            self.queue.clear()
+            self.pending_other.clear()
+            self._maybe_idle()
+
+    def _maybe_idle(self) -> None:
+        if self.attached or self.inflight is not None or self.closing:
+            return
+        self.closing = True
+        if self.session.hub is self:
+            self.session.hub = None
+        self._stop()
 
     async def serve(self, att: Attached) -> None:
         """Run one browser connection until it ends."""
@@ -146,7 +173,7 @@ class Hub:
                 if isinstance(frame, bytes):
                     self._close(att, 1003)
                     break
-                if len(frame.encode("utf-8", "surrogatepass")) > BROWSER_FRAME_MAX:
+                if nbytes(frame) > BROWSER_FRAME_MAX:
                     self._close(att, 1009)
                     break
                 await self._from_browser(att, frame)
@@ -169,6 +196,13 @@ class Hub:
 
     async def _from_browser(self, att: Attached, frame: str) -> None:
         try:
+            await self._handle_browser(att, frame)
+        except Exception:  # any parse, filter or serialisation error rejects this frame only
+            self.dropped["rejected:error"] += 1
+            self._enqueue(att, json.dumps(notice("rejected")))
+
+    async def _handle_browser(self, att: Attached, frame: str) -> None:
+        try:
             msg = inbound(
                 frame, session_id=self.session.id, handle=self.session.handle, pending=self._pending_ids()
             )
@@ -176,10 +210,11 @@ class Hub:
             self._enqueue(att, json.dumps(notice("rejected", r.msg_id)))
             self.dropped[f"rejected:{r.reason}"] += 1
             return
+        text = json.dumps(msg)
         msg_id = msg["header"]["msg_id"]
         if msg["header"]["msg_type"] == "execute_request":
             if self.inflight is None:
-                await self._forward_execute(msg)
+                await self._forward_execute(msg_id, text)
             elif len(self.queue) < QUEUE_MAX:
                 self.queue.append(msg)
             else:
@@ -189,29 +224,35 @@ class Hub:
             self._enqueue(att, json.dumps(notice("busy", msg_id)))
             return
         self.pending_other.add(msg_id)
-        await self._send_upstream(msg)
+        await self._send_upstream(text)
 
-    async def _forward_execute(self, msg: dict[str, Any]) -> None:
-        msg_id = msg["header"]["msg_id"]
+    async def _forward_execute(self, msg_id: str, text: str) -> None:
         self.inflight = InFlight(msg_id, self.service.clock())
         self.output[msg_id] = 0
-        await self._send_upstream(msg)
+        self.truncated.discard(msg_id)
+        await self._send_upstream(text)
 
-    async def _send_upstream(self, msg: dict[str, Any]) -> None:
+    async def _send_upstream(self, text: str) -> None:
         if self.upstream is None:
             return
         with contextlib.suppress(ConnectionClosed):
-            await self.upstream.send(json.dumps(msg))
+            await self.upstream.send(text)
 
-    async def _next(self) -> None:
+    async def _finished(self, msg_id: str) -> None:
+        """The in-flight execute replied: release its budget and forward the next queued one."""
+        self.output.pop(msg_id, None)
+        self.truncated.discard(msg_id)
         self.inflight = None
         if self.queue:
-            await self._forward_execute(self.queue.popleft())
+            nxt = self.queue.popleft()
+            await self._forward_execute(nxt["header"]["msg_id"], json.dumps(nxt))
+        else:
+            self._maybe_idle()
 
     def _free(self) -> None:
         """FR-KERNEL-10: on kernel_restarted or kernel_dead, free the slot and drop the queue."""
-        if self.inflight is not None:
-            self.output.pop(self.inflight.msg_id, None)
+        self.output.clear()
+        self.truncated.clear()
         self.inflight = None
         self.queue.clear()
         self.pending_other.clear()
@@ -222,7 +263,10 @@ class Hub:
             return
         try:
             async for frame in self.upstream:
-                await self._from_kernel(frame)
+                try:
+                    await self._from_kernel(frame)
+                except Exception:  # any parse, filter or serialisation error drops this frame only
+                    self.dropped["error"] += 1
                 await asyncio.sleep(0)  # let the writers drain between messages of a burst
         except ConnectionClosed as e:
             if self.closing:
@@ -240,17 +284,19 @@ class Hub:
         if msg is None:
             self.dropped[message_type(frame)] += 1
             return
+        text = json.dumps(msg)
         mt = msg["header"]["msg_type"]
         pid = parent_id(msg)
         if msg["channel"] == "iopub" and mt == "status":
             state = msg["content"].get("execution_state")
             if state in ("restarting", "dead"):
-                self._broadcast(msg)
+                self._broadcast_text(text)
                 self._free()
                 self._broadcast(notice("kernel_restarted" if state == "restarting" else "kernel_dead"))
+                self._maybe_idle()
                 return
         if msg["channel"] == "iopub" and pid is not None and pid in self.output:
-            size = len(frame)
+            size = nbytes(text)
             if pid in self.truncated or self.output[pid] + size > EXEC_OUTPUT_MAX:
                 if pid not in self.truncated:
                     self.truncated.add(pid)
@@ -258,15 +304,17 @@ class Hub:
                 self.dropped["iopub:over_budget"] += 1
                 return
             self.output[pid] += size
-        self._broadcast(msg)
+        self._broadcast_text(text)
         if msg["channel"] == "shell":
             if mt == "execute_reply" and self.inflight is not None and pid == self.inflight.msg_id:
-                await self._next()
+                await self._finished(pid)
             elif pid is not None:
                 self.pending_other.discard(pid)
 
     def _broadcast(self, msg: dict[str, Any]) -> None:
-        text = json.dumps(msg)
+        self._broadcast_text(json.dumps(msg))
+
+    def _broadcast_text(self, text: str) -> None:
         for att in list(self.attached):
             self._enqueue(att, text)
 
@@ -274,7 +322,7 @@ class Hub:
     def _enqueue(self, att: Attached, text: str) -> None:
         if att.closed:
             return
-        att.buffered += len(text)
+        att.buffered += nbytes(text)
         if att.buffered > SEND_BUFFER_MAX:
             # The writer may be stuck on a slow browser: close directly instead of queueing behind it.
             att.closed = True
@@ -301,7 +349,7 @@ class Hub:
                     with contextlib.suppress(Exception):
                         await att.conn.close(item)
                 return
-            att.buffered -= len(item)
+            att.buffered -= nbytes(item)
             try:
                 await att.conn.send_text(item)
             except Exception:  # a gone browser ends only its own connection
@@ -315,15 +363,16 @@ class Hub:
             now = self.service.clock()
             fl = self.inflight
             if fl is not None:
-                if fl.interrupted_at is None and now - fl.started >= EXEC_TIMEOUT_S:
-                    fl.interrupted_at = now
+                if not fl.interrupting and now - fl.started >= EXEC_TIMEOUT_S:
+                    fl.interrupting = True
                     self._broadcast(notice("timeout", fl.msg_id))
                     with contextlib.suppress(Exception):
                         await self.service.interrupt(self.session.handle, self.session.id)
+                    fl.interrupted_at = self.service.clock()   # the grace starts once the interrupt returned
                 elif (
                     fl.interrupted_at is not None
                     and not fl.escalated
-                    and now - fl.interrupted_at >= INTERRUPT_GRACE_S
+                    and self.service.clock() - fl.interrupted_at >= INTERRUPT_GRACE_S
                 ):
                     fl.escalated = True
                     self.service.spawn(self._reset())

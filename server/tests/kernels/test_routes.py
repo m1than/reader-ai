@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from .conftest import (
     ORIGIN,
     FakeClock,
@@ -152,6 +154,10 @@ def test_authentication_origin_and_bodies(pg: Pg, tmp_path: Path) -> None:
         assert c.post(url, content=b"{}", headers=as_json).status_code == 204
         assert c.post(url, json={"x": 1}, headers=_h(ivan)).status_code == 415
         assert c.post(url, content=b"{}", headers=as_text).status_code == 415
+        big = b"{" + b" " * (65 * 1024) + b"}"
+        deep = b"[" * 100_000 + b"]" * 100_000
+        assert c.post(url, content=big, headers=as_json).status_code == 415
+        assert c.post(url, content=deep, headers=as_json).status_code == 415
         foreign = c.post(url, headers=_h(anna))
         unknown = c.post(f"/api/kernel/sessions/{'0' * 32}/interrupt", headers=_h(anna))
         assert (foreign.status_code, foreign.json()) == (404, {"error": "not_found"})
@@ -172,7 +178,7 @@ def test_websocket_relay_end_to_end(pg: Pg, tmp_path: Path) -> None:
         made = c.post("/api/kernel/sessions", json={"lesson_id": "L02"}, headers=_h(ivan))
         path = f"/api/kernel/sessions/{made.json()['session_id']}/channels"
         assert _refused(c, path, _h(None)) == ("denied", 401)
-        assert _refused(c, path, _h(ivan, "https://evil.example"))[0] in {"denied", "closed"}
+        assert _refused(c, path, _h(ivan, "https://evil.example")) == ("closed", 1008)   # FR-AUTH-12 gate
         assert _refused(c, path, _h(cookies["anna"])) == ("denied", 404)
         with c.websocket_connect(path, headers=_h(ivan)) as ws:
             ws.send_text(json.dumps(execute("m1")))
@@ -195,21 +201,109 @@ def test_websocket_relay_end_to_end(pg: Pg, tmp_path: Path) -> None:
 def test_session_recheck_and_unusable_service_notice(pg: Pg, tmp_path: Path) -> None:
     from reader.auth import store
 
-    with stack(pg, tmp_path) as (c, app, _, clock, cookies):
+    with stack(pg, tmp_path) as (c, app, up, clock, cookies):
         made = c.post("/api/kernel/sessions", json={"lesson_id": "L02"}, headers=_h(cookies["ivan"]))
         path = f"/api/kernel/sessions/{made.json()['session_id']}/channels"
         with c.websocket_connect(path, headers=_h(cookies["ivan"])) as ws:
             c.portal.call(store.revoke_session, app.state.test_engine, cookies["ivan"])
             clock.advance(61)
             assert _closed_with(ws) == 4401
-        service_mod = load("reader.kernels.service")
-        svc = app.state.kernel_service
-        svc.user("anna").usable = False
-        sid = "0" * 32
-        svc.user("anna").sessions[sid] = service_mod.Session(
-            sid, "anna", "L1", "3f2b6c1e-8a4d-4c2b-9e1f-0a1b2c3d4e5f", "n"
-        )
-        with c.websocket_connect(f"/api/kernel/sessions/{sid}/channels", headers=_h(cookies["anna"])) as ws:
+        # anna's service becomes unusable the real way: her reset fails (the exit is refused).
+        anna = cookies["anna"]
+        made = c.post("/api/kernel/sessions", json={"lesson_id": "L01"}, headers=_h(anna))
+        sid = made.json()["session_id"]
+        up.exit_status = 500
+        failed = c.post("/api/kernel/reset", headers=_h(anna))
+        assert (failed.status_code, failed.json()) == (503, {"error": "kernel_unavailable"})
+        with c.websocket_connect(f"/api/kernel/sessions/{sid}/channels", headers=_h(anna)) as ws:
             msg = json.loads(ws.receive_text())
             assert msg["content"]["code"] == "kernel_unavailable"
             assert _closed_with(ws) == 1013
+
+
+@requires_docker
+def test_session_dropped_during_the_handshake_gets_kernel_reset(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from starlette.websockets import WebSocket
+
+    with stack(pg, tmp_path) as (c, app, up, _, cookies):
+        made = c.post("/api/kernel/sessions", json={"lesson_id": "L02"}, headers=_h(cookies["ivan"]))
+        path = f"/api/kernel/sessions/{made.json()['session_id']}/channels"
+        real_accept = WebSocket.accept
+
+        async def accept_after_a_drop(self: Any, *args: Any, **kwargs: Any) -> None:
+            app.state.kernel_service.drop_all("ivan", "kernel_reset", 1012)
+            await real_accept(self, *args, **kwargs)
+
+        monkeypatch.setattr(WebSocket, "accept", accept_after_a_drop)
+        with c.websocket_connect(path, headers=_h(cookies["ivan"])) as ws:
+            msg = json.loads(ws.receive_text())
+            assert msg["content"]["code"] == "kernel_reset"
+            assert _closed_with(ws) == 1012
+        assert up.ws_hosts == []       # no upstream connection for a dropped session
+
+
+class _SlowHandshake:
+    """A WebSocket stand-in whose accept takes a while, for concurrent upgrades through `channels`."""
+
+    def __init__(self, app: Any, sid: str, gate: asyncio.Event) -> None:
+        self.app, self.gate = app, gate
+        self.headers = {"origin": ORIGIN}
+        self.cookies = {COOKIE: "c"}
+        self.path_params = {"session_id": sid}
+        self.scope = {"extensions": {"websocket.http.response": {}}}
+        self.client_state = type("S", (), {"name": "CONNECTING"})()
+        self.accepted = False
+        self.denied: int | None = None
+        self.closed: int | None = None
+
+    async def accept(self) -> None:
+        await self.gate.wait()
+        self.accepted = True
+        self.client_state = type("S", (), {"name": "CONNECTED"})()
+
+    async def send_denial_response(self, response: Any) -> None:
+        self.denied = response.status_code
+
+    async def send_text(self, _: str) -> None:
+        return None
+
+    async def close(self, code: int = 1000) -> None:
+        self.closed = code
+
+    async def receive(self) -> dict[str, Any]:
+        await asyncio.sleep(0.05)
+        return {"type": "websocket.disconnect"}
+
+
+def test_concurrent_upgrades_respect_the_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    routes = load("reader.kernels.routes")
+    service_mod = load("reader.kernels.service")
+    from reader.auth import store
+
+    async def run() -> list[_SlowHandshake]:
+        up = FakeUpstream()
+        clock = FakeClock()
+        svc = service_mod.KernelService(up.endpoint, clock=clock, sleep=tick_sleep, http=up.http, ws=up.ws)
+        app = type("App", (), {})()
+        app.state = type("State", (), {"kernel_service": svc})()
+        _, session = await svc.create("ivan", "L02")
+        user = type("U", (), {"handle": "ivan"})()
+
+        async def session_user(*_: Any) -> Any:
+            return user
+
+        monkeypatch.setattr(store, "session_user", session_user)
+        settings = type("Settings", (), {"origin": ORIGIN})()
+        gate = asyncio.Event()
+        sockets = [_SlowHandshake(app, session.id, gate) for _ in range(3)]
+        tasks = [asyncio.ensure_future(routes.channels(ws, settings, None)) for ws in sockets]
+        await asyncio.sleep(0.05)       # all three are inside the handshake
+        gate.set()
+        await asyncio.wait_for(asyncio.gather(*tasks), 5)
+        return sockets
+
+    sockets = asyncio.run(run())
+    assert sorted(ws.accepted for ws in sockets) == [False, True, True]
+    assert [ws.denied for ws in sockets if not ws.accepted] == [409]

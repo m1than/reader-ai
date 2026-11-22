@@ -66,7 +66,7 @@ async def test_create_validates_lesson_and_kernel_id() -> None:
     assert svc.list("ivan") == []
 
 
-async def test_fifth_session_is_refused_without_upstream_request() -> None:
+async def test_fifth_session_is_refused_after_the_nonce_check_without_a_gateway_request() -> None:
     up = FakeUpstream()
     svc = make_service(up)
     for i in range(4):
@@ -74,7 +74,10 @@ async def test_fifth_session_is_refused_without_upstream_request() -> None:
     n = len(up.calls)
     e = await _error(svc.create("ivan", "L9"))
     assert (e.status, e.code) == (409, "too_many_kernels")
-    assert len(up.calls) == n
+    assert [c.path for c in up.calls[n:]] == ["/control/state"]
+    up.nonce["kernel-user-ivan"] = "c" * 32      # the container restarted: its sessions are gone
+    status, _ = await svc.create("ivan", "L9")
+    assert status == 201
 
 
 async def test_delete_and_interrupt() -> None:
@@ -247,6 +250,52 @@ async def test_interrupt_404_runs_unplanned_restart_handling() -> None:
     e = await _error(svc.interrupt("ivan", s.id))
     assert e.status == 404
     assert svc.list("ivan") == []
+
+
+async def test_delete_404_runs_the_state_read_and_removes_the_session() -> None:
+    up = FakeUpstream()
+    svc = make_service(up)
+    _, s1 = await svc.create("ivan", "L01")
+    _, s2 = await svc.create("ivan", "L02")
+    up.kernels["kernel-user-ivan"].discard(s1.kernel_id)
+    up.nonce["kernel-user-ivan"] = "b" * 32          # and the container restarted
+    before = len(up.requests_to("/control/state"))
+    await svc.delete("ivan", s1.id)
+    assert len(up.requests_to("/control/state")) == before + 1
+    assert svc.list("ivan") == []      # FR-KERNEL-14: a new nonce drops all of the user's sessions
+    assert s2.hub is None
+
+
+async def test_first_use_reset_coalesces_with_an_explicit_reset() -> None:
+    clock = FakeClock()
+    up = FakeUpstream()
+    svc = make_service(up, clock, advancing_sleep(clock))
+    await asyncio.gather(svc.create("ivan", "L01"), svc.reset("ivan"))
+    assert len(up.requests_to("/control/exit")) == 1
+
+
+async def test_reset_deadline_is_a_whole_even_when_a_state_read_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = load("reader.kernels.service")
+    monkeypatch.setattr(service, "RESET_DEADLINE_S", 0.3)
+    up = FakeUpstream()
+    calls = {"n": 0}
+    real = up.http
+
+    async def hanging(method: str, host: str, port: int, path: str, body: Any = None) -> Any:
+        if path == "/control/state":
+            calls["n"] += 1
+            if calls["n"] > 1:            # every read after the exit hangs
+                await asyncio.sleep(3600)
+        return await real(method, host, port, path, body)
+
+    svc = service.KernelService(up.endpoint, http=hanging, ws=up.ws)
+    svc.user("ivan").started = True
+    started = asyncio.get_running_loop().time()
+    e = await _error(svc.reset("ivan"))
+    assert e.code == "kernel_unavailable"
+    assert asyncio.get_running_loop().time() - started < 2.0
 
 
 async def test_no_session_outlives_its_nonce() -> None:

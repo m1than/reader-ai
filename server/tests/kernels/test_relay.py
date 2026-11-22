@@ -12,6 +12,8 @@ import logging
 from typing import Any
 
 import pytest
+from hypothesis import given, settings
+from hypothesis import strategies as st
 
 from .conftest import (
     FakeClock,
@@ -235,8 +237,185 @@ async def test_logs_carry_no_code_or_output(caplog: pytest.LogCaptureFixture) ->
     await settle()
     run.upstream.push(kernel_msg("iopub", "stream", "a", {"name": "stdout", "text": "CANARY-OUT-9"}))
     run.upstream.push(kernel_msg("iopub", "comm_msg", "a", {"data": "CANARY-OUT-9"}))
+    for i in range(300):   # canaries in channel and msg_type, each distinct
+        run.upstream.push(json.dumps({"channel": f"CANARY-CH-{i}\nforged", "header": {"msg_type": "x"}}))
+        run.upstream.push(json.dumps({"channel": "iopub", "header": {"msg_type": f"CANARY-MT-{i}"}}))
+    await settle(80)
+    assert len(run.hub.dropped) <= 10        # closed-set labels: the counter stays bounded
     run.upstream.push(closed_with(1009))
     await settle(40)
     text = "\n".join(r.getMessage() for r in caplog.records)
-    assert "CANARY-CODE-7" not in text
-    assert "CANARY-OUT-9" not in text
+    for canary in ("CANARY-CODE-7", "CANARY-OUT-9", "CANARY-CH", "CANARY-MT", "forged"):
+        assert canary not in text
+
+
+POISON: list[Any] = [
+    {"channel": "iopub", "header": {"msg_type": {}}},
+    {"channel": "shell", "header": {"msg_type": []}},
+    {"channel": "iopub", "header": {"msg_type": ["status"]}},
+    {"channel": {"x": 1}, "header": {"msg_type": "stream"}},
+    {"channel": "iopub", "header": {"msg_type": "stream"}, "content": {"a": "[" * 1}},
+]
+
+
+def _deep(depth: int) -> str:
+    head = '{"channel":"iopub","header":{"msg_type":"stream"},"content":{"a":'
+    return head + "[" * depth + "]" * depth + "}}"
+
+
+async def test_poison_and_deep_kernel_frames_are_dropped_and_the_relay_survives() -> None:
+    _, svc, _, run = await _running()
+    run.browser.send(execute("a"))
+    await settle()
+    for frame in POISON:
+        run.upstream.push(json.dumps(frame))
+    for depth in (500, 900, 1500, 5000, 50000, 200000):
+        run.upstream.push(_deep(depth))
+    run.upstream.push(kernel_msg("iopub", "stream", "a", {"name": "stdout", "text": "after"}))
+    run.upstream.push(kernel_msg("shell", "execute_reply", "a", {"status": "ok"}))
+    await settle(60)
+    assert not run.hub.tasks[0].done()
+    assert "execute_reply" in run.browser.types()
+    iopub = [m for m in run.browser.received if m.get("channel") == "iopub"]
+    assert any(m["content"].get("text") == "after" for m in iopub)
+    assert svc.list("ivan")
+
+
+async def test_poison_browser_frames_are_rejected_and_the_connection_survives() -> None:
+    _, _, _, run = await _running()
+    poison = [
+        {"channel": "shell", "header": {"msg_id": "p1", "msg_type": []}, "parent_header": {}, "content": {}},
+        {"channel": "shell", "header": {"msg_id": "p2", "msg_type": {}}, "parent_header": {}, "content": {}},
+        {"channel": [], "header": {"msg_id": "p3", "msg_type": "execute_request"}, "parent_header": {}},
+    ]
+    for frame in poison:
+        run.browser.send(frame)
+    run.browser.send('{"a":' + "[" * 100000 + "]" * 100000 + "}")
+    run.browser.send(execute("ok"))
+    await settle(40)
+    assert not run.task.done()
+    assert run.browser.close_code is None
+    assert [n for n in run.browser.notices() if n[0] == "rejected"][:3] == [
+        ("rejected", "p1"), ("rejected", "p2"), ("rejected", "p3")]
+    assert [m["header"]["msg_id"] for m in run.upstream.sent] == ["ok"]
+
+
+async def test_timeout_survives_the_last_browser_disconnecting() -> None:
+    up, svc, clock, run = await _running()
+    run.browser.send(execute("a", code="while True: pass"))
+    run.browser.send(execute("queued"))
+    await settle()
+    run.browser.disconnect()
+    await settle(30)
+    assert not run.hub.closing
+    assert run.hub.queue == type(run.hub.queue)()
+    clock.advance(60.5)
+    await settle(30)
+    assert len(up.requests_to("/interrupt")) == 1
+    clock.advance(5.5)
+    await settle(60)
+    assert len(up.requests_to("/control/exit")) == 2      # first use + escalation
+    assert svc.list("ivan") == []
+
+
+async def test_idle_hub_ends_after_the_reply_once_alone() -> None:
+    _, _, _, run = await _running()
+    run.browser.send(execute("a"))
+    await settle()
+    run.browser.disconnect()
+    await settle(20)
+    assert not run.hub.closing
+    _reply_only(run, "a")
+    await settle(20)
+    assert run.hub.closing
+    assert run.session.hub is None
+
+
+def _reply_only(run: Any, msg_id: str) -> None:
+    run.upstream.push(kernel_msg("shell", "execute_reply", msg_id, {"status": "ok"}))
+
+
+async def test_budgets_are_released_per_execute() -> None:
+    _, _, _, run = await _running()
+    for i in range(50):
+        run.browser.send(execute(f"m{i}"))
+        await settle(2)
+        _reply_only(run, f"m{i}")
+        await settle(2)
+    assert run.hub.output == {}
+    assert run.hub.truncated == set()
+
+
+async def test_start_refuses_on_a_closing_hub() -> None:
+    relay = load("reader.kernels.relay")
+    up = FakeUpstream()
+    svc = make_service(up, FakeClock(), tick_sleep)
+    _, s = await svc.create("ivan", "L03")
+    hub = relay.Hub(svc, s)
+    s.hub = hub
+    svc.drop_all("ivan", "kernel_reset", 1012)
+    assert await hub.start() is False
+    assert up.ws_hosts == []
+
+
+any_json = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.floats(allow_nan=False) | st.text(max_size=12),
+    lambda inner: st.lists(inner, max_size=3) | st.dictionaries(st.text(max_size=8), inner, max_size=3),
+    max_leaves=12,
+)
+kernel_frames = st.one_of(
+    any_json.map(json.dumps),
+    st.builds(lambda ch, mt, c: json.dumps({"channel": ch, "header": {"msg_type": mt}, "content": c}),
+              st.one_of(st.sampled_from(["shell", "iopub", "stdin", "control"]), any_json),
+              st.one_of(st.sampled_from(["stream", "status", "execute_reply", "comm_open"]), any_json),
+              any_json),
+    st.binary(max_size=20),
+)
+browser_frames = st.one_of(
+    any_json.map(json.dumps),
+    st.builds(lambda ch, mt, mid, c: json.dumps({"channel": ch, "header": {"msg_id": mid, "msg_type": mt},
+                                                 "parent_header": {}, "metadata": {}, "content": c}),
+              st.one_of(st.just("shell"), any_json),
+              st.one_of(st.sampled_from(["execute_request", "kernel_info_request", "comm_open"]), any_json),
+              st.one_of(st.text(min_size=1, max_size=10), any_json),
+              any_json),
+)
+KEYS = {"channel", "header", "parent_header", "metadata", "content"}
+ALLOWED_OUT = {
+    ("shell", t) for t in ("execute_reply", "kernel_info_reply", "complete_reply", "inspect_reply",
+                           "is_complete_reply")
+} | {("iopub", t) for t in ("status", "execute_input", "stream", "display_data", "update_display_data",
+                            "execute_result", "error", "clear_output")}
+
+
+@settings(max_examples=60, deadline=None)
+@given(from_browser=st.lists(browser_frames, max_size=12), from_kernel=st.lists(kernel_frames, max_size=12))
+def test_frame_sequences_through_the_relay(from_browser: list[str], from_kernel: list[Any]) -> None:
+    """FR-KERNEL-8, INV-KERNEL-2/3: arbitrary frames in both directions never end the relay, and only rebuilt,
+    allow-listed messages cross it."""
+
+    async def run_case() -> None:
+        _, svc, _, run = await _running()
+        for frame in from_browser:
+            run.browser.send(frame)
+        for frame in from_kernel:
+            run.upstream.push(frame)
+        await settle(30)
+        assert not run.task.done()
+        assert not run.hub.tasks[0].done()
+        assert run.browser.close_code is None
+        for msg in run.upstream.sent:
+            assert set(msg) == KEYS
+            assert msg["channel"] == "shell"
+            assert msg["header"]["username"] == "ivan"
+            assert msg["header"]["session"] == run.session.id
+        for msg in run.browser.received:
+            if msg["channel"] == "reader":
+                continue
+            assert set(msg) == KEYS
+            assert (msg["channel"], msg["header"]["msg_type"]) in ALLOWED_OUT
+        run.browser.disconnect()
+        await settle(10)
+        assert svc.list("ivan")
+
+    asyncio.run(run_case())

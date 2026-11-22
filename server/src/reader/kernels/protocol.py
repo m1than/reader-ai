@@ -28,6 +28,17 @@ IOPUB_TYPES: Final = frozenset(
 )
 KEYS: Final = ("channel", "header", "parent_header", "metadata", "content")
 
+# INV-KERNEL-6: log labels come only from these closed sets (REF-KERNEL-1 message types).
+LOG_CHANNELS: Final = frozenset({"shell", "iopub", "stdin", "control"})
+KNOWN_TYPES: Final = SHELL_REQUESTS | SHELL_REPLIES | IOPUB_TYPES | frozenset(
+    {
+        "comm_open", "comm_msg", "comm_close", "comm_info_request", "comm_info_reply", "history_request",
+        "history_reply", "input_request", "input_reply", "interrupt_request", "interrupt_reply",
+        "shutdown_request", "shutdown_reply", "debug_request", "debug_reply", "debug_event", "usage_request",
+        "usage_reply", "kernel_info_request", "connect_request", "connect_reply",
+    }
+)
+
 # FR-KERNEL-11
 NOTICE_CODES: Final = frozenset(
     {
@@ -109,7 +120,7 @@ def inbound(
     if msg_id in pending:
         raise Rejected(msg_id, "duplicate_msg_id")
     msg_type = header.get("msg_type")
-    if raw.get("channel") != "shell" or msg_type not in SHELL_REQUESTS:
+    if raw.get("channel") != "shell" or not isinstance(msg_type, str) or msg_type not in SHELL_REQUESTS:
         raise Rejected(msg_id, "type")
     if raw.get("parent_header") != {}:
         raise Rejected(msg_id, "parent_header")
@@ -159,6 +170,8 @@ def outbound(frame: str | bytes) -> dict[str, Any] | None:
     if not isinstance(header, dict):
         return None
     msg_type = header.get("msg_type")
+    if not isinstance(msg_type, str):
+        return None
     shell = channel == "shell" and msg_type in SHELL_REPLIES
     iopub = channel == "iopub" and msg_type in IOPUB_TYPES
     if not (shell or iopub):
@@ -178,18 +191,20 @@ def outbound(frame: str | bytes) -> dict[str, Any] | None:
 
 
 def message_type(frame: str | bytes) -> str:
-    """A loggable type label for a dropped frame (never its content)."""
+    """A loggable label for a dropped frame, from closed sets only (INV-KERNEL-6): the channel in LOG_CHANNELS
+    else `?`, the type in KNOWN_TYPES else `other`; or `binary`, `unparseable`, `malformed`."""
     if not isinstance(frame, str):
         return "binary"
     try:
         raw = json.loads(frame)
     except (ValueError, RecursionError):
         return "unparseable"
-    if isinstance(raw, dict) and isinstance(raw.get("header"), dict):
-        value = raw["header"].get("msg_type")
-        if isinstance(value, str) and re.fullmatch(r"[a-z_]{1,40}", value):
-            return f"{raw.get('channel') if isinstance(raw.get('channel'), str) else '?'}:{value}"[:60]
-    return "malformed"
+    if not isinstance(raw, dict) or not isinstance(raw.get("header"), dict):
+        return "malformed"
+    channel, value = raw.get("channel"), raw["header"].get("msg_type")
+    channel_label = channel if isinstance(channel, str) and channel in LOG_CHANNELS else "?"
+    type_label = value if isinstance(value, str) and value in KNOWN_TYPES else "other"
+    return f"{channel_label}:{type_label}"
 
 
 def parent_id(message: dict[str, Any]) -> str | None:

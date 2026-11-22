@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from reader.kernels import upstream
 from reader.kernels.protocol import KERNEL_ID, LESSON_ID
-from reader.kernels.upstream import Endpoint, Reply, UpstreamError
+from reader.kernels.upstream import Endpoint, Reply, UpstreamError, UpstreamUnresolvable
 
 if TYPE_CHECKING:
     from websockets.asyncio.client import ClientConnection
@@ -72,7 +72,7 @@ class State:
 
 def _unavailable(e: UpstreamError) -> bool:
     """The service name does not resolve: the kernels profile is not running (FR-KERNEL-13)."""
-    return str(e) == "gaierror"
+    return isinstance(e, UpstreamUnresolvable)
 
 
 class KernelService:
@@ -150,14 +150,15 @@ class KernelService:
         if not isinstance(lesson_id, str) or not LESSON_ID.fullmatch(lesson_id):
             raise ServiceError(400, "lesson_id")
         st = self.user(handle)
+        if not st.started and st.usable:
+            await self.reset(handle)   # FR-KERNEL-9, coalesced with an explicit reset
         async with st.lock:
-            existing = next((s for s in st.sessions.values() if s.lesson_id == lesson_id), None)
-            if existing is None and len(st.sessions) >= MAX_SESSIONS:
-                raise ServiceError(409, "too_many_kernels")
-            await self._ensure(handle)
+            await self._ensure(handle)   # the nonce check first (a control state read), then the cap
             existing = next((s for s in st.sessions.values() if s.lesson_id == lesson_id), None)
             if existing is not None:
                 return 200, existing
+            if len(st.sessions) >= MAX_SESSIONS:
+                raise ServiceError(409, "too_many_kernels")
             try:
                 reply = await self.gateway(handle, "POST", "/api/kernels", {"name": "python3"})
                 data = reply.json() if reply.status == 201 else None
@@ -181,7 +182,10 @@ class KernelService:
                 raise self._upstream_error(e) from None
             if reply.status not in (200, 204, 404):
                 raise ServiceError(502, "kernel_upstream")
-            self.drop(session, None, 1000)
+            if reply.status == 404:
+                await self._lost_locked(session)    # FR-KERNEL-14: a known kernel id answered 404
+            if st.sessions.get(session.id) is session:
+                self.drop(session, None, 1000)
 
     async def interrupt(self, handle: str, session_id: str) -> None:
         session = self.get(handle, session_id)
@@ -204,11 +208,8 @@ class KernelService:
     async def _ensure(self, handle: str) -> None:
         """Called under the user's lock before a session is created or returned."""
         st = self.user(handle)
-        if not st.usable:
+        if not st.usable or not st.started:
             raise ServiceError(503, "kernel_unavailable")
-        if not st.started:
-            await self._reset_locked(handle)
-            return
         try:
             state = await self.state(handle)
         except UpstreamError as e:
@@ -221,38 +222,47 @@ class KernelService:
             return
         await self._await_new(handle, st.nonce)
 
-    async def _await_new(self, handle: str, old: str | None) -> None:
-        st = self.user(handle)
-        t0 = self.clock()
-        while self.clock() - t0 < RESET_DEADLINE_S:
+    async def _poll_new(self, handle: str, old: str | None) -> State | None:
+        """Poll until a nonce other than `old` answers with `up`. The 30 s deadline is a whole: each poll's
+        own timeout is clipped to the time left (FR-KERNEL-5)."""
+        deadline = self.clock() + RESET_DEADLINE_S
+        while (left := deadline - self.clock()) > 0:
             try:
-                state = await self.state(handle)
+                state = await asyncio.wait_for(self.state(handle), left)
                 if state.nonce != old and state.gateway == "up":
-                    st.nonce = state.nonce
-                    return
-            except UpstreamError:
+                    return state
+            except (UpstreamError, TimeoutError):
                 pass
-            await self.sleep(POLL_S)
-        raise ServiceError(503, "kernel_unavailable")
+            await self.sleep(min(POLL_S, max(deadline - self.clock(), 0)))
+        return None
+
+    async def _await_new(self, handle: str, old: str | None) -> None:
+        state = await self._poll_new(handle, old)
+        if state is None:
+            raise ServiceError(503, "kernel_unavailable")
+        self.user(handle).nonce = state.nonce
 
     async def upstream_lost(self, session: Session) -> None:
         """FR-KERNEL-14: the upstream WebSocket closed or failed to connect, or a known kernel id answered
         404."""
+        async with self.user(session.handle).lock:
+            await self._lost_locked(session)
+
+    async def _lost_locked(self, session: Session) -> None:
         st = self.user(session.handle)
-        async with st.lock:
-            if st.sessions.get(session.id) is not session:
-                return
-            try:
-                state = await self.state(session.handle)
-            except UpstreamError:
-                self.drop_all(session.handle, "kernel_unavailable", 1013)
-                return
-            if state.nonce != st.nonce or state.gateway == "exiting":
-                self.drop_all(session.handle, "kernel_reset", 1012)
-                if state.nonce != st.nonce and state.gateway == "up":
-                    st.nonce = state.nonce
-                return
-            self.drop(session, "kernel_dead", 1000)
+        if st.sessions.get(session.id) is not session:
+            return
+        try:
+            state = await self.state(session.handle)
+        except UpstreamError:
+            self.drop_all(session.handle, "kernel_unavailable", 1013)
+            return
+        if state.nonce != st.nonce or state.gateway == "exiting":
+            self.drop_all(session.handle, "kernel_reset", 1012)
+            if state.nonce != st.nonce and state.gateway == "up":
+                st.nonce = state.nonce
+            return
+        self.drop(session, "kernel_dead", 1000)
 
     # Reset (FR-KERNEL-5)
     async def reset(self, handle: str) -> None:
@@ -285,15 +295,8 @@ class KernelService:
         if reply.status != 202:
             raise fail()
         self.drop_all(handle, "kernel_reset", 1012)
-        t0 = self.clock()
-        while self.clock() - t0 < RESET_DEADLINE_S:
-            try:
-                state = await self.state(handle)
-                if state.nonce != n0 and state.gateway == "up":
-                    st.nonce, st.usable, st.started = state.nonce, True, True
-                    log.info("kernel_reset handle=%s", handle)
-                    return
-            except UpstreamError:
-                pass
-            await self.sleep(POLL_S)
-        raise fail()
+        state = await self._poll_new(handle, n0)
+        if state is None:
+            raise fail()
+        st.nonce, st.usable, st.started = state.nonce, True, True
+        log.info("kernel_reset handle=%s", handle)

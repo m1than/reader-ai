@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import socket
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -27,6 +28,10 @@ CONTROL_PORT: Final = 8889
 
 class UpstreamError(Exception):
     """Any failed upstream call: connection, timeout, redirect, oversized or malformed response."""
+
+
+class UpstreamUnresolvable(UpstreamError):
+    """The service name does not resolve: the kernels profile is not running (FR-KERNEL-13)."""
 
 
 @dataclass(frozen=True)
@@ -123,6 +128,8 @@ async def http(method: str, host: str, port: int, path: str, body: Any = None) -
             return await _http(method, host, port, path, data)
     except UpstreamError:
         raise
+    except socket.gaierror:
+        raise UpstreamUnresolvable("gaierror") from None
     except (OSError, TimeoutError) as e:
         raise UpstreamError(type(e).__name__) from None
 
