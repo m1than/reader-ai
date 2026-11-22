@@ -40,16 +40,14 @@ def write_config(directory: Path, text: str) -> Path:
 
 def settings_for(tmp: Path, **kwargs: Any) -> Any:
     from reader.auth.policy import settings_from_config
-
     from reader.config import load_config
 
     return settings_from_config(load_config(write_config(tmp, config_text(**kwargs))))
 
 
 def target(pg: Pg, password: str | None = None) -> Any:
-    from reader.db import DbTarget
-
     from reader.config import Secret
+    from reader.db import DbTarget
 
     return DbTarget(
         pg.host, pg.port, pg.user, pg.database, Secret(pg.password if password is None else password)

@@ -57,6 +57,7 @@ async def test_migrate_reaches_all_heads_and_is_idempotent(pg: Pg) -> None:
 
 async def test_concurrent_migrations_serialize(pg: Pg) -> None:
     import anyio
+
     from reader.db import at_heads, make_engine, migrate
 
     engines = [make_engine(target(pg)) for _ in range(3)]
