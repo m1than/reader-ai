@@ -8,6 +8,8 @@
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
+  compile_cap_usd: { usd: 8, per: "one lesson compile (all stages)", date: 2026-11-22, by: owner,
+    why: "owner 'accept everything' on the compile budget; spike L02 cost $2.42–$2.97 per run, $8 matches the spike's own cap" }
   spent_usd: 5.4576      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
