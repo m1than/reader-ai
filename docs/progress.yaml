@@ -406,6 +406,48 @@ tasks:
         against Postgres 18 (pinned digest, testcontainers). Live item left: fixture load on a fresh blobs volume
         (e2e/live/slice.sh). Cross-spec still open: SRV-INGEST issues span ids as <material_sha256>:<seq> and reuses
         reader.blobs; SRV-PIPELINE owns G2." }
+  - { id: V.OPS-DEPLOY-web, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.OPS-DEPLOY],
+      branch: V/V.WEB-min,
+      note: "Done on branch V/V.WEB-min (commit 5b5ed0c), awaits the code review with V.WEB-min. Chose the derived image:
+        reader-caddy:local (deploy/images/caddy.Dockerfile: node:26-trixie-slim@sha256:e6bedef2…20bc build stage with
+        allow-listed web inputs and a dockerignore, then the pinned caddy:2-alpine with web/dist at /srv/spa), so the
+        SPA ships with its build and no host path enters the edge; the placeholder directory is gone. Caddyfile: the
+        exact app CSP of WEB-UI's header (no data:, no 'unsafe-inline') and try_files {path} /index.html. Paired
+        OPS-DEPLOY FR-DEPLOY-2/5/7 and tests: 66 deploy tests pass, including the opt-in [image: build] test
+        (READER_TEST_IMAGE_BUILD=1) that built reader-caddy:test and found /srv/spa/index.html and the JS assets." }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: in_progress,
+      needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels, V.OPS-DEPLOY-web], branch: V/V.WEB-min,
+      review: "deep-reviewer (Fable), single round (outside the complex areas): changes, 9 blockers (B1–B3 the sandboxed
+        frame, incl. a one-click session takeover via the frame page opened top-level, reproduced in Chromium; B4
+        sanitiser order and schema; B5 reconnect and notice table; B6 gradient check; B7 story coverage; B8 bundle
+        budget; B9 contrast fixture as recipes); applied per coordinator decisions, no second round",
+      note: "specs revised after the review, folding in the SRV-LESSON API (list with course and latest_sha256; notebook
+        only from the immutable revision route; span citations). Three specs: WEB-UI (shell, vendored library tarball
+        from tag v0.1.0 via web/scripts/vendor-ui.mjs with tag→commit check, Calm tokens, routes, API client, sign-in
+        via SRV-AUTH's page, lesson list by course), WEB-NOTEBOOK (cells by kind, span/URL citations, G2 open cells,
+        own typed relay client with one reconnect procedure and the full notice/close table), WEB-RENDER (sanitise →
+        KaTeX → Shiki as React, no rehype-raw, no markdown images; HTML as text, SVG as blob: img; the sandboxed frame
+        deferred to 4b with the review's findings). Declared deviations from proposed ADR-0013: hand-written API
+        client; no @jupyterlab/services (widgets deferred). Approved by agent 2026-11-22. Red 5bdd54d: 109 Vitest
+        tests (104 failing on assertions against empty stubs; the vendor checks pass on the tarball) and 2 Playwright
+        [browser] tests. Green 1f6ac7e: 109/109 Vitest pass; typecheck and build-storybook pass. NFR-UI-1 measured
+        110,131 B gzip initial JS (threshold 121,144 = +10 %). Chromium [browser] run (2026-11-22, Playwright 1.65.1,
+        chrome-headless-shell 159): first run INV-UI-4 failed with 13 style-src-attr violations from rehype-katex's
+        DOM-based HTML parser (hast-util-from-html-isomorphic browser build); fixed by aliasing it to its parse5 build
+        in vite.config.ts; second run 2/2 pass (no CSP violation on / and /lessons/w01 with KaTeX and Shiki; no
+        gradient, glass or glow in any story, light and dark). Library vendored from tag v0.1.0 (eae463bc) as
+        web/vendor/acme-ui-v0.1.0.tgz, sha256 a1f228e1…8e88, Node 26.13.0, npm 11.20.0; nothing pushed to the
+        library. Owner notes: the library's styles.css carries a data: mask URL for the table sort indicator (FR-UI-9
+        note; blocked by the CSP if a table were rendered). Code review (fca75a1, single round, 2026-11-22): 3 blockers
+        fixed — SVG renders as text and never becomes a blob (an SVG blob opened top-level ran its script in the app
+        origin, Chromium); a Run all stops on any error reply whatever the label; giving up a reconnect and a 401 in
+        a reconnect POST are lost events. Non-blocking applied: retry() runs the reconnect; INV-NOTEBOOK-1 checked
+        against a reference model with HTTP failures and a socket that rejects early sends; output coercion; Retry
+        reset; inline-math clipping; protocols spread, // links absolute, footnote links via clobberPrefix '' plus a
+        fragment rewrite; decode-named-character-reference aliased to its table build; raster blob URLs revoked on
+        load/error; caddy build with npm ci --ignore-scripts; /assets/* 404 instead of the SPA; COPY --from stage
+        check; one distinct data: URL pinned; NFR-UI-1 110,139 B (threshold 121,153). After the fixes: Vitest 122/122,
+        Playwright Chromium 5/5, tests/deploy 67 passed (incl. the image build), tests/sandbox skipped as asked." }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
       note: "SRV-KERNEL code review approve (round 1 changes, round 2 approve; 71 kernel tests); PR after the
         OPS-SANDBOX flaky-test fix (investigator) so the full gate can pass. OPS-SANDBOX done (code review approve,
@@ -434,7 +476,8 @@ tasks:
         kernels 248 MiB; reset round trip 1.12–1.20 s (3 resets, 11 s apart); exit with 50 idle connections held:
         process gone 0.11 s after the 202. SRV-KERNEL stays draft until SRV-AUTH merges (its Red needs the app and
         session layers). Cross-spec: SRV-AUTH's app factory includes routers from a declared list naming
-        reader.kernels.routes" }
+        reader.kernels.routes. Item from the WEB review for SRV-KERNEL (done in SRV-KERNEL FR-KERNEL-10): on
+        kernel_restarted the relay frees its in-flight execute slot and drops its queue." }
   - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: fix, track: engineering, status: done, needs: [],
       note: "Root cause (investigator, 2026-11-22): the OPS-SANDBOX test session finalizer removed every container and
         network labelled org.reader-ai.test=sandbox on the shared Docker daemon, killing other concurrent sessions'
@@ -445,8 +488,6 @@ tasks:
   - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
       note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels],
-      note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
   - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
       note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
         spends credit, ledger" }

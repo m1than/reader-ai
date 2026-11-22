@@ -1,0 +1,235 @@
+# WEB-UI — the app shell: the owner's component library consumed from a pinned build, the Calm tokens, routing,
+# the API client, sign-in and sign-out, the lesson list and Storybook (vertical slice V6, `V.WEB-min`; full module in
+# stage 4b).
+#
+# Scope (slice): a signed-in learner sees their lessons and opens one; the lesson view itself is WEB-NOTEBOOK, output
+# rendering is WEB-RENDER. Sign-in uses SRV-AUTH's own pages (FR-AUTH-14), which WEB-UI replaces only in stage 4.
+#
+# Library consumption (ADR-0013, spike library-publish): the owner tagged `v0.1.0` on the library's
+# `web3/material-parity` line (commit eae463bc, merge of the release workflow); its GitHub Packages release has not run
+# (Actions billing). Until it has, reader-ai consumes a tarball built from that tag by a committed script, checked in
+# with its sha256 (FR-UI-1). The script only clones, builds and packs locally; it never pushes, tags or publishes in the
+# library repository (the library's AGENTS.md). When the registry release exists, a paired change switches the
+# dependency to `@m1than/ui@0.1.0` and the imports from `@acme/ui/*` to `@m1than/ui/*` (spike finding 1).
+#
+# Declared deviations from proposed ADR-0013, for the owner:
+# - API client: hand-written typed wrappers with runtime validation for the slice's few routes, not a client generated
+#   from the server's OpenAPI. Generation comes in stage 4 when the API surface grows (it needs an exported
+#   openapi.json, a SRV-AUTH `reader-server` change).
+# - Storybook's live token editor and the library gallery under Calm are deferred to stage 4b; the slice builds
+#   Storybook with stories for its own components only. The owner's design gate (roadmap 4b) is still required before
+#   anything in 4b is marked implemented.
+#
+# Content Security Policy: the app never sets `innerHTML` and never injects `<style>` or `<script>` at run time
+# (INV-UI-2), so it needs no 'unsafe-inline'.
+#
+# Cross-spec items (paired change in OPS-DEPLOY, task V.OPS-DEPLOY-web, before V.WEB-min Green):
+# - Caddyfile app CSP: keep `default-src 'self'` and `frame-ancestors 'none'`; add `img-src 'self' blob:`
+#   (image outputs as blob: URLs), `connect-src 'self' wss://localhost` (explicit, for engines where 'self' does not
+#   cover wss), `frame-src 'none'`, `object-src 'none'`, `base-uri 'none'`, `form-action 'self'`. No data: anywhere
+#   (FR-UI-9).
+# - Serving (done in V.OPS-DEPLOY-web: the derived image `reader-caddy:local`): the built `web/dist` at `/srv/spa`;
+#   `/assets/*` served as files only (a missing asset is a 404); an SPA fallback (`try_files {path} /index.html`) for
+#   every other path outside `/api/*` and `/mcp`, so deep links such as `/lessons/w01` load.
+# - SRV-LESSON (V4; API fixed by the coordinator 2026-11-21): `GET /api/lessons` →
+#   `{"lessons": [{lesson_id, course_id, course_title, ordinal, title, updated_at, latest_sha256}]}` (VEC-UI-2);
+#   `GET /api/lessons/{lesson_id}` → metadata plus revisions; the notebook only from
+#   `GET /api/lessons/{lesson_id}/revisions/{sha256}` (immutable, ETag).
+# - SRV-AUTH (approved): `GET /api/me`, `POST /api/auth/signout`, the sign-in page `GET /api/auth/signin`, the
+#   `Origin` and Content-Type rule (FR-AUTH-12), the session cookie (HttpOnly; the SPA never reads it).
+#
+# Test levels: [unit] Vitest in jsdom; [story] the story builds in `npm run build-storybook` (ci-local); [browser]
+# Playwright (Chromium) against `vite preview` behind the committed test server (`web/test-server/`), which reads the
+# CSP header from `deploy/Caddyfile` and stubs `/api/me` and the lesson routes with VEC-UI-2, run on request and in the
+# slice live check (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
+# `reader up`, signed in with the S1 `live-check` learner through a Chromium virtual authenticator.
+
+id: WEB-UI
+title: App shell — pinned library build, Calm tokens, routing, API client, sign-in redirect and lesson list
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round"
+layer: web
+track: product
+adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
+
+paths:
+  - web/src/ui/**
+  - web/src/app/**
+  - web/src/main.tsx
+  - web/.storybook/**
+  - web/scripts/**
+  - web/vendor/**
+  - web/index.html
+  - web/package.json
+  - web/package-lock.json
+  - web/vite.config.ts
+  - web/tsconfig.json
+  - web/playwright.config.ts
+  - web/test-server/**
+  - e2e/web/ui/**
+  - spec/fixtures/WEB-UI/**
+
+defers:
+  - "registry package `@m1than/ui` from GitHub Packages (needs the release run and a read:packages token): when the release workflow has run"
+  - "client generated from the server's OpenAPI: stage 4"
+  - "own passkey ceremony pages in the SPA (replacing SRV-AUTH FR-AUTH-14): stage 4b"
+  - "Storybook live token editor, library gallery under Calm, Storybook served at /storybook, the owner's design gate: stage 4b"
+  - "course progress and lesson status: stage 6"
+  - "sharing, cohorts, KB, export, habits, recall views: stages 6–8"
+  - "mobile layout polish below 360 px width: stage 9"
+
+normative:
+  - id: REF-UI-1
+    title: ADR-0013 — Frontend and rendering (React 19, Vite, TanStack Router and Query, the library, Calm, Storybook 10)
+    url: docs/adr/0013-frontend-and-rendering.md
+  - id: REF-UI-2
+    title: spikes/library-publish/RESULT.md — consuming a built commit; Calm draft; 218 contrast pairs; 124,206 B gallery build
+    url: spikes/library-publish/RESULT.md
+  - id: REF-UI-3
+    title: W3C Design Tokens Format Module (community group draft)
+    url: https://tr.designtokens.org/format/
+  - id: REF-UI-4
+    title: WCAG 2.2 — 1.4.3 Contrast (Minimum) and 1.4.11 Non-text Contrast; relative luminance
+    url: https://www.w3.org/TR/WCAG22/
+  - id: REF-UI-5
+    title: SRV-AUTH — /api/me, /api/auth/signout, the sign-in page, FR-AUTH-12
+    url: spec/modules/SRV-AUTH.yaml
+  - id: REF-UI-6
+    title: CSS Color Module Level 5 — color-mix()
+    url: https://www.w3.org/TR/css-color-5/
+
+requirements:
+  - id: FR-UI-1
+    text: >-
+      The library is the npm dependency `"@acme/ui": "file:vendor/acme-ui-v0.1.0.tgz"`. `npm pack` at the tag names its
+      output after the source version (`acme-ui-0.0.0.tgz`; the release workflow sets the version only when
+      publishing), so the script renames it to `acme-ui-v0.1.0.tgz`; the package inside stays `@acme/ui@0.0.0`.
+      `web/vendor/acme-ui.lock.json` records `{tag: "v0.1.0", commit: <40-hex sha>, tarball: "acme-ui-v0.1.0.tgz",
+      sha256, node: <version>, npm: <version>}`. `web/scripts/vendor-ui.mjs <library checkout>` refuses unless
+      `git rev-parse v0.1.0^{commit}` in that checkout equals the recorded commit, then builds in a temporary clone at
+      that commit with the library's own `npm ci && npm run build && npm pack` under the recorded Node version, writes
+      the tarball and rewrites the lock file; it runs no git command that writes to a remote. A unit test hashes the
+      committed tarball and compares it with the lock file. Imports use one entry per component (`@acme/ui/<entry>`),
+      plus `@acme/ui/styles.css`. The slice uses these entries only: button, toast, progress, skeleton, tooltip,
+      dialog, chip, divider, link, typography, stack, container, app-bar, list-view, alert. [unit]
+  - id: FR-UI-2
+    text: >-
+      Calm tokens are data: `web/src/ui/tokens/calm.tokens.json` (W3C Design Tokens, light and dark, starting from the
+      spike's adjusted draft), compiled by `web/src/ui/tokens/build.mjs` into `calm.css`, which overrides the
+      library's `--acme-*` variables unlayered, maps holo, glass and glow to flat values, and sets every duration to 0
+      under `prefers-reduced-motion: reduce`. The generator is deterministic (same input, byte-identical output) and the
+      committed `calm.css` equals its output (test). The app shell paints `--acme-canvas` on `html` (spike finding 4)
+      and follows `prefers-color-scheme`. [unit]
+  - id: FR-UI-3
+    text: >-
+      Routes (TanStack Router, declared as one route table): `/` the lesson list; `/lessons/$lessonId` the lesson view
+      (WEB-NOTEBOOK); anything else a not-found view with a link to `/`. `$lessonId` must match
+      `^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$` and must not be `.` or `..` (VEC-UI-2 `bad_ids`), otherwise the not-found
+      view renders and no request is made. [unit]
+  - id: FR-UI-4
+    text: >-
+      API client: one module with a typed function per route the slice calls (`me`, `signOut`, `listLessons`,
+      `getLesson`, `getRevision`, and the kernel session routes used by WEB-NOTEBOOK). Path segments are encoded with
+      `encodeURIComponent`. Every request is same-origin with `credentials: "same-origin"`; a request with a body sends
+      JSON with `Content-Type: application/json`; bodiless POST and DELETE send no body (SRV-AUTH FR-AUTH-12, SRV-KERNEL
+      FR-KERNEL-3). Every response body is validated at run time against its declared shape (VEC-UI-2 for the lesson
+      routes); a mismatch is an error `bad_response`, never a partially typed value. TanStack Query caches the list and
+      lesson metadata with a stale time of 30 s (a structural choice: lessons change only on republish) and a revision
+      with an infinite stale time keyed by its sha256 (revisions are immutable). [unit]
+  - id: FR-UI-5
+    text: >-
+      Authentication: on app start the app calls `GET /api/me`; on a 401 from it, or from any later API call, the app
+      navigates the whole page to `/api/auth/signin` (SRV-AUTH FR-AUTH-14, which returns to `/` on success). The header
+      shows the signed-in `display_name` and a Sign out button that calls `POST /api/auth/signout`, clears the query
+      cache and then navigates to `/api/auth/signin`. The SPA never reads, stores or logs the session cookie, and keeps
+      no credential in `localStorage`, `sessionStorage` or IndexedDB. [unit]
+  - id: FR-UI-6
+    text: >-
+      Lesson list: `GET /api/lessons`, grouped by course (`course_title`, courses sorted by title in the user's locale)
+      and within a course by `ordinal`. A lesson with `latest_sha256` set is a link to `/lessons/<lesson_id>` with its
+      title and updated date; a lesson with `latest_sha256: null` is shown without a link and with "not published yet".
+      States: loading (skeleton), empty ("No lessons yet"), error (a calm message with Retry). [unit] [story]
+  - id: FR-UI-7
+    text: >-
+      Notices: one toast region for app-level messages (sign-out failure, network loss, the notebook's kernel notices
+      handed over by WEB-NOTEBOOK). At most 3 toasts are visible (a structural bound for a calm screen); older ones
+      collapse. Every message is plain text from a fixed catalogue keyed by code; no server text is shown as HTML.
+      [unit] [story]
+  - id: FR-UI-8
+    text: >-
+      Stories: every exported React component in `web/src/{ui,app,notebook,render}/` (a PascalCase export of a `.tsx`
+      file that is not a story or test) has a sibling `<File>.stories.tsx` with at least the stories `Light` and `Dark`
+      (Calm in each mode). A [unit] test enumerates the components, finds the sibling file through Vite's
+      `import.meta.glob` (whose keys are `./`-relative in the test's own directory and `../`-relative elsewhere),
+      asserts both stories, and renders every story through Storybook's `composeStories` in jsdom without an error. `npm run build-storybook` is
+      part of the local gate. [unit] [story]
+  - id: FR-UI-9
+    text: >-
+      Build: Vite with `build.assetsInlineLimit: 0`, so fonts and images are emitted as files and never inlined as
+      `data:` URLs (the app CSP allows none); markdown, math, code highlighting and the lesson view are lazy chunks.
+      [unit] by inspecting the build output for `data:` URLs. The only `data:` URL allowed in the output is the one
+      literal that the vendored library's own stylesheet carries at v0.1.0 (a `mask: url("data:image/svg+xml,…")` for
+      the table sort indicator, a component the slice does not render; under the app CSP that mask would be blocked, so
+      it is an owner note for a library change, not an inlined asset). The test pins the number of distinct `data:`
+      URLs at exactly 1 (the minifier repeats it for `-webkit-mask`), so a new library literal fails the build check
+      until it is reviewed.
+
+invariants:
+  - id: INV-UI-1
+    text: >-
+      Contrast: under the committed Calm tokens every pair that VEC-UI-1's recipes expand to (109 per mode) meets its
+      minimum (text 4.5:1, UI 3:1) in light and dark. The test derives every colour from the committed token file and
+      computes composited backgrounds per the recipe (alpha composite in gamma sRGB; `color-mix` in sRGB and in Oklab,
+      REF-UI-6); no colour value is stored in the fixture. [unit]
+  - id: INV-UI-2
+    text: >-
+      No HTML string ever reaches the app document: no source file under `web/src/` uses `dangerouslySetInnerHTML`,
+      `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `document.write`, `DOMParser`, `createContextualFragment`, `eval`,
+      `new Function` or a string `setTimeout`/`setInterval`. A source scan test enforces it. Dependencies whose browser
+      build parses HTML with the DOM are resolved to their JavaScript builds by `web/vite.config.ts` aliases
+      (`hast-util-from-html-isomorphic` → its parse5 build; `decode-named-character-reference` → its table build); a
+      test checks both aliases. [unit]
+  - id: INV-UI-3
+    text: >-
+      No gradients, glass or glow: no value in the committed Calm token file contains `gradient`, and every story of
+      the slice's own components (FR-UI-8), rendered in a browser in light and dark, has on every element a computed
+      `background-image` of `none` (except `url(blob:…)` images), a computed `backdrop-filter` of `none`, and no
+      `box-shadow` layer with a blur radius over 12 px. [unit] for the tokens; [browser] for the computed styles.
+  - id: INV-UI-4
+    text: >-
+      Under the production CSP (the test server's header, read from `deploy/Caddyfile` as amended by
+      V.OPS-DEPLOY-web), loading `/` and `/lessons/w01` with VEC-NOTEBOOK-1 raises zero `securitypolicyviolation`
+      events. [browser]
+
+nfr:
+  - id: NFR-UI-1
+    metric: >-
+      gzip size in bytes (Node zlib, level 9) of the initial JavaScript chunks of the lesson-list route in the `vite
+      build` output (lazy chunks excluded), production mode. Measured after the code review (2026-11-22, Vite 8.3.8,
+      Node 26.13.0): one initial chunk, 350,012 B raw, 110,139 B gzip (React 19 + ReactDOM, TanStack Router and Query,
+      valibot, the library parts used, the app shell); threshold = measured + 10 %. Lazy chunks, for the record, from
+      the same build: the lesson view with markdown, KaTeX (parsed by parse5) and the notebook 199,283 B; Shiki core and
+      engine 47,284 B; the python grammar 9,012 B. For comparison, the spike's React-plus-20-component gallery measured
+      124,206 B (REF-UI-2).
+    threshold: 121153
+    verified_by: test
+
+vectors:
+  - id: VEC-UI-1
+    source: >-
+      Contrast pair recipes (groups, token sets, mix operations and minimums) from spikes/library-publish/consumer/calm.mjs
+      and the library CSS lines it cites; expands to the spike's 218 pairs
+    file: spec/fixtures/WEB-UI/contrast-recipes.yaml
+  - id: VEC-UI-2
+    source: >-
+      SRV-LESSON response shapes as fixed by the coordinator (2026-11-21), synthetic values, plus lesson ids the router
+      must refuse
+    file: spec/fixtures/WEB-UI/lessons.json
+
+# Owner notes:
+# - The design gate of stage 4b still applies: the owner reviews Calm in Storybook before 4b is marked implemented.
+#   The slice uses the spike's adjusted Calm draft as is.
+# - The library tarball in web/vendor/ (about 354 KB) is built from the owner's tag v0.1.0 locally; nothing is pushed to
+#   the library.

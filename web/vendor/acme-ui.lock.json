@@ -1,0 +1,8 @@
+{
+  "tag": "v0.1.0",
+  "commit": "eae463bcf39c7ada21d731db8d147ad85e2e3797",
+  "tarball": "acme-ui-v0.1.0.tgz",
+  "sha256": "a1f228e102f9c71b4081d22797ed4e3ec6a986eead6fa9d64d1c9327074d8e88",
+  "node": "v26.13.0",
+  "npm": "11.20.0"
+}

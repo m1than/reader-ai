@@ -26,6 +26,7 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 TAGGED_DIGEST = re.compile(r"^[^@:]+:[^@:/]+@sha256:[0-9a-f]{64}$")
 LOCAL_IMAGES = {
     "reader-server:local", "reader-postgres:local", "reader-kernel:local", "reader-agent-proxy:local",
+    "reader-caddy:local",
 }
 BASE = {"caddy", "api", "worker", "postgres"}
 
@@ -57,8 +58,9 @@ def _third_party_images(model: dict[str, Any]) -> set[str]:
 
 
 def test_images_pinned_by_digest_in_compose() -> None:
+    # Since V.OPS-DEPLOY-web every image in compose.yaml is built locally (caddy too); third-party
+    # bases are pinned in the Dockerfiles (test_dockerfile_from_lines_pinned). A later one is checked here.
     images = set().union(*(_third_party_images(m) for m in all_renders()))
-    assert images, "no third-party image declared"
     assert all(TAGGED_DIGEST.match(img) for img in images), images
     assert not any(":latest" in img for img in images)
 
@@ -81,7 +83,7 @@ def _instructions(path: Path, keyword: str) -> list[list[str]]:
 
 def test_dockerfile_from_lines_pinned() -> None:
     dockerfiles = _dockerfiles()
-    assert {p.name for p in dockerfiles} >= {"server.Dockerfile", "postgres.Dockerfile"}
+    assert {p.name for p in dockerfiles} >= {"server.Dockerfile", "postgres.Dockerfile", "caddy.Dockerfile"}
     for path in dockerfiles:
         froms = [args[0] for args in _instructions(path, "FROM")]
         assert froms, path
@@ -92,6 +94,10 @@ def test_dockerfile_from_lines_pinned() -> None:
 COPY_ALLOW_LIST = {
     "server.Dockerfile": {"server/pyproject.toml", "server/src", "deploy/images/wait-for-secret.sh"},
     "postgres.Dockerfile": {"reader-postgres-entrypoint.sh"},
+    "caddy.Dockerfile": {
+        "web/package.json", "web/package-lock.json", "web/vendor", "web/index.html", "web/vite.config.ts",
+        "web/tsconfig.json", "web/src", "/web/dist",
+    },
 }
 
 
@@ -102,6 +108,19 @@ def test_dockerfile_build_inputs_are_an_allow_list() -> None:
         assert not _instructions(path, "ADD"), path
         sources = {src for args in _instructions(path, "COPY") for src in args[:-1]}
         assert sources == COPY_ALLOW_LIST[path.name], (path.name, sources)
+        # COPY --from=<x> must name a stage of this Dockerfile, never an external image.
+        lines = [ln.split() for ln in path.read_text().splitlines() if ln.split()]
+        stages = {ln[3] for ln in lines if ln[0].upper() == "FROM" and len(ln) >= 4 and ln[2].upper() == "AS"}
+        copies = [ln[1:] for ln in lines if ln[0].upper() == "COPY"]
+        froms = [arg.split("=", 1)[1] for args in copies for arg in args if arg.startswith("--from=")]
+        assert all(f in stages for f in froms), (path.name, froms, stages)
+
+
+def test_caddy_build_runs_no_install_scripts() -> None:
+    text = (DEPLOY / "images" / "caddy.Dockerfile").read_text()
+    installs = [ln for ln in text.splitlines() if ln.strip().startswith("RUN") and "npm ci" in ln]
+    assert installs, "caddy.Dockerfile runs no npm ci"
+    assert all("--ignore-scripts" in ln for ln in installs), installs
 
 
 def test_server_dockerignore_excludes_caches_and_env_files() -> None:
@@ -109,6 +128,13 @@ def test_server_dockerignore_excludes_caches_and_env_files() -> None:
     assert path.exists(), path
     patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
     assert {"**/__pycache__", "**/.env*"} <= patterns, patterns
+
+
+def test_caddy_dockerignore_excludes_build_outputs_and_env_files() -> None:
+    path = DEPLOY / "images" / "caddy.Dockerfile.dockerignore"
+    assert path.exists(), path
+    patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+    assert {"**/node_modules", "**/dist", "**/storybook-static", "**/.env*"} <= patterns, patterns
 
 
 def _mounts(model: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -127,7 +153,7 @@ def test_volumes_and_mounts() -> None:
     assert {n for n, vols in named.items() if "blobs" in vols} == {"api", "worker"}
     assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES}  # server roles: the override's bind
     caddy_binds = {(m["target"], m.get("read_only", False)) for m in binds["caddy"]}
-    assert caddy_binds == {("/srv/spa", True), ("/etc/caddy/Caddyfile", True)}
+    assert caddy_binds == {("/etc/caddy/Caddyfile", True)}  # the SPA is in the reader-caddy image
     labels = {
         name: (v.get("labels") or {}).get("org.reader-ai.backup") for name, v in model["volumes"].items()
     }
