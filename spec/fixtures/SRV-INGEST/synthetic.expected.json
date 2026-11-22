@@ -1,0 +1,48 @@
+{
+  "canary": "QUOKKAZEBRA",
+  "code_between": [
+    "1.",
+    "2."
+  ],
+  "code_lines": [
+    "$ pip install example==1.0",
+    "$ example --init",
+    "# creates config.yaml",
+    "$ example run --fast"
+  ],
+  "furniture_dropped": [
+    "Synthetic header line",
+    "Footer page"
+  ],
+  "heading_levels_at_most": 2,
+  "headings": [
+    "Синтетический материал",
+    "Введение",
+    "Шаги установки",
+    "Таблица параметров"
+  ],
+  "outline": [
+    {
+      "level": 1,
+      "page": 1,
+      "title": "Введение"
+    },
+    {
+      "level": 1,
+      "page": 1,
+      "title": "Шаги установки"
+    },
+    {
+      "level": 1,
+      "page": 2,
+      "title": "Таблица параметров"
+    }
+  ],
+  "outline_source": "bookmarks",
+  "page_count": 2,
+  "pdf_sha256": "54fd7156eac1fc09e09e6f63b15125ac274fc77f60c1ef74656da277912227c2",
+  "table_shape": [
+    3,
+    3
+  ]
+}

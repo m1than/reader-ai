@@ -392,16 +392,11 @@ class Jobs:
         return await self._defer(kind, key, row["args"], {"outcome": None, "job_id": None}, 0)
 
     async def _job_statuses(self, conn: AsyncConnection, key: str) -> list[tuple[int, str]]:
-        rows = await conn.execute(
-            text("SELECT id, status::text FROM procrastinate_jobs WHERE lock = :key"), {"key": key}
-        )
-        return [(int(i), str(s)) for i, s in rows]
+        return await _job_statuses(conn, key)
 
     async def job_status(self, kind_name: str, key: str) -> str:
         async with self.engine.connect() as conn:
-            row = await _row(conn, kind_name, key)
-            deciding = deciding_status(await self._job_statuses(conn, key))
-        return status_of(deciding, row["outcome"] if row else None, row is not None)[0]
+            return await job_status_of(conn, kind_name, key)
 
     # ---- the sweep (FR-EVENTS-7, -15) ---------------------------------------------------------------------
 
@@ -526,3 +521,17 @@ class Jobs:
 
 def _json(payload: Mapping[str, Any]) -> str:
     return canonical_json(dict(payload))
+
+
+async def _job_statuses(conn: AsyncConnection, key: str) -> list[tuple[int, str]]:
+    rows = await conn.execute(
+        text("SELECT id, status::text FROM procrastinate_jobs WHERE lock = :key"), {"key": key}
+    )
+    return [(int(i), str(s)) for i, s in rows]
+
+
+async def job_status_of(conn: AsyncConnection, kind_name: str, key: str) -> str:
+    """FR-EVENTS-12 on an open connection, without a procrastinate app (shared with SRV-INGEST's routes)."""
+    row = await _row(conn, kind_name, key)
+    deciding = deciding_status(await _job_statuses(conn, key))
+    return status_of(deciding, row["outcome"] if row else None, row is not None)[0]

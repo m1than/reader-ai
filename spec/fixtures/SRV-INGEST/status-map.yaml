@@ -1,0 +1,13 @@
+# VEC-INGEST-5 (spec/modules/SRV-INGEST.yaml, FR-INGEST-15): api status of a material from the SRV-EVENTS
+# job_status of the key FR-INGEST-12 picks and whether an `ingests` row exists. Agent-written from the spec.
+rows:
+  - { job_status: none,      ingested: false, status: not_ingested }
+  - { job_status: queued,    ingested: false, status: queued }
+  - { job_status: running,   ingested: false, status: running }
+  - { job_status: succeeded, ingested: true,  status: imported }
+  - { job_status: succeeded, ingested: false, status: dead, logged: inconsistent }
+  - { job_status: dead,      ingested: false, status: dead }
+  - { job_status: none,      ingested: true,  status: imported }
+  - { job_status: queued,    ingested: true,  status: imported }
+  - { job_status: running,   ingested: true,  status: imported }
+  - { job_status: dead,      ingested: true,  status: imported }

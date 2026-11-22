@@ -70,9 +70,9 @@
 
 id: SRV-INGEST
 title: Ingestion (slice) — native confined Docling conversion of a declared PDF into ordered spans and an outline
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: engineering
 slice: V.SRV-INGEST-min
@@ -140,7 +140,10 @@ requirements:
       `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, requires `fstat` to report a regular file, and copies it into
       `<work>/in/material.pdf` (0400) while computing its sha256 over the copied bytes. A mismatch with
       `materials[].sha256` exits 2 `sha256_mismatch` and runs nothing else. The child only ever reads the copy.
-      [unit]
+      A material that cannot be opened exits 2 `material_unreadable`, one that is not a regular file
+      `material_not_a_file`; `--setup` failures exit 2 with `setup_*` codes; a receive or requeue reply that is not
+      FR-INGEST-11's or FR-INGEST-12's exits 5 `receive_failed` or `requeue_failed`. Subprocesses the parent runs
+      for itself (`ps`, `lsof` of FR-INGEST-16) also get the allow-listed environment. [unit]
   - id: FR-INGEST-2
     text: >-
       Before converting, `reader-ingest` runs `reader status --json` (OPS-CLI FR-CLI-13); any exit other than 0 gives
@@ -255,7 +258,8 @@ requirements:
     text: >-
       Span mapping from Docling items, with page furniture (page headers and footers) dropped:
       - section header or title → `heading`, with `level` from Docling (title = 1);
-      - list item → `list_item`;
+      - list item → `list_item`; an enumerated item keeps Docling's marker as a text prefix (`1. …`), because
+        Docling stores it apart and numbered steps would lose their numbers;
       - formula → `formula`: text is the decoded LaTeX; an undecoded formula keeps text "" and `decoded: false`;
       - code → `code` (FR-INGEST-7);
       - table → `table`, text = Docling's Markdown export of that table;
@@ -272,8 +276,9 @@ requirements:
       [host, VEC-INGEST-2]
   - id: FR-INGEST-7
     text: >-
-      A `code` span's text comes from the PDF text layer inside each of the code item's provenance boxes, in
-      provenance order, joined with `\n`; it is read with pypdfium2, not from Docling's code model (ADR-0021). A block
+      A `code` span's text comes from the PDF text layer inside each of the code item's provenance boxes, each
+      widened by 1.0 pt on every side (CODE_MARGIN_PT: Docling's boxes hug the glyph ink, so edge glyphs are kept),
+      in provenance order, joined with `\n`; it is read with pypdfium2, not from Docling's code model (ADR-0021). A block
       split across a page break therefore keeps both parts. Line order and line breaks are kept:
       - `\r\n` → `\n`;
       - trailing spaces of each line removed;
@@ -287,8 +292,9 @@ requirements:
       - Each code item is moved to sit immediately after the non-code item on its page that comes last in Docling's
         order among those whose bbox top lies above the code item's bbox top.
       - If there is no such item, the code item goes before the page's first non-code item.
-      - Several code items on one page keep their relative order by bbox top.
-      - Every other item keeps Docling's order.
+      - Several code items placed at the same spot keep their relative order by bbox top.
+      - On a page with no non-code item, its code items keep Docling's order, at Docling's position.
+      - Every non-code item keeps exactly Docling's order (also across pages); only code items move.
       The correction is ADR-0021's hypothesis for the misread pages 461 and 468, and its evidence is scoped to those
       two pages (VEC-INGEST-3). On other pages it is checked only by VEC-INGEST-2's synthetic list. `seq` numbers the spans from 0 across the material in the resulting order. [host, VEC-INGEST-2; local,
       VEC-INGEST-3]
@@ -314,12 +320,15 @@ requirements:
       `,` and `:`, UTF-8, non-ASCII unescaped).
       **Parent checks before sending.**
       - A non-zero child exit, a timeout, or a missing output exits 5 `convert_failed`.
+      - Once the child has exited, the parent kills its session (`killpg` SIGKILL), so nothing the child started
+        can still write into WORK.
       - The parent opens `<work>/out` with `O_RDONLY|O_DIRECTORY|O_NOFOLLOW`. It opens each of the three members
-        through that `dir_fd` with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, so no path component the child controls is
-        followed. It requires `fstat` to report a regular file within its cap, and runs FR-INGEST-11's validator,
-        which includes `pages_converted == page_count`.
-      **Tar sent.** A ustar tar with exactly the three regular members, in the order manifest, spans, outline: mode
-      0644, mtime 0, uid and gid 0, no pax headers.
+        once, through that `dir_fd` with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, so no path component the child controls
+        is followed; it requires `fstat` to report a regular file and reads at most its cap + 1 bytes (more is
+        `too_large`). It runs FR-INGEST-11's validator on those bytes, which includes `pages_converted ==
+        page_count`, and uses the manifest that validator returns.
+      **Tar sent.** The same bytes that were validated, never re-read from WORK: a ustar tar with exactly the three
+      regular members, in the order manifest, spans, outline: mode 0644, mtime 0, uid and gid 0, no pax headers.
       [unit]
   - id: FR-INGEST-11
     text: >-
@@ -332,11 +341,19 @@ requirements:
         is at most the key's `job_keys` row and its job; a key row left without a job is enqueued by the SRV-EVENTS
         sweep (FR-EVENTS-15). A re-run of `reader-ingest` is
         idempotent: same artifact id, existing directory verified and kept, enqueue returns the key's state.
+      - The deadline covers every await (the database read of the frozen version, the enqueue) through
+        `asyncio.timeout` on the remaining time; a SIGALRM bounds only the blocking stdin read. The exit code after
+        the deadline follows whether storage completed (`timeout` before, `enqueue_failed` after), in `main` too.
+      - The artifact id is the sha256 of the manifest bytes as received; the import re-checks it (FR-INGEST-13).
+      - Before storage, an unreachable database gives `database_unreachable`, a driver connect timeout included
+        (only the expiry of the deadline's own scope is `timeout`); a runtime that cannot start (config
+        or secret missing) gives `runtime_unavailable`; any other failure `unavailable`, never with detail.
       **Stream checks.** It reads the tar from stdin in stream mode with a strict reader:
       - only ustar regular-file headers, in the order manifest, spans, outline;
       - each name exactly as expected, with no `/`, `..` or NUL;
       - no pax or GNU extension headers, links, devices or directories;
-      - each size within its cap, and the total within 80 MiB;
+      - each size within its cap, and the total within 80 MiB; the size and checksum fields hold only octal digits
+        `[0-7]`, ended by NUL or space (no sign, no spaces before the digits);
       - after the third member, only the end-of-archive blocks;
       - a short read fails.
       **Content checks.**
@@ -390,7 +407,9 @@ requirements:
         another version;
       - in the run session, upserts `materials` by (owner_id, sha256), setting `config_id` and `page_count`;
       - inserts one `ingests` row and all `material_spans` and `material_outline` rows.
-      It never commits itself (SRV-EVENTS FR-EVENTS-5). The owner is the one `users` row with role `owner`
+      It never commits itself (SRV-EVENTS FR-EVENTS-5). The sha256 of the stored manifest bytes must equal
+      `artifact_id` (else `artifact_mismatch`). Memory is bounded at the caps: it holds the validated member bytes
+      (at most 64 MiB of spans) and parses and inserts the spans 1,000 lines at a time, never all spans as objects. The owner is the one `users` row with role `owner`
       (SRV-AUTH). Importing `reader.ingest.jobs`, `reader.ingest.receive`, `reader.ingest.status` and
       `reader.ingest.routes` never imports `reader.ingest.host` or `docling`. [db; unit for the import check]
   - id: FR-INGEST-14
@@ -419,7 +438,9 @@ requirements:
       - `GET /api/materials/{id}/outline` returns the imported outline entries.
       - `GET /api/materials/{id}/spans?page=N` returns that page's spans in `seq` order, each with
         `{span_id, seq, page, kind, level, decoded, text, bbox}`. N must lie in [1, page_count], else 400 `page`.
-      An unknown id, or a material that is not imported, gives 404 `not_found`. `status` follows VEC-INGEST-5.
+      An unknown id, or a material that is not imported, gives 404 `not_found`. `status` follows VEC-INGEST-5. The
+      page parameter is ASCII decimal digits of at most 5 characters. When reader.yaml cannot be loaded, the routes
+      answer 503 `config_unavailable`. The job status comes from SRV-EVENTS's shared `job_status_of` read.
       [db]
   - id: FR-INGEST-16
     text: >-
@@ -477,7 +498,8 @@ invariants:
       - `decoded` is non-null only for `formula`;
       - text is at most 1 MiB, NFC, with no U+0000, no C0 control except `\n` and `\t`, and no lone surrogate;
         non-code text also has no U+00AD;
-      - bbox is four finite numbers with 0 ≤ x0 ≤ x1 and 0 ≤ y0 ≤ y1.
+      - bbox is four finite numbers with 0 ≤ x0 ≤ x1 ≤ 1e5 and 0 ≤ y0 ≤ y1 ≤ 1e5 (a structural bound far above
+        any page size in points); a number too large to parse is a `schema` error.
       **Outline**, a JSON array of at most 20,000 objects with exactly the keys {seq, level, title, page}:
       - `seq` runs 0.. without gaps;
       - `level` is an integer in [1, 16];
@@ -569,8 +591,9 @@ nfr:
     threshold: 10
     verified_by: bench
     note: "Bound from ADR-0021 Consequences ('≥ 10 pages/min, peak memory recorded'). Measured under the profile:
-      15.69 and 15.85 pages/min on the formula-heavy 20-page sample (spikes/ingest-confine, conf3 and conf4); the
-      whole-book rate is not measured (the spike estimates about 12.7 min for 935 pages). [local], full run, records
+      15.69 and 15.85 pages/min on the formula-heavy 20-page sample (spikes/ingest-confine, conf3 and conf4); full
+      pilot run 2026-11-22: 935 pages in 856.3 s = 65.5 pages/min, child peak RSS 4,025 MiB
+      (spec/fixtures/SRV-INGEST/pilot-fullrun.json, numbers only). [local], full run, records
       peak RSS of the child."
   - id: NFR-INGEST-2
     metric: pilot pages misread out of the 20-page fidelity sample, rule B (owner live check with an agent judge)
@@ -612,7 +635,11 @@ vectors:
       - the code-block count and the lines per block;
       - the sha256 of each block's text, read from the text layer inside a box recorded by hand from the rendered
         page and normalised as in FR-INGEST-7, so the hash is independent of Docling;
-      - on pages 461 and 468, the block's position relative to list items.
+      - on pages 461 and 468, each block's index relative to its list steps (ADR-0021's wording, relational): the
+        block comes after the step before it and before the next step, with the steps anchored by hand-recorded
+        boxes. Other list items on the page (such as a filename label Docling labels as a list item) do not count.
+      - page 133 also pins the one-line block Docling labels as code (a line of the curve constants, measured
+        2026-11-22) as an explicit entry with its own hand-recorded box and text-layer hash, so its count is 3.
       **Formulas:** decoded-formula counts per page as Docling detects them: 2 on page 128 and 1 each on pages 130,
       132, 133 and 141, 6 in total (RESULT.md, M1). The 15 display formulas the judge counted belong to NFR-INGEST-2,
       not here.
@@ -653,5 +680,6 @@ owner_notes:
   - "3. Confinement uses sandbox-exec (deprecated by Apple, still shipped, works on macOS 27.2); spikes/ingest-confine measured no speed cost. The dedicated-user fallback is not needed."
   - "4. `reader-ingest --setup` creates a separate converter venv (Docling 2.151.1 with torch, several GB) and fetches 1.2 GB of models under `<data_dir>`."
   - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
+  - "6. NFR-INGEST-2's rule-B count may be 3 of 20 against a threshold of 2: page 378 (known miss), page 133 (a curve-constant line labelled code) and page 468 (a filename label labelled a list item), all measured 2026-11-22. The owner judges these pages before the first full import, because the converter version freezes at that import."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Status stays draft: approval goes with Red, which waits for SRV-AUTH (PR #33), SRV-EVENTS Red/Green and the owner's ADR-0027 status flip."
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says."

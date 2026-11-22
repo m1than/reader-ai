@@ -1,0 +1,417 @@
+{
+  "known_misses": [
+    378
+  ],
+  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
+  "pages": {
+    "128": {
+      "formulas_decoded": 2
+    },
+    "130": {
+      "formulas_decoded": 1
+    },
+    "132": {
+      "formulas_decoded": 1
+    },
+    "133": {
+      "code": [
+        {
+          "box": [
+            146.0,
+            75.0,
+            316.0,
+            87.0
+          ],
+          "lines": 1,
+          "sha256": "fdf62f1f167f014ee87e83c563c7595fc3186de05bd47fd281397e4e65e29cbf"
+        },
+        {
+          "box": [
+            43.0,
+            498.0,
+            411.0,
+            512.0
+          ],
+          "lines": 1,
+          "sha256": "763fc5aeba961aac501c8ec6d1bf3f06752bc1096639777e11e07667e4c88817"
+        },
+        {
+          "box": [
+            43.0,
+            545.0,
+            411.0,
+            618.0
+          ],
+          "lines": 6,
+          "sha256": "1f5a5815299e4428c775fc525e36a073b947cd012b6229a9a154d208725a9377"
+        }
+      ],
+      "formulas_decoded": 1
+    },
+    "141": {
+      "code": [
+        {
+          "box": [
+            43.0,
+            541.0,
+            411.0,
+            625.0
+          ],
+          "lines": 7,
+          "sha256": "40c331e1b193a5134db02efb3d586eac2c3f5f5a4dee5c4c09ee259d39e63f33"
+        }
+      ],
+      "formulas_decoded": 1
+    },
+    "143": {
+      "code": [
+        {
+          "box": [
+            43.0,
+            97.0,
+            411.0,
+            111.0
+          ],
+          "lines": 1,
+          "sha256": "ca85766f6058c6a4a0de83deb0fc03364f459849f6a6f24f3d72bb86d20baf47"
+        },
+        {
+          "box": [
+            43.0,
+            144.0,
+            411.0,
+            465.0
+          ],
+          "lines": 27,
+          "sha256": "c2b7a123c2813f35ec6acbc25cd37bb91e7d1c056dac0b15e22c399feca6ef15"
+        }
+      ]
+    },
+    "378": {
+      "code": [
+        {
+          "box": [
+            56.0,
+            135.0,
+            425.0,
+            279.0
+          ],
+          "lines": 12,
+          "sha256": "8c81432ae32f42b280f638a4a71d5cc1fbc24ba9eff569ce54b5e384a598a47a"
+        },
+        {
+          "box": [
+            56.0,
+            474.0,
+            425.0,
+            618.0
+          ],
+          "lines": 12,
+          "sha256": "238f67c5c9ecfca774607ee9bc662b782fa3e701fed378733aa1bf62addc9018"
+        }
+      ]
+    },
+    "381": {
+      "code": [
+        {
+          "box": [
+            43.0,
+            97.0,
+            411.0,
+            135.0
+          ],
+          "lines": 3,
+          "sha256": "57d74ed6712c6c0e14c7e7d26a146316b9a8684661201b2e40550945ebfeb4a9"
+        },
+        {
+          "box": [
+            43.0,
+            168.0,
+            411.0,
+            182.0
+          ],
+          "lines": 1,
+          "sha256": "ca5868d98c1fb22d65b481ee18b3bf542c00e2677dc4ad1f4be19775996b6ddf"
+        },
+        {
+          "box": [
+            43.0,
+            302.0,
+            411.0,
+            363.0
+          ],
+          "lines": 5,
+          "sha256": "c49bf04673f774c415b3d20acc349162fd608b0fa2e8fb54f63ca697e561b5fa"
+        },
+        {
+          "box": [
+            43.0,
+            433.0,
+            411.0,
+            459.0
+          ],
+          "lines": 2,
+          "sha256": "d8af31b45d2dc65bdbc846d945419a8ed817be46603274465e932b82d8b6fd71"
+        },
+        {
+          "box": [
+            43.0,
+            492.0,
+            411.0,
+            623.0
+          ],
+          "lines": 11,
+          "sha256": "e00179cd038e5fe404d76abe40fe881e052b604609be07bca4f470d2bf7fbca2"
+        }
+      ]
+    },
+    "461": {
+      "code": [
+        {
+          "box": [
+            44.0,
+            122.0,
+            411.0,
+            361.0
+          ],
+          "lines": 20,
+          "sha256": "97a63288d7650da43448a76a5896b81062e552550a98739b2230d5962ef964e8"
+        },
+        {
+          "box": [
+            71.0,
+            431.0,
+            411.0,
+            552.0
+          ],
+          "lines": 10,
+          "sha256": "2b987b5169e65e6032396344250eaf17b8a308f6af544ac5b2b3a55490a6a582"
+        },
+        {
+          "box": [
+            71.0,
+            597.0,
+            411.0,
+            623.0
+          ],
+          "lines": 2,
+          "sha256": "2e1caf4b5ccc865c159f41cfe2b087a948c09e694239837bcc748092b8341301"
+        }
+      ],
+      "order": [
+        [
+          0,
+          "4",
+          "5"
+        ],
+        [
+          1,
+          "5",
+          "6"
+        ],
+        [
+          2,
+          "6",
+          null
+        ]
+      ],
+      "steps": {
+        "3": [
+          52,
+          62,
+          412,
+          85
+        ],
+        "4": [
+          52,
+          87,
+          412,
+          110
+        ],
+        "5": [
+          52,
+          408,
+          412,
+          421
+        ],
+        "6": [
+          52,
+          562,
+          412,
+          585
+        ]
+      }
+    },
+    "468": {
+      "code": [
+        {
+          "box": [
+            85.0,
+            85.0,
+            425.0,
+            169.0
+          ],
+          "lines": 7,
+          "sha256": "53c7cc010cb572cc47cf4b783fb6ed4e1b284674962c02b35620b072a60d1bc3"
+        },
+        {
+          "box": [
+            85.0,
+            216.0,
+            425.0,
+            276.0
+          ],
+          "lines": 5,
+          "sha256": "fa871b1a07dc1d1f3adbc6ec7deddeafe44d10c6ad853f622af62ed4315221d1"
+        },
+        {
+          "box": [
+            85.0,
+            310.0,
+            425.0,
+            359.0
+          ],
+          "lines": 4,
+          "sha256": "d54ac1b3bca1466bf1c14b20f42cd10d82fd9dfab6f051a36144063fac7e2c27"
+        },
+        {
+          "box": [
+            85.0,
+            420.0,
+            425.0,
+            575.0
+          ],
+          "lines": 13,
+          "sha256": "df7c7e24abc48abf5cf56521ecf20dd1145a59b9427fcbaf24764fd7fa668f87"
+        }
+      ],
+      "order": [
+        [
+          0,
+          "5",
+          "6"
+        ],
+        [
+          1,
+          "6",
+          "7"
+        ],
+        [
+          2,
+          "6",
+          "7"
+        ],
+        [
+          3,
+          "7",
+          null
+        ]
+      ],
+      "steps": {
+        "5": [
+          65,
+          62,
+          425,
+          74
+        ],
+        "6": [
+          65,
+          181,
+          425,
+          203
+        ],
+        "7": [
+          65,
+          370,
+          425,
+          393
+        ]
+      }
+    },
+    "483": {
+      "tables": [
+        [
+          4,
+          2
+        ]
+      ]
+    },
+    "497": {
+      "tables": [
+        [
+          4,
+          2
+        ],
+        [
+          6,
+          2
+        ]
+      ]
+    },
+    "559": {
+      "tables": [
+        [
+          6,
+          6
+        ]
+      ]
+    },
+    "592": {
+      "tables": [
+        [
+          12,
+          3
+        ]
+      ]
+    },
+    "602": {
+      "tables": [
+        [
+          4,
+          4
+        ]
+      ]
+    },
+    "661": {
+      "tables": [
+        [
+          3,
+          4
+        ]
+      ]
+    },
+    "672": {
+      "tables": [
+        [
+          3,
+          4
+        ]
+      ]
+    },
+    "700": {
+      "tables": [
+        [
+          4,
+          5
+        ]
+      ]
+    },
+    "776": {
+      "tables": [
+        [
+          8,
+          3
+        ]
+      ]
+    },
+    "812": {
+      "tables": [
+        [
+          8,
+          3
+        ]
+      ]
+    }
+  },
+  "source_sha256": "61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2"
+}

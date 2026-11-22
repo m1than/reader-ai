@@ -13,7 +13,7 @@ from typing import Final
 
 from reader.jobs.model import NAME_PATTERN, SWEEP_TASK, JobError, JobKind, model_has_secret_field
 
-KIND_MODULES: Final[tuple[str, ...]] = ()
+KIND_MODULES: Final[tuple[str, ...]] = ("reader.ingest.jobs",)  # SRV-INGEST paired change (FR-EVENTS-1)
 
 
 class Catalog(Mapping[str, JobKind]):
