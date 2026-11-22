@@ -243,25 +243,29 @@ async def add_material(
     async with w.engine.begin() as conn:
         material = (
             await conn.execute(
-                text("INSERT INTO materials (owner_id, sha256, config_id) VALUES (:o, :s, :c) RETURNING id"),
-                {"o": owner, "s": sha, "c": config_id},
+                text(
+                    "INSERT INTO materials (owner_id, sha256, config_id, page_count)"
+                    " VALUES (:o, :s, :c, 500) RETURNING id"
+                ),
+                {"o": owner, "s": sha, "c": config_id or ""},
             )
         ).scalar_one()
         ingest = (
             await conn.execute(
                 text(
-                    "INSERT INTO ingests (owner_id, material_id, converter_version) VALUES (:o, :m, 'test-1')"
-                    " RETURNING id"
+                    "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                    " outline_count, outline_source, pages_without_text)"
+                    " VALUES (:o, :m, 'test-1', :a, :n, 0, 'headings', '{}') RETURNING id"
                 ),
-                {"o": owner, "m": material},
+                {"o": owner, "m": material, "a": "d" * 64, "n": len(spans)},
             )
         ).scalar_one()
         span_kinds = list(kinds or ["text"] * len(spans))
         for seq, (page, body) in enumerate(spans):
             await conn.execute(
                 text(
-                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text)"
-                    " VALUES (:i, :o, :q, :p, :k, :t)"
+                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                    " VALUES (:i, :o, :q, :p, :k, :t, 0, 0, 1, 1)"
                 ),
                 {"i": ingest, "o": owner, "q": seq, "p": page, "k": span_kinds[seq], "t": body},
             )
