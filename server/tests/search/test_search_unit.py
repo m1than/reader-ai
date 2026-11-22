@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import hashlib
 import json
 import subprocess
 import sys
@@ -13,6 +16,9 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator, Sequence
+from http.server import BaseHTTPRequestHandler, SimpleHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -52,6 +58,14 @@ def test_primary_span_is_the_largest_overlap() -> None:
     (chunk,) = chunking.chunk_spans(spans, size=20, overlap=5, min_len=4)
     assert chunk.span_seqs == (0, 1)
     assert chunk.primary_seq == 1
+
+
+def test_primary_span_tie_goes_to_the_first() -> None:
+    chunking = need("reader.search.chunking")
+    spans = [chunking.Span(0, 1, "abcd"), chunking.Span(1, 1, "efgh")]  # 4 characters each in the window
+    (chunk,) = chunking.chunk_spans(spans, size=20, overlap=5, min_len=4)
+    assert chunk.span_seqs == (0, 1)
+    assert chunk.primary_seq == 0
 
 
 @given(
@@ -162,10 +176,12 @@ def test_job_kind_is_declared() -> None:
 
     for cls in (
         asyncpg.exceptions.ConnectionDoesNotExistError, asyncpg.exceptions.CannotConnectNowError,
-        ConnectionRefusedError, httpx.ConnectError, httpx.TimeoutException,
+        ConnectionRefusedError, httpx.TransportError,
         errors.EmbedUnavailable, errors.IngestNotReady,
     ):
         assert cls in kind.transient, cls
+    for cls in (httpx.ConnectError, httpx.ReadError, httpx.TimeoutException):  # covered by TransportError
+        assert issubclass(cls, kind.transient), cls
     from reader.jobs.catalog import KIND_MODULES
 
     assert "reader.search.jobs" in KIND_MODULES
@@ -300,3 +316,128 @@ def test_embed_service_imports_no_config_or_db() -> None:
     )
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "[] []"
+
+
+def test_encoder_is_never_entered_twice_at_once() -> None:
+    svc = need("reader.search.embed_service")
+    params = need("reader.search.params")
+    encoder = HashEncoder(delay_s=0.05)
+    server = svc.make_server(encoder, "127.0.0.1", 0, model_id=params.MODEL_ID)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    url = "http://{}:{}".format(*server.server_address[:2])
+    try:
+        callers = [
+            threading.Thread(target=_post, args=(url, {"kind": kind, "texts": ["a b"] * 3}))
+            for kind in ("passage", "query") * 4
+        ]
+        for t in callers:
+            t.start()
+        for t in callers:
+            t.join(10)
+        assert len(encoder.calls) == 8
+        assert encoder.max_active == 1
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+# ---- FR-SEARCH-2: fetch_model verifies sha256 and size --------------------------------------------------
+
+
+class _Quiet(SimpleHTTPRequestHandler):
+    def log_message(self, format: str, *args: Any) -> None:
+        pass
+
+
+@pytest.fixture
+def file_server(tmp_path: Path) -> Iterator[tuple[str, Path]]:
+    root = tmp_path / "srv"
+    root.mkdir()
+    server = ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(_Quiet, directory=str(root)))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        yield "http://{}:{}".format(*server.server_address[:2]), root
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_fetch_model_verifies_hash_and_size(
+    file_server: tuple[str, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fetch_model = need("reader.search.fetch_model")
+    base, root = file_server
+    body = b"synthetic model bytes"
+    served = root / "org" / "model" / "resolve" / "rev1" / "sub" / "w.bin"
+    served.parent.mkdir(parents=True)
+    served.write_bytes(body)
+    monkeypatch.setattr(fetch_model, "BASE", base)
+    good = {"sha256": hashlib.sha256(body).hexdigest(), "size": len(body)}
+
+    def lock(meta: dict[str, Any]) -> dict[str, Any]:
+        return {"repo": "org/model", "revision": "rev1", "files": {"sub/w.bin": meta}}
+
+    fetch_model.fetch(tmp_path / "ok", lock(good))
+    assert (tmp_path / "ok" / "sub" / "w.bin").read_bytes() == body
+    for name, meta in (("sha", {**good, "sha256": "0" * 64}), ("size", {**good, "size": len(body) + 1})):
+        with pytest.raises(SystemExit):
+            fetch_model.fetch(tmp_path / name, lock(meta))
+        assert not (tmp_path / name / "sub" / "w.bin").exists(), name
+
+
+# ---- FR-SEARCH-1: the client's error mapping --------------------------------------------------------------
+
+
+def _fixed_server(status: int, body: bytes) -> ThreadingHTTPServer:
+    class Fixed(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            self.rfile.read(int(self.headers.get("Content-Length", "0")))
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Fixed)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+class _ShortEncoder:
+    def encode(self, kind: str, texts: Sequence[str]) -> list[list[float]]:
+        return [[1.0, 0.0, 0.0] for _ in texts]
+
+
+def _client_error(monkeypatch: pytest.MonkeyPatch, url: str) -> Exception:
+    client = need("reader.search.embed_client")
+    monkeypatch.setenv("READER_EMBED_URL", url)
+    try:
+        asyncio.run(client.embed("query", ["x"], 5.0))
+    except Exception as error:
+        return error
+    raise AssertionError("the call succeeded")
+
+
+def test_client_maps_service_failures(embed_server: EmbedServer, monkeypatch: pytest.MonkeyPatch) -> None:
+    errors = need("reader.search.errors")
+    embed_server.server.encoder = None  # 503 loading
+    assert isinstance(_client_error(monkeypatch, embed_server.url), errors.EmbedUnavailable)
+    embed_server.server.encoder = _ShortEncoder()  # 3-dimensional vectors
+    error = _client_error(monkeypatch, embed_server.url)
+    assert isinstance(error, errors.SearchError)
+    assert error.code == "model_mismatch"
+    assert isinstance(_client_error(monkeypatch, "http://127.0.0.1:9"), errors.EmbedUnavailable)
+    for status, body, expected in (
+        (200, b"not json", errors.EmbedUnavailable),
+        (500, b"{}", errors.EmbedUnavailable),
+        (418, b"{}", errors.SearchError),
+    ):
+        server = _fixed_server(status, body)
+        try:
+            url = "http://{}:{}".format(*server.server_address[:2])
+            assert isinstance(_client_error(monkeypatch, url), expected), status
+        finally:
+            server.shutdown()
+            server.server_close()

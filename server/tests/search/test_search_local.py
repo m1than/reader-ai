@@ -3,8 +3,10 @@
 @trace NFR-SEARCH-1 NFR-SEARCH-2 NFR-SEARCH-3 NFR-SEARCH-4 VEC-SEARCH-3
 
 Opt-in: READER_PILOT_PDF=<path to the pilot PDF> and a built reader-embed:local (see test_search_image.py).
-The book's text exists only in memory and in the throwaway database; the result file holds numbers only and
-is written to READER_BENCH_OUT (default: a temp file), never into the repository.
+The book's text exists only in memory and in the throwaway database. The results hold numbers only (counts,
+ranks, page-free metrics, the PDF's sha256): they are written to spec/fixtures/SRV-SEARCH/results/ (the grid
+phase to fusion-weight-v1.json, the test phase to fusion-test-v2.json, both committed as the spec's sources)
+and to READER_BENCH_OUT (default: a temp file).
 
 Spans: SRV-INGEST's artifact does not exist yet (its code is built in parallel), so each page's pypdfium2
 text layer is one span, the same text the embeddings-local spike chunked (declared in the result). The
@@ -24,7 +26,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import DOCKER, FIXTURES, Pg, World, add_material, need, scalar, world
+from .conftest import DOCKER, FIXTURES, Pg, World, add_material, need, page_of, scalar, world
 
 PDF = os.environ.get("READER_PILOT_PDF", "")
 pytestmark = [
@@ -66,7 +68,8 @@ def _start_embed() -> tuple[str, str]:
     return cid, f"http://127.0.0.1:{port}"
 
 
-def _truncated(cid: str, texts: list[str]) -> int:
+def _truncated(texts: list[str]) -> int:
+    """Chunks over 1,024 tokens, counted by the image's own tokenizer in a one-shot offline container."""
     code = (
         "import json, sys; from transformers import AutoTokenizer; "
         "t = AutoTokenizer.from_pretrained('/opt/models/bge-m3'); "
@@ -74,10 +77,11 @@ def _truncated(cid: str, texts: list[str]) -> int:
         "print(sum(1 for x in texts if len(t(x)['input_ids']) > 1024))"
     )
     out = subprocess.run(
-        ["docker", "exec", "-i", cid, "python", "-I", "-c", code],
+        ["docker", "run", "--rm", "-i", "--network", "none", "--read-only", "--tmpfs", TMPFS,
+         "--user", "10003:10003", "--entrypoint", "python", IMAGE, "-I", "-c", code],
         input=json.dumps(texts), capture_output=True, text=True, check=True,
     )
-    return int(out.stdout.strip())
+    return int(out.stdout.strip().splitlines()[-1])
 
 
 GRID = (1, 1.5, 2, 3, 5)  # NFR-SEARCH-1's dev/test protocol
@@ -94,7 +98,7 @@ async def _lists(w: World, questions: list[dict[str, Any]], store: Any) -> list[
         async with w.engine.connect() as conn:
             dense = await store.dense_list(conn, owner, vector, None)
             fts = await store.fts_list(conn, owner, q["question"], None)
-            pages = {i: await store.page_of(conn, i) for i in {*dense, *fts}}
+        pages = {i: await page_of(w.engine, i) for i in {*dense, *fts}}
         out.append({"gold": set(q["gold_pages"]), "dense": dense, "fts": fts, "pages": pages})
     return out
 
@@ -170,7 +174,7 @@ async def test_pilot_bench(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPat
             return
         async with w.engine.connect() as conn:
             texts = [r[0] for r in await conn.execute(text("SELECT text FROM search_chunks ORDER BY id"))]
-        truncated = _truncated(cid, texts)
+        truncated = _truncated(texts)
         chosen = json.loads((RESULTS / "fusion-weight-v1.json").read_text())["chosen_w_dense"]
         assert chosen == params.W_DENSE
         v2 = await _lists(w, _questions(FIXTURES / "pilot-questions-v2.yaml"), store)

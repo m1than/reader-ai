@@ -6,9 +6,7 @@ The handler runs inside SRV-EVENTS' run transaction: every database write is the
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import time
 from typing import Any, Final
 from uuid import UUID
 
@@ -26,8 +24,6 @@ from reader.search.store import fts_config_of, vector_literal
 
 log = logging.getLogger("reader.search")
 KIND: Final = "search.embed"
-INGEST_POLL_S = 120.0  # structural: the import is the previous job on the same single-slot worker
-INGEST_POLL_STEP_S: Final = 1.0
 # structural: a cold start of the 5.6 GB image, with wide margin over the measured 1-2 s model load
 HEALTH_WAIT_S = 300.0
 # 1.7 times the upper end of the measured 22-36 min full-pilot estimate at 8 CPUs
@@ -53,36 +49,32 @@ def embed_args(material_sha256: str, ingest_id: UUID, fts_config: str) -> EmbedA
 
 
 async def _resolve(conn: AsyncConnection, args: EmbedArgs) -> UUID:
-    """FR-SEARCH-5 step 1: the material's frozen ingest; poll while none is committed, then IngestNotReady."""
-    deadline = time.monotonic() + INGEST_POLL_S
-    while True:
-        found = (
-            await conn.execute(
-                text(
-                    "SELECT i.owner_id FROM ingests i JOIN materials m ON m.id = i.material_id"
-                    " WHERE i.id = :i AND m.sha256 = :s"
-                ),
-                {"i": args.ingest_id, "s": args.material_sha256},
-            )
-        ).first()
-        if found is not None:
-            owner: UUID = found[0]
-            return owner
-        other = (
-            await conn.execute(
-                text(
-                    "SELECT 1 FROM ingests i JOIN materials m ON m.id = i.material_id"
-                    " WHERE m.sha256 = :s LIMIT 1"
-                ),
-                {"s": args.material_sha256},
-            )
-        ).first()
-        if other is not None:
-            raise SearchError("ingest_superseded")
-        remaining = deadline - time.monotonic()
-        if remaining <= 0:
-            raise IngestNotReady("ingest_not_ready")
-        await asyncio.sleep(min(INGEST_POLL_STEP_S, remaining))
+    """FR-SEARCH-5 step 1: the material's frozen ingest. None yet is IngestNotReady at once (SRV-EVENTS
+    retries it; the worker's only slot is not held); another ingest is `ingest_superseded`."""
+    found = (
+        await conn.execute(
+            text(
+                "SELECT i.owner_id FROM ingests i JOIN materials m ON m.id = i.material_id"
+                " WHERE i.id = :i AND m.sha256 = :s"
+            ),
+            {"i": args.ingest_id, "s": args.material_sha256},
+        )
+    ).first()
+    if found is not None:
+        owner: UUID = found[0]
+        return owner
+    other = (
+        await conn.execute(
+            text(
+                "SELECT 1 FROM ingests i JOIN materials m ON m.id = i.material_id"
+                " WHERE m.sha256 = :s LIMIT 1"
+            ),
+            {"s": args.material_sha256},
+        )
+    ).first()
+    if other is not None:
+        raise SearchError("ingest_superseded")
+    raise IngestNotReady("ingest_not_ready")
 
 
 async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) -> None:
@@ -155,8 +147,7 @@ JOB_KINDS: Final[tuple[JobKind, ...]] = (
             asyncpg.exceptions.ConnectionDoesNotExistError,
             asyncpg.exceptions.CannotConnectNowError,
             ConnectionRefusedError,
-            httpx.ConnectError,
-            httpx.TimeoutException,
+            httpx.TransportError,
             EmbedUnavailable,
             IngestNotReady,
         ),

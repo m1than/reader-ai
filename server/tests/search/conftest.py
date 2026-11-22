@@ -80,13 +80,21 @@ class HashEncoder:
         self.model_override = model
         self.calls: list[tuple[str, int]] = []
         self.lock = threading.Lock()
+        self.active = 0  # calls inside encode() right now (INV-SEARCH-8)
+        self.max_active = 0
 
     def encode(self, kind: str, texts: Sequence[str]) -> list[list[float]]:
         with self.lock:
             self.calls.append((kind, len(texts)))
-        if self.delay_s:
-            time.sleep(self.delay_s)
-        return [hash_vector(t) for t in texts]
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            if self.delay_s:
+                time.sleep(self.delay_s)
+            return [hash_vector(t) for t in texts]
+        finally:
+            with self.lock:
+                self.active -= 1
 
 
 @dataclass
@@ -292,3 +300,18 @@ async def current_fts(w: World, sha: str) -> str:
     language = {"book-ru": "ru", "book-en": "en"}.get(config_id or "")
     value: str = params.fts_config_for(language)
     return value
+
+
+async def page_of(engine: Any, chunk_id: int) -> int:
+    """Test-only: a chunk's page (moved out of reader.search.store, which has no owner-free reads)."""
+    page: int = await scalar(engine, "SELECT page FROM search_chunks WHERE id = :i", i=chunk_id)
+    return page
+
+
+async def reset(w: World) -> None:
+    """Empty the search and test-only ingest tables (between property-test examples)."""
+    from sqlalchemy import text
+
+    async with w.engine.begin() as conn:
+        for table in ("search_chunks", "search_embeds", "material_spans", "ingests", "materials"):
+            await conn.execute(text(f"DELETE FROM {table}"))

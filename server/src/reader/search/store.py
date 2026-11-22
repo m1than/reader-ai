@@ -27,13 +27,11 @@ from reader.search.fusion import rrf, snippet, tsquery_text
 log = logging.getLogger("reader.search")
 DEFAULT_CONFIG: Final = "/etc/reader/reader.yaml"
 
-_CURRENT: Final = """
-WITH cur AS (
-    SELECT DISTINCT ON (ingest_id) ingest_id, params_sha256
-    FROM search_embeds WHERE owner_id = :o AND model = :m
-    ORDER BY ingest_id, embedded_at DESC
+# The current key per ingest is computed in Python (it needs reader.yaml's language) and passed as two arrays.
+_CURRENT: Final = (
+    "WITH cur AS (SELECT * FROM unnest(CAST(:ci AS uuid[]), CAST(:cp AS text[]))"
+    " AS cur(ingest_id, params_sha256))"
 )
-"""
 _FILTER: Final = (
     " FROM search_chunks c JOIN cur ON cur.ingest_id = c.ingest_id AND cur.params_sha256 = c.params_sha256"
     " WHERE c.owner_id = :o AND c.model = :m AND (CAST(:mat AS text) IS NULL OR c.material_sha256 = :mat)"
@@ -62,10 +60,10 @@ class SearchResult:
     degraded: bool
 
 
-def _language(config_id: str | None) -> str | None:
-    path = Path(os.environ.get("READER_CONFIG", DEFAULT_CONFIG))
-    config = load_config(path)
-    return next((m.language for m in config.materials if m.id == config_id), None)
+def _languages() -> dict[str, str]:
+    """reader.yaml's materials: config id → language."""
+    config = load_config(Path(os.environ.get("READER_CONFIG", DEFAULT_CONFIG)))
+    return {m.id: m.language for m in config.materials}
 
 
 async def fts_config_of(conn: AsyncConnection, material_sha256: str, ingest_id: UUID | None = None) -> str:
@@ -76,7 +74,22 @@ async def fts_config_of(conn: AsyncConnection, material_sha256: str, ingest_id: 
     else:
         sql = "SELECT m.config_id FROM ingests i JOIN materials m ON m.id = i.material_id WHERE i.id = :i"
         row = (await conn.execute(text(sql), {"i": ingest_id})).first()
-    return params.fts_config_for(_language(row[0]) if row else None)
+    return params.fts_config_for(_languages().get(row[0] or "") if row else None)
+
+
+async def current_keys(conn: AsyncConnection, owner_id: UUID) -> dict[str, Any]:
+    """FR-SEARCH-7: per embedded ingest of the owner, the params_sha256 its material would get now."""
+    rows = await conn.execute(
+        text(
+            "SELECT DISTINCT e.ingest_id, m.config_id FROM search_embeds e"
+            " JOIN ingests i ON i.id = e.ingest_id JOIN materials m ON m.id = i.material_id"
+            " WHERE e.owner_id = :o AND e.model = :m"
+        ),
+        {"o": owner_id, "m": params.MODEL_ID},
+    )
+    languages = _languages()
+    pairs = [(r[0], params.params_sha256(params.fts_config_for(languages.get(r[1] or "")))) for r in rows]
+    return {"ci": [p[0] for p in pairs], "cp": [p[1] for p in pairs]}
 
 
 def vector_literal(vector: list[float]) -> str:
@@ -98,7 +111,7 @@ async def dense_list(
     rows = await conn.execute(
         text(sql),
         {"o": owner_id, "m": params.MODEL_ID, "mat": material_sha256, "q": vector_literal(vector),
-         "n": params.CANDIDATES},
+         "n": params.CANDIDATES, **await current_keys(conn, owner_id)},
     )
     return [int(r[0]) for r in rows]
 
@@ -107,7 +120,7 @@ async def fts_list(
     conn: AsyncConnection, owner_id: UUID, query: str, material_sha256: str | None
 ) -> list[int]:
     """The OR full-text list: per configuration present, the query's lexemes quoted and OR-ed."""
-    base = {"o": owner_id, "m": params.MODEL_ID, "mat": material_sha256}
+    base = {"o": owner_id, "m": params.MODEL_ID, "mat": material_sha256, **await current_keys(conn, owner_id)}
     present = await conn.execute(text(_CURRENT + "SELECT DISTINCT c.fts_config" + _FILTER), base)
     configs = [r[0] for r in present]
     scored: list[tuple[float, int]] = []
@@ -132,12 +145,6 @@ async def fts_list(
         scored.extend((float(r[1]), int(r[0])) for r in rows)
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
     return [cid for _, cid in scored[: params.CANDIDATES]]
-
-
-async def page_of(conn: AsyncConnection, chunk_id: int) -> int:
-    row = await conn.execute(text("SELECT page FROM search_chunks WHERE id = :i"), {"i": chunk_id})
-    page: int = row.scalar_one()
-    return page
 
 
 async def search(
