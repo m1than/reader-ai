@@ -557,10 +557,6 @@ tasks:
         job (api cannot reach agent-proxy, ADR-0025), polling instead of SSE (answers validated whole before display),
         grounding enforced by code (span ids outside the retrieved set removed, unsupported blocks marked), Sonnet 5.5,
         per-question cap $0.20, daily $3; typical ≈ $0.026 warm / $0.053 cold per question (VEC-TUTOR-3)." }
-  - { id: V.OPS-CLI-agents, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
-      note: "Paired OPS-CLI/OPS-DEPLOY change for SRV-AGENT: `reader up` starts profile `agents` (agent-proxy); FR-CLI-4 and
-        FR-DEPLOY-5 add agent-proxy to the read-only reader.yaml bind set; OPS-DEPLOY notes that
-        deploy/images/agent-proxy.Dockerfile is owned by SRV-AGENT" }
   - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
       result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
         placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with
