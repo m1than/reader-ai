@@ -21,6 +21,8 @@ jobs:
       - run: npm ci --prefix tools
       - name: T1–T9 trace-check
         run: node tools/trace/check.mjs
+      - name: Write hook gates hold in every worktree
+        run: node --test tools/hooks/pre-write.test.mjs
       - name: P7 tests change only with their spec
         if: github.event_name == 'pull_request'
         run: node tools/trace/guard-tests.mjs --base origin/${{ github.base_ref }}
