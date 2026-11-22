@@ -5,14 +5,14 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from reader.ingest.artifact import open_members, validate
+from reader.ingest.artifact import read_members, validate_members
 
 log = logging.getLogger("reader.ingest")
 _BATCH: Final = 1000  # rows per INSERT: bounds one statement's parameters, not a tuning value
@@ -37,15 +37,25 @@ async def frozen_version(conn: AsyncConnection, material_sha256: str) -> str | N
     return None if value is None else str(value)
 
 
-def read_artifact(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]]:
-    """Validate the stored artifact (FR-INGEST-11's validator) and return manifest, spans and outline."""
-    with open_members(root) as handles:
-        manifest_bytes = handles["manifest.json"].read()
-        outline_bytes = handles["outline.json"].read()
-        manifest = validate(manifest_bytes, handles["spans.jsonl"], outline_bytes)
-        handles["spans.jsonl"].seek(0)
-        spans = [json.loads(line) for line in handles["spans.jsonl"]]
-    return manifest, spans, json.loads(outline_bytes)
+def read_artifact(root: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """Read the stored artifact once and validate it (FR-INGEST-11's validator): manifest and member bytes.
+
+    Memory stays at the caps: the bytes (at most 64 MiB of spans) are kept and parsed in batches later.
+    """
+    members = read_members(root)
+    return validate_members(members), members
+
+
+def span_batches(spans: bytes) -> Iterator[list[dict[str, Any]]]:
+    """The validated spans.jsonl, parsed _BATCH lines at a time, never all spans as objects at once."""
+    batch: list[dict[str, Any]] = []
+    for line in spans.splitlines():
+        batch.append(json.loads(line))
+        if len(batch) == _BATCH:
+            yield batch
+            batch = []
+    if batch:
+        yield batch
 
 
 async def _insert_many(conn: AsyncConnection, sql: str, rows: Sequence[dict[str, Any]]) -> None:
@@ -59,7 +69,7 @@ async def import_rows(
     material_id: str,
     artifact_id: str,
     manifest: dict[str, Any],
-    spans: Sequence[dict[str, Any]],
+    spans: bytes,
     outline: Sequence[dict[str, Any]],
 ) -> bool:
     """Write the material, its ingest and its rows in the caller's transaction; False if already imported."""
@@ -96,28 +106,21 @@ async def import_rows(
     ).scalar()
     if ingest is None:
         return False
-    await _insert_many(
-        conn,
+    span_sql = (
         "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, level, decoded, text,"
-        " x0, y0, x1, y1) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text, :x0, :y0, :x1, :y1)",
-        [
+        " x0, y0, x1, y1) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text, :x0, :y0, :x1, :y1)"
+    )
+    for batch in span_batches(spans):
+        rows = [
             {
                 "i": ingest,
                 "o": owner,
-                "seq": s["seq"],
-                "page": s["page"],
-                "kind": s["kind"],
-                "level": s["level"],
-                "decoded": s["decoded"],
-                "text": s["text"],
-                "x0": s["bbox"][0],
-                "y0": s["bbox"][1],
-                "x1": s["bbox"][2],
-                "y1": s["bbox"][3],
+                **{k: s[k] for k in ("seq", "page", "kind", "level", "decoded", "text")},
+                **dict(zip(("x0", "y0", "x1", "y1"), s["bbox"], strict=True)),
             }
-            for s in spans
-        ],
-    )
+            for s in batch
+        ]
+        await conn.execute(text(span_sql), rows)
     await _insert_many(
         conn,
         "INSERT INTO material_outline (ingest_id, owner_id, seq, level, title, page)"

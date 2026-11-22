@@ -125,6 +125,8 @@ BROKEN_SPANS: list[tuple[str, dict[str, Any]]] = [
     ("heading without level", {"kind": "heading", "level": None}),
     ("decoded on text", {"decoded": True}),
     ("formula without decoded", {"kind": "formula", "decoded": None}),
+    ("bbox over 1e5", {"bbox": [0, 0, 100001, 1]}),
+    ("huge number", {"page": 10**400}),
     ("nul", {"text": "a\x00b"}),
     ("c0 control", {"text": "a\x1bb"}),
     ("lone surrogate", {"text": "a\ud800b"}),

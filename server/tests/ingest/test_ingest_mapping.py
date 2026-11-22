@@ -117,6 +117,22 @@ def test_outline_from_bookmarks() -> None:
     ]
 
 
+def test_page_with_only_code_keeps_docling_order() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    before = item("text", "p1", 1, 700)
+    c_low = item("code", "c-low", 2, 400)
+    c_high = item("code", "c-high", 2, 100)  # Docling put the lower block first; nothing to anchor to
+    after = item("text", "p3", 3, 50)
+    ordered = mapping.order([before, c_low, c_high, after])
+    assert [i.text for i in ordered] == ["p1", "c-low", "c-high", "p3"]
+
+
+def test_out_of_range_bookmark_page_is_null() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    outline, _ = mapping.outline([(0, "A", 1), (0, "B", 9), (0, "C", -1)], [], 2)
+    assert [o["page"] for o in outline] == [2, None, None]
+
+
 def test_outline_falls_back_to_headings() -> None:
     mapping = need("reader.ingest.host.mapping")
     spans = mapping.spans([item("title", "T", 1, 10, level=1), item("text", "x", 1, 30)])

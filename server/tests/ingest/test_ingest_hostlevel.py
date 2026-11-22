@@ -144,6 +144,33 @@ def extract(pdf: Path, pages: list[int], dest: Path) -> Path:
     return dest
 
 
+def _inside(span: dict[str, Any], box: list[float]) -> bool:
+    """The span's vertical centre lies in the recorded box (boxes are top-left origin, in points)."""
+    centre = (span["bbox"][1] + span["bbox"][3]) / 2
+    return box[1] <= centre <= box[3]
+
+
+def order_failures(page: int, got: list[dict[str, Any]], want: dict[str, Any]) -> list[str]:
+    """ADR-0021, relational: each recorded code block comes after the step before it and before the next one;
+    steps are the list items inside the hand-recorded step boxes, other list items do not count."""
+    steps: dict[str, int] = {}
+    for number, box in want["steps"].items():
+        found = [s["seq"] for s in got if s["kind"] == "list_item" and _inside(s, box)]
+        if len(found) != 1:
+            return [f"page {page}: step {number} matched {len(found)} list items"]
+        steps[number] = found[0]
+    failures = []
+    for index, after, before in want["order"]:
+        box = want["code"][index]["box"]
+        found = [s["seq"] for s in got if s["kind"] == "code" and _inside(s, box)]
+        if len(found) != 1:
+            failures.append(f"page {page}: code block {index} matched {len(found)} code spans")
+            continue
+        if not (steps[after] < found[0] and (before is None or found[0] < steps[before])):
+            failures.append(f"page {page}: code block {index} is not between steps {after} and {before}")
+    return failures
+
+
 @pytest.mark.ingest_host
 def test_pilot_page_expectations(tmp_path: Path) -> None:
     path = pilot()
@@ -181,11 +208,8 @@ def test_pilot_page_expectations(tmp_path: Path) -> None:
                     shapes.append([len(rows), rows[0].count("|") - 1 if rows else 0])
             if shapes != want["tables"]:
                 failures.append(f"page {page}: tables {shapes} != {want['tables']}")
-        if "code_after_list_item" in want:
-            items = [s for s in got if s["kind"] in ("list_item", "code")]
-            kinds = [s["kind"] for s in items]
-            if kinds != want["code_after_list_item"]:
-                failures.append(f"page {page}: order {kinds} != {want['code_after_list_item']}")
+        if "order" in want:
+            failures.extend(order_failures(int(page), got, want))
     known = set(expectations.get("known_misses", []))
     unexpected = [f for f in failures if int(f.split()[1].rstrip(":")) not in known]
     assert not unexpected, unexpected
@@ -261,7 +285,16 @@ attempt("read home canary", lambda: read(cfg["home_canary"]))
 attempt("read data canary", lambda: read(cfg["data_canary"]))
 attempt("read original material", lambda: read(cfg["material"]))
 attempt("read /etc/passwd", lambda: read("/etc/passwd"))
+attempt("list home", lambda: os.listdir(cfg["home"]))
 attempt("write outside", lambda: write(cfg["outside"]))
+def semaphore():
+    import multiprocessing
+    multiprocessing.Semaphore(1)
+def shm():
+    from multiprocessing import shared_memory
+    shared_memory.SharedMemory(create=True, size=16).unlink()
+attempt("posix semaphore", semaphore)
+attempt("posix shm", shm)
 results["env"] = sorted(os.environ)
 results["canary_env"] = "CANARY_ENV" in os.environ
 print(json.dumps(results))
@@ -302,6 +335,7 @@ def test_confinement_probes(tmp_path: Path) -> None:
                 "data_canary": str(data_canary),
                 "material": str(pilot_path),
                 "outside": str(outside),
+                "home": str(Path.home()),
             }
         ),
     ]
@@ -329,6 +363,21 @@ def test_confinement_probes(tmp_path: Path) -> None:
     results = json.loads(done.stdout)
     allowed = sorted(k for k, v in results.items() if v == "allowed")
     assert allowed == [], allowed
+    # Where the target exists, the refusal must be the sandbox's, not a missing file or a failed lookup.
+    existing = [
+        "read home canary",
+        "read data canary",
+        "read original material",
+        "read /etc/passwd",
+        "list home",
+        "signal parent",
+        "exec /usr/bin/security",
+        "exec /bin/sh",
+        "posix semaphore",
+        "posix shm",
+    ]
+    refused = {name: results[name] for name in existing}
+    assert all(kind == "PermissionError" for kind in refused.values()), refused
     assert results["env"] == sorted(env) and results["canary_env"] is False
     assert not outside.exists()
     assert listening.stdout.strip() == b""

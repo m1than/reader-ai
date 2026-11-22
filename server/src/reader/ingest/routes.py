@@ -21,9 +21,10 @@ from reader.config.model import Material
 from reader.ingest import store
 from reader.ingest.artifact import span_id
 from reader.ingest.jobs import KIND, key_for
-from reader.jobs.states import deciding_status, status_of
+from reader.jobs.queue import job_status_of
 
 DEFAULT_CONFIG: Final = "/etc/reader/reader.yaml"
+PAGE_DIGITS: Final = 5  # page_count <= 5,000 (artifact caps)
 
 
 class _NoConfig(Exception):
@@ -41,13 +42,8 @@ def _materials(ctx: Ctx) -> Sequence[Material]:
 
 
 async def _job_status(conn: AsyncConnection, key: str) -> str:
-    """SRV-EVENTS job_status, read directly: the api holds no procrastinate app."""
-    outcome_sql = "SELECT outcome FROM job_keys WHERE kind = :k AND key = :key"
-    row = (await conn.execute(text(outcome_sql), {"k": KIND, "key": key})).first()
-    jobs_sql = "SELECT id, status::text FROM procrastinate_jobs WHERE lock = :key"
-    jobs = await conn.execute(text(jobs_sql), {"key": key})
-    deciding = deciding_status([(int(i), str(s)) for i, s in jobs])
-    return status_of(deciding, row[0] if row else None, row is not None)[0]
+    """SRV-EVENTS job_status on this connection: the api holds no procrastinate app."""
+    return await job_status_of(conn, KIND, key)
 
 
 async def _imported(conn: AsyncConnection, owner: Any, sha: str) -> Any:
@@ -125,7 +121,8 @@ async def get_spans(ctx: Ctx) -> Response:
             return error(404, "not_found")
         material, row = found
         raw = ctx.request.query_params.get("page", "")
-        if not raw.isdigit() or not 1 <= int(raw) <= int(row[2]):
+        valid = raw.isascii() and raw.isdecimal() and len(raw) <= PAGE_DIGITS
+        if not valid or not 1 <= int(raw) <= int(row[2]):
             return error(400, "page")
         spans = await conn.execute(
             text(

@@ -1,24 +1,25 @@
 """The strict ustar channel between `reader-ingest` and the worker (FR-INGEST-10, -11; INV-INGEST-3).
 
 Written by hand rather than with `tarfile`: the writer is deterministic (mode 0644, mtime 0, uid and gid 0,
-no pax headers), and the reader accepts exactly the three regular members in order, nothing else, so no
-member can name a path, a link or a device.
+no pax headers) and writes bytes already validated; the reader accepts exactly the three regular members in
+order, nothing else, so no member can name a path, a link or a device; its numeric fields are strict octal.
 """
 
 from __future__ import annotations
 
 import os
-import stat
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import BinaryIO, Final
 
-from reader.ingest.artifact import CAPS, MEMBERS, TOTAL_CAP, ArtifactError
+from reader.ingest.artifact import CAPS, MEMBERS, TOTAL_CAP, ArtifactError, read_members
 
 BLOCK: Final = 512
 MAGIC: Final = b"ustar\x0000"
 END_LIMIT: Final = 20 * BLOCK  # end-of-archive blocks, padded to one 10 KiB record at most
 _CHUNK: Final = 1024 * 1024
+_NUMERIC: Final = re.compile(rb"([0-7]+)[\0 ]*")  # octal digits, then only NUL or space terminators
 
 
 def _octal(value: int, width: int) -> bytes:
@@ -40,28 +41,30 @@ def header(name: str, size: int) -> bytes:
     return bytes(raw)
 
 
-def write_dir(root: Path, dest: BinaryIO) -> int:
-    """Stream the three members of `root` (O_NOFOLLOW, regular files only) as a tar; returns its size."""
+def write_members(members: Mapping[str, bytes], dest: BinaryIO) -> int:
+    """Write member bytes (read once and validated) as a tar; returns its size."""
     written = 0
     for name in MEMBERS:
-        fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-        with os.fdopen(fd, "rb") as handle:
-            info = os.fstat(handle.fileno())
-            if not stat.S_ISREG(info.st_mode):
-                raise ArtifactError("tar_format")
-            dest.write(header(name, info.st_size))
-            remaining = info.st_size
-            while remaining:
-                chunk = handle.read(min(_CHUNK, remaining))
-                if not chunk:
-                    raise ArtifactError("tar_format")
-                dest.write(chunk)
-                remaining -= len(chunk)
-            pad = (-info.st_size) % BLOCK
-            dest.write(b"\0" * pad)
-            written += BLOCK + info.st_size + pad
+        body = members[name]
+        pad = (-len(body)) % BLOCK
+        dest.write(header(name, len(body)))
+        dest.write(body)
+        dest.write(b"\0" * pad)
+        written += BLOCK + len(body) + pad
     dest.write(b"\0" * (2 * BLOCK))
     return written + 2 * BLOCK
+
+
+def write_dir(root: Path, dest: BinaryIO) -> int:
+    """Read the members of `root` once (artifact.read_members) and write them as a tar."""
+    return write_members(read_members(root), dest)
+
+
+def _number(field: bytes) -> int:
+    match = _NUMERIC.fullmatch(field)
+    if match is None:
+        raise ArtifactError("tar_format")
+    return int(match.group(1), 8)
 
 
 def _exact(src: BinaryIO, size: int) -> bytes:
@@ -74,15 +77,11 @@ def _exact(src: BinaryIO, size: int) -> bytes:
 def _parse(block: bytes, expected: str) -> int:
     if block[257:265] != MAGIC or block[156:157] not in (b"0", b"\0"):
         raise ArtifactError("tar_format")
-    stored = block[148:156]
     probe = bytearray(block)
     probe[148:156] = b" " * 8
-    try:
-        if int(stored.split(b"\0", 1)[0].strip() or b"x", 8) != sum(probe):
-            raise ArtifactError("tar_format")
-        size = int(block[124:136].split(b"\0", 1)[0].strip() or b"x", 8)
-    except ValueError:
-        raise ArtifactError("tar_format") from None
+    if _number(block[148:156]) != sum(probe):
+        raise ArtifactError("tar_format")
+    size = _number(block[124:136])
     field, _, rest = block[0:100].partition(b"\0")
     if rest.strip(b"\0") or block[345:500].strip(b"\0") or block[157:257].strip(b"\0"):
         raise ArtifactError("tar_format")  # NUL inside the name, a prefix, or a link name

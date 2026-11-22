@@ -2,7 +2,7 @@
   "known_misses": [
     378
   ],
-  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are the shaded code regions in PDF points, top-left origin; table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
+  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
   "pages": {
     "128": {
       "formulas_decoded": 2
@@ -15,6 +15,16 @@
     },
     "133": {
       "code": [
+        {
+          "box": [
+            146.0,
+            75.0,
+            316.0,
+            87.0
+          ],
+          "lines": 1,
+          "sha256": "fdf62f1f167f014ee87e83c563c7595fc3186de05bd47fd281397e4e65e29cbf"
+        },
         {
           "box": [
             43.0,
@@ -188,15 +198,49 @@
           "sha256": "2e1caf4b5ccc865c159f41cfe2b087a948c09e694239837bcc748092b8341301"
         }
       ],
-      "code_after_list_item": [
-        "list_item",
-        "list_item",
-        "code",
-        "list_item",
-        "code",
-        "list_item",
-        "code"
-      ]
+      "order": [
+        [
+          0,
+          "4",
+          "5"
+        ],
+        [
+          1,
+          "5",
+          "6"
+        ],
+        [
+          2,
+          "6",
+          null
+        ]
+      ],
+      "steps": {
+        "3": [
+          52,
+          62,
+          412,
+          85
+        ],
+        "4": [
+          52,
+          87,
+          412,
+          110
+        ],
+        "5": [
+          52,
+          408,
+          412,
+          421
+        ],
+        "6": [
+          52,
+          562,
+          412,
+          585
+        ]
+      }
     },
     "468": {
       "code": [
@@ -241,15 +285,48 @@
           "sha256": "df7c7e24abc48abf5cf56521ecf20dd1145a59b9427fcbaf24764fd7fa668f87"
         }
       ],
-      "code_after_list_item": [
-        "list_item",
-        "code",
-        "list_item",
-        "code",
-        "code",
-        "list_item",
-        "code"
-      ]
+      "order": [
+        [
+          0,
+          "5",
+          "6"
+        ],
+        [
+          1,
+          "6",
+          "7"
+        ],
+        [
+          2,
+          "6",
+          "7"
+        ],
+        [
+          3,
+          "7",
+          null
+        ]
+      ],
+      "steps": {
+        "5": [
+          65,
+          62,
+          425,
+          74
+        ],
+        "6": [
+          65,
+          181,
+          425,
+          203
+        ],
+        "7": [
+          65,
+          370,
+          425,
+          393
+        ]
+      }
     },
     "483": {
       "tables": [

@@ -20,7 +20,10 @@ from reader.ingest.artifact import write_artifact
 from reader.ingest.host.mapping import BatchFailed, Item, outline, run_batches, spans
 
 TEXTLESS_BELOW: Final = 200  # characters in a page's text layer (the ingest-docling spike's threshold)
-CODE_MARGIN_PT: Final = 1.0  # the text-layer box around a code item, so edge glyphs are not cut
+# Points added around a code item's box before reading the text layer. Structural: Docling's boxes hug the
+# glyph ink, and 1 pt (well under a line's 2 pt leading gap in the pilot) keeps edge glyphs without reaching
+# the next line. Checked by VEC-INGEST-3: the pilot's code hashes, from wider hand-recorded boxes, match.
+CODE_MARGIN_PT: Final = 1.0
 
 
 def _sha256(path: Path) -> str:
@@ -47,10 +50,10 @@ def read_outline(path: str | Path) -> list[dict[str, Any]]:
 
     pdf = pypdfium2.PdfDocument(str(path))
     try:
-        marks = bookmarks(pdf)
+        marks, page_count = bookmarks(pdf), len(pdf)
     finally:
         pdf.close()
-    return outline(marks, [])[0] if marks else []
+    return outline(marks, [], page_count)[0] if marks else []
 
 
 def _code_text(pdf: Any, prov: list[Any], heights: dict[int, float]) -> str:
@@ -111,7 +114,8 @@ def _items(doc: Any, pdf: Any) -> list[Item]:
             text = node.text or ""
             if isinstance(node, SectionHeaderItem):
                 level = int(node.level)
-            marker = str(getattr(node, "marker", "") or "").strip() if isinstance(node, ListItem) else ""
+            enumerated = isinstance(node, ListItem) and bool(getattr(node, "enumerated", False))
+            marker = str(getattr(node, "marker", "") or "").strip() if enumerated else ""
             if marker and not text.startswith(marker):
                 text = f"{marker} {text}"  # numbered steps keep their numbers (Docling stores them apart)
         else:
@@ -164,7 +168,7 @@ def convert(source: Path, models: Path, out: Path, report: Any = None) -> int:
         except BatchFailed:
             return 3
         rows = spans(items)
-        entries, source_kind = outline(marks, rows)
+        entries, source_kind = outline(marks, rows, page_count)
         write_artifact(
             out,
             material_sha256=_sha256(source),

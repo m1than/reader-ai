@@ -7,6 +7,7 @@ Permanent failures carry their code as the exception class name, which is what S
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 from typing import Any, Final
 
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 import reader.ingest as ingest
 from reader.ingest import store
-from reader.ingest.artifact import ArtifactError
+from reader.ingest.artifact import ArtifactError, artifact_id
 from reader.ingest.errors import import_error
 from reader.jobs.model import JobContext, JobKind, idempotency_key
 
@@ -41,21 +42,25 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
         del ctx
         root = blobs_root / "ingest" / args.artifact_id
         try:
-            manifest, spans, outline = await asyncio.to_thread(store.read_artifact, root)
+            manifest, members = await asyncio.to_thread(store.read_artifact, root)
         except ArtifactError as error:
             raise (ArtifactMissing if error.code == "missing" else ArtifactInvalid)() from None
         frozen = await store.frozen_version(conn, args.material_sha256)
         if frozen is not None and frozen != args.converter_version:
             raise VersionFrozen()
         if (
-            manifest["material_sha256"] != args.material_sha256
+            artifact_id(members["manifest.json"]) != args.artifact_id
+            or manifest["material_sha256"] != args.material_sha256
             or manifest["converter_version"] != args.converter_version
         ):
             raise ArtifactMismatch()
         owner = await store.owner_id(conn)
         if owner is None:
             raise NoOwner()
-        await store.import_rows(conn, owner, args.material_id, args.artifact_id, manifest, spans, outline)
+        outline = json.loads(members["outline.json"])
+        await store.import_rows(
+            conn, owner, args.material_id, args.artifact_id, manifest, members["spans.jsonl"], outline
+        )
 
     return (
         JobKind(

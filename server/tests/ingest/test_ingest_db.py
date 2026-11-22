@@ -293,6 +293,111 @@ async def test_no_material_text_in_worker_logs(pg: Pg, tmp_path: Path, caplog: A
     assert CANARY not in caplog.text
 
 
+async def test_no_material_text_when_the_import_fails(pg: Pg, tmp_path: Path, caplog: Any) -> None:
+    caplog.set_level(logging.DEBUG)
+    async with world(pg, tmp_path) as w:
+        result = await receive(w, tar())
+        spans = w.blobs / "ingest" / result["artifact_id"] / "spans.jsonl"
+        spans.write_bytes(spans.read_bytes().replace(b"\n", b"\n" + CANARY.encode() + b"\n", 1))
+        await w.work()
+        (row,) = await w.rows("SELECT outcome, error_code FROM job_keys")
+        assert tuple(row) == ("dead", "artifact_invalid")
+    assert CANARY not in caplog.text
+
+
+@pytest.mark.parametrize("page", ["٣", "1" * 6, "+1", " 1", "1.0"])
+async def test_page_parameter_is_ascii_decimal_and_short(pg: Pg, tmp_path: Path, page: str) -> None:
+    async with world(pg, tmp_path) as w:
+        await receive(w, tar())
+        await w.work()
+        async with client(w) as c:
+            response = await c.get("/api/materials/synthetic/spans", params={"page": page})
+            assert response.status_code == 400 and response.json() == {"error": "page"}
+
+
+# ---- FR-INGEST-11 through main(): the deadline after storage, run_command's error mapping ----
+
+
+class SlowJobs:
+    async def enqueue(self, *_: Any, **__: Any) -> Any:
+        import asyncio
+
+        await asyncio.sleep(30)
+
+
+def test_main_deadline_after_storage_is_enqueue_failed(
+    pg: Pg, tmp_path: Path, monkeypatch: Any, capsys: Any
+) -> None:
+    """receive.main() in the main thread (its SIGALRM needs it), with a runtime built in main's own loop."""
+    import asyncio
+    import contextlib
+    import sys
+
+    from reader.config import Secret, load_config
+    from reader.db import DbTarget, make_engine
+
+    async def prepare() -> None:
+        async with world(pg, tmp_path):
+            pass  # migrated database, users, reader.yaml and an empty blob root stay behind
+
+    asyncio.run(prepare())
+    runtime = need("reader.ingest.runtime")
+    receive_mod = need("reader.ingest.receive")
+    ingest = need("reader.ingest")
+
+    @contextlib.asynccontextmanager
+    async def fake_runtime() -> Any:
+        engine = make_engine(DbTarget(pg.host, pg.port, pg.user, pg.database, Secret(pg.password)))
+        try:
+            yield runtime.Runtime(load_config(tmp_path / "reader.yaml"), engine, SlowJobs())
+        finally:
+            await engine.dispose()
+
+    class Stdin:
+        buffer = io.BytesIO(tar().getvalue())
+
+    monkeypatch.setattr(runtime, "runtime", fake_runtime)
+    monkeypatch.setattr(receive_mod, "DEADLINE_S", 3.0)
+    monkeypatch.setattr(ingest, "BLOBS_DIR", tmp_path / "blobs")
+    monkeypatch.setattr(sys, "stdin", Stdin())
+    code = receive_mod.main()
+    out = capsys.readouterr().out
+    assert code == 1 and json.loads(out.strip().splitlines()[-1]) == {"error": "enqueue_failed"}
+    kept = [p for p in (tmp_path / "blobs" / "ingest").iterdir() if not p.name.startswith(".")]
+    assert len(kept) == 1  # the stored directory stays
+    assert CANARY not in out
+
+
+def test_run_command_maps_failures_to_fixed_codes(monkeypatch: Any, capsys: Any) -> None:
+    import contextlib
+
+    runtime = need("reader.ingest.runtime")
+    errors = need("reader.ingest.errors")
+
+    @contextlib.asynccontextmanager
+    async def fake_runtime() -> Any:
+        yield None
+
+    monkeypatch.setattr(runtime, "runtime", fake_runtime)
+
+    async def refuse(_: Any) -> dict[str, Any]:
+        raise errors.IngestError("schema")
+
+    async def crash(_: Any) -> dict[str, Any]:
+        raise RuntimeError(f"driver detail {CANARY}")
+
+    async def ok(_: Any) -> dict[str, Any]:
+        return {"result": "queued"}
+
+    assert runtime.run_command(refuse) == 1
+    assert runtime.run_command(crash) == 1
+    assert runtime.run_command(ok) == 0
+    out = capsys.readouterr().out.strip().splitlines()
+    want = [{"error": "schema"}, {"error": "unavailable"}, {"result": "queued"}]
+    assert [json.loads(line) for line in out] == want
+    assert CANARY not in "".join(out)
+
+
 # ---- INV-INGEST-2: one ingest per material under repeated receives ----
 
 

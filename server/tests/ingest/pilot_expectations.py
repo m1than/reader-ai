@@ -139,7 +139,7 @@ def build(pdf_path: str, boxes_path: str) -> None:
         entry: dict[str, Any] = {}
         if "code_boxes" in want:
             entry["code"] = [_code_entry(pdf, int(number), [float(v) for v in b]) for b in want["code_boxes"]]
-        for key in ("formulas_decoded", "tables", "code_after_list_item"):
+        for key in ("formulas_decoded", "tables", "steps", "order"):
             if key in want:
                 entry[key] = want[key]
         pages[str(number)] = entry

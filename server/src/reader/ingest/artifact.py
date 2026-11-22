@@ -1,22 +1,22 @@
 """The ingest artifact: normalisation, writing and validation (SRV-INGEST FR-INGEST-6, -7, -10; INV-INGEST-1).
 
 Stdlib only (imported by the confined converter). The validator is the one both sides run: the host before it
-sends (FR-INGEST-10) and the worker on receive and import (FR-INGEST-11, -13). Members are opened through a
-directory descriptor with O_NOFOLLOW|O_NONBLOCK and must be regular files within their caps, because the
-converter's output directory is untrusted.
+sends (FR-INGEST-10) and the worker on receive and import (FR-INGEST-11, -13). Members are read once
+through a directory descriptor with O_NOFOLLOW|O_NONBLOCK, as regular files, at most cap + 1 bytes, because
+the converter's output directory is untrusted; the bytes validated are the bytes sent.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import math
 import os
 import re
 import stat
 import unicodedata
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, BinaryIO, Final
 
@@ -37,6 +37,7 @@ MAX_PAGES: Final = 5_000
 MAX_OUTLINE: Final = 20_000
 MAX_TITLE: Final = 1_024
 MAX_LEVEL: Final = 16
+MAX_COORD: Final = 1e5  # points; structural, far above any page size (A0 is 3,370 pt tall)
 KINDS: Final = frozenset({"text", "heading", "list_item", "formula", "code", "table", "figure"})
 SPAN_KEYS: Final = frozenset({"seq", "page", "kind", "level", "decoded", "text", "bbox"})
 OUTLINE_KEYS: Final = frozenset({"seq", "level", "title", "page"})
@@ -150,7 +151,7 @@ def _reject_constant(_: str) -> Any:
 def _json(raw: bytes) -> Any:
     try:
         return json.loads(raw.decode("utf-8"), parse_constant=_reject_constant)
-    except (ValueError, RecursionError) as error:
+    except (ValueError, RecursionError, OverflowError) as error:
         raise ArtifactError("schema") from error
 
 
@@ -220,7 +221,7 @@ def check_span(span: Any, seq: int, page_count: int) -> None:
     if not isinstance(bbox, list) or len(bbox) != 4 or not all(_finite(v) for v in bbox):
         raise ArtifactError("schema")
     x0, y0, x1, y1 = bbox
-    if not (0 <= x0 <= x1 and 0 <= y0 <= y1):
+    if not (0 <= x0 <= x1 <= MAX_COORD and 0 <= y0 <= y1 <= MAX_COORD):
         raise ArtifactError("schema")
 
 
@@ -271,39 +272,37 @@ def validate(manifest: bytes, spans: BinaryIO, outline: bytes) -> dict[str, Any]
     return meta
 
 
-@contextmanager
-def open_members(root: Path) -> Iterator[dict[str, BinaryIO]]:
-    """Open the three members through a directory descriptor: no symlink is followed, FIFOs do not block, and
-    each must be a regular file within its cap."""
+def read_members(root: Path) -> dict[str, bytes]:
+    """Read the three members once, through a directory descriptor: no symlink is followed (the directory
+    itself included), FIFOs do not block, each must be a regular file, and at most cap + 1 bytes are read."""
     flags = os.O_RDONLY | os.O_NOFOLLOW
     try:
         dir_fd = os.open(root, flags | os.O_DIRECTORY)
     except OSError as error:
         raise ArtifactError("missing") from error
-    handles: dict[str, BinaryIO] = {}
+    members: dict[str, bytes] = {}
     try:
         for name in MEMBERS:
             try:
                 fd = os.open(name, flags | os.O_NONBLOCK, dir_fd=dir_fd)
             except OSError as error:
                 raise ArtifactError("missing") from error
-            info = os.fstat(fd)
-            if not stat.S_ISREG(info.st_mode):
-                os.close(fd)
-                raise ArtifactError("tar_format")
-            if info.st_size > CAPS[name]:
-                os.close(fd)
+            with os.fdopen(fd, "rb") as handle:
+                if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                    raise ArtifactError("tar_format")
+                data = handle.read(CAPS[name] + 1)
+            if len(data) > CAPS[name]:
                 raise ArtifactError("too_large")
-            handles[name] = os.fdopen(fd, "rb")
-        yield handles
+            members[name] = data
     finally:
-        for handle in handles.values():
-            handle.close()
         os.close(dir_fd)
+    return members
+
+
+def validate_members(members: Mapping[str, bytes]) -> dict[str, Any]:
+    """Validate member bytes read once (read_members); returns the manifest."""
+    return validate(members["manifest.json"], io.BytesIO(members["spans.jsonl"]), members["outline.json"])
 
 
 def validate_dir(root: Path) -> dict[str, Any]:
-    with open_members(root) as handles:
-        manifest = handles["manifest.json"].read()
-        outline = handles["outline.json"].read()
-        return validate(manifest, handles["spans.jsonl"], outline)
+    return validate_members(read_members(root))

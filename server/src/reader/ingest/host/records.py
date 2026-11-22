@@ -16,7 +16,7 @@ import shutil
 import signal
 import subprocess
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Final, Protocol
 
 
 class Probe(Protocol):
@@ -98,6 +98,11 @@ def cleanup_stale(run_dir: Path, work_root: Path, material_sha256: str, probe: P
     return cleaned
 
 
+# FR-INGEST-1: the parent's own subprocesses get an allow-listed environment; `ps` and `lsof` need only these
+# (LANG=C keeps `ps -o lstart=` in one fixed format).
+PROBE_ENV: Final = {"PATH": "/usr/bin:/bin:/usr/sbin", "LANG": "C"}
+
+
 class SystemProbe:
     """The real process probe: `ps` for the start time, `lsof` for the cwd (no new dependency)."""
 
@@ -112,14 +117,20 @@ class SystemProbe:
 
     def start_time(self, pid: int) -> str | None:
         done = subprocess.run(  # noqa: S603 (fixed argv, a numeric pid)
-            ["/bin/ps", "-o", "lstart=", "-p", str(pid)], capture_output=True, text=True, check=False
+            ["/bin/ps", "-o", "lstart=", "-p", str(pid)],
+            capture_output=True,
+            text=True,
+            check=False,
+            env=PROBE_ENV,
         )
         value = done.stdout.strip()
         return value or None
 
     def cwd(self, pid: int) -> str | None:
         argv = ["/usr/sbin/lsof", "-a", "-d", "cwd", "-p", str(pid), "-Fn"]
-        done = subprocess.run(argv, capture_output=True, text=True, check=False)  # noqa: S603 (fixed argv)
+        done = subprocess.run(  # noqa: S603 (fixed argv)
+            argv, capture_output=True, text=True, check=False, env=PROBE_ENV
+        )
         for line in done.stdout.splitlines():
             if line.startswith("n"):
                 return os.path.realpath(line[1:])

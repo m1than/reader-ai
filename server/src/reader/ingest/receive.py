@@ -8,6 +8,7 @@ removes. After storage the content-addressed directory is valid and stays, whate
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import os
 import secrets
@@ -15,6 +16,7 @@ import shutil
 import signal
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Final, Protocol
 
@@ -23,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 import reader.ingest as ingest
 from reader.config import ReaderConfig
 from reader.ingest import store
-from reader.ingest.artifact import ArtifactError, artifact_id, validate_dir
+from reader.ingest.artifact import ArtifactError, artifact_id, read_members, validate_dir, validate_members
 from reader.ingest.errors import IngestError
 from reader.ingest.jobs import KIND
 from reader.ingest.tarstream import read_tar
@@ -75,27 +77,35 @@ async def receive(
     jobs: Enqueuer,
     blobs_root: Path,
     deadline: float | None = None,
+    state: dict[str, bool] | None = None,
+    after_read: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
+    """`state["stored"]` turns True once the final rename is done, for callers that see the deadline fire."""
     deadline = time.monotonic() + DEADLINE_S if deadline is None else deadline
-    stored = False
+    state = {} if state is None else state
+    state["stored"] = False
 
-    def check() -> None:
-        if time.monotonic() > deadline:
+    def remaining() -> float:
+        left = deadline - time.monotonic()
+        if left <= 0:
             raise DeadlineExceeded
+        return left
 
     root = blobs_root / "ingest"
     root.mkdir(parents=True, exist_ok=True)
     tmp = root / f".tmp-{secrets.token_hex(8)}"
     tmp.mkdir(mode=0o700)
     try:
-        check()
+        remaining()
         try:
-            read_tar(stream, tmp)
-            check()
-            manifest = validate_dir(tmp)
+            read_tar(stream, tmp)  # the one blocking read; main's SIGALRM bounds it
+            if after_read is not None:
+                after_read()
+            remaining()
+            members = read_members(tmp)
+            manifest = validate_members(members)
         except ArtifactError as error:
             raise IngestError(error.code) from None
-        check()
         sha, version = manifest["material_sha256"], manifest["converter_version"]
         material = next((m for m in config.materials if m.sha256 == sha), None)
         if material is None:
@@ -103,25 +113,27 @@ async def receive(
         if version != ingest.CONVERTER_VERSION:
             raise IngestError("version_mismatch")
         try:
-            async with engine.connect() as conn:
+            async with asyncio.timeout(remaining()), engine.connect() as conn:
                 frozen = await store.frozen_version(conn, sha)
+        except TimeoutError:
+            raise DeadlineExceeded from None
         except Exception:
             raise IngestError("database_unreachable") from None
         if frozen is not None and frozen != version:
             raise IngestError("version_frozen")
-        artifact = artifact_id((tmp / "manifest.json").read_bytes())
-        check()
+        artifact = artifact_id(members["manifest.json"])  # the bytes as received
+        remaining()
         _store(tmp, root, artifact)
-        stored = True
+        state["stored"] = True
     except DeadlineExceeded:
         raise IngestError("timeout") from None
     finally:
-        if not stored:
+        if not state["stored"]:
             shutil.rmtree(tmp, ignore_errors=True)
     try:
-        check()
         args = {"material_sha256": sha, "converter_version": version, "artifact_id": artifact}
-        result = await jobs.enqueue(KIND, {**args, "material_id": material.id})
+        async with asyncio.timeout(remaining()):
+            result = await jobs.enqueue(KIND, {**args, "material_id": material.id})
     except (Exception, DeadlineExceeded):
         raise IngestError("enqueue_failed") from None
     return {"result": result.kind, "artifact_id": artifact}
@@ -132,25 +144,37 @@ def _alarm(_: int, __: Any) -> None:
 
 
 def main() -> int:
-    from reader.ingest.runtime import run_command
+    from reader.ingest.runtime import emit, run_command
 
     signal.signal(signal.SIGALRM, _alarm)
     signal.setitimer(signal.ITIMER_REAL, DEADLINE_S)
     with contextlib.suppress(Exception):
         os.umask(0o077)
+    deadline = time.monotonic() + DEADLINE_S
+    state: dict[str, bool] = {}
+
+    def disarm() -> None:  # after the stdin read, asyncio.timeout bounds the awaits
+        signal.setitimer(signal.ITIMER_REAL, 0)
 
     async def work(rt: Any) -> dict[str, Any]:
         return await receive(
-            sys.stdin.buffer, config=rt.config, engine=rt.engine, jobs=rt.jobs, blobs_root=ingest.BLOBS_DIR
+            sys.stdin.buffer,
+            config=rt.config,
+            engine=rt.engine,
+            jobs=rt.jobs,
+            blobs_root=ingest.BLOBS_DIR,
+            deadline=deadline,
+            state=state,
+            after_read=disarm,
         )
 
     try:
         return run_command(work)
     except DeadlineExceeded:
-        sys.stdout.write('{"error":"timeout"}\n')
+        emit({"error": "enqueue_failed" if state.get("stored") else "timeout"})
         return 1
     finally:
-        signal.setitimer(signal.ITIMER_REAL, 0)
+        disarm()
 
 
 if __name__ == "__main__":

@@ -84,6 +84,9 @@ HOSTILE: list[tuple[str, str]] = [
     ("over cap", "cap"),
     ("bad magic", "magic"),
     ("bad checksum", "checksum"),
+    ("negative size", "negative"),
+    ("size with a leading space", "spaced"),
+    ("size with a non-octal digit", "nonoctal"),
 ]
 
 
@@ -113,6 +116,14 @@ def hostile(case: str) -> bytes:
         return good[0] + good[1] + tar_header("outline.json", len(body) + 4096) + body + end
     if case == "cap":
         return good[0] + tar_header("spans.jsonl", 64 * 1024 * 1024 + 1) + end
+    if case in ("negative", "spaced", "nonoctal"):
+        # A size field int(..., 8) would accept after .strip(), or with a sign; the checksum is valid.
+        field = {"negative": b"-0000000001\0", "spaced": b" 0000000004\0", "nonoctal": b"00000000008\0"}[case]
+        raw = bytearray(tar_header("manifest.json", 0))
+        raw[124:136] = field
+        raw[148:156] = b" " * 8
+        raw[148:156] = f"{sum(raw):06o}\0 ".encode()
+        return bytes(raw) + good[1] + good[2] + end
     if case == "magic":
         return tar_header("manifest.json", len(files["manifest.json"]), magic=b"ustar  \x00") + end
     if case == "checksum":

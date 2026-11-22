@@ -38,6 +38,7 @@ CHILD_GRACE_S: Final = 10.0
 STATUS_TIMEOUT_S: Final = 60.0
 RECEIVE_TIMEOUT_S: Final = 330.0  # receive ends itself at 300 s
 DOCKER_TIMEOUT_S: Final = 30.0
+LINE_LIMIT: Final = 4096  # bytes per child stdout line; a progress line is under 60
 ENV_ALLOWED: Final = ("PATH", "HOME", "LANG", "DOCKER_HOST")
 LABELS: Final = {
     "com.docker.compose.service": "worker",
@@ -94,7 +95,8 @@ class SystemChild:
 
     def stdout_lines(self) -> Iterator[bytes]:
         assert self.process.stdout is not None  # noqa: S101
-        yield from self.process.stdout
+        while line := self.process.stdout.readline(LINE_LIMIT):  # a newline-free flood stays bounded
+            yield line
 
     def wait(self, timeout: float | None = None) -> int:
         return self.process.wait(timeout)
@@ -178,47 +180,63 @@ def _json_line(raw: bytes) -> Any:
 # ---- conversion (FR-INGEST-4, -5, -10) ---------------------------------------------------------------------
 
 
-def convert(
+def convert_members(
     work: Path,
     deps: Deps,
     report: Callable[[str], None],
     on_start: Callable[[Child], None] | None = None,
-) -> Path:
-    """Run the confined child on `<work>/in/material.pdf`; returns `<work>/out` once validated."""
+) -> tuple[dict[str, bytes], dict[str, Any]]:
+    """Run the confined child on `<work>/in/material.pdf`; returns the members, read once and validated, and
+    the manifest the validator returned. These bytes, never WORK again, are what is sent (FR-INGEST-10)."""
     if deps.venv is None or deps.pyroot is None or deps.models is None:
         raise Stop("setup_missing", 2)
     for sub in ("home", "tmp"):
         (work / sub).mkdir(mode=0o700, exist_ok=True)
     argv = sandbox.child_argv(deps.venv, deps.pyroot, deps.models, work)
-    child = deps.spawn(argv, sandbox.child_env(work, deps.cpus), Path(os.path.realpath(work)))
-    if on_start is not None:
-        on_start(child)
-    timer = threading.Timer(CHILD_TIMEOUT_S, child.kill)
-    timer.daemon = True
-    timer.start()
+    child: Child | None = None
+    timer: threading.Timer | None = None
     try:
+        child = deps.spawn(argv, sandbox.child_env(work, deps.cpus), Path(os.path.realpath(work)))
+        if on_start is not None:
+            on_start(child)
+        timer = threading.Timer(CHILD_TIMEOUT_S, child.kill)
+        timer.daemon = True
+        timer.start()
         for line in child.stdout_lines():
             parsed = parse_progress(line.strip())
             if parsed is not None:
                 report(f"page {parsed[0]}/{parsed[1]}")
         code = child.wait()
     except BaseException:
-        child.terminate()
-        try:
-            child.wait(CHILD_GRACE_S)
-        except subprocess.TimeoutExpired:
-            child.kill()
+        if child is not None:
+            child.terminate()
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                child.wait(CHILD_GRACE_S)
         raise
     finally:
-        timer.cancel()
+        if timer is not None:
+            timer.cancel()
+        if child is not None:
+            child.kill()  # the whole session, so nothing the child started still writes into WORK
     if code != 0:
         raise Stop("convert_failed", 5)
-    out = work / "out"
     try:
-        artifact.validate_dir(out)
+        members = artifact.read_members(work / "out")
+        meta = artifact.validate_members(members)
     except ArtifactError as error:
         raise Stop("convert_failed", 5, error.code) from None
-    return out
+    return members, meta
+
+
+def convert(
+    work: Path,
+    deps: Deps,
+    report: Callable[[str], None],
+    on_start: Callable[[Child], None] | None = None,
+) -> Path:
+    """convert_members, returning `<work>/out` (for the [host] tests, which read the files back)."""
+    convert_members(work, deps, report, on_start)
+    return work / "out"
 
 
 # ---- the stack (FR-INGEST-2) -------------------------------------------------------------------------------
@@ -344,9 +362,9 @@ def _status(deps: Deps, container: str, sha256: str, out: TextIO) -> str:
     return status
 
 
-def _receive(deps: Deps, container: str, out_dir: Path, out: TextIO) -> int:
+def _receive(deps: Deps, container: str, members: dict[str, bytes], out: TextIO) -> int:
     buffer = io.BytesIO()
-    tarstream.write_dir(out_dir, buffer)
+    tarstream.write_members(members, buffer)  # the validated bytes, not a second read of WORK
     code, reply = _exec(deps, container, "reader.ingest.receive", [], RECEIVE_TIMEOUT_S, buffer.getvalue())
     if isinstance(reply, dict) and isinstance(reply.get("error"), str):
         raise Stop(str(reply["error"]), 5)
@@ -391,11 +409,10 @@ def _ingest(material: Material, deps: Deps, requeue: bool, out: TextIO) -> int:
             def record_child(child: Child) -> None:
                 records.set_child(run_dir, name, child.pid, deps.start_time(child.pid) or "")
 
-            out_dir = convert(work, deps, _printer(out), record_child)
-            meta = json.loads((out_dir / "manifest.json").read_bytes())
-            if meta.get("material_sha256") != material.sha256:
+            members, meta = convert_members(work, deps, _printer(out), record_child)
+            if meta["material_sha256"] != material.sha256:
                 raise Stop("convert_failed", 5)
-            return _receive(deps, container, out_dir, out)
+            return _receive(deps, container, members, out)
         finally:
             records.end_run(run_dir, work_root, name)
 

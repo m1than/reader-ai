@@ -60,30 +60,32 @@ def order(items: Sequence[Item]) -> list[Item]:
     on its page that comes last in Docling's order among those whose top lies above the code item's top (or
     before the page's first non-code item); code items placed at the same spot keep their order by top."""
     kept = [i for i in items if kind_of(i.label) is not None]
-    plain = [i for i in kept if kind_of(i.label) != "code"]
-    codes = [i for i in kept if kind_of(i.label) == "code"]
-    after: dict[int, list[Item]] = {}  # id(anchor) -> code items placed after it
-    before: dict[int, list[Item]] = {}  # page -> code items placed before its first non-code item
-    for code in codes:
-        anchor = None
-        for candidate in plain:
-            if candidate.page == code.page and candidate.top < code.top:
-                anchor = candidate
-        if anchor is None:
-            before.setdefault(code.page, []).append(code)
-        else:
-            after.setdefault(id(anchor), []).append(code)
+    pages: dict[int, list[Item]] = {}  # in the order Docling first reaches each page
+    for item in kept:
+        pages.setdefault(item.page, []).append(item)
     result: list[Item] = []
-    placed_pages: set[int] = set()
-    for item in plain:
-        if item.page not in placed_pages:
-            placed_pages.add(item.page)
-            result.extend(sorted(before.pop(item.page, []), key=lambda c: c.top))
-        result.append(item)
-        result.extend(sorted(after.get(id(item), []), key=lambda c: c.top))
-    for page in sorted(before):  # pages with code but no other item
-        result.extend(sorted(before[page], key=lambda c: c.top))
-    return sorted(result, key=lambda i: i.page) if before else result
+    for page_items in pages.values():
+        plain = [i for i in page_items if kind_of(i.label) != "code"]
+        codes = [i for i in page_items if kind_of(i.label) == "code"]
+        if not plain:  # only code on the page: nothing to anchor to, Docling's order stays
+            result.extend(codes)
+            continue
+        after: dict[int, list[Item]] = {}  # id(anchor) -> code items placed after it
+        before: list[Item] = []  # code items placed before the page's first non-code item
+        for code in codes:
+            anchor = None
+            for candidate in plain:
+                if candidate.top < code.top:
+                    anchor = candidate
+            if anchor is None:
+                before.append(code)
+            else:
+                after.setdefault(id(anchor), []).append(code)
+        result.extend(sorted(before, key=lambda c: c.top))
+        for item in plain:
+            result.append(item)
+            result.extend(sorted(after.get(id(item), []), key=lambda c: c.top))
+    return result
 
 
 def _bbox(box: Box) -> list[float]:
@@ -121,16 +123,27 @@ def spans(items: Sequence[Item]) -> list[dict[str, Any]]:
 
 
 def outline(
-    bookmarks: Sequence[tuple[int, str, int | None]], span_rows: Sequence[Mapping[str, Any]]
+    bookmarks: Sequence[tuple[int, str, int | None]],
+    span_rows: Sequence[Mapping[str, Any]],
+    page_count: int | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
-    """FR-INGEST-9: bookmarks (0-based level, title, 0-based page index or None), else the heading spans."""
+    """FR-INGEST-9: bookmarks (0-based level, title, 0-based page index or None), else the heading spans.
+
+    A bookmark whose page lies outside 1..page_count gets `page: null` (the artifact validator requires it).
+    """
+
+    def page_of(index: int | None) -> int | None:
+        if index is None or index < 0 or (page_count is not None and index + 1 > page_count):
+            return None
+        return index + 1
+
     if bookmarks:
         rows = [
             {
                 "seq": seq,
                 "level": min(level + 1, MAX_LEVEL),
                 "title": normalise(title, code=False)[:1024],
-                "page": None if page is None else page + 1,
+                "page": page_of(page),
             }
             for seq, (level, title, page) in enumerate(bookmarks)
         ]

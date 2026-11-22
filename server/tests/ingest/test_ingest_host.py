@@ -87,18 +87,23 @@ class FakeChild:
     pid: int
     lines: list[bytes]
     code: int
+    events: list[str] = field(default_factory=list)
+    raise_in_lines: BaseException | None = None
 
     def stdout_lines(self) -> Iterator[bytes]:
         yield from self.lines
+        if self.raise_in_lines is not None:
+            raise self.raise_in_lines
 
     def wait(self, timeout: float | None = None) -> int:
+        self.events.append("wait")
         return self.code
 
     def terminate(self) -> None:
-        pass
+        self.events.append("terminate")
 
     def kill(self) -> None:
-        pass
+        self.events.append("kill")
 
 
 @dataclass
@@ -106,19 +111,35 @@ class FakeSpawn:
     write_artifact: bool = True
     code: int = 0
     noise: bool = False
+    hostile: str | None = None  # symlink member, fifo member, out symlink
+    raise_in_lines: BaseException | None = None
     started: list[tuple[list[str], dict[str, str], Path]] = field(default_factory=list)
+    children: list[FakeChild] = field(default_factory=list)
 
     def __call__(self, argv: list[str], env: dict[str, str], cwd: Path) -> FakeChild:
         self.started.append((argv, env, cwd))
         out = Path(argv[argv.index("--out") + 1])
         if self.write_artifact:
-            out.mkdir(parents=True, exist_ok=True)
+            target = out
+            if self.hostile == "out symlink":  # the child replaces `out` with a link to a valid artifact
+                target = out.parent / "elsewhere"
+                out.symlink_to(target)
+            target.mkdir(parents=True, exist_ok=True)
             for name, body in build_artifact(material_sha256=SHA).items():
-                (out / name).write_bytes(body)
+                (target / name).write_bytes(body)
+            if self.hostile == "symlink member":
+                real = out.parent / "real-spans"
+                os.replace(out / "spans.jsonl", real)
+                (out / "spans.jsonl").symlink_to(real)
+            if self.hostile == "fifo member":
+                (out / "outline.json").unlink()
+                os.mkfifo(out / "outline.json")
         lines = [b'{"pages_done":2,"pages_total":2}\n']
         if self.noise:
             lines = [CANARY.encode() + b"\n", *lines, b"stderr? " + CANARY.encode()]
-        return FakeChild(4242, lines, self.code)
+        child = FakeChild(4242, lines, self.code, raise_in_lines=self.raise_in_lines)
+        self.children.append(child)
+        return child
 
 
 @dataclass
@@ -448,3 +469,114 @@ def test_cleanup_never_removes_outside_the_work_root(tmp_path: Path) -> None:
     (run_dir / "x.json").write_text(json.dumps({"material_sha256": SHA, "work": str(outside)}))
     records.cleanup_stale(run_dir, tmp_path / "work", SHA, FakeProbe())
     assert outside.is_dir() and not (run_dir / "x.json").exists()
+
+
+def test_run_record_comes_before_the_work_directory(tmp_path: Path, monkeypatch: Any) -> None:
+    records = need("reader.ingest.host.records")
+
+    def refuse(path: Path, record: dict[str, Any]) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(records, "_write", refuse)
+    with pytest.raises(OSError, match="disk full"):
+        records.new_run(tmp_path / "run", tmp_path / "work", SHA)
+    assert list((tmp_path / "work").iterdir()) == []  # no anonymous work directory
+
+
+def test_probe_subprocesses_get_an_allow_listed_environment() -> None:
+    records = need("reader.ingest.host.records")
+    assert set(records.PROBE_ENV) == {"PATH", "LANG"}
+    assert os.getpid() and records.SystemProbe().start_time(os.getpid())
+
+
+# ---- FR-INGEST-10: members read once, hostile outputs, the session killed ----
+
+
+@pytest.mark.parametrize("hostile", ["symlink member", "fifo member", "out symlink"])
+def test_hostile_child_outputs_are_refused(tmp_path: Path, hostile: str) -> None:
+    spawn = FakeSpawn(hostile=hostile)
+    code, _, err = run(tmp_path, FakeRunner(), spawn)
+    assert code == 5 and "convert_failed" in err, err
+
+
+def test_bytes_sent_are_the_bytes_validated(tmp_path: Path, monkeypatch: Any) -> None:
+    artifact = need("reader.ingest.artifact")
+    original = artifact.validate_members
+    swapped: list[Path] = []
+
+    def validate_then_swap(members: dict[str, bytes]) -> dict[str, Any]:
+        meta = original(members)
+        out = next(tmp_path.rglob("out"))
+        (out / "spans.jsonl").write_bytes(b"swapped after validation\n")  # the child's last word
+        swapped.append(out)
+        return meta
+
+    monkeypatch.setattr(artifact, "validate_members", validate_then_swap)
+    runner = FakeRunner()
+    code, _, err = run(tmp_path, runner, FakeSpawn())
+    assert code == 0, err
+    assert swapped
+    (sent,) = [c[2] for c in runner.calls if "reader.ingest.receive" in " ".join(c[0])]
+    assert sent is not None and b"swapped after validation" not in sent
+    assert build_artifact(material_sha256=SHA)["spans.jsonl"] in sent
+
+
+def test_child_session_is_killed_after_every_exit(tmp_path: Path) -> None:
+    for code, spawn in ((0, FakeSpawn()), (5, FakeSpawn(code=1))):
+        got, _, _ = run(tmp_path / str(code), FakeRunner(), spawn)
+        assert got == code
+        assert spawn.children[0].events[-1] == "kill"
+
+
+def test_interrupt_terminates_then_kills_and_cleans_up(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    spawn = FakeSpawn(raise_in_lines=cli.Stop("interrupted", 143))
+    got, _, err = run(tmp_path, FakeRunner(), spawn)
+    assert got == 143 and "interrupted" in err
+    assert spawn.children[0].events[:1] == ["terminate"] and spawn.children[0].events[-1] == "kill"
+    assert list((data(tmp_path) / "work").iterdir()) == []
+    assert list((data(tmp_path) / "run").iterdir()) == []
+
+
+def test_child_timeout_kills_the_session(tmp_path: Path, monkeypatch: Any) -> None:
+    import threading
+
+    cli = need("reader.ingest.host.cli")
+    monkeypatch.setattr(cli, "CHILD_TIMEOUT_S", 0.05)
+    released = threading.Event()
+
+    @dataclass
+    class HangingChild(FakeChild):
+        def stdout_lines(self) -> Iterator[bytes]:
+            released.wait(5)  # blocks until the timer kills the session
+            yield from ()
+
+        def kill(self) -> None:
+            self.events.append("kill")
+            released.set()
+
+    hanging = HangingChild(4242, [], -9)
+
+    def spawn(argv: list[str], env: dict[str, str], cwd: Path) -> FakeChild:
+        return hanging
+
+    got, _, err = run(tmp_path, FakeRunner(), spawn)  # type: ignore[arg-type]
+    assert got == 5 and "convert_failed" in err
+    assert released.is_set() and "kill" in hanging.events
+
+
+def test_system_spawn_runs_a_session_reads_lines_and_counts_stderr(tmp_path: Path) -> None:
+    import sys
+
+    cli = need("reader.ingest.host.cli")
+    script = (
+        "import sys; sys.stderr.write('x' * 10); print('{\"pages_done\":1,\"pages_total\":1}'); "
+        "print('y' * 10000)"
+    )
+    child = cli.system_spawn([sys.executable, "-I", "-c", script], {"PATH": "/usr/bin:/bin"}, tmp_path)
+    lines = list(child.stdout_lines())
+    assert child.wait(10) == 0
+    assert lines[0].strip() == b'{"pages_done":1,"pages_total":1}'
+    assert all(len(line) <= cli.LINE_LIMIT for line in lines)  # a long line arrives in bounded pieces
+    assert os.getpgid(child.pid) == child.pid if child.wait(0) is None else True
+    child.kill()  # a finished session: no error

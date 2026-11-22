@@ -401,7 +401,13 @@ tasks:
         4.0 GiB. VEC-INGEST-3 (ADR-0021's deterministic check): 18 of 20 pages as recorded, code hashes and the
         461/468 code-after-step order hold; 2 deviations are Docling layout labels: p133 a hex-constant line labelled
         code (3 blocks, 2 recorded), p468 a filename label labelled list_item. Not run: reader up / docker exec
-        receive (the live end-to-end agent's).",
+        receive (the live end-to-end agent's).
+        Code review round 1 (9222276, changes) applied with paired tests: VEC-INGEST-3 pins p133's extra block
+        (count 3) and checks 461/468 order relationally against hand-recorded step boxes (owner note: rule-B pages
+        may be 3 — 378, 133, 468 — owner judges them before the first full import); the host reads the members
+        once through a dir fd (cap + 1, no symlinks, no FIFOs) and tars those validated bytes; killpg after every
+        exit; strict octal tar fields; receive's deadline after storage via asyncio.timeout, exit code from the
+        stored flag; non-blocking items. Full-run numbers committed as spec/fixtures/SRV-INGEST/pilot-fullrun.json.",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line
