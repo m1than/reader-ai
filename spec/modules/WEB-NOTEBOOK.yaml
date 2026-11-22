@@ -32,10 +32,10 @@
 
 id: WEB-NOTEBOOK
 title: Lesson view — cells by kind, citations, open findings, and running labs over the kernel relay
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions"
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]

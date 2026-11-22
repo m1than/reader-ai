@@ -46,10 +46,10 @@
 
 id: WEB-UI
 title: App shell — pinned library build, Calm tokens, routing, API client, sign-in redirect and lesson list
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions"
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -66,6 +66,7 @@ paths:
   - web/package-lock.json
   - web/vite.config.ts
   - web/tsconfig.json
+  - web/playwright.config.ts
   - web/test-server/**
   - e2e/web/ui/**
   - spec/fixtures/WEB-UI/**

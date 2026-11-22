@@ -16,19 +16,43 @@
     "e2e": "playwright test"
   },
   "dependencies": {
+    "@acme/ui": "file:vendor/acme-ui-v0.1.0.tgz",
+    "@shikijs/core": "^4.6.0",
+    "@shikijs/engine-javascript": "^4.6.0",
+    "@shikijs/langs": "^4.6.0",
+    "@shikijs/themes": "^4.6.0",
+    "@tanstack/react-query": "^5.108.2",
+    "@tanstack/react-router": "^1.170.46",
+    "hast-util-to-jsx-runtime": "^2.3.7",
+    "katex": "^0.19.1",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "rehype-katex": "^7.0.1",
+    "rehype-sanitize": "^6.0.0",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
     "@storybook/react-vite": "^10.6.8",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@types/hast": "^3.0.5",
+    "@types/katex": "^0.16.8",
+    "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.3.0",
+    "fast-check": "^4.11.0",
     "jsdom": "^31.0.1",
     "storybook": "^10.6.8",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
-    "vitest": "^5.1.1"
+    "vitest": "^5.1.1",
+    "yaml": "^2.9.1"
   }
 }

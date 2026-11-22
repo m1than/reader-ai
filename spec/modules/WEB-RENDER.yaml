@@ -33,10 +33,10 @@
 
 id: WEB-RENDER
 title: Rendering — sanitised markdown, KaTeX, Shiki and the safe output types; HTML shown as text in the slice
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions"
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a); approved without a second round"
 layer: web
 track: engineering
 adr: [ADR-0013, ADR-0024]
