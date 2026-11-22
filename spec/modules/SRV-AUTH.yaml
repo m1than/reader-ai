@@ -161,7 +161,11 @@ requirements:
       2026-11-22); SRV-EVENTS appends its own directory and the installed
       `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
       Since SRV-LESSON and SRV-EVENTS (2026-11-22, paired changes): the list is `reader/db/migrations/versions`,
-      `reader/lessons/migrations`, `reader/jobs/migrations` and procrastinate's versions directory; "all heads" are the effective heads
+      `reader/lessons/migrations`, `reader/jobs/migrations` and procrastinate's versions directory; SRV-INGEST
+      appends `reader/ingest/migrations`, then SRV-AGENT and SRV-PIPELINE (2026-11-22, paired changes) append
+      `reader/agent/migrations` and `reader/pipeline/migrations` (integrated order: db, lessons, jobs, ingest, agent,
+      pipeline, procrastinate);
+      "all heads" are the effective heads
       (`get_revisions("heads")`, so `procrastinate_0043`, reached through `jobs_0001`'s `depends_on`, is not compared);
       and the lock is taken by polling `pg_try_advisory_lock` on a dedicated autocommit connection, because
       procrastinate's `CREATE INDEX CONCURRENTLY` deadlocks against a waiter holding an open transaction. The poll
@@ -259,7 +263,11 @@ requirements:
       (2026-11-22): ROUTERS adds `reader.kernels.routes`; a route's `method` may also be `DELETE`; a router module may
       export `WS_ROUTES` (WebSocket routes, registered under the same CSRF gate, whose handlers authenticate through
       `store.session_user` themselves); the server dependency `websockets` gives Uvicorn its WebSocket support.
-      Integrated order (V/slice-integration): api, auth, lessons, kernels.
+      Integrated order (V/slice-integration): api, auth, lessons, kernels. Paired SRV-PIPELINE change (2026-11-22):
+      ROUTERS adds `reader.pipeline.routes`; the api role builds one SRV-EVENTS `Jobs` (the declared catalog, a
+      procrastinate app on its own DbTarget, opened before serving and closed after) on `app.state.jobs`, so routes
+      can enqueue; a factory argument `jobs` lets tests pass their own. SRV-INGEST adds `reader.ingest.routes`
+      (paired change). Integrated order: api, auth, lessons, kernels, ingest, pipeline.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

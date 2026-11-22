@@ -30,7 +30,7 @@ Date: 2026-11-22. Command: `bash spikes/agent-proxy-handshake/run.sh` (and `NONE
 | Requests to the base URL per query | 2 × `POST /v1/messages?beta=true` (an auxiliary 4,054-byte structured-output request, then the main one) | 1 × `POST /v1/messages?beta=true` |
 | Other hosts | `CONNECT api.anthropic.com:443` twice per query (refused; the query still succeeded) | none |
 | Credential | `Authorization: Bearer <handle>` in every request; no `x-api-key` | same |
-| `tools=[]` | init `SystemMessage` `tools: []`; request `tools: []` | same |
+| `tools=[]` | init `SystemMessage` `tools: []`; the request carries no tool (the stub logged `tools` absent or empty alike, so which of the two is not distinguished; the proxy refuses only a present, non-empty `tools`) | same |
 | Tools when unset | 24 in init, 12 in the request (the rest deferred) | 23 / 12 |
 | Result | `ResultMessage` `success`, `total_cost_usd` 0.0001 (computed from the stub's fake usage) | 0.00005 |
 
@@ -44,8 +44,43 @@ x-stainless-retry-count, x-stainless-runtime, x-stainless-runtime-version, x-sta
 `fallback_credit`, `inference_geo`, `input_tokens`, `iterations`, `output_tokens`, `output_tokens_details`,
 `server_tool_use`, `service_tier`, `speed`.
 
-Message order: `RateLimitEvent`, `SystemMessage(init)`, `AssistantMessage`, `ResultMessage`. The init message arrives
-before the model's answer is used, but the request has already been sent by then (one turn).
+Message order (timestamped in round 2, `results/20261122T213025-maxout/`): `SystemMessage(init)` at 0.228 s,
+`AssistantMessage` 0.250 s, `RateLimitEvent` 0.253 s, `ResultMessage` 0.262 s. The init message always precedes the
+assistant message, but the request has already been sent by then (one turn). (Round 1 listed `RateLimitEvent` first;
+the timestamps show it follows the assistant message.)
+
+## Round 2 (SRV-AGENT review R2-B2, R2-B4): output cap and upstream errors
+
+All with `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, mode `tools-empty`, zero credit.
+
+**Query string:** logged in full: exactly `beta=true`.
+
+**Output cap** (`MAX_OUT=32000 TAG=maxout`, `results/20261122T213025-maxout/`): with `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000`
+the request body has `max_tokens: 32000`. The proxy can therefore bind the cap to the run_token and refuse a larger
+`max_tokens`.
+
+**Upstream errors** (`STUB_ERROR_STATUS=429|529|500`, the stub answers every `/v1/messages` with that status and an
+Anthropic-shaped error body; 429 adds `retry-after: 1`):
+
+| Status | Upstream requests | Request times (s from first) | `api_retry` SystemMessages | `AssistantMessage.error` | `ResultMessage` | Raised | Wall |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 429 (`results/…213028-429/`) | 11 | 0, 1.2, 2.3, 4.8, 9.2, 18.1, 34.7, 68.1, 103.4, 142.8, 176.1 | 10 | `rate_limit` | `subtype` success, `is_error` true, cost 0 | `ResultError` ("Server is temporarily limiting requests") | 176.4 s |
+| 529 (`results/…213327-529/`) | 11 | 0, 0.5, 1.5, 3.9, 7.9, 16.1, 34.2, 73.4, 107.3, 140.2, 178.3 | 10 | `server_error` | same | `ResultError` ("API Error: 529 …") | 178.8 s |
+| 500 (`results/…213629-500/`) | 11 | 0, 0.5, 1.7, 3.8, 8.3, 17.6, 36.8, 71.1, 108.3, 141.2, 173.6 | 10 | `server_error` | same | `ResultError` ("API Error: 500 …") | 174.1 s |
+
+Each `api_retry` SystemMessage carries `attempt`, `error`, `error_status`, `max_retries`, `retry_delay_ms`. The CLI's
+own retry budget is 10 retries with exponential backoff capped near 35–40 s, about 3 minutes in all. With
+`retry-after: 1` the 429 delays matched the 529 and 500 delays, so a short `retry-after` did not shorten the backoff; it
+may act as a floor. Longer `retry-after` values were not tested, so a server asking for minutes could stretch one
+attempt beyond 3 minutes (the stage job timeout, 1,200 s, still bounds it).
+
+## Hands to SRV-AGENT (round 2)
+
+- Classify by `AssistantMessage.error`: `rate_limit` → `rate_limited`; `server_error` → `provider_unavailable` (529 and
+  500 are not distinguished by the SDK). The result's cost is 0 and no upstream 2xx happened, so the reservation settles
+  at $0; the proxy's per-run_token status record confirms "no 2xx" independently of the SDK.
+- One stage attempt can spend ~3 minutes in the CLI's retries before failing; job timeouts must cover that.
+- Bind `max_tokens` to the run_token: the CLI sends `CLAUDE_CODE_MAX_OUTPUT_TOKENS` verbatim as `max_tokens`.
 
 ## Hands to SRV-AGENT
 

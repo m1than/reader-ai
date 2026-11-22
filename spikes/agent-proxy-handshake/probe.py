@@ -33,6 +33,7 @@ async def run(mode: str) -> dict:
             "LANG": "C.UTF-8",
             "DISABLE_TELEMETRY": "1",
             **({"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"} if os.environ.get("NONESSENTIAL_OFF") else {}),
+            **({"CLAUDE_CODE_MAX_OUTPUT_TOKENS": os.environ["MAX_OUT"]} if os.environ.get("MAX_OUT") else {}),
         },
     )
     out: dict = {"mode": mode, "messages": [], "init_tools": None, "error": None}
@@ -40,7 +41,9 @@ async def run(mode: str) -> dict:
     try:
         async for msg in query(prompt="Reply with the word ok.", options=opts):
             kind = type(msg).__name__
-            entry = {"type": kind}
+            entry = {"type": kind, "t": round(time.time() - t0, 3)}
+            if kind == "AssistantMessage":
+                entry["error"] = getattr(msg, "error", None)
             if kind == "SystemMessage":
                 entry["subtype"] = getattr(msg, "subtype", None)
                 data = getattr(msg, "data", {}) or {}
@@ -56,6 +59,7 @@ async def run(mode: str) -> dict:
                 entry["usage_keys"] = sorted((getattr(msg, "usage", None) or {}).keys())
                 entry["usage"] = getattr(msg, "usage", None)
                 entry["result"] = getattr(msg, "result", None)
+                entry["fields"] = {k: v for k, v in vars(msg).items() if k not in ("usage", "model_usage")}
             out["messages"].append(entry)
     except Exception as exc:  # recorded, not raised: the spike reports what happened
         out["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"

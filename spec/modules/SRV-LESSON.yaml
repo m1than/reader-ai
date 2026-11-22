@@ -180,7 +180,8 @@ requirements:
       (content-addressed) and collected by a later stage (`defers`).
   - id: FR-LESSON-5
     text: >-
-      `stage` is one of the schema's provenance stages. `provenance` is a JSON object whose compact UTF-8 serialisation
+      `stage` is one of the schema's provenance stages (paired SRV-PIPELINE change, 2026-11-22: the enum adds
+      `findings`, the deterministic step that appends open cells). `provenance` is a JSON object whose compact UTF-8 serialisation
       is ≤ `bounds.provenance_max_bytes`, with only the keys `input_sha256`, `prompt_version`, `model`, `cost_usd`,
       `duration_s`, `job_key`, `source` and JSON scalar values (finite numbers; strings without U+0000, which jsonb
       cannot hold); a value that cannot be serialised (an integer past Python's int-to-str limit) or encoded (a lone

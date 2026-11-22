@@ -13,6 +13,8 @@ HANDLE=$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')
 docker run --rm --platform linux/arm64 --network none --read-only \
   --tmpfs /home/worker:uid=1000,size=64m --tmpfs /tmp:uid=1000,size=64m --cap-drop ALL \
   --security-opt no-new-privileges -e HANDLE="$HANDLE" -e EXPECT_HANDLE="$HANDLE" -e HOME=/home/worker \
-  ${NONESSENTIAL_OFF:+-e NONESSENTIAL_OFF=1} \
-  -v "$PWD/$OUT:/out" "$IMAGE" tools-empty tools-default
+  ${NONESSENTIAL_OFF:+-e NONESSENTIAL_OFF=1} ${MAX_OUT:+-e MAX_OUT="$MAX_OUT"} \
+  ${STUB_ERROR_STATUS:+-e STUB_ERROR_STATUS="$STUB_ERROR_STATUS"} \
+  -v "$PWD/$OUT:/out" "$IMAGE" ${MODES:-tools-empty tools-default}
+if [[ -n "${TAG:-}" ]]; then mv "$OUT" "$OUT-$TAG"; OUT="$OUT-$TAG"; fi
 echo "results in $OUT"

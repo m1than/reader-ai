@@ -162,12 +162,23 @@ def _serve_api(bind: str, env: Env) -> None:
             except OSError:
                 raise Failure("run_dir_unwritable") from None
             serving_logs()
-            app = create_app(settings, engine)
+            # Routes enqueue jobs (SRV-PIPELINE): one Jobs on the declared catalog, its own procrastinate app.
+            from reader.jobs import load_kinds
+            from reader.jobs.queue import Jobs
+            from reader.jobs.worker import make_app
+
+            queue_app = make_app(target)
+            await queue_app.open_async()
+            jobs = Jobs(engine, queue_app, load_kinds(), [target.password.reveal()])
+            app = create_app(settings, engine, jobs=jobs)
             # log_config=None: uvicorn's records go through the root handler of serving_logs (no tracebacks).
             server = uvicorn.Server(
                 uvicorn.Config(app, host=host, port=port, proxy_headers=False, log_config=None)
             )
-            await server.serve()
+            try:
+                await server.serve()
+            finally:
+                await queue_app.close_async()
         finally:
             await engine.dispose()
 

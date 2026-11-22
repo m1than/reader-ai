@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import importlib
 import re
-from collections.abc import Iterable, Iterator, Mapping
-from typing import Final
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
+from typing import Any, Final
 
 from reader.jobs.model import NAME_PATTERN, SWEEP_TASK, JobError, JobKind, model_has_secret_field
 
-KIND_MODULES: Final[tuple[str, ...]] = ("reader.ingest.jobs",)  # SRV-INGEST paired change (FR-EVENTS-1)
+# SRV-INGEST and SRV-PIPELINE paired changes (FR-EVENTS-1)
+KIND_MODULES: Final[tuple[str, ...]] = ("reader.ingest.jobs", "reader.pipeline.jobs")
+StartHook = Callable[[Any], Awaitable[None]]
 
 
 class Catalog(Mapping[str, JobKind]):
@@ -56,3 +58,13 @@ def load_kinds(modules: Iterable[str] = KIND_MODULES) -> Catalog:
     for name in modules:
         kinds.extend(importlib.import_module(name).JOB_KINDS)
     return Catalog(kinds)
+
+
+def start_hooks(modules: Iterable[str] = KIND_MODULES) -> list[StartHook]:
+    """Each kind module's optional `on_worker_start(jobs)` (paired SRV-PIPELINE amendment)."""
+    hooks: list[StartHook] = []
+    for name in modules:
+        hook = getattr(importlib.import_module(name), "on_worker_start", None)
+        if callable(hook):
+            hooks.append(hook)
+    return hooks
