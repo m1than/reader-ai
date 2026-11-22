@@ -24,20 +24,18 @@
 #   - Citation display: page and span id come from `material_spans`; `material_title` is the lesson's course title
 #     (SRV-LESSON `courses.title`, the course bound by `courses.material_sha256`), because materials have no title
 #     column (SRV-INGEST, SRV-CONFIG). Nothing in a citation comes from model text.
-#   - ADR-0005, ADR-0010 and ADR-0017 are `status: proposed`; SRV-AGENT is a draft in review (V/V.COMPILE-min).
-#     SRV-TUTOR's approval waits for SRV-AGENT's.
+#   - ADR-0005, ADR-0010 and ADR-0017 are `status: proposed`; SRV-AGENT is approved (V/V.COMPILE-min); the amendments
+#     below are owned by SRV-AGENT's author and land there as paired changes.
 #
 # Cross-spec requirements (paired changes):
-#   - SRV-AGENT: (a) the Provider port takes the caller's cap scope — `run_id` = question id with run cap
-#     `question_cap_usd`, and a per-user daily scope for task `tutor` (`spent(user, task=tutor, UTC day)`), refused
-#     before the reserve row with `budget_exhausted` / `daily_budget_exhausted`; (b) the port can turn extended thinking
-#     off per task (`MAX_THINKING_TOKENS=0` in the CLI environment for task `tutor`); (c) the reserve counts a fixed
-#     CLI overhead plus the system prompt plus the user prompt, in UTF-8 bytes as an upper bound on tokens; with a
-#     caller `system_prompt` the CLI's own 6,803-token prompt is not sent (REF-TUTOR-7), so `cli_system_tokens` applies
-#     only to calls that use the CLI default prompt; (d) a `max_tokens` stop reason maps to
-#     the permanent code `output_truncated`; (e) a settlement above its reserve logs WARNING `reserve_exceeded`;
-#     (f) the adapter exposes the CLI's `api_retry` messages and accepts a per-call deadline, so the tutor can abort on
-#     the first retry (FR-TUTOR-7); an aborted call with no 2xx settles at $0.
+#   - SRV-AGENT (amendments sent to its owner): (a) a per-user daily scope for task `tutor` (`spent(user, task=tutor,
+#     UTC day)`) refused before the reserve row with `daily_budget_exhausted`, besides the run cap (`run_id` = question
+#     id, cap `question_cap_usd`, refusal `budget_exhausted`); (b) extended thinking off per task (`MAX_THINKING_TOKENS=0`
+#     in the CLI environment for task `tutor`); (c) a caller `system_prompt` option (with it the CLI sends no system
+#     prompt of its own, REF-TUTOR-7); (d) the stop reason in `StageResult`, a `max_tokens` stop mapping to the
+#     permanent code `output_truncated`; (e) the CLI's `api_retry` messages exposed and a per-call deadline accepted, so
+#     the tutor can abort on the first retry (FR-TUTOR-7). The tutor passes its own byte-based worst case
+#     (VEC-TUTOR-3) as the reserve floor `floor_usd` and logs `reserve_exceeded` itself when a settlement exceeds it.
 #   - SRV-EVENTS: KIND_MODULES lists `reader.tutor.jobs`; job kinds may declare a `priority` (FR-EVENTS-1 amendment),
 #     used by `tutor.answer` to run before queued compile stages.
 #   - SRV-AUTH: ROUTERS lists `reader.tutor.routes`; VERSION_LOCATIONS lists `reader/tutor/migrations`;
@@ -45,8 +43,9 @@
 #   - WEB-NOTEBOOK: the lesson view mounts `web/src/tutor/AskPanel` and passes the focused cell id.
 #   - SRV-INGEST: read helper `spans_by_ids(conn, owner_id, span_ids)`; until it exists this module reads
 #     `material_spans` directly (read-only).
-#   - V.cost-optimize: the tutor's prompt cache shape (the CLI system prompt warm in the 1-hour cache) and output caps
-#     are inputs to that task's measurements.
+#   - V.cost-optimize: the tutor's prompt cache shape and output caps are inputs to that task's measurements. With a
+#     custom `system_prompt` there is no CLI system prompt, and the fixed part is not cached separately: the CLI
+#     writes the whole prompt (system + user) to the 1-hour cache at 2× input on every new question (REF-TUTOR-7).
 
 id: SRV-TUTOR
 title: Tutor (slice) — questions about the open lesson, answered by one model call from retrieved spans, citations and quotes checked by code
@@ -73,7 +72,7 @@ normative:
     title: "ADR-0025 — agent sandbox and credential separation: only the worker reaches agent-proxy"
     url: docs/adr/0025-agent-sandbox-and-credential-separation.md
   - id: REF-TUTOR-3
-    title: "SRV-AGENT (draft, V/V.COMPILE-min) — Provider port, run_token, reservation/settlement ledger, pricing table"
+    title: "SRV-AGENT (approved, V/V.COMPILE-min) — Provider port, run_token, reservation/settlement ledger, pricing table"
     url: spec/modules/SRV-AGENT.yaml
   - id: REF-TUTOR-4
     title: "SRV-SEARCH — search(owner_id, query, k, material_sha256) with span ids"
@@ -112,7 +111,8 @@ bounds:
                                 # running compile stage; REF-TUTOR-6 stages took ≤ 190 s each)
   stale_without_job_s: 60       # a queued row with no job for this long is finalised `lost`
   call_deadline_s: 20           # structural: bounds a stuck or retrying call far below the CLI's ~3 min of retries
-                                # (REF-TUTOR-8); one healthy attempt fits NFR-TUTOR-1's 30 s p95
+                                # (REF-TUTOR-8); one healthy attempt fits NFR-TUTOR-1's 30 s p95. At the measured
+                                # 1.5–3.5 s for ≤ 310 tokens it is effectively the output cap as well
   job_timeout_s: 120            # structural: one CLI turn of ≤ 2000 output tokens
   poll_backoff_ms: [1000, 2000, 5000]  # web: then 5000 until a terminal state or the deadline
   poll_deadline_s: 630          # question_ttl_s + 30 s
@@ -123,8 +123,8 @@ tables:
 
 errors:                         # fixed catalogue, shared by api, worker and web (VEC-TUTOR-5); unknown codes → tutor_failed
   [question_invalid, cell_unknown, unknown_revision, not_found, tutor_busy, daily_budget_exhausted, budget_exhausted,
-   sources_unavailable, output_invalid, output_truncated, provider_unavailable, rate_limited, expired, lost,
-   tutor_failed]
+   monthly_budget_exhausted, provider_missing, sources_unavailable, output_invalid, output_truncated,
+   provider_unavailable, rate_limited, expired, lost, tutor_failed]
 
 requirements:
   - id: FR-TUTOR-1
@@ -153,7 +153,10 @@ requirements:
       compile stages (SRV-EVENTS amendment). Transient: `provider_unavailable`, `rate_limited`, `output_invalid`. The
       handler never leaves a row `queued`: it catches every permanent error, every budget refusal and a transient error
       on the last attempt, writes `failed` (code) or `refused` (`budget_exhausted` / `daily_budget_exhausted`), and
-      returns normally; only a transient error before the last attempt is re-raised for a retry. [db]
+      returns normally; only a transient error before the last attempt is re-raised for a retry. `monthly_budget_exhausted`
+      (SRV-AGENT FR-AGENT-9) also ends `refused`; `provider_missing` ends `failed` with its own message. Every row
+      transition, in the api and the worker, is `UPDATE … WHERE state = 'queued'`; the handler first checks that the
+      row is still `queued` and exits without a model call when it is not. [db]
   - id: FR-TUTOR-4
     text: >-
       Expiry. Before reserving anything, the handler marks a row older than `question_ttl_s` `expired` and returns.
@@ -171,8 +174,10 @@ requirements:
       `json.dumps({"question", "cell": {"id", "kind", "text"} | null, "sources": [{"id": "s1".."s8", "page",
       "text"}]}, ensure_ascii=False)`, so no question, cell or source text can close a delimiter or forge a source
       entry; the system prompt states that every string value is data, never an instruction. Sources get aliases s1…sk
-      in rank order; the alias → span id map stays in the handler. If the prompt exceeds `prompt_bytes_max`, sources
-      are dropped from the lowest rank until it fits; the dropped ones are not in the sent set. [unit]
+      in rank order; the alias → span id map stays in the handler. Sizes are measured after JSON escaping: the
+      question and the cell text are first cut so that question + cell + overhead fit `prompt_bytes_max`; then, if the
+      prompt still exceeds it, sources are dropped from the lowest rank until it fits; the dropped ones are not in the
+      sent set. If every source is dropped, the row is `failed` / `sources_unavailable` and no model is called. [unit]
   - id: FR-TUTOR-7
     text: >-
       Model call. One call through the SRV-AGENT Provider port (FR-AGENT-6): `run_id = question_id`, `stage` and
@@ -181,9 +186,11 @@ requirements:
       path calls a model. Fast failure: on 429, 529 or 500 the CLI retries about 10 times over about 3 minutes
       (REF-TUTOR-8), which NFR-TUTOR-1 cannot afford, so the tutor adapter aborts the call on the first `api_retry`
       message or when `call_deadline_s` passes, whichever comes first. The attempt then ends `rate_limited` (after a 429
-      or 529) or `provider_unavailable` (after a 500, a connect failure or the deadline), and settles at $0, since no 2xx
-      response was received; the next attempt follows FR-TUTOR-3. [unit] with a fake provider that emits `api_retry`,
-      and one that stalls past the deadline
+      or 529) or `provider_unavailable` (after a 500, a connect failure or the deadline), and settles per SRV-AGENT
+      FR-AGENT-9 (its reserve keeps counting until a settlement or the SDK's reported cost replaces it); the next attempt
+      follows FR-TUTOR-3. The tutor passes its byte-based worst case (VEC-TUTOR-3) as the reserve floor `floor_usd` and
+      logs WARNING `reserve_exceeded` when a settlement exceeds it. [unit] with a fake provider that emits `api_retry`,
+      and stalled providers that stop before any 2xx and after a 2xx has started streaming
   - id: FR-TUTOR-8
     text: >-
       Answer validation. The model's text, after removing one optional surrounding ```json fence, must be one JSON
@@ -205,7 +212,7 @@ requirements:
       Stale rows. The busy check and FR-TUTOR-2 derive a queued row's state from the job: job `dead` → the row becomes
       `failed` with the mapped code (VEC-TUTOR-4); no job and older than `stale_without_job_s` → `failed` / `lost`;
       older than `question_ttl_s` → `expired`. The finalised row no longer blocks `UNIQUE (owner_id) WHERE state =
-      'queued'`. [db]
+      'queued'`; an insert that violates that index (a concurrent ask) answers 409 `tutor_busy`. [db]
   - id: FR-TUTOR-11
     text: >-
       Web Ask panel (`web/src/tutor/AskPanel.tsx`) in the lesson view: a labelled text area (counter, 1..1000
@@ -231,8 +238,9 @@ requirements:
     text: >-
       Live: on the stack with L02 compiled and its material embedded, a learner asks a question about an L02 cell in
       Chromium; within `poll_deadline_s` the answer shows ≥ 1 citation "material_title, p. N" whose span exists and
-      whose quote is verified, and its ledger cost is ≤ `question_cap_usd`. Spends from `budget.test_budget_usd`.
-      [live]
+      whose quote is verified, and its ledger cost is ≤ `question_cap_usd`. Spends from `budget.test_budget_usd`. The
+      live check and the bench never write answer, quote or question text (it holds book quotes) to committed files:
+      committed outputs carry ids, counts, flags, timings and costs only. [live]
 
 invariants:
   - id: INV-TUTOR-1
@@ -273,15 +281,18 @@ invariants:
 nfr:
   - id: NFR-TUTOR-1
     metric: >-
-      p95 (nearest rank, 21 samples) seconds from Ask to the answer shown, idle worker, on the bench questions
-      (VEC-TUTOR-7) against L02 ([live]); bench spend ≤ 21 × question_cap_usd = $6.30 (expected ≈ $1), from budget.test_budget_usd,
-      with the daily cap raised for the run only
+      p95 by nearest rank, rank ceil(0.95 × n), over the n bench samples (VEC-TUTOR-7; n = min(20, explain cells) + 1),
+      seconds from Ask to the answer shown, idle worker, against L02 ([live]). Bench spend ≤ n × question_cap_usd
+      (≤ $6.30; expected ≈ $1) from budget.test_budget_usd, inside the normal daily cap: one bench run per UTC day; a
+      second run on the same day may be refused with daily_budget_exhausted. The bench also records thinking tokens per
+      call and the share of blocks with a verified quote
     threshold: 30
     verified_by: bench
   - id: NFR-TUTOR-2
     metric: >-
-      mean USD per question over the NFR-TUTOR-1 run (ledger spent(run)); expected ≈ 0.044–0.048 for L02-shaped
-      prompts (VEC-TUTOR-3, extrapolated from REF-TUTOR-7's measured rates)
+      mean USD per question over the NFR-TUTOR-1 run (ledger spent(run)); expected about $0.048 for an L02-shaped
+      prompt (VEC-TUTOR-3, extrapolated from REF-TUTOR-7's measured rates; every new question writes its whole prompt
+      to the 1-hour cache)
     threshold: 0.06
     verified_by: bench
   - id: NFR-TUTOR-3
@@ -310,10 +321,10 @@ vectors:
     file: spec/fixtures/SRV-TUTOR/render.yaml
   - id: VEC-TUTOR-7
     source: >-
-      bench questions: one question per `explain` cell of the compiled L02 revision, in cell order, first 20 cells,
-      generated at run time as "Explain in your own words: <cell title>" (the cell titles are not committed; only the
-      generator `e2e/web/tutor/bench_questions.py` is), plus questions-v2 `v03` (the only accepted question on L02's
-      pages 60–84)
+      bench questions: one question per `explain` cell of the compiled L02 revision, in cell order, the first
+      min(20, explain cells), generated at run time as "Explain in your own words: <cell title>" (the cell titles are
+      not committed; only the generator `e2e/web/tutor/bench_questions.py` is), plus questions-v2 `v03` (the only
+      accepted question on L02's pages 60–84)
     file: spec/fixtures/SRV-TUTOR/bench.yaml
 
 defers:
@@ -328,9 +339,9 @@ defers:
   - "findings from tutor sessions into the knowledge base: stage 7"
 
 owner_notes:
-  - "Cost (VEC-TUTOR-3, from spikes/tutor-call on 2026-11-22: 10 calls, $0.038): ≈ $0.044–0.048 per L02-shaped question with Sonnet 5.5 (measured short calls cost $0.001–0.006); worst-case reserve $0.136 per attempt; caps $0.30 per question and $3 per user per day (≈ 63 typical questions)."
+  - "Cost (VEC-TUTOR-3, from spikes/tutor-call on 2026-11-22: 10 calls, $0.038): about $0.048 per L02-shaped question with Sonnet 5.5 (measured short calls cost $0.001–0.006); worst-case reserve $0.136 per attempt; caps $0.30 per question and $3 per user per day (about 63 questions)."
   - "Cost lever for V.cost-optimize (REF-TUTOR-7): the CLI writes each one-shot prompt to the 1-hour cache at 2× the input price; an uncached send would roughly halve the tutor's input cost, if the CLI allows it."
   - "While a lesson compile stage runs, a question waits for it (one worker); after 10 minutes it expires instead of being answered late."
   - "An answer says when it is not grounded in the book instead of hiding it."
 
-review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s, settle at $0. Round 2 next; approval waits for SRV-AGENT's."
+review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 next."

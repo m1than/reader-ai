@@ -62,5 +62,16 @@ Input tokens outside the cache were 2 per call; all cache writes were `ephemeral
   Worst case per attempt = (1,000 + 4,000 + 24,000) × $4.00/M + 2,000 × $10.00/M = **$0.136**; two attempts $0.272,
   so `question_cap_usd` = **$0.30**.
 - Typical L02-shaped question (about 19,000 bytes of Russian sources, ≈ 10,000 tokens, ≈ 400 output tokens):
-  ≈ **$0.044–0.048**, an extrapolation from the measured rates. NFR-TUTOR-2 measures it on L02.
+  about **$0.048**, an extrapolation from the measured rates: every new question writes its whole prompt to the
+  1-hour cache (the first call of each question read nothing from the cache). NFR-TUTOR-2 measures it on L02.
 - `call_deadline_s` 20 is about 6× the slowest measured call.
+
+## Limits of this spike
+
+- Prompts were short: at most 867 tokens, against about 10,000 for an L02-shaped question with 8 sources. Latency,
+  output length and thinking behaviour at that size are not measured here; the SRV-TUTOR bench (NFR-TUTOR-1..3)
+  measures them on L02 and records thinking tokens per call.
+- Quotes were not verified: the outputs are not stored (numbers only), so whether the model's quotes pass SRV-TUTOR's
+  verbatim check is unmeasured. The bench records the share of blocks with a verified quote.
+- Thinking off was not shown to have an effect: thinking tokens were 0 with the default as well, for this short shape.
+  The tutor keeps `MAX_THINKING_TOKENS=0` as a safeguard for longer prompts, not because this spike proved it needed.

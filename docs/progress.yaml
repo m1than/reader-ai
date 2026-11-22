@@ -539,10 +539,11 @@ tasks:
         spends credit, ledger" }
   - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
       branch: V/V.TUTOR-min,
-      note: "spec round 1 (bfb7047): changes; revision applied with spikes/tutor-call's numbers, awaits round 2; approval
-        waits for SRV-AGENT's. Question as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking
-        off, byte-based reserve with ≈ 410 measured CLI overhead tokens; caps $0.30 per question and $3 per day; typical
-        ≈ $0.044–0.048 per L02-shaped question (VEC-TUTOR-3)." }
+      note: "spec round 1 (bfb7047): changes; round 2 (410314b): changes, applied; round 3 next. Question as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking
+        off, byte-based reserve with ≈ 410 measured CLI overhead tokens; caps $0.30 per question and $3 per day; about
+        $0.048 per L02-shaped question (VEC-TUTOR-3). Round 2: 5 of 7 closed; bench cap override removed, cache
+        assumption removed. SRV-AGENT is approved; the amendments the tutor needs (daily scope, thinking off,
+        system_prompt option, stop reason, api_retry and per-call deadline) go to SRV-AGENT's owner." }
   - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token

@@ -21,13 +21,13 @@ inputs:
     prompt_tokens: 10000         # ~19,000 bytes of Russian sources at 1.9 bytes/token (measured on q3)
     fixed_tokens: 900            # system prompt (~800 bytes) + ≈ 410 overhead, rounded up
     output_tokens: 400           # measured 92–310 on short sources; rounded up for 8 sources
-    fixed_cached: true           # the fixed part is read from the 1-hour cache after the first question (measured)
+                                 # every new question writes its whole prompt to the 1-hour cache (measured: the first
+                                 # call of each question read nothing from the cache)
 derived_by_test:                 # USD, for readers
   reserve_per_attempt: 0.136     # (1000 + 4000 + 24000) × 4.00e-6 + 2000 × 10.00e-6 = 0.116 + 0.020
   question_cap_min: 0.272        # 2 × reserve → bounds.question_cap_usd 0.30
-  typical_warm: 0.04409          # 10000 × 4.00e-6 + 900 × 0.10e-6 + 400 × 10.00e-6
-  typical_cold: 0.0476           # (10000 + 900) × 4.00e-6 + 400 × 10.00e-6
-  daily_cap_questions: {at_reserve: 22, typical_warm: 68, typical_cold: 63}   # floor(3.00 / value)
+  typical: 0.0476                # (10000 + 900) × 4.00e-6 + 400 × 10.00e-6 — about $0.048
+  daily_cap_questions: {at_reserve: 22, typical: 63}   # floor(3.00 / value)
 measured:                        # spikes/tutor-call, 2026-11-22, short synthetic sources (not L02-shaped)
   calls: 10
   usd_total: 0.038299
