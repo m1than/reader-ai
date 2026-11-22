@@ -368,7 +368,12 @@ tasks:
         done, stage-1.sh refuses --drill. Found by the S1.live script author, 2026-11-22." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
-      note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
+      note: "2026-11-22 automated live run (agent, branch V/live-e2e, a6e622b): bash e2e/live/verify-all.sh — 53 of 53
+        PASS (stage-1 31, browser 22 incl. CDP virtual passkey, lesson, notebook cells, sandbox probes, CSP, token canary;
+        axe: no serious/critical). Found and fixed: WEB-UI /api/me id string, WEB-UI nested lesson metadata, OPS-CLI
+        kernels profile, doctor detail. Remaining owner step: own passkey in Safari (reader bootstrap). Follow-up: F01
+        references show raw span ids and one empty item (WEB-NOTEBOOK skip empty refs; fixture titles).
+        --drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
         e2e/live/lib/{passkey_check,secret_scan}.py (outside the spec gate). Non-destructive by default (≈ 5 min; restarts
         api and postgres, stops and restarts the watcher). --drill deletes and recreates the pgdata and blobs volumes
         after a backup. Known risk for --drill: the api seeds users rows from reader.yaml at startup, so OPS-CLI's restore
@@ -507,9 +512,10 @@ tasks:
         fine: 480/480 restarts within 4.0 s under load. Fix on branch V/OPS-SANDBOX-test-isolation: per-run label
         org.reader-ai.test.sandbox-run=<pid>.<random>, end sweep of own objects, start sweep of dead pids only;
         test_session_sweep_spares_other_runs. Old-label orphans left for the owner" }
-  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
-      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
-        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-CLI],
+      note: "FR-CLI-5 amended (spec, test, code paired, branch V/live-e2e): `reader up` always activates `kernels`
+        besides the default profile (config, build and up all carry `--profile kernels`); compose builds the kernel image.
+        The profile also starts kernel-verify, kernel-agent and kernel-pair-1 from the same image. CLI tests 216 pass" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
       branch: V/V.SRV-SEARCH-min,
       note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 approved by

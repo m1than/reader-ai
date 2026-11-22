@@ -33,7 +33,9 @@
 #   every other path outside `/api/*` and `/mcp`, so deep links such as `/lessons/w01` load.
 # - SRV-LESSON (V4; API fixed by the coordinator 2026-11-21): `GET /api/lessons` →
 #   `{"lessons": [{lesson_id, course_id, course_title, ordinal, title, updated_at, latest_sha256}]}` (VEC-UI-2);
-#   `GET /api/lessons/{lesson_id}` → metadata plus revisions; the notebook only from
+#   `GET /api/lessons/{lesson_id}` → `{"lesson": {…the list fields}, "revisions": [{sha256, byte_size, cell_count,
+#   created_at, stages}]}` exactly as SRV-LESSON FR-LESSON-8 (nested; the live run of 2026-11-22 found the client and
+#   VEC-UI-2 expecting the fields flat, so every lesson page failed); the notebook only from
 #   `GET /api/lessons/{lesson_id}/revisions/{sha256}` (immutable, ETag).
 # - SRV-AUTH (approved): `GET /api/me`, `POST /api/auth/signout`, the sign-in page `GET /api/auth/signin`, the
 #   `Origin` and Content-Type rule (FR-AUTH-12), the session cookie (HttpOnly; the SPA never reads it).
@@ -140,7 +142,10 @@ requirements:
       with an infinite stale time keyed by its sha256 (revisions are immutable). [unit]
   - id: FR-UI-5
     text: >-
-      Authentication: on app start the app calls `GET /api/me`; on a 401 from it, or from any later API call, the app
+      Authentication: on app start the app calls `GET /api/me`, whose body is SRV-AUTH FR-AUTH-9's
+      `{id, handle, role, display_name, consent: {evaluation, tuning}}` with `id` the user's UUID as a string (found by
+      the live run, 2026-11-22: the client had expected a number and rejected every real response); on a 401 from it, or
+      from any later API call, the app
       navigates the whole page to `/api/auth/signin` (SRV-AUTH FR-AUTH-14, which returns to `/` on success). The header
       shows the signed-in `display_name` and a Sign out button that calls `POST /api/auth/signout`, clears the query
       cache and then navigates to `/api/auth/signin`. The SPA never reads, stores or logs the session cookie, and keeps
