@@ -1,0 +1,89 @@
+# VEC-KERNEL-1 — relay filter table (SRV-KERNEL FR-KERNEL-8, INV-KERNEL-2/3).
+# Source: Jupyter messaging protocol 5.x message types (https://jupyter-client.readthedocs.io/en/stable/messaging.html);
+# example frames follow spikes/kernel-roundtrip/client.py.
+# action: forward | rewrite (forward after the listed rewrites) | reject (not forwarded, reader_notice rejected) |
+#         drop (not forwarded, counted in the log) | close (connection closed with the code)
+
+browser_to_kernel:
+  - { channel: shell,   msg_type: execute_request,     action: rewrite, rewrites: [header.session, header.username, content.allow_stdin=false, content.user_expressions={}] }
+  - { channel: shell,   msg_type: kernel_info_request, action: rewrite, rewrites: [header.session, header.username] }
+  - { channel: shell,   msg_type: complete_request,    action: rewrite, rewrites: [header.session, header.username] }
+  - { channel: shell,   msg_type: inspect_request,     action: rewrite, rewrites: [header.session, header.username] }
+  - { channel: shell,   msg_type: is_complete_request, action: rewrite, rewrites: [header.session, header.username] }
+  - { channel: shell,   msg_type: history_request,     action: reject }
+  - { channel: shell,   msg_type: comm_info_request,   action: reject }
+  - { channel: shell,   msg_type: comm_open,           action: reject }
+  - { channel: shell,   msg_type: comm_msg,            action: reject }
+  - { channel: shell,   msg_type: comm_close,          action: reject }
+  - { channel: control, msg_type: shutdown_request,    action: reject }
+  - { channel: control, msg_type: interrupt_request,   action: reject, note: "interrupt goes through FR-KERNEL-4" }
+  - { channel: control, msg_type: debug_request,       action: reject }
+  - { channel: control, msg_type: usage_request,       action: reject }
+  - { channel: stdin,   msg_type: input_reply,         action: reject }
+  - { channel: shell,   msg_type: execute_request, parent_header: { msg_id: x }, action: reject, note: "parent_header must be {}" }
+  - { channel: shell,   msg_type: execute_request, buffers: [AA==],              action: reject }
+  - { channel: shell,   msg_type: execute_request, content: { code: 1 },          action: reject, note: "code must be a string" }
+  - { channel: shell,   msg_type: execute_request, header: { msg_id: "129 characters" }, action: reject, note: "msg_id over 128 characters" }
+  - { channel: shell,   msg_type: execute_request, header: { msg_id: 7 },        action: reject, note: "msg_id must be a string" }
+  - { channel: shell,   msg_type: execute_request, header: { msg_id: "<id of a pending request>" }, action: reject, note: "duplicate of a pending msg_id" }
+  - { channel: shell,   msg_type: execute_request, extra_keys: { buffers: [], signature: x, idents: [a] }, action: rewrite, note: "forwarded message rebuilt from channel, header, parent_header, metadata, content only; extra keys absent" }
+  - { frame: "not json",                             action: reject, note: "no msg_id parses: notice with parent_msg_id null" }
+  - { frame: "json array",                           action: reject }
+  - { frame: binary,                                 action: close, code: 1003 }
+  - { frame: "text over 1 MiB",                      action: close, code: 1009 }
+
+kernel_to_browser:
+  - { channel: shell,   msg_type: execute_reply,       action: forward }
+  - { channel: shell,   msg_type: kernel_info_reply,   action: forward }
+  - { channel: shell,   msg_type: complete_reply,      action: forward }
+  - { channel: shell,   msg_type: inspect_reply,       action: forward }
+  - { channel: shell,   msg_type: is_complete_reply,   action: forward }
+  - { channel: iopub,   msg_type: status,              action: forward, note: "execution_state restarting → then kernel_restarted; dead → then kernel_dead" }
+  - { channel: iopub,   msg_type: execute_input,       action: forward }
+  - { channel: iopub,   msg_type: stream,              action: forward }
+  - { channel: iopub,   msg_type: display_data,        action: forward }
+  - { channel: iopub,   msg_type: update_display_data, action: forward }
+  - { channel: iopub,   msg_type: execute_result,      action: forward }
+  - { channel: iopub,   msg_type: error,               action: forward }
+  - { channel: iopub,   msg_type: clear_output,        action: forward }
+  - { channel: iopub,   msg_type: comm_open,           action: drop }
+  - { channel: iopub,   msg_type: comm_msg,            action: drop }
+  - { channel: iopub,   msg_type: comm_close,          action: drop }
+  - { channel: iopub,   msg_type: debug_event,         action: drop }
+  - { channel: shell,   msg_type: comm_info_reply,     action: drop }
+  - { channel: shell,   msg_type: history_reply,       action: drop }
+  - { channel: stdin,   msg_type: input_request,       action: drop }
+  - { channel: control, msg_type: interrupt_reply,     action: drop }
+  - { channel: control, msg_type: shutdown_reply,      action: drop }
+  - { channel: iopub,   msg_type: an_unknown_type,     action: drop }
+  - { channel: iopub,   msg_type: stream, extra_keys: { buffers: [AA==], msg_id: x, signature: y }, action: forward, note: "rebuilt from the five keys; extra keys absent" }
+  - { frame: binary, note: "carries display_data buffers", action: drop }
+  - { frame: "not json",                               action: drop }
+  - { frame: "json without channel or header",         action: drop }
+  - { message: "over 4 MiB, detected while receiving", action: "close upstream 1009", then: [output_truncated, "session dropped with kernel_dead"] }
+  - { message: "iopub after 16 MiB forwarded for one execute_request", action: drop, then: "output_truncated once" }
+
+upstream_http:
+  # FR-KERNEL-2/13: REST and control responses are untrusted
+  - { call: "POST /api/kernels", response: { status: 201, body: { id: "3f2b6c1e-8a4d-4c2b-9e1f-0a1b2c3d4e5f" } }, result: ok }
+  - { call: "POST /api/kernels", response: { status: 201, body: { id: "../../api/kernels" } },                result: kernel_upstream, note: "id fails the UUID regex" }
+  - { call: "POST /api/kernels", response: { status: 302, location: "http://attacker/" },                     result: kernel_upstream, note: "no redirects" }
+  - { call: "GET /control/state", response: { status: 200, body: "65 KiB of JSON" },                           result: failed, note: "body cap 64 KiB" }
+  - { call: "WS /api/kernels/<kid>/channels", response: { status: 301, location: "ws://elsewhere/" },          result: "connect failed, FR-KERNEL-14" }
+
+example_exchange:
+  # print(1): browser sends, relay forwards (rewritten), kernel answers, browser receives.
+  browser_sends:
+    - { channel: shell, header: { msg_id: m1, msg_type: execute_request, session: spoofed, username: someone-else, version: "5.3" },
+        parent_header: {}, metadata: {}, content: { code: "print(1)", silent: false, store_history: true, user_expressions: { x: "1" }, allow_stdin: true, stop_on_error: true } }
+  kernel_receives:
+    - { channel: shell, header: { msg_id: m1, msg_type: execute_request, session: "<session_id>", username: "<handle>", version: "5.3" },
+        parent_header: {}, metadata: {}, content: { code: "print(1)", silent: false, store_history: true, user_expressions: {}, allow_stdin: false, stop_on_error: true } }
+  kernel_sends:
+    - { channel: iopub, msg_type: status,        parent_msg_id: m1, content: { execution_state: busy } }
+    - { channel: iopub, msg_type: execute_input, parent_msg_id: m1, content: { code: "print(1)", execution_count: 1 } }
+    - { channel: iopub, msg_type: stream,        parent_msg_id: m1, content: { name: stdout, text: "1\n" } }
+    - { channel: iopub, msg_type: comm_open,     parent_msg_id: m1, content: { comm_id: c1, target_name: t } }
+    - { channel: shell, msg_type: execute_reply, parent_msg_id: m1, content: { status: ok, execution_count: 1 } }
+    - { channel: iopub, msg_type: status,        parent_msg_id: m1, content: { execution_state: idle } }
+  browser_receives_types: [status, execute_input, stream, execute_reply, status]

@@ -8,6 +8,8 @@ users:
     providers:
       - kind: anthropic-subscription
         token: secret://keychain/reader-ai/claude-oauth-token
+  - handle: live-check   # learner for the stage-1 live check (SRV-AUTH): passkey from a virtual authenticator
+    role: learner
 tasks:
   draft:      { model: opus,   budget_usd_per_lesson: 2.0 }
   fact_check: { model: sonnet, budget_usd_per_lesson: 1.0 }

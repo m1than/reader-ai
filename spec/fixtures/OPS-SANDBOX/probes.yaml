@@ -1,0 +1,24 @@
+# VEC-SANDBOX-1 — probes run from a python3 kernel cell.
+# Source: OPS-DEPLOY network table (VEC-DEPLOY-2), ADR-0014 controls, ADR-0022 routes; env-names measured by
+# deep-reviewer round 1 (gateway started with the explicit environment of FR-SANDBOX-8).
+# expect: resolve_fails | connect_fails | absent | equals
+# level: image (throwaway --internal IPv4 network, a probe container stands in for api) | live (e2e/live/slice.sh against
+# reader up, cells run through a SRV-KERNEL session opened with the live-check software-authenticator session)
+
+probes:
+  - { id: dns-external,   action: "socket.getaddrinfo('example.com', 443)",        expect: resolve_fails, level: [image, live] }
+  - { id: ip-external,    action: "socket.create_connection(('1.1.1.1', 443), 3)", expect: connect_fails, level: [image, live] }
+  - { id: http-external,  action: "urllib.request.urlopen('https://pypi.org', timeout=3)", expect: connect_fails, level: [image, live] }
+  - { id: dns-postgres,   action: "socket.getaddrinfo('postgres', 5432)",          expect: resolve_fails, level: [live] }
+  - { id: dns-worker,     action: "socket.getaddrinfo('worker', 80)",              expect: resolve_fails, level: [live] }
+  - { id: dns-caddy,      action: "socket.getaddrinfo('caddy', 443)",              expect: resolve_fails, level: [live] }
+  - { id: dns-mcp,        action: "socket.getaddrinfo('mcp', 8001)",               expect: resolve_fails, level: [live] }
+  - { id: dns-agentproxy, action: "socket.getaddrinfo('agent-proxy', 80)",         expect: resolve_fails, level: [live] }
+  - { id: dns-other-kernel, action: "socket.getaddrinfo(name, 8888) for kernel-verify, kernel-agent, kernel-pair-1 and every other kernel-user-<handle>", expect: resolve_fails, level: [live] }
+  - { id: api-front,      action: "socket.create_connection(('10.230.1.10', 8000), 3)", expect: connect_fails, level: [live] }
+  - { id: api-portscan,   action: "for every address of 'api': TCP connect to every port 1-65535 (0.5 s timeout, parallel)", expect: connect_fails, level: [live] }
+  - { id: secrets-dir,    action: "os.path.exists('/run/secrets')",                expect: absent, level: [image, live] }
+  - { id: docker-sock,    action: "os.path.exists('/var/run/docker.sock') or os.path.exists('/run/docker.sock')", expect: absent, level: [image, live] }
+  - { id: env-names,      action: "sorted(os.environ)", expect: equals, level: [image, live],
+      scope: "kernels created without `env` (SRV-KERNEL's kernels); a cell-created kernel with KERNEL_* keys adds them",
+      value: [CLICOLOR, CLICOLOR_FORCE, FORCE_COLOR, GIT_PAGER, HOME, HOSTNAME, JPY_PARENT_PID, KERNEL_GATEWAY, LANG, MPLBACKEND, PAGER, PATH, PYDEVD_USE_FRAME_EVAL, TERM] }

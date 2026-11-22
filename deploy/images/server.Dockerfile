@@ -7,5 +7,8 @@ COPY server/pyproject.toml /opt/reader/pyproject.toml
 COPY server/src /opt/reader/src
 RUN pip install --no-cache-dir /opt/reader
 COPY --chmod=0755 deploy/images/wait-for-secret.sh /usr/local/bin/wait-for-secret
+# The blobs mount point, owned by the service uid: Docker copies its ownership into an empty named volume on first
+# mount, so uid 10001 with cap_drop ALL can write there (FR-DEPLOY-5).
+RUN mkdir -p /var/lib/reader/blobs && chown 10001:10001 /var/lib/reader/blobs
 USER 10001:10001
 ENTRYPOINT ["/usr/local/bin/wait-for-secret", "db-password", "--"]
