@@ -48,14 +48,14 @@
 
 id: SRV-LESSON
 title: Lesson notebooks (ADR-0004) — validate, store as content-addressed revisions with stage records, list and open (slice subset)
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
 layer: server
 track: product
 adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
 slice: V.SRV-LESSON-min
-review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied with coordinator decisions, diff checked by the coordinator"
+review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22)"
 
 paths:
   - server/src/reader/lessons/**
@@ -102,8 +102,9 @@ bounds:
   blobs_root: /var/lib/reader/blobs
 
 # Tables of this module's migration (branch label `lessons`, depends on SRV-AUTH's base revision for users.id).
-# Every table carries NOT NULL `owner_id` with a foreign key to users.id (INV-AUTH-8); for lessons, revisions and stage
-# records it is the course owner's id, enforced by composite foreign keys (INV-LESSON-7). Every foreign key is
+# Every table carries NOT NULL `owner_id` with a direct foreign key to users.id (INV-AUTH-8 checks exactly that); for
+# lessons, revisions and stage records it is also the course owner's id, enforced by composite foreign keys
+# (INV-LESSON-7). Every foreign key is
 # ON DELETE RESTRICT. A trigger refuses UPDATE and DELETE on lesson_revisions and lesson_revision_stages (INV-LESSON-6).
 tables:
   courses: { owner_id: true, columns: "id uuid pk, title text CHECK (1..200 chars), material_sha256 text null CHECK (64 lowercase hex), created_at; UNIQUE (id, owner_id); UNIQUE (owner_id, title) WHERE material_sha256 IS NULL" }
@@ -132,7 +133,9 @@ requirements:
       equals the schema's `x-cell-type` for its kind (`cell_type_mismatch`); (9) the canonical bytes (FR-LESSON-2)
       encode as UTF-8 (`not_utf8`, e.g. an escaped lone surrogate) and are ≤ `bounds.notebook_max_bytes` (`too_large`);
       (10) cells ≤ `bounds.cells_max` (`too_many_cells`). The schema and the kind → cell type map are read from
-      cell.schema.json; no kind is hard-coded in Python.
+      cell.schema.json; no kind is hard-coded in Python. Interface: `reader.lessons.schema.validate(data: bytes) ->
+      Validated` (fields `notebook` (the parsed document), `canonical` (bytes), `sha256`, `cell_count`), raising
+      `reader.lessons.schema.LessonWriteError` whose `code` is one of `write_errors`.
   - id: FR-LESSON-2
     text: >-
       Canonical form. The canonical bytes of a valid notebook are `nbformat.writes(nb).encode("utf-8")` of the
@@ -149,8 +152,9 @@ requirements:
       directory; no environment variable selects it.
   - id: FR-LESSON-4
     text: >-
-      Write path, `reader.lessons.store.write_revision(session, blobs_root, owner_id, lesson_id, data: bytes, stage,
-      provenance) -> (sha256, created: bool)`, inside the caller's transaction: (1) `SELECT … FOR UPDATE` the lesson row;
+      Write path, `reader.lessons.store.write_revision(conn, blobs_root, owner_id, lesson_id, data: bytes, stage,
+      provenance) -> (sha256, created: bool)`, where `conn` is an SQLAlchemy `AsyncConnection` inside the caller's
+      transaction (the module's functions never commit): (1) `SELECT … FOR UPDATE` the lesson row;
       it must exist with `owner_id`, else `unknown_lesson` (missing and foreign are one code), which serialises
       concurrent writes to one lesson; (2) FR-LESSON-1 validation; (3) canonical bytes and sha256 (FR-LESSON-2); (4)
       FR-LESSON-5 checks on `stage` and `provenance` (`bad_provenance`); (5) every `notes` cell id of the lesson's
@@ -169,8 +173,9 @@ requirements:
       anywhere in it raises TypeError before any write.
   - id: FR-LESSON-6
     text: >-
-      Internal functions for the compile pipeline and the fixture loader: `create_course(session, owner_id, title,
-      material_sha256 | None) -> course_id` and `ensure_lesson(session, owner_id, course_id, ordinal, title) ->
+      Internal functions for the compile pipeline and the fixture loader, in `reader.lessons.store`:
+      `create_course(conn, owner_id, title, material_sha256 | None) -> course_id` and `ensure_lesson(conn, owner_id,
+      course_id, ordinal, title) ->
       lesson_id` (idempotent on (course_id, ordinal): an existing lesson is returned with its title unchanged; a course
       of another owner is `not_owner`). Titles are 1..`bounds.title_max_chars` characters after stripping.
   - id: FR-LESSON-7
@@ -194,10 +199,11 @@ requirements:
       `X-Content-Type-Options: nosniff`. `If-None-Match` is evaluated only after the access check, per REF-LESSON-5:
       `*`, or a comma-separated list containing the ETag strongly or weakly (`W/"<sha256>"`), answers 304 with the ETag
       and cache headers and no body. `BlobCorrupt` or `BlobMissing` answers 500 `{"error":"blob_unavailable"}` and logs
-      the lesson id, the sha256 and the exception class only.
+      the lesson id, the sha256 and the exception class only. The route reads blobs from `request.app.state.blobs_root`
+      when set (tests set a temporary directory on the app), else `bounds.blobs_root`.
   - id: FR-LESSON-11
     text: >-
-      `reader.lessons.access.can_open(session, user_id, lesson_id) -> bool` is true exactly when `lesson_id` is a
+      `reader.lessons.access.can_open(conn, user_id, lesson_id) -> bool` is true exactly when `lesson_id` is a
       lowercase canonical UUID string, the lesson exists and its course's owner is `user_id`; any other input returns
       False without a query (stage 1: own courses only; ADR-0016 roles arrive in stage 8).
   - id: FR-LESSON-12
@@ -208,7 +214,9 @@ requirements:
       header set (header values compared except `Date`).
   - id: FR-LESSON-13
     text: >-
-      Fixture loader `python -m reader.lessons.fixture load --handle <h>` (run inside the api container): for the
+      Fixture loader `python -m reader.lessons.fixture load --handle <h> [--blobs-root DIR]` (run inside the api
+      container; DIR defaults to `bounds.blobs_root`; the database is reached exactly as `reader-server` reaches it,
+      SRV-AUTH FR-AUTH-1, and any database failure exits 1 with `reader-lessons: database_unreachable`): for the
       enabled user with that handle it ensures the course "Fixture course (synthetic)" (material_sha256 null, unique
       per owner by the partial unique index), lesson ordinal 1 "F01 — fixture lesson (synthetic)", and writes the
       packaged F01 (`server/src/reader/lessons/fixtures/F01.ipynb`, byte-identical to VEC-LESSON-2) with stage

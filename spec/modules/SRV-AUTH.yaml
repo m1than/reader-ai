@@ -157,8 +157,8 @@ requirements:
       asyncpg engine (`run_sync` in env.py; procrastinate 3.12.0's `execute_script` has its own asyncpg path through the
       raw driver connection for multi-statement SQL). `reader.db` sets `version_locations` on the programmatic Alembic
       `Config` before `command.upgrade`, from a declared list of directories (Alembic does not glob; no scan): in stage
-      1 only `reader/db/migrations/versions`; SRV-EVENTS appends its own directory and the installed
-      `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
+      1 only `reader/db/migrations/versions`; SRV-LESSON appends `reader/lessons/migrations` (paired change,
+      2026-11-22); SRV-EVENTS appends its own directory and the installed `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
       procrastinate's `autocommit_block` path on asyncpg is tested by SRV-EVENTS against Postgres, not here.
       Paths and endpoints default to the container's and may be overridden by six variables (tests, and OPS-DEPLOY's
       static `READER_CONFIG`): `READER_CONFIG` (default `/etc/reader/reader.yaml`), `READER_SECRETS_ROOT`
@@ -247,7 +247,8 @@ requirements:
       for a `recent_session` route with an older session); `public` are exactly `/api/healthz`, the bootstrap and sign-in ceremonies,
       `/api/auth/signout`, and the pages and script of FR-AUTH-14. No GET route writes to the database. The app
       factory includes routers from a declared list, `reader.api.app.ROUTERS`; stage 1 lists only the api and auth
-      routers (SRV-KERNEL adds `reader.kernels.routes` in its own paired change).
+      routers; SRV-LESSON adds `reader.lessons.routes` (paired change, 2026-11-22), and SRV-KERNEL adds
+      `reader.kernels.routes` in its own paired change.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

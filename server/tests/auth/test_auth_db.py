@@ -19,7 +19,10 @@ pytestmark = pytest.mark.anyio
 def test_version_locations_are_a_declared_list() -> None:
     import reader.db as db
 
-    assert [p.as_posix().split("/reader/", 1)[1] for p in db.VERSION_LOCATIONS] == ["db/migrations/versions"]
+    assert [p.as_posix().split("/reader/", 1)[1] for p in db.VERSION_LOCATIONS] == [
+        "db/migrations/versions",
+        "lessons/migrations",  # SRV-LESSON paired change (FR-AUTH-1 note)
+    ]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)
 
 
@@ -55,6 +58,7 @@ async def test_migrate_reaches_all_heads_and_is_idempotent(pg: Pg) -> None:
 
 async def test_concurrent_migrations_serialize(pg: Pg) -> None:
     import anyio
+
     from reader.db import at_heads, make_engine, migrate
 
     engines = [make_engine(target(pg)) for _ in range(3)]
