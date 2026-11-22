@@ -57,14 +57,17 @@ x-server: &server
 
 services:
   caddy:
-    image: caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0
+    # The pinned caddy image plus the built SPA at /srv/spa (deploy/images/caddy.Dockerfile, FR-DEPLOY-2).
+    image: reader-caddy:local
+    build:
+      context: ..
+      dockerfile: deploy/images/caddy.Dockerfile
     ports:
       - "127.0.0.1:443:443"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./spa-placeholder:/srv/spa:ro
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     networks: [edge, front]

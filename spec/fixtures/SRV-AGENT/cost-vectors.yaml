@@ -46,3 +46,14 @@ sdk_usage_mapping:
   - name: sdk-shape-unmapped
     sdk_usage: { input_tokens: 5, output_tokens: 5, cache_creation_input_tokens: 100 }
     error: usage_unmapped
+# Settlement (FR-AGENT-9): the settled amount from the run_token's upstream record (FR-AGENT-3) and the SDK result.
+# Error shapes measured in spikes/agent-proxy-handshake (429, 529, 500: 11 upstream requests, then is_error, cost 0).
+settlements:
+  - { name: success,             reserve: 0.94, upstream: { statuses: [200], any_2xx: true },  sdk_usd: 0.6,  settled_usd: 0.6 }
+  - { name: rate-limited-429,    reserve: 0.94, upstream: { statuses: [429, 429, 429, 429, 429, 429, 429, 429, 429, 429, 429], any_2xx: false }, sdk_usd: 0, sdk_error: rate_limit, settled_usd: 0, error: rate_limited }
+  - { name: overloaded-529,      reserve: 0.94, upstream: { statuses: [529, 529, 529, 529, 529, 529, 529, 529, 529, 529, 529], any_2xx: false }, sdk_usd: 0, sdk_error: server_error, settled_usd: 0, error: provider_unavailable }
+  - { name: server-error-500,    reserve: 0.94, upstream: { statuses: [500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500], any_2xx: false }, sdk_usd: 0, sdk_error: server_error, settled_usd: 0, error: provider_unavailable }
+  - { name: retried-then-ok,     reserve: 0.94, upstream: { statuses: [529, 200], any_2xx: true },  sdk_usd: 0.6,  settled_usd: 0.6 }
+  - { name: proxy-refused,       reserve: 0.94, upstream: { statuses: [], any_2xx: false, refused: [output_cap] }, sdk_usd: 0, settled_usd: 0, error: sdk_error }
+  - { name: crash-after-2xx,     reserve: 0.94, upstream: { statuses: [200], any_2xx: true },  sdk_usd: null, settled_usd: 0.94, error: sdk_error }
+  - { name: no-2xx-but-sdk-cost, reserve: 0.94, upstream: { statuses: [500], any_2xx: false }, sdk_usd: 0.01, settled_usd: 0, log: settle_mismatch, error: provider_unavailable }

@@ -10,6 +10,7 @@ from typing import Any, Final, Literal
 from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.websockets import WebSocket
 
 from reader.auth.policy import SESSION_COOKIE, Settings
 from reader.auth.store import SessionUser
@@ -62,10 +63,21 @@ Handler = Callable[[Ctx], Awaitable[Response]]
 
 @dataclass(frozen=True)
 class Route:
-    method: Literal["GET", "POST"]
+    method: Literal["GET", "POST", "DELETE"]
     path: str
     auth: Auth
     handler: Handler
+
+
+WsHandler = Callable[[WebSocket, Settings, AsyncEngine], Awaitable[None]]
+
+
+@dataclass(frozen=True)
+class WsRoute:
+    """A WebSocket route (paired SRV-KERNEL change to FR-AUTH-10): the handler authenticates itself."""
+
+    path: str
+    handler: WsHandler
 
 
 def error(status: int, code: str, headers: dict[str, str] | None = None) -> JSONResponse:

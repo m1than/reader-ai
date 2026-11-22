@@ -1,0 +1,21 @@
+# VEC-SEARCH-2 — chunking over material spans (FR-SEARCH-3). Synthetic text, small parameters so the windows can be
+# checked by hand; production parameters are size 1200, overlap 200, min 80 (spikes/embeddings-local/bench.py
+# chunk_pages, the parameters behind the measured recall). The algorithm is the same for both.
+#
+# Per page, in span seq order: each span's text is whitespace-collapsed (" ".join(text.split())); empty results are
+# skipped; the rest are joined with one space. Windows start at range(0, max(len(text) - overlap, 1), size - overlap)
+# and take text[start:start + size]; a window shorter than `min` is dropped. A chunk lists every span seq whose
+# character range intersects the window; its primary span is the one with the largest overlap with the window, the
+# first such span on a tie. (Chunk 1 below: seq 0 overlaps 10 characters [0,10), seq 2 overlaps 9 [11,20) -> seq 0.)
+params: { size: 20, overlap: 5, min: 4 }
+spans:
+  - { seq: 0, page: 1, text: "Alpha beta" }
+  - { seq: 1, page: 1, text: "" }
+  - { seq: 2, page: 1, text: "gamma  delta\nepsilon" }
+  - { seq: 3, page: 2, text: "Hi" }
+  - { seq: 4, page: 3, text: "xxxxxxx" }
+expected:
+  - { page: 1, start: 0, end: 20, text: "Alpha beta gamma del", span_seqs: [0, 2], primary_seq: 0 }
+  - { page: 1, start: 15, end: 30, text: "a delta epsilon", span_seqs: [2], primary_seq: 2 }
+  # page 2: "Hi" is 2 characters, shorter than min 4 -> no chunk
+  - { page: 3, start: 0, end: 7, text: "xxxxxxx", span_seqs: [4], primary_seq: 4 }

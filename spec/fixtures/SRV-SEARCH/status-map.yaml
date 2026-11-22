@@ -1,0 +1,21 @@
+# VEC-SEARCH-4 — search_status (FR-SEARCH-9): the search.embed job status for the material's current key
+# (SRV-EVENTS FR-EVENTS-12: none | queued | running | succeeded | dead) and whether a search_embeds row exists for that
+# key, mapped to the status V.COMPILE-min waits on.
+rows:
+  - { job: none,      embeds_row: false, status: none }
+  - { job: queued,    embeds_row: false, status: queued }
+  - { job: running,   embeds_row: false, status: running }
+  - { job: dead,      embeds_row: false, status: dead }
+  # The row and the success outcome commit in one transaction (FR-SEARCH-5 step 3), so succeeded without the row is
+  # unreachable. If it is ever seen, it is reported as `dead` with a logged `status_inconsistent` line: enqueueing a
+  # succeeded key returns already_done (SRV-EVENTS FR-EVENTS-3), so `ensure` cannot re-run it and a caller must not
+  # wait on it; the owner-visible fix is a new key (a chunking or model change) or a manual cleanup.
+  - { job: succeeded, embeds_row: false, status: dead }
+  # A row means the vectors exist for the current key, whatever the job record says.
+  - { job: succeeded, embeds_row: true,  status: ready }
+  - { job: none,      embeds_row: true,  status: ready }
+  - { job: queued,    embeds_row: true,  status: ready }
+  - { job: running,   embeds_row: true,  status: ready }
+  - { job: dead,      embeds_row: true,  status: ready }
+# An embed service that stays unhealthy (FR-SEARCH-5 step 2) spends attempts: queued between retries, dead after the
+# third, when `reader.search.ensure` requeues it.

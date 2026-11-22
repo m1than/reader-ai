@@ -1,0 +1,258 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reader-ai.local/schemas/lesson-cell-reader-metadata/1",
+  "title": "metadata.reader of a lesson cell (ADR-0004), slice V.SRV-LESSON-min",
+  "description": "Validates the `reader` key of one cell's metadata, with jsonschema's FormatChecker (dates). The cell_type each kind requires is checked by FR-LESSON-1 from `x-cell-type`. Properties not declared for the cell's kind are refused (unevaluatedProperties).",
+  "type": "object",
+  "unevaluatedProperties": false,
+  "required": ["kind", "sectors", "provenance"],
+  "properties": {
+    "kind": {
+      "enum": ["diagnostic", "route", "explain", "changed", "erratum", "tradeoff", "lab", "recall", "notes", "open"]
+    },
+    "sectors": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/slug" }
+    },
+    "provenance": { "$ref": "#/$defs/provenance" }
+  },
+  "x-cell-type": {
+    "diagnostic": "markdown",
+    "route": "markdown",
+    "explain": "markdown",
+    "changed": "markdown",
+    "erratum": "markdown",
+    "tradeoff": "markdown",
+    "lab": "code",
+    "recall": "markdown",
+    "notes": "markdown",
+    "open": "markdown"
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "kind": { "const": "diagnostic" } } },
+      "then": {
+        "required": ["questions", "routes"],
+        "properties": {
+          "questions": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": ["id", "text"],
+              "additionalProperties": false,
+              "properties": { "id": { "$ref": "#/$defs/slug" }, "text": { "$ref": "#/$defs/text" } }
+            }
+          },
+          "routes": {
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": { "$ref": "#/$defs/slug" },
+            "additionalProperties": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/slug" } }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "route" } } },
+      "then": {
+        "required": ["source_refs"],
+        "properties": {
+          "source_refs": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/source_ref" } }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "explain" } } },
+      "then": {
+        "required": ["claims"],
+        "properties": {
+          "claims": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "required": ["id", "text", "citations"],
+              "additionalProperties": false,
+              "properties": {
+                "id": { "$ref": "#/$defs/slug" },
+                "text": { "$ref": "#/$defs/text" },
+                "citations": { "$ref": "#/$defs/citations" }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "changed" } } },
+      "then": {
+        "required": ["as_of", "citations"],
+        "properties": {
+          "as_of": { "$ref": "#/$defs/date" },
+          "citations": { "$ref": "#/$defs/citations" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "erratum" } } },
+      "then": {
+        "required": ["source_ref", "correction", "citations"],
+        "properties": {
+          "source_ref": { "$ref": "#/$defs/source_ref" },
+          "correction": { "$ref": "#/$defs/text" },
+          "citations": { "$ref": "#/$defs/citations" }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "tradeoff" } } },
+      "then": {
+        "required": ["options", "rejected_because"],
+        "properties": {
+          "options": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 20,
+            "items": {
+              "type": "object",
+              "required": ["id", "name"],
+              "additionalProperties": false,
+              "properties": { "id": { "$ref": "#/$defs/slug" }, "name": { "$ref": "#/$defs/text" } }
+            }
+          },
+          "rejected_because": {
+            "type": "object",
+            "maxProperties": 20,
+            "propertyNames": { "$ref": "#/$defs/slug" },
+            "additionalProperties": { "$ref": "#/$defs/text" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "lab" } } },
+      "then": {
+        "required": ["kernel", "network", "asserts"],
+        "properties": {
+          "kernel": { "enum": ["python3"] },
+          "network": { "enum": ["none"] },
+          "asserts": { "type": "array", "minItems": 1, "maxItems": 100, "items": { "$ref": "#/$defs/text" } },
+          "verified": {
+            "description": "Written by lab verification (ADR-0009 stage 5). `input_sha256` is the sha256 of this cell's joined source, not of the stage input (a declared narrowing of ADR-0009's 'input hash'); binding it to the lesson's ordered labs is SRV-PIPELINE's.",
+            "type": "object",
+            "required": ["runs", "passed", "outputs_identical", "input_sha256"],
+            "additionalProperties": false,
+            "properties": {
+              "runs": { "type": "integer", "minimum": 0, "maximum": 10 },
+              "passed": { "type": "boolean" },
+              "outputs_identical": { "type": "boolean" },
+              "input_sha256": { "$ref": "#/$defs/sha256" }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "recall" } } },
+      "then": {
+        "required": ["front", "back"],
+        "properties": { "front": { "$ref": "#/$defs/text" }, "back": { "$ref": "#/$defs/text" } }
+      }
+    },
+    {
+      "if": { "properties": { "kind": { "const": "open" } } },
+      "then": {
+        "required": ["status"],
+        "properties": {
+          "status": { "enum": ["open", "answered", "wontfix"] },
+          "answer_ref": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/slug" }] },
+          "finding": {
+            "description": "Present when the open question comes from a finding; absent for a question the drafter asks.",
+            "type": "object",
+            "required": ["stage", "blocking", "text"],
+            "additionalProperties": false,
+            "properties": {
+              "stage": { "enum": ["draft", "fact_check", "lab_verification", "adversarial_review", "owner"] },
+              "blocking": { "type": "boolean" },
+              "text": { "$ref": "#/$defs/text" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "single_line": {
+      "description": "JSON Schema `pattern` is a search, and `$` in Python's re also matches before a trailing newline; every anchored identifier below adds this guard.",
+      "not": { "pattern": "\\n" }
+    },
+    "slug": { "type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$", "$ref": "#/$defs/single_line" },
+    "text": { "type": "string", "minLength": 1, "maxLength": 20000 },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$", "$ref": "#/$defs/single_line" },
+    "date": { "type": "string", "format": "date", "pattern": "^\\d{4}-\\d{2}-\\d{2}$", "$ref": "#/$defs/single_line" },
+    "span_ref": {
+      "description": "Span id issued by SRV-INGEST: `<material_sha256>:<seq>` (the material's lowercase hex sha256, a colon, the span's decimal sequence number within that material; ADR-0008 spans). SRV-LESSON checks the form only; resolving it to source text is SRV-PIPELINE's (stage 4).",
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}:(0|[1-9][0-9]{0,11})$",
+      "$ref": "#/$defs/single_line"
+    },
+    "page": { "type": "integer", "minimum": 1, "maximum": 100000 },
+    "material_title": { "type": "string", "minLength": 1, "maxLength": 200, "$ref": "#/$defs/single_line" },
+    "source_ref": {
+      "type": "object",
+      "required": ["material_sha256"],
+      "additionalProperties": false,
+      "properties": {
+        "material_sha256": { "$ref": "#/$defs/sha256" },
+        "page": { "$ref": "#/$defs/page" },
+        "span": { "$ref": "#/$defs/span_ref" }
+      }
+    },
+    "citation": {
+      "oneOf": [
+        {
+          "description": "A source span; `page` and `material_title` are for display (WEB renders 'material_title, p. page').",
+          "type": "object",
+          "required": ["span"],
+          "additionalProperties": false,
+          "properties": {
+            "span": { "$ref": "#/$defs/span_ref" },
+            "page": { "$ref": "#/$defs/page" },
+            "material_title": { "$ref": "#/$defs/material_title" }
+          }
+        },
+        {
+          "type": "object",
+          "required": ["url", "retrieved"],
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "description": "https only, a DNS host name (no IP literal, no userinfo), optional port, printable ASCII after the host.",
+              "type": "string",
+              "maxLength": 2000,
+              "pattern": "^https://[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\\.[A-Za-z]{2,63}(?::[0-9]{1,5})?(?:[/?#][\\x21-\\x7e]*)?$",
+              "$ref": "#/$defs/single_line"
+            },
+            "retrieved": { "$ref": "#/$defs/date" }
+          }
+        }
+      ]
+    },
+    "citations": { "type": "array", "maxItems": 50, "items": { "$ref": "#/$defs/citation" } },
+    "provenance": {
+      "type": "object",
+      "required": ["stage"],
+      "additionalProperties": false,
+      "properties": {
+        "stage": { "enum": ["template", "fixture", "draft", "fact_check", "lab_verification", "adversarial_review", "revise"] },
+        "input_sha256": { "$ref": "#/$defs/sha256" },
+        "prompt_version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "$ref": "#/$defs/single_line" },
+        "model": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$", "$ref": "#/$defs/single_line" }
+      }
+    }
+  }
+}

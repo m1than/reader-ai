@@ -1,0 +1,21 @@
+# VEC-SEARCH-5 — full-text list with OR semantics and no operator parsing (FR-SEARCH-7 step 3, INV-SEARCH-7).
+# Synthetic English chunks, fts_config english. Expected sets are the chunks sharing at least one lexeme with the
+# query; order inside a set is checked against ts_rank_cd computed by the same database (not hand-ranked), then id.
+fts_config: english
+chunks:
+  - { id: c1, text: "The miner validates blocks and earns a reward." }
+  - { id: c2, text: "Wallets store private keys." }
+  - { id: c3, text: "Blocks link to previous blocks by hash." }
+cases:
+  - name: partial-overlap
+    query: "miners link blocks"
+    expected_ids: [c1, c3]          # lexemes miner, link, block: c1 shares miner+block, c3 shares link+block; AND would match none
+  - name: operators-are-text
+    query: "block & !link | :* <-> 'x\\"
+    expected_ids: [c1, c3]          # only the words block and link (and x) become lexemes; no operator is parsed
+  - name: stop-words-only
+    query: "the a of"
+    expected_ids: []                # no lexemes -> empty list, no error
+  - name: no-overlap
+    query: "quantum telescope"
+    expected_ids: []

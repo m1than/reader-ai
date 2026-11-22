@@ -1,0 +1,8 @@
+# Build-context exclusions for caddy.Dockerfile (OPS-DEPLOY FR-DEPLOY-2). BuildKit reads <Dockerfile>.dockerignore
+# next to the Dockerfile. A second guard beside the COPY allow-list: host dependencies, build outputs and any .env
+# never enter the build.
+**/node_modules
+**/dist
+**/storybook-static
+**/__pycache__
+**/.env*

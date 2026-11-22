@@ -1,0 +1,163 @@
+# WEB-RENDER — rendering of lesson content and notebook outputs per ADR-0013's matrix: sanitised markdown, math, code
+# and the safe output types (vertical slice V6, `V.WEB-min`; full module in stage 4b).
+#
+# Threat model: lesson markdown comes from the compile pipeline (agent output over a copyrighted source) and outputs
+# come from code the learner runs; both are untrusted. The app document holds the learner's session (an HttpOnly
+# cookie) and can call the api, so no untrusted markup may run or be parsed as HTML in it.
+#
+# Slice decision (coordinator, after deep-reviewer, 2026-11-21): the sandboxed frame for `text/html` and
+# `image/svg+xml` is deferred to stage 4b. The review reproduced in Chromium a one-click session takeover through a
+# frame page opened top-level, plus two more frame defects; the findings are recorded in `defers` for 4b. In the slice,
+# `text/html` and `image/svg+xml` render their `text/plain` alternative (or their source as text). No SVG blob is
+# ever created: the code review measured in Chromium that an `image/svg+xml` blob URL, opened top-level (a new tab
+# from the image), runs its script in the app origin with the session. Raster images (PNG, JPEG, GIF) keep blob: URLs,
+# revoked as soon as the image has loaded or failed. Nothing under `/sandbox/` exists.
+#
+# Design:
+# - Everything shown in the app document is built as React elements from a syntax tree: remark (GFM, math) → rehype →
+#   `rehype-sanitize` → `rehype-katex` → Shiki on `code` → `hast-util-to-jsx-runtime`. Sanitising runs before KaTeX
+#   and Shiki, so the sanitiser sees only author input and the trusted renderers' output is not stripped. No
+#   `rehype-raw`: raw HTML in markdown stays text. No HTML string is ever inserted (WEB-UI INV-UI-2). Inline styles
+#   produced by KaTeX and Shiki become React style objects, applied through the CSSOM, so the app needs no
+#   `style-src 'unsafe-inline'` (WEB-UI INV-UI-4 checks it in a browser). rehype-katex turns KaTeX's HTML into hast
+#   through hast-util-from-html-isomorphic; its browser build parses with the DOM, which the Chromium run of INV-UI-4
+#   reported as `style-src-attr` violations, so the build aliases it to its JavaScript (parse5) build
+#   (web/vite.config.ts).
+# - The MathML `annotation` element, which repeats the TeX source as text, is removed after KaTeX, so source such as
+#   `\href{javascript:…}` never appears in the document even as text.
+# - Math: KaTeX (ADR-0013) with `trust: false`; fonts are bundled as files (WEB-UI FR-UI-9: no data: URLs). KaTeX over
+#   MathJax: ADR-0013 names it, it renders synchronously into the tree above, and MathJax would inject styles at run
+#   time.
+# - Code: Shiki with its JavaScript regex engine (no WebAssembly, so no `wasm-unsafe-eval`), only the python grammar,
+#   loaded lazily.
+#
+# Cross-spec: the app CSP additions are in WEB-UI's header (task V.OPS-DEPLOY-web). This spec needs `img-src 'self'
+# blob:` from them.
+#
+# Test levels: [unit] Vitest in jsdom on the hast and React output; [story] stories per output type and for VEC-RENDER-1;
+# [browser] Playwright (Chromium) against `vite preview` behind WEB-UI's test server with the production CSP, run on
+# request and in the slice live check.
+
+id: WEB-RENDER
+title: Rendering — sanitised markdown, KaTeX, Shiki and the safe output types; HTML shown as text in the slice
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a); approved without a second round"
+layer: web
+track: engineering
+adr: [ADR-0013, ADR-0024]
+
+paths:
+  - web/src/render/**
+  - e2e/web/render/**
+  - spec/fixtures/WEB-RENDER/**
+
+defers:
+  - >-
+    Sandboxed frame for text/html and image/svg+xml (ADR-0013): stage 4b. Findings of the slice review to address there:
+    (1) a top-level load of the frame page must not run in the app origin: serve it with a CSP `sandbox allow-scripts`
+    directive and have its script refuse to run unless `self.origin === "null"`; (2) the frame's script is
+    self-contained and inline in the frame page (no module graph shared with the app); (3) WebRTC can bypass
+    `connect-src`, so whether outputs may use it is an owner decision; (4) probe navigation of the parent and top
+    (`top.location`, `window.open`, forms) from the frame; (5) answer the frame's `ready` once only; (6) `document.open()`
+    removes the frame's own message listener, so the render step must re-register or avoid it; (7) clamp the reported
+    height and ignore non-finite values.
+  - "Mermaid diagrams: stage 4b"
+  - "ipywidgets rendering (html-manager): stage 4b"
+  - "markdown images (relative lesson attachments): stage 4b, with an attachment route in SRV-LESSON"
+  - "ANSI colours in text outputs: stage 4b"
+  - "binary output buffers: with SRV-KERNEL in stage 4a"
+
+normative:
+  - id: REF-RENDER-1
+    title: ADR-0013 — rendering matrix and safety column
+    url: docs/adr/0013-frontend-and-rendering.md
+  - id: REF-RENDER-2
+    title: Content Security Policy Level 3
+    url: https://www.w3.org/TR/CSP3/
+  - id: REF-RENDER-3
+    title: KaTeX options (trust, strict, maxSize, maxExpand, output)
+    url: https://katex.org/docs/options
+  - id: REF-RENDER-4
+    title: rehype-sanitize and hast-util-sanitize (schema, protocols, clobber)
+    url: https://github.com/rehypejs/rehype-sanitize
+  - id: REF-RENDER-5
+    title: Jupyter nbformat — output types and MIME bundles
+    url: https://nbformat.readthedocs.io/en/latest/format_description.html#code-cell-outputs
+  - id: REF-RENDER-6
+    title: JupyterLab rendermime — default renderer rank order
+    url: https://jupyterlab.readthedocs.io/en/stable/extension/extension_points.html#mime-renderers
+
+requirements:
+  - id: FR-RENDER-1
+    text: >-
+      Output dispatch: an output with several MIME types renders exactly one, the first present in VEC-RENDER-1's
+      `preference` list (JupyterLab's order restricted to the slice's types); `text/html` renders as text: the
+      output's `text/plain` when present, otherwise the HTML source. `stream` and `error` outputs render as text
+      (an error as its traceback lines joined by newlines). An output with none of the listed types shows
+      "unsupported output type: <type>" as text. [unit]
+  - id: FR-RENDER-2
+    text: >-
+      Markdown (cell sources and `text/markdown` outputs): remark with GFM and math, then rehype without `rehype-raw`
+      (raw HTML stays text; remark-rehype with `clobberPrefix: ''`, so the sanitiser adds its prefix once, and an
+      in-page link `#x` is then pointed at `#user-content-x` when that id exists, so footnotes work), then
+      `rehype-sanitize` with a schema derived from the default one that: allows on `code` only the classes
+      `language-*`, `math-inline` and `math-display` and on no other element any class; allows no `style`, `srcset` or
+      event attribute and keeps the default `id`/`name` clobber prefix; keeps the default protocol rules of every URL
+      attribute and narrows `href` to http, https and mailto plus relative URLs; and removes `img`, `picture`, `source`,
+      `video`, `audio`, `iframe`, `object`, `embed`, `form`, `input`, `button`, `base` and `style` elements (markdown
+      images are not rendered in the slice). Then `rehype-katex` (FR-RENDER-3), then Shiki on `code` elements with
+      `language-python` (FR-RENDER-4). Links get `rel="noopener noreferrer"` and, when absolute (a scheme, or a
+      protocol-relative `//host`), `target="_blank"`. The tree is rendered with `hast-util-to-jsx-runtime`. [unit]
+  - id: FR-RENDER-3
+    text: >-
+      Math (`$…$` and `$$…$$` in markdown, and `text/latex` outputs): KaTeX with `trust: false`, `strict: "ignore"`,
+      `throwOnError: false` (a parse error renders the source in the error colour), `maxSize: 10` (em; a structural
+      bound on rule and box sizes), `maxExpand: 1000` and output `htmlAndMathml`. Display math sits in a container with
+      horizontal scrolling and clipped overflow; inline math is an inline block of at most 4em height with
+      `overflow: hidden` and `contain: paint`, so a `\raisebox` or `\rule` cannot paint or lay out outside it (code
+      review; a [browser] check renders `$\raisebox{-500em}{X}$` and the page stays short). For `text/latex` outputs one
+      outer delimiter pair (`$$…$$`, `$…$`, `\[…\]`, `\(…\)`) is removed before rendering, and the output renders in
+      display mode. `\href`, `\url` and `\includegraphics` render as text, never as links or attributes. [unit]
+      [browser]
+  - id: FR-RENDER-4
+    text: >-
+      Code: Shiki with the JavaScript regex engine, the python grammar and one Calm theme per colour scheme, loaded as
+      a lazy chunk; tokens become React elements. Until the chunk loads, and for any other language, code renders as
+      plain monospace text. [unit]
+  - id: FR-RENDER-5
+    text: >-
+      Safe types: `text/plain`, stream and error text render as text nodes in a monospace block with ANSI escape
+      sequences removed; `image/png`, `image/jpeg` and `image/gif` decode base64 into a Blob and render as `<img>` with a
+      `blob:` URL that is revoked as soon as the image has loaded or failed (and on unmount), with `alt` from the
+      output's `text/plain` when present; `image/svg+xml` renders as text like `text/html` (its `text/plain`, or its
+      source) and never becomes a blob. A malformed output (a traceback that is not a list of strings, a bundle that is
+      not an object) is coerced, never thrown. `application/json` renders pretty-printed with 2-space
+      indentation as text. A single text output longer than 1 MiB is cut at 1 MiB with a "truncated" note (a
+      structural bound on DOM size; SRV-KERNEL caps an execution at 16 MiB). [unit]
+
+invariants:
+  - id: INV-RENDER-1
+    text: >-
+      For any markdown or `text/markdown` input, the rendered React tree contains no `script`, `style`, `img`,
+      `iframe`, `object`, `embed`, `form` or `base` element; no attribute starting with `on`; no `style` or `srcset`
+      attribute taken from the input (style objects come only from KaTeX and Shiki output); no `class` outside
+      FR-RENDER-2's allowance except on elements KaTeX and Shiki create; and no `href` whose scheme is not http, https,
+      mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
+      cases and VEC-NOTEBOOK-1's explain cell]
+  - id: INV-RENDER-2
+    text: >-
+      Output content of type `text/html` or `image/svg+xml` is never parsed or loaded in the app document: for any
+      such string, the rendered output is a text node whose text equals the `text/plain` alternative or the source, and
+      no blob is created for it. [unit, property-based] [browser: VEC-RENDER-1 `svg-script` yields no
+      `img[src^="blob:"]` and runs no script]
+
+nfr: []
+
+vectors:
+  - id: VEC-RENDER-1
+    source: >-
+      ADR-0013 rendering matrix as the slice renders it (one case per output type, plus hostile markdown, LaTeX, HTML and
+      SVG probes), written for this spec
+    file: spec/fixtures/WEB-RENDER/outputs.yaml

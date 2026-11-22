@@ -5,7 +5,7 @@
 #         drop (not forwarded, counted in the log) | close (connection closed with the code)
 
 browser_to_kernel:
-  - { channel: shell,   msg_type: execute_request,     action: rewrite, rewrites: [header.session, header.username, content.allow_stdin=false, content.user_expressions={}] }
+  - { channel: shell,   msg_type: execute_request,     action: rewrite, rewrites: [header.session, header.username, content.allow_stdin=false, "content.user_expressions={}"] }
   - { channel: shell,   msg_type: kernel_info_request, action: rewrite, rewrites: [header.session, header.username] }
   - { channel: shell,   msg_type: complete_request,    action: rewrite, rewrites: [header.session, header.username] }
   - { channel: shell,   msg_type: inspect_request,     action: rewrite, rewrites: [header.session, header.username] }

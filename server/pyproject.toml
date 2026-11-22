@@ -13,6 +13,12 @@ dependencies = [
   "asyncpg>=0.32.0,<0.33",     # SRV-AUTH: Postgres driver (ADR-0006)
   "alembic>=1.20.1,<1.21",     # SRV-AUTH: migrations (ADR-0006)
   "webauthn==3.0.1",           # SRV-AUTH: passkey ceremonies (REF-AUTH-2)
+  "procrastinate[alembic]==3.12.0",   # SRV-EVENTS: job queue and its shipped Alembic chain (REF-EVENTS-2)
+  "psycopg[binary,pool]==3.3.9",      # SRV-EVENTS: procrastinate's async driver (cp314 wheels for macOS and Linux arm64)
+  "nbformat==5.11.1",          # SRV-LESSON: notebook validation and canonical form (REF-LESSON-1)
+  "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
+  "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
+  "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
 ]
 
 [project.scripts]
@@ -39,12 +45,15 @@ dev = [
   "pytest>=9.2",
   "ruff>=0.17",
   "testcontainers>=4.15",
+  "types-jsonschema>=4.26",   # SRV-LESSON: mypy --strict over reader.lessons.schema
 ]
 
 [tool.ruff]
 line-length = 110
 target-version = "py314"
 src = ["src", "tests"]
+# Packaged lesson fixtures are generated data (spec/fixtures/SRV-LESSON/gen_f01.py), not source.
+extend-exclude = ["src/reader/lessons/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PT", "TID"]

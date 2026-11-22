@@ -1,0 +1,657 @@
+# SRV-INGEST — vertical-slice revision (slice: V.SRV-INGEST-min; docs/roadmap.md "Vertical slice first", step V2).
+#
+# What this revision covers: one declared PDF material (reader.yaml `materials[]`) becomes ordered source spans with
+# stable public ids, plus an outline, in Postgres, owned by the owner, with its status visible through the api.
+#
+# Flow (ADR-0021 native decision; transport per ADR-0027, accepted by the owner in chat):
+#   1. Host: `reader-ingest <material id>` takes a per-material lock, copies the PDF into a fresh work directory while
+#      hashing it, checks the stack's health and the import status.
+#   2. Host: it runs the converter from its own non-editable venv as a child under a deny-default macOS sandbox
+#      profile: CPU only, no network, no Unix sockets, no mach services, reads only its runtime, the models and its
+#      work directory, writes only its work directory, no secrets.
+#      Docling 2.151.1, formula model on, code model off, code lines from the PDF text layer (ADR-0021 Decision 1).
+#   3. Host: it validates the artifact (manifest, spans, outline) and streams it as a tar over stdin into
+#      `docker exec -i <worker container> python -I -m reader.ingest.receive` (the image's default user is 10001).
+#   4. Worker container: `receive` validates again, stores the artifact content-addressed on the blobs volume
+#      (ADR-0007), and enqueues the job `ingest.import` (SRV-EVENTS).
+#   5. Worker: the job writes the material, ingest, span and outline rows in its run transaction.
+#   6. api: `GET /api/materials…` shows status, counts, outline and a page's spans with their public ids.
+#
+# Why not the loopback listener of ADR-0021 Decision 3: the worker sits only on internal networks (OPS-DEPLOY), so it
+# cannot reach a host listener. ADR-0027 records the change. The owner accepted ADR-0027 and CLI-first ingestion in
+# chat on 2026-11-21 (upload later); the owner sets its status line and adds ADR-0021's amendment note.
+#
+# Confinement evidence: `spikes/ingest-confine` (RESULT.md, converter.sb). The deny-default profile runs configuration D
+# on CPU at 15.69–15.85 pages/min, against 15.85–16.57 unconfined on the same 20 pages, with identical output (6
+# formulas, 11 tables). Every negative probe was denied. The dedicated-macOS-user fallback is not needed.
+#
+# Declared deviations:
+#   - The roadmap's slice says "Upload the Bashir PDF". The PDF is declared in reader.yaml and ingested with a host
+#     command; browser upload is deferred (owner note 1).
+#   - ADR-0008 (proposed) names pypdf for bookmarks. This spec reads bookmarks and the text layer with pypdfium2, which
+#     Docling already depends on, so one PDF library serves both and no second parser enters the host install.
+#
+# Span ids (coordinator decision, 2026-11-21): every span has the public id "<material_sha256>:<seq>". Lesson
+# citations use it. A material's converter_version is frozen at its first successful import, so the id stays stable;
+# re-ingesting under a new version is deferred and carries an obligation (defers).
+#
+# Cross-spec items (each a paired change in the owning spec):
+#   - SRV-EVENTS: `reader.jobs.catalog.KINDS` includes the kinds of `reader.ingest.jobs.KINDS` through a declared list
+#     of kind modules (today KINDS is one tuple in jobs/catalog).
+#   - SRV-AUTH: `reader.api.app.ROUTERS` lists `reader.ingest.routes`; `reader.db`'s declared `version_locations`
+#     list adds `reader/ingest/migrations`. The owner-only rule is an in-handler check here (FR-INGEST-15), so SRV-AUTH
+#     needs no new access policy.
+#   - OPS-DEPLOY: the server image creates `/var/lib/reader/blobs` owned by uid 10001 (scheduled as its own paired
+#     change). Without it a fresh `blobs` volume is root-owned and receive cannot write.
+#   - OPS-CLI: none. `reader-ingest` is its own console script and calls `reader status --json` (FR-CLI-13) for the
+#     project name and health; it resolves the worker container with OPS-CLI FR-CLI-9's label rule.
+#
+# `server/pyproject.toml` is in this spec's paths for a narrow purpose only: the `reader-ingest` console script and the
+# `reportlab` dev dependency for the fixture generator. Docling never enters the server environment or image: it lives
+# only in the converter's own venv (FR-INGEST-3). Other specs keep their own entries in that file.
+#
+# Test levels:
+#   [unit]   pure Python, no services.
+#   [db]     Postgres through testcontainers on the pinned postgres:18-trixie digest (as SRV-AUTH); skips without a
+#            Docker daemon.
+#   [host]   needs the converter venv and models from `reader-ingest --setup` (FR-INGEST-3); pytest marker
+#            `ingest_host`, run on request (READER_TEST_INGEST_HOST=1), not in every local gate: Docling with torch
+#            and its 1.2 GB of models are a multi-GB install.
+#   [local]  needs the sha256-matched pilot PDF on the owner's Mac; reported as a skip when absent, never as a pass
+#            (ADR-0021 verified_by).
+#   [live]   e2e/live/slice.sh against `reader up`.
+#
+# First exercised only in the [local] check, because unit and host tests use synthetic inputs:
+#   - the real profile's behaviour on the pilot (FR-INGEST-4, INV-INGEST-4);
+#   - code text from the pilot's text layer and the code-order correction on pages 461 and 468 (FR-INGEST-7,
+#     FR-INGEST-8, VEC-INGEST-3);
+#   - the pilot outline (FR-INGEST-9, VEC-INGEST-4);
+#   - the full-run throughput (NFR-INGEST-1).
+
+id: SRV-INGEST
+title: Ingestion (slice) — native confined Docling conversion of a declared PDF into ordered spans and an outline
+status: draft
+approved_by: null
+approved_at: null
+layer: server
+track: engineering
+slice: V.SRV-INGEST-min
+adr: [ADR-0021, ADR-0027, ADR-0008, ADR-0006, ADR-0007, ADR-0011, ADR-0017, ADR-0026]
+
+paths:
+  - server/src/reader/ingest/**
+  - server/tests/ingest/**
+  - spec/fixtures/SRV-INGEST/**
+  - server/pyproject.toml
+
+normative:
+  - id: REF-INGEST-1
+    title: "ADR-0021 — formula model on, code from the PDF text layer, deterministic page check; native after M1 — accepted"
+    url: docs/adr/0021-ingestion-formulas-text-layer-code.md
+  - id: REF-INGEST-2
+    title: "ADR-0027 — native ingestion transport over docker exec stdin, no listener — accepted by the owner in chat 2026-11-21 (status line set by the owner)"
+    url: docs/adr/0027-native-ingest-transport-no-listener.md
+  - id: REF-INGEST-3
+    title: "Spike ingest-docling RESULT: configuration D, fidelity table, M1 numbers"
+    url: spikes/ingest-docling/RESULT.md
+  - id: REF-INGEST-4
+    title: Docling 2.151.1 documentation — PdfPipelineOptions, DoclingDocument items and provenance
+    url: https://docling-project.github.io/docling/
+  - id: REF-INGEST-5
+    title: PDF 2.0 (ISO 32000-2), 12.3.3 Document outline
+    url: https://www.pdfa.org/resource/iso-32000-2/
+  - id: REF-INGEST-6
+    title: "POSIX.1-2001 pax / ustar archive format (Python tarfile)"
+    url: https://docs.python.org/3/library/tarfile.html
+  - id: REF-INGEST-7
+    title: "Spike ingest-confine RESULT: deny-default sandbox-exec profile, throughput, negative probes"
+    url: spikes/ingest-confine/RESULT.md
+  - id: REF-INGEST-8
+    title: "Spike ingest-confine converter.sb: the measured profile the product profile derives from"
+    url: spikes/ingest-confine/converter.sb
+
+# Structural bounds, each with its reason. None is measured unless it says so.
+#   Artifact caps: spans.jsonl ≤ 64 MiB, outline.json ≤ 4 MiB, manifest.json ≤ 64 KiB, the whole tar on stdin
+#     ≤ 80 MiB; one span's text ≤ 1 MiB; ≤ 500,000 spans; page_count ≤ 5,000; outline ≤ 20,000 entries, title
+#     ≤ 1,024 characters, level ≤ 16. Reason: generous ceilings that keep the worker (mem_limit 2g, OPS-DEPLOY)
+#     safe while it parses line by line and never holds the tar in memory. The pilot's real sizes are recorded in
+#     Red, not assumed here.
+#   Converter wall clock ≤ 4 h. Reason: ADR-0021's floor of 10 pages/min gives 94 min for the pilot; 4 h stops a hung
+#     child without cutting a slow but valid run of a 2,400-page material.
+#   Docling page batches of 50. Reason: the spike's full run used 50-page batches (Docker; 5,005 MiB peak).
+#   Import job: max_attempts 3, timeout_s 600. Reason: the import is one transaction of row inserts (no conversion);
+#     600 s covers 500,000 spans at an assumed 1,000 rows/s, itself a structural assumption, not a measurement.
+#   receive: 300 s internal deadline; host-side exec timeouts: receive 330 s, status and requeue 60 s. Reason:
+#     validation and an 80 MiB copy take seconds; a host-side timeout does not stop a process inside the container,
+#     so receive bounds itself, and the host waits slightly longer than that bound.
+
+requirements:
+  - id: FR-INGEST-1
+    text: >-
+      `reader-ingest MATERIAL_ID [--config PATH]` is a console script (`[project.scripts] reader-ingest =
+      "reader.ingest.host.cli:main"`). It loads reader.yaml with SRV-CONFIG's `load_config` (exit 2 with its error text
+      on a ConfigError) and finds the material by `materials[].id` (exit 2 `unknown_material`). It takes an exclusive
+      non-blocking `flock` on `<data_dir>/ingest/locks/<material sha256>.lock` for the whole run; a held lock exits 3
+      `busy`. It picks the work name (16 random hex) and first writes the run record
+      `<data_dir>/ingest/run/<work name>.json` (0600) = `{material_sha256, work}`, outside the child's tree. Only then
+      does it create `<work>` = `<data_dir>/ingest/work/<work name>/` (0700). This way no work directory ever exists
+      without a record that names its material. `child_sid` and `child_start` are added once the child has started
+      (FR-INGEST-16). It opens `materials[].file` with
+      `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, requires `fstat` to report a regular file, and copies it into
+      `<work>/in/material.pdf` (0400) while computing its sha256 over the copied bytes. A mismatch with
+      `materials[].sha256` exits 2 `sha256_mismatch` and runs nothing else. The child only ever reads the copy.
+      [unit]
+  - id: FR-INGEST-2
+    text: >-
+      Before converting, `reader-ingest` runs `reader status --json` (OPS-CLI FR-CLI-13); any exit other than 0 gives
+      exit 3 `stack_unhealthy`. It takes the project name from `project` and resolves the worker container as OPS-CLI
+      FR-CLI-9 does: labels `com.docker.compose.project=<project>`, `com.docker.compose.service=worker`,
+      `com.docker.compose.oneoff=False`, re-checked on the container's own attributes, exactly one running container
+      (else exit 3 `stack_unhealthy`). It then runs
+      `docker exec -i <container id> python -I -m reader.ingest.status --material-sha256 <sha>` (60 s; the worker
+      image's default user is 10001, so no `-u`) and
+      reads one JSON line (FR-INGEST-12).
+      - `succeeded`: prints "already ingested (converter <frozen version>)" and exits 0;
+      - `queued` or `running`: prints "import in progress" and exits 0;
+      - `dead`: exits 4 `import_dead` and names `--requeue`;
+      - `none`: continues.
+      Every subprocess gets an explicit allow-listed environment (PATH, HOME, LANG, DOCKER_HOST when set), never the
+      inherited one. [unit, fake runner]
+  - id: FR-INGEST-3
+    text: >-
+      `reader-ingest --setup [--config PATH]` prepares the converter. It is the only networked step and runs no
+      material.
+      **Converter venv**, `<data_dir>/ingest/venv-<CONVERTER_VERSION>/`:
+      - created with uv for CPython 3.14;
+      - filled from the committed, hash-pinned `reader/ingest/host/requirements.lock` (Docling 2.151.1 and its
+        closure, `--require-hashes`);
+      - holds a **non-editable** install of the `reader` package: a wheel built from the checkout and installed with
+        `--no-deps`, so every dependency comes only from the lock. The profile then reads the converter's code from
+        the venv and never from `server/src` (spikes/ingest-confine, "Where code is read from").
+      **Models:**
+      - `reader/ingest/host/models.lock.json` (committed) lists, for each model the converter uses (layout,
+        tableformer, code_formula; 1.2 GB in the spike), the Hugging Face repo id, the commit revision, and every
+        file's relative path and sha256;
+      - setup downloads exactly those revisions into `<data_dir>/models/docling-2.151.1/`, in the directory layout
+        `docling-tools models download` produces (the layout `artifacts_path` expects; the spike used that tool),
+        verifies every file, then makes the tree read-only (directories 0555, files 0444).
+      **Environment.** Setup runs with the FR-INGEST-2 allow-listed environment plus `HF_HUB_DISABLE_TELEMETRY=1`.
+      **Record and checks.**
+      - Setup writes `setup.json` = `{converter_version, converter_source_sha256, requirements_lock_sha256,
+        models_lock_sha256}`.
+      - `converter_source_sha256` is the sha256 over the sorted (relative path, file sha256) pairs of the `reader`
+        package source files in the converter's import closure. One function computes that closure, statically from
+        `reader.ingest.host.convert`, and both this hash and the imports test below use it. A wheel's hash is not
+        reproducible across builds, so the source is hashed instead.
+      - A normal run recomputes that hash from the checkout. It exits 2 `setup_missing` or `setup_stale` when the
+        venv, `setup.json` or any locked model file is absent, or when any recorded value differs from the
+        checkout's.
+      **Unit test:** every third-party module in that same import closure is satisfied by a distribution named in
+      `requirements.lock`, and every other module is in the stdlib or the `reader` package.
+      [host; unit for the checks]
+  - id: FR-INGEST-4
+    text: >-
+      **Command.** The converter runs as a child process:
+      `sandbox-exec -f <profile> -D PYROOT=<CPython prefix the venv links to> -D VENV=<converter venv> -D
+      MODELS=<models dir> -D WORK=<work> <VENV>/bin/python -I -m reader.ingest.host.convert --input
+      <work>/in/material.pdf --models <models dir> --out <work>/out`.
+      - Every `-D` value is passed through `os.path.realpath` first. Measured: the profile matches resolved paths, so
+        `WORK=/tmp/x` denied a write to `/private/tmp/x/f` (spikes/ingest-confine, "`-D` parameters must be
+        realpaths").
+      - The profile has no INPUT, PKG or SCRIPTS parameter: the PDF copy lies inside WORK, and the code lies inside
+        VENV (FR-INGEST-3).
+      **Profile.** `reader/ingest/host/converter.sb` is the measured spike profile `spikes/ingest-confine/converter.sb`
+      with only the SCRIPTS parameter removed. It holds exactly these rules, each cited to that file:
+      - `(deny default)` (converter.sb:6);
+      - read and map PYROOT, VENV, `/usr/lib`, `/System/Library`, `/System/Cryptexes` and `/private/var/db/dyld`
+        (:9–16);
+      - read MODELS (:17);
+      - read `/dev/urandom` and `/dev/null` (:18);
+      - read the literal `/`, without which dyld aborts at start (:19);
+      - read the literal `/private/etc/apache2/mime.types`, which stdlib `mimetypes` opens on import (:20);
+      - `file-read-metadata` (:21);
+      - read and write under WORK (:24);
+      - write data to `/dev/null` (:25);
+      - `process-exec` of exactly `<VENV>/bin/python` and `<PYROOT>/bin/python3.14`, the resolved symlink target
+        (:28–30);
+      - `process-fork` (:31);
+      - `sysctl-read` (:32).
+      There is no rule for `network*`, `mach-lookup`, `iokit-open`, `ipc-posix*` or `signal`, so they all stay
+      denied. The spike shows POSIX semaphores and shared memory are not needed.
+      **Child process setup:**
+      - the cwd is WORK (measured: torch's import fails when `getcwd` is unreadable);
+      - stdin is `/dev/null`;
+      - stdout and stderr are pipes;
+      - it starts in a new session (`start_new_session=True`).
+      **Child environment, exactly** (`env -i` semantics; HOME and TMPDIR inside WORK, as in the spike):
+      PATH=/usr/bin:/bin, HOME=<work>/home, TMPDIR=<work>/tmp, LANG=en_US.UTF-8, HF_HUB_OFFLINE=1,
+      TRANSFORMERS_OFFLINE=1, HF_HUB_DISABLE_TELEMETRY=1, OMP_NUM_THREADS=<logical CPUs>.
+      **The parent treats WORK as untrusted.** The spike measured that the child can create files, symlinks to outside
+      paths and FIFOs inside WORK. Hence FR-INGEST-10's `O_DIRECTORY|O_NOFOLLOW` and `dir_fd` opens and `fstat`
+      checks.
+      **Tests:**
+      - [unit] the argv, the environment and the realpaths;
+      - [unit] a rule-for-rule comparison, comments ignored, of the profile against the copy of the spike's profile
+        at `spec/fixtures/SRV-INGEST/spike-converter.sb`, minus its SCRIPTS line;
+      - [local] the profile's behaviour.
+  - id: FR-INGEST-5
+    text: >-
+      The converter uses Docling 2.151.1 with `PdfPipelineOptions(do_ocr=False, do_table_structure=True)`,
+      `do_formula_enrichment=True`, `do_code_enrichment=False`, `artifacts_path=<models>`, and
+      `AcceleratorOptions(device=CPU, num_threads=<logical CPUs>)`. The device is CPU, never MPS or AUTO. The formula
+      model is CPU-only anyway (ingest-docling RESULT.md: Docling refuses MPS for it), and with CPU nothing needed
+      IOKit or Metal mach services under the profile (ingest-confine RESULT.md, "No IOKit").
+      **Batches.** Conversion runs in batches of 50 pages. `pages_converted` counts the pages of batches whose Docling
+      `ConversionResult.status` is `ConversionStatus.SUCCESS`. On any other status (`PARTIAL_SUCCESS`, `FAILURE`,
+      `SKIPPED` and so on), the converter stops, writes no `manifest.json`, and exits non-zero, which the parent
+      reports as `convert_failed`.
+      **Progress output.** Stdout carries only progress lines, one per finished batch: `{"pages_done": n,
+      "pages_total": m}`. The parent renders a line only if it parses as exactly that schema with 0 ≤ n ≤ m ≤ 5,000.
+      It drops anything else, and never forwards the child's stderr, keeping only its byte count for the error
+      message.
+      **Tests:** [host]; [unit] for rendering; [unit] with a fake Docling result per status, checking
+      `pages_converted`, the missing manifest and the exit code.
+  - id: FR-INGEST-6
+    text: >-
+      Span mapping from Docling items, with page furniture (page headers and footers) dropped:
+      - section header or title → `heading`, with `level` from Docling (title = 1);
+      - list item → `list_item`;
+      - formula → `formula`: text is the decoded LaTeX; an undecoded formula keeps text "" and `decoded: false`;
+      - code → `code` (FR-INGEST-7);
+      - table → `table`, text = Docling's Markdown export of that table;
+      - picture → `figure`, text = its caption or "";
+      - every other text item (paragraph, caption, footnote) → `text`.
+      - An item with several provenance boxes takes its page and its bbox from the first box; a code item's text
+        reads every box (FR-INGEST-7).
+      - bbox is `[x0, y0, x1, y1]` in PDF points, top-left origin, rounded to 0.01.
+      **Text normalisation**, applied to every span and outline title:
+      - NFC;
+      - remove U+0000, every C0 control except `\n` and `\t`, and every lone surrogate.
+      **Soft hyphens:** every U+00AD is removed from non-code spans. The spike saw them inside words in table cells;
+      that every U+00AD in this book is a soft hyphen meant for removal is unmeasured. Code spans keep U+00AD.
+      [host, VEC-INGEST-2]
+  - id: FR-INGEST-7
+    text: >-
+      A `code` span's text comes from the PDF text layer inside each of the code item's provenance boxes, in
+      provenance order, joined with `\n`; it is read with pypdfium2, not from Docling's code model (ADR-0021). A block
+      split across a page break therefore keeps both parts. Line order and line breaks are kept:
+      - `\r\n` → `\n`;
+      - trailing spaces of each line removed;
+      - no line joined to another;
+      - then FR-INGEST-6's control-character removal and NFC.
+      VEC-INGEST-3's hashes are computed over exactly this normalised form. [host, VEC-INGEST-2; local,
+      VEC-INGEST-3]
+  - id: FR-INGEST-8
+    text: >-
+      Reading order is Docling's reading order with one correction, limited to code items:
+      - Each code item is moved to sit immediately after the non-code item on its page that comes last in Docling's
+        order among those whose bbox top lies above the code item's bbox top.
+      - If there is no such item, the code item goes before the page's first non-code item.
+      - Several code items on one page keep their relative order by bbox top.
+      - Every other item keeps Docling's order.
+      The correction is ADR-0021's hypothesis for the misread pages 461 and 468, and its evidence is scoped to those
+      two pages (VEC-INGEST-3). On other pages it is checked only by VEC-INGEST-2's synthetic list. `seq` numbers the spans from 0 across the material in the resulting order. [host, VEC-INGEST-2; local,
+      VEC-INGEST-3]
+  - id: FR-INGEST-9
+    text: >-
+      Outline (ADR-0008 Decision 1, structure first): the converter reads the PDF bookmark tree with pypdfium2 into
+      entries `{seq, level, title, page}`, where level 1 is the top and page is a 1-based page number, or null when the
+      destination has no page. Titles go through FR-INGEST-6's normalisation. With no bookmarks, the outline is the
+      `heading` spans in order with their levels. `manifest.outline_source` is `bookmarks` or `headings`. [host,
+      VEC-INGEST-2; local, VEC-INGEST-4]
+  - id: FR-INGEST-10
+    text: >-
+      **Artifact** (VEC-INGEST-1), three files in `<work>/out`:
+      - `manifest.json` = `{format: "reader-ingest/1", material_sha256, converter_version, page_count,
+        pages_converted, pages_without_text, span_count, outline_count, outline_source, spans_sha256,
+        outline_sha256}`. `pages_without_text` lists, sorted, the pages whose text layer holds fewer than 200
+        characters (the spike's threshold).
+      - `spans.jsonl`: one span per line, `{seq, page, kind, level, decoded, text, bbox}`.
+      - `outline.json`: a JSON array of `{seq, level, title, page}`.
+      **Converter version.** `converter_version` is the constant `reader.ingest.CONVERTER_VERSION` =
+      "docling-2.151.1+r1"; the `r` number rises with any change to FR-INGEST-5..9.
+      **Artifact id.** The sha256 of the exact `manifest.json` bytes, which are canonical JSON (sorted keys, separators
+      `,` and `:`, UTF-8, non-ASCII unescaped).
+      **Parent checks before sending.**
+      - A non-zero child exit, a timeout, or a missing output exits 5 `convert_failed`.
+      - The parent opens `<work>/out` with `O_RDONLY|O_DIRECTORY|O_NOFOLLOW`. It opens each of the three members
+        through that `dir_fd` with `O_RDONLY|O_NOFOLLOW|O_NONBLOCK`, so no path component the child controls is
+        followed. It requires `fstat` to report a regular file within its cap, and runs FR-INGEST-11's validator,
+        which includes `pages_converted == page_count`.
+      **Tar sent.** A ustar tar with exactly the three regular members, in the order manifest, spans, outline: mode
+      0644, mtime 0, uid and gid 0, no pax headers.
+      [unit]
+  - id: FR-INGEST-11
+    text: >-
+      `python -I -m reader.ingest.receive` (in the worker container, as its default uid 10001) has an internal
+      deadline of 300 s. Its phases are: read and validate, then store, then enqueue.
+      - **Deadline before storage completes** (the final rename): receive removes its temporary directory, exits 1
+        with `timeout`, and has written nothing (INV-INGEST-3).
+      - **Deadline or database error after storage:** the content-addressed directory is valid and stays. It is never
+        deleted on a timeout or an error. Receive exits 1 with `enqueue_failed`. What may exist beyond the directory
+        is at most the key's `job_keys` row and its job; a key row left without a job is enqueued by the SRV-EVENTS
+        sweep (FR-EVENTS-15). A re-run of `reader-ingest` is
+        idempotent: same artifact id, existing directory verified and kept, enqueue returns the key's state.
+      **Stream checks.** It reads the tar from stdin in stream mode with a strict reader:
+      - only ustar regular-file headers, in the order manifest, spans, outline;
+      - each name exactly as expected, with no `/`, `..` or NUL;
+      - no pax or GNU extension headers, links, devices or directories;
+      - each size within its cap, and the total within 80 MiB;
+      - after the third member, only the end-of-archive blocks;
+      - a short read fails.
+      **Content checks.**
+      - The manifest bytes equal their own canonical re-serialisation.
+      - Each file's sha256 matches the manifest.
+      - Every span line and the outline are valid under INV-INGEST-1.
+      - `pages_converted == page_count`.
+      - `material_sha256` equals a `materials[].sha256` in reader.yaml.
+      - `converter_version` equals its own `CONVERTER_VERSION`, and equals the material's frozen version when one
+        exists (FR-INGEST-17).
+      **Storage.** The blobs root is the constant `reader.ingest.BLOBS_DIR = /var/lib/reader/blobs`, the mount path of
+      the `blobs` volume in OPS-DEPLOY's compose.yaml. Receive writes the files to
+      `<BLOBS_DIR>/ingest/.tmp-<random>/`, fsyncs each file and the directory, then renames it to
+      `<BLOBS_DIR>/ingest/<artifact id>/` and fsyncs `<BLOBS_DIR>/ingest/`. If the target already exists, receive
+      verifies its three files against the manifest hashes. If they are valid, receive keeps it. If they are invalid,
+      it renames the bad directory aside, renames the new one in, and deletes the bad one.
+      **Enqueue and output.** It calls SRV-EVENTS `enqueue("ingest.import", {material_sha256, converter_version,
+      artifact_id, material_id})` and prints one JSON line: `{"result": "queued" | "already_queued" | "already_done" |
+      "dead", "artifact_id": ...}`.
+      **Rejection.** It prints `{"error": <code>}` and exits 1. Codes: `tar_format`, `too_large`, `hash_mismatch`,
+      `manifest_not_canonical`, `schema`, `incomplete`, `unknown_material`, `version_mismatch`, `version_frozen`,
+      `timeout`, `enqueue_failed`.
+      **Host mapping.** The parent exits 0 on queued, already_queued or already_done, 4 on dead, and 5 on an error,
+      repeating the code. The host waits up to 330 s; the exec timeout does not stop the in-container process, which
+      ends itself at 300 s. [db]
+  - id: FR-INGEST-12
+    text: >-
+      `python -I -m reader.ingest.status --material-sha256 <sha>` prints `{"status": s, "converter_version": v}`:
+      - **Frozen material:** if the material has a frozen version, `v` is that version and `s` is SRV-EVENTS
+        `job_status("ingest.import", key)` for the key (material_sha256, v).
+      - **Otherwise:** `v` is `CONVERTER_VERSION` and `s` is the status of the key (material_sha256,
+        CONVERTER_VERSION).
+      `python -I -m reader.ingest.requeue --material-sha256 <sha>` calls SRV-EVENTS `requeue_dead` for that key.
+      `reader-ingest --requeue MATERIAL_ID` runs it after FR-INGEST-1's lock and FR-INGEST-2's health check, without
+      converting again: the artifact is already on the blobs volume. A `dead` key whose artifact is invalid is
+      recovered in the slice only by raising `CONVERTER_VERSION` (a new key). This is possible because a dead key has
+      no `ingests` row, so no version is frozen. [db]
+  - id: FR-INGEST-13
+    text: >-
+      The job kind `ingest.import` is declared in `reader.ingest.jobs.KINDS`.
+      - **args:** `{material_sha256, converter_version, artifact_id, material_id}`.
+      - **key:** `[material_sha256, converter_version]`.
+      - **max_attempts:** 3.
+      - **transient:** asyncpg's connection errors (`asyncpg.exceptions.ConnectionDoesNotExistError`,
+        `asyncpg.exceptions.CannotConnectNowError`, `ConnectionRefusedError`). `FileNotFoundError`,
+        `PermissionError` and validation errors are permanent.
+      - **timeout_s:** 600.
+      **The handler:**
+      - reads the artifact from `<BLOBS_DIR>/ingest/<artifact_id>/` and re-validates it with FR-INGEST-11's validator;
+      - refuses with the permanent error `version_frozen` when the material already has an `ingests` row under
+        another version;
+      - in the run session, upserts `materials` by (owner_id, sha256), setting `config_id` and `page_count`;
+      - inserts one `ingests` row and all `material_spans` and `material_outline` rows.
+      It never commits itself (SRV-EVENTS FR-EVENTS-5). The owner is the one `users` row with role `owner`
+      (SRV-AUTH). Importing `reader.ingest.jobs`, `reader.ingest.receive`, `reader.ingest.status` and
+      `reader.ingest.routes` never imports `reader.ingest.host` or `docling`. [db; unit for the import check]
+  - id: FR-INGEST-14
+    text: >-
+      Migration `reader/ingest/migrations/<rev>_ingest.py` has branch label `ingest` and `depends_on` SRV-AUTH's base
+      revision, which creates `users`. It creates the tables below; every one has `owner_id uuid NOT NULL`
+      referencing `users.id`.
+      - `materials(id uuid pk, owner_id, sha256 text CHECK 64 lowercase hex, config_id text, page_count int,
+        created_at)`, unique (owner_id, sha256).
+      - `ingests(id uuid pk, owner_id, material_id fk, converter_version text, artifact_id text, span_count int,
+        outline_count int, outline_source text, pages_without_text int[], imported_at)`. It is unique
+        (material_id), which is the frozen version (FR-INGEST-17), not (material_id, converter_version).
+      - `material_spans(ingest_id fk, owner_id, seq int, page int, kind text CHECK in the enum, level int null,
+        decoded bool null, text text, x0 real, y0 real, x1 real, y1 real)`, pk (ingest_id, seq).
+      - `material_outline(ingest_id fk, owner_id, seq int, level int, title text, page int null)`, pk
+        (ingest_id, seq).
+      The downgrade drops these four tables only. [db]
+  - id: FR-INGEST-15
+    text: >-
+      `reader.ingest.routes.ROUTES` hold three routes. Each needs a session (SRV-AUTH), and each handler checks that
+      the session user has role `owner`; any other user gets 403 `owner_only`. The reason: sharing is deferred, and
+      materials may be `personal-use` (ADR-0008 Decision 4).
+      - `GET /api/materials` lists each `materials[]` entry of reader.yaml in config order as `{id, sha256, language,
+        license, status, converter_version, page_count, span_count, outline_count, pages_without_text}`. Fields that
+        come from the database are null until the material is imported.
+      - `GET /api/materials/{id}/outline` returns the imported outline entries.
+      - `GET /api/materials/{id}/spans?page=N` returns that page's spans in `seq` order, each with
+        `{span_id, seq, page, kind, level, decoded, text, bbox}`. N must lie in [1, page_count], else 400 `page`.
+      An unknown id, or a material that is not imported, gives 404 `not_found`. `status` follows VEC-INGEST-5.
+      [db]
+  - id: FR-INGEST-16
+    text: >-
+      `reader-ingest` removes `<work>` and its run record on every exit path:
+      - success, and any error code;
+      - SIGINT and SIGTERM, which are handled: the child's session gets SIGTERM, then SIGKILL after 10 s;
+      - the 4 h child timeout.
+      **Run record.** Once the child has started, the record holds:
+      - `child_sid`: the child's session id, which equals its pid because it leads a new session;
+      - `child_start`: the child's start time, read with `ps -o lstart= -p <pid>` (no new dependency).
+      **Stale cleanup at start.**
+      - Once it holds the material lock, every run record whose `material_sha256` is this material's is stale. A free
+        lock proves that no live run of this material owns it.
+      - Records of other materials are never read for cleanup, signalled or removed; their own runs clean them under
+        their own locks.
+      For each stale record of this material:
+      - **Kill only a verified process.** `killpg(child_sid, SIGKILL)` is sent only if all three hold:
+        - a process with that pid is alive;
+        - its start time from `ps -o lstart=` equals `child_start`;
+        - its cwd, from `lsof -a -d cwd -p <pid> -Fn`, is the record's `work` directory, compared as realpaths.
+        Otherwise nothing is signalled, because the id may have been reused by an unrelated process. A real stale
+        child that changed its cwd away from its work directory is therefore not killed: it survives, still sandboxed,
+        while its work directory is removed. This is harmless, because the profile lets it write only under that
+        removed directory and it holds no network or socket access.
+      - **Then** remove the record's work directory, if it lies under `<data_dir>/ingest/work/`, and the record.
+      The artifact holds material text, so it never stays on the host.
+      **Unit cases:**
+      - a record whose id now belongs to another process (different start time or cwd) is not signalled, and its work
+        directory and record are removed;
+      - a record of another material is left untouched;
+      - a matching record has its session killed, and its directory and record removed.
+      [unit]
+  - id: FR-INGEST-17
+    text: >-
+      Span ids and frozen versions (coordinator decision, 2026-11-21):
+      - Every span has the public id `span_id = "<material_sha256>:<seq>"`: lowercase hex, a colon, and the decimal
+        `seq` in reading order. It is derived and not stored as a column.
+      - A material's `converter_version` is frozen at its first successful import, which is the material's one
+        `ingests` row.
+      - A later receive or import under another version is refused with `version_frozen` (FR-INGEST-11,
+        FR-INGEST-13).
+      - FR-INGEST-12 reports the frozen version, so `reader-ingest` never converts a frozen material again.
+      [db]
+
+invariants:
+  - id: INV-INGEST-1
+    text: >-
+      Every accepted artifact satisfies all of the rules below; receive (FR-INGEST-11) rejects any artifact that
+      breaks one.
+      **Spans:**
+      - `seq` runs 0..span_count−1 without gaps;
+      - `page` is in [1, page_count];
+      - `kind` is in {text, heading, list_item, formula, code, table, figure};
+      - `level` is non-null only for `heading`, and in [1, 16];
+      - `decoded` is non-null only for `formula`;
+      - text is at most 1 MiB, NFC, with no U+0000, no C0 control except `\n` and `\t`, and no lone surrogate;
+        non-code text also has no U+00AD;
+      - bbox is four finite numbers with 0 ≤ x0 ≤ x1 and 0 ≤ y0 ≤ y1.
+      **Outline**, a JSON array of at most 20,000 objects with exactly the keys {seq, level, title, page}:
+      - `seq` runs 0.. without gaps;
+      - `level` is an integer in [1, 16];
+      - `title` is a normalised string of at most 1,024 characters;
+      - `page` is null or an integer in [1, page_count].
+      **Manifest:**
+      - it holds exactly its keys, and its bytes are canonical;
+      - its counts and sha256s match the files;
+      - `pages_without_text` is sorted, unique and within range;
+      - `pages_converted == page_count`.
+      **Property test inputs:**
+      - generated valid artifacts;
+      - each rule broken one at a time;
+      - text with NUL, other C0 controls, lone surrogates, decomposed (non-NFC) forms, U+00AD in code and non-code
+        spans, and NaN or infinite bbox values.
+      [unit]
+  - id: INV-INGEST-2
+    text: >-
+      Idempotency and frozen versions:
+      - for one material, any number of receives and imports leaves at most one `ingests` row and one set of span and
+        outline rows;
+      - an import never runs for a key whose job has succeeded (SRV-EVENTS INV-EVENTS-3);
+      - an artifact under a version other than the frozen one is refused at receive and at import;
+      - `reader-ingest` never starts the converter when FR-INGEST-2 reports `succeeded`, `queued` or `running`, nor
+        while another run holds the material lock.
+      [db; unit, fake runner]
+  - id: INV-INGEST-3
+    text: >-
+      A rejected receive, or one whose deadline comes before storage completes, changes nothing: no file or directory
+      under `<BLOBS_DIR>/ingest/` other than its own temporary directory, which it removes; no `job_keys` row; no
+      procrastinate job. A deadline or database error after storage (`enqueue_failed`) leaves the valid stored
+      directory, plus at most the key row and its job. The stored directory is never deleted, and a re-run then
+      reaches exactly one import.
+      **Covered:**
+      - each rejection code;
+      - `enqueue_failed`, injected as a database error after the rename: the directory stays valid, and a re-run plus
+        a sweep give one import;
+      - tars with symlinks, hard links, devices, directories, FIFOs, pax or GNU headers, absolute names, `..`, NUL in a
+        name, duplicate names, wrong member order, extra or missing members, trailing data after end-of-archive, a
+        member over its cap, a size field larger than the data, and a stream cut short;
+      - a manifest with the same content but non-canonical bytes;
+      - an existing target directory with a corrupted file, which is replaced.
+      Property test. [db]
+  - id: INV-INGEST-4
+    text: >-
+      Confinement of the converter child (ADR-0021 Consequences, ADR-0027), checked with the real profile on the
+      owner's Mac. The child converts the 20 pilot pages, and every probe below fails.
+      **Already measured** under the spike's profile (spikes/ingest-confine, `results/probes.json`):
+      - TCP connect, and TCP bind and listen, on 127.0.0.1;
+      - Unix connect to `~/.docker/run/docker.sock` and `/var/run/docker.sock`, and Unix bind inside WORK;
+      - `bootstrap_look_up` of `com.apple.SecurityServer` and `com.apple.coreservices.launchservicesd` (kern_return
+        1100);
+      - exec of `/usr/bin/security`, `/usr/local/bin/docker` and `/bin/sh`;
+      - signalling the parent (`kill(ppid, 0)`);
+      - opening `/dev/tty`;
+      - listing and reading the home directory, and reading `/etc/passwd`;
+      - writing outside WORK;
+      - POSIX semaphores and shared memory.
+      **Added for the product profile:**
+      - TCP connects to 1.1.1.1:443 and to `host.docker.internal`;
+      - reading a canary in `<data_dir>` outside WORK and the models, and reading the original material path;
+      - the environment equals FR-INGEST-4's list and holds no canary variable set in the parent's environment;
+      - no listening socket (`lsof -a -p <pid> -i`).
+      **Allowed by design:** `socketpair()` (no external endpoint), and files, symlinks and FIFOs inside WORK, which the
+      parent treats as untrusted.
+      [local; the probes run as a test-only module under the product profile]
+  - id: INV-INGEST-5
+    text: >-
+      No material text in logs or terminal output. The synthetic fixture's text contains a canary word. That word never
+      appears in:
+      - the stdout or stderr of `reader-ingest`, receive, status or requeue;
+      - any log record of the worker process;
+      - any api error response.
+      Only counts, page numbers, codes, hashes and timings are logged. A child that writes the canary to stdout or
+      stderr has it dropped (FR-INGEST-5). [host; db; unit with a fake child]
+  - id: INV-INGEST-6
+    text: >-
+      Every table of the ingest migration has `owner_id` with a foreign key to `users.id`; SRV-AUTH's INV-AUTH-8 checks
+      this over the migrated schema. Every row the import writes carries the owner's id. [db]
+  - id: INV-INGEST-7
+    text: >-
+      Span ids: for every imported material, the `span_id`s the spans route returns are unique, equal
+      `material_sha256 + ":" + str(seq)`, and are the same before and after any number of further receives, imports,
+      requeues and api restarts. [db]
+
+nfr:
+  - id: NFR-INGEST-1
+    metric: native full-run throughput of the pilot PDF under the sandbox profile on CPU, formula model on, pages/min
+    threshold: 10
+    verified_by: bench
+    note: "Bound from ADR-0021 Consequences ('≥ 10 pages/min, peak memory recorded'). Measured under the profile:
+      15.69 and 15.85 pages/min on the formula-heavy 20-page sample (spikes/ingest-confine, conf3 and conf4); the
+      whole-book rate is not measured (the spike estimates about 12.7 min for 935 pages). [local], full run, records
+      peak RSS of the child."
+  - id: NFR-INGEST-2
+    metric: pilot pages misread out of the 20-page fidelity sample, rule B (owner live check with an agent judge)
+    threshold: 2
+    verified_by: bench
+    note: "ADR-0021 Decision 4: owner live check outside CI with a judge and a per-run budget; the judge counts all 15
+      display formulas of the sample. Page 378 (emoji code block classified as a picture) is a known miss under
+      ADR-0021, investigated in the full stage-3 module."
+
+vectors:
+  - id: VEC-INGEST-1
+    source: >-
+      Agent-written synthetic artifact, with no book text: a valid `artifact-ok/` (three files, with span ids
+      derivable) and its expected artifact id. The tests apply a list of corruptions to it: one per rejection code and
+      per INV-INGEST-3 tar case.
+    file: spec/fixtures/SRV-INGEST/artifact-ok/manifest.json
+  - id: VEC-INGEST-2
+    source: >-
+      Synthetic PDF `synthetic.pdf`, generated deterministically by the committed generator
+      `server/tests/ingest/make_fixture_pdf.py` (reportlab, invariant mode). Its content:
+      - Russian and English text containing a canary word;
+      - a 3-entry bookmark tree;
+      - headings at two levels;
+      - a numbered list with a 4-line code block between steps 1 and 2;
+      - a 3×3 table;
+      - a soft-hyphenated word;
+      - a header and a footer on every page.
+      `synthetic.expected.json` holds:
+      - the kinds in order, the levels and the span ids;
+      - the exact code lines, the table shape and the outline entries;
+      - which furniture is dropped.
+      The test regenerates the PDF and requires identical bytes.
+    file: spec/fixtures/SRV-INGEST/synthetic.expected.json
+  - id: VEC-INGEST-3
+    source: >-
+      Pilot page expectations (ADR-0021 verified_by) for the 20 pages of the spike's sample. The fixture holds only
+      counts, hashes, boxes and page numbers, no book text.
+      **Code blocks, per page:**
+      - the code-block count and the lines per block;
+      - the sha256 of each block's text, read from the text layer inside a box recorded by hand from the rendered
+        page and normalised as in FR-INGEST-7, so the hash is independent of Docling;
+      - on pages 461 and 468, the block's position relative to list items.
+      **Formulas:** decoded-formula counts per page as Docling detects them: 2 on page 128 and 1 each on pages 130,
+      132, 133 and 141, 6 in total (RESULT.md, M1). The 15 display formulas the judge counted belong to NFR-INGEST-2,
+      not here.
+      **Tables:** shapes (rows × columns) for the 11 tables.
+      Produced in Red on the owner's Mac by `server/tests/ingest/pilot_expectations.py`, which reads the text layer
+      with pypdfium2 inside the recorded boxes.
+    file: spec/fixtures/SRV-INGEST/pilot-expectations.yaml
+  - id: VEC-INGEST-4
+    source: >-
+      Pilot outline from the PDF bookmarks (ADR-0008 Context: 494 entries on three levels). The level-1 count is
+      measured in Red, not assumed from "23 chapters". The fixture also holds the sha256 of the canonical JSON of the
+      (level, page) pairs and of the titles; no titles are committed.
+    file: spec/fixtures/SRV-INGEST/pilot-outline.yaml
+  - id: VEC-INGEST-5
+    source: >-
+      Status table for FR-INGEST-15. Inputs: SRV-EVENTS job_status (none, queued, running, succeeded, dead) for the key
+      FR-INGEST-12 picks, and whether an `ingests` row exists. Outputs: `not_ingested`, `queued`, `running`, `imported`
+      or `dead`. `succeeded` without a row cannot be produced by FR-INGEST-13; it maps to `dead` and is logged as
+      `inconsistent`.
+    file: spec/fixtures/SRV-INGEST/status-map.yaml
+
+defers:
+  - "Browser upload of materials (roadmap slice wording); this revision declares materials in reader.yaml and ingests with a host command (ADR-0027 revisit_when)."
+  - "Re-ingesting a material under a new converter_version. Obligation when it arrives: it must map every old span id `<sha>:<seq>` to its new span, or keep the old spans, so that no lesson citation ever resolves to different text (FR-INGEST-17)."
+  - "OCR for pages without a text layer (ADR-0008 resolved question 1; EasyOCR ru+en). The manifest lists such pages; the pilot has 6."
+  - "Non-PDF formats (EPUB, DOCX, HTML, web and git snapshots; ADR-0008 Decision 2)."
+  - "Figure image crops on the blobs volume; figure spans carry bbox and caption only."
+  - "Character offsets into the page text layer (ADR-0008 Decision 3); spans cite page and bbox through their span id."
+  - "Multi-column reading order beyond Docling's own."
+  - "Per-material limits from ADR-0008 Decision 4 (page ranges, max size, fetch domains)."
+  - "Page 378's emoji code block classified as a picture (ADR-0021 known miss): investigation in the full stage-3 module."
+  - "Events on the outbox and notifications for import completion (stage 2)."
+  - "MPS for Docling's layout and table models; CPU only keeps the sandbox free of mach services."
+
+owner_notes:
+  - "1. The roadmap's slice says 'Upload the Bashir PDF'. With a native converter and no host listener (ADR-0027), the slice declares the PDF in reader.yaml and runs `reader-ingest bashir-2025` on the Mac. The owner accepted CLI-first ingestion on 2026-11-21; browser upload comes later."
+  - "2. ADR-0027 changes ADR-0021 Decision 3's transport. The owner accepted it and CLI-first ingestion in chat on 2026-11-21 (upload later); the owner sets ADR-0027's status line and adds ADR-0021's amendment note."
+  - "3. Confinement uses sandbox-exec (deprecated by Apple, still shipped, works on macOS 27.2); spikes/ingest-confine measured no speed cost. The dedicated-user fallback is not needed."
+  - "4. `reader-ingest --setup` creates a separate converter venv (Docling 2.151.1 with torch, several GB) and fetches 1.2 GB of models under `<data_dir>`."
+  - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
+
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Status stays draft: approval goes with Red, which waits for SRV-AUTH (PR #33), SRV-EVENTS Red/Green and the owner's ADR-0027 status flip."
