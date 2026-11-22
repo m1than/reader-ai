@@ -369,6 +369,10 @@ tasks:
         Postgres; [image]: first-use reset and print(1) on reader-kernel:local, interrupted sleep and busy loop reply
         1.49 s after a 1 s test timeout). Paired SRV-AUTH change: ROUTERS adds reader.kernels.routes, Route DELETE,
         WS_ROUTES, websockets 17.4; three auth-test import blocks re-sorted (ruff 0.17.6 failed them on main too).
+        Local gate 2026-11-22: two runs FAIL on one OPS-SANDBOX timing test each (own_address, then signals race;
+        765 passed otherwise), with 12 other workloads' containers on the shared Docker VM; own_address passes 3/3
+        alone; the signals race failed once alone (state polls via docker exec failing for 10 s) while a direct
+        replay of 8 flood+signal cases restarted in 0–2 s by docker inspect. Needs an investigator before merge.
         Earlier: Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2
         changes, round 3 approve. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
