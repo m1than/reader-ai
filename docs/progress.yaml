@@ -310,15 +310,18 @@ tasks:
       note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-INGEST-min],
       branch: V/V.SRV-SEARCH-min,
-      note: "deep-reviewer round 1 (30a4120): changes B1–B10, all applied (one round per policy); ADR-0028 (proposed)
-        drafted for the embed service and goes to its own review, then the owner sets its status. BAAI/bge-m3
-        (owner-confirmed 2026-11-21) in service `embed` on its own internal network (api, worker, embed), no secrets,
-        model baked from a pinned revision; one encode at a time, passage batches of 8, query timeout 10 s,
-        max_seq_length 1,024 (reviewer-measured: prose 266, Rust 603, hex 740, LaTeX 887 tokens per 1,200 chars). Exact dense scan (HNSW deferred, declared deviation), OR full text from the query's
-        lexemes, RRF k=60, total orders. Acceptance: hybrid hits ≥ dense-only hits in the same run and ≥ 27/40 on
-        questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
-        VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
-        module only; an unhealthy embed service raises EmbedUnavailable, a transient that spends an attempt), SRV-INGEST (enqueue search.embed after import)." }
+      note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
+        ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
+        ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at
+        cap 1,024, peak RSS 2,410 MiB for the worst 8-text request, so the service admits ≤ 8 texts per call and its
+        mem_limit is 3g; at 8 CPUs a worst batch of 8 takes 11–13 s, so the query timeout is 30 s (chosen over a batch
+        of 4); full pilot about 22–36 min. Status stays draft: approval goes in the Red commit (T5), which the
+        coordinator schedules after the integration branch lands. Design: service `embed` on its own internal network
+        (api, worker, embed), no secrets, model baked from revision 5617a9f6; one encode at a time; exact dense scan
+        (HNSW deferred); OR full text from the query's lexemes; RRF k=60; total orders. Acceptance: hybrid hits ≥
+        dense-only hits in the same run and ≥ 27/40 on questions-v2. Paired changes: OPS-DEPLOY (embed service 3g,
+        network, VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters),
+        SRV-EVENTS (kind module), SRV-INGEST (enqueue search.embed after import)." }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live],
       note: "OPS-SANDBOX + SRV-KERNEL, python3 only (ADR-0022)" }
