@@ -462,7 +462,8 @@ async def test_stale_rows_are_finalised_by_reads_and_the_busy_check(pg: Pg, tmp_
         dead = await insert_question(w, age_s=200)
         jobs.statuses[tutor_jobs.job_key(dead)] = "dead"
         listed = (await c.get(f"/api/lessons/{lesson}/questions")).json()["questions"]
-        assert [(q["state"], q["error_code"]) for q in listed] == [("failed", "tutor_failed"), ("failed", "lost")]
+        # newest first (FR-TUTOR-2): the lost row is 61 s old, the dead one 200 s
+        assert [(q["state"], q["error_code"]) for q in listed] == [("failed", "lost"), ("failed", "tutor_failed")]
         waiting = await insert_question(w, age_s=601)
         jobs.statuses[tutor_jobs.job_key(waiting)] = "queued"
         r = await c.post(f"/api/lessons/{lesson}/ask", json={"question": "new"})  # the busy check finalises it

@@ -13,9 +13,12 @@ from typing import Final
 
 from reader.jobs.model import NAME_PATTERN, SWEEP_TASK, JobError, JobKind, model_has_secret_field
 
+SWEEP_PRIORITY: Final = 1_000_000  # jobs.sweep runs before every kind; a kind's priority stays below it
+
 KIND_MODULES: Final[tuple[str, ...]] = (
     "reader.ingest.jobs",  # SRV-INGEST paired change (FR-EVENTS-1)
     "reader.search.jobs",
+    "reader.tutor.jobs",  # SRV-TUTOR paired change (FR-EVENTS-1)
 )
 
 
@@ -35,7 +38,7 @@ class Catalog(Mapping[str, JobKind]):
                 raise JobError("kind_key_field_missing")
             if model_has_secret_field(kind.args):
                 raise JobError("secret_in_payload")
-            if kind.max_attempts < 1 or kind.timeout_s <= 0:
+            if kind.max_attempts < 1 or kind.timeout_s <= 0 or not 0 <= kind.priority < SWEEP_PRIORITY:
                 raise JobError("kind_bounds_invalid")
             by_name[kind.name] = kind
         self._kinds = by_name

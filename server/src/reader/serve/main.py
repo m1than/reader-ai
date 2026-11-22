@@ -143,6 +143,9 @@ def _serve_api(bind: str, env: Env) -> None:
 
     from reader.api.app import create_app
     from reader.auth.store import prepare
+    from reader.jobs.catalog import load_kinds
+    from reader.jobs.queue import Jobs
+    from reader.jobs.worker import make_app
 
     host, port = _bind(bind)
     settings = _settings(env)
@@ -162,12 +165,19 @@ def _serve_api(bind: str, env: Env) -> None:
             except OSError:
                 raise Failure("run_dir_unwritable") from None
             serving_logs()
-            app = create_app(settings, engine)
-            # log_config=None: uvicorn's records go through the root handler of serving_logs (no tracebacks).
-            server = uvicorn.Server(
-                uvicorn.Config(app, host=host, port=port, proxy_headers=False, log_config=None)
-            )
-            await server.serve()
+            # FR-AUTH-10 note: one SRV-EVENTS Jobs for routes that enqueue (the tutor's ask).
+            queue = make_app(target)
+            await queue.open_async()
+            try:
+                jobs = Jobs(engine, queue, load_kinds(), (target.password.reveal(),))
+                app = create_app(settings, engine, jobs=jobs)
+                # log_config=None: uvicorn's records go through serving_logs' root handler (no tracebacks).
+                server = uvicorn.Server(
+                    uvicorn.Config(app, host=host, port=port, proxy_headers=False, log_config=None)
+                )
+                await server.serve()
+            finally:
+                await queue.close_async()
         finally:
             await engine.dispose()
 

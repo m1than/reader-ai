@@ -56,6 +56,7 @@ class JobKind:
     max_attempts: int = 3
     transient: tuple[type[BaseException], ...] = ()
     timeout_s: float = 600.0
+    priority: int = 0  # procrastinate job priority at every defer; higher first (FR-EVENTS-1 amendment)
 
 
 @dataclass(frozen=True)
