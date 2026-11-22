@@ -1,0 +1,45 @@
+# VEC-PIPELINE-4: fact-report validation and citation handling (FR-PIPELINE-4, FR-PIPELINE-7).
+# Notebook: cells `e1` (explain, claims c1, c2), `ch1` (changed), `er1` (erratum); source spans S = {A:0, A:1, A:2}
+# where A is a 64-hex material sha256 (abbreviated here; the test uses a full one).
+cases:
+  - name: complete-report
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: ["A:0"] },
+             { cell: e1, claim: c2, verdict: unsupported, spans: [] },
+             { cell: ch1, verdict: supported, spans: ["A:1"] },
+             { cell: er1, verdict: contradicted, spans: ["A:2"] }]
+    result: valid
+  - name: missing-claim
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: ["A:0"] },
+             { cell: ch1, verdict: supported, spans: ["A:1"] },
+             { cell: er1, verdict: supported, spans: ["A:2"] }]
+    result: output_invalid
+  - name: summary-only            # spikes/compile-cost finding 2
+    report: { all_supported: true, count: 4 }
+    result: output_invalid
+  - name: unknown-claim
+    report: [{ cell: e1, claim: c9, verdict: supported, spans: ["A:0"] }]
+    result: output_invalid
+  - name: supported-without-span
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [] },
+             { cell: e1, claim: c2, verdict: supported, spans: ["A:1"] },
+             { cell: ch1, verdict: supported, spans: ["A:1"] },
+             { cell: er1, verdict: supported, spans: ["A:2"] }]
+    result: valid
+    forced: [{ cell: e1, claim: c1, verdict: unsupported, reason: no_span }]
+  - name: supported-with-unknown-span
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: ["A:99"] },
+             { cell: e1, claim: c2, verdict: supported, spans: ["A:1"] },
+             { cell: ch1, verdict: supported, spans: ["A:1"] },
+             { cell: er1, verdict: supported, spans: ["A:2"] }]
+    result: valid
+    forced: [{ cell: e1, claim: c1, verdict: unsupported, reason: citation_unknown_span }]
+citations:
+  # Before write_revision, citations naming a span not in the source are removed and the claim is forced unsupported.
+  - name: strip-unknown-span
+    claim_citations: [{ span: "A:0" }, { span: "A:99" }, { url: "https://example.org/x", retrieved: "2026-11-01" }]
+    kept: [{ span: "A:0", page: 61, material_title: "<from material>" }]
+    stripped: ["A:99"]
+    open_cells: [url_citation_unchecked]   # slice: URL citations are not web-checked; they become an open cell
+  - name: changed-cell-in-slice
+    cell_kind: changed
+    open_cells: [changed_unchecked]        # slice: no web fact-check of `changed` cells

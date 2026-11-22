@@ -551,21 +551,37 @@ tasks:
         questions-v2. mem_limit waits for spikes/embed-service. Paired changes: OPS-DEPLOY (embed service, network,
         VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters), SRV-EVENTS (kind
         module only; an unhealthy embed service raises EmbedUnavailable, a transient that spends an attempt), SRV-INGEST (enqueue search.embed after import)." }
-  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
-      note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
-        spends credit, ledger" }
-  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min] }
+  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
+      branch: V/V.TUTOR-min,
+      note: "spec drafted, awaits deep-reviewer (cost and auth: full review). spec/modules/SRV-TUTOR.yaml: question as a
+        job (api cannot reach agent-proxy, ADR-0025), polling instead of SSE (answers validated whole before display),
+        grounding enforced by code (span ids outside the retrieved set removed, unsupported blocks marked), Sonnet 5.5,
+        per-question cap $0.20, daily $3; typical ≈ $0.026 warm / $0.053 cold per question (VEC-TUTOR-3)." }
+  - { id: V.OPS-CLI-agents, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
+      note: "Paired OPS-CLI/OPS-DEPLOY change for SRV-AGENT: `reader up` starts profile `agents` (agent-proxy); FR-CLI-4 and
+        FR-DEPLOY-5 add agent-proxy to the read-only reader.yaml bind set; OPS-DEPLOY notes that
+        deploy/images/agent-proxy.Dockerfile is owned by SRV-AGENT" }
+  - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
+      result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
+        placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 one request per query and no other host (without it: an auxiliary
+        request and CONNECT api.anthropic.com:443 twice per query); tools=[] → empty init tool list and request tools" }
+  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: in_progress,
+      needs: [V.SRV-LESSON-min, V.SRV-INGEST-min, V.KERNEL-min, V.OPS-CLI-agents, V.OPS-CLI-kernels, V.spike.agent-proxy-handshake],
+      branch: V/V.COMPILE-min,
+      review: "deep-reviewer (Fable) round 1: changes (B1–B11 plus non-blocking), all addressed in round 2 draft",
+      note: "spec drafted, awaits deep-reviewer round 2. SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
+        bearer placeholder, POST /v1/messages?beta=true and header allow-lists, body tools check; no-tool Agent SDK
+        provider with model ids resolved and priced before spend; reservation/settlement ledger with run, task and
+        monthly caps; pricing table recomputes all 12 spike stages within 0.38–1.78 %. SRV-PIPELINE: steps as jobs keyed
+        by (run_id, step, stage, input_sha256), next step enqueued after commit, derived run state, one revise loop,
+        run cap $4.35, worst-case reserves with measured floors, verdicts keyed by cell/claim with forced unsupported,
+        findings step with stable open-cell ids, G2 report (labs binding, claims, stage records, deltas) after lab
+        verification, worker-side kernel-verify client, course_plans mapping for an idempotent G1 import. One L02
+        compile ≈ $2.4–3.0 (spike), within the owner's $30 test budget (2026-11-22). Search is not a dependency." }
   - { id: V.live, stage: V, kind: live, status: todo,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
       what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }
-  - { id: V.DOD-index, stage: V, kind: module, track: product, status: todo, needs: [V.live],
-      what: "Owner 2026-11-22: a Definition-of-Done index of every user operation (sign in, add material/ingest, search,
-        list/open lesson, run/interrupt/reset a cell, compile a lesson, read findings, ask the tutor, sign out, backup and
-        restore). Each operation is data: its DoD criteria (functional, security, a11y, latency budget, cost budget,
-        observability) and the automated checks that prove each criterion (unit, [db], [image], Playwright [live]). A
-        verifier (part of e2e/live/verify-all.sh) runs them and writes docs/dod/INDEX.md plus a machine-readable report:
-        per operation PASS/FAIL per criterion with links to evidence. trace-check gains a rule: every operation has ≥ 1
-        check per criterion. One spec, reviewed." }
   - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
       what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
         (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a
@@ -587,6 +603,19 @@ tasks:
         escalation + 10% Sonnet audit −$0.26 after L1; L4 patch-only revise −$0.12–0.34; L5 review on Sonnet/lower effort
         −$0.20–0.26. Stack ≈ $0.035–0.047/page (−50–60%). RAG (lever 7) saves < $0.001/page after L1 but is tested for
         quality (LaRA). Batch API not reachable via the Agent SDK (would need an ADR). Plan E0–E6 ≈ $14.5 of the test budget." }
+  - { id: V.DOD-index, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.live],
+      branch: V/V.DOD-index,
+      what: "Owner 2026-11-22: Definition-of-Done index of every user operation, verified automatically; feeds
+        V.cost-optimize (spec OPS-DOD).",
+      review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review)",
+      note: "spec revised after review. Index: 30 operations × 8 criteria = 240 cells, 44 na, 44 missing (ingest.setup,
+        material.browse, lesson.list, lesson.open, course.import, lesson.findings, stack.backup, stack.restore 3 each;
+        auth.signout, auth.add_passkey, lesson.compile_resume, stack.trust 2 each; 12 operations with 1; material.ingest,
+        cell.run, cell.reset, lesson.compile, tutor.ask, stack.up 0). 81 mapped items untraced, all in draft specs.
+        Paired tools changes in Red/Green: repo.mjs TEST_PATTERNS ^tools/dod/.+\\.test\\.mjs$; check.mjs T10; guard-tests
+        ratchet; pre-write hook refuses agent `waived`; ci runs node --test \"tools/dod/*.test.mjs\"; verify-all.sh
+        inputs and report. Cross-spec: SRV-TUTOR FR-TUTOR-11 becomes a pointer to this index. This entry duplicates the
+        one on V/owner-housekeeping; keep this one when merging." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

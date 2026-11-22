@@ -1,0 +1,29 @@
+# VEC-TUTOR-1 — answer validation (SRV-TUTOR FR-TUTOR-7). Synthetic; no book text.
+# retrieved: the span ids the question's retrieval returned (FR-TUTOR-4).
+retrieved: ["aaaa000000000000000000000000000000000000000000000000000000000000:1",
+            "aaaa000000000000000000000000000000000000000000000000000000000000:7"]
+cases:
+  - name: all-cited
+    output: {blocks: [{text: "A block is a list of transactions.", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"]}], insufficient: false}
+    expect: {blocks: [{kept: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"], unsupported: false}], grounded: true}
+  - name: invented-span-removed
+    output: {blocks: [{text: "Claim.", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:99"]}], insufficient: false}
+    expect: {blocks: [{kept: [], unsupported: true}], grounded: false}
+  - name: foreign-material-span-removed
+    output: {blocks: [{text: "Claim.", spans: ["bbbb000000000000000000000000000000000000000000000000000000000000:1", "aaaa000000000000000000000000000000000000000000000000000000000000:7"]}], insufficient: false}
+    expect: {blocks: [{kept: ["aaaa000000000000000000000000000000000000000000000000000000000000:7"], unsupported: false}], grounded: true}
+  - name: mixed
+    output: {blocks: [{text: "Cited.", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"]}, {text: "Uncited.", spans: []}], insufficient: false}
+    expect: {blocks: [{kept: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"], unsupported: false}, {kept: [], unsupported: true}], grounded: false}
+  - name: insufficient-flag
+    output: {blocks: [{text: "The sources do not cover this.", spans: []}], insufficient: true}
+    expect: {blocks: [{kept: [], unsupported: true}], grounded: false}
+  - name: not-json
+    output_text: "Sure! Here is the answer."
+    expect: {error: output_invalid}
+  - name: zero-blocks
+    output: {blocks: [], insufficient: false}
+    expect: {error: output_invalid}
+  - name: extra-key
+    output: {blocks: [{text: "x", spans: [], url: "https://evil.example"}], insufficient: false}
+    expect: {error: output_invalid}
