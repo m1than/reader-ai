@@ -25,7 +25,13 @@ from reader.api.http import Ctx, Route, WsRoute, error
 from reader.auth import store
 from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
-ROUTERS: Final = ("reader.api.routes", "reader.auth.routes", "reader.lessons.routes", "reader.kernels.routes")
+ROUTERS: Final = (
+    "reader.api.routes",
+    "reader.auth.routes",
+    "reader.lessons.routes",
+    "reader.kernels.routes",
+    "reader.ingest.routes",  # SRV-INGEST paired change (FR-AUTH-10 note)
+)
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
 )

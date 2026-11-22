@@ -389,7 +389,19 @@ tasks:
         now runs reader.jobs.worker.run. Merged origin/1/ruff-import-order (3 pre-existing import-order errors on main).
         KIND_MODULES is empty until V.SRV-INGEST-min / V.SRV-SEARCH-min add theirs" }
   - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.SRV-JOBS-min],
-      branch: V/V.SRV-INGEST-min,
+      branch: V/SRV-INGEST-impl,
+      green: "2026-11-22: spec approved (agent) with Red cdfaab0 (146 tests failing in their bodies); Green: the
+        [unit] and [db] ingest tests pass; cross-spec KIND_MODULES, ROUTERS, VERSION_LOCATIONS paired with
+        SRV-EVENTS/SRV-AUTH notes. Measured on the owner's Mac: `reader-ingest --setup` builds the converter venv
+        (103 hash-pinned packages, torch 2.15.0, non-editable reader wheel) and fetches 1.2 GB of pinned models; the
+        synthetic PDF converts under the real profile as VEC-INGEST-2 expects; confinement probes ([local]) all denied;
+        pilot outline 494 entries, 3 levels, level 1 measured 27; full pilot run under the profile on CPU: 935 pages
+        in 856.3 s = 65.5 pages/min (NFR-INGEST-1 bound 10), 9,463 spans (code 360, formula 36 all decoded, table 48,
+        figure 586), outline from bookmarks, pages without text 1-4/392/935, spans.jsonl 4.5 MB, child peak RSS
+        4.0 GiB. VEC-INGEST-3 (ADR-0021's deterministic check): 18 of 20 pages as recorded, code hashes and the
+        461/468 code-after-step order hold; 2 deviations are Docling layout labels: p133 a hex-constant line labelled
+        code (3 blocks, 2 recorded), p468 a filename label labelled list_item. Not run: reader up / docker exec
+        receive (the live end-to-end agent's).",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line

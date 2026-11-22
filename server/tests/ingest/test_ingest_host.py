@@ -26,6 +26,7 @@ CONTAINER = "c0ffee" * 10 + "abcd"
 
 
 def config(tmp: Path, sha: str = SHA) -> Path:
+    tmp.mkdir(parents=True, exist_ok=True)
     (tmp / "m.pdf").write_bytes(PDF)
     path = tmp / "reader.yaml"
     path.write_text(

@@ -19,10 +19,15 @@ pytestmark = pytest.mark.anyio
 def test_version_locations_are_a_declared_list() -> None:
     import reader.db as db
 
-    ours, theirs = db.VERSION_LOCATIONS[:3], db.VERSION_LOCATIONS[3:]
+    ours, theirs = db.VERSION_LOCATIONS[:4], db.VERSION_LOCATIONS[4:]
     relative = [p.as_posix().split("/reader/", 1)[1] for p in ours]
-    # SRV-LESSON and SRV-EVENTS paired changes (FR-AUTH-1 note)
-    assert relative == ["db/migrations/versions", "lessons/migrations", "jobs/migrations"]
+    # SRV-LESSON, SRV-EVENTS and SRV-INGEST paired changes (FR-AUTH-1 note)
+    assert relative == [
+        "db/migrations/versions",
+        "lessons/migrations",
+        "jobs/migrations",
+        "ingest/migrations",
+    ]
     assert [p.as_posix().rsplit("/procrastinate/", 1)[1] for p in theirs] == ["contrib/alembic/versions"]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)
 
