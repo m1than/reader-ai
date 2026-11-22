@@ -522,6 +522,33 @@ tasks:
         V/OPS-SANDBOX-test-image): the shared image tag reader-kernel:local was rebuilt by every session, so a
         concurrent session retagged it mid-run; each session now builds and uses reader-kernel:test-<run id> and sweeps
         tags like labels (test_session_sweep_spares_other_runs_tags). Tests never touch reader-kernel:local" }
+  - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
+      result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
+        placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 one request per query and no other host (without it: an auxiliary
+        request and CONNECT api.anthropic.com:443 twice per query); tools=[] → empty init tool list and no request tools.
+        Round 2: CLAUDE_CODE_MAX_OUTPUT_TOKENS is sent as max_tokens; on 429/529/500 the CLI retries 10 times over
+        174–178 s, then AssistantMessage.error rate_limit|server_error, ResultMessage is_error with cost 0" }
+  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: in_progress,
+      needs: [V.SRV-LESSON-min, V.SRV-INGEST-min, V.KERNEL-min, V.OPS-CLI-agents, V.OPS-CLI-kernels, V.spike.agent-proxy-handshake],
+      branch: V/V.COMPILE-min,
+      review: "deep-reviewer (Fable) round 1: changes (B1–B11 plus non-blocking), addressed in 2526267; round 2: changes
+        (R2-B1 per-run task budgets and cross-run reuse, R2-B2 settle $0 without upstream 2xx, R2-B3 in-handler enqueue
+        and `stalled`, R2-B4 output cap bound to the run_token, plus non-blocking), all addressed; round 3: approve
+        (3c10698). Run cap = the owner's compile_cap_usd $8.00, a declared deviation from ADR-0005's $4.35 target
+        (23 × $8 = $184 > $100; the $200 monthly budget is the guard; ADR-0005 amendment when the pipeline lands)",
+      note: "SRV-AGENT and SRV-PIPELINE approved (agent, 2026-11-22) with the round-3 items folded in; Red tests in
+        server/tests/agent and server/tests/pipeline; Green next, no live compile until the coordinator schedules it.
+        SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
+        bearer placeholder, POST /v1/messages?beta=true and header allow-lists, body tools check; no-tool Agent SDK
+        provider with model ids resolved and priced before spend; reservation/settlement ledger with run, task and
+        monthly caps; pricing table recomputes all 12 spike stages within 0.38–1.78 %. SRV-PIPELINE: steps as jobs keyed
+        by (run_id, step, stage, input_sha256) and reused across runs by input_sha256, next step enqueued inside the
+        handler, derived run state with `stalled` and ensure(), one revise loop, run cap $8.00, per-run task budgets,
+        span aliases s1…sN, worst-case reserves with measured floors, verdicts keyed by cell/claim with forced unsupported,
+        findings step with stable open-cell ids, G2 report (labs binding, claims, stage records, deltas) after lab
+        verification, worker-side kernel-verify client, course_plans mapping for an idempotent G1 import. One L02
+        compile ≈ $2.4–3.0 (spike), within the owner's $30 test budget (2026-11-22). Search is not a dependency." }
   - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-CLI],
       note: "FR-CLI-5 amended (spec, test, code paired, branch V/live-e2e): `reader up` always activates `kernels`
         besides the default profile (config, build and up all carry `--profile kernels`); compose builds the kernel image.
@@ -566,24 +593,6 @@ tasks:
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
         prompt (745–867 prompt tokens in total, ≈ 410 fixed); prices recompute within $0.000004; the CLI writes one-shot
         prompts to the 1-hour cache at 2× input. spikes/tutor-call/RESULT.md." }
-  - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
-      result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
-        placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with
-        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 one request per query and no other host (without it: an auxiliary
-        request and CONNECT api.anthropic.com:443 twice per query); tools=[] → empty init tool list and request tools" }
-  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: in_progress,
-      needs: [V.SRV-LESSON-min, V.SRV-INGEST-min, V.KERNEL-min, V.OPS-CLI-agents, V.OPS-CLI-kernels, V.spike.agent-proxy-handshake],
-      branch: V/V.COMPILE-min,
-      review: "deep-reviewer (Fable) round 1: changes (B1–B11 plus non-blocking), all addressed in round 2 draft",
-      note: "spec drafted, awaits deep-reviewer round 2. SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
-        bearer placeholder, POST /v1/messages?beta=true and header allow-lists, body tools check; no-tool Agent SDK
-        provider with model ids resolved and priced before spend; reservation/settlement ledger with run, task and
-        monthly caps; pricing table recomputes all 12 spike stages within 0.38–1.78 %. SRV-PIPELINE: steps as jobs keyed
-        by (run_id, step, stage, input_sha256), next step enqueued after commit, derived run state, one revise loop,
-        run cap $4.35, worst-case reserves with measured floors, verdicts keyed by cell/claim with forced unsupported,
-        findings step with stable open-cell ids, G2 report (labs binding, claims, stage records, deltas) after lab
-        verification, worker-side kernel-verify client, course_plans mapping for an idempotent G1 import. One L02
-        compile ≈ $2.4–3.0 (spike), within the owner's $30 test budget (2026-11-22). Search is not a dependency." }
   - { id: V.live, stage: V, kind: live, status: todo,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
       what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }

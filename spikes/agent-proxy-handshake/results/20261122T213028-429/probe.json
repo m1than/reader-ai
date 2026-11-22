@@ -1,0 +1,289 @@
+{
+  "sdk_version": "0.2.187",
+  "cli_on_path": "not on PATH",
+  "python": "3.14.10",
+  "runs": [
+    {
+      "mode": "tools-empty",
+      "messages": [
+        {
+          "type": "SystemMessage",
+          "t": 0.199,
+          "subtype": "init",
+          "data_keys": [
+            "additional_directories",
+            "agents",
+            "analytics_disabled",
+            "apiKeySource",
+            "capabilities",
+            "claude_code_version",
+            "cwd",
+            "fast_mode_disabled_reason",
+            "fast_mode_state",
+            "mcp_servers",
+            "memory_paths",
+            "messaging_socket_path",
+            "model",
+            "original_cwd",
+            "output_style",
+            "per_turn_effort_active",
+            "permissionMode",
+            "plugins",
+            "product_feedback_disabled",
+            "served_by_anthropic",
+            "session_id",
+            "skills",
+            "slash_commands",
+            "subtype",
+            "terminal_slash_commands",
+            "tools",
+            "type",
+            "ultrathink_available",
+            "ultrathink_typed_raises",
+            "uuid",
+            "view_mode"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 0.227,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 1.42,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 2.557,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 5.05,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 9.454,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 18.294,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 34.895,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 68.349,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 103.63,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "SystemMessage",
+          "t": 142.984,
+          "subtype": "api_retry",
+          "data_keys": [
+            "attempt",
+            "error",
+            "error_status",
+            "max_retries",
+            "retry_delay_ms",
+            "session_id",
+            "subtype",
+            "type",
+            "uuid"
+          ]
+        },
+        {
+          "type": "RateLimitEvent",
+          "t": 176.391
+        },
+        {
+          "type": "AssistantMessage",
+          "t": 176.401,
+          "error": "rate_limit"
+        },
+        {
+          "type": "ResultMessage",
+          "t": 176.414,
+          "subtype": "success",
+          "is_error": true,
+          "total_cost_usd": 0,
+          "usage_keys": [
+            "cache_creation",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "fallback_credit",
+            "inference_geo",
+            "input_tokens",
+            "iterations",
+            "output_tokens",
+            "output_tokens_details",
+            "server_tool_use",
+            "service_tier",
+            "speed"
+          ],
+          "usage": {
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 0,
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "result": "API Error: Server is temporarily limiting requests (not your usage limit) \u00b7 stub",
+          "fields": {
+            "subtype": "success",
+            "duration_ms": 176225,
+            "duration_api_ms": 0,
+            "is_error": true,
+            "num_turns": 1,
+            "session_id": "313ef3ab-9667-4399-9d1d-5883b0d9b335",
+            "stop_reason": "stop_sequence",
+            "total_cost_usd": 0,
+            "result": "API Error: Server is temporarily limiting requests (not your usage limit) \u00b7 stub",
+            "structured_output": null,
+            "permission_denials": [],
+            "deferred_tool_use": null,
+            "errors": null,
+            "api_error_status": 429,
+            "uuid": "b3708a99-9b0c-42b8-bad3-6df71683ea84",
+            "terminal_reason": "api_error",
+            "origin": null,
+            "user_message_uuid": null,
+            "user_message_uuids": null
+          }
+        }
+      ],
+      "init_tools": [],
+      "error": "ResultError: Claude Code returned an error result: API Error: Server is temporarily limiting requests (not your usage limit) \u00b7 stub (exit code: 1)",
+      "init_model": "claude-sonnet-5-5",
+      "init_mcp_servers": [],
+      "wall_s": 176.44
+    }
+  ]
+}

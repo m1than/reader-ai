@@ -5,7 +5,8 @@ RUN useradd --uid 10001 --create-home --home-dir /home/reader reader
 # Only what the build needs (FR-DEPLOY-2 allow-list): copying server/ would bake .venv, caches, tests and any .env.
 COPY server/pyproject.toml /opt/reader/pyproject.toml
 COPY server/src /opt/reader/src
-RUN pip install --no-cache-dir /opt/reader
+# The `agent` extra: the Agent SDK and its bundled CLI for the worker's provider adapter (SRV-AGENT).
+RUN pip install --no-cache-dir "/opt/reader[agent]"
 COPY --chmod=0755 deploy/images/wait-for-secret.sh /usr/local/bin/wait-for-secret
 # The blobs mount point, owned by the service uid: Docker copies its ownership into an empty named volume on first
 # mount, so uid 10001 with cap_drop ALL can write there (FR-DEPLOY-5).

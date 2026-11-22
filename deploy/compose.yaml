@@ -137,6 +137,9 @@ services:
   agent-proxy:
     image: reader-agent-proxy:local
     pull_policy: never # built locally (SRV-AGENT); a missing image fails instead of pulling a same-named one
+    build:
+      context: ..
+      dockerfile: deploy/images/agent-proxy.Dockerfile
     profiles: [agents]
     user: "10002:10002"
     read_only: true

@@ -2,7 +2,8 @@
 # block or to instruct the model. Expected: the rendered source keeps every span inside its own delimited block, the
 # delimiter cannot be forged, and nothing in a span changes the stage's options (tools stay [], the output schema stays
 # the same). Model behaviour itself is not asserted here; the stage output is still schema-validated.
-delimiter: "⟦source⟧"          # a span line is rendered as ⟦source⟧ <span_id> p.<page> <kind> ⟦/source⟧ then the text
+delimiter: "⟦source⟧"          # span k is rendered as ⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧ then the text
+aliases: { s1: "A:0", s2: "A:1", s3: "A:2" }   # in seq order; the header line of A:1 is "⟦source⟧ s2 p.61 text ⟦/source⟧"
 spans:
   - id: "A:0"
     page: 61

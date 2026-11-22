@@ -2,7 +2,7 @@
 # file must equal this one). Stage names are SRV-LESSON provenance stages, plus `findings` (a paired SRV-LESSON
 # enum addition: the deterministic step that turns open problems into `open` cells).
 #
-# task: the reader.yaml `tasks` entry naming the model and the per-lesson task budget (ADR-0005, SRV-CONFIG).
+# task: the reader.yaml `tasks` entry naming the model and the task budget, spent per compile run (ADR-0005, SRV-CONFIG).
 # max_output_tokens: passed to the CLI as CLAUDE_CODE_MAX_OUTPUT_TOKENS. Measured maxima on L02 (spikes/compile-cost):
 #   draft 17,591; revise 25,825; fact_check 6,617 (summary-style, see below); review 8,517. Caps: 32,000 for notebook
 #   stages (1.24x the largest measured); 16,000 for reports.

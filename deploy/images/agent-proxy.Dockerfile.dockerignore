@@ -1,0 +1,4 @@
+# Build-context exclusions for agent-proxy.Dockerfile (SRV-AGENT FR-AGENT-1), as for server.Dockerfile: bytecode
+# caches and any .env file never enter the image.
+**/__pycache__
+**/.env*
