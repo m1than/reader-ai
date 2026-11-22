@@ -378,6 +378,13 @@ tasks:
         process gone 0.11 s after the 202. SRV-KERNEL stays draft until SRV-AUTH merges (its Red needs the app and
         session layers). Cross-spec: SRV-AUTH's app factory includes routers from a declared list naming
         reader.kernels.routes" }
+  - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: fix, track: engineering, status: done, needs: [],
+      note: "Root cause (investigator, 2026-11-22): the OPS-SANDBOX test session finalizer removed every container and
+        network labelled org.reader-ai.test=sandbox on the shared Docker daemon, killing other concurrent sessions'
+        live objects (caught twice with pid attribution; shared label fails, per-run labels pass). The supervisor was
+        fine: 480/480 restarts within 4.0 s under load. Fix on branch V/OPS-SANDBOX-test-isolation: per-run label
+        org.reader-ai.test.sandbox-run=<pid>.<random>, end sweep of own objects, start sweep of dead pids only;
+        test_session_sweep_spares_other_runs. Old-label orphans left for the owner" }
   - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
       note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
