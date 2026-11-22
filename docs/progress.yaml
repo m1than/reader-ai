@@ -528,8 +528,11 @@ tasks:
         (3c10698). Run cap = the owner's compile_cap_usd $8.00, a declared deviation from ADR-0005's $4.35 target
         (23 × $8 = $184 > $100; the $200 monthly budget is the guard; ADR-0005 amendment when the pipeline lands)",
       note: "SRV-AGENT and SRV-PIPELINE approved (agent, 2026-11-22) with the round-3 items folded in; Green done
-        (agent dca70a2, pipeline modules 64480ca, runs/jobs/routes next commit), awaiting the code review; no live
-        compile until the coordinator schedules it. SRV-AGENT amended for SRV-TUTOR (FR-AGENT-12 daily scope,
+        (agent dca70a2, pipeline 64480ca, c3f9995). Code review by deep-reviewer (Fable): round 1 changes (B1 system
+        prompt as a file, B2 in-flight record, S1–S6, minors, test gaps; fixed in 0ed0310 and 7c8411a), round 2
+        approve (2026-11-23), its non-blocking items applied. Any claude-agent-sdk version bump must re-run
+        server/tests/agent/test_cli_image.py (the kill path reads the SDK transport's private _process). Watch the
+        first live Opus stage for a model_mismatch refusal. No live compile until the coordinator schedules it. SRV-AGENT amended for SRV-TUTOR (FR-AGENT-12 daily scope,
         FR-AGENT-13 thinking off, custom system prompt reserve, stop_reason, abort on first api_retry, deadline).
         Paired: OPS-DEPLOY (agent-proxy build, server image installs [agent], example budgets 4/2/4, agent-proxy
         healthy while listening), SRV-AUTH (ROUTERS, VERSION_LOCATIONS, api Jobs), SRV-EVENTS (KIND_MODULES,

@@ -157,6 +157,19 @@ async def test_body_checks(tmp_path: Path, body: bytes, status: int, code: str |
         assert p.upstream.requests == []
 
 
+async def test_lone_surrogate_is_a_4xx_not_a_500(tmp_path: Path) -> None:
+    """Code review round 2: a lone surrogate escape cannot be re-serialised as UTF-8; a 400 is not retried."""
+    p = make_proxy(tmp_path)
+    body = b'{"model": "claude-sonnet-5-5", "max_tokens": 100, "messages": [{"role": "user", "content": "\\ud800"}]}'
+    async with p.client() as c:
+        token = await issue(c)
+        r = await forward(c, token, body=body)
+        record = (await c.post("/run-tokens/revoke", json={"run_token": token})).json()
+    assert (r.status_code, r.json()) == (400, {"error": "body_not_utf8"})
+    assert p.upstream.requests == []
+    assert record["refused"] == ["body_not_utf8"]
+
+
 async def test_forwarded_body_is_the_checked_object(tmp_path: Path) -> None:
     """Duplicate keys: json.loads keeps the last; the proxy sends exactly what it checked."""
     p = make_proxy(tmp_path)

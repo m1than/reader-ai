@@ -86,3 +86,12 @@ def test_deadline_kills_the_cli_at_once(image: str, tmp_path: Path) -> None:
     assert report.get("timeout") is True, report
     assert report["elapsed_s"] < 3.5  # deadline 2 s; the SDK's own close would add a 5 s grace
     assert report["cli_processes_left"] == 0
+
+
+def test_abort_on_first_api_retry_kills_the_cli_at_once(image: str, tmp_path: Path) -> None:
+    """The stub answers 429: the first api_retry ends the call and the CLI is killed, not waited for (S6)."""
+    report, requests = _run(image, tmp_path, "abort", STUB_ERROR_STATUS="429")
+    assert report["retried"] is True, report
+    assert report["elapsed_s"] < 3.0  # the CLI's own backoff runs ~176 s; the SDK's close adds a 5 s grace
+    assert report["cli_processes_left"] == 0
+    assert len([r for r in requests if r.get("path") == "/v1/messages"]) <= 2

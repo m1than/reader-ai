@@ -122,7 +122,7 @@ tables:
 
 errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, provider_missing, provider_unavailable,
   rate_limited, run_token_unknown, tools_mismatch, model_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
-  usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded]
+  usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded, body_not_utf8]
 
 requirements:
   - id: FR-AGENT-1
@@ -167,7 +167,10 @@ requirements:
       `tools_mismatch`, one whose `model` differs from the run_token's model with 403 `model_mismatch`, and one whose
       `max_tokens` is missing or exceeds the run_token's bound with 403 `output_cap` (REF-AGENT-4 measured that the CLI
       sends CLAUDE_CODE_MAX_OUTPUT_TOKENS as `max_tokens`). The forwarded body is the checked object re-serialised, so
-      what was checked is what is sent. Bodies over `bounds.proxy_body_max_bytes` get 413. Responses,
+      what was checked is what is sent; a body that cannot be re-serialised as UTF-8 (a lone surrogate escape such as
+      `\ud800`) is refused with 400 `body_not_utf8`, a 4xx the CLI does not retry (code review round 2; it was a 500,
+      which the CLI retried for 3 minutes). The `model_mismatch` check is new against the real CLI: the first live
+      Opus stage must be watched for a refusal (the CLI might send a dated or aliased model id). Bodies over `bounds.proxy_body_max_bytes` get 413. Responses,
       including SSE streams, pass through with hop-by-hop headers dropped. No redirect is followed.
   - id: FR-AGENT-5
     text: >-

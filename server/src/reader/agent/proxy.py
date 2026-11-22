@@ -269,11 +269,19 @@ class Proxy:
         max_tokens = payload.get("max_tokens")
         if type(max_tokens) is not int or max_tokens > entry.max_output_tokens:
             return refuse(403, "output_cap")
-        return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        try:
+            return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        except UnicodeEncodeError:  # a lone surrogate (`\ud800`): a 4xx, which the CLI does not retry
+            return refuse(400, "body_not_utf8")
 
 
 class _Once:
-    """Marks one forwarded request finished, exactly once, whichever path ends it."""
+    """Marks one forwarded request finished, exactly once, whichever path ends it.
+
+    A client that disconnects before the relay starts leaves `in_flight` up on purpose: neither the relay
+    nor the background close then runs, the request may still have been billed, and the run settles
+    conservatively at the reserve (FR-AGENT-9, `outcome_unknown`).
+    """
 
     def __init__(self, entry: Entry) -> None:
         self.entry: Entry | None = entry

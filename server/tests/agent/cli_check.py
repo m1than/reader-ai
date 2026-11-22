@@ -53,6 +53,7 @@ async def main(mode: str) -> dict[str, object]:
         floor_usd=Decimal(0),
         run_cap_usd=Decimal(1),
         deadline_s=deadline,
+        abort_on_retry=mode == "abort",  # with STUB_ERROR_STATUS=429: the first api_retry ends the call
     )
     seen = _Seen()
     started = time.monotonic()
@@ -63,6 +64,7 @@ async def main(mode: str) -> dict[str, object]:
         )
         out["ok"] = seen.result is not None and not seen.result.is_error
         out["init_tools"] = (seen.init or {}).get("tools")
+        out["retried"] = seen.retried
     except AgentError as error:
         out["timeout"] = error.code == "deadline_exceeded"
     out["elapsed_s"] = round(time.monotonic() - started, 2)
@@ -72,9 +74,7 @@ async def main(mode: str) -> dict[str, object]:
 
 
 if __name__ == "__main__":
-    stub = subprocess.Popen(
-        [sys.executable, "/stub/stub.py"], stdin=subprocess.PIPE, stdout=subprocess.PIPE
-    )
+    stub = subprocess.Popen([sys.executable, "/stub/stub.py"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
     assert stub.stdout is not None
     stub.stdout.readline()  # stub-ready
     sys.stdout.write(json.dumps(asyncio.run(main(sys.argv[1]))) + "\n")
