@@ -33,6 +33,8 @@ priority: "owner 2026-11-20: vertical slice first (docs/roadmap.md 'Vertical sli
   before any task of stages 2–9; stages resume in order after V.live. Review depth (AGENTS.md): full review until approve in the
   complex areas, one deep-reviewer round elsewhere."
 
+integration: "owner 2026-11-22: one final PR; all work integrates on V/slice-integration"
+
 tasks:
   # Stage 0 — groundwork and spikes
   - { id: S0.owner.adr-status, stage: 0, kind: owner, status: done, needs: [],
