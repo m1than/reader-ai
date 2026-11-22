@@ -30,6 +30,7 @@ agent = ["claude-agent-sdk==0.2.187"]
 [project.scripts]
 reader = "reader.cli.app:main"   # OPS-CLI FR-CLI-1
 reader-server = "reader.serve.main:main"   # SRV-AUTH: roles api|worker|mcp, bootstrap-link (FR-DEPLOY-11)
+reader-ingest = "reader.ingest.host.cli:main"   # SRV-INGEST FR-INGEST-1: the host ingest command
 
 # The project is built (editable) so that `python -m reader.…`
 # works outside pytest (SRV-CONFIG FR-CONFIG-4). `reader` is a namespace package: no spec claims
@@ -53,6 +54,8 @@ dev = [
   "ruff>=0.17",
   "testcontainers>=4.15",
   "types-jsonschema>=4.26",   # SRV-LESSON: mypy --strict over reader.lessons.schema
+  "reportlab==5.1.0",         # SRV-INGEST: VEC-INGEST-2 fixture generator (invariant mode)
+  "matplotlib==3.11.2",       # SRV-INGEST: only for its bundled DejaVu TTFs (Cyrillic in the VEC-INGEST-2 PDF)
 ]
 
 [tool.ruff]
@@ -82,6 +85,10 @@ known-first-party = ["reader"]
 # SQL and @trace lines whole.
 "tests/agent/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
 "tests/pipeline/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+# SRV-INGEST: PT018 compound expectations on one result; S603 the [host] tests run the converter and probes as
+# subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
+# Russian text on purpose (Cyrillic letters that look Latin).
+"tests/ingest/**" = ["S101", "PT018", "S603", "S108", "RUF001"]
 
 [tool.mypy]
 strict = true
@@ -90,10 +97,17 @@ mypy_path = "src"
 explicit_package_bases = true   # `reader` is a namespace package (no src/reader/__init__.py)
 warn_unreachable = true
 
+# SRV-INGEST: Docling, pypdfium2 and huggingface_hub exist only in the converter venv (FR-INGEST-3), never in the
+# server environment; asyncpg ships no type information.
+[[tool.mypy.overrides]]
+module = ["docling.*", "docling_core.*", "pypdfium2.*", "huggingface_hub.*", "asyncpg.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
 markers = [
   "registry: queries a remote image registry on every run; runs only with READER_TEST_REGISTRY=1 (OPS-DEPLOY [image: registry])",
+  "ingest_host: needs the converter venv and models (READER_TEST_INGEST_HOST=1, READER_TEST_INGEST_DATA); [local] cases also READER_TEST_PILOT_PDF (SRV-INGEST)",
 ]

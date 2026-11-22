@@ -42,6 +42,7 @@ VERSION_LOCATIONS: Final[list[Path]] = [
     SCRIPT_LOCATION / "versions",
     _HERE.parent / "lessons" / "migrations",
     _HERE.parent / "jobs" / "migrations",
+    _HERE.parent / "ingest" / "migrations",  # SRV-INGEST paired change (FR-AUTH-1 note)
     _HERE.parent / "agent" / "migrations",
     _procrastinate_versions(),
 ]
