@@ -24,16 +24,27 @@ pytestmark = pytest.mark.skipif(
     reason="opt-in: READER_TEST_IMAGE_BUILD=1 and a docker daemon (builds reader-embed:local)",
 )
 TMPFS = "/tmp:size=64m,uid=10003"  # noqa: S108 - a container tmpfs, as compose.yaml declares it
-HARDENING = [
-    "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
-    "--tmpfs", TMPFS, "--user", "10003:10003", "--memory", "3g", "--memory-swap", "3g",
+# compose.yaml's embed hardening and limits (OPS-DEPLOY FR-DEPLOY-9), without a network
+PROCESS = [
+    "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true", "--tmpfs", TMPFS,
+    "--user", "10003:10003", "--memory", "3g", "--memory-swap", "3g", "--init",
 ]
+HARDENING = ["--network", "none", *PROCESS]
+HEALTH = ["--health-cmd", "python -I -m reader.search.embed_service --healthcheck", "--health-interval", "2s"]
 
 
 def _docker(*args: str, stdin: str | None = None, timeout: float = 600) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["docker", *args], input=stdin, capture_output=True, text=True, check=False, timeout=timeout
     )
+
+
+def _python(
+    image: str, code: str, stdin: str | None = None, network: str = "none"
+) -> subprocess.CompletedProcess[str]:
+    """A one-shot container of the image running `python -I -c code` (no docker exec)."""
+    run = ["run", "--rm", "-i", "--network", network, *PROCESS]
+    return _docker(*run, "--entrypoint", "python", image, "-I", "-c", code, stdin=stdin)
 
 
 @pytest.fixture(scope="module")
@@ -46,13 +57,14 @@ def built() -> str:
 
 @pytest.fixture
 def service(built: str) -> Iterator[str]:
-    run = _docker("run", "-d", *HARDENING, built)
+    """The real entrypoint, healthy by its own compose healthcheck command."""
+    run = _docker("run", "-d", *HARDENING, *HEALTH, built)
     assert run.returncode == 0, run.stderr
     cid = run.stdout.strip()
     try:
         for _ in range(240):
-            check = _docker("exec", cid, "python", "-I", "-m", "reader.search.embed_service", "--healthcheck")
-            if check.returncode == 0:
+            status = _docker("inspect", "-f", "{{.State.Health.Status}}", cid).stdout.strip()
+            if status == "healthy":
                 break
             time.sleep(1)
         else:
@@ -74,24 +86,86 @@ print(json.dumps({"model": body["model"], "n": len(body["vectors"]), "dim": len(
 
 
 def test_service_embeds_offline_under_the_hardening(service: str) -> None:
-    out = _docker(
-        "exec", "-i", service, "python", "-I", "-c", CALL,
-        stdin=json.dumps({"kind": "query", "texts": ["как устроен блокчейн"]}),
-    )
+    # a sidecar in the service's network namespace (which has no network but loopback)
+    body = json.dumps({"kind": "query", "texts": ["как устроен блокчейн"]})
+    out = _python(IMAGE, CALL, stdin=body, network=f"container:{service}")
     assert out.returncode == 0, out.stderr
     got = json.loads(out.stdout)
     assert got["model"] == "BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181"
     assert got["n"] == 1 and got["dim"] == 1024 and abs(got["norm"] - 1.0) < 1e-4
-    user = _docker("exec", service, "id", "-u")
-    assert user.stdout.strip() == "10003"
+    user = _docker("inspect", "-f", "{{.Config.User}}", service)
+    assert user.stdout.strip() == "10003:10003"
 
 
 def test_logs_carry_no_text(service: str) -> None:
     canary = "kanareyka-embed-canary"
     body = json.dumps({"kind": "query", "texts": [canary]})
-    _docker("exec", "-i", service, "python", "-I", "-c", CALL, stdin=body)
+    assert _python(IMAGE, CALL, stdin=body, network=f"container:{service}").returncode == 0
     logs = _docker("logs", service)
+    assert "encoded kind=query n=1" in logs.stderr  # the service did log the call, as counts
     assert canary not in logs.stdout + logs.stderr
+
+
+PRECHECK = """
+from reader.search import embed_service as m
+calls = []
+original = m.load_checkpoint
+def counted(path):
+    calls.append(str(path))
+    return original(path)
+m.load_checkpoint = counted
+encoder = m.load_encoder()
+print(len(calls), calls[0].endswith("pytorch_model.bin"), encoder.model.max_seq_length)
+"""
+
+
+def test_service_start_runs_the_precheck_and_caps_the_length(built: str) -> None:
+    out = _python(built, PRECHECK)
+    assert out.returncode == 0, out.stderr[-2000:]
+    assert out.stdout.split() == ["1", "True", "1024"]
+
+
+# FR-SEARCH-1 / OPS-DEPLOY FR-DEPLOY-9: a real service start plus the worst admitted request (8 texts of 1,200
+# characters that each reach the 1,024-token cap) under compose's 3g limit; the cgroup never hits its limit.
+MEMORY = """
+import json, random, threading, urllib.request
+from reader.search import embed_service as m
+
+def cgroup(name):
+    with open("/sys/fs/cgroup/" + name) as f:
+        return f.read()
+
+server = m.make_server(None, "127.0.0.1", 0, m.model_id())
+threading.Thread(target=server.serve_forever, daemon=True).start()
+server.encoder = m.load_encoder()
+after_load = int(cgroup("memory.peak"))
+rng = random.Random(7)
+pool = ("абвгдеёжзийклмнопрстуфхцчшщъыьэюя" + "αβγδεζηθλμξπσφψω0123456789+-*/=^_{}()[]<>|\\\\$%&#@~;:,.!?"
+        + "".join(chr(c) for c in range(0x4E00, 0x4E00 + 200)))
+texts = ["".join(rng.choice(pool) for _ in range(1200)) for _ in range(8)]
+data = json.dumps({"kind": "passage", "texts": texts}).encode()
+url = "http://127.0.0.1:%d/embed" % server.server_address[1]
+request = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
+with urllib.request.urlopen(request, timeout=600) as r:
+    n = len(json.loads(r.read())["vectors"])
+events = dict(line.split() for line in cgroup("memory.events").splitlines())
+tokens = [len(server.encoder.model.tokenizer(t)["input_ids"]) for t in texts]
+print(json.dumps({"n": n, "after_load": after_load, "peak": int(cgroup("memory.peak")),
+                  "limit": int(cgroup("memory.max")), "events": events, "min_tokens": min(tokens)}))
+"""
+
+
+def test_worst_batch_stays_under_the_compose_limit(built: str) -> None:
+    out = _python(built, MEMORY)
+    assert out.returncode == 0, out.stderr[-2000:]
+    got = json.loads(out.stdout.strip().splitlines()[-1])
+    print(json.dumps(got))  # the measurement, recorded in the spec
+    assert got["n"] == 8
+    assert got["min_tokens"] > 1024  # every text reaches the cap: the worst admitted request
+    assert got["limit"] == 3 * 1024**3
+    assert got["events"]["max"] == "0"
+    assert got["events"]["oom_kill"] == "0"
+    assert got["peak"] * 1.25 <= got["limit"]  # the spec's 25 % margin
 
 
 EVIL = """

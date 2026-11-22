@@ -55,6 +55,7 @@ def test_embed_hardened_and_not_a_consumer() -> None:
         assert embed["image"] == "reader-embed:local"
         assert embed["build"]["dockerfile"] == "deploy/images/embed.Dockerfile"
         assert embed["user"] == "10003:10003"
+        assert embed.get("init") is True
         assert embed.get("read_only") is True
         assert embed.get("cap_drop") == ["ALL"]
         assert NNP in (embed.get("security_opt") or [])

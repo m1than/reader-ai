@@ -10,6 +10,8 @@ supersedes: []
 
 > Amends [ADR-0012](0012-deployment-and-auth.md) (the Compose stack and its networks gain `embed`) and [ADR-0025](0025-agent-sandbox-and-credential-separation.md) rule 5 (the worker's reachable set gains `embed`). Both amendments are notes for the owner to add when this ADR is accepted.
 
+> Measurement note (2026-11-23, SRV-SEARCH code review of dd364ba; the Decision is unchanged): the Context's memory figure (2,410 MiB peak RSS, spikes/embed-service) did not include the service's own `weights_only` precheck, which first loaded the whole 2.27 GB checkpoint without mmap: `memory.peak` 3,169 MiB after load and 3,459 MiB after a worst batch, over the 3g limit and survived only through reclaim (`memory.events max` 2,870). The precheck now loads with `mmap=True`. Re-measured under compose's 3g, a real service start plus the worst admitted request (8 texts, each over the 1,024-token cap) peaks at `memory.peak` 2,114 MiB on a cold page cache (1,153 MiB warm) with `memory.events max` 0; 2,114 × 1.25 = 2,643 MiB, so `mem_limit` 3g stands. Numbers in OPS-DEPLOY FR-DEPLOY-9; the SRV-SEARCH [image] test `test_worst_batch_stays_under_the_compose_limit` re-checks them on every build.
+
 ## Context
 
 SRV-SEARCH (slice step V3) needs BAAI/bge-m3 dense vectors, which the owner confirmed on 2026-11-21 (spikes/embeddings-local/RESULT.md). The vectors are needed in two places:

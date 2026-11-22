@@ -53,14 +53,15 @@ class UnsafeCheckpoint(Exception):
 
 
 def load_checkpoint(path: str | Path) -> dict[str, Any]:
-    """Load a state dict with `weights_only=True`; any refused global raises UnsafeCheckpoint."""
+    """Load a state dict with `weights_only=True` and `mmap=True` (tensors stay file-backed, so the check
+    costs no anonymous memory); any refused global raises UnsafeCheckpoint."""
     import pickle
 
     import torch
 
     try:
-        state: dict[str, Any] = torch.load(str(path), map_location="cpu", weights_only=True)
-    except pickle.UnpicklingError as error:
+        state: dict[str, Any] = torch.load(str(path), map_location="cpu", weights_only=True, mmap=True)
+    except (pickle.UnpicklingError, RuntimeError) as error:
         raise UnsafeCheckpoint("unsafe_checkpoint") from error
     return state
 
@@ -69,8 +70,9 @@ class SentenceEncoder:
     """bge-m3 through sentence-transformers: CPU, fp32, max_seq_length 1,024, normalised, no prefixes."""
 
     def __init__(self, directory: Path) -> None:
-        # refuse an unsafe checkpoint before the library reads it
-        load_checkpoint(directory / "pytorch_model.bin")
+        # refuse an unsafe checkpoint before the library reads it; the mapped state is dropped at once
+        checked = load_checkpoint(directory / "pytorch_model.bin")
+        del checked
         from sentence_transformers import SentenceTransformer
 
         self.model = SentenceTransformer(str(directory), device="cpu")
@@ -78,7 +80,9 @@ class SentenceEncoder:
 
     def encode(self, kind: str, texts: Sequence[str]) -> list[list[float]]:
         del kind  # bge-m3 needs no query or passage instruction (REF-SEARCH-3)
-        vectors = self.model.encode(list(texts), batch_size=MAX_TEXTS, normalize_embeddings=True)
+        vectors = self.model.encode(
+            list(texts), batch_size=MAX_TEXTS, normalize_embeddings=True, show_progress_bar=False
+        )
         return [[float(x) for x in row] for row in vectors]
 
 
@@ -94,6 +98,9 @@ class _Job:
 
 class EmbedServer(ThreadingHTTPServer):
     daemon_threads = True
+    # structural: socketserver's default listen backlog of 5 refused overlapping callers in the INV-SEARCH-8
+    # test (8 at once); requests queue in the FIFO anyway, so the backlog only has to hold them
+    request_queue_size = 64
 
     def __init__(self, address: tuple[str, int], encoder: Encoder | None, model: str) -> None:
         super().__init__(address, _Handler)

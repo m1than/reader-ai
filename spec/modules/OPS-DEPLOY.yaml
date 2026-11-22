@@ -31,7 +31,10 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   Paired change 2026-11-22 (coordinator-scheduled, for SRV-SEARCH, ADR-0028 accepted by the owner): service `embed`
   (reader-embed:local, hash-locked dependencies, model baked at a pinned revision, uid 10003, read-only, mem 3g from
   spikes/embed-service) on its own internal network `embed` with api and worker; pgvector 0.8.7 in reader-postgres;
-  VEC-DEPLOY-2 gains api–embed and worker–embed and the embed negatives (FR-DEPLOY-1, -2, -3, -9, -11)."
+  VEC-DEPLOY-2 gains api–embed and worker–embed and the embed negatives (FR-DEPLOY-1, -2, -3, -9, -11).
+  SRV-SEARCH code review of dd364ba (2026-11-23): FR-DEPLOY-9's embed memory figure corrected from a re-measurement
+  (the precheck now maps the checkpoint; 3g kept, memory.peak 2,114 MiB cold, memory.events max 0) and `init: true`
+  added; the config test checks `init`."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -199,10 +202,17 @@ requirements:
       2 GiB limit without recording its peak). The stage-1 live check records each consumer's peak from its cgroup's
       `memory.peak`, and the values are revised from it; the worker's 2g is revisited in stage 3, when it runs ingestion.
       [config] Paired SRV-SEARCH change (ADR-0028): `embed` runs as `user: "10003:10003"`, `read_only: true`, tmpfs
-      `/tmp` (`size=64m,uid=10003`, the image's HOME), `cap_drop: [ALL]`, `no-new-privileges`, `restart:
-      unless-stopped`, and `mem_limit: 3g` with `memswap_limit: 3g`. 3g is measured, not structural:
-      spikes/embed-service peak RSS 2,410 MiB for the worst admitted request of 8 texts at max_seq_length 1,024, × 1.25.
-      It is not a secret consumer: no `/run/secrets` tmpfs, no `environment`. [config]
+      `/tmp` (`size=64m,uid=10003`, the image's HOME), `init: true` (a PID 1 that forwards signals and reaps),
+      `cap_drop: [ALL]`, `no-new-privileges`, `restart: unless-stopped`, and `mem_limit: 3g` with `memswap_limit: 3g`.
+      3g is measured, not structural. Corrected 2026-11-23 (SRV-SEARCH code review of dd364ba): the first figure,
+      spikes/embed-service's peak RSS 2,410 MiB, counted the mapped checkpoint but not the service's own
+      `weights_only` precheck, which loaded the whole 2.27 GB state without mmap and pushed the cgroup's
+      `memory.peak` to 3,169 MiB after load and 3,459 MiB after a worst batch (over 3g, kept alive only by reclaim:
+      `memory.events max` 2,870). With the precheck on `mmap=True`, a real service start plus the worst admitted
+      request (8 texts of 1,200 characters, each over the 1,024-token cap) under 3g measured `memory.peak` 2,114 MiB
+      on a cold page cache and 1,153 MiB warm, `memory.events max` 0 (2026-11-23, reader-embed:local); 2,114 × 1.25 =
+      2,643 MiB ≤ 3,072. The SRV-SEARCH [image] test `test_worst_batch_stays_under_the_compose_limit` re-measures it
+      on every image build. It is not a secret consumer: no `/run/secrets` tmpfs, no `environment`. [config]
   - id: FR-DEPLOY-10
     text: >-
       Secrets follow ADR-0026 (REF-DEPLOY-6):
