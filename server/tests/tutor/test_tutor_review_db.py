@@ -16,7 +16,6 @@ from typing import Any
 import pytest
 
 from .conftest import (
-    MAT,
     SPANS,
     FakeJobs,
     FakeProvider,
@@ -190,4 +189,3 @@ async def test_no_text_in_logs_when_search_raises(
     assert (await question_row(w, qid))[0] == "queued"  # SRV-EVENTS judges the job; a read then finalises the row
     text = "\n".join(r.getMessage() for r in caplog.records)
     assert "CANARY" not in text
-    assert MAT  # the material id is the only thing a log may name

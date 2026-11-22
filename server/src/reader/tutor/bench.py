@@ -42,7 +42,10 @@ _LESSON: Final = (
     " ORDER BY c.created_at LIMIT 1"
 )
 _STATE: Final = "SELECT state, answer, grounded, error_code FROM tutor_questions WHERE id = :q"
-_OUTPUT: Final = "SELECT coalesce(sum(output), 0) FROM agent_spend WHERE run_id = :q AND kind = 'settle'"
+# thinking: SRV-AGENT's settle rows (agent_0002); null when no settle row recorded it
+_OUTPUT: Final = (
+    "SELECT coalesce(sum(output), 0), sum(thinking) FROM agent_spend WHERE run_id = :q AND kind = 'settle'"
+)
 
 
 class BenchError(Exception):
@@ -129,7 +132,7 @@ async def _ask(
         await asyncio.sleep(POLL_S)
     wall = time.monotonic() - started
     async with engine.connect() as conn:
-        output = (await conn.execute(text(_OUTPUT), {"q": qid})).scalar_one()
+        output, thinking = (await conn.execute(text(_OUTPUT), {"q": qid})).one()
     blocks = (answer or {}).get("blocks", [])
     return {
         "id": label,
@@ -139,7 +142,7 @@ async def _ask(
         "wall_s": round(wall, 2),
         "usd": float(await ledger.spent(engine, run_id=qid)),
         "output_tokens": int(output),
-        "thinking_tokens": None,  # the SDK's usage has no thinking split; thinking is off
+        "thinking_tokens": None if thinking is None else int(thinking),
         "grounded": bool(grounded),
         "blocks": len(blocks),
         "blocks_with_verified_quote": sum(1 for b in blocks if b["supported"]),

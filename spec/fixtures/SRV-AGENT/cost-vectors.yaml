@@ -7,7 +7,9 @@
 #   cache_write_5m = usage.cache_creation.ephemeral_5m_input_tokens
 #   cache_write_1h = usage.cache_creation.ephemeral_1h_input_tokens
 #   cache_read     = usage.cache_read_input_tokens
-# A missing key counts 0; a missing `cache_creation` breakdown with a non-zero cache_creation_input_tokens is
+#   thinking       = usage.output_tokens_details.thinking_tokens (recorded, not priced: it is inside output; null
+#                    when the SDK gives no details)
+# A missing key counts 0 (thinking: null); a missing `cache_creation` breakdown with a non-zero cache_creation_input_tokens is
 # `usage_unmapped` (refused, never guessed).
 # usd = sum(tokens_k * rate_k) / 1e6, rounded to 6 decimals.
 #
@@ -39,7 +41,12 @@ sdk_usage_mapping:
     sdk_usage: { input_tokens: 2, output_tokens: 17591, cache_creation_input_tokens: 31370, cache_read_input_tokens: 0,
                  cache_creation: { ephemeral_1h_input_tokens: 31370, ephemeral_5m_input_tokens: 0 },
                  output_tokens_details: { thinking_tokens: 1353 }, service_tier: standard }
-    usage: { input: 2, output: 17591, cache_write_5m: 0, cache_write_1h: 31370, cache_read: 0 }
+    usage: { input: 2, output: 17591, cache_write_5m: 0, cache_write_1h: 31370, cache_read: 0, thinking: 1353 }
+  - name: sdk-shape-tutor-call-q1
+    sdk_usage: { input_tokens: 2, output_tokens: 305, cache_creation_input_tokens: 0, cache_read_input_tokens: 844,
+                 cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 0 },
+                 output_tokens_details: { thinking_tokens: 0 }, service_tier: standard }
+    usage: { input: 2, output: 305, cache_write_5m: 0, cache_write_1h: 0, cache_read: 844, thinking: 0 }
   - name: sdk-shape-zero
     sdk_usage: { input_tokens: 0, output_tokens: 0 }
     usage: { input: 0, output: 0, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }

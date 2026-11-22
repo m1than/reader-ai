@@ -63,6 +63,10 @@
 # pre-check reads FR-AGENT-12's scope through it); `HttpProxyClient.aclose()` closes its HTTP client; a [db] test
 # pins FR-AGENT-9's per-user advisory lock: two concurrent reserves with room for one (under the daily scope, and
 # separately under the run cap) give one reserve row and one refusal.
+# Paired from SRV-TUTOR's code review round 2 (2026-11-23; no new review round): the settle row also stores
+# `thinking`, the SDK's `usage.output_tokens_details.thinking_tokens` (measured present in spikes/tutor-call and
+# spikes/compile-cost). It is already inside `output`, so it is not priced; null when the SDK gives none. Additive
+# migration agent_0002 (a nullable column); VEC-AGENT-1's mapping and a [db] settle test cover it.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -118,7 +122,7 @@ bounds:
   cli_overhead_tokens: 1000     # the fixed overhead beside a custom system prompt: ≈ 410 measured (REF-AGENT-7), 2.4×
 
 tables:
-  agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE" }
+  agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), thinking bigint null (settle only: output_tokens_details.thinking_tokens, part of output, not priced; agent_0002), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE" }
 
 # One cost definition: `cost(model, usage) = sum(usage_k * rate_k) / 1e6` over the five fields of VEC-AGENT-1's mapping.
 # `spent(scope) = sum(settle.settled_usd) + sum(reserve.usd for reserves with neither a settle nor a void)`, where
