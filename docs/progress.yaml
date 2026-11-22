@@ -562,12 +562,15 @@ tasks:
       branch: V/V.DOD-index,
       what: "Owner 2026-11-22: Definition-of-Done index of every user operation, verified automatically; feeds
         V.cost-optimize (spec OPS-DOD).",
-      note: "spec drafted, awaits deep-reviewer. Initial index: 19 operations × 8 criteria = 152 cells, 25 na, 39 missing
-        (tutor.ask 8; lesson.list, lesson.open, lesson.findings 4 each; auth.signout 3; auth.bootstrap, auth.signin,
-        cell.interrupt, cell.run_all, stack.restore 2 each; search.query, cell.run, cell.reset, stack.backup, stack.down,
-        stack.status 1 each; material.ingest, lesson.compile, stack.up 0). Paired tools change: repo.mjs TEST_PATTERNS
-        gains ^tools/dod/.+\\.test\\.mjs$, ci runs node --test tools/dod/. This entry duplicates the one on
-        V/owner-housekeeping; keep this one when merging." }
+      review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review)",
+      note: "spec revised after review. Index: 30 operations × 8 criteria = 240 cells, 44 na, 44 missing (ingest.setup,
+        material.browse, lesson.list, lesson.open, course.import, lesson.findings, stack.backup, stack.restore 3 each;
+        auth.signout, auth.add_passkey, lesson.compile_resume, stack.trust 2 each; 12 operations with 1; material.ingest,
+        cell.run, cell.reset, lesson.compile, tutor.ask, stack.up 0). 81 mapped items untraced, all in draft specs.
+        Paired tools changes in Red/Green: repo.mjs TEST_PATTERNS ^tools/dod/.+\\.test\\.mjs$; check.mjs T10; guard-tests
+        ratchet; pre-write hook refuses agent `waived`; ci runs node --test \"tools/dod/*.test.mjs\"; verify-all.sh
+        inputs and report. Cross-spec: SRV-TUTOR FR-TUTOR-11 becomes a pointer to this index. This entry duplicates the
+        one on V/owner-housekeeping; keep this one when merging." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
