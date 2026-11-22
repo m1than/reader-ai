@@ -21,7 +21,13 @@
       "Bash(git push origin main*)",
       "Bash(git push origin HEAD:main*)",
       "Bash(npm publish *)",
-      "Bash(gh release create *)"
+      "Bash(gh release create *)",
+      "Bash(docker exec *)",
+      "Bash(docker container exec *)",
+      "Bash(docker compose exec *)",
+      "Bash(docker compose * exec *)",
+      "Bash(docker run *--pid*)",
+      "Bash(docker container run *--pid*)"
     ]
   },
   "hooks": {
