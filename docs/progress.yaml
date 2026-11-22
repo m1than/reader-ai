@@ -116,6 +116,14 @@ tasks:
         bge-m3 0.675; MRR 0.230 / 0.409 / 0.413; full pilot 1.2 / 15.1 / 14.1 min. e5-small rejected on recall; the bge-m3 pair is
         within noise. Agent recommends BAAI/bge-m3 (general multilingual, best recall@1 and MRR, MIT); V.SRV-SEARCH-min uses it
         and measures the hybrid on v2 as its acceptance number." }
+  - { id: S0.spike.embed-service, stage: 0, kind: spike, status: done, needs: [S0.spike.embeddings-local],
+      result: "spikes/embed-service/RESULT.md: bge-m3 (rev 5617a9f…, baked, image 5.6 GB), fp32, torch 2.15.0+cpu,
+        sentence-transformers 6.3.0, under the OPS-DEPLOY hardening flags. Cap 1,024, worst admitted request (32 texts at
+        1,024 tokens): peak RSS 3,644 MiB, memory.peak 2,289–2,415 MiB; worst batch of 8 alone: RSS 2,410, memory.peak 1,137.
+        8 CPUs: idle query 0.5–0.9 s, worst batch of 8 11–13 s, worst batch of 32 62 s, prose 1.05–1.72 chunks/s (±40 % run
+        variance). Cap 512 comparison: RSS 2,956, memory.peak 1,626. bf16 on CPU rejected (higher memory, 9–30× slower).
+        torch.load(weights_only=True) of pytorch_model.bin works. Recommended embed mem_limit 4.5 GiB (RSS × 1.25);
+        3.0 GiB if calls were limited to 8 texts." }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
       review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
