@@ -351,8 +351,15 @@ tasks:
         `live-check`; OPS-CLI `reader bootstrap [--handle]` opens the link without printing it. S1.live: learner
         `live-check` reset through psql each run, software authenticator with a per-run key, plus a manual owner
         check in Safari." }
-  - { id: S1.live, stage: 1, kind: live, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
-      what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md" }
+  - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
+      what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
+      note: "script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
+        e2e/live/lib/{passkey_check,secret_scan}.py (outside the spec gate). Non-destructive by default (≈ 5 min; restarts
+        api and postgres, stops and restarts the watcher). --drill deletes and recreates the pgdata and blobs volumes
+        after a backup. Known risk for --drill: the api seeds users rows from reader.yaml at startup, so OPS-CLI's restore
+        precondition (no rows in application tables) may refuse a fresh stack; the drill reports it as FAIL. Cookies stay in
+        the helper's memory (no cookie file), stricter than SRV-AUTH's mktemp jar. Shell checked with shellcheck; helpers
+        dry-run only (no stack)." }
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
   - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
