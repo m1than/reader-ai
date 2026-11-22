@@ -127,6 +127,21 @@ def test_page_with_only_code_keeps_docling_order() -> None:
     assert [i.text for i in ordered] == ["p1", "c-low", "c-high", "p3"]
 
 
+def test_non_code_items_keep_docling_order_across_pages() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    # Docling reaches page 2, returns to page 1 (a float), then goes on; only code may move.
+    seq = [
+        item("text", "a1", 1, 100),
+        item("text", "b2", 2, 100),
+        item("caption", "a1-float", 1, 600),
+        item("code", "c1", 1, 300),
+        item("text", "b2-more", 2, 400),
+    ]
+    ordered = [i.text for i in mapping.order(seq)]
+    assert [t for t in ordered if t != "c1"] == ["a1", "b2", "a1-float", "b2-more"]
+    assert ordered.index("c1") == ordered.index("a1") + 1  # after the last page-1 item above it
+
+
 def test_out_of_range_bookmark_page_is_null() -> None:
     mapping = need("reader.ingest.host.mapping")
     outline, _ = mapping.outline([(0, "A", 1), (0, "B", 9), (0, "C", -1)], [], 2)

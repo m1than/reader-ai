@@ -60,31 +60,31 @@ def order(items: Sequence[Item]) -> list[Item]:
     on its page that comes last in Docling's order among those whose top lies above the code item's top (or
     before the page's first non-code item); code items placed at the same spot keep their order by top."""
     kept = [i for i in items if kind_of(i.label) is not None]
-    pages: dict[int, list[Item]] = {}  # in the order Docling first reaches each page
-    for item in kept:
-        pages.setdefault(item.page, []).append(item)
+    plain = [i for i in kept if kind_of(i.label) != "code"]
+    plain_pages = {i.page for i in plain}
+    after: dict[int, list[Item]] = {}  # id(anchor) -> code items placed after it
+    before: dict[int, list[Item]] = {}  # page -> code items placed before its first non-code item
+    for code in (i for i in kept if kind_of(i.label) == "code" and i.page in plain_pages):
+        anchor = None
+        for candidate in plain:
+            if candidate.page == code.page and candidate.top < code.top:
+                anchor = candidate
+        if anchor is None:
+            before.setdefault(code.page, []).append(code)
+        else:
+            after.setdefault(id(anchor), []).append(code)
     result: list[Item] = []
-    for page_items in pages.values():
-        plain = [i for i in page_items if kind_of(i.label) != "code"]
-        codes = [i for i in page_items if kind_of(i.label) == "code"]
-        if not plain:  # only code on the page: nothing to anchor to, Docling's order stays
-            result.extend(codes)
+    started: set[int] = set()
+    for item in kept:  # non-code items in exactly Docling's order; code only where FR-INGEST-8 puts it
+        if kind_of(item.label) == "code":
+            if item.page not in plain_pages:  # a page of only code: Docling's order and position
+                result.append(item)
             continue
-        after: dict[int, list[Item]] = {}  # id(anchor) -> code items placed after it
-        before: list[Item] = []  # code items placed before the page's first non-code item
-        for code in codes:
-            anchor = None
-            for candidate in plain:
-                if candidate.top < code.top:
-                    anchor = candidate
-            if anchor is None:
-                before.append(code)
-            else:
-                after.setdefault(id(anchor), []).append(code)
-        result.extend(sorted(before, key=lambda c: c.top))
-        for item in plain:
-            result.append(item)
-            result.extend(sorted(after.get(id(item), []), key=lambda c: c.top))
+        if item.page not in started:
+            started.add(item.page)
+            result.extend(sorted(before.get(item.page, []), key=lambda c: c.top))
+        result.append(item)
+        result.extend(sorted(after.get(id(item), []), key=lambda c: c.top))
     return result
 
 

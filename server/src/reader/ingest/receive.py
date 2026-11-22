@@ -112,11 +112,14 @@ async def receive(
             raise IngestError("unknown_material")
         if version != ingest.CONVERTER_VERSION:
             raise IngestError("version_mismatch")
+        scope = asyncio.timeout(remaining())
         try:
-            async with asyncio.timeout(remaining()), engine.connect() as conn:
+            async with scope, engine.connect() as conn:
                 frozen = await store.frozen_version(conn, sha)
         except TimeoutError:
-            raise DeadlineExceeded from None
+            if scope.expired():  # the deadline's own scope, not a driver's connect timeout
+                raise DeadlineExceeded from None
+            raise IngestError("database_unreachable") from None
         except Exception:
             raise IngestError("database_unreachable") from None
         if frozen is not None and frozen != version:

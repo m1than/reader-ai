@@ -570,13 +570,13 @@ def test_system_spawn_runs_a_session_reads_lines_and_counts_stderr(tmp_path: Pat
 
     cli = need("reader.ingest.host.cli")
     script = (
-        "import sys; sys.stderr.write('x' * 10); print('{\"pages_done\":1,\"pages_total\":1}'); "
-        "print('y' * 10000)"
+        "import sys, time; time.sleep(3); sys.stderr.write('x' * 10); "
+        "print('{\"pages_done\":1,\"pages_total\":1}'); print('y' * 10000)"
     )
     child = cli.system_spawn([sys.executable, "-I", "-c", script], {"PATH": "/usr/bin:/bin"}, tmp_path)
+    assert os.getsid(child.pid) == child.pid  # alive (sleeping), and the leader of its own session
     lines = list(child.stdout_lines())
     assert child.wait(10) == 0
     assert lines[0].strip() == b'{"pages_done":1,"pages_total":1}'
     assert all(len(line) <= cli.LINE_LIMIT for line in lines)  # a long line arrives in bounded pieces
-    assert os.getpgid(child.pid) == child.pid if child.wait(0) is None else True
     child.kill()  # a finished session: no error

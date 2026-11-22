@@ -407,7 +407,12 @@ tasks:
         may be 3 — 378, 133, 468 — owner judges them before the first full import); the host reads the members
         once through a dir fd (cap + 1, no symlinks, no FIFOs) and tars those validated bytes; killpg after every
         exit; strict octal tar fields; receive's deadline after storage via asyncio.timeout, exit code from the
-        stored flag; non-blocking items. Full-run numbers committed as spec/fixtures/SRV-INGEST/pilot-fullrun.json.",
+        stored flag; non-blocking items. Full-run numbers committed as spec/fixtures/SRV-INGEST/pilot-fullrun.json.
+        Code review, deep-reviewer (Fable): round 1 changes (9222276), round 2 VERDICT approve (6aa0409). Its four
+        non-blocking items applied with paired tests: FR-INGEST-8 non-code items keep exactly Docling's order (code
+        only reattached by bbox top); FR-INGEST-7 states the 1.0 pt CODE_MARGIN_PT; a driver connect TimeoutError
+        maps to database_unreachable (only the deadline scope's expiry is timeout); the system_spawn test checks
+        os.getsid while the child is alive.",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line

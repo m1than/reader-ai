@@ -276,8 +276,9 @@ requirements:
       [host, VEC-INGEST-2]
   - id: FR-INGEST-7
     text: >-
-      A `code` span's text comes from the PDF text layer inside each of the code item's provenance boxes, in
-      provenance order, joined with `\n`; it is read with pypdfium2, not from Docling's code model (ADR-0021). A block
+      A `code` span's text comes from the PDF text layer inside each of the code item's provenance boxes, each
+      widened by 1.0 pt on every side (CODE_MARGIN_PT: Docling's boxes hug the glyph ink, so edge glyphs are kept),
+      in provenance order, joined with `\n`; it is read with pypdfium2, not from Docling's code model (ADR-0021). A block
       split across a page break therefore keeps both parts. Line order and line breaks are kept:
       - `\r\n` → `\n`;
       - trailing spaces of each line removed;
@@ -291,8 +292,9 @@ requirements:
       - Each code item is moved to sit immediately after the non-code item on its page that comes last in Docling's
         order among those whose bbox top lies above the code item's bbox top.
       - If there is no such item, the code item goes before the page's first non-code item.
-      - Several code items on one page keep their relative order by bbox top.
-      - Every other item keeps Docling's order.
+      - Several code items placed at the same spot keep their relative order by bbox top.
+      - On a page with no non-code item, its code items keep Docling's order, at Docling's position.
+      - Every non-code item keeps exactly Docling's order (also across pages); only code items move.
       The correction is ADR-0021's hypothesis for the misread pages 461 and 468, and its evidence is scoped to those
       two pages (VEC-INGEST-3). On other pages it is checked only by VEC-INGEST-2's synthetic list. `seq` numbers the spans from 0 across the material in the resulting order. [host, VEC-INGEST-2; local,
       VEC-INGEST-3]
@@ -343,7 +345,8 @@ requirements:
         `asyncio.timeout` on the remaining time; a SIGALRM bounds only the blocking stdin read. The exit code after
         the deadline follows whether storage completed (`timeout` before, `enqueue_failed` after), in `main` too.
       - The artifact id is the sha256 of the manifest bytes as received; the import re-checks it (FR-INGEST-13).
-      - Before storage, an unreachable database gives `database_unreachable`; a runtime that cannot start (config
+      - Before storage, an unreachable database gives `database_unreachable`, a driver connect timeout included
+        (only the expiry of the deadline's own scope is `timeout`); a runtime that cannot start (config
         or secret missing) gives `runtime_unavailable`; any other failure `unavailable`, never with detail.
       **Stream checks.** It reads the tar from stdin in stream mode with a strict reader:
       - only ustar regular-file headers, in the order manifest, spans, outline;
@@ -679,4 +682,4 @@ owner_notes:
   - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
   - "6. NFR-INGEST-2's rule-B count may be 3 of 20 against a threshold of 2: page 378 (known miss), page 133 (a curve-constant line labelled code) and page 468 (a filename label labelled a list item), all measured 2026-11-22. The owner judges these pages before the first full import, because the converter version freezes at that import."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says."
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says."

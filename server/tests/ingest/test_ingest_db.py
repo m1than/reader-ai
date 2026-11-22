@@ -318,6 +318,27 @@ async def test_page_parameter_is_ascii_decimal_and_short(pg: Pg, tmp_path: Path,
 # ---- FR-INGEST-11 through main(): the deadline after storage, run_command's error mapping ----
 
 
+async def test_driver_connect_timeout_is_database_unreachable(pg: Pg, tmp_path: Path) -> None:
+    import contextlib
+
+    mod = need("reader.ingest.receive")
+    errors = need("reader.ingest.errors")
+
+    class TimingOutEngine:
+        @contextlib.asynccontextmanager
+        async def connect(self) -> Any:
+            raise TimeoutError  # the driver's own connect timeout, well inside the deadline
+            yield
+
+    async with world(pg, tmp_path) as w:
+        with pytest.raises(errors.IngestError) as failure:
+            await mod.receive(
+                tar(), config=w.config, engine=TimingOutEngine(), jobs=w.jobs, blobs_root=w.blobs
+            )
+        assert failure.value.code == "database_unreachable"
+        assert stored(w) == []
+
+
 class SlowJobs:
     async def enqueue(self, *_: Any, **__: Any) -> Any:
         import asyncio
