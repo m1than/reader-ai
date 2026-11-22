@@ -22,7 +22,7 @@ export const cspFromCaddyfile = (text) => {
 const CSP = cspFromCaddyfile(readFileSync(join(repo, 'deploy/Caddyfile'), 'utf8'));
 const fixtures = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-UI/lessons.json'), 'utf8'));
 const notebook = readFileSync(join(repo, 'spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb'), 'utf8');
-const me = { id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
+const me = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',

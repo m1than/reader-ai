@@ -65,7 +65,7 @@ export const staticController = (cells: KernelState['cells'] = {}): KernelContro
   };
 };
 
-export const sampleMe = { id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
+export const sampleMe = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
 export const sampleSha = '1'.repeat(64);
 export const sampleLessons = {
   lessons: [

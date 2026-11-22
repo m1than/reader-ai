@@ -140,7 +140,10 @@ requirements:
       with an infinite stale time keyed by its sha256 (revisions are immutable). [unit]
   - id: FR-UI-5
     text: >-
-      Authentication: on app start the app calls `GET /api/me`; on a 401 from it, or from any later API call, the app
+      Authentication: on app start the app calls `GET /api/me`, whose body is SRV-AUTH FR-AUTH-9's
+      `{id, handle, role, display_name, consent: {evaluation, tuning}}` with `id` the user's UUID as a string (found by
+      the live run, 2026-11-22: the client had expected a number and rejected every real response); on a 401 from it, or
+      from any later API call, the app
       navigates the whole page to `/api/auth/signin` (SRV-AUTH FR-AUTH-14, which returns to `/` on success). The header
       shows the signed-in `display_name` and a Sign out button that calls `POST /api/auth/signout`, clears the query
       cache and then navigates to `/api/auth/signin`. The SPA never reads, stores or logs the session cookie, and keeps

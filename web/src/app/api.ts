@@ -15,7 +15,7 @@ export class ApiError extends Error {
 }
 
 const Me = v.object({
-  id: v.number(),
+  id: v.string(), // the user's UUID (SRV-AUTH FR-AUTH-9)
   handle: v.string(),
   role: v.string(),
   display_name: v.string(),

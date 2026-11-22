@@ -45,7 +45,7 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       urls.push(url);
-      if (url === '/api/me') return json({ id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
+      if (url === '/api/me') return json({ id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
       if (url === '/api/lessons/w01') return json(lessons().lesson);
       if (url === `/api/lessons/w01/revisions/${sha}`) return json(notebook());
       return new Response(null, { status: 404 });
@@ -67,7 +67,7 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       urls.push(url);
-      if (url === '/api/me') return json({ id: 1, handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
+      if (url === '/api/me') return json({ id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
       return json({ ...lessons().lesson, lesson_id: 'w02', latest_sha256: null, revisions: [] });
     });
     await act(async () => {
