@@ -351,9 +351,17 @@ tasks:
         `live-check`; OPS-CLI `reader bootstrap [--handle]` opens the link without printing it. S1.live: learner
         `live-check` reset through psql each run, software authenticator with a per-run key, plus a manual owner
         check in Safari." }
+  - { id: S1.OPS-CLI-restore-seed, stage: 1, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI, S1.SRV-AUTH],
+      what: "Paired OPS-CLI change: restore's precondition ignores rows the api seeds from reader.yaml at start (users
+        without credentials or sessions) and other declared system tables; --clean --if-exists then replaces them. Until
+        done, stage-1.sh refuses --drill. Found by the S1.live script author, 2026-11-22." }
+  - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: module, track: engineering, status: todo, needs: [],
+      what: "tests/sandbox/test_supervisor.py::test_own_address_source_counts_as_local failed once in the full local gate
+        while other Docker workloads ran (embed spike at 8 CPUs, SRV-KERNEL tests), and passed alone in 17.9 s (2026-11-22).
+        Make its timing robust under load (longer settle or polling with a bound), paired OPS-SANDBOX spec note (H2)." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
-      note: "script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
+      note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
         e2e/live/lib/{passkey_check,secret_scan}.py (outside the spec gate). Non-destructive by default (≈ 5 min; restarts
         api and postgres, stops and restarts the watcher). --drill deletes and recreates the pgdata and blobs volumes
         after a backup. Known risk for --drill: the api seeds users rows from reader.yaml at startup, so OPS-CLI's restore

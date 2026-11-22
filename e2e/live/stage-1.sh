@@ -20,7 +20,11 @@ DRILL=0
 while (($#)); do
   case "$1" in
     --config) CONFIG="$2"; shift 2 ;;
-    --drill) DRILL=1; shift ;;
+    --drill)
+      # Disabled until S1.OPS-CLI-restore-seed: restore refuses the rows the api seeds from reader.yaml, so the drill
+      # would delete the volumes and then fail to restore.
+      echo "--drill is disabled until task S1.OPS-CLI-restore-seed lands (restore would fail after deleting volumes)" >&2
+      exit 2 ;;
     *) echo "usage: $0 --config PATH [--drill]" >&2; exit 2 ;;
   esac
 done
