@@ -49,22 +49,23 @@ async def test_each_run_token_maps_to_its_own_user(tmp_path: Path) -> None:
 async def test_token_loading_missing_file_and_unknown_user(tmp_path: Path) -> None:
     p = make_proxy(tmp_path, handles=("ivan",))
     async with p.client() as c:
-        r = await c.post("/run-tokens", json={"user": "anna", "max_output_tokens": 100})
+        m = "claude-sonnet-5-5"
+        r = await c.post("/run-tokens", json={"user": "anna", "max_output_tokens": 100, "model": m})
         assert (r.status_code, r.json()) == (409, {"error": "provider_missing"})
         r = await c.post(
-            "/run-tokens", json={"user": "lea", "max_output_tokens": 100}
+            "/run-tokens", json={"user": "lea", "max_output_tokens": 100, "model": m}
         )  # no provider configured
         assert (r.status_code, r.json()) == (409, {"error": "provider_missing"})
-        r = await c.post("/run-tokens", json={"user": "nobody", "max_output_tokens": 100})
+        r = await c.post("/run-tokens", json={"user": "nobody", "max_output_tokens": 100, "model": m})
         assert r.status_code == 409
         from .conftest import deliver_tokens
 
         deliver_tokens(p.secrets_root, ("anna",))  # appears later: re-read on each request (FR-AGENT-2)
         assert (
-            await c.post("/run-tokens", json={"user": "anna", "max_output_tokens": 100})
+            await c.post("/run-tokens", json={"user": "anna", "max_output_tokens": 100, "model": m})
         ).status_code == 200
-        bad = await c.post("/run-tokens", json={"user": "ivan"})
-        assert bad.status_code == 400
+        for bad in ({"user": "ivan"}, {"user": "ivan", "max_output_tokens": 100}):  # cap and model required
+            assert (await c.post("/run-tokens", json=bad)).status_code == 400
 
 
 def test_default_config_path_is_the_bind_target() -> None:
@@ -84,7 +85,14 @@ async def test_run_token_shape_revoke_record_and_unknown(tmp_path: Path) -> None
         await forward(c, token, body=message_body(max_tokens=99999))
         r = await c.post("/run-tokens/revoke", json={"run_token": token})
         assert r.status_code == 200
-        assert r.json() == {"requests": 1, "statuses": [529], "any_2xx": False, "refused": ["output_cap"]}
+        assert r.json() == {
+            "requests": 1,
+            "statuses": [529],
+            "any_2xx": False,
+            "refused": ["output_cap"],
+            "in_flight": 0,
+            "failed": 0,
+        }
         assert (await forward(c, token)).status_code == 401  # revoked
         again = await c.post("/run-tokens/revoke", json={"run_token": token})
         assert (again.status_code, again.json()) == (404, {"error": "run_token_unknown"})
@@ -130,6 +138,9 @@ async def test_method_path_query_allow_list(tmp_path: Path, method: str, path: s
         (b"not json", 415, "body_not_json"),
         (b"[1, 2]", 415, "body_not_json"),
         (message_body(tools=[{"name": "Bash"}]), 403, "tools_mismatch"),
+        (message_body(mcp_servers=[{"name": "x", "url": "https://example.org"}]), 403, "tools_mismatch"),
+        (message_body(model="claude-opus-5-5"), 403, "model_mismatch"),
+        (message_body(model=DROP), 403, "model_mismatch"),
         (message_body(max_tokens=16001), 403, "output_cap"),
         (message_body(max_tokens=DROP), 403, "output_cap"),
         (message_body(tools=DROP), 200, None),
@@ -144,6 +155,82 @@ async def test_body_checks(tmp_path: Path, body: bytes, status: int, code: str |
     if code:
         assert r.json() == {"error": code}
         assert p.upstream.requests == []
+
+
+async def test_forwarded_body_is_the_checked_object(tmp_path: Path) -> None:
+    """Duplicate keys: json.loads keeps the last; the proxy sends exactly what it checked."""
+    p = make_proxy(tmp_path)
+    smuggled = b'{"model": "claude-sonnet-5-5", "max_tokens": 100, "tools": [{"name": "Bash"}], "tools": []}'
+    async with p.client() as c:
+        token = await issue(c)
+        assert (await forward(c, token, body=smuggled)).status_code == 200
+    sent = json.loads(p.upstream.bodies[0])
+    assert sent == {"model": "claude-sonnet-5-5", "max_tokens": 100, "tools": []}
+    assert p.upstream.bodies[0].count(b'"tools"') == 1
+
+
+async def test_revoke_during_a_slow_upstream_counts_the_request_in_flight(tmp_path: Path) -> None:
+    """Code review B2: a request still being relayed at revoke is in the record, so it settles at the reserve."""
+    import asyncio
+
+    proxy = need("reader.agent.proxy")
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def slow(request: httpx.Request) -> httpx.Response:
+        entered.set()
+        await release.wait()
+        return httpx.Response(200, content=b"data: {}\n\n")
+
+    from .conftest import deliver_tokens, write_config
+
+    deliver_tokens(tmp_path / "s")
+    app = proxy.create_app(
+        proxy.ProxySettings(config_path=write_config(tmp_path), secrets_root=tmp_path / "s"),
+        upstream_transport=httpx.MockTransport(slow),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://agent-proxy:8080"
+    ) as c:
+        token = await issue(c)
+        pending = asyncio.ensure_future(forward(c, token))
+        await entered.wait()
+        r = await c.post("/run-tokens/revoke", json={"run_token": token})
+        release.set()
+        assert (await pending).status_code == 200
+    assert r.json()["in_flight"] == 1
+    assert r.json()["statuses"] == []
+
+
+async def test_send_failure_after_the_request_was_written_counts_as_failed(tmp_path: Path) -> None:
+    proxy = need("reader.agent.proxy")
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("connection reset after the request was written", request=request)
+
+    def refused(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused", request=request)
+
+    from .conftest import deliver_tokens, write_config
+
+    deliver_tokens(tmp_path / "s")
+    for handler, failed in ((broken, 1), (refused, 0)):
+        app = proxy.create_app(
+            proxy.ProxySettings(config_path=write_config(tmp_path), secrets_root=tmp_path / "s"),
+            upstream_transport=httpx.MockTransport(handler),
+        )
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://agent-proxy:8080") as c:
+            token = await issue(c)
+            assert (await forward(c, token)).status_code == 502
+            record = (await c.post("/run-tokens/revoke", json={"run_token": token})).json()
+        assert (record["failed"], record["in_flight"]) == (failed, 0)
+
+
+def test_clients_ignore_proxy_environment() -> None:
+    proxy = need("reader.agent.proxy")
+    provider = need("reader.agent.provider")
+    assert proxy.Proxy(proxy.ProxySettings(), None).client.trust_env is False
+    assert provider.HttpProxyClient().client.trust_env is False
 
 
 async def test_unknown_or_missing_bearer_is_401_and_not_forwarded(tmp_path: Path) -> None:
@@ -267,5 +354,16 @@ async def test_logging_has_no_secrets(tmp_path: Path, caplog: pytest.LogCaptureF
         assert secret not in text
     assert token[:8] not in text  # the digest prefix is logged, never the token's own prefix
     lines = [r.getMessage() for r in caplog.records if r.name == "reader.agent.proxy"]
-    assert any("ivan" in line for line in lines)
+    assert lines and not any("ivan" in line for line in lines)  # no user handle (route template only)
     assert json.dumps(TOKENS) not in text
+
+
+async def test_logging_uses_the_route_template(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    p = make_proxy(tmp_path)
+    async with p.client() as c:
+        token = await issue(c)
+        await forward(c, token, path="/v1/secret-path-CANARY?q=1")
+    lines = [r.getMessage() for r in caplog.records if r.name == "reader.agent.proxy"]
+    assert any(line.startswith("POST other 404") for line in lines)
+    assert not any("CANARY" in line for line in lines)

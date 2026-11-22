@@ -27,6 +27,7 @@ UPGRADE = (
         pdf_last integer NOT NULL CHECK (pdf_last >= pdf_first),
         g1_at timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (owner_id, plan_course_id, plan_lesson_id),
+        UNIQUE (lesson_id),
         CONSTRAINT course_plans_lesson FOREIGN KEY (lesson_id, owner_id) REFERENCES lessons (id, owner_id)
     )""",
     """CREATE TABLE compile_runs (

@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 OUT = "/out/requests.jsonl"
 HANDLE = os.environ.get("EXPECT_HANDLE", "")
 ERROR_STATUS = int(os.environ.get("STUB_ERROR_STATUS", "0") or 0)  # 0: success; 429, 529 or 500: always that error
+DELAY_S = float(os.environ.get("STUB_DELAY_S", "0") or 0)  # seconds before answering /v1/messages (deadline tests)
 LOCK = threading.Lock()
 
 
@@ -89,6 +90,8 @@ class Upstream(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         body = self._body()
         self._record(body)
+        if DELAY_S and self.path.split("?")[0] == "/v1/messages":
+            time.sleep(DELAY_S)
         if self.path.split("?")[0] == "/v1/messages" and ERROR_STATUS:
             kinds = {429: "rate_limit_error", 529: "overloaded_error", 500: "api_error"}
             data = json.dumps({"type": "error", "error": {"type": kinds.get(ERROR_STATUS, "api_error"),

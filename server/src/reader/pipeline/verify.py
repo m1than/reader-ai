@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from typing import Any, Final
 
 from reader.kernels import upstream
+from reader.kernels.protocol import EXEC_OUTPUT_MAX
 from reader.kernels.upstream import Endpoint, UpstreamError
 from reader.pipeline.errors import VerifyUnavailable
 from reader.pipeline.findings import Problem, labs_of, labs_sha256, source_sha256, source_text
@@ -30,6 +31,7 @@ VERIFY_JOB_TIMEOUT_S: Final = 3600.0  # bounds.verify_job_timeout_s
 RESET_DEADLINE_S: Final = 30.0  # SRV-KERNEL FR-KERNEL-5
 POLL_S: Final = 0.25
 INTERRUPT_GRACE_S: Final = 5.0
+OUTPUT_MAX: Final = EXEC_OUTPUT_MAX  # SRV-KERNEL's relay budget, for all text of one run (S4)
 VERIFY_HOST: Final = "kernel-verify"
 VERIFY_ENDPOINT: Final = Endpoint(VERIFY_HOST)
 
@@ -90,6 +92,8 @@ class VerifyClient:
     ) -> None:
         self.endpoint, self.http, self.ws = endpoint, http, ws
         self.exec_timeout_s, self.runs, self.budget_s, self.clock = exec_timeout_s, runs, budget_s, clock
+        self._used = 0
+        self._kept: list[str] = []
 
     async def run(self, notebook: Mapping[str, Any]) -> LabReport:
         labs = labs_of(notebook)
@@ -97,7 +101,8 @@ class VerifyClient:
         if not labs:
             return LabReport(sha, {}, [])
         steps = sum(1 + len(cell["metadata"]["reader"].get("asserts", [])) for _, cell in labs)
-        if steps * self.exec_timeout_s * self.runs > self.budget_s:
+        needed = steps * (self.exec_timeout_s + INTERRUPT_GRACE_S) * self.runs + self.runs * RESET_DEADLINE_S
+        if needed > self.budget_s:
             text = "The labs need more time than one verification may take; they were not run."
             return LabReport(
                 sha, {}, [Problem("labs_unverifiable", None, None, text, "lab_verification", True)]
@@ -136,6 +141,7 @@ class VerifyClient:
         except UpstreamError:
             raise VerifyUnavailable() from None
         session = uuid.uuid4().hex
+        self._used = 0  # text collected in this run (S4: at most EXEC_OUTPUT_MAX)
         try:
             for _, cell in labs:
                 cid = cell["id"]
@@ -214,6 +220,8 @@ class VerifyClient:
             )
         )
         texts: list[str] = []
+        size = 0
+        over = False
         reply_status: str | None = None
         idle = False
         try:
@@ -222,12 +230,24 @@ class VerifyClient:
                     reply_status, idle = self._take(
                         await connection.recv(), msg_id, texts, reply_status, idle
                     )
+                    if texts:
+                        size += sum(len(t) for t in texts)
+                        if self._used + size > OUTPUT_MAX:
+                            over = True  # keep draining to the reply, keep nothing more
+                        if not over:
+                            self._kept.extend(texts)
+                        texts.clear()
         except TimeoutError:
             await self._interrupt(connection, kernel, msg_id)
-            return _Exec(False, "".join(texts))
+            return _Exec(False, self._flush())
         except Exception as error:  # the WebSocket closed or failed
             raise UpstreamError(type(error).__name__) from None
-        return _Exec(reply_status == "ok", "".join(texts))
+        self._used += size
+        return _Exec(reply_status == "ok" and not over, self._flush())
+
+    def _flush(self) -> str:
+        text, self._kept = "".join(self._kept), []
+        return text
 
     @staticmethod
     def _take(

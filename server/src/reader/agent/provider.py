@@ -1,4 +1,4 @@
-"""The Provider port and its Agent SDK adapter (SRV-AGENT FR-AGENT-6, -7, -9, -10).
+"""The Provider port and its Agent SDK adapter (SRV-AGENT FR-AGENT-6, -7, -9, -10, -13).
 
 A call: resolve the task's model (refused before any spend), reserve, get a run_token from agent-proxy, run
 the bundled CLI with no tools in a fresh HOME, check the init message, then in `finally` revoke the run_token,
@@ -11,7 +11,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import shutil
+import signal
 import tempfile
 import time
 import uuid
@@ -32,6 +34,7 @@ from reader.config import ReaderConfig
 
 PROXY_URL: Final = "http://agent-proxy:8080"
 PATH_ENV: Final = "/usr/local/bin:/usr/bin:/bin"
+SYSTEM_FILE: Final = "system.md"  # in the per-run HOME, mode 0600 (code review B1: argv limit 131,071 bytes)
 # AssistantMessage.error as measured (REF-AGENT-4 round 2): 429 → rate_limit; 529 and 500 → server_error.
 ERROR_CODES: Final[Mapping[str, str]] = {
     "rate_limit": "rate_limited",
@@ -76,19 +79,35 @@ class Provider(Protocol):
 
 
 class ProxyClient(Protocol):
-    async def issue(self, handle: str, max_output_tokens: int) -> str: ...
+    async def issue(self, handle: str, max_output_tokens: int, model: str) -> str: ...
 
     async def revoke(self, run_token: str) -> UpstreamRecord | None: ...
 
 
+class Killer:
+    """Holds the way to kill the running CLI process; set by the CLI runner, used on abort and deadline."""
+
+    def __init__(self) -> None:
+        self._kill: Callable[[], None] | None = None
+
+    def set(self, kill: Callable[[], None]) -> None:
+        self._kill = kill
+
+    def kill(self) -> None:
+        if self._kill is not None:
+            with contextlib.suppress(Exception):
+                self._kill()
+
+
 @dataclass(frozen=True)
 class CliRequest:
-    system: str | None
+    system_file: Path | None  # the system prompt, in a 0600 file in HOME; None: the CLI's default
     prompt: str
     model: str
     env: dict[str, str]
     max_budget_usd: float
     home: Path
+    killer: Killer = field(default_factory=Killer)
 
 
 CliRun = Callable[[CliRequest], AsyncIterator[Any]]
@@ -100,31 +119,48 @@ class HttpProxyClient:
     def __init__(self, base_url: str = PROXY_URL, transport: httpx.AsyncBaseTransport | None = None) -> None:
         self.client = httpx.AsyncClient(base_url=base_url, transport=transport, timeout=10.0, trust_env=False)
 
-    async def issue(self, handle: str, max_output_tokens: int) -> str:
+    async def issue(self, handle: str, max_output_tokens: int, model: str) -> str:
+        body = {"user": handle, "max_output_tokens": max_output_tokens, "model": model}
         try:
-            r = await self.client.post(
-                "/run-tokens", json={"user": handle, "max_output_tokens": max_output_tokens}
-            )
+            r = await self.client.post("/run-tokens", json=body)
         except httpx.HTTPError:
             raise agent_error("provider_unavailable") from None
         if r.status_code == 409:
             raise agent_error("provider_missing")
-        token = r.json().get("run_token") if r.status_code == 200 else None
+        try:
+            token = r.json().get("run_token") if r.status_code == 200 else None
+        except ValueError:
+            token = None
         if not isinstance(token, str):
             raise agent_error("provider_unavailable")
         return token
 
     async def revoke(self, run_token: str) -> UpstreamRecord | None:
+        """The upstream record, or None when unknown (404, a failed call, or an answer that is not JSON)."""
         try:
             r = await self.client.post("/run-tokens/revoke", json={"run_token": run_token})
-        except httpx.HTTPError:
+            return UpstreamRecord.from_json(r.json()) if r.status_code == 200 else None
+        except httpx.HTTPError, ValueError:
             return None
-        return UpstreamRecord.from_json(r.json()) if r.status_code == 200 else None
+
+
+def cli_env(env: Mapping[str, str]) -> dict[str, str]:
+    """The SDK merges the worker's own environment into the CLI's: blank every variable not passed (S1)."""
+    return {**{name: "" for name in os.environ}, **env}
+
+
+def _discard(_: str) -> None:
+    """The CLI's stderr is read and dropped (it may echo a prompt)."""
 
 
 def sdk_options(request: CliRequest) -> Any:
     from claude_agent_sdk import ClaudeAgentOptions
 
+    system: Any = (
+        {"type": "file", "path": str(request.system_file)}
+        if request.system_file is not None
+        else {"type": "preset", "preset": "claude_code"}  # the SDK turns None into an empty prompt
+    )
     return ClaudeAgentOptions(
         tools=[],
         allowed_tools=[],
@@ -132,17 +168,28 @@ def sdk_options(request: CliRequest) -> Any:
         max_turns=1,
         model=request.model,
         max_budget_usd=request.max_budget_usd,
-        system_prompt=request.system,
-        env=request.env,
+        system_prompt=system,
+        env=cli_env(request.env),
         cwd=str(request.home),
+        stderr=_discard,
     )
 
 
 async def sdk_cli(request: CliRequest) -> AsyncIterator[Any]:
-    """The real CLI through the Agent SDK (the `agent` extra)."""
+    """The real CLI through the Agent SDK (the `agent` extra); the killer can kill its process."""
     from claude_agent_sdk import query
+    from claude_agent_sdk._internal.transport.subprocess_cli import SubprocessCLITransport
 
-    async for message in query(prompt=request.prompt, options=sdk_options(request)):
+    options = sdk_options(request)
+    transport = SubprocessCLITransport(prompt=request.prompt, options=options)
+
+    def kill() -> None:
+        process = getattr(transport, "_process", None)
+        if process is not None and process.returncode is None:
+            os.kill(process.pid, signal.SIGKILL)
+
+    request.killer.set(kill)
+    async for message in query(prompt=request.prompt, options=options, transport=transport):
         yield message
 
 
@@ -213,7 +260,7 @@ class AgentProvider:
         scope = Scope(call.owner_id, call.run_id, call.lesson_id, call.stage, call.task, call.attempt)
         reservation = await ledger.reserve(self.engine, scope, model, reserve, self._caps(call))
         started = time.monotonic()
-        home = Path(tempfile.mkdtemp(prefix="reader-cli-", dir=self.home_root))  # mode 0700
+        home: Path | None = None
         run_token: str | None = None
         seen = _Seen()
         record: UpstreamRecord | None = UpstreamRecord((), ())  # nothing sent until a run_token exists
@@ -221,12 +268,9 @@ class AgentProvider:
         usage: Usage | None = None
         failure: AgentError | None = None
         try:
-            run_token = await self.proxy.issue(call.handle, call.max_output_tokens)
-            try:
-                async with asyncio.timeout(call.deadline_s):
-                    await self._drive(call, model, reserve, run_token, home, seen)
-            except TimeoutError:
-                raise agent_error("deadline_exceeded") from None
+            home = Path(tempfile.mkdtemp(prefix="reader-cli-", dir=self.home_root))  # mode 0700
+            run_token = await self.proxy.issue(call.handle, call.max_output_tokens, model)
+            await self.drive_bounded(call, model, reserve, run_token, home, seen)
             if seen.retried and call.abort_on_retry:
                 raise agent_error("upstream_retry")
             result = seen.result
@@ -242,8 +286,10 @@ class AgentProvider:
         finally:
             if run_token is not None:
                 record = await self.proxy.revoke(run_token)
-            shutil.rmtree(home, ignore_errors=True)
-            settled, warn = ledger.settle_amount(reserve, record, sdk_usd)
+            if home is not None:
+                shutil.rmtree(home, ignore_errors=True)
+            error_result = seen.result is None or bool(getattr(seen.result, "is_error", False))
+            settled, warn = ledger.settle_amount(reserve, record, sdk_usd, error_result=error_result)
             if warn:
                 log.warning("%s stage=%s run=%s", warn, call.stage, call.run_id)
             usd = cost(model, usage) if usage is not None else None
@@ -277,8 +323,36 @@ class AgentProvider:
         stop = getattr(seen.result, "stop_reason", None)
         return StageResult(text, usage, sdk_usd, model, stop if isinstance(stop, str) else None)
 
-    async def _drive(
+    async def drive_bounded(
         self, call: StageCall, model: str, reserve: Decimal, run_token: str, home: Path, seen: _Seen
+    ) -> None:
+        """The CLI call under the call's deadline (FR-AGENT-13 e): `deadline_exceeded` with the CLI killed."""
+        killer = Killer()
+        # S6: the kill is scheduled before the timeout, so at the deadline it runs first, before the
+        # cancellation reaches the SDK's own close (which would wait up to 5 s for the CLI to exit).
+        timer = (
+            asyncio.get_running_loop().call_later(call.deadline_s, killer.kill)
+            if call.deadline_s is not None
+            else None
+        )
+        try:
+            async with asyncio.timeout(call.deadline_s):
+                await self._drive(call, model, reserve, run_token, home, seen, killer)
+        except TimeoutError:
+            raise agent_error("deadline_exceeded") from None
+        finally:
+            if timer is not None:
+                timer.cancel()
+
+    async def _drive(
+        self,
+        call: StageCall,
+        model: str,
+        reserve: Decimal,
+        run_token: str,
+        home: Path,
+        seen: _Seen,
+        killer: Killer | None = None,
     ) -> None:
         env = {
             "PATH": PATH_ENV,
@@ -292,8 +366,15 @@ class AgentProvider:
         }
         if call.thinking_off:
             env["MAX_THINKING_TOKENS"] = "0"
-        request = CliRequest(call.system, call.prompt, model, env, float(reserve), home)
+        system_file: Path | None = None
+        if call.system is not None:
+            system_file = home / SYSTEM_FILE
+            fd = os.open(system_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as out:
+                out.write(call.system)
+        request = CliRequest(system_file, call.prompt, model, env, float(reserve), home, killer or Killer())
         stream = self.cli(request)
+        finished = False
         try:
             async for message in stream:
                 kind = _kind(message)
@@ -305,7 +386,7 @@ class AgentProvider:
                         log.info("api_retry stage=%s run=%s", call.stage, call.run_id)
                     seen.retried = True
                     if call.abort_on_retry:
-                        break  # FR-AGENT-13 d: closed below, before the CLI's own backoff
+                        break  # FR-AGENT-13 d: killed below, before the CLI's own backoff
                 elif kind == "AssistantMessage":
                     # FR-AGENT-7: no assistant output is used unless the init message came first and passed.
                     error = getattr(message, "error", None)
@@ -316,10 +397,15 @@ class AgentProvider:
                             seen.texts.append(block.text)
                 elif kind == "ResultMessage":
                     seen.result = message
+            else:
+                finished = True
         except Exception:
+            finished = True
             if seen.result is None and seen.assistant_error is None:
                 raise agent_error("sdk_error") from None
         finally:
+            if not finished:  # abort or deadline (a cancellation lands here too): no 5 s grace (S6)
+                request.killer.kill()
             with contextlib.suppress(Exception):
                 await stream.aclose()  # type: ignore[attr-defined]
 

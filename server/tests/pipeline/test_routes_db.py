@@ -45,6 +45,35 @@ async def test_course_import_is_idempotent_and_owner_only(pg: Pg, tmp_path: Path
         assert MATERIAL in str(await env.rows("SELECT material_sha256 FROM courses"))
 
 
+async def test_a_lesson_inserted_mid_plan_gets_its_own_lesson(pg: Pg, tmp_path: Path) -> None:
+    """Code review S5: lessons map by plan lesson id, never by position; course_plans.lesson_id is unique."""
+    async with pipeline_env(pg, tmp_path) as env:
+        async with client(env) as c:
+            first = {
+                x["plan_lesson_id"]: x["lesson_id"]
+                for x in (await c.post("/api/pipeline/courses", json=plan())).json()["lessons"]
+            }
+            inserted = plan()
+            inserted["lessons"].insert(
+                1, {"id": "L01b", "title": "Between", "chapter": 1, "pages": {"pdf": [60, 61]}}
+            )
+            again = {
+                x["plan_lesson_id"]: x["lesson_id"]
+                for x in (await c.post("/api/pipeline/courses", json=inserted)).json()["lessons"]
+            }
+        assert again["L01"] == first["L01"]
+        assert again["L02"] == first["L02"]
+        assert again["L01b"] not in (first["L01"], first["L02"])
+        assert len(set(again.values())) == 3
+        titles = dict(await env.rows("SELECT id::text, title FROM lessons"))
+        assert titles[again["L01b"]] == "Between"
+        assert titles[again["L02"]] == "Consensus"
+        unique = await env.rows(
+            "SELECT count(*) FROM pg_indexes WHERE tablename = 'course_plans' AND indexdef LIKE '%UNIQUE%(lesson_id)'"
+        )
+        assert unique == [(1,)]
+
+
 async def test_compile_routes(pg: Pg, tmp_path: Path) -> None:
     async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
         lesson = await env.import_plan()
@@ -58,8 +87,9 @@ async def test_compile_routes(pg: Pg, tmp_path: Path) -> None:
             for cap in (0, -1, 8.01, 1.234, "x"):
                 r = await c.post(f"/api/lessons/{lesson}/compile", json={"cap_usd": cap})
                 assert (r.status_code, r.json()) == (400, {"error": "cap_invalid"}), cap
-            r = await c.post(f"/api/lessons/{lesson}/compile", json={})
+            r = await c.post(f"/api/lessons/{lesson}/compile")  # no body at all: the default cap
             assert r.status_code == 202, r.text
+            assert (await c.get(f"/api/compiles/{r.json()['run_id']}")).json()["cap_usd"] == "8.00"
             run = r.json()["run_id"]
             busy = await c.post(f"/api/lessons/{lesson}/compile", json={"cap_usd": 5})
             assert (busy.status_code, busy.json()) == (409, {"error": "compile_running"})

@@ -12,6 +12,7 @@ import logging
 import math
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any, Final
 
@@ -30,6 +31,7 @@ CLI_OVERHEAD_TOKENS: Final = 1000  # beside a custom system prompt (FR-AGENT-13 
 LOCK_NAMESPACE: Final = 0x52414753
 
 log = logging.getLogger("reader.agent")
+_WARNED: set[tuple[uuid.UUID, str]] = set()  # (user, UTC month) already warned (budget_warn)
 
 
 @dataclass(frozen=True)
@@ -57,6 +59,8 @@ class UpstreamRecord:
 
     statuses: tuple[int, ...]
     refused: tuple[str, ...]
+    in_flight: int = 0  # still being relayed at revoke (code review B2)
+    failed: int = 0  # failed after the connection was made: written upstream, outcome unknown
 
     @property
     def count_2xx(self) -> int:
@@ -67,7 +71,13 @@ class UpstreamRecord:
         return self.count_2xx > 0
 
     def as_json(self) -> dict[str, Any]:
-        return {"statuses": list(self.statuses), "refused": list(self.refused), "any_2xx": self.any_2xx}
+        return {
+            "statuses": list(self.statuses),
+            "refused": list(self.refused),
+            "any_2xx": self.any_2xx,
+            "in_flight": self.in_flight,
+            "failed": self.failed,
+        }
 
     @classmethod
     def from_json(cls, data: Any) -> UpstreamRecord | None:
@@ -78,7 +88,10 @@ class UpstreamRecord:
             return None
         if not isinstance(refused, list) or not all(isinstance(r, str) for r in refused):
             return None
-        return cls(tuple(statuses), tuple(refused))
+        in_flight, failed = data.get("in_flight", 0), data.get("failed", 0)
+        if type(in_flight) is not int or type(failed) is not int:
+            return None
+        return cls(tuple(statuses), tuple(refused), in_flight, failed)
 
 
 def worst_case(
@@ -99,16 +112,18 @@ def reserve_amount(
 
 
 def settle_amount(
-    reserve: Decimal, record: UpstreamRecord | None, sdk_usd: Decimal | None
+    reserve: Decimal, record: UpstreamRecord | None, sdk_usd: Decimal | None, *, error_result: bool = False
 ) -> tuple[Decimal, str | None]:
     """The settled amount, and a WARNING code to log (FR-AGENT-9, VEC-AGENT-1 `settlements`)."""
-    if record is None:  # revoke answered 404 or failed: the upstream outcome is unknown
+    if record is None:  # revoke answered 404, failed or was not JSON: the upstream outcome is unknown
         return reserve, None
+    if record.in_flight or record.failed:  # a request that may have been billed without our seeing it
+        return max(sdk_usd if sdk_usd is not None else Decimal(0), reserve), "outcome_unknown"
     if record.count_2xx == 0:  # nothing was billed
         return Decimal(0), ("settle_mismatch" if sdk_usd is not None and sdk_usd > 0 else None)
     if record.count_2xx > 1:
         return max(sdk_usd if sdk_usd is not None else Decimal(0), reserve), "multiple_2xx"
-    if sdk_usd is None:
+    if sdk_usd is None or (error_result and sdk_usd == 0):  # an error result's 0 is not a bill
         return reserve, None
     return sdk_usd, None
 
@@ -201,7 +216,9 @@ async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, c
         reservation_id = int(row.scalar_one())
     if caps.monthly_usd is not None and caps.warn_at is not None:
         threshold = caps.warn_at * caps.monthly_usd
-        if month < threshold <= month + usd:
+        key = (scope.owner_id, datetime.now(UTC).strftime("%Y-%m"))
+        if month + usd >= threshold and key not in _WARNED:  # once per user and month, this process
+            _WARNED.add(key)
             log.warning(
                 "budget_warn owner=%s month_spent=%s monthly_usd=%s",
                 scope.owner_id,

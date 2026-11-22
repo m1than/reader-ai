@@ -121,7 +121,7 @@ tables:
 # settled_usd is the amount FR-AGENT-9 settles at (0, the SDK cost, or the reserve; VEC-AGENT-1 `settlements`).
 
 errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, provider_missing, provider_unavailable,
-  rate_limited, run_token_unknown, tools_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
+  rate_limited, run_token_unknown, tools_mismatch, model_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
   usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded]
 
 requirements:
@@ -142,12 +142,15 @@ requirements:
       user's token. Tokens are held as `Secret` and never logged, echoed or written.
   - id: FR-AGENT-3
     text: >-
-      Run tokens. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n}` returns `{"run_token": "<43-char urlsafe
-      base64 of 32 random bytes>"}` bound to that user and that output cap for `bounds.run_token_ttl_s`; `POST
+      Run tokens. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n, "model": "<full id>"}` returns
+      `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that user, that output cap and that
+      model for `bounds.run_token_ttl_s`; `POST
       /run-tokens/revoke {"run_token": "..."}` revokes it (in the body, never in a path, so it appears in no URL) and
-      returns the token's upstream record `{"requests": k, "statuses": [...], "any_2xx": bool, "refused": [...]}`: every
-      upstream response status seen for it in order, and the codes of the proxy's own refusals (FR-AGENT-4), which never
-      reach upstream. Revoking an unknown token (never issued, already revoked, or evicted) answers 404 `run_token_unknown`
+      returns the token's upstream record `{"requests": k, "statuses": [...], "any_2xx": bool, "refused": [...],
+      "in_flight": n, "failed": m}`: every upstream response status seen for it in order, the codes of the proxy's own
+      refusals (FR-AGENT-4), which never reach upstream, the requests still being relayed at revoke (`in_flight`,
+      code review B2: a request forwarded but not finished may still be billed), and the requests that failed after
+      the connection was made (`failed`: written upstream, outcome unknown). Revoking an unknown token (never issued, already revoked, or evicted) answers 404 `run_token_unknown`
       and no record. At most `bounds.run_tokens_max` live tokens; the oldest is revoked when
       exceeded. Only the worker reaches the port (agentnet). A user without a loaded token gets 409 `provider_missing`.
       Tokens are stored only as sha256 digests and compared in constant time.
@@ -160,14 +163,17 @@ requirements:
       anthropic-beta, anthropic-dangerous-direct-browser-access, anthropic-version, content-type, user-agent, x-app,
       x-claude-code-session-id, x-stainless-*` plus `authorization: Bearer <user token>` set by the proxy; all others,
       including any `x-api-key` and any client `authorization`, are dropped. The body must be a JSON object (else 415
-      `body_not_json`); a body whose `tools` is present and non-empty is refused with 403 `tools_mismatch`, and one whose
+      `body_not_json`); a body whose `tools` or `mcp_servers` is present and non-empty is refused with 403
+      `tools_mismatch`, one whose `model` differs from the run_token's model with 403 `model_mismatch`, and one whose
       `max_tokens` is missing or exceeds the run_token's bound with 403 `output_cap` (REF-AGENT-4 measured that the CLI
-      sends CLAUDE_CODE_MAX_OUTPUT_TOKENS as `max_tokens`). Bodies over `bounds.proxy_body_max_bytes` get 413. Responses,
+      sends CLAUDE_CODE_MAX_OUTPUT_TOKENS as `max_tokens`). The forwarded body is the checked object re-serialised, so
+      what was checked is what is sent. Bodies over `bounds.proxy_body_max_bytes` get 413. Responses,
       including SSE streams, pass through with hop-by-hop headers dropped. No redirect is followed.
   - id: FR-AGENT-5
     text: >-
-      Proxy logging. One line per request: method, path, status, duration, run_token digest prefix (8 hex) and the user
-      handle; never a header value, body, query string, token or run_token. The HTTP server's own access log is off.
+      Proxy logging. One line per request: method, the route template (`/run-tokens`, `/run-tokens/revoke`,
+      `/v1/messages` or `other`), status, duration and the run_token digest prefix (8 hex); never a raw path, a user
+      handle, a header value, body, query string, token or run_token. The HTTP server's own access log is off.
   - id: FR-AGENT-6
     text: >-
       Provider port. `reader.agent.Provider.run(StageCall(owner_id, handle, run_id, lesson_id, stage, task, attempt,
@@ -180,9 +186,16 @@ requirements:
       (FR-AGENT-9); requests a run_token; starts the CLI with HOME a fresh per-run tmpfs directory and exactly the
       environment `PATH, HOME, LANG, CLAUDE_CODE_OAUTH_TOKEN=<run_token>, ANTHROPIC_BASE_URL=http://agent-proxy:8080,
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, DISABLE_TELEMETRY=1, CLAUDE_CODE_MAX_OUTPUT_TOKENS=<max_output_tokens>`,
-      plus `MAX_THINKING_TOKENS=0` for a call with `thinking_off`,
-      and `ClaudeAgentOptions(tools=[], allowed_tools=[], setting_sources=[], max_turns=1, model=<full id>,
-      max_budget_usd=<this call's reserve>, system_prompt=<system>)` (no `system_prompt` when `system` is None); in a `finally`, revokes the run_token, removes HOME and settles. Errors are
+      plus `MAX_THINKING_TOKENS=0` for a call with `thinking_off`. The SDK merges the worker's own environment into
+      the CLI's, so every other variable the worker holds is passed blank (empty string); the SDK itself adds
+      `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_VERSION`, its session-state flag and `PWD`. Options:
+      `ClaudeAgentOptions(tools=[], allowed_tools=[], setting_sources=[], max_turns=1, model=<full id>,
+      max_budget_usd=<this call's reserve>, system_prompt={"type": "file", "path": <HOME>/system.md})`, the system
+      prompt written to a 0600 file in HOME because the SDK passes a string prompt as one argv argument, which fails
+      above 131,071 bytes (code review B1); `system` None passes the `claude_code` preset (the SDK turns a missing
+      prompt into an empty one). The CLI's stderr is read and discarded through the SDK's callback. On abort
+      (FR-AGENT-13 d) or deadline (e) the adapter kills the CLI process at once (SIGKILL) before closing the SDK
+      stream, so the call returns within a second. In a `finally`, revokes the run_token, removes HOME and settles. Errors are
       classified from what the SDK emits (REF-AGENT-4, error-mode runs): the CLI itself retries 429, 529 and 5xx with
       backoff (measured: 10 retries, 11 requests over 176–178 s for 429 and for 529, each announced by a
       `SystemMessage` subtype `api_retry` with `error_status`), then ends with an `AssistantMessage.error`, a
@@ -215,13 +228,15 @@ requirements:
       before the reserve row, with: `budget_exhausted` when spent(run) + reserve > the run cap; `task_budget_exhausted`
       when spent(run, task) + reserve > the task's `budget_usd_per_lesson`, scoped to one compile run (the example config
       gives each task room for two worst-case calls; a recompile starts fresh); `monthly_budget_exhausted` when
-      spent(user, UTC calendar month) + reserve > `budgets.monthly_usd`, with a WARNING `budget_warn` once when it first
-      passes `budgets.warn_at` (ADR-0005; a log line, not yet an event — SRV-EVENTS stage 2). After the call it appends a
+      spent(user, UTC calendar month) + reserve > `budgets.monthly_usd`, with a WARNING `budget_warn` once per user and
+      month (tracked in the worker process) when it first passes `budgets.warn_at` (ADR-0005; a log line, not yet an event — SRV-EVENTS stage 2). After the call it appends a
       `settle` row from the SDK cost and usage and the run_token's upstream record (FR-AGENT-3): no upstream 2xx → $0
       (nothing was billed; a non-zero SDK cost is logged as `settle_mismatch`); exactly one 2xx with an SDK cost → that
       cost; one 2xx without an SDK cost (a crash or exception after the response) → the reserve; more than one 2xx →
       max(SDK cost, reserve), logged as `multiple_2xx` (one turn should make one request); an unknown or evicted record
-      (the revoke answered 404 or failed) → the reserve, since the upstream outcome is not known. A reservation without a settlement (the
+      (the revoke answered 404, failed or was not JSON) → the reserve, since the upstream outcome is not known; any
+      request in flight at revoke or failed after connect → max(SDK cost, reserve), logged as `outcome_unknown`; one
+      2xx with an SDK cost of 0 on an error result → the reserve (the SDK's 0 is not a bill). A reservation without a settlement (the
       worker died) keeps counting at its reserve, so overshoot of any cap is bounded by the call in flight; the owner can
       void it with `python -I -m reader.agent.void <reservation_id>`, which appends a logged `void` row that removes it
       from spent and is refused for a reservation that has a settlement. `max_budget_usd` passed to the SDK is a second,

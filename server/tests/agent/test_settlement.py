@@ -20,8 +20,15 @@ def _record(upstream: dict[str, Any] | None) -> Any:
     if upstream is None:
         return None
     return ledger.UpstreamRecord(
-        statuses=tuple(upstream["statuses"]), refused=tuple(upstream.get("refused", ()))
+        statuses=tuple(upstream["statuses"]),
+        refused=tuple(upstream.get("refused", ())),
+        in_flight=upstream.get("in_flight", 0),
+        failed=upstream.get("failed", 0),
     )
+
+
+def _error_result(case: dict[str, Any]) -> bool:
+    return bool(case.get("error_result", case.get("sdk_error") is not None))
 
 
 @pytest.mark.parametrize("case", VECTORS["settlements"], ids=lambda c: c["name"])
@@ -30,8 +37,11 @@ def test_settlement_vectors(case: dict[str, Any]) -> None:
     record = _record(case["upstream"])
     if record is not None:
         assert record.any_2xx is case["upstream"]["any_2xx"]
+        assert ledger.UpstreamRecord.from_json(record.as_json()) == record
     sdk = None if case["sdk_usd"] is None else Decimal(str(case["sdk_usd"]))
-    settled, log_code = ledger.settle_amount(Decimal(str(case["reserve"])), record, sdk)
+    settled, log_code = ledger.settle_amount(
+        Decimal(str(case["reserve"])), record, sdk, error_result=_error_result(case)
+    )
     assert settled == Decimal(str(case["settled_usd"]))
     assert log_code == case.get("log")
 
@@ -43,7 +53,7 @@ def test_error_classification_vectors(case: dict[str, Any]) -> None:
     sdk = None if case["sdk_usd"] is None else Decimal(str(case["sdk_usd"]))
     code = provider.classify(
         assistant_error=case.get("sdk_error"),
-        is_error=case.get("sdk_error") is not None,
+        is_error=_error_result(case),
         sdk_usd=sdk,
         record=record,
     )

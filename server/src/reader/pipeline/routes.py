@@ -80,7 +80,8 @@ async def compile_lesson(ctx: Ctx) -> Response:
     lesson = _uuid(ctx.request.path_params["lesson_id"])
     if not _owner(ctx) or lesson is None:
         return error(404, "not_found")
-    cap = _cap(await ctx.json())
+    raw = await ctx.request.body()
+    cap = _cap({} if not raw.strip() else await ctx.json())  # no body at all: the default cap
     if cap is None:
         return error(400, "cap_invalid")
     try:
