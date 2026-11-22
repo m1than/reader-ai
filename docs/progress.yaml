@@ -361,11 +361,15 @@ tasks:
   - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
-  - { id: V.OPS-DEPLOY-web, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-DEPLOY],
-      note: "Paired OPS-DEPLOY change for V.WEB-min (WEB-UI header): Caddyfile app CSP additions (img-src 'self' blob:,
-        connect-src 'self' wss://localhost, frame-src 'none', object-src 'none', base-uri 'none', form-action 'self'; no
-        data:); the built web/dist served at /srv/spa (derived caddy image or OPS-CLI bind, OPS-DEPLOY decides); SPA
-        fallback try_files {path} /index.html outside /api/* and /mcp*. No /sandbox/* (frame deferred to 4b)." }
+  - { id: V.OPS-DEPLOY-web, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.OPS-DEPLOY],
+      branch: V/V.WEB-min,
+      note: "Done on branch V/V.WEB-min (commit 5b5ed0c), awaits the code review with V.WEB-min. Chose the derived image:
+        reader-caddy:local (deploy/images/caddy.Dockerfile: node:26-trixie-slim@sha256:e6bedef2…20bc build stage with
+        allow-listed web inputs and a dockerignore, then the pinned caddy:2-alpine with web/dist at /srv/spa), so the
+        SPA ships with its build and no host path enters the edge; the placeholder directory is gone. Caddyfile: the
+        exact app CSP of WEB-UI's header (no data:, no 'unsafe-inline') and try_files {path} /index.html. Paired
+        OPS-DEPLOY FR-DEPLOY-2/5/7 and tests: 66 deploy tests pass, including the opt-in [image: build] test
+        (READER_TEST_IMAGE_BUILD=1) that built reader-caddy:test and found /srv/spa/index.html and the JS assets." }
   - { id: V.WEB-min, stage: V, kind: module, track: product, status: in_progress,
       needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels, V.OPS-DEPLOY-web], branch: V/V.WEB-min,
       review: "deep-reviewer (Fable), single round (outside the complex areas): changes, 9 blockers (B1–B3 the sandboxed
@@ -379,7 +383,17 @@ tasks:
         own typed relay client with one reconnect procedure and the full notice/close table), WEB-RENDER (sanitise →
         KaTeX → Shiki as React, no rehype-raw, no markdown images; HTML as text, SVG as blob: img; the sandboxed frame
         deferred to 4b with the review's findings). Declared deviations from proposed ADR-0013: hand-written API
-        client; no @jupyterlab/services (widgets deferred). Record the Chromium [browser] run in the PR." }
+        client; no @jupyterlab/services (widgets deferred). Approved by agent 2026-11-22. Red 5bdd54d: 109 Vitest
+        tests (104 failing on assertions against empty stubs; the vendor checks pass on the tarball) and 2 Playwright
+        [browser] tests. Green 1f6ac7e: 109/109 Vitest pass; typecheck and build-storybook pass. NFR-UI-1 measured
+        110,131 B gzip initial JS (threshold 121,144 = +10 %). Chromium [browser] run (2026-11-22, Playwright 1.65.1,
+        chrome-headless-shell 159): first run INV-UI-4 failed with 13 style-src-attr violations from rehype-katex's
+        DOM-based HTML parser (hast-util-from-html-isomorphic browser build); fixed by aliasing it to its parse5 build
+        in vite.config.ts; second run 2/2 pass (no CSP violation on / and /lessons/w01 with KaTeX and Shiki; no
+        gradient, glass or glow in any story, light and dark). Library vendored from tag v0.1.0 (eae463bc) as
+        web/vendor/acme-ui-v0.1.0.tgz, sha256 a1f228e1…8e88, Node 26.13.0, npm 11.20.0; nothing pushed to the
+        library. Owner notes: the library's styles.css carries a data: mask URL for the table sort indicator (FR-UI-9
+        note; blocked by the CSP if a table were rendered)." }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
       note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2

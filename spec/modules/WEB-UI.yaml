@@ -205,7 +205,9 @@ nfr:
       build` output (lazy chunks excluded), production mode. Measured at Green (2026-11-22, Vite 8.3.8, Node 26.13.0):
       one initial chunk, 349,994 B raw, 110,131 B gzip (React 19 + ReactDOM, TanStack Router and Query, valibot, the
       library parts used, the app shell); threshold = measured + 10 %. Lazy chunks, for the record: the lesson view
-      with markdown, KaTeX and the notebook 139,795 B gzip; Shiki core and engine 47,285 B; the python grammar 9,012 B.
+      with markdown, KaTeX and the notebook 139,795 B gzip, 187,603 B after the parse5 alias of the [browser] run
+      (vite.config.ts: KaTeX's HTML parsed in JavaScript, not by the DOM, so the app CSP holds; the initial chunk is
+      unchanged at 110,088 B); Shiki core and engine 47,285 B; the python grammar 9,012 B.
       For comparison, the spike's React-plus-20-component gallery measured 124,206 B (REF-UI-2).
     threshold: 121144
     verified_by: test

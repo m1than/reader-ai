@@ -17,7 +17,12 @@
 #   and Shiki, so the sanitiser sees only author input and the trusted renderers' output is not stripped. No
 #   `rehype-raw`: raw HTML in markdown stays text. No HTML string is ever inserted (WEB-UI INV-UI-2). Inline styles
 #   produced by KaTeX and Shiki become React style objects, applied through the CSSOM, so the app needs no
-#   `style-src 'unsafe-inline'` (WEB-UI INV-UI-4 checks it in a browser).
+#   `style-src 'unsafe-inline'` (WEB-UI INV-UI-4 checks it in a browser). rehype-katex turns KaTeX's HTML into hast
+#   through hast-util-from-html-isomorphic; its browser build parses with the DOM, which the Chromium run of INV-UI-4
+#   reported as `style-src-attr` violations, so the build aliases it to its JavaScript (parse5) build
+#   (web/vite.config.ts).
+# - The MathML `annotation` element, which repeats the TeX source as text, is removed after KaTeX, so source such as
+#   `\href{javascript:…}` never appears in the document even as text.
 # - Math: KaTeX (ADR-0013) with `trust: false`; fonts are bundled as files (WEB-UI FR-UI-9: no data: URLs). KaTeX over
 #   MathJax: ADR-0013 names it, it renders synchronously into the tree above, and MathJax would inject styles at run
 #   time.
