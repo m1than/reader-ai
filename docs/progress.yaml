@@ -10,6 +10,9 @@ budget:
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
   compile_cap_usd: { usd: 8, per: "one lesson compile (all stages)", date: 2026-11-22, by: owner,
     why: "owner 'accept everything' on the compile budget; spike L02 cost $2.42–$2.97 per run, $8 matches the spike's own cap" }
+  test_budget_usd: { usd: 30, date: 2026-11-22, by: owner,
+    why: "owner: 'Do all for 1000% ready status, I'm approving $30 budget for tests'. Covers live checks and live L02
+      compiles of the vertical slice; no per-run owner consent needed within it; every spend goes to the ledger below" }
   live_runs_by_agent: "owner 2026-11-22: the agent may run `bash e2e/live/stage-1.sh` and `bash e2e/live/verify-all.sh`
     itself (allow rules in .claude/settings.json). Those scripts docker-exec internally only to fetch the test user's
     one-time bootstrap link and reset the test user; they never print or store a secret, and the agent still never runs
