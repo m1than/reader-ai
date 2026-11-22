@@ -10,7 +10,7 @@ import logging
 from typing import Any, Final
 from uuid import UUID
 
-import asyncpg  # type: ignore[import-untyped]  # asyncpg ships no type information
+import asyncpg  # untyped: covered by the asyncpg.* mypy override in pyproject.toml
 import httpx
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text

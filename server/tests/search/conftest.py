@@ -6,8 +6,8 @@ Modules under test are imported through `need()` inside test bodies or helpers, 
 assertion failure (Red), not a collection error. Postgres runs from the pinned pgvector-enabled image
 (SRV-SEARCH header).
 
-SRV-INGEST's tables are not on the integration branch yet (declared deviation, FR-SEARCH-4): `INGEST_TABLES`
-creates the three tables search reads, with SRV-INGEST FR-INGEST-14's columns, as a test-only helper.
+SRV-INGEST's tables come from its migration `ingest_0001` (FR-SEARCH-4 integration note): `add_material`
+inserts rows that satisfy that schema and creates no tables.
 
 The fake embed service is the real `reader.search.embed_service` HTTP server with a deterministic
 `HashEncoder`: a hashed bag of words, so texts sharing words are closer, and every vector is unit length.
@@ -186,24 +186,6 @@ sharing: {}
 MAT_RU = "a" * 64
 MAT_EN = "b" * 64
 
-# Test-only: SRV-INGEST FR-INGEST-14's tables, the columns search reads (declared deviation, FR-SEARCH-4).
-INGEST_TABLES = (
-    """CREATE TABLE IF NOT EXISTS materials (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), owner_id uuid NOT NULL REFERENCES users (id),
-        sha256 text NOT NULL, config_id text, page_count int, created_at timestamptz NOT NULL DEFAULT now(),
-        UNIQUE (owner_id, sha256))""",
-    """CREATE TABLE IF NOT EXISTS ingests (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(), owner_id uuid NOT NULL REFERENCES users (id),
-        material_id uuid NOT NULL UNIQUE REFERENCES materials (id), converter_version text NOT NULL,
-        artifact_id text, span_count int, outline_count int, outline_source text, pages_without_text int[],
-        imported_at timestamptz NOT NULL DEFAULT now())""",
-    """CREATE TABLE IF NOT EXISTS material_spans (
-        ingest_id uuid NOT NULL REFERENCES ingests (id), owner_id uuid NOT NULL REFERENCES users (id),
-        seq int NOT NULL, page int NOT NULL, kind text NOT NULL, level int, decoded bool, text text NOT NULL,
-        x0 real, y0 real, x1 real, y1 real, PRIMARY KEY (ingest_id, seq))""",
-)
-
-
 @dataclass
 class World:
     engine: Any
@@ -213,7 +195,7 @@ class World:
 
 
 async def world(pg: Pg, tmp: Path, monkeypatch: pytest.MonkeyPatch | None = None) -> World:
-    """A migrated database (all heads, search included), ivan (owner), anna (learner), the ingest tables."""
+    """A migrated database (all heads, search and ingest included), ivan (owner), anna (learner)."""
     from sqlalchemy import text
 
     from reader.auth.policy import settings_from_config
@@ -230,8 +212,6 @@ async def world(pg: Pg, tmp: Path, monkeypatch: pytest.MonkeyPatch | None = None
     await migrate(engine)
     await prepare(engine, settings)
     async with engine.begin() as conn:
-        for statement in INGEST_TABLES:
-            await conn.execute(text(statement))
         users = {r[0]: r[1] for r in await conn.execute(text("SELECT handle, id FROM users"))}
     return World(engine, settings, users, path)
 
@@ -251,25 +231,29 @@ async def add_material(
     async with w.engine.begin() as conn:
         material = (
             await conn.execute(
-                text("INSERT INTO materials (owner_id, sha256, config_id) VALUES (:o, :s, :c) RETURNING id"),
-                {"o": owner, "s": sha, "c": config_id},
+                text(
+                    "INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, :c, :n)"
+                    " RETURNING id"
+                ),
+                {"o": owner, "s": sha, "c": config_id, "n": max([1, *(page for page, _ in spans)])},
             )
         ).scalar_one()
         ingest = (
             await conn.execute(
                 text(
-                    "INSERT INTO ingests (owner_id, material_id, converter_version) VALUES (:o, :m, 'test-1')"
-                    " RETURNING id"
+                    "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                    " outline_count, outline_source, pages_without_text)"
+                    " VALUES (:o, :m, 'test-1', :a, :n, 0, 'headings', '{}') RETURNING id"
                 ),
-                {"o": owner, "m": material},
+                {"o": owner, "m": material, "a": "0" * 64, "n": len(spans)},
             )
         ).scalar_one()
         span_kinds = list(kinds or ["text"] * len(spans))
         for seq, (page, body) in enumerate(spans):
             await conn.execute(
                 text(
-                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text)"
-                    " VALUES (:i, :o, :q, :p, :k, :t)"
+                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                    " VALUES (:i, :o, :q, :p, :k, :t, 0, 0, 0, 0)"
                 ),
                 {"i": ingest, "o": owner, "q": seq, "p": page, "k": span_kinds[seq], "t": body},
             )

@@ -206,7 +206,9 @@ requirements:
   - id: FR-SEARCH-4
     text: >-
       **Tables.** Migration `reader/search/migrations/0001_search.py` (revision `search_0001`, branch label `search`,
-      down_revision `0001_auth`; the ingest dependency is the declared deviation above) runs `CREATE EXTENSION IF NOT EXISTS vector` (migrations run as the postgres superuser, SRV-AUTH owner
+      down_revision `0001_auth`; the ingest dependency is the declared deviation above; on V/slice-integration,
+      2026-11-23, SRV-INGEST's migration `ingest_0001` is present, so the [db] tests create no ingest tables and
+      insert rows that satisfy its schema, while the re-parenting and foreign keys stay with V.SRV-SEARCH-fk) runs `CREATE EXTENSION IF NOT EXISTS vector` (migrations run as the postgres superuser, SRV-AUTH owner
       note; a later dedicated role needs the extension created beforehand) and creates, each with
       `owner_id uuid NOT NULL` referencing `users.id`:
       - `search_chunks(id bigint generated always as identity pk, owner_id, ingest_id uuid (fk → ingests once
