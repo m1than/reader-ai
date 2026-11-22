@@ -268,11 +268,12 @@ requirements:
       `store.session_user` themselves); the server dependency `websockets` gives Uvicorn its WebSocket support.
       Integrated order (V/slice-integration): api, auth, lessons, kernels. Paired SRV-PIPELINE change (2026-11-22):
       ROUTERS adds `reader.pipeline.routes`; the api role builds one SRV-EVENTS `Jobs` (the declared catalog, a
-      procrastinate app on its own DbTarget, opened in the app's lifespan) on `app.state.jobs`, so routes can enqueue;
-      a factory argument `jobs` lets tests pass their own. Paired SRV-SEARCH change (2026-11-22): ROUTERS appends
-      `reader.search.routes`. Paired SRV-TUTOR change (2026-11-23): ROUTERS appends `reader.tutor.routes`, and
-      `reader/tutor/migrations` joins VERSION_LOCATIONS after `agent`; the `jobs` factory argument and the api
-      role's `Jobs` above land with it (the tutor's ask route enqueues through `app.state.jobs`).
+      procrastinate app on its own DbTarget, opened before serving and closed after) on `app.state.jobs`, so routes
+      can enqueue; a factory argument `jobs` lets tests pass their own. Paired SRV-SEARCH change (2026-11-22):
+      ROUTERS appends `reader.search.routes`. Paired SRV-TUTOR change (2026-11-23): ROUTERS appends
+      `reader.tutor.routes`, and `reader/tutor/migrations` joins VERSION_LOCATIONS after `pipeline`; the tutor's ask
+      route enqueues through the same `app.state.jobs`. Integrated order: api, auth, lessons, kernels, ingest,
+      search, pipeline, tutor.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

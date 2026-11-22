@@ -72,14 +72,18 @@ async def _lock(conn: AsyncConnection, key: str) -> None:
 
 async def _row(conn: AsyncConnection, kind: str, key: str) -> Mapping[str, Any] | None:
     row = (
-        await conn.execute(
-            text(
-                "SELECT args::text AS args, attempts, outcome, job_id FROM job_keys"
-                " WHERE kind = :kind AND key = :key"
-            ),
-            {"kind": kind, "key": key},
+        (
+            await conn.execute(
+                text(
+                    "SELECT args::text AS args, attempts, outcome, job_id FROM job_keys"
+                    " WHERE kind = :kind AND key = :key"
+                ),
+                {"kind": kind, "key": key},
+            )
         )
-    ).mappings().first()
+        .mappings()
+        .first()
+    )
     if row is None:
         return None
     return {**row, "args": json.loads(row["args"])}
@@ -514,14 +518,18 @@ class Jobs:
         known = [*self.catalog, SWEEP_TASK]
         async with self.engine.connect() as conn:
             ids = (
-                await conn.execute(
-                    text(
-                        "SELECT id FROM procrastinate_jobs WHERE status = 'todo'"
-                        " AND NOT (task_name = ANY(:known))"
-                    ),
-                    {"known": known},
+                (
+                    await conn.execute(
+                        text(
+                            "SELECT id FROM procrastinate_jobs WHERE status = 'todo'"
+                            " AND NOT (task_name = ANY(:known))"
+                        ),
+                        {"known": known},
+                    )
                 )
-            ).scalars().all()
+                .scalars()
+                .all()
+            )
         for job_id in ids:
             if await self.app.job_manager.cancel_job_by_id_async(int(job_id)):
                 report.cancelled.append(int(job_id))

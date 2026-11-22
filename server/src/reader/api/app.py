@@ -33,6 +33,7 @@ ROUTERS: Final = (
     "reader.kernels.routes",
     "reader.ingest.routes",  # SRV-INGEST paired change (FR-AUTH-10 note)
     "reader.search.routes",
+    "reader.pipeline.routes",
     "reader.tutor.routes",  # SRV-TUTOR paired change (FR-AUTH-10 note)
 )
 ROUTES: Final[tuple[Route, ...]] = tuple(
@@ -146,7 +147,7 @@ def create_app(
                     await task
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
-    app.state.jobs = jobs
+    app.state.jobs = jobs  # SRV-PIPELINE and SRV-TUTOR routes enqueue through it (paired changes)
     for route in ROUTES:
         app.add_api_route(
             route.path, _endpoint(route, settings, engine), methods=[route.method], include_in_schema=False

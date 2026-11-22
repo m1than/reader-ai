@@ -112,8 +112,13 @@ requirements:
       the worker fetches higher-priority `todo` jobs first (procrastinate orders by priority, then id), so a short
       interactive kind runs before queued jobs of lower priority, never in the middle of a running one. The worker
       serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared module list
-      `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST, SRV-SEARCH and SRV-TUTOR add theirs); building a
-      `Catalog` rejects a duplicate name (`kind_name_duplicate`), the reserved name `jobs.sweep`, an `args` model
+      `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST, SRV-SEARCH, SRV-PIPELINE and SRV-TUTOR add
+      theirs). Paired SRV-AGENT/SRV-PIPELINE amendment: a handler may
+      (a) append spend rows through SRV-AGENT's ledger, which opens its own connection and commits at once (append-only,
+      never an outcome effect, so a rolled-back run still records its spend), and (b) enqueue through
+      `reader.jobs.running()`, the worker's `Jobs` (FR-EVENTS-3 commits independently of the run's transaction); a kind
+      module may export `on_worker_start(jobs)`, which `worker.run` awaits once after the start sweep; building
+      a `Catalog` rejects a duplicate name (`kind_name_duplicate`), the reserved name `jobs.sweep`, an `args` model
       whose `model_config` does not set `extra="forbid"` (`kind_args_not_forbid`), a `key` field missing from
       `args`, a `priority` outside 0 ≤ priority < the sweep's 1,000,000 (`kind_bounds_invalid`), and an `args` model
       that fails FR-EVENTS-10 (a field typed `Secret` or any subclass of it). Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a

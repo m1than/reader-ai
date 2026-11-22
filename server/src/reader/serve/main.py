@@ -165,7 +165,8 @@ def _serve_api(bind: str, env: Env) -> None:
             except OSError:
                 raise Failure("run_dir_unwritable") from None
             serving_logs()
-            # FR-AUTH-10 note: one SRV-EVENTS Jobs for routes that enqueue (the tutor's ask).
+            # FR-AUTH-10 note: one SRV-EVENTS Jobs on the declared catalog, its own procrastinate app, for
+            # routes that enqueue (SRV-PIPELINE, the tutor's ask).
             queue = make_app(target)
             await queue.open_async()
             try:

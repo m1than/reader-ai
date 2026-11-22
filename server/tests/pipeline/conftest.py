@@ -295,13 +295,17 @@ def pg_container() -> Iterator[tuple[Pg, Any]]:
         )
 
 
-@pytest.fixture
-def pg(pg_container: tuple[Pg, Any]) -> Pg:
+def fresh_pg(pg_container: tuple[Pg, Any]) -> Pg:
     server, container = pg_container
     name = "p_" + secrets.token_hex(6)
     code, out = container.exec(["psql", "-U", "postgres", "-c", f"CREATE DATABASE {name}"])
     assert code == 0, out
     return Pg(server.host, server.port, server.user, server.password, name)
+
+
+@pytest.fixture
+def pg(pg_container: tuple[Pg, Any]) -> Pg:
+    return fresh_pg(pg_container)
 
 
 def config_text(task_budgets: dict[str, float] | None = None) -> str:

@@ -557,8 +557,14 @@ tasks:
         and `stalled`, R2-B4 output cap bound to the run_token, plus non-blocking), all addressed; round 3: approve
         (3c10698). Run cap = the owner's compile_cap_usd $8.00, a declared deviation from ADR-0005's $4.35 target
         (23 × $8 = $184 > $100; the $200 monthly budget is the guard; ADR-0005 amendment when the pipeline lands)",
-      note: "SRV-AGENT and SRV-PIPELINE approved (agent, 2026-11-22) with the round-3 items folded in; Red tests in
-        server/tests/agent and server/tests/pipeline; Green next, no live compile until the coordinator schedules it.
+      note: "SRV-AGENT and SRV-PIPELINE approved (agent, 2026-11-22) with the round-3 items folded in; Green done
+        (agent dca70a2, pipeline modules 64480ca, runs/jobs/routes next commit), awaiting the code review; no live
+        compile until the coordinator schedules it. SRV-AGENT amended for SRV-TUTOR (FR-AGENT-12 daily scope,
+        FR-AGENT-13 thinking off, custom system prompt reserve, stop_reason, abort on first api_retry, deadline).
+        Paired: OPS-DEPLOY (agent-proxy build, server image installs [agent], example budgets 4/2/4, agent-proxy
+        healthy while listening), SRV-AUTH (ROUTERS, VERSION_LOCATIONS, api Jobs), SRV-EVENTS (KIND_MODULES,
+        running(), on_worker_start, spend rows), SRV-LESSON (`findings` stage), SRV-KERNEL (public upstream client),
+        SRV-CONFIG (per-run budget note). SRV-INGEST tables are read through to_regclass until its migration lands.
         SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
         bearer placeholder, POST /v1/messages?beta=true and header allow-lists, body tools check; no-tool Agent SDK
         provider with model ids resolved and priced before spend; reservation/settlement ledger with run, task and

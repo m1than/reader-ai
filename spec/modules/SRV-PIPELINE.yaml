@@ -157,7 +157,8 @@ requirements:
       an unsupported or contradicted verdict, or the last review a blocking finding, and fewer than `max_revise_loops`
       loops ran, it executes `revise`, `fact_check`, `adversarial_review`; then `findings` and `lab_verification`
       whenever a notebook exists. Each step is one `pipeline.stage` job (`max_attempts` = `bounds.stage_max_attempts`,
-      `timeout_s` = `bounds.stage_job_timeout_s`, or `bounds.verify_job_timeout_s` for lab verification; transient set per
+      `timeout_s` = `bounds.stage_job_timeout_s`, or `bounds.verify_job_timeout_s` for lab verification, which runs as a
+      second kind `pipeline.verify` because a kind has one timeout (same args, key and handler); transient set per
       SRV-AGENT FR-AGENT-10 plus `verify_unavailable` and `input_not_ready`). A handler: reads its input (absent →
       `input_not_ready`, transient); reuses an earlier completed step with the same `input_sha256` for this lesson if one
       exists (no provider call, `cost_usd` 0, `reused_from` set); otherwise runs the stage; writes its effect; enqueues

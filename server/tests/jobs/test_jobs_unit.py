@@ -115,9 +115,13 @@ def test_kind_modules_are_a_declared_list() -> None:
     jobs = require_jobs()
     assert isinstance(jobs.KIND_MODULES, tuple)
     assert len(jobs.load_kinds(())) == 0
-    # SRV-INGEST, SRV-SEARCH and SRV-TUTOR paired changes (FR-EVENTS-1 note)
-    assert jobs.KIND_MODULES == ("reader.ingest.jobs", "reader.search.jobs", "reader.tutor.jobs")
-    assert list(jobs.load_kinds()) == ["ingest.import", "search.embed", "tutor.answer"]
+    # SRV-INGEST, SRV-SEARCH, SRV-PIPELINE and SRV-TUTOR paired changes (FR-EVENTS-1 note)
+    assert jobs.KIND_MODULES == (
+        "reader.ingest.jobs", "reader.search.jobs", "reader.pipeline.jobs", "reader.tutor.jobs"
+    )
+    assert list(jobs.load_kinds()) == [
+        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer"
+    ]
 
 
 # ---- FR-EVENTS-2, -13: keys and lock ids

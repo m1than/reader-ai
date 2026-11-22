@@ -638,7 +638,7 @@ async def test_disabled_user_cannot_sign_in(pg: Pg, tmp_path: Path) -> None:
 def test_routers_are_a_declared_list() -> None:
     from reader.api.app import ROUTERS
 
-    # SRV-LESSON, -KERNEL, -INGEST, -SEARCH and -TUTOR add their routers (paired changes, FR-AUTH-10 notes).
+    # SRV-LESSON, -KERNEL, -INGEST, -SEARCH, -PIPELINE, -TUTOR add routers (paired changes, FR-AUTH-10 notes)
     assert list(ROUTERS) == [
         "reader.api.routes",
         "reader.auth.routes",
@@ -646,6 +646,7 @@ def test_routers_are_a_declared_list() -> None:
         "reader.kernels.routes",
         "reader.ingest.routes",
         "reader.search.routes",
+        "reader.pipeline.routes",
         "reader.tutor.routes",
     ]
 

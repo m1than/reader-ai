@@ -18,6 +18,7 @@ from .conftest import (
     FIXTURES,
     MATERIAL,
     Pg,
+    fresh_pg,
     load_yaml,
     need,
     pipeline_env,
@@ -148,13 +149,13 @@ async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path
         assert status["task_budgets"] == {"draft": "4.0", "fact_check": "2.0", "review": "4.0"}
 
 
-async def test_recompiles_reuse_unchanged_steps(pg: Pg, tmp_path: Path) -> None:
+async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tmp_path: Path) -> None:
     """INV-PIPELINE-2: a model step never calls the provider when an earlier step of the lesson had its input."""
     prior = BY_NAME["not-converged-after-loop"]
     for recompile in CASES["recompiles"]:
         sub = tmp_path / recompile["name"]
         sub.mkdir()
-        async with pipeline_env(pg, sub, **_env_kwargs(prior)) as env:
+        async with pipeline_env(fresh_pg(pg_container), sub, **_env_kwargs(prior)) as env:
             await _run_case(env, prior)
             changed = recompile["changed"]
             if "adversarial_review.prompt_version" in changed:
@@ -191,7 +192,10 @@ async def test_stalled_run_is_resumed_by_ensure(pg: Pg, tmp_path: Path) -> None:
         await env.app.job_manager.connector.execute_query_async(
             "DELETE FROM procrastinate_jobs WHERE status = 'todo'"
         )
-        await env.rows("DELETE FROM job_keys RETURNING key")
+        from sqlalchemy import text
+
+        async with env.engine.begin() as conn:  # the lost enqueue: no key row, no job
+            await conn.execute(text("DELETE FROM job_keys"))
         runs = need("reader.pipeline.runs")
         assert (await runs.derive(env.engine, env.jobs, env.users["ivan"], run))["state"] == "stalled"
         status = await env.state(run)  # the status read calls ensure
