@@ -236,7 +236,9 @@ requirements:
       64 KiB of response body (structural: the largest expected body is a kernel model or the state object; more is a
       failure). A failed call answers 502 `kernel_upstream` and leaves the session map unchanged, except as
       FR-KERNEL-14 says. The upstream WebSocket follows no redirects either. If the user's service does not resolve
-      (profile not started), session routes answer 503 `kernel_unavailable`. [unit]
+      (profile not started), session routes answer 503 `kernel_unavailable`. [unit] Paired SRV-PIPELINE change
+      (2026-11-22): `reader.kernels.upstream` (`http`, `ws_connect`, `Endpoint`, `UpstreamError`) is a public client
+      that SRV-PIPELINE's worker-side lab verifier reuses against `kernel-verify`, with the same bounds.
   - id: FR-KERNEL-14
     text: >-
       Unplanned restarts: the api records the user's nonce at each successful reset and at the first use of the service

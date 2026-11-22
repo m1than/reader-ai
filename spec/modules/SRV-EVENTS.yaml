@@ -108,7 +108,12 @@ requirements:
       (a Pydantic model with `extra="forbid"`), `key` (the ordered list of `args` field names that form the
       idempotency key), `max_attempts` (≥ 1 counted runs per key), `transient` (a tuple of exception types) and
       `timeout_s`. The worker serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared
-      module list `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST and SRV-SEARCH add theirs); building
+      module list `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST and SRV-SEARCH add theirs; SRV-PIPELINE
+      adds `reader.pipeline.jobs`, paired change 2026-11-22). Paired SRV-AGENT/SRV-PIPELINE amendment: a handler may
+      (a) append spend rows through SRV-AGENT's ledger, which opens its own connection and commits at once (append-only,
+      never an outcome effect, so a rolled-back run still records its spend), and (b) enqueue through
+      `reader.jobs.running()`, the worker's `Jobs` (FR-EVENTS-3 commits independently of the run's transaction); a kind
+      module may export `on_worker_start(jobs)`, which `worker.run` awaits once after the start sweep; building
       a `Catalog` rejects a duplicate name (`kind_name_duplicate`), the reserved name `jobs.sweep`, an `args` model
       whose `model_config` does not set `extra="forbid"` (`kind_args_not_forbid`), a `key` field missing from
       `args`, and an `args` model that fails FR-EVENTS-10 (a field typed `Secret` or any subclass of it). Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
