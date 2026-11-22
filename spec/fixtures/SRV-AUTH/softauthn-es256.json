@@ -1,0 +1,37 @@
+{
+  "authentication": {
+    "authenticatorAttachment": "platform",
+    "clientExtensionResults": {},
+    "id": "JWsb4ydF0dHJ1JEhzIe8RRxPLfp1bYm0yRCvrrYliuA",
+    "rawId": "JWsb4ydF0dHJ1JEhzIe8RRxPLfp1bYm0yRCvrrYliuA",
+    "response": {
+      "authenticatorData": "SZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2MdAAAAAA",
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uZ2V0IiwiY2hhbGxlbmdlIjoiQWdJQ0FnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSSIsIm9yaWdpbiI6Imh0dHBzOi8vbG9jYWxob3N0IiwiY3Jvc3NPcmlnaW4iOmZhbHNlfQ",
+      "signature": "MEUCICh00QcnZMeRfHx5fUsc63hNtmKMWR1xNVgmnZ2vd-svAiEA-Kna_HbKSCKgiwJWz9-wq-qgntQvrj09u-kIzQ2qTxQ",
+      "userHandle": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+    },
+    "type": "public-key"
+  },
+  "challenge": "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI",
+  "credential_id": "JWsb4ydF0dHJ1JEhzIe8RRxPLfp1bYm0yRCvrrYliuA",
+  "origin": "https://localhost",
+  "public_key": "pQECAyYgASFYIG_wO5SSQc4drdQ1GeaWDgqFtBppoFwygQOqK84VlMoWIlggPE91OlW_AdxT9sCwx-7ni0DG_30lqW4igrmJzvccFEo",
+  "registration": {
+    "authenticatorAttachment": "platform",
+    "clientExtensionResults": {},
+    "id": "JWsb4ydF0dHJ1JEhzIe8RRxPLfp1bYm0yRCvrrYliuA",
+    "rawId": "JWsb4ydF0dHJ1JEhzIe8RRxPLfp1bYm0yRCvrrYliuA",
+    "response": {
+      "attestationObject": "o2NmbXRkbm9uZWdhdHRTdG10oGhhdXRoRGF0YVikSZYN5YgOjGh0NBcPZHZgW4_krrmihjLHmVzzuoMdl2NdAAAAAAAAAAAAAAAAAAAAAAAAAAAAICVrG-MnRdHRydSRIcyHvEUcTy36dW2JtMkQr662JYrgpQECAyYgASFYIG_wO5SSQc4drdQ1GeaWDgqFtBppoFwygQOqK84VlMoWIlggPE91OlW_AdxT9sCwx-7ni0DG_30lqW4igrmJzvccFEo",
+      "clientDataJSON": "eyJ0eXBlIjoid2ViYXV0aG4uY3JlYXRlIiwiY2hhbGxlbmdlIjoiQWdJQ0FnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSUNBZ0lDQWdJQ0FnSSIsIm9yaWdpbiI6Imh0dHBzOi8vbG9jYWxob3N0IiwiY3Jvc3NPcmlnaW4iOmZhbHNlfQ",
+      "transports": [
+        "hybrid",
+        "internal"
+      ]
+    },
+    "type": "public-key"
+  },
+  "rp_id": "localhost",
+  "source": "server/tests/auth/softauthn.py (spec/modules/SRV-AUTH.yaml VEC-AUTH-1)",
+  "user_handle": "AwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAw"
+}
