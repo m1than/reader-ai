@@ -94,8 +94,19 @@ class Hub:
         self.closing = False
         self.tasks: list[asyncio.Task[Any]] = []
         self.started = asyncio.Event()
+        self._start_task: asyncio.Task[bool] | None = None
 
     # Lifecycle
+    async def ensure_started(self) -> bool:
+        """Idempotent: every attacher calls this after its handshake; the first call starts the hub and the
+        others wait for that same start, so a failed handshake of the creating connection leaves no hub
+        unstarted (FR-KERNEL-7)."""
+        if self.started.is_set():
+            return True
+        if self._start_task is None:
+            self._start_task = asyncio.ensure_future(self.start())
+        return await asyncio.shield(self._start_task)
+
     async def start(self) -> bool:
         """Open the upstream WebSocket (FR-KERNEL-7); on failure run FR-KERNEL-14 and report False.
         A closing hub never starts."""

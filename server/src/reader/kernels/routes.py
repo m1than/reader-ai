@@ -6,7 +6,6 @@ through `store.session_user`, after SRV-AUTH's CSRF gate has checked the Origin 
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import json
 
@@ -22,8 +21,6 @@ from reader.auth.policy import SESSION_COOKIE, Settings
 from reader.kernels.protocol import notice
 from reader.kernels.relay import MAX_CONNECTIONS, Hub
 from reader.kernels.service import KernelService, ServiceError
-
-_START_WAIT_S = 10.0
 
 
 def service_of(app: Starlette) -> KernelService:
@@ -169,7 +166,6 @@ async def channels(ws: WebSocket, settings: Settings, engine: AsyncEngine) -> No
 
     # Reserve the slot before the first await, so the limit of 2 holds under concurrent upgrades.
     current = session.hub
-    fresh = current is None or current.closing
     hub = Hub(svc, session) if current is None or current.closing else current
     session.hub = hub
     if len(hub.attached) >= MAX_CONNECTIONS:
@@ -186,11 +182,7 @@ async def channels(ws: WebSocket, settings: Settings, engine: AsyncEngine) -> No
         hub.detach(att)
         await _close_with(ws, "kernel_reset", 1012)
         return
-    if fresh:
-        await hub.start()
-    else:
-        with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(hub.started.wait(), _START_WAIT_S)
+    await hub.ensure_started()   # idempotent: whichever attacher gets here first starts the hub
     await hub.serve(att)
 
 

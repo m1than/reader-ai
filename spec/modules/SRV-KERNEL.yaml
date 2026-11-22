@@ -41,7 +41,7 @@ title: Kernel sessions and the authenticated WebSocket relay to Kernel Gateway, 
 status: approved
 approved_by: agent
 approved_at: 2026-11-22
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Approved 2026-11-22 after SRV-AUTH merged, with FR-KERNEL-10's kernel_restarted rule (from WEB) added at approval. Code review round 1 changes (5 blockers): FR-KERNEL-3, -5, -6, -7, -8, -10, -11, -12 and INV-KERNEL-6 amended with their tests"
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Approved 2026-11-22 after SRV-AUTH merged, with FR-KERNEL-10's kernel_restarted rule (from WEB) added at approval. Code review round 1 changes (5 blockers): FR-KERNEL-3, -5, -6, -7, -8, -10, -11, -12 and INV-KERNEL-6 amended with their tests. Code review round 2 approve (nit applied: idempotent relay start, FR-KERNEL-7)"
 layer: server
 track: engineering
 adr: [ADR-0022, ADR-0014, ADR-0006, ADR-0012, ADR-0013, ADR-0024, ADR-0026]
@@ -157,7 +157,9 @@ requirements:
       SRV-AUTH session every 60 s and closes with 4401 when the session has ended (sign-out or expiry). The connection
       slot is taken before the first await of the upgrade, so the limit of 2 holds under concurrent upgrades; after
       the handshake the api re-checks that the session is still mapped and its relay is not closing, else it sends
-      `kernel_reset` and closes with 1012; a closing relay never opens an upstream connection. [unit]
+      `kernel_reset` and closes with 1012; a closing relay never opens an upstream connection. Every connection that
+      completes its handshake starts the relay through one idempotent start, so a failed handshake of the connection
+      that created it leaves no relay unstarted. [unit]
   - id: FR-KERNEL-8
     text: >-
       Filtering per VEC-KERNEL-1, both directions. Every forwarded message is rebuilt from exactly the keys

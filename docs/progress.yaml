@@ -362,8 +362,9 @@ tasks:
       note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
   - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
   - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "OPS-SANDBOX done (code review approve, PR #34). SRV-KERNEL approved 2026-11-22, green locally on branch
-        V/V.SRV-KERNEL, code review next (complex area, full review): 57 tests in server/tests/kernels (protocol and
+      note: "SRV-KERNEL code review approve (round 1 changes, round 2 approve; 71 kernel tests); PR after the
+        OPS-SANDBOX flaky-test fix (investigator) so the full gate can pass. OPS-SANDBOX done (code review approve,
+        PR #34). SRV-KERNEL approved 2026-11-22 on branch V/V.SRV-KERNEL. At green: 57 tests in server/tests/kernels (protocol and
         VEC-KERNEL-1 table with Hypothesis properties; service and VEC-KERNEL-2 reset sequences with a fake clock;
         relay against an in-memory upstream; upstream client against local servers; routes through the app on
         Postgres; [image]: first-use reset and print(1) on reader-kernel:local, interrupted sleep and busy loop reply

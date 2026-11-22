@@ -258,8 +258,12 @@ class _SlowHandshake:
         self.denied: int | None = None
         self.closed: int | None = None
 
+    fail_accept = False
+
     async def accept(self) -> None:
         await self.gate.wait()
+        if self.fail_accept:
+            raise ConnectionResetError("the browser went away during the handshake")
         self.accepted = True
         self.client_state = type("S", (), {"name": "CONNECTED"})()
 
@@ -307,3 +311,44 @@ def test_concurrent_upgrades_respect_the_limit(monkeypatch: pytest.MonkeyPatch) 
     sockets = asyncio.run(run())
     assert sorted(ws.accepted for ws in sockets) == [False, True, True]
     assert [ws.denied for ws in sockets if not ws.accepted] == [409]
+
+
+def test_hub_starts_when_the_creating_handshake_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-KERNEL-7: the connection that created the hub fails its accept while a second one is attached;
+    the second still starts the hub (ensure_started is idempotent)."""
+    routes = load("reader.kernels.routes")
+    service_mod = load("reader.kernels.service")
+    from reader.auth import store
+
+    up = FakeUpstream()
+
+    async def run() -> list[_SlowHandshake]:
+        svc = service_mod.KernelService(
+            up.endpoint, clock=FakeClock(), sleep=tick_sleep, http=up.http, ws=up.ws
+        )
+        app = type("App", (), {})()
+        app.state = type("State", (), {"kernel_service": svc})()
+        _, session = await svc.create("ivan", "L02")
+        user = type("U", (), {"handle": "ivan"})()
+
+        async def session_user(*_: Any) -> Any:
+            return user
+
+        monkeypatch.setattr(store, "session_user", session_user)
+        settings = type("Settings", (), {"origin": ORIGIN})()
+        gate = asyncio.Event()
+        first, second = _SlowHandshake(app, session.id, gate), _SlowHandshake(app, session.id, gate)
+        first.fail_accept = True
+        t1 = asyncio.ensure_future(routes.channels(first, settings, None))
+        await asyncio.sleep(0.02)
+        t2 = asyncio.ensure_future(routes.channels(second, settings, None))
+        await asyncio.sleep(0.02)
+        gate.set()
+        results = await asyncio.wait_for(asyncio.gather(t1, t2, return_exceptions=True), 5)
+        assert isinstance(results[0], ConnectionResetError)
+        return [first, second]
+
+    first, second = asyncio.run(run())
+    assert not first.accepted
+    assert second.accepted
+    assert up.ws_hosts == ["kernel-user-ivan"]     # the hub was started exactly once
