@@ -48,7 +48,7 @@ title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skele
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound"
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
@@ -157,10 +157,11 @@ requirements:
       asyncpg engine (`run_sync` in env.py; procrastinate 3.12.0's `execute_script` has its own asyncpg path through the
       raw driver connection for multi-statement SQL). `reader.db` sets `version_locations` on the programmatic Alembic
       `Config` before `command.upgrade`, from a declared list of directories (Alembic does not glob; no scan): in stage
-      1 only `reader/db/migrations/versions`; SRV-EVENTS appends its own directory and the installed
+      1 only `reader/db/migrations/versions`; SRV-LESSON appends `reader/lessons/migrations` (paired change,
+      2026-11-22); SRV-EVENTS appends its own directory and the installed
       `procrastinate/contrib/alembic/versions`. "At all heads" in FR-AUTH-2 means every head of that history.
-      Since SRV-EVENTS (2026-11-22, paired change): the list is `reader/db/migrations/versions`,
-      `reader/jobs/migrations` and procrastinate's versions directory; "all heads" are the effective heads
+      Since SRV-LESSON and SRV-EVENTS (2026-11-22, paired changes): the list is `reader/db/migrations/versions`,
+      `reader/lessons/migrations`, `reader/jobs/migrations` and procrastinate's versions directory; "all heads" are the effective heads
       (`get_revisions("heads")`, so `procrastinate_0043`, reached through `jobs_0001`'s `depends_on`, is not compared);
       and the lock is taken by polling `pg_try_advisory_lock` on a dedicated autocommit connection, because
       procrastinate's `CREATE INDEX CONCURRENTLY` deadlocks against a waiter holding an open transaction. The poll
@@ -254,7 +255,8 @@ requirements:
       for a `recent_session` route with an older session); `public` are exactly `/api/healthz`, the bootstrap and sign-in ceremonies,
       `/api/auth/signout`, and the pages and script of FR-AUTH-14. No GET route writes to the database. The app
       factory includes routers from a declared list, `reader.api.app.ROUTERS`; stage 1 lists only the api and auth
-      routers (SRV-KERNEL adds `reader.kernels.routes` in its own paired change).
+      routers; SRV-LESSON adds `reader.lessons.routes` (paired change, 2026-11-22), and SRV-KERNEL adds
+      `reader.kernels.routes` in its own paired change.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

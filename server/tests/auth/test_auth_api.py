@@ -638,7 +638,8 @@ async def test_disabled_user_cannot_sign_in(pg: Pg, tmp_path: Path) -> None:
 def test_routers_are_a_declared_list() -> None:
     from reader.api.app import ROUTERS
 
-    assert list(ROUTERS) == ["reader.api.routes", "reader.auth.routes"]
+    # SRV-LESSON adds its router in a paired change (FR-AUTH-10 note).
+    assert list(ROUTERS) == ["reader.api.routes", "reader.auth.routes", "reader.lessons.routes"]
 
 
 def test_route_table_is_declared_as_data() -> None:

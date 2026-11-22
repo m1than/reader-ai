@@ -79,7 +79,7 @@ The owner wants a working full-stack product on the Mac as early as possible. Af
 | V1 | `V.SRV-JOBS-min` | A Postgres job table with claim/complete/retry (ADR-0006 queue shape), no outbox fan-out or SSE yet | S1.live |
 | V2 | `V.SRV-INGEST-min` | Native Docling converter per ADR-0021 (formula model on, code from the text layer); PDF only; the Bashir book into material spans | V1 |
 | V3 | `V.SRV-SEARCH-min` | `BAAI/bge-m3` embeddings (spike embeddings-local v2: recall@10 0.675 dense vs 0.400 for e5-small) + Postgres full text; top-k spans with citations | V2 |
-| V4 | `V.SRV-LESSON-min` | ADR-0004 lesson notebook format: store, list, open one lesson | V1 |
+| V4 | `V.SRV-LESSON-min` | ADR-0004 lesson notebook format: store, list, open one lesson | S1.live |
 | V5 | `V.KERNEL-min` | OPS-SANDBOX + SRV-KERNEL for `python3` only, one `kernel-<user>` service (ADR-0022), the api WebSocket relay | S1.live |
 | V6 | `V.WEB-min` | WEB-UI + WEB-NOTEBOOK + WEB-RENDER: sign in, list lessons, open one, run cells; the library from the local build (spike library-publish) | V4, V5 |
 | V7 | `V.COMPILE-min` | SRV-AGENT + SRV-PIPELINE: draft → fact-check → review → revise for L02 through `agent-proxy` (ADR-0025); open findings go to G2 as open cells | V3, V4 |

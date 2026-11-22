@@ -36,9 +36,10 @@ def _procrastinate_versions() -> Path:
     return Path(spec.origin).resolve().parent / "contrib" / "alembic" / "versions"
 
 
-# Declared list of version directories (no scan): SRV-AUTH's, SRV-EVENTS's own, and procrastinate's chain.
+# Declared list of version directories (no scan): SRV-AUTH's, SRV-LESSON's, SRV-EVENTS's own, and procrastinate's.
 VERSION_LOCATIONS: Final[list[Path]] = [
     SCRIPT_LOCATION / "versions",
+    _HERE.parent / "lessons" / "migrations",
     _HERE.parent / "jobs" / "migrations",
     _procrastinate_versions(),
 ]
