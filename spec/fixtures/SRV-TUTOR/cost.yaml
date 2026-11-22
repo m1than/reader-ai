@@ -1,0 +1,22 @@
+# VEC-TUTOR-3 — tutor cost bounds (SRV-TUTOR bounds, NFR-TUTOR-2). Prices per million tokens from the SRV-AGENT pricing
+# table (as_of 2026-11-03): claude-sonnet-5-5 input 2.00, output 10.00, cache_write_1h 4.00, cache_read 0.10.
+# Reserve formula: SRV-AGENT FR-AGENT-9 (cli_system_tokens 6803, chars_per_token_floor 2.0, no cache sharing assumed).
+model: claude-sonnet-5-5
+worst_case_reserve:
+  cli_system_tokens: 6803
+  prompt_chars_max: 20000
+  prompt_tokens: 10000          # ceil(20000 / 2.0)
+  input_usd: 0.067212           # (6803 + 10000) × 4.00 / 1e6
+  output_tokens: 1200
+  output_usd: 0.012             # 1200 × 10.00 / 1e6
+  reserve_usd: 0.079212
+question_cap_usd: 0.20          # ≥ 2 attempts × 0.079212 = 0.158424
+typical_estimate:               # an estimate, measured by NFR-TUTOR-2 in the live run
+  cli_system_cached_read_usd: 0.00068   # 6803 × 0.10 / 1e6 (CLI prompt warm in the 1-hour cache)
+  content_tokens: 5000                  # question + cell + 8 spans ≈ 12,500 chars at ~2.5 chars/token (REF-AGENT-5)
+  content_write_1h_usd: 0.02            # 5000 × 4.00 / 1e6
+  output_tokens: 500
+  output_usd: 0.005
+  total_usd_warm: 0.0257
+  total_usd_cold: 0.0529                # CLI prompt written instead of read: + 6803 × (4.00 − 0.10) / 1e6
+daily_cap_usd: 3.00                     # ≈ 57 cold or ≈ 117 warm questions
