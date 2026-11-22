@@ -358,7 +358,11 @@ tasks:
   - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: module, track: engineering, status: todo, needs: [],
       what: "tests/sandbox/test_supervisor.py::test_own_address_source_counts_as_local failed once in the full local gate
         while other Docker workloads ran (embed spike at 8 CPUs, SRV-KERNEL tests), and passed alone in 17.9 s (2026-11-22).
-        Make its timing robust under load (longer settle or polling with a bound), paired OPS-SANDBOX spec note (H2)." }
+        Make its timing robust under load (longer settle or polling with a bound), paired OPS-SANDBOX spec note (H2).
+        Also seen during concurrent gates: test_signals_under_state_flood_always_restart and
+        test_full_table_from_inside_does_not_block_the_caller failed, one with `network rk-net-… not found`. Likely cause:
+        the session sweep removes every test-labelled container and network, including another concurrent run's. Fix:
+        label resources with a per-run id and sweep only this run's." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
       note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
