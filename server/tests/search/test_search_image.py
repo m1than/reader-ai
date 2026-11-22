@@ -126,19 +126,31 @@ def test_service_start_runs_the_precheck_and_caps_the_length(built: str) -> None
 
 
 # FR-SEARCH-1 / OPS-DEPLOY FR-DEPLOY-9: a real service start plus the worst admitted request (8 texts of 1,200
-# characters that each reach the 1,024-token cap) under compose's 3g limit; the cgroup never hits its limit.
+# characters that each reach the 1,024-token cap) under compose's 3g limit. The limit is sized on anonymous
+# memory (memory.stat anon, sampled every 20 ms through the batch for its maximum): the mmap'd weights are
+# file cache, which the kernel may reclaim at the limit, so memory.peak and memory.events max are reported only.
 MEMORY = """
-import json, random, threading, urllib.request
+import json, random, threading, time, urllib.request
 from reader.search import embed_service as m
 
 def cgroup(name):
     with open("/sys/fs/cgroup/" + name) as f:
         return f.read()
 
+def stat(key):
+    return next(int(v) for k, v in (line.split() for line in cgroup("memory.stat").splitlines()) if k == key)
+
+anon_max = [0]
+sampling = [True]
+def sample():
+    while sampling[0]:
+        anon_max[0] = max(anon_max[0], stat("anon"))
+        time.sleep(0.02)
+threading.Thread(target=sample, daemon=True).start()
 server = m.make_server(None, "127.0.0.1", 0, m.model_id())
 threading.Thread(target=server.serve_forever, daemon=True).start()
 server.encoder = m.load_encoder()
-after_load = int(cgroup("memory.peak"))
+after_load = stat("anon")
 rng = random.Random(7)
 pool = ("абвгдеёжзийклмнопрстуфхцчшщъыьэюя" + "αβγδεζηθλμξπσφψω0123456789+-*/=^_{}()[]<>|\\\\$%&#@~;:,.!?"
         + "".join(chr(c) for c in range(0x4E00, 0x4E00 + 200)))
@@ -148,9 +160,11 @@ url = "http://127.0.0.1:%d/embed" % server.server_address[1]
 request = urllib.request.Request(url, data=data, method="POST", headers={"Content-Type": "application/json"})
 with urllib.request.urlopen(request, timeout=600) as r:
     n = len(json.loads(r.read())["vectors"])
+sampling[0] = False
 events = dict(line.split() for line in cgroup("memory.events").splitlines())
 tokens = [len(server.encoder.model.tokenizer(t)["input_ids"]) for t in texts]
-print(json.dumps({"n": n, "after_load": after_load, "peak": int(cgroup("memory.peak")),
+print(json.dumps({"n": n, "anon_after_load": after_load, "anon_max": max(anon_max[0], stat("anon")),
+                  "file": stat("file"), "peak": int(cgroup("memory.peak")),
                   "limit": int(cgroup("memory.max")), "events": events, "min_tokens": min(tokens)}))
 """
 
@@ -163,9 +177,8 @@ def test_worst_batch_stays_under_the_compose_limit(built: str) -> None:
     assert got["n"] == 8
     assert got["min_tokens"] > 1024  # every text reaches the cap: the worst admitted request
     assert got["limit"] == 3 * 1024**3
-    assert got["events"]["max"] == "0"
     assert got["events"]["oom_kill"] == "0"
-    assert got["peak"] * 1.25 <= got["limit"]  # the spec's 25 % margin
+    assert got["anon_max"] * 1.25 <= got["limit"]  # the spec's 25 % margin, on unreclaimable memory
 
 
 EVIL = """

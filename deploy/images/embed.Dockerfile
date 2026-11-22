@@ -7,9 +7,11 @@ FROM python:3.14-slim-trixie@sha256:9aaa474097d094040649f2162a627c0049b408f52138
 COPY deploy/images/embed.requirements.lock /tmp/embed.requirements.lock
 RUN pip install --no-cache-dir --require-hashes --only-binary :all: --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple -r /tmp/embed.requirements.lock \
  && rm /tmp/embed.requirements.lock
-COPY server/src/reader/search/__init__.py server/src/reader/search/embed_service.py server/src/reader/search/fetch_model.py server/src/reader/search/models.lock.json /usr/local/lib/python3.14/site-packages/reader/search/
+# The model layer depends only on the lock and the fetcher, so a service edit does not download 2.27 GB again.
+COPY server/src/reader/search/__init__.py server/src/reader/search/fetch_model.py server/src/reader/search/models.lock.json /usr/local/lib/python3.14/site-packages/reader/search/
 RUN python -I -m reader.search.fetch_model /opt/models/bge-m3 \
  && useradd --uid 10003 --no-create-home --shell /usr/sbin/nologin embed
+COPY server/src/reader/search/embed_service.py /usr/local/lib/python3.14/site-packages/reader/search/
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HOME=/tmp
 USER 10003:10003
 EXPOSE 8100

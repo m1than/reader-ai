@@ -451,6 +451,17 @@ async def test_route_is_owner_only_and_validates(w: World) -> None:
             assert set(r.json()) == {"error"}
 
 
+async def test_broken_reader_yaml_is_503_config_unavailable(w: World) -> None:
+    await _ingested(w)
+    async with client(w) as c:
+        w.config_path.write_text("version: 1\nusers: [ : broken\n", encoding="utf-8")
+        r = await c.post("/api/search", json={"q": "кошелёк"})
+        assert (r.status_code, r.json()) == (503, {"error": "config_unavailable"})
+        w.config_path.unlink()
+        r = await c.post("/api/search", json={"q": "кошелёк"})
+        assert (r.status_code, r.json()) == (503, {"error": "config_unavailable"})
+
+
 async def test_no_text_in_logs(
     w: World, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:

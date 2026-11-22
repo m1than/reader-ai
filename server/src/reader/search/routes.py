@@ -13,6 +13,7 @@ from typing import Any, Final
 from starlette.responses import JSONResponse, Response
 
 from reader.api.http import Ctx, Route, error
+from reader.config import ConfigError
 from reader.search import params
 from reader.search.store import search
 
@@ -41,7 +42,11 @@ async def post_search(ctx: Ctx) -> Response:
         log.info("search refused: invalid input")
         return error(400, "invalid_search")
     q, k, material = parsed
-    result = await search(ctx.engine, ctx.signed_in.id, q, k, material)
+    try:
+        result = await search(ctx.engine, ctx.signed_in.id, q, k, material)
+    except (ConfigError, OSError):  # reader.yaml unreadable or invalid: no material language (FR-SEARCH-6)
+        log.warning("search refused: config_unavailable")
+        return error(503, "config_unavailable")
     log.info("search q_len=%d k=%d results=%d degraded=%s", len(q), k, len(result.results), result.degraded)
     return JSONResponse({"results": [h.to_json() for h in result.results], "degraded": result.degraded})
 
