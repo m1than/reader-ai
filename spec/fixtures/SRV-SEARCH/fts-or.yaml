@@ -1,11 +1,13 @@
 # VEC-SEARCH-5 — full-text list with OR semantics and no operator parsing (FR-SEARCH-7 step 3, INV-SEARCH-7).
 # Synthetic English chunks, fts_config english. Expected sets are the chunks sharing at least one lexeme with the
 # query; order inside a set is checked against ts_rank_cd computed by the same database (not hand-ranked), then id.
+# Each text is one page of at least 80 characters (CHUNK_MIN), so each becomes exactly one chunk; the filler words
+# share no lexeme with any query below (corrected 2026-11-22: the first texts were shorter than CHUNK_MIN).
 fts_config: english
 chunks:
-  - { id: c1, text: "The miner validates blocks and earns a reward." }
-  - { id: c2, text: "Wallets store private keys." }
-  - { id: c3, text: "Blocks link to previous blocks by hash." }
+  - { id: c1, text: "The miner validates blocks and earns a reward. Nothing further is said here about anything." }
+  - { id: c2, text: "Wallets store private keys. Nothing further is said here about anything else in this paragraph." }
+  - { id: c3, text: "Blocks link to previous blocks by hash. Nothing further is said here about anything else." }
 cases:
   - name: partial-overlap
     query: "miners link blocks"

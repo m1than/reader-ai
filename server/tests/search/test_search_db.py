@@ -34,11 +34,16 @@ from .conftest import (
 
 pytestmark = pytest.mark.anyio
 
+FILL_RU = " Здесь больше ничего не сказано ни о чём другом, это просто заполнитель для абзаца."
+FILL_EN = " Nothing further is said here about anything else in this paragraph."
+
 RU_SPANS = [
     (1, "Блокчейн хранит цепочку блоков, каждый блок ссылается на предыдущий по хешу."),
     (1, "Майнер проверяет транзакции и получает награду за новый блок."),
-    (2, "Кошелёк хранит закрытые ключи владельца."),
-    (3, "Смарт-контракт исполняется виртуальной машиной сети."),
+    # each page's text is at least 80 characters (CHUNK_MIN), so every page gives one chunk; FILL_* pad short
+    # texts with words that share no lexeme with any query here
+    (2, "Кошелёк хранит закрытые ключи владельца и подписывает ими переводы, не раскрывая их сети."),
+    (3, "Смарт-контракт исполняется виртуальной машиной сети, и каждый узел повторяет его вычисление."),
 ]
 
 
@@ -217,7 +222,7 @@ async def test_model_mismatch_is_permanent(w: World, embed_server: EmbedServer) 
 
 
 async def test_fts_config_follows_the_material_language(w: World) -> None:
-    await _ingested(w, sha=MAT_EN, spans=[(1, "Miners validate blocks and earn rewards.")])
+    await _ingested(w, sha=MAT_EN, spans=[(1, "Miners validate blocks and earn rewards." + FILL_EN)])
     assert await scalar(w.engine, "SELECT DISTINCT fts_config FROM search_chunks") == "english"
     store = need("reader.search.store")
     async with w.engine.connect() as conn:
@@ -244,7 +249,7 @@ async def test_hybrid_search_returns_cited_chunks(w: World) -> None:
 async def test_search_is_owner_isolated(w: World) -> None:
     store = need("reader.search.store")
     await _ingested(w, "ivan")
-    await _ingested(w, "anna", sha=MAT_EN, spans=[(1, "кошелёк ключи кошелёк")])
+    await _ingested(w, "anna", sha=MAT_EN, spans=[(1, "кошелёк ключи кошелёк" + FILL_RU)])
     result = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50)
     assert result.results
     assert all(r.material_sha256 == MAT_RU for r in result.results)
@@ -270,7 +275,7 @@ async def test_citations_resolve_to_spans_on_the_page(w: World) -> None:
 
 async def test_order_is_total_and_deterministic(w: World) -> None:
     store = need("reader.search.store")
-    same = [(p, "одинаковый текст про блок") for p in range(1, 6)]
+    same = [(p, "одинаковый текст про блок" + FILL_RU) for p in range(1, 6)]
     await _ingested(w, spans=same)
     first = await store.search(w.engine, w.users["ivan"], "блок", k=10)
     second = await store.search(w.engine, w.users["ivan"], "блок", k=10)
@@ -310,7 +315,7 @@ OPERATOR_QUERIES = ["&", "|", "!", ":*", "<->", "'", "\\", "a & b | !c", "''\\''
 @pytest.mark.parametrize("query", OPERATOR_QUERIES)
 async def test_operator_strings_never_raise(w: World, query: str) -> None:
     store = need("reader.search.store")
-    await _ingested(w, sha=MAT_EN, spans=[(1, "a b c x y")])
+    await _ingested(w, sha=MAT_EN, spans=[(1, "a b c x y" + FILL_EN)])
     async with w.engine.connect() as conn:
         await store.fts_list(conn, w.users["ivan"], query, None)
 
@@ -348,7 +353,7 @@ async def test_no_text_in_logs(
     w: World, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     canary = "kanareyka" + uuid.uuid4().hex[:8]
-    await _ingested(w, spans=[(1, f"текст {canary} про блок")])
+    await _ingested(w, spans=[(1, f"текст {canary} про блок" + FILL_RU)])
     caplog.set_level(logging.DEBUG)
     async with client(w) as c:
         await c.post("/api/search", json={"q": f"{canary} блок"})

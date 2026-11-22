@@ -36,11 +36,13 @@ def _procrastinate_versions() -> Path:
     return Path(spec.origin).resolve().parent / "contrib" / "alembic" / "versions"
 
 
-# Declared list of version directories (no scan): SRV-AUTH's, SRV-LESSON's, SRV-EVENTS's, procrastinate's.
+# Declared list of version directories (no scan): SRV-AUTH's, SRV-LESSON's, SRV-EVENTS's, SRV-SEARCH's,
+# procrastinate's.
 VERSION_LOCATIONS: Final[list[Path]] = [
     SCRIPT_LOCATION / "versions",
     _HERE.parent / "lessons" / "migrations",
     _HERE.parent / "jobs" / "migrations",
+    _HERE.parent / "search" / "migrations",
     _procrastinate_versions(),
 ]
 # pg_advisory_lock(namespace, key): this namespace is for migrations only ("RDMG"); SRV-EVENTS uses another.
@@ -81,8 +83,11 @@ def make_engine(target: DbTarget) -> AsyncEngine:
     async def _password() -> str:
         return password.reveal()
 
-    # asyncpg accepts a callable password; the URL stays password-free.
-    return create_async_engine(url, connect_args={"password": _password}, pool_pre_ping=True)
+    # asyncpg accepts a callable password; the URL stays password-free. hide_parameters: a SQL error never
+    # logs bound parameters such as a search query or a token hash (paired SRV-SEARCH change, FR-AUTH-1).
+    return create_async_engine(
+        url, connect_args={"password": _password}, pool_pre_ping=True, hide_parameters=True
+    )
 
 
 def alembic_config() -> Config:

@@ -34,7 +34,7 @@ def test_engine_hides_bound_parameters(pg: Pg) -> None:
     from reader.db import make_engine
 
     engine = make_engine(target(pg))
-    assert engine.hide_parameters is True
+    assert engine.sync_engine.hide_parameters is True
 
 
 def test_migration_lock_namespace_is_fixed() -> None:
