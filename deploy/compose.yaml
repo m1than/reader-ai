@@ -136,6 +136,9 @@ services:
 
   agent-proxy:
     image: reader-agent-proxy:local
+    build:
+      context: ..
+      dockerfile: deploy/images/agent-proxy.Dockerfile
     profiles: [agents]
     user: "10002:10002"
     read_only: true

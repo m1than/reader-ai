@@ -83,7 +83,10 @@ requirements:
       `reader-server --role <role>`. Every Dockerfile `FROM` under deploy/** and every third-party `image:` carries a
       readable tag and a `@sha256:` digest, `<name>:<tag>@sha256:<64 hex>` (ADR-0020; the digest binds, the tag
       documents); images built by reader-ai carry a local tag. Build inputs are an allow-list: `server.Dockerfile`
-      copies exactly `server/pyproject.toml`, `server/src` and `deploy/images/wait-for-secret.sh`,
+      copies exactly `server/pyproject.toml`, `server/src` and `deploy/images/wait-for-secret.sh` and installs the
+      server package with its `agent` extra (the Agent SDK for the worker, SRV-AGENT; paired change 2026-11-22),
+      `agent-proxy.Dockerfile` (owned by SRV-AGENT FR-AGENT-1; image `reader-agent-proxy:local`, built by `reader
+      up` through the agent-proxy service's `build` section) exactly `server/pyproject.toml` and `server/src`,
       `postgres.Dockerfile` exactly `reader-postgres-entrypoint.sh`, and `caddy.Dockerfile` (image
       `reader-caddy:local`, V.OPS-DEPLOY-web) exactly `web/package.json`, `web/package-lock.json`, `web/vendor`,
       `web/index.html`, `web/vite.config.ts`, `web/tsconfig.json` and `web/src` into a pinned node build stage, then
@@ -194,8 +197,10 @@ requirements:
       /run/secrets/.<name>.tmp && mv /run/secrets/.<name>.tmp /run/secrets/<name>'`, value on stdin only, exit code
       checked; the file is mode 0600, owned by the service uid, and appears only complete. Consumer images therefore
       provide `sh`, `cat` and `mv` (a requirement on SRV-AGENT's agent-proxy image). [live]
-      (d) Waiting and fail-closed: values are lost on every container restart. api, worker, mcp and agent-proxy wrap
-      their entrypoint to wait for their file on every start and report healthy only after it exists. Both wrappers
+      (d) Waiting and fail-closed: values are lost on every container restart. api, worker and mcp wrap
+      their entrypoint to wait for their file on every start and report healthy only after it exists; agent-proxy
+      does not wait (paired SRV-AGENT change, 2026-11-22): it re-reads its token files on every run_token request, so
+      a user whose file is missing gets `provider_missing` until it arrives, and it is healthy while it listens. Both wrappers
       trap SIGTERM and exit 143, because a shell running as PID 1 ignores SIGTERM without a handler and `docker stop`
       would otherwise wait for its kill timeout. [config] postgres runs as
       uid 999; its wrapper waits for `/run/secrets/db-password` and sets `POSTGRES_PASSWORD_FILE` only while PGDATA is
@@ -218,15 +223,17 @@ requirements:
       postgres and the server roles share the timing `interval: 2s`, `timeout: 2s`, `retries: 3`, `start_period: 60s`:
       Docker's default 30 s interval would add up to 30 s per `service_healthy` hop against NFR-DEPLOY-1, and the 60 s
       start period covers initdb on the first start and the wait for delivery. These are structural values, revised
-      from the stage-1 live check. Kernels keep FR-DEPLOY-8's literal healthcheck. [config] api, worker, mcp and agent-proxy report
-      healthy only after their secret file exists; postgres needs its file only while PGDATA is empty
+      from the stage-1 live check. Kernels keep FR-DEPLOY-8's literal healthcheck. [config] api, worker and mcp report
+      healthy only after their secret file exists, agent-proxy while it listens (FR-DEPLOY-10 d); postgres needs its file only while PGDATA is empty
       (FR-DEPLOY-10 d). [live]
   - id: FR-DEPLOY-12
     text: >-
       `deploy/reader.example.yaml` is the single documented example configuration: it loads through SRV-CONFIG's
       `load_config` without errors, holds secret references only, uses `instance.url: https://localhost`, and contains
       all nine top-level sections of SRV-CONFIG's field table (version, instance, users, tasks, budgets, kernels,
-      materials, sectors, sharing). [config, VEC-DEPLOY-1]
+      materials, sectors, sharing). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
+      sized for two worst-case calls each (paired SRV-AGENT/SRV-PIPELINE change, 2026-11-22): draft 4.0, fact_check
+      2.0, review 4.0.
 
 invariants:
   - id: INV-DEPLOY-1

@@ -51,6 +51,10 @@ def test_server_roles_share_one_built_image() -> None:
         assert svc["image"] == "reader-server:local"
         assert svc["build"]["dockerfile"] == "deploy/images/server.Dockerfile"
         assert svc["command"][:3] == ["reader-server", "--role", role]
+    # the worker's Agent SDK (SRV-AGENT `agent` extra); agent-proxy is built from its own Dockerfile
+    assert "/opt/reader[agent]" in (DEPLOY / "images" / "server.Dockerfile").read_text()
+    proxy = render(("agents",))["services"]["agent-proxy"]
+    assert proxy["build"]["dockerfile"] == "deploy/images/agent-proxy.Dockerfile"
 
 
 def _third_party_images(model: dict[str, Any]) -> set[str]:
@@ -93,6 +97,7 @@ def test_dockerfile_from_lines_pinned() -> None:
 
 COPY_ALLOW_LIST = {
     "server.Dockerfile": {"server/pyproject.toml", "server/src", "deploy/images/wait-for-secret.sh"},
+    "agent-proxy.Dockerfile": {"server/pyproject.toml", "server/src"},  # SRV-AGENT FR-AGENT-1
     "postgres.Dockerfile": {"reader-postgres-entrypoint.sh"},
     "caddy.Dockerfile": {
         "web/package.json", "web/package-lock.json", "web/vendor", "web/index.html", "web/vite.config.ts",

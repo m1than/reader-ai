@@ -304,6 +304,7 @@ class ResultMessage:
     total_cost_usd: float | None
     usage: dict[str, Any] | None
     result: str | None
+    stop_reason: str | None = None
 
 
 def sdk_usage(output: int = 100, write_1h: int = 7000) -> dict[str, Any]:
@@ -332,33 +333,48 @@ class Script:
     refused: tuple[str, ...] = ()
     raise_after: bool = False  # the SDK raises after the ResultMessage (as it does for is_error)
     revoke_unknown: bool = False
+    stop_reason: str | None = "end_turn"
+    api_retries: int = 0  # SystemMessage subtype api_retry before the answer (FR-AGENT-13 d)
+    sleep_s: float = 0.0  # before the answer (FR-AGENT-13 e)
 
 
 @dataclass
 class FakeCli:
     scripts: list[Script]
     requests: list[Any] = field(default_factory=list)
+    closed: list[bool] = field(default_factory=list)
 
     async def __call__(self, request: Any) -> AsyncIterator[Any]:
+        import asyncio
+
         script = self.scripts.pop(0)
         self.requests.append(request)
         self.current = script
-        yield SystemMessage(
-            "init",
-            {
-                "tools": script.init_tools,
-                "mcp_servers": script.init_mcp,
-                "model": script.init_model or request.model,
-            },
-        )
-        yield AssistantMessage([TextBlock(script.text)], request.model, script.assistant_error)
-        yield ResultMessage(
-            "success",
-            script.is_error,
-            script.cost,
-            script.usage,
-            script.text if not script.is_error else "API Error",
-        )
+        try:
+            yield SystemMessage(
+                "init",
+                {
+                    "tools": script.init_tools,
+                    "mcp_servers": script.init_mcp,
+                    "model": script.init_model or request.model,
+                },
+            )
+            for attempt in range(script.api_retries):
+                yield SystemMessage("api_retry", {"attempt": attempt + 1, "error_status": 429})
+            if script.sleep_s:
+                await asyncio.sleep(script.sleep_s)
+            yield AssistantMessage([TextBlock(script.text)], request.model, script.assistant_error)
+            yield ResultMessage(
+                "success",
+                script.is_error,
+                script.cost,
+                script.usage,
+                script.text if not script.is_error else "API Error",
+                script.stop_reason,
+            )
+        except GeneratorExit, asyncio.CancelledError:
+            self.closed.append(True)  # the adapter closed the CLI early
+            raise
         if script.raise_after or script.is_error:
             raise RuntimeError("Claude Code returned an error result")
 

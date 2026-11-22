@@ -56,6 +56,9 @@
 #
 # Review: deep-reviewer (Fable) rounds 1 and 2 changes, round 3 approve (2026-11-22); the approval items (unknown or
 # evicted upstream record, multiple 2xx, INV-AGENT-4 wording, agent-proxy's config path) are folded in.
+# Amendment (SRV-TUTOR review, 2026-11-22): FR-AGENT-12 (daily per-user, per-task scope) and FR-AGENT-13 (thinking
+# off, custom system prompt and its reserve, stop reason, abort on the first api_retry, per-call deadline); covered by
+# the implementation's code review.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -92,6 +95,9 @@ normative:
   - id: REF-AGENT-6
     title: Anthropic API pricing and prompt-caching economics (model table cached 2026-11-03)
     url: https://platform.claude.com/docs/en/about-claude/pricing
+  - id: REF-AGENT-7
+    title: spikes/tutor-call/RESULT.md (origin/V/V.TUTOR-min) — a custom system_prompt replaces the CLI's 6,803-token prompt (≈ 410 tokens overhead); thinking off
+    url: spikes/tutor-call/RESULT.md
 
 bounds:
   run_token_ttl_s: 1500         # proxy_upstream_timeout_s + 600 s margin: a token outlives its longest call, and a
@@ -103,7 +109,9 @@ bounds:
   crosscheck_tolerance: { relative: 0.05, absolute_usd: 0.005 }  # VEC-AGENT-1: 0.38–1.78 % and $0.0023–0.0043 observed
   chars_per_token_floor: 2.0    # estimator bound: L02 measured ~2.5 chars/token (60,034 chars ≈ 23,900 tokens,
                                 # REF-AGENT-5); 2.0 overestimates tokens, so reserves err high
-  cli_system_tokens: 6803       # the CLI's own system prompt, measured in every stage (REF-AGENT-5)
+  cli_system_tokens: 6803       # the CLI's own system prompt, measured in every stage (REF-AGENT-5); used only
+                                # when a call sets no system prompt of its own (FR-AGENT-13)
+  cli_overhead_tokens: 1000     # the fixed overhead beside a custom system prompt: ≈ 410 measured (REF-AGENT-7), 2.4×
 
 tables:
   agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE" }
@@ -114,7 +122,7 @@ tables:
 
 errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, provider_missing, provider_unavailable,
   rate_limited, run_token_unknown, tools_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
-  usage_unmapped]
+  usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded]
 
 requirements:
   - id: FR-AGENT-1
@@ -163,16 +171,18 @@ requirements:
   - id: FR-AGENT-6
     text: >-
       Provider port. `reader.agent.Provider.run(StageCall(owner_id, handle, run_id, lesson_id, stage, task, attempt,
-      system, prompt, max_output_tokens, floor_usd, run_cap_usd)) -> StageResult(text, usage, sdk_usd, model)` is the only
-      way SRV-PIPELINE calls a model. Model
+      system, prompt, max_output_tokens, floor_usd, run_cap_usd, daily_budget_usd=None, thinking_off=False,
+      abort_on_retry=False, deadline_s=None)) -> StageResult(text, usage, sdk_usd, model, stop_reason)` is the only
+      way SRV-PIPELINE and SRV-TUTOR call a model (the optional fields: FR-AGENT-12, FR-AGENT-13). Model
       resolution happens first: the task's `model` from reader.yaml is resolved to a full model id (aliases `opus` →
       `claude-opus-5-5`, `sonnet` → `claude-sonnet-5-5`, as data next to the pricing table); a model not in the pricing
       table raises `unknown_model` before any reservation or call. The Agent SDK adapter then: takes a reservation
       (FR-AGENT-9); requests a run_token; starts the CLI with HOME a fresh per-run tmpfs directory and exactly the
       environment `PATH, HOME, LANG, CLAUDE_CODE_OAUTH_TOKEN=<run_token>, ANTHROPIC_BASE_URL=http://agent-proxy:8080,
-      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, DISABLE_TELEMETRY=1, CLAUDE_CODE_MAX_OUTPUT_TOKENS=<max_output_tokens>`
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, DISABLE_TELEMETRY=1, CLAUDE_CODE_MAX_OUTPUT_TOKENS=<max_output_tokens>`,
+      plus `MAX_THINKING_TOKENS=0` for a call with `thinking_off`,
       and `ClaudeAgentOptions(tools=[], allowed_tools=[], setting_sources=[], max_turns=1, model=<full id>,
-      max_budget_usd=<this call's reserve>)`; in a `finally`, revokes the run_token, removes HOME and settles. Errors are
+      max_budget_usd=<this call's reserve>, system_prompt=<system>)` (no `system_prompt` when `system` is None); in a `finally`, revokes the run_token, removes HOME and settles. Errors are
       classified from what the SDK emits (REF-AGENT-4, error-mode runs): the CLI itself retries 429, 529 and 5xx with
       backoff (measured: 10 retries, 11 requests over 176–178 s for 429 and for 529, each announced by a
       `SystemMessage` subtype `api_retry` with `error_status`), then ends with an `AssistantMessage.error`, a
@@ -199,7 +209,8 @@ requirements:
     text: >-
       Reservations, settlements and budgets. Before each call, on a separate connection committed at once (SRV-EVENTS
       amendment), the adapter appends a `reserve` row with `usd = reserve`, where reserve = max(stage floor, worst-case
-      estimate) and the worst case = (`bounds.cli_system_tokens` + ceil(prompt characters / `bounds.chars_per_token_floor`))
+      estimate) and the worst case = (`bounds.cli_system_tokens`, or `bounds.cli_overhead_tokens` when the call sets its
+      own system prompt (FR-AGENT-13), + ceil(prompt characters / `bounds.chars_per_token_floor`))
       × the model's `cache_write_1h` rate + max_output_tokens × its output rate (no cache sharing assumed). It refuses,
       before the reserve row, with: `budget_exhausted` when spent(run) + reserve > the run cap; `task_budget_exhausted`
       when spent(run, task) + reserve > the task's `budget_usd_per_lesson`, scoped to one compile run (the example config
@@ -218,10 +229,26 @@ requirements:
   - id: FR-AGENT-10
     text: >-
       Job contract for agent stages (used by SRV-PIPELINE's `pipeline.stage` kind): transient (retried within
-      `max_attempts`, each attempt reserving and settling): `provider_unavailable`, `rate_limited`, `output_invalid`;
-      permanent: `sdk_error`, `tools_mismatch`, `unknown_model`, `provider_missing`, `usage_unmapped`; budget refusals are
+      `max_attempts`, each attempt reserving and settling): `provider_unavailable`, `rate_limited`, `output_invalid`,
+      `upstream_retry`, `deadline_exceeded`; permanent: `sdk_error`, `tools_mismatch`, `unknown_model`, `provider_missing`, `usage_unmapped`; budget refusals are
       not failures but a stage outcome (SRV-PIPELINE FR-PIPELINE-5). Because the CLI already retries 429/529/5xx for
       about 3 minutes inside one attempt (REF-AGENT-4), one stage attempt can take up to that long before it fails.
+  - id: FR-AGENT-12
+    text: >-
+      Daily scope (SRV-TUTOR amendment, 2026-11-22). A call with `daily_budget_usd` set is refused with
+      `daily_budget_exhausted` when spent(user, task, UTC calendar day) + reserve > that budget, checked with the other
+      caps under the same per-user lock before the reserve row (FR-AGENT-9), so two concurrent calls cannot both pass.
+  - id: FR-AGENT-13
+    text: >-
+      Call options (SRV-TUTOR amendment, 2026-11-22; REF-AGENT-7). (a) `thinking_off` adds `MAX_THINKING_TOKENS=0` to the
+      CLI environment. (b) `system`, when not None, is passed as `system_prompt` and replaces the CLI's default prompt,
+      so the reserve counts `bounds.cli_overhead_tokens` instead of `bounds.cli_system_tokens`. (c) `StageResult.stop_reason`
+      is the result's stop reason (`end_turn`, `max_tokens`, ...), or None when the SDK gives none, so a caller sees a
+      truncated answer. (d) With `abort_on_retry`, the first `SystemMessage` subtype `api_retry` ends the call: the CLI is
+      closed and the call raises `upstream_retry` (transient) instead of waiting out the CLI's own ~3-minute backoff.
+      (e) With `deadline_s`, a call still running after that many seconds is closed and raises `deadline_exceeded`
+      (transient). In (d) and (e) the run_token is still revoked and the reservation settled per FR-AGENT-9 from the
+      upstream record (no 2xx → $0; a 2xx without an SDK cost → the reserve).
   - id: FR-AGENT-11
     text: >-
       Live: one `claude-sonnet-5-5` call with `max_turns=1` and a one-word answer through agent-proxy with a run_token

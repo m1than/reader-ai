@@ -10,10 +10,11 @@ users:
         token: secret://keychain/reader-ai/claude-oauth-token
   - handle: live-check   # learner for the stage-1 live check (SRV-AUTH): passkey from a virtual authenticator
     role: learner
+# Compile task budgets are spent per compile run (SRV-AGENT FR-AGENT-9), sized for two worst-case calls each.
 tasks:
-  draft:      { model: opus,   budget_usd_per_lesson: 2.0 }
-  fact_check: { model: sonnet, budget_usd_per_lesson: 1.0 }
-  review:     { model: opus,   budget_usd_per_lesson: 1.2 }
+  draft:      { model: opus,   budget_usd_per_lesson: 4.0 }
+  fact_check: { model: sonnet, budget_usd_per_lesson: 2.0 }
+  review:     { model: opus,   budget_usd_per_lesson: 4.0 }
   tutor:      { model: sonnet }
 budgets: { monthly_usd: 200, warn_at: 0.8 }
 kernels: [python3, rust, deno]
