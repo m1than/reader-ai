@@ -1,0 +1,16 @@
+# Per-million-token prices for the models the slice uses (USD). Data for SRV-AGENT FR-AGENT-7; the runtime table in
+# server/src/reader/agent/pricing.yaml must equal this file (test). Not authoritative for spend: the ledger stores the
+# cost the Agent SDK reports (ADR-0005); this table only gives pre-stage estimates and the cross-check of FR-AGENT-8.
+#
+# Source: Anthropic first-party API rates, Claude API skill model table (cached 2026-11-03) and its prompt-caching
+# economics: cache write 1.25x input for the 5-minute TTL, 2x for the 1-hour TTL; cache read 0.05x on Claude Opus 5.5
+# and Claude Sonnet 5.5, 0.025x on Claude Fable 5.2, ~0.1x elsewhere. ADR-0005: the subscription's Agent SDK credit is
+# billed at API rates. Cross-check against a measurement: spikes/compile-cost inferred an Opus input rate of about
+# $4.0/M from two drafts (4.02 and 3.95), matching claude-opus-5-5 below.
+# Haiku 5.5 rates hold for prompts up to 100K tokens ($0.50 / $2.50 beyond); the slice does not use Haiku.
+as_of: 2026-11-03
+models:
+  claude-opus-5-5:   { input: 4.00, output: 20.00, cache_write_5m: 5.00,  cache_write_1h: 8.00,  cache_read: 0.20 }
+  claude-sonnet-5-5: { input: 2.00, output: 10.00, cache_write_5m: 2.50,  cache_write_1h: 4.00,  cache_read: 0.10 }
+  claude-haiku-5-5:  { input: 0.10, output: 0.50,  cache_write_5m: 0.125, cache_write_1h: 0.20,  cache_read: 0.01 }
+  claude-fable-5-2:  { input: 8.00, output: 40.00, cache_write_5m: 10.00, cache_write_1h: 16.00, cache_read: 0.20 }

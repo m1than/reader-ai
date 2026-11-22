@@ -355,14 +355,6 @@ tasks:
       what: "Paired OPS-CLI change: restore's precondition ignores rows the api seeds from reader.yaml at start (users
         without credentials or sessions) and other declared system tables; --clean --if-exists then replaces them. Until
         done, stage-1.sh refuses --drill. Found by the S1.live script author, 2026-11-22." }
-  - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: module, track: engineering, status: todo, needs: [],
-      what: "tests/sandbox/test_supervisor.py::test_own_address_source_counts_as_local failed once in the full local gate
-        while other Docker workloads ran (embed spike at 8 CPUs, SRV-KERNEL tests), and passed alone in 17.9 s (2026-11-22).
-        Make its timing robust under load (longer settle or polling with a bound), paired OPS-SANDBOX spec note (H2).
-        Also seen during concurrent gates: test_signals_under_state_flood_always_restart and
-        test_full_table_from_inside_does_not_block_the_caller failed, one with `network rk-net-… not found`. Likely cause:
-        the session sweep removes every test-labelled container and network, including another concurrent run's. Fix:
-        label resources with a per-run id and sweep only this run's." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
       note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
@@ -409,9 +401,14 @@ tasks:
         starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
   - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels],
       note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
-  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
-      note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
-        spends credit, ledger" }
+  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-LESSON-min, V.SRV-INGEST-min],
+      branch: V/V.COMPILE-min,
+      note: "spec drafted, awaits deep-reviewer. SRV-AGENT (agent-proxy reverse proxy with per-run handles as the CLI's
+        bearer placeholder, Agent SDK provider with tools=[] checked against the init tool list, cost ledger, run and
+        monthly budgets, pricing table as data with a 5 % cross-check) + SRV-PIPELINE (stages as data, one revise loop,
+        run cap $4.35 per ADR-0005, open findings as open cells, G2 report without publish, lab verification in
+        kernel-verify, owner-only routes). Search is not a dependency (the lesson's page-range spans are the source).
+        One L02 compile ≈ $2.4–3.0 (spike). Duplicate V.OPS-SANDBOX-flaky-load entry from the #36/#38 merges removed." }
   - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min] }
   - { id: V.live, stage: V, kind: live, status: todo,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],

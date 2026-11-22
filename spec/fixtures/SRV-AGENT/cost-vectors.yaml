@@ -1,0 +1,29 @@
+# VEC-AGENT-1: cost recomputed from usage with spec/fixtures/SRV-AGENT/pricing.yaml (FR-AGENT-8).
+# usd = sum(tokens_k * rate_k) / 1e6, rounded to 6 decimals; computed with Python on 2026-11-22.
+# The first two cases reuse token counts of spikes/compile-cost run 1 (results/*/1-draft.json, 2-fact-check.json);
+# the SDK reported $0.605 and $0.237 for them, within the 5 % cross-check tolerance of FR-AGENT-8 (0.3 % and 1.6 %).
+# `input` for the draft is the ~650 instruction tokens outside the cached prefix (RESULT.md); for the fact-check it
+# is unknown and set to 0, which explains most of its 1.6 % gap.
+cases:
+  - name: opus-draft-cold
+    model: claude-opus-5-5
+    usage: { input: 650, output: 17591, cache_write_5m: 0, cache_write_1h: 31370, cache_read: 6803 }
+    usd: 0.606741
+    sdk_reported_usd: 0.605
+  - name: sonnet-factcheck
+    model: claude-sonnet-5-5
+    usage: { input: 0, output: 4601, cache_write_5m: 0, cache_write_1h: 46774, cache_read: 0 }
+    usd: 0.233106
+    sdk_reported_usd: 0.237
+  - name: opus-review-source-prefix-read
+    model: claude-opus-5-5
+    usage: { input: 1200, output: 8517, cache_write_5m: 0, cache_write_1h: 0, cache_read: 40022 }
+    usd: 0.183144
+  - name: zero
+    model: claude-sonnet-5-5
+    usage: { input: 0, output: 0, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }
+    usd: 0.0
+  - name: unknown-model
+    model: claude-opus-9
+    usage: { input: 1, output: 1, cache_write_5m: 0, cache_write_1h: 0, cache_read: 0 }
+    error: unknown_model

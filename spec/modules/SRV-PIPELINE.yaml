@@ -1,0 +1,202 @@
+# SRV-PIPELINE — the compile pipeline for the slice (V.COMPILE-min, docs/roadmap.md "Vertical slice first", V7):
+# compile one lesson (L02 of the Bashir pilot) from its source spans through draft → fact-check → adversarial review
+# → at most one revise loop → lab verification, writing a lesson revision per stage (SRV-LESSON FR-LESSON-4), and
+# leaving every open finding in the notebook as an `open` cell (G2 report; no publish in the slice).
+#
+# Complex areas (AGENTS.md): cost math and the compile pipeline's verification stages. Full deep-reviewer review.
+#
+# Design decisions:
+#   - Stages are data (ADR-0009: stages.yaml, VEC-PIPELINE-1); each stage run is one SRV-EVENTS job of kind
+#     `pipeline.stage` keyed by (lesson_id, stage, input_sha256), so a rerun with the same input is `already_done`
+#     and costs nothing (ADR-0009 "a stage reruns only if its input hash changed").
+#   - Loops: at most 1 revise loop in the slice (ADR-0009 allows 3). Measured: 0 of 2 L02 compiles converged after
+#     one loop, nothing improved after the revision, and 2–3 loops project to $3.90–6.24 against ADR-0005's $4.35 per
+#     lesson (spikes/compile-cost). The roadmap's V7 row (owner-approved plan, PR #25) says open findings go to G2 as
+#     open cells, so non-convergence ends the compile with `open_findings`, not an error.
+#   - Run cap: $4.35 per compile, ADR-0005's per-lesson target. One measured loop costs $2.42–2.97 on L02.
+#   - No publish: the owner studies the draft revision (SRV-LESSON owner note). The G2 report (FR-PIPELINE-8) records
+#     what publish would check, including SRV-LESSON's three deferred items.
+#   - Source: the lesson's own spans (its PDF page range from the course plan) are the source for every stage, put
+#     first and identical in every stage's system prompt so stages can share a cache prefix (spike finding 1;
+#     unmeasured lever). Search (SRV-SEARCH) is not needed to compile a chapter lesson and is not a dependency.
+#   - Models per stage come from reader.yaml `tasks` (ADR-0005; the example config: draft and review on Opus, fact
+#     check on Sonnet, revise uses the draft task). The spike measured exactly that split.
+#
+# Cross-spec (paired changes in their own specs):
+#   - SRV-EVENTS: KIND_MODULES adds `reader.pipeline.jobs`.
+#   - SRV-AUTH: ROUTERS adds `reader.pipeline.routes`; VERSION_LOCATIONS adds `reader/pipeline/migrations`.
+#   - SRV-LESSON: writes go only through `write_revision`; the G2 report takes over its `defers` items (a)–(c).
+#   - SRV-INGEST: spans by material and page range, span ids `<material_sha256>:<seq>`.
+#   - SRV-KERNEL / OPS-SANDBOX: lab verification uses `kernel-verify` through the SRV-KERNEL upstream client and the
+#     OPS-SANDBOX reset protocol (ADR-0022: one run at a time, fresh container between runs).
+#   - OPS-CLI: start profiles `agents` and `kernels` for a compile (V.OPS-CLI-kernels covers `kernels`).
+
+id: SRV-PIPELINE
+title: Compile pipeline — stages as data, one revise loop, budgeted agent stages, lab verification, open findings as G2 cells (slice)
+status: draft
+approved_by: null
+approved_at: null
+layer: server
+track: ai
+adr: [ADR-0009, ADR-0004, ADR-0005, ADR-0006, ADR-0008, ADR-0022, ADR-0025, ADR-0017]
+slice: V.COMPILE-min
+
+paths:
+  - server/src/reader/pipeline/**
+  - server/tests/pipeline/**
+  - spec/fixtures/SRV-PIPELINE/**
+
+normative:
+  - id: REF-PIPELINE-1
+    title: ADR-0009 — staged compile pipeline with fact-check, lab verification, adversarial review and two gates
+    url: docs/adr/0009-compile-pipeline-and-verification.md
+  - id: REF-PIPELINE-2
+    title: spikes/compile-cost/RESULT.md — six-stage L02 compiles, costs, non-convergence, rubber-stamp fact-check
+    url: spikes/compile-cost/RESULT.md
+  - id: REF-PIPELINE-3
+    title: ADR-0004 — lesson notebook format (cell kinds, claims, citations, labs, open cells)
+    url: docs/adr/0004-lesson-notebook-format.md
+  - id: REF-PIPELINE-4
+    title: pilot/bashir/course.yaml — the course plan (lessons, chapters, PDF page ranges), generated from plan.yaml
+    url: pilot/bashir/course.yaml
+
+bounds:
+  run_cap_usd: 4.35          # ADR-0005: ≤ $100 for 23 lessons, ≤ $4.35 per lesson
+  max_revise_loops: 1        # see header; ADR-0009's 3 projects over the cap (REF-PIPELINE-2)
+  claims_max_per_report: 400 # structural: L02 drafts had 59–94 claims; 400 bounds a 39-page chapter at 4× L02's density
+  source_max_chars: 600000   # structural: the largest chapter of the pilot is 135,935 characters (ADR-0005); 600k
+                             # stays under the model context with the notebook and prompt added
+  lab_runs: 2                # ADR-0009 stage 5: each lab runs twice
+  lab_cell_timeout_s: 60     # SRV-KERNEL FR-KERNEL-10's execution timeout
+
+tables:
+  compile_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, state text (queued|running|converged|open_findings|budget_exhausted|stage_failed), cap_usd numeric, loops int, g2 jsonb null, created_at, finished_at; FK (lesson_id, owner_id) → lessons (id, owner_id)" }
+
+errors: [no_material, no_source_spans, source_too_large, lesson_unknown, compile_running, output_invalid, citation_unknown_span,
+  budget_exhausted, stage_failed, not_owner]
+
+requirements:
+  - id: FR-PIPELINE-1
+    text: >-
+      Course import (gate G1). `POST /api/pipeline/courses` (owner role only) takes a course plan in the shape of
+      `pilot/bashir/course.yaml` (JSON body), validates it (course id, material sha256, lessons with ids, titles, chapter
+      and `pages.pdf` ranges), refuses it with `no_material` unless the caller has an imported material with that sha256
+      (SRV-INGEST), and creates or updates the course and its lessons idempotently through SRV-LESSON FR-LESSON-6 (by
+      course id and lesson id). Posting the plan is the owner's G1 approval and is recorded with the course.
+  - id: FR-PIPELINE-2
+    text: >-
+      Source assembly. For a lesson, the source is the material's spans whose page lies in the lesson's `pages.pdf`
+      range, in `seq` order, rendered as one text block per span: `[<span_id> p.<page> <kind>]\n<text>`. No spans gives
+      `no_source_spans`; more than `bounds.source_max_chars` gives `source_too_large`. The rendering is deterministic, so
+      its sha256 is the first stage's input hash.
+  - id: FR-PIPELINE-3
+    text: >-
+      Stage prompts. Each model stage sends: a system prompt whose first block is the source (FR-PIPELINE-2), byte-
+      identical in every stage of a run, then the stage instructions; and a user prompt with the stage input (the
+      current notebook, the fact report, the review report). Prompts are versioned files under
+      `server/src/reader/pipeline/prompts/` named `<stage>.<prompt_version>.md`; the version is recorded in provenance.
+      Outputs are JSON validated against the stage's output schema (notebook: SRV-LESSON's cell schema; fact report and
+      review report: FR-PIPELINE-4); an invalid output raises `output_invalid`, a declared transient (SRV-EVENTS), so the
+      job retries within its attempts, each retry spending budget.
+  - id: FR-PIPELINE-4
+    text: >-
+      Report schemas. Fact report: one verdict per claim id of the notebook's `explain`, `changed` and `erratum` cells,
+      `{claim_id, verdict: supported|unsupported|contradicted, span_ids, note}`; a report missing any claim id, naming an
+      unknown one, or giving a summary instead of per-claim verdicts is `output_invalid` (REF-PIPELINE-2 finding 2).
+      Review report: `{findings: [{id, cell_id|null, blocking: bool, text}]}`. Both cap at `bounds.claims_max_per_report`
+      items.
+  - id: FR-PIPELINE-5
+    text: >-
+      Stage sequence (VEC-PIPELINE-1, -2). A compile runs `draft`, `fact_check`, `adversarial_review`; if the fact report
+      has any unsupported or contradicted claim, or the review any blocking finding, and fewer than `max_revise_loops`
+      loops ran, it runs `revise` (input: notebook, fact report, review report), `fact_check`, `adversarial_review` again;
+      then `lab_verification`. Before each model stage, SRV-AGENT's budget check with the stage's `reserve_usd` decides
+      whether it runs; a refusal ends the model stages with state `budget_exhausted` and still runs `lab_verification` on
+      the latest notebook. Only one compile per lesson runs at a time (`compile_running`).
+  - id: FR-PIPELINE-6
+    text: >-
+      Findings into the notebook. After the last model stage, a deterministic step (no model call) appends one `open`
+      cell per remaining problem with `finding: {stage, blocking, text}`: every unsupported or contradicted claim of the
+      last fact report (`stage: fact_check`, blocking) and every finding of the last review (`stage:
+      adversarial_review`, its own blocking flag). The run ends `converged` when none of them is blocking, else
+      `open_findings` (or `budget_exhausted` / `stage_failed` as above). Existing `open` cells from earlier findings are
+      replaced by cell id, never duplicated; `notes` cells are never touched (SRV-LESSON INV-LESSON-3).
+  - id: FR-PIPELINE-7
+    text: >-
+      Citations. Every citation the model writes names a span id; the pipeline checks it exists in the lesson's source and
+      fills `page` and `material_title` from the span and material (the model never writes them). An unknown span id is
+      `citation_unknown_span`, reported as an unsupported claim of that cell in the next fact report input.
+  - id: FR-PIPELINE-8
+    text: >-
+      G2 report, stored on the run and returned by FR-PIPELINE-10 (no publish in the slice). It states, for the final
+      revision sha256: (a) labs: the sha256 over the ordered list of lab cells as `(id, source, asserts, kernel,
+      network)` and whether lab verification passed on exactly that list; (b) claims: uncited claims, where an `explain`
+      cell with no claims counts as uncited, and blocking findings, where `wontfix` still counts as blocking; (c) stages:
+      which of fact_check, adversarial_review and lab_verification have a SRV-LESSON stage record on this exact sha256.
+      `publishable` is true only when all three are clean — SRV-LESSON's deferred items (a)–(c).
+  - id: FR-PIPELINE-9
+    text: >-
+      Lab verification. For each `lab` cell in notebook order, in one kernel of `kernel-verify` after an OPS-SANDBOX reset
+      (ADR-0022 hand-off), run the cell's source, then each assert, with `bounds.lab_cell_timeout_s` per execution; the
+      whole list runs `bounds.lab_runs` times, each on a fresh kernel. A lab passes when every assert passes on every run
+      and the cell outputs are identical across runs; the result is written into the cell's `verified` and recorded as
+      the `lab_verification` stage. A failing lab becomes a blocking `open` cell (`stage: lab_verification`). No labs is a
+      pass (L02 has none).
+  - id: FR-PIPELINE-10
+    text: >-
+      Routes (owner role only; others get 404). `POST /api/lessons/{lesson_id}/compile` creates a run with cap
+      `bounds.run_cap_usd` (or a lower `cap_usd` in the body) and enqueues its first stage; 409 `compile_running` while one
+      runs. `GET /api/lessons/{lesson_id}/compile` returns the latest run: state, stages done with model, cost and
+      duration, total spend, the G2 report, and the latest revision sha256. Bodies follow SRV-AUTH FR-AUTH-12.
+  - id: FR-PIPELINE-11
+    text: >-
+      Provenance. Every stage writes through SRV-LESSON `write_revision` with provenance `{input_sha256, prompt_version,
+      model, cost_usd, duration_s}` (the keys SRV-LESSON allows), also when the notebook is unchanged.
+  - id: FR-PIPELINE-12
+    text: >-
+      Live compile of L02 on the Bashir pilot: one run ends in `converged` or `open_findings` within the cap; its ledger
+      sum equals the SDK-reported total; the owner opens the revision in the browser. Spends credit (≈ $2.4–3.0 measured
+      for one loop on L02); recorded in docs/progress.yaml's budget ledger. [live]
+
+invariants:
+  - id: INV-PIPELINE-1
+    text: >-
+      For any sequence of stage results (VEC-PIPELINE-2 and generated ones), the run never starts a model stage whose
+      reserve would exceed the cap, never runs more than `max_revise_loops` loops, and always ends in one of the terminal
+      states with every unresolved problem present as an `open` cell (property test with a fake provider).
+  - id: INV-PIPELINE-2
+    text: >-
+      A stage job with the same (lesson, stage, input_sha256) never calls the provider twice after it succeeded
+      (SRV-EVENTS INV-EVENTS-3), so a retried or re-enqueued compile spends only on stages whose input changed.
+  - id: INV-PIPELINE-3
+    text: Every citation in a stored revision names a span of the lesson's source, with page and title taken from that span.
+  - id: INV-PIPELINE-4
+    text: No log line contains source text, a prompt, model output or a claim text (canary test); only ids, stage names, costs and counts.
+
+nfr:
+  - id: NFR-PIPELINE-1
+    metric: wall time of one L02 compile with one loop, minutes
+    threshold: 45            # ADR-0005/roadmap spike criterion; measured 8.3–9.4 min (REF-PIPELINE-2)
+    verified_by: bench
+
+vectors:
+  - id: VEC-PIPELINE-1
+    source: The compile stages as data, with reserves from the measured L02 stage costs (REF-PIPELINE-2)
+    file: spec/fixtures/SRV-PIPELINE/stages.yaml
+  - id: VEC-PIPELINE-2
+    source: Loop decision table, including the spike's measured non-convergence and both budget stops
+    file: spec/fixtures/SRV-PIPELINE/loop-cases.yaml
+
+defers:
+  - "Publish (gate G2) as an owner action, with an immutable published revision and no override (ADR-0009 stage 7)."
+  - "More revise loops (ADR-0009 allows 3) once the review bar is revised; the owner's non-convergence decision (S0.spike.compile-cost ask a)."
+  - "Plan generation (ADR-0009 stage 2) by an agent; the slice imports the owner's committed plan."
+  - "Web fact-checking of `changed` cells (separate web-fetch proxy, ADR-0025 rule 5)."
+  - "Independent expected values for labs (ADR-0009 stage 5 'independent path'): in the slice, asserts are the drafter's; L02 has no labs."
+  - "Prompt caching levers (source-first prefix is in; TTL choice and measured savings later)."
+  - "WEB-AUTHORING (trigger, progress and G2 in the browser); the slice uses the routes."
+
+owner_notes:
+  - "One L02 compile costs about $2.4–3.0 of Agent SDK credit (measured in the spike) and is capped at $4.35. The first live compile asks before it runs."
+  - "With one loop, the measured outcome is open findings: the lesson is studyable as a draft, and its unresolved points appear as open cells. Deciding more loops or a revised review bar is still your call (compile-cost ask a)."
+  - "L01 vs L02 (compile-cost ask b): the slice compiles L02 as the roadmap says; L01 (larger) is measured when the full pipeline lands."

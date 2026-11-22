@@ -1,0 +1,62 @@
+# VEC-PIPELINE-2: the compile loop as a decision table (FR-PIPELINE-5, -6). Each case gives the stage results a fake
+# provider returns, in order, and the expected sequence of stages run, the final state and the cells added for
+# findings. `cap` is the run cap; `cost` is each stage's reported cost. "clean" = 0 unsupported/contradicted claims in
+# the fact report and 0 blocking findings in the review.
+cases:
+  - name: clean-first-pass
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 2 }
+    expect_stages: [draft, fact_check, adversarial_review, lab_verification]
+    expect_state: converged
+    expect_open_cells: { blocking: 0, nonblocking: 2 }
+  - name: one-loop-converges
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 2, nonblocking: 3 }
+      - { stage: revise, cost: 0.87 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.52, blocking: 0, nonblocking: 1 }
+    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review, lab_verification]
+    expect_state: converged
+    expect_open_cells: { blocking: 0, nonblocking: 1 }
+  - name: not-converged-after-loop   # the spike's outcome in both runs (RESULT.md)
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 3, nonblocking: 13 }
+      - { stage: revise, cost: 0.87 }
+      - { stage: fact_check, cost: 0.24, unsupported: 2, contradicted: 1 }
+      - { stage: adversarial_review, cost: 0.52, blocking: 3, nonblocking: 15 }
+    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review, lab_verification]
+    expect_state: open_findings
+    expect_open_cells: { blocking: 6, nonblocking: 15 }   # 3 review blocking + 3 fact-check problems (blocking) + 15
+  - name: budget-stops-before-revise
+    cap: 2.0
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 1, nonblocking: 0 }
+    # spent 1.34; revise reserve 0.88 → 2.22 > 2.0: refused before the stage
+    expect_stages: [draft, fact_check, adversarial_review, lab_verification]
+    expect_state: budget_exhausted
+    expect_open_cells: { blocking: 2, nonblocking: 0 }
+  - name: budget-stops-before-draft
+    cap: 0.5
+    results: []
+    expect_stages: []
+    expect_state: budget_exhausted
+    expect_open_cells: { blocking: 0, nonblocking: 0 }
+  - name: invalid-fact-report-is-a-failed-stage   # spike finding 2: a summary without per-claim verdicts
+    cap: 4.35
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, invalid: summary_only }
+    expect_stages: [draft, fact_check]
+    expect_state: stage_failed
+    expect_open_cells: { blocking: 0, nonblocking: 0 }

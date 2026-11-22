@@ -1,0 +1,19 @@
+# VEC-PIPELINE-1: the compile pipeline declared as data (ADR-0009: server/src/reader/pipeline/stages.yaml; the runtime
+# file must equal this one). Stage names are SRV-LESSON's provenance stages. task: the reader.yaml `tasks` entry that
+# names the model and the per-lesson task budget (ADR-0005, SRV-CONFIG); none means no model call.
+# reserve_usd: the pre-stage reserve of SRV-AGENT FR-AGENT-9, the largest measured cost of that stage on L02
+# (spikes/compile-cost/RESULT.md, run 1/run 2): draft 0.605/0.296, fact_check 0.242/0.235 (max over both passes),
+# adversarial_review 0.520/0.501, revise 0.871/0.738. Scaled to a 39-page chapter these grow (RESULT.md factor 1.56),
+# which the run cap absorbs; they are reserves, not estimates.
+prompt_version: v1
+max_revise_loops: 1
+stages:
+  - { name: draft,              task: draft,      reserve_usd: 0.61, output: notebook }
+  - { name: fact_check,         task: fact_check, reserve_usd: 0.25, output: fact_report }
+  - { name: adversarial_review, task: review,     reserve_usd: 0.53, output: review_report }
+  - { name: revise,             task: draft,      reserve_usd: 0.88, output: notebook, loop: true }
+  - { name: lab_verification,   task: none,       reserve_usd: 0.0,  output: lab_report }
+order:
+  first_pass: [draft, fact_check, adversarial_review]
+  loop: [revise, fact_check, adversarial_review]
+  final: [lab_verification]
