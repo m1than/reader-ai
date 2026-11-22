@@ -36,13 +36,14 @@ def _procrastinate_versions() -> Path:
     return Path(spec.origin).resolve().parent / "contrib" / "alembic" / "versions"
 
 
-# Declared list of version directories (no scan): SRV-AUTH's, SRV-LESSON's, SRV-EVENTS's, procrastinate's,
-# SRV-AGENT's.
+# Declared list of version directories (no scan): SRV-AUTH's, SRV-LESSON's, SRV-EVENTS's, SRV-AGENT's,
+# SRV-PIPELINE's, procrastinate's.
 VERSION_LOCATIONS: Final[list[Path]] = [
     SCRIPT_LOCATION / "versions",
     _HERE.parent / "lessons" / "migrations",
     _HERE.parent / "jobs" / "migrations",
     _HERE.parent / "agent" / "migrations",
+    _HERE.parent / "pipeline" / "migrations",
     _procrastinate_versions(),
 ]
 # pg_advisory_lock(namespace, key): this namespace is for migrations only ("RDMG"); SRV-EVENTS uses another.

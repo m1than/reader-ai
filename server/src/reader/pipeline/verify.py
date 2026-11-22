@@ -1,15 +1,16 @@
 """Lab verification against `kernel-verify` (SRV-PIPELINE FR-PIPELINE-9; ADR-0022: one run at a time).
 
-Worker-side, no browser relay: SRV-KERNEL's upstream client. Each run resets the kernel container (OPS-SANDBOX:
-exit, a new nonce, `up`), starts one kernel and executes every lab's source, then each assert, under
-`lab_exec_timeout_s`. The list runs `lab_runs` times. A lab passes when every assert passes on every run and its
-normalised text outputs are identical across runs.
+Worker-side, no browser relay: SRV-KERNEL's upstream client. Each run resets the kernel container
+(OPS-SANDBOX: exit, a new nonce, `up`), starts one kernel and executes every lab's source, then each assert,
+under `lab_exec_timeout_s`. The list runs `lab_runs` times. A lab passes when every assert passes on every
+run and its normalised text outputs are identical across runs.
 """
 
 from __future__ import annotations
 
 import ast
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -30,6 +31,7 @@ RESET_DEADLINE_S: Final = 30.0  # SRV-KERNEL FR-KERNEL-5
 POLL_S: Final = 0.25
 INTERRUPT_GRACE_S: Final = 5.0
 VERIFY_HOST: Final = "kernel-verify"
+VERIFY_ENDPOINT: Final = Endpoint(VERIFY_HOST)
 
 log = logging.getLogger("reader.pipeline")
 
@@ -49,7 +51,9 @@ class LabReport:
 
     @classmethod
     def from_json(cls, data: Mapping[str, Any]) -> LabReport:
-        return cls(data["labs_sha256"], dict(data["results"]), [Problem.from_json(p) for p in data["problems"]])
+        return cls(
+            data["labs_sha256"], dict(data["results"]), [Problem.from_json(p) for p in data["problems"]]
+        )
 
 
 def _normalise(text: str) -> str:
@@ -75,7 +79,7 @@ class _Exec:
 class VerifyClient:
     def __init__(
         self,
-        endpoint: Endpoint = Endpoint(VERIFY_HOST),
+        endpoint: Endpoint = VERIFY_ENDPOINT,
         *,
         http: Callable[..., Awaitable[Any]] = upstream.http,
         ws: Callable[..., Awaitable[Any]] = upstream.ws_connect,
@@ -95,7 +99,9 @@ class VerifyClient:
         steps = sum(1 + len(cell["metadata"]["reader"].get("asserts", [])) for _, cell in labs)
         if steps * self.exec_timeout_s * self.runs > self.budget_s:
             text = "The labs need more time than one verification may take; they were not run."
-            return LabReport(sha, {}, [Problem("labs_unverifiable", None, None, text, "lab_verification", True)])
+            return LabReport(
+                sha, {}, [Problem("labs_unverifiable", None, None, text, "lab_verification", True)]
+            )
         passed = {cell["id"]: True for _, cell in labs}
         outputs: dict[str, list[str]] = {cell["id"]: [] for _, cell in labs}
         for _ in range(self.runs):
@@ -107,11 +113,15 @@ class VerifyClient:
             identical = len(set(outputs[cid])) <= 1
             ok = passed[cid] and identical
             results[cid] = {
-                "runs": self.runs, "passed": ok, "outputs_identical": identical,
+                "runs": self.runs,
+                "passed": ok,
+                "outputs_identical": identical,
                 "input_sha256": source_sha256(cell),
             }
             if not ok:
-                text = "A lab assert failed or the lab timed out." if identical else "The lab's outputs differ."
+                text = (
+                    "A lab assert failed or the lab timed out." if identical else "The lab's outputs differ."
+                )
                 problems.append(Problem("lab_failed", cid, None, f"{cid}: {text}", "lab_verification", True))
         log.info("lab_verification labs=%s failed=%s", len(labs), len(problems))
         return LabReport(sha, results, problems)
@@ -140,10 +150,8 @@ class VerifyClient:
         except UpstreamError:
             raise VerifyUnavailable() from None
         finally:
-            try:
+            with contextlib.suppress(Exception):  # the kernel is reset before the next run anyway
                 await connection.close()
-            except Exception:  # noqa: S110 (the kernel is reset before the next run anyway)
-                pass
 
     async def _state(self) -> dict[str, Any]:
         reply = await self.http("GET", self.endpoint.host, self.endpoint.control_port, "/control/state")
@@ -181,21 +189,39 @@ class VerifyClient:
 
     async def _execute(self, connection: Any, kernel: str, session: str, code: str) -> _Exec:
         msg_id = uuid.uuid4().hex
-        await connection.send(json.dumps({
-            "channel": "shell",
-            "header": {"msg_id": msg_id, "msg_type": "execute_request", "session": session,
-                       "username": "reader", "version": "5.3"},
-            "parent_header": {}, "metadata": {},
-            "content": {"code": code, "silent": False, "store_history": False, "user_expressions": {},
-                        "allow_stdin": False, "stop_on_error": True},
-        }))
+        await connection.send(
+            json.dumps(
+                {
+                    "channel": "shell",
+                    "header": {
+                        "msg_id": msg_id,
+                        "msg_type": "execute_request",
+                        "session": session,
+                        "username": "reader",
+                        "version": "5.3",
+                    },
+                    "parent_header": {},
+                    "metadata": {},
+                    "content": {
+                        "code": code,
+                        "silent": False,
+                        "store_history": False,
+                        "user_expressions": {},
+                        "allow_stdin": False,
+                        "stop_on_error": True,
+                    },
+                }
+            )
+        )
         texts: list[str] = []
         reply_status: str | None = None
         idle = False
         try:
             async with asyncio.timeout(self.exec_timeout_s):
                 while reply_status is None or not idle:
-                    reply_status, idle = self._take(await connection.recv(), msg_id, texts, reply_status, idle)
+                    reply_status, idle = self._take(
+                        await connection.recv(), msg_id, texts, reply_status, idle
+                    )
         except TimeoutError:
             await self._interrupt(connection, kernel, msg_id)
             return _Exec(False, "".join(texts))
@@ -209,7 +235,7 @@ class VerifyClient:
     ) -> tuple[str | None, bool]:
         try:
             message = json.loads(frame)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return status, idle
         if not isinstance(message, dict) or message.get("parent_header", {}).get("msg_id") != msg_id:
             return status, idle
@@ -237,7 +263,7 @@ class VerifyClient:
                 status, idle = None, False
                 while status is None or not idle:
                     status, idle = self._take(await connection.recv(), msg_id, [], status, idle)
-        except (TimeoutError, UpstreamError):
+        except TimeoutError, UpstreamError:
             pass
         except Exception:  # noqa: S110 (a closed connection surfaces on the next execute)
             pass

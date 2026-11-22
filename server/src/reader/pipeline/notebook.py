@@ -1,9 +1,9 @@
 """The model's compact notebook form and the lesson notebook built from it (SRV-PIPELINE FR-PIPELINE-3, -7).
 
-The model writes `{"cells": [{id, kind, source, sectors?, <kind fields>}]}` with citations as `{"span": "s<k>"}` or
-`{"url", "retrieved"}`. Code expands aliases (page and title from the span, never from the model), stamps each
-cell's provenance, carries over the previous revision's `notes` cells, and validates the result with SRV-LESSON's
-schema; anything invalid is `output_invalid`.
+The model writes `{"cells": [{id, kind, source, sectors?, <kind fields>}]}` with citations as
+`{"span": "s<k>"}` or `{"url", "retrieved"}`. Code expands aliases (page and title from the span, never from
+the model), stamps each cell's provenance, carries over the previous revision's `notes` cells, and validates
+the result with SRV-LESSON's schema; anything invalid is `output_invalid`.
 """
 
 from __future__ import annotations
@@ -46,7 +46,11 @@ def _ref(value: Any, aliases: Mapping[str, Span]) -> dict[str, Any] | None:
 
 
 def _reader(
-    cell: dict[str, Any], aliases: Mapping[str, Span], title: str, provenance: dict[str, Any], stripped: set[Key]
+    cell: dict[str, Any],
+    aliases: Mapping[str, Span],
+    title: str,
+    provenance: dict[str, Any],
+    stripped: set[Key],
 ) -> dict[str, Any]:
     kind = cell["kind"]
     reader: dict[str, Any] = {"kind": kind, "sectors": cell.get("sectors", []), "provenance": provenance}
@@ -123,7 +127,7 @@ def build(
     }
     try:
         validated = validate(to_bytes(notebook))
-    except (LessonWriteError, ValueError):
+    except LessonWriteError, ValueError:
         raise invalid() from None
     return Built(validated.notebook, frozenset(stripped))
 
@@ -133,7 +137,7 @@ def to_bytes(notebook: Mapping[str, Any]) -> bytes:
 
 
 def to_compact(notebook: Mapping[str, Any], aliases: Mapping[str, Span]) -> dict[str, Any]:
-    """The model's view of a stored notebook: span ids back to aliases, provenance and verification removed."""
+    """The model's view of a stored notebook: span ids back to aliases, provenance and `verified` removed."""
     back = {span.span_id: alias for alias, span in aliases.items()}
 
     def cite(c: Any) -> Any:
@@ -147,7 +151,9 @@ def to_compact(notebook: Mapping[str, Any], aliases: Mapping[str, Span]) -> dict
         reader.pop("provenance", None)
         reader.pop("verified", None)
         if "claims" in reader:
-            reader["claims"] = [{**c, "citations": [cite(x) for x in c.get("citations", [])]} for c in reader["claims"]]
+            reader["claims"] = [
+                {**c, "citations": [cite(x) for x in c.get("citations", [])]} for c in reader["claims"]
+            ]
         if "citations" in reader:
             reader["citations"] = [cite(x) for x in reader["citations"]]
         if isinstance(reader.get("source_ref"), dict):
@@ -155,7 +161,9 @@ def to_compact(notebook: Mapping[str, Any], aliases: Mapping[str, Span]) -> dict
         if "source_refs" in reader:
             reader["source_refs"] = [cite(x) for x in reader["source_refs"]]
         source = cell.get("source", "")
-        cells.append({"id": cell["id"], **reader, "source": "".join(source) if isinstance(source, list) else source})
+        cells.append(
+            {"id": cell["id"], **reader, "source": "".join(source) if isinstance(source, list) else source}
+        )
     return {"cells": cells}
 
 

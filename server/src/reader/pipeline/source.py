@@ -1,8 +1,9 @@
 """The lesson's source: spans by page range, aliases and delimited rendering (FR-PIPELINE-2, VEC-PIPELINE-5).
 
-Span k (1-based, in `seq` order) gets the alias `s<k>`; the model sees and cites only aliases, and code expands
-them to SRV-INGEST span ids. Each span renders as a marker line `⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧` and
-its text, in which the marker characters are replaced (⟦ → [, ⟧ → ]), so span text cannot forge a marker.
+Span k (1-based, in `seq` order) gets the alias `s<k>`; the model sees and cites only aliases, and code
+expands them to SRV-INGEST span ids. Each span renders as a marker line
+`⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧` and its text, in which the marker characters are replaced
+(⟦ → [, ⟧ → ]), so span text cannot forge a marker.
 """
 
 from __future__ import annotations
@@ -90,6 +91,7 @@ async def material_imported(conn: AsyncConnection, owner_id: uuid.UUID, material
     if (await conn.execute(text("SELECT to_regclass('materials')"))).scalar() is None:
         return False
     found = await conn.execute(
-        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :m"), {"o": owner_id, "m": material_sha256}
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :m"),
+        {"o": owner_id, "m": material_sha256},
     )
     return found.scalar() is not None

@@ -77,7 +77,7 @@ def with_floors(pipeline: Pipeline, floors: Mapping[str, Decimal]) -> Pipeline:
 
 
 def _dirty(done: Sequence[Done]) -> bool:
-    """The last fact report has an unsupported or contradicted verdict, or the last review a blocking finding."""
+    """The last fact report has an unsupported or contradicted verdict, or the last review a blocker."""
     fact = next((d for d in reversed(done) if d.stage == "fact_check"), None)
     review = next((d for d in reversed(done) if d.stage == "adversarial_review"), None)
     return bool((fact and fact.problems) or (review and review.problems))

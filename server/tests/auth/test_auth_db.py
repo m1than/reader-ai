@@ -23,7 +23,11 @@ def test_version_locations_are_a_declared_list() -> None:
     relative = [p.as_posix().split("/reader/", 1)[1] for p in ours]
     # SRV-LESSON, SRV-EVENTS, SRV-AGENT and SRV-PIPELINE paired changes (FR-AUTH-1 note)
     assert relative == [
-        "db/migrations/versions", "lessons/migrations", "jobs/migrations", "agent/migrations", "pipeline/migrations"
+        "db/migrations/versions",
+        "lessons/migrations",
+        "jobs/migrations",
+        "agent/migrations",
+        "pipeline/migrations",
     ]
     assert [p.as_posix().rsplit("/procrastinate/", 1)[1] for p in theirs] == ["contrib/alembic/versions"]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)

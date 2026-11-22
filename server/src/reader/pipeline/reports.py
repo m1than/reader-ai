@@ -1,8 +1,9 @@
 """Report schemas, forced verdicts and citation expansion (SRV-PIPELINE FR-PIPELINE-4, FR-PIPELINE-7).
 
-A fact report has exactly one verdict per claim key: (cell, claim) for `explain` claims, (cell, None) for `changed`
-and `erratum` cells. A `supported` verdict without a span, or with an alias not in the source, is forced to
-`unsupported` after validation. Anything else malformed is `output_invalid` (transient: the step is retried).
+A fact report has exactly one verdict per claim key: (cell, claim) for `explain` claims, (cell, None) for
+`changed` and `erratum` cells. A `supported` verdict without a span, or with an alias not in the source, is
+forced to `unsupported` after validation. Anything else malformed is `output_invalid` (transient: the
+step is retried).
 """
 
 from __future__ import annotations
@@ -139,7 +140,9 @@ def expand_citations(
             if span is None:
                 stripped.append(str(alias))
                 continue
-            kept.append({"span": span.span_id, "page": span.page, "material_title": material_title[:TITLE_MAX]})
+            kept.append(
+                {"span": span.span_id, "page": span.page, "material_title": material_title[:TITLE_MAX]}
+            )
         elif set(citation) == {"url", "retrieved"}:
             kept.append({"url": citation["url"], "retrieved": citation["retrieved"]})
         else:
