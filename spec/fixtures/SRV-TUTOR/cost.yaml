@@ -1,22 +1,27 @@
-# VEC-TUTOR-3 — tutor cost bounds (SRV-TUTOR bounds, NFR-TUTOR-2). Prices per million tokens from the SRV-AGENT pricing
-# table (as_of 2026-11-03): claude-sonnet-5-5 input 2.00, output 10.00, cache_write_1h 4.00, cache_read 0.10.
-# Reserve formula: SRV-AGENT FR-AGENT-9 (cli_system_tokens 6803, chars_per_token_floor 2.0, no cache sharing assumed).
-model: claude-sonnet-5-5
-worst_case_reserve:
-  cli_system_tokens: 6803
-  prompt_chars_max: 20000
-  prompt_tokens: 10000          # ceil(20000 / 2.0)
-  input_usd: 0.067212           # (6803 + 10000) × 4.00 / 1e6
-  output_tokens: 1200
-  output_usd: 0.012             # 1200 × 10.00 / 1e6
-  reserve_usd: 0.079212
-question_cap_usd: 0.20          # ≥ 2 attempts × 0.079212 = 0.158424
-typical_estimate:               # an estimate, measured by NFR-TUTOR-2 in the live run
-  cli_system_cached_read_usd: 0.00068   # 6803 × 0.10 / 1e6 (CLI prompt warm in the 1-hour cache)
-  content_tokens: 5000                  # question + cell + 8 spans ≈ 12,500 chars at ~2.5 chars/token (REF-AGENT-5)
-  content_write_1h_usd: 0.02            # 5000 × 4.00 / 1e6
-  output_tokens: 500
-  output_usd: 0.005
-  total_usd_warm: 0.0257
-  total_usd_cold: 0.0529                # CLI prompt written instead of read: + 6803 × (4.00 − 0.10) / 1e6
-daily_cap_usd: 3.00                     # ≈ 57 cold or ≈ 117 warm questions
+# VEC-TUTOR-3 — cost inputs for SRV-TUTOR (bounds, NFR-TUTOR-2). The test DERIVES every result from these inputs and
+# asserts the spec's bounds against them (question_cap_usd ≥ attempts × reserve; typical ≤ NFR-TUTOR-2); the values
+# under `derived_by_test` are for readers and are not asserted from this file.
+#
+# Prices per million tokens: SRV-AGENT pricing table (as_of 2026-11-03), claude-sonnet-5-5.
+# Reserve rule (SRV-AGENT FR-AGENT-9 with this spec's cross-spec item c): tokens ≤ UTF-8 bytes, so
+#   reserve = (cli_system_tokens + system_bytes_max + prompt_bytes_max) × cache_write_1h + max_output_tokens × output
+# (no cache sharing assumed).
+inputs:
+  model: claude-sonnet-5-5
+  price_per_mtok: {input: 2.00, output: 10.00, cache_write_1h: 4.00, cache_read: 0.10}
+  cli_system_tokens: 6803        # SRV-AGENT bounds (measured, spikes/compile-cost)
+  system_bytes_max: 4000
+  prompt_bytes_max: 24000
+  max_output_tokens: 2000        # provisional (spikes/tutor-call)
+  attempts_max: 2
+  daily_cap_usd: 3.00
+  typical:                       # an estimate until spikes/tutor-call and NFR-TUTOR-2 measure it
+    prompt_tokens: 5000          # ~12,500 characters at ~2.5 chars/token (spikes/compile-cost)
+    system_tokens: 600           # answer-v1.md at ~2.5 chars/token
+    output_tokens: 500
+derived_by_test:                 # USD, for readers
+  reserve_per_attempt: 0.159212  # (6803 + 4000 + 24000) × 4.00e-6 + 2000 × 10.00e-6 = 0.139212 + 0.020000
+  question_cap_min: 0.318424     # 2 × reserve → bounds.question_cap_usd 0.35
+  typical_warm: 0.02808          # CLI prompt read from cache: 6803 × 0.10e-6 + 5600 × 4.00e-6 + 500 × 10.00e-6
+  typical_cold: 0.054612         # CLI prompt written instead: warm + 6803 × (4.00 − 0.10)e-6
+  daily_cap_questions: {at_reserve: 18, typical_warm: 106, typical_cold: 54}   # floor(3.00 / value)

@@ -532,10 +532,16 @@ tasks:
         spends credit, ledger" }
   - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: in_progress, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
       branch: V/V.TUTOR-min,
-      note: "spec drafted, awaits deep-reviewer (cost and auth: full review). spec/modules/SRV-TUTOR.yaml: question as a
-        job (api cannot reach agent-proxy, ADR-0025), polling instead of SSE (answers validated whole before display),
-        grounding enforced by code (span ids outside the retrieved set removed, unsupported blocks marked), Sonnet 5.5,
-        per-question cap $0.20, daily $3; typical ≈ $0.026 warm / $0.053 cold per question (VEC-TUTOR-3)." }
+      note: "spec round 1 (bfb7047): changes; revision applied, awaits round 2; approval waits for SRV-AGENT's. Question
+        as a job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off (cross-spec SRV-AGENT),
+        byte-based reserve; provisional caps $0.35 per question and $3 per day, typical ≈ $0.028 warm / $0.055 cold
+        (VEC-TUTOR-3). spikes/tutor-call is written but NOT run: its runner reads the Keychain token, which the owner
+        allowed only for three named spikes (2026-11-20); the owner runs `bash spikes/tutor-call/run.sh` (≈ $0.25–0.60
+        of the $30 test budget) or extends that permission, then the numbers replace the provisional bounds." }
+  - { id: S0.spike.tutor-call, stage: V, kind: spike, status: blocked, needs: [],
+      reason: "The runner reads the Keychain item reader-ai/claude-oauth-token; the owner allowed that only for
+        agent-sdk-container, compile-cost and trace-backend, and `security find-generic-password` is denied for the agent.",
+      ask: "Run `bash spikes/tutor-call/run.sh` once (cap $0.60 from the $30 test budget), or allow the agent to run it." }
   - { id: V.live, stage: V, kind: live, status: todo,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
       what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }

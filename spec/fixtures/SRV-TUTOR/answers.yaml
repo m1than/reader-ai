@@ -1,29 +1,42 @@
-# VEC-TUTOR-1 — answer validation (SRV-TUTOR FR-TUTOR-7). Synthetic; no book text.
-# retrieved: the span ids the question's retrieval returned (FR-TUTOR-4).
-retrieved: ["aaaa000000000000000000000000000000000000000000000000000000000000:1",
-            "aaaa000000000000000000000000000000000000000000000000000000000000:7"]
+# VEC-TUTOR-1 — answer validation (SRV-TUTOR FR-TUTOR-8). Synthetic; no book text.
+# sent: the sources as sent in the prompt (alias → span id, text). Quotes are checked against `text` after collapsing
+# whitespace and NFC.
+sent:
+  s1: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:1", text: "Each block carries a nonce. Miners vary the nonce until the hash of the block header is below a target."}
+  s2: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:7", text: "The target is adjusted every 2016 blocks so that one block is found about every ten minutes."}
 cases:
-  - name: all-cited
-    output: {blocks: [{text: "A block is a list of transactions.", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"]}], insufficient: false}
-    expect: {blocks: [{kept: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"], unsupported: false}], grounded: true}
-  - name: invented-span-removed
-    output: {blocks: [{text: "Claim.", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:99"]}], insufficient: false}
-    expect: {blocks: [{kept: [], unsupported: true}], grounded: false}
-  - name: foreign-material-span-removed
-    output: {blocks: [{text: "Claim.", spans: ["bbbb000000000000000000000000000000000000000000000000000000000000:1", "aaaa000000000000000000000000000000000000000000000000000000000000:7"]}], insufficient: false}
-    expect: {blocks: [{kept: ["aaaa000000000000000000000000000000000000000000000000000000000000:7"], unsupported: false}], grounded: true}
-  - name: mixed
-    output: {blocks: [{text: "Cited.", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"]}, {text: "Uncited.", spans: []}], insufficient: false}
-    expect: {blocks: [{kept: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"], unsupported: false}, {kept: [], unsupported: true}], grounded: false}
-  - name: insufficient-flag
-    output: {blocks: [{text: "The sources do not cover this.", spans: []}], insufficient: true}
-    expect: {blocks: [{kept: [], unsupported: true}], grounded: false}
-  - name: not-json
-    output_text: "Sure! Here is the answer."
-    expect: {error: output_invalid}
-  - name: zero-blocks
-    output: {blocks: [], insufficient: false}
-    expect: {error: output_invalid}
-  - name: extra-key
-    output: {blocks: [{text: "x", spans: [], url: "https://evil.example"}], insufficient: false}
-    expect: {error: output_invalid}
+  - name: supported
+    output: {blocks: [{text: "Miners search for a nonce.", spans: [s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [s1], supported: true}], grounded: true}
+  - name: quote-whitespace-normalised
+    output: {blocks: [{text: "x", spans: [s1], quote: "Miners   vary the\nnonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [s1], supported: true}], grounded: true}
+  - name: quote-not-in-source
+    output: {blocks: [{text: "x", spans: [s1], quote: "Miners choose the block reward freely"}], insufficient: false}
+    expect: {blocks: [{kept: [s1], supported: false}], grounded: false}
+  - name: quote-checked-against-first-kept-alias
+    output: {blocks: [{text: "x", spans: [s9, s2], quote: "adjusted every 2016 blocks so that"}], insufficient: false}
+    expect: {blocks: [{kept: [s2], supported: true}], grounded: true}
+  - name: quote-too-short
+    output: {blocks: [{text: "x", spans: [s1], quote: "a nonce"}], insufficient: false}
+    expect: {blocks: [{kept: [s1], supported: false}], grounded: false}
+  - name: unsent-alias-removed
+    output: {blocks: [{text: "x", spans: [s9], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [], supported: false}], grounded: false}
+  - name: real-span-id-instead-of-alias-removed
+    output: {blocks: [{text: "x", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [], supported: false}], grounded: false}
+  - name: duplicates-collapsed
+    output: {blocks: [{text: "x", spans: [s1, s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [s1], supported: true}], grounded: true}
+  - name: insufficient
+    output: {blocks: [{text: "The sources do not cover this.", spans: [], quote: ""}], insufficient: true}
+    expect: {blocks: [{kept: [], supported: false}], grounded: false}
+  - name: json-fence-allowed
+    output_text: "```json\n{\"blocks\": [{\"text\": \"x\", \"spans\": [\"s1\"], \"quote\": \"Miners vary the nonce until the hash\"}], \"insufficient\": false}\n```"
+    expect: {blocks: [{kept: [s1], supported: true}], grounded: true}
+  - {name: not-json, output_text: "Sure! Here is the answer.", expect: {error: output_invalid}}
+  - {name: zero-blocks, output: {blocks: [], insufficient: false}, expect: {error: output_invalid}}
+  - {name: extra-key-in-block, output: {blocks: [{text: "x", spans: [], quote: "", url: "https://evil.example"}], insufficient: false}, expect: {error: output_invalid}}
+  - {name: extra-top-level-key, output: {blocks: [{text: "x", spans: [], quote: ""}], insufficient: false, note: "hi"}, expect: {error: output_invalid}}
+  - {name: too-many-aliases, output: {blocks: [{text: "x", spans: [s1, s2, s1, s2], quote: ""}], insufficient: false}, expect: {error: output_invalid}}

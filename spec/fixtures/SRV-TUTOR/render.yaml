@@ -1,0 +1,22 @@
+# VEC-TUTOR-6 — rendering of answer block text in the Ask panel (SRV-TUTOR FR-TUTOR-11). Block text goes through
+# WEB-RENDER's markdown pipeline (sanitised, no raw HTML) with the tutor option "links as text": a link renders as its
+# label followed by the URL in parentheses, as plain text; no <a>, no <img>.
+cases:
+  - name: inline-link
+    text: "See [the paper](https://bitcoin.org/bitcoin.pdf) for details."
+    expect: {anchors: 0, text_contains: "the paper (https://bitcoin.org/bitcoin.pdf)"}
+  - name: javascript-link
+    text: "[click](javascript:alert(1))"
+    expect: {anchors: 0, scripts: 0, text_contains: "click"}
+  - name: autolink
+    text: "Visit <https://evil.example/x> now."
+    expect: {anchors: 0, text_contains: "https://evil.example/x"}
+  - name: image
+    text: "![chart](https://evil.example/c.png)"
+    expect: {images: 0, requests: 0, text_contains: "chart"}
+  - name: raw-html
+    text: "<b>bold</b><script>alert(1)</script>"
+    expect: {scripts: 0, elements_from_input: 0}
+  - name: math-and-code-still-render
+    text: "The hash $H(x)$ is shown in `sha256(x)`."
+    expect: {katex: 1, code: 1}

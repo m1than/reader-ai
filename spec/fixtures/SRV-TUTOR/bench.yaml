@@ -1,0 +1,14 @@
+# VEC-TUTOR-7 — bench question set for NFR-TUTOR-1..3 ([live], L02). No book text is committed: the questions are
+# generated at run time from the compiled L02 revision by e2e/web/tutor/bench_questions.py.
+lesson: L02                       # pilot/bashir/course.yaml, PDF pages 60–84
+generator:
+  cells: explain                  # cell kind (ADR-0004)
+  order: notebook                 # cell order of the revision under test
+  take: 20                        # first 20 explain cells; fewer if the lesson has fewer
+  template: "Explain in your own words: {cell_title}"
+  cell_id: "{cell_id}"            # each question is asked on its cell
+fixed:
+  - {source: spikes/embeddings-local/questions-v2.yaml, id: v03}   # the only accepted v2 question on pages 60–84
+samples: 21                       # 20 generated + 1 fixed; p95 by nearest rank over all samples
+spend_bound_usd: 7.35             # 21 × question_cap_usd 0.35; from budget.test_budget_usd
+daily_cap_for_run_usd: 8.00       # the bench raises the per-user daily cap for its run only, then restores it

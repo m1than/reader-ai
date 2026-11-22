@@ -1,0 +1,18 @@
+# VEC-TUTOR-5 — the tutor error catalogue (SRV-TUTOR `errors`): code → HTTP status (api codes only) and the web message.
+# Any code not listed renders tutor_failed's message.
+codes:
+  question_invalid:       {http: 400, message: "Please type a question (up to 1000 characters)."}
+  cell_unknown:           {http: 400, message: "That cell is no longer in this lesson. Reload the lesson."}
+  unknown_revision:       {http: 400, message: "This lesson changed. Reload it to ask about the current version."}
+  not_found:              {http: 404, message: "This lesson or question is not available."}
+  tutor_busy:             {http: 409, message: "The tutor is still answering your previous question."}
+  daily_budget_exhausted: {http: 429, message: "Today's tutor budget is used up. Try again tomorrow."}
+  budget_exhausted:       {message: "This question reached its cost limit and was not answered."}
+  sources_unavailable:    {message: "No indexed source for this lesson yet, so the tutor cannot answer from the book."}
+  output_invalid:         {message: "The tutor's answer could not be read. Try asking again."}
+  output_truncated:       {message: "The answer was too long and was cut off. Try a narrower question."}
+  provider_unavailable:   {message: "The tutor is unavailable right now. Try again in a minute."}
+  rate_limited:           {message: "The tutor is busy right now. Try again in a minute."}
+  expired:                {message: "This question waited too long and was not answered. Ask again."}
+  lost:                   {message: "This question was lost before it was answered. Ask again."}
+  tutor_failed:           {message: "The tutor could not answer this question. Ask again."}
