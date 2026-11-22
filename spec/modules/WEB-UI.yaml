@@ -161,14 +161,18 @@ requirements:
     text: >-
       Stories: every exported React component in `web/src/{ui,app,notebook,render}/` (a PascalCase export of a `.tsx`
       file that is not a story or test) has a sibling `<File>.stories.tsx` with at least the stories `Light` and `Dark`
-      (Calm in each mode). A [unit] test enumerates the components, asserts the sibling file and both stories, and
-      renders every story through Storybook's `composeStories` in jsdom without an error. `npm run build-storybook` is
+      (Calm in each mode). A [unit] test enumerates the components, finds the sibling file through Vite's
+      `import.meta.glob` (whose keys are `./`-relative in the test's own directory and `../`-relative elsewhere),
+      asserts both stories, and renders every story through Storybook's `composeStories` in jsdom without an error. `npm run build-storybook` is
       part of the local gate. [unit] [story]
   - id: FR-UI-9
     text: >-
       Build: Vite with `build.assetsInlineLimit: 0`, so fonts and images are emitted as files and never inlined as
       `data:` URLs (the app CSP allows none); markdown, math, code highlighting and the lesson view are lazy chunks.
-      [unit] by inspecting the build output for `data:` URLs.
+      [unit] by inspecting the build output for `data:` URLs. The only `data:` URLs allowed in the output are literals
+      that the vendored library's own stylesheet carries (at v0.1.0, one `mask: url("data:image/svg+xml,…")` for the
+      table sort indicator, a component the slice does not render; under the app CSP that mask would be blocked, so it
+      is an owner note for a library change, not an inlined asset).
 
 invariants:
   - id: INV-UI-1
@@ -198,11 +202,12 @@ nfr:
   - id: NFR-UI-1
     metric: >-
       gzip size in bytes (Node zlib, level 9) of the initial JavaScript chunks of the lesson-list route in the `vite
-      build` output (lazy chunks excluded). Sourced part: 124,206 B, the spike's measured gallery build (React 19 +
-      ReactDOM 67,668 B plus the 20-component gallery 56,538 B, REF-UI-2). The router, query and app code are not yet
-      measured, so the threshold is provisional; at Green it is replaced, in a paired change, by the measured value plus
-      10 %, recorded with the per-chunk breakdown.
-    threshold: 250000
+      build` output (lazy chunks excluded), production mode. Measured at Green (2026-11-22, Vite 8.3.8, Node 26.13.0):
+      one initial chunk, 349,994 B raw, 110,131 B gzip (React 19 + ReactDOM, TanStack Router and Query, valibot, the
+      library parts used, the app shell); threshold = measured + 10 %. Lazy chunks, for the record: the lesson view
+      with markdown, KaTeX and the notebook 139,795 B gzip; Shiki core and engine 47,285 B; the python grammar 9,012 B.
+      For comparison, the spike's React-plus-20-component gallery measured 124,206 B (REF-UI-2).
+    threshold: 121144
     verified_by: test
 
 vectors:

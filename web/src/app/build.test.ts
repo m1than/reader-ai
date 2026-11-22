@@ -11,7 +11,14 @@ let outDir = '';
 beforeAll(async () => {
   outDir = mkdtempSync(join(tmpdir(), 'reader-web-build-'));
   const { build } = await import('vite');
-  await build({ root: webRoot, configFile: `${webRoot}vite.config.ts`, logLevel: 'silent', build: { outDir, emptyOutDir: true } });
+  // Vitest sets NODE_ENV=test, which would make Vite bundle React's development build; measure the production build.
+  const previous = process.env.NODE_ENV;
+  process.env.NODE_ENV = 'production';
+  try {
+    await build({ root: webRoot, configFile: `${webRoot}vite.config.ts`, mode: 'production', logLevel: 'silent', build: { outDir, emptyOutDir: true } });
+  } finally {
+    process.env.NODE_ENV = previous;
+  }
 }, 180_000);
 
 afterAll(() => rmSync(outDir, { recursive: true, force: true }));
@@ -24,8 +31,12 @@ describe('build (FR-UI-9)', () => {
     const all = files(outDir);
     expect(all.some((f) => /\.woff2$/.test(f))).toBe(true);
     const text = all.filter((f) => /\.(css|js|html)$/.test(f)).map((f) => readFileSync(f, 'utf8'));
-    expect(text.filter((t) => /url\(\s*["']?data:/.test(t))).toEqual([]);
-    expect(text.filter((t) => /["'`]data:(image|font)\//.test(t))).toEqual([]);
+    // The vendored library's stylesheet carries data: URLs as literals of its own (FR-UI-9 note); nothing else may.
+    const dataUrls = (s: string) => [...s.matchAll(/url\(\s*["']?(data:[^"')]*)/g)].map((m) => m[1]!.replace(/\s+/g, ''));
+    const library = new Set(dataUrls(readFileSync(`${webRoot}node_modules/@acme/ui/dist/styles.css`, 'utf8')));
+    expect(text.flatMap(dataUrls).filter((u) => !library.has(u))).toEqual([]);
+    const withoutLibrary = text.map((t) => [...library].reduce((s, u) => s.split(u).join(''), t.replace(/\s+/g, '')));
+    expect(withoutLibrary.flatMap((t) => t.match(/["'`]data:(image|font)\/[^"'`]{0,40}/g) ?? [])).toEqual([]);
   });
 
   it('keeps markdown, math, highlighting and the lesson view out of the initial chunks', () => {

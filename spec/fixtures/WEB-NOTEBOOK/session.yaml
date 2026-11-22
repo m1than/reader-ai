@@ -150,7 +150,7 @@ sequences:
     note: "SRV-KERNEL allows 2 browser connections per session; a third upgrade is refused with 409, which a browser sees as a failed connection (close 1006)"
     steps:
       - {close: 1006, before_open: true}
-      - {reconnect: failed, attempt: 3, session: disconnected, notice: connect_failed, action: "Retry; the notice says the lesson may be open in other tabs"}
+      - {reconnect_try: 3, result: failed, session: disconnected, notice: connect_failed, action: "Retry; the notice says the lesson may be open in other tabs"}
   - id: late-frame-after-close
     steps:
       - {close: 1006, cell_state: {c1: lost}}

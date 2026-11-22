@@ -34,8 +34,9 @@ describe('stories for every component (FR-UI-8)', () => {
     const stories = import.meta.glob('../**/*.stories.tsx');
     const { composeStories } = await import('@storybook/react-vite');
     for (const file of files) {
-      const storyPath = `../${file.replace(/^src\//, '').replace(/\.tsx$/, '.stories.tsx')}`;
-      const importer = stories[storyPath];
+      // Vite keys files of this test's own directory as './…' and others as '../…'.
+      const rel = file.replace(/^src\//, '').replace(/\.tsx$/, '.stories.tsx');
+      const importer = stories[`../${rel}`] ?? stories[`./${rel.replace(/^app\//, '')}`];
       expect(importer, `stories for ${file}`).toBeTypeOf('function');
       const composed = composeStories((await importer!()) as Parameters<typeof composeStories>[0]) as Record<
         string,
