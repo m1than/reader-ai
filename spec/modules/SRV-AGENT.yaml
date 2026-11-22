@@ -59,6 +59,10 @@
 # Amendment (SRV-TUTOR review, 2026-11-22): FR-AGENT-12 (daily per-user, per-task scope) and FR-AGENT-13 (thinking
 # off, custom system prompt and its reserve, stop reason, abort on the first api_retry, per-call deadline); covered by
 # the implementation's code review.
+# Paired from SRV-TUTOR's code review (2026-11-23): `ledger.spent(..., day=True)` is public (the tutor's daily
+# pre-check reads FR-AGENT-12's scope through it); `HttpProxyClient.aclose()` closes its HTTP client; a [db] test
+# pins FR-AGENT-9's per-user advisory lock: two concurrent reserves with room for one (under the daily scope, and
+# separately under the run cap) give one reserve row and one refusal.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)

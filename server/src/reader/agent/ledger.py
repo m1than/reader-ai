@@ -172,9 +172,11 @@ async def spent(
     task: str | None = None,
     owner_id: uuid.UUID | None = None,
     month: bool = False,
+    day: bool = False,
 ) -> Decimal:
+    """`day=True`: the owner's spend on `task` this UTC calendar day (FR-AGENT-12's scope)."""
     async with engine.connect() as conn:
-        return await _spent(conn, run_id=run_id, task=task, owner_id=owner_id, month=month)
+        return await _spent(conn, run_id=run_id, task=task, owner_id=owner_id, month=month, day=day)
 
 
 async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, caps: Caps) -> int:
