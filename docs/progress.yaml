@@ -631,7 +631,13 @@ tasks:
         V/SRV-TUTOR-impl (merges V/V.TUTOR-min, V/V.COMPILE-min, V/SRV-INGEST-impl, V/SRV-SEARCH-impl). Question as a
         job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off, byte-based reserve with ≈ 410
         measured CLI overhead tokens; caps $0.30 per question and $3 per day; about $0.048 per L02-shaped question
-        (VEC-TUTOR-3)." }
+        (VEC-TUTOR-3). 2026-11-23: approved with Red (fa9b075), Green server (dca647c) and web (696ee1f), merged with
+        V.COMPILE-min's SRV-PIPELINE Green. Paired: SRV-EVENTS JobKind.priority (tutor 100), SRV-AUTH jobs seam
+        and lists, WEB-RENDER linksAsText, WEB-NOTEBOOK aside mount, WEB-UI Services.tutor and the axe dev
+        dependency. The tutor calls the real SRV-AGENT AgentProvider (FR-AGENT-12/13 options). Tests: tutor server
+        suite green (unit, bench generator, db incl. stalls through the real adapter, api), vitest 140, Playwright 6
+        incl. the axe check. Not run: the [live] check (READER_LIVE, spends test budget) and the bench (NFR-TUTOR-1..3,
+        the first bench run is NFR-TUTOR-3's measurement). Code review by deep-reviewer pending (cost, auth areas)." }
   - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
