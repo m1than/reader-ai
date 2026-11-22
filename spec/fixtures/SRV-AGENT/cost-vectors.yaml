@@ -61,5 +61,12 @@ settlements:
   - { name: unknown-record-crash, reserve: 0.94, upstream: null, sdk_usd: null, settled_usd: 0.94, error: sdk_error }
   - { name: multiple-2xx,        reserve: 0.94, upstream: { statuses: [200, 200], any_2xx: true }, sdk_usd: 0.6, settled_usd: 0.94, log: multiple_2xx }
   - { name: multiple-2xx-above,  reserve: 0.94, upstream: { statuses: [200, 200], any_2xx: true }, sdk_usd: 1.1, settled_usd: 1.1, log: multiple_2xx }
+  # Code review B2: a request still relayed at revoke, or one that failed after connect, may be billed.
+  - { name: in-flight-at-revoke, reserve: 0.94, upstream: { statuses: [], any_2xx: false, in_flight: 1 }, sdk_usd: null, settled_usd: 0.94, log: outcome_unknown, error: sdk_error }
+  - { name: in-flight-above,     reserve: 0.94, upstream: { statuses: [200], any_2xx: true, in_flight: 1 }, sdk_usd: 1.2, settled_usd: 1.2, log: outcome_unknown }
+  - { name: failed-after-connect, reserve: 0.94, upstream: { statuses: [], any_2xx: false, failed: 1 }, sdk_usd: 0, sdk_error: server_error, settled_usd: 0.94, log: outcome_unknown, error: provider_unavailable }
+  # An error result after one 2xx with an SDK cost of 0: the 0 is not a bill.
+  - { name: zero-cost-error-after-2xx, reserve: 0.94, upstream: { statuses: [200], any_2xx: true }, sdk_usd: 0, error_result: true, sdk_error: server_error, settled_usd: 0.94, error: provider_unavailable }
 # Columns: `sdk_error` is AssistantMessage.error (absent: none); `error` is the adapter's classification (absent: the
-# call succeeded); `log` is a WARNING code the settlement logs.
+# call succeeded); `log` is a WARNING code the settlement logs; `error_result` is ResultMessage.is_error (absent:
+# true when `sdk_error` is set).

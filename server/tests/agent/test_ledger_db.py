@@ -55,7 +55,7 @@ async def test_reserve_settle_and_spent(pg: Pg, tmp_path: Path) -> None:
     kinds = [r[0] for r in await rows(w.engine, "SELECT kind FROM agent_spend ORDER BY id")]
     assert kinds == ["reserve", "settle"]
     upstream = await scalar(w.engine, "SELECT upstream FROM agent_spend WHERE kind = 'settle'")
-    assert upstream == {"statuses": [200], "refused": [], "any_2xx": True}
+    assert upstream == {"statuses": [200], "refused": [], "any_2xx": True, "in_flight": 0, "failed": 0}
 
 
 async def test_refusals_come_before_any_row(pg: Pg, tmp_path: Path) -> None:

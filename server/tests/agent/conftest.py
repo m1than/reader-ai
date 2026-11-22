@@ -257,8 +257,15 @@ def make_proxy(
     return Proxy(proxy.create_app(settings, upstream_transport=up.transport()), up, root, clock)
 
 
-async def issue(c: httpx.AsyncClient, handle: str = "ivan", max_output_tokens: int = 16000) -> str:
-    r = await c.post("/run-tokens", json={"user": handle, "max_output_tokens": max_output_tokens})
+async def issue(
+    c: httpx.AsyncClient,
+    handle: str = "ivan",
+    max_output_tokens: int = 16000,
+    model: str = "claude-sonnet-5-5",
+) -> str:
+    r = await c.post(
+        "/run-tokens", json={"user": handle, "max_output_tokens": max_output_tokens, "model": model}
+    )
     assert r.status_code == 200, r.text
     token: str = r.json()["run_token"]
     return token
@@ -336,6 +343,7 @@ class Script:
     stop_reason: str | None = "end_turn"
     api_retries: int = 0  # SystemMessage subtype api_retry before the answer (FR-AGENT-13 d)
     sleep_s: float = 0.0  # before the answer (FR-AGENT-13 e)
+    send_init: bool = True  # False: the init SystemMessage never arrives (FR-AGENT-7)
 
 
 @dataclass
@@ -343,22 +351,26 @@ class FakeCli:
     scripts: list[Script]
     requests: list[Any] = field(default_factory=list)
     closed: list[bool] = field(default_factory=list)
+    systems: list[tuple[str, int] | None] = field(default_factory=list)  # (text, mode) of the system file
 
     async def __call__(self, request: Any) -> AsyncIterator[Any]:
         import asyncio
 
         script = self.scripts.pop(0)
         self.requests.append(request)
+        path = request.system_file
+        self.systems.append((path.read_text(encoding="utf-8"), path.stat().st_mode & 0o777) if path else None)
         self.current = script
         try:
-            yield SystemMessage(
-                "init",
-                {
-                    "tools": script.init_tools,
-                    "mcp_servers": script.init_mcp,
-                    "model": script.init_model or request.model,
-                },
-            )
+            if script.send_init:
+                yield SystemMessage(
+                    "init",
+                    {
+                        "tools": script.init_tools,
+                        "mcp_servers": script.init_mcp,
+                        "model": script.init_model or request.model,
+                    },
+                )
             for attempt in range(script.api_retries):
                 yield SystemMessage("api_retry", {"attempt": attempt + 1, "error_status": 429})
             if script.sleep_s:
@@ -384,15 +396,15 @@ class FakeProxyClient:
     """The worker's view of agent-proxy: issue and revoke (FR-AGENT-3)."""
 
     cli: FakeCli
-    issued: list[tuple[str, int]] = field(default_factory=list)
+    issued: list[tuple[str, int, str]] = field(default_factory=list)
     revoked: list[str] = field(default_factory=list)
     missing: set[str] = field(default_factory=set)
 
-    async def issue(self, handle: str, max_output_tokens: int) -> str:
+    async def issue(self, handle: str, max_output_tokens: int, model: str) -> str:
         if handle in self.missing:
             errors = need("reader.agent.errors")
             raise errors.agent_error("provider_missing")
-        self.issued.append((handle, max_output_tokens))
+        self.issued.append((handle, max_output_tokens, model))
         return "rt-" + secrets.token_urlsafe(8)
 
     async def revoke(self, run_token: str) -> Any:

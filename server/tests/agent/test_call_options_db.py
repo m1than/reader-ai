@@ -75,14 +75,18 @@ async def test_thinking_off_system_prompt_and_stop_reason(pg: Pg, tmp_path: Path
     result = await p.run(_call(w, thinking_off=True, system="TUTOR SYSTEM"))
     assert result.stop_reason == "max_tokens"
     assert cli.requests[0].env["MAX_THINKING_TOKENS"] == "0"
-    assert cli.requests[0].system == "TUTOR SYSTEM"
+    assert cli.systems[0] == ("TUTOR SYSTEM", 0o600)
     result = await p.run(_call(w, system=None))
     assert result.stop_reason == "end_turn"
     assert "MAX_THINKING_TOKENS" not in cli.requests[1].env
-    assert cli.requests[1].system is None
+    assert cli.requests[1].system_file is None
     provider = need("reader.agent.provider")
-    assert "system_prompt" not in _set_fields(provider.sdk_options(cli.requests[1]))
-    assert provider.sdk_options(cli.requests[0]).system_prompt == "TUTOR SYSTEM"
+    assert provider.sdk_options(cli.requests[1]).system_prompt == {"type": "preset", "preset": "claude_code"}
+    assert provider.sdk_options(cli.requests[0]).system_prompt == {
+        "type": "file",
+        "path": str(cli.requests[0].system_file),
+    }
+    assert "system_prompt" in _set_fields(provider.sdk_options(cli.requests[0]))
 
 
 def _set_fields(options: Any) -> set[str]:

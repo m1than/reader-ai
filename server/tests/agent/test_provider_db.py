@@ -80,7 +80,9 @@ async def test_success_reserves_runs_and_settles(pg: Pg, tmp_path: Path) -> None
     assert req.env["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] == "16000"
     assert req.env["CLAUDE_CODE_OAUTH_TOKEN"] == proxy.revoked[0]  # the run_token, revoked after the call
     assert not os.path.exists(req.env["HOME"])  # the per-run HOME is removed  # noqa: ASYNC240
-    assert proxy.issued == [("ivan", 16000)]
+    assert proxy.issued == [("ivan", 16000, "claude-sonnet-5-5")]  # the token is bound to the model
+    assert cli.systems == [("SYSTEM", 0o600)]  # the system prompt travels as a 0600 file, never in argv
+    assert req.system_file.name == "system.md"
     ledger = await _ledger(w)
     assert [k for k, _, _ in ledger] == ["reserve", "settle"]
     assert ledger[1][2] == D("0.05")
@@ -88,10 +90,11 @@ async def test_success_reserves_runs_and_settles(pg: Pg, tmp_path: Path) -> None
     assert model == [("claude-sonnet-5-5",)]
 
 
-def test_sdk_options_have_no_tools() -> None:
+def test_sdk_options_have_no_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = need("reader.agent.provider")
+    monkeypatch.setenv("READER_DB_HOST", "postgres")  # a worker variable the CLI must not see
     req = provider.CliRequest(
-        system="S",
+        system_file=Path("/tmp/x/system.md"),
         prompt="P",
         model="claude-sonnet-5-5",
         env={"HOME": "/tmp/x"},
@@ -101,9 +104,44 @@ def test_sdk_options_have_no_tools() -> None:
     options = provider.sdk_options(req)
     assert options.tools == [] and options.allowed_tools == [] and options.setting_sources == []
     assert options.max_turns == 1 and options.model == "claude-sonnet-5-5"
-    assert options.max_budget_usd == 0.5 and options.system_prompt == "S"
-    assert options.env == {"HOME": "/tmp/x"}
+    assert options.max_budget_usd == 0.5
+    assert options.system_prompt == {"type": "file", "path": "/tmp/x/system.md"}
+    # S1: the SDK merges os.environ; every worker variable is overridden with an empty value
+    assert options.env["HOME"] == "/tmp/x"
+    assert options.env["READER_DB_HOST"] == ""
+    assert {k for k, v in options.env.items() if v} == {"HOME"}
+    assert set(options.env) == {*os.environ, "HOME"}
+    assert options.stderr is not None  # stderr is read and discarded
     assert options.mcp_servers == {} or options.mcp_servers == []
+    default = provider.sdk_options(dataclasses_replace(req, system_file=None))
+    assert default.system_prompt == {"type": "preset", "preset": "claude_code"}
+
+
+def dataclasses_replace(obj: Any, **changes: Any) -> Any:
+    import dataclasses
+
+    return dataclasses.replace(obj, **changes)
+
+
+async def test_missing_init_message_is_rejected(pg: Pg, tmp_path: Path) -> None:
+    errors = need("reader.agent.errors")
+    w = await world(pg, tmp_path)
+    p, _, _ = _provider(w, [Script(send_init=False)], tmp_path)
+    with pytest.raises(errors.AgentError) as refused:
+        await p.run(_call(w, uuid.uuid4()))
+    assert refused.value.code == "tools_mismatch"
+
+
+async def test_unparseable_revoke_answer_settles_at_the_reserve(pg: Pg, tmp_path: Path) -> None:
+    import httpx
+
+    provider = need("reader.agent.provider")
+    client = provider.HttpProxyClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"<html>proxy error</html>")
+        )
+    )
+    assert await client.revoke("rt-x") is None  # handled before settlement: the outcome is unknown
 
 
 async def test_unknown_model_refused_before_any_row(pg: Pg, tmp_path: Path) -> None:
