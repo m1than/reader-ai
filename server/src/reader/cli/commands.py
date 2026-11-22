@@ -37,10 +37,7 @@ from reader.cli.watcher import encode_bundle, lock_holder, stop_watcher
 from reader.config import ConfigError, ReaderConfig, Secret, SecretRef, SecretResolutionError, load_config
 
 READY_TIMEOUT: Final = 10  # s for the watcher's readiness byte (FR-CLI-8): two local daemon calls
-KNOWN_PROFILES: Final = ("agents", "kernels")  # FR-CLI-5; `mcp` stays off in the slice
-KERNEL_IMAGE: Final = "reader-kernel:local"
 AGENT_PROXY_IMAGE: Final = "reader-agent-proxy:local"
-KERNEL_BUILD_TIMEOUT: Final = 1800  # s: a cold kernel-image build, the bound the kernel-image tests use
 HEALTH_TIMEOUT: Final = 180  # s from `up -d` (FR-CLI-10)
 HEALTH_POLL: Final = 2  # s, the services' own healthcheck interval (compose.yaml x-health)
 LINK_TIMEOUT: Final = 15  # s, FR-CLI-21
@@ -103,54 +100,40 @@ class Project:
     profiles: tuple[str, ...] = ()
 
 
-def compose_argv(ctx: Ctx, profiles: Sequence[str], *args: str) -> list[str]:
-    """`docker compose -f deploy/compose.yaml -f - [--profile p]… …`; the override goes on stdin."""
-    flags = [item for name in sorted(profiles) for item in ("--profile", name)]
-    return ["docker", "compose", "-f", str(ctx.compose_file), "-f", "-", *flags, *args]
+ACTIVE_PROFILES: tuple[str, ...] = ("kernels",)  # FR-CLI-5: the default profile plus these, always
+OPTIONAL_PROFILES: tuple[str, ...] = ("agents",)  # FR-CLI-5: chosen by `reader up`, recorded in run/profiles
 
 
-def compose(ctx: Ctx, override: bytes, *args: str, profiles: Sequence[str] = ()) -> Result:
-    return ctx.runner.run(compose_argv(ctx, profiles, *args), env=ctx.env, stdin=override)
+def compose_argv(ctx: Ctx, *args: str, extra: Sequence[str] = ()) -> list[str]:
+    """`docker compose --profile … -f deploy/compose.yaml -f - …` (FR-CLI-5; override on stdin, INV-CLI-6)."""
+    names = sorted({*ACTIVE_PROFILES, *extra})
+    profiles = [flag for p in names for flag in ("--profile", p)]
+    return ["docker", "compose", *profiles, "-f", str(ctx.compose_file), "-f", "-", *args]
+
+
+def compose(ctx: Ctx, override: bytes, *args: str, extra: Sequence[str] = ()) -> Result:
+    return ctx.runner.run(compose_argv(ctx, *args, extra=extra), env=ctx.env, stdin=override)
 
 
 def recorded_profiles(ctx: Ctx) -> tuple[str, ...]:
-    """The profiles the last `reader up` activated (FR-CLI-5), or none."""
+    """The optional profiles the last `reader up` activated (FR-CLI-5), or none."""
     try:
         names = (ctx.run_dir / "profiles").read_text(encoding="utf-8").split()
     except OSError:
         return ()
-    return tuple(sorted(n for n in names if n in KNOWN_PROFILES))
+    return tuple(sorted(n for n in names if n in OPTIONAL_PROFILES))
 
 
 def choose_profiles(ctx: Ctx, config: ReaderConfig) -> tuple[str, ...]:
-    """FR-CLI-5: kernels when the kernel image builds; agents when a provider is configured and the
-    agent-proxy image exists. A profile whose condition fails stays off with one line on stderr."""
-    chosen: list[str] = []
-    sandbox = ctx.compose_file.resolve().parents[1] / "sandbox"
-    built = docker(
-        ctx,
-        "docker",
-        "build",
-        "--platform",
-        "linux/arm64",
-        "-t",
-        KERNEL_IMAGE,
-        "-f",
-        str(sandbox / "Dockerfile"),
-        str(sandbox),
-        timeout=KERNEL_BUILD_TIMEOUT,
-    )
-    if built is not None and built.code == 0:
-        chosen.append("kernels")
-    else:
-        print(f"note: profile kernels stays off: {KERNEL_IMAGE} did not build", file=ctx.err)
-    if any(u.providers for u in config.users):
-        found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
-        if found is not None and found.code == 0:
-            chosen.append("agents")
-        else:
-            print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
-    return tuple(sorted(chosen))
+    """FR-CLI-5: `agents` when a provider is configured and the agent-proxy image exists; otherwise it stays
+    off with one line on stderr and `up` continues."""
+    if not any(u.providers for u in config.users):
+        return ()
+    found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
+    if found is not None and found.code == 0:
+        return ("agents",)
+    print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
+    return ()
 
 
 def load(ctx: Ctx, config_path: Path, profiles: Sequence[str] | None = None) -> Project:
@@ -160,7 +143,7 @@ def load(ctx: Ctx, config_path: Path, profiles: Sequence[str] | None = None) -> 
     override = build_override(load_compose_source(ctx.compose_file), [u.handle for u in config.users], path)
     data = json.dumps(override).encode()
     rendered = _checked(
-        ctx, lambda: compose(ctx, data, "config", "--format", "json", profiles=active), "compose_config"
+        ctx, lambda: compose(ctx, data, "config", "--format", "json", extra=active), "compose_config"
     )
     parsed: Any = None
     try:
@@ -377,7 +360,7 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     ensure_run_dir(ctx)
     (ctx.run_dir / "project").write_text(model.name + "\n", encoding="utf-8")
     (ctx.run_dir / "profiles").write_text("".join(p + "\n" for p in project.profiles), encoding="utf-8")
-    _checked(ctx, lambda: compose(ctx, project.override, "build", profiles=project.profiles), "build_failed")
+    _checked(ctx, lambda: compose(ctx, project.override, "build", extra=project.profiles), "build_failed")
     since = (
         _checked(
             ctx,
@@ -404,7 +387,7 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     if not process.wait_ready(READY_TIMEOUT):
         process.terminate()
         raise CliError("watcher_not_ready", "the watcher did not signal readiness; no container was started")
-    started = docker(ctx, *compose_argv(ctx, project.profiles, "up", "-d"), stdin=project.override)
+    started = docker(ctx, *compose_argv(ctx, "up", "-d", extra=project.profiles), stdin=project.override)
     if started is None or started.code != 0:
         process.terminate()
         raise CliError("up_failed", "docker compose up failed; the watcher was stopped")

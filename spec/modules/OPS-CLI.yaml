@@ -118,18 +118,18 @@ requirements:
       only `secret://` references) and reaches `docker compose` only on stdin.
   - id: FR-CLI-5
     text: >-
-      Active profiles (amended for the vertical slice, V.OPS-CLI-kernels and V.OPS-CLI-agents): `reader up` takes no
-      `--profile` flag of its own; it activates the default profile plus `kernels` when
-      `docker build --platform linux/arm64 -t reader-kernel:local -f sandbox/Dockerfile sandbox` (repository root,
-      timeout 1800 s, structural: the bound the kernel-image tests use for a cold build) exits 0, and `agents` when at
-      least one `users[].providers[]` entry is configured and `docker image inspect reader-agent-proxy:local` exits 0
-      (nothing in this repository builds that image yet; SRV-AGENT owns it). A profile whose condition fails stays off
-      with one line on stderr naming the profile and the reason; `up` continues. The active profiles are passed as
-      `--profile <p>` (sorted) to every `docker compose -f … -f -` call (config, build, up -d) and recorded in
-      `run/profiles`; commands that render the model without running `up` (status, down, bootstrap, doctor, trust,
-      backup, restore) use the recorded profiles, or none. With `kernels`, the override's `kernel-user-<handle>` for
-      every configured user (FR-CLI-4) and the pool services `kernel-verify`, `kernel-agent` and `kernel-pair-1` start;
-      all of them must be healthy for FR-CLI-10. The consumer set is FR-DEPLOY-10 (b)'s, restricted to services
+      Active profiles: `reader up` activates the default profile plus `kernels` (task V.OPS-CLI-kernels, vertical slice:
+      the notebook needs `kernel-user-<handle>`, OPS-DEPLOY FR-DEPLOY-8) and takes no `--profile` flag; every
+      `docker compose -f … -f -` call of `reader up` (config, build, up) carries `--profile kernels` before `-f`.
+      With `kernels`, the override's `kernel-user-<handle>` for every configured user (FR-CLI-4) and the pool services
+      `kernel-verify`, `kernel-agent` and `kernel-pair-1` start. `reader up` also activates `agents` (task
+      V.OPS-CLI-agents) when at least one `users[].providers[]` entry is configured and
+      `docker image inspect reader-agent-proxy:local` exits 0 (nothing in this repository builds that image yet;
+      SRV-AGENT owns it); otherwise `agents` stays off with one line on stderr naming the reason, and `up` continues.
+      The active profiles go as `--profile <p>` flags, sorted, before `-f`; `reader up` records `agents` in
+      `run/profiles`, and the commands that render the model without running `up` (status, down, bootstrap, doctor,
+      trust, backup, restore) use `kernels` plus the recorded profiles. A later stage adds profiles by amending this
+      requirement. The consumer set is FR-DEPLOY-10 (b)'s, restricted to services
       present in the rendered active model; each consumer's uid is the numeric `user` of its rendered service, and a
       consumer without one stops `up` naming the service. `reader up` resolves and hands over only the values whose
       consumer is in that set: `db-password` for postgres, api, worker and mcp; for agent-proxy, one file per
@@ -165,7 +165,7 @@ requirements:
       FR-CLI-3's project name or, without a valid config, the one `up` recorded in `run/project`.
   - id: FR-CLI-8
     text: >-
-      Start order of `reader up`: (0) the kernel-image build and the agent-proxy image check of FR-CLI-5, then the
+      Start order of `reader up`: (0) the agent-proxy image check of FR-CLI-5, then the
       render with the chosen profiles; (1) `docker compose … build` as its own step; (2) T0 = the daemon's clock,
       `docker info --format '{{.SystemTime}}'`; (3) resolve every value of FR-CLI-5, and any failure stops `up` before a
       container starts; (4) start the watcher as a new program (`python -m reader.cli.watcher`, `start_new_session`,
@@ -236,7 +236,8 @@ requirements:
       reports major version ≥ 2 (the delivery mechanism was measured on Compose 5.6.1, REF-CLI-7); the keyring backend is
       the macOS Keychain and answers a lookup; reader.yaml loads; every reference of FR-CLI-5 resolves (the value is
       discarded at once, and `detail` holds only the code on failure); every `hostfile` reference passes FR-CLI-2's
-      checks; the Keychain item `reader-ai-system/postgres` exists or the pgdata volume does not; the watcher runs while
+      checks; the Keychain item `reader-ai-system/postgres` exists or the pgdata volume does not (detail: `item present`,
+      `not generated yet (fresh install)`, or `volume exists without the item`); the watcher runs while
       the stack runs; every root recorded by `reader trust` is still trusted. No check prints a value.
   - id: FR-CLI-16
     text: >-

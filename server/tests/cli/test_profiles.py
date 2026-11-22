@@ -1,5 +1,5 @@
-"""`reader up` profiles for the vertical slice: kernels when the kernel image builds, agents when a provider
-is configured and the agent-proxy image exists; tokens go to agent-proxy only.
+"""`reader up` profiles for the vertical slice: kernels always, agents when a provider is configured and the
+agent-proxy image exists; tokens go to agent-proxy only.
 
 @trace FR-CLI-4, FR-CLI-5, FR-CLI-8, VEC-CLI-2
 """
@@ -12,7 +12,6 @@ import pytest
 
 from .conftest import FIXTURES, World, make_world, rendered, stack, write_config
 
-KERNEL_BUILD = ["docker", "build", "--platform", "linux/arm64", "-t", "reader-kernel:local", "-f"]
 NO_PROVIDERS = """\
 version: 1
 instance: {url: https://localhost, data_dir: ./data}
@@ -68,32 +67,19 @@ def _compose_calls(world: World) -> dict[str, list[str]]:
     return calls
 
 
-def test_kernel_image_build_argv_and_both_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agents_and_kernels_profiles_with_a_provider_and_the_image(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     world = _world(tmp_path, monkeypatch, agents_in_model=True)
     assert _up(world, _config(tmp_path)) == 0
-    (build,) = world.runner.argvs("docker", "build", "--platform")
-    sandbox = world.ctx.compose_file.parents[1] / "sandbox"
-    assert build == [*KERNEL_BUILD, str(sandbox / "Dockerfile"), str(sandbox)]
     (inspect,) = world.runner.argvs("docker", "image", "inspect")
-    assert inspect[-1] == "reader-agent-proxy:local"
+    assert inspect == ["docker", "image", "inspect", "reader-agent-proxy:local"]
     calls = _compose_calls(world)
     assert set(calls) == {"config", "build", "up"}
     for argv in calls.values():
         assert _profiles(argv) == ["agents", "kernels"]
-    assert (world.ctx.run_dir / "profiles").read_text().split() == ["agents", "kernels"]
-    timeouts = [c.timeout for c in world.runner.calls if c.argv[:2] == ["docker", "build"]]
-    assert timeouts == [1800]
-
-
-def test_failed_kernel_build_leaves_kernels_off_and_up_continues(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    world = _world(tmp_path, monkeypatch, agents_in_model=True)
-    world.runner.on("docker", "build", "--platform", result=(1, b"", b"build failed"))
-    assert _up(world, _config(tmp_path)) == 0
-    for argv in _compose_calls(world).values():
-        assert _profiles(argv) == ["agents"]
-    assert "kernels" in world.err
+        assert argv.index("--profile") < argv.index("-f")
+    assert (world.ctx.run_dir / "profiles").read_text().split() == ["agents"]
 
 
 def test_missing_agent_proxy_image_leaves_agents_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
