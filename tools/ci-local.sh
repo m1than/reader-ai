@@ -23,6 +23,7 @@ echo "trace (specd-lite)"
 step "tooling dependencies" npm ci --prefix tools --silent
 step "T1–T9 trace-check" node tools/trace/check.mjs
 step "P7 guard-tests vs $BASE" node tools/trace/guard-tests.mjs --base "$BASE"
+step "write hook (H1–H3 in every worktree)" node --test tools/hooks/pre-write.test.mjs
 
 if [[ -f server/pyproject.toml ]]; then
   echo "server"
