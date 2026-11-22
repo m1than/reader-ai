@@ -10,6 +10,8 @@ supersedes: []
 
 > Amends [ADR-0012](0012-deployment-and-auth.md) (the Compose stack and its networks gain `embed`) and [ADR-0025](0025-agent-sandbox-and-credential-separation.md) rule 5 (the worker's reachable set gains `embed`). Both amendments are notes for the owner to add when this ADR is accepted.
 
+> Measurement note (2026-11-23, SRV-SEARCH code review of dd364ba; the Decision is unchanged): the Context's memory figure (2,410 MiB peak RSS, spikes/embed-service) did not include the service's own `weights_only` precheck, which first loaded the whole 2.27 GB checkpoint without mmap: `memory.peak` 3,169 MiB after load and 3,459 MiB after a worst batch, over the 3g limit and survived only through reclaim (`memory.events max` 2,870). The precheck now loads with `mmap=True`. Re-measured under compose's 3g for a real service start plus the worst admitted request (8 texts, each over the 1,024-token cap): anonymous memory (`memory.stat` anon), which the kernel cannot reclaim, is 683 MiB after load and at most 1,192 MiB through the batch, about 1.1 GiB; 1,192 × 1.25 = 1,490 MiB, so `mem_limit` 3g stands. The 2.17 GiB of mmap'd weights are reclaimable file cache: `memory.peak` counts them (1,153–2,114 MiB measured, 2,738–2,780 MiB on a cold cache in the round-2 review), and at the limit the kernel evicts those pages rather than killing the service. Numbers in OPS-DEPLOY FR-DEPLOY-9; the SRV-SEARCH [image] test `test_worst_batch_stays_under_the_compose_limit` asserts anon × 1.25 ≤ the limit and no OOM kill on every build.
+
 ## Context
 
 SRV-SEARCH (slice step V3) needs BAAI/bge-m3 dense vectors, which the owner confirmed on 2026-11-21 (spikes/embeddings-local/RESULT.md). The vectors are needed in two places:
@@ -20,8 +22,9 @@ Numbers:
 - **Weights:** bge-m3's fp32 `pytorch_model.bin` is 2.27 GB (spike, Candidates). It is a pickle file, so it is loaded with `torch.load(..., weights_only=True)`, which refuses arbitrary objects.
 - **Container limits** (deploy/compose.yaml): the worker has `mem_limit: 2g`, the api `1g`.
 - **Speed:** 2.71 chunks/s with 13 torch threads in the Docker VM; the full pilot of 2,285 chunks took 841.74 s, or 14.03 min (results/20261120T232835-v2/BAAI__bge-m3.json).
-- **Memory:** the service's peak RSS (model load plus the largest admitted request: 32 texts of 1,200 characters at `max_seq_length` 1,024) is measured by `spikes/embed-service`: **peak RSS ___ GiB, so mem_limit ___ GiB** (filled when the spike lands). That number sets `mem_limit`.
-- **Standing memory budget** against the Docker VM's 11.6 GiB (ADR-0022): postgres 1g, api 1g, worker 2g, mcp 1g, agent-proxy 256m, one `kernel-<user>` 2g, plus embed's ___ GiB. Limits are not reservations, but the sum shows what is left for more kernels.
+- **Memory** (`spikes/embed-service`, fp32, `max_seq_length` 1,024, worst-case texts): peak RSS 877 MiB after load; **2,410 MiB for the worst admitted request of 8 texts**; 3,644 MiB for a request of 32. The service admits at most 8 texts per call (SRV-SEARCH's passage batch size), so **`mem_limit` is 3g** (2,410 MiB × 1.25, rounded), with `memswap_limit` equal. bf16 was measured and rejected: more memory and 9–30× slower. `torch.load(weights_only=True)` loads the checkpoint (391 tensors).
+- **Speed at 8 CPUs** (same spike): an idle query takes 0.5–0.9 s, a worst batch of 8 takes 11–13 s, and the full pilot about 22–36 min.
+- **Standing memory budget** against the Docker VM's 11.6 GiB (ADR-0022): postgres 1g, api 1g, worker 2g, mcp 1g, agent-proxy 256m, one `kernel-<user>` 2g, plus embed's 3g, about 10.25 GiB in all. Limits are not reservations, but the sum shows what is left for more kernels.
 - **Token lengths** of a 1,200-character chunk, measured by the reviewer with bge-m3's tokenizer: Russian prose 266, Rust code 603, hex 740, LaTeX 887. So the cap is `max_seq_length` 1,024, which covers all four kinds (SRV-SEARCH).
 - **Networks:** every stack network except `edge`/`egress` is `internal: true`. Since ADR-0027 (on V/V.SRV-INGEST-min until merged), nothing on the host listens for the stack.
 
@@ -63,5 +66,5 @@ The service holds no secret and reaches no store, so a compromise of `embed` (th
 
 ## Hypotheses (unmeasured)
 
-- The service's peak RSS for the largest admitted request (32 texts of 1,200 characters, `max_seq_length` 1,024) fits a limit the Mac can spare. `spikes/embed-service` measures it.
-- The rate measured in the spike's container (2.71 chunks/s) holds for the service, whose batches are smaller (8). The bench records the job's wall time.
+- Measured since: the memory of the largest admitted request (8 texts) is 2,410 MiB peak RSS, so the limit is 3g (Context).
+- The service's speed under the full stack's load matches the spike's 8-CPU numbers. The SRV-SEARCH bench records the job's wall time.

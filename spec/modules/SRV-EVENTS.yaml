@@ -110,7 +110,7 @@ requirements:
       `timeout_s`. The worker serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared
       module list `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST and SRV-SEARCH add theirs; SRV-PIPELINE
       adds `reader.pipeline.jobs`, paired change 2026-11-22; integrated order on V/slice-integration: ingest, pipeline,
-      giving kinds `ingest.import`, `pipeline.stage`, `pipeline.verify`). Paired SRV-AGENT/SRV-PIPELINE amendment: a handler may
+      search, giving kinds `ingest.import`, `pipeline.stage`, `pipeline.verify`, `search.embed`). Paired SRV-AGENT/SRV-PIPELINE amendment: a handler may
       (a) append spend rows through SRV-AGENT's ledger, which opens its own connection and commits at once (append-only,
       never an outcome effect, so a rolled-back run still records its spend), and (b) enqueue through
       `reader.jobs.running()`, the worker's `Jobs` (FR-EVENTS-3 commits independently of the run's transaction); a kind

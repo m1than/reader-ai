@@ -13,8 +13,8 @@ from typing import Any, Final
 
 from reader.jobs.model import NAME_PATTERN, SWEEP_TASK, JobError, JobKind, model_has_secret_field
 
-# SRV-INGEST and SRV-PIPELINE paired changes (FR-EVENTS-1)
-KIND_MODULES: Final[tuple[str, ...]] = ("reader.ingest.jobs", "reader.pipeline.jobs")
+# SRV-INGEST, SRV-PIPELINE and SRV-SEARCH paired changes (FR-EVENTS-1)
+KIND_MODULES: Final[tuple[str, ...]] = ("reader.ingest.jobs", "reader.pipeline.jobs", "reader.search.jobs")
 StartHook = Callable[[Any], Awaitable[None]]
 
 

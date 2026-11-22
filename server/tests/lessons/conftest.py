@@ -35,8 +35,11 @@ PACKAGE = REPO / "server" / "src" / "reader" / "lessons"
 F01 = (FIXTURES / "F01.ipynb").read_bytes()
 ORIGIN = "https://localhost"
 SESSION_COOKIE = "__Host-reader_session"
-# The image OPS-DEPLOY pins (deploy/images/postgres.Dockerfile).
-PG_IMAGE = "postgres:18-trixie@sha256:eb63372c1e05c755f55fa30cbd07aecc443676fc6c0fa90b9002d01537841e1a"
+# postgres:18-trixie plus pgvector 0.8.7, the extension reader-postgres installs (OPS-DEPLOY FR-DEPLOY-2): the
+# heads include SRV-SEARCH's migration, which creates the `vector` extension (SRV-SEARCH header).
+PG_IMAGE = (
+    "pgvector/pgvector:0.8.7-pg18-trixie@sha256:ab49524d18df7200b74ac9a475e1db6297fc1eb57da4c214c63d10ecc4b754fa"
+)
 
 
 def spec_data() -> dict[str, Any]:

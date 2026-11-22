@@ -32,6 +32,10 @@ def test_network_membership() -> None:
     assert members["sb-agent"] == {"worker", "kernel-agent"}
     assert members["sb-pair-1"] == {"api", "kernel-pair-1"}
     assert members["sb-user-ivan"] == {"api", "kernel-user-ivan"}
+    # Paired SRV-SEARCH change (FR-DEPLOY-3, ADR-0028): embed's own internal network, and embed on no other.
+    assert members["embed"] == {"api", "worker", "embed"}
+    assert networks_of(model["services"]["embed"]) == {"embed"}
+    assert model["networks"]["embed"].get("internal") is True
     front = model["networks"]["front"]
     assert front["ipam"]["config"] == [{"subnet": "10.230.1.0/24", "ip_range": "10.230.1.128/25"}]
     assert model["services"]["api"]["networks"]["front"]["ipv4_address"] == API_FRONT

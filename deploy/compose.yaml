@@ -85,6 +85,7 @@ services:
         ipv4_address: 10.230.1.10
       core: {}
       sb-pair-1: {}
+      embed: {}
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "api", "--healthcheck"]
@@ -96,7 +97,7 @@ services:
     memswap_limit: 2g
     volumes:
       - blobs:/var/lib/reader/blobs
-    networks: [core, agentnet, sb-verify, sb-agent]
+    networks: [core, agentnet, sb-verify, sb-agent, embed]
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
@@ -133,6 +134,31 @@ services:
       <<: *health
       # TCP on 127.0.0.1: the entrypoint's temporary initdb server listens on the socket only, so it never looks healthy.
       test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"]
+
+  embed:
+    # SRV-SEARCH's bge-m3 service (ADR-0028): its own internal network with api and worker only, no secrets, no
+    # environment, the model baked into the image. mem_limit 3g is measured: cgroup memory.peak of a real start plus
+    # the worst admitted request (8 texts at max_seq_length 1,024) with the mmap'd checkpoint precheck, times 1.25,
+    # fits (OPS-DEPLOY FR-DEPLOY-9 has the numbers). Nothing depends_on it: callers wait for its /health. init: a
+    # PID 1 that forwards signals and reaps children, so `docker stop` ends the Python server at once.
+    image: reader-embed:local
+    build:
+      context: ..
+      dockerfile: deploy/images/embed.Dockerfile
+    init: true
+    user: "10003:10003"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=10003
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 3g
+    memswap_limit: 3g
+    restart: unless-stopped
+    networks: [embed]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-I", "-m", "reader.search.embed_service", "--healthcheck"]
 
   agent-proxy:
     image: reader-agent-proxy:local
@@ -182,6 +208,7 @@ networks:
   sb-verify: { internal: true }
   sb-agent: { internal: true }
   sb-pair-1: { internal: true }
+  embed: { internal: true }   # ADR-0028: api, worker and embed only
 
 volumes:
   pgdata: { labels: { org.reader-ai.backup: include } }

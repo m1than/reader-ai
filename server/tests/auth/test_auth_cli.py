@@ -208,6 +208,9 @@ def test_database_failure_while_api_runs(pg_container: tuple[Pg, Any], pg: Pg, t
     ]:
         code, out = container.exec(["psql", "-U", "postgres", "-c", sql])
         assert code == 0, out
+    # SRV-SEARCH's migration needs the `vector` extension, which only a superuser creates (FR-SEARCH-4 note).
+    code, out = container.exec(["psql", "-U", "postgres", "-d", pg.database, "-c", "CREATE EXTENSION vector"])
+    assert code == 0, out
     env = _env(Pg(pg.host, pg.port, role, CANARY, pg.database), tmp_path)
     server = ApiServer(env, _free_port())
     try:
