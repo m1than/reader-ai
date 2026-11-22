@@ -1,7 +1,8 @@
 """SRV-TUTOR migration: `tutor_questions` (FR-TUTOR-1..4, -9, -10, INV-TUTOR-7).
 
 Revision ID: tutor_0001
-Revises: lessons_0001 (a branch off SRV-LESSON's head; it needs lessons and lesson_revisions)
+Revises: none (its own branch, as SRV-INGEST's); depends on lessons_0001 (lessons, lesson_revisions, users),
+so SRV-LESSON's branch stays its own (`lessons@-1` still removes only SRV-LESSON's tables).
 """
 
 from __future__ import annotations
@@ -9,9 +10,9 @@ from __future__ import annotations
 from alembic import op
 
 revision = "tutor_0001"
-down_revision = "lessons_0001"
+down_revision: str | None = None
 branch_labels = ("tutor",)
-depends_on = None
+depends_on = "lessons_0001"
 
 _STATES = "'queued', 'answered', 'failed', 'refused', 'expired'"
 
