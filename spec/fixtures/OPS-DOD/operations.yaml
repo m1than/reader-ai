@@ -387,15 +387,16 @@ operations:
 
   - id: lesson.compile
     title: Compile a lesson with agents (draft, fact-check, review, revise, labs, G2 report)
-    surface: [api]
-    specs: [SRV-PIPELINE, SRV-AGENT, SRV-EVENTS, SRV-LESSON]
-    routes: ["POST /api/lessons/{lesson_id}/compile"]
+    surface: [api, web]
+    specs: [SRV-PIPELINE, SRV-AGENT, SRV-EVENTS, SRV-LESSON, SRV-PLAN, WEB-UI]
+    # V/compile-ui (2026-11-23): the owner's Compile confirm reads the per-lesson estimate (SRV-PLAN FR-PLAN-13).
+    routes: ["POST /api/lessons/{lesson_id}/compile", "GET /api/lessons/{lesson_id}/estimate"]
     gate: tracked
     criteria:
-      functional: { items: [FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-5, FR-PIPELINE-7, FR-PIPELINE-9, FR-PIPELINE-12, FR-AGENT-6, FR-LESSON-4] }
+      functional: { items: [FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-5, FR-PIPELINE-7, FR-PIPELINE-9, FR-PIPELINE-12, FR-AGENT-6, FR-LESSON-4, FR-PLAN-13, FR-UI-15] }
       security: { items: [FR-PIPELINE-3, FR-PIPELINE-11, VEC-PIPELINE-5, INV-AGENT-1, INV-AGENT-2, INV-AGENT-3, FR-AGENT-4, FR-AGENT-7] }
       privacy: { items: [INV-PIPELINE-4, INV-AGENT-5] }
-      a11y: { na: "no web surface in the slice (owner route, no compile UI)" }
+      a11y: { missing: "axe runs on the Compile confirm only in the [browser] spec against the test server (e2e/web/ui/compile.spec.ts, 1280/1024/390); not yet in the live ui step" }
       latency:
         budget: { p95_ms_max: 2700000, n_min: 1, kind: target,
                   source: "NFR-PIPELINE-1, 45 min per lesson (ADR-0005 / spikes/compile-cost pass criterion); measured 8.3–9.4 min for L02. n_min 1: each sample costs ≈ $2.4–3.0 (structural)" }
@@ -408,15 +409,16 @@ operations:
 
   - id: lesson.compile_status
     title: Watch a compile run (state, stages, spend)
-    surface: [api]
-    specs: [SRV-PIPELINE]
-    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile"]
+    surface: [api, web]
+    specs: [SRV-PIPELINE, SRV-EVENTS, WEB-UI, WEB-NOTEBOOK]
+    # V/compile-ui (2026-11-23): the owner's open runs for the list (FR-PIPELINE-17) and the stopped step's code.
+    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile", "GET /api/compiles"]
     gate: tracked
     criteria:
-      functional: { items: [FR-PIPELINE-6, FR-PIPELINE-11] }
-      security: { items: [FR-PIPELINE-11] }
+      functional: { items: [FR-PIPELINE-6, FR-PIPELINE-11, FR-PIPELINE-16, FR-PIPELINE-17, FR-EVENTS-17, FR-UI-15, FR-NOTEBOOK-12] }
+      security: { items: [FR-PIPELINE-11, FR-PIPELINE-17] }
       privacy: { items: [INV-PIPELINE-4] }
-      a11y: { na: no web surface in the slice (owner route) }
+      a11y: { missing: "axe runs on the list's compile states only in the [browser] spec against the test server (e2e/web/ui/compile.spec.ts); not yet in the live ui step" }
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call (reads the ledger) }
       observability: { items: [FR-PIPELINE-6] }
