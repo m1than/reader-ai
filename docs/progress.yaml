@@ -689,8 +689,15 @@ tasks:
         owner has a passkey unless --reset-owner-passkeys) and e2e/web/live/owner.slice.ts; e2e/live/slice.sh runs
         reader-ingest then verify-all --slice. Step `routes` PASS (owner registered with a virtual passkey; materials
         200, search 200 with 0 hits, course import 409 no_material before the import, unknown compile/run/ask 404);
-        anonymous curl: the seven slice routes 401, healthz 200. Consequence: the owner now holds a virtual passkey
-        on this stack, so `reader bootstrap` in Safari needs a --reset-owner-passkeys run first. Not reachable through
+        anonymous curl: the seven slice routes 401, healthz 200. deep-reviewer (Fable) one round on 63227ea: changes
+        (2 blocking: the tutor loop matched the previous answer; the run left the owner's virtual passkey behind),
+        fixed in a6c57f5: per-question wait on its own POST 202 and the answering notice, results keyed by
+        question_id; web_live.py --owner removes the run's owner passkey and sessions in a finally. Non-blocking
+        applied: fragment guard, stale results cleared, rc != 0 without a failing test is a FAIL, process-group kill,
+        timeout 210 min matching the suite, results written after every test, --out required and outside the repo,
+        pages/min only when reader-ingest converted, lab state scoped to .lab-controls. Re-run of `routes` twice:
+        PASS both, the second without --reset-owner-passkeys (cleanup proven); the owner has no passkey left, so
+        `reader bootstrap` in Safari still works. Not reachable through
         the allowed interfaces: tutor bench (runs in the worker over docker exec) and tutor cost per question (no API
         exposes agent_spend). The route names differ from the brief: compile is POST /api/lessons/{id}/compile, the
         course import POST /api/pipeline/courses. Import waits for the owner's 'import approved' (converter r2, ad0da76)." }
