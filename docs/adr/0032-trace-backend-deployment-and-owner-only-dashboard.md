@@ -41,7 +41,7 @@ Measurements behind this ADR, all zero credit:
 | Option | Gives | Costs (numbers) |
 | --- | --- | --- |
 | **A. SQLite on MLflow's own volume** | No secret in MLflow. MLflow on no network with Postgres. The stock image plus a 2-line derived image (a non-root data directory). The measured configuration | A second store to back up (a labelled volume). SQLite is single-writer, which is fine at `--workers 1` and ≈ 3 spans/s |
-| B. A database in reader-ai's Postgres (ADR-0018's text) | One backup set | The stock image has no Postgres driver (`import psycopg2` fails in `ghcr.io/mlflow/mlflow:v3.18.0`, measured), so a derived image with a hash-locked driver is needed. MLflow would need the database password, which makes it a secret consumer (ADR-0026 delivery, wait wrapper). It would also join `core`, where today the only role is the `postgres` superuser (SRV-AUTH note 2): a third-party UI server would hold the app database's superuser password. Memory: see the spike |
+| B. A database in reader-ai's Postgres (ADR-0018's text) | One backup set | The stock image has no Postgres driver: `import psycopg2` fails in `ghcr.io/mlflow/mlflow:v3.18.0`, and with `postgresql://` MLflow exits at start with "No module named 'psycopg'" (measured). A derived image with a hash-locked driver is needed. MLflow would need the database password, which makes it a secret consumer (ADR-0026 delivery, wait wrapper). It would also join `core`, where today the only role is the `postgres` superuser (SRV-AUTH note 2): a third-party UI server would hold the app database's superuser password. Memory: no gain (below) |
 
 ### Dashboard access
 
@@ -97,7 +97,9 @@ Measurements behind this ADR, all zero credit:
 - **Store B (Postgres).**
   - It needs a derived image with a database driver (none in the stock image, measured).
   - It hands the app database's superuser password to a third-party UI server on `core`.
-  - It buys nothing at this load: memory is in the spike table, and the stored volume is small, at bytes per span in `spikes/obs-stack/RESULT.md`.
+  - It buys nothing at this load:
+    - MLflow peaked at 440 MiB on Postgres and 443 MiB on SQLite over the same 8-minute lesson replay plus a 10,080-span bulk, and Postgres added 45–70 MiB of its own;
+    - SQLite stored 927 bytes per span, so a whole-book compile (≈ 11,000 spans) is ≈ 10 MB.
 - **Access B and C (same origin).**
   - The UI's JavaScript would be same-origin with the app, and the app's only cross-site guard for state changes is the Origin check, which a same-origin script passes.
 - **Access D (subdomain).**
