@@ -170,15 +170,28 @@ def slice_inputs(out: Path, steps: str) -> dict[str, str]:
     yaml = YAML(typ="safe")
     plan = yaml.load((REPO / "pilot" / "bashir" / "course.yaml").read_text("utf-8"))
     questions = yaml.load((REPO / "spikes" / "embeddings-local" / "questions-v2.yaml").read_text("utf-8"))
+    # SRV-TUTOR VEC-TUTOR-7's fixed bench question (step tutor-bench)
+    fixed = yaml.load((REPO / "spec" / "fixtures" / "SRV-TUTOR" / "bench-fixed.yaml").read_text("utf-8"))
     plan_path, questions_path = out / "slice-plan.json", out / "slice-questions.json"
+    fixed_path = out / "slice-tutor-fixed.json"
     plan_path.write_text(json.dumps(plan, ensure_ascii=False, default=str), "utf-8")
-    picked = [{"id": q["id"], "gold_pages": q["gold_pages"], "question": q["question"]} for q in questions["questions"]]
-    questions_path.write_text(json.dumps(picked, ensure_ascii=False), "utf-8")
-    return {
+
+    def pick(qs: list[dict[str, object]]) -> list[dict[str, object]]:
+        return [{k: q[k] for k in ("id", "chapter", "gold_pages", "question")} for q in qs]
+
+    questions_path.write_text(json.dumps(pick(questions["questions"]), ensure_ascii=False), "utf-8")
+    fixed_path.write_text(json.dumps(pick(fixed["questions"]), ensure_ascii=False), "utf-8")
+    inputs = {
         "READER_SLICE_STEPS": steps,
         "READER_SLICE_PLAN": str(plan_path.resolve()),
         "READER_SLICE_QUESTIONS": str(questions_path.resolve()),
+        "READER_SLICE_TUTOR_FIXED": str(fixed_path.resolve()),
     }
+    # The tutor bench's resume (slice.sh --tutor-bench-from/--tutor-bench-dir): passed on only when set.
+    for name in ("READER_TUTOR_BENCH_FROM", "READER_TUTOR_BENCH_DIR"):
+        if os.environ.get(name):
+            inputs[name] = os.environ[name]
+    return inputs
 
 
 def main() -> int:

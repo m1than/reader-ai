@@ -17,6 +17,8 @@ const QuestionStateSchema = v.object({
   answer: v.optional(Answer),
   grounded: v.optional(v.boolean()),
   error_code: v.optional(v.string()),
+  // SRV-TUTOR FR-TUTOR-2: the question's own spend, once it is no longer queued (the bench reads it)
+  usage: v.optional(v.object({ usd: v.number(), output_tokens: v.number(), thinking_tokens: v.nullable(v.number()) })),
 });
 const HistoryItemSchema = v.object({
   question_id: v.string(),

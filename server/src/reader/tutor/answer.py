@@ -24,7 +24,7 @@ from reader.tutor.errors import TutorError, TutorTransient
 
 SYSTEM_PROMPT: Final = Path(__file__).resolve().parent / "prompts" / "answer-v1.md"
 # The prompt without sources gets what the bounds give question, cell and JSON overhead: 3000 + 4000 + 1000.
-_QUESTION_CELL_BYTES: Final = params.PROMPT_BYTES_MAX - params.RETRIEVE_K * params.SPAN_BYTES_MAX
+_QUESTION_CELL_BYTES: Final = params.QUESTION_CELL_BYTES_MAX
 _FENCE: Final = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n```\Z", re.DOTALL)
 _BLOCK_KEYS: Final = frozenset({"text", "spans", "quote"})
 _TOP_KEYS: Final = frozenset({"blocks", "insufficient"})
@@ -117,7 +117,7 @@ def build_prompt(question: str, cell: Cell | None, spans: Sequence[Span]) -> Pro
     """FR-TUTOR-6: the user prompt as one JSON document, sized after escaping, lowest ranks dropped first."""
     sources = [
         Source(f"s{i + 1}", s.span_id, s.page, cut_bytes(s.text, params.SPAN_BYTES_MAX))
-        for i, s in enumerate(spans[: params.RETRIEVE_K])
+        for i, s in enumerate(spans[: params.SOURCES_MAX])
     ]
     if not sources:
         raise TutorError("sources_unavailable")

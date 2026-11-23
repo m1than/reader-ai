@@ -14,6 +14,7 @@
 //            (serious and critical) on the list and the lesson, no horizontal scroll, prose type and column, the
 //            skip link and the contents (toggle at 390, column at 1280 and 1024, an entry focuses its cell). Review
 //            screenshots (sign-in, list, L02 parts, not-found) go to READER_LIVE_OUT/ui. Spends nothing (no Run, no Ask).
+//   tutor-bench  SRV-TUTOR's bench (VEC-TUTOR-7): questions-v2 with v03 → t01 (40) over the HTTP API; ≈ $1.8.
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
 // snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots and READER_LIVE_OUT/ui, and the `ui` step also
 // writes the L02 revision, the lesson list and the tutor history (they hold book text and questions) to
@@ -21,8 +22,9 @@
 // committed.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { benchSet, hitsGold, mergeRuns, summary, type BenchRecord } from '../../../web/src/tutor/bench.ts';
 
 const OUT = resolve(process.env.READER_LIVE_OUT ?? 'out');
 const SHOTS = resolve(OUT, 'screenshots');
@@ -32,18 +34,20 @@ const LESSON_PLAN_ID = 'L02';
 const MATERIAL_ID = 'bashir-2025';
 const NIL = '00000000-0000-4000-8000-000000000000';
 const TERMINAL = new Set(['converged', 'open_findings', 'budget_exhausted', 'stage_failed']);
-// The agent's own questions about L02's topic (chapter 2); v03 comes from questions-v2.
+// The agent's own questions about L02's topic (chapter 2); the first comes from SRV-TUTOR's bench-fixed.yaml (t01).
 const TUTOR_EXTRA = [
   'Что в этой главе понимается под децентрализацией и зачем она нужна?',
   'Какие уровни или способы децентрализации системы описаны в этой главе?',
 ];
 
 type Plan = { material: { sha256: string } };
-type Question = { id: string; gold_pages: number[]; question: string };
+type Question = { id: string; chapter: number; gold_pages: number[]; question: string };
 type Hit = { page: number };
 
 const plan = (): Plan => JSON.parse(readFileSync(process.env.READER_SLICE_PLAN ?? '', 'utf-8')) as Plan;
 const questions = (): Question[] => JSON.parse(readFileSync(process.env.READER_SLICE_QUESTIONS ?? '', 'utf-8')) as Question[];
+// SRV-TUTOR's bench-fixed.yaml (t01), written by web_live.py's slice_inputs
+const fixedQuestions = (): Question[] => JSON.parse(readFileSync(process.env.READER_SLICE_TUTOR_FIXED ?? '', 'utf-8')) as Question[];
 const only = (step: string) => test.skip(!STEPS.has(step), `step ${step} not requested`);
 const now = () => performance.now();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -262,12 +266,13 @@ test('tutor: three questions through the Ask panel', async () => {
   if (!page.url().includes(lessonId)) await page.goto(`/lessons/${lessonId}`);
   const panel = page.getByRole('region', { name: 'Tutor' });
   await expect(panel).toBeVisible({ timeout: 30_000 });
-  const v03 = questions().find((q) => q.id === 'v03')!;
+  // t01 replaces questions-v2 v03, whose premise the book does not support (SRV-TUTOR VEC-TUTOR-7, 2026-11-23)
+  const t01 = fixedQuestions()[0]!;
   type Asked = { n: number; question_id: string | null; ask_status: number; latency_s: number | null;
     state: string | null; grounded: boolean | null; error_code: string | null };
   const asked: Asked[] = [];
   const waiting = panel.getByText('The tutor is answering…');
-  for (const [i, q] of [v03.question, ...TUTOR_EXTRA].entries()) {
+  for (const [i, q] of [t01.question, ...TUTOR_EXTRA].entries()) {
     await panel.getByLabel('Ask the tutor').fill(q);
     const t = now();
     // This question's own POST, not the previous answer still on screen (deep-reviewer, 2026-11-23).
@@ -429,4 +434,74 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     expect.soft(l.p_font_family.startsWith('ui-serif'), `prose family ${name}`).toBe(true);
     expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '30px' : '36px');
   }
+});
+
+// SRV-TUTOR NFR-TUTOR-1..3 over the HTTP API (VEC-TUTOR-7): questions-v2 with v03 → t01 (40 independent questions),
+// all asked from L02 without a cell (retrieval is book-wide), each polled every 0.5 s to a terminal state. Each run
+// writes its own record file to READER_TUTOR_BENCH_DIR (default: the run's OUT) and asks only questions no earlier
+// run file there recorded; READER_TUTOR_BENCH_FROM skips further by index. A 429 whose body code is
+// daily_budget_exhausted stops the run (resume the next UTC day); the summary merges every run file. Numbers, states
+// and ids only.
+test('tutor-bench: the 40 bench questions over the HTTP API', async () => {
+  only('tutor-bench');
+  test.setTimeout(150 * 60_000);
+  await ensureLesson();
+  const set = benchSet(questions(), fixedQuestions());
+  const setIds = set.map((q) => q.id);
+  const dir = resolve(process.env.READER_TUTOR_BENCH_DIR || OUT);
+  mkdirSync(dir, { recursive: true });
+  const prior = readdirSync(dir)
+    .filter((f) => /^tutor-bench-.+\.json$/.test(f))
+    .sort()
+    .map((f) => (JSON.parse(readFileSync(resolve(dir, f), 'utf-8')) as { records: BenchRecord[] }).records);
+  const done = new Set(mergeRuns(prior).map((r) => r.id));
+  const from = Number(process.env.READER_TUTOR_BENCH_FROM ?? '0');
+  const runFile = resolve(dir, `tutor-bench-${new Date().toISOString().replace(/[:.]/g, '')}.json`);
+  const records: BenchRecord[] = [];
+  let stoppedAt: string | null = null;
+  const report = () => {
+    writeFileSync(runFile, `${JSON.stringify({ lesson_id: lessonId, records }, null, 2)}\n`);
+    results.tutor_bench = {
+      lesson_id: lessonId, dir_runs: prior.length + 1, from, stopped_at: stoppedAt, asked_this_run: records.length,
+      summary: summary(mergeRuns([...prior, records]), setIds),
+    };
+    save();
+  };
+  for (const q of set.slice(from).filter((x) => !done.has(x.id))) {
+    // The retrieval predictor (NFR-TUTOR-3): is a gold page among the tutor's 8 hits? POST /api/search spends nothing.
+    const goldInTop8 = hitsGold((await search(q.question, 8)).results.map((h) => h.page), q.gold_pages);
+    const body = { question: q.question };
+    const t = now();
+    let res = await post(`/api/lessons/${lessonId}/ask`, body);
+    for (let tries = 0; res.status() === 409 && tries < 20; tries += 1) { // the previous row is still finalising
+      await sleep(1000);
+      res = await post(`/api/lessons/${lessonId}/ask`, body);
+    }
+    if (res.status() === 429) {
+      const code = ((await res.json().catch(() => ({}))) as { error?: string }).error;
+      expect(code, `ask ${q.id}: a 429 other than the daily cap`).toBe('daily_budget_exhausted');
+      stoppedAt = q.id;
+      break;
+    }
+    expect(res.status(), `ask ${q.id}`).toBe(202);
+    const qid = ((await res.json()) as { question_id: string }).question_id;
+    type Got = { state: string; grounded?: boolean;
+      answer?: { insufficient: boolean; blocks: { supported: boolean; citations: { page: number }[] }[] };
+      usage?: { usd: number; output_tokens: number; thinking_tokens: number | null } };
+    let got: Got = { state: 'queued' };
+    while (got.state === 'queued' && now() - t < 630_000) {
+      await sleep(500);
+      got = (await (await api.get(`/api/lessons/${lessonId}/questions/${qid}`)).json()) as Got;
+    }
+    const blocks = got.answer?.blocks ?? [];
+    records.push({
+      id: q.id, chapter: q.chapter, question_id: qid, state: got.state, wall_s: +((now() - t) / 1000).toFixed(2),
+      usd: got.usage?.usd ?? 0, output_tokens: got.usage?.output_tokens ?? 0, thinking_tokens: got.usage?.thinking_tokens ?? null,
+      grounded: got.grounded === true, insufficient: got.answer?.insufficient === true, blocks: blocks.length,
+      blocks_with_verified_quote: blocks.filter((b) => b.supported).length,
+      gold_in_top8: goldInTop8, gold_cited: hitsGold(blocks.flatMap((b) => b.citations.map((c) => c.page)), q.gold_pages),
+    });
+    report();
+  }
+  report();
 });

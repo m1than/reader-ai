@@ -39,6 +39,7 @@ from .conftest import (
 
 pytestmark = pytest.mark.anyio
 D = Decimal
+NO_SPEND = {"usd": 0.0, "output_tokens": 0, "thinking_tokens": None}  # FR-TUTOR-2: a row no model call reached
 
 
 # ---- FR-TUTOR-3, -7, -8, -9: the handler
@@ -441,7 +442,7 @@ async def test_enqueue_failure_finishes_the_row(pg: Pg, tmp_path: Path, jobs: An
         assert r.status_code == 202
         qid = r.json()["question_id"]
         assert (await c.get(f"/api/lessons/{lesson}/questions/{qid}")).json() == {
-            "state": "failed", "error_code": "tutor_failed"
+            "state": "failed", "error_code": "tutor_failed", "usage": NO_SPEND
         }
         # INV-TUTOR-6: nothing stays queued, so a new question can be asked
         assert (await c.post(f"/api/lessons/{lesson}/ask", json={"question": "again"})).status_code == 202
@@ -458,7 +459,7 @@ async def test_stale_rows_are_finalised_by_reads_and_the_busy_check(pg: Pg, tmp_
     lost = await insert_question(w, age_s=61)
     async with client(w, jobs=jobs) as c:
         assert (await c.get(f"/api/lessons/{lesson}/questions/{lost}")).json() == {
-            "state": "failed", "error_code": "lost"
+            "state": "failed", "error_code": "lost", "usage": NO_SPEND
         }
         dead = await insert_question(w, age_s=200)
         jobs.statuses[tutor_jobs.job_key(dead)] = "dead"

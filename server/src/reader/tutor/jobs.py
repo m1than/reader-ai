@@ -46,7 +46,19 @@ class AnswerArgs(BaseModel):
 
 class Hit(Protocol):
     @property
-    def span_id(self) -> str: ...
+    def span_id(self) -> str: ...  # the chunk's primary span
+
+    @property
+    def span_ids(self) -> list[str]: ...  # every span the chunk overlaps, in chunk order
+
+
+def candidate_span_ids(hits: list[Any]) -> list[str]:
+    """FR-TUTOR-5: every hit's primary span in rank order, then every hit's other chunk spans in rank order,
+    no repeats; the budget drops from the end, so neighbours go before any primary."""
+    ordered = [hit.span_id for hit in hits]
+    for hit in hits:
+        ordered.extend(s for s in hit.span_ids if s != hit.span_id)
+    return list(dict.fromkeys(ordered))
 
 
 class Found(Protocol):
@@ -112,11 +124,11 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
         raise TutorError("sources_unavailable")
     engine = conn.engine
     found = await deps.search(engine, q.owner_id, q.question, params.RETRIEVE_K, q.material_sha256)
-    span_ids = [hit.span_id for hit in found.results]
+    span_ids = candidate_span_ids(found.results)[: params.SOURCES_MAX]  # beyond the alias cap nothing is sent
     if not span_ids:
         raise TutorError("sources_unavailable")
     loaded = await store.spans_by_ids(conn, q.owner_id, span_ids)
-    spans = [Span(s, loaded[s][0], loaded[s][1]) for s in dict.fromkeys(span_ids) if s in loaded]
+    spans = [Span(s, loaded[s][0], loaded[s][1]) for s in span_ids if s in loaded]
     cell = None
     if q.cell_id is not None:
         cells = await asyncio.to_thread(store.revision_cells, deps.blobs_root, q.revision_sha256)
