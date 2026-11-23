@@ -832,6 +832,57 @@ tasks:
         verify-all.sh inputs and report; web_live.py and passkey_check.py details after a TAB; slice.live.ts writes
         axe.json. Cross-spec: SRV-TUTOR FR-TUTOR-13 (dod.yaml) becomes a pointer to this index at its next
         revision. This entry duplicates the one on V/owner-housekeeping; keep this one when merging." }
+  - { id: V.WEB-polish, stage: V, kind: fix, track: product, status: in_progress, needs: [V.WEB-min, V.live],
+      branch: V/WEB-polish,
+      what: "Owner 2026-11-23: 'the right padding, UI and UX implementation' — a polish pass on the web app against the
+        live L02 (Bashir pilot). Specs amended: WEB-NOTEBOOK FR-NOTEBOOK-1/2/3/9 and new -10/-11/-12, WEB-UI FR-UI-6 and
+        new FR-UI-10/-11, SRV-TUTOR FR-TUTOR-11 (web only). Live `ui` step added to e2e/web/live/owner.slice.ts and to
+        slice.sh's default steps (spends nothing).",
+      findings: "From the live screenshots (1280/1024/390, 2026-11-23): (1) explain cells listed up to 29 references,
+        e.g. 16 × '…, p. 70'; route source_refs had no title and showed 64-hex span ids, overflowing at 390 px; tutor
+        answers repeated the full title per span. (2) 8 recall cells and the notes cell rendered as bare labels (content in
+        metadata); the diagnostic questions were never shown. (3) open cells read 'open open'. (4) 27 cells, ~17,000 px,
+        no contents, no way back, the tutor at the very bottom. (5) ~90 Cyrillic characters per line (46rem at 16px).
+        (6) one serif for prose and chrome, ad-hoc rem spacing. (7) list rows ran status and date into the title.
+        (8) the tutor panel had no styles (inline label, ~200px text area). (9) lab code soft-wrapped at 390 px.
+        (10) bare 'Loading…', error without Retry or a way back. (11) no skip link; focus rings on library buttons only.
+        Outside the WEB specs: the sign-in and bootstrap pages are SRV-AUTH's unstyled server HTML; no compile-progress UI
+        exists (owner API only).",
+      review: "deep-reviewer (Fable) single round on the spec diff d5e59b1 (outside the complex areas): changes, 5
+        blocking, fixed without a second round (coordinator 2026-11-23). B1 FR-NOTEBOOK-11 responsive nav: below 60rem the
+        closed list is display:none (out of tab order and the accessibility tree), at 60rem+ the Contents button is
+        display:none and the list always shows, the sticky column is capped at the viewport height with overflow-y:auto;
+        fix: stated in the spec, app.css, and [live] checks in the `ui` step (390: links hidden before the toggle, visible
+        after, an entry focuses and scrolls to its cell and closes the list; 1280/1024: button hidden, nav visible) — PASS.
+        B2 borrowed title: LessonView test 'names an untitled route source after an explain cell of the same material'.
+        B3 grouping edge cases (span without ':' is its own material; citations with neither span nor url dropped; only
+        integer pages ≥ 1, no numeric strings): spec text and the 'ignores …' test cases. B4 FR-UI-10 live checks: the
+        `ui` step asserts p font-size 17px, line-height 28.05px ±0.1, family starting ui-serif, h1 36px (30px at 390),
+        widest p > 0 and ≤ 608px; `ui` joins slice.sh's default steps and SLICE_TIMEOUT_S grows 210 → 220 min; the
+        characters-per-line figure is recorded, not asserted. B5 one `main`: the shell renders a single
+        main#content tabIndex -1 around the router outlet and not-found; aria-busy moved to the page container; unit
+        tests on /, a loaded lesson, a failed lesson and /no-such-page; live: the skip link focuses main#content.
+        Non-blocking, all applied: rem type sizes, the named serif stack, no web font for text (KaTeX math fonts only);
+        styles.test scans color-mix and border/outline/box-shadow/fill/caret colours and the top/right/bottom/left
+        offsets; skeletons are the library Skeleton in role=status with visually hidden text; FR-NOTEBOOK-10 declares
+        native details as a deviation from the library collapsible, `back` is plain text, tests for no back and for a
+        non-empty source; contents headings come from the remark parse (a '#' inside a fence is not one, tested), labs
+        numbered 'Lab 1…', only unanswered open questions counted, the nav sits inside main before the cells, cells
+        have tabIndex -1; FR-NOTEBOOK-12: a 404 shows 'Lesson not found' with only a way back, other errors Retry;
+        formatCitation lost its dead span branch (URLs only); synthetic titles and headings in AskPanel.test; the
+        owner.slice.ts header comment names the ui/data files that hold book text. Found during Green: a scrolling
+        markdown table is an axe serious issue (scrollable-region-focusable) and a 6-column L02 table was 697px wide at
+        break-word, so tables wrap anywhere and fit the column (FR-UI-10 text updated).",
+      measured: "Live `ui` step after (2026-11-23, stack rebuilt by `reader up` from V/WEB-polish, only caddy recreated):
+        axe serious/critical 0 on the list and L02 at 1280/1024/390; horizontal overflow 0 everywhere; prose 17px /
+        28.05px, column 608px (358px at 390); characters per line, median estimate 60 at 1280/1024 and 35 at 390; the
+        PASS line 'browser: ui: review screenshots and axe at 1280, 1024 and 390 px'. Sign-in page axe (report only):
+        0 serious/critical at all widths. Unit: 176 Vitest tests pass; NFR-UI-1 initial chunk unchanged in budget.",
+      follow_up: "SRV-AUTH amendment (auth is a complex area, full review): style the sign-in and bootstrap pages
+        (currently browser-default HTML, 8px margin, Times) with a same-origin stylesheet under the existing CSP, or move
+        the ceremony into the SPA as WEB-UI's stage-4b defer plans; axe is clean there today. No library change needed.",
+      note: "Screenshots and the L02 replay data stay outside the repository (book text). The stack now runs from the
+        V/WEB-polish worktree (reader up); the live agent's next `reader up` from its own worktree restores its build." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
