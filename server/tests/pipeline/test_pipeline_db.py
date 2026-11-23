@@ -1,9 +1,10 @@
-# @trace VEC-PIPELINE-2, FR-PIPELINE-5, FR-PIPELINE-6, FR-PIPELINE-12, INV-PIPELINE-1, INV-PIPELINE-2, INV-PIPELINE-3, INV-PIPELINE-4
+# @trace VEC-PIPELINE-2, FR-PIPELINE-5, FR-PIPELINE-6, FR-PIPELINE-8, FR-PIPELINE-12, INV-PIPELINE-1, INV-PIPELINE-2, INV-PIPELINE-3, INV-PIPELINE-4
 """The compile loop end to end on the real job machinery: each VEC-PIPELINE-2 case and recompile, run state
 derivation, provenance, citations and logs. [db]"""
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import uuid
@@ -180,6 +181,19 @@ async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tm
                 assert await _spent(env, run) == Decimal(str(recompile["expect_spent"]))
             if "expect_state" in recompile:
                 assert status["state"] == recompile["expect_state"]
+
+
+async def test_converged_run_with_a_finding_has_no_deltas_mismatch(pg: Pg, tmp_path: Path) -> None:
+    """FR-PIPELINE-8 (d) on the stored revision: a converged run that appends one non-blocking open cell keeps
+    deltas clean (V.live 2026-11-23 reported deltas.mismatch on every run that appended a findings cell)."""
+    case = copy.deepcopy(BY_NAME["clean-first-pass"])
+    case["results"][2]["nonblocking"] = 1
+    async with pipeline_env(pg, tmp_path, **_env_kwargs(case)) as env:
+        _, status = await _run_case(env, case)
+        assert status["state"] == "converged", status
+        assert await _open_cells(env, status["latest_sha256"]) == {"blocking": 0, "nonblocking": 1}
+        assert status["g2"] is not None
+        assert "deltas.mismatch" not in status["g2"]["failing"], status["g2"]
 
 
 async def test_stalled_run_is_resumed_by_ensure(pg: Pg, tmp_path: Path) -> None:
