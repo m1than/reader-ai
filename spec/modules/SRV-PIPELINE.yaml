@@ -49,9 +49,12 @@
 # Integration (V/SRV-TUTOR-impl, 2026-11-23): with SRV-INGEST's migration in the heads, the test fixture
 # `import_material` fills the real tables' NOT NULL columns (ingests.artifact_id, span_count, outline_count,
 # outline_source, pages_without_text; material_spans boxes); no oracle changed.
-# Amendment (DRAFT, 2026-11-23, V/onboarding): FR-PIPELINE-14 (course import as a function, with re-plan removal of
-# unstarted lessons and renumbering for origin `study_plan`) and FR-PIPELINE-15 (run creation as a function), for
-# SRV-PLAN. Paired: SRV-LESSON `delete_unstarted_lesson` and `reorder_lessons`. Awaits deep-reviewer.
+# Amendment (DRAFT, 2026-11-23, V/onboarding; revision 2 on V/plan after deep-reviewer round 1 B11/B12):
+# FR-PIPELINE-14 (a per-course advisory lock; course import as a function, with re-plan removal of unstarted lessons,
+# re-checked under the lock, and renumbering for origin `study_plan`) and FR-PIPELINE-15 (run creation takes the same
+# course lock and can refuse `already_started`), for SRV-PLAN. Paired: SRV-LESSON `delete_unstarted_lesson` and
+# `reorder_lessons`. The `proposed_requirements` key is promoted in the same commit as the items' Red tests; nothing
+# merges while any `proposed_*` key remains. Awaits deep-reviewer.
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).
@@ -262,29 +265,44 @@ requirements:
 proposed_requirements:
   - id: FR-PIPELINE-14
     text: >-
-      **Course import as a function.** FR-PIPELINE-1's import becomes `reader.pipeline.courses.import_course_plan(conn,
-      owner_id, plan, *, origin: "manifest" | "study_plan") -> ImportResult`, called by the existing route (origin
-      `manifest`, behaviour unchanged) and by SRV-PLAN's confirm (origin `study_plan`, inside the caller's
-      transaction). For origin `study_plan` only:
-      - lessons of the course that are absent from the new plan and have **not started** (no lesson revision and no
-        compile run) are removed: their `course_plans` row, then the SRV-LESSON lesson through
-        `delete_unstarted_lesson` (SRV-LESSON paired change; it refuses a lesson with any revision);
-      - a started lesson absent from the new plan is an error `started_lesson_dropped` (SRV-PLAN FR-PLAN-6 keeps them
-        fixed, so this means a bug; the transaction rolls back);
-      - after the upserts, the course's lessons are renumbered to plan order through SRV-LESSON `reorder_lessons`
-        (paired change: one statement under a deferred unique constraint, or two passes through negative ordinals),
-        so the lesson list follows the plan after any re-plan;
-      - `course_plans` gains `origin text NOT NULL DEFAULT 'manifest' CHECK in (manifest, study_plan)` (migration in
-        `reader/pipeline/migrations`), and a course holds rows of one origin only (`origin_conflict` otherwise).
+      **Course lock and course import as a function.**
+      - `reader.pipeline.courses.lock_course(conn, owner_id, plan_course_id)` takes
+        `pg_advisory_xact_lock(COURSE_LOCK_NAMESPACE, hashtext(owner_id || ':' || plan_course_id))`, held to the end of
+        the caller's transaction (a hash collision only serializes two courses). Lock order everywhere: the course
+        lock before FR-PIPELINE-11's per-lesson lock.
+      - FR-PIPELINE-1's import becomes `import_course_plan(conn, owner_id, plan, *, origin: "manifest" |
+        "study_plan") -> ImportResult`, called by the existing route (origin `manifest`, behaviour unchanged; the
+        route now takes the course lock too) and by SRV-PLAN's confirm (origin `study_plan`, inside the caller's
+        transaction, which already holds the course lock).
+      For origin `study_plan` only:
+      - lessons of the course that are absent from the new plan are removed when they have **not started**,
+        re-checked inside this transaction immediately before each removal: their `course_plans` row, then the
+        SRV-LESSON lesson through `delete_unstarted_lesson` (SRV-LESSON paired change: it deletes the lesson only when
+        no row refers to it — no revision, no compile run, no tutor row — and otherwise raises `lesson_started`);
+      - a started lesson absent from the new plan, or `lesson_started` from that call, is `started_lesson_dropped`
+        (SRV-PLAN FR-PLAN-6 keeps started lessons fixed, so this is a guard; the transaction rolls back);
+      - a lesson kept with a changed page range or title gets its `course_plans` row updated (`g1_at` as
+        FR-PIPELINE-1); a started lesson's range never changes (SRV-PLAN fixes it), else `started_lesson_dropped`;
+      - after the upserts, the course's lessons are renumbered to plan order 1..n through SRV-LESSON `reorder_lessons`
+        (paired change: two passes, first every ordinal + (current max + n), then the final values, because
+        `UNIQUE (course_id, ordinal)` is not deferrable and `ordinal ≥ 1`), so the lesson list follows the plan after
+        any re-plan;
+      - `course_plans` gains `origin text NOT NULL DEFAULT 'manifest' CHECK (origin IN ('manifest', 'study_plan'))`
+        (migration `pipeline_0002` in `reader/pipeline/migrations`), and a course holds rows of one origin only
+        (`origin_conflict`, 409, otherwise).
       `ImportResult` = `{course_id, lessons: [(plan_lesson_id, lesson_id, ordinal)], created, removed}`. [db] with the
       pilot: importing pilot/bashir/course.yaml through the route gives the same `course_plans` and lesson rows
       (ids, ordinals, page ranges, `g1_at` rules) as before the change, and a second import changes nothing; a study
       plan re-import removes only unstarted lessons and renumbers the rest in plan order.
   - id: FR-PIPELINE-15
     text: >-
-      **Run creation as a function.** FR-PIPELINE-11's run creation is `reader.pipeline.runs.start_compile(conn, jobs,
-      owner_id, lesson_id, cap_usd | None) -> run_id`, raising `compile_running` (and SRV-AGENT's budget refusals as
-      today), called by the route and by SRV-PLAN's confirm after its commit. No behaviour changes. [db]
+      **Run creation under the course lock.** FR-PIPELINE-11's `reader.pipeline.runs.create_run(engine, jobs,
+      owner_id, lesson_id, cap_usd, *, require_course_unstarted=False) -> run_id` first takes the course lock of the
+      lesson's `course_plans` row (FR-PIPELINE-14; none for a lesson without one), then the per-lesson lock as today,
+      and re-reads the lesson inside that transaction (a lesson removed by a concurrent re-plan is `not_found`). With
+      `require_course_unstarted`, any compile run of any lesson of the same plan course raises `already_started`
+      (SRV-PLAN's compile-first target). `compile_running` and SRV-AGENT's budget refusals are unchanged; the route
+      passes the default and behaves as before. [db]
 
 invariants:
   - id: INV-PIPELINE-1

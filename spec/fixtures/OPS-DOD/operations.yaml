@@ -177,7 +177,7 @@ operations:
   # (ADR-0029 proposed). No route or command is named yet: they enter the registry only when implemented, and are
   # added here then (POST /api/materials/uploads, GET /api/materials/uploads/{id}, …/cancel, …/retry, DELETE …,
   # GET /api/materials/converter; reader-ingest --watch; POST /api/plans/preview, POST /api/plans/confirm,
-  # GET /api/plans/{course_id}). Every cell without a test or a live label is `missing`.
+  # GET /api/plans?material_id=…). Every cell without a test or a live label is `missing`.
   - id: material.upload
     title: Upload a PDF in the browser, follow its host-side conversion and indexing, cancel or retry it
     surface: [web, api]
@@ -196,19 +196,21 @@ operations:
   - id: course.plan
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
     surface: [web, api]
-    specs: [SRV-PLAN, SRV-PIPELINE, WEB-IMPORT, WEB-UI]
+    specs: [SRV-PLAN, SRV-PIPELINE, SRV-LESSON, WEB-IMPORT, WEB-UI]
     gate: tracked
     criteria:
       functional:
-        items: [FR-PLAN-1, FR-PLAN-4, FR-PLAN-6, FR-PLAN-7, FR-PLAN-9, VEC-PLAN-1, FR-IMPORT-4, FR-IMPORT-5, FR-IMPORT-6]
-        missing: "SRV-PIPELINE proposed FR-PIPELINE-14/-15 and WEB-UI proposed FR-UI-12 (under review); no test yet"
+        items: [FR-PLAN-1, FR-PLAN-3, FR-PLAN-4, FR-PLAN-6, FR-PLAN-7, FR-PLAN-9, INV-PLAN-2, INV-PLAN-3, VEC-PLAN-1, FR-IMPORT-4, FR-IMPORT-5, FR-IMPORT-6, FR-IMPORT-8]
+        missing: "proposed, under review, no test yet: SRV-PIPELINE FR-PIPELINE-14/-15, SRV-LESSON FR-LESSON-15, WEB-UI FR-UI-12"
       security: { items: [FR-PLAN-9, INV-PLAN-5] }
-      privacy: { items: [INV-PLAN-4, FR-PLAN-12] }
-      a11y: { missing: "no axe run on the study-time form and estimate states yet (WEB-IMPORT FR-IMPORT-9)" }
+      privacy: { items: [INV-PLAN-4, FR-PLAN-10, FR-PLAN-12] }
+      a11y: { missing: "no axe run on the study-time form and estimate states yet (WEB-IMPORT FR-IMPORT-9; at 1280, 1024 and 390 px once implemented)" }
       latency: { missing: "NFR-PLAN-1 (preview p95 ≤ 500 ms on the pilot) is a bench not yet run" }
-      cost: { missing: "the estimate (FR-PLAN-8) scales one measured lesson; confirm with compile_first spends under SRV-PIPELINE's cap, and no run through this operation is measured yet" }
+      cost: { missing: "the estimate (FR-PLAN-8, VEC-PLAN-2) scales one measured lesson and is not a bound; confirm with compile_first spends under SRV-PIPELINE's $8.00 cap and the live check never sets it, so no spend through this operation is measured yet" }
       observability: { items: [FR-PLAN-12] }
-      recovery: { items: [FR-PLAN-9, INV-PLAN-5, FR-IMPORT-6] }
+      recovery:
+        items: [FR-PLAN-9, INV-PLAN-5, FR-IMPORT-6]
+        missing: "proposed FR-PIPELINE-14/-15 (course lock, re-check under the lock, already_started); no test yet"
 
   - id: material.browse
     title: Browse my materials (list, outline, spans of a page)

@@ -251,6 +251,22 @@ requirements:
       and leaves SRV-AUTH's tables. Routes are declared as
       data in `reader.lessons.routes` (method, path, auth) and reach the app through SRV-AUTH's `ROUTERS` list.
 
+# ---- Paired amendment (DRAFT, 2026-11-23, V/plan, for SRV-PIPELINE FR-PIPELINE-14 and SRV-PLAN): removal of an
+# unstarted lesson and renumbering. Held under `proposed_requirements` (not read by trace-check) until the
+# deep-reviewer approves SRV-PLAN; promoted in the same commit as its Red tests. ----
+proposed_requirements:
+  - id: FR-LESSON-15
+    text: >-
+      **Unstarted lessons and order.** `store.delete_unstarted_lesson(conn, owner_id, lesson_id)` deletes the
+      owner's lesson only when no row refers to it: it deletes with `DELETE … WHERE id = :l AND owner_id = :o AND NOT
+      EXISTS (a lesson revision stage)`, and a foreign-key violation from any other referring row (a compile run, a
+      `course_plans` row still present, a tutor row; all `ON DELETE RESTRICT`) is caught inside a savepoint; both
+      raise `LessonWriteError("lesson_started")`, and an absent lesson raises `LessonWriteError("not_found")`.
+      `store.reorder_lessons(conn, owner_id, course_id, lesson_ids)` sets the ordinals of the listed lessons, which
+      must be exactly the course's lessons, to 1..n in list order, in two statements: first every ordinal +
+      (current max + n), then the final values, because `UNIQUE (course_id, ordinal)` is not deferrable and `ordinal
+      ≥ 1`; a list that is not the course's lessons raises `LessonWriteError("lessons_mismatch")`. [db]
+
 invariants:
   - id: INV-LESSON-1
     text: >-
