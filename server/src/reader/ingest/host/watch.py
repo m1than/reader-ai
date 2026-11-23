@@ -178,6 +178,8 @@ class Watcher:
             self.d.sleep(IDLE_WAIT_S)
             return
         state, strays = self.d.setup_state(), self.d.strays()
+        if strays > 0:  # a warning only: never killed, claims continue (FR-INGEST-22)
+            log.warning("stray_processes count=%d", strays)
         peek = self._next(container, "--peek", params.WAIT_MAX_S, "none", state, strays)
         kind, peeked = reply(peek, _peek_shape)
         if kind != "ok":

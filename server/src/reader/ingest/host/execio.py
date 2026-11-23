@@ -113,6 +113,9 @@ class SystemRunner:
                     overflow = True
                     kill()
                     break
+        except BaseException:  # an interrupt (the watcher's SIGTERM) never waits for the exec client
+            kill()
+            raise
         finally:
             code = process.wait()
             timer.cancel()
