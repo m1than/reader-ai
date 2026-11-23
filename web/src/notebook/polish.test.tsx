@@ -80,6 +80,15 @@ describe('metadata-only kinds (FR-NOTEBOOK-10)', () => {
     expect(within(cellEl('w01-diagnostic')).queryByRole('list')).toBeNull();
   });
 
+  it('still lists the questions when the source holds only some of them', async () => {
+    const cells = [
+      { cell_type: 'markdown', id: 'd', source: 'First question? is below.', metadata: { reader: { kind: 'diagnostic', questions: ['First question?', 'Second question?'] } } },
+    ];
+    await view({ ...notebook(), cells });
+    const list = within(cellEl('d')).getByRole('list');
+    expect(within(list).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['First question?', 'Second question?']);
+  });
+
   it('shows a recall card front and its back behind a closed "Show answer" disclosure', async () => {
     await view(nb());
     const recall = cellEl('r');
@@ -109,6 +118,27 @@ describe('metadata-only kinds (FR-NOTEBOOK-10)', () => {
   it('marks an empty notes cell as not saved', async () => {
     await view(nb());
     expect(within(cellEl('n')).getByText('Notes are not saved in this version.')).toBeTruthy();
+  });
+});
+
+describe('contents details (FR-NOTEBOOK-11, code review 2026-11-23)', () => {
+  it('renders neither the nav nor the Contents button without entries', async () => {
+    await view({ ...notebook(), cells: [{ cell_type: 'markdown', id: 'p', source: 'No heading here.', metadata: { reader: { kind: 'explain' } } }] });
+    expect(screen.queryByRole('navigation', { name: 'Lesson contents' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Contents' })).toBeNull();
+  });
+
+  it('marks the unbulleted contents and sources lists as lists', async () => {
+    await view();
+    expect(screen.getByRole('navigation', { name: 'Lesson contents' }).querySelector('ol')?.getAttribute('role')).toBe('list');
+    expect(within(cellEl('w01-explain')).getByRole('list', { name: 'Sources' }).getAttribute('role')).toBe('list');
+  });
+
+  it('moves focus to the cell a contents entry points at', async () => {
+    await view();
+    const nav = screen.getByRole('navigation', { name: 'Lesson contents' });
+    fireEvent.click(within(nav).getByRole('link', { name: 'Lab 1' }));
+    await waitFor(() => expect(document.activeElement).toBe(cellEl('w01-lab')));
   });
 });
 
@@ -209,8 +239,8 @@ describe('lesson page header and states (FR-NOTEBOOK-11, FR-NOTEBOOK-12)', () =>
 
   it('shows a busy skeleton with a status while the lesson loads', async () => {
     await mount(() => new Promise<Response>(() => undefined));
-    await waitFor(() => expect(document.querySelector('[aria-busy="true"][role="status"]')).toBeTruthy());
-    expect(document.querySelector('[aria-busy="true"][role="status"]')?.textContent).toContain('Loading the lesson');
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Loading the lesson'));
+    expect(document.querySelector('[aria-busy]')).toBeNull();
   });
 
   it('shows "Lesson not found" with only a way back on a 404', async () => {

@@ -19,16 +19,20 @@ const BackLink = () => (
   </Link>
 );
 
-/** FR-NOTEBOOK-12: the library skeleton in a busy status container. */
+/** FR-NOTEBOOK-12: a status with hidden text (no aria-busy: it would silence the status) and the library skeleton. */
 const LessonSkeleton = () => (
-  <div className="page" aria-busy="true" role="status">
-    <span className="visually-hidden">Loading the lesson</span>
-    <Skeleton.Root>
-      <Skeleton.Item variant="text" width="50%" height="2.25rem" />
-      <Skeleton.Item variant="text" width="100%" />
-      <Skeleton.Item variant="text" width="95%" />
-      <Skeleton.Item variant="text" width="70%" />
-    </Skeleton.Root>
+  <div className="page">
+    <p role="status" className="visually-hidden">
+      Loading the lesson
+    </p>
+    <div aria-hidden="true">
+      <Skeleton.Root>
+        <Skeleton.Item variant="text" width="50%" height="2.25rem" />
+        <Skeleton.Item variant="text" width="100%" />
+        <Skeleton.Item variant="text" width="95%" />
+        <Skeleton.Item variant="text" width="70%" />
+      </Skeleton.Root>
+    </div>
   </div>
 );
 

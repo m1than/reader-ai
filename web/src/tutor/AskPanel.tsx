@@ -230,7 +230,7 @@ export function AskPanel({ lessonId, revision, cellId, cellLabel = null, api }: 
       {history.length > 0 && (
         <>
           <h3>Earlier questions</h3>
-          <ul className="tutor-history">
+          <ul className="tutor-history" role="list">
             {history.map((item) => (
               <HistoryEntry key={item.question_id} item={item} />
             ))}

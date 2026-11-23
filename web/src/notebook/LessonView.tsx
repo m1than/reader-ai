@@ -71,7 +71,8 @@ function Sources({ refs }: { refs: Reference[] }) {
       <p className="sources-label" aria-hidden="true">
         Sources
       </p>
-      <ol className="references" aria-label="Sources">
+      {/* list-style none drops the list role in WebKit; role="list" restores it (FR-NOTEBOOK-2). */}
+      <ol className="references" aria-label="Sources" role="list">
         {refs.map((r, i) => (
           <li key={i}>
             {r.kind === 'link' ? (
@@ -286,18 +287,20 @@ export function LessonView({
               {open.length} open finding{open.length === 1 ? '' : 's'}
             </a>
           )}
-          <span className="contents-toggle">
-            <Button
-              size="sm"
-              variant="outline"
-              color="neutral"
-              aria-expanded={contentsOpen}
-              aria-controls={navId}
-              onClick={() => setContentsOpen((o) => !o)}
-            >
-              Contents
-            </Button>
-          </span>
+          {entries.length > 0 && (
+            <span className="contents-toggle">
+              <Button
+                size="sm"
+                variant="outline"
+                color="neutral"
+                aria-expanded={contentsOpen}
+                aria-controls={navId}
+                onClick={() => setContentsOpen((o) => !o)}
+              >
+                Contents
+              </Button>
+            </span>
+          )}
           <div className="lesson-controls">
             {labs.length > 0 && (
               <Button size="sm" variant="outline" disabled={state.resetting} onClick={() => controller.runAll(labs.map(({ c, id }) => ({ id, code: text(c.source) })))}>
@@ -320,26 +323,28 @@ export function LessonView({
           </div>
         </div>
       </header>
-      <nav id={navId} className="lesson-contents" aria-label="Lesson contents" data-open={contentsOpen}>
-        <p className="contents-label" aria-hidden="true">
-          Contents
-        </p>
-        <ol>
-          {entries.map((e) => (
-            <li key={`${e.href}:${e.label}`}>
-              <a
-                href={e.href}
-                onClick={(ev) => {
-                  setContentsOpen(false);
-                  focusHashTarget(ev);
-                }}
-              >
-                {e.label}
-              </a>
-            </li>
-          ))}
-        </ol>
-      </nav>
+      {entries.length > 0 && (
+        <nav id={navId} className="lesson-contents" aria-label="Lesson contents" data-open={contentsOpen}>
+          <p className="contents-label" aria-hidden="true">
+            Contents
+          </p>
+          <ol role="list">
+            {entries.map((e) => (
+              <li key={`${e.href}:${e.label}`}>
+                <a
+                  href={e.href}
+                  onClick={(ev) => {
+                    setContentsOpen(false);
+                    focusHashTarget(ev);
+                  }}
+                >
+                  {e.label}
+                </a>
+              </li>
+            ))}
+          </ol>
+        </nav>
+      )}
       <div className="cells" onFocusCapture={(e) => focusFrom(e.target)} onClickCapture={(e) => focusFrom(e.target)}>
         {notebook.cells.map((c, i) => (
           <CellView key={cellId(c, i)} cell={c} index={i} run={state.cells[cellId(c, i)]} controller={controller} resetting={state.resetting} titles={titles} />

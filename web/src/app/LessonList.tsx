@@ -15,7 +15,7 @@ export function LessonList({ lessons, locale }: { lessons: LessonSummary[]; loca
       {groupLessons(lessons, locale).map((course) => (
         <section key={course.course_id} aria-labelledby={`course-${course.course_id}`}>
           <h2 id={`course-${course.course_id}`}>{course.course_title}</h2>
-          <ul>
+          <ul role="list">
             {/* FR-UI-6: one row — ordinal, title, then status and date as separate muted elements. */}
             {course.lessons.map((l) => (
               <li key={l.lesson_id} className={l.latest_sha256 ? 'lesson-row published' : 'lesson-row'}>

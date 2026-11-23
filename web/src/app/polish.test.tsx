@@ -1,6 +1,6 @@
 // @trace FR-UI-6 FR-UI-11 VEC-UI-2
 // The shell's presentation, amended from the live screenshots (2026-11-23, V/WEB-polish).
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readJson } from './testing/fixtures';
 import { load } from './testing/load';
@@ -74,11 +74,29 @@ describe('skip link, one main and shell loading (FR-UI-11)', () => {
     shellTarget();
   });
 
-  it('shows a busy skeleton with a status, not a bare line, while /api/me loads', async () => {
+  it('shows a status and a skeleton, not a bare line and no aria-busy, while /api/me loads', async () => {
     await mount('/', () => new Promise<Response>(() => undefined));
-    const busy = document.querySelector('[aria-busy="true"][role="status"]') as HTMLElement;
-    expect(busy).toBeTruthy();
-    expect(busy.textContent).toContain('Loading');
+    expect(screen.getByRole('status').textContent).toBe('Loading');
+    expect(document.querySelector('[aria-busy]')).toBeNull();
     expect(screen.queryByText('Loading…')).toBeNull();
+  });
+
+  it('the lesson list loads with the same status pattern', async () => {
+    await mount('/', (url) => (url === '/api/me' ? json(200, me) : new Promise<Response>(() => undefined)));
+    await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Loading the lessons'));
+    expect(document.querySelector('[aria-busy]')).toBeNull();
+  });
+
+  it('following the skip link focuses main#content', async () => {
+    await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
+    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
+    fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
+    await waitFor(() => expect(document.activeElement).toBe(document.getElementById('content')));
+  });
+
+  it('marks the unbulleted lesson list as a list', async () => {
+    await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
+    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
+    for (const ul of document.querySelectorAll('.lesson-list ul')) expect(ul.getAttribute('role')).toBe('list');
   });
 });

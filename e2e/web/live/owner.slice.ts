@@ -336,7 +336,8 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         .sort((a, b) => a - b);
       const h1 = document.querySelector('h1');
       return {
-        overflow_px: document.documentElement.scrollWidth - window.innerWidth,
+        // clientWidth excludes a vertical scrollbar, which innerWidth includes.
+        overflow_px: document.documentElement.scrollWidth - document.documentElement.clientWidth,
         widest_p_px: Math.max(0, ...ps.map((p) => Math.round(p.getBoundingClientRect().width))),
         p_font_size: cs?.fontSize ?? '',
         p_line_height: cs?.lineHeight ?? '',
@@ -398,9 +399,11 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
       await expect.soft(toggle(), `no Contents button (${w})`).toBeHidden();
       await expect.soft(firstEntry, `contents visible (${w})`).toBeVisible();
     }
-    // Following an entry scrolls to its cell and focuses it.
-    const href = (await firstEntry.getAttribute('href')) ?? '';
-    await firstEntry.click();
+    // Following the last entry (its target far down the page, not in view before) scrolls to it and focuses it.
+    const lastEntry = nav().getByRole('link').last();
+    const href = (await lastEntry.getAttribute('href')) ?? '';
+    await expect.soft(page.locator(href), `${href} not in view before the click (${w})`).not.toBeInViewport();
+    await lastEntry.click();
     await expect.soft(page.locator(href), `${href} focused (${w})`).toBeFocused();
     await expect.soft(page.locator(href), `${href} in view (${w})`).toBeInViewport();
     if (w === 390) await expect.soft(firstEntry, 'contents close after an entry (390)').toBeHidden();

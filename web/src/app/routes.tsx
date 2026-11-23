@@ -31,13 +31,18 @@ function NotFound() {
 
 function Loading({ label }: { label: string }) {
   return (
-    <div aria-busy="true" role="status">
-      <span className="visually-hidden">{label}</span>
-      <Skeleton.Root>
-        <Skeleton.Item variant="text" width="60%" />
-        <Skeleton.Item variant="text" width="80%" />
-        <Skeleton.Item variant="text" width="40%" />
-      </Skeleton.Root>
+    <div>
+      {/* FR-UI-11: no aria-busy, which would silence the status. */}
+      <p role="status" className="visually-hidden">
+        {label}
+      </p>
+      <div aria-hidden="true">
+        <Skeleton.Root>
+          <Skeleton.Item variant="text" width="60%" />
+          <Skeleton.Item variant="text" width="80%" />
+          <Skeleton.Item variant="text" width="40%" />
+        </Skeleton.Root>
+      </div>
     </div>
   );
 }

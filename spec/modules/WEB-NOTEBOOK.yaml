@@ -53,7 +53,10 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   (5, WEB-UI) one `main`. Non-blocking applied: native `details` declared as a deviation, the library Skeleton named,
   recall without `back` and with a source tested, `back` as plain text, headings from the markdown parse (a `#` in
   a fence is not one), labs numbered, only unanswered open cells counted, nav inside `main` before the cells, cells
-  focusable by link, 404 'Lesson not found'. Approved by agent without a second round (coordinator, 2026-11-23)"
+  focusable by link, 404 'Lesson not found'. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16
+  surviving mutants closed as test gaps with paired wording — url wins over span, empty material ids dropped, safe
+  integer pages, numeric page order, top-level non-empty headings, one recall entry, no nav without entries,
+  role=list, status regions without aria-busy, the live scroll test on the last entry"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
@@ -106,11 +109,14 @@ requirements:
     text: >-
       Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`
       and `citations[]` is shown in a reference list labelled "Sources" under the cell, one entry per source, in order
-      of first use. Span citations are grouped by material (the part of `span` before the last `:`, or the whole span
-      when it has no `:`); a citation with neither a non-empty string `span` nor a non-empty string `url` is dropped.
+      of first use. A citation with a non-empty string `url` is a URL citation, even when it also carries a `span`.
+      Other citations are span citations, grouped by material (the part of `span` before the last `:`, or the whole
+      span when it has no `:`; so "a:b:3" and "a:b:4" are one material "a:b"); a citation with neither a non-empty
+      string `url` nor a non-empty string `span`, or whose material id is empty (":3"), is dropped.
       One entry per material, "<title>, p. <page>" for one distinct page and "<title>, pp. <pages>" for several, where
-      a page counts only when it is a number that is an integer ≥ 1 (a numeric string, a fraction, 0, a negative,
-      NaN or Infinity is ignored), and <pages> lists the distinct pages in ascending order with each run of
+      a page counts only when it is a number that is a safe integer ≥ 1 (a numeric string, a fraction, 0, a negative,
+      NaN, Infinity or an integer above 2^53 − 1 is ignored), and <pages> lists the distinct pages in ascending
+      numeric order with each run of
       consecutive pages written as a range joined by an en dash ("pp. 69–70, 75"); a material none of whose citations
       carries a page renders as "<title>" alone. <title> is the
       first `material_title` among that material's citations in the cell, else the first among span citations of the
@@ -120,7 +126,8 @@ requirements:
       per distinct `url`: an external link only when its scheme is http or https (text: host and path;
       `rel="noopener noreferrer"`, `target="_blank"`) with its retrieved date; any other scheme renders as plain text.
       `route` cells list their `source_refs` the same way; `erratum` cells also show `source_ref` and the correction.
-      A single grouping function is shared with SRV-TUTOR's Ask panel (FR-TUTOR-11). [unit] [story]
+      A single grouping function is shared with SRV-TUTOR's Ask panel (FR-TUTOR-11). The reference list is an `ol`
+      with `role="list"` (list style none). [unit] [story]
   - id: FR-NOTEBOOK-3
     text: >-
       Open findings: an `open` cell whose `status` is not `answered` is shown with a visible marker that reads its
@@ -218,24 +225,29 @@ requirements:
       header holds a "Lessons" link back to `/`, the title (`h1`) on its own line, then one row with the open-findings
       link and the kernel controls. A contents list (`nav` labelled "Lesson contents", inside the page's `main`, before
       the cells) is built from the cells, in order: one entry per markdown cell, other than recall and open cells,
-      whose source has a heading of depth 1–3 in its markdown parse (remark with GFM and math, as WEB-RENDER
-      FR-RENDER-2; the first such heading's plain text, so emphasis, code and link markup are gone, and a `#` line
-      inside a code fence is not a heading); each lab cell as "Lab <n>" numbered from 1 in lesson order; one entry "Recall cards (<n>)" at the first recall cell;
-      one entry "Open questions (<n>)" at the first open cell whose status is not `answered`, counting only those; and
-      "Ask the tutor" when the panel is shown. Every entry is an in-page link to `#cell-<id>` (the panel: `#tutor`);
+      whose source has a top-level heading (a direct child of the document root, so not inside a list or a block
+      quote) of depth 1–3 in its markdown parse (remark with GFM and math, as WEB-RENDER FR-RENDER-2): the first such
+      heading whose plain text, with whitespace collapsed and trimmed, is not empty; emphasis, code and link markup are
+      gone, raw HTML contributes no text, and a `#` line inside a code fence or in a code cell is not a heading. Each
+      lab cell is "Lab <n>", numbered from 1 in lesson order; one entry "Recall cards (<n>)" at the first recall cell,
+      however many there are; one entry "Open questions (<n>)" at the first open cell whose status is not `answered`,
+      counting only those; and "Ask the tutor" when the panel is shown. With no entry at all, neither the list nor the
+      "Contents" button is rendered. Every entry is an in-page link to `#cell-<id>` (the panel: `#tutor`); the list is
+      an `ol` with `role="list"` (its list style is none, which drops the list role in WebKit);
       every cell container has `tabIndex={-1}`, so following an entry moves focus there. At a viewport of 60rem or
       wider the list is a sticky column beside the cells, at most the viewport height tall and scrolling inside itself
       (`max-height: calc(100vh - <top offset>)`, `overflow-y: auto`), and the "Contents" button is not displayed;
       below 60rem the list is not displayed (`display: none`, so its links are neither in the tab order nor in the
       accessibility tree) until the "Contents" button (`aria-expanded`, `aria-controls`) opens it, and following an
       entry closes it. [unit] [story] [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and
-      visible after it, and following an entry scrolls to that cell and focuses it; at 1280 and 1024 px the button is
-      hidden and the nav is visible.
+      visible after it; at every width following the last entry, whose target is not in the viewport before the click,
+      scrolls to that target and focuses it; at 1280 and 1024 px the button is hidden and the nav is visible.
   - id: FR-NOTEBOOK-12
     text: >-
-      Lesson page states, inside WEB-UI FR-UI-11's single `main`: while the lesson or its revision loads, the library's
-      `Skeleton` (title and three text lines) in a page container with `aria-busy="true"` and `role="status"` holding
-      the visually hidden text "Loading the lesson"; a 404 for the lesson shows "Lesson not found" with only a "Back to
+      Lesson page states, inside WEB-UI FR-UI-11's single `main`: while the lesson or its revision loads, a page
+      container holding a `role="status"` element with the visually hidden text "Loading the lesson" (no `aria-busy`,
+      which would make screen readers skip the status) and the library's `Skeleton` (title and three text lines),
+      hidden from assistive technology; a 404 for the lesson shows "Lesson not found" with only a "Back to
       lessons" link; any other error shows "The lesson could not be loaded." with a Retry button that refetches the
       failed query and a "Back to lessons" link; a lesson not published yet keeps FR-NOTEBOOK-1's text and adds the
       "Lessons" back link. [unit] [story]

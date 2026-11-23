@@ -126,4 +126,64 @@ describe('grouped references (FR-NOTEBOOK-2, amended 2026-11-23)', () => {
       ]).map((r) => r.text),
     ).toEqual(['Plain, pp. 3–4', 'source other']);
   });
+
+  it('drops an empty material id and pages above the safe-integer range', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    expect(groupCitations([{ span: ':3', page: 3, material_title: 'Nobody' }]).map((r) => r.text)).toEqual([]);
+    expect(groupCitations([{ span: `${M}:1`, page: 2 ** 53, material_title: 'Book' }]).map((r) => r.text)).toEqual(['Book']);
+  });
+});
+
+describe('grouping details (FR-NOTEBOOK-2, code review 2026-11-23)', () => {
+  it('sorts pages numerically, not as text', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    const cites = [100, 9, 10, 99].map((p, i) => span(M, i, p, 'Book'));
+    expect(groupCitations(cites).map((r) => r.text)).toEqual(['Book, pp. 9–10, 99–100']);
+  });
+
+  it('groups by the part before the last colon', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    const refs = groupCitations([
+      { span: 'a:b:3', page: 3, material_title: 'AB' },
+      { span: 'a:c:1', page: 1, material_title: 'AC' },
+      { span: 'a:b:4', page: 4, material_title: 'AB' },
+    ]);
+    expect(refs.map((r) => r.text)).toEqual(['AB, pp. 3–4', 'AC, p. 1']);
+  });
+
+  it('prefers the first title in the cell over the lesson title', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    const titles = new Map([[M, 'Lesson title']]);
+    expect(groupCitations([span(M, 1, 5, 'Cell title')], titles).map((r) => r.text)).toEqual(['Cell title, p. 5']);
+    expect(groupCitations([span(M, 1, 5), span(M, 2, 6, 'First'), span(M, 3, 7, 'Second')], titles).map((r) => r.text)).toEqual([
+      'First, pp. 5–7',
+    ]);
+  });
+
+  it('takes the first title per material for the lesson', async () => {
+    const { lessonTitles } = await load(() => import('./citations'));
+    expect(lessonTitles).toBeTypeOf('function');
+    const titles = lessonTitles([
+      { metadata: { reader: { citations: [span(M, 1, 1, 'One'), span(N, 1, 1, 'Other')] } } },
+      { metadata: { reader: { source_refs: [span(M, 2, 2, 'Two')] } } },
+    ]);
+    expect(titles.get(M)).toBe('One');
+    expect(titles.get(N)).toBe('Other');
+  });
+
+  it('reads cell-level citations[] and treats a citation with url and span as a URL citation', async () => {
+    const { collectCitations } = await load(() => import('./citations'));
+    expect(collectCitations).toBeTypeOf('function');
+    const refs = collectCitations({
+      citations: [span(M, 1, 4, 'Book'), { url: 'https://example.org/x', span: `${M}:2`, page: 9, material_title: 'Book' }],
+    });
+    expect(refs).toEqual([
+      { kind: 'text', text: 'Book, p. 4' },
+      { kind: 'link', href: 'https://example.org/x', text: 'example.org/x', retrieved: '' },
+    ]);
+  });
 });

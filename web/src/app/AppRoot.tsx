@@ -70,13 +70,18 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
     return (
       <>
         <div className="app-header" aria-hidden="true" />
-        <div className="page" aria-busy="true" role="status">
-          <span className="visually-hidden">Loading</span>
-          <Skeleton.Root>
-            <Skeleton.Item variant="text" width="40%" height="2.25rem" />
-            <Skeleton.Item variant="text" width="90%" />
-            <Skeleton.Item variant="text" width="75%" />
-          </Skeleton.Root>
+        {/* FR-UI-11: a status with hidden text (no aria-busy: it would silence the status) and the library skeleton. */}
+        <div className="page">
+          <p role="status" className="visually-hidden">
+            Loading
+          </p>
+          <div aria-hidden="true">
+            <Skeleton.Root>
+              <Skeleton.Item variant="text" width="40%" height="2.25rem" />
+              <Skeleton.Item variant="text" width="90%" />
+              <Skeleton.Item variant="text" width="75%" />
+            </Skeleton.Root>
+          </div>
         </div>
       </>
     );

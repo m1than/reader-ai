@@ -51,7 +51,7 @@ title: App shell — pinned library build, Calm tokens, routing, API client, sig
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23)"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -205,8 +205,9 @@ requirements:
       `inherit` or `currentColor`), every `padding`, `margin`, `gap`, `inset`, `top`, `right`, `bottom` and `left`
       value made of `0`, `auto` and `var(--acme-space-N)` only, the reading column's `max-width: 38rem`, and a
       `:focus-visible` rule whose outline is `2px solid var(--acme-focus)`. [live] the `ui` step of
-      e2e/web/live/owner.slice.ts on the running stack: at each width `scrollWidth` ≤ the viewport width on the list
-      and on L02; on L02 the widest `[data-markdown] p` is > 0 and ≤ 608px, its computed `font-size` is 17px, its
+      e2e/web/live/owner.slice.ts on the running stack: at each width the document element's `scrollWidth` ≤ its
+      `clientWidth` (the viewport without a scrollbar) on the list and on L02, and the numbers-only `ui` object of
+      slice-results.json is committed to e2e/live/results/; on L02 the widest `[data-markdown] p` is > 0 and ≤ 608px, its computed `font-size` is 17px, its
       `line-height` 28.05px (± 0.1) and its `font-family` begins with `ui-serif`, and the `h1` is 36px at 1280 and
       1024 px and 30px at 390 px; axe reports no
       serious or critical issue.
@@ -214,12 +215,15 @@ requirements:
     text: >-
       Keyboard and states of the shell: the shell renders exactly one `<main id="content" tabIndex={-1}>`, around the
       router outlet and around the not-found view; pages render sections inside it, never a `main` of their own. The
-      first Tab stop is a "Skip to content" link (visible when focused) to `#content`. While `/api/me` loads, the shell
-      shows a header-height bar and the library's `Skeleton` in a container with `aria-busy="true"` and `role="status"`
-      holding the visually hidden text "Loading", not a bare "Loading…" line. The not-found view keeps FR-UI-3's link.
-      [unit] on `/`, `/lessons/w01` (loaded and error states) and `/no-such-page`: one `main#content` with tabindex -1
-      and the skip link first; [live] the `ui` step follows the skip link with the keyboard and finds focus on
-      `main#content`. [story]
+      first Tab stop is a "Skip to content" link (visible when focused) to `#content`; following it moves focus to that
+      `main`. While `/api/me` loads, the shell shows a header-height bar, a `role="status"` element with the visually
+      hidden text "Loading" (no `aria-busy`, which would make screen readers skip the status) and the library's
+      `Skeleton` hidden from assistive technology, not a bare "Loading…" line; the lesson list's loading state follows
+      the same pattern ("Loading the lessons"). The not-found view keeps FR-UI-3's link. Lists styled without bullets
+      (`list-style: none`) carry `role="list"`. [unit] on `/`, `/lessons/w01` (loaded and error states) and
+      `/no-such-page`: one `main#content` with tabindex -1 and the skip link first; following the skip link focuses
+      it; [live] the `ui` step follows the skip link with the keyboard and finds focus on `main#content`; overflow is
+      measured as `scrollWidth − clientWidth` of the document element. [story] the shell's loading state.
 
 invariants:
   - id: INV-UI-1

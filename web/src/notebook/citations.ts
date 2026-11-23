@@ -31,7 +31,7 @@ const materialOf = (span: string): string => {
   return i < 0 ? span : span.slice(0, i);
 };
 
-const pageOf = (v: unknown): number | undefined => (typeof v === 'number' && Number.isInteger(v) && v >= 1 ? v : undefined);
+const pageOf = (v: unknown): number | undefined => (typeof v === 'number' && Number.isSafeInteger(v) && v >= 1 ? v : undefined);
 
 /** Distinct pages ascending, consecutive runs as en-dash ranges: [69, 70, 75] → "69–70, 75". */
 export const pageRanges = (pages: number[]): string => {
@@ -94,6 +94,7 @@ export const groupCitations = (citations: Citation[], titles: Titles = new Map()
     }
     if (span === undefined) continue;
     const id = materialOf(span);
+    if (id === '') continue;
     const key = `span:${id}`;
     let e = byKey.get(key);
     if (!e) {

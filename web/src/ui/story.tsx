@@ -36,10 +36,16 @@ export const stubFetch =
     return Object.hasOwn(routes, url) ? json(routes[url]) : json({ error: 'not_found' }, 404);
   };
 
+/** A fetch that never answers (loading states). */
+export const pendingFetch: typeof fetch = () => new Promise<Response>(() => undefined);
+
+/** A fetch that answers every request with a server error (error states with Retry). */
+export const failingFetch: typeof fetch = async () => json({ error: 'internal' }, 500);
+
 export const withServices =
-  (routes: Record<string, unknown>): Decorator =>
+  (routes: Record<string, unknown>, fetchFn: typeof fetch = stubFetch(routes)): Decorator =>
   (Story) => {
-    const api = createApi({ fetch: stubFetch(routes), onUnauthorized: () => undefined });
+    const api = createApi({ fetch: fetchFn, onUnauthorized: () => undefined });
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return (
       <ServicesContext.Provider value={{ api, notify: () => undefined, navigateAway: () => undefined }}>
