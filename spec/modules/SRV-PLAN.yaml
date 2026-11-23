@@ -4,8 +4,8 @@
 # estimate; confirm imports the plan through SRV-PIPELINE's course import and, if asked, starts compiling the first
 # lesson.
 #
-# Status: DRAFT, revision 2 (deep-reviewer round 1 on 62a86b2: B11–B14 and the non-blocking items applied). Nothing is
-# implemented until the deep-reviewer approves (cost math, jobs and idempotency are complex areas, AGENTS.md).
+# Status: approved (revision 4, deep-reviewer round 4 `VERDICT: approve` on d9f655a; cost math, jobs and idempotency
+# are complex areas, AGENTS.md).
 #
 # Owner decisions:
 #   1. (2026-11-23) The learner enters total weeks and minutes per day. The default minutes per day is 60 (owner
@@ -51,9 +51,9 @@
 
 id: SRV-PLAN
 title: Course planning — the study-time question, a deterministic planner that spreads the material over the study days within the daily minutes, the estimate and confirm
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
 layer: server
 track: product
 adr: [ADR-0010, ADR-0009, ADR-0005, ADR-0008]
@@ -352,4 +352,4 @@ owner_notes:
   - "4. A re-plan keeps your deadline: the start date of your first plan stays, started lessons stay as they are, and the rest of the source is spread over the days left until the deadline. Past the deadline the page suggests more weeks; changing the weeks moves the deadline from the original start. A lesson you start ahead of its calendar day takes no day, so compiling ahead leaves more days for the rest. This rule was decided by the coordinator for you (owner decision 4); you can overrule it, for example to restart the deadline from the re-plan day."
   - "5. Confirm with 'compile lesson 1' spends credit (about the first lesson's estimate) under your existing compile cap and monthly budget; the checkbox shows the amount."
 
-review: "draft revision 4, 2026-11-23 (V/plan): round 1 (B11–B14), round 2 (cut-rule tail drop, re-plan keeps the deadline per owner decision 4, extrapolation flag) and round 3 (lessons_max dropped, today clamped to start_date, replay before the today check, null mean, wording) applied. Awaits deep-reviewer round 4."
+review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent."

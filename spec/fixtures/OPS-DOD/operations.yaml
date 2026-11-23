@@ -196,7 +196,7 @@ operations:
   - id: course.plan
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
     surface: [web, api]
-    specs: [SRV-PLAN, SRV-PIPELINE, SRV-LESSON, WEB-IMPORT, WEB-UI]
+    specs: [SRV-PLAN, SRV-PIPELINE, SRV-LESSON, WEB-PLAN, WEB-UI]
     gate: tracked
     criteria:
       functional:
