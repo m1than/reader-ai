@@ -132,8 +132,7 @@ requirements:
       A collapsed "Lessons" disclosure lists each lesson's title, pages and minutes, started ones marked "Started,
       stays as it is". Out-of-order responses are dropped (only the latest request's answer is shown); while a new one
       loads, the card keeps the previous estimate, dimmed, and its `role="status"` line reads "Updating the
-      estimate". 404, 422 `no_text` ("This source has no text layer to plan from") and 422 `too_many_lessons` show
-      the code's message in place of the card. [unit]
+      estimate". 404, 422 `no_text` ("This source has no text layer to plan from") show the code's message in place of the card. [unit]
       [story: fits, small source, does not fit, loading, error]
   - id: FR-IMPORT-6
     text: >-

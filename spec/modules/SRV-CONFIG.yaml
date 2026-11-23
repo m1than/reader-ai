@@ -231,18 +231,6 @@ requirements:
       This module's own log calls never include a resolved value or an input scalar; they log references, codes and key
       paths only. Redaction in the shared logger and event serializer is a dependency on SRV-OBS and SRV-EVENTS.
 
-# ---- Paired amendment (DRAFT, 2026-11-23, V/plan, for SRV-SEARCH FR-SEARCH-10 and SRV-INGEST revision 2): the `up-`
-# id prefix is reserved for uploaded materials (`materials.config_id = up-<12 hex>`). Held under
-# `proposed_requirements` (not read by trace-check) until reviewed; promoted with its Red test. ----
-proposed_requirements:
-  - id: FR-CONFIG-17
-    text: >-
-      **Reserved material id prefix.** A `materials[].id` that starts with `up-` (case-sensitive, no
-      normalization) is a validation problem with the code `reserved_id` and the fixed message "material ids
-      starting with up- are reserved for uploads", reported like every FR-CONFIG-10 problem (file, line, key path).
-      Ids such as `upload-notes` or `Up-x` are accepted. [unit] with VEC-CONFIG's invalid configs: `up-`, `up-abc`
-      refused; `upx`, `upload-notes`, `Up-x` accepted.
-
 invariants:
   - id: INV-CONFIG-1
     text: >-

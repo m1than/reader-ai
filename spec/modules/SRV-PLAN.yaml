@@ -89,7 +89,6 @@ bounds:
   week_days: 7                 # owner decision 3: every day is a study day, no review days
   study_minutes_per_kchar_default: "2.64"   # spikes/study-rate step 1b: the owner's 81 theory hours over 1,841,091 span characters
   study_minutes_per_kchar: { min: "0.10", max: "20.00" }        # structural; the pilot's per-stage spread is 1.40–5.30
-  lessons_max: 728             # 104 weeks × 7 days: no plan has more lessons than the longest deadline has study days
   span_header_chars: 46        # an upper bound: the longest FR-PIPELINE-2 marker line "⟦source⟧ s<5 digits> p.<4 digits> list_item ⟦/source⟧" is 42 characters, 45 with its "\n" and the "\n\n" join
   lesson_source_chars_max: 270000   # SRV-PIPELINE source_max_chars (300,000) less a 10 % margin (chosen); see FR-PLAN-2
   today_skew_days: 1           # the client's local date may differ from the server's UTC date by one day
@@ -119,9 +118,11 @@ requirements:
   - id: FR-PLAN-3
     text: >-
       **Days and free intervals.** `D = total_weeks × week_days` study days; the plan's last day is `end = start_date
-      + D − 1`. The free lessons are spread over the days left, `days_left = end − today + 1` (on a first plan `today
-      = start_date`, so `days_left = D`). Fixed lessons take nothing from `days_left`: they are already scheduled on
-      past days or today (owner decision 4, keep the deadline). The free intervals are the maximal page runs not
+      + D − 1`. The planner first sets `today = max(today, start_date)` (a re-plan on a date before the stored start,
+      e.g. across the ±1-day skew, counts from the start). The free lessons are spread over the days left, `days_left
+      = end − today + 1` (on a first plan `today = start_date`, so `days_left = D`). Fixed lessons take nothing from
+      `days_left`: they are already scheduled on past days or today (owner decision 4, decided by the coordinator for
+      the owner: keep the deadline; owner note 4). The free intervals are the maximal page runs not
       covered by a fixed lesson; a free interval whose pages all have 0 characters is left out of the plan (no lesson;
       the only place a page may be unplanned). `G` is the number of remaining free intervals, `C` their total
       characters and `P` the number of their pages with more than 0 characters. When `C = 0` and there are no fixed
@@ -140,8 +141,8 @@ requirements:
       The lessons are the page runs between consecutive cuts (the duplicates of step 1 and 3 counted once). So every
       free lesson holds at least one page with more than 0 characters: a run of 0-character pages joins the lesson
       that follows it, and a trailing run joins the interval's last lesson. Fixed lessons are inserted verbatim between
-      the free intervals. More than `lessons_max` lessons in all raise `PlanInputError("too_many_lessons")`. [unit,
-      VEC-PLAN-1]
+      the free intervals. There is no separate cap on the lesson count: `new_count ≤ P ≤ page_count ≤ 5,000`
+      (SRV-INGEST's page cap), and a plan that fits has `new_count ≤ days_left ≤ 728`. [unit, VEC-PLAN-1]
   - id: FR-PLAN-5
     text: >-
       **Lesson fields.** Each lesson has `id = "p<first>-<last>"` (decimal page numbers; a fixed lesson keeps its
@@ -156,7 +157,7 @@ requirements:
     text: >-
       **Re-planning.** A plan is recomputed from scratch for any change of inputs (weeks, minutes, rate, today).
       A course with a `study_plans` row is re-planned: `start_date` is the stored one (the deadline is kept, owner
-      decision 4) and `today` is the request's date; a changed `total_weeks` moves `end` from the stored start. A first
+      decision 4, decided by the coordinator for the owner) and `today` is the request's date; a changed `total_weeks` moves `end` from the stored start. A first
       plan has `start_date = today`. A lesson of the course is `started` when SRV-LESSON `started_lessons(conn,
       owner_id, course_id)` lists it (any row other than its `course_plans` row refers to it: a lesson revision, a
       compile run, a tutor row; FR-LESSON-15); preview and the removal in FR-PIPELINE-14 use the same function.
@@ -180,8 +181,8 @@ requirements:
       on the 5-minute grid above the current one and up to 240 whose plan fits with the same weeks, and
       `total_weeks`: the smallest value above the current one and up to 104 whose plan fits with the same minutes
       (with the same `start_date`, so on a re-plan past the deadline only more weeks can help); each is found by
-      re-running the planner (fit is not assumed monotonic), a candidate that raises `too_many_lessons` does not fit,
-      and each is null when no candidate fits. [unit, VEC-PLAN-1]
+      re-running the planner (fit is not assumed monotonic), and each is null when no candidate fits. [unit,
+      VEC-PLAN-1]
   - id: FR-PLAN-8
     text: >-
       **Compile estimate** (an estimate from one measured lesson, never a budget; neither end of the range is a bound).
@@ -195,7 +196,7 @@ requirements:
       first lesson (FR-PLAN-9's compile target), `run_cap_usd` and `basis: "L02"`, all as decimal strings with two
       decimals, plus `basis_kchars: "58.938"`, `mean_lesson_kchars` (the free lessons' mean, three decimals, half up)
       and `extrapolated: bool`, true when `mean_lesson_kchars` lies outside `estimate_band` × `basis_kchars`
-      (0.5×–2×, a chosen band) — the pilot's 890 planned pages (1,841 kchars) over 12 weeks give about 22 kchars a
+      (0.5×–2×, a chosen band); with no free lessons `mean_lesson_kchars` is null and `extrapolated` is false — the pilot's 890 planned pages (1,841 kchars) over 12 weeks give about 22 kchars a
       lesson, about 0.37× the basis, so such an estimate is an extrapolation. The constants live in `reader.plan.params` with their sources; VEC-PLAN-2 pins
       them.
       **Hypothesis:** compile cost scales with source characters. Only L02 is measured; for the pilot's 1,841,091
@@ -215,8 +216,7 @@ requirements:
         outline, `outline_entries(conn, owner_id, ingest_id) -> ((level, page | None, title), ...)` in seq order;
         both read only the owner's rows.
         `fixed` and the stored `start_date` come from the material's existing plan course, if any (FR-PLAN-6). `today`
-        outside the server's UTC date ± `today_skew_days` is 400 `today`. `no_text` and `too_many_lessons` are 422
-        with that code.
+        outside the server's UTC date ± `today_skew_days` is 400 `today`. `no_text` is 422 with that code.
       - `POST /api/plans/confirm` with the same fields plus `plan_sha256` and `compile_first: bool`. The course is
         `plan-<first 12 hex of the material sha256>`, titled with the material id (so lesson citations name the
         material as, for the pilot, "bashir-2025"; a display title is an uploaded-material defer). In one
@@ -226,7 +226,8 @@ requirements:
         - **replay:** when the course's `study_plans` row has the request's `plan_sha256`, nothing is recomputed or
           imported, and the response lists the course's current plan lessons (a retry after a lost response gets the
           same lessons). The stored sha alone decides: the body's weeks, minutes, rate and today are not compared
-          again (the sha's pre-image already holds them);
+          again (the sha's pre-image already holds them). The replay check runs before the `today` range check (only
+          the body's shape is validated first), so a retry after a lost response that crosses midnight still replays;
         - otherwise it reads `fixed` and recomputes the plan; a different sha256 is 409 `plan_changed` with the new
           plan in the body (the learner confirms what they saw, never a plan that moved underneath); a plan that does
           not fit is 422 `does_not_fit`; else it calls SRV-PIPELINE `import_course_plan(conn, owner_id, plan, origin=
@@ -321,8 +322,11 @@ vectors:
       with D ≥ 2 (one lesson, the 0-character tail is not a lesson), `(1, 100)` with D = 2 (one lesson), and the gap
       case `(10, 0) | fixed | (10)` (two free lessons, none of 0 characters); a re-plan on day 80 of 84 (12 weeks)
       with 80 started lessons (days_left 5, "80 started + K new", finish by ≤ end) and one past the deadline
-      (days_left < 1: `does_not_fit`, reason `days`, a weeks suggestion only). Each case gives the expected lesson
-      ranges, minutes, summary and finish date.
+      (days_left < 1: `does_not_fit`, reason `days`, a weeks suggestion only); round-3 cases: 104 weeks on a
+      728-page source, first plan, lesson 1 then fixed (started by the compile), and a same-day re-plan (727 new
+      lessons over 728 days left; fits, no error), and a re-plan with `today` one day before the stored
+      `start_date` (counted as `start_date`, days_left = D). Each case gives the expected lesson ranges, minutes,
+      summary and finish date.
     file: spec/fixtures/SRV-PLAN/planner-cases.yaml
   - id: VEC-PLAN-2
     source: >-
@@ -345,7 +349,7 @@ owner_notes:
   - "1. The default study rate comes from your own pilot plan: 81 theory hours for the 890 PDF pages of the 23 lessons, i.e. 5.46 min per page or 2.64 min per 1,000 characters of the stack's spans (spikes/study-rate step 1b). Per stage it ranges from 1.40 to 5.30. For comparison, plain silent reading of English non-fiction is 238 words a minute (Brysbaert 2019), about 1.3 min for a median pilot page. You can change the rate per plan in the form's 'Study pace'."
   - "2. As you decided: every day is a study day, the source is spread evenly over all of them, and no day's lesson is longer than your minutes per day. The estimate counts reading time only; labs and review are not included. Your own plan budgets 349 sessions (theory plus code, +20 %) against about 81 reading days."
   - "3. The compile estimate scales one measured lesson (L02: $1.26 converged, up to $2.97 in the spike, 58,938 characters) by characters. It is a range, not a promise, and neither end is a bound; each compile still stops at your $8.00 cap. Spread over your days, lessons are usually much shorter than L02 (the pilot over 12 weeks: about 22,000 characters, 0.37× L02); per-lesson fixed costs then make the real cost per lesson likely higher than the range, and the page says so whenever the mean lesson is outside 0.5×–2× of L02."
-  - "4. A re-plan keeps your deadline: the start date of your first plan stays, started lessons stay as they are, and the rest of the source is spread over the days left until the deadline. Past the deadline the page suggests more weeks; changing the weeks moves the deadline from the original start."
+  - "4. A re-plan keeps your deadline: the start date of your first plan stays, started lessons stay as they are, and the rest of the source is spread over the days left until the deadline. Past the deadline the page suggests more weeks; changing the weeks moves the deadline from the original start. A lesson you start ahead of its calendar day takes no day, so compiling ahead leaves more days for the rest. This rule was decided by the coordinator for you (owner decision 4); you can overrule it, for example to restart the deadline from the re-plan day."
   - "5. Confirm with 'compile lesson 1' spends credit (about the first lesson's estimate) under your existing compile cap and monthly budget; the checkbox shows the amount."
 
-review: "draft revision 3, 2026-11-23 (V/plan): round 1 (B11–B14) and round 2 (B11, B12 closed; cut-rule tail drop, re-plan keeps the deadline per owner decision 4, extrapolation flag, and the non-blocking items) applied. Awaits deep-reviewer round 3."
+review: "draft revision 4, 2026-11-23 (V/plan): round 1 (B11–B14), round 2 (cut-rule tail drop, re-plan keeps the deadline per owner decision 4, extrapolation flag) and round 3 (lessons_max dropped, today clamped to start_date, replay before the today check, null mean, wording) applied. Awaits deep-reviewer round 4."
