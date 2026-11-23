@@ -1,0 +1,79 @@
+{
+  "what": "V.live first vertical-slice run on the owner's Mac (numbers, states, ids and hashes only; no book text)",
+  "date": "2026-11-23",
+  "branch": "V/live-slice",
+  "commits": {
+    "stack_run_1": "64602b3 (merge of origin/V/slice-integration 8477c4f)",
+    "stack_run_2": "8e8cfd5 (plus the FR-INGEST-13 and FR-SEARCH-9 fixes found by run 1)"
+  },
+  "material_sha256": "61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2",
+  "stack": {
+    "reader_up_s": [64, 40, 105],
+    "services_healthy": 11,
+    "doctor": "all ok",
+    "verify_all": { "passed": 53, "failed": 0, "stage1_s": 117, "browser_s": 11 }
+  },
+  "ingest": {
+    "run": 1,
+    "converter_version": "docling-2.151.1+r2",
+    "host_wall_s": 698,
+    "pages": 935,
+    "pages_per_min": 80.4,
+    "peak_rss_bytes": 4247060480,
+    "span_count": 9463,
+    "outline_count": 494,
+    "pages_without_text": [1, 2, 3, 4, 392, 935],
+    "code_boxes": { "total": 360, "exact": 343, "majority_cell": 7, "indent_fallback": 10, "multi_box": 0 },
+    "artifact_id_prefix": "0da6326b5712"
+  },
+  "embed": {
+    "run_1": { "result": "FAIL", "waited_min": 75.26, "passages_encoded": 0,
+      "cause": "search.embed never enqueued: SRV-INGEST lacked the paired enqueue (fixed: FR-INGEST-13, FR-SEARCH-9)" },
+    "run_2": { "result": "PASS", "minutes_from_worker_start": 12.0, "suite_wait_min": 11.0,
+      "batch": 8, "batch_ms_observed": [2141, 2155], "note": "upper bound by the 30 s poll" }
+  },
+  "search_bench_v2": {
+    "questions": 40, "hits_at_10": 27, "recall_at_1": 0.3, "recall_at_10": 0.675, "mrr": 0.4,
+    "degraded": 0, "p50_ms": 103, "p95_ms": 173,
+    "ranks": {
+      "v01": 8, "v02": 1, "v03": 1, "v04": 7, "v05": null, "v06": 1, "v07": 1, "v08": 10, "v09": null, "v10": 2,
+      "v11": null, "v12": null, "v13": null, "v14": 1, "v15": null, "v16": null, "v17": null, "v18": 1, "v19": 4,
+      "v20": 3, "v21": 4, "v22": 6, "v23": 5, "v24": 7, "v25": 3, "v26": 5, "v27": 2, "v28": null, "v29": null,
+      "v30": 1, "v31": null, "v32": 1, "v33": 1, "v34": 1, "v35": 2, "v36": 4, "v37": 1, "v38": null, "v39": 1,
+      "v40": null
+    }
+  },
+  "course_import": { "status": 200, "course_id": "48b725fb-cb70-4a0a-a2d5-903b45a85a6f", "lessons": 23,
+    "l02_lesson_id": "fe25f465-efd3-4c2b-a967-840be1a13472" },
+  "compile_l02": {
+    "run_id": "22f757ee-8432-4744-94bf-86a3499a5c75",
+    "state": "converged",
+    "wall_s": 210,
+    "spent_usd": 1.258714,
+    "cap_usd": 8.0,
+    "steps": [
+      { "stage": "draft", "model": "claude-opus-5-5", "cost_usd": 0.623268, "duration_s": 156.8 },
+      { "stage": "fact_check", "model": "claude-sonnet-5-5", "cost_usd": 0.228414, "duration_s": 18.3 },
+      { "stage": "adversarial_review", "model": "claude-opus-5-5", "cost_usd": 0.407032, "duration_s": 20.0 },
+      { "stage": "findings", "model": null, "cost_usd": 0.0, "duration_s": 0.002 },
+      { "stage": "lab_verification", "model": null, "cost_usd": 0.0, "duration_s": 3.7 }
+    ],
+    "g2": { "publishable": false, "failing": ["deltas.mismatch"], "blocking_open": 0 },
+    "revision": { "sha256": "542521481e88f001b773118ae2cefb25ab98be2c0758861fe540703810a39db9", "cells": 27,
+      "explain": 10, "lab": 1, "open_findings": 4, "blocking_open": 0 }
+  },
+  "lesson_browser": { "references_rendered": 149, "labs": 1, "lab_state": "done", "lab_output_chars": 99,
+    "lab_run_s": 1.9 },
+  "tutor": {
+    "questions": 3,
+    "states": ["answered", "answered", "answered"],
+    "grounded": [false, true, true],
+    "grounded_rate": 0.667,
+    "latency_s": [8.4, 8.4, 13.5],
+    "p95_latency_s": 13.5,
+    "latency_note": "UI wall time, quantised by the panel's 1/2/5 s poll",
+    "cost_per_question_usd": null,
+    "cost_note": "no allowed interface exposes agent_spend; cap $0.30 per question",
+    "bench_nfr_tutor": "skipped: reader.tutor.bench runs in the worker over docker exec"
+  }
+}

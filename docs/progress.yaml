@@ -20,9 +20,10 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 5.4959      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 7.6546      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
-                         #   + tutor-call 0.0383 (from test_budget_usd)
+                         #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
+                         #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface shows agent_spend)
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
@@ -35,6 +36,12 @@ budget:
     - { task: S0.spike.tutor-call, usd: 0.0383, date: 2026-11-22, funding: test_budget_usd,
         what: "10 tutor-shaped Sonnet 5.5 calls (5 synthetic questions × thinking off/default), cap $0.60; per call in
           spikes/tutor-call/results/" }
+    - { task: V.live, usd: 1.2587, date: 2026-11-23, funding: test_budget_usd,
+        what: "one L02 compile through POST /api/lessons/{id}/compile (run 22f757ee): draft 0.6233, fact_check 0.2284,
+          adversarial_review 0.4070; cap $8.00; e2e/live/results/2026-11-23-slice.json" }
+    - { task: V.live, usd: 0.90, date: 2026-11-23, funding: test_budget_usd,
+        what: "3 tutor questions through the Ask panel; UPPER BOUND (3 × the $0.30 question cap): the actual cost sits in
+          agent_spend, which no allowed interface exposes (VEC-TUTOR-3 estimates ≈ $0.048 each)" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -740,7 +747,25 @@ tasks:
         `reader bootstrap` in Safari still works. Not reachable through
         the allowed interfaces: tutor bench (runs in the worker over docker exec) and tutor cost per question (no API
         exposes agent_spend). The route names differ from the brief: compile is POST /api/lessons/{id}/compile, the
-        course import POST /api/pipeline/courses. Import waits for the owner's 'import approved' (converter r2, ad0da76)." }
+        course import POST /api/pipeline/courses.
+        Import approved 2026-11-23; merged origin/V/slice-integration 8477c4f. Run 1 (slice.sh, full): import PASS —
+        converter r2, 935 pages in 698 s host wall = 80.4 pages/min, 9,463 spans, 494 outline entries, peak RSS
+        4,247,060,480 B, code boxes 360 (exact 343, majority-cell 7, indentation fallback 10, multi-box 0); embed FAIL
+        after 75.3 min: search.embed was never enqueued (SRV-SEARCH declared the paired SRV-INGEST enqueue; reader.ingest
+        never had it; the embed service encoded no passage). Fixed spec-first: FR-INGEST-13 (the import enqueues
+        search.embed; ConnectorException transient) and FR-SEARCH-9 (on_worker_start enqueues never-enqueued keys, which
+        recovered the imported pilot without exec); deep-reviewer (Fable) round 1 changes, round 2 approve (8e8cfd5);
+        server suites 547 passed. Run 2 (slice.sh --no-ingest, after reader up): all PASS. Embed 12.0 min from worker
+        start. Search v2 on the real spans: 27/40 at 10, recall@10 0.675, recall@1 0.300, MRR 0.400, p95 173 ms
+        (NFR-SEARCH-1 holds). L02 compile converged in 210 s, $1.2587 (draft 0.6233 / 156.8 s, fact_check 0.2284 /
+        18.3 s, review 0.4070 / 20.0 s, lab verification 3.7 s); G2 not publishable: deltas.mismatch only, 0 blocking
+        open, 4 open findings; 27 cells (10 explain, 1 lab). Browser: notebook renders, 149 references as 'title, p. N'
+        (follow-up: identical references repeat when one cell cites several spans of one page), lab cell done in 1.9 s
+        with output. Tutor: 3/3 answered, grounded 2/3 = 0.667 (below NFR-TUTOR-3's 0.8 on this small sample),
+        latency 8.4/8.4/13.5 s (p95 13.5 ≤ 30). Not measured: tutor cost per question (no interface), the tutor bench
+        (docker exec). Follow-ups: G2 deltas.mismatch on a converged run (investigate); shared :local image tags are
+        retagged and pruned by other worktrees' sessions (another session moved every tag mid-run). Results:
+        e2e/live/results/2026-11-23-slice.json; screenshots stay in the session scratchpad." }
   - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
       what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
         (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a
