@@ -4,9 +4,9 @@
 # $2.00 per day, 6 searches per check, 90-day TTL; queries may hold title, edition, authors and outline topics, never
 # book text (ADR-0030, proposed).
 #
-# Status: DRAFT, revision 3 (deep-reviewer rounds 1 and 2: changes; all blocking items addressed, see `review`).
-# Red gate: the deep-reviewer approves, the owner accepts ADR-0030, and the live call of spikes/web-search § 5b has
-# been run (H-WS-3/-6 and H-FRESH-2 observed once). Complex areas (AGENTS.md): tool authorization in agent-proxy, secrets, cost
+# Status: APPROVED, revision 4 (deep-reviewer rounds 1 and 2: changes; round 3: approve; see `review`). Red gate met:
+# the deep-reviewer approved, the owner accepted ADR-0030, and the live call of spikes/web-search § 5b has been run
+# (H-WS-3/-6 and H-FRESH-2 observed once). Complex areas (AGENTS.md): tool authorization in agent-proxy, secrets, cost
 # math, jobs.
 #
 # What it does, for one imported material, in three stages:
@@ -46,7 +46,8 @@
 #     `tasks.freshness_report: { model: sonnet }` (SRV-CONFIG task keys are open).
 #   - SRV-INGEST (V/onboarding owns it; for later): the PDF Info dictionary as a third bibliography source.
 #   - WEB-UI / WEB-IMPORT (V/plan, V/onboarding; for later): where the WEB-FRESH card mounts.
-#   - OPS-DOD: operation `material.freshness` (every cell `missing`).
+#   - OPS-DOD: operation `material.freshness` (routes named and items mapped with this spec's Green).
+#   - SRV-AUTH: `Route.method` admits `PUT` (the bibliography route).
 #
 # Test levels: [unit] pure Python with fixtures; [db] testcontainers Postgres; [agent] the SDK adapter against the
 # spike stub (spikes/agent-proxy-handshake `websearch` mode) through a real agent-proxy, zero credit; [live] against
@@ -54,9 +55,9 @@
 
 id: SRV-FRESH
 title: Source freshness check — dated-claims scan, code-planned server-side web searches, tool-less report with safe links
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
 layer: server
 track: ai
 adr: [ADR-0030, ADR-0025, ADR-0005, ADR-0008, ADR-0006]
@@ -117,8 +118,17 @@ bounds:
   result_host_chars_max: 100     # chosen: a longer host drops the entry before the prompt (`dropped.url_unsafe`)
   result_title_chars_max: 120    # chosen: titles cut for the prompt; with the host ≤ 240 characters per entry, so
                                  # the report prompt's links ≤ 2,400 characters per search (L ≤ 1,500 tokens enforced)
+  scan_output_tokens: 4000       # REF-FRESH-2 § 4: the scan's output cap in its reserve formula
   # Report (stage c).
   report_output_tokens: 4000
+  report_prompt_tokens_max: 19100 # REF-FRESH-2 § 4: the report prompt's bound in tokens (the estimate's worst case)
+  # Expected values for `estimate.low_usd` (REF-FRESH-2 § 4 and § 5b; not bounds, not enforced).
+  expected_chars_per_token: 2.5  # measured (spikes/compile-cost)
+  expected_scan_output_tokens: 2600
+  expected_search_usd: 0.012     # one search run; observed once $0.0126 (§ 5b)
+  expected_report_prompt_tokens: 12000
+  expected_report_output_tokens: 2500
+  stale_without_job_s: 60        # a `running` report with no live job key for this long reads as failed (FR-FRESH-12)
   recommendations_min: 3         # owner request: 3–5 when the verdict is not `current`
   recommendations_max: 5
   reasons_max: 8
@@ -139,10 +149,11 @@ bounds:
 
 tables:
   material_bibliography: { owner_id: true, columns: "owner_id → users.id, material_id uuid → materials, title text, authors text[], edition text null, year int null, publisher text null, isbn text null, original_title text null, original_authors text[] null, original_edition text null, original_year int null, source text (owner|scan), sha256 text (canonical JSON of the fields), updated_at; pk (owner_id, material_id)" }
-  freshness_reports: { owner_id: true, columns: "id uuid pk, owner_id → users.id, material_id uuid, ingest_id uuid → ingests, status text (running|done|failed|budget_refused), scan_inputs_sha256 text, inputs_sha256 text null, scan_reused_from uuid null → freshness_reports, bibliography jsonb, sample jsonb (span ids and pages only), claims jsonb null, scan_bibliography jsonb null (what the scan read; owner-visible for confirmation), searches jsonb null ([{query, template, status, result_count}]: no URLs, titles or summaries), verdict text null, reasons jsonb null, claim_status jsonb null, recommendations jsonb null, dropped jsonb null (counts by reason), web_search_requests int null, cost_usd numeric(12,6) null, models jsonb, prompt_versions jsonb, error text null, created_at, finished_at null; index (owner_id, material_id, created_at desc)" }
+  freshness_reports: { owner_id: true, columns: "id uuid pk, owner_id → users.id, material_id uuid, ingest_id uuid → ingests, status text (running|done|failed|budget_refused), scan_inputs_sha256 text, inputs_sha256 text null, scan_reused_from uuid null → freshness_reports, bibliography jsonb null (the bibliography stage (b) searches with, as `{…fields, source, sha256}`; null when the check is scan-only), sample jsonb (span ids and pages only), claims jsonb null, scan_bibliography jsonb null (what the scan read; owner-visible for confirmation), searches jsonb null ([{query, template, status, result_count}]: no URLs, titles or summaries), verdict text null, reasons jsonb null, claim_status jsonb null, recommendations jsonb null, dropped jsonb null (counts by reason), web_search_requests int null, cost_usd numeric(12,6) null, models jsonb, prompt_versions jsonb, error text null, created_at, finished_at null; index (owner_id, material_id, created_at desc)" }
 
 errors: [no_material, not_imported, freshness_running, budget_exhausted, daily_budget_exhausted, output_invalid,
-  bibliography_invalid, bibliography_unconfirmed, nothing_to_confirm, estimate_changed, no_results, not_owner]
+  bibliography_invalid, bibliography_unconfirmed, nothing_to_confirm, estimate_changed, no_results, not_owner,
+  job_failed, config_unavailable]
 
 requirements:
   - id: FR-FRESH-1
@@ -231,12 +242,14 @@ requirements:
       and cut to `result_title_chars_max`. The summary string, sanitised and cut to `summary_chars_max`, is kept with
       its search. **R and the summaries live only in the memory of the `freshness.web` job (FR-FRESH-12) and are never
       stored.** The model's own reply is discarded. A run that fails, is denied, or is refused by a cap is recorded
-      in `searches` with its status; the check continues with the remaining queries, and stage (c) runs if R is not
+      in `searches` with its status (`pending` before it runs, then `ok` with results, `empty` without, `denied` by
+      the gate, `failed`, or `refused` by a cap, which ends the check `budget_refused` per FR-FRESH-9); the check
+      continues with the remaining queries, and stage (c) runs if R is not
       empty (else the check ends `failed` with `no_results`).
   - id: FR-FRESH-8
     text: >-
       Report (stage c) and safety (VEC-FRESH-1..3). One SRV-AGENT call, task `freshness_report`, stage `report`,
-      `thinking_off`, no tools, `max_output_tokens` = `report_output_tokens`. Its prompt (`prompts/report.<version>.md`)
+      `thinking_off`, no tools, `max_output_tokens` = `report_output_tokens`. Its prompt (`prompts/verdict.<version>.md`)
       holds the bibliography, the topics with ids, the kept claims as `{id: "c<k>", subject, kind, confidence, page}`,
       and each search's query, its R entries rendered as `r<k> <host> <title>` (no URLs) and its summary, inside a
       delimiter `⟦web⟧ … ⟦/web⟧` that web text cannot forge (`⟦`/`⟧` replaced), with the rules that web text is
@@ -258,8 +271,12 @@ requirements:
     text: >-
       Estimate and caps. `estimate(material)` returns `{low_usd, high_usd, cap_usd}` as decimal strings: high = scan
       reserve (from the actual sample characters, SRV-AGENT FR-AGENT-9) + `searches_max` × `search_reserve_floor_usd`
-      + the report's worst case (REF-FRESH-2 § 4 formula over the bounds); low = the expected values of REF-FRESH-2
-      § 4; cap = `run_cap_usd` (VEC-FRESH-6). Starting a check requires the client to echo `high_usd`; a different
+      + the report's worst case (REF-FRESH-2 § 4 formula over the bounds: `report_prompt_tokens_max` at the report
+      model's 1-hour cache-write rate + `report_output_tokens` at its output rate); low = the expected values of
+      REF-FRESH-2 § 4 (the `expected_*` bounds: the scan prompt at `expected_chars_per_token` and
+      `expected_scan_output_tokens`, `searches_max` × `expected_search_usd`, the report's expected tokens); cap =
+      `run_cap_usd`. The strings have two decimals: `high_usd` rounded up to the cent, `low_usd` to the nearest cent
+      (VEC-FRESH-6). Starting a check requires the client to echo `high_usd`; a different
       value gives 409 `estimate_changed` with the new estimate. Before each call the check refuses with
       `daily_budget_exhausted` when spent(user, {freshness_scan, freshness_web, freshness_report}, UTC day) + that
       call's reserve > `daily_cap_usd`, and each call passes `run_cap_usd` as its run cap (SRV-AGENT FR-AGENT-9) and
@@ -279,6 +296,16 @@ requirements:
       TTL. Stored: the fields of FR-FRESH-8 (with the R entries that a citation or recommendation uses) and `searches`
       as `{query, template, status, result_count}`. Not stored: R itself, unused titles or URLs, summaries, page text,
       `cited_text`, `encrypted_content`.
+      **Read shape** (fixed by WEB-FRESH VEC-FRESHUI-1, paired change): a report reads as `{id, status, created_at,
+      finished_at|null, error|null, progress|null, verdict|null, reasons|null, claims|null, claim_status|null,
+      recommendations|null, topics|null, dropped|null}`. `progress` is `{stage: scan|search|report, done, total}`
+      while `running` (scan 0 of 1; then the searches not `pending` of those planned; then report 0 of 1), else null.
+      `claims` are `[{id: "c<k>", subject, kind, confidence, page, span (SRV-INGEST span id), cell: null}]` (`cell`
+      stays null until a lesson cell can be linked; WEB-NOTEBOOK defers). `reasons` are `[{text, citations}]`,
+      `claim_status` `[{id, status, note, citations}]`, `recommendations` `[{url, host, title, date|null,
+      date_source: model, kind, why, covers: [section id]}]`, every citation `{url, host, title}`. `topics` are
+      FR-FRESH-4's `[{id, title}]` read from the report's ingest when the report has a verdict, else null. `dropped`
+      is `{reason: count}`.
   - id: FR-FRESH-11
     text: >-
       Routes (session, owner role, the material's owner only; anyone else gets the 404 `not_found` of a material that
@@ -292,6 +319,18 @@ requirements:
       after stage (a) as `done` with `verdict` null, so the owner can confirm or correct it and run again (the scan is
       reused, FR-FRESH-3). `GET /api/materials/{id}/freshness/{report_id}` → that report. JSON bodies ≤ 64 KiB
       (SRV-AUTH FR-AUTH-12).
+      **Shapes** (fixed by WEB-FRESH VEC-FRESHUI-1, paired change): `{id}` is the material's uuid or its reader.yaml
+      id (`materials.config_id`). `GET …/freshness` → `{report|null (the latest report of the material, any status,
+      FR-FRESH-10's read shape), stale: bool, stale_reason: reingested|bibliography_changed|ttl|null (the first that
+      applies, in that order; only for a `done` report), bibliography: {…FR-FRESH-1 fields, source: owner|scan,
+      sha256}|null, scan_bibliography: {…fields, sha256}|null (the latest report's that has one), estimate: {low_usd,
+      high_usd, cap_usd}, daily_cap_usd}`; `PUT …/bibliography` → that `bibliography` object. Error bodies are
+      `{error, …}`: 409 `estimate_changed` carries `estimate`; 409 `daily_budget_exhausted` (POST, when today's spend
+      over the three tasks plus `high_usd` exceeds `daily_cap_usd`) carries `daily_cap_usd` and `spent_usd`; 400
+      `bibliography_invalid` carries `field`. A POST body that is not an object or whose `high_usd` is not the
+      current string gets `estimate_changed`; a `bibliography_sha256` that is not the latest scan bibliography's
+      gets `bibliography_unconfirmed`. Money is a two-decimal string. Without a readable reader.yaml (models,
+      language) the routes answer 503 `config_unavailable`.
   - id: FR-FRESH-12
     text: >-
       Jobs. Two kinds (SRV-EVENTS), keyed by (report_id, kind):
@@ -311,7 +350,9 @@ requirements:
       ≈ $0.87 with the $0.02 search reserve floors, under the $1.00 cap (REF-FRESH-2 § 4).
 
       Status: `running` while a key is queued or running; `failed` with the error code when a key is dead or R is
-      empty; `budget_refused`; `done`.
+      empty; `budget_refused`; `done`. The handlers write every final status themselves; a read that finds a
+      `running` report whose job key is dead, or with no job for `stale_without_job_s`, stores it `failed` with
+      `job_failed`.
   - id: FR-FRESH-13
     text: >-
       Logging. One line per stage end: report id prefix (8 hex), stage, index, status, error code, searches used,
@@ -432,4 +473,18 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   Round 3 (2026-11-23): VERDICT approve, with three fixes applied: the Haiku tier jump in the tail cost
   (FR-FRESH-9, REF-FRESH-2 § 4); the cross-check's tier rule and the open tier part of H-WS-6 (SRV-AGENT
   FR-AGENT-16); and the combined worst case of ≈ $0.84–0.87 (FR-FRESH-12). The Red gate still needs the owner's
-  acceptance of ADR-0030 and the live call."
+  acceptance of ADR-0030 and the live call.
+  Promoted 2026-11-23 with Red after the three-part gate: deep-reviewer round 3 approve; stub and live shapes
+  (spikes/web-search §§ 5a/5b); the owner accepted ADR-0030.
+  Revision 4, with the promotion (paired change with WEB-FRESH, whose card and VEC-FRESHUI-1 already fix the
+  response shapes): FR-FRESH-10 states the report's read shape (progress, claims with span and a null cell,
+  citations `{url, host, title}`, topics, dropped) and FR-FRESH-11 the GET body (`stale_reason`, `daily_cap_usd`),
+  the error bodies (409 `estimate_changed` with `estimate`, 409 `daily_budget_exhausted` with `daily_cap_usd` and
+  `spent_usd` as a POST pre-check, 400 `bibliography_invalid` with `field`), `{id}` as uuid or reader.yaml id and
+  503 `config_unavailable`; FR-FRESH-7 names the search statuses; FR-FRESH-9 names the estimate's constants (new
+  bounds `scan_output_tokens`, `report_prompt_tokens_max` and the `expected_*` values, all from REF-FRESH-2 § 4)
+  and its rounding; FR-FRESH-12 the `job_failed` read rule (`stale_without_job_s`); `bibliography` is null for a
+  scan-only check; FR-FRESH-8's prompt file is `prompts/verdict.<version>.md` (the agent session's file tools
+  refuse to create a file named `report.*`). No bound, cap or safety rule changed. Paired changes, each noted in
+  its spec: SRV-EVENTS KIND_MODULES, SRV-AUTH ROUTERS, VERSION_LOCATIONS and `Route.method` PUT, OPS-DEPLOY's
+  example tasks, OPS-DOD's material.freshness cells."
