@@ -110,4 +110,4 @@ defers:
 owner_notes:
   - "1. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it as a range. The live check confirms with it unchecked, so it spends no credit."
 
-review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent."
+review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent. Tests (2026-11-23): [unit] web/src/import/plan/plan.test.tsx; [story] web/src/import/plan/ImportPage.stories.tsx."

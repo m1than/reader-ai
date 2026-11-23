@@ -197,20 +197,21 @@ operations:
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
     surface: [web, api]
     specs: [SRV-PLAN, SRV-PIPELINE, SRV-LESSON, WEB-PLAN, WEB-UI]
+    routes: ["POST /api/plans/preview", "POST /api/plans/confirm", "GET /api/plans"]
     gate: tracked
     criteria:
       functional:
-        items: [FR-PLAN-1, FR-PLAN-3, FR-PLAN-4, FR-PLAN-6, FR-PLAN-7, FR-PLAN-9, INV-PLAN-2, INV-PLAN-3, VEC-PLAN-1, FR-IMPORT-4, FR-IMPORT-5, FR-IMPORT-6, FR-IMPORT-8]
-        missing: "proposed, under review, no test yet: SRV-PIPELINE FR-PIPELINE-14/-15, SRV-LESSON FR-LESSON-15, WEB-UI FR-UI-12"
+        items: [FR-PLAN-1, FR-PLAN-3, FR-PLAN-4, FR-PLAN-6, FR-PLAN-7, FR-PLAN-9, INV-PLAN-2, INV-PLAN-3, VEC-PLAN-1, FR-PIPELINE-14, FR-LESSON-15, FR-UI-12, FR-IMPORT-4, FR-IMPORT-5, FR-IMPORT-6, FR-IMPORT-8]
       security: { items: [FR-PLAN-9, INV-PLAN-5] }
       privacy: { items: [INV-PLAN-4, FR-PLAN-10, FR-PLAN-12] }
-      a11y: { missing: "no axe run on the study-time form and estimate states yet (WEB-IMPORT FR-IMPORT-9; at 1280, 1024 and 390 px once implemented)" }
-      latency: { missing: "NFR-PLAN-1 (preview p95 ≤ 500 ms on the pilot) is a bench not yet run" }
+      a11y: { pages: ["/import"] }   # e2e/web/import/plan: axe, no serious or critical issue at 1280, 1024 and 390 px
+      latency:
+        items: [NFR-PLAN-1]
+        budget: { p95_ms_max: 500, n_min: 20, kind: target,
+                  source: "SRV-PLAN NFR-PLAN-1: preview of a pilot-sized material (935 pages, 494 outline entries) including the suggestion search; a chosen interactive target" }
       cost: { missing: "the estimate (FR-PLAN-8, VEC-PLAN-2) scales one measured lesson and is not a bound; confirm with compile_first spends under SRV-PIPELINE's $8.00 cap and the live check never sets it, so no spend through this operation is measured yet" }
       observability: { items: [FR-PLAN-12] }
-      recovery:
-        items: [FR-PLAN-9, INV-PLAN-5, FR-IMPORT-6]
-        missing: "proposed FR-PIPELINE-14/-15 (course lock, re-check under the lock, already_started); no test yet"
+      recovery: { items: [FR-PLAN-9, INV-PLAN-5, FR-PIPELINE-14, FR-PIPELINE-15, FR-IMPORT-6] }
 
   - id: material.browse
     title: Browse my materials (list, outline, spans of a page)
