@@ -51,14 +51,16 @@ FORWARD_HEADERS = {"accept", "anthropic-beta", "anthropic-dangerous-direct-brows
 LOCK = threading.Lock()
 STATE: dict = {"spent_usd": 0.0, "searches": 0, "requests": 0, "records": [], "refused": []}
 
-# The gate of SRV-FRESH FR-FRESH-6 in miniature, for H-FRESH-2 (the denial rate): the vocabulary of the prompt's
-# metadata plus fixed query words, integers, ordinals and version tokens. Records counts, never the query.
+# For comparison only (the gate decides on the verbatim planned query): the vocabulary of the prompt's metadata plus
+# fixed query words, integers, ordinals and version tokens. Records counts, never the query.
 META = {"title": "Mastering Blockchain", "authors": ["Imran Bashir"], "edition": "4th", "publisher": "Packt",
         "year": 2023}
 QUERY_WORDS = {"edition", "new", "newer", "latest", "official", "documentation", "docs", "course", "release",
                "released", "book", "books", "by", "the", "of", "a", "an", "and", "or", "vs", "is", "there", "after",
                "published", "publication", "date", "fifth", "5th", "update", "updated", "second", "third", "fourth"}
-STATS = {"gate_allowed": 0, "gate_denied": 0, "denied_oov_tokens": [], "query_chars": []}
+STATS: dict = {"gate_allowed": 0, "gate_denied": 0, "denied_oov_tokens": [], "query_chars": []}
+# The code-built query (SRV-FRESH FR-FRESH-6 template "edition"): metadata words only.
+PLANNED_QUERY = "Mastering Blockchain Imran Bashir new edition after 4th edition 2023"
 
 
 def tokens(text: str) -> list[str]:
@@ -226,22 +228,24 @@ async def run() -> dict:
     from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, ResultMessage, UserMessage, query
 
     async def gate(input_data, tool_use_id, context):  # type: ignore[no-untyped-def]
+        # SRV-FRESH FR-FRESH-6: allow only the planned query, verbatim (after trimming), and no domain lists.
+        # The vocabulary check is recorded alongside, for comparison only.
         q = str((input_data.get("tool_input") or {}).get("query", ""))
         domains = any(k in (input_data.get("tool_input") or {}) for k in ("allowed_domains", "blocked_domains"))
         oov = [t for t in tokens(q) if not in_vocab(t)]
         STATS["query_chars"].append(len(q))
-        ok = 1 <= len(q) <= 120 and not oov and not domains
+        STATS.setdefault("verbatim", []).append(q.strip() == PLANNED_QUERY)
+        STATS.setdefault("domains_passed", []).append(domains)
+        ok = q.strip() == PLANNED_QUERY and not domains
         STATS["gate_allowed" if ok else "gate_denied"] += 1
-        if not ok:
-            STATS["denied_oov_tokens"].append(len(oov) + (100 if domains else 0))
+        STATS["denied_oov_tokens"].append(len(oov))
         return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                        "permissionDecision": "allow" if ok else "deny",
-                                       "permissionDecisionReason": "Use only words from the given metadata."}}
+                                       "permissionDecisionReason": "Use exactly the given query and no domain lists."}}
 
-    system = ("You check whether a book has a newer edition. Search queries may use only words from this metadata "
-              "plus generic words such as 'edition', 'new', 'latest', years, ordinals and version numbers: "
-              f"{json.dumps(META)}. Do not pass allowed_domains or blocked_domains. Answer in one line with the "
-              "source URL as plain text.")
+    system = ("You run one web search for a freshness check. Call WebSearch exactly once with exactly this query and "
+              f"no other parameters: {PLANNED_QUERY}\nThen answer in one line: is there an edition newer than the "
+              f"one in this metadata {json.dumps(META)}? Give the source URL as plain text, not as a markdown link.")
     opts = ClaudeAgentOptions(
         system_prompt=system, tools=["WebSearch"], allowed_tools=[], setting_sources=[], max_turns=4, model=MODEL,
         max_budget_usd=CAP_USD, hooks={"PreToolUse": [HookMatcher(matcher="WebSearch", hooks=[gate])]},
@@ -303,7 +307,7 @@ def main() -> None:
                     v["web_search_requests"] for v in by_model.values())), 6),
             "H-WS-6 per-model proxy sums": by_model,
             "H-WS-6 sdk vs proxy usd": {"sdk": sdk_cost, "proxy": proxy_sum},
-            "H-FRESH-2 denial rate": (STATS["gate_denied"] / max(1, STATS["gate_allowed"] + STATS["gate_denied"])),
+            "H-FRESH-2 denial rate (query not verbatim)": (STATS["gate_denied"] / max(1, STATS["gate_allowed"] + STATS["gate_denied"])),
             "max_uses rewrite accepted (search request status)": [r["status"] for r in recs if r["kind"] == "search"],
         },
     }
