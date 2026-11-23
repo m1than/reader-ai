@@ -678,9 +678,22 @@ tasks:
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
         prompt (745–867 prompt tokens in total, ≈ 410 fixed); prices recompute within $0.000004; the CLI writes one-shot
         prompts to the 1-hour cache at 2× input. spikes/tutor-call/RESULT.md." }
-  - { id: V.live, stage: V, kind: live, status: todo,
+  - { id: V.live, stage: V, kind: live, status: in_progress, branch: V/live-slice,
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
-      what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }
+      what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor",
+      note: "2026-11-23 first live run (agent, worktree from V/slice-integration 744997e, fresh volumes). reader up 64 s,
+        11 services healthy, reader doctor all ok (first doctor waited on a macOS Keychain prompt until the owner
+        clicked Allow). verify-all.sh 53/53 PASS (stage-1 117 s, browser 11 s; CDP virtual passkey register and
+        sign-in for live-check). Owner session (owner's choice (a), 2026-11-23): verify-all.sh --slice STEPS runs
+        web_live.py --owner (the owner's bootstrap link through the existing helper, no new exec; refused once the
+        owner has a passkey unless --reset-owner-passkeys) and e2e/web/live/owner.slice.ts; e2e/live/slice.sh runs
+        reader-ingest then verify-all --slice. Step `routes` PASS (owner registered with a virtual passkey; materials
+        200, search 200 with 0 hits, course import 409 no_material before the import, unknown compile/run/ask 404);
+        anonymous curl: the seven slice routes 401, healthz 200. Consequence: the owner now holds a virtual passkey
+        on this stack, so `reader bootstrap` in Safari needs a --reset-owner-passkeys run first. Not reachable through
+        the allowed interfaces: tutor bench (runs in the worker over docker exec) and tutor cost per question (no API
+        exposes agent_spend). The route names differ from the brief: compile is POST /api/lessons/{id}/compile, the
+        course import POST /api/pipeline/courses. Import waits for the owner's 'import approved' (converter r2, ad0da76)." }
   - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
       what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
         (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a
