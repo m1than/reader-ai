@@ -61,6 +61,7 @@ class UpstreamRecord:
     refused: tuple[str, ...]
     in_flight: int = 0  # still being relayed at revoke (code review B2)
     failed: int = 0  # failed after the connection was made: written upstream, outcome unknown
+    searches_forwarded: int = 0  # the sum of forwarded max_uses on an allowance token (FR-AGENT-15)
 
     @property
     def count_2xx(self) -> int:
@@ -77,6 +78,7 @@ class UpstreamRecord:
             "any_2xx": self.any_2xx,
             "in_flight": self.in_flight,
             "failed": self.failed,
+            **({"searches_forwarded": self.searches_forwarded} if self.searches_forwarded else {}),
         }
 
     @classmethod
@@ -89,18 +91,19 @@ class UpstreamRecord:
         if not isinstance(refused, list) or not all(isinstance(r, str) for r in refused):
             return None
         in_flight, failed = data.get("in_flight", 0), data.get("failed", 0)
-        if type(in_flight) is not int or type(failed) is not int:
+        searches = data.get("searches_forwarded", 0)
+        if type(in_flight) is not int or type(failed) is not int or type(searches) is not int:
             return None
-        return cls(tuple(statuses), tuple(refused), in_flight, failed)
+        return cls(tuple(statuses), tuple(refused), in_flight, failed, searches)
 
 
 def worst_case(
     model: str, prompt_chars: int, max_output_tokens: int, *, custom_system: bool = False
 ) -> Decimal:
     """(CLI tokens + ceil(chars / 2.0)) * the 1h cache-write rate + max output * the output rate."""
-    table = rates(model)
     fixed = CLI_OVERHEAD_TOKENS if custom_system else CLI_SYSTEM_TOKENS
     tokens = fixed + math.ceil(Decimal(prompt_chars) / CHARS_PER_TOKEN_FLOOR)
+    table = rates(model, tokens)  # the higher tier past 100,000 estimated prompt tokens (FR-AGENT-16)
     total = Decimal(tokens) * table["cache_write_1h"] + Decimal(max_output_tokens) * table["output"]
     return micro(total / Decimal(10**6))
 
@@ -112,11 +115,33 @@ def reserve_amount(
 
 
 def settle_amount(
-    reserve: Decimal, record: UpstreamRecord | None, sdk_usd: Decimal | None, *, error_result: bool = False
+    reserve: Decimal,
+    record: UpstreamRecord | None,
+    sdk_usd: Decimal | None,
+    *,
+    error_result: bool = False,
+    tool_call: bool = False,
+    requests_max: int | None = None,
 ) -> tuple[Decimal, str | None]:
-    """The settled amount, and a WARNING code to log (FR-AGENT-9, VEC-AGENT-1 `settlements`)."""
+    """The settled amount, and a WARNING code to log (FR-AGENT-9, VEC-AGENT-1 `settlements`).
+
+    A tool call (FR-AGENT-16) expects several 2xx: with a clean record (no refusal, nothing in flight or
+    failed, at most `requests_max` requests) and an SDK cost, it settles at that cost; every other case keeps
+    FR-AGENT-9's rule.
+    """
     if record is None:  # revoke answered 404, failed or was not JSON: the upstream outcome is unknown
         return reserve, None
+    if (
+        tool_call
+        and sdk_usd is not None
+        and not error_result
+        and not record.refused
+        and not record.in_flight
+        and not record.failed
+        and record.count_2xx >= 1
+        and (requests_max is None or len(record.statuses) <= requests_max)
+    ):
+        return sdk_usd, None
     if record.in_flight or record.failed:  # a request that may have been billed without our seeing it
         return max(sdk_usd if sdk_usd is not None else Decimal(0), reserve), "outcome_unknown"
     if record.count_2xx == 0:  # nothing was billed
@@ -233,11 +258,11 @@ async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, c
 _CLOSE = (
     "INSERT INTO agent_spend (owner_id, run_id, lesson_id, stage, task, attempt, kind, reservation_id, model,"
     " usd, sdk_usd, settled_usd, upstream, input, output, cache_write_5m, cache_write_1h, cache_read,"
-    " thinking)"
+    " thinking, web_search_requests)"
     " SELECT owner_id, run_id, lesson_id, stage, task, attempt, CAST(:kind AS text), id, model,"
     " CAST(:usd AS numeric), CAST(:sdk AS numeric), CAST(:settled AS numeric), CAST(:upstream AS jsonb),"
     " CAST(:i AS bigint), CAST(:out AS bigint), CAST(:w5 AS bigint), CAST(:w1 AS bigint),"
-    " CAST(:cr AS bigint), CAST(:th AS bigint)"
+    " CAST(:cr AS bigint), CAST(:th AS bigint), CAST(:ws AS int)"
     " FROM agent_spend WHERE id = :rid AND kind = 'reserve'"
 )
 
@@ -265,6 +290,7 @@ async def settle(
         "w1": counts.get("cache_write_1h"),
         "cr": counts.get("cache_read"),
         "th": counts.get("thinking"),
+        "ws": counts.get("web_search_requests"),
     }
     try:
         async with engine.begin() as conn:
@@ -290,6 +316,7 @@ async def void(engine: AsyncEngine, reservation_id: int) -> None:
         "w1": None,
         "cr": None,
         "th": None,
+        "ws": None,
     }
     try:
         async with engine.begin() as conn:

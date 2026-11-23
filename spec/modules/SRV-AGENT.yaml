@@ -313,12 +313,13 @@ requirements:
       `mcp_servers` stays refused. Every request's `model` must equal the token's model, else 403 `model_mismatch`
       (a nested request moved to another model by a CLI flag fails closed). More than `requests_max` requests on one
       token → 403 `request_cap`. A refusal settles by FR-AGENT-9's record rule (no 2xx → $0; otherwise the reserve).
-      The adapter (FR-AGENT-6) accepts tools only from the code table
-      `TOOL_STAGES = {("freshness_web", "search"): ("WebSearch",)}`; any other StageCall with tools raises
-      `tools_mismatch` before the reservation. For such a call it passes `tools=["WebSearch"]`, `allowed_tools=[]`,
-      the caller's `PreToolUse` hook (the prompt is a string, so not `can_use_tool`), `max_turns` from the call,
-      `abort_on_retry`, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`; the init check (FR-AGENT-7)
-      then requires `tools == ["WebSearch"]` and empty `mcp_servers`. Pinned data (from the stub run and the owner's
+      The adapter (FR-AGENT-6) takes tool use only through one optional StageCall field, `web_search:
+      WebSearchCall(allowance, hook, max_turns)`, so no StageCall field names a tool (SRV-TUTOR's no-tools test
+      holds); the tools come from the code table `TOOL_STAGES = {("freshness_web", "search"): ("WebSearch",)}`, and a
+      call with `web_search` for any other (task, stage) raises `tools_mismatch` before the reservation. For such a
+      call it passes `tools=["WebSearch"]`, `allowed_tools=[]`, the caller's `PreToolUse` hook (the prompt is a
+      string, so not `can_use_tool`), its `max_turns`, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`;
+      the init check (FR-AGENT-7) then requires `tools == ["WebSearch"]` and empty `mcp_servers`. Pinned data (from the stub run and the owner's
       live call, spikes/web-search §§ 3a, 5b): any other web search version or CLI pin needs a new deep-reviewer round;
       the CLI paths seen only in the binary (`search_profile`, the small-model flag `tengu_plum_vx3`,
       search-elsewhere, searchViaSearchService, a ccr-proxy, an auxiliary request) fail closed.
@@ -332,7 +333,8 @@ requirements:
       against `requests_max`, including the CLI's own retries of a 429, 529 or 5xx (REF-AGENT-4: up to 10 resends): a
       retried nested request finds the allowance used and is refused, so retries cannot buy more searches. SRV-FRESH
       sets `requests_max` = 3 (2 main-loop requests + 1 nested) and `abort_on_retry` (FR-AGENT-13 d). The upstream
-      record (FR-AGENT-3) adds `searches_forwarded`. Failed searches still count against `max_uses` upstream
+      record (FR-AGENT-3) of every `freshness_web` token, with or without an allowance, adds `searches_forwarded`
+      (0 without one); other tokens' records are unchanged. Failed searches still count against `max_uses` upstream
       (REF-AGENT-8), so the allowance bounds billed searches from above. The proxy log line (FR-AGENT-5) adds the route
       kind (`main` | `search`) and nothing else.
   - id: FR-AGENT-16

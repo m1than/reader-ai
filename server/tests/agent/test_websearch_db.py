@@ -43,9 +43,12 @@ def _call(w: Any, **kw: Any) -> Any:
         "owner_id": w.users["ivan"], "handle": "ivan", "run_id": uuid.uuid4(), "lesson_id": None,
         "stage": "search", "task": "freshness_web", "attempt": 0, "system": "S", "prompt": "P",
         "max_output_tokens": 1000, "floor_usd": D("0.02"), "run_cap_usd": D("1.00"), "thinking_off": True,
-        "abort_on_retry": True, "tools": ("WebSearch",), "max_turns": 2,
-        "web_search": provider.WebSearchAllowance(searches_max=1, searches_per_request_max=1, requests_max=3),
-        "pre_tool_use": _hook,
+        "abort_on_retry": True,
+        "web_search": provider.WebSearchCall(
+            allowance=provider.WebSearchAllowance(searches_max=1, searches_per_request_max=1, requests_max=3),
+            hook=_hook,
+            max_turns=2,
+        ),
     }
     base.update(kw)
     return provider.StageCall(**base)
@@ -62,7 +65,7 @@ async def test_tools_only_for_the_freshness_search_stage(pg: Pg, tmp_path: Path)
     errors = need("reader.agent.errors")
     w = await world(pg, tmp_path)
     p, cli, proxy = _provider(w, [Script()], tmp_path)
-    for bad in ({"task": "draft"}, {"stage": "report"}, {"tools": ("WebSearch", "Bash")}, {"tools": ("Bash",)}):
+    for bad in ({"task": "draft"}, {"stage": "report"}, {"task": "fact_check", "stage": "tutor"}):
         with pytest.raises(errors.AgentError) as refused:
             await p.run(_call(w, **bad))
         assert refused.value.code == "tools_mismatch"
@@ -117,8 +120,8 @@ async def test_tool_call_init_must_list_websearch(pg: Pg, tmp_path: Path) -> Non
 async def test_tool_less_calls_are_unchanged(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     p, cli, proxy = _provider(w, [Script()], tmp_path)
-    await p.run(_call(w, task="fact_check", stage="tutor", tools=(), max_turns=1, web_search=None,
-                      pre_tool_use=None, abort_on_retry=False, thinking_off=False))
+    await p.run(_call(w, task="fact_check", stage="tutor", web_search=None, abort_on_retry=False,
+                      thinking_off=False))
     assert proxy.issue_extras == [{}]
     options = need("reader.agent.provider").sdk_options(cli.requests[0])
     assert options.tools == [] and options.max_turns == 1 and not options.hooks

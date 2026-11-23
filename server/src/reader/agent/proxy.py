@@ -73,6 +73,64 @@ HOP_BY_HOP: Final = frozenset(
 log = logging.getLogger("reader.agent.proxy")
 METHODS: Final = ("GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS")
 
+# FR-AGENT-14 (ADR-0030): the one task whose run_tokens may carry a WebSearch allowance, and the pinned
+# shapes of the CLI's WebSearch requests (VEC-AGENT-3; claude-agent-sdk 0.2.187). Any other version or pin
+# needs a new review.
+TOOL_TASK: Final = "freshness_web"
+WEB_SEARCH_VERSION: Final = "web_search_20250305"
+WEBSEARCH_INPUT_SCHEMA_SHA256: Final = "ce035ada7312377e4219f1f4d74d325e1db5b9e3b9c4bf9b8e46e7e119b7cbbb"
+PLACEHOLDER_INPUT_SCHEMA_SHA256: Final = "efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49"
+WEBSEARCH_DESCRIPTION_MAX: Final = 1000
+PLACEHOLDER_DESCRIPTION_MAX: Final = 200
+ALLOWANCE_KEYS: Final = ("searches_max", "searches_per_request_max", "requests_max")
+
+
+def canonical_sha256(value: Any) -> str:
+    """sha256 of canonical JSON: sorted keys, no spaces, UTF-8 without ASCII escaping."""
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
+
+
+def _is_count(value: Any) -> bool:
+    return type(value) is int and value >= 1
+
+
+def _main_tools_ok(tools: list[Any]) -> bool:
+    """Shape (a): exactly one WebSearch client tool, plus at most one DeferredToolPlaceholder."""
+    searches = [t for t in tools if isinstance(t, dict) and t.get("name") == "WebSearch"]
+    holders = [t for t in tools if isinstance(t, dict) and t.get("name") == "DeferredToolPlaceholder"]
+    if len(searches) != 1 or len(holders) > 1 or len(searches) + len(holders) != len(tools):
+        return False
+    ws = searches[0]
+    if set(ws) != {"name", "description", "input_schema"}:
+        return False
+    if not isinstance(ws["description"], str) or len(ws["description"]) > WEBSEARCH_DESCRIPTION_MAX:
+        return False
+    if canonical_sha256(ws["input_schema"]) != WEBSEARCH_INPUT_SCHEMA_SHA256:
+        return False
+    for holder in holders:
+        if set(holder) != {"name", "description", "input_schema", "defer_loading"}:
+            return False
+        if holder["defer_loading"] is not True or not isinstance(holder["description"], str):
+            return False
+        if len(holder["description"]) > PLACEHOLDER_DESCRIPTION_MAX:
+            return False
+        if canonical_sha256(holder["input_schema"]) != PLACEHOLDER_INPUT_SCHEMA_SHA256:
+            return False
+    return True
+
+
+def _nested_tools_ok(tools: list[Any]) -> bool:
+    """Shape (b): exactly the pinned server tool, with at most `max_uses` beside `type` and `name`."""
+    if len(tools) != 1 or not isinstance(tools[0], dict):
+        return False
+    tool = tools[0]
+    if not set(tool) <= {"type", "name", "max_uses"}:
+        return False
+    if tool.get("type") != WEB_SEARCH_VERSION or tool.get("name") != "web_search":
+        return False
+    return "max_uses" not in tool or _is_count(tool["max_uses"])
+
 
 def forwarded_header(name: str) -> bool:
     lower = name.lower()
@@ -98,9 +156,13 @@ class Entry:
     refused: list[str] = field(default_factory=list)
     in_flight: int = 0  # forwarded, not yet fully relayed (code review B2)
     failed: int = 0  # failed after the connection was made
+    allowance: dict[str, int] | None = None  # FR-AGENT-14: a freshness_web token's web_search allowance
+    task: str | None = None
+    forwarded: int = 0  # requests forwarded (FR-AGENT-15's request cap counts these)
+    searches_forwarded: int = 0  # the sum of forwarded max_uses
 
     def record(self) -> dict[str, Any]:
-        return {
+        record: dict[str, Any] = {
             "requests": len(self.statuses),
             "statuses": list(self.statuses),
             "any_2xx": any(200 <= s < 300 for s in self.statuses),
@@ -108,6 +170,9 @@ class Entry:
             "in_flight": self.in_flight,
             "failed": self.failed,
         }
+        if self.task == TOOL_TASK:  # FR-AGENT-15, with or without an allowance
+            record["searches_forwarded"] = self.searches_forwarded
+        return record
 
 
 def _digest(token: str) -> str:
@@ -161,11 +226,27 @@ class Proxy:
             or not model
         ):
             return _error(400, "bad_request")
+        task, web_search = fields.get("task"), fields.get("web_search")
+        if task is not None and not isinstance(task, str):
+            return _error(400, "bad_request")
+        allowance: dict[str, int] | None = None
+        if "web_search" in fields:  # FR-AGENT-14: only a freshness_web token may carry an allowance
+            if task != TOOL_TASK:
+                return _error(400, "tools_not_allowed")
+            if (
+                not isinstance(web_search, dict)
+                or set(web_search) != set(ALLOWANCE_KEYS)
+                or not all(_is_count(web_search[k]) for k in ALLOWANCE_KEYS)
+            ):
+                return _error(400, "bad_request")
+            allowance = {k: int(web_search[k]) for k in ALLOWANCE_KEYS}
         token = self._user_token(handle)
         if token is None:
             return _error(409, "provider_missing")
         run_token = secrets.token_urlsafe(32)
-        self.tokens[_digest(run_token)] = Entry(handle, token, cap, model, self.settings.clock())
+        self.tokens[_digest(run_token)] = Entry(
+            handle, token, cap, model, self.settings.clock(), allowance=allowance, task=task
+        )
         while len(self.tokens) > RUN_TOKENS_MAX:
             self.tokens.popitem(last=False)  # the oldest is revoked
         return JSONResponse({"run_token": run_token})
@@ -205,9 +286,12 @@ class Proxy:
             return _error(401, "run_token_unknown"), "-"
         digest, entry = live
         tag = digest[:8]
-        checked = await self._check_body(request, entry)
-        if isinstance(checked, Response):
-            return checked, tag
+        outcome = await self._check_body(request, entry)
+        if isinstance(outcome, Response):
+            return outcome, tag
+        checked, kind = outcome
+        if kind is not None:
+            tag = f"{tag} kind={kind}"  # FR-AGENT-15: the route kind of an allowance token, nothing else
         headers = {
             k: v for k, v in request.headers.items() if forwarded_header(k) and k.lower() not in OWN_HEADERS
         }
@@ -244,8 +328,9 @@ class Proxy:
             tag,
         )
 
-    async def _check_body(self, request: Request, entry: Entry) -> Response | bytes:
-        """The checked body, re-serialised (what was checked is what is sent), or a refusal."""
+    async def _check_body(self, request: Request, entry: Entry) -> Response | tuple[bytes, str | None]:
+        """The checked body, re-serialised (what was checked is what is sent), with the route kind of an
+        allowance token (`main` | `search`, else None), or a refusal."""
 
         def refuse(status: int, code: str) -> Response:
             entry.refused.append(code)
@@ -262,17 +347,53 @@ class Proxy:
             return refuse(415, "body_not_json")
         if not isinstance(payload, dict):
             return refuse(415, "body_not_json")
-        if any(key in payload and payload[key] not in ([], {}) for key in ("tools", "mcp_servers")):
+        kind: str | None = None
+        if "mcp_servers" in payload and payload["mcp_servers"] not in ([], {}):
             return refuse(403, "tools_mismatch")
+        if entry.allowance is None:
+            if "tools" in payload and payload["tools"] not in ([], {}):
+                return refuse(403, "tools_mismatch")
+        else:
+            kind = self._shape(payload)
+            if kind is None:
+                return refuse(403, "tools_mismatch")
         if payload.get("model") != entry.model:
             return refuse(403, "model_mismatch")
         max_tokens = payload.get("max_tokens")
         if type(max_tokens) is not int or max_tokens > entry.max_output_tokens:
             return refuse(403, "output_cap")
+        if entry.allowance is not None:
+            if entry.forwarded >= entry.allowance["requests_max"]:
+                return refuse(403, "request_cap")
+            if kind == "search":
+                remaining = entry.allowance["searches_max"] - entry.searches_forwarded
+                if remaining <= 0:
+                    return refuse(403, "search_cap")
+                per_request = entry.allowance["searches_per_request_max"]
+                tool = payload["tools"][0]
+                # FR-AGENT-15: the only field the proxy ever rewrites.
+                tool["max_uses"] = min(tool.get("max_uses", per_request), per_request, remaining)
         try:
-            return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            body_out = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         except UnicodeEncodeError:  # a lone surrogate (`\ud800`): a 4xx, which the CLI does not retry
             return refuse(400, "body_not_utf8")
+        if entry.allowance is not None:  # counted when it is certain to be sent
+            entry.forwarded += 1
+            if kind == "search":
+                entry.searches_forwarded += payload["tools"][0]["max_uses"]
+        return body_out, kind
+
+    @staticmethod
+    def _shape(payload: dict[str, Any]) -> str | None:
+        """FR-AGENT-14: `main` or `search` for one of the two pinned shapes, else None."""
+        tools = payload.get("tools")
+        if not isinstance(tools, list) or not tools:
+            return None
+        if payload.get("tool_choice", {"type": "auto"}) != {"type": "auto"}:
+            return None
+        if any(isinstance(t, dict) and "type" in t for t in tools):
+            return "search" if _nested_tools_ok(tools) else None
+        return "main" if _main_tools_ok(tools) else None
 
 
 class _Once:

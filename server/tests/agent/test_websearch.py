@@ -99,11 +99,11 @@ def test_pins_match_the_recorded_definitions() -> None:
     pins = SHAPES["pins"]
     assert proxy.canonical_sha256(MAIN[1]["input_schema"]) == pins["websearch_input_schema_sha256"]
     assert proxy.canonical_sha256(MAIN[0]["input_schema"]) == pins["placeholder_input_schema_sha256"]
-    assert proxy.WEB_SEARCH_VERSION == pins["web_search_version"] == NESTED[0]["type"]
-    assert proxy.WEBSEARCH_INPUT_SCHEMA_SHA256 == pins["websearch_input_schema_sha256"]
-    assert proxy.PLACEHOLDER_INPUT_SCHEMA_SHA256 == pins["placeholder_input_schema_sha256"]
-    assert proxy.WEBSEARCH_DESCRIPTION_MAX == pins["websearch_description_chars_max"]
-    assert proxy.PLACEHOLDER_DESCRIPTION_MAX == pins["placeholder_description_chars_max"]
+    assert pins["web_search_version"] == NESTED[0]["type"] == proxy.WEB_SEARCH_VERSION
+    assert pins["websearch_input_schema_sha256"] == proxy.WEBSEARCH_INPUT_SCHEMA_SHA256
+    assert pins["placeholder_input_schema_sha256"] == proxy.PLACEHOLDER_INPUT_SCHEMA_SHA256
+    assert pins["websearch_description_chars_max"] == proxy.WEBSEARCH_DESCRIPTION_MAX
+    assert pins["placeholder_description_chars_max"] == proxy.PLACEHOLDER_DESCRIPTION_MAX
 
 
 @pytest.mark.parametrize("case", SHAPES["cases"], ids=lambda c: c["id"])
@@ -208,7 +208,7 @@ async def test_allowance_sequences(seq: dict[str, Any], tmp_path: Path) -> None:
 
 async def test_allowance_invariant_over_random_sequences(tmp_path: Path) -> None:
     """INV-AGENT-6: for random request sequences, retries included, the bounds hold for what reaches upstream."""
-    rng = random.Random(20261123)
+    rng = random.Random(20261123)  # noqa: S311 (a seeded test sequence, not cryptography)
     for trial in range(25):
         allowance = {
             "searches_max": rng.randint(1, 4),
@@ -285,14 +285,14 @@ def test_haiku_tiers_and_the_search_fee() -> None:
     # the owner's live search request (spikes/web-search § 5b): $0.011863 with the fee
     assert pricing.cost("claude-haiku-5-5", live) == D("0.011863")
     big = pricing.Usage(input=200500, output=835, cache_write_5m=0, cache_write_1h=0, cache_read=0)
-    assert pricing.cost("claude-haiku-5-5", big) == D("0.102338")  # 200,500 × 0.50 + 835 × 2.50, per 1e6
+    assert pricing.cost("claude-haiku-5-5", big) == D("0.102338")  # 200,500 * 0.50 + 835 * 2.50, per 1e6
     sonnet = pricing.Usage(input=1000, output=0, cache_write_5m=0, cache_write_1h=0, cache_read=0,
                            web_search_requests=2)
     assert pricing.cost("claude-sonnet-5-5", sonnet) == D("0.022000")
     small = ledger.worst_case("claude-haiku-5-5", 2000, 1000, custom_system=True)
     large = ledger.worst_case("claude-haiku-5-5", 220000, 1000, custom_system=True)
-    assert small == D("0.000900")  # (1,000 + 1,000) × 0.20 + 1,000 × 0.50
-    assert large == D("0.113500")  # (1,000 + 110,000) × 1.00 + 1,000 × 2.50: the higher tier
+    assert small == D("0.000900")  # (1,000 + 1,000) * 0.20 + 1,000 * 0.50
+    assert large == D("0.113500")  # (1,000 + 110,000) * 1.00 + 1,000 * 2.50: the higher tier
 
 
 def test_model_usage_sum_and_tier_note(caplog: pytest.LogCaptureFixture) -> None:
