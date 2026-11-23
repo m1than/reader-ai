@@ -76,24 +76,29 @@ requirements:
       `navigator.language` (`ru*` → Russian, `en*` → English, else Other). [unit] [story]
   - id: FR-IMPORT-2
     text: >-
-      **Upload.** "Upload" sends the file with XMLHttpRequest (`POST /api/materials/uploads?filename=…&language=…`,
-      the name and language through `URLSearchParams`, `Content-Type: application/pdf`, same origin, credentials
-      same-origin), showing a determinate progress bar from `upload.onprogress` with its percentage as text, and a
-      Cancel button that aborts the request. Responses: 201 or 200 (dedupe: "Already imported" with a link to its
-      state) move to Processing; 401 navigates to sign-in (WEB-UI FR-UI-5); 403, 409, 413, 415 and 400 show the
-      code's message; a network error shows `network` with Retry. The response body is validated (valibot) like
-      every WEB-UI client response (`bad_response`). [unit]
+      **Upload.** "Upload" sends the file with XMLHttpRequest (`POST /api/materials/uploads?language=…` with the
+      language through `URLSearchParams`; the file name in the header `X-Reader-Filename`, percent-encoded with
+      `encodeURIComponent`, never in the URL (SRV-INGEST proposed FR-INGEST-18); `Content-Type: application/pdf`;
+      same origin, credentials same-origin), showing a determinate progress bar from `upload.onprogress` with its
+      percentage as text, and a Cancel button that aborts the request. Responses: 201 or 200 (dedupe: "Already
+      imported" with a link to its state) move to Processing; 401 navigates to sign-in (WEB-UI FR-UI-5); 403, 408,
+      409 (`upload_busy`; `inbox_full` with its remedy "Discard failed uploads, cancel queued ones, or wait";
+      `id_collision`), 413, 415 and 400 show the code's message; a network error shows `network` with Retry. The
+      response body is validated (valibot) like every WEB-UI client response (`bad_response`). [unit]
   - id: FR-IMPORT-3
     text: >-
-      **Processing.** The page polls `GET /api/materials/uploads/{id}` every `poll_ms` until `ready`, `failed` or
-      `cancelled`, and shows a step list (an ordered list with `role="list"`): Uploaded → Converting on your Mac →
+      **Processing.** The page polls `GET /api/materials/uploads/{id}` every `poll_ms` until `ready` or `failed` (a
+      404 after the owner's own cancel or Discard ends polling with "Cancelled" or "Discarded"; any other 404 shows
+      "This upload no longer exists"), and shows a step list (an ordered list with `role="list"`): Uploaded → Converting on your Mac →
       Importing → Indexing for search → Ready. The current step has `aria-current="step"`; `converting` shows "Page n
       of m" and a determinate progress bar when `pages_total` is known. One `role="status"` region announces step
       changes only (not every page count). While `queued`, the page also polls `GET /api/materials/converter` every
       `converter_poll_ms` and shows: online → "Waiting for the converter"; offline → "The converter on your Mac is not
       running. Start it with `reader up`."; setup_missing → "The converter is not set up. Run `reader-ingest
-      --setup`." (commands in `<code>`, copyable as text). Cancel is shown in queued, claimed and converting (a
-      confirm dialog first); Retry and Discard on failed, with the code's message. Polling stops when the page is
+      --setup`."; degraded → "The converter left processes running on your Mac. Restart your Mac session, then run
+      `reader up`." (commands in `<code>`, copyable as text). Cancel is shown in queued, claimed and converting (a
+      confirm dialog first; cancel deletes the upload, so the same file can be uploaded again); Retry and Discard on
+      failed, with the code's message; a 409 `state` reply (the import has already started) refreshes the view. Polling stops when the page is
       hidden (`document.visibilityState`) and resumes when visible. [unit] [story: each state]
   - id: FR-IMPORT-4
     text: >-

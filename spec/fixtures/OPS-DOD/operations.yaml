@@ -185,13 +185,17 @@ operations:
     gate: tracked
     criteria:
       functional: { items: [FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3] }
-      security: { missing: "SRV-INGEST proposed FR-INGEST-18, FR-INGEST-22, INV-INGEST-8..10 (under review) plus INV-INGEST-4 for a watcher-started child, and WEB-IMPORT INV-IMPORT-1/-3; no test yet" }
-      privacy: { missing: "SRV-INGEST proposed FR-INGEST-25 and INV-INGEST-5 extended to the upload path; no canary test yet" }
+      security:
+        items: [INV-IMPORT-1, INV-IMPORT-3]
+        missing: "proposed, under review, no test yet: SRV-INGEST FR-INGEST-18 (upload checks), FR-INGEST-21/-22 (framing, watchdogs, setsid accounting), INV-INGEST-8..10, INV-INGEST-4 for a watcher-started child; SRV-AUTH FR-AUTH-19 (raw-body allow-list); OPS-DEPLOY FR-DEPLOY-13 (200MiB at Caddy); OPS-CLI FR-CLI-22 (watcher spawn env and fds)"
+      privacy: { missing: "proposed SRV-INGEST FR-INGEST-24 (filename canary in logs and URLs) and INV-INGEST-5 extended to the upload path; no test yet" }
       a11y: { missing: "no axe run on /import yet (WEB-IMPORT FR-IMPORT-9; pages /import at 1280, 1024 and 390 px once implemented)" }
-      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher" }
+      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher; fetch throughput is an ADR-0029 hypothesis" }
       cost: { na: no provider call (local converter) }
-      observability: { missing: "SRV-INGEST proposed FR-INGEST-25; no test yet" }
-      recovery: { missing: "SRV-INGEST proposed FR-INGEST-19..21 (lease, cancel, retry) and WEB-IMPORT INV-IMPORT-2; no test yet" }
+      observability: { missing: "proposed SRV-INGEST FR-INGEST-24; no test yet" }
+      recovery:
+        items: [INV-IMPORT-2]
+        missing: "proposed SRV-INGEST FR-INGEST-19..21, FR-INGEST-23 (lease and heartbeat, stack-side expiry, import-key authority, receive order, delete on cancel, crash sweep, watch-mode stale cleanup); no test yet"
 
   - id: course.plan
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
