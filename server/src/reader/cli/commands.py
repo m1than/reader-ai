@@ -13,6 +13,7 @@ from typing import Any, Concatenate, Final, TextIO
 
 import keyring.errors
 
+from reader.cli import ingest_watch
 from reader.cli.errors import CliError
 from reader.cli.log import LOGGER, log_event
 from reader.cli.resolve import (
@@ -67,6 +68,8 @@ class Ctx:
     sleep: Callable[[float], None]
     monotonic: Callable[[], float]
     kill: Callable[[int, int], None]
+    # FR-CLI-22: starts `reader-ingest --watch` detached; None starts no ingest watcher
+    ingest_spawn: Callable[[list[str], Mapping[str, str], Path], int] | None = None
 
 
 def guarded[**P](command: Callable[Concatenate[Ctx, P], int]) -> Callable[Concatenate[Ctx, P], int]:
@@ -211,6 +214,14 @@ def watcher_running(ctx: Ctx) -> bool:
     return lock_holder(ctx.run_dir / "watcher.lock") is not None
 
 
+def _ingest_data_dir(config_path: Path) -> Path | None:
+    """The ingest watcher's data_dir from reader.yaml; None when the configuration cannot be loaded."""
+    try:
+        return ingest_watch.data_dir_of(load_config(config_path), config_path)
+    except ConfigError, OSError:
+        return None
+
+
 # Health and status (FR-CLI-10, FR-CLI-13) -----------------------------------------------------------------
 
 
@@ -272,15 +283,28 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         {"name": str(s.get("Service")), "state": str(s.get("State")), "health": s.get("Health") or None}
         for s in services
     ]
+    data_dir = _ingest_data_dir(config_path)  # FR-CLI-22
+    ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "stopped"
+    converting = ingest_watch.converter(data_dir) if data_dir else "idle"
     if as_json:
         print(
             json.dumps(
-                {"project": project, "watcher": "running" if watcher else "stopped", "services": rows}
+                {
+                    "project": project,
+                    "watcher": "running" if watcher else "stopped",
+                    "ingest_watcher": ingest,
+                    "converter": converting,
+                    "services": rows,
+                }
             ),
             file=ctx.out,
         )
     else:
-        print(f"project {project}; watcher {'running' if watcher else 'stopped'}", file=ctx.out)
+        print(
+            f"project {project}; watcher {'running' if watcher else 'stopped'}; ingest watcher {ingest};"
+            f" converter {converting}",
+            file=ctx.out,
+        )
         for row in rows:
             print(f"  {row['name']}: {row['state']} {row['health'] or ''}".rstrip(), file=ctx.out)
     return code
@@ -419,6 +443,7 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
             file=ctx.err,
         )
         return 1
+    ingest_watch.ensure(ctx, config_path, config)  # FR-CLI-22; a failed spawn is reported, never fatal
     offer_trust(ctx, model.name)
     print(f"reader is up ({model.name}); the watcher keeps delivering secrets", file=ctx.out)
     return 0
@@ -428,6 +453,9 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
 def cmd_down(ctx: Ctx, config_path: Path, untrust: bool = False) -> int:
     project, _ = project_name(ctx, config_path)
     stop_watcher(ctx)
+    data_dir = _ingest_data_dir(config_path)
+    if data_dir is not None:
+        ingest_watch.stop(ctx, data_dir)  # FR-CLI-22: before `docker compose down`
     code = 0
     if project is None:
         print("error: no project (nothing was started by `reader up`)", file=ctx.err)

@@ -34,13 +34,17 @@ def _write(path: Path, record: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def new_run(run_dir: Path, work_root: Path, material_sha256: str) -> str:
-    """Write the record `{material_sha256, work}`, then create the 0700 work directory; returns its name."""
+def new_run(run_dir: Path, work_root: Path, material_sha256: str, upload_id: str | None = None) -> str:
+    """Write the record `{material_sha256, work}` (plus `upload_id` in watch mode, FR-INGEST-21), then create
+    the 0700 work directory; returns its name."""
     run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     work_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = secrets.token_hex(8)
     work = work_root / name
-    _write(run_dir / f"{name}.json", {"material_sha256": material_sha256, "work": str(work)})
+    record: dict[str, Any] = {"material_sha256": material_sha256, "work": str(work)}
+    if upload_id is not None:
+        record["upload_id"] = upload_id
+    _write(run_dir / f"{name}.json", record)
     work.mkdir(mode=0o700)
     os.chmod(work, 0o700)
     return name

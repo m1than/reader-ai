@@ -25,7 +25,17 @@ ALLOWED = {"PATH", "HOME", "LANG", "DOCKER_HOST"}
 
 
 def _config(tmp_path: Path) -> Path:
-    text = (FIXTURES / "config.yaml").read_text().replace("secret://op/Private/anna-claude/token", "secret://keychain/x/y")
+    """VEC-CLI-1 with the op reference on the keychain and the hostfile pointing at a real 0600 file."""
+    secret = tmp_path / "secrets" / "anna-api-key"
+    secret.parent.mkdir(parents=True, exist_ok=True)
+    secret.write_text("CANARY-hf")
+    secret.chmod(0o600)
+    text = (
+        (FIXTURES / "config.yaml")
+        .read_text()
+        .replace("secret://op/Private/anna-claude/token", "secret://keychain/x/y")
+        .replace("secret://hostfile/tmp/reader-ai-test/anna-api-key", "secret://hostfile" + str(secret.resolve()))
+    )
     return write_config(tmp_path / "cfg", text)
 
 
@@ -81,7 +91,7 @@ def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any, **kw: Any)
     monkeypatch.setenv("READER_TEST_TOKEN", "CANARY-env")
     stack(world, rendered(agents=True), volume_exists=True)
     spawns = Spawns()
-    monkeypatch.setattr(mod, "spawn", spawns)
+    world.ctx.ingest_spawn = spawns
     return world, spawns
 
 

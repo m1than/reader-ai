@@ -495,9 +495,8 @@ def test_receive_errors_are_reported(tmp_path: Path, reply: tuple[int, bytes], c
 def test_convert_failure_codes_are_reported(tmp_path: Path) -> None:
     cli = need("reader.ingest.host.cli")
     for code in ("convert_failed", "memory_limit", "work_limit", "timeout"):
-        h = Harness(tmp_path / code)
         (tmp_path / code).mkdir()
-        h.__post_init__()
+        h = Harness(tmp_path / code)
 
         def failing(_: Path, code: str = code) -> None:
             raise cli.Stop(code, 5)

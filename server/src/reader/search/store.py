@@ -66,29 +66,55 @@ def _languages() -> dict[str, str]:
     return {m.id: m.language for m in config.materials}
 
 
+UPLOAD_PREFIX: Final = "up-"  # SRV-CONFIG FR-CONFIG-17 reserves it for uploads (SRV-INGEST FR-INGEST-23)
+
+
+async def _upload_language(conn: AsyncConnection, material_sha256: str) -> str | None:
+    """FR-SEARCH-10: an uploaded material's language comes from its upload; `other` or no row is `simple`."""
+    sql = "SELECT language FROM uploads WHERE sha256 = :s"
+    row = (await conn.execute(text(sql), {"s": material_sha256})).first()
+    return None if row is None else str(row[0])
+
+
+async def _fts_config(conn: AsyncConnection, config_id: str | None, sha: str, languages: Any) -> str:
+    """`languages` is a callable that loads reader.yaml's languages once; it is never called for an upload."""
+    if config_id and config_id.startswith(UPLOAD_PREFIX):
+        return params.fts_config_for(await _upload_language(conn, sha))
+    return params.fts_config_for(languages().get(config_id or ""))
+
+
 async def fts_config_of(conn: AsyncConnection, material_sha256: str, ingest_id: UUID | None = None) -> str:
-    """FR-SEARCH-6: the material's reader.yaml language through materials.config_id; no entry is `simple`."""
+    """FR-SEARCH-6: the material's reader.yaml language through materials.config_id; no entry is `simple`.
+    FR-SEARCH-10: an `up-` material reads its upload's language and never reader.yaml."""
     if ingest_id is None:
         sql = "SELECT config_id FROM materials WHERE sha256 = :s ORDER BY id LIMIT 1"
         row = (await conn.execute(text(sql), {"s": material_sha256})).first()
     else:
         sql = "SELECT m.config_id FROM ingests i JOIN materials m ON m.id = i.material_id WHERE i.id = :i"
         row = (await conn.execute(text(sql), {"i": ingest_id})).first()
-    return params.fts_config_for(_languages().get(row[0] or "") if row else None)
+    if row is None:
+        return params.fts_config_for(None)
+    return await _fts_config(conn, row[0], material_sha256, _languages)
 
 
 async def current_keys(conn: AsyncConnection, owner_id: UUID) -> dict[str, Any]:
     """FR-SEARCH-7: per embedded ingest of the owner, the params_sha256 its material would get now."""
     rows = await conn.execute(
         text(
-            "SELECT DISTINCT e.ingest_id, m.config_id FROM search_embeds e"
+            "SELECT DISTINCT e.ingest_id, m.config_id, m.sha256 FROM search_embeds e"
             " JOIN ingests i ON i.id = e.ingest_id JOIN materials m ON m.id = i.material_id"
             " WHERE e.owner_id = :o AND e.model = :m"
         ),
         {"o": owner_id, "m": params.MODEL_ID},
     )
-    languages = _languages()
-    pairs = [(r[0], params.params_sha256(params.fts_config_for(languages.get(r[1] or "")))) for r in rows]
+    loaded: list[dict[str, str]] = []
+
+    def languages() -> dict[str, str]:  # reader.yaml is read once, and only for a declared material
+        if not loaded:
+            loaded.append(_languages())
+        return loaded[0]
+
+    pairs = [(r[0], params.params_sha256(await _fts_config(conn, r[1], r[2], languages))) for r in rows.all()]
     return {"ci": [p[0] for p in pairs], "cp": [p[1] for p in pairs]}
 
 

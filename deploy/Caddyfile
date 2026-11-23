@@ -13,6 +13,15 @@ localhost {
 		Referrer-Policy "no-referrer"
 	}
 
+	# The PDF upload (OPS-DEPLOY FR-DEPLOY-13): the edge refuses a body over 200 MiB; the exact path only, so the
+	# /api/materials/uploads/{id} routes keep the /api/* handler. The body's 300 s deadline lives in the api.
+	handle /api/materials/uploads {
+		request_body {
+			max_size 200MiB
+		}
+		reverse_proxy 10.230.1.10:8000
+	}
+
 	handle /api/* {
 		reverse_proxy 10.230.1.10:8000
 	}

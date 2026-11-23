@@ -182,6 +182,14 @@ operations:
     title: Upload a PDF in the browser, follow its host-side conversion and indexing, cancel or retry it
     surface: [web, api]
     specs: [SRV-INGEST, WEB-IMPORT, WEB-UI, SRV-AUTH, OPS-DEPLOY, OPS-CLI, SRV-SEARCH, SRV-CONFIG]
+    routes:
+      - "POST /api/materials/uploads"
+      - "GET /api/materials/uploads/{upload_id}"
+      - "POST /api/materials/uploads/{upload_id}/cancel"
+      - "POST /api/materials/uploads/{upload_id}/retry"
+      - "DELETE /api/materials/uploads/{upload_id}"
+      - "GET /api/materials/converter"
+    commands: ["reader-ingest --watch"]
     gate: tracked
     criteria:
       functional: { items: [FR-INGEST-18, FR-INGEST-20, FR-INGEST-21, FR-INGEST-23, VEC-INGEST-6, VEC-INGEST-7, FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3, FR-UI-13, FR-CLI-22] }

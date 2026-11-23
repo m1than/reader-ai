@@ -143,10 +143,12 @@ def test_no_pdf_parser_importable_by_api_or_worker() -> None:
         for p in _stack_modules()
     }
     assert {k: v for k, v in offenders.items() if v} == {}
-    # and nothing outside the host package imports the host package (which holds the converter)
+    # and nothing the api or worker can load imports the host package (which holds the converter); the host CLI
+    # `reader` (reader/cli, OPS-CLI FR-CLI-22) runs on the Mac and may read its closure hash
     importers = [
         str(p.relative_to(SRC))
         for p in _stack_modules()
+        if not p.is_relative_to(READER / "cli")
         if any(
             isinstance(n, ast.ImportFrom) and (n.module or "").startswith("reader.ingest.host")
             for n in ast.walk(ast.parse(p.read_text(encoding="utf-8")))

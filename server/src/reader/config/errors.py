@@ -19,6 +19,7 @@ MESSAGES: Final[Mapping[str, str]] = MappingProxyType({
     "out_of_range": "value is out of range",
     "not_finite": "number must be finite",
     "not_unique": "value repeats an earlier item",
+    "reserved_id": "material ids starting with up- are reserved for uploads",
     # load (FR-CONFIG-15)
     "file_unreadable": "file cannot be read",
     "not_utf8": "file is not valid UTF-8",

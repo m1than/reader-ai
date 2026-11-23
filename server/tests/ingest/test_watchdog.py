@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import signal
@@ -308,7 +309,7 @@ def test_escaping_children_are_found_and_killed(tmp_path: Path, mode: str) -> No
         time.sleep(0.3)
         assert all(not _alive(pid) for pid in found)
     finally:
-        with __import__("contextlib").suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):  # macOS: EPERM for a group that is gone
             os.killpg(child.pid, signal.SIGKILL)
         child.wait(5)
 
@@ -332,9 +333,19 @@ PARENT = textwrap.dedent(
     with cli.convert_lock(data):
         name = records.new_run(run_dir, work_root, "a" * 64)
         work = work_root / name
-        child = cli.system_spawn(
-            ["/bin/sh", "-c", "ls /dev/fd > fds.txt; sleep 60"], {"PATH": "/usr/bin:/bin"}, work
+        check = (
+            "import os, sys, time; lock = os.stat(sys.argv[1]); held = []\\n"
+            "for fd in range(256):\\n"
+            "    try:\\n"
+            "        s = os.fstat(fd)\\n"
+            "    except OSError:\\n"
+            "        continue\\n"
+            "    held.append((s.st_dev, s.st_ino) == (lock.st_dev, lock.st_ino))\\n"
+            "open('fds.txt', 'w').write(str(any(held)))\\n"
+            "time.sleep(60)\\n"
         )
+        lock_file = str(data / "ingest" / "locks" / "convert.lock")
+        child = cli.system_spawn([sys.executable, "-I", "-c", check, lock_file], {"PATH": "/usr/bin:/bin"}, work)
         records.set_child(run_dir, name, child.pid, records.SystemProbe().start_time(child.pid) or "")
         print(json.dumps({"pid": child.pid, "work": str(work)}), flush=True)
         time.sleep(60)
@@ -353,18 +364,23 @@ def test_lock_is_not_inherited_and_an_orphan_is_cleaned(tmp_path: Path) -> None:
     started = json.loads(parent.stdout.readline())
     time.sleep(0.5)
     assert watch.try_convert_lock(data) is None  # held by the parent
-    lock_fds = (Path(started["work"]) / "fds.txt").read_text().split()
+    report = Path(started["work"]) / "fds.txt"
+    for _ in range(50):
+        if report.exists() and report.read_text():
+            break
+        time.sleep(0.1)
+    child_holds_lock = report.read_text()
     parent.send_signal(signal.SIGKILL)
     parent.wait(5)
     try:
         assert _alive(started["pid"])  # the orphaned child still runs
         held = watch.try_convert_lock(data)
         assert held is not None  # ... but does not hold the lock
-        assert len(lock_fds) <= 4  # 0, 1, 2 and ls's own directory fd: no inherited lock fd
+        assert child_holds_lock == "False"  # no descriptor of the child is the lock file
         assert watch.clean_all(data, need("reader.ingest.host.records").SystemProbe()) == 1
         time.sleep(0.3)
         assert not _alive(started["pid"])
         held.release()
     finally:
-        with __import__("contextlib").suppress(ProcessLookupError):
+        with contextlib.suppress(ProcessLookupError, PermissionError):
             os.killpg(started["pid"], signal.SIGKILL)

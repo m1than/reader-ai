@@ -26,7 +26,7 @@ def test_reserved_ids_are_refused(tmp_path: Path, material_id: str) -> None:
     with pytest.raises(ConfigError) as caught:
         load_config(path)
     got = [(p.line, p.path, p.code) for p in caught.value.problems]
-    assert got == [(5, "materials[1].id", "reserved_id")]
+    assert got == [(5, "materials.1.id", "reserved_id")]
     assert "material ids starting with up- are reserved for uploads" in str(caught.value)
 
 

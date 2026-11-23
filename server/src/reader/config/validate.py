@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Final
 
-from reader.config.checks import SHA256, FrozenDict, decimal_in_context, url_problem
+from reader.config.checks import SHA256, FrozenDict, decimal_in_context, material_id_problem, url_problem
 from reader.config.refs import SecretRef
 from reader.config.yaml_tree import OVERSIZED, Map, Node, Scalar, Seq
 
@@ -243,7 +243,7 @@ ROOT: Final = record({
     }), required=False),
     "kernels": Field(items(text(), unique=True), required=False),
     "materials": Field(items(record({
-        "id": Field(text()),
+        "id": Field(text(material_id_problem)),
         "file": Field(path_value),
         "sha256": Field(sha256),
         "license": Field(text()),

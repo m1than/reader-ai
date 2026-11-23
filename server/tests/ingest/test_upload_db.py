@@ -591,6 +591,12 @@ async def test_retry_replies_for_a_dead_import_or_embed(pg: Pg, tmp_path: Path) 
             await conn.execute(
                 text("UPDATE job_keys SET outcome = 'dead', error_code = 'EmbedUnavailable' WHERE kind = 'search.embed'")
             )
+            await conn.execute(
+                text(
+                    "UPDATE procrastinate_jobs SET status = 'failed'"
+                    " WHERE lock IN (SELECT key FROM job_keys WHERE kind = 'search.embed')"
+                )
+            )
         async with api(w) as c:
             seen = (await c.get(f"/api/materials/uploads/{view['id']}")).json()
             assert (seen["state"], seen["code"], seen["retry"]) == ("failed", "EmbedUnavailable", "requeue")
