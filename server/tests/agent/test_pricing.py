@@ -18,8 +18,12 @@ def test_runtime_pricing_table_equals_the_fixture() -> None:
     pricing = need("reader.agent.pricing")
     assert pricing.PRICING_FILE.read_bytes() == (FIXTURES / "pricing.yaml").read_bytes()
     table = pricing.load_pricing()
-    assert set(table.models) == {"claude-opus-5-5", "claude-sonnet-5-5"}
+    assert set(table.models) == {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"}
     assert table.models["claude-opus-5-5"]["cache_write_1h"] == Decimal("8.00")
+    assert table.models["claude-haiku-5-5"]["cache_write_1h"] == Decimal("0.20")  # FR-AGENT-16, lower tier
+    assert table.high_tier["claude-haiku-5-5"]["input"] == Decimal("0.50")  # prompts over 100,000 tokens
+    assert table.web_search_usd == Decimal("0.01")
+    assert pricing.resolve_model("haiku") == "claude-haiku-5-5"
 
 
 def test_aliases_resolve_and_unknown_models_are_refused() -> None:

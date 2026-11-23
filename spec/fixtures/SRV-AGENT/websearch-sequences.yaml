@@ -1,0 +1,57 @@
+# VEC-AGENT-4 — search allowance, request cap and settlement for a `freshness_web` run_token (SRV-AGENT
+# FR-AGENT-14..16). Each sequence runs against one token minted with `allowance`; each step is a request kind
+# (main | nested; shapes from VEC-AGENT-3) and the upstream status the stub answers. `expect` lists, per step, either
+# `forwarded` with the `max_uses` upstream receives (nested) or the proxy's refusal code. `record` is the revoke record's
+# allowance fields afterwards.
+sequences:
+  - id: one-search-run
+    allowance: {searches_max: 1, searches_per_request_max: 1, requests_max: 3}
+    steps: [{kind: main}, {kind: nested}, {kind: main}]
+    expect: [{forwarded: true}, {forwarded: true, max_uses: 1}, {forwarded: true}]
+    record: {requests: 3, searches_forwarded: 1, refused: []}
+  - id: cli-resends-the-nested-request
+    allowance: {searches_max: 1, searches_per_request_max: 1, requests_max: 3}
+    steps: [{kind: main}, {kind: nested, status: 529}, {kind: nested}]
+    expect: [{forwarded: true}, {forwarded: true, max_uses: 1}, {refused: search_cap}]
+    record: {requests: 2, searches_forwarded: 1, refused: [search_cap]}
+  - id: main-loop-turns-hit-the-request-cap
+    allowance: {searches_max: 1, searches_per_request_max: 1, requests_max: 3}
+    steps: [{kind: main}, {kind: main, status: 429}, {kind: main, status: 429}, {kind: main}]
+    expect: [{forwarded: true}, {forwarded: true}, {forwarded: true}, {refused: request_cap}]
+    record: {requests: 3, searches_forwarded: 0, refused: [request_cap]}
+  - id: two-searches-one-per-request
+    allowance: {searches_max: 2, searches_per_request_max: 1, requests_max: 6}
+    steps: [{kind: nested}, {kind: nested}, {kind: nested}]
+    expect: [{forwarded: true, max_uses: 1}, {forwarded: true, max_uses: 1}, {refused: search_cap}]
+    record: {requests: 2, searches_forwarded: 2, refused: [search_cap]}
+  - id: per-request-cap-above-remaining
+    allowance: {searches_max: 3, searches_per_request_max: 2, requests_max: 6}
+    steps: [{kind: nested}, {kind: nested}, {kind: nested}]
+    expect: [{forwarded: true, max_uses: 2}, {forwarded: true, max_uses: 1}, {refused: search_cap}]
+    record: {requests: 2, searches_forwarded: 3, refused: [search_cap]}
+  - id: tool-less-freshness-token
+    allowance: null          # task freshness_web without a `web_search` allowance: FR-AGENT-4 unchanged
+    steps: [{kind: main}, {kind: nested}]
+    expect: [{refused: tools_mismatch}, {refused: tools_mismatch}]
+    record: {requests: 0, searches_forwarded: 0, refused: [tools_mismatch, tools_mismatch]}
+
+# Run-token requests: what POST /run-tokens answers.
+issue:
+  - {id: allowance-on-freshness-web, body: {task: freshness_web, web_search: {searches_max: 1, searches_per_request_max: 1, requests_max: 3}}, status: 200}
+  - {id: allowance-on-other-task, body: {task: draft, web_search: {searches_max: 1, searches_per_request_max: 1, requests_max: 3}}, status: 400, error: tools_not_allowed}
+  - {id: allowance-without-task, body: {web_search: {searches_max: 1, searches_per_request_max: 1, requests_max: 3}}, status: 400, error: tools_not_allowed}
+  - {id: allowance-zero, body: {task: freshness_web, web_search: {searches_max: 0, searches_per_request_max: 1, requests_max: 3}}, status: 400, error: bad_request}
+  - {id: allowance-bool, body: {task: freshness_web, web_search: {searches_max: true, searches_per_request_max: 1, requests_max: 3}}, status: 400, error: bad_request}
+  - {id: allowance-missing-key, body: {task: freshness_web, web_search: {searches_max: 1, requests_max: 3}}, status: 400, error: bad_request}
+  - {id: task-without-allowance, body: {task: freshness_web}, status: 200}
+
+# Settlement of a tool call (FR-AGENT-16): the record, the SDK cost and the reserve → the settled amount.
+settlements:
+  - {id: clean-three-2xx, tool_call: true, record: {statuses: [200, 200, 200], refused: []}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.012588"}
+  - {id: tool-call-with-refusal, tool_call: true, record: {statuses: [200, 200], refused: [search_cap]}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
+  - {id: tool-call-in-flight, tool_call: true, record: {statuses: [200, 200], refused: [], in_flight: 1}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
+  - {id: tool-call-no-2xx, tool_call: true, record: {statuses: [529], refused: []}, sdk_usd: null, reserve: "0.020000", settled: "0"}
+  - {id: tool-call-no-sdk-cost, tool_call: true, record: {statuses: [200, 200, 200], refused: []}, sdk_usd: null, reserve: "0.020000", settled: "0.020000"}
+  - {id: tool-call-unknown-record, tool_call: true, record: null, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
+  - {id: tool-call-over-requests-max, tool_call: true, requests_max: 3, record: {statuses: [200, 200, 200, 200], refused: []}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
+  - {id: no-tool-call-multiple-2xx, tool_call: false, record: {statuses: [200, 200], refused: []}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}

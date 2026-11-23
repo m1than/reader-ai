@@ -1,0 +1,62 @@
+# VEC-AGENT-3 — the CLI's WebSearch request shapes (SRV-AGENT FR-AGENT-14), pinned from the zero-credit stub run
+# spikes/agent-proxy-handshake/results/20261123T205549-websearch (claude-agent-sdk 0.2.187, CLI cc_version
+# 2.1.330.355) and confirmed by the owner's live call spikes/web-search/results/20261123T214429/live.json (keys and
+# shapes only). Hand-copied from those records; the digests are sha256 of canonical JSON (sorted keys, separators
+# "," and ":", UTF-8, no ASCII escaping).
+pins:
+  web_search_version: web_search_20250305
+  websearch_input_schema_sha256: ce035ada7312377e4219f1f4d74d325e1db5b9e3b9c4bf9b8e46e7e119b7cbbb
+  placeholder_input_schema_sha256: efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49
+  websearch_description_chars_max: 1000
+  placeholder_description_chars_max: 200
+
+# The bodies the CLI sent (tools only; every other key of the body is the ordinary message body).
+main_tools:
+  - name: DeferredToolPlaceholder
+    description: "Reserved placeholder that keeps deferred tool loading active; never call this tool."
+    input_schema: {type: object, properties: {}}
+    defer_loading: true
+  - name: WebSearch
+    description: "Search the web. Returns result blocks with titles and URLs. US-only.\n\n- The current month is (provided in the conversation below) — use this when searching for recent information.\n- `allowed_domains` / `blocked_domains` filter results.\n- After answering from results, end with a \"Sources:\" list of the URLs you used as markdown links."
+    input_schema:
+      $schema: "https://json-schema.org/draft/2020-12/schema"
+      type: object
+      properties:
+        query: {description: "The search query to use", type: string, minLength: 2}
+        allowed_domains: {description: "Only include search results from these domains", type: array, items: {type: string}}
+        blocked_domains: {description: "Never include search results from these domains", type: array, items: {type: string}}
+      required: [query]
+      additionalProperties: false
+nested_tools:
+  - {type: web_search_20250305, name: web_search, max_uses: 8}
+nested_tool_choice: {type: auto}
+
+# Cases: `tools` (built from the pieces above by name), an optional `tool_choice`, and the expected outcome.
+#   main | nested         forwarded as that kind (nested: `max_uses_forwarded` is what upstream receives)
+#   tools_mismatch        403, nothing forwarded
+cases:
+  - {id: main-as-sent, tools: main, expect: main}
+  - {id: main-websearch-only, tools: main_websearch_only, expect: main}
+  - {id: main-month-in-description, tools: main_with_description_suffix, suffix: " The current month is November 2026.", expect: main}
+  - {id: main-description-too-long, tools: main_with_description_suffix, suffix_repeat: 1001, expect: tools_mismatch}
+  - {id: main-websearch-with-type, tools: main_websearch_extra_key, key: type, value: custom, expect: tools_mismatch}
+  - {id: main-schema-changed, tools: main_websearch_schema_extra_property, expect: tools_mismatch}
+  - {id: main-second-client-tool, tools: main_plus_tool, tool: {name: Bash, description: x, input_schema: {type: object}}, expect: tools_mismatch}
+  - {id: main-two-placeholders, tools: main_two_placeholders, expect: tools_mismatch}
+  - {id: main-tool-choice-any, tools: main, tool_choice: {type: any}, expect: tools_mismatch}
+  - {id: nested-as-sent, tools: nested, tool_choice: {type: auto}, expect: nested, max_uses_forwarded: 1}
+  - {id: nested-max-uses-absent, tools: nested_without_max_uses, expect: nested, max_uses_forwarded: 1}
+  - {id: nested-max-uses-zero, tools: nested_max_uses, value: 0, expect: tools_mismatch}
+  - {id: nested-max-uses-float, tools: nested_max_uses, value: 1.5, expect: tools_mismatch}
+  - {id: nested-max-uses-string, tools: nested_max_uses, value: "1", expect: tools_mismatch}
+  - {id: nested-max-uses-bool, tools: nested_max_uses, value: true, expect: tools_mismatch}
+  - {id: nested-other-version, tools: nested_type, value: web_search_20260209, expect: tools_mismatch}
+  - {id: nested-allowed-domains, tools: nested_extra_key, key: allowed_domains, value: [example.com], expect: tools_mismatch}
+  - {id: nested-blocked-domains, tools: nested_extra_key, key: blocked_domains, value: [example.com], expect: tools_mismatch}
+  - {id: nested-user-location, tools: nested_extra_key, key: user_location, value: {type: approximate, country: US}, expect: tools_mismatch}
+  - {id: nested-allowed-callers, tools: nested_extra_key, key: allowed_callers, value: [direct], expect: tools_mismatch}
+  - {id: nested-search-profile, tools: nested_extra_key, key: search_profile, value: default, expect: tools_mismatch}
+  - {id: nested-two-tools, tools: nested_twice, expect: tools_mismatch}
+  - {id: nested-tool-choice-tool, tools: nested, tool_choice: {type: tool, name: web_search}, expect: tools_mismatch}
+  - {id: code-execution-tool, tools: custom, value: [{type: code_execution_20260521, name: code_execution}], expect: tools_mismatch}
+  - {id: mcp-servers, tools: main, mcp_servers: [{type: url, url: "https://example.com", name: x}], expect: tools_mismatch}
