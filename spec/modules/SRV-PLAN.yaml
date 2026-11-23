@@ -74,8 +74,8 @@ normative:
 bounds:
   minutes_per_day: { min: 10, max: 240, step: 5, default: 60 }   # default ADR-0010; 240 = four hours, structural
   total_weeks: { min: 1, max: 104 }                             # two years, structural
-  study_minutes_per_kchar_default: "TBD by spikes/study-rate step 1b (spans basis); text-layer basis 2.58"
-  study_minutes_per_kchar: { min: "0.10", max: "20.00" }        # structural; the pilot's per-stage spread is 1.40–5.18
+  study_minutes_per_kchar_default: "2.64"   # spikes/study-rate step 1b: the owner's 81 theory hours over 1,841,091 span characters
+  study_minutes_per_kchar: { min: "0.10", max: "20.00" }        # structural; the pilot's per-stage spread is 1.40–5.30
   lesson_fill_max: 1.25        # a lesson may run to 1.25 × minutes_per_day before it is closed (chosen bound)
   lesson_fill_min: 0.50        # a chapter start closes the open lesson only when it holds ≥ 0.5 × minutes_per_day (chosen bound)
   outline_cut_level_max: 3     # sections are runs between outline entries of level ≤ 3 (the pilot has 3 levels)
@@ -150,11 +150,12 @@ requirements:
       **Compile estimate** (an estimate, labelled as such, never a budget). Per lesson: `low = kchars ×
       L02_LOW_USD / L02_KCHARS` and `high = min(kchars × L02_HIGH_USD / L02_KCHARS, run_cap_usd)`, where
       `L02_LOW_USD = 1.2587` (the converged product run, REF-PLAN-4), `L02_HIGH_USD = 2.9714` (the dearest spike run,
-      one loop, not converged), `L02_KCHARS` = L02's characters on the spans basis (spikes/study-rate step 1b), and
+      one loop, not converged), `L02_KCHARS = 58.938` (L02's span characters, spikes/study-rate step 1b), so $0.0214–0.0504 per 1,000
+      characters, and
       `run_cap_usd` = SRV-PIPELINE's `bounds.run_cap_usd` (8.00). The summary gives the sums for the whole course and
       the values for the first unstarted lesson, rounded to cents (half up). The constants live in
       `reader.plan.params` with their sources; VEC-PLAN-2 pins them. **Hypothesis:** compile cost scales with source
-      characters. Only L02 (54,742 text-layer characters) is measured; per-lesson fixed costs (prompts, the notebook
+      characters. Only L02 is measured; for the pilot's 1,841,091 planned characters the line gives about $39–93; per-lesson fixed costs (prompts, the notebook
       skeleton) make short lessons dearer per character than this line says. V.cost-optimize re-measures. [unit,
       VEC-PLAN-2]
   - id: FR-PLAN-9
@@ -255,7 +256,7 @@ defers:
   - "Choosing chapters instead of a page range."
 
 owner_notes:
-  - "1. The default study rate comes from your own pilot plan: 81 theory hours for the 890 PDF pages of the 23 lessons, i.e. 5.46 min per page or 2.58 min per 1,000 characters of text layer (spikes/study-rate step 1; the spans-basis value replaces it before approval). Per stage it ranges from 1.40 to 5.18. For comparison, plain silent reading of English non-fiction is 238 words a minute (Brysbaert 2019), about 1.7 min for an average pilot page: your plan budgets about three times reading speed for study. You can change the default in reader.yaml (`planner.study_minutes_per_kchar`) and per plan in the form. Spike step 2 measures your real pace from timed L02 sessions."
+  - "1. The default study rate comes from your own pilot plan: 81 theory hours for the 890 PDF pages of the 23 lessons, i.e. 5.46 min per page or 2.64 min per 1,000 characters of the stack's spans (spikes/study-rate step 1b). Per stage it ranges from 1.40 to 5.30. For comparison, plain silent reading of English non-fiction is 238 words a minute (Brysbaert 2019), about 1.3 min for a median pilot page: your plan budgets about four times reading time for study. You can change the default in reader.yaml (`planner.study_minutes_per_kchar`) and per plan in the form. Spike step 2 measures your real pace from timed L02 sessions."
   - "2. Seven study days a week is assumed; spare days become review days. Say if you want fewer study days per week."
   - "3. Lesson size follows minutes per day (one lesson per session). The alternative, fewer longer lessons when weeks are plentiful, was not chosen; say if you prefer it."
   - "4. The compile estimate scales one measured lesson (L02: $1.26 converged, up to $2.97 in the spike) by characters. It is a range, not a promise; each compile still stops at your $8.00 cap."
