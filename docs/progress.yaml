@@ -999,6 +999,24 @@ tasks:
         (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
         timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
         latest live run (OPS-DOD owner note)." }
+  - { id: V.ingest-profile-v2, stage: V, kind: fix, track: engineering, status: in_progress, branch: V/ingest-profile-v2,
+      needs: [V.live],
+      what: "Security fix to the current converter profile (SRV-INGEST FR-INGEST-4, INV-INGEST-4), found in the
+        SRV-INGEST revision 2 review (round 3, 2026-11-23) and measured in spikes/ingest-sysctl on V/onboarding: under
+        `(allow sysctl-read)` and with no process-info rule, a confined converter child read every same-uid process's
+        arguments and environment (kern.procargs2) and cwd (proc_pidinfo). Fix: a sysctl allow-list (kern.hostname
+        kept: os.uname needs it) plus process-info limited to self; both are needed (either alone, or a deny by name,
+        leaves kern.procargs2 open). Not closed by any profile tried: fsgetpath of another directory's inode
+        (recorded by the [host] probe).",
+      gate: "NFR-INGEST-1 [local] full pilot under v2, 2026-11-23 (spikes/ingest-sysctl/fullrun.py on V/onboarding):
+        935/935 pages in 961.6 s = 58.3 pages/min (≥ 10: PASS; earlier r1 baseline 65.5, this run shared the CPU
+        with other tests for its first minutes), converter peak RSS 3,590.8 MiB sampled at 1 s (baseline 4,025.5),
+        span_count 9,463 (= baseline); denied sysctl names: none observed, but the unified log showed no sandbox
+        reports to this user (2 lines), so the check is inconclusive. Earlier the same day under v2: the five
+        [host]/[local] converter tests passed (149.9 s), the 20-page test took 123.1 s vs 111.6 s under the old
+        profile (one run each). Branch tests: ingest 214 passed (6 [host] skipped), test_cross_process_probes passed
+        [host], ruff and mypy clean, trace-check 0 errors.",
+      next: "deep-reviewer round (sandbox: full review), then merge into the PR #39 line." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
