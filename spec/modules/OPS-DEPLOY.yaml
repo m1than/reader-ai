@@ -404,5 +404,6 @@ proposed_requirements:
       cleared after the upgrade is not verified. 300 s is structural: v1 serves only `localhost` (ADR-0012), where a
       200 MiB body takes seconds, and the bound limits how long a stalled client holds the single upload lock.
       [unit] the config check parses the Caddyfile: exactly one `request_body` block, on exactly that path, with
-      `max_size 200MiB`, and no server-wide `read_body`; [live] 209,715,200 bytes pass and 209,715,201 bytes are 413
-      (SRV-INGEST FR-INGEST-18's live case).
+      `max_size 200MiB`, and no server-wide `read_body`; [live] 209,715,200 bytes pass the edge and the api, and
+      209,715,201 bytes are 413 (SRV-INGEST FR-INGEST-18's live case). The live check does not assert which of Caddy
+      or the api answered the 413: both enforce the same cap, and the config check above pins Caddy's.

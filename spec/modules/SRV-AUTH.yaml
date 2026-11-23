@@ -446,9 +446,11 @@ vectors:
 proposed_requirements:
   - id: FR-AUTH-22   # FR-AUTH-19..21 are taken by V/auth-page-style (PR #39)
     text: >-
-      **Raw-body routes.** `reader.auth.csrf.RAW_BODY_ROUTES` is an exact allow-list of (method, route template,
-      media type) with one entry: (`POST`, `/api/materials/uploads`, `application/pdf`). For a request matching an
-      entry by method and by the matched route template (never by a path prefix or a pattern):
+      **Raw-body routes.** `reader.auth.csrf.RAW_BODY_ROUTES` is an exact allow-list of (method, path, media type)
+      with one entry: (`POST`, `/api/materials/uploads`, `application/pdf`). A request matches an entry only when its
+      method equals the entry's and its path string (the request path, query excluded, as received, before any
+      normalisation) equals the entry's path exactly; never by a prefix, a pattern or a route template. For a
+      matching request:
       - the Origin check of FR-AUTH-12 applies unchanged (403 `origin`, before the handler);
       - the Content-Type must be exactly that entry's media type (compared per REF-AUTH-7, parameters ignored), else
         415 `content_type`; `application/json` is refused there too;

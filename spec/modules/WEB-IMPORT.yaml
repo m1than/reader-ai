@@ -95,10 +95,13 @@ requirements:
       changes only (not every page count). While `queued`, the page also polls `GET /api/materials/converter` every
       `converter_poll_ms` and shows: online → "Waiting for the converter"; offline → "The converter on your Mac is not
       running. Start it with `reader up`."; setup_missing → "The converter is not set up. Run `reader-ingest
-      --setup`."; degraded → "The converter left processes running on your Mac. Restart your Mac session, then run
-      `reader up`." (commands in `<code>`, copyable as text). Cancel is shown in queued, claimed and converting (a
-      confirm dialog first; cancel deletes the upload, so the same file can be uploaded again); Retry and Discard on
-      failed, with the code's message; a 409 `state` reply (the import has already started) refreshes the view. Polling stops when the page is
+      --setup`." (commands in `<code>`, copyable as text); and, whatever the state, when `strays` > 0 a non-blocking
+      warning "Earlier conversions left processes running on your Mac; restarting your Mac session clears them".
+      Cancel is shown in queued, claimed and converting (a confirm dialog first; cancel deletes the upload, so the
+      same file can be uploaded again). On failed, the view's `retry` decides the controls: `reconvert` shows Retry
+      and Discard; `requeue` (the import or indexing job died after the file was converted) shows Retry only, which
+      restarts that job without converting again; null shows neither. A 409 `state` or `upload_busy` reply refreshes
+      the view. Polling stops when the page is
       hidden (`document.visibilityState`) and resumes when visible. [unit] [story: each state]
   - id: FR-IMPORT-4
     text: >-
@@ -158,7 +161,9 @@ invariants:
   - id: INV-IMPORT-2
     text: >-
       For every upload state, plan state and error code in VEC-IMPORT-1, the page shows exactly one message from the
-      catalogue and the controls that state allows (Cancel, Retry, Discard, the form, Confirm), and no other. [unit]
+      catalogue and the controls that state allows (Cancel, Retry, Discard, the form, Confirm), and no other. Upload
+      cases include a `failed` view with `retry: requeue` from a dead import and from a dead embed (Retry only, no
+      Discard) and with `retry: reconvert` (Retry and Discard). [unit]
   - id: INV-IMPORT-3
     text: >-
       Under the production CSP (WEB-UI INV-UI-4's test server), loading `/import` and walking every stubbed state
