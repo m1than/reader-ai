@@ -476,7 +476,11 @@ vectors:
 #            ingested with a 40-day-old timestamp is deleted by the handler and a fresh one stays (FR-OBS-11, measured
 #            in spikes/obs-stack round 2); the Caddy + gate + echo upstream case of INV-OBS-5 (no Cookie or
 #            Authorization upstream, no Set-Cookie or Access-Control-* down); the CLI canary of INV-OBS-2 and
-#            FR-OBS-6 (b) in server/tests/obs/cli_canary/ (no network, stub upstream, zero credit).
+#            FR-OBS-6 (b) in server/tests/obs/cli_canary/ (no network, stub upstream, zero credit). The backend
+#            tests' internal networks take explicit subnets 10.233.<n>.0/24 (random n per network, a new n on an
+#            overlap), because Docker Desktop's predefined pools run out (measured 2026-11-24); nothing else in the
+#            repository or on the owner's Docker uses 10.233/16. The ingest check reads the spans of
+#            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24).
 #   [live]   e2e/live/obs.sh against `reader up` (run by the stage-2 live check): 8443 answers 401 without a cookie and
 #            the INV-OBS-5 Origin cases with the owner's session (Playwright owner suite); a tutor-stub question
 #            produces a `job tutor.answer` trace found through MLflow's REST get-trace within NFR-OBS-1, nested job →

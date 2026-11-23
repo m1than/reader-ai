@@ -19,7 +19,7 @@ import subprocess
 import time
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 
@@ -43,6 +43,36 @@ def sh(*cmd: str, check: bool = True, timeout: float = 600) -> str:
     if check:
         assert proc.returncode == 0, proc.stderr[-2000:]
     return proc.stdout
+
+
+TEST_NET: Final = "10.233.{n}.0/24"  # nothing else in the repository or on the owner's Docker uses 10.233/16
+NET_TRIES: Final = 20
+
+
+def _used_subnets() -> set[str]:
+    """Every subnet of an existing Docker network (read-only `docker network inspect`)."""
+    ids = sh("docker", "network", "ls", "-q").split()
+    if not ids:
+        return set()
+    out = sh("docker", "network", "inspect", "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", *ids)
+    return set(out.split())
+
+
+def internal_network(name: str) -> None:
+    """An internal network on an explicit 10.233.<n>.0/24 (Docker Desktop's predefined pools run out); a new
+    random n when the subnet is taken or the create reports an overlap."""
+    for _ in range(NET_TRIES):
+        subnet = TEST_NET.format(n=secrets.randbelow(256))
+        if subnet in _used_subnets():
+            continue
+        proc = subprocess.run(
+            ["docker", "network", "create", "--internal", "--subnet", subnet, name],
+            capture_output=True, text=True, check=False, timeout=60,
+        )
+        if proc.returncode == 0:
+            return
+        assert "overlap" in proc.stderr, proc.stderr[-2000:]
+    raise AssertionError(f"no free 10.233.<n>.0/24 for {name} after {NET_TRIES} tries")
 
 
 def _sdk_pin() -> str:
@@ -218,7 +248,7 @@ def _wait_healthy(prefix: str, name: str, limit: float = 60) -> float:
 
 def _backend(prefix: str, mlflow_image: str) -> None:
     for net in ("otel", "obs"):
-        sh("docker", "network", "create", "--internal", f"{prefix}-{net}")
+        internal_network(f"{prefix}-{net}")
     _run(
         prefix,
         "mlflow",
@@ -317,7 +347,7 @@ while True:
         url = "http://mlflow:5000/api/3.0/mlflow/traces/get?trace_id=tr-" + sys.argv[1]
         with urllib.request.urlopen(url, timeout=5) as r:
             body = json.load(r)
-        spans = body.get("trace", {}).get("data", {}).get("spans", [])
+        spans = body.get("trace", {}).get("spans", [])  # MLflow 3.18's v3 get: trace.spans (measured)
         if len(spans) >= int(sys.argv[2]):
             print(json.dumps({"found": time.time(), "spans": len(spans)})); break
     except urllib.error.HTTPError:
@@ -412,7 +442,7 @@ def _edge_caddyfile() -> str:
 def test_edge_gate_and_header_stripping(prefix: str, canary_image: str, tmp_path: Path) -> None:
     (tmp_path / "Caddyfile").write_text(_edge_caddyfile(), encoding="utf-8")
     (tmp_path / "stubs.py").write_text(GATE, encoding="utf-8")
-    sh("docker", "network", "create", "--internal", f"{prefix}-edge")
+    internal_network(f"{prefix}-edge")
     src = REPO / "server" / "src"
     _run(
         prefix,
