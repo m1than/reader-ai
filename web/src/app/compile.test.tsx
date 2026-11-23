@@ -228,6 +228,50 @@ describe('status mapping', () => {
     for (const s of ['stage_failed', 'budget_exhausted', 'converged', 'open_findings', null]) expect(pollInterval(s, 0, 0)).toBe(false);
   });
 
+  it('submitAction: nothing while closed; resume without a run closes and never compiles', async () => {
+    const { submitAction } = await model();
+    expect(submitAction).toBeTypeOf('function');
+    const stopped = run('stage_failed', [pending(1, 'draft', 'dead')]) as never;
+    expect(submitAction(false, 'compile', null)).toBe('skip');
+    expect(submitAction(false, 'resume', stopped)).toBe('skip');
+    expect(submitAction(true, 'resume', null)).toBe('close');
+    expect(submitAction(true, 'resume', undefined)).toBe('close');
+    expect(submitAction(true, 'resume', stopped)).toBe('resume');
+    expect(submitAction(true, 'compile', null)).toBe('compile');
+    expect(submitAction(true, 'compile', stopped)).toBe('compile');
+  });
+
+  it('a run started after 31 idle minutes is polled (the window restarts when a run starts)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-11-24T10:00:00Z').getTime();
+    vi.setSystemTime(t0);
+    let posted = false;
+    const calls = await mount('/', (url, init) => {
+      if (url === '/api/me') return json(200, owner);
+      if (url === '/api/lessons') return json(200, w02List());
+      if (init?.method === 'POST' && url === '/api/lessons/w02/compile') {
+        posted = true;
+        return json(202, { run_id: 'run-late' });
+      }
+      if (url === '/api/compiles') return json(200, posted ? runs(run('running', [pending(1, 'draft', 'running')], { run_id: 'run-late' })) : runs());
+      if (url === '/api/lessons/w02/estimate') return json(200, estimate());
+      return json(404, { error: 'not_found' });
+    });
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('not compiled yet')).toBeTruthy());
+    vi.setSystemTime(t0 + 31 * 60 * 1000); // idle for 31 minutes: the first window has long expired
+    await act(async () => {
+      fireEvent.click(within(rowOf('Lesson w02')).getByRole('button', { name: 'Compile' }));
+    });
+    const dialog = await screen.findByRole('dialog');
+    await act(async () => {
+      fireEvent.click(within(dialog).getByRole('button', { name: 'Compile' }));
+    });
+    await within(rowOf('Lesson w02')).findByText('Compiling: drafting');
+    const after = calls.filter((c) => c.url === '/api/compiles').length;
+    await waitFor(() => expect(calls.filter((c) => c.url === '/api/compiles').length).toBeGreaterThan(after), { timeout: 8000 });
+    expect(within(rowOf('Lesson w02')).queryByRole('button', { name: 'Refresh' })).toBeNull();
+  }, 15_000);
+
   it('pins RUN_CAP_USD to SRV-PIPELINE bounds.run_cap_usd', async () => {
     const { RUN_CAP_USD } = await model();
     const spec = readYaml<{ bounds: { run_cap_usd: number } }>('spec/modules/SRV-PIPELINE.yaml');

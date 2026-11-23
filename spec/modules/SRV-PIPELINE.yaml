@@ -64,6 +64,9 @@
 # run by the coordinator). Folded in before Green at the coordinator's request: the key's code through SRV-EVENTS
 # FR-EVENTS-17 `dead_error_code_of`, an off-list permanent code writes null, `runs.record_stage_error` named, the
 # open-runs route's query cost and unloadable-lesson limit recorded, a 101-run bound test. Approved by agent.
+# Code review (2026-11-24, on cb81aff): VERDICT approve; applied with tests — `derive` treats an `AgentError` from
+# `step_input` as "no args" (an unpriced model cannot 500 the list), and FR-PIPELINE-17 breaks ties by id ascending
+# like `GET /api/lessons/{lesson_id}/compile`.
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).
@@ -356,8 +359,9 @@ requirements:
   - id: FR-PIPELINE-17
     text: >-
       **Open runs.** `GET /api/compiles` (owner role only, others 404, as FR-PIPELINE-11) returns `{"runs": [...]}`:
-      for each of the owner's lessons its latest run (by `created_at`, then id), kept when it is unfinished
-      (`finished_at` null) or ended with a budget refusal (`budget_refused` set), newest first, at most
+      for each of the owner's lessons its latest run (`created_at` descending, ties broken by `id` ascending, the
+      order FR-PIPELINE-11's `GET /api/lessons/{lesson_id}/compile` uses), kept when it is unfinished
+      (`finished_at` null) or ended with a budget refusal (`budget_refused` set), in that same order, at most
       `bounds.open_runs_max` = 100 (structural: one run per lesson at a time, started by the owner's own clicks;
       more are cut, newest kept). Each entry is that run's FR-PIPELINE-11 status (with FR-PIPELINE-16's `error`),
       so the derived state is one of `running`, `stalled`, `stage_failed` or `budget_exhausted`; a run whose derived
@@ -365,14 +369,18 @@ requirements:
       a list view re-enqueues a stalled run.
       Known costs and limits (recorded, accepted for v1): every read derives each open run, about 8 queries per run
       (run, steps, current revision, job status, dead code, ledger, and ensure's re-derive), on every list poll while
-      a run is `running` or `stalled`, so 100 open runs mean about 800 queries per 5 s poll; a run whose lesson cannot
-      be loaded (its next step's input cannot be computed) stays `stalled`, is never re-enqueued and shows
-      "Compiling" in the list until FR-UI-15's 30-minute polling stop.
+      a run is `running` or `stalled`, so 100 open runs mean about 800 queries per 5 s poll; a run whose next step's
+      input cannot be computed (its lesson cannot be loaded, a `PipelineError`, or its stage's model cannot be
+      resolved or priced, an SRV-AGENT `AgentError` from `step_input`; FR-PIPELINE-6's `derive` treats both as "no
+      args", so neither turns the read into a 500) stays `stalled`, is never re-enqueued and shows "Compiling" in
+      the list until FR-UI-15's 30-minute polling stop.
       [db] server/tests/pipeline/test_open_runs_db.py: a running run, a
       stage_failed run, a budget-refused run and a converged run of four lessons give the first three, newest first;
       a lesson's older stopped run under a newer converged run is not listed; another owner's runs (rows under a
       second owner id) are not listed; a learner gets 404; a stalled run is re-enqueued by the read; 101 lessons with
-      a budget-refused run each give exactly 100 entries, the oldest cut.
+      a budget-refused run each give exactly 100 entries, the oldest cut; two runs with the same `created_at` list in
+      `id` order, the same one `GET /api/lessons/{lesson_id}/compile` returns; a stage whose `step_input` raises
+      `AgentError` leaves the read 200 with that run `stalled`.
 
 invariants:
   - id: INV-PIPELINE-1

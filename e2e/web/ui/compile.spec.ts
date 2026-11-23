@@ -29,17 +29,27 @@ const serious = async (page: Page) =>
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
     .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
 
-/** axe reads colours as rendered: wait for the dialog's open transition (mid-fade text fails contrast). */
+/** axe reads colours as rendered: wait for the dialog's open fade (the library's --acme-duration-slow, 280 ms;
+ * mid-fade text fails contrast), at most 2 s, so a longer fade fails the test instead of hiding behind the wait. */
 const settled = (page: Page) =>
-  page.getByRole('dialog').evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+  page.getByRole('dialog').evaluate((el) =>
+    Promise.race([
+      Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)).then(() => 'settled'),
+      new Promise<string>((_, reject) => setTimeout(() => reject(new Error('dialog animations ran over 2 s')), 2000)),
+    ]),
+  );
+
+const SCHEMES = ['light', 'dark'] as const;
 
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
+for (const scheme of SCHEMES)
 for (const width of WIDTHS) {
-  test(`compile from the list at ${width} px: confirm, a draft still compiling, then finished`, async ({ page, request }) => {
+  test(`compile from the list at ${width} px, ${scheme}: confirm, a draft still compiling, then finished`, async ({ page, request }) => {
     test.setTimeout(60_000);
     expect((await request.post('/__test__/reset')).status()).toBe(204);
     await collectViolations(page);
+    await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
     const row = page.locator('li', { hasText: TITLE });
@@ -77,8 +87,11 @@ for (const width of WIDTHS) {
   });
 }
 
-test('a stopped compile of a drafted lesson: the link, the chip, its reason and Retry', async ({ page, request }) => {
+for (const scheme of SCHEMES)
+test(`a stopped compile of a drafted lesson, ${scheme}: the link, the chip, its reason, Retry and the Resume dialog`, async ({ page, request }) => {
+  test.setTimeout(60_000);
   expect((await request.post('/__test__/reset?w02=stopped')).status()).toBe(204);
+  await page.emulateMedia({ colorScheme: scheme });
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
@@ -89,6 +102,17 @@ test('a stopped compile of a drafted lesson: the link, the chip, its reason and 
     await expect(row.getByRole('button', { name: 'Retry' })).toBeVisible();
     expect(await serious(page)).toEqual([]);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
-    if (SHOTS) await page.screenshot({ path: `${SHOTS}/compile-stopped-${width}.png`, fullPage: true });
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/compile-stopped-${width}-${scheme}.png`, fullPage: true });
+
+    await row.getByRole('button', { name: 'Retry' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog.getByRole('heading', { name: 'Resume the compile of lesson 2?' })).toBeVisible();
+    await expect(dialog.getByText('Spent so far: $0.60 of $8.00.')).toBeVisible();
+    await settled(page);
+    expect(await serious(page)).toEqual([]);
+    expect(await overflow(page)).toBeLessThanOrEqual(0);
+    if (SHOTS) await page.screenshot({ path: `${SHOTS}/compile-resume-${width}-${scheme}.png`, fullPage: true });
+    await dialog.getByRole('button', { name: 'Cancel' }).click(); // never resume here: the state stays stopped
+    await expect(dialog).toBeHidden();
   }
 });

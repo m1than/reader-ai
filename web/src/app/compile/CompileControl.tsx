@@ -19,6 +19,7 @@ import {
   pollInterval,
   polls,
   postOutcome,
+  submitAction,
 } from './model';
 
 export const DRAFT_CHIP = 'draft, compile not finished';
@@ -42,6 +43,28 @@ const restartWindow = (client: QueryClient, key: string) => {
   windowStart(client, key);
   windows.get(client)?.set(key, Date.now());
 };
+// The polling runs each query has seen: a run it has not polled before (started anywhere) restarts its window.
+const seenRuns = new WeakMap<QueryClient, Map<string, Set<string>>>();
+const windowFor = (client: QueryClient, key: string, polling: readonly CompileStatus[]): number => {
+  let byKey = seenRuns.get(client);
+  if (!byKey) {
+    byKey = new Map();
+    seenRuns.set(client, byKey);
+  }
+  let seen = byKey.get(key);
+  if (!seen) {
+    seen = new Set();
+    byKey.set(key, seen);
+  }
+  const known = seen;
+  const fresh = polling.filter((r) => !known.has(r.run_id));
+  if (fresh.length > 0) {
+    for (const r of fresh) known.add(r.run_id);
+    restartWindow(client, key);
+  }
+  return windowStart(client, key);
+};
+const pollingRuns = (runs: readonly CompileStatus[]) => runs.filter((r) => polls(r.state));
 
 type Source = 'list' | 'page';
 
@@ -64,28 +87,37 @@ function useRunState(lesson: LessonSummary, source: Source): RunState {
   const list = useQuery({
     ...q.openCompiles(),
     enabled: source === 'list',
-    refetchInterval: (query) =>
-      pollInterval(query.state.data?.runs.some((r) => polls(r.state)) ? 'running' : null, windowStart(client, listKey), Date.now()),
+    refetchInterval: (query) => {
+      const active = pollingRuns(query.state.data?.runs ?? []);
+      return pollInterval(active.length > 0 ? 'running' : null, windowFor(client, listKey, active), Date.now());
+    },
   });
   const page = useQuery({
     ...q.compile(lesson.lesson_id),
     enabled: source === 'page',
-    refetchInterval: (query) => pollInterval(query.state.data?.state ?? null, windowStart(client, pageKey), Date.now()),
+    refetchInterval: (query) => {
+      const run = query.state.data;
+      return pollInterval(run?.state ?? null, windowFor(client, pageKey, run ? pollingRuns([run]) : []), Date.now());
+    },
   });
   if (source === 'list') {
     const data = list.data;
+    const active = pollingRuns(data?.runs ?? []);
+    windowFor(client, listKey, active); // also at render: a newly seen run restarts the window
     return {
       run: data ? (data.runs.find((r) => r.lesson_id === lesson.lesson_id) ?? null) : undefined,
       failed: list.isError,
-      active: Boolean(data?.runs.some((r) => polls(r.state))),
+      active: active.length > 0,
       updatedAt: list.dataUpdatedAt,
       windowKey: listKey,
     };
   }
+  const run = page.data;
+  windowFor(client, pageKey, run ? pollingRuns([run]) : []);
   return {
-    run: page.data,
+    run,
     failed: page.isError,
-    active: polls(page.data?.state ?? null),
+    active: polls(run?.state ?? null),
     updatedAt: page.dataUpdatedAt,
     windowKey: pageKey,
   };
@@ -196,12 +228,17 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
   };
 
   const submit = async () => {
-    if (inFlight.current) return;
+    const what = submitAction(open, mode, run);
+    if (what === 'skip' || inFlight.current) return;
+    if (what === 'close') {
+      setOpen(false); // the run left the state since the dialog opened: never start a new compile instead
+      return;
+    }
     inFlight.current = true;
     setBusy(true);
     setAlert(null);
     try {
-      if (mode === 'resume' && run) await api.resumeCompile(run.run_id);
+      if (what === 'resume' && run) await api.resumeCompile(run.run_id);
       else await api.startCompile(lesson.lesson_id);
       setOpen(false);
       setFocusStatus(true);

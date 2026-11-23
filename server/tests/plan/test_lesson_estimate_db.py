@@ -13,7 +13,17 @@ from typing import Any
 
 import pytest
 
-from .conftest import PAGE_CHARS, Pg, body, client, import_plan_material, need, plan_env
+from .conftest import (
+    PAGE_CHARS,
+    PLAN_SHA,
+    Pg,
+    body,
+    client,
+    import_plan_material,
+    need,
+    pipeline_env,
+    plan_env,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -38,9 +48,15 @@ async def _confirmed(c: Any) -> tuple[dict[str, Any], dict[str, Any]]:
 async def test_route_answers_lesson_estimate_of_the_lessons_own_characters(pg: Pg, tmp_path: Path) -> None:
     estimate = need("reader.plan.estimate")
     store = need("reader.plan.store")
-    async with plan_env(pg, tmp_path) as env:
-        # A second owner id with a material of the same sha256 and pages but other text lengths: changes nothing.
+    source = need("reader.pipeline.source")
+    async with pipeline_env(pg, tmp_path) as env:
+        # A second owner id with a material of the same sha256 and pages but other text lengths, inserted FIRST, so
+        # it holds the first rows a query without the owner filter would meet: it must change nothing.
         await import_plan_material(env.engine, env.users["anna"], page_chars=tuple(7777 for _ in PAGE_CHARS))
+        await import_plan_material(env.engine, env.users["ivan"])  # as plan_env, after the other owner's
+        env.spans.spans = [
+            source.Span(f"{PLAN_SHA}:{p}", p, "text", "x" * n) for p, n in enumerate(PAGE_CHARS, start=1) if n
+        ]
         async with client(env) as c:
             preview, confirmed = await _confirmed(c)
             by_plan = {x["plan_lesson_id"]: x["lesson_id"] for x in confirmed["lessons"]}

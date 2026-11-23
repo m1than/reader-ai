@@ -143,3 +143,54 @@ async def test_open_runs_are_bounded_newest_first(pg: Pg, tmp_path: Path) -> Non
             listed = (await c.get("/api/compiles")).json()["runs"]
             assert len(listed) == 100
             assert [x["lesson_id"] for x in listed] == list(reversed(ids[1:]))
+
+
+async def test_ties_break_by_id_ascending_like_latest_run(pg: Pg, tmp_path: Path) -> None:
+    """Same created_at (one transaction, one now()): the latest run of a lesson and the list order follow id
+    ascending, the order GET /api/lessons/{lesson_id}/compile uses."""
+    from sqlalchemy import text
+
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        env.spans.spans = synthetic_spans(15)
+        async with client(env) as c:
+            r = await c.post("/api/pipeline/courses", json=copy.deepcopy(five_lessons()))
+            ids = {x["plan_lesson_id"]: x["lesson_id"] for x in r.json()["lessons"]}
+            insert = text(
+                "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets, budget_refused, created_at,"
+                " finished_at) VALUES (:o, :l, 8.00, '{}'::jsonb, 'budget_exhausted', now(), now()) RETURNING id::text"
+            )
+            async with env.engine.begin() as conn:  # now() is the same for every row of this transaction
+                a_runs = [
+                    (await conn.execute(insert, {"o": env.users["ivan"], "l": uuid.UUID(ids["A"])})).scalar_one()
+                    for _ in range(3)
+                ]
+                b_run = (await conn.execute(insert, {"o": env.users["ivan"], "l": uuid.UUID(ids["B"])})).scalar_one()
+            latest_a = (await c.get(f"/api/lessons/{ids['A']}/compile")).json()["run_id"]
+            assert latest_a == min(a_runs)  # uuid order is the order of their lowercase hex text
+            listed = (await c.get("/api/compiles")).json()["runs"]
+            assert {x["lesson_id"]: x["run_id"] for x in listed} == {ids["A"]: latest_a, ids["B"]: b_run}
+            assert [x["run_id"] for x in listed] == sorted([latest_a, b_run])
+
+
+async def test_an_unresolvable_model_leaves_the_read_working(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An AgentError from step_input (e.g. an unpriced model) is "no args": the run reads as stalled, never a 500."""
+    from .conftest import need
+
+    runs = need("reader.pipeline.runs")
+    errors = need("reader.agent.errors")
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        lesson = await env.import_plan()
+        async with client(env) as c:
+            run = (await c.post(f"/api/lessons/{lesson}/compile")).json()["run_id"]
+
+            def unpriced(*_args: Any, **_kwargs: Any) -> str:
+                raise errors.agent_error("unknown_model")
+
+            monkeypatch.setattr(runs, "step_input", unpriced)
+            r = await c.get("/api/compiles")
+            assert r.status_code == 200, r.text
+            assert [(x["run_id"], x["state"]) for x in r.json()["runs"]] == [(run, "stalled")]
+            single = await c.get(f"/api/lessons/{lesson}/compile")
+            assert (single.status_code, single.json()["state"]) == (200, "stalled")

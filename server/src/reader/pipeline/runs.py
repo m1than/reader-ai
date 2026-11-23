@@ -19,6 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from reader.agent import ledger
+from reader.agent.errors import AgentError
 from reader.agent.pricing import resolve_model
 from reader.jobs import idempotency_key
 from reader.jobs.queue import dead_error_code_of
@@ -239,7 +240,7 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
                 try:
                     lesson = await load_lesson(conn, rt, owner_id, run.lesson_id)
                     args = step_args(run, len(steps) + 1, stage, step_input(rt, lesson, steps, stage))
-                except PipelineError:
+                except (PipelineError, AgentError):  # unloadable lesson or unresolvable model: no args
                     args = None
                 status = "none"
                 if args is not None:
@@ -320,9 +321,9 @@ async def open_runs(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID) -> list
                 text(
                     "SELECT id FROM (SELECT DISTINCT ON (lesson_id) id, created_at, finished_at,"
                     " budget_refused FROM compile_runs WHERE owner_id = :o"
-                    " ORDER BY lesson_id, created_at DESC, id DESC) latest"
+                    " ORDER BY lesson_id, created_at DESC, id) latest"  # ties: id ascending, as latest_run
                     " WHERE finished_at IS NULL OR budget_refused IS NOT NULL"
-                    " ORDER BY created_at DESC, id DESC LIMIT :n"
+                    " ORDER BY created_at DESC, id LIMIT :n"
                 ),
                 {"o": owner_id, "n": OPEN_RUNS_MAX},
             )

@@ -82,6 +82,14 @@ export const describeRun = (run: CompileStatus | null): Described => {
 export const pollInterval = (state: string | null, startedAt: number, now: number): number | false =>
   state !== null && POLLING.has(state) && now - startedAt < COMPILE_POLL_MAX_MS ? COMPILE_POLL_MS : false;
 
+/** What the dialog's confirm does (FR-UI-15): nothing while closed; resume with no run closes, never compiles. */
+export type Submit = 'skip' | 'close' | 'resume' | 'compile';
+export const submitAction = (open: boolean, mode: 'compile' | 'resume', run: CompileStatus | null | undefined): Submit => {
+  if (!open) return 'skip';
+  if (mode === 'resume') return run ? 'resume' : 'close';
+  return 'compile';
+};
+
 /** Whether a run state polls at all (before the 30-minute window is applied). */
 export const polls = (state: string | null): boolean => state !== null && POLLING.has(state);
 
