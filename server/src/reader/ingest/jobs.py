@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from asyncpg.exceptions import CannotConnectNowError, ConnectionDoesNotExistError
+from procrastinate.exceptions import ConnectorException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
@@ -98,7 +99,13 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
             key=("material_sha256", "converter_version"),
             handler=handle,
             max_attempts=3,
-            transient=(ConnectionDoesNotExistError, CannotConnectNowError, ConnectionRefusedError),
+            # ConnectorException: procrastinate's wrapper of psycopg errors in the search.embed defer
+            transient=(
+                ConnectionDoesNotExistError,
+                CannotConnectNowError,
+                ConnectionRefusedError,
+                ConnectorException,
+            ),
             timeout_s=600.0,
         ),
     )
