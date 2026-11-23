@@ -765,7 +765,10 @@ tasks:
         latency 8.4/8.4/13.5 s (p95 13.5 ≤ 30). Not measured: tutor cost per question (no interface), the tutor bench
         (docker exec). Follow-ups: G2 deltas.mismatch on a converged run (investigate); shared :local image tags are
         retagged and pruned by other worktrees' sessions (another session moved every tag mid-run). Results:
-        e2e/live/results/2026-11-23-slice.json; screenshots stay in the session scratchpad." }
+        e2e/live/results/2026-11-23-slice.json; screenshots stay in the session scratchpad. After the run: merged
+        origin/V/slice-integration c1d7e61 (OPS-DOD; no conflict, both sides of web_live.py kept, owner/slice lines moved
+        to the label-TAB-detail grammar in 2fa9422); verify-all.sh again 53/53 PASS (stage-1 116 s, browser 11 s), log
+        in the DoD grammar." }
   - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
       what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
         (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a
