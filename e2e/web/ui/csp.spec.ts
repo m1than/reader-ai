@@ -22,7 +22,7 @@ test('no CSP violation on the lesson list and the W01 lesson (INV-UI-4)', async 
   await page.goto('/');
   await expect(page.getByText('Fixture course')).toBeVisible();
   await page.goto('/lessons/w01');
-  await expect(page.getByText('Digests')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Digests' })).toBeVisible();
   await expect(page.locator('.katex').first()).toBeVisible();
   await expect(page.locator('pre.shiki').first()).toBeVisible();
   const violations = await page.evaluate(() => (window as unknown as { __csp: string[] }).__csp);
