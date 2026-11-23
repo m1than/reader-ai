@@ -250,7 +250,8 @@ requirements:
     text: >-
       **Plan hash.** `plan_sha256` is the sha256 of the canonical JSON (sorted keys, separators `,` `:`, UTF-8) of
       `{inputs, lessons}` where `inputs` holds the material sha256, the ingest id, the resolved `rate_centi`, weeks,
-      minutes, `start_date` and `today`, and `lessons` holds every lesson's id, pages and minutes. Titles and the fixed set are
+      minutes, `start_date` and the clamped `today` (FR-PLAN-3's `max(today, start_date)`, so preview and confirm
+      agree; VEC-PLAN-1 pins it), and `lessons` holds every lesson's id, pages and minutes. Titles and the fixed set are
       not in the pre-image: titles so that the hash carries no book text, the fixed set because it is derived state
       (the lessons it keeps are in the pre-image through their ids and pages). [unit]
   - id: FR-PLAN-11

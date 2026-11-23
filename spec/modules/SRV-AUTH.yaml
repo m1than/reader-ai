@@ -9,10 +9,6 @@
 #     process in stage 1 (jobs arrive with V.SRV-JOBS-min) and never migrates. The mcp role exits with code 2 until
 #     SRV-MCP (stage 7); it is not in the default profile.
 # Later modules add their routes and tables to these packages under their own specs.
-# Paired note (PROPOSED, 2026-11-23, V/plan, reviewed with SRV-PLAN; no new requirement): SRV-PLAN FR-PLAN-9/-11 append
-# `reader.plan.routes` to ROUTERS (after `tutor`) and `reader/plan/migrations` to VERSION_LOCATIONS (after `pipeline`,
-# before `procrastinate`); no behaviour of this module changes. With the Red tests it moves into FR-AUTH-10's paired
-# notes and the two list tests take the new unions.
 #
 # Out of scope for stage 1: invitations beyond a stub table and self-service sign-up (stage 8, ADR-0016, ADR-0017);
 # MCP OAuth and personal access tokens (SRV-MCP, ADR-0015); the web UI (WEB-UI, stage 4) — until then the api serves
@@ -281,7 +277,10 @@ requirements:
       (paired change). Paired SRV-SEARCH change (2026-11-22): ROUTERS appends `reader.search.routes`. Paired
       SRV-TUTOR change (2026-11-23): ROUTERS appends `reader.tutor.routes`, and `reader/tutor/migrations` joins
       VERSION_LOCATIONS after `pipeline`; the tutor's ask route enqueues through the same `app.state.jobs`.
-      Integrated order: api, auth, lessons, kernels, ingest, search, pipeline, tutor.
+      Integrated order: api, auth, lessons, kernels, ingest, search, pipeline, tutor. Paired SRV-PLAN change
+      (2026-11-23, V/plan; reviewed with SRV-PLAN, deep-reviewer round 4 approve on d9f655a): ROUTERS appends
+      `reader.plan.routes`, and `reader/plan/migrations` joins VERSION_LOCATIONS after `tutor`, before procrastinate's
+      directory; no behaviour of this module changes, and the two list tests take the new lists.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

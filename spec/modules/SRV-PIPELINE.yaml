@@ -49,12 +49,11 @@
 # Integration (V/SRV-TUTOR-impl, 2026-11-23): with SRV-INGEST's migration in the heads, the test fixture
 # `import_material` fills the real tables' NOT NULL columns (ingests.artifact_id, span_count, outline_count,
 # outline_source, pages_without_text; material_spans boxes); no oracle changed.
-# Amendment (DRAFT, 2026-11-23, V/onboarding; revision 2 on V/plan after deep-reviewer round 1 B11/B12):
+# Amendment (2026-11-23, V/plan; reviewed with SRV-PLAN, deep-reviewer rounds 1–4, approve on d9f655a):
 # FR-PIPELINE-14 (a per-course advisory lock; course import as a function, with re-plan removal of unstarted lessons,
 # re-checked under the lock, and renumbering for origin `study_plan`) and FR-PIPELINE-15 (run creation takes the same
-# course lock and can refuse `already_started`), for SRV-PLAN. Paired: SRV-LESSON `delete_unstarted_lesson` and
-# `reorder_lessons`. The `proposed_requirements` key is promoted in the same commit as the items' Red tests; nothing
-# merges while any `proposed_*` key remains. Awaits deep-reviewer.
+# course lock and can refuse `already_started`), for SRV-PLAN. Paired: SRV-LESSON FR-LESSON-15. Promoted with their
+# Red tests.
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).
@@ -118,7 +117,8 @@ tables:
   compile_steps: { owner_id: true, columns: "id bigint identity pk, owner_id, run_id → compile_runs, step int, stage text, input_sha256 text, output_sha256 text null, report jsonb null, reused_from bigint null → compile_steps, model text null, cost_usd numeric(12,6), duration_s numeric, created_at; unique (run_id, step); index (owner_id, stage, input_sha256)" }
 
 errors: [no_material, no_source_spans, source_too_large, lesson_unknown, compile_running, output_invalid,
-  input_not_ready, citation_unknown_span, cap_invalid, labs_unverifiable, verify_unavailable, not_owner]
+  input_not_ready, citation_unknown_span, cap_invalid, labs_unverifiable, verify_unavailable, not_owner,
+  origin_conflict, started_lesson_dropped, already_started]
 
 requirements:
   - id: FR-PIPELINE-1
@@ -257,12 +257,9 @@ requirements:
       the cap with zero task-budget refusals (the example budgets fit two worst-case calls per task, so a refusal means
       the sizing is wrong); its settled ledger sum equals the SDK-reported total; the owner opens the revision in the browser. Spends
       credit within the owner's test budget; the spike's $2.4–3.0 for one loop is a lower guide, not a bound. [live]
-
-# ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for SRV-PLAN): course import from a study plan. Held under
-# `proposed_requirements` (not read by trace-check; this spec is approved and T5 needs a test per item) until the
-# deep-reviewer approves; then the items move into `requirements` with their Red tests. FR-PIPELINE-1..13 are
-# unchanged in behaviour; the pilot's `POST /api/pipeline/courses` keeps importing pilot/bashir/course.yaml. ----
-proposed_requirements:
+  # Amendment for SRV-PLAN (2026-11-23, V/plan; reviewed with SRV-PLAN, deep-reviewer round 4 approve on d9f655a):
+  # promoted with its Red tests. FR-PIPELINE-1..13 are unchanged in behaviour; the pilot's `POST /api/pipeline/courses`
+  # keeps importing pilot/bashir/course.yaml.
   - id: FR-PIPELINE-14
     text: >-
       **Course lock and course import as a function.**
@@ -300,7 +297,7 @@ proposed_requirements:
       owner_id, lesson_id, cap_usd, *, require_course_unstarted=False) -> run_id` first takes the course lock of the
       lesson's `course_plans` row (FR-PIPELINE-14; none for a lesson without one), then the per-lesson lock as today,
       and re-reads the lesson after taking the locks, inside that transaction (a lesson removed by a concurrent re-plan
-      is `not_found`; a [db] test pins this re-read with a removal committed while `create_run` waits on the lock). With
+      FR-PIPELINE-11's `lesson_unknown`, 404 at the route; a [db] test pins this re-read with a removal committed while `create_run` waits on the lock). With
       `require_course_unstarted`, any compile run of any lesson of the same plan course raises `already_started`
       (SRV-PLAN's compile-first target). `compile_running` and SRV-AGENT's budget refusals are unchanged; the route
       passes the default and behaves as before. [db]
