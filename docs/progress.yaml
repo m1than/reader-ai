@@ -718,8 +718,17 @@ tasks:
         NFC, the job key through the real queue), all pinned by tests checked against mutants; non-blocking applied,
         including the runnable bench driver (reader.tutor.bench, e2e/web/tutor/bench_questions.py). Round 2:
         approve. Its non-blocking items applied: thinking tokens on SRV-AGENT's settle rows (agent_0002) and in the
-        bench; an empty assertion removed. Next: the [live] check and the first bench run (test budget).",
-      review: "code review by deep-reviewer (Fable): round 1 (25a5920) changes, round 2 approve (2026-11-23)" }
+        bench; an empty assertion removed. First live run (V.live, 2026-11-23): 3 answered, 2 grounded; investigator:
+        the third was correctly insufficient, its fact one span away from the top hit's primary span. Revision on
+        V/SRV-TUTOR-chunks (from V/live-slice): whole-chunk sources, prompt_bytes_max 29000 and system_bytes_max 2000
+        from spikes/tutor-chunks (reserve $0.148, two attempts within the kept $0.30), usage over GET, t01 replaces v03,
+        n >= 40 bench over HTTP (owner slice step tutor-bench). Awaits deep-reviewer; the bench runs after approval.",
+      review: "code review by deep-reviewer (Fable): round 1 (25a5920) changes, round 2 approve (2026-11-23);
+        the chunks revision awaits deep-reviewer (cost math, new numbers)" }
+  - { id: S0.spike.tutor-chunks, stage: V, kind: spike, status: done, needs: [],
+      result: "2026-11-23, read-only, no spend (the stack's own converter and chunker on the pilot; 665 s): 9,463 spans,
+        2,247 chunks; bytes as sent: whole chunk mean 2,145 (p50 2,206, p90 3,119, p95 3,422, max 5,462), primary
+        span mean 942; spans per chunk mean 5 (p90 9). spikes/tutor-chunks/RESULT.md." }
   - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
         in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
