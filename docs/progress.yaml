@@ -415,6 +415,17 @@ tasks:
         round 4 approve; code review round 1 changes (4719a0e), round 2 changes (3650190), both applied. No approve
         verdict for the code is on record, and jobs and idempotency is a complex area (AGENTS.md), so the task stays
         in_progress until a final deep-reviewer round returns approve (listed for the owner's review-after).",
+      final_review: "Final code review on 2924dcf (deep-reviewer, 2026-11-23): changes — no live correctness bug; 3
+        blocking (start hooks untested and tied to `catalog is None`; the reconcile wrote dead/unknown_kind outside
+        FR-EVENTS-15, overriding 'cancelled: no action'; FR-EVENTS-7's unknown-kind dead untested with the lock free)
+        plus non-blocking. Applied on branch V/SRV-EVENTS-final, spec then Red (a8169f2, 9 failing) then Green:
+        worker.run(hooks=) with HOOK_TIMEOUT_S 30 s (chosen bound), each hook once after the start sweep with
+        running() set, failure isolated, stop observed during the start sweep and hooks, a failing start sweep returns
+        1, running() cleared in the finally; reconcile skips unknown-kind keys; sweep enqueues guarded; the key computed
+        inside the wrapper's try; the lost-run log names count or re-enqueue. Tests: server/tests/jobs 68 passed (41
+        db + 27 unit), new: hooks (a)-(c), hook timeout and stop, failing start sweep, unknown-kind reconcile skip,
+        failing sweep enqueue, FR-EVENTS-7 unknown kind with the lock free, wrapper_error, the worker's own re-enqueue
+        after a lost run, requeue_dead without outcome or job, stored sweep priority. Round 2 pending.",
       note: "green locally; code review next (complex area: full review). Spec SRV-EVENTS approved with Red (deep-reviewer
         rounds 1–3 changes, round 4 approve). 41 tests (21 unit incl. a Hypothesis state machine, 20 db on testcontainers
         Postgres with the OPS-DEPLOY digest); all 41 failed on their own assertion at Red; two mutations (exhaustion

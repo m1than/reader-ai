@@ -662,7 +662,7 @@ async def test_unknown_kind_stalled_with_the_lock_free_is_dead(pg: Pg) -> None:
 
 
 async def test_reconcile_skips_keys_of_an_unknown_kind(pg: Pg) -> None:
-    """FR-EVENTS-15: after a rollback-style cancel, an unknown kind's key is never marked dead by reconcile."""
+    """FR-EVENTS-15: after a rollback-style cancel, reconcile never marks an unknown kind's key dead."""
     async with jobs_env(pg) as env:
         await env.jobs.enqueue(KIND, {"name": "rb"})
         other, old = await _other_version(env, pg)
@@ -681,7 +681,7 @@ async def test_reconcile_skips_keys_of_an_unknown_kind(pg: Pg) -> None:
 
 
 async def test_wrapper_error_counts_one_attempt_and_reenqueues(pg: Pg, monkeypatch: Any) -> None:
-    """FR-EVENTS-4: a failure of the wrapper itself (here _judge) is counted once and the key enqueued again."""
+    """FR-EVENTS-4: a failure of the wrapper itself (here _judge) is counted once; the key is queued again."""
     async with jobs_env(pg) as env:
         await env.jobs.enqueue(KIND, {"name": "we", "mode": "permanent"})
         job = await _claim(env)
@@ -744,7 +744,9 @@ async def test_a_failing_enqueue_does_not_end_the_sweep_round(pg: Pg, monkeypatc
     async with jobs_env(pg) as env:
         for name in ("d1", "d2"):
             await env.jobs.enqueue(KIND, {"name": name})
-        await env.execute("DELETE FROM procrastinate_jobs WHERE lock IN (:a, :b)", a=env.key("d1"), b=env.key("d2"))
+        await env.execute(
+            "DELETE FROM procrastinate_jobs WHERE lock IN (:a, :b)", a=env.key("d1"), b=env.key("d2")
+        )
         await env.age_keys()
         real = env.jobs._defer
         calls: list[str] = []
@@ -769,8 +771,8 @@ async def test_a_failing_enqueue_does_not_end_the_sweep_round(pg: Pg, monkeypatc
 
 
 async def _until(predicate: Any, timeout_s: float = 20.0) -> None:
-    with anyio.fail_after(timeout_s):
-        while not await predicate():
+    with anyio.fail_after(timeout_s):  # polls database state: there is no event to wait on
+        while not await predicate():  # noqa: ASYNC110
             await asyncio.sleep(0.05)
 
 
