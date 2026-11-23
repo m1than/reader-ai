@@ -218,7 +218,17 @@ requirements:
       - `process-exec` of exactly `<VENV>/bin/python` and `<PYROOT>/bin/python3.14`, the resolved symlink target
         (:28–30);
       - `process-fork` (:31);
-      - `sysctl-read` (:32).
+      - `sysctl-read` (:32), **replaced** (2026-11-23, ADR-0029 Decision 3, spikes/ingest-sysctl) by the rules of
+        `spec/fixtures/SRV-INGEST/profile-edits.sb`: `sysctl-read` only for the name prefixes `hw.`, `machdep.`,
+        `vm.`, `sysctl.`, `security.mac.`, `kern.os` and the names `kern.version`, `kern.hostname`, `kern.boottime`,
+        `kern.argmax`, `kern.maxfiles`, `kern.maxfilesperproc`, `kern.ngroups`, `kern.secure_kernel`,
+        `kern.usrstack64`, `kern.clockrate`, `kern.hv_vmm_present`, `kern.willshutdown`, `kern.memorystatus_level`
+        (nothing under `kern.proc` or `kern.procargs`; `kern.hostname` stays because `os.uname()`, called by `import
+        ctypes`, needs it); then `(deny process-info*)` and `(allow process-info* (target self))`. Reason, measured:
+        under the unrestricted rule and with no process-info rule, a confined child read every same-uid process's
+        arguments and environment (`kern.procargs2`) and cwd (`proc_pidinfo`); both edits are needed, since either
+        alone, or a deny by sysctl name, leaves `kern.procargs2` of another pid readable. The edits do not change the
+        output, so `CONVERTER_VERSION` stays.
       There is no rule for `network*`, `mach-lookup`, `iokit-open`, `ipc-posix*` or `signal`, so they all stay
       denied. The spike shows POSIX semaphores and shared memory are not needed.
       **Child process setup:**
@@ -235,7 +245,8 @@ requirements:
       **Tests:**
       - [unit] the argv, the environment and the realpaths;
       - [unit] a rule-for-rule comparison, comments ignored, of the profile against the copy of the spike's profile
-        at `spec/fixtures/SRV-INGEST/spike-converter.sb`, minus its SCRIPTS line;
+        at `spec/fixtures/SRV-INGEST/spike-converter.sb`, minus its SCRIPTS line, with its `(allow sysctl-read)`
+        replaced by `profile-edits.sb`'s rules in order;
       - [local] the profile's behaviour.
   - id: FR-INGEST-5
     text: >-
@@ -627,6 +638,13 @@ invariants:
       - reading a canary in `<data_dir>` outside WORK and the models, and reading the original material path;
       - the environment equals FR-INGEST-4's list and holds no canary variable set in the parent's environment;
       - no listening socket (`lsof -a -p <pid> -i`).
+      **Added with the profile edits** (2026-11-23, spikes/ingest-sysctl), [host], against a second confined process
+      of the same uid whose argv and cwd name its own WORK: `kern.procargs2`, `kern.procargs`, `kern.proc.pid` and
+      `kern.proc.all` by sysctl MIB; `proc_pidinfo` (PROC_PIDVNODEPATHINFO), `proc_pidpath` and `proc_listallpids`;
+      listing that WORK's parent. Every one is refused (`server/tests/ingest/cross_process_probe.py`, run by
+      `test_cross_process_probes`). Recorded, allowed by design: the process's own `kern.procargs2`, and `fsgetpath()`
+      of another directory's inode and `chdir` into a known path (the global `file-read-metadata`; no profile edit
+      tried closes them, measured; ADR-0029 answers them with one converter run at a time).
       **Allowed by design:** `socketpair()` (no external endpoint), and files, symlinks and FIFOs inside WORK, which the
       parent treats as untrusted.
       [local; the probes run as a test-only module under the product profile]

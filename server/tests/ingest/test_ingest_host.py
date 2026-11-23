@@ -413,12 +413,19 @@ def test_child_argv_and_environment(tmp_path: Path) -> None:
 
 
 def test_profile_equals_the_spike_profile_minus_scripts() -> None:
+    """The spike profile minus SCRIPTS, `(allow sysctl-read)` replaced by the measured edits (FR-INGEST-4)."""
     sandbox = need("reader.ingest.host.sandbox")
     ours = sandbox.profile_rules(sandbox.PROFILE.read_text())
     spike = sandbox.profile_rules((FIXTURES / "spike-converter.sb").read_text())
+    edits = sandbox.profile_rules((FIXTURES / "profile-edits.sb").read_text())
     without_scripts = [r.replace(' (subpath (param "SCRIPTS"))', "") for r in spike]
-    assert ours == without_scripts
+    assert without_scripts.count("(allow sysctl-read)") == 1
+    at = without_scripts.index("(allow sysctl-read)")
+    assert ours == [*without_scripts[:at], *edits, *without_scripts[at + 1 :]]
+    assert "(allow sysctl-read)" not in ours
     assert all("network" not in r and "mach-lookup" not in r and "iokit" not in r for r in ours)
+    assert not any("kern.proc" in r for r in ours)
+    assert ours[-2:] == ["(deny process-info*)", "(allow process-info* (target self))"]
 
 
 # ---- FR-INGEST-16: stale cleanup ----

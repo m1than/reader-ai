@@ -323,6 +323,66 @@ print(json.dumps(results))
 
 
 @pytest.mark.ingest_host
+def test_cross_process_probes(tmp_path: Path) -> None:
+    """INV-INGEST-4 (profile edits): a confined child learns nothing about another confined process."""
+    sandbox = need("reader.ingest.host.sandbox")
+    setup = need("reader.ingest.host.setup")
+    data = data_dir()
+    root = Path(os.path.realpath(tmp_path))
+    work_a, work_b = root / "a" / "w", root / "b" / "w"
+    for w in (work_a, work_b):
+        for sub in ("in", "home", "tmp"):
+            (w / sub).mkdir(parents=True)
+    probe = work_a / "cross_process_probe.py"
+    probe.write_text((HERE / "cross_process_probe.py").read_text())
+    venv = setup.venv_dir(data)
+
+    def confined(work: Path, tail: list[str]) -> list[str]:
+        argv = sandbox.child_argv(venv, setup.pyroot_of(venv), setup.models_dir(data), work)
+        python_at = max(i for i, a in enumerate(argv) if a == "-D") + 2
+        return [*argv[: python_at + 1], "-I", *tail]
+
+    other = subprocess.Popen(
+        confined(work_b, ["-c", "import time; time.sleep(30)", "--input", f"{work_b}/in/material.pdf"]),
+        env=sandbox.child_env(work_b, 1),
+        cwd=work_b,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(1.5)
+        cfg = {
+            "target": other.pid,
+            "work_b": str(work_b),
+            "work_b_dev": os.stat(work_b).st_dev,
+            "work_b_ino": os.stat(work_b).st_ino,
+        }
+        done = subprocess.run(
+            confined(work_a, [str(probe), json.dumps(cfg)]),
+            env=sandbox.child_env(work_a, 1),
+            cwd=work_a,
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+    finally:
+        other.kill()
+        other.wait()
+    results = json.loads(done.stdout)
+    channels = {k: v for k, v in results.items() if not k.startswith("recorded ")}
+    assert set(channels) == {
+        "kern.procargs2",
+        "kern.procargs",
+        "kern.proc.pid",
+        "kern.proc.all",
+        "proc_pidpath",
+        "proc_pidinfo cwd",
+        "proc_listallpids",
+        "list WORK parent",
+    }
+    assert all(v.startswith("denied:") for v in channels.values()), channels
+
+
+@pytest.mark.ingest_host
 def test_confinement_probes(tmp_path: Path) -> None:
     pilot_path = pilot()
     sandbox = need("reader.ingest.host.sandbox")
