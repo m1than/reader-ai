@@ -23,13 +23,14 @@ from reader.ingest.host import sandbox, setup
 
 HERE = Path(__file__).resolve().parent
 PROFILES = {"product": sandbox.PROFILE, "deny-by-name": HERE / "converter.sb", "v2": HERE / "converter-v2.sb",
-            "v3": HERE / "converter-v3.sb", "v4": HERE / "converter-v4.sb"}
+            "v3": HERE / "converter-v3.sb", "v4": HERE / "converter-v4.sb", "v5": HERE / "converter-v5.sb"}
 
 
 def confined(profile: Path, work: Path, data: Path, tail: list[str]) -> list[str]:
     venv = setup.venv_dir(data)
     argv = sandbox.child_argv(venv, setup.pyroot_of(venv), setup.models_dir(data), work)
     argv[2] = str(profile)
+    argv[3:3] = ["-D", f"WORKROOT={os.path.realpath(work.parent)}"]  # used by v5 only; unused params are ignored
     python_at = max(i for i, a in enumerate(argv) if a == "-D") + 2
     return [*argv[: python_at + 1], "-I", *tail]
 
@@ -64,7 +65,22 @@ def one(name: str, profile: Path, data: Path, scratch: Path) -> dict[str, object
     )
     time.sleep(1.5)
     done = subprocess.run(
-        confined(profile, work_a, data, [str(work_a / "probe.py"), json.dumps({"target": run_b.pid, "work_b": str(work_b)})]),
+        confined(
+            profile,
+            work_a,
+            data,
+            [
+                str(work_a / "probe.py"),
+                json.dumps(
+                    {
+                        "target": run_b.pid,
+                        "work_b": str(work_b),
+                        "work_b_dev": os.stat(work_b).st_dev,
+                        "work_b_ino": os.stat(work_b).st_ino,
+                    }
+                ),
+            ],
+        ),
         env=sandbox.child_env(work_a, 1),
         cwd=work_a,
         capture_output=True,

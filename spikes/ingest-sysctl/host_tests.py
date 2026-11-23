@@ -27,7 +27,8 @@ TESTS = [
 
 def main() -> int:
     sandbox.PROFILE = Path(sys.argv[1]).resolve()  # type: ignore[misc]
-    return pytest.main(["-q", "-p", "no:cacheprovider", *TESTS])
+    chosen = [t for t in TESTS if not sys.argv[2:] or t.rsplit("::", 1)[1] in sys.argv[2:]]
+    return pytest.main(["-q", "-p", "no:cacheprovider", "--durations=0", *chosen])
 
 
 if __name__ == "__main__":

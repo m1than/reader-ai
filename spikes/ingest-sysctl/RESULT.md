@@ -72,9 +72,43 @@ reaching the terminal, the 20 pilot pages (VEC-INGEST-3), the pilot outline (VEC
    add `(deny process-info*)` and `(allow process-info* (target self))`. It is drafted as a proposed amendment of
    SRV-INGEST FR-INGEST-4 and INV-INGEST-4; the product file changes with its Red tests after review.
 
+## Round 4 additions (2026-11-23): inode channels, a metadata wall, `kern.hostname`, 20-page timing
+
+The probe now also tries the inode channels (the harness passes WORK_B's device and inode, the best case for an
+attacker) and a realistic scan: `fsgetpath()` over the ±2,000 inode numbers around the child's own WORK.
+
+| Channel | product | v2 | **v5** = v2 + metadata wall below WORKROOT |
+| --- | --- | --- | --- |
+| `stat` of the shared parent of all WORKs | allowed | allowed | allowed |
+| list `/.vol/<dev>/<ino>` of that parent | denied | denied | denied |
+| open `/.vol/<dev>/<ino of WORK_B>` + `F_GETPATH` | denied | denied | denied |
+| `fsgetpath` on WORK_B's inode | **allowed, names WORK_B** | **allowed, names WORK_B** | **allowed, names WORK_B** |
+| `fsgetpath` scan ±2,000 around own WORK | **finds WORK_B** | **finds WORK_B** | **finds WORK_B** |
+| `chdir` into WORK_B | allowed | allowed | allowed |
+| attacker's child a member of run B | yes | yes (WORK_B learned by inode) | yes |
+
+v5 (`converter-v5.sb`): `(deny file-read-metadata (subpath WORKROOT))`, then WORKROOT itself and the child's own WORK
+allowed again. It does refuse `stat` below WORKROOT (without the explicit re-allow of WORK, even the child's own
+WORK could not be `stat`ed), but **`fsgetpath` and `chdir` into another WORK are not mediated by that rule**: both
+still succeed. So no profile edit tried closes the inode channel; v2's edits close the process channels only.
+
+`kern.hostname` cannot leave the allow-list: without it `os.uname()` fails, and `import ctypes` calls it (measured
+with a first v5 that dropped it: the probe died at import).
+
+20-page sample alone (`host_tests.py … test_pilot_page_expectations`, conversion plus the expectation checks): 111.6 s
+under the product profile, 123.1 s under v2, one back-to-back run each. The 10 % difference is within a single run's
+unknown spread; NFR-INGEST-1's full pilot run under the final profile decides (≥ 10 pages/min, peak RSS recorded).
+
+**Consequence for SRV-INGEST FR-INGEST-22:** a confined child can learn another *concurrent* run's WORK through
+`fsgetpath`, so the cwd and args membership arms remain spoofable while two converter runs coexist. Two structural
+answers, not decided here: (A) one converter run on the host at a time (a lock shared by the CLI and the watcher), so
+no concurrent run exists to join; (B) membership by session id only, so nothing can join another run, at the price
+of never counting a child that called `setsid()`. v2 stays worth having on its own: under the product profile the
+child read every same-uid process's environment through `kern.procargs2`, which may hold secrets, and could have
+written them into its artifact's text.
+
 ## Not measured
 
-- Throughput under v2 on its own (the five tests ran in 149.9 s together; the 20-page sample was 75.7–76.5 s under
-  the product profile in spikes/ingest-confine). The full pilot run under v2.
+- Throughput under v2 on a full run (the five tests ran in 149.9 s together; the 20-page test above).
 - Whether the allow-list is minimal: it is wide enough for Python, torch and Docling on these tests; names the
   converter never reads were not pruned.

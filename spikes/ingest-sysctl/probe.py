@@ -60,6 +60,65 @@ else:
 pids = (ctypes.c_int * 8192)()
 n = libc.proc_listallpids(pids, ctypes.sizeof(pids))
 out["proc_listallpids"] = f"allowed:{n} pids" if n > 0 else f"denied:errno {ctypes.get_errno()}"
+# Inode channels (round-4 review): the child can stat its own WORK's parent (file-read-metadata is global), so it
+# knows that directory's device and inode without any leak. The harness also passes WORK_B's own inode, the best case
+# for an attacker who enumerated inode numbers.
+parent = os.path.dirname(os.path.dirname(os.environ["HOME"]))  # WORK_A/home → WORK_A → the shared parent
+try:
+    st = os.stat(parent)
+    out["stat shared parent"] = "allowed"
+    try:
+        names = os.listdir(f"/.vol/{st.st_dev}/{st.st_ino}")
+        hit = os.path.basename(args["work_b"]) in names
+        if hit:
+            learned = args["work_b"]
+        out["list /.vol parent"] = f"allowed:{len(names)} names, names WORK_B: {hit}"
+    except OSError as e:
+        out["list /.vol parent"] = f"denied:errno {e.errno}"
+except OSError as e:
+    out["stat shared parent"] = f"denied:errno {e.errno}"
+F_GETPATH = 50
+for label, path in (("WORK_B", f"/.vol/{args['work_b_dev']}/{args['work_b_ino']}"),):
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        buf = ctypes.create_string_buffer(1024)
+        r = libc.fcntl(fd, F_GETPATH, buf)
+        os.close(fd)
+        if r == 0 and args["work_b"] in buf.value.decode(errors="replace"):
+            learned = args["work_b"]
+        out[f"open /.vol {label} + F_GETPATH"] = (
+            f"allowed, names WORK_B: {args['work_b'] in buf.value.decode(errors='replace')}"
+            if r == 0
+            else f"open allowed, F_GETPATH errno {ctypes.get_errno()}"
+        )
+    except OSError as e:
+        out[f"open /.vol {label} + F_GETPATH"] = f"denied:errno {e.errno}"
+
+
+class Fsid(ctypes.Structure):
+    _fields_ = [("val", ctypes.c_int32 * 2)]
+
+
+fsid = Fsid()
+fsid.val[0] = args["work_b_dev"]
+buf = ctypes.create_string_buffer(1024)
+n = libc.fsgetpath(buf, 1024, ctypes.byref(fsid), ctypes.c_uint64(args["work_b_ino"]))
+if n > 0:
+    hit = args["work_b"] in buf.value.decode(errors="replace")
+    if hit:
+        learned = args["work_b"]
+    out["fsgetpath WORK_B inode"] = f"allowed, names WORK_B: {hit}"
+else:
+    out["fsgetpath WORK_B inode"] = f"denied:errno {ctypes.get_errno()}"
+# The realistic form: no inode from the harness, only the child's own WORK inode and a scan around it.
+own = os.stat(os.path.dirname(os.environ["HOME"]))
+found = 0
+for ino in range(max(2, own.st_ino - 2000), own.st_ino + 2000):
+    if libc.fsgetpath(buf, 1024, ctypes.byref(fsid), ctypes.c_uint64(ino)) > 0:
+        if buf.value.decode(errors="replace") == args["work_b"]:
+            found += 1
+            learned = args["work_b"]
+out["fsgetpath scan ±2000 around own WORK"] = f"found WORK_B: {found > 0}"
 try:
     os.listdir(os.path.dirname(args["work_b"]))
     out["list WORK parent"] = "allowed"
