@@ -861,7 +861,10 @@ requirements:
       before serving, and its `shutdown()` when serving ends; `serving_logs()` adds SRV-OBS's trace filter to the
       `reader` handler (FR-OBS-4). (d) The CSRF gate is unchanged: a POST under /api/* and the kernel WebSocket upgrade
       with `Origin: https://localhost:8443` and a valid session answer 403 `origin` (SRV-OBS INV-OBS-5's app side).
-      [unit] server/tests/auth/test_obs_wiring.py.
+      [unit, db] server/tests/auth/test_obs_wiring.py (the serving_logs test restores the process's logging state).
+      The pinned lists follow: FR-AUTH-10's ROUTERS test gains `reader.obs.routes`, the public-route set gains
+      `GET /api/obs/gate`, FR-AUTH-2's readiness test removes the jobs branch's head (`jobs_0002`), and the edge CSP test
+      pins the app site's CSP plus the dashboard site's (SRV-OBS FR-OBS-9).
 
 invariants:
   - id: INV-AUTH-1

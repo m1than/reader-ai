@@ -407,6 +407,41 @@ h4 {
   margin: var(--acme-space-2) 0 0;
 }
 
+/* Observability page (WEB-UI FR-UI-18): wide tables scroll inside their own box. */
+.obs-section h2 {
+  margin: var(--acme-space-6) 0 var(--acme-space-3);
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.obs-scroll {
+  overflow-x: auto;
+}
+
+.obs-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.obs-table th,
+.obs-table td {
+  padding: var(--acme-space-1) var(--acme-space-3);
+  border-bottom: 1px solid var(--acme-border);
+  text-align: start;
+}
+
+.obs-traces,
+.obs-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-2) var(--acme-space-3);
+}
+
+.obs-metrics dd {
+  margin: 0 var(--acme-space-4) 0 0;
+  font-weight: 600;
+}
+
 /* Sign-ups screen (WEB-ACCOUNTS FR-ACCOUNTS-1..3). */
 .signups .lead {
   color: var(--acme-text-muted);

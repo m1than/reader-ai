@@ -650,6 +650,7 @@ def test_routers_are_a_declared_list() -> None:
         "reader.pipeline.routes",
         "reader.tutor.routes",
         "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
+        "reader.obs.routes",  # SRV-OBS paired change (FR-AUTH-33)
     ]
 
 
@@ -681,6 +682,7 @@ def test_route_table_is_declared_as_data() -> None:
         ("GET", "/api/auth/signup"),  # FR-AUTH-23, FR-AUTH-31
         ("POST", "/api/auth/signup/options"),
         ("POST", "/api/auth/signup/verify"),
+        ("GET", "/api/obs/gate"),  # FR-AUTH-33: answers 401/403/204 itself (SRV-OBS FR-OBS-9)
     }
     by_path = {(r.method, r.path): r.auth for r in ROUTES}
     assert by_path[("GET", "/api/me")] == "session"

@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -83,6 +83,17 @@ def _settings(env: Env) -> Settings:
         return settings_from_config(config)
     except StartupError as error:
         raise Failure(error.code) from None
+
+
+def start_obs(role: str, env: Env) -> Any:
+    """FR-AUTH-33: SRV-OBS tracing for this role from the configuration's `observability` section."""
+    from reader.obs.setup import setup
+
+    try:
+        config = load_config(env.config)
+    except ConfigError as error:
+        raise Failure(error.problems[0].code if error.problems else "config_invalid") from None
+    return setup(role, config)
 
 
 def _target(env: Env) -> DbTarget:
@@ -177,6 +188,7 @@ def _serve_api(bind: str, env: Env) -> None:
             # routes that enqueue (SRV-PIPELINE, the tutor's ask).
             queue = make_app(target)
             await queue.open_async()
+            obs = start_obs("api", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1)
             try:
                 jobs = Jobs(engine, queue, load_kinds(), (target.password.reveal(),))
                 app = create_app(settings, engine, jobs=jobs)
@@ -186,6 +198,7 @@ def _serve_api(bind: str, env: Env) -> None:
                 )
                 await server.serve()
             finally:
+                obs.shutdown()
                 await queue.close_async()
         finally:
             await engine.dispose()
@@ -217,7 +230,12 @@ def _run_worker(env: Env) -> None:
 
                 # Every resolved secret this process holds: the worker role holds only the database password.
                 held = (target.password.reveal(),)
-                if await run_jobs(engine, target, stop, secret_values=held) != 0:
+                obs = start_obs("worker", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1)
+                try:
+                    code = await run_jobs(engine, target, stop, secret_values=held)
+                finally:
+                    obs.shutdown()
+                if code != 0:
                     raise Failure("database_unreachable")
         finally:
             await engine.dispose()
@@ -326,6 +344,9 @@ def serving_logs() -> None:
     reader = logging.getLogger("reader")
     own = logging.StreamHandler(sys.stderr)
     own.setFormatter(ReaderFormatter())
+    from reader.obs.logs import TraceFilter  # FR-AUTH-33 (SRV-OBS FR-OBS-4): ` trace=<32 hex>` inside a span
+
+    own.addFilter(TraceFilter())
     reader.addHandler(own)
     reader.setLevel(logging.INFO)
     reader.propagate = False

@@ -31,6 +31,8 @@ from reader.agent.errors import AgentError, agent_error
 from reader.agent.ledger import Caps, Scope, UpstreamRecord
 from reader.agent.pricing import Usage, cost, log_crosscheck, map_usage, resolve_model
 from reader.config import ReaderConfig
+from reader.obs.agent import AgentSpan, agent_call
+from reader.obs.cli_env import cli_env_additions
 
 PROXY_URL: Final = "http://agent-proxy:8080"
 PATH_ENV: Final = "/usr/local/bin:/usr/bin:/bin"
@@ -253,6 +255,11 @@ class AgentProvider:
         if task is None:
             raise agent_error("unknown_model")
         model = resolve_model(task.model)
+        # FR-AGENT-14 (SRV-OBS FR-OBS-6): the call runs inside `agent.call`, current while the CLI starts.
+        with agent_call(call.task, call.stage, model) as span:
+            return await self._run(call, model, span)
+
+    async def _run(self, call: StageCall, model: str, span: AgentSpan) -> StageResult:
         reserve = ledger.reserve_amount(
             model,
             len(call.system or "") + len(call.prompt),
@@ -299,6 +306,8 @@ class AgentProvider:
             if usd is not None and sdk_usd is not None:
                 log_crosscheck(model, sdk_usd, usd)
             await ledger.settle(self.engine, reservation, settled, sdk_usd, usd, usage, record)
+            stop_reason = getattr(seen.result, "stop_reason", None)
+            span.settled(usage, settled, stop_reason if isinstance(stop_reason, str) else None)
         log.info(
             "agent_call stage=%s run=%s model=%s settled=%s seconds=%.1f",
             call.stage,
@@ -369,6 +378,11 @@ class AgentProvider:
         }
         if call.thinking_off:
             env["MAX_THINKING_TOKENS"] = "0"
+        # FR-AGENT-14 (SRV-OBS FR-OBS-6): traces only, content off. A provider built without a configuration
+        # (the [image] CLI check drives `drive_bounded` directly) adds nothing.
+        observability = getattr(self.config, "observability", None)
+        if observability is not None and observability.enabled:
+            env.update(cli_env_additions())
         system_file: Path | None = None
         if call.system is not None:
             system_file = home / SYSTEM_FILE

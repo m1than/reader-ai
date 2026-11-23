@@ -120,8 +120,10 @@ def test_inv_obs_3_exporter_failures_never_reach_the_caller() -> None:
 
 
 def test_default_exporter_points_at_rotel_without_headers() -> None:
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
     setup = require("reader.obs.setup")
+    assert setup.EXPORTER_KWARGS == {"endpoint": "http://rotel:4318/v1/traces", "timeout": 10, "headers": {}}
     exporter = setup.default_exporter()
+    assert isinstance(exporter, OTLPSpanExporter)
     assert exporter._endpoint == "http://rotel:4318/v1/traces"
-    assert exporter._timeout == 10
-    assert not dict(exporter._headers or {})

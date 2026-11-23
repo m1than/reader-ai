@@ -70,7 +70,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
-    networks: [edge, front]
+    networks: [edge, front, obs-ui]   # obs-ui: the 8443 dashboard site reaches mlflow (FR-DEPLOY-13)
     healthcheck:
       # 127.0.0.1, not localhost: the admin endpoint listens on IPv4 loopback only, and busybox wget tries ::1 first.
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
@@ -86,6 +86,7 @@ services:
       core: {}
       sb-pair-1: {}
       embed: {}
+      otel: {}   # FR-DEPLOY-13: spans to rotel
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "api", "--healthcheck"]
@@ -97,7 +98,8 @@ services:
     memswap_limit: 2g
     volumes:
       - blobs:/var/lib/reader/blobs
-    networks: [core, agentnet, sb-verify, sb-agent, embed]
+    # otel: spans to rotel; obs: the retention job's delete calls to mlflow (FR-DEPLOY-13, ADR-0032)
+    networks: [core, agentnet, sb-verify, sb-agent, embed, otel, obs]
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
@@ -194,6 +196,60 @@ services:
     <<: *kernel
     networks: [sb-pair-1]
 
+  # SRV-OBS (ADR-0032; OPS-DEPLOY FR-DEPLOY-13): the collector and the trace backend, profile `observability`.
+  # Neither holds a secret, publishes a port or reaches egress. Rotel's image entrypoint already sets its receivers
+  # (4317, 4318); repeating them fails. Its image has bash and no HTTP client, so its healthcheck is a TCP probe.
+  rotel:
+    image: streamfold/rotel:v0.2.7@sha256:7a12878dae3dc494c27def53ebcccbdc18e13389ececf33abf116af3a07c3427
+    profiles: [observability]
+    command: [--exporter, otlp, --otlp-exporter-endpoint, "http://mlflow:5000", --otlp-exporter-protocol, http,
+              --otlp-exporter-custom-headers, x-mlflow-experiment-id=0]
+    user: "10005:10005"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,uid=10005
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+    networks: [otel, obs]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4318"]
+
+  mlflow:
+    # MLflow 3.18.0 minimal (spikes/trace-backend): one worker, the job runner off, SQLite on its own volume.
+    image: reader-mlflow:local
+    pull_policy: build
+    build:
+      context: ..   # the context is empty: deploy/otel/mlflow.Dockerfile.dockerignore excludes everything
+      dockerfile: deploy/otel/mlflow.Dockerfile
+    profiles: [observability]
+    command: [mlflow, server, --host, 0.0.0.0, --port, "5000", --workers, "1",
+              --backend-store-uri, "sqlite:////var/lib/mlflow/mlflow.db",
+              --artifacts-destination, /var/lib/mlflow/artifacts, --default-artifact-root, "mlflow-artifacts:/",
+              --allowed-hosts, "localhost:8443,mlflow:5000,mlflow"]
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+      MLFLOW_DISABLE_TELEMETRY: "true"
+    user: "10004:10004"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=10004
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+    volumes:
+      - obs_mlflow:/var/lib/mlflow
+    networks: [obs, obs-ui]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:5000/health',timeout=2).status!=200)"]
+
 networks:
   edge: {}
   egress: {}
@@ -209,9 +265,14 @@ networks:
   sb-agent: { internal: true }
   sb-pair-1: { internal: true }
   embed: { internal: true }   # ADR-0028: api, worker and embed only
+  # ADR-0032: explicit subnets (no free predefined pool on the owner's Docker Desktop, measured 2026-11-24).
+  otel: { internal: true, ipam: { config: [{ subnet: 10.230.2.0/24 }] } }     # api, worker, rotel
+  obs: { internal: true, ipam: { config: [{ subnet: 10.230.3.0/24 }] } }      # rotel, mlflow, worker (retention)
+  obs-ui: { internal: true, ipam: { config: [{ subnet: 10.230.4.0/24 }] } }   # caddy, mlflow
 
 volumes:
   pgdata: { labels: { org.reader-ai.backup: include } }
   blobs: { labels: { org.reader-ai.backup: include } }
   caddy_data: { labels: { org.reader-ai.backup: exclude } }
   caddy_config: { labels: { org.reader-ai.backup: include } }
+  obs_mlflow: { labels: { org.reader-ai.backup: exclude } }   # traces are diagnostic (ADR-0032)

@@ -34,3 +34,37 @@ localhost {
 		file_server
 	}
 }
+
+# The traces dashboard (SRV-OBS FR-OBS-9, ADR-0032; OPS-DEPLOY FR-DEPLOY-13): MLflow's UI on a second origin, owner
+# only. Port 8443 is published by `reader up` only while the `observability` profile is active (OPS-CLI FR-CLI-22).
+# The gate checks the session and where the request comes from first; MLflow's ingest, gateway, assistant and MCP
+# routes never reach it from the edge (a `handle` block, because Caddy orders `handle` before `respond`); no cookie or
+# credential goes up, no cookie or CORS header comes down. The CSP is the one measured in a headless browser.
+localhost:8443 {
+	tls internal
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	forward_auth 10.230.1.10:8000 {
+		uri /api/obs/gate
+	}
+
+	@blocked path /v1/* /gateway/* /ajax-api/*/mlflow/assistant/* /ajax-api/*/mlflow/gateway-proxy* /mcp* /api/*/mlflow/gateway/*
+	handle @blocked {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy mlflow:5000 {
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+			header_down -Access-Control-*
+		}
+	}
+}

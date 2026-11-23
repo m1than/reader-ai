@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from reader.cli.commands import (
+    TRACES_URL,
     Ctx,
     Project,
     choose_profiles,
@@ -49,6 +50,34 @@ _MAJOR: Final = re.compile(r"v?(\d+)\.\d+")
 
 def _roots_dir(ctx: Ctx) -> Path:
     return ctx.run_dir / "trusted-roots"
+
+
+GATE_ROOTS: list[str] = []  # the recorded Caddy roots (`reader trust`), set by `reader doctor`
+GATE_TIMEOUT_S: Final = 5.0
+
+
+def gate_status(url: str) -> int | None:
+    """FR-CLI-22: the HTTP status of a cookie-less GET of the dashboard, verified against Caddy's recorded
+    roots; None when it cannot be reached. Redirects are not followed (a 3xx counts as an open gate)."""
+    import urllib.error
+    import urllib.request
+
+    context = ssl.create_default_context()
+    for root in GATE_ROOTS:
+        context.load_verify_locations(cafile=root)
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args: Any, **kwargs: Any) -> None:
+            return None
+
+    opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=context), NoRedirect)
+    try:
+        with opener.open(url, timeout=GATE_TIMEOUT_S) as response:
+            return int(response.status)
+    except urllib.error.HTTPError as error:
+        return int(error.code)
+    except (OSError, ValueError):
+        return None
 
 
 def _login_keychain(ctx: Ctx) -> str:
@@ -181,6 +210,18 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     if roots:
         trusted = _still_trusted(ctx, {p.stem for p in roots})
         check("trust", trusted == {p.stem for p in roots}, f"{len(roots)} recorded root(s)")
+    # FR-CLI-22: with the profile chosen, the dashboard answers 401 without a cookie (the gate is in front).
+    if config.observability.enabled:
+        GATE_ROOTS[:] = [str(p) for p in roots]
+        status = gate_status(TRACES_URL)
+        if status == 401:
+            check("observability", True, "gate ok")
+        elif status is None:
+            check("observability", False, "unreachable")
+        else:
+            check("observability", False, "gate open")
+    else:
+        check("observability", True, "off")
     ok = all(c["ok"] for c in checks)
     if as_json:
         print(json.dumps(checks), file=ctx.out)

@@ -23,6 +23,7 @@ DB_CONSUMERS: Final = ("postgres", "api", "worker", "mcp")  # FR-DEPLOY-10 (b)
 TOKEN_CONSUMER: Final = "agent-proxy"  # noqa: S105 - a service name
 CONFIG_ROLES: Final = ("api", "worker", "mcp", "agent-proxy")  # FR-CLI-4: the reader.yaml bind
 CONFIG_TARGET: Final = "/etc/reader/reader.yaml"
+DASHBOARD_PORT: Final = "127.0.0.1:8443:8443"  # FR-CLI-22 (SRV-OBS FR-OBS-9)
 _USER: Final = re.compile(r"(\d+)(?::\d+)?")
 
 
@@ -51,7 +52,9 @@ def load_compose_source(path: Path) -> dict[str, Any]:
     return cast(dict[str, Any], data)
 
 
-def build_override(source: Mapping[str, Any], handles: Iterable[str], config_path: Path) -> dict[str, Any]:
+def build_override(
+    source: Mapping[str, Any], handles: Iterable[str], config_path: Path, *, observability: bool = False
+) -> dict[str, Any]:
     template = source.get("x-kernel")
     if not isinstance(template, Mapping):
         raise CliError("bad_compose", "compose.yaml has no x-kernel template")
@@ -73,6 +76,8 @@ def build_override(source: Mapping[str, Any], handles: Iterable[str], config_pat
         }
         services[role] = {"volumes": [bind]}
     services["api"]["networks"] = {f"sb-user-{h}": {} for h in handles}
+    if observability:  # FR-CLI-22: the dashboard's loopback port, only while the profile is active
+        services["caddy"] = {"ports": [DASHBOARD_PORT]}
     return {"services": services, "networks": networks}
 
 

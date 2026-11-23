@@ -20,6 +20,7 @@ KIND_MODULES: Final[tuple[str, ...]] = (
     "reader.search.jobs",
     "reader.pipeline.jobs",  # SRV-PIPELINE paired change
     "reader.tutor.jobs",  # SRV-TUTOR paired change (FR-EVENTS-1)
+    "reader.obs.jobs",  # SRV-OBS paired change (FR-EVENTS-19): obs.retention
 )
 StartHook = Callable[[Any], Awaitable[None]]
 

@@ -116,6 +116,27 @@ def decimal(upper: Decimal | None = None) -> Rule:
     return rule
 
 
+def boolean(node: Node, path: str, ctx: Context) -> Value:
+    """A YAML boolean only (FR-CONFIG-17)."""
+    if not (isinstance(node, Scalar) and node.kind == "bool"):
+        return ctx.fail(node.line, path, "wrong_type")
+    return node.value
+
+
+def integer(low: int, high: int) -> Rule:
+    """A YAML int only (no floats, strings or booleans), low <= n <= high (FR-CONFIG-17)."""
+
+    def rule(node: Node, path: str, ctx: Context) -> Value:
+        if not (isinstance(node, Scalar) and node.kind == "int"):
+            return ctx.fail(node.line, path, "wrong_type")
+        value = node.value
+        if value is OVERSIZED or not isinstance(value, int) or not low <= value <= high:
+            return ctx.fail(node.line, path, "out_of_range")
+        return value
+
+    return rule
+
+
 def version(node: Node, path: str, ctx: Context) -> Value:
     if not (isinstance(node, Scalar) and node.kind == "int"):
         return ctx.fail(node.line, path, "wrong_type")
@@ -251,4 +272,8 @@ ROOT: Final = record({
     }), unique_by="id"), required=False),
     "sectors": Field(opaque, required=False),
     "sharing": Field(opaque, required=False),
+    "observability": Field(record({  # FR-CONFIG-17 (paired SRV-OBS change)
+        "enabled": Field(boolean, required=False),
+        "retention_days": Field(integer(1, 365), required=False),
+    }), required=False),
 })

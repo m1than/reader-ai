@@ -24,6 +24,8 @@ const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ de
 const ImportPage = lazy(() => import('../import/plan/ImportPage').then((m) => ({ default: m.ImportPage })));
 // FR-UI-14: WEB-ACCOUNTS's Sign-ups screen, a lazy chunk, for the owner only.
 const SignupsPage = lazy(() => import('../accounts/SignupsPage').then((m) => ({ default: m.SignupsPage })));
+// FR-UI-18: the observability page, a lazy chunk, for the owner only.
+const ObservabilityPage = lazy(() => import('./observability/ObservabilityPage').then((m) => ({ default: m.ObservabilityPage })));
 
 const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 
@@ -213,7 +215,29 @@ const signupsRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, lessonRoute, importRoute, signupsRoute]);
+const observabilityRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/observability',
+  component: function ObservabilityRoute() {
+    const { api } = useServices();
+    const me = useQuery(queries(api).me());
+    // A non-owner gets not-found without any request to /api/obs/* (FR-UI-18).
+    if (me.data?.role !== 'owner') return <NotFound />;
+    return (
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading label="Loading observability" />
+          </div>
+        }
+      >
+        <ObservabilityPage />
+      </Suspense>
+    );
+  },
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, lessonRoute, importRoute, signupsRoute, observabilityRoute]);
 
 export const createAppRouter = (history: RouterHistory) =>
   createRouter({ routeTree, history, defaultNotFoundComponent: NotFound });

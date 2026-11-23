@@ -27,6 +27,7 @@ TAGGED_DIGEST = re.compile(r"^[^@:]+:[^@:/]+@sha256:[0-9a-f]{64}$")
 LOCAL_IMAGES = {
     "reader-server:local", "reader-postgres:local", "reader-kernel:local", "reader-agent-proxy:local",
     "reader-caddy:local", "reader-embed:local",
+    "reader-mlflow:local",  # FR-DEPLOY-13 (paired SRV-OBS change)
 }
 BASE = {"caddy", "api", "worker", "postgres", "embed"}  # embed: paired SRV-SEARCH change (FR-DEPLOY-1)
 
@@ -115,6 +116,8 @@ COPY_ALLOW_LIST = {
         "server/src/reader/search/embed_service.py", "server/src/reader/search/fetch_model.py",
         "server/src/reader/search/models.lock.json",
     },
+    # FR-DEPLOY-13 (paired SRV-OBS change): the pinned MLflow image plus a data directory; nothing copied.
+    "mlflow.Dockerfile": set(),
 }
 
 

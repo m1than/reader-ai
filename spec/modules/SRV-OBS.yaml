@@ -144,7 +144,8 @@ requirements:
       call path still runs. When enabled, it installs one `TracerProvider` with the resource exactly
       `{service.name: "reader-<role>", service.version: <reader package version>}`, the parent-based always-on sampler,
       the `IdGenerator` of FR-OBS-5, one BatchSpanProcessor with the `bounds` values feeding the AllowListExporter
-      (FR-OBS-2), which wraps an OTLP/HTTP protobuf exporter to `http://rotel:4318/v1/traces` with no headers. Every
+      (FR-OBS-2), which wraps an OTLP/HTTP protobuf exporter built with exactly the endpoint
+      `http://rotel:4318/v1/traces`, a 10 s timeout and no headers (`EXPORTER_KWARGS`, checked by a unit test). Every
       tracer is obtained under the one instrumentation scope `reader` (a constant, no version). The global propagator
       is W3C tracecontext only (no baggage). `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http` are
       pinned at 1.45.2 (the spike versions; `opentelemetry-api` 1.45.2 is already in uv.lock). No other OpenTelemetry
@@ -465,8 +466,8 @@ vectors:
 #            next-day-first order (FR-OBS-11), the canary for our process (INV-OBS-2 first half), failure isolation
 #            (INV-OBS-3).
 #   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
-#            capturing exporter (INV-OBS-4 end to end), the summary queries on VEC-OBS-3 (FR-OBS-10), the gate route on
-#            real sessions (FR-OBS-9).
+#            capturing exporter (INV-OBS-4 end to end), the summary queries on VEC-OBS-3 (FR-OBS-10; the fixture's ISO
+#            times are seeded as timezone-aware datetimes), the gate route on real sessions (FR-OBS-9).
 #   [config] OPS-DEPLOY's rendered-model tests for the paired services, networks, ports and env (FR-OBS-8, INV-OBS-5),
 #            and `caddy adapt` of the Caddyfile: both sites' upstreams, the handle order, every blocked pattern, the
 #            header_up/header_down removals and the 8443 CSP (FR-OBS-9).

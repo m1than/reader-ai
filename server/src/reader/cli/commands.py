@@ -101,7 +101,9 @@ class Project:
 
 
 ACTIVE_PROFILES: tuple[str, ...] = ("kernels",)  # FR-CLI-5: the default profile plus these, always
-OPTIONAL_PROFILES: tuple[str, ...] = ("agents",)  # FR-CLI-5: chosen by `reader up`, recorded in run/profiles
+# FR-CLI-5, FR-CLI-22: chosen by `reader up`, recorded in run/profiles
+OPTIONAL_PROFILES: tuple[str, ...] = ("agents", "observability")
+TRACES_URL: Final = "https://localhost:8443/"  # FR-CLI-22: the dashboard, published only with `observability`
 
 
 def compose_argv(ctx: Ctx, *args: str, extra: Sequence[str] = ()) -> list[str]:
@@ -126,14 +128,17 @@ def recorded_profiles(ctx: Ctx) -> tuple[str, ...]:
 
 def choose_profiles(ctx: Ctx, config: ReaderConfig) -> tuple[str, ...]:
     """FR-CLI-5: `agents` when a provider is configured and the agent-proxy image exists; otherwise it stays
-    off with one line on stderr and `up` continues."""
-    if not any(u.providers for u in config.users):
-        return ()
-    found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
-    if found is not None and found.code == 0:
-        return ("agents",)
-    print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
-    return ()
+    off with one line on stderr and `up` continues. FR-CLI-22: `observability` when the config enables it."""
+    chosen: list[str] = []
+    if any(u.providers for u in config.users):
+        found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
+        if found is not None and found.code == 0:
+            chosen.append("agents")
+        else:
+            print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
+    if config.observability.enabled:
+        chosen.append("observability")
+    return tuple(chosen)
 
 
 def profile_services(ctx: Ctx, profile: str) -> list[str]:
@@ -152,7 +157,10 @@ def load(
     config = config if config is not None else load_config(config_path)
     active = tuple(sorted(profiles)) if profiles is not None else recorded_profiles(ctx)
     path = check_config_path(config_path)
-    override = build_override(load_compose_source(ctx.compose_file), [u.handle for u in config.users], path)
+    override = build_override(
+        load_compose_source(ctx.compose_file), [u.handle for u in config.users], path,
+        observability="observability" in active,
+    )
     data = json.dumps(override).encode()
     rendered = _checked(
         ctx, lambda: compose(ctx, data, "config", "--format", "json", extra=active), "compose_config"
@@ -421,6 +429,8 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
         return 1
     offer_trust(ctx, model.name)
     print(f"reader is up ({model.name}); the watcher keeps delivering secrets", file=ctx.out)
+    if "observability" in project.profiles:  # FR-CLI-22
+        print(f"traces: {TRACES_URL}", file=ctx.out)
     return 0
 
 

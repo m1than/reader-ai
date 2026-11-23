@@ -574,7 +574,8 @@ requirements:
       (text "Trace", `rel="noopener noreferrer"`); a section whose data carries `truncated: true` shows "More rows
       may exist." Values render as text only. A load failure shows a retry block; a 401 goes to the shell's sign-in
       redirect (FR-UI-5). The header shows an "Observability" link for the owner. [unit]
-      web/src/app/observability/observability.test.tsx; [story] the page with fixture data.
+      web/src/app/observability/observability.test.tsx (VEC-OBS-3's expected JSON without its seeded-row references
+      `job` and `jobs: [ids]`); [story] the page with fixture data.
 
 
 # ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for WEB-IMPORT). Held under `proposed_requirements` (not read by

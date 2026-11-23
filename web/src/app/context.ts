@@ -4,6 +4,7 @@ import type { SignupsApi } from '../accounts/api';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
 import type { Api, LessonSummary } from './api';
+import type { ObsApi } from './observability/api';
 
 /** Where a slot component renders: a lesson row or the lesson page. */
 export type SlotPlace = 'list' | 'page';
@@ -33,6 +34,8 @@ export interface Services {
   plan?: PlanApi;
   /** WEB-ACCOUNTS's client (FR-UI-14): the owner's Sign-ups screen and header count. */
   signups?: SignupsApi;
+  /** SRV-OBS's summary client (FR-UI-18): the owner's observability page. */
+  obs?: ObsApi;
   /** Rendered for every lesson row and on the lesson page (FR-UI-6); AppRoot's default renders FR-UI-15's
    * CompileControl for the owner. */
   compileSlot?: CompileSlot;

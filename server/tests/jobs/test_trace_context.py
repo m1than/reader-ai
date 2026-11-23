@@ -45,7 +45,8 @@ async def test_enqueue_carries_the_current_span_and_the_run_links_to_it(pg: Pg) 
                 await env.jobs.enqueue(KIND, {"name": "a"})
             (job,) = await _job_rows(env, "a")
             assert job["trace"] == parent
-            assert "trace" not in json.dumps(await env.rows("SELECT args FROM job_keys"))
+            key_args = [r[0] for r in await env.rows("SELECT args FROM job_keys")]
+            assert "trace" not in json.dumps(key_args)
             await env.work()
             (root,) = _roots(finished(handle, memory))
     assert root.context.trace_id == ids.derive_trace_id(job["id"], env.key("a"))
@@ -65,8 +66,8 @@ async def test_retry_links_to_the_failed_run(pg: Pg) -> None:
     with obs_setup("worker") as (handle, memory):
         async with jobs_env(pg) as env:
             await env.jobs.enqueue(KIND, {"name": "t", "mode": "transient"})
-            await env.work()  # attempt 1 fails transient: re-enqueued from inside the run
-            first, second = await _job_rows(env, "t")
+            await env.work()  # attempt 1 fails transient: re-enqueued from inside the run (and so on)
+            first, second = (await _job_rows(env, "t"))[:2]
             roots = _roots(finished(handle, memory))
     assert "trace" not in first
     run1 = roots[0]

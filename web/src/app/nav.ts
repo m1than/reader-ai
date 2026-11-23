@@ -18,6 +18,8 @@ export const NAV_ITEMS: NavItem[] = [
   { label: 'Import', to: '/import', owner_only: true },
   // FR-UI-14: WEB-ACCOUNTS's screen with the pending count.
   { label: 'Sign-ups', to: '/signups', owner_only: true, badge: () => createElement(SignupsBadge) },
+  // FR-UI-18 (SRV-OBS FR-OBS-10): the owner's observability page.
+  { label: 'Observability', to: '/observability', owner_only: true },
 ];
 
 /** The item a path belongs to: "/" also for lesson pages. */

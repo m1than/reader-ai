@@ -65,7 +65,7 @@ def catalogs(**overrides: Any) -> Any:
             }
         ),
         "pipeline_stages": frozenset({"draft", "fact_check", "adversarial_review", "revise", "verify"}),
-        "tasks": frozenset({"draft", "tutor"}),
+        "tasks": frozenset({"draft", "fact_check", "tutor"}),  # fact_check: tests/agent's configured task
         "models": frozenset({"claude-sonnet-5-5", "claude-opus-5-5"}),
     }
     values.update(overrides)

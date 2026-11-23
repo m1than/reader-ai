@@ -36,6 +36,7 @@ ROUTERS: Final = (
     "reader.pipeline.routes",
     "reader.tutor.routes",  # SRV-TUTOR paired change (FR-AUTH-10 note)
     "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
+    "reader.obs.routes",  # SRV-OBS paired change (FR-AUTH-33): the owner gate and the summary
 )
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
@@ -162,4 +163,9 @@ def create_app(
         return error(404, "not_found")
 
     app.add_middleware(CsrfGate, origin=settings.origin)
+    # FR-AUTH-33 (SRV-OBS FR-OBS-3): added last, so it is the outermost middleware, outside the CSRF gate.
+    from reader.obs.asgi import TraceMiddleware
+
+    templates = [r.path for r in ROUTES] + [w.path for w in WS_ROUTES]
+    app.add_middleware(TraceMiddleware, templates=templates)
     return app

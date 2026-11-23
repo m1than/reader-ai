@@ -35,9 +35,15 @@ def test_routers_and_middleware_order(tmp_path: Path) -> None:
 def test_serving_logs_installs_the_trace_filter() -> None:
     from reader.serve.main import serving_logs
 
-    serving_logs()
-    filters = [f for h in logging.getLogger("reader").handlers for f in h.filters]
-    assert any(type(f).__name__ == "TraceFilter" for f in filters)
+    reader, root = logging.getLogger("reader"), logging.getLogger()
+    saved = (list(reader.handlers), reader.propagate, reader.level, list(root.handlers), root.level)
+    try:
+        serving_logs()
+        filters = [f for h in reader.handlers for f in h.filters]
+        assert any(type(f).__name__ == "TraceFilter" for f in filters)
+    finally:
+        reader.handlers[:], reader.propagate, reader.level = saved[0], saved[1], saved[2]
+        root.handlers[:], root.level = saved[3], saved[4]
 
 
 def test_reader_server_starts_and_stops_tracing(tmp_path: Path) -> None:

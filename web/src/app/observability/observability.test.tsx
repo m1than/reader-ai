@@ -10,13 +10,16 @@ import { load } from '../testing/load';
 afterEach(cleanup);
 
 type Node = unknown;
+// `job: 101` and `jobs: [106]` name seeded rows; `failures.jobs`, a list of groups, stays.
+const rowRef = (k: string, v: Node): boolean =>
+  (k === 'job' && typeof v === 'number') || (k === 'jobs' && Array.isArray(v) && v.every((x) => typeof x === 'number'));
 const strip = (n: Node): Node =>
   Array.isArray(n)
     ? n.map(strip)
     : n && typeof n === 'object'
-      ? Object.fromEntries(Object.entries(n as Record<string, Node>).filter(([k]) => k !== 'job' && k !== 'jobs').map(([k, v]) => [k, strip(v)]))
+      ? Object.fromEntries(Object.entries(n as Record<string, Node>).filter(([k, v]) => !rowRef(k, v)).map(([k, v]) => [k, strip(v)]))
       : n;
-const summary = () => ({ days: 7, ...(strip(readYaml<{ expected: object }>('spec/fixtures/SRV-OBS/summary.yaml').expected) as object) });
+const summary = (): Record<string, unknown> => ({ days: 7, ...(strip(readYaml<{ expected: object }>('spec/fixtures/SRV-OBS/summary.yaml').expected) as object) });
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const DEEP = 'https://localhost:8443/#/experiments/0/traces?selectedEvaluationId=tr-';
 

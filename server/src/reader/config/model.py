@@ -102,6 +102,14 @@ class Material(BaseModel):
     language: Text
 
 
+class Observability(BaseModel):
+    """FR-CONFIG-17 (paired SRV-OBS change): tracing on or off, and the trace retention in days."""
+
+    model_config = _FROZEN
+    enabled: bool = True
+    retention_days: Annotated[int, Field(ge=1, le=365)] = 30
+
+
 class ReaderConfig(BaseModel):
     model_config = _FROZEN
     version: Annotated[Literal[1], BeforeValidator(_exact_int)]  # schema keeps "const": 1
@@ -114,6 +122,7 @@ class ReaderConfig(BaseModel):
     materials: tuple[Material, ...] = ()
     sectors: Opaque = Field(default_factory=_empty)
     sharing: Opaque = Field(default_factory=_empty)
+    observability: Observability = Field(default_factory=Observability)
 
     @model_validator(mode="after")
     def _unique(self) -> Self:

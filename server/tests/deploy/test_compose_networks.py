@@ -2,6 +2,7 @@
 """OPS-DEPLOY [config]: networks, the api bind address, kernel isolation and the reachability matrix."""
 
 from .conftest import (
+    PROFILES,
     REACHABILITY,
     full_render,
     kernel_services,
@@ -87,7 +88,7 @@ def test_sharing_pairs_equal_the_matrix() -> None:
 
 
 def test_override_adds_only_kernel_and_its_network() -> None:
-    base = render(("kernels", "agents", "mcp"))
+    base = render(PROFILES)  # the same profiles as full_render (observability included, FR-DEPLOY-13)
     merged = full_render()
     assert set(merged["services"]) - set(base["services"]) == {"kernel-user-ivan"}
     assert set(merged["networks"]) - set(base["networks"]) == {"sb-user-ivan"}

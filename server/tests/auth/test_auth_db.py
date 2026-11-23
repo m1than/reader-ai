@@ -81,7 +81,8 @@ async def test_not_at_heads_when_one_branch_is_missing(pg: Pg) -> None:
 
     engine = make_engine(target(pg))
     await migrate(engine)
-    await execute(engine, "DELETE FROM alembic_version WHERE version_num = 'jobs_0001'")
+    # The jobs branch's head (jobs_0002 since SRV-EVENTS FR-EVENTS-18).
+    await execute(engine, "DELETE FROM alembic_version WHERE version_num = 'jobs_0002'")
     assert await at_heads(engine) is False
     await engine.dispose()
 

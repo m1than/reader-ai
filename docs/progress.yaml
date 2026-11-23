@@ -1320,7 +1320,7 @@ tasks:
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
   - { id: S2.SRV-OBS, stage: 2, kind: module, track: engineering, status: in_progress,
-      needs: [S2.SRV-EVENTS, S0.spike.trace-backend], branch: V/obs,
+      needs: [S2.SRV-EVENTS, S0.spike.trace-backend], branch: V/obs-impl,
       what: "Owner 2026-11-24: 'the tracing system via dashboard for this system'.",
       note: "Draft spec spec/modules/SRV-OBS.yaml and ADR-0032 (proposed): MLflow on its own SQLite volume, the UI on
         https://localhost:8443 behind Caddy forward_auth to GET /api/obs/gate (owner only), one trace per job linked to
@@ -1349,7 +1349,19 @@ tasks:
         owner accepts ADR-0032 (it amends accepted ADR-0025 rule 5), on V/slice-integration's versions of the paired
         specs (OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS incl. FR-EVENTS-17/18, SRV-AGENT, SRV-CONFIG, WEB-UI).
         On main S2.SRV-EVENTS still reads todo; its slice revision is approved and implemented, which is what this spec
-        builds on.",
+        builds on. 2026-11-24: the owner accepted ADR-0018 and ADR-0032 (973cd62). Implementation on V/obs-impl (from
+        V/slice-integration 04b2563, V/obs merged): Red 2c73e40 (SRV-OBS approved by agent; paired changes in OPS-DEPLOY
+        FR-DEPLOY-13, OPS-CLI FR-CLI-22, SRV-CONFIG FR-CONFIG-17, SRV-AUTH FR-AUTH-33, SRV-EVENTS FR-EVENTS-18/19,
+        SRV-AGENT FR-AGENT-14, WEB-UI FR-UI-18, OPS-DOD obs.view; the CLI canary harness under server/tests/obs/
+        cli_canary). Green: reader.obs (allow-list exporter, ids, propagation, asgi, logs, gate, summary, retention
+        job, agent span), jobs_0002 index, the trace kwarg and job span in reader.jobs.queue, key_rows_of and
+        recent_keys_of, config, serve wiring, provider span and CLI env, `reader up`/doctor, rotel and mlflow in
+        compose.yaml, deploy/otel/mlflow.Dockerfile, the 8443 Caddy site, the /observability page. Learned at Green:
+        OTel SDK 1.45 sets W3C's random-trace-id flag (traceparent ...-03) unless the id generator says its ids are not
+        random, so JobIdGenerator returns False (flags stay 01, derived ids are not random); OTLPSpanExporter exposes
+        no timeout attribute, so the spec pins EXPORTER_KWARGS. Not run here: the [image] obs tests
+        (READER_TEST_IMAGE_BUILD=1) and every live step (owner's rule for this task). Waiting for code review (OTel
+        propagation, auth, secrets are complex areas).",
       review: "deep-reviewer (Fable): design rounds 1–3 changes (7, 3 and 1 blockers, all applied), round 4 approve
         (5677fb3); details in the spec's review field." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }

@@ -10,6 +10,7 @@ import { createPlanApi } from '../import/plan/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ownerCompileSlot } from './compile/slot';
+import { createObsApi } from './observability/api';
 import { ServicesContext, useServices, type CompileSlot, type Services } from './context';
 import { NoticeRegion, type Notice } from './notices';
 import { queries } from './queries';
@@ -97,6 +98,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       tutor: createTutorApi(deps),
       plan: createPlanApi(deps),
       signups: createSignupsApi(deps),
+      obs: createObsApi(deps), // FR-UI-18
       notify,
       navigateAway,
       // FR-UI-6, FR-UI-15: the owner's CompileControl renders through the slot unless a caller supplies its own.

@@ -548,6 +548,7 @@ operations:
     title: Open the traces dashboard and the observability page
     surface: [web]
     specs: [SRV-OBS, OPS-DEPLOY, WEB-UI]
+    routes: ["GET /api/obs/gate", "GET /api/obs/summary"]
     gate: tracked
     criteria:
       functional: { items: [FR-OBS-9, FR-OBS-10, FR-UI-18] }

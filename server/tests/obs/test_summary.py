@@ -80,18 +80,35 @@ def _strip(node: Any) -> Any:
     if isinstance(node, list):
         return [_strip(n) for n in node]
     if isinstance(node, dict):
-        return {k: _strip(v) for k, v in node.items() if k not in ("job", "jobs")}
+        return {k: _strip(v) for k, v in node.items() if not _row_ref(k, v)}
     return node
+
+
+def _row_ref(key: str, value: Any) -> bool:
+    """`job: 101` or `jobs: [106]` (seeded row ids); `failures.jobs`, a list of groups, stays."""
+    if key == "job":
+        return isinstance(value, int)
+    return key == "jobs" and isinstance(value, list) and all(isinstance(v, int) for v in value)
 
 
 async def _seed(engine: Any) -> None:
     from sqlalchemy import text
 
     seed = VEC["seed"]
+
+    def when(value: Any) -> Any:
+        """asyncpg binds timestamptz from datetimes only: the fixture's ISO strings become aware datetimes."""
+        if isinstance(value, str) and len(value) >= 19 and value[4] == "-" and value[10] == "T":
+            return datetime.fromisoformat(value)
+        return value
+
+    async def run(statement: Any, params: dict[str, Any]) -> None:
+        await conn.execute(statement, {k: when(v) for k, v in params.items()})
+
     async with engine.begin() as conn:
         await conn.execute(text("SET LOCAL session_replication_role = replica"))
         for r in seed["compile_runs"]:
-            await conn.execute(
+            await run(
                 text(
                     "INSERT INTO compile_runs (id, owner_id, lesson_id, cap_usd, task_budgets, created_at, finished_at)"
                     " VALUES (:id, :o, :l, 8, '{}', :c, :f)"
@@ -106,7 +123,7 @@ async def _seed(engine: Any) -> None:
             )
         for s in seed["compile_steps"]:
             owner = next(r["owner_id"] for r in seed["compile_runs"] if r["id"] == s["run_id"])
-            await conn.execute(
+            await run(
                 text(
                     "INSERT INTO compile_steps (owner_id, run_id, step, stage, input_sha256, model, cost_usd, duration_s,"
                     " created_at) VALUES (:o, :r, :n, :st, :i, :m, :c, :d, :at)"
@@ -124,7 +141,7 @@ async def _seed(engine: Any) -> None:
                 },
             )
         for a in seed["agent_spend"]:
-            await conn.execute(
+            await run(
                 text(
                     "INSERT INTO agent_spend (id, owner_id, run_id, stage, task, attempt, kind, reservation_id, model,"
                     " usd, settled_usd, created_at) OVERRIDING SYSTEM VALUE"
@@ -144,7 +161,7 @@ async def _seed(engine: Any) -> None:
                 },
             )
         for q in seed["tutor_questions"]:
-            await conn.execute(
+            await run(
                 text(
                     "INSERT INTO tutor_questions (id, owner_id, lesson_id, revision_sha256, question, state, error_code,"
                     " created_at, finished_at) VALUES (:id, :o, :l, :rev, 'q', :s, :e, :c, :f)"
@@ -161,14 +178,14 @@ async def _seed(engine: Any) -> None:
                 },
             )
         for m in seed["materials"]:
-            await conn.execute(
+            await run(
                 text(
                     "INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, 'm', :p)"
                 ),
                 {"o": m["owner_id"], "s": m["sha256"], "p": m["page_count"]},
             )
         for k in seed["job_keys"]:
-            await conn.execute(
+            await run(
                 text(
                     "INSERT INTO job_keys (kind, key, args, attempts, outcome, error_code, job_id, created_at, updated_at,"
                     " finished_at) VALUES (:kind, :key, CAST(:args AS jsonb), :att, :out, :code, :job, :c, :c, :f)"
@@ -218,7 +235,7 @@ async def test_summary_on_vec_obs_3(pg: Any) -> None:
         ("search.embed", "exhausted"),
     }
     assert other["ingest"]["rows"] == []
-    assert "question" not in json.dumps(got)  # no text column is read
+    assert '"question"' not in json.dumps(got)  # no text column is read (`question_id` is an id)
 
 
 @pytest.mark.anyio

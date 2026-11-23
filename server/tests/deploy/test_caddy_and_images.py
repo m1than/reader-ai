@@ -36,8 +36,10 @@ def test_caddyfile_text() -> None:
     assert "frame-ancestors 'none'" in text
     assert all(h in text for h in HEADERS)
     assert f'Content-Security-Policy "{APP_CSP}"' in text
-    assert "data:" not in text
-    assert "unsafe-inline" not in text
+    # The app's site only: the 8443 dashboard site has its own measured CSP (FR-DEPLOY-13, SRV-OBS FR-OBS-9).
+    app_site = text.split("\nlocalhost:8443 {", 1)[0]
+    assert "data:" not in app_site
+    assert "unsafe-inline" not in app_site
     assert "try_files {path} /index.html" in text
     # Assets are files only: their handler has a file server and no fallback to the SPA index.
     assets = text.split("handle /assets/* {", 1)[1].split("}", 1)[0] if "handle /assets/* {" in text else ""

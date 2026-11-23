@@ -278,6 +278,8 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       { label: 'Import', to: '/import', owner_only: true },
       // FR-UI-14 (merge with V/signup): the Sign-ups entry with its count as the badge.
       { label: 'Sign-ups', to: '/signups', owner_only: true, badge: expect.any(Function) },
+      // FR-UI-18 (paired SRV-OBS change).
+      { label: 'Observability', to: '/observability', owner_only: true },
     ]);
     if (!mod.NAV_ITEMS) return;
     // An appended entry with a badge appears without changes to the header.
@@ -297,12 +299,12 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       const nav = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
       const links = within(nav).getAllByRole('link');
       // The owner's Sign-ups count call fails here (404), so its badge renders nothing.
-      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Sign-ups', 'Test entry, 7 waiting']);
+      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Sign-ups', 'Observability', 'Test entry, 7 waiting']);
       expect(within(nav).getByRole('link', { name: 'Sign-ups' })).toBe(links[2]);
       // The accessible name joins the parts (jsdom's name computation drops the spaces between inline parts, which a
       // browser keeps: "Test entry, 7 waiting"), so compare without whitespace.
-      expect(within(nav).getByRole('link', { name: (n) => n.replace(/\s+/g, '') === 'Testentry,7waiting' })).toBe(links[3]);
-      expect(links[3]!.querySelector('.nav-badge')?.firstChild?.textContent).toBe('7');
+      expect(within(nav).getByRole('link', { name: (n) => n.replace(/\s+/g, '') === 'Testentry,7waiting' })).toBe(links[4]);
+      expect(links[4]!.querySelector('.nav-badge')?.firstChild?.textContent).toBe('7');
       mod.NAV_ITEMS.pop();
       mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false });
       cleanup();

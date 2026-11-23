@@ -81,7 +81,15 @@ def test_stylesheet_imports_nothing() -> None:
 def test_edge_csp_is_unchanged() -> None:
     caddyfile = (REPO / "deploy" / "Caddyfile").read_text("utf-8")
     found = re.findall(r'Content-Security-Policy\s+"([^"]+)"', caddyfile)
-    assert found == [PINNED_CSP]
+    # The app's site first, then the 8443 dashboard site's measured CSP (FR-AUTH-33, SRV-OBS FR-OBS-9).
+    assert found == [PINNED_CSP, DASHBOARD_CSP]
+
+
+DASHBOARD_CSP = (
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "
+    "font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; "
+    "object-src 'none'; base-uri 'none'; form-action 'self'"
+)
 
 
 # FR-AUTH-19 ---------------------------------------------------------------------------------------------
