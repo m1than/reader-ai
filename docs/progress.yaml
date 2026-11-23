@@ -20,7 +20,8 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 8.7416      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 8.7542      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+                         # (+ V.freshness live web-search call 0.012588, 2026-11-23)
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
                          #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
                          #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
@@ -46,6 +47,10 @@ budget:
     - { task: V.live, usd: 1.0870, date: 2026-11-23, funding: test_budget_usd,
         what: "SRV-TUTOR bench, 40 questions over the HTTP API (sum of the questions' usage.usd, 1.086955); mean $0.0267;
           e2e/live/results/2026-11-23-tutor-bench.json" }
+    - { task: V.freshness, usd: 0.012588, date: 2026-11-23, funding: test_budget_usd,
+        what: "spikes/web-search § 5b live call, run by the owner (cap $0.10): one WebSearch run on Haiku 5.5, 3 upstream
+          requests, 1 search ($0.01 fee included); SDK total_cost_usd = the recording proxy's sum;
+          spikes/web-search/results/20261123T214429/live.json. Whether the fee draws from the Agent SDK credit: unknown" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -1018,18 +1023,21 @@ tasks:
         no cache_control, same model as the main loop, max_tokens from CLAUDE_CODE_MAX_OUTPUT_TOKENS); the main loop
         sends WebSearch plus DeferredToolPlaceholder; a PreToolUse deny stops the search; ResultMessage.usage covers
         the main loop only while total_cost_usd/model_usage include the nested request and the $0.01 fee; the main
-        loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Estimate (not measured):
-        ≈ $0.27 per check, worst ≈ $0.39 by formula.",
+        loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Live call, observed once
+        (owner, 2026-11-23, spikes/web-search/results/20261123T214429/live.json, $0.012588): Haiku 5.5, 3 requests,
+        nested model Haiku, t ≈ 13,950 (nested input 14,452) under the 20,000 planning bound, fee inside the SDK cost,
+        SDK = proxy (18,518 input-side tokens, 1,147 output, 1 search, same dollars), query passed verbatim (denial rate
+        0), max_uses rewrite accepted (200), thinking 152 (main) + 290 (nested) tokens with MAX_THINKING_TOKENS=0; fee
+        vs subscription credit unknown. No spec bound changes. Estimate (not measured): ≈ $0.27 per check, worst
+        ≈ $0.39 by formula.",
       review: "deep-reviewer (Fable) on ADR-0030, SRV-FRESH, WEB-FRESH and the SRV-AGENT amendment: round 1 changes
         (12 blocking), round 2 changes (3 blocking), round 3 VERDICT approve (2026-11-23). Round 3's three fixes applied
         without a new round: the Haiku tier jump in the tail cost, the cross-check's lower-tier rule with `tier_unknown`
         and the tier part of H-WS-6, and the combined worst case ≈ $0.84–0.87 under the $1.00 cap.",
-      next: "1) Done: deep-reviewer approve (round 3). 2) The owner runs
-        `bash spikes/web-search/run-live.sh` at d9f96f0 (≤ $0.10, Haiku; H-WS-1..6, H-FRESH-2, observed once); the result
-        goes into RESULT.md § 5b and budget.ledger. 3) After that run, a separate commit hardens the script (round-2
-        list: no Sonnet option, non-SSE usage or worst case, a killed run counted, handle_error prints the exception
-        type only, abort unless init tools are [WebSearch], refuse any server tool but web_search_20250305). 4) Red only
-        after the deep-reviewer approves AND the owner accepts ADR-0030 AND the live call has run.",
+      next: "1) Done: deep-reviewer approve (round 3). 2) Done: the owner's live call (results in RESULT.md § 5b and
+        budget.ledger). 3) Done: the script hardening commit (round-2 list). 4) The owner accepts ADR-0030 (status line,
+        H3). 5) Then Red, in order SRV-AGENT amendment (its pricing.yaml Haiku row with VEC-AGENT-2), SRV-FRESH,
+        WEB-FRESH.",
       paired_later: "SRV-EVENTS KIND_MODULES (reader.freshness.jobs: freshness.scan, freshness.web); SRV-AUTH ROUTERS
         and VERSION_LOCATIONS; OPS-DEPLOY reader.example.yaml tasks freshness_scan (sonnet), freshness_web (haiku),
         freshness_report (sonnet); SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount

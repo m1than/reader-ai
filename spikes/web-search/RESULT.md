@@ -7,11 +7,11 @@
    is a direct Messages API call through agent-proxy simpler?
 3. What does one freshness check cost, and what is its worst case?
 
-**Status (2026-11-23, round 2):**
+**Status (2026-11-23):**
 - §§ 1–2: documentation facts, sourced below.
 - § 5a: the zero-credit stub run is done (results in `spikes/agent-proxy-handshake/results/*-websearch*`).
-- § 5b: the live call is approved by the owner (≤ $0.10, one search, Haiku 5.5). The owner runs
-  `spikes/web-search/run-live.sh` himself; it has not run yet.
+- § 5b: the owner ran the live call: Haiku 5.5, one search, **$0.012588**. H-WS-1, -2, -4, -6 (without the tier part)
+  and H-FRESH-2 held, observed once; t ≈ 13,950 tokens.
 - Owner decisions of 2026-11-23 are in ADR-0030, "Owner decisions".
 
 ## Sources (fetched 2026-11-23)
@@ -109,17 +109,17 @@ Any of them changes a body shape or model away from the pin, and **agent-proxy r
 `model_mismatch`, SRV-AGENT proposed FR-AGENT-14). The search run then fails and settles by FR-AGENT-9's record rule:
 no 2xx → $0; a 2xx before the refusal → that call's reserve.
 
-Still hypotheses:
+Hypotheses, with the live call's single observation (§ 5b):
 - **H-WS-3** — t, the input tokens one backend search adds. A chosen planning bound `t_max` = 20,000 (S1's example
-  shows 6,039 input tokens for one search including the prompt). **t cannot be enforced**: the API adds the results
-  server-side. § 5b records t for every live search.
+  shows 6,039 input tokens for one search including the prompt). **Observed once: t ≈ 13,950** (14,452 nested input).
+  **t cannot be enforced**: the API adds the results server-side. FR-FRESH-14 records t for every live search.
 - **H-WS-6 (real upstream)** — `total_cost_usd` and `model_usage` equal the sum of the per-request usage that the
   proxy records, per model; and `total_cost_usd` knows Haiku 5.5's two tiers (a request over 100k prompt tokens
-  priced at the higher tier). The live call's prompts stay below 100k, so it shows the first part only. The tier part
-  stays open until a request over 100k is observed; until then SRV-AGENT's cross-check flags such requests
-  (FR-AGENT-16).
-- **H-FRESH-2** — the search run passes the planned query verbatim (SRV-FRESH FR-FRESH-6 denies anything else). The
-  denial rate is measured in § 5b.
+  priced at the higher tier). **Observed once: the first part holds** (SDK = proxy to the cent, 18,518 input-side
+  tokens each). The tier part stays open until a request over 100k is observed; until then SRV-AGENT's cross-check
+  flags such requests (FR-AGENT-16).
+- **H-FRESH-2** — the search run passes the planned query verbatim (SRV-FRESH FR-FRESH-6 denies anything else).
+  **Observed once: 1 of 1 verbatim**, denial rate 0.0.
 
 ### 3b. A direct Messages API call through agent-proxy
 
@@ -262,5 +262,50 @@ FR-FRESH-14's live check records t and denials again for every search.
 **Expected spend** ≈ $0.012: one search $0.01 plus about 10,000 Haiku tokens. The worst case is refused by the proxy
 above the cap. Record the spend in `budget.ledger` from `test_budget_usd`.
 
-**Not verified:** a zero-credit dry run of `live.py` against the stub (with `DRY_UPSTREAM_PORT`) was refused by the
-agent session's permission system. `live.py` compiles, and `run-live.sh` passes `bash -n`.
+**Not verified before the run:** a zero-credit dry run of `live.py` against the stub (with `DRY_UPSTREAM_PORT`) was
+refused by the agent session's permission system. `live.py` compiled, and `run-live.sh` passed `bash -n`.
+
+#### Result — observed once (owner run, 2026-11-23, script at d9f96f0)
+
+File: `results/20261123T214429/live.json`. It holds numbers, key names and shapes only, with no text, title, URL,
+query or header value, and it is committed.
+
+The run: Haiku 5.5, 9.7 s wall, `terminal_reason: completed`, 2 SDK turns, 3 upstream requests, 0 refused, no
+error. **Spend: $0.012588** (SDK `total_cost_usd` 0.01258811 = the proxy's sum 0.012588), recorded in `budget.ledger`
+from `test_budget_usd`.
+
+| Request | Usage | Other |
+| --- | --- | --- |
+| main 1 | input 2, 1-h write 1,281, output 76 (thinking 0) | stop `tool_use`; `cache_control` present; $0.000294 |
+| search (nested) | **input 14,452**, no cache, output 835 (**thinking 290**), `web_search_requests` 1 | 10 results, 5 with `page_age`; `max_uses` sent 8 → rewritten to 1, **status 200**; blocks: thinking, `server_tool_use`, `web_search_tool_result`, thinking, 11 text; $0.011863 incl. the $0.01 fee |
+| main 2 | input 2, 1-h write 1,500, cache read 1,281, output 236 (**thinking 152**) | stop `end_turn`; $0.000431 |
+
+| Hypothesis | Observed once |
+| --- | --- |
+| H-WS-1 nested request | **holds:** one nested search request through the base URL, in the stub's shapes (tool `web_search_20250305` with `max_uses` 8, `tool_choice` auto, no `thinking` key, no `cache_control`; main loop `DeferredToolPlaceholder` + `WebSearch`) |
+| H-WS-2 nested model | **holds:** `claude-haiku-5-5`, equal to the main model |
+| H-WS-3 t | **t ≈ 13,950** (14,452 nested input minus ≈ 500 of the CLI's nested prompt), under the chosen `t_max` of 20,000 (×1.43 margin) |
+| H-WS-4 fee in SDK cost | **holds:** SDK − the proxy's token-only sum = $0.0100 |
+| H-WS-6 SDK = proxy | **holds for this run:** `model_usage` input 14,456 + cache write 2,781 + read 1,281 = 18,518 = the proxy's per-request sum; output 1,147 both; 1 search both; dollars equal. `ResultMessage.usage` again covered the main loop only (`web_search_requests` 0). The tier part stays open (all prompts < 100k) |
+| H-FRESH-2 verbatim query | **holds:** 1 of 1 query verbatim (68 characters, 0 tokens outside the metadata vocabulary), no domain lists, denial rate 0.0 |
+| `max_uses` rewrite | **accepted** (200) by the real upstream |
+| SSE names | events `message_start`, `content_block_start`/`_delta`/`_stop`, `message_delta`, `message_stop`, `ping`; `web_search_result` keys `encrypted_content`, `page_age`, `title`, `type`, `url`; `web_search_tool_result` and `tool_use` carry a `caller` key; citation keys `cited_text`, `encrypted_index`, `title`, `type`, `url` |
+| SDK structured result | `tool_use_result` keys `durationSeconds`, `query`, `results`, `searchCount`; 10 links and a 1,125-character summary (under `summary_chars_max` 1,500) |
+| US-only | results came back (10, no error code) for the owner's account |
+| Fee and the subscription credit | **unknown**: the owner has not reported the credit comparison |
+
+**Side findings:**
+- **Thinking.** Thinking ran with `MAX_THINKING_TOKENS=0`: 152 tokens on the main loop, which sent
+  `thinking: {type: adaptive}`. The nested request has no `thinking` key, so Haiku 5.5 runs adaptive thinking by
+  default (290 tokens). This is evidence for V.agent-thinking. Thinking tokens are billed inside `output` and are
+  bounded by the output cap.
+- **Nested output near its cap.** The nested output used 835 of the 1,000-token cap. A longer reply would stop at
+  `max_tokens` and shorten the summary. That cannot raise the cost, because the cap is already in the formula.
+
+**Effect on spec numbers:**
+- No bound changes. `t_max_tokens` 20,000 stays: one observation at ≈ 13,950 does not justify lowering it, and it
+  remains a planning bound, not a limit. `search_output_tokens` 1,000 stays: it is a cost cap, and 835 fits.
+- The expected cost per search run was ≈ $0.012; observed $0.0126. So 6 runs are ≈ $0.076 and the per-check
+  estimate stays ≈ $0.27.
+- The worst-case formulas (§ 4) already price output at the cap and the main loop at the 1-hour rate observed here,
+  so ≈ $0.39 per check and ≈ $0.84–0.87 combined stand.
