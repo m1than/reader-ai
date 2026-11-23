@@ -1,5 +1,6 @@
 // App-wide services handed to routes and the lesson view.
 import { createContext, useContext } from 'react';
+import type { UploadApi } from '../import/api';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
 import type { Api } from './api';
@@ -12,6 +13,8 @@ export interface Services {
   tutor?: TutorApi;
   /** SRV-PLAN's client for the /import page (FR-UI-12, WEB-PLAN). */
   plan?: PlanApi;
+  /** SRV-INGEST's upload client for the /import page's upload sections (FR-UI-13, WEB-IMPORT). */
+  upload?: UploadApi;
 }
 
 export const ServicesContext = createContext<Services | null>(null);

@@ -45,7 +45,10 @@ describe('import route and link (FR-UI-12)', () => {
 
   it('loads the page as a lazy chunk', () => {
     const routes = readFileSync(`${webRoot}src/app/routes.tsx`, 'utf8');
-    expect(routes).toMatch(/lazy\(\(\) => import\('\.\.\/import\/plan\/ImportPage'\)/);
+    // FR-UI-13 mount note: the chunk's entry is WEB-IMPORT's page, which renders WEB-PLAN's page first
+    expect(routes).toMatch(/lazy\(\(\) => import\('\.\.\/import\/ImportPage'\)/);
     expect(routes).not.toMatch(/^import .*ImportPage/m);
+    const entry = readFileSync(`${webRoot}src/import/ImportPage.tsx`, 'utf8');
+    expect(entry).toMatch(/import \{ ImportPage as PlanImportPage \} from '\.\/plan\/ImportPage'/);
   });
 });

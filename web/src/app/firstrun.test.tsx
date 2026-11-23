@@ -14,6 +14,9 @@ const json = (status: number, body: unknown) => new Response(JSON.stringify(body
 const user = (role: string) => ({ id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role, display_name: 'Ivan', consent: { evaluation: true, tuning: false } });
 const lesson = (id: string, published: boolean) => ({
   lesson_id: id,
+  course_id: 'c1',
+  course_title: 'Synthetic course',
+  ordinal: 1,
   title: `Synthetic chapter ${id}`,
   latest_sha256: published ? 'a'.repeat(64) : null,
   updated_at: '2026-11-23T10:00:00Z',

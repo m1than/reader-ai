@@ -78,6 +78,32 @@ const planPreview = (body) => {
   };
 };
 
+// WEB-IMPORT / WEB-UI FR-UI-13: the upload routes from VEC-IMPORT-1. An upload walks queued → converting → importing →
+// indexing → ready, one state per poll; the cookie `stub-first-run=1` gives an owner with no lessons and no materials.
+const imports = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-IMPORT/responses.json'), 'utf8'));
+const WALK = ['queued', 'converting', 'importing', 'indexing', 'ready'];
+const steps = new Map(); // upload id → its next state, so parallel test workers do not share one walk
+const uploadRoute = (method, path, firstRun) => {
+  if (firstRun && method === 'GET' && path === '/api/lessons') return [200, { lessons: [] }];
+  if (firstRun && method === 'GET' && path === '/api/materials') return [200, { materials: [], inbox_retained_bytes: 0 }];
+  if (method === 'POST' && path === '/api/materials/uploads') {
+    const id = `00000000-0000-4000-8000-${String(steps.size + 1).padStart(12, '0')}`;
+    steps.set(id, 0);
+    return [201, { ...imports.views.queued, id }];
+  }
+  if (method === 'GET' && path === '/api/materials/converter') return [200, imports.converter.online];
+  const one = /^\/api\/materials\/uploads\/([^/]+)(\/cancel|\/retry)?$/.exec(path);
+  if (one && method === 'GET' && !one[2]) {
+    const id = decodeURIComponent(one[1]);
+    const step = steps.get(id) ?? 0;
+    steps.set(id, Math.min(step + 1, WALK.length - 1));
+    return [200, { ...imports.views[WALK[step]], id }];
+  }
+  if (one && method === 'POST' && one[2] === '/cancel') return [200, { cancelled: true }];
+  if (one && method === 'DELETE' && !one[2]) return [200, { discarded: true }];
+  return null;
+};
+
 const planRoute = (method, path, body) => {
   if (method === 'POST' && path === '/api/plans/preview') return [200, planPreview(body)];
   if (method === 'POST' && path === '/api/plans/confirm')
@@ -127,7 +153,8 @@ createServer((req, res) => {
       } catch {
         parsed = {};
       }
-      const [status, body] = planRoute(req.method, path, parsed) ?? api(req.method, path);
+      const firstRun = (req.headers.cookie ?? '').includes('stub-first-run=1');
+      const [status, body] = uploadRoute(req.method, path, firstRun) ?? planRoute(req.method, path, parsed) ?? api(req.method, path);
       res.writeHead(status, body === null ? {} : { 'Content-Type': 'application/json' });
       res.end(body === null ? undefined : JSON.stringify(body));
     });

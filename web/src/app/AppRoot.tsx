@@ -5,6 +5,7 @@ import { Skeleton } from '@acme/ui/skeleton';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { createUploadApi } from '../import/api';
 import { createPlanApi } from '../import/plan/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
@@ -122,7 +123,14 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       fetch: fetchFn ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a)),
       onUnauthorized: () => navigateAway(SIGN_IN_URL),
     };
-    return { api: createApi(deps), tutor: createTutorApi(deps), plan: createPlanApi(deps), notify, navigateAway };
+    return {
+      api: createApi(deps),
+      tutor: createTutorApi(deps),
+      plan: createPlanApi(deps),
+      upload: createUploadApi(deps),
+      notify,
+      navigateAway,
+    };
   }, [fetchFn, navigateAway, notify]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');
