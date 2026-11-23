@@ -56,6 +56,21 @@ const CASES: Case[] = [
   { name: 'sign-in rejected', page: 'signin', options: ok(), verify: { status: 400, body: { error: 'signin_failed' } }, mode: 'ok', click: true, state: 'rejected', message: 'That passkey was not accepted here. Try again, or use another passkey saved for this site.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS, SIGNIN_VERIFY], webauthn: true },
   { name: 'sign-in rate limited', page: 'signin', options: { status: 429, body: { error: 'rate_limited' }, headers: { 'Retry-After': '61' } }, mode: 'ok', click: true, state: 'rate_limited', message: 'Too many attempts. Try again in 2 minutes.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
   { name: 'sign-in rate limited without header', page: 'signin', options: { status: 429, body: { error: 'rate_limited' } }, mode: 'ok', click: true, state: 'rate_limited', message: 'Too many attempts. Try again later.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
+  ...(
+    [
+      ['60', 'Too many attempts. Try again in 1 minute.'],
+      ['0', 'Too many attempts. Try again in 1 minute.'],
+      ['1.5', 'Too many attempts. Try again later.'],
+      ['Wed, 21 Oct 2026 07:28:00 GMT', 'Too many attempts. Try again later.'],
+      ['1234567', 'Too many attempts. Try again later.'],
+    ] as const
+  ).map(([after, message]): Case => ({
+    name: `sign-in rate limited, Retry-After ${after}`, page: 'signin', options: { status: 429, body: { error: 'rate_limited' }, headers: { 'Retry-After': after } },
+    mode: 'ok', click: true, state: 'rate_limited', message, button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false,
+  })),
+  { name: 'sign-in 429 with another code', page: 'signin', options: { status: 429, body: { error: 'slow_down' }, headers: { 'Retry-After': '60' } }, mode: 'ok', click: true, state: 'failed', message: 'Something went wrong. Try again.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
+  { name: 'sign-in 500 on options', page: 'signin', options: { status: 500, body: { error: 'internal' } }, mode: 'ok', click: true, state: 'unreachable', message: 'reader-ai could not be reached. Check that it is running, then try again.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
+  { name: 'sign-in signin_failed on options', page: 'signin', options: { status: 400, body: { error: 'signin_failed' } }, mode: 'ok', click: true, state: 'failed', message: 'Something went wrong. Try again.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
   { name: 'sign-in server error', page: 'signin', options: { status: 503, body: { error: SECRET_BODY } }, mode: 'ok', click: true, state: 'unreachable', message: 'reader-ai could not be reached. Check that it is running, then try again.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
   { name: 'sign-in network failure', page: 'signin', options: 'network', mode: 'ok', click: true, state: 'unreachable', message: /could not be reached/, button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
   { name: 'sign-in other failure', page: 'signin', options: { status: 403, body: { error: SECRET_BODY } }, mode: 'ok', click: true, state: 'failed', message: 'Something went wrong. Try again.', button: 'enabled', focus: 'button', posts: [SIGNIN_OPTIONS], webauthn: false },
@@ -102,7 +117,7 @@ const prepare = async (page: Page, c: Case) => {
   const api: string[] = [];
   page.on('request', (r) => {
     const path = new URL(r.url()).pathname;
-    if (path.startsWith('/api/')) api.push(`${r.method()} ${path}`);
+    api.push(`${r.method()} ${path}`); // every request, any path: a same-origin beacon fails the oracle
     if (r.method() === 'GET') {
       if (path.startsWith('/api/')) apiGets.push(path);
       return;
@@ -191,7 +206,7 @@ for (const width of WIDTHS) {
         await page.waitForURL((u) => u.pathname === '/');
         expect(posts).toEqual(c.posts);
         expect([...api.slice(0, 3)].sort()).toEqual([...statics].sort());
-        expect(api.slice(3)).toEqual(c.posts.map((p) => `${p.method} ${p.path}`));
+        expect(api.slice(3)).toEqual([...c.posts.map((p) => `${p.method} ${p.path}`), 'GET /']);
         return;
       }
       if (c.click) await button.click();
@@ -219,6 +234,18 @@ for (const width of WIDTHS) {
       expect(api.slice(3)).toEqual(c.posts.map((p) => `${p.method} ${p.path}`));
       const seen = await page.evaluate(() => (window as unknown as { __publicKey: unknown[] }).__publicKey);
       expect(seen).toEqual(c.webauthn ? [OPTIONS] : []);
+    });
+  }
+
+  for (const name of ['signin', 'bootstrap'] as const) {
+    test(`${name} without its script stays in loading with no button at ${width} px (FR-AUTH-20)`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 800 });
+      await page.route('**/api/auth/static/passkey.js', (route) => route.abort('failed'));
+      await page.goto(`/api/auth/${name}`);
+      await expect(page.locator('main.auth')).toHaveAttribute('data-state', 'loading');
+      await expect(page.locator('#go')).toBeHidden();
+      const axe = await new AxeBuilder({ page }).analyze();
+      expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([]);
     });
   }
 

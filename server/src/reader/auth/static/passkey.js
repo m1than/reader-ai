@@ -117,7 +117,8 @@
   };
 
   const minutes = (retryAfter) => {
-    if (retryAfter === null || !/^\d+$/.test(retryAfter.trim())) return STATES.rate_limited.message;
+    // Whole seconds, at most six digits (FR-AUTH-11's limit is at most an hour); anything else reads "later".
+    if (retryAfter === null || !/^\d{1,6}$/.test(retryAfter.trim())) return STATES.rate_limited.message;
     const n = Math.max(1, Math.ceil(Number(retryAfter) / 60));
     return `Too many attempts. Try again in ${n} ${n === 1 ? "minute" : "minutes"}.`;
   };

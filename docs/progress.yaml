@@ -1002,7 +1002,23 @@ tasks:
       exit: "Green's exit condition: OPS-DOD's operations index gains `GET /api/auth/static/auth.css` in the routes of
         auth.bootstrap and auth.signin in the same commit as the `Route(...)` (T10 refuses a route the registry lacks).
         The two auth a11y cells stay missing: OPS-DOD takes only live `pages` evidence (axe.json, no producer yet), not
-        the [browser] axe runs; that stays with V.DOD-gaps." }
+        the [browser] axe runs; that stays with V.DOD-gaps.",
+      green: "83d4ef6: pages, auth.css (tokens copied, drift test), passkey.js states, the auth.css route with
+        no-cache, OPS-DOD routes, the test-server map, the live `auth` step. Checks: 48 server tests, 69 [browser]
+        cases, verify-all --slice auth PASS (owner bootstrap, pages at 3 widths with 0 serious/critical axe and 0
+        overflow, real sign-out and sign-in), full verify-all 53/53 PASS (learner bootstrap and sign-in through the
+        pages), LOCAL CI PASS.",
+      code_review: "Round 1 on 83d4ef6: changes — ceremony verified unchanged in the code, no server text reaches the
+        DOM; 6 surviving mutants closed with browser cases: Retry-After 60 and 0 (1 minute), 1.5 and an HTTP-date
+        (later), a 500 on options (unreachable), a 429 with another code and a 400 signin_failed on options (failed).
+        Non-blocking applied: Retry-After bounded to ^\\d{1,6}$ with a seven-digit case; auth-dark and auth-light
+        Playwright projects (every state axe-checked in both schemes); the bootstrap copy without 'owner' (the link
+        also serves learners); static markup data-state=loading with the button hidden until the script runs, and a
+        blocked-script case; the full request list of every path asserted (a beacon fails).",
+      process_note: "For the PR description: in 83d4ef6 the deferred OPS-DOD routes edit was re-applied with `git apply`
+        of the agent's own earlier diff (written with the Edit tool, reverted while T10 could not yet pass). That is a
+        shell write, which AGENTS.md asks to avoid; the content is the two-line routes change, checked by T10 and the
+        P8 ratchet." }
   - { id: V.DOD-gaps, stage: V, kind: module, track: engineering, status: todo, needs: [V.DOD-index],
       what: "Close the Definition-of-Done gaps in docs/dod/INDEX.md: the 49 declared `missing` cells (latency budgets,
         log lines and tests asserting them, privacy canaries for lesson, material and course text, the backup-restore

@@ -10,6 +10,11 @@ export default defineConfig({
   fullyParallel: false,
   reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:4173' },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    { name: 'chromium', testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts'], use: { ...devices['Desktop Chrome'] } },
+    // SRV-AUTH FR-AUTH-21: every auth page state in the pages' default dark scheme and in light.
+    { name: 'auth-dark', testMatch: ['auth/**/*.spec.ts'], use: { ...devices['Desktop Chrome'], colorScheme: 'dark' } },
+    { name: 'auth-light', testMatch: ['auth/**/*.spec.ts'], use: { ...devices['Desktop Chrome'], colorScheme: 'light' } },
+  ],
   webServer: { command: 'node test-server/server.mjs', url: 'http://127.0.0.1:4173/', reuseExistingServer: false },
 });

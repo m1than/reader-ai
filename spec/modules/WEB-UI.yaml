@@ -47,8 +47,9 @@
 # static auth files from a fixed map of exactly four entries (`GET /api/auth/signin` → signin.html,
 # `/api/auth/bootstrap` → bootstrap.html, `/api/auth/static/passkey.js`, `/api/auth/static/auth.css`, read from
 # `server/src/reader/auth/static`, no other path) with the Caddyfile's Content-Security-Policy header and the api's
-# content types, and web/playwright.config.ts also matches e2e/web/auth/**; the ceremony POSTs are stubbed by the
-# auth spec itself (page.route) (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
+# content types, and web/playwright.config.ts runs e2e/web/auth/** in two projects of its own, `auth-dark` and
+# `auth-light` (`colorScheme`), while the existing `chromium` project keeps the ui, render and tutor specs; the
+# ceremony POSTs are stubbed by the auth spec itself (page.route) (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
 # `reader up`, signed in with the S1 `live-check` learner through a Chromium virtual authenticator.
 
 id: WEB-UI
