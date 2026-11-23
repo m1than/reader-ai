@@ -1054,7 +1054,16 @@ tasks:
         [browser] on FR-ACCOUNTS-1/-3, FR-ACCOUNTS-5 (route, link, axe, overflow), return to /signups after re-auth
         through an allow-listed `next` on the sign-in page (FR-AUTH-31); disable is one transaction; a device passkey
         can outlive a reject (owner note 7). Residuals stated: pending-cap DoS and the sign-up limit on localhost.
-        Awaits round 2.",
+        Round 2: changes, all round-1 blockers resolved. Blocking, fixed in revision 2: (1) skeleton step 4 adds
+        i→l (admin and adm1n → admln, ivan meets lvan), table rows rechecked with their skeletons, ADR Decision 6
+        mirrored; (2) `next`: raw `location.search === \"?next=/signups\"`, navigation to the allow-list constant;
+        FR-AUTH-14 (sign-in only) and FR-AUTH-21 (done target) amendments listed; bootstrap ignores ?next=/signups
+        (browser case). Non-blocking applied: absent-key default open only on RP ID localhost, otherwise off with a
+        startup note (ADR guard from 'this Mac only'); reject deletes challenges by signup_handle, sync leaves them to
+        expire (verify re-checks); collisions name the first handle in users[] order; `signup_superseded <user id>`
+        log record; the live SKIP is exactly a full pending cap or a 429 on the first options call; ZWNJ/ZWJ refusal
+        stated as a known limit; WEB-UI proposed FR-UI-14 drafted (12 is V/plan's, 13 V/onboarding's). Awaits
+        round 3.",
       notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
         disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
         need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding also adds a

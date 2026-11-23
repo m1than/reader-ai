@@ -288,3 +288,22 @@ vectors:
 #   The slice uses the spike's adjusted Calm draft as is.
 # - The library tarball in web/vendor/ (about 354 KB) is built from the owner's tag v0.1.0 locally; nothing is pushed to
 #   the library.
+
+# ---- Amendment (DRAFT, 2026-11-23, V/signup, for ADR-0031 proposed and WEB-ACCOUNTS draft). Held under
+# `proposed_requirements` (not read by trace-check; this spec is approved) until the deep-reviewer approves it with
+# WEB-ACCOUNTS; it moves into `requirements` with its Red tests, and no web/src/app edit for the Sign-ups screen happens
+# before then. Ids: FR-UI-12 is V/plan's, FR-UI-13 is V/onboarding's. Merge note: those branches also add a
+# `proposed_requirements` key to this file; when the branches meet the lists become one key (a YAML mapping cannot
+# hold the key twice). ----
+proposed_requirements:
+  - id: FR-UI-14
+    text: >-
+      **Sign-ups entry points (WEB-ACCOUNTS).** The route table adds `/signups`, WEB-ACCOUNTS's page as a lazy chunk.
+      For a user whose `/api/me` role is `owner`, the header shows a link "Sign-ups" to `/signups`, with the pending
+      count of WEB-ACCOUNTS FR-ACCOUNTS-4; a learner sees no link, and on `/signups` a learner gets the not-found view
+      (FR-UI-3) without any request to `/api/auth/signups`. The shell's behaviour is otherwise unchanged: one
+      `main#content` (FR-UI-11), the skip link first, the 401 redirect of FR-UI-5. `web/test-server/` stubs
+      `GET /api/auth/signups` and the three POST routes from VEC-ACCOUNTS-1, and its fixed map of static auth files
+      adds `/api/auth/signup` → signup.html (SRV-AUTH FR-AUTH-31), five entries in all. [unit] the route table, the
+      link for owner and learner, the learner's request log on `/signups`; [browser] WEB-ACCOUNTS FR-ACCOUNTS-5's
+      matrix covers the link at 1280, 1024 and 390 px in both schemes.

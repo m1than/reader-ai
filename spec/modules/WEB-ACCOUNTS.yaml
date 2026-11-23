@@ -19,12 +19,11 @@
 # `Skeleton`, lists without bullets carry `role="list"`, no HTML strings (INV-UI-2). The checks are FR-ACCOUNTS-5's.
 #
 # Cross-spec items (paired changes, written with Green):
-#   - WEB-UI (reserved id FR-UI-14; FR-UI-12 is V/onboarding's, FR-UI-13 is V/plan's): one pointer requirement, "the
-#     shell mounts the route and the header link that WEB-ACCOUNTS FR-ACCOUNTS-5 specifies", which claims the few
-#     lines in web/src/app (route table, header) under WEB-UI's paths. The behaviour and its tests are FR-ACCOUNTS-5
-#     here. It is written into WEB-UI when that spec's proposed block from the other branches has merged (two branches
-#     already add a `proposed_requirements` key to WEB-UI; a third copy would not merge). `web/test-server/` stubs
-#     FR-AUTH-29's routes from VEC-ACCOUNTS-1.
+#   - WEB-UI: proposed FR-UI-14, drafted on this branch under WEB-UI's `proposed_requirements` (FR-UI-12 is V/plan's,
+#     FR-UI-13 is V/onboarding's): the route `/signups`, the owner's header link and the test-server stubs, in
+#     web/src/app and web/test-server under WEB-UI's paths. It must be approved before any web/src/app edit for this
+#     screen. The page-level checks are FR-ACCOUNTS-5 here. Merge note: the other branches also add that key to
+#     WEB-UI; the lists become one key when the branches meet.
 #   - SRV-AUTH FR-AUTH-29: the routes and bodies; `recent_session` on approve, reject and disable (401
 #     `reauth_required` for an older session). FR-AUTH-31: the sign-in page's `next=/signups` return.
 #
@@ -113,7 +112,8 @@ requirements:
       the call failing, a learner (no call, no link).
   - id: FR-ACCOUNTS-5
     text: >-
-      **Route, link and page checks.** The route table has `/signups` (this page, a lazy chunk). For a user with role
+      **Route, link and page checks.** The route table has `/signups` (this page, a lazy chunk, mounted by WEB-UI's
+      proposed FR-UI-14). For a user with role
       `owner` (from `/api/me`) the header shows the link "Sign-ups" (FR-ACCOUNTS-4's count); a non-owner sees no link,
       and `/signups` shows the not-found view to a non-owner without calling FR-AUTH-29's routes. At 1280, 1024 and
       390 px, in light and dark, every state of FR-ACCOUNTS-1..3 (loading, error, empty, 1 and 20 pending, a

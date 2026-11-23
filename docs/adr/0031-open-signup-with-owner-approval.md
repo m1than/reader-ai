@@ -15,6 +15,10 @@ supersedes: []
 > Revision 1 (2026-11-23), after review round 1 and the owner's answers: one global limit, no per-client limit and no
 > client addresses; default `open`; a pending sign-up loses to a configured handle; sign-up failures in their own
 > scope; wider display-name rules; the live check is a real oracle.
+>
+> Revision 2 (2026-11-23), after review round 2: `i`→`l` in the skeleton; the sign-in `next` compared raw against
+> one constant; the `open` default applies only on `localhost`; collisions name the first handle in `users[]` order;
+> the ZWNJ/ZWJ limit stated.
 
 ## Context
 
@@ -59,8 +63,10 @@ Reachability today: Caddy publishes `127.0.0.1:443` only (OPS-DEPLOY compose.yam
    named `auth.signup`; `sharing.signup` is the key SRV-AUTH already reserves and validates, and SRV-CONFIG rejects an
    unknown top-level `auth` key, so reusing it needs no SRV-CONFIG change. The example config quotes both values.
    Because the default is `open`, upgrading an instance whose config lacks the key turns sign-up on; the owner chose
-   this. While `"off"`, every sign-up route answers 404 exactly as today (FR-AUTH-13) and the sign-in page shows no
-   link.
+   this. **Guard:** the absent-key default is `open` only while the RP ID is `localhost`. For any other
+   `instance.url` host an absent key means `"off"`, and the api logs a startup note. This follows from the owner's
+   "this Mac only": moving to another host never opens sign-up by default; an explicit `"open"` still does. While
+   `"off"`, every sign-up route answers 404 exactly as today (FR-AUTH-13) and the sign-in page shows no link.
 2. **Page and ceremony.** A public page `GET /api/auth/signup`, linked from the sign-in page ("New here? Create an
    account") while `open`. The visitor chooses a **handle** and a **display name**, then creates a passkey:
    `POST /api/auth/signup/options {handle, display_name}` checks the rules and the limits and returns registration
@@ -79,7 +85,9 @@ Reachability today: Caddy publishes `127.0.0.1:443` only (OPS-DEPLOY compose.yam
    same screen, in one transaction that also revokes their sessions; **disable cannot be undone in the product** (the
    screen says so). Each action locks the user row and re-checks its state. Approve, reject and disable need a recent
    owner session (`recent_session`, 10 minutes, the rule add-passkey uses), because each changes who can use the
-   instance. Notification is in-app only: the header shows "Sign-ups (n)" to the owner when n > 0. A Telegram notice
+   instance. When re-authentication is needed, the owner signs in through `/api/auth/signin?next=/signups` and
+   returns to the screen: the sign-in page compares its raw query with exactly `?next=/signups` and navigates to a
+   constant, never to the input (the bootstrap and sign-up pages never read it). Notification is in-app only: the header shows "Sign-ups (n)" to the owner when n > 0. A Telegram notice
    waits for SRV-NOTIFY (an event `signup.pending`), because no spec has a server-side notification path today.
 5. **Sync with reader.yaml.** `users.source` is `config` or `signup`. `sync_users` disables only `source = config`
    users missing from `users[]`, and a configured handle never takes over a sign-up account. When a `users[]` handle
@@ -87,7 +95,8 @@ Reachability today: Caddy publishes `127.0.0.1:443` only (OPS-DEPLOY compose.yam
    - a **pending** sign-up row loses: it and its credential are deleted inside the sync transaction, and the
      configured user is created;
    - an **approved or disabled** sign-up row stops the api with `reader-server: handle_taken_by_signup <handle>`. The
-     line names the handle so the owner can fix reader.yaml or delete the account (SRV-AUTH owner note 5).
+     line names the handle (the first in `users[]` order when several collide) so the owner can fix reader.yaml or
+     delete the account (SRV-AUTH owner note 5).
 
    Without this rule, a configured handle with a `providers` entry would hand the owner's provider token to a
    stranger's passkey (the proxy matches by handle). The check is exact-handle only.
@@ -108,12 +117,14 @@ Reachability today: Caddy publishes `127.0.0.1:443` only (OPS-DEPLOY compose.yam
      - `^[a-z][a-z0-9-]{2,31}$`, no `--`, no trailing `-`. Every accepted handle also fits OPS-CLI's kernel-service
        rule. ASCII-only removes cross-script lookalikes.
      - Within ASCII, a skeleton must not equal the skeleton of any existing user's or reserved handle. It is computed
-       in order: lower-case; remove hyphens; `rn`→`m` and `vv`→`w`, left to right; `0`→`o` and `1`→`l`.
+       in order: lower-case; remove hyphens; `rn`→`m` and `vv`→`w`, left to right; `0`→`o`, and `1` and `i`→`l`.
+       So `admin` and `adm1n` are both `admln`, `ivan` meets `lvan`, and `rnike` meets `mike`.
      - The skeleton is unique among sign-up rows only, so two configured handles may share one.
      - A reserved list (owner, admin, root, system, support, reader, reader-ai, api, auth, signin, signup, bootstrap,
        mcp, live-check, …) and every `users[]` handle are unavailable.
    - **Display name:** 1–64 Unicode code points after NFC and trimming. No code point of category Cc, Cf (bidi
-     overrides included), Cs, Co, Cn, Zl or Zp. It is shown only to the owner, as text.
+     overrides included), Cs, Co, Cn, Zl or Zp. It is shown only to the owner, as text. Known limit: ZWNJ and ZWJ
+     (U+200C, U+200D) are Cf, so some Persian and Indic names and emoji ZWJ sequences are refused.
    - **Challenge expiry:** the sign-up ceremony uses the existing 300 s challenge (`challenge_ttl_s`), single use
      (INV-AUTH-1).
    - **Enumeration:** handles must be unique, so a sign-up form necessarily tells a visitor whether a handle is free.
