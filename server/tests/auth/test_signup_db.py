@@ -1,4 +1,5 @@
-"""SRV-AUTH sign-up against Postgres: switch, schema and sync, options, verify, pending, owner routes, cleanup.
+"""SRV-AUTH sign-up against Postgres: switch, schema and sync, options, verify, pending, owner routes,
+cleanup.
 
 @trace FR-AUTH-23 FR-AUTH-24 FR-AUTH-25 FR-AUTH-26 FR-AUTH-27 FR-AUTH-28 FR-AUTH-29 FR-AUTH-30 FR-AUTH-31
 @trace INV-AUTH-10 INV-AUTH-11 INV-AUTH-12 INV-AUTH-13 INV-AUTH-14
@@ -6,24 +7,15 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import secrets
 from pathlib import Path
 from typing import Any
 
 import anyio
-import httpx
 import pytest
-from auth_helpers import (
-    ORIGIN,
-    client,
-    execute,
-    owner_with_passkey,
-    ready_engine,
-    scalar,
-    settings_for,
-    target,
-    unb64url,
-)
+from auth_helpers import client, execute, owner_with_passkey, ready_engine, scalar, settings_for, unb64url
 from conftest import Pg
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
@@ -41,12 +33,14 @@ from softauthn import SoftAuthenticator
 
 pytestmark = pytest.mark.anyio
 
-USERS = (("ivan", "owner"), ("live-check", "learner"))
-
 
 async def _setup(pg: Pg, tmp_path: Path, **kwargs: Any) -> tuple[Any, Any]:
-    settings = settings_for(tmp_path, **kwargs)
-    return settings, await ready_engine(pg, settings)
+    s = settings_for(tmp_path, **kwargs)
+    return s, await ready_engine(pg, s)
+
+
+def _cred(opts: dict[str, Any]) -> dict[str, Any]:
+    return SoftAuthenticator.random().register(challenge=unb64url(opts["challenge"]))
 
 
 # FR-AUTH-23 / INV-AUTH-14 — the switch -------------------------------------------------------------------
@@ -55,15 +49,16 @@ ROW_SQL = (
     "SELECT (SELECT count(*) FROM users) + (SELECT count(*) FROM webauthn_credentials) + "
     "(SELECT count(*) FROM auth_challenges) + (SELECT count(*) FROM signup_attempts)"
 )
+SIGNUP_POSTS = ["/api/auth/signup/options", "/api/auth/signup/verify"]
 
 
 async def test_off_answers_404_and_writes_nothing(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path, sharing='{ signup: "off" }')
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path, sharing='{ signup: "off" }')
+    async with client(s, engine) as c:
         before = await scalar(engine, ROW_SQL)
         page = await c.get("/api/auth/signup")
         assert (page.status_code, page.json()) == (404, {"error": "not_found"})
-        for path in ["/api/auth/signup/options", "/api/auth/signup/verify"]:
+        for path in SIGNUP_POSTS:
             r = await c.post(path, json={"handle": "abcd", "display_name": "x"})
             assert (r.status_code, r.json()) == (404, {"error": "not_found"})
         assert await scalar(engine, ROW_SQL) == before
@@ -72,31 +67,28 @@ async def test_off_answers_404_and_writes_nothing(pg: Pg, tmp_path: Path) -> Non
     await engine.dispose()
 
 
-@settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(
-    body=st.one_of(
-        st.none(), st.integers(), st.text(max_size=20),
-        st.dictionaries(st.text(max_size=12), st.one_of(st.text(max_size=12), st.integers(), st.none()), max_size=4),
+BODIES = st.one_of(
+    st.none(),
+    st.integers(),
+    st.text(max_size=20),
+    st.dictionaries(
+        st.text(max_size=12), st.one_of(st.text(max_size=12), st.integers(), st.none()), max_size=4
     ),
-    header=st.sampled_from([{}, {"X-Forwarded-For": "203.0.113.7"}, {"Cookie": f"{CEREMONY}=x"}]),
 )
+HEADERS = st.sampled_from([{}, {"X-Forwarded-For": "203.0.113.7"}, {"Cookie": f"{CEREMONY}=x"}])
+
+
+@settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@given(body=BODIES, header=HEADERS)
 def test_off_mode_property(pg: Pg, tmp_path: Path, body: object, header: dict[str, str]) -> None:
     """INV-AUTH-14: in `off`, no body or header makes a sign-up route write a row."""
 
     async def run() -> None:
-        settings = settings_for(tmp_path, sharing="{ signup: false }")
-        from reader.db import make_engine
-
-        engine = make_engine(target(pg))
-        from reader.db import migrate
-
-        await migrate(engine)
-        from reader.auth.store import prepare
-
-        await prepare(engine, settings)
-        async with client(settings, engine) as c:
+        s = settings_for(tmp_path, sharing="{ signup: false }")
+        engine = await ready_engine(pg, s)
+        async with client(s, engine) as c:
             before = await scalar(engine, ROW_SQL)
-            for path in ["/api/auth/signup/options", "/api/auth/signup/verify"]:
+            for path in SIGNUP_POSTS:
                 assert (await c.post(path, json=body, headers=header)).status_code == 404
             assert await scalar(engine, ROW_SQL) == before
         await engine.dispose()
@@ -105,9 +97,9 @@ def test_off_mode_property(pg: Pg, tmp_path: Path, body: object, header: dict[st
 
 
 async def test_open_signin_page_links_to_signup(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    assert settings.signup == "open"
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    assert s.signup == "open"
+    async with client(s, engine) as c:
         signin = await c.get("/api/auth/signin")
         assert signin.text.count('href="/api/auth/signup"') == 1
         page = await c.get("/api/auth/signup")
@@ -121,86 +113,103 @@ async def test_open_signin_page_links_to_signup(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_migration_backfills_config_rows(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    _, engine = await _setup(pg, tmp_path)
     rows = await scalar(
         engine,
-        "SELECT array_agg(handle || ':' || source || ':' || state || ':' || handle_skeleton ORDER BY handle) FROM users",
+        "SELECT array_agg(handle || ':' || source || ':' || state || ':' || handle_skeleton ORDER BY handle) "
+        "FROM users",
     )
     assert rows == ["ivan:config:active:lvan", "live-check:config:active:llvecheck"]
-    assert await scalar(engine, "SELECT column_default FROM information_schema.columns "
-                                "WHERE table_name = 'auth_failures' AND column_name = 'scope'") == "'auth'::text"
+    default = await scalar(
+        engine,
+        "SELECT column_default FROM information_schema.columns "
+        "WHERE table_name = 'auth_failures' AND column_name = 'scope'",
+    )
+    assert default == "'auth'::text"
     await engine.dispose()
 
 
 async def test_config_handles_may_share_a_skeleton(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path, users=(("ivan", "owner"), ("mike", "learner"), ("rnike", "learner")))
+    users = (("ivan", "owner"), ("mike", "learner"), ("rnike", "learner"))
+    _, engine = await _setup(pg, tmp_path, users=users)
     assert await count(engine, "users", "handle_skeleton = 'mlke'") == 2
     await engine.dispose()
+
+
+SNAPSHOT_ONE = "SELECT row(handle, role, source, state, disabled_at)::text FROM users WHERE id = :u"
 
 
 async def test_signup_user_survives_a_restart_without_it(pg: Pg, tmp_path: Path) -> None:
     from reader.auth.store import prepare
 
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as c:
         r, _, _ = await signup(c, "lc-aaaa")
         assert r.status_code == 202, r.text
     uid = await user_id(engine, "lc-aaaa")
     await execute(engine, "UPDATE users SET state = 'active' WHERE id = :u", u=uid)
-    before = await scalar(engine, "SELECT row(handle, role, source, state, disabled_at)::text FROM users WHERE id = :u", u=uid)
+    before = await scalar(engine, SNAPSHOT_ONE, u=uid)
     await prepare(engine, settings_for(tmp_path / "b", users=(("ivan", "owner"),)))
-    after = await scalar(engine, "SELECT row(handle, role, source, state, disabled_at)::text FROM users WHERE id = :u", u=uid)
-    assert before == after
+    assert await scalar(engine, SNAPSHOT_ONE, u=uid) == before
     await engine.dispose()
 
 
 async def test_config_handle_supersedes_a_pending_signup(pg: Pg, tmp_path: Path) -> None:
     from reader.auth.store import prepare
 
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     old = await insert_pending(engine, "maria")
-    async with client(settings, engine) as c:
-        # An open ceremony for that handle, as if a second person had asked before the restart (written directly:
-        # options refuses a handle that is already pending).
+    async with client(s, engine) as c:
+        # An open ceremony for that handle, as if a second person had asked before the restart (written
+        # directly: options refuses a handle that is already pending).
         opts = (await signup_options(c, "marta")).json()
-        await execute(engine, "UPDATE auth_challenges SET signup_handle = 'maria' WHERE signup_handle = 'marta'")
-        superseded = await prepare(engine, settings_for(tmp_path / "b", users=(("ivan", "owner"), ("maria", "learner"))))
-        assert superseded == [old]
+        await execute(
+            engine, "UPDATE auth_challenges SET signup_handle = 'maria' WHERE signup_handle = 'marta'"
+        )
+        users = (("ivan", "owner"), ("maria", "learner"))
+        assert await prepare(engine, settings_for(tmp_path / "b", users=users)) == [old]
         assert await count(engine, "users", "id = :u", u=old) == 0
         assert await count(engine, "webauthn_credentials", "owner_id = :u", u=old) == 0
-        assert await scalar(engine, "SELECT source || ':' || role FROM users WHERE handle = 'maria'") == "config:learner"
+        row = await scalar(engine, "SELECT source || ':' || role FROM users WHERE handle = 'maria'")
+        assert row == "config:learner"
         # The ceremony left to expire cannot create the account: verify re-checks the handle under its lock.
-        cred = SoftAuthenticator.random().register(challenge=unb64url(opts["challenge"]))
-        r = await c.post("/api/auth/signup/verify", json=cred)
+        r = await c.post("/api/auth/signup/verify", json=_cred(opts))
         assert (r.status_code, r.json()) == (409, {"error": "handle_unavailable"})
     await engine.dispose()
 
 
+SNAPSHOT_ALL = (
+    "SELECT array_agg(row(id, handle, source, state, role, disabled_at)::text ORDER BY handle) FROM users"
+)
+
+
 @pytest.mark.parametrize("state", ["active", "disabled"])
-async def test_config_handle_equal_to_an_active_or_disabled_signup_stops(pg: Pg, tmp_path: Path, state: str) -> None:
+async def test_config_handle_equal_to_an_active_or_disabled_signup_stops(
+    pg: Pg, tmp_path: Path, state: str
+) -> None:
     from reader.auth.store import HandleTakenBySignup, prepare
 
-    settings, engine = await _setup(pg, tmp_path)
+    _, engine = await _setup(pg, tmp_path)
     await insert_pending(engine, "zora", state="active")
     await insert_pending(engine, "maria", state="active")
     if state == "disabled":
         await execute(engine, "UPDATE users SET disabled_at = now() WHERE handle IN ('zora', 'maria')")
-    snapshot = "SELECT array_agg(row(id, handle, source, state, role, disabled_at)::text ORDER BY handle) FROM users"
-    before = await scalar(engine, snapshot)
+    before = await scalar(engine, SNAPSHOT_ALL)
     users = (("ivan", "owner"), ("zora", "learner"), ("maria", "learner"))
     with pytest.raises(HandleTakenBySignup) as raised:
         await prepare(engine, settings_for(tmp_path / "b", users=users))
     assert raised.value.handle == "zora"  # the first in users[] order
-    assert await scalar(engine, snapshot) == before
+    assert await scalar(engine, SNAPSHOT_ALL) == before
     await engine.dispose()
 
 
 async def test_skeleton_only_collision_starts(pg: Pg, tmp_path: Path) -> None:
     from reader.auth.store import prepare
 
-    settings, engine = await _setup(pg, tmp_path)
+    _, engine = await _setup(pg, tmp_path)
     await insert_pending(engine, "rnike", state="active")
-    assert await prepare(engine, settings_for(tmp_path / "b", users=(("ivan", "owner"), ("mike", "learner")))) == []
+    users = (("ivan", "owner"), ("mike", "learner"))
+    assert await prepare(engine, settings_for(tmp_path / "b", users=users)) == []
     assert await count(engine, "users", "handle IN ('mike', 'rnike')") == 2
     await engine.dispose()
 
@@ -208,10 +217,10 @@ async def test_skeleton_only_collision_starts(pg: Pg, tmp_path: Path) -> None:
 async def test_bootstrap_link_refuses_signup_users(pg: Pg, tmp_path: Path) -> None:
     from reader.auth.store import BootstrapRefused, create_bootstrap_token
 
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     await insert_pending(engine, "lc-bbbb", state="active")
     with pytest.raises(BootstrapRefused) as raised:
-        await create_bootstrap_token(engine, settings, "lc-bbbb")
+        await create_bootstrap_token(engine, s, "lc-bbbb")
     assert raised.value.code == "signup_user"
     await engine.dispose()
 
@@ -220,12 +229,12 @@ async def test_bootstrap_link_refuses_signup_users(pg: Pg, tmp_path: Path) -> No
 
 
 async def test_skeleton_is_compared_with_every_row(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path, users=(("ivan", "owner"), ("mike", "learner")))
+    s, engine = await _setup(pg, tmp_path, users=(("ivan", "owner"), ("mike", "learner")))
     await insert_pending(engine, "watt")
     await insert_pending(engine, "olga", state="active")
     await insert_pending(engine, "petr", state="active")
     await execute(engine, "UPDATE users SET disabled_at = now() WHERE handle = 'petr'")
-    async with client(settings, engine) as c:
+    async with client(s, engine) as c:
         for taken in ["rnike", "lvan", "i-van", "vvatt", "o1ga", "petr", "ivan", "adm1n", "Ivan", "a--b"]:
             r = await signup_options(c, taken)
             assert (r.status_code, r.json()) == (409, {"error": "handle_unavailable"}), taken
@@ -237,8 +246,8 @@ async def test_skeleton_is_compared_with_every_row(pg: Pg, tmp_path: Path) -> No
 
 
 async def test_options_shape_and_ceremony(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as c:
         r = await signup_options(c, "lc-1a2b", "  Анна  ")
         assert r.status_code == 200
         o = r.json()
@@ -247,16 +256,18 @@ async def test_options_shape_and_ceremony(pg: Pg, tmp_path: Path) -> None:
         assert o.get("excludeCredentials", []) == []
         assert o["authenticatorSelection"]["userVerification"] == "required"
         assert c.cookies.get(CEREMONY)
-        row = await scalar(engine, "SELECT signup_handle || ':' || signup_display_name FROM auth_challenges "
-                                   "WHERE kind = 'signup'")
+        row = await scalar(
+            engine,
+            "SELECT signup_handle || ':' || signup_display_name FROM auth_challenges WHERE kind = 'signup'",
+        )
         assert row == "lc-1a2b:Анна"
         assert await count(engine, "users", "handle = 'lc-1a2b'") == 0
     await engine.dispose()
 
 
 async def test_options_refusals_in_order(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as c:
         r = await signup_options(c, "lc-aaaa", "")
         assert (r.status_code, r.json()) == (400, {"error": "display_name_invalid"})
         r = await c.post("/api/auth/signup/options", json=["not", "an", "object"])
@@ -273,16 +284,19 @@ async def test_options_refusals_in_order(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_global_limit(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    await execute(engine, "INSERT INTO signup_attempts (at) SELECT now() - interval '10 minutes' FROM generate_series(1, 60)")
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    await execute(
+        engine,
+        "INSERT INTO signup_attempts (at) SELECT now() - interval '10 minutes' FROM generate_series(1, 60)",
+    )
+    async with client(s, engine) as c:
         r = await signup_options(c, "lc-aaaa")
         assert (r.status_code, r.json()) == (429, {"error": "rate_limited"})
         assert 2995 <= int(r.headers["retry-after"]) <= 3000
         assert await count(engine, "signup_attempts") == 60
     await execute(engine, "DELETE FROM signup_attempts")
     await execute(engine, "INSERT INTO signup_attempts (at) SELECT now() FROM generate_series(1, 59)")
-    async with client(settings, engine) as c:
+    async with client(s, engine) as c:
         statuses: list[int] = []
 
         async def one(i: int) -> None:
@@ -297,14 +311,17 @@ async def test_global_limit(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_failure_scopes_are_separate(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    await execute(engine, "INSERT INTO auth_failures (reason, scope) SELECT 'malformed', 'signup' FROM generate_series(1, 100)")
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    await execute(
+        engine,
+        "INSERT INTO auth_failures (reason, scope) SELECT 'malformed', 'signup' FROM generate_series(1, 100)",
+    )
+    async with client(s, engine) as c:
         assert (await signup_options(c, "lc-aaaa")).status_code == 429
         assert (await c.post("/api/auth/signup/verify", json={})).status_code == 429
         assert (await c.post("/api/auth/signin/options", json={})).status_code == 200
     await execute(engine, "UPDATE auth_failures SET scope = 'auth'")
-    async with client(settings, engine) as c:
+    async with client(s, engine) as c:
         assert (await c.post("/api/auth/signin/options", json={})).status_code == 429
         assert (await signup_options(c, "lc-aaaa")).status_code == 200
     await engine.dispose()
@@ -314,14 +331,19 @@ async def test_failure_scopes_are_separate(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_verify_creates_a_pending_learner_and_no_session(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as c:
-        r, _, _ = await signup(c, "lc-aaaa", display_name="Анна", extra={"role": "owner", "state": "active"})
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as c:
+        extra = {"role": "owner", "state": "active"}
+        r, _, _ = await signup(c, "lc-aaaa", display_name="Анна", extra=extra)
         assert (r.status_code, r.json()) == (202, {"status": "pending"})
-        assert SESSION not in r.headers.get("set-cookie", "")
-        assert f"{CEREMONY}=" in r.headers.get("set-cookie", "") and "Max-Age=0" in r.headers.get("set-cookie", "")
-    row = await scalar(engine, "SELECT role || ':' || source || ':' || state || ':' || display_name || ':' || "
-                               "handle_skeleton || ':' || consent_evaluation FROM users WHERE handle = 'lc-aaaa'")
+        cookies = r.headers.get("set-cookie", "")
+        assert SESSION not in cookies
+        assert f"{CEREMONY}=" in cookies and "Max-Age=0" in cookies
+    row = await scalar(
+        engine,
+        "SELECT role || ':' || source || ':' || state || ':' || display_name || ':' || handle_skeleton "
+        "|| ':' || consent_evaluation FROM users WHERE handle = 'lc-aaaa'",
+    )
     assert row == "learner:signup:pending:Анна:lcaaaa:false"
     uid = await user_id(engine, "lc-aaaa")
     assert await count(engine, "webauthn_credentials", "owner_id = :u", u=uid) == 1
@@ -330,107 +352,106 @@ async def test_verify_creates_a_pending_learner_and_no_session(pg: Pg, tmp_path:
 
 
 async def test_verify_failure_rolls_back_with_a_signup_failure(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as c:
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as c:
         r, auth, opts = await signup(c, "lc-aaaa", origin="https://evil.example")
         assert (r.status_code, r.json()) == (400, {"error": "signup_failed"})
         assert await count(engine, "users", "source = 'signup'") == 0
-        assert await scalar(engine, "SELECT reason || ':' || scope FROM auth_failures") == "origin_mismatch:signup"
+        failure = await scalar(engine, "SELECT reason || ':' || scope FROM auth_failures")
+        assert failure == "origin_mismatch:signup"
         # The challenge stays usable until it expires: a good response with the same ceremony succeeds.
         good = auth.register(challenge=unb64url(opts["challenge"]))
-        r2 = await c.post("/api/auth/signup/verify", json=good)
-        assert r2.status_code == 202
+        assert (await c.post("/api/auth/signup/verify", json=good)).status_code == 202
         # A reused ceremony fails.
         r3 = await c.post("/api/auth/signup/verify", json=good)
         assert (r3.status_code, r3.json()) == (400, {"error": "signup_failed"})
     await engine.dispose()
 
 
-async def test_concurrent_verifies_for_one_handle(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+async def _ceremonies(s: Any, engine: Any, handles: list[str]) -> list[tuple[str, dict[str, Any]]]:
     prepared = []
-    for _ in range(2):
-        async with client(settings, engine) as c:
-            opts = (await signup_options(c, "lc-same")).json()
-            prepared.append((c.cookies.get(CEREMONY), opts))
-    results: list[httpx.Response] = []
-    async with client(settings, engine) as c:
+    for handle in handles:
+        async with client(s, engine) as c:
+            opts = (await signup_options(c, handle)).json()
+            cookie = c.cookies.get(CEREMONY)
+            assert cookie
+            prepared.append((cookie, opts))
+    return prepared
 
-        async def one(cookie: str, opts: dict[str, Any]) -> None:
-            cred = SoftAuthenticator.random().register(challenge=unb64url(opts["challenge"]))
-            results.append(await c.post("/api/auth/signup/verify", json=cred, cookies={CEREMONY: cookie}))
 
-        async with anyio.create_task_group() as tg:
-            for cookie, opts in prepared:
-                tg.start_soon(one, cookie, opts)
-    assert sorted(r.status_code for r in results) == [202, 409]
+async def _verify_all(s: Any, engine: Any, prepared: list[tuple[str, dict[str, Any]]]) -> list[int]:
+    codes: list[int] = []
+
+    async def one(cookie: str, opts: dict[str, Any]) -> None:
+        async with client(s, engine) as c:
+            c.cookies.set(CEREMONY, cookie)
+            codes.append((await c.post("/api/auth/signup/verify", json=_cred(opts))).status_code)
+
+    async with anyio.create_task_group() as tg:
+        for cookie, opts in prepared:
+            tg.start_soon(one, cookie, opts)
+    return codes
+
+
+async def test_concurrent_verifies_for_one_handle(pg: Pg, tmp_path: Path) -> None:
+    s, engine = await _setup(pg, tmp_path)
+    codes = await _verify_all(s, engine, await _ceremonies(s, engine, ["lc-same", "lc-same"]))
+    assert sorted(codes) == [202, 409]
     assert await count(engine, "users", "handle = 'lc-same'") == 1
     await engine.dispose()
 
 
 async def test_cap_holds_under_concurrent_verifies(pg: Pg, tmp_path: Path) -> None:
-    """INV-AUTH-12: 19 pending plus concurrent verifies leave exactly 20."""
-    settings, engine = await _setup(pg, tmp_path)
+    """INV-AUTH-12: 18 pending plus four concurrent verifies leave exactly 20."""
+    s, engine = await _setup(pg, tmp_path)
     for i in range(18):
         await insert_pending(engine, f"pend-{i:02d}")
-    prepared = []
-    for i in range(4):
-        async with client(settings, engine) as c:
-            opts = (await signup_options(c, f"lc-new{i}")).json()
-            prepared.append((c.cookies.get(CEREMONY), opts))
-    results: list[int] = []
-    async with client(settings, engine) as c:
-
-        async def one(cookie: str, opts: dict[str, Any]) -> None:
-            cred = SoftAuthenticator.random().register(challenge=unb64url(opts["challenge"]))
-            results.append((await c.post("/api/auth/signup/verify", json=cred, cookies={CEREMONY: cookie})).status_code)
-
-        async with anyio.create_task_group() as tg:
-            for cookie, opts in prepared:
-                tg.start_soon(one, cookie, opts)
-    assert sorted(results) == [202, 202, 429, 429]
+    prepared = await _ceremonies(s, engine, [f"lc-new{i}" for i in range(4)])
+    assert sorted(await _verify_all(s, engine, prepared)) == [202, 202, 429, 429]
     assert await count(engine, "users", "state = 'pending'") == 20
     await engine.dispose()
 
 
 async def test_concurrent_options_and_verifies_near_full(pg: Pg, tmp_path: Path) -> None:
     """INV-AUTH-12: under any interleaving, pending ≤ 20 and attempts within the window ≤ 60."""
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     for i in range(15):
         await insert_pending(engine, f"pend-{i:02d}")
     await execute(engine, "INSERT INTO signup_attempts (at) SELECT now() FROM generate_series(1, 20)")
-    async with client(settings, engine) as c:
 
-        async def flow(i: int) -> None:
-            async with client(settings, engine) as own:
-                o = await signup_options(own, f"lc-x{i:03d}")
-                if o.status_code == 200:
-                    cred = SoftAuthenticator.random().register(challenge=unb64url(o.json()["challenge"]))
-                    await own.post("/api/auth/signup/verify", json=cred)
+    async def flow(i: int) -> None:
+        async with client(s, engine) as own:
+            o = await signup_options(own, f"lc-x{i:03d}")
+            if o.status_code == 200:
+                await own.post("/api/auth/signup/verify", json=_cred(o.json()))
 
-        async with anyio.create_task_group() as tg:
-            for i in range(40):
-                tg.start_soon(flow, i)
-        del c
+    async with anyio.create_task_group() as tg:
+        for i in range(40):
+            tg.start_soon(flow, i)
     assert await count(engine, "users", "state = 'pending'") <= 20
     assert await count(engine, "signup_attempts") <= 60
     await engine.dispose()
 
 
+EXTRA = st.dictionaries(
+    st.sampled_from(["role", "source", "state", "handle", "user", "id"]),
+    st.one_of(st.text(max_size=8), st.integers(), st.none()),
+    max_size=4,
+)
+
+
 @settings(max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(extra=st.dictionaries(st.sampled_from(["role", "source", "state", "handle", "user", "id"]),
-                             st.one_of(st.text(max_size=8), st.integers(), st.none()), max_size=4))
+@given(extra=EXTRA)
 def test_no_body_changes_role_source_or_state(pg: Pg, tmp_path: Path, extra: dict[str, Any]) -> None:
-    """INV-AUTH-10: whatever the verify body holds, every sign-up user is a pending learner and no session exists."""
+    """INV-AUTH-10: whatever the verify body holds, every sign-up user is a pending learner, no session."""
 
     async def run() -> None:
-        settings = settings_for(tmp_path, users=(("ivan", "owner"),))
-        engine = await ready_engine(pg, settings)
-        async with client(settings, engine) as c:
-            import secrets
-
+        s = settings_for(tmp_path, users=(("ivan", "owner"),))
+        engine = await ready_engine(pg, s)
+        async with client(s, engine) as c:
             await signup(c, f"lc-{secrets.token_hex(4)}", extra=extra)
-        assert await count(engine, "users", "source = 'signup' AND NOT (role = 'learner' AND state = 'pending')") == 0
+        wrong = "source = 'signup' AND NOT (role = 'learner' AND state = 'pending')"
+        assert await count(engine, "users", wrong) == 0
         assert await count(engine, "sessions") == 0
         await engine.dispose()
 
@@ -441,28 +462,32 @@ def test_no_body_changes_role_source_or_state(pg: Pg, tmp_path: Path, extra: dic
 
 
 async def test_pending_user_cannot_sign_in(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as c:
-        r, auth, opts = await signup(c, "lc-aaaa")
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as c:
+        _, auth, opts = await signup(c, "lc-aaaa")
         handle = unb64url(opts["user"]["id"])
-        s = await signin_status(c, auth, handle)
-        assert (s.status_code, s.json()) == (403, {"error": "pending_approval"})
+        r = await signin_status(c, auth, handle)
+        assert (r.status_code, r.json()) == (403, {"error": "pending_approval"})
         assert await count(engine, "sessions") == 0
         assert await count(engine, "auth_failures") == 0
         assert (await c.get("/api/me")).status_code == 401
         # A forged assertion is checked first: signin_failed, not the state.
         options = await c.post("/api/auth/signin/options", json={})
-        forged = auth.assertion(challenge=unb64url(options.json()["challenge"]), user_handle=handle, corrupt_signature=True)
+        challenge = unb64url(options.json()["challenge"])
+        forged = auth.assertion(challenge=challenge, user_handle=handle, corrupt_signature=True)
         f = await c.post("/api/auth/signin/verify", json=forged)
         assert (f.status_code, f.json()) == (400, {"error": "signin_failed"})
     # A session row written directly for a pending user does not authenticate.
-    import hashlib
-
     uid = await user_id(engine, "lc-aaaa")
-    await execute(engine, "INSERT INTO sessions (id_sha256, owner_id, expires_at) VALUES (:h, :u, now() + interval '1 day')",
-                  h=hashlib.sha256(b"forged-session").digest(), u=uid)
-    async with client(settings, engine) as c:
-        assert (await c.get("/api/me", cookies={SESSION: "forged-session"})).status_code == 401
+    await execute(
+        engine,
+        "INSERT INTO sessions (id_sha256, owner_id, expires_at) VALUES (:h, :u, now() + interval '1 day')",
+        h=hashlib.sha256(b"forged-session").digest(),
+        u=uid,
+    )
+    async with client(s, engine) as c:
+        c.cookies.set(SESSION, "forged-session")
+        assert (await c.get("/api/me")).status_code == 401
     await engine.dispose()
 
 
@@ -470,7 +495,7 @@ async def test_approved_learner_has_no_other_kernel(pg: Pg, tmp_path: Path) -> N
     from reader.kernels.service import KernelService
     from reader.kernels.upstream import Endpoint
 
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     resolved: list[str] = []
 
     def resolve(handle: str) -> Endpoint:
@@ -480,8 +505,8 @@ async def test_approved_learner_has_no_other_kernel(pg: Pg, tmp_path: Path) -> N
     async def refuse(*_: Any, **__: Any) -> Any:
         raise ConnectionRefusedError
 
-    async with client(settings, engine) as c:
-        r, auth, opts = await signup(c, "lc-kern")
+    async with client(s, engine) as c:
+        _, auth, opts = await signup(c, "lc-kern")
         await execute(engine, "UPDATE users SET state = 'active' WHERE handle = 'lc-kern'")
         assert (await signin_status(c, auth, unb64url(opts["user"]["id"]))).status_code == 200
         app = c._transport.app  # type: ignore[attr-defined]
@@ -495,27 +520,24 @@ async def test_approved_learner_has_no_other_kernel(pg: Pg, tmp_path: Path) -> N
 # FR-AUTH-29 — owner routes ---------------------------------------------------------------------------------
 
 
-async def _owner(c: httpx.AsyncClient, engine: Any, settings: Any) -> None:
-    await owner_with_passkey(c, engine, settings)
-
-
 async def test_owner_routes_list_approve_and_signin(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as visitor:
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as visitor:
         r, auth, opts = await signup(visitor, "lc-aaaa", display_name="Анна")
         assert r.status_code == 202
     uid = str(await user_id(engine, "lc-aaaa"))
-    async with client(settings, engine) as c:
-        await _owner(c, engine, settings)
+    async with client(s, engine) as c:
+        await owner_with_passkey(c, engine, s)
         listed = (await c.get("/api/auth/signups")).json()
-        assert [(p["id"], p["handle"], p["display_name"]) for p in listed["pending"]] == [(uid, "lc-aaaa", "Анна")]
+        pending = [(p["id"], p["handle"], p["display_name"]) for p in listed["pending"]]
+        assert pending == [(uid, "lc-aaaa", "Анна")]
         assert "requested_at" in listed["pending"][0] and listed["accounts"] == []
         a = await c.post(f"/api/auth/signups/{uid}/approve", json={})
         assert (a.status_code, a.json()) == (200, {"status": "active"})
         listed = (await c.get("/api/auth/signups")).json()
         assert listed["pending"] == [] and [x["handle"] for x in listed["accounts"]] == ["lc-aaaa"]
         assert listed["accounts"][0]["disabled"] is False
-    async with client(settings, engine) as visitor:
+    async with client(s, engine) as visitor:
         assert (await signin_status(visitor, auth, unb64url(opts["user"]["id"]))).status_code == 200
         me = (await visitor.get("/api/me")).json()
         assert (me["handle"], me["role"]) == ("lc-aaaa", "learner")
@@ -523,15 +545,15 @@ async def test_owner_routes_list_approve_and_signin(pg: Pg, tmp_path: Path) -> N
 
 
 async def test_owner_routes_refuse_others(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     pending = str(await insert_pending(engine, "lc-pend"))
-    async with client(settings, engine) as anon:
+    async with client(s, engine) as anon:
         assert (await anon.get("/api/auth/signups")).status_code == 401
         for action in ["approve", "reject", "disable"]:
             assert (await anon.post(f"/api/auth/signups/{pending}/{action}", json={})).status_code == 401
     # A learner with a recent session: 403 owner_only (the role check, not the age check).
-    async with client(settings, engine) as learner:
-        r, auth, opts = await signup(learner, "lc-lrn")
+    async with client(s, engine) as learner:
+        _, auth, opts = await signup(learner, "lc-lrn")
         await execute(engine, "UPDATE users SET state = 'active' WHERE handle = 'lc-lrn'")
         assert (await signin_status(learner, auth, unb64url(opts["user"]["id"]))).status_code == 200
         assert (await learner.get("/api/auth/signups")).json() == {"error": "owner_only"}
@@ -543,18 +565,23 @@ async def test_owner_routes_refuse_others(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_owner_routes_wrong_targets(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     pending = str(await insert_pending(engine, "lc-pend"))
     active = str(await insert_pending(engine, "lc-act", state="active"))
     config_learner = str(await user_id(engine, "live-check"))
     snapshot = "SELECT array_agg(row(handle, state, disabled_at)::text ORDER BY handle) FROM users"
-    async with client(settings, engine) as c:
-        await _owner(c, engine, settings)
+    async with client(s, engine) as c:
+        await owner_with_passkey(c, engine, s)
         before = await scalar(engine, snapshot)
         for target_id, action in [
-            ("00000000-0000-0000-0000-000000000000", "approve"), ("not-a-uuid", "approve"),
-            (config_learner, "approve"), (config_learner, "reject"), (config_learner, "disable"),
-            (active, "approve"), (active, "reject"), (pending, "disable"),
+            ("00000000-0000-0000-0000-000000000000", "approve"),
+            ("not-a-uuid", "approve"),
+            (config_learner, "approve"),
+            (config_learner, "reject"),
+            (config_learner, "disable"),
+            (active, "approve"),
+            (active, "reject"),
+            (pending, "disable"),
         ]:
             r = await c.post(f"/api/auth/signups/{target_id}/{action}", json={})
             assert (r.status_code, r.json()) == (404, {"error": "not_found"}), (target_id, action)
@@ -563,35 +590,36 @@ async def test_owner_routes_wrong_targets(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_reject_frees_the_handle_and_cancels_open_ceremonies(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as first:
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as first:
         assert (await signup(first, "lc-twin"))[0].status_code == 202
     uid = str(await user_id(engine, "lc-twin"))
-    # Another person's open ceremony for the same handle: written as if issued before the first verify.
-    async with client(settings, engine) as second:
+    # Another person's open ceremony for the same handle, written as if issued before the first verify.
+    async with client(s, engine) as second:
         opts = (await signup_options(second, "lc-other")).json()
-        await execute(engine, "UPDATE auth_challenges SET signup_handle = 'lc-twin' WHERE signup_handle = 'lc-other'")
-        async with client(settings, engine) as owner:
-            await _owner(owner, engine, settings)
+        await execute(
+            engine, "UPDATE auth_challenges SET signup_handle = 'lc-twin' WHERE signup_handle = 'lc-other'"
+        )
+        async with client(s, engine) as owner:
+            await owner_with_passkey(owner, engine, s)
             assert (await owner.post(f"/api/auth/signups/{uid}/reject", json={})).status_code == 204
         assert await count(engine, "users", "handle = 'lc-twin'") == 0
         assert await count(engine, "webauthn_credentials", "owner_id = :u", u=uid) == 0
-        cred = SoftAuthenticator.random().register(challenge=unb64url(opts["challenge"]))
-        r = await second.post("/api/auth/signup/verify", json=cred)
+        r = await second.post("/api/auth/signup/verify", json=_cred(opts))
         assert (r.status_code, r.json()) == (400, {"error": "signup_failed"})
         assert (await signup_options(second, "lc-twin")).status_code == 200  # the handle is free again
     await engine.dispose()
 
 
 async def test_disable_revokes_sessions_in_one_transaction(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
-    async with client(settings, engine) as learner:
-        r, auth, opts = await signup(learner, "lc-dis")
+    s, engine = await _setup(pg, tmp_path)
+    async with client(s, engine) as learner:
+        _, auth, opts = await signup(learner, "lc-dis")
         uid = str(await user_id(engine, "lc-dis"))
         await execute(engine, "UPDATE users SET state = 'active' WHERE handle = 'lc-dis'")
         assert (await signin_status(learner, auth, unb64url(opts["user"]["id"]))).status_code == 200
-        async with client(settings, engine) as owner:
-            await _owner(owner, engine, settings)
+        async with client(s, engine) as owner:
+            await owner_with_passkey(owner, engine, s)
             assert (await owner.post(f"/api/auth/signups/{uid}/disable", json={})).status_code == 204
             listed = (await owner.get("/api/auth/signups")).json()
             assert listed["accounts"][0]["disabled"] is True
@@ -602,10 +630,10 @@ async def test_disable_revokes_sessions_in_one_transaction(pg: Pg, tmp_path: Pat
 
 
 async def test_old_owner_session_needs_reauth(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     pending = str(await insert_pending(engine, "lc-pend"))
-    async with client(settings, engine) as c:
-        await _owner(c, engine, settings)
+    async with client(s, engine) as c:
+        await owner_with_passkey(c, engine, s)
         await execute(engine, "UPDATE sessions SET created_at = now() - interval '15 minutes'")
         assert (await c.get("/api/auth/signups")).status_code == 200
         r = await c.post(f"/api/auth/signups/{pending}/approve", json={})
@@ -614,10 +642,10 @@ async def test_old_owner_session_needs_reauth(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_approve_racing_reject_has_one_outcome(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     pending = str(await insert_pending(engine, "lc-race"))
-    async with client(settings, engine) as c:
-        await _owner(c, engine, settings)
+    async with client(s, engine) as c:
+        await owner_with_passkey(c, engine, s)
         codes: list[int] = []
 
         async def act(action: str) -> None:
@@ -627,8 +655,7 @@ async def test_approve_racing_reject_has_one_outcome(pg: Pg, tmp_path: Path) -> 
             tg.start_soon(act, "approve")
             tg.start_soon(act, "reject")
     assert sorted(codes) in ([200, 404], [204, 404])
-    left = await count(engine, "users", "handle = 'lc-race'")
-    assert left == (1 if 200 in codes else 0)
+    assert await count(engine, "users", "handle = 'lc-race'") == (1 if 200 in codes else 0)
     await engine.dispose()
 
 
@@ -639,7 +666,7 @@ async def test_expiry_and_attempt_cleanup(pg: Pg, tmp_path: Path) -> None:
     from reader.auth.policy import PENDING_TTL_S
     from reader.auth.store import cleanup
 
-    settings, engine = await _setup(pg, tmp_path)
+    _, engine = await _setup(pg, tmp_path)
     young = await insert_pending(engine, "lc-young", age_s=PENDING_TTL_S - 1)
     old = await insert_pending(engine, "lc-old", age_s=PENDING_TTL_S + 1)
     active_old = await insert_pending(engine, "lc-actold", state="active", age_s=PENDING_TTL_S + 100)
@@ -654,11 +681,12 @@ async def test_expiry_and_attempt_cleanup(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_expiry_skips_a_row_an_approve_holds(pg: Pg, tmp_path: Path) -> None:
-    from reader.auth.policy import PENDING_TTL_S
-    from reader.auth.store import cleanup
     from sqlalchemy import text
 
-    settings, engine = await _setup(pg, tmp_path)
+    from reader.auth.policy import PENDING_TTL_S
+    from reader.auth.store import cleanup
+
+    _, engine = await _setup(pg, tmp_path)
     old = await insert_pending(engine, "lc-held", age_s=PENDING_TTL_S + 1)
     async with engine.begin() as conn:
         await conn.execute(text("SELECT 1 FROM users WHERE id = :u FOR UPDATE"), {"u": old})
@@ -671,16 +699,18 @@ async def test_expiry_skips_a_row_an_approve_holds(pg: Pg, tmp_path: Path) -> No
 async def test_logs_never_carry_handles_or_display_names(
     pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    s, engine = await _setup(pg, tmp_path)
     caplog.set_level(logging.DEBUG)
     handle, name = "lc-canary9", "Canary Name Zq77"
-    async with client(settings, engine) as c:
+    async with client(s, engine) as c:
         r, auth, opts = await signup(c, handle, display_name=name)
-        bad = await c.post("/api/auth/signup/verify", json={"handle": handle}, headers={"X-Forwarded-For": "198.51.100.23"})
+        bad = await c.post(
+            "/api/auth/signup/verify", json={"handle": handle}, headers={"X-Forwarded-For": "198.51.100.23"}
+        )
         await signin_status(c, auth, unb64url(opts["user"]["id"]))
         uid = str(await user_id(engine, handle))
-        async with client(settings, engine) as owner:
-            await _owner(owner, engine, settings)
+        async with client(s, engine) as owner:
+            await owner_with_passkey(owner, engine, s)
             await owner.post(f"/api/auth/signups/{uid}/approve", json={})
             await owner.post(f"/api/auth/signups/{uid}/disable", json={})
         bodies = r.text + bad.text
@@ -691,6 +721,3 @@ async def test_logs_never_carry_handles_or_display_names(
     assert f"pending_signin {uid}" in caplog.text
     assert f"signup_approve {uid}" in caplog.text and f"signup_disable {uid}" in caplog.text
     await engine.dispose()
-
-
-__all__ = ["ORIGIN"]

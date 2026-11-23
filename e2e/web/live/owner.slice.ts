@@ -18,6 +18,14 @@
 //            (axe, overflow, the button's focus outline; screenshots to READER_LIVE_OUT/auth), then slice.live.ts's
 //            sign-out and sign-in sequence for the owner with the same CDP virtual passkey (/api/me 401, then 200).
 //            Spends nothing.
+//   signup   SRV-AUTH FR-AUTH-32 [live] (ADR-0031): the stack's sign-up mode equals the one web_live.py derived from
+//            reader.yaml with FR-AUTH-23's rule (READER_SIGNUP_EXPECTED). In `off`, one assertion that the page and
+//            both POSTs are 404. In `open`, a second browser context with its own CDP virtual passkey signs up a
+//            run-generated `lc-<8 hex>`, sees `pending`, then `pending_approval` at sign-in; the owner (signed in again,
+//            so the session is recent) approves it on the Sign-ups screen; it signs in as a learner; a second
+//            run-generated request is rejected on the screen. The run's handles and ids go to
+//            READER_LIVE_OUT/signup-created.json; web_live.py deletes exactly those accounts by id afterwards. SKIP
+//            only when the pending cap is full or the first options call answers 429 rate_limited. Spends nothing.
 //   tutor-bench  SRV-TUTOR's bench (VEC-TUTOR-7): questions-v2 with v03 → t01 (40) over the HTTP API; ≈ $1.8.
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
 // snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots and READER_LIVE_OUT/ui, and the `ui` step also
@@ -485,6 +493,149 @@ test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', 
   results.auth = { widths: [...WIDTHS], axe_serious_critical: axe, overflow_px: overflow, signin_again: me.status() };
   for (const [k, v] of Object.entries(axe)) expect.soft(v, `axe ${k}`).toEqual([]);
   for (const [k, v] of Object.entries(overflow)) expect.soft(v, `overflow ${k}`).toBeLessThanOrEqual(0);
+});
+
+// SRV-AUTH FR-AUTH-32 [live]: open sign-up with owner approval (ADR-0031). Each test is its own PASS/FAIL line; a
+// SKIP is never evidence (OPS-DOD FR-DOD-5). The run touches only the accounts it creates: their handles and ids are
+// written to signup-created.json as soon as they are known, and web_live.py deletes exactly those by id.
+const SIGNUP_EXPECTED = process.env.READER_SIGNUP_EXPECTED ?? '';
+const signupState: { skip: string | null; visitor?: BrowserContext; vpage?: Page; handles: string[]; ids: Record<string, string> } = {
+  skip: null,
+  handles: [],
+  ids: {},
+};
+const runHandle = () => `lc-${[...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+const writeCreated = () =>
+  writeFileSync(resolve(OUT, 'signup-created.json'), `${JSON.stringify({ handles: signupState.handles, ids: Object.values(signupState.ids) })}\n`);
+const onlyOpen = () => {
+  only('signup');
+  test.skip(SIGNUP_EXPECTED !== 'open', 'signup off in reader.yaml');
+  test.skip(Boolean(signupState.skip), signupState.skip ?? '');
+};
+const withPasskey = async (ctx: BrowserContext, p: Page) => {
+  const session = await ctx.newCDPSession(p);
+  await session.send('WebAuthn.enable', { enableUI: false });
+  await session.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true,
+      hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+    },
+  });
+};
+/** Sign up `handle` through the page in `p`; returns the options response's status and error code. */
+const signUpThroughPage = async (p: Page, handle: string): Promise<{ status: number; code: string }> => {
+  signupState.handles.push(handle);
+  writeCreated();
+  await p.goto('/api/auth/signup');
+  await p.locator('#handle').fill(handle);
+  await p.locator('#display-name').fill('Live Check');
+  const options = p.waitForResponse((r) => r.url().endsWith('/api/auth/signup/options'));
+  await p.getByRole('button', { name: 'Create account with a passkey' }).click();
+  const res = await options;
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { status: res.status(), code: body.error ?? '' };
+};
+const pendingList = async () => (await (await api.get('/api/auth/signups')).json()) as { pending: { id: string; handle: string }[] };
+const ownerSignsInAgain = async () => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.waitForURL(/\/api\/auth\/signin$/);
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await page.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
+};
+
+test('signup: the stack serves the sign-up mode reader.yaml asks for', async () => {
+  only('signup');
+  expect(['open', 'off'], 'web_live.py derived the expected mode').toContain(SIGNUP_EXPECTED);
+  const status = (await api.get('/api/auth/signup')).status();
+  expect(status).toBe(SIGNUP_EXPECTED === 'open' ? 200 : 404);
+});
+
+test('signup off: GET /api/auth/signup and both POSTs are 404', async () => {
+  only('signup');
+  test.skip(SIGNUP_EXPECTED !== 'off', 'signup open in reader.yaml');
+  expect((await api.get('/api/auth/signup')).status()).toBe(404);
+  for (const path of ['/api/auth/signup/options', '/api/auth/signup/verify'])
+    expect((await post(path, { handle: 'lc-00000000', display_name: 'x' })).status(), path).toBe(404);
+});
+
+test('signup: a visitor signs up through the page and waits for approval', async ({ browser }) => {
+  onlyOpen();
+  test.setTimeout(3 * 60_000);
+  if ((await pendingList()).pending.length >= 20) {
+    signupState.skip = 'pending cap full';
+    test.skip(true, signupState.skip);
+  }
+  signupState.visitor = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  signupState.vpage = await signupState.visitor.newPage();
+  await withPasskey(signupState.visitor, signupState.vpage);
+  const handle = runHandle();
+  const first = await signUpThroughPage(signupState.vpage, handle);
+  if (first.status === 429 && first.code === 'rate_limited') {
+    signupState.skip = 'global sign-up limit used';
+    test.skip(true, signupState.skip);
+  }
+  expect(first.status, 'options').toBe(200);
+  await expect(signupState.vpage.locator('main.auth')).toHaveAttribute('data-state', 'pending', { timeout: 30_000 });
+  const row = (await pendingList()).pending.find((r) => r.handle === handle);
+  expect(row, 'the request is listed for the owner').toBeTruthy();
+  signupState.ids[handle] = row!.id;
+  writeCreated();
+});
+
+test('signup: the pending visitor sees pending_approval at sign-in and /api/me is 401', async () => {
+  onlyOpen();
+  const vp = signupState.vpage!;
+  await vp.goto('/api/auth/signin');
+  await vp.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expect(vp.locator('main.auth')).toHaveAttribute('data-state', 'pending_approval', { timeout: 30_000 });
+  expect((await vp.request.get('/api/me')).status()).toBe(401);
+});
+
+test('signup: the owner approves the request on the Sign-ups screen', async () => {
+  onlyOpen();
+  const handle = signupState.handles[0]!;
+  await ownerSignsInAgain();
+  await page.goto('/signups');
+  await page.getByRole('button', { name: `Approve @${handle}` }).click();
+  await expect(page.getByText(`@${handle} approved.`)).toBeVisible();
+});
+
+test('signup: the approved account signs in as a learner', async () => {
+  onlyOpen();
+  const vp = signupState.vpage!;
+  await vp.goto('/api/auth/signin');
+  await vp.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await vp.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
+  const me = await vp.request.get('/api/me');
+  expect(me.status()).toBe(200);
+  const body = (await me.json()) as { handle: string; role: string };
+  expect([body.handle, body.role]).toEqual([signupState.handles[0], 'learner']);
+});
+
+test('signup: a second request is rejected on the screen and is gone', async ({ browser }) => {
+  onlyOpen();
+  test.setTimeout(3 * 60_000);
+  const other = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  try {
+    const op = await other.newPage();
+    await withPasskey(other, op);
+    const handle = runHandle();
+    expect((await signUpThroughPage(op, handle)).status, 'options').toBe(200);
+    await expect(op.locator('main.auth')).toHaveAttribute('data-state', 'pending', { timeout: 30_000 });
+    const row = (await pendingList()).pending.find((r) => r.handle === handle);
+    expect(row).toBeTruthy();
+    signupState.ids[handle] = row!.id;
+    writeCreated();
+    await page.goto('/signups');
+    await page.getByRole('button', { name: `Reject @${handle}` }).click();
+    await page.getByRole('button', { name: 'Reject', exact: true }).click();
+    await expect(page.getByText(`@${handle} rejected.`)).toBeVisible();
+    expect((await pendingList()).pending.some((r) => r.handle === handle)).toBe(false);
+  } finally {
+    await other.close();
+    await signupState.visitor?.close();
+  }
 });
 
 // SRV-TUTOR NFR-TUTOR-1..3 over the HTTP API (VEC-TUTOR-7): questions-v2 with v03 → t01 (40 independent questions),

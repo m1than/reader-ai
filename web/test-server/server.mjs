@@ -22,6 +22,7 @@ export const cspFromCaddyfile = (text) => {
 const CSP = cspFromCaddyfile(readFileSync(join(repo, 'deploy/Caddyfile'), 'utf8'));
 const fixtures = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-UI/lessons.json'), 'utf8'));
 const notebook = readFileSync(join(repo, 'spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb'), 'utf8');
+const signups = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-ACCOUNTS/signups.json'), 'utf8'));
 const me = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
 
 const TYPES = {
@@ -41,6 +42,13 @@ const api = (method, path) => {
       ? [{ sha256: s.latest_sha256, byte_size: 1, cell_count: 1, created_at: s.updated_at, stages: ['fixture'] }]
       : [];
     return s ? [200, { lesson: s, revisions }] : [404, { error: 'not_found' }];
+  }
+  // WEB-UI FR-UI-14: WEB-ACCOUNTS's routes from VEC-ACCOUNTS-1 (the [browser] specs may override them).
+  if (method === 'GET' && path === '/api/auth/signups') return [200, signups.one];
+  const action = /^\/api\/auth\/signups\/([^/]+)\/(approve|reject|disable)$/.exec(path);
+  if (method === 'POST' && action) {
+    const o = signups.outcomes[action[2]];
+    return [o.status, o.body];
   }
   const rev = /^\/api\/lessons\/([^/]+)\/revisions\/([0-9a-f]{64})$/.exec(path);
   if (method === 'GET' && rev) return [200, JSON.parse(notebook)];
@@ -62,14 +70,24 @@ const file = (root, path) => {
 
 export const apiRequests = [];
 
-// SRV-AUTH FR-AUTH-21 (paired WEB-UI change): exactly SRV-AUTH's four static auth files, under the same CSP and with
-// the api's content types. No other path is served from that directory.
+// SRV-AUTH FR-AUTH-21 (paired WEB-UI change): exactly SRV-AUTH's static auth files, under the same CSP and with the
+// api's content types; FR-UI-14 adds the sign-up page (five entries). No other path is served from that directory.
+// The sign-in page is served as the api serves it while sign-up is open (FR-AUTH-31): its marker replaced by the
+// fixed link fragment.
 const AUTH_STATIC = join(repo, 'server/src/reader/auth/static');
 const AUTH_FILES = {
   '/api/auth/signin': ['signin.html', 'text/html; charset=utf-8'],
   '/api/auth/bootstrap': ['bootstrap.html', 'text/html; charset=utf-8'],
+  '/api/auth/signup': ['signup.html', 'text/html; charset=utf-8'],
   '/api/auth/static/passkey.js': ['passkey.js', 'text/javascript; charset=utf-8'],
   '/api/auth/static/auth.css': ['auth.css', 'text/css; charset=utf-8'],
+};
+const SIGNIN_MARKER = '<!--signup-link-->';
+const authFile = (name) => {
+  const bytes = readFileSync(join(AUTH_STATIC, name));
+  if (name !== 'signin.html') return bytes;
+  const fragment = readFileSync(join(AUTH_STATIC, 'signup-link.html'), 'utf8').trim();
+  return Buffer.from(bytes.toString('utf8').replace(SIGNIN_MARKER, fragment), 'utf8');
 };
 
 createServer((req, res) => {
@@ -78,7 +96,7 @@ createServer((req, res) => {
   if (req.method === 'GET' && Object.hasOwn(AUTH_FILES, path)) {
     const [name, type] = AUTH_FILES[path];
     res.writeHead(200, { 'Content-Type': type, 'Content-Security-Policy': CSP, 'Cache-Control': 'no-cache' });
-    res.end(readFileSync(join(AUTH_STATIC, name)));
+    res.end(authFile(name));
     return;
   }
   if (path.startsWith('/api/')) {

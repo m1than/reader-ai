@@ -16,6 +16,7 @@ from hypothesis import strategies as st
 
 OWNER_ONLY = (("ivan", "owner"),)
 STATIC = Path(__file__).resolve().parents[2] / "src" / "reader" / "auth" / "static"
+CYRILLIC_A = chr(0x430)
 
 
 # FR-AUTH-23 — the switch ----------------------------------------------------------------------------------
@@ -42,8 +43,14 @@ def test_switch_parse_table(tmp_path: Path, url: str, sharing: str, mode: str, n
 
 @pytest.mark.parametrize(
     "sharing",
-    ["{ signup: true }", "{ signup: 'yes' }", "{ signup: 1 }", '{ signup: "Open" }', "{ signup: null }",
-     "{ signup: 'false' }"],
+    [
+        "{ signup: true }",
+        "{ signup: 'yes' }",
+        "{ signup: 1 }",
+        '{ signup: "Open" }',
+        "{ signup: null }",
+        "{ signup: 'false' }",
+    ],
 )
 def test_switch_refuses_other_values(tmp_path: Path, sharing: str) -> None:
     from reader.auth.policy import StartupError, settings_from_config
@@ -95,9 +102,9 @@ def test_skeleton_steps_in_order(handle: str, expected: str) -> None:
         ("ab-", False),
         ("a--b", False),
         ("1abc", False),
-        ("аbc", False),  # Cyrillic а
+        (CYRILLIC_A + "bc", False),
         ("admin", False),  # reserved
-        ("adm1n", False),  # skeleton of reserved `admin`
+        ("adm1n", False),  # the skeleton of reserved `admin`
         ("live-check", False),  # reserved
         ("signups", False),
         ("null", False),
@@ -113,6 +120,10 @@ def test_handle_candidate_rules(handle: object, ok: bool) -> None:
     assert handle_candidate_ok(handle) is ok
 
 
+E_ACUTE, COMBINING_ACUTE = chr(0xE9), chr(0x301)
+THUMB, SKIN = chr(0x1F44D), chr(0x1F3FD)
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -122,18 +133,18 @@ def test_handle_candidate_rules(handle: object, ok: bool) -> None:
         ("a" * 65, None),
         ("  Анна Петрова  ", "Анна Петрова"),
         ("a\tb", None),
-        ("evil‮abc", None),
-        ("zero​width", None),
-        ("x\ud800y", None),
-        ("pua", None),
-        ("un\U000e0080", None),  # unassigned (Cn)
-        ("line sep", None),
-        ("para sep", None),
-        ("zw‌nj", None),  # ZWNJ is Cf: the stated known limit
-        ("é", "é"),  # decomposed é becomes one code point
-        ("é" * 64, "é" * 64),
-        ("é" * 64, "é" * 64),  # 128 code points before NFC, 64 after
-        ("\U0001f44d\U0001f3fd", "\U0001f44d\U0001f3fd"),  # emoji with a skin-tone modifier: two code points
+        ("evil" + chr(0x202E) + "abc", None),  # Cf, a bidi override
+        ("zero" + chr(0x200B) + "width", None),  # Cf
+        ("x" + chr(0xD800) + "y", None),  # Cs, a lone surrogate (JSON "\ud800")
+        ("pua" + chr(0xE000), None),  # Co
+        ("un" + chr(0xE0080), None),  # Cn, unassigned
+        ("line" + chr(0x2028) + "sep", None),  # Zl
+        ("para" + chr(0x2029) + "sep", None),  # Zp
+        ("zw" + chr(0x200C) + "nj", None),  # ZWNJ is Cf: the stated known limit
+        ("e" + COMBINING_ACUTE, E_ACUTE),  # decomposed é becomes one code point
+        (E_ACUTE * 64, E_ACUTE * 64),
+        (("e" + COMBINING_ACUTE) * 64, E_ACUTE * 64),  # 128 code points before NFC, 64 after
+        (THUMB + SKIN, THUMB + SKIN),  # an emoji with a skin-tone modifier: two code points
         (None, None),
         (5, None),
     ],
@@ -185,10 +196,19 @@ def test_signup_page_static_rules() -> None:
     form = re.search(r"<form\b[^>]*>", html)
     assert form and "novalidate" in form.group(0) and "action=" not in form.group(0)
     for needle in [
-        'id="handle"', 'autocomplete="username"', 'autocapitalize="none"', 'spellcheck="false"', 'maxlength="32"',
-        'id="display-name"', 'autocomplete="name"', 'maxlength="64"', "Create an account",
+        'id="handle"',
+        'autocomplete="username"',
+        'autocapitalize="none"',
+        'spellcheck="false"',
+        'maxlength="32"',
+        'id="display-name"',
+        'autocomplete="name"',
+        'maxlength="64"',
+        "Create an account",
         "Choose a handle and create a passkey. The owner of this reader-ai approves new accounts.",
-        "Create account with a passkey", 'href="/api/auth/signin"', "Already have an account?",
+        "Create account with a passkey",
+        'href="/api/auth/signin"',
+        "Already have an account?",
     ]:
         assert needle in html, needle
     button = re.search(r"<button\b[^>]*id=\"go\"[^>]*>", html)

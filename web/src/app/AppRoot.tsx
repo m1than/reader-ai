@@ -5,6 +5,7 @@ import { Skeleton } from '@acme/ui/skeleton';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { createSignupsApi, SIGNUPS_KEY } from '../accounts/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ServicesContext, useServices, type Services } from './context';
@@ -22,7 +23,43 @@ export interface AppRootProps {
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-function Header({ displayName, queryClient }: { displayName: string; queryClient: QueryClient }) {
+/** FR-UI-14, WEB-ACCOUNTS FR-ACCOUNTS-4: the owner's Sign-ups link with the pending count, asked once per page
+ * load (the screen shares the query) and after each action; no polling. A failure shows the link without a count. */
+function SignupsLink({ router }: { router: ReturnType<typeof createAppRouter> }) {
+  const { signups } = useServices();
+  const q = useQuery({
+    queryKey: SIGNUPS_KEY,
+    queryFn: () => (signups ? signups.list() : Promise.reject(new Error('no client'))),
+    staleTime: Infinity,
+    enabled: Boolean(signups),
+  });
+  const n = q.data?.pending.length ?? 0;
+  return (
+    <a
+      className="header-link"
+      href="/signups"
+      aria-label={n > 0 ? `Sign-ups, ${n} waiting` : undefined}
+      onClick={(e) => {
+        e.preventDefault();
+        void router.navigate({ to: '/signups' });
+      }}
+    >
+      {n > 0 ? `Sign-ups (${n})` : 'Sign-ups'}
+    </a>
+  );
+}
+
+function Header({
+  displayName,
+  queryClient,
+  owner,
+  router,
+}: {
+  displayName: string;
+  queryClient: QueryClient;
+  owner: boolean;
+  router: ReturnType<typeof createAppRouter>;
+}) {
   const { api, notify, navigateAway } = useServices();
   const signOut = async () => {
     try {
@@ -39,6 +76,7 @@ function Header({ displayName, queryClient }: { displayName: string; queryClient
       <a className="brand" href="/">
         reader
       </a>
+      {owner ? <SignupsLink router={router} /> : null}
       <span className="who">{displayName}</span>
       <Button variant="ghost" color="neutral" size="sm" onClick={() => void signOut()}>
         Sign out
@@ -89,7 +127,7 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
   return (
     <>
       <SkipLink />
-      <Header displayName={me.data.display_name} queryClient={queryClient} />
+      <Header displayName={me.data.display_name} queryClient={queryClient} owner={me.data.role === 'owner'} router={router} />
       <main id="content" tabIndex={-1}>
         {isBadLessonPath(path) ? (
           <div className="page">
@@ -119,7 +157,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       fetch: fetchFn ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a)),
       onUnauthorized: () => navigateAway(SIGN_IN_URL),
     };
-    return { api: createApi(deps), tutor: createTutorApi(deps), notify, navigateAway };
+    return { api: createApi(deps), tutor: createTutorApi(deps), signups: createSignupsApi(deps), notify, navigateAway };
   }, [fetchFn, navigateAway, notify]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');

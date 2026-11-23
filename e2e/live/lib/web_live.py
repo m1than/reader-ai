@@ -195,6 +195,67 @@ def slice_inputs(out: Path, steps: str) -> dict[str, str]:
     return inputs
 
 
+def expected_signup_mode(config: str | None) -> str:
+    """SRV-AUTH FR-AUTH-23's rule on the owner's reader.yaml: "open", "off" or "" when it cannot be read."""
+    from urllib.parse import urlsplit
+
+    from ruamel.yaml import YAML
+
+    if not config:
+        return ""
+    try:
+        doc = YAML(typ="safe").load(Path(config).read_text("utf-8")) or {}
+    except (OSError, ValueError):
+        return ""
+    sharing = doc.get("sharing") or {}
+    host = (urlsplit(str((doc.get("instance") or {}).get("url", ""))).hostname or "").lower()
+    if "signup" not in sharing:
+        return "open" if host == "localhost" else "off"
+    value = sharing["signup"]
+    return "open" if value == "open" else "off" if value in (False, "off") else ""
+
+
+UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+RUN_HANDLE_RE = re.compile(r"^lc-[0-9a-f]{8}$")
+
+
+def cleanup_signups(project: str, out: Path) -> None:
+    """FR-AUTH-32: delete exactly the sign-up accounts this run created, by id, only where source = 'signup'.
+
+    The suite writes its run-generated handles and the ids it learned to signup-created.json; an id it never learned
+    is looked up by its exact handle (never a pattern). Each id is deleted with its sessions and credentials; the
+    count must be 1 per id (0 for a request the run rejected, which the product already deleted)."""
+    path = out / "signup-created.json"
+    if not path.exists():
+        return
+    created = json.loads(path.read_text("utf-8"))
+    handles = [h for h in created.get("handles", []) if RUN_HANDLE_RE.match(h)]
+    ids = {i for i in created.get("ids", []) if UUID_RE.match(i)}
+    for handle in handles:
+        code, found = psql(project, f"SELECT id FROM users WHERE handle = '{handle}' AND source = 'signup';")
+        if code == 0 and UUID_RE.match(found.strip()):
+            ids.add(found.strip())
+    removed = 0
+    for uid in sorted(ids):
+        code, count = psql(
+            project,
+            f"DELETE FROM sessions WHERE owner_id = '{uid}'; DELETE FROM webauthn_credentials WHERE owner_id = "
+            f"'{uid}'; WITH d AS (DELETE FROM users WHERE id = '{uid}' AND source = 'signup' RETURNING 1) "
+            "SELECT count(*) FROM d;",
+        )
+        if code != 0:
+            line("FAIL", "browser: signup cleanup by id", "psql failed")
+            return
+        removed += int(count.strip().splitlines()[-1] or 0)
+    left = 0
+    for handle in handles:
+        _, n = psql(project, f"SELECT count(*) FROM users WHERE handle = '{handle}';")
+        left += int(n.strip() or 0)
+    line("PASS" if left == 0 else "FAIL", "browser: signup cleanup removed only the run's accounts",
+         f"{removed} deleted by id, {left} left")
+    path.unlink(missing_ok=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
@@ -205,6 +266,7 @@ def main() -> int:
     parser.add_argument("--reset-owner-passkeys", action="store_true",
                         help="with --owner: delete every passkey and session of the owner first")
     parser.add_argument("--slice-steps", default="routes", help="with --owner: comma-separated slice steps")
+    parser.add_argument("--config", default=None, help="with --owner: reader.yaml (the signup step's expected mode)")
     args = parser.parse_args()
     out = Path(args.out)
     suite = Path(args.suite)
@@ -224,6 +286,8 @@ def main() -> int:
         try:
             run_suite(args, out, suite, spki, root_pem, "owner")
         finally:
+            # SRV-AUTH FR-AUTH-32: the sign-up accounts this run created, by id, before anything else.
+            cleanup_signups(args.project, out)
             # The virtual passkey dies with the browser: remove it and the run's sessions so the owner's own
             # `reader bootstrap` (Safari) is not refused with owner_has_credential (deep-reviewer, 2026-11-23).
             code, _ = psql(args.project, OWNER_RESET_SQL)
@@ -244,6 +308,7 @@ def run_suite(args: argparse.Namespace, out: Path, suite: Path, spki: str, root_
     extra: dict[str, str] = {}
     if who == "owner":
         extra = slice_inputs(out, args.slice_steps)
+        extra["READER_SIGNUP_EXPECTED"] = expected_signup_mode(args.config)  # SRV-AUTH FR-AUTH-32
         token = bootstrap_token(args.project, args.url, handle=None)
         config, budget = "playwright.slice.config.ts", SLICE_TIMEOUT_S
     else:

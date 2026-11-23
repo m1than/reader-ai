@@ -28,3 +28,6 @@ sectors:
   blockchain: { title: Blockchain }
 sharing:
   invitations: false
+  # Open sign-up with owner approval (ADR-0031, SRV-AUTH FR-AUTH-23): "open" or "off". Absent means "open" on
+  # localhost and "off" on any other host. New accounts wait in the app's Sign-ups screen until you approve them.
+  signup: "open"

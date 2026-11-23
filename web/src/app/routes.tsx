@@ -14,6 +14,8 @@ const LESSON_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 export const isLessonId = (id: string): boolean => LESSON_ID.test(id) && id !== '.' && id !== '..';
 
 const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ default: m.LessonPage })));
+// FR-UI-14: WEB-ACCOUNTS's Sign-ups screen, a lazy chunk, for the owner only.
+const SignupsPage = lazy(() => import('../accounts/SignupsPage').then((m) => ({ default: m.SignupsPage })));
 
 const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 
@@ -93,7 +95,29 @@ const lessonRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, lessonRoute]);
+const signupsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/signups',
+  component: function SignupsRoute() {
+    const { api } = useServices();
+    const me = useQuery(queries(api).me());
+    // A non-owner gets not-found without any request to the sign-up routes (FR-UI-14).
+    if (me.data?.role !== 'owner') return <NotFound />;
+    return (
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading label="Loading sign-ups" />
+          </div>
+        }
+      >
+        <SignupsPage />
+      </Suspense>
+    );
+  },
+});
+
+const routeTree = rootRoute.addChildren([indexRoute, lessonRoute, signupsRoute]);
 
 export const createAppRouter = (history: RouterHistory) =>
   createRouter({ routeTree, history, defaultNotFoundComponent: NotFound });

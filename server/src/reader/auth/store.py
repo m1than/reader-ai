@@ -11,11 +11,12 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import logging
 import math
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy import Row, text
@@ -31,6 +32,7 @@ from webauthn.helpers.structs import (
 )
 
 from reader.auth import webauthn as seam
+from reader.auth.handles import skeleton
 from reader.auth.policy import (
     ALGORITHMS,
     BOOTSTRAP_TOKEN_BYTES,
@@ -39,13 +41,18 @@ from reader.auth.policy import (
     CHALLENGE_TTL_S,
     FAILURE_MAX,
     FAILURE_WINDOW_S,
+    PENDING_TTL_S,
     SESSION_ID_BYTES,
     SESSION_TTL_S,
+    SIGNUP_FAILURE_MAX,
+    SIGNUP_FAILURE_WINDOW_S,
+    SIGNUP_WINDOW_S,
     FailureReason,
     Settings,
 )
 
 Json = dict[str, Any]
+log = logging.getLogger("reader.auth")
 
 
 def b64url(data: bytes) -> str:
@@ -103,31 +110,92 @@ async def cleanup(engine: AsyncEngine) -> None:
         await conn.execute(text("DELETE FROM sessions WHERE expires_at < now() OR revoked_at IS NOT NULL"))
         await conn.execute(
             text("DELETE FROM auth_failures WHERE at < now() - make_interval(secs => :w)"),
-            {"w": FAILURE_WINDOW_S},
+            {"w": max(FAILURE_WINDOW_S, SIGNUP_FAILURE_WINDOW_S)},
         )
+        # FR-AUTH-30: sign-up attempts past the window.
+        await conn.execute(
+            text("DELETE FROM signup_attempts WHERE at < now() - make_interval(secs => :w)"),
+            {"w": SIGNUP_WINDOW_S},
+        )
+    await _expire_pending(engine)
 
 
-async def sync_users(engine: AsyncEngine, settings: Settings) -> None:
-    """FR-AUTH-1: one row per configured user; users no longer configured are disabled, their rows kept."""
-    handles = [u.handle for u in settings.users]
+async def _expire_pending(engine: AsyncEngine) -> None:
+    """FR-AUTH-30: delete pending sign-ups older than the TTL; a row another transaction holds is skipped."""
     async with engine.begin() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT id FROM users WHERE source = 'signup' AND state = 'pending' "
+                    "AND created_at < now() - make_interval(secs => :ttl) FOR UPDATE SKIP LOCKED"
+                ),
+                {"ttl": PENDING_TTL_S},
+            )
+        ).scalars().all()
+        for user_id in rows:
+            await _delete_signup_user(conn, user_id)
+            log.info("auth signup_expired %s", user_id)
+
+
+async def _delete_signup_user(conn: AsyncConnection, user_id: UUID) -> None:
+    """A pending sign-up owns only its credentials (FR-AUTH-29 reject, FR-AUTH-24, FR-AUTH-30)."""
+    await conn.execute(text("DELETE FROM webauthn_credentials WHERE owner_id = :u"), {"u": user_id})
+    await conn.execute(text("DELETE FROM sessions WHERE owner_id = :u"), {"u": user_id})
+    await conn.execute(text("DELETE FROM users WHERE id = :u AND source = 'signup'"), {"u": user_id})
+
+
+class HandleTakenBySignup(Exception):
+    """FR-AUTH-24: a `users[]` handle equals an active or disabled sign-up account's handle."""
+
+    def __init__(self, handle: str) -> None:
+        super().__init__("handle_taken_by_signup")
+        self.handle = handle
+
+
+async def sync_users(engine: AsyncEngine, settings: Settings) -> list[UUID]:
+    """FR-AUTH-1 and FR-AUTH-24: one row per configured user; configured users no longer listed are disabled,
+    their rows kept. A pending sign-up whose handle a `users[]` entry names exactly is deleted (returned); an
+    active or disabled one stops the sync (HandleTakenBySignup, the first in `users[]` order) and nothing
+    changes."""
+    handles = [u.handle for u in settings.users]
+    superseded: list[UUID] = []
+    async with engine.begin() as conn:
+        for user in settings.users:
+            row = (
+                await conn.execute(
+                    text(
+                        "SELECT id, state, disabled_at FROM users WHERE handle = :h AND source = 'signup' "
+                        "FOR UPDATE"
+                    ),
+                    {"h": user.handle},
+                )
+            ).first()
+            if row is None:
+                continue
+            if row.state != "pending" or row.disabled_at is not None:
+                raise HandleTakenBySignup(user.handle)
+            await _delete_signup_user(conn, row.id)
+            superseded.append(row.id)
         for user in settings.users:
             await conn.execute(
                 text(
-                    "INSERT INTO users (handle, role, webauthn_user_id, display_name, consent_evaluation) "
-                    "VALUES (:handle, :role, :uid, :handle, :consent) "
-                    "ON CONFLICT (handle) DO UPDATE SET role = excluded.role, disabled_at = NULL"
+                    "INSERT INTO users (handle, role, webauthn_user_id, display_name, consent_evaluation, "
+                    "handle_skeleton) VALUES (:handle, :role, :uid, :handle, :consent, :skeleton) "
+                    "ON CONFLICT (handle) DO UPDATE SET role = excluded.role, disabled_at = NULL, "
+                    "handle_skeleton = excluded.handle_skeleton WHERE users.source = 'config'"
                 ),
                 {
                     "handle": user.handle,
                     "role": user.role,
                     "uid": secrets.token_bytes(64),
                     "consent": user.role == "owner",
+                    "skeleton": skeleton(user.handle),
                 },
             )
         await conn.execute(
             text(
-                "UPDATE users SET disabled_at = now() WHERE disabled_at IS NULL AND handle <> ALL(:handles)"
+                "UPDATE users SET disabled_at = now() WHERE source = 'config' AND disabled_at IS NULL "
+                "AND handle <> ALL(:handles)"
             ),
             {"handles": handles},
         )
@@ -137,40 +205,51 @@ async def sync_users(engine: AsyncEngine, settings: Settings) -> None:
                 "(SELECT id FROM users WHERE disabled_at IS NOT NULL)"
             )
         )
+    return superseded
 
 
-async def prepare(engine: AsyncEngine, settings: Settings) -> None:
-    """The api startup work after migrations: cleanup, then the user sync."""
+async def prepare(engine: AsyncEngine, settings: Settings) -> list[UUID]:
+    """The api startup work after migrations: cleanup, then the user sync. Returns the superseded pending
+    sign-ups, which the api logs once serving starts (FR-AUTH-24; best-effort, owner note 5)."""
     await cleanup(engine)
-    await sync_users(engine, settings)
+    return await sync_users(engine, settings)
 
 
 # Failures ------------------------------------------------------------------------------------------------
 
+Scope = Literal["auth", "signup"]
 
-async def record_failure(engine: AsyncEngine, reason: FailureReason) -> None:
+
+async def record_failure(engine: AsyncEngine, reason: FailureReason, scope: Scope = "auth") -> None:
     async with engine.begin() as conn:
-        await _insert_failure(conn, reason)
+        await _insert_failure(conn, reason, scope)
 
 
-async def _insert_failure(conn: AsyncConnection, reason: FailureReason) -> None:
-    await conn.execute(text("INSERT INTO auth_failures (reason) VALUES (:r)"), {"r": reason.value})
+async def _insert_failure(conn: AsyncConnection, reason: FailureReason, scope: Scope = "auth") -> None:
+    await conn.execute(
+        text("INSERT INTO auth_failures (reason, scope) VALUES (:r, :s)"), {"r": reason.value, "s": scope}
+    )
 
 
-async def retry_after(engine: AsyncEngine) -> int | None:
-    """FR-AUTH-11: seconds until the oldest counted failure leaves the window, while the limit is reached."""
+async def retry_after(engine: AsyncEngine, scope: Scope = "auth") -> int | None:
+    """FR-AUTH-11 (scope `auth`) and FR-AUTH-26 step 1 (scope `signup`): seconds until the oldest counted
+    failure leaves the window, while that scope's limit is reached."""
+    if scope == "auth":
+        limit, window = FAILURE_MAX, FAILURE_WINDOW_S
+    else:
+        limit, window = SIGNUP_FAILURE_MAX, SIGNUP_FAILURE_WINDOW_S
     async with engine.connect() as conn:
         row = (
             await conn.execute(
                 text(
                     "SELECT count(*), extract(epoch FROM min(at) + make_interval(secs => :w) - now()) "
-                    "FROM auth_failures WHERE at > now() - make_interval(secs => :w)"
+                    "FROM auth_failures WHERE scope = :s AND at > now() - make_interval(secs => :w)"
                 ),
-                {"w": FAILURE_WINDOW_S},
+                {"w": window, "s": scope},
             )
         ).one()
     count, remaining = int(row[0]), row[1]
-    if count < FAILURE_MAX:
+    if count < limit:
         return None
     return max(1, math.ceil(float(remaining)))
 
@@ -184,11 +263,13 @@ async def create_bootstrap_token(engine: AsyncEngine, settings: Settings, handle
     async with engine.begin() as conn:
         user = (
             await conn.execute(
-                text("SELECT id, disabled_at FROM users WHERE handle = :h FOR UPDATE"), {"h": target}
+                text("SELECT id, disabled_at, source FROM users WHERE handle = :h FOR UPDATE"), {"h": target}
             )
         ).first()
         if user is None:
             raise BootstrapRefused("unknown_handle")
+        if user.source == "signup":  # FR-AUTH-24: sign-up users registered their passkey through sign-up
+            raise BootstrapRefused("signup_user")
         if user.disabled_at is not None:
             raise BootstrapRefused(FailureReason.user_disabled.value)
         if await _has_credential(conn, user.id):
@@ -490,14 +571,18 @@ def _raw_id(credential: Json) -> bytes | None:
 
 async def signin_verify(
     engine: AsyncEngine, settings: Settings, ceremony: str | None, credential: Json, presented: str | None
-) -> str | FailureReason:
+) -> str | FailureReason | PendingApproval:
     """FR-AUTH-7, two transactions: (1) consume the challenge, verify, and on failure record it, always
-    committed; (2) on one connection, the conditional counter update and the new session, or a rollback."""
+    committed; (2) on one connection, the conditional counter update and the new session, or a rollback.
+    FR-AUTH-28: a pending user's valid assertion ends after (1): no failure row, no counter update, no
+    session."""
     async with engine.begin() as conn:
         checked = await _signin_check(conn, settings, ceremony, credential)
         if isinstance(checked, FailureReason):
             await _insert_failure(conn, checked)
             return checked
+    if isinstance(checked, PendingApproval):
+        return checked
     authenticated, owner_id = checked
     try:
         async with engine.begin() as conn:
@@ -513,7 +598,7 @@ async def signin_verify(
 
 async def _signin_check(
     conn: AsyncConnection, settings: Settings, ceremony: str | None, credential: Json
-) -> tuple[seam.Authenticated, UUID] | FailureReason:
+) -> tuple[seam.Authenticated, UUID] | FailureReason | PendingApproval:
     consumed = await _consume_ceremony(conn, ceremony, "authenticate")
     if consumed is None:
         return FailureReason.ceremony_invalid
@@ -524,7 +609,7 @@ async def _signin_check(
         await conn.execute(
             text(
                 "SELECT c.public_key, c.sign_count, c.owner_id, u.webauthn_user_id, "
-                "u.disabled_at FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id "
+                "u.disabled_at, u.state FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id "
                 "WHERE c.credential_id = :id"
             ),
             {"id": raw_id},
@@ -546,7 +631,16 @@ async def _signin_check(
     if isinstance(result, FailureReason):
         return result
     owner_id: UUID = row.owner_id
+    if row.state == "pending":  # FR-AUTH-28: after the signature, so only the passkey's holder learns it
+        return PendingApproval(owner_id)
     return result, owner_id
+
+
+@dataclass(frozen=True)
+class PendingApproval:
+    """FR-AUTH-28: a valid assertion of a pending sign-up user. Not a failure: no `auth_failures` row."""
+
+    user_id: UUID
 
 
 async def finish_signin(conn: AsyncConnection, credential_id: bytes, new_count: int, backed_up: bool) -> bool:
@@ -574,7 +668,7 @@ async def session_user(engine: AsyncEngine, session: str | None) -> SessionUser 
                     "SELECT u.id, u.handle, u.role, u.display_name, u.consent_evaluation, u.consent_tuning, "
                     "s.created_at, extract(epoch FROM now() - s.created_at) AS age FROM sessions s "
                     "JOIN users u ON u.id = s.owner_id WHERE s.id_sha256 = :h AND s.revoked_at IS NULL "
-                    "AND s.expires_at > now() AND u.disabled_at IS NULL"
+                    "AND s.expires_at > now() AND u.disabled_at IS NULL AND u.state = 'active'"
                 ),
                 {"h": digest(session)},
             )

@@ -142,7 +142,7 @@ def _serve_api(bind: str, env: Env) -> None:
     import uvicorn
 
     from reader.api.app import create_app
-    from reader.auth.store import prepare
+    from reader.auth.store import HandleTakenBySignup, prepare
     from reader.jobs.catalog import load_kinds
     from reader.jobs.queue import Jobs
     from reader.jobs.worker import make_app
@@ -156,7 +156,10 @@ def _serve_api(bind: str, env: Env) -> None:
         try:
             try:
                 await migrate(engine)
-                await prepare(engine, settings)
+                superseded = await prepare(engine, settings)
+            except HandleTakenBySignup as taken:
+                # FR-AUTH-24, FR-AUTH-2: the one code naming a value; a handle is no secret (owner note 5).
+                raise Failure(f"handle_taken_by_signup {taken.handle}") from None
             except Exception:
                 raise Failure("database_unreachable") from None
             try:
@@ -165,6 +168,11 @@ def _serve_api(bind: str, env: Env) -> None:
             except OSError:
                 raise Failure("run_dir_unwritable") from None
             serving_logs()
+            auth_log = logging.getLogger("reader.auth")
+            for user_id in superseded:  # best-effort: lost if the api died before this line (owner note 5)
+                auth_log.info("auth signup_superseded %s", user_id)
+            if settings.signup_default_note:  # FR-AUTH-23
+                auth_log.info("auth signup_default_off non_localhost")
             # FR-AUTH-10 note: one SRV-EVENTS Jobs on the declared catalog, its own procrastinate app, for
             # routes that enqueue (SRV-PIPELINE, the tutor's ask).
             queue = make_app(target)

@@ -1088,11 +1088,26 @@ tasks:
         (b0b4808): VERDICT approve. Folded in after it: FR-AUTH-32's live mode derived with FR-AUTH-23's rule (absent
         key on a non-localhost host = off); owner note 5's signup_superseded record is best-effort; FR-AUTH-29 reject
         also cancels another person's open ceremony for the same handle (signup_failed). ADR-0031 stays proposed: the
-        owner accepts it; Red and Green start only after that and the coordinator's go.",
+        owner accepts it; Red and Green start only after that and the coordinator's go. ADR-0031 accepted by the
+        owner (49f93ce, 2026-11-23); go from the coordinator.",
+      red: "33e5cbf (after merging origin/V/slice-integration 3c4dbf3, which holds auth-page-style and
+        SRV-EVENTS-final; no other proposed_requirements key existed to combine): SRV-AUTH FR-AUTH-23..32,
+        INV-AUTH-10..15 and policy/tables/config_errors promoted, WEB-UI FR-UI-14 promoted, WEB-ACCOUNTS approved by
+        agent; [unit], [db], CLI, Vitest and [browser] tests; VEC-ACCOUNTS-1.",
+      green: "Migration 0002_signup; reader.auth.handles, reader.auth.signup; store (sync collisions, failure scopes,
+        pending refusal, expiry), routes, serve (handle_taken_by_signup line, superseded and default-off notes);
+        signup.html, signup-link fragment, passkey.js states and the `next` allow-list, auth.css; web/src/accounts
+        (screen, client, stories), the header link and /signups route; test server; owner.slice.ts `signup` step,
+        web_live.py id-only cleanup and expected mode, verify-all --config, slice.sh default steps; example config;
+        OPS-DOD operations mapped to their traced items. Green test corrections (spec review note): the CLI test binds
+        a free port; the sign-up tests wrapped to 110 columns. Checks: 273 auth tests, 236 web unit tests, 414
+        [browser] tests (auth-dark and auth-light at three widths), ci-local (see the PR notes). Live step written,
+        not run: the owner tests the stack by hand; the coordinator decides when.",
       notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
         disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
-        need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding also adds a
-        `proposed_requirements` key to SRV-AUTH (FR-AUTH-22); the two lists must become one key." }
+        need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding and V/plan add
+        `proposed_requirements` keys to SRV-AUTH (FR-AUTH-22) and WEB-UI (FR-UI-12/-13); this branch has none left,
+        so their keys merge without a duplicate." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

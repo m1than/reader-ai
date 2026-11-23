@@ -116,6 +116,80 @@ h1 {
   gap: var(--acme-space-4);
 }
 
+/* Header link to the owner's Sign-ups screen (WEB-UI FR-UI-14). */
+.app-header .header-link {
+  color: var(--acme-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.app-header .header-link:hover {
+  text-decoration: underline;
+}
+
+/* Sign-ups screen (WEB-ACCOUNTS FR-ACCOUNTS-1..3). */
+.signups .lead {
+  color: var(--acme-text-muted);
+}
+
+.signups h2 {
+  margin: var(--acme-space-6) 0 var(--acme-space-3);
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.signups-announce:empty {
+  display: none;
+}
+
+.signup-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.signup-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--acme-space-3);
+  padding: var(--acme-space-3) 0;
+  border-bottom: 1px solid var(--acme-border);
+  font-family: var(--acme-font);
+}
+
+.signup-who {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-1);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.signup-handle {
+  font-weight: 600;
+}
+
+.signup-time {
+  font-size: 0.8125rem;
+}
+
+.signup-confirm,
+.signup-problem {
+  flex-basis: 100%;
+}
+
+.signup-confirm p,
+.signup-problem p {
+  margin: 0 0 var(--acme-space-2);
+}
+
+.signups-help {
+  margin-top: var(--acme-space-5);
+  font-size: 0.875rem;
+}
+
 /* Lesson list (FR-UI-6) */
 .lesson-list h2 {
   margin: var(--acme-space-6) 0 var(--acme-space-3);

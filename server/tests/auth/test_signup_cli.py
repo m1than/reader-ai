@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import socket
 import subprocess
 from pathlib import Path
 
@@ -33,13 +34,19 @@ def _seed(pg: Pg, tmp_path: Path) -> None:
     anyio.run(run)
 
 
+def _run(env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        server_cmd(*args), env=env, capture_output=True, text=True, timeout=120, check=False
+    )
+
+
 def test_api_stops_with_the_colliding_handle(pg: Pg, tmp_path: Path) -> None:
     _seed(pg, tmp_path)
     env = _env(pg, tmp_path, (("ivan", "owner"), ("maria", "learner")))
-    done = subprocess.run(
-        server_cmd("--role", "api", "--bind", "127.0.0.1:0"), env=env, capture_output=True, text=True, timeout=120,
-        check=False,
-    )
+    with socket.socket() as s:  # a free port: --bind refuses port 0 (bind_invalid)
+        s.bind(("127.0.0.1", 0))
+        port = int(s.getsockname()[1])
+    done = _run(env, "--role", "api", "--bind", f"127.0.0.1:{port}")
     assert done.returncode == 1
     assert done.stderr == "reader-server: handle_taken_by_signup maria\n"
     assert done.stdout == ""
@@ -48,10 +55,7 @@ def test_api_stops_with_the_colliding_handle(pg: Pg, tmp_path: Path) -> None:
 def test_bootstrap_link_refuses_a_signup_user(pg: Pg, tmp_path: Path) -> None:
     _seed(pg, tmp_path)
     env = _env(pg, tmp_path, (("ivan", "owner"),))
-    done = subprocess.run(
-        server_cmd("bootstrap-link", "--handle", "maria"), env=env, capture_output=True, text=True, timeout=120,
-        check=False,
-    )
+    done = _run(env, "bootstrap-link", "--handle", "maria")
     assert done.returncode == 1
     assert done.stderr == "reader-server: signup_user\n"
     assert done.stdout == ""

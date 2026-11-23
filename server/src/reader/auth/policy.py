@@ -5,7 +5,7 @@ from __future__ import annotations
 import ipaddress
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Final
+from typing import Final, Literal
 from urllib.parse import urlsplit
 
 from reader.config import ReaderConfig
@@ -25,6 +25,28 @@ ATTESTATION_FORMATS: Final = ("none",)
 SESSION_COOKIE: Final = "__Host-reader_session"
 CEREMONY_COOKIE: Final = "__Host-reader_ceremony"
 ROLES: Final = ("owner", "learner")
+
+# Sign-up (ADR-0031, FR-AUTH-23..30; spec `policy.signup`).
+SIGNUP_MAX: Final = 60
+SIGNUP_WINDOW_S: Final = 3600
+SIGNUP_FAILURE_MAX: Final = 100
+SIGNUP_FAILURE_WINDOW_S: Final = 3600
+PENDING_MAX: Final = 20
+PENDING_TTL_S: Final = 604_800
+DISPLAY_NAME_MAX: Final = 64
+RESERVED_HANDLES: Final = frozenset(
+    {
+        "owner", "admin", "administrator", "root", "system", "support", "help", "security", "staff",
+        "moderator", "reader", "reader-ai", "readerai", "api", "auth", "signin", "signup", "signout",
+        "bootstrap", "register", "login", "logout", "mcp", "live-check", "null", "undefined", "anonymous",
+        "me", "settings", "static", "assets", "signups",
+    }
+)
+# pg_advisory_xact_lock(namespace, key) for sign-up ("RDAU"); not the migration namespace of reader.db.
+AUTH_LOCK_NAMESPACE: Final = 0x52444155
+SIGNUP_ATTEMPT_LOCK: Final = 2
+SIGNUP_COMMIT_LOCK: Final = 3
+SignupMode = Literal["open", "off"]
 
 
 class FailureReason(StrEnum):
@@ -82,6 +104,9 @@ class Settings:
     origin: str
     users: tuple[UserEntry, ...]
     owner_handle: str
+    signup: SignupMode = "off"
+    # True when the key is absent on a host other than localhost (FR-AUTH-23): the api logs a startup note.
+    signup_default_note: bool = False
 
 
 def _is_ip(host: str) -> bool:
@@ -137,10 +162,27 @@ def settings_from_config(config: ReaderConfig) -> Settings:
         problems.append("owner_count")
     if any(u.role not in ROLES for u in config.users):
         problems.append("unknown_role")
-    if "signup" in config.sharing and config.sharing["signup"] is not False:
+    value = config.sharing.get("signup", _ABSENT)
+    if value is not _ABSENT and value is not False and value not in ("off", "open"):
         problems.append("signup_not_supported")
     if problems:
         raise StartupError(min(problems, key=CONFIG_ERROR_CODES.index))
     rp_id, origin = _origin(config.instance.url)
     users = tuple(UserEntry(u.handle, u.role) for u in config.users)
-    return Settings(rp_id=rp_id, origin=origin, users=users, owner_handle=owners[0].handle)
+    # FR-AUTH-23: an absent key opens sign-up only on localhost ("this Mac only", ADR-0031).
+    mode: SignupMode
+    if value is _ABSENT:
+        mode = "open" if rp_id == "localhost" else "off"
+    else:
+        mode = "open" if value == "open" else "off"
+    return Settings(
+        rp_id=rp_id,
+        origin=origin,
+        users=users,
+        owner_handle=owners[0].handle,
+        signup=mode,
+        signup_default_note=value is _ABSENT and rp_id != "localhost",
+    )
+
+
+_ABSENT: Final = object()

@@ -74,7 +74,8 @@ if [[ -n "$SLICE" ]]; then
     "$(cd "$ROOT" && pwd -P)/"*) echo "--out must be outside the repository (screenshots show book text)" >&2; exit 2 ;;
   esac
   [[ -d "$SUITE/node_modules" ]] || (cd "$SUITE" && npm ci --no-audit --no-fund --silent)
-  owner_args=(--owner --slice-steps "$SLICE")
+  # --config: the `signup` step derives the expected sign-up mode from reader.yaml (SRV-AUTH FR-AUTH-32).
+  owner_args=(--owner --slice-steps "$SLICE" --config "$CONFIG")
   ((RESET_OWNER)) && owner_args+=(--reset-owner-passkeys)
   rc=0
   (cd "$ROOT/server" && uv run --quiet python -I "$ROOT/e2e/live/lib/web_live.py" \
