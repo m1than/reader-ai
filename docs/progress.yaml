@@ -1028,6 +1028,20 @@ tasks:
         (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
         timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
         latest live run (OPS-DOD owner note)." }
+  - { id: V.signup, stage: V, kind: module, track: product, status: in_progress, needs: [V.auth-page-style],
+      branch: V/signup,
+      what: "Owner 2026-11-23: a 'Sign up' page from the sign-in screen; the owner chose open sign-up and accepted rate
+        limiting and owner approval of new accounts. Drafts (stop for review): ADR-0031 (proposed), SRV-AUTH
+        FR-AUTH-23..32 and INV-AUTH-10..14 under `proposed_*` keys, WEB-ACCOUNTS (draft; WEB-UI FR-UI-14 reserved),
+        OPS-DOD operations auth.signup and auth.approve with every cell missing except FR-AUTH-12.",
+      notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Owner questions in ADR-0031: default
+        off or open (recommended off), approval required (recommended yes), handle rules, reachability beyond
+        localhost (RP ID change), what an approved learner may do before stage 8. Found while drafting: sync_users
+        disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
+        need users.source and a startup refusal of a users[] handle equal to a sign-up handle (FR-AUTH-24). Spike
+        before approval: spikes/signup-client-ip (the address Caddy sees under Docker Desktop; hypothesis: one gateway
+        address, so the per-client limit equals a second global limit on the Mac). Merge note: V/onboarding also adds
+        a `proposed_requirements` key to SRV-AUTH (FR-AUTH-22); the two lists must become one key." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
