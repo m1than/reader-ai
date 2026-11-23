@@ -552,7 +552,15 @@ tasks:
         test_session_sweep_spares_other_runs. Old-label orphans left for the owner. Second fix (2026-11-23, branch
         V/OPS-SANDBOX-test-image): the shared image tag reader-kernel:local was rebuilt by every session, so a
         concurrent session retagged it mid-run; each session now builds and uses reader-kernel:test-<run id> and sweeps
-        tags like labels (test_session_sweep_spares_other_runs_tags). Tests never touch reader-kernel:local" }
+        tags like labels (test_session_sweep_spares_other_runs_tags). Tests never touch reader-kernel:local. Third fix
+        (2026-11-23, branch V/OPS-SANDBOX-test-subnets, investigator's root cause of 15 supervisor failures with the
+        stack up): Docker's default address pools had one subnet left and test_session_sweep_spares_other_runs leaked
+        a network created before its try, so every later network create failed. Test networks take an explicit /28
+        in 10.231.0.0/16 (conftest create_network, retried on Pool overlaps), objects are registered for cleanup as
+        soon as they exist (test_test_networks_use_explicit_subnets), and SRV-KERNEL's and SRV-PIPELINE's image tests
+        use per-run tags. Measured with the stack up: tests/sandbox, tests/kernels and test_verify.py 114 passed, no
+        labelled networks left, reader-kernel:local unchanged. Review: deep-reviewer on b3c485d VERDICT approve;
+        non-blocking items applied" }
   - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
       result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
         placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with
