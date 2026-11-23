@@ -110,17 +110,25 @@ requirements:
   - id: FR-IMPORT-5
     text: >-
       **Estimate preview.** On valid input, after `preview_debounce_ms` without change, `POST /api/plans/preview` with
-      the material id, the fields and `start_date` = the browser's local date (YYYY-MM-DD); no page range is sent.
+      the material id, the fields and `today` = the browser's local date (YYYY-MM-DD); no page range is sent.
       The estimate card shows:
-      - "N lessons, one a day, about M min each (at most X), finish by <date>" (`minutes_mean`, `minutes_max`; the
-        date in the user's locale, long form), and under it "Reading time only; labs and review are not included.";
-      - when `spare_days` > 0: "This source fills N of D days." (owner decision: a small source gets fewer lessons);
+      - "N lessons, one a day, about M min each (at most X), finish by <date>" (`new_count`, `minutes_mean`,
+        `minutes_max`, `finish_by`; the date in the user's locale, long form); on a re-plan the count reads "F started
+        + K new" (`fixed_count`, `new_count`) and the deadline `end` is shown ("Deadline kept: <date>"); under it
+        "Reading time only; labs and review are not included.";
+      - when `spare_days` > 0: "This source fills <new_count> of <days_left> days." (owner decision: a small source
+        gets fewer lessons);
       - "Compile: $low–$high for the whole course, an estimate from one measured lesson" and "Lesson 1: $low–$high,
         stops at $8.00" (`estimate.first_lesson` and `run_cap_usd`), both as ranges, never as one number or a bound;
+        when `estimate.extrapolated`, also "Lessons are R× shorter than the measured one; real cost per lesson is likely
+        higher than this range." (R = `basis_kchars / mean_lesson_kchars`, one decimal) or, for longer lessons,
+        "Lessons are R× longer than the measured one; real cost per lesson may differ from this range." (R =
+        `mean_lesson_kchars / basis_kchars`);
       - when it does not fit, a calm notice per reason (`minutes`: "A day's lesson would take X min, more than your
-        M min"; `days`: "This needs more lessons than W weeks have days"; `source_size`: "A day's lesson would be too
-        long to compile") with up to two buttons from `suggest` ("Use X min a day", "Use Y weeks") that set the field
-        and preview again, or "Choose more weeks or more minutes a day" when both are null.
+        M min"; `days`: "This needs more lessons than the days left before the deadline" or, when `days_left < 1`,
+        "The deadline has passed"; `source_size`: "A day's lesson would be too long to compile") with up to two buttons
+        from `suggest` ("Use X min a day", "Use Y weeks") that set the field and preview again, or "Choose more weeks
+        or more minutes a day" when both are null.
       A collapsed "Lessons" disclosure lists each lesson's title, pages and minutes, started ones marked "Started,
       stays as it is". Out-of-order responses are dropped (only the latest request's answer is shown); while a new one
       loads, the card keeps the previous estimate, dimmed, and its `role="status"` line reads "Updating the
@@ -148,7 +156,8 @@ requirements:
       **Existing sources.** Below the drop zone, "Your sources" lists `GET /api/materials` (id, status, page count):
       an imported material offers "Plan study time", which opens the study-time form for it; when `GET
       /api/plans?material_id=<id>` (SRV-PLAN FR-PLAN-9) returns a stored plan, the button reads "Re-plan" and the form
-      is pre-filled with its inputs (an unfinished upload's processing link is the upload track's, FR-IMPORT-3).
+      is pre-filled with its inputs; a 404 there means "no plan yet" and is not shown as an error (an unfinished
+      upload's processing link is the upload track's, FR-IMPORT-3).
       Re-planning shows which lessons are already started and stay as they are ("3 started lessons keep their
       pages"). [unit] [story]
   - id: FR-IMPORT-9

@@ -277,8 +277,8 @@ proposed_requirements:
       For origin `study_plan` only:
       - lessons of the course that are absent from the new plan are removed when they have **not started**,
         re-checked inside this transaction immediately before each removal: their `course_plans` row, then the
-        SRV-LESSON lesson through `delete_unstarted_lesson` (SRV-LESSON paired change: it deletes the lesson only when
-        no row refers to it — no revision, no compile run, no tutor row — and otherwise raises `lesson_started`);
+        SRV-LESSON lesson through `delete_unstarted_lesson` (SRV-LESSON paired change FR-LESSON-15: "started" is
+        `started_lessons`, the same function SRV-PLAN's preview uses; it raises `lesson_started` otherwise);
       - a started lesson absent from the new plan, or `lesson_started` from that call, is `started_lesson_dropped`
         (SRV-PLAN FR-PLAN-6 keeps started lessons fixed, so this is a guard; the transaction rolls back);
       - a lesson kept with a changed page range or title gets its `course_plans` row updated (`g1_at` as
@@ -299,7 +299,8 @@ proposed_requirements:
       **Run creation under the course lock.** FR-PIPELINE-11's `reader.pipeline.runs.create_run(engine, jobs,
       owner_id, lesson_id, cap_usd, *, require_course_unstarted=False) -> run_id` first takes the course lock of the
       lesson's `course_plans` row (FR-PIPELINE-14; none for a lesson without one), then the per-lesson lock as today,
-      and re-reads the lesson inside that transaction (a lesson removed by a concurrent re-plan is `not_found`). With
+      and re-reads the lesson after taking the locks, inside that transaction (a lesson removed by a concurrent re-plan
+      is `not_found`; a [db] test pins this re-read with a removal committed while `create_run` waits on the lock). With
       `require_course_unstarted`, any compile run of any lesson of the same plan course raises `already_started`
       (SRV-PLAN's compile-first target). `compile_running` and SRV-AGENT's budget refusals are unchanged; the route
       passes the default and behaves as before. [db]
