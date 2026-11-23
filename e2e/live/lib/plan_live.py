@@ -168,6 +168,12 @@ def main() -> int:
     if not report("plan: Caddy local root fetched", spki is not None):
         return failures
     assert spki is not None
+    count_sql = (
+        "SELECT (SELECT count(*) FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id WHERE u.role = 'owner')"
+        " || ' ' || (SELECT count(*) FROM sessions s JOIN users u ON u.id = s.owner_id WHERE u.role = 'owner'"
+        " AND s.revoked_at IS NULL AND s.expires_at > now());"
+    )
+    _, before = psql(args.project, count_sql)
     token = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
     insert, delete = session_sql(token)
     code, _ = psql(args.project, insert)
@@ -185,6 +191,10 @@ def main() -> int:
         code, _ = psql(args.project, delete)
         report("plan: this run's session deleted (by id; no other session or passkey touched)", code == 0)
         del token
+        _, after = psql(args.project, count_sql)
+        results["owner_passkeys_and_live_sessions"] = {"before": before, "after": after}
+        report("plan: the owner's passkeys and live sessions are unchanged", before == after and before != "",
+               f"{before} -> {after}")
     (out / "plan-results.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n", "utf-8")
     return failures
 

@@ -1044,6 +1044,20 @@ tasks:
         1,000 characters, pilot ≈ $39–93 (spikes/study-rate/RESULT.md). Paired changes to schedule: SRV-AUTH (upload Content-Type), OPS-DEPLOY (Caddy request_body),
         OPS-CLI (reader up starts reader-ingest --watch), SRV-SEARCH (fts_config of uploads), SRV-CONFIG
         (planner.study_minutes_per_kchar), SRV-LESSON (delete_unstarted_lesson, reorder_lessons)." }
+  - { id: V.onboarding-plan, stage: V, kind: module, track: product, status: in_progress, branch: V/plan,
+      needs: [V.live, V.WEB-polish],
+      what: "The course-planning track of V.onboarding, split from the upload track (coordinator 2026-11-23): SRV-PLAN
+        (planner, estimate, preview/confirm/GET routes, study_plans), SRV-PIPELINE FR-PIPELINE-14/15 (course lock,
+        study-plan import, create_run under the lock), SRV-LESSON FR-LESSON-15, WEB-UI FR-UI-12 (/import route, owner
+        Import link), WEB-PLAN (FR-IMPORT-4/5/6/8 moved verbatim from WEB-IMPORT), OPS-DOD course.plan.",
+      next: "Live check `bash e2e/live/plan.sh` after the coordinator's go for `reader up` from this worktree (the
+        owner is testing a real Safari passkey; the check's owner session is created and deleted by id only).",
+      note: "Specs: SRV-PLAN and WEB-PLAN approved by agent after deep-reviewer (Fable) rounds 1–4, VERDICT approve on
+        d9f655a. Owner decisions recorded in SRV-PLAN: even spread over total_weeks × 7 days (3), re-plan keeps the
+        deadline (4, decided by the coordinator for the owner; overrulable). Tests: server 46 plan tests (planner
+        vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
+        bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
+        with axe 0 serious at 1280/1024/390." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
