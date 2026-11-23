@@ -638,7 +638,27 @@ async def test_disabled_user_cannot_sign_in(pg: Pg, tmp_path: Path) -> None:
 def test_routers_are_a_declared_list() -> None:
     from reader.api.app import ROUTERS
 
-    assert list(ROUTERS) == ["reader.api.routes", "reader.auth.routes"]
+    # SRV-LESSON, -KERNEL, -INGEST, -SEARCH, -PIPELINE, -TUTOR add routers (paired changes, FR-AUTH-10 notes)
+    assert list(ROUTERS) == [
+        "reader.api.routes",
+        "reader.auth.routes",
+        "reader.lessons.routes",
+        "reader.kernels.routes",
+        "reader.ingest.routes",
+        "reader.search.routes",
+        "reader.pipeline.routes",
+        "reader.tutor.routes",
+    ]
+
+
+def test_create_app_carries_the_jobs_seam(tmp_path: Path) -> None:
+    from reader.api.app import create_app
+
+    settings = settings_for(tmp_path)
+    marker = object()
+    engine: Any = None  # never used: no request is served
+    assert create_app(settings, engine, run_cleanup_task=False, jobs=marker).state.jobs is marker
+    assert create_app(settings, engine, run_cleanup_task=False).state.jobs is None
 
 
 def test_route_table_is_declared_as_data() -> None:

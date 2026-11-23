@@ -30,6 +30,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - Spec `implemented`: the owner sets it after the stage live check.
 - ADR `accepted` / `rejected` / `superseded`: the owner decides. You write ADRs as `proposed`.
 - `main` is changed only through merged PRs; never force-push.
+- The Definition of Done (`spec/fixtures/OPS-DOD/operations.yaml`) is loosened only by the owner: you never add or change a `waived` cell or a `not_user_facing` entry, and you never write the `DoD-Owner-Change` commit trailer that lets P8 pass (OPS-DOD FR-DOD-12, -13).
 
 ## Hard rules (hooks and CI)
 
@@ -71,11 +72,12 @@ Complex work is always done with Claude Fable, through the `deep-reviewer` and `
 
 ## Checks before every PR
 
-`bash tools/ci-local.sh` runs the first four lines below, the same jobs as `.github/workflows/ci.yml`. While GitHub Actions cannot run on the owner's account, its PASS is the gate (owner, 2026-11-20).
+`bash tools/ci-local.sh` runs the first five lines below, the same jobs as `.github/workflows/ci.yml`. While GitHub Actions cannot run on the owner's account, its PASS is the gate (owner, 2026-11-20).
 
 ```bash
-node tools/trace/check.mjs                              # T1–T9 (T9: docs/progress.yaml parses and is consistent)
-node tools/trace/guard-tests.mjs --base origin/main     # P7
+node tools/trace/check.mjs                              # T0–T10 (T9: docs/progress.yaml; T10: the Definition-of-Done index)
+node tools/trace/guard-tests.mjs --base origin/main     # P7 tests change with their spec; P8 the DoD index is not loosened
+node --test "tools/dod/*.test.mjs"                      # OPS-DOD: T10, report, waiver rule, ratchet
 (cd server && uv run ruff check . && uv run mypy src && uv run pytest)    # once server/ exists
 (cd web && npm run typecheck && npm test && npm run build-storybook)      # once web/ exists
 bash e2e/live/stage-N.sh                                # for the stage you touched, against `reader up`

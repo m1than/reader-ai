@@ -1,0 +1,28 @@
+# VEC-UI-1: contrast pairs as recipes (data), from spikes/library-publish/consumer/calm.mjs and the library CSS it cites.
+# The test expands every group per mode (light, dark) over the committed Calm tokens (web/src/ui/tokens/calm.tokens.json)
+# and computes each background as `bg` says; no colour value is stored here.
+# bg forms:
+#   <token>                         a token value
+#   over(<tone>, <p>, <below>)      color-mix(in <any>, tone p, transparent) alpha-composited over below, gamma sRGB
+#   oklab(<x>, <p>, <y>)            color-mix(in oklab, x p, y), opaque
+#   srgb(<x>, <p>, <y>)             color-mix(in srgb, x p, y), opaque
+# `glass` is `surface` under Calm; `hover` is over(text, 0.05, <surface>).
+# Expected expansion: 109 pairs per mode, 218 in all (the spike's count). Minimums: text 4.5, ui 3.
+sets:
+  SURFACES: [canvas, surface, surface-raised]
+  STATUS: [success, warning, danger, info]
+  TONE_FILLS: [accent, neutral, danger, success, warning, info]
+  BUTTON_TONES: [accent, neutral, danger]
+  CHIP_TONES: [accent, danger, success, warning, info]
+groups:
+  - {group: flat, fg: [text, text-muted, accent, success, warning, danger, info], bg: "{SURFACES}", min: text}
+  - {group: flat, fg: [control-border, focus, accent], bg: "{SURFACES}", min: ui}
+  - {group: on-tone, fg: [on-tone], bg: "{TONE_FILLS}", min: text}
+  - {group: soft-button, fg: "{tone}", tone: "{BUTTON_TONES}", p: [0.16, 0.24], bg: "over({tone}, {p}, {SURFACES})", min: text, source: "button.css:41-42"}
+  - {group: outline-hover, fg: "{tone}", tone: "{BUTTON_TONES}", bg: "oklab({tone}, 0.10, surface)", min: text, source: "button.css:45"}
+  - {group: ghost-hover, fg: "{tone}", tone: "{BUTTON_TONES}", bg: "over(text, 0.05, {SURFACES})", min: text}
+  - {group: hover-border, fg: [control-border], bg: "over(text, 0.05, {SURFACES})", min: ui}
+  - {group: toast, fg: [text, text-muted], tone: [success, warning, danger, info, neutral], p: [0.10, 0.18], bg: "srgb({tone}, {p}, surface-raised)", min: text, source: "toast.css:46, :87"}
+  - {group: chip, fg: [text], tone: "{CHIP_TONES}", bg: "oklab({tone}, 0.12, surface-raised)", min: text, source: "chip.css:39"}
+  - {group: chip, fg: [text], tone: "{CHIP_TONES}", bg: "over({tone}, 0.10, {SURFACES})", min: text, source: "chip.css:43"}
+expected_pairs_per_mode: 109

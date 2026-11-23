@@ -1,0 +1,186 @@
+# VEC-NOTEBOOK-2: relay message sequences (SRV-KERNEL wire format, Jupyter messaging 5.x plus channel `reader`) and the
+# cell state the notebook must show after each step, per FR-NOTEBOOK-8's table and reconnect procedure.
+# `send` is what the client sends; `recv` is a frame from the relay; `close` is a close of the current socket by the
+# server or the network; `user` is a user action. Cell states: idle | queued | running | done | error | interrupted |
+# timed_out | not_run | lost. `slot` is the session's in-flight execute (null when free). msg ids are fixed here.
+sequences:
+  - id: run-ok
+    steps:
+      - {user: run, cell: c1, sent: [e1], cell_state: {c1: running}, slot: e1}
+      - {recv: {channel: iopub, msg_type: status, parent: e1, content: {execution_state: busy}}}
+      - {recv: {channel: iopub, msg_type: execute_input, parent: e1, content: {code: "print(1)", execution_count: 1}}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "1\n"}}, outputs: {c1: ["stdout:1\n"]}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: done}, execution_count: {c1: 1}, slot: null}
+      - {recv: {channel: iopub, msg_type: status, parent: e1, content: {execution_state: idle}}}
+  - id: stream-merge
+    note: "a stream appends to the cell's last output only if that output is a stream of the same name"
+    steps:
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "a"}}, outputs: {c1: ["stdout:a"]}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "b"}}, outputs: {c1: ["stdout:ab"]}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stderr, text: "w"}}, outputs: {c1: ["stdout:ab", "stderr:w"]}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "c"}}, outputs: {c1: ["stdout:ab", "stderr:w", "stdout:c"]}}
+  - id: queue-two
+    steps:
+      - {user: run, cell: c1, sent: [e1], cell_state: {c1: running}, slot: e1}
+      - {user: run, cell: c2, sent: [e1], cell_state: {c1: running, c2: queued}, slot: e1}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, sent: [e1, e2], cell_state: {c1: done, c2: running}, slot: e2}
+  - id: error-stops-run-all
+    steps:
+      - {user: run_all, cells: [c1, c2, c3], sent: [e1], cell_state: {c1: running, c2: queued, c3: queued}}
+      - {recv: {channel: iopub, msg_type: error, parent: e1, content: {ename: E, evalue: "", traceback: ["E"]}}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: E, evalue: ""}}, cell_state: {c1: error, c2: idle, c3: idle}, slot: null}
+  - id: aborted
+    steps:
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: aborted}}, cell_state: {c1: not_run}, slot: null}
+  - id: clear-output-wait
+    steps:
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "a"}}, outputs: {c1: ["stdout:a"]}}
+      - {recv: {channel: iopub, msg_type: clear_output, parent: e1, content: {wait: true}}, outputs: {c1: ["stdout:a"]}}
+      - {recv: {channel: iopub, msg_type: stream, parent: e1, content: {name: stdout, text: "b"}}, outputs: {c1: ["stdout:b"]}}
+  - id: update-display
+    steps:
+      - {recv: {channel: iopub, msg_type: display_data, parent: e1, content: {data: {text/plain: "10%"}, metadata: {}, transient: {display_id: d1}}}, outputs: {c1: ["10%"]}}
+      - {recv: {channel: iopub, msg_type: update_display_data, parent: e2, content: {data: {text/plain: "90%"}, metadata: {}, transient: {display_id: d1}}}, outputs: {c1: ["90%"]}}
+  - id: unknown-parent
+    steps:
+      - {recv: {channel: iopub, msg_type: stream, parent: zz, content: {name: stdout, text: "x"}}, outputs: {}, slot: e1}
+  - id: duplicate-reply
+    steps:
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: done}, slot: null}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: E, evalue: ""}}, cell_state: {c1: done}, slot: null}
+  - id: timeout-then-reply
+    note: "timeout marks the cell; only the execute_reply (or a lost event) frees the slot"
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, cell_state: {c1: running}, cell_marker: {c1: timed_out}, notice: timeout, slot: e1}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: timed_out}, slot: null}
+  - id: timeout-then-reset
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, slot: e1}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_reset, parent_msg_id: null}}, cell_state: {c1: lost}, slot: null}
+      - {close: 1012, session: forgotten, action: "next Run creates the session (POST /api/kernel/sessions), then connects"}
+  - id: interrupted
+    steps:
+      - {user: interrupt, request: "POST /api/kernel/sessions/{sid}/interrupt"}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: interrupted}, slot: null}
+  - id: restarted-by-kernel
+    note: "the socket stays open and the session stays; running is lost, queued returns to idle"
+    steps:
+      - {user: run_all, cells: [c1, c2], sent: [e1], cell_state: {c1: running, c2: queued}}
+      - {recv: {channel: iopub, msg_type: status, parent: null, content: {execution_state: restarting}}}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_restarted, parent_msg_id: null}}, cell_state: {c1: lost, c2: idle}, notice: kernel_restarted, slot: null}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: lost}, note: "a reply for a lost execute changes nothing"}
+  - id: kernel-dead
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_dead, parent_msg_id: null}}, cell_state: {c1: lost}, slot: null}
+      - {close: 1000, session: forgotten, notice: kernel_dead}
+  - id: busy-for-inflight
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: busy, parent_msg_id: e1}}, cell_state: {c1: lost}, slot: null, notice: busy}
+  - id: rejected-for-inflight
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: rejected, parent_msg_id: e1}}, cell_state: {c1: lost}, slot: null, notice: rejected}
+  - id: rejected-other
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: rejected, parent_msg_id: k9}}, cell_state: {c1: running}, slot: e1, notice: rejected}
+  - id: truncated
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: output_truncated, parent_msg_id: e1}}, cell_note: {c1: output_truncated}, slot: e1}
+  - id: reset-close-1012
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_reset, parent_msg_id: null}}, cell_state: {c1: lost}}
+      - {close: 1012, session: forgotten, notice: kernel_reset}
+  - id: unavailable-1013
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_unavailable, parent_msg_id: null}}, cell_state: {c1: lost}}
+      - {close: 1013, session: unavailable, notice: kernel_unavailable, action: "no automatic reconnect; Retry (or the next Run) creates the session again"}
+  - id: oversized-1009
+    steps:
+      - {close: 1009, cell_state: {c1: lost}, session: forgotten, notice: output_truncated}
+  - id: signed-out-4401
+    steps:
+      - {close: 4401, cell_state: {c1: lost}, action: "navigate to /api/auth/signin"}
+  - id: network-drop
+    steps:
+      - {close: 1006, cell_state: {c1: lost}, slot: null, action: "reconnect tries after 1 s, 2 s, 4 s"}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 200, body: {session_id: s1}}, then: "open the WebSocket of s1", result: failed}
+      - {reconnect_try: 2, http: {request: "POST /api/kernel/sessions", status: 200, body: {session_id: s1}}, then: "open the WebSocket of s1", result: open, session: s1}
+  - id: network-drop-gives-up
+    steps:
+      - {close: 1011, cell_state: {c1: lost}}
+      - {reconnect_try: 3, result: failed, session: disconnected, notice: connect_failed, action: "Retry runs the same procedure"}
+  - id: reconnect-after-api-restart
+    note: "the api lost its session map; POST creates a new session, then the WebSocket opens"
+    steps:
+      - {close: 1006}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 201, body: {session_id: s9}}, then: "open the WebSocket of s9", result: open, session: s9}
+  - id: reconnect-session-expired
+    note: "an expired sign-in at the upgrade shows only as 1006; the POST before the upgrade reveals it"
+    steps:
+      - {close: 1006}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 401}, action: "navigate to /api/auth/signin; no further tries"}
+  - id: create-401
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 401}, cell_state: {c1: idle}, action: "navigate to /api/auth/signin"}
+  - id: create-409
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 409, body: {error: too_many_kernels}}, cell_state: {c1: idle}, slot: null, notice: too_many_kernels, notice_text: "too many open lessons; close one or reset"}
+  - id: create-502
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 502, body: {error: kernel_upstream}}, cell_state: {c1: idle}, notice: kernel_upstream}
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 201, body: {session_id: s1}}, cell_state: {c1: running}}
+  - id: create-503
+    steps:
+      - {user: run, cell: c1, http: {request: "POST /api/kernel/sessions", status: 503, body: {error: kernel_unavailable}}, cell_state: {c1: idle}, notice: kernel_unavailable, action: "the next Run tries again"}
+  - id: interrupt-404
+    steps:
+      - {user: interrupt, http: {request: "POST /api/kernel/sessions/{sid}/interrupt", status: 404}, cell_state: {c1: lost}, slot: null, session: forgotten, action: "the next Run creates the session again"}
+  - id: interrupt-401
+    steps:
+      - {user: interrupt, http: {request: "POST /api/kernel/sessions/{sid}/interrupt", status: 401}, action: "navigate to /api/auth/signin"}
+  - id: reset-503
+    steps:
+      - {user: reset, http: {request: "POST /api/kernel/reset", status: 503, body: {error: kernel_unavailable}}, notice: kernel_unavailable, action: "Retry"}
+  - id: late-reply-after-timeout-and-reset
+    note: "after timeout the reset's lost event freed the slot; the late execute_reply is ignored"
+    steps:
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, slot: e1}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: kernel_reset, parent_msg_id: null}}, cell_state: {c1: lost}, slot: null}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: lost}, slot: null}
+  - id: third-tab
+    note: "SRV-KERNEL allows 2 browser connections per session; a third upgrade is refused with 409, which a browser sees as a failed connection (close 1006)"
+    steps:
+      - {close: 1006, before_open: true}
+      - {reconnect_try: 3, result: failed, session: disconnected, notice: connect_failed, action: "Retry; the notice says the lesson may be open in other tabs"}
+  - id: late-frame-after-close
+    steps:
+      - {close: 1006, cell_state: {c1: lost}}
+      - {recv_on_old_socket: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: ok, execution_count: 1}}, cell_state: {c1: lost}}
+  - id: interrupt-during-run-all
+    note: "an execute_reply with status error stops the rest of its Run all, whatever the final label"
+    steps:
+      - {user: run_all, cells: [c1, c2, c3], sent: [e1], cell_state: {c1: running, c2: queued, c3: queued}}
+      - {user: interrupt, request: "POST /api/kernel/sessions/{sid}/interrupt"}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: interrupted, c2: idle, c3: idle}, slot: null, sent: [e1]}
+  - id: timeout-then-error-in-run-all
+    steps:
+      - {user: run_all, cells: [c1, c2], sent: [e1], cell_state: {c1: running, c2: queued}}
+      - {recv: {channel: reader, msg_type: reader_notice, content: {code: timeout, parent_msg_id: e1}}, cell_marker: {c1: timed_out}}
+      - {recv: {channel: shell, msg_type: execute_reply, parent: e1, content: {status: error, ename: KeyboardInterrupt, evalue: ""}}, cell_state: {c1: timed_out, c2: idle}, slot: null, sent: [e1]}
+  - id: reconnect-post-fails
+    note: "every reconnect try fails at the session POST; giving up is a lost event, so a Run queued meanwhile returns to idle"
+    steps:
+      - {close: 1006, cell_state: {c1: lost}}
+      - {user: run, cell: c2, cell_state: {c2: queued}}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 503, body: {error: kernel_unavailable}}, cell_state: {c2: queued}}
+      - {reconnect_try: 2, http: {request: "POST /api/kernel/sessions", status: 502, body: {error: kernel_upstream}}, cell_state: {c2: queued}}
+      - {reconnect_try: 3, http: {request: "POST /api/kernel/sessions", status: 503, body: {error: kernel_unavailable}}, cell_state: {c2: idle}, session: disconnected, notice: connect_failed}
+  - id: reconnect-post-401-with-queued-run
+    steps:
+      - {close: 1011, cell_state: {c1: lost}}
+      - {user: run, cell: c2, cell_state: {c2: queued}}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 401}, cell_state: {c2: idle}, slot: null, action: "navigate to /api/auth/signin; no further tries"}
+  - id: retry-runs-the-reconnect-procedure
+    steps:
+      - {close: 1013, session: unavailable}
+      - {user: retry, cell_state: {c1: lost}}
+      - {reconnect_try: 1, http: {request: "POST /api/kernel/sessions", status: 201, body: {session_id: s5}}, result: open, session: s5}

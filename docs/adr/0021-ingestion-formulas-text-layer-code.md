@@ -8,6 +8,8 @@ revisit_when: "After SRV-INGEST is green: the owner's fidelity live check misrea
 supersedes: []
 ---
 
+> Amendment: [ADR-0027](0027-native-ingest-transport-no-listener.md) (accepted by the owner, 2026-11-21) — the native converter does not listen on `127.0.0.1`. The host command `reader-ingest` runs it confined by `sandbox-exec` with no network at all and streams the validated artifact into the worker over `docker exec` stdin (M1 decided native: Docker 266–284 s per formula).
+
 ## Context
 
 ADR-0008 chose Docling for content, with `revisit_when`: "misreads more than 2 of 20 sampled pages with formulas or tables". `spikes/ingest-docling` triggered it on 2026-11-20 (`spikes/ingest-docling/RESULT.md` on main, PR #13; deep-reviewer approve, round 2).

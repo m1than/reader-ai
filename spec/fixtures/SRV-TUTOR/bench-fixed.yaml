@@ -1,0 +1,10 @@
+# VEC-TUTOR-7's fixed bench question (replaces questions-v2 `v03`, whose premise the book does not support: v03
+# blames relational databases, while the book contrasts blockchain with traditional databases; investigator,
+# 2026-11-23). Same discipline as spikes/embeddings-local/questions-v2.yaml: the agent's own wording, nothing
+# quoted; no word stem shared with the outline headings covering a gold page or with bold words on it (checked
+# with spikes/embeddings-local/check_questions.py on this file: 0 issues); gold pages found through the text layer
+# and checked by reading them; the answer is stated on the gold pages (two ways, and why the second is partial).
+source_sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
+language: ru
+questions:
+  - { id: t01, chapter: 2, gold_pages: [65, 66], kind: why_how, question: "Какими двумя путями можно лишить систему единой управляющей инстанции и почему второй путь даёт лишь неполный результат?" }

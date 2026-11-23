@@ -1,0 +1,7 @@
+# Read by BuildKit next to embed.Dockerfile (OPS-DEPLOY FR-DEPLOY-2): the COPY allow-list is the first guard,
+# this is the second.
+**/__pycache__
+**/.env*
+**/.venv
+**/node_modules
+data

@@ -1,0 +1,482 @@
+{
+  "commit": "abc1234",
+  "exit_code": 1,
+  "live_fail_unmapped": 2,
+  "operations": [
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-X-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: lesson renders (markdown, math)",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-X-2",
+              "kind": "item",
+              "status": "FAIL"
+            }
+          ],
+          "gaps": [],
+          "status": "FAIL"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "FR-X-3",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-X-3"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "stage-1: log line found",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [],
+          "gaps": [
+            "no recovery test"
+          ],
+          "status": "MISSING"
+        }
+      ],
+      "fail": 1,
+      "gate": "enforced",
+      "id": "lesson.read",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 3,
+          "p95_ms_max": 100,
+          "source": "structural: test"
+        },
+        "n": 3,
+        "p50_ms": 60,
+        "p95_ms": 70,
+        "per": null
+      },
+      "missing": 2,
+      "status": "FAIL",
+      "title": "Read a lesson | with a pipe"
+    },
+    {
+      "cost": {
+        "budget": {
+          "kind": "baseline",
+          "n_min": 2,
+          "source": "VEC-X-1",
+          "usd_per_run_max": 0.3
+        },
+        "by_model": {
+          "claude-opus-5-5": {
+            "cache_read": 0,
+            "cache_write_1h": 0,
+            "cache_write_5m": 200,
+            "input": 10,
+            "output": 5,
+            "thinking": 3,
+            "usd": "0.200000",
+            "usd_micro": 200000
+          },
+          "claude-sonnet-5-5": {
+            "cache_read": 1000,
+            "cache_write_1h": 1000,
+            "cache_write_5m": 0,
+            "input": 200,
+            "output": 110,
+            "thinking": 0,
+            "usd": "0.150000",
+            "usd_micro": 150000
+          }
+        },
+        "by_stage": {
+          "tutor": {
+            "cache_read": 1000,
+            "cache_write_1h": 1000,
+            "cache_write_5m": 200,
+            "input": 210,
+            "output": 115,
+            "thinking": 3,
+            "usd": "0.350000",
+            "usd_micro": 350000
+          }
+        },
+        "cache_read_share": 0.4149,
+        "per_run_max": {
+          "cache_read": 1000,
+          "cache_write_1h": 1000,
+          "cache_write_5m": 200,
+          "input": 110,
+          "output": 65,
+          "thinking": 3,
+          "usd": "0.250000",
+          "usd_micro": 250000
+        },
+        "per_run_mean": {
+          "cache_read": 500,
+          "cache_write_1h": 500,
+          "cache_write_5m": 100,
+          "input": 105,
+          "output": 58,
+          "thinking": 2,
+          "usd": "0.175000",
+          "usd_micro": 175000
+        },
+        "runs": 2
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-X-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: bootstrap link issued (not printed)",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "stage-1: sign-in options",
+              "kind": "label",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for label \"stage-1: sign-in options\""
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "FR-X-5",
+              "kind": "item",
+              "status": "FAIL"
+            }
+          ],
+          "gaps": [],
+          "status": "FAIL"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/",
+              "kind": "page",
+              "status": "FAIL"
+            }
+          ],
+          "gaps": [],
+          "status": "FAIL"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [
+            {
+              "id": "cost",
+              "kind": "budget",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-X-6",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-X-6"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "browser: an error ends the cell in error",
+              "kind": "label",
+              "status": "FAIL"
+            }
+          ],
+          "gaps": [],
+          "status": "FAIL"
+        }
+      ],
+      "fail": 3,
+      "gate": "tracked",
+      "id": "tutor.ask",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 5,
+          "p95_ms_max": 30000,
+          "source": "NFR-X-1"
+        },
+        "n": 2,
+        "p50_ms": 12000,
+        "p95_ms": 15000,
+        "per": null
+      },
+      "missing": 3,
+      "status": "FAIL",
+      "title": "Ask the tutor"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {
+          "claude-sonnet-5-5": {
+            "cache_read": 0,
+            "cache_write_1h": 0,
+            "cache_write_5m": 0,
+            "input": 1,
+            "output": 1,
+            "thinking": 0,
+            "usd": "0.000001",
+            "usd_micro": 1
+          }
+        },
+        "by_stage": {
+          "none": {
+            "cache_read": 0,
+            "cache_write_1h": 0,
+            "cache_write_5m": 0,
+            "input": 1,
+            "output": 1,
+            "thinking": 0,
+            "usd": "0.000001",
+            "usd_micro": 1
+          }
+        },
+        "cache_read_share": 0,
+        "per_run_max": {
+          "cache_read": 0,
+          "cache_write_1h": 0,
+          "cache_write_5m": 0,
+          "input": 1,
+          "output": 1,
+          "thinking": 0,
+          "usd": "0.000001",
+          "usd_micro": 1
+        },
+        "per_run_mean": {
+          "cache_read": 0,
+          "cache_write_1h": 0,
+          "cache_write_5m": 0,
+          "input": 1,
+          "output": 1,
+          "thinking": 0,
+          "usd": "0.000001",
+          "usd_micro": 1
+        },
+        "runs": 1
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "stage-1: all services healthy (four default plus kernels), watcher running",
+              "kind": "label",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for label \"stage-1: all services healthy (four default plus kernels), watcher running\""
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "security",
+          "evidence": [],
+          "gaps": [],
+          "status": "WAIVED"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "FR-X-7",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-X-7"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [
+            {
+              "id": "cost",
+              "kind": "ledger",
+              "status": "FAIL"
+            }
+          ],
+          "gaps": [],
+          "status": "FAIL"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-X-6",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-X-6"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [],
+          "gaps": [
+            "drill disabled"
+          ],
+          "status": "MISSING"
+        }
+      ],
+      "fail": 1,
+      "gate": "enforced",
+      "id": "stack.up",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 2,
+          "p50_ms_max": 1000,
+          "per": "page",
+          "source": "structural: test"
+        },
+        "n": 2,
+        "p50_ms": 900,
+        "p95_ms": 1200,
+        "per": "page"
+      },
+      "missing": 4,
+      "status": "FAIL",
+      "title": "Start the stack"
+    }
+  ]
+}

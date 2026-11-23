@@ -66,7 +66,7 @@ fields:
   - { path: "users[].providers[].token", type: SecretRef, required: true, constraint: "FR-CONFIG-5" }
   - { path: tasks, type: "mapping of open keys to mapping", required: false, constraint: "keys non-empty strings" }
   - { path: "tasks.*.model", type: str, required: true, constraint: "non-empty, open set" }
-  - { path: "tasks.*.budget_usd_per_lesson", type: Decimal, required: false, constraint: "YAML number only; finite, > 0" }
+  - { path: "tasks.*.budget_usd_per_lesson", type: Decimal, required: false, constraint: "YAML number only; finite, > 0", note: "spent per compile run, not per lesson over time (SRV-AGENT FR-AGENT-9, paired note 2026-11-22); the name stays for compatibility" }
   - { path: budgets, type: mapping, required: false, constraint: "" }
   - { path: budgets.monthly_usd, type: Decimal, required: true, constraint: "YAML number only; finite, > 0" }
   - { path: budgets.warn_at, type: Decimal, required: false, constraint: "YAML number only; finite, 0 < x <= 1" }

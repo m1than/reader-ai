@@ -1,0 +1,60 @@
+# VEC-DOD-2 — a three-operation index for the report fixture (OPS-DOD FR-DOD-5..11). Written in Red, 2026-11-23.
+# The item ids are synthetic; traces.yaml stands in for the repository's @trace tags (FR-DOD-6). The inputs beside
+# this file are one synthetic live run; expected/ holds the report it must produce with `--commit abc1234` and the
+# repository root /repo. live.log holds TAB details, labels ending in their own parenthetical, duplicate labels,
+# indented output, a summary line and passkey_check.py's pre-TAB FAIL format (`FAIL stage-1: sign-in options:
+# assertion rejected …`, which must not count for the label `stage-1: sign-in options`). The ANSI variant is made by
+# the test, which wraps every status in colour escapes (a file tool cannot write ESC bytes): the report must not
+# change.
+version: 1
+criteria:
+  functional: does what the spec says
+  security: holds
+  privacy: no leak
+  a11y: no serious axe issue
+  latency: within budget
+  cost: within budget
+  observability: a log line
+  recovery: failure path tested
+not_user_facing:
+  - { route: "GET /api/healthz", reason: probe }
+operations:
+  - id: lesson.read
+    title: Read a lesson | with a pipe
+    surface: [web]
+    gate: enforced
+    criteria:
+      functional: { items: [FR-X-1], live: ["browser: lesson renders (markdown, math)"] }
+      security: { items: [FR-X-2] }
+      privacy: { items: [FR-X-3] }
+      a11y: { pages: ["/lessons/{lesson_id}"] }
+      latency: { budget: { p95_ms_max: 100, n_min: 3, kind: target, source: "structural: test" } }
+      cost: { na: "no provider call" }
+      observability: { live: ["stage-1: log line found"] }
+      recovery: { missing: "no recovery test" }
+  - id: tutor.ask
+    title: Ask the tutor
+    surface: [web]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-X-4], live: ["browser: bootstrap link issued (not printed)"] }
+      security: { live: ["stage-1: sign-in options"] }
+      privacy: { items: [FR-X-5] }
+      a11y: { pages: ["/"] }
+      latency: { budget: { p95_ms_max: 30000, n_min: 5, kind: target, source: NFR-X-1 } }
+      cost: { budget: { usd_per_run_max: 0.3, n_min: 2, kind: baseline, source: VEC-X-1 } }
+      observability: { items: [FR-X-6] }
+      recovery: { live: ["browser: an error ends the cell in error"] }
+  - id: stack.up
+    title: Start the stack
+    surface: [cli]
+    gate: enforced
+    criteria:
+      functional: { live: ["stage-1: all services healthy (four default plus kernels), watcher running"] }
+      security: { waived: { reason: "owner accepted", by: owner, date: "2026-11-23" } }
+      privacy: { items: [FR-X-7] }
+      a11y: { na: "no web surface" }
+      latency: { budget: { p50_ms_max: 1000, per: page, n_min: 2, kind: target, source: "structural: test" } }
+      cost: { na: "no provider call" }
+      observability: { items: [FR-X-6] }
+      recovery: { missing: "drill disabled" }

@@ -1,0 +1,606 @@
+# VEC-DOD-1 — Definition-of-Done index of every user operation (OPS-DOD).
+# Written 2026-11-22 from the specs on V/V.DOD-index after merging V/slice-integration, V/live-e2e, V/V.TUTOR-min and
+# V/V.COMPILE-min, the route registry (ROUTES/WS_ROUTES of the modules in reader.api.app.ROUTERS) and the CLI command
+# registry (reader.cli.app), and the live labels of e2e/live (stage-1.sh incl. passkey_check.py; web_live.py and
+# e2e/web/live/slice.live.ts under key `browser`).
+# Rechecked 2026-11-23 on V/slice-integration (744997e; every other spec approved): routes renamed by SRV-INGEST and
+# SRV-PIPELINE, the tutor items renumbered by SRV-TUTOR, the compile cap and the ledger's settled amount;
+# lesson.compile_resume × cost closed by the run's stored cap. Review round 1 opened search.query and cell.* ×
+# observability, auth.bootstrap and auth.signin × a11y, and a narrowed lesson.findings × recovery. 49 missing,
+# 44 na, counting declared gaps only (OPS-DOD header); every mapped item is traced by a test.
+# Every `na`, `missing` and `source` string that holds a comma or a colon is quoted: inside a `{ … }` flow mapping
+# an unquoted comma ends the value and starts a second key.
+#
+# A cell (operation × criterion) holds any of:
+#   items:   [spec item ids]     evidence = the test files that @trace them (FR-DOD-6); bench-only items are not used
+#   live:    ["<key>: <label>"]  evidence = PASS/FAIL lines of the live run (FR-DOD-4)
+#   budget:  {...}               latency/cost only; evidence = measurements with n ≥ n_min (FR-DOD-2)
+#   pages:   ["/path"]           a11y only; evidence = one axe.json entry per page (FR-DOD-5)
+#   na:      reason              criterion does not apply (allowed only per FR-DOD-2)
+#   waived:  {reason, by, date}  owner only (FR-DOD-12); never written by the agent
+#   missing: what is needed      a known gap; T10 error only when the operation is `enforced`
+# Every operation starts at gate: tracked. V.DOD-index is done when every operation is `enforced` with 0 missing.
+
+version: 1
+
+criteria:
+  functional:    the operation does what its spec says, end to end where a live check exists
+  security:      authentication, authorisation, isolation, CSRF and hardening hold for this operation
+  privacy:       no secret, token, book text, prompt or model output reaches a log, an artifact or a response it does not belong to
+  a11y:          every page of the operation has no serious or critical axe-core violation (web operations only)
+  latency:       p50/p95 within a sourced budget over at least n_min measurements
+  cost:          provider $ and tokens within a sourced budget over at least n_min runs (operations that call a model)
+  observability: the operation leaves a structured log line an owner can find it by
+  recovery:      the failure path is defined and tested (fail closed, retry, resume or a clear message)
+
+# Routes, commands and specs no user operation names, with the reason (FR-DOD-3). Agent additions are refused by the
+# guard-tests ratchet (FR-DOD-13); the initial list is reviewed with this spec.
+not_user_facing:
+  - { spec: OPS-DOD, reason: "tooling: this index and its verifier" }
+  - { route: "GET /api/healthz", reason: "container health probe (FR-AUTH-2), not a user action" }
+  - { route: "GET /api/auth/static/passkey.js", reason: "static asset of the bootstrap and sign-in pages" }
+  - { command: "reader-server", reason: "container entrypoint: the api, worker and mcp roles and --healthcheck (OPS-DEPLOY); its bootstrap-link runs only through `reader bootstrap` (FR-CLI-21)" }
+
+operations:
+  - id: auth.bootstrap
+    title: Register the first passkey from a one-time bootstrap link
+    surface: [cli, web]
+    specs: [SRV-AUTH, OPS-CLI]
+    routes: ["GET /api/auth/bootstrap", "POST /api/auth/bootstrap/options", "POST /api/auth/bootstrap/verify"]
+    commands: ["reader bootstrap"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-4, FR-AUTH-5, FR-AUTH-14, FR-CLI-21, INV-AUTH-7]
+        live: ["stage-1: bootstrap link issued for live-check (not printed)", "stage-1: bootstrap options",
+               "stage-1: registration with a per-run software passkey",
+               "browser: passkey registration through the bootstrap page (learner live-check)"]
+      security:
+        items: [INV-AUTH-1, INV-AUTH-4, INV-AUTH-7, FR-AUTH-11, FR-AUTH-12]
+        live: ["stage-1: POST without Origin is refused (403)"]
+      privacy:
+        items: [INV-AUTH-5, INV-CLI-9]
+        live: ["browser: bootstrap token appears in no artifact"]
+      a11y: { missing: "no axe run on /api/auth/bootstrap (the browser suite scans only / and the lesson page)" }
+      latency: { missing: "no sourced budget for the bootstrap ceremony; record timings in the live suite" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-18] }
+      recovery: { items: [FR-AUTH-5, FR-AUTH-11] }
+
+  - id: auth.signin
+    title: Sign in with a passkey
+    surface: [web]
+    specs: [SRV-AUTH, WEB-UI]
+    routes: ["GET /api/auth/signin", "POST /api/auth/signin/options", "POST /api/auth/signin/verify", "GET /api/me"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-7, FR-AUTH-8, FR-AUTH-14, FR-UI-5]
+        live: ["stage-1: sign-in options", "stage-1: sign-in with the same passkey", "stage-1: signed in again: /api/me is 200",
+               "browser: sign out, then sign in through the real page with the same passkey"]
+      security:
+        items: [INV-AUTH-1, INV-AUTH-2, INV-AUTH-3, INV-AUTH-4, INV-AUTH-6, FR-AUTH-10, FR-AUTH-12]
+        live: ["stage-1: anonymous /api/me is 401",
+               "browser: /api/me reports the learner; session cookie is __Host-, HttpOnly, Secure, SameSite"]
+      privacy: { items: [INV-AUTH-5] }
+      a11y: { missing: "no axe run on /api/auth/signin (the browser suite scans only / and the lesson page)" }
+      latency: { missing: "no sourced budget for the sign-in ceremony; record timings in the live suite" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-18] }
+      recovery: { items: [FR-AUTH-11, INV-AUTH-9] }
+
+  - id: auth.signout
+    title: Sign out
+    surface: [web]
+    specs: [SRV-AUTH, WEB-UI]
+    routes: ["POST /api/auth/signout"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-9, FR-UI-5]
+        live: ["stage-1: signed out: /api/me is 401"]
+      security: { items: [INV-AUTH-3, FR-AUTH-12] }
+      privacy: { items: [INV-AUTH-5] }
+      a11y: { pages: ["/"] }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for sign-out (FR-AUTH-18 covers failures only)" }
+      recovery: { items: [FR-UI-7] }
+
+  - id: auth.add_passkey
+    title: Add another passkey to my account (recent session)
+    surface: [web]
+    specs: [SRV-AUTH]
+    routes: ["POST /api/auth/register/options", "POST /api/auth/register/verify"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-AUTH-6] }
+      security: { items: [INV-AUTH-1, INV-AUTH-2, INV-AUTH-4, FR-AUTH-10, FR-AUTH-12] }
+      privacy: { items: [INV-AUTH-5] }
+      a11y: { missing: "no add-passkey page in the slice (api only); a page and its axe run come with stage 4b" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-18] }
+      recovery: { items: [FR-AUTH-11] }
+
+  - id: material.ingest
+    title: Add a material to reader.yaml and ingest it (reader-ingest, confined native converter, import job)
+    surface: [cli]
+    specs: [SRV-INGEST, SRV-EVENTS]
+    commands: ["reader-ingest"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-1, FR-INGEST-5, FR-INGEST-6, FR-INGEST-7, FR-INGEST-8, FR-INGEST-9, FR-INGEST-10, FR-INGEST-13, VEC-INGEST-2, VEC-INGEST-3] }
+      security: { items: [FR-INGEST-4, INV-INGEST-3, INV-INGEST-4, INV-INGEST-6, INV-EVENTS-5] }
+      privacy: { items: [INV-INGEST-5] }
+      a11y: { na: "no web surface in the slice (host command; browser upload deferred, owner 2026-11-21)" }
+      latency:
+        budget: { p50_ms_max: 6000, per: page, n_min: 20, kind: target,
+                  source: "ADR-0021 revisit_when ≥ 10 pages/min = 6,000 ms/page (NFR-INGEST-1); measured 15.69–15.85 pages/min confined (spikes/ingest-confine)" }
+      cost: { na: no provider call (local converter) }
+      observability: { items: [FR-INGEST-5, FR-INGEST-12] }
+      recovery: { items: [FR-INGEST-11, FR-INGEST-16, INV-INGEST-2] }
+
+  - id: ingest.setup
+    title: Prepare the converter venv and models (reader-ingest --setup)
+    surface: [cli]
+    specs: [SRV-INGEST]
+    commands: ["reader-ingest --setup"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-3] }
+      security: { items: [FR-INGEST-3] }
+      privacy: { missing: "no canary check for the setup step's output" }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (a multi-GB download, network dependent)" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for setup" }
+      recovery: { items: [FR-INGEST-3] }
+
+  - id: ingest.requeue
+    title: Requeue a dead import (reader-ingest --requeue)
+    surface: [cli]
+    specs: [SRV-INGEST, SRV-EVENTS]
+    commands: ["reader-ingest --requeue"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-12, FR-EVENTS-8] }
+      security: { items: [FR-EVENTS-8] }
+      privacy: { items: [INV-INGEST-5] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-INGEST-12] }
+      recovery: { items: [FR-EVENTS-8, INV-INGEST-2] }
+
+  - id: material.browse
+    title: Browse my materials (list, outline, spans of a page)
+    surface: [api]
+    specs: [SRV-INGEST]
+    routes: ["GET /api/materials", "GET /api/materials/{material_id}/outline", "GET /api/materials/{material_id}/spans"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-15, FR-INGEST-17, VEC-INGEST-5] }
+      security: { items: [FR-INGEST-15, INV-INGEST-6] }
+      privacy: { missing: "canary: span text never reaches api logs (INV-INGEST-5's [db] test reads a spans page that does not hold the canary span; a read of that span's page under caplog is needed)" }
+      a11y: { na: no web surface in the slice (api only) }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for material reads" }
+      recovery: { items: [VEC-INGEST-5] }
+
+  - id: search.query
+    title: Search the owner's materials (hybrid dense + full text)
+    surface: [api]
+    specs: [SRV-SEARCH]
+    routes: ["POST /api/search"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-SEARCH-7, FR-SEARCH-8, VEC-SEARCH-1] }
+      security: { items: [INV-SEARCH-1, INV-SEARCH-7] }
+      privacy: { items: [INV-SEARCH-5] }
+      a11y: { na: no web search surface in the slice (api for compile and tutor) }
+      latency:
+        items: [INV-SEARCH-8]
+        budget: { p95_ms_max: 30000, n_min: 40, kind: baseline,
+                  source: "SRV-SEARCH query call timeout 30 s (spec/modules/SRV-SEARCH.yaml:141: worst batch of 8 = 13.29 s + query 0.93 s, about 2× margin; spikes/embed-service); a hard deadline, so a baseline, not a target" }
+      cost: { na: "local embedding model, no provider spend" }
+      observability: { missing: "FR-SEARCH-8 requires the line; no test asserts it is emitted" }
+      recovery: { items: [FR-SEARCH-7] }
+
+  - id: lesson.list
+    title: List my lessons
+    surface: [web]
+    specs: [SRV-LESSON, WEB-UI]
+    routes: ["GET /api/lessons"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-LESSON-7, FR-UI-6, VEC-UI-2]
+        live: ["browser: lesson list shows the fixture lesson"]
+      security: { items: [INV-LESSON-4, FR-LESSON-12] }
+      privacy: { missing: "canary: lesson titles and text never reach api logs" }
+      a11y: { items: [INV-UI-1], pages: ["/"] }
+      latency: { missing: "no sourced budget (NFR-UI-1 bounds bundle bytes, not time)" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for lesson reads" }
+      recovery: { items: [FR-UI-6] }
+
+  - id: lesson.open
+    title: Open a lesson and read it (markdown, math, code, citations, open findings)
+    surface: [web]
+    specs: [SRV-LESSON, WEB-NOTEBOOK, WEB-RENDER, WEB-UI]
+    routes: ["GET /api/lessons/{lesson_id}", "GET /api/lessons/{lesson_id}/revisions/{sha256}"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-LESSON-8, FR-LESSON-9, FR-NOTEBOOK-1, FR-NOTEBOOK-2, FR-NOTEBOOK-3, FR-RENDER-1, FR-RENDER-2, FR-RENDER-3, FR-RENDER-4, VEC-NOTEBOOK-1]
+        live: ["browser: lesson renders: markdown, references, open finding"]
+      security:
+        items: [INV-LESSON-4, INV-RENDER-1, INV-RENDER-2, INV-UI-2, INV-UI-4, INV-NOTEBOOK-2]
+        live: ["browser: no Content-Security-Policy violation during the whole session"]
+      privacy: { missing: "canary: lesson cell text never reaches api logs" }
+      a11y: { items: [INV-UI-1], pages: ["/lessons/{lesson_id}"] }
+      latency: { missing: "no sourced budget for time to first render of a lesson" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for lesson reads" }
+      recovery: { items: [FR-LESSON-9, FR-NOTEBOOK-1] }
+
+  - id: cell.run
+    title: Run a lab cell
+    surface: [web]
+    specs: [SRV-KERNEL, OPS-SANDBOX, WEB-NOTEBOOK]
+    routes: ["POST /api/kernel/sessions", "GET /api/kernel/sessions", "DELETE /api/kernel/sessions/{session_id}",
+             "WS /api/kernel/sessions/{session_id}/channels"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-KERNEL-2, FR-KERNEL-3, FR-KERNEL-7, FR-KERNEL-10, FR-NOTEBOOK-4, FR-NOTEBOOK-5, FR-NOTEBOOK-6, FR-SANDBOX-3, VEC-KERNEL-1]
+        live: ["browser: cell runs: print(1) outputs 1", "browser: math and code render in kernel outputs (KaTeX, Shiki)",
+               "browser: an error ends the cell in error"]
+      security:
+        items: [INV-KERNEL-1, INV-KERNEL-2, INV-KERNEL-3, INV-KERNEL-4, INV-SANDBOX-1, INV-SANDBOX-3, INV-SANDBOX-4, FR-KERNEL-8, FR-KERNEL-12]
+        live: ["browser: sandbox: no egress, no secrets, no tokens in the environment",
+               "browser: HTML and SVG outputs are shown as text, never parsed"]
+      privacy: { items: [INV-KERNEL-6, INV-SANDBOX-2] }
+      a11y: { pages: ["/lessons/{lesson_id}"] }
+      latency:
+        budget: { p95_ms_max: 500, n_min: 30, kind: target,
+                  source: "NFR-KERNEL-1, roadmap SRV-KERNEL row; reviewer measured 47 ms median, 51 ms p95 over 30 runs direct to the gateway" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)" }
+      recovery: { items: [FR-KERNEL-14, FR-NOTEBOOK-8, INV-NOTEBOOK-1] }
+
+  - id: cell.interrupt
+    title: Interrupt a running cell
+    surface: [web]
+    specs: [SRV-KERNEL, WEB-NOTEBOOK]
+    routes: ["POST /api/kernel/sessions/{session_id}/interrupt"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-KERNEL-4, FR-NOTEBOOK-7]
+        live: ["browser: interrupt a busy loop"]
+      security: { items: [INV-KERNEL-1] }
+      privacy: { items: [INV-KERNEL-6] }
+      a11y: { pages: ["/lessons/{lesson_id}"] }
+      latency: { missing: "no sourced budget for interrupt-to-idle" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)" }
+      recovery: { items: [FR-KERNEL-10, FR-NOTEBOOK-8] }
+
+  - id: cell.reset
+    title: Reset the notebook kernel (fresh container)
+    surface: [web]
+    specs: [SRV-KERNEL, OPS-SANDBOX, WEB-NOTEBOOK]
+    routes: ["POST /api/kernel/reset"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-KERNEL-5, FR-SANDBOX-9, FR-NOTEBOOK-7, VEC-KERNEL-2]
+        live: ["browser: reset with confirmation, then the cell runs again"]
+      security: { items: [INV-SANDBOX-5, INV-SANDBOX-6, INV-KERNEL-5] }
+      privacy: { items: [INV-KERNEL-6] }
+      a11y: { pages: ["/lessons/{lesson_id}"] }
+      latency:
+        items: [FR-SANDBOX-9]
+        budget: { p95_ms_max: 30000, n_min: 3, kind: baseline,
+                  source: "FR-KERNEL-5 reset deadline (a hard deadline, so a baseline); measured 1.12–1.20 s round trips over 3 resets (docs/progress.yaml:541, OPS-SANDBOX)" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)" }
+      recovery: { items: [FR-KERNEL-5, FR-KERNEL-14] }
+
+  - id: cell.run_all
+    title: Run all cells of a lesson
+    surface: [web]
+    specs: [WEB-NOTEBOOK, SRV-KERNEL]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-NOTEBOOK-5, FR-KERNEL-10]
+        live: ["browser: Run all runs the lesson’s labs from their original source"]
+      security: { items: [INV-KERNEL-2, FR-KERNEL-10] }
+      privacy: { items: [INV-KERNEL-6] }
+      a11y: { pages: ["/lessons/{lesson_id}"] }
+      latency: { missing: "no sourced budget (bounded per cell by FR-KERNEL-10's 60 s timeout)" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)" }
+      recovery: { items: [FR-NOTEBOOK-5, INV-NOTEBOOK-1] }
+
+  - id: course.import
+    title: Import a course plan (gate G1)
+    surface: [api]
+    specs: [SRV-PIPELINE, SRV-LESSON]
+    routes: ["POST /api/pipeline/courses"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-PIPELINE-1, FR-LESSON-6] }
+      security: { items: [FR-PIPELINE-1] }
+      privacy: { missing: "canary: course titles never reach api logs" }
+      a11y: { na: no web surface in the slice (owner route) }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for course import" }
+      recovery: { items: [FR-PIPELINE-1] }
+
+  - id: lesson.compile
+    title: Compile a lesson with agents (draft, fact-check, review, revise, labs, G2 report)
+    surface: [api]
+    specs: [SRV-PIPELINE, SRV-AGENT, SRV-EVENTS, SRV-LESSON]
+    routes: ["POST /api/lessons/{lesson_id}/compile"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-5, FR-PIPELINE-7, FR-PIPELINE-9, FR-PIPELINE-12, FR-AGENT-6, FR-LESSON-4] }
+      security: { items: [FR-PIPELINE-3, FR-PIPELINE-11, VEC-PIPELINE-5, INV-AGENT-1, INV-AGENT-2, INV-AGENT-3, FR-AGENT-4, FR-AGENT-7] }
+      privacy: { items: [INV-PIPELINE-4, INV-AGENT-5] }
+      a11y: { na: "no web surface in the slice (owner route, no compile UI)" }
+      latency:
+        budget: { p95_ms_max: 2700000, n_min: 1, kind: target,
+                  source: "NFR-PIPELINE-1, 45 min per lesson (ADR-0005 / spikes/compile-cost pass criterion); measured 8.3–9.4 min for L02. n_min 1: each sample costs ≈ $2.4–3.0 (structural)" }
+      cost:
+        items: [FR-AGENT-8, FR-AGENT-9, INV-AGENT-4, VEC-AGENT-1]
+        budget: { usd_per_run_max: 4.35, n_min: 1, kind: target,
+                  source: "ADR-0005 per-lesson target ($100 for 23 lessons); the SRV-PIPELINE run cap is $8.00 (bounds.run_cap_usd, a declared deviation); measured $2.42–2.97 for L02" }
+      observability: { items: [FR-AGENT-5, FR-PIPELINE-6] }
+      recovery: { items: [FR-PIPELINE-6, INV-PIPELINE-2, VEC-PIPELINE-2, FR-AGENT-10] }
+
+  - id: lesson.compile_status
+    title: Watch a compile run (state, stages, spend)
+    surface: [api]
+    specs: [SRV-PIPELINE]
+    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-PIPELINE-6, FR-PIPELINE-11] }
+      security: { items: [FR-PIPELINE-11] }
+      privacy: { items: [INV-PIPELINE-4] }
+      a11y: { na: no web surface in the slice (owner route) }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call (reads the ledger) }
+      observability: { items: [FR-PIPELINE-6] }
+      recovery: { items: [FR-PIPELINE-6] }
+
+  - id: lesson.compile_resume
+    title: Resume a compile run with a dead step
+    surface: [api]
+    specs: [SRV-PIPELINE, SRV-EVENTS, SRV-AGENT]
+    routes: ["POST /api/compiles/{run_id}/resume"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-PIPELINE-11, FR-EVENTS-8] }
+      security: { items: [FR-PIPELINE-11] }
+      privacy: { items: [INV-PIPELINE-4] }
+      a11y: { na: no web surface in the slice (owner route) }
+      latency: { missing: "no sourced budget" }
+      cost:
+        items: [FR-AGENT-9, INV-AGENT-4]
+        budget: { usd_per_run_max: 8.00, n_min: 1, kind: baseline,
+                  source: "SRV-PIPELINE bounds.run_cap_usd: a resume requeues the dead step of the same run, which keeps its stored cap_usd (FR-PIPELINE-11, FR-AGENT-9); a hard cap, so a baseline" }
+      observability: { items: [FR-PIPELINE-6] }
+      recovery: { items: [INV-PIPELINE-2, FR-EVENTS-8] }
+
+  - id: lesson.findings
+    title: Read open findings and the G2 report of a compiled lesson
+    surface: [web, api]
+    specs: [SRV-PIPELINE, WEB-NOTEBOOK, SRV-LESSON]
+    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-PIPELINE-8, FR-PIPELINE-10, FR-PIPELINE-11, FR-NOTEBOOK-3, VEC-PIPELINE-3]
+        live: ["browser: lesson renders: markdown, references, open finding"]
+      security: { items: [INV-PIPELINE-3, INV-PIPELINE-5, INV-LESSON-4] }
+      privacy: { items: [INV-PIPELINE-4] }
+      a11y: { pages: ["/lessons/{lesson_id}"] }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call (the findings step is deterministic) }
+      observability: { missing: "no spec requires a log line for reading the G2 report" }
+      recovery:
+        items: [FR-PIPELINE-6, FR-NOTEBOOK-1]
+        missing: "no test asserts the status routes' answer while the G2 report is absent (run running, stalled or stage_failed: g2 null, FR-PIPELINE-11)"
+
+  - id: tutor.ask
+    title: Ask the tutor about the open lesson
+    surface: [web]
+    specs: [SRV-TUTOR, SRV-AGENT, SRV-SEARCH]
+    routes: ["POST /api/lessons/{lesson_id}/ask"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-4, FR-TUTOR-5, FR-TUTOR-6, FR-TUTOR-7, FR-TUTOR-8, FR-TUTOR-9, FR-TUTOR-11, VEC-TUTOR-1] }
+      security: { items: [INV-TUTOR-1, INV-TUTOR-2, INV-TUTOR-3, VEC-TUTOR-2] }
+      privacy: { items: [INV-TUTOR-4] }
+      a11y: { items: [FR-TUTOR-11], pages: ["/lessons/{lesson_id}"] }
+      latency:
+        budget: { p95_ms_max: 30000, n_min: 20, kind: target, source: "NFR-TUTOR-1 (20 questions on L02, idle worker)" }
+      cost:
+        items: [INV-TUTOR-5, VEC-TUTOR-3]
+        budget: { usd_per_run_max: 0.30, n_min: 20, kind: baseline,
+                  source: "SRV-TUTOR bounds.question_cap_usd = 0.30 (derived by VEC-TUTOR-3: attempts_max × worst-case reserve), a hard cap, so a baseline; NFR-TUTOR-2 expects a mean of about $0.048" }
+      observability: { items: [FR-TUTOR-12] }
+      recovery: { items: [FR-TUTOR-3, FR-TUTOR-10, INV-TUTOR-5, INV-TUTOR-6] }
+
+  - id: tutor.history
+    title: Read a tutor answer and my earlier questions on a lesson
+    surface: [web]
+    specs: [SRV-TUTOR]
+    routes: ["GET /api/lessons/{lesson_id}/questions/{question_id}", "GET /api/lessons/{lesson_id}/questions"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-TUTOR-2, FR-TUTOR-9, FR-TUTOR-11] }
+      security: { items: [INV-TUTOR-1] }
+      privacy: { items: [INV-TUTOR-4] }
+      a11y: { items: [FR-TUTOR-11], pages: ["/lessons/{lesson_id}"] }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call (reads stored answers) }
+      observability: { items: [FR-TUTOR-12] }
+      recovery: { items: [FR-TUTOR-2, FR-TUTOR-10, INV-TUTOR-6] }
+
+  - id: stack.backup
+    title: Back up the stack (reader backup DIR)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader backup"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-17]
+        missing: "live label 'stage-1: reader backup' runs only under --drill, disabled until S1.OPS-CLI-restore-seed"
+      security:
+        items: [FR-CLI-17]
+        missing: "live label 'stage-1: backup files are 0600' runs only under --drill (disabled)"
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (FR-CLI-17 bounds pg_dump at 600 s, a hard deadline)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery: { items: [FR-CLI-17] }
+
+  - id: stack.restore
+    title: Restore the stack from a backup (reader restore DIR)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader restore"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-18]
+        missing: "drill labels (restore onto a fresh stack, restored passkey) disabled until S1.OPS-CLI-restore-seed"
+      security: { items: [FR-CLI-18] }
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (FR-CLI-18 bounds pg_restore at 600 s, a hard deadline)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery:
+        items: [FR-CLI-18]
+        missing: "the backup-restore drill is disabled until S1.OPS-CLI-restore-seed"
+
+  - id: stack.up
+    title: Start the stack (reader up)
+    surface: [cli]
+    specs: [OPS-CLI, OPS-DEPLOY, SRV-CONFIG]
+    commands: ["reader up"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-8, FR-CLI-10, FR-DEPLOY-1, FR-DEPLOY-11, VEC-CLI-3]
+        live: ["stage-1: all services healthy (four default plus kernels), watcher running", "stage-1: GET /api/healthz is ok"]
+      security:
+        items: [INV-CLI-8, INV-DEPLOY-2, INV-DEPLOY-10, FR-DEPLOY-9]
+        live: ["stage-1: api and worker run as 10001, read-only, cap-drop ALL", "stage-1: postgres runs as 999 with a read-only root",
+               "stage-1: secret files 0600, owned by the service uid", "stage-1: nothing below /run/secrets in docker diff",
+               "stage-1: security headers and CSP"]
+      privacy: { items: [INV-CLI-1, INV-CLI-2, INV-CONFIG-2] }
+      a11y: { na: no web surface }
+      latency:
+        items: [FR-CLI-10]
+        budget: { p95_ms_max: 180000, n_min: 1, kind: baseline,
+                  source: "FR-CLI-10 health deadline (a hard deadline, so a baseline; NFR-DEPLOY-1 120 s plus initdb)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-13, FR-CLI-19] }
+      recovery:
+        items: [INV-CLI-4]
+        live: ["stage-1: re-delivered by the watcher after an api restart", "stage-1: fails closed without the watcher, then reader up restores",
+               "stage-1: postgres restarts without its secret file"]
+
+  - id: stack.down
+    title: Stop the stack (reader down, reader watcher stop)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader down", "reader watcher stop"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-CLI-1, FR-CLI-7] }
+      security: { items: [INV-CLI-7] }
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (watcher SIGKILL at 15 s is the only bound)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery: { items: [FR-CLI-20] }
+
+  - id: stack.status
+    title: Show stack health (reader status, reader watcher status)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader status", "reader watcher status"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-CLI-13] }
+      security: { items: [FR-CLI-11] }
+      privacy: { items: [INV-CLI-2] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-13] }
+      recovery: { items: [FR-CLI-13] }
+
+  - id: stack.doctor
+    title: Check the host setup (reader doctor)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader doctor"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CLI-15]
+        live: ["stage-1: reader doctor: all ok"]
+      security: { items: [FR-CLI-11] }
+      privacy: { items: [INV-CLI-2] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-15] }
+      recovery: { items: [FR-CLI-15] }
+
+  - id: stack.trust
+    title: Trust or untrust the local TLS root (reader trust, reader down --untrust)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader trust", "reader down --untrust"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-CLI-16] }
+      security: { items: [FR-CLI-16] }
+      privacy: { items: [INV-CLI-1] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (owner-interactive)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery: { missing: "no live check of untrust verification (owner-run, ADR-0024)" }
+
+  - id: secrets.set
+    title: Store a secret in the Keychain (reader secrets set NAME)
+    surface: [cli]
+    specs: [OPS-CLI]
+    commands: ["reader secrets set"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-CLI-12] }
+      security: { items: [FR-CLI-12, INV-CLI-2] }
+      privacy: { items: [INV-CLI-1, INV-CLI-2] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget (owner-interactive)" }
+      cost: { na: no provider call }
+      observability: { items: [FR-CLI-19] }
+      recovery: { items: [FR-CLI-12, FR-CLI-20] }

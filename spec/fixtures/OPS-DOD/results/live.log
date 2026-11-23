@@ -1,0 +1,13 @@
+== Stage 1: stack ==
+  some indented command output CANARY
+PASS stage-1: log line found
+PASS browser: lesson renders (markdown, math)	(3.4s)
+PASS browser: bootstrap link issued (not printed)
+FAIL stage-1: sign-in options: assertion rejected CANARY
+SKIP stage-1: all services healthy (four default plus kernels), watcher running
+PASS browser: an error ends the cell in error	(1.0s)
+FAIL browser: an error ends the cell in error	(found and removed in: CANARY)
+FAIL browser: unmapped check CANARY
+PASS stage-1: log line found
+PASS: 5 of 7 checks
+

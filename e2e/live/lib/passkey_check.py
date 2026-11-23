@@ -33,12 +33,13 @@ failures = 0
 
 
 def report(name: str, ok: bool, detail: str = "") -> bool:
+    """One `<STATUS> <label>` line; any detail follows a TAB, so the label stays exact (OPS-DOD FR-DOD-4)."""
     global failures
     if ok:
         print(f"PASS {name}")
     else:
         failures += 1
-        print(f"FAIL {name}" + (f": {detail}" if detail else ""))
+        print(f"FAIL {name}" + (f"\t{detail}" if detail else ""))
     return ok
 
 
@@ -54,9 +55,11 @@ def psql(project: str, sql: str) -> tuple[int, str]:
     return done.returncode, done.stdout.decode("utf-8", "replace").strip()
 
 
-def bootstrap_token(project: str, url: str) -> str | None:
-    """The token from the link; the link itself never leaves this function."""
-    done = compose(project, "exec", "-T", "api", "reader-server", "bootstrap-link", "--handle", HANDLE)
+def bootstrap_token(project: str, url: str, handle: str | None = HANDLE) -> str | None:
+    """The token from the link; the link itself never leaves this function. `handle=None` is the owner's link,
+    as `reader bootstrap` issues it (FR-DEPLOY-11); it is refused once the owner has a passkey."""
+    argv = ["exec", "-T", "api", "reader-server", "bootstrap-link"] + (["--handle", handle] if handle else [])
+    done = compose(project, *argv)
     if done.returncode != 0:
         return None
     lines = done.stdout.decode("utf-8", "replace").strip().splitlines()

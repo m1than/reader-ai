@@ -1,0 +1,14 @@
+{
+  "note": "NFR-INGEST-1 measurement: one full `reader-ingest` conversion of the pilot material on the owner's Mac (Apple Silicon, CPU, configuration D of ADR-0021), 2026-11-22, converter docling-2.151.1+r1. Numbers only, no book text.",
+  "source_sha256_ref": "pilot-expectations.yaml#source_sha256",
+  "page_count": 935,
+  "pages_converted": 935,
+  "wall_seconds": 856.3,
+  "pages_per_minute": 65.5,
+  "child_peak_rss_mib": 4025.5,
+  "pages_without_text": [1, 2, 3, 4, 392, 935],
+  "span_count": 9463,
+  "spans_by_kind": {"code": 360, "formula": 36, "table": 48, "figure": 586},
+  "formulas_decoded": 36,
+  "spans_jsonl_bytes": 4479265
+}

@@ -270,6 +270,16 @@ def test_doctor_reports_each_check_without_values(tmp_path: Path, monkeypatch: p
     assert CANARY not in world.out + world.err
 
 
+def test_doctor_db_password_detail_on_a_fresh_install(tmp_path: Path) -> None:
+    world = make_world(tmp_path)
+    stack(world, rendered(agents=True), volume_exists=False)
+    world.runner.on("docker", "compose", "version", result=b"5.6.1\n")
+    config = write_config(tmp_path / "cfg")
+    _main(world, "doctor", "--json", "--config", str(config))
+    check = next(c for c in json.loads(world.out) if c["name"] == "db-password")
+    assert check == {"name": "db-password", "ok": True, "detail": "not generated yet (fresh install)"}
+
+
 def test_doctor_fails_on_compose_v1(tmp_path: Path) -> None:
     _, checks, _ = _doctor(tmp_path, b"1.29.2\n")
     assert next(c for c in checks if c["name"] == "compose")["ok"] is False

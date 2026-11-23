@@ -1,24 +1,30 @@
 """Helpers for the OPS-SANDBOX [image] tests (spec/modules/OPS-SANDBOX.yaml).
 
-The image `reader-kernel:local` is built once per session from sandbox/. Each test starts its own kernel
+The image is built once per session from sandbox/ under this session's own tag
+`reader-kernel:test-<pid>.<random>` (the stack's `reader-kernel:local` is never built, tagged or removed by
+tests; a shared tag was retagged by concurrent sessions mid-run). Each test starts its own kernel
 container with `docker run` flags equal to OPS-DEPLOY's `x-kernel` template (read from the source of
-deploy/compose.yaml) plus `--restart always`, on a throwaway `--internal` network under the alias `kernel`.
+deploy/compose.yaml) plus `--restart always`, on a throwaway `--internal` network under the alias `kernel`;
+the network takes an explicit /28 in 10.231.0.0/16 (`create_network`), since the live stack can exhaust
+Docker's default address pools.
 "From inside the container" means `docker exec` as uid 1000 (the same uid, namespaces, capabilities and
 seccomp as a cell) or a cell run through Kernel Gateway. "The caller" is a probe container on the same
 network. Everything a test creates carries this session's own label
 `org.reader-ai.test.sandbox-run=<pid>.<random>` and is removed after the test. The Docker daemon is shared
 with concurrent sessions (other worktrees, other gates), so the session finalizer removes only objects with
 this session's value, and the session start removes only objects whose pid is no longer alive (a killed
-session runs no finalizer). Another live session's objects are never touched (OPS-SANDBOX header, test
-isolation).
+session runs no finalizer). The same holds for image tags. Another live session's objects are never touched
+(OPS-SANDBOX header, test isolation and test image).
 
 Inputs that do not exist yet (sandbox/Dockerfile, the image) make a test fail on an assertion inside its
 body.
 """
 
+import ipaddress
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -38,11 +44,14 @@ LOCK = SANDBOX / "requirements.lock"
 COMPOSE = REPO / "deploy" / "compose.yaml"
 SERVER_DOCKERFILE = REPO / "deploy" / "images" / "server.Dockerfile"
 PROBES = REPO / "spec" / "fixtures" / "OPS-SANDBOX" / "probes.yaml"
-IMAGE = "reader-kernel:local"
-# One label per pytest process: `<key>=<pid>.<random>`. Concurrent sessions share the Docker daemon, so a
-# session removes only what carries its own value, plus what a dead pytest process left behind.
+# One run id per pytest process, `<pid>.<random>`, for the label and the image tag. Concurrent sessions share
+# the Docker daemon, so a session removes only what carries its own id, plus what a dead pytest process left.
+RUN_ID = f"{os.getpid()}.{uuid.uuid4().hex[:8]}"
 RUN_KEY = "org.reader-ai.test.sandbox-run"
-LABEL = f"{RUN_KEY}={os.getpid()}.{uuid.uuid4().hex[:8]}"
+LABEL = f"{RUN_KEY}={RUN_ID}"
+IMAGE_REPO = "reader-kernel"
+TAG_PREFIX = "test-"
+IMAGE = f"{IMAGE_REPO}:{TAG_PREFIX}{RUN_ID}"
 NONCE = re.compile(r"^[0-9a-f]{32}$")
 RESET_DEADLINE_S = 30.0  # SRV-KERNEL FR-KERNEL-5
 
@@ -60,6 +69,28 @@ def docker(*args: str, timeout: float = 300) -> subprocess.CompletedProcess[str]
     return subprocess.run(  # noqa: S603
         ["docker", *args], capture_output=True, text=True, check=False, timeout=timeout,  # noqa: S607
     )
+
+
+TEST_SUBNETS = ipaddress.IPv4Network("10.231.0.0/16")  # explicit test subnets, outside Docker's default pools
+
+
+def create_network(name: str, label: str, attempts: int = 20) -> None:
+    """An `--internal` network on a random /28 of TEST_SUBNETS (OPS-SANDBOX header, test networks).
+
+    The live stack can use up Docker's default address pools, so test networks never draw from them. A /28
+    holds 13 containers besides the gateway, more than any test puts on one network. A random /28 can collide
+    with a concurrent session's; "Pool overlaps" is retried with another one."""
+    base, count = int(TEST_SUBNETS.network_address), TEST_SUBNETS.num_addresses // 16
+    last = ""
+    for _ in range(attempts):
+        subnet = ipaddress.IPv4Network((base + 16 * secrets.randbelow(count), 28))
+        proc = docker("network", "create", "--internal", "--subnet", str(subnet), "--label", label, name)
+        if proc.returncode == 0:
+            return
+        last = proc.stderr
+        if "overlap" not in last.lower():
+            break
+    raise AssertionError(f"network create {name} failed: {last}")
 
 
 def load_yaml(path: Path) -> Any:
@@ -101,7 +132,7 @@ def image() -> Iterator[Build]:
         proc = docker("build", "--platform", "linux/arm64", "-t", IMAGE, "-f", str(DOCKERFILE), str(SANDBOX),
                       timeout=1800)
         yield Build(proc.returncode == 0, (proc.stdout + proc.stderr)[-6000:])
-    sweep(lambda value: value == LABEL.split("=", 1)[1])
+    sweep(lambda value: value == RUN_ID)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -131,6 +162,11 @@ def sweep(mine: Any) -> None:
     for r in rows:
         if len(r.split()) == 2 and mine(r.split()[1]):
             docker("network", "rm", r.split()[0])
+    # Image tags last: untag only (`image rm` of a tag never deletes layers another tag still uses).
+    tags = docker("image", "ls", IMAGE_REPO, "--format", "{{.Tag}}").stdout.split()
+    for tag in tags:
+        if tag.startswith(TAG_PREFIX) and mine(tag[len(TAG_PREFIX):]):
+            docker("image", "rm", f"{IMAGE_REPO}:{tag}")
 
 
 # A minimal Jupyter client run in a probe container: creates a kernel over REST (optionally with `env`),
@@ -225,13 +261,12 @@ class Sandbox:
     def _net(self) -> str:
         if self.network is None:
             net = f"rk-net-{self.tag}"
-            proc = docker("network", "create", "--internal", "--label", LABEL, net)
-            assert proc.returncode == 0, proc.stderr
+            create_network(net, LABEL)
             self.network = net
         return self.network
 
     def start(self, wait_up: bool = True) -> dict[str, Any]:
-        assert self.build.ok, f"image reader-kernel:local did not build:\n{self.build.log}"
+        assert self.build.ok, f"image {IMAGE} did not build:\n{self.build.log}"
         net = self._net()
         proc = docker("run", "-d", "--name", self.name, "--label", LABEL, "--network", net,
                       "--network-alias", "kernel", *template_flags(), IMAGE)
@@ -262,7 +297,12 @@ class Sandbox:
         return docker("exec", "-u", "1000:1000", self.name, *argv)
 
     def state(self) -> dict[str, Any]:
-        proc = self.exec(STATE, timeout=30)
+        # A `docker exec` into a container that is being restarted can hang on Docker Desktop: that is one
+        # failed poll, not a test error. 5 s covers the in-container 2 s request with margin.
+        try:
+            proc = self.exec(STATE, timeout=5)
+        except subprocess.TimeoutExpired:
+            return {"error": "exec-timeout"}
         if proc.returncode != 0 or not proc.stdout.strip():
             return {"error": "exec"}
         result: dict[str, Any] = json.loads(proc.stdout)

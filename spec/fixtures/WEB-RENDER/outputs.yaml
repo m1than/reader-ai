@@ -1,0 +1,70 @@
+# VEC-RENDER-1: the ADR-0013 rendering matrix as cases, as the slice renders them (the sandboxed frame is deferred to
+# stage 4b, so text/html and image/svg+xml render their plain-text alternative or their source as text; an SVG blob
+# opened top-level would run its script in the app origin). Synthetic content.
+# treatment:
+#   text      — text nodes only (no HTML parsing), ANSI escape sequences removed
+#   image     — <img> with a blob: URL from the decoded base64 (PNG, JPEG, GIF only); revoked once loaded or failed,
+#               and on unmount
+#   json      — pretty-printed with 2-space indentation, as text
+#   markdown  — the markdown pipeline (FR-RENDER-2)
+#   latex     — KaTeX (FR-RENDER-3), outer delimiters stripped first
+#   dropped   — "unsupported output type: <type>" as text
+# Preference: JupyterLab's default rendermime order (REF-RENDER-6) restricted to the types the slice handles.
+# text/html stays first so that an output whose richest type is HTML shows its text/plain alternative (or its source
+# as text), never a lower-ranked rich type the kernel did not intend as the main view.
+preference: [text/html, text/markdown, text/latex, image/svg+xml, image/png, image/jpeg, image/gif, application/json, text/plain]
+cases:
+  - id: plain
+    output: {output_type: stream, name: stdout, text: "ba7816bf\n"}
+    treatment: text
+  - id: ansi-traceback
+    output: {output_type: error, ename: ZeroDivisionError, evalue: "division by zero",
+             traceback: ["\u001b[0;31mZeroDivisionError\u001b[0m: division by zero"]}
+    treatment: text
+    expect_text: "ZeroDivisionError: division by zero"
+  - id: png
+    output: {output_type: display_data, data: {image/png: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", text/plain: "<Figure>"}, metadata: {}}
+    treatment: image
+    expect_alt: "<Figure>"
+  - id: json
+    output: {output_type: execute_result, execution_count: 1, data: {application/json: {a: 1}, text/plain: "{'a': 1}"}, metadata: {}}
+    treatment: json
+  - id: markdown-hostile
+    output: {output_type: display_data, data: {text/markdown: "**ok** <script>alert(1)</script> [x](javascript:alert(2)) <img src=x onerror=alert(3)> ![p](https://example.com/p.png) <span style='position:fixed'>o</span>"}, metadata: {}}
+    treatment: markdown
+    expect_absent_elements: [script, img, style, span]
+    expect_absent_attributes: [onerror, style, srcset]
+    expect_absent_in_hrefs: ["javascript:"]
+    note: "raw HTML is shown as text (no rehype-raw); markdown images are not rendered in the slice"
+  - id: latex
+    output: {output_type: display_data, data: {text/latex: "$$\\href{javascript:alert(1)}{x} + 2^{n/2}$$"}, metadata: {}}
+    treatment: latex
+    expect_absent_in_hrefs: ["javascript:"]
+  - id: latex-size
+    output: {output_type: display_data, data: {text/latex: "$\\rule{1000em}{1000em}$"}, metadata: {}}
+    treatment: latex
+    note: "KaTeX maxSize caps the rule; the container clips overflow"
+  - id: html-with-plain
+    output: {output_type: execute_result, execution_count: 2, data: {text/html: "<b>x</b><script>alert(1)</script>", text/plain: "x"}, metadata: {}}
+    treatment: text
+    expect_text: "x"
+  - id: html-only
+    output: {output_type: display_data, data: {text/html: "<p onclick=alert(1)>probe</p>"}, metadata: {}}
+    treatment: text
+    expect_text: "<p onclick=alert(1)>probe</p>"
+  - id: svg-script
+    output: {output_type: display_data, data: {image/svg+xml: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script><circle r='4'/></svg>"}, metadata: {}}
+    treatment: text
+    expect_text: "<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script><circle r='4'/></svg>"
+    note: "no SVG blob is created: an image/svg+xml blob URL opened top-level runs its script with the session (code review, Chromium)"
+  - id: svg-with-plain
+    output: {output_type: display_data, data: {image/svg+xml: "<svg xmlns='http://www.w3.org/2000/svg'/>", text/plain: "<Figure size 1x1>"}, metadata: {}}
+    treatment: text
+    expect_text: "<Figure size 1x1>"
+  - id: widget-view
+    output: {output_type: display_data, data: {application/vnd.jupyter.widget-view+json: {model_id: "m1", version_major: 2, version_minor: 0}, text/plain: "IntSlider(value=0)"}, metadata: {}}
+    treatment: text
+    note: "widgets are deferred; the text/plain fallback renders"
+  - id: unknown-only
+    output: {output_type: display_data, data: {application/x-unknown: "?"}, metadata: {}}
+    treatment: dropped

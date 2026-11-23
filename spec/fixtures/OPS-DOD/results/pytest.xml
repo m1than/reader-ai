@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites><testsuite name="pytest" errors="1" failures="0" skipped="1" tests="4" time="0.04" hostname="CANARY-host">
+<testcase classname="tests.test_a" name="test_one" file="tests/test_a.py" line="1" time="0.010" />
+<testcase classname="tests.test_a" name="test_two_CANARY" file="tests/test_a.py" line="5" time="0.020"><system-out>CANARY captured output</system-out></testcase>
+<testcase classname="tests.test_b" name="test_err" file="tests/test_b.py" line="1" time="0.010"><error message="CANARY boom">Traceback CANARY</error></testcase>
+<testcase classname="tests.test_c" name="test_skip" file="/repo/server/tests/test_c.py" line="1" time="0.000"><skipped type="pytest.skip" message="CANARY skip">CANARY</skipped></testcase>
+</testsuite></testsuites>

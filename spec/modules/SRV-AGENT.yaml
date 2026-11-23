@@ -1,0 +1,330 @@
+# SRV-AGENT — the agent runtime for the slice (V.COMPILE-min, docs/roadmap.md "Vertical slice first", V7).
+#
+# What it is:
+#   - `agent-proxy`, the credential-injecting reverse proxy of accepted ADR-0025 (c): the only holder of provider tokens,
+#     reachable only by `worker` on `agentnet`, forwarding one method and path to one pinned host with the credential of
+#     the user a per-run token names;
+#   - the `Provider` port (ADR-0005) and its Agent SDK adapter, run inside `worker` with no tools;
+#   - spend accounting: an append-only ledger of reservations and settlements, run and monthly budgets, and a pricing
+#     table as data (ADR-0005).
+#
+# Complex areas (AGENTS.md): secrets, the egress proxy, cost math. Full deep-reviewer review until approve.
+#
+# Evidence:
+#   - spikes/agent-proxy-handshake (2026-11-22, zero credit): with CLAUDE_CODE_OAUTH_TOKEN=<run token> and
+#     ANTHROPIC_BASE_URL=<proxy>, the bundled CLI (claude-agent-sdk 0.2.187) sends `Authorization: Bearer <run token>`
+#     on `POST /v1/messages?beta=true` only; with CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 exactly one request per
+#     query and no other host; `tools=[]` gives an empty init tool list and an empty request `tools`. ADR-0025
+#     hypothesis 1 holds against a stub; the real upstream is FR-AGENT-11.
+#   - spikes/compile-cost: 12 stage costs; the pricing table recomputes them within 0.38–1.78 % (VEC-AGENT-1).
+#
+# Design decisions:
+#   - The per-run token (`run_token`) IS the bearer placeholder the CLI sends. The worker asks agent-proxy for a
+#     run_token bound to one user, starts the CLI with it, and agent-proxy swaps it for that user's token on the way out.
+#     The worker never holds a provider token; a run_token is useless outside `agentnet` and expires.
+#   - agent-proxy is a reverse proxy to one pinned upstream, not a forward proxy, with a method, path, query and header
+#     allow-list (FR-AGENT-4), so injection cannot reach any other host by construction (still tested, INV-AGENT-3).
+#   - Spend is what the SDK reports (`ResultMessage.total_cost_usd`). Before each call a reservation row is appended;
+#     after it a settlement row. `spent` counts settlements plus unsettled reservations, so a crash, stall, timeout or
+#     abort between the two still counts its worst case (FR-AGENT-9).
+#   - No tools for any compile stage (`tools=[]`), checked twice: the init tool list must be empty before any assistant
+#     output is read, and agent-proxy refuses a request body whose `tools` is not empty (FR-AGENT-7).
+#   - Under ADR-0025's fallback (if FR-AGENT-11 fails on the real upstream): the worker receives the user's token file
+#     (OPS-CLI delivery to worker), passes the token only in the CLI subprocess environment, and agent-proxy becomes a
+#     plain egress proxy for the same allow-list without injection; FR-AGENT-3 and INV-AGENT-1 for the worker no longer
+#     hold and are replaced by "token only in the CLI subprocess env"; FR-AGENT-7 is unchanged.
+#
+# ADRs: ADR-0025, ADR-0023, ADR-0026 accepted; ADR-0005, ADR-0006, ADR-0011, ADR-0017 proposed and followed as written.
+# Upstream specs: SRV-CONFIG (merged), SRV-AUTH (merged), SRV-EVENTS (origin/V/V.SRV-JOBS-min, approved in review).
+#
+# Cross-spec (paired changes in their own specs):
+#   - OPS-DEPLOY: FR-DEPLOY-5 adds agent-proxy to the read-only reader.yaml bind set (READER_CONFIG); a note that
+#     `deploy/images/agent-proxy.Dockerfile` is owned by SRV-AGENT; agent-proxy's command is the image entrypoint;
+#     `deploy/reader.example.yaml` task budgets become per-run and sized for two worst-case calls each (draft 4.00,
+#     fact_check 2.00, review 4.00; today 2.0/1.0/1.2, which a second review or a revise would exceed).
+#   - OPS-CLI: FR-CLI-4 adds agent-proxy to the override bind set; profile `agents` started for a compile (progress task
+#     V.OPS-CLI-agents); it already delivers provider token files to agent-proxy (FR-CLI-5).
+#   - SRV-EVENTS: an amendment allowing a handler to append spend rows (append-only, no outcome effect) on a separate
+#     connection outside the run transaction (FR-EVENTS-4/5).
+#   - SRV-AUTH: VERSION_LOCATIONS adds `reader/agent/migrations`. No route module in the slice (/api/spend deferred).
+#   - SRV-CONFIG: a note that `tasks.<name>.budget_usd_per_lesson` is spent per compile run (FR-AGENT-9); the field
+#     name stays for compatibility.
+#   - server/pyproject.toml: `httpx` as a dependency (agent-proxy's upstream client); an optional extra `agent` with
+#     `claude-agent-sdk==0.2.187`, also in the dev group (tests, mypy). OPS-DEPLOY: `server.Dockerfile` installs the extra
+#     (api, worker and mcp share one image); `agent-proxy.Dockerfile` does not. Only `reader.agent.provider` imports
+#     the SDK, and the api never imports that module.
+#
+# Review: deep-reviewer (Fable) rounds 1 and 2 changes, round 3 approve (2026-11-22); the approval items (unknown or
+# evicted upstream record, multiple 2xx, INV-AGENT-4 wording, agent-proxy's config path) are folded in.
+# Amendment (SRV-TUTOR review, 2026-11-22): FR-AGENT-12 (daily per-user, per-task scope) and FR-AGENT-13 (thinking
+# off, custom system prompt and its reserve, stop reason, abort on the first api_retry, per-call deadline); covered by
+# the implementation's code review.
+# Paired from SRV-TUTOR's code review (2026-11-23): `ledger.spent(..., day=True)` is public (the tutor's daily
+# pre-check reads FR-AGENT-12's scope through it); `HttpProxyClient.aclose()` closes its HTTP client; a [db] test
+# pins FR-AGENT-9's per-user advisory lock: two concurrent reserves with room for one (under the daily scope, and
+# separately under the run cap) give one reserve row and one refusal.
+# Paired from SRV-TUTOR's code review round 2 (2026-11-23; no new review round): the settle row also stores
+# `thinking`, the SDK's `usage.output_tokens_details.thinking_tokens` (measured present in spikes/tutor-call and
+# spikes/compile-cost). It is already inside `output`, so it is not priced; null when the SDK gives none. Additive
+# migration agent_0002 (a nullable column); VEC-AGENT-1's mapping and a [db] settle test cover it.
+
+id: SRV-AGENT
+title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+layer: server
+track: ai
+adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017]
+slice: V.COMPILE-min
+
+paths:
+  - server/src/reader/agent/**
+  - server/tests/agent/**
+  - deploy/images/agent-proxy.Dockerfile
+  - spec/fixtures/SRV-AGENT/**
+
+normative:
+  - id: REF-AGENT-1
+    title: ADR-0025 — agent sandbox and credential separation (accepted)
+    url: docs/adr/0025-agent-sandbox-and-credential-separation.md
+  - id: REF-AGENT-2
+    title: ADR-0005 — agent runtime, per-user providers and cost budgets
+    url: docs/adr/0005-agent-runtime-and-providers.md
+  - id: REF-AGENT-3
+    title: Claude Agent SDK for Python (ClaudeAgentOptions, SystemMessage init, ResultMessage.total_cost_usd and usage)
+    url: https://code.claude.com/docs/en/agent-sdk
+  - id: REF-AGENT-4
+    title: spikes/agent-proxy-handshake/RESULT.md — methods, paths, headers, hosts and init tools of the bundled CLI
+    url: spikes/agent-proxy-handshake/RESULT.md
+  - id: REF-AGENT-5
+    title: spikes/compile-cost/RESULT.md — L02 stage costs and token counts
+    url: spikes/compile-cost/RESULT.md
+  - id: REF-AGENT-6
+    title: Anthropic API pricing and prompt-caching economics (model table cached 2026-11-03)
+    url: https://platform.claude.com/docs/en/about-claude/pricing
+  - id: REF-AGENT-7
+    title: spikes/tutor-call/RESULT.md (origin/V/V.TUTOR-min) — a custom system_prompt replaces the CLI's 6,803-token prompt (≈ 410 tokens overhead); thinking off
+    url: spikes/tutor-call/RESULT.md
+
+bounds:
+  run_token_ttl_s: 1500         # proxy_upstream_timeout_s + 600 s margin: a token outlives its longest call, and a
+                                # leaked one dies within 25 min
+  run_tokens_max: 32            # structural: one per running stage; worker concurrency is 1 (SRV-EVENTS FR-EVENTS-9)
+  proxy_body_max_bytes: 33554432  # 32 MiB: the API's own request cap is 32 MB
+  proxy_upstream_timeout_s: 900   # structural: the longest measured stage took 190 s (REF-AGENT-5); a stream keeps the
+                                  # connection busy, so 15 min only stops a hung upstream
+  crosscheck_tolerance: { relative: 0.05, absolute_usd: 0.005 }  # VEC-AGENT-1: 0.38–1.78 % and $0.0023–0.0043 observed
+  chars_per_token_floor: 2.0    # estimator bound: L02 measured ~2.5 chars/token (60,034 chars ≈ 23,900 tokens,
+                                # REF-AGENT-5); 2.0 overestimates tokens, so reserves err high
+  cli_system_tokens: 6803       # the CLI's own system prompt, measured in every stage (REF-AGENT-5); used only
+                                # when a call sets no system prompt of its own (FR-AGENT-13)
+  cli_overhead_tokens: 1000     # the fixed overhead beside a custom system prompt: ≈ 410 measured (REF-AGENT-7), 2.4×
+
+tables:
+  agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), thinking bigint null (settle only: output_tokens_details.thinking_tokens, part of output, not priced; agent_0002), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE" }
+
+# One cost definition: `cost(model, usage) = sum(usage_k * rate_k) / 1e6` over the five fields of VEC-AGENT-1's mapping.
+# `spent(scope) = sum(settle.settled_usd) + sum(reserve.usd for reserves with neither a settle nor a void)`, where
+# settled_usd is the amount FR-AGENT-9 settles at (0, the SDK cost, or the reserve; VEC-AGENT-1 `settlements`).
+
+errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, provider_missing, provider_unavailable,
+  rate_limited, run_token_unknown, tools_mismatch, model_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
+  usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded, body_not_utf8]
+
+requirements:
+  - id: FR-AGENT-1
+    text: >-
+      agent-proxy image and entry point. `deploy/images/agent-proxy.Dockerfile` builds `reader-agent-proxy:local` from
+      the pinned `python:3.14-slim-trixie` digest with the server package (no `agent` extra), entry point `python -I -m
+      reader.agent.proxy`, uid 10002, `sh`, `cat` and `mv` for delivery (OPS-DEPLOY FR-DEPLOY-10), and the health command
+      `/usr/local/bin/reader-agent-proxy-health`: exit 0 when listening on 8080 (with zero provider users this is
+      healthy-idle), 1 otherwise. Only allow-listed COPY inputs (OPS-DEPLOY's allow-list test).
+  - id: FR-AGENT-2
+    text: >-
+      Token loading. agent-proxy reads reader.yaml at the fixed path `/etc/reader/reader.yaml`, where OPS-CLI's override
+      binds it read-only (OPS-DEPLOY sets no environment on agent-proxy, so no READER_CONFIG), to map each user to the reference of
+      their `anthropic-subscription` provider, and reads the token from `/run/secrets/<secret_file_name(ref)>` (SRV-CONFIG
+      FR-CONFIG-14) with SRV-CONFIG's host-resolved checks (O_NOFOLLOW, regular file, mode, size, UTF-8, non-empty). A
+      missing file means that user has no provider until it appears (re-read on each run_token request); never another
+      user's token. Tokens are held as `Secret` and never logged, echoed or written.
+  - id: FR-AGENT-3
+    text: >-
+      Run tokens. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n, "model": "<full id>"}` returns
+      `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that user, that output cap and that
+      model for `bounds.run_token_ttl_s`; `POST
+      /run-tokens/revoke {"run_token": "..."}` revokes it (in the body, never in a path, so it appears in no URL) and
+      returns the token's upstream record `{"requests": k, "statuses": [...], "any_2xx": bool, "refused": [...],
+      "in_flight": n, "failed": m}`: every upstream response status seen for it in order, the codes of the proxy's own
+      refusals (FR-AGENT-4), which never reach upstream, the requests still being relayed at revoke (`in_flight`,
+      code review B2: a request forwarded but not finished may still be billed), and the requests that failed after
+      the connection was made (`failed`: written upstream, outcome unknown). Revoking an unknown token (never issued, already revoked, or evicted) answers 404 `run_token_unknown`
+      and no record. At most `bounds.run_tokens_max` live tokens; the oldest is revoked when
+      exceeded. Only the worker reaches the port (agentnet). A user without a loaded token gets 409 `provider_missing`.
+      Tokens are stored only as sha256 digests and compared in constant time.
+  - id: FR-AGENT-4
+    text: >-
+      Forwarding allow-list (REF-AGENT-4). Only `POST /v1/messages` with the query exactly `beta=true` or empty is
+      forwarded, to the pinned upstream `https://api.anthropic.com` with TLS verification on; every other method, path or
+      query gets 404 and nothing is forwarded. The request's `Authorization: Bearer <run_token>` must name a live token,
+      else 401 `run_token_unknown`. Forwarded request headers are exactly the allow-list `accept, accept-encoding,
+      anthropic-beta, anthropic-dangerous-direct-browser-access, anthropic-version, content-type, user-agent, x-app,
+      x-claude-code-session-id, x-stainless-*` plus `authorization: Bearer <user token>` set by the proxy; all others,
+      including any `x-api-key` and any client `authorization`, are dropped. The body must be a JSON object (else 415
+      `body_not_json`); a body whose `tools` or `mcp_servers` is present and non-empty is refused with 403
+      `tools_mismatch`, one whose `model` differs from the run_token's model with 403 `model_mismatch`, and one whose
+      `max_tokens` is missing or exceeds the run_token's bound with 403 `output_cap` (REF-AGENT-4 measured that the CLI
+      sends CLAUDE_CODE_MAX_OUTPUT_TOKENS as `max_tokens`). The forwarded body is the checked object re-serialised, so
+      what was checked is what is sent; a body that cannot be re-serialised as UTF-8 (a lone surrogate escape such as
+      `\ud800`) is refused with 400 `body_not_utf8`, a 4xx the CLI does not retry (code review round 2; it was a 500,
+      which the CLI retried for 3 minutes). The `model_mismatch` check is new against the real CLI: the first live
+      Opus stage must be watched for a refusal (the CLI might send a dated or aliased model id). Bodies over `bounds.proxy_body_max_bytes` get 413. Responses,
+      including SSE streams, pass through with hop-by-hop headers dropped. No redirect is followed.
+  - id: FR-AGENT-5
+    text: >-
+      Proxy logging. One line per request: method, the route template (`/run-tokens`, `/run-tokens/revoke`,
+      `/v1/messages` or `other`), status, duration and the run_token digest prefix (8 hex); never a raw path, a user
+      handle, a header value, body, query string, token or run_token. The HTTP server's own access log is off.
+  - id: FR-AGENT-6
+    text: >-
+      Provider port. `reader.agent.Provider.run(StageCall(owner_id, handle, run_id, lesson_id, stage, task, attempt,
+      system, prompt, max_output_tokens, floor_usd, run_cap_usd, daily_budget_usd=None, thinking_off=False,
+      abort_on_retry=False, deadline_s=None)) -> StageResult(text, usage, sdk_usd, model, stop_reason)` is the only
+      way SRV-PIPELINE and SRV-TUTOR call a model (the optional fields: FR-AGENT-12, FR-AGENT-13). Model
+      resolution happens first: the task's `model` from reader.yaml is resolved to a full model id (aliases `opus` →
+      `claude-opus-5-5`, `sonnet` → `claude-sonnet-5-5`, as data next to the pricing table); a model not in the pricing
+      table raises `unknown_model` before any reservation or call. The Agent SDK adapter then: takes a reservation
+      (FR-AGENT-9); requests a run_token; starts the CLI with HOME a fresh per-run tmpfs directory and exactly the
+      environment `PATH, HOME, LANG, CLAUDE_CODE_OAUTH_TOKEN=<run_token>, ANTHROPIC_BASE_URL=http://agent-proxy:8080,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, DISABLE_TELEMETRY=1, CLAUDE_CODE_MAX_OUTPUT_TOKENS=<max_output_tokens>`,
+      plus `MAX_THINKING_TOKENS=0` for a call with `thinking_off`. The SDK merges the worker's own environment into
+      the CLI's, so every other variable the worker holds is passed blank (empty string); the SDK itself adds
+      `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_AGENT_SDK_VERSION`, its session-state flag and `PWD`. Options:
+      `ClaudeAgentOptions(tools=[], allowed_tools=[], setting_sources=[], max_turns=1, model=<full id>,
+      max_budget_usd=<this call's reserve>, system_prompt={"type": "file", "path": <HOME>/system.md})`, the system
+      prompt written to a 0600 file in HOME because the SDK passes a string prompt as one argv argument, which fails
+      above 131,071 bytes (code review B1); `system` None passes the `claude_code` preset (the SDK turns a missing
+      prompt into an empty one). The CLI's stderr is read and discarded through the SDK's callback. On abort
+      (FR-AGENT-13 d) or deadline (e) the adapter kills the CLI process at once (SIGKILL) before closing the SDK
+      stream, so the call returns within a second. In a `finally`, revokes the run_token, removes HOME and settles. Errors are
+      classified from what the SDK emits (REF-AGENT-4, error-mode runs): the CLI itself retries 429, 529 and 5xx with
+      backoff (measured: 10 retries, 11 requests over 176–178 s for 429 and for 529, each announced by a
+      `SystemMessage` subtype `api_retry` with `error_status`), then ends with an `AssistantMessage.error`, a
+      `ResultMessage` with `is_error` true and cost 0, and a raised `ResultError`. The adapter maps `AssistantMessage.error`
+      `rate_limit` (measured for 429) to `rate_limited`; `server_error` (measured for 529 and 500) to
+      `provider_unavailable`; a proxy refusal (listed in `refused` of the run_token's upstream record) to
+      `sdk_error`; any other non-success result or a missing `total_cost_usd` to `sdk_error`. The resolved model id is
+      stored on the ledger rows.
+  - id: FR-AGENT-7
+    text: >-
+      Init check (ADR-0025 rule 2). The init `SystemMessage` arrives before any assistant message (REF-AGENT-4). If its
+      `tools` is missing or not empty, its `mcp_servers` is not empty, or its `model` differs from the resolved model id,
+      the stage stops with `tools_mismatch` and no assistant output is used. The request may already have been sent by
+      then, so agent-proxy's body checks (FR-AGENT-4: `tools`, `max_tokens`) are the controls that keep a tool-carrying
+      or over-long request from reaching the provider.
+  - id: FR-AGENT-8
+    text: >-
+      Pricing and cross-check. `reader.agent.pricing` loads a table equal to `spec/fixtures/SRV-AGENT/pricing.yaml`
+      (VEC-AGENT-2), maps SDK usage to the five fields per VEC-AGENT-1 (`usage_unmapped` when the cache breakdown is
+      missing) and computes `cost(model, usage)`. Each settlement stores `sdk_usd` (authoritative) and the recomputed
+      `usd`; when they differ by more than max(relative × sdk_usd, absolute) of `bounds.crosscheck_tolerance`, a WARNING
+      `cost_crosscheck` (model, both values) is logged.
+  - id: FR-AGENT-9
+    text: >-
+      Reservations, settlements and budgets. Before each call, on a separate connection committed at once (SRV-EVENTS
+      amendment), the adapter appends a `reserve` row with `usd = reserve`, where reserve = max(stage floor, worst-case
+      estimate) and the worst case = (`bounds.cli_system_tokens`, or `bounds.cli_overhead_tokens` when the call sets its
+      own system prompt (FR-AGENT-13), + ceil(prompt characters / `bounds.chars_per_token_floor`))
+      × the model's `cache_write_1h` rate + max_output_tokens × its output rate (no cache sharing assumed). It refuses,
+      before the reserve row, with: `budget_exhausted` when spent(run) + reserve > the run cap; `task_budget_exhausted`
+      when spent(run, task) + reserve > the task's `budget_usd_per_lesson`, scoped to one compile run (the example config
+      gives each task room for two worst-case calls; a recompile starts fresh); `monthly_budget_exhausted` when
+      spent(user, UTC calendar month) + reserve > `budgets.monthly_usd`, with a WARNING `budget_warn` once per user and
+      month (tracked in the worker process) when it first passes `budgets.warn_at` (ADR-0005; a log line, not yet an event — SRV-EVENTS stage 2). After the call it appends a
+      `settle` row from the SDK cost and usage and the run_token's upstream record (FR-AGENT-3): no upstream 2xx → $0
+      (nothing was billed; a non-zero SDK cost is logged as `settle_mismatch`); exactly one 2xx with an SDK cost → that
+      cost; one 2xx without an SDK cost (a crash or exception after the response) → the reserve; more than one 2xx →
+      max(SDK cost, reserve), logged as `multiple_2xx` (one turn should make one request); an unknown or evicted record
+      (the revoke answered 404, failed or was not JSON) → the reserve, since the upstream outcome is not known; any
+      request in flight at revoke or failed after connect → max(SDK cost, reserve), logged as `outcome_unknown`; one
+      2xx with an SDK cost of 0 on an error result → the reserve (the SDK's 0 is not a bill). A reservation without a settlement (the
+      worker died) keeps counting at its reserve, so overshoot of any cap is bounded by the call in flight; the owner can
+      void it with `python -I -m reader.agent.void <reservation_id>`, which appends a logged `void` row that removes it
+      from spent and is refused for a reservation that has a settlement. `max_budget_usd` passed to the SDK is a second,
+      untested guard.
+  - id: FR-AGENT-10
+    text: >-
+      Job contract for agent stages (used by SRV-PIPELINE's `pipeline.stage` kind): transient (retried within
+      `max_attempts`, each attempt reserving and settling): `provider_unavailable`, `rate_limited`, `output_invalid`,
+      `upstream_retry`, `deadline_exceeded`; permanent: `sdk_error`, `tools_mismatch`, `unknown_model`, `provider_missing`, `usage_unmapped`; budget refusals are
+      not failures but a stage outcome (SRV-PIPELINE FR-PIPELINE-5). Because the CLI already retries 429/529/5xx for
+      about 3 minutes inside one attempt (REF-AGENT-4), one stage attempt can take up to that long before it fails.
+  - id: FR-AGENT-12
+    text: >-
+      Daily scope (SRV-TUTOR amendment, 2026-11-22). A call with `daily_budget_usd` set is refused with
+      `daily_budget_exhausted` when spent(user, task, UTC calendar day) + reserve > that budget, checked with the other
+      caps under the same per-user lock before the reserve row (FR-AGENT-9), so two concurrent calls cannot both pass.
+  - id: FR-AGENT-13
+    text: >-
+      Call options (SRV-TUTOR amendment, 2026-11-22; REF-AGENT-7). (a) `thinking_off` adds `MAX_THINKING_TOKENS=0` to the
+      CLI environment. (b) `system`, when not None, is passed as `system_prompt` and replaces the CLI's default prompt,
+      so the reserve counts `bounds.cli_overhead_tokens` instead of `bounds.cli_system_tokens`. (c) `StageResult.stop_reason`
+      is the result's stop reason (`end_turn`, `max_tokens`, ...), or None when the SDK gives none, so a caller sees a
+      truncated answer. (d) With `abort_on_retry`, the first `SystemMessage` subtype `api_retry` ends the call: the CLI is
+      closed and the call raises `upstream_retry` (transient) instead of waiting out the CLI's own ~3-minute backoff.
+      (e) With `deadline_s`, a call still running after that many seconds is closed and raises `deadline_exceeded`
+      (transient). In (d) and (e) the run_token is still revoked and the reservation settled per FR-AGENT-9 from the
+      upstream record (no 2xx → $0; a 2xx without an SDK cost → the reserve).
+  - id: FR-AGENT-11
+    text: >-
+      Live: one `claude-sonnet-5-5` call with `max_turns=1` and a one-word answer through agent-proxy with a run_token
+      succeeds against the real upstream, and its reservation and settlement land in the ledger (about 7k input tokens
+      written once: ≈ $0.03). [live]
+
+invariants:
+  - id: INV-AGENT-1
+    text: >-
+      No provider token in the worker or any kernel service: absent from env, `/proc/*/environ`, `/run/secrets`,
+      `~/.claude`, `docker inspect` and logs (ADR-0025 verified_by). [live]
+  - id: INV-AGENT-2
+    text: >-
+      A run_token maps to exactly one user's token: user A's run_token never yields user B's token, a revoked or expired
+      run_token yields nothing, and no request without a live run_token is forwarded (property test over sequences).
+  - id: INV-AGENT-3
+    text: >-
+      agent-proxy opens connections only to the pinned upstream, only for `POST /v1/messages` with an allowed query, and
+      forwards only allow-listed headers (property test over methods, paths, queries and header sets against a stub).
+  - id: INV-AGENT-4
+    text: >-
+      For every run, task and month: spent counts every reservation until it is settled or voided, settled spend equals
+      the sum of `settled_usd` (each computed by FR-AGENT-9's rule from the SDK cost, the reserve and the upstream
+      record), and no scope's spent exceeds its cap by more than one call's reserve (property test over
+      reserve/settle/void/crash sequences).
+  - id: INV-AGENT-5
+    text: No log line from agent-proxy or the adapter contains a token, a run_token, a prompt or model output (canary test).
+
+nfr:
+  # Structural bound: a first token takes 1.6–3.9 s on the measured models (spikes/agent-sdk-container), so 50 ms of
+  # proxy overhead is under 3 % of it. Measured as p95 over at least 50 requests against a local stub upstream.
+  - id: NFR-AGENT-1
+    metric: agent-proxy added latency to first byte, p95 over ≥ 50 requests, ms
+    threshold: 50
+    verified_by: bench
+
+vectors:
+  - id: VEC-AGENT-1
+    source: All 12 spikes/compile-cost stages (exact token counts, SDK-reported costs), usage-key mapping, edge cases, settlements from the measured error shapes
+    file: spec/fixtures/SRV-AGENT/cost-vectors.yaml
+  - id: VEC-AGENT-2
+    source: Pricing table (Anthropic API rates as cached 2026-11-03; cache multipliers from the prompt-caching economics)
+    file: spec/fixtures/SRV-AGENT/pricing.yaml
+
+defers:
+  - "`anthropic-api` keys, Bedrock and Vertex providers (ADR-0005); the slice serves `anthropic-subscription` only."
+  - "`GET /api/spend` and a spend view (SRV-PIPELINE's run route shows the run's spend)."
+  - "The separate web-fetch proxy for fact-checking `changed` cells (ADR-0025 rule 5) and agent tools in kernel-agent."
+  - "Telemetry through Rotel (SRV-OBS); budget events and notifications (SRV-EVENTS outbox, SRV-NOTIFY)."
+
+owner_notes:
+  - "ADR-0025 hypothesis 1 passed against a stub (spikes/agent-proxy-handshake, zero credit). FR-AGENT-11 checks the real upstream (≈ $0.03) under the owner's $30 test budget (budget.test_budget_usd, 2026-11-22), which covers live checks and live L02 compiles without further consent; every spend goes to the ledger and the per-run cap still applies."
+  - "Spend is the Agent SDK credit of the subscription (ADR-0005). The ledger records it; docs/progress.yaml's budget ledger keeps the development spend."

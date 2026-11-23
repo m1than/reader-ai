@@ -21,6 +21,8 @@
 # - OPS-SANDBOX: Kernel Gateway on `kernel-user-<handle>:8888`, control endpoint on `:8889` (FR-SANDBOX-3..9).
 # - OPS-DEPLOY / OPS-CLI: the service and its network exist only when profile `kernels` runs (task V.OPS-CLI-kernels).
 # - SRV-CONFIG: `instance.url` gives the instance origin; `users[].handle` the handles.
+# - websockets 17.4 (server dependency, pinned): the upstream WebSocket client, used without proxies, redirects,
+#   compression or a User-Agent; it also gives Uvicorn its WebSocket support (SRV-AUTH FR-AUTH-10 note).
 # - SRV-LESSON (V4): this slice keys sessions by a lesson id string and does not check that the lesson exists; the
 #   check is added when WEB-min wires lessons to kernels.
 # - WEB-RENDER: `text/html` and `image/svg+xml` outputs pass this relay unchanged; the control for untrusted HTML is
@@ -31,15 +33,17 @@
 # channel `reader`, `msg_type` `reader_notice`, content `{code, parent_msg_id?}` (FR-KERNEL-11).
 #
 # Test levels: [unit] the relay and session logic against a fake Kernel Gateway and a fake control endpoint (test
-# servers in-process) with a fake clock; [image] against `reader-kernel:local` started by the test; [live] in
+# servers in-process) with a fake clock; [image] against the kernel image built from sandbox/ under a per-run tag
+# `reader-kernel:test-<pid>.<random>` and removed at the end of the module (never `reader-kernel:local`, the live
+# stack's tag; OPS-SANDBOX header, test image, 2026-11-23), started by the test; [live] in
 # `e2e/live/slice.sh` against `reader up` with the stage-1 `live-check` software-authenticator session (SRV-AUTH).
 
 id: SRV-KERNEL
 title: Kernel sessions and the authenticated WebSocket relay to Kernel Gateway, with message filtering, timeouts, caps and reset
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Stays draft until SRV-AUTH merges (its Red needs the app and session layers)"
+status: approved
+approved_by: agent
+approved_at: 2026-11-22
+review: "deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-21); FR-KERNEL-2 nonce check on every create (round-3 nit). Approved 2026-11-22 after SRV-AUTH merged, with FR-KERNEL-10's kernel_restarted rule (from WEB) added at approval. Code review round 1 changes (5 blockers): FR-KERNEL-3, -5, -6, -7, -8, -10, -11, -12 and INV-KERNEL-6 amended with their tests. Code review round 2 approve (nit applied: idempotent relay start, FR-KERNEL-7)"
 layer: server
 track: engineering
 adr: [ADR-0022, ADR-0014, ADR-0006, ADR-0012, ADR-0013, ADR-0024, ADR-0026]
@@ -108,10 +112,11 @@ requirements:
     text: >-
       `GET /api/kernel/sessions` lists the caller's own sessions. `DELETE /api/kernel/sessions/{session_id}` deletes the
       kernel (`DELETE /api/kernels/<kid>`) and the session, closing its WebSocket connections with 1000; an upstream 404
-      also removes the session. The state-changing calls without a payload (`DELETE`, and `POST` for interrupt and
-      reset) accept either no body or the body `{}` with `Content-Type: application/json` (SRV-AUTH FR-AUTH-12 requires
-      the type only when a body is present); any other body or type is refused with 415 before any upstream call.
-      [unit]
+      runs FR-KERNEL-14's state read for that session and also removes it. The state-changing calls without a payload
+      (`DELETE`, and `POST` for interrupt and reset) accept either no body or the body `{}` with
+      `Content-Type: application/json` (SRV-AUTH FR-AUTH-12 requires the type only when a body is present); the body is
+      read up to SRV-AUTH's 64 KiB bound, and any other body or type, a larger body, or nesting past the parser's
+      recursion limit is refused with 415 before any upstream call. [unit]
   - id: FR-KERNEL-4
     text: >-
       `POST /api/kernel/sessions/{session_id}/interrupt` calls `POST /api/kernels/<kid>/interrupt` and answers 204.
@@ -130,13 +135,16 @@ requirements:
       marks the service unusable: every later session request or upgrade for that user is refused per FR-KERNEL-11
       until an explicit reset succeeds. The 30 s deadline is a structural bound (OPS-SANDBOX FR-SANDBOX-9 measures the
       round trip; Docker's doubling restart delay exceeds it at about the tenth quick reset). A reset requested while
-      one runs for the same user joins it and gets its result (coalesced). [unit] with a fake control endpoint and fake
-      clock (VEC-KERNEL-2); [image] against the real image.
+      one runs for the same user joins it and gets its result (coalesced); FR-KERNEL-9's first-use reset is the same
+      coalesced reset. The 30 s is a whole: each state read's own timeout is clipped to the time left. [unit] with a
+      fake control endpoint and fake clock (VEC-KERNEL-2); [image] against the real image.
   - id: FR-KERNEL-6
     text: >-
       At most 4 sessions per user (OPS-SANDBOX FR-SANDBOX-3 `max_kernels`); a fifth `POST /api/kernel/sessions` answers
-      409 `too_many_kernels` and makes no upstream request. Session creation, deletion and reset for one user are
-      serialised by a per-user lock; requests for different users do not wait for each other. [unit]
+      409 `too_many_kernels`. The nonce check of FR-KERNEL-2 runs first (a cheap control state read; a restarted
+      container frees the slots), then the cap; a refused fifth makes no gateway request. Session creation, deletion
+      and reset for one user are serialised by a per-user lock; requests for different users do not wait for each
+      other. [unit]
 
   # Relay
   - id: FR-KERNEL-7
@@ -148,7 +156,12 @@ requirements:
       upgrade is refused with 409. The api then opens `ws://kernel-user-<h>:8888/api/kernels/<kid>/channels` without a
       subprotocol, with a 10 s connect timeout and a fixed header set (Host and the WebSocket handshake headers only;
       no Cookie, Authorization or any header copied from the browser). Each open browser connection re-checks its
-      SRV-AUTH session every 60 s and closes with 4401 when the session has ended (sign-out or expiry). [unit]
+      SRV-AUTH session every 60 s and closes with 4401 when the session has ended (sign-out or expiry). The connection
+      slot is taken before the first await of the upgrade, so the limit of 2 holds under concurrent upgrades; after
+      the handshake the api re-checks that the session is still mapped and its relay is not closing, else it sends
+      `kernel_reset` and closes with 1012; a closing relay never opens an upstream connection. Every connection that
+      completes its handshake starts the relay through one idempotent start, so a failed handshake of the connection
+      that created it leaves no relay unstarted. [unit]
   - id: FR-KERNEL-8
     text: >-
       Filtering per VEC-KERNEL-1, both directions. Every forwarded message is rebuilt from exactly the keys
@@ -166,7 +179,11 @@ requirements:
       kernel_info_reply, complete_reply, inspect_reply, is_complete_reply} and on `iopub` with `msg_type` in {status,
       execute_input, stream, display_data, update_display_data, execute_result, error, clear_output}; everything else,
       including every `comm_*`, `input_request`, any `control` or `stdin` message, binary frames (which carry
-      `display_data` buffers) and unparseable frames, is dropped and counted by type in the log. [unit]
+      `display_data` buffers) and unparseable frames, is dropped and counted by type in the log. A `msg_type` that is
+      not a string is outside every list. Any error while parsing, filtering or serialising one frame (including
+      nesting past the parser's recursion limit) drops that kernel frame, or answers that browser frame with
+      `rejected`; it never ends the relay or the browser connection. [unit, property-based over arbitrary JSON values
+      and frame sequences through the relay]
   - id: FR-KERNEL-9
     text: >-
       The first session request for a user after the api process starts runs a reset (FR-KERNEL-5) first, because the
@@ -182,11 +199,16 @@ requirements:
       against queue flooding; the WEB spec sends one lesson's cells in order). Timeout 60 s (ADR-0014), measured from
       forwarding an execute_request until the execute_reply whose `parent_header.msg_id` matches. On expiry the relay
       calls interrupt (FR-KERNEL-4) and sends `reader_notice` `timeout` with that msg_id. If the execute_reply still has
-      not arrived 5 s after the interrupt, the relay runs a reset (FR-KERNEL-5). The 5 s is a structural bound: an
+      not arrived 5 s after the interrupt call returned, the relay runs a reset (FR-KERNEL-5). The relay stays alive
+      while an execute is in flight even when its last browser connection has gone (the queue is dropped then): the
+      timeout, the interrupt and the reset still happen, and the relay ends after the reply or the reset. The 5 s is a structural bound: an
       interrupted python3 cell replies promptly unless it ignores SIGINT or sits in C code; the [image] test measures
       `time.sleep(600)` and a busy loop. The timeout is a usability control; the container limits are the security
-      boundary (OPS-SANDBOX header). [unit] with a fake clock, including a queued request whose own 60 s start only
-      when it is forwarded; [image]
+      boundary (OPS-SANDBOX header). When the kernel restarts or dies under the relay (`kernel_restarted` or
+      `kernel_dead`, FR-KERNEL-11), the relay frees the in-flight slot (its timeout is cancelled) and drops every queued
+      request without forwarding it; the browser has the notice, and its next execute_request is forwarded at once.
+      [unit] with a fake clock, including a queued request whose own 60 s start only when it is forwarded, and the
+      slot freed and the queue dropped on `kernel_restarted`, and a busy loop whose browser disconnected; [image]
   - id: FR-KERNEL-11
     text: >-
       Relay notices are messages `{"channel": "reader", "header": {"msg_type": "reader_notice", "msg_id": <uuid4 hex>},
@@ -194,8 +216,9 @@ requirements:
       {rejected, busy, timeout, output_truncated, kernel_restarted, kernel_dead, kernel_reset, kernel_unavailable}.
       An upstream iopub `status` with `execution_state` `restarting` (Kernel Gateway's automatic restart after the kernel
       died, e.g. on OOM, ADR-0022) is forwarded and followed by `kernel_restarted`; `dead` by `kernel_dead`.
-      `kernel_unavailable`: an upgrade for a session of a user whose service is marked unusable (FR-KERNEL-5) or does not
-      resolve (FR-KERNEL-13) is accepted, receives `kernel_unavailable`, and is closed with 1013, so the browser learns
+      `kernel_unavailable`: an upgrade by a user whose service is marked unusable (FR-KERNEL-5; checked right after
+      authentication, before the session lookup, because the failed reset dropped every session) or does not resolve
+      (FR-KERNEL-13) is accepted, receives `kernel_unavailable`, and is closed with 1013, so the browser learns
       the reason (a refused upgrade's HTTP status is not visible to browser scripts); the matching HTTP routes answer
       503 `kernel_unavailable`. [unit]
   - id: FR-KERNEL-12
@@ -206,7 +229,7 @@ requirements:
       WebSocket with 1009, sends `output_truncated` to the session's browser connections, and drops the session with
       `kernel_dead` (its browser connections close with 1000; the user may open the session again). Once the messages
       forwarded for one execute_request total 16 MiB, its further iopub messages are dropped and `output_truncated` is
-      sent once for it. If a browser connection's unsent buffer exceeds 16 MiB, that connection is closed with 1013 and
+      sent once for it; the budget is released when its execute_reply arrives. Every size here counts UTF-8 bytes. If a browser connection's unsent buffer exceeds 16 MiB, that connection is closed with 1013 and
       the session stays usable. [unit]
   - id: FR-KERNEL-13
     text: >-
@@ -215,7 +238,9 @@ requirements:
       64 KiB of response body (structural: the largest expected body is a kernel model or the state object; more is a
       failure). A failed call answers 502 `kernel_upstream` and leaves the session map unchanged, except as
       FR-KERNEL-14 says. The upstream WebSocket follows no redirects either. If the user's service does not resolve
-      (profile not started), session routes answer 503 `kernel_unavailable`. [unit]
+      (profile not started), session routes answer 503 `kernel_unavailable`. [unit] Paired SRV-PIPELINE change
+      (2026-11-22): `reader.kernels.upstream` (`http`, `ws_connect`, `Endpoint`, `UpstreamError`) is a public client
+      that SRV-PIPELINE's worker-side lab verifier reuses against `kernel-verify`, with the same bounds.
   - id: FR-KERNEL-14
     text: >-
       Unplanned restarts: the api records the user's nonce at each successful reset and at the first use of the service
@@ -261,8 +286,10 @@ invariants:
   - id: INV-KERNEL-6
     text: >-
       Logs from this module carry route, handle, session id, message types, counts, sizes and notice codes only; never
-      cell code, outputs or any header value from the browser. [unit] by scanning captured log records for canary code
-      and output strings.
+      cell code, outputs or any header value from the browser. Labels of dropped frames come from closed sets: the
+      channel in {shell, iopub, stdin, control} else `?`, the type in the known Jupyter message types else `other`, so
+      upstream text never reaches a log line and the drop counter stays bounded. [unit] by scanning captured log
+      records for canary code and output strings, including canaries in `channel` and `msg_type`.
 
 nfr:
   - id: NFR-KERNEL-1

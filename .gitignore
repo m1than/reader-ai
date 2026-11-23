@@ -8,6 +8,10 @@ __pycache__/
 dist/
 build/
 storybook-static/
+web/test-results/
+e2e/live/out/
+e2e/web/live/out/
+e2e/web/live/test-results/
 .env
 .env.*
 !.env.example

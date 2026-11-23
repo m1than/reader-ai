@@ -1,0 +1,666 @@
+/* reader-ai app styles under Calm (WEB-UI). Flat surfaces, no gradients, glass or glow (INV-UI-3).
+   FR-UI-10: spacing only in the library's --acme-space-1..7 steps, colours only Calm tokens, prose in the system serif
+   stack at 1.0625rem / 1.65 in a 38rem reading column, UI chrome in the library sans. No web font for text. */
+:root {
+  font-family: ui-serif, Georgia, 'Iowan Old Style', serif;
+  line-height: 1.65;
+}
+
+body {
+  margin: 0;
+  font-size: 1.0625rem;
+  color: var(--acme-text);
+}
+
+code,
+pre,
+textarea {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.875em;
+}
+
+a {
+  color: var(--acme-accent);
+  text-underline-offset: 0.2em;
+}
+
+/* Focus (FR-UI-10): every interactive element shows the focus token on keyboard focus. */
+a:focus-visible,
+button:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+main:focus,
+.tutor:focus {
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Skip link (FR-UI-11): off screen until focused. */
+.skip-link {
+  position: absolute;
+  top: var(--acme-space-2);
+  left: var(--acme-space-2);
+  z-index: 10;
+  padding: var(--acme-space-2) var(--acme-space-3);
+  border-radius: 6px;
+  background: var(--acme-surface-raised);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  transform: translateY(-300%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+.muted {
+  color: var(--acme-text-muted);
+}
+
+/* Header */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: var(--acme-space-4);
+  min-height: 3.5rem;
+  padding: 0 var(--acme-space-5);
+  border-bottom: 1px solid var(--acme-border);
+  background: var(--acme-surface);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  box-sizing: border-box;
+}
+
+.app-header .brand {
+  margin-right: auto;
+  color: var(--acme-text);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+
+/* Pages */
+.page {
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: var(--acme-space-6) var(--acme-space-5) var(--acme-space-7);
+}
+
+h1 {
+  margin: 0 0 var(--acme-space-4);
+  font-size: 2.25rem;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+}
+
+.state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-4);
+}
+
+/* Lesson list (FR-UI-6) */
+.lesson-list h2 {
+  margin: var(--acme-space-6) 0 var(--acme-space-3);
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.lesson-list ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lesson-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  column-gap: var(--acme-space-3);
+  align-items: baseline;
+  padding: var(--acme-space-3) 0;
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.lesson-ordinal,
+.lesson-meta {
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.lesson-row:not(.published) .lesson-title {
+  color: var(--acme-text-muted);
+}
+
+.lesson-row.published .lesson-title a {
+  font-weight: 600;
+}
+
+.lesson-meta {
+  display: flex;
+  gap: var(--acme-space-3);
+  white-space: nowrap;
+}
+
+/* Lesson page: one 38rem reading column; at 60rem and wider the contents sit beside it (FR-NOTEBOOK-11). */
+.page.lesson-page {
+  max-width: 38rem;
+}
+
+.lesson {
+  display: grid;
+  grid-template-columns: minmax(0, 38rem);
+}
+
+.lesson-header {
+  padding: 0 0 var(--acme-space-4);
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.back-link {
+  display: inline-block;
+  margin: 0 0 var(--acme-space-3);
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.back-link::before {
+  content: '← ';
+}
+
+.lesson-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-3);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.lesson-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-2);
+  margin-left: auto;
+}
+
+.lesson-contents {
+  display: none;
+  margin: var(--acme-space-4) 0 0;
+  padding: var(--acme-space-3) var(--acme-space-4);
+  border: 1px solid var(--acme-border);
+  border-radius: 12px;
+  background: var(--acme-surface);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+
+.lesson-contents[data-open='true'] {
+  display: block;
+}
+
+.contents-label {
+  margin: 0 0 var(--acme-space-2);
+  color: var(--acme-text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lesson-contents ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.lesson-contents li a {
+  display: block;
+  padding: var(--acme-space-1) 0;
+  color: var(--acme-text);
+  text-decoration: none;
+}
+
+.lesson-contents li a:hover {
+  color: var(--acme-accent);
+  text-decoration: underline;
+}
+
+@media (min-width: 60rem) {
+  .page.lesson-page {
+    max-width: 54rem;
+  }
+
+  .lesson {
+    grid-template-columns: 13rem minmax(0, 38rem);
+    column-gap: var(--acme-space-7);
+  }
+
+  .lesson-header,
+  .cells,
+  .lesson-aside {
+    grid-column: 2;
+  }
+
+  .lesson-contents,
+  .lesson-contents[data-open='true'] {
+    display: block;
+    position: sticky;
+    top: var(--acme-space-5);
+    grid-column: 1;
+    grid-row: 2 / span 2;
+    align-self: start;
+    max-height: calc(100vh - 3rem);
+    overflow-y: auto;
+    margin: var(--acme-space-6) 0 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .contents-toggle {
+    display: none;
+  }
+}
+
+/* Cells */
+.cell {
+  padding: var(--acme-space-6) 0;
+  border-top: 1px solid var(--acme-border);
+  scroll-margin-top: var(--acme-space-5);
+}
+
+.cells > .cell:first-child {
+  border-top: 0;
+}
+
+.cell-kind {
+  margin: 0 0 var(--acme-space-3);
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.cell[data-kind='lab'] .cell-kind,
+.cell[data-kind='recall'] .cell-kind {
+  color: var(--acme-accent);
+}
+
+[data-markdown] > :first-child {
+  margin-top: 0;
+}
+
+[data-markdown] p,
+[data-markdown] ul,
+[data-markdown] ol,
+[data-markdown] blockquote,
+[data-markdown] table {
+  margin: 0 0 var(--acme-space-4);
+}
+
+[data-markdown] h1,
+[data-markdown] h2 {
+  margin: var(--acme-space-6) 0 var(--acme-space-3);
+  font-size: 1.5rem;
+  line-height: 1.3;
+}
+
+[data-markdown] h3 {
+  margin: var(--acme-space-5) 0 var(--acme-space-2);
+  font-size: 1.2rem;
+  line-height: 1.35;
+}
+
+[data-markdown] h4,
+[data-markdown] h5,
+[data-markdown] h6 {
+  margin: var(--acme-space-4) 0 var(--acme-space-2);
+  font-size: 1.0625rem;
+}
+
+[data-markdown] ul,
+[data-markdown] ol,
+.questions {
+  padding: 0 0 0 var(--acme-space-5);
+}
+
+[data-markdown] li + li,
+.questions li + li {
+  margin: var(--acme-space-1) 0 0;
+}
+
+/* Tables fit the column (cells wrap, long words break): a scrolling table would be a scroll region that keyboard
+   users cannot reach (axe scrollable-region-focusable; the sanitised markdown cannot carry a tabindex). */
+[data-markdown] table {
+  width: 100%;
+  border-collapse: collapse;
+  overflow-wrap: anywhere; /* L02 has a 6-column table 697px wide at break-word (measured 2026-11-23) */
+  font-size: 0.9375rem;
+  line-height: 1.45;
+}
+
+[data-markdown] th,
+[data-markdown] td {
+  padding: var(--acme-space-2) var(--acme-space-3);
+  border-bottom: 1px solid var(--acme-border);
+  text-align: left;
+  vertical-align: top;
+}
+
+[data-markdown] th {
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+}
+
+.open-finding {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  margin: 0 0 var(--acme-space-3);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.cell[data-kind='open'] {
+  padding-left: var(--acme-space-4);
+  border-left: 3px solid var(--acme-warning);
+}
+
+.correction {
+  font-weight: 600;
+}
+
+/* Sources (FR-NOTEBOOK-2) */
+.sources {
+  margin: var(--acme-space-4) 0 0;
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+.sources-label {
+  margin: 0 0 var(--acme-space-1);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.references {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-wrap: anywhere;
+}
+
+/* Recall (FR-NOTEBOOK-10) */
+.recall-front {
+  margin: 0 0 var(--acme-space-3);
+  font-weight: 600;
+}
+
+.recall-back summary {
+  width: fit-content;
+  color: var(--acme-accent);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.recall-back p {
+  margin: var(--acme-space-2) 0 0;
+}
+
+/* Lab (FR-NOTEBOOK-9) */
+.lab textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--acme-space-3);
+  border: 1px solid var(--acme-control-border);
+  border-radius: 6px;
+  background: var(--acme-surface-raised);
+  color: var(--acme-text);
+  line-height: 1.5;
+  white-space: pre;
+  overflow-x: auto;
+  resize: vertical;
+}
+
+.lab-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  margin: var(--acme-space-3) 0 0;
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+}
+
+.outputs {
+  margin: var(--acme-space-3) 0 0;
+}
+
+.outputs pre,
+pre[data-code='plain'],
+pre.shiki {
+  margin: 0 0 var(--acme-space-2);
+  padding: var(--acme-space-3);
+  overflow-x: auto;
+  border-radius: 6px;
+  background: var(--acme-surface);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+
+/* KaTeX: display math scrolls and clips inside its box; inline math is clipped to its line (FR-RENDER-3). */
+.math-box,
+[data-markdown] .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
+}
+
+/* Inline math stays within a few lines of text: its box is capped and its painting clipped, so a \raisebox or
+   \rule cannot spill over the page (FR-RENDER-3). */
+[data-markdown] .katex {
+  display: inline-block;
+  max-width: 100%;
+  max-height: 4em;
+  overflow: hidden;
+  contain: paint;
+  vertical-align: middle;
+}
+
+[data-markdown] .katex-display > .katex {
+  max-height: none;
+}
+
+/* Tutor panel (SRV-TUTOR FR-TUTOR-11) */
+.lesson-aside {
+  margin: var(--acme-space-6) 0 0;
+}
+
+.tutor {
+  padding: var(--acme-space-5);
+  border: 1px solid var(--acme-border);
+  border-radius: 12px;
+  background: var(--acme-surface);
+  scroll-margin-top: var(--acme-space-5);
+}
+
+.tutor h2 {
+  margin: 0 0 var(--acme-space-1);
+  font-size: 1.25rem;
+}
+
+.tutor h3 {
+  margin: var(--acme-space-5) 0 var(--acme-space-2);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.tutor label {
+  display: block;
+  margin: var(--acme-space-3) 0 var(--acme-space-2);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.tutor-about {
+  margin: 0;
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+}
+
+.tutor textarea {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--acme-space-3);
+  border: 1px solid var(--acme-control-border);
+  border-radius: 6px;
+  background: var(--acme-surface-raised);
+  color: var(--acme-text);
+  font-family: inherit;
+  font-size: 1rem;
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.tutor-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-3);
+  margin: var(--acme-space-2) 0 0;
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+}
+
+.tutor-hint {
+  margin-right: auto;
+}
+
+.tutor-question {
+  margin: var(--acme-space-5) 0 var(--acme-space-2);
+  font-weight: 600;
+}
+
+.tutor-block {
+  margin: 0 0 var(--acme-space-4);
+}
+
+.tutor-citations,
+.tutor-unsupported {
+  margin: var(--acme-space-1) 0 0;
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+}
+
+.tutor-history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9375rem;
+}
+
+.tutor-history li {
+  padding: var(--acme-space-2) 0;
+  border-top: 1px solid var(--acme-border);
+}
+
+/* Notices */
+.notices {
+  position: fixed;
+  right: var(--acme-space-4);
+  bottom: var(--acme-space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-2);
+  max-width: 22rem;
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.notice {
+  display: flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-2) var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: 6px;
+  background: var(--acme-surface-raised);
+  box-shadow: var(--acme-shadow);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--acme-space-2);
+  margin: var(--acme-space-4) 0 0;
+}
+
+/* Narrow screens: one column, tighter page padding, list meta under the title. */
+@media (max-width: 40rem) {
+  .app-header {
+    padding: 0 var(--acme-space-4);
+  }
+
+  .page {
+    padding: var(--acme-space-5) var(--acme-space-4) var(--acme-space-6);
+  }
+
+  h1 {
+    font-size: 1.875rem;
+  }
+
+  .lesson-row {
+    grid-template-columns: 2rem minmax(0, 1fr);
+  }
+
+  .lesson-meta {
+    grid-column: 2;
+  }
+  .lesson-controls {
+    margin-left: 0;
+  }
+
+  .notices {
+    left: var(--acme-space-4);
+    max-width: none;
+  }
+
+  .tutor {
+    padding: var(--acme-space-4);
+  }
+}

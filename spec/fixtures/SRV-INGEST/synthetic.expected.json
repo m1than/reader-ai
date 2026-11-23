@@ -1,0 +1,48 @@
+{
+  "canary": "QUOKKAZEBRA",
+  "code_between": [
+    "1.",
+    "2."
+  ],
+  "code_lines": [
+    "$ example run --fast",
+    "    --retries 3",
+    "        --timeout 30s",
+    "$ example report --json"
+  ],
+  "furniture_dropped": [
+    "Synthetic header line",
+    "Footer page"
+  ],
+  "heading_levels_at_most": 2,
+  "headings": [
+    "Синтетический материал",
+    "Введение",
+    "Шаги установки",
+    "Таблица параметров"
+  ],
+  "outline": [
+    {
+      "level": 1,
+      "page": 1,
+      "title": "Введение"
+    },
+    {
+      "level": 1,
+      "page": 1,
+      "title": "Шаги установки"
+    },
+    {
+      "level": 1,
+      "page": 2,
+      "title": "Таблица параметров"
+    }
+  ],
+  "outline_source": "bookmarks",
+  "page_count": 2,
+  "pdf_sha256": "c9aab243db925e3b66703552bb0434c2bf8c90bbb754e4927e53714c67e6f82a",
+  "table_shape": [
+    3,
+    3
+  ]
+}

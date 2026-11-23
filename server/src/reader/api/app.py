@@ -1,7 +1,8 @@
 """App factory: routers from a declared list, the CSRF gate, the session lookup, the cleanup task.
 
 ROUTERS names the modules whose `ROUTES` the app serves (FR-AUTH-10). Stage 1 lists the api and auth routers;
-SRV-KERNEL adds `reader.kernels.routes` in its own paired change.
+SRV-LESSON adds `reader.lessons.routes`; SRV-KERNEL adds `reader.kernels.routes` in its own paired change;
+SRV-SEARCH adds `reader.search.routes`.
 """
 
 from __future__ import annotations
@@ -19,14 +20,27 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.websockets import WebSocket
 
-from reader.api.http import Ctx, Route, error
+from reader.api.http import Ctx, Route, WsRoute, error
 from reader.auth import store
 from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
-ROUTERS: Final = ("reader.api.routes", "reader.auth.routes")
+ROUTERS: Final = (
+    "reader.api.routes",
+    "reader.auth.routes",
+    "reader.lessons.routes",
+    "reader.kernels.routes",
+    "reader.ingest.routes",  # SRV-INGEST paired change (FR-AUTH-10 note)
+    "reader.search.routes",
+    "reader.pipeline.routes",
+    "reader.tutor.routes",  # SRV-TUTOR paired change (FR-AUTH-10 note)
+)
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
+)
+WS_ROUTES: Final[tuple[WsRoute, ...]] = tuple(
+    route for module in ROUTERS for route in getattr(importlib.import_module(module), "WS_ROUTES", ())
 )
 
 log = logging.getLogger("reader.api")
@@ -99,6 +113,15 @@ def _endpoint(
     return endpoint
 
 
+def _ws_endpoint(
+    route: WsRoute, settings: Settings, engine: AsyncEngine
+) -> Callable[[WebSocket], Awaitable[None]]:
+    async def endpoint(websocket: WebSocket) -> None:
+        await route.handler(websocket, settings, engine)
+
+    return endpoint
+
+
 async def _cleanup_forever(engine: AsyncEngine, interval_s: float) -> None:
     while True:
         try:
@@ -108,7 +131,10 @@ async def _cleanup_forever(engine: AsyncEngine, interval_s: float) -> None:
         await asyncio.sleep(interval_s)
 
 
-def create_app(settings: Settings, engine: AsyncEngine, *, run_cleanup_task: bool = True) -> FastAPI:
+def create_app(
+    settings: Settings, engine: AsyncEngine, *, run_cleanup_task: bool = True, jobs: object | None = None
+) -> FastAPI:
+    """`jobs`: the api's SRV-EVENTS `Jobs` (FR-AUTH-10 note), on `app.state.jobs` for routes that enqueue."""
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         task = asyncio.create_task(_cleanup_forever(engine, CLEANUP_INTERVAL_S)) if run_cleanup_task else None
@@ -121,10 +147,14 @@ def create_app(settings: Settings, engine: AsyncEngine, *, run_cleanup_task: boo
                     await task
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.jobs = jobs  # SRV-PIPELINE and SRV-TUTOR routes enqueue through it (paired changes)
     for route in ROUTES:
         app.add_api_route(
             route.path, _endpoint(route, settings, engine), methods=[route.method], include_in_schema=False
         )
+
+    for ws_route in WS_ROUTES:
+        app.router.add_websocket_route(ws_route.path, _ws_endpoint(ws_route, settings, engine))
 
     @app.exception_handler(404)
     async def not_found(_: Request, __: Exception) -> JSONResponse:

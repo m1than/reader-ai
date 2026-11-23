@@ -13,11 +13,28 @@ dependencies = [
   "asyncpg>=0.32.0,<0.33",     # SRV-AUTH: Postgres driver (ADR-0006)
   "alembic>=1.20.1,<1.21",     # SRV-AUTH: migrations (ADR-0006)
   "webauthn==3.0.1",           # SRV-AUTH: passkey ceremonies (REF-AUTH-2)
+  "procrastinate[alembic]==3.12.0",   # SRV-EVENTS: job queue and its shipped Alembic chain (REF-EVENTS-2)
+  "psycopg[binary,pool]==3.3.9",      # SRV-EVENTS: procrastinate's async driver (cp314 wheels for macOS and Linux arm64)
+  "nbformat==5.11.1",          # SRV-LESSON: notebook validation and canonical form (REF-LESSON-1)
+  "jsonschema==4.26.0",        # SRV-LESSON: cell.schema.json, Draft 2020-12 (REF-LESSON-2)
+  "anyio>=4.16,<5",            # SRV-LESSON: blob IO in a worker thread (already pulled in by Starlette)
+  "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
+  "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy's upstream client and the worker's agent-proxy client;
+                               # SRV-SEARCH: the api's and worker's client of the embed service (FR-SEARCH-5, -7)
 ]
+
+[project.optional-dependencies]
+# SRV-AGENT: the Agent SDK (bundled CLI) for the worker's provider adapter; installed in reader-server:local, not in
+# reader-agent-proxy:local (OPS-DEPLOY).
+agent = ["claude-agent-sdk==0.2.187"]
+# SRV-SEARCH / ADR-0028: the embed service's model runtime, only in the reader-embed image, which installs it from the
+# hash lock deploy/images/embed.requirements.lock (torch from the PyTorch CPU index there: 2.15.0+cpu).
+embed = ["torch==2.15.0", "transformers==5.23.0", "sentence-transformers==6.3.0"]
 
 [project.scripts]
 reader = "reader.cli.app:main"   # OPS-CLI FR-CLI-1
 reader-server = "reader.serve.main:main"   # SRV-AUTH: roles api|worker|mcp, bootstrap-link (FR-DEPLOY-11)
+reader-ingest = "reader.ingest.host.cli:main"   # SRV-INGEST FR-INGEST-1: the host ingest command
 
 # The project is built (editable) so that `python -m reader.…`
 # works outside pytest (SRV-CONFIG FR-CONFIG-4). `reader` is a namespace package: no spec claims
@@ -33,18 +50,25 @@ packages = ["src/reader"]
 [dependency-groups]
 dev = [
   "anyio>=4.16",
+  "claude-agent-sdk==0.2.187",   # SRV-AGENT: mypy and the adapter's option tests (the `agent` extra)
   "httpx>=0.28.1",
   "hypothesis>=6.170",
   "mypy>=2.4",
   "pytest>=9.2",
   "ruff>=0.17",
   "testcontainers>=4.15",
+  "types-jsonschema>=4.26",   # SRV-LESSON: mypy --strict over reader.lessons.schema
+  "reportlab==5.1.0",         # SRV-INGEST: VEC-INGEST-2 fixture generator (invariant mode)
+  "matplotlib==3.11.2",       # SRV-INGEST: only for its bundled DejaVu TTFs (Cyrillic in the VEC-INGEST-2 PDF)
+  "pypdfium2>=5",             # SRV-SEARCH: the [local] bench reads the pilot's text layer (no SRV-INGEST artifact yet)
 ]
 
 [tool.ruff]
 line-length = 110
 target-version = "py314"
 src = ["src", "tests"]
+# Packaged lesson fixtures are generated data (spec/fixtures/SRV-LESSON/gen_f01.py), not source.
+extend-exclude = ["src/reader/lessons/fixtures"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PT", "TID"]
@@ -61,6 +85,22 @@ known-first-party = ["reader"]
 # SRV-AUTH: PT018 compound status-and-body assertions read as one HTTP expectation; S603/S608 the tests run the
 # entrypoint as a subprocess and build SQL from fixed table names; ASYNC110 polling the database is the point.
 "tests/auth/**" = ["S101", "PT018", "S603", "S608", "ASYNC110"]
+# SRV-AGENT / SRV-PIPELINE: PT018 compound expectations on one result; S603/S607 docker and the void CLI run as
+# subprocesses; S108 fixed /tmp paths are option values, never opened; E501 the formatter keeps long docstrings,
+# SQL and @trace lines whole.
+"tests/agent/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+"tests/pipeline/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+# SRV-INGEST: PT018 compound expectations on one result; S603 the [host] tests run the converter and probes as
+# subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
+# Russian text on purpose (Cyrillic letters that look Latin).
+"tests/ingest/**" = ["S101", "PT018", "S603", "S108", "RUF001"]
+# SRV-SEARCH: the tests talk to a local HTTP server (S310), run docker and python subprocesses (S603, S607), and
+# build SQL for assertions from fixed names (S608); RUF001: the synthetic corpus is Russian text on purpose.
+"tests/search/**" = ["S101", "S310", "S603", "S607", "S608", "PT018", "RUF001"]
+# SRV-TUTOR: PT018 compound expectations on one result; S603/S607 the [live] test runs docker; E501 long SQL and
+# @trace lines stay whole; SIM300 bounds compare module constants (UPPER_CASE) to spec values; PT017 the parse
+# property asserts the code of the one exception type it allows.
+"tests/tutor/**" = ["S101", "PT018", "S603", "S607", "E501", "SIM300", "PT017"]
 
 [tool.mypy]
 strict = true
@@ -69,10 +109,23 @@ mypy_path = "src"
 explicit_package_bases = true   # `reader` is a namespace package (no src/reader/__init__.py)
 warn_unreachable = true
 
+# SRV-INGEST: Docling, pypdfium2 and huggingface_hub exist only in the converter venv (FR-INGEST-3), never in the
+# server environment; asyncpg ships no type information.
+[[tool.mypy.overrides]]
+module = ["docling.*", "docling_core.*", "pypdfium2.*", "huggingface_hub.*", "asyncpg.*"]
+ignore_missing_imports = true
+
+# SRV-SEARCH: torch and sentence-transformers live only in the reader-embed image (extra `embed`), not in the dev
+# environment; embed_service keeps them behind a typed Encoder protocol (declared deviation in the spec).
+[[tool.mypy.overrides]]
+module = ["torch", "torch.*", "sentence_transformers", "sentence_transformers.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["--strict-markers", "--strict-config", "-ra"]
 markers = [
   "registry: queries a remote image registry on every run; runs only with READER_TEST_REGISTRY=1 (OPS-DEPLOY [image: registry])",
+  "ingest_host: needs the converter venv and models (READER_TEST_INGEST_HOST=1, READER_TEST_INGEST_DATA); [local] cases also READER_TEST_PILOT_PDF (SRV-INGEST)",
 ]

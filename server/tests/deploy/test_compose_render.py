@@ -26,8 +26,9 @@ DIGEST = re.compile(r"@sha256:[0-9a-f]{64}$")
 TAGGED_DIGEST = re.compile(r"^[^@:]+:[^@:/]+@sha256:[0-9a-f]{64}$")
 LOCAL_IMAGES = {
     "reader-server:local", "reader-postgres:local", "reader-kernel:local", "reader-agent-proxy:local",
+    "reader-caddy:local", "reader-embed:local",
 }
-BASE = {"caddy", "api", "worker", "postgres"}
+BASE = {"caddy", "api", "worker", "postgres", "embed"}  # embed: paired SRV-SEARCH change (FR-DEPLOY-1)
 
 
 @pytest.mark.parametrize(
@@ -43,6 +44,12 @@ def test_services_by_profile(profiles: tuple[str, ...], expected: set[str]) -> N
     assert set(render(profiles)["services"]) == expected
 
 
+def test_agent_proxy_never_pulls() -> None:
+    services = render(("agents",))["services"]
+    assert services["agent-proxy"]["pull_policy"] == "never"
+    assert all("pull_policy" not in body for name, body in services.items() if name != "agent-proxy")
+
+
 def test_server_roles_share_one_built_image() -> None:
     services = render(("mcp",))["services"]
     for role in ("api", "worker", "mcp"):
@@ -50,6 +57,10 @@ def test_server_roles_share_one_built_image() -> None:
         assert svc["image"] == "reader-server:local"
         assert svc["build"]["dockerfile"] == "deploy/images/server.Dockerfile"
         assert svc["command"][:3] == ["reader-server", "--role", role]
+    # the worker's Agent SDK (SRV-AGENT `agent` extra); agent-proxy is built from its own Dockerfile
+    assert "/opt/reader[agent]" in (DEPLOY / "images" / "server.Dockerfile").read_text()
+    proxy = render(("agents",))["services"]["agent-proxy"]
+    assert proxy["build"]["dockerfile"] == "deploy/images/agent-proxy.Dockerfile"
 
 
 def _third_party_images(model: dict[str, Any]) -> set[str]:
@@ -57,8 +68,9 @@ def _third_party_images(model: dict[str, Any]) -> set[str]:
 
 
 def test_images_pinned_by_digest_in_compose() -> None:
+    # Since V.OPS-DEPLOY-web every image in compose.yaml is built locally (caddy too); third-party
+    # bases are pinned in the Dockerfiles (test_dockerfile_from_lines_pinned). A later one is checked here.
     images = set().union(*(_third_party_images(m) for m in all_renders()))
-    assert images, "no third-party image declared"
     assert all(TAGGED_DIGEST.match(img) for img in images), images
     assert not any(":latest" in img for img in images)
 
@@ -81,7 +93,7 @@ def _instructions(path: Path, keyword: str) -> list[list[str]]:
 
 def test_dockerfile_from_lines_pinned() -> None:
     dockerfiles = _dockerfiles()
-    assert {p.name for p in dockerfiles} >= {"server.Dockerfile", "postgres.Dockerfile"}
+    assert {p.name for p in dockerfiles} >= {"server.Dockerfile", "postgres.Dockerfile", "caddy.Dockerfile"}
     for path in dockerfiles:
         froms = [args[0] for args in _instructions(path, "FROM")]
         assert froms, path
@@ -91,7 +103,18 @@ def test_dockerfile_from_lines_pinned() -> None:
 
 COPY_ALLOW_LIST = {
     "server.Dockerfile": {"server/pyproject.toml", "server/src", "deploy/images/wait-for-secret.sh"},
+    "agent-proxy.Dockerfile": {"server/pyproject.toml", "server/src"},  # SRV-AGENT FR-AGENT-1
     "postgres.Dockerfile": {"reader-postgres-entrypoint.sh"},
+    "caddy.Dockerfile": {
+        "web/package.json", "web/package-lock.json", "web/vendor", "web/index.html", "web/vite.config.ts",
+        "web/tsconfig.json", "web/src", "/web/dist",
+    },
+    # Paired SRV-SEARCH change (FR-DEPLOY-2, ADR-0028): only the embed module files and the hash lock.
+    "embed.Dockerfile": {
+        "deploy/images/embed.requirements.lock", "server/src/reader/search/__init__.py",
+        "server/src/reader/search/embed_service.py", "server/src/reader/search/fetch_model.py",
+        "server/src/reader/search/models.lock.json",
+    },
 }
 
 
@@ -102,6 +125,19 @@ def test_dockerfile_build_inputs_are_an_allow_list() -> None:
         assert not _instructions(path, "ADD"), path
         sources = {src for args in _instructions(path, "COPY") for src in args[:-1]}
         assert sources == COPY_ALLOW_LIST[path.name], (path.name, sources)
+        # COPY --from=<x> must name a stage of this Dockerfile, never an external image.
+        lines = [ln.split() for ln in path.read_text().splitlines() if ln.split()]
+        stages = {ln[3] for ln in lines if ln[0].upper() == "FROM" and len(ln) >= 4 and ln[2].upper() == "AS"}
+        copies = [ln[1:] for ln in lines if ln[0].upper() == "COPY"]
+        froms = [arg.split("=", 1)[1] for args in copies for arg in args if arg.startswith("--from=")]
+        assert all(f in stages for f in froms), (path.name, froms, stages)
+
+
+def test_caddy_build_runs_no_install_scripts() -> None:
+    text = (DEPLOY / "images" / "caddy.Dockerfile").read_text()
+    installs = [ln for ln in text.splitlines() if ln.strip().startswith("RUN") and "npm ci" in ln]
+    assert installs, "caddy.Dockerfile runs no npm ci"
+    assert all("--ignore-scripts" in ln for ln in installs), installs
 
 
 def test_server_dockerignore_excludes_caches_and_env_files() -> None:
@@ -109,6 +145,48 @@ def test_server_dockerignore_excludes_caches_and_env_files() -> None:
     assert path.exists(), path
     patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
     assert {"**/__pycache__", "**/.env*"} <= patterns, patterns
+
+
+def test_embed_dockerignore_excludes_caches_and_env_files() -> None:
+    path = DEPLOY / "images" / "embed.Dockerfile.dockerignore"
+    assert path.exists(), path
+    patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+    assert {"**/__pycache__", "**/.env*"} <= patterns, patterns
+
+
+def test_embed_dockerfile_installs_only_hashed_binaries_and_pins_the_model() -> None:
+    # Paired SRV-SEARCH change (FR-DEPLOY-2): hash-locked wheels only; the model fetched, verified at build.
+    text = (DEPLOY / "images" / "embed.Dockerfile").read_text()
+    installs = [ln for ln in text.splitlines() if "pip install" in ln]
+    assert installs, "embed.Dockerfile installs nothing"
+    for line in installs:
+        assert "--require-hashes" in line, line
+        assert "--only-binary" in line, line
+        assert "embed.requirements.lock" in line, line
+    assert "fetch_model" in text
+    assert "HF_HUB_OFFLINE=1" in text
+    assert "TRANSFORMERS_OFFLINE=1" in text
+    users = [ln.split()[1] for ln in text.splitlines() if ln.split()[:1] == ["USER"]]
+    assert users == ["10003:10003"], users
+    lock = (DEPLOY / "images" / "embed.requirements.lock").read_text()
+    for pin in ("torch==2.15.0", "transformers==5.23.0", "sentence-transformers==6.3.0"):
+        assert pin in lock, pin
+    reqs = [ln for ln in lock.splitlines() if ln and not ln.startswith((" ", "#", "-"))]
+    assert reqs
+    assert all("==" in ln for ln in reqs), reqs
+
+
+def test_postgres_image_installs_pinned_pgvector() -> None:
+    # Paired SRV-SEARCH change (FR-DEPLOY-2): pgvector from the base image's PGDG source, exact version.
+    text = (DEPLOY / "images" / "postgres.Dockerfile").read_text()
+    assert "postgresql-18-pgvector=0.8.7-1.pgdg13+2" in text
+
+
+def test_caddy_dockerignore_excludes_build_outputs_and_env_files() -> None:
+    path = DEPLOY / "images" / "caddy.Dockerfile.dockerignore"
+    assert path.exists(), path
+    patterns = {ln.strip() for ln in path.read_text().splitlines() if ln.strip() and not ln.startswith("#")}
+    assert {"**/node_modules", "**/dist", "**/storybook-static", "**/.env*"} <= patterns, patterns
 
 
 def _mounts(model: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
@@ -125,9 +203,10 @@ def test_volumes_and_mounts() -> None:
     assert named["postgres"] == {"pgdata"}
     assert {n for n, vols in named.items() if "pgdata" in vols} == {"postgres"}
     assert {n for n, vols in named.items() if "blobs" in vols} == {"api", "worker"}
-    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES}  # server roles: the override's bind
+    # server roles and agent-proxy: the override's reader.yaml bind
+    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES, "agent-proxy"}
     caddy_binds = {(m["target"], m.get("read_only", False)) for m in binds["caddy"]}
-    assert caddy_binds == {("/srv/spa", True), ("/etc/caddy/Caddyfile", True)}
+    assert caddy_binds == {("/etc/caddy/Caddyfile", True)}  # the SPA is in the reader-caddy image
     labels = {
         name: (v.get("labels") or {}).get("org.reader-ai.backup") for name, v in model["volumes"].items()
     }
@@ -155,16 +234,18 @@ def test_base_has_no_bind_on_server_roles() -> None:
         assert not any(_binds(services[r]) for r in SERVER_ROLES if r in services), profiles
 
 
-def test_override_binds_the_config_file_into_server_roles_only() -> None:
+def test_override_binds_the_config_file_into_server_roles_and_agent_proxy_only() -> None:
     services = render(PROFILES, override=True)["services"]
     with_config = {
         name for name, svc in services.items()
         if any(m["target"] == CONFIG_BIND["target"] for m in svc.get("volumes") or [])
     }
-    assert with_config == set(SERVER_ROLES)
-    for role in SERVER_ROLES:
+    assert with_config == {*SERVER_ROLES, "agent-proxy"}
+    for role in (*SERVER_ROLES, "agent-proxy"):
         assert _binds(services[role]) == [CONFIG_BIND], role
+    for role in SERVER_ROLES:
         assert services[role]["environment"] == {"READER_CONFIG": CONFIG_BIND["target"]}, role
+    assert not services["agent-proxy"].get("environment")
 
 
 def test_caddy_volumes_only_in_caddy() -> None:

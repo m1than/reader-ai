@@ -35,11 +35,12 @@ export const walk = (root, dir = root) =>
     : [];
 
 // Test locations (ADR-0001): pytest in server/tests/, Vitest *.test.ts(x) in web/,
-// Playwright *.spec.ts in e2e/.
+// Playwright *.spec.ts in e2e/; node:test files of the Definition-of-Done tooling in tools/dod/ (OPS-DOD).
 const TEST_PATTERNS = [
   /^server\/tests\/(.+\/)?test_[^/]+\.py$/,
   /^web\/.+\.test\.tsx?$/,
   /^e2e\/.+\.spec\.ts$/,
+  /^tools\/dod\/.+\.test\.mjs$/,
 ];
 // Implementation: application code in server/src, web/src, sandbox/ and deploy/.
 // Stories (*.stories.tsx) are component documentation and count as implementation of the component.

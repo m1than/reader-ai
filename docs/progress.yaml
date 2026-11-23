@@ -8,8 +8,23 @@
 budget:
   live_runs_usd: 40      # Agent SDK credit the agent may spend on spikes and live checks before stage 9; owner can raise
   daily_cap_usd: { date: 2026-11-20, usd: 40, by: owner }   # "only 40 dollars for the full flow run today"
-  spent_usd: 5.4576      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  compile_cap_usd: { usd: 8, per: "one lesson compile (all stages)", date: 2026-11-22, by: owner,
+    why: "owner 'accept everything' on the compile budget; spike L02 cost $2.42–$2.97 per run, $8 matches the spike's own cap" }
+  test_budget_usd: { usd: 30, date: 2026-11-22, by: owner,
+    why: "owner: 'Do all for 1000% ready status, I'm approving $30 budget for tests'. Covers live checks and live L02
+      compiles of the vertical slice; no per-run owner consent needed within it; every spend goes to the ledger below" }
+  live_runs_by_agent: "owner 2026-11-22: the agent may run `bash e2e/live/stage-1.sh` and `bash e2e/live/verify-all.sh`
+    itself (allow rules in .claude/settings.json). Those scripts docker-exec internally only to fetch the test user's
+    one-time bootstrap link and reset the test user; they never print or store a secret, and the agent still never runs
+    docker exec directly. Changes to e2e/live/** therefore get a deep-reviewer pass for secret handling."
+  tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
+    the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
+    compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
+  spent_usd: 8.7416      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
+                         #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
+                         #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
+                         #   + V.live tutor bench 1.0870 (40 questions, per-question usage from GET .../questions/{id})
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
@@ -19,6 +34,18 @@ budget:
     - { task: S0.spike.trace-backend, usd: 0.0058, date: 2026-11-20,
         what: "2 exploratory (hand-recorded) + 2 measured rounds of probe runs (3 haiku stages each); span replays without model calls;
           breakdown in spikes/trace-backend/RESULT.md" }
+    - { task: S0.spike.tutor-call, usd: 0.0383, date: 2026-11-22, funding: test_budget_usd,
+        what: "10 tutor-shaped Sonnet 5.5 calls (5 synthetic questions × thinking off/default), cap $0.60; per call in
+          spikes/tutor-call/results/" }
+    - { task: V.live, usd: 1.2587, date: 2026-11-23, funding: test_budget_usd,
+        what: "one L02 compile through POST /api/lessons/{id}/compile (run 22f757ee): draft 0.6233, fact_check 0.2284,
+          adversarial_review 0.4070; cap $8.00; e2e/live/results/2026-11-23-slice.json" }
+    - { task: V.live, usd: 0.90, date: 2026-11-23, funding: test_budget_usd,
+        what: "3 tutor questions through the Ask panel; UPPER BOUND (3 × the $0.30 question cap): the actual cost sits in
+          agent_spend, which no allowed interface exposes (VEC-TUTOR-3 estimates ≈ $0.048 each)" }
+    - { task: V.live, usd: 1.0870, date: 2026-11-23, funding: test_budget_usd,
+        what: "SRV-TUTOR bench, 40 questions over the HTTP API (sum of the questions' usage.usd, 1.086955); mean $0.0267;
+          e2e/live/results/2026-11-23-tutor-bench.json" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -30,6 +57,8 @@ owner_review:            # stage exits waiting for the owner's live check and `i
 priority: "owner 2026-11-20: vertical slice first (docs/roadmap.md 'Vertical slice first'). After S1.live, pick ready V.* tasks
   before any task of stages 2–9; stages resume in order after V.live. Review depth (AGENTS.md): full review until approve in the
   complex areas, one deep-reviewer round elsewhere."
+
+integration: "owner 2026-11-22: one final PR; all work integrates on V/slice-integration"
 
 tasks:
   # Stage 0 — groundwork and spikes
@@ -126,6 +155,14 @@ tasks:
         bge-m3 0.675; MRR 0.230 / 0.409 / 0.413; full pilot 1.2 / 15.1 / 14.1 min. e5-small rejected on recall; the bge-m3 pair is
         within noise. Agent recommends BAAI/bge-m3 (general multilingual, best recall@1 and MRR, MIT); V.SRV-SEARCH-min uses it
         and measures the hybrid on v2 as its acceptance number." }
+  - { id: S0.spike.embed-service, stage: 0, kind: spike, status: done, needs: [S0.spike.embeddings-local],
+      result: "spikes/embed-service/RESULT.md: bge-m3 (rev 5617a9f…, baked, image 5.6 GB), fp32, torch 2.15.0+cpu,
+        sentence-transformers 6.3.0, under the OPS-DEPLOY hardening flags. Cap 1,024, worst admitted request (32 texts at
+        1,024 tokens): peak RSS 3,644 MiB, memory.peak 2,289–2,415 MiB; worst batch of 8 alone: RSS 2,410, memory.peak 1,137.
+        8 CPUs: idle query 0.5–0.9 s, worst batch of 8 11–13 s, worst batch of 32 62 s, prose 1.05–1.72 chunks/s (±40 % run
+        variance). Cap 512 comparison: RSS 2,956, memory.peak 1,626. bf16 on CPU rejected (higher memory, 9–30× slower).
+        torch.load(weights_only=True) of pytorch_model.bin works. Recommended embed mem_limit 4.5 GiB (RSS × 1.25);
+        3.0 GiB if calls were limited to 8 texts." }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: blocked, needs: [S0.spike.agent-sdk-container],
       review: "deep-reviewer (Fable): round 1 changes, round 2 changes (source-token count, egress wording), round 3 approve",
       note: "spends Agent SDK credit; record in budget.ledger. The owner allowed spikes/compile-cost/run.sh to read the Keychain
@@ -355,17 +392,14 @@ tasks:
       what: "Paired OPS-CLI change: restore's precondition ignores rows the api seeds from reader.yaml at start (users
         without credentials or sessions) and other declared system tables; --clean --if-exists then replaces them. Until
         done, stage-1.sh refuses --drill. Found by the S1.live script author, 2026-11-22." }
-  - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: module, track: engineering, status: todo, needs: [],
-      what: "tests/sandbox/test_supervisor.py::test_own_address_source_counts_as_local failed once in the full local gate
-        while other Docker workloads ran (embed spike at 8 CPUs, SRV-KERNEL tests), and passed alone in 17.9 s (2026-11-22).
-        Make its timing robust under load (longer settle or polling with a bound), paired OPS-SANDBOX spec note (H2).
-        Also seen during concurrent gates: test_signals_under_state_flood_always_restart and
-        test_full_table_from_inside_does_not_block_the_caller failed, one with `network rk-net-… not found`. Likely cause:
-        the session sweep removes every test-labelled container and network, including another concurrent run's. Fix:
-        label resources with a per-run id and sweep only this run's." }
   - { id: S1.live, stage: 1, kind: live, status: in_progress, needs: [S1.OPS-CLI, S1.SRV-AUTH],
       what: "e2e/live/stage-1.sh; re-plan checkpoint 1 in docs/roadmap.md",
-      note: "--drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
+      note: "2026-11-22 automated live run (agent, branch V/live-e2e, a6e622b): bash e2e/live/verify-all.sh — 53 of 53
+        PASS (stage-1 31, browser 22 incl. CDP virtual passkey, lesson, notebook cells, sandbox probes, CSP, token canary;
+        axe: no serious/critical). Found and fixed: WEB-UI /api/me id string, WEB-UI nested lesson metadata, OPS-CLI
+        kernels profile, doctor detail. Remaining owner step: own passkey in Safari (reader bootstrap). Follow-up: F01
+        references show raw span ids and one empty item (WEB-NOTEBOOK skip empty refs; fixture titles).
+        --drill disabled until S1.OPS-CLI-restore-seed. script ready; awaits the owner run. e2e/live/stage-1.sh --config <reader.yaml> [--drill] with helpers
         e2e/live/lib/{passkey_check,secret_scan}.py (outside the spec gate). Non-destructive by default (≈ 5 min; restarts
         api and postgres, stops and restarts the watcher). --drill deletes and recreates the pgdata and blobs volumes
         after a backup. Known risk for --drill: the api seeds users rows from reader.yaml at startup, so OPS-CLI's restore
@@ -374,14 +408,192 @@ tasks:
         dry-run only (no stack)." }
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
-  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: todo, needs: [S1.live] }
-  - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: todo, needs: [V.SRV-JOBS-min],
-      note: "native converter per ADR-0021 (M1: Docker 266–284 s per formula, PR #24)" }
-  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-INGEST-min],
-      note: "BAAI/bge-m3 (spike embeddings-local v2; owner confirmation pending); acceptance: hybrid recall on questions-v2" }
-  - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-JOBS-min] }
-  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
-      note: "OPS-SANDBOX done (code review approve); SRV-KERNEL draft until SRV-AUTH merges. Branch V/V.KERNEL-min.
+  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+      final: "2026-11-23 (final slice PR): merged into V/slice-integration (2a138f6) and exercised by the live slice
+        (ingest.import, search.embed, pipeline steps and tutor.answer all ran as SRV-EVENTS jobs). Tests:
+        server/tests/jobs (41 at Green, plus the code-review tests). Reviews: spec deep-reviewer rounds 1–3 changes,
+        round 4 approve; code review round 1 changes (4719a0e), round 2 changes (3650190), both applied. No approve
+        verdict for the code is on record, and jobs and idempotency is a complex area (AGENTS.md), so the task stays
+        in_progress until a final deep-reviewer round returns approve (listed for the owner's review-after).",
+      note: "green locally; code review next (complex area: full review). Spec SRV-EVENTS approved with Red (deep-reviewer
+        rounds 1–3 changes, round 4 approve). 41 tests (21 unit incl. a Hypothesis state machine, 20 db on testcontainers
+        Postgres with the OPS-DEPLOY digest); all 41 failed on their own assertion at Red; two mutations (exhaustion
+        off-by-one, removed skip) are caught. procrastinate 3.12.0 + psycopg[binary,pool] 3.3.9 (cp314 wheels for macOS
+        and Linux arm64). Paired SRV-AUTH changes in reader.db, found by its tests: version_locations gains
+        jobs/migrations and procrastinate's chain; readiness compares effective heads (procrastinate_0043 sits behind
+        jobs_0001's depends_on); the migration lock is a polled try-lock on its own autocommit connection, because
+        procrastinate's CREATE INDEX CONCURRENTLY deadlocked the concurrent-migration test. reader-server --role worker
+        now runs reader.jobs.worker.run. Merged origin/1/ruff-import-order (3 pre-existing import-order errors on main).
+        KIND_MODULES is empty until V.SRV-INGEST-min / V.SRV-SEARCH-min add theirs" }
+  - { id: V.SRV-INGEST-min, stage: V, kind: module, track: engineering, status: done, needs: [V.SRV-JOBS-min],
+      branch: V/SRV-INGEST-impl,
+      final: "2026-11-23: merged into V/slice-integration (8477c4f; FR-INGEST-13 embed enqueue fix 8e8cfd5). Tests:
+        server/tests/ingest (unit, db, [host] opt-in). Reviews: spec rounds 1–3 changes, round 4 approve; code review
+        round 1 changes, round 2 approve (6aa0409); indentation r2 round 1 changes, round 2 approve (c6ae789), round 3
+        approve (d703f21); embed-enqueue fix round 1 changes, round 2 approve (8e8cfd5). Live: 935 pages, 80.4
+        pages/min, 9,463 spans (e2e/live/results/2026-11-23-slice.json). Spec status stays approved (implemented is the
+        owner's).",
+      green: "2026-11-22: spec approved (agent) with Red cdfaab0 (146 tests failing in their bodies); Green: the
+        [unit] and [db] ingest tests pass; cross-spec KIND_MODULES, ROUTERS, VERSION_LOCATIONS paired with
+        SRV-EVENTS/SRV-AUTH notes. Measured on the owner's Mac: `reader-ingest --setup` builds the converter venv
+        (103 hash-pinned packages, torch 2.15.0, non-editable reader wheel) and fetches 1.2 GB of pinned models; the
+        synthetic PDF converts under the real profile as VEC-INGEST-2 expects; confinement probes ([local]) all denied;
+        pilot outline 494 entries, 3 levels, level 1 measured 27; full pilot run under the profile on CPU: 935 pages
+        in 856.3 s = 65.5 pages/min (NFR-INGEST-1 bound 10), 9,463 spans (code 360, formula 36 all decoded, table 48,
+        figure 586), outline from bookmarks, pages without text 1-4/392/935, spans.jsonl 4.5 MB, child peak RSS
+        4.0 GiB. VEC-INGEST-3 (ADR-0021's deterministic check): 18 of 20 pages as recorded, code hashes and the
+        461/468 code-after-step order hold; 2 deviations are Docling layout labels: p133 a hex-constant line labelled
+        code (3 blocks, 2 recorded), p468 a filename label labelled list_item. Not run: reader up / docker exec
+        receive (the live end-to-end agent's).
+        Code review round 1 (9222276, changes) applied with paired tests: VEC-INGEST-3 pins p133's extra block
+        (count 3) and checks 461/468 order relationally against hand-recorded step boxes (owner note: rule-B pages
+        may be 3 — 378, 133, 468 — owner judges them before the first full import); the host reads the members
+        once through a dir fd (cap + 1, no symlinks, no FIFOs) and tars those validated bytes; killpg after every
+        exit; strict octal tar fields; receive's deadline after storage via asyncio.timeout, exit code from the
+        stored flag; non-blocking items. Full-run numbers committed as spec/fixtures/SRV-INGEST/pilot-fullrun.json.
+        Code review, deep-reviewer (Fable): round 1 changes (9222276), round 2 VERDICT approve (6aa0409). Its four
+        non-blocking items applied with paired tests: FR-INGEST-8 non-code items keep exactly Docling's order (code
+        only reattached by bbox top); FR-INGEST-7 states the 1.0 pt CODE_MARGIN_PT; a driver connect TimeoutError
+        maps to database_unreachable (only the deadline scope's expiry is timeout); the system_spawn test checks
+        os.getsid while the child is alive.
+        Owner judgement 2026-11-23 (SRV-INGEST owner note 6): NFR-INGEST-2 rule B is 1 of 20 (page 378); pages 133
+        and 468 are label noise, not rule-B misses. The owner chose to fix code-block indentation before the first
+        full import: FR-INGEST-7 now rebuilds leading spaces from glyph origins, converter docling-2.151.1+r2.
+        Indentation review of ad0da76 (deep-reviewer, Fable): changes — the median step halved indents in
+        one-letter-token code. Fixed: the cell is the font advance (pdfium loose char box width, one width within
+        2%), every step and line offset a whole number of cells within the chosen 0.25 bound, dedent to the
+        leftmost line, no tabs, text-layer fallback when undefined; [unit] tests pin each choice. Measured
+        2026-11-23 on the 20 pilot code blocks: cell 4.05 pt, spread 0.000, residual 0.00; hand counts equal the
+        converter's on four blocks (468 Solidity 0,0,0,0,0,2,4,4,4,4,4,2,0; 468 first 0,0,0,0,0,0,3; 461 first
+        0,2,...,6,...,2,0; 133 output 0,0,2,2,2,0). Full book under r2 (confined, CPU): 935 pages in 642.2 s; code
+        boxes 360, indentation fallbacks 17 (kept the text layer), multi-box code items 0, so FR-INGEST-7's
+        per-box known limit does not touch the pilot. Owner: `reader-ingest --setup` builds the r2 venv; the old
+        <data_dir>/ingest/venv-docling-2.151.1+r1 (several GB) can be deleted.
+        Indentation review: round 1 changes (ad0da76), round 2 VERDICT approve (c6ae789), deep-reviewer (Fable).
+        Gate at c6ae789: LOCAL CI FAIL only in tests/sandbox (15 tests: test_session_sweep_spares_other_runs and 14
+        in test_supervisor.py), the identical set failing on clean origin/V/slice-integration 744997e; each passes
+        alone (order-dependent, not SRV-INGEST).
+        Majority-cell rule (FR-INGEST-7, still r2: no r2 artifact outside test runs): modal advance, at least 80%
+        of glyphs within 2%, steps checked between in-band glyphs only, every line offset on the grid. Full book
+        2026-11-23: 935 pages in 634.7 s; code boxes 360: exact 343, majority cell 7 (pages 419, 429, 431 x2,
+        432 x2, 859), fallbacks 10. The fallbacks with page, reason, modal advance, in-band share: 105 below 80%
+        3.43 0.114; 133 below 80% 4.80 0.731; 341 below 80% 5.33 0.286; 341 below 80% 3.43 0.133; 369 below 80%
+        4.82 0.373; 418 below 80% 4.05 0.789; 425 below 80% 4.05 0.756; 460 off grid 4.05 1.000; 469 off grid
+        4.05 0.994 (also 12 visual vs 11 text lines); 568 below 80% 4.05 0.566. Pages 418, 425 and 568 are short
+        (3-4 line) boxes whose italic comments exceed 20% of the glyphs. Page 419's italic-comment block counted
+        by eye (0,4,4,4,4,4,8,8,12,12,8,4,0) equals the converter's. Gate: FAIL only on the same 15 sandbox tests.
+        Indentation review round 3 (d703f21, deep-reviewer, Fable): VERDICT approve; its items applied (offset-only
+        out-of-band test, 4.14 out of band and [0.0] -> None, the digit-dominated known limit, page 419 kept out
+        of the rule-B tally). For the owner, code blocks that import with the text layer's indentation (0-1 leading
+        space): pages 418, 425 and 568 (italic comments push the box below the 80% floor) and pages 460 and 469
+        (a line off the monospace grid); the other five fallbacks (105, 133, 341 x2, 369) are proportional text
+        Docling labels as code. Both full-book r2 runs removed their own work directories; nothing of them remains.",
+      note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
+        (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
+        non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line
+        is the owner's). Review: rounds 1–3 changes, round 4 approve (2d2bd15) for SRV-INGEST and ADR-0027; nits
+        applied. Spec stays draft: approval goes with Red, which waits for SRV-AUTH (PR #33), SRV-EVENTS Red/Green
+        and the owner's ADR-0027 status flip.
+        spec/modules/SRV-INGEST.yaml (slice revision): host command `reader-ingest` copies the PDF into a private work
+        dir and runs Docling natively on CPU as a deny-by-default sandbox-exec child (no network, no Unix sockets, no
+        mach services), then streams the validated artifact over `docker exec -i <worker> python -I -m
+        reader.ingest.receive` stdin; the worker stores it on blobs and enqueues `ingest.import`. Span ids
+        `<material_sha256>:<seq>`; converter_version frozen at first import. Transport differs from ADR-0021 Decision 3
+        (loopback listener, unreachable from the worker's internal networks): ADR-0027 proposed. Cross-spec: SRV-EVENTS
+        KINDS from a declared module list; SRV-AUTH ROUTERS + version_locations add ingest; OPS-DEPLOY creates
+        /var/lib/reader/blobs owned by 10001 (paired change scheduled). Owner: browser upload deferred (reader.yaml +
+        host command instead)." }
+  - { id: V.SRV-LESSON-min, stage: V, kind: module, track: product, status: done, needs: [S1.live],
+      branch: V/V.SRV-LESSON-min,
+      final: "2026-11-23: merged into V/slice-integration (031e02d); the live L02 lesson renders from its revisions.
+        Tests: server/tests/lessons (176). Reviews: spec round 1 changes (one round outside complex areas), code review
+        one round, blockers applied (see review).",
+      review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas;
+        applied with coordinator decisions (G2 publish deferred to SRV-PIPELINE; stage records per revision; seq; single
+        /api/lessons API; span id form <material_sha256>:<seq>); coordinator diff check passed; spec approved (agent,
+        2026-11-22) with Red. Code review (one round) on bdb4eff: 4 blocking (deep nesting → not_nbformat; provenance
+        surrogate/huge int/NUL → bad_provenance before any blob; notes check skipped only for the current revision;
+        trailing newline accepted by `$` patterns → single_line schema guard and fullmatch cell ids) plus non-blocking,
+        all applied with paired spec and tests; current revision = most recent stage record (coordinator decision);
+        176 lessons tests and 153 auth tests pass",
+      note: "green locally; awaits one code-review round. Red 231092a: 126 tests in server/tests/lessons, all failing on
+        assertions (missing modules surface through need() as AssertionError), plus the paired SRV-AUTH tests for ROUTERS and
+        version_locations (spec notes in FR-AUTH-1/FR-AUTH-10; three import-order fixes in SRV-AUTH tests that ruff 0.17.6
+        flags on main). Green: reader.blobs, reader.lessons.{schema,store,access,routes,fixture}, migration lessons_0001
+        (branch lessons, down_revision 0001_auth; composite FKs, immutability trigger); ROUTERS and VERSION_LOCATIONS wired.
+        Found in Green: with `depends_on` 0001_auth the history kept 0001_auth as a head that alembic_version never records,
+        so SRV-AUTH's at_heads failed; switched to down_revision with a paired FR-LESSON-14 + downgrade-test change
+        (lessons@-1). SRV-EVENTS's `depends_on = procrastinate_0043` will hit the same check: note for its Green;
+        packaged cell.schema.json and F01.ipynb written by the committed generator (spec/fixtures/SRV-LESSON/gen_f01.py now
+        also writes them). Deps: nbformat 5.11.1, jsonschema 4.26.0; dev types-jsonschema. 126/126 lessons tests pass
+        against Postgres 18 (pinned digest, testcontainers). Live item left: fixture load on a fresh blobs volume
+        (e2e/live/slice.sh). Cross-spec still open: SRV-INGEST issues span ids as <material_sha256>:<seq> and reuses
+        reader.blobs; SRV-PIPELINE owns G2." }
+  - { id: V.OPS-DEPLOY-web, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-DEPLOY],
+      branch: V/V.WEB-min,
+      final: "2026-11-23: reviewed with V.WEB-min's code review (single round, blockers fixed) and merged; the live stack
+        serves the SPA from reader-caddy:local. Tests: server/tests/deploy (67 incl. the opt-in image build).",
+      note: "Done on branch V/V.WEB-min (commit 5b5ed0c), awaits the code review with V.WEB-min. Chose the derived image:
+        reader-caddy:local (deploy/images/caddy.Dockerfile: node:26-trixie-slim@sha256:e6bedef2…20bc build stage with
+        allow-listed web inputs and a dockerignore, then the pinned caddy:2-alpine with web/dist at /srv/spa), so the
+        SPA ships with its build and no host path enters the edge; the placeholder directory is gone. Caddyfile: the
+        exact app CSP of WEB-UI's header (no data:, no 'unsafe-inline') and try_files {path} /index.html. Paired
+        OPS-DEPLOY FR-DEPLOY-2/5/7 and tests: 66 deploy tests pass, including the opt-in [image: build] test
+        (READER_TEST_IMAGE_BUILD=1) that built reader-caddy:test and found /srv/spa/index.html and the JS assets." }
+  - { id: V.WEB-min, stage: V, kind: module, track: product, status: done,
+      needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels, V.OPS-DEPLOY-web], branch: V/V.WEB-min,
+      final: "2026-11-23: merged into V/slice-integration; live verify-all browser suite 53/53 PASS. Tests: web Vitest
+        (207 after V.WEB-polish), Playwright [browser] specs in e2e/web/{ui,render,tutor}. Reviews: spec single round
+        changes (applied), code review single round (fca75a1) changes, 3 blockers fixed.",
+      review: "deep-reviewer (Fable), single round (outside the complex areas): changes, 9 blockers (B1–B3 the sandboxed
+        frame, incl. a one-click session takeover via the frame page opened top-level, reproduced in Chromium; B4
+        sanitiser order and schema; B5 reconnect and notice table; B6 gradient check; B7 story coverage; B8 bundle
+        budget; B9 contrast fixture as recipes); applied per coordinator decisions, no second round",
+      note: "specs revised after the review, folding in the SRV-LESSON API (list with course and latest_sha256; notebook
+        only from the immutable revision route; span citations). Three specs: WEB-UI (shell, vendored library tarball
+        from tag v0.1.0 via web/scripts/vendor-ui.mjs with tag→commit check, Calm tokens, routes, API client, sign-in
+        via SRV-AUTH's page, lesson list by course), WEB-NOTEBOOK (cells by kind, span/URL citations, G2 open cells,
+        own typed relay client with one reconnect procedure and the full notice/close table), WEB-RENDER (sanitise →
+        KaTeX → Shiki as React, no rehype-raw, no markdown images; HTML as text, SVG as blob: img; the sandboxed frame
+        deferred to 4b with the review's findings). Declared deviations from proposed ADR-0013: hand-written API
+        client; no @jupyterlab/services (widgets deferred). Approved by agent 2026-11-22. Red 5bdd54d: 109 Vitest
+        tests (104 failing on assertions against empty stubs; the vendor checks pass on the tarball) and 2 Playwright
+        [browser] tests. Green 1f6ac7e: 109/109 Vitest pass; typecheck and build-storybook pass. NFR-UI-1 measured
+        110,131 B gzip initial JS (threshold 121,144 = +10 %). Chromium [browser] run (2026-11-22, Playwright 1.65.1,
+        chrome-headless-shell 159): first run INV-UI-4 failed with 13 style-src-attr violations from rehype-katex's
+        DOM-based HTML parser (hast-util-from-html-isomorphic browser build); fixed by aliasing it to its parse5 build
+        in vite.config.ts; second run 2/2 pass (no CSP violation on / and /lessons/w01 with KaTeX and Shiki; no
+        gradient, glass or glow in any story, light and dark). Library vendored from tag v0.1.0 (eae463bc) as
+        web/vendor/acme-ui-v0.1.0.tgz, sha256 a1f228e1…8e88, Node 26.13.0, npm 11.20.0; nothing pushed to the
+        library. Owner notes: the library's styles.css carries a data: mask URL for the table sort indicator (FR-UI-9
+        note; blocked by the CSP if a table were rendered). Code review (fca75a1, single round, 2026-11-22): 3 blockers
+        fixed — SVG renders as text and never becomes a blob (an SVG blob opened top-level ran its script in the app
+        origin, Chromium); a Run all stops on any error reply whatever the label; giving up a reconnect and a 401 in
+        a reconnect POST are lost events. Non-blocking applied: retry() runs the reconnect; INV-NOTEBOOK-1 checked
+        against a reference model with HTTP failures and a socket that rejects early sends; output coercion; Retry
+        reset; inline-math clipping; protocols spread, // links absolute, footnote links via clobberPrefix '' plus a
+        fragment rewrite; decode-named-character-reference aliased to its table build; raster blob URLs revoked on
+        load/error; caddy build with npm ci --ignore-scripts; /assets/* 404 instead of the SPA; COPY --from stage
+        check; one distinct data: URL pinned; NFR-UI-1 110,139 B (threshold 121,153). After the fixes: Vitest 122/122,
+        Playwright Chromium 5/5, tests/deploy 67 passed (incl. the image build), tests/sandbox skipped as asked." }
+  - { id: V.KERNEL-min, stage: V, kind: module, track: engineering, status: done, needs: [S1.live],
+      final: "2026-11-23: merged into V/slice-integration; the sandbox load flakes were test isolation (V.OPS-SANDBOX-
+        flaky-load, three fixes, last approved on b3c485d) and the gate passes. Live: lab cell 1.9 s, interrupt, reset,
+        no egress (verify-all). Tests: server/tests/kernels, server/tests/sandbox. Reviews: SRV-KERNEL spec round 3
+        approve, code review round 2 approve; OPS-SANDBOX spec round 3 approve, code review round 3 approve.",
+      note: "SRV-KERNEL code review approve (round 1 changes, round 2 approve; 71 kernel tests); PR after the
+        OPS-SANDBOX flaky-test fix (investigator) so the full gate can pass. OPS-SANDBOX done (code review approve,
+        PR #34). SRV-KERNEL approved 2026-11-22 on branch V/V.SRV-KERNEL. At green: 57 tests in server/tests/kernels (protocol and
+        VEC-KERNEL-1 table with Hypothesis properties; service and VEC-KERNEL-2 reset sequences with a fake clock;
+        relay against an in-memory upstream; upstream client against local servers; routes through the app on
+        Postgres; [image]: first-use reset and print(1) on reader-kernel:local, interrupted sleep and busy loop reply
+        1.49 s after a 1 s test timeout). Paired SRV-AUTH change: ROUTERS adds reader.kernels.routes, Route DELETE,
+        WS_ROUTES, websockets 17.4; three auth-test import blocks re-sorted (ruff 0.17.6 failed them on main too).
+        Local gate 2026-11-22: two runs FAIL on one OPS-SANDBOX timing test each (own_address, then signals race;
+        765 passed otherwise), with 12 other workloads' containers on the shared Docker VM; own_address passes 3/3
+        alone; the signals race failed once alone (state polls via docker exec failing for 10 s) while a direct
+        replay of 8 flood+signal cases restarted in 0–2 s by docker inspect. Needs an investigator before merge.
+        Earlier: Branch V/V.KERNEL-min.
         Specs: deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-21). OPS-SANDBOX code review: rounds 1–2
         changes, round 3 approve. Code review round 1 changes (SIGTERM-vs-lock deadlock in PID 1, 4 of 40
         runs; connection-table veto by a cell) fixed: lock-free supervisor with a SIGTERM self-pipe, local 192 / remote
@@ -396,26 +608,397 @@ tasks:
         kernels 248 MiB; reset round trip 1.12–1.20 s (3 resets, 11 s apart); exit with 50 idle connections held:
         process gone 0.11 s after the 202. SRV-KERNEL stays draft until SRV-AUTH merges (its Red needs the app and
         session layers). Cross-spec: SRV-AUTH's app factory includes routers from a declared list naming
-        reader.kernels.routes" }
+        reader.kernels.routes. Item from the WEB review for SRV-KERNEL (done in SRV-KERNEL FR-KERNEL-10): on
+        kernel_restarted the relay frees its in-flight execute slot and drops its queue." }
   - { id: V.OPS-SANDBOX-flaky-load, stage: V, kind: fix, track: engineering, status: done, needs: [],
       note: "Root cause (investigator, 2026-11-22): the OPS-SANDBOX test session finalizer removed every container and
         network labelled org.reader-ai.test=sandbox on the shared Docker daemon, killing other concurrent sessions'
         live objects (caught twice with pid attribution; shared label fails, per-run labels pass). The supervisor was
         fine: 480/480 restarts within 4.0 s under load. Fix on branch V/OPS-SANDBOX-test-isolation: per-run label
         org.reader-ai.test.sandbox-run=<pid>.<random>, end sweep of own objects, start sweep of dead pids only;
-        test_session_sweep_spares_other_runs. Old-label orphans left for the owner" }
-  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: todo, needs: [S1.OPS-CLI],
-      note: "OPS-CLI starts profile `kernels` when reader-kernel:local exists (paired OPS-CLI spec change). The profile also
-        starts kernel-verify, kernel-agent and kernel-pair-1 from the same image" }
-  - { id: V.WEB-min, stage: V, kind: module, track: product, status: todo, needs: [V.SRV-LESSON-min, V.KERNEL-min, V.OPS-CLI-kernels],
-      note: "WEB-UI + WEB-NOTEBOOK + WEB-RENDER minimal; library from the local build (spike library-publish)" }
-  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.SRV-LESSON-min],
-      note: "SRV-AGENT + SRV-PIPELINE for L02 through agent-proxy (ADR-0025); open findings to G2 (compile-cost: 0 of 2 converged);
-        spends credit, ledger" }
-  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: todo, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min] }
-  - { id: V.live, stage: V, kind: live, status: todo,
+        test_session_sweep_spares_other_runs. Old-label orphans left for the owner. Second fix (2026-11-23, branch
+        V/OPS-SANDBOX-test-image): the shared image tag reader-kernel:local was rebuilt by every session, so a
+        concurrent session retagged it mid-run; each session now builds and uses reader-kernel:test-<run id> and sweeps
+        tags like labels (test_session_sweep_spares_other_runs_tags). Tests never touch reader-kernel:local. Third fix
+        (2026-11-23, branch V/OPS-SANDBOX-test-subnets, investigator's root cause of 15 supervisor failures with the
+        stack up): Docker's default address pools had one subnet left and test_session_sweep_spares_other_runs leaked
+        a network created before its try, so every later network create failed. Test networks take an explicit /28
+        in 10.231.0.0/16 (conftest create_network, retried on Pool overlaps), objects are registered for cleanup as
+        soon as they exist (test_test_networks_use_explicit_subnets), and SRV-KERNEL's and SRV-PIPELINE's image tests
+        use per-run tags. Measured with the stack up: tests/sandbox, tests/kernels and test_verify.py 114 passed, no
+        labelled networks left, reader-kernel:local unchanged. Review: deep-reviewer on b3c485d VERDICT approve;
+        non-blocking items applied" }
+  - { id: V.spike.agent-proxy-handshake, stage: V, kind: spike, status: done, needs: [],
+      result: "PASS, zero credit (spikes/agent-proxy-handshake/RESULT.md): claude-agent-sdk 0.2.187's CLI sends the
+        placeholder as `Authorization: Bearer` to ANTHROPIC_BASE_URL on POST /v1/messages?beta=true only; with
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 one request per query and no other host (without it: an auxiliary
+        request and CONNECT api.anthropic.com:443 twice per query); tools=[] → empty init tool list and no request tools.
+        Round 2: CLAUDE_CODE_MAX_OUTPUT_TOKENS is sent as max_tokens; on 429/529/500 the CLI retries 10 times over
+        174–178 s, then AssistantMessage.error rate_limit|server_error, ResultMessage is_error with cost 0" }
+  - { id: V.COMPILE-min, stage: V, kind: module, track: ai, status: done,
+      final: "2026-11-23: merged; live L02 compile converged in 210 s for $1.2587, G2 publishable after the canonical
+        compare fix (eb3e01d, deep-reviewer approve), recompile reused every step at $0. Tests: server/tests/agent,
+        server/tests/pipeline. Reviews: spec rounds 1–2 changes, round 3 approve; code review round 1 changes, round 2
+        approve.",
+      needs: [V.SRV-LESSON-min, V.SRV-INGEST-min, V.KERNEL-min, V.OPS-CLI-agents, V.OPS-CLI-kernels, V.spike.agent-proxy-handshake],
+      branch: V/V.COMPILE-min,
+      review: "deep-reviewer (Fable) round 1: changes (B1–B11 plus non-blocking), addressed in 2526267; round 2: changes
+        (R2-B1 per-run task budgets and cross-run reuse, R2-B2 settle $0 without upstream 2xx, R2-B3 in-handler enqueue
+        and `stalled`, R2-B4 output cap bound to the run_token, plus non-blocking), all addressed; round 3: approve
+        (3c10698). Run cap = the owner's compile_cap_usd $8.00, a declared deviation from ADR-0005's $4.35 target
+        (23 × $8 = $184 > $100; the $200 monthly budget is the guard; ADR-0005 amendment when the pipeline lands)",
+      note: "SRV-AGENT and SRV-PIPELINE approved (agent, 2026-11-22) with the round-3 items folded in; Green done
+        (agent dca70a2, pipeline 64480ca, c3f9995). Code review by deep-reviewer (Fable): round 1 changes (B1 system
+        prompt as a file, B2 in-flight record, S1–S6, minors, test gaps; fixed in 0ed0310 and 7c8411a), round 2
+        approve (2026-11-23), its non-blocking items applied. Any claude-agent-sdk version bump must re-run
+        server/tests/agent/test_cli_image.py (the kill path reads the SDK transport's private _process). Watch the
+        first live Opus stage for a model_mismatch refusal. No live compile until the coordinator schedules it. SRV-AGENT amended for SRV-TUTOR (FR-AGENT-12 daily scope,
+        FR-AGENT-13 thinking off, custom system prompt reserve, stop_reason, abort on first api_retry, deadline).
+        Paired: OPS-DEPLOY (agent-proxy build, server image installs [agent], example budgets 4/2/4, agent-proxy
+        healthy while listening), SRV-AUTH (ROUTERS, VERSION_LOCATIONS, api Jobs), SRV-EVENTS (KIND_MODULES,
+        running(), on_worker_start, spend rows), SRV-LESSON (`findings` stage), SRV-KERNEL (public upstream client),
+        SRV-CONFIG (per-run budget note). SRV-INGEST tables are read through to_regclass until its migration lands.
+        SRV-AGENT: agent-proxy reverse proxy with run_tokens as the CLI's
+        bearer placeholder, POST /v1/messages?beta=true and header allow-lists, body tools check; no-tool Agent SDK
+        provider with model ids resolved and priced before spend; reservation/settlement ledger with run, task and
+        monthly caps; pricing table recomputes all 12 spike stages within 0.38–1.78 %. SRV-PIPELINE: steps as jobs keyed
+        by (run_id, step, stage, input_sha256) and reused across runs by input_sha256, next step enqueued inside the
+        handler, derived run state with `stalled` and ensure(), one revise loop, run cap $8.00, per-run task budgets,
+        span aliases s1…sN, worst-case reserves with measured floors, verdicts keyed by cell/claim with forced unsupported,
+        findings step with stable open-cell ids, G2 report (labs binding, claims, stage records, deltas) after lab
+        verification, worker-side kernel-verify client, course_plans mapping for an idempotent G1 import. One L02
+        compile ≈ $2.4–3.0 (spike), within the owner's $30 test budget (2026-11-22). Search is not a dependency." }
+  - { id: V.OPS-CLI-kernels, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-CLI],
+      note: "FR-CLI-5 amended (spec, test, code paired, branch V/live-e2e): `reader up` always activates `kernels`
+        besides the default profile (config, build and up all carry `--profile kernels`); compose builds the kernel image.
+        The profile also starts kernel-verify, kernel-agent and kernel-pair-1 from the same image. CLI tests 216 pass" }
+  - { id: V.OPS-CLI-agents, stage: V, kind: module, track: engineering, status: done, needs: [S1.OPS-CLI],
+      final: "2026-11-23: merged; the live stack ran agent-proxy under the `agents` profile for the compile and the tutor.
+        Tests: server/tests/cli (231). Review: deep-reviewer code review of 04f6d7a approve.",
+      branch: V/OPS-CLI-profiles,
+      review: "deep-reviewer (Fable) code review of 04f6d7a: approve; its five items applied (spec, tests, code)",
+      note: "Branch V/OPS-CLI-profiles (merged origin/V/live-e2e; its kernels change kept); one final PR (owner), none
+        opened. FR-CLI-5: profile flags sorted before -f; `agents` recorded in run/profiles immediately before `up -d`
+        (a failed up keeps the old record), used by status, down, bootstrap, trust, backup and restore; doctor uses the
+        profiles up would choose now. A profile recorded but no longer chosen is withdrawn before `up -d` with
+        `docker compose -p <name> rm -sf agent-proxy`, so its tokens leave tmpfs. compose.yaml: agent-proxy
+        `pull_policy: never` (OPS-DEPLOY FR-DEPLOY-1). CLI tests 231 (14 in tests/cli/test_profiles.py). `agents` is active when a user has a provider configured
+        AND `docker image inspect reader-agent-proxy:local` exits 0: nothing in the repository builds that image yet
+        (SRV-AGENT), and starting the profile without it would fail `up -d`; otherwise a stderr note. Provider tokens go
+        to agent-proxy only (ADR-0023/0025), named secret_file_name(ref); without agent-proxy in the active model no
+        provider reference is resolved (tested). The watcher's consumer set is the plan's services, so it gains
+        agent-proxy with the profile. Paired OPS-DEPLOY change (FR-DEPLOY-5, VEC-DEPLOY-3, test_compose_render): the
+        override's read-only reader.yaml bind also on agent-proxy (SRV-AGENT B6), no READER_CONFIG env on it (SRV-AGENT
+        decides). Open cross-spec item: the `embed` service (SRV-SEARCH, ADR-0028) is not in deploy/compose.yaml:
+        origin/V/V.SRV-SEARCH-min holds only its spec and origin/V/SRV-SEARCH-impl does not exist; once OPS-DEPLOY adds it
+        with a build section, `reader up` builds and starts it with no OPS-CLI change; it is not a secret consumer." }
+  - { id: V.SRV-SEARCH-min, stage: V, kind: module, track: ai, status: done, needs: [V.SRV-INGEST-min],
+      final: "2026-11-23: merged; live on the real spans: embed 12.0 min, questions-v2 recall@10 0.675 (27/40), p95
+        173 ms (NFR-SEARCH-1 holds on the served dense order). Tests: server/tests/search. Reviews: spec round 1 changes
+        plus D1 delta, approved; code review round 1 changes, round 2 approve (59c2c9f); FR-SEARCH-9 fix round 2
+        approve (8e8cfd5). Retrieval recall bounds tutor grounding: V.tutor-retrieval.",
+      branch: V/SRV-SEARCH-impl,
+      impl: "Spec approved by agent (6e37914, with Red). Green 1890712, 740b548: reader.search (embed service, chunking,
+        RRF, OR full text, search(), POST /api/search, search.embed job, ensure, migration search_0001), embed image
+        (hash-locked wheels, model verified by sha256 at build, 5.6 GB), pgvector 0.8.7 in reader-postgres, compose
+        embed service on its own network; paired SRV-AUTH (ROUTERS, VERSION_LOCATIONS, hide_parameters) and OPS-DEPLOY
+        (FR-1/2/3/9/11, VEC-DEPLOY-2) changes; module tests run Postgres from pgvector/pgvector:0.8.7-pg18-trixie.
+        Tests: search 57 passed (unit + db), [image] 4 passed (build, offline embed, no text in logs, weights_only
+        refuses a non-allow-listed global, real checkpoint loads); ci-local PASS. [local] bench 2026-11-22 (pilot
+        PDF, pypdfium2 page text as spans because no SRV-INGEST artifact exists yet; real embed image, batches of 8):
+        2,285 chunks (= the spike's), embed job 17.18 min, 0 truncated chunks. questions-v2 hits at 10: dense 27,
+        full text 14, hybrid 24 (recall@1 0.225, @3 0.425, MRR 0.338, 0 empty full-text lists); questions-v1: dense
+        30, full text 26, hybrid 29 of 30. NFR-SEARCH-1 FAILS: hybrid 24 < dense-only 27 and < 27; NFR-SEARCH-2
+        (0.967 ≥ 0.8), -3 (17.18 ≤ 60) and -4 (0 truncated) pass. Dense reproduces the spike's 0.675 exactly, so the
+        embed path is right; equal-weight RRF with the weak OR full-text list (14/40) costs 3 hits.
+        Coordinator decision (dev/test protocol): weighted RRF, w_dense chosen on v1 only from {1, 1.5, 2, 3, 5}
+        (max recall@10, then MRR, then smallest w). v1 grid hits 29/29/29/30/30, MRR 0.756/0.771/0.796/0.822/0.824,
+        so w = 5 (results/fusion-weight-v1.json). One v2 test with w 5: dense 27, full text 14, hybrid 24 of 40
+        (results/fusion-test-v2.json). Hybrid stays below dense-only, so the slice's search() serves the dense order
+        (params.HYBRID false; full text only when degraded) — a measured negative result for V.cost-optimize / stage
+        3. NFR-SEARCH-1 on the served order: 27 ≥ 27 and ≥ dense-only (pass); v1 dense 30/30. Re-measure on
+        SRV-INGEST's real spans (9,463, V/SRV-INGEST-impl) in the integration run.
+        Code review of dd364ba: changes, fixed in 891d71a (B1) and 428913e (B2–B7, non-blocking). Embed memory with
+        the precheck on mmap, compose's 3g, real start + worst 8-text batch: memory.peak 2,114 MiB cold, 1,153 warm,
+        1,928 in the [image] test, memory.events max 0 (before: 3,459 MiB, max 2,870); 3g kept, ADR-0028 measurement
+        note. Tests: search 71 passed + [image] 6 passed; ci-local PASS.
+        Code review verdicts (deep-reviewer, Fable): round 1 (dd364ba) changes; round 2 (59c2c9f) VERDICT: approve,
+        with pre-merge fixes applied: memory sized on memory.stat anon (683 MiB after load, max 1,192 MiB through a
+        worst batch; x 1.25 = 1,490 MiB <= 3g) with oom_kill 0, since memory.peak counts the reclaimable mapped
+        weights (reviewer: 2,738–2,780 MiB cold); the model layer built before the service copy; a broken reader.yaml
+        answers 503 config_unavailable. Ready for the integration branch.",
+      note: "Spec review done: deep-reviewer round 1 (30a4120) changes B1–B10, all applied (one round per policy, track
+        ai); delta check closed B1–B10 except D1 (max_seq_length 512 cut code and formula chunks), fixed with 1,024.
+        ADR-0028 reviewed and accepted by the owner (2026-11-22). spikes/embed-service (559bc35, merged here): fp32 at
+        cap 1,024, peak RSS 2,410 MiB for the worst 8-text request, so the service admits ≤ 8 texts per call and its
+        mem_limit is 3g; at 8 CPUs a worst batch of 8 takes 11–13 s, so the query timeout is 30 s (chosen over a batch
+        of 4); full pilot about 22–36 min. Status stays draft: approval goes in the Red commit (T5), which the
+        coordinator schedules after the integration branch lands. Design: service `embed` on its own internal network
+        (api, worker, embed), no secrets, model baked from revision 5617a9f6; one encode at a time; exact dense scan
+        (HNSW deferred); OR full text from the query's lexemes; RRF k=60; total orders. Acceptance: hybrid hits ≥
+        dense-only hits in the same run and ≥ 27/40 on questions-v2. Paired changes: OPS-DEPLOY (embed service 3g,
+        network, VEC-DEPLOY-2 pairs, pgvector 0.8.7), SRV-AUTH (ROUTERS, version_locations, hide_parameters),
+        SRV-EVENTS (kind module), SRV-INGEST (enqueue search.embed after import)." }
+  - { id: V.TUTOR-min, stage: V, kind: module, track: ai, status: done, needs: [V.SRV-SEARCH-min, V.WEB-min, V.COMPILE-min],
+      final: "2026-11-23: merged with the whole-chunk revision; bench n=40: grounded 0.625 (NFR-TUTOR-3 FAIL, follow-up
+        V.tutor-retrieval), p95 9.26 s and mean $0.0267 pass. Tests: server/tests/tutor, web AskPanel tests, Playwright
+        e2e/web/tutor. Reviews: spec round 3 approve; code review round 2 approve; chunks revision round 2 approve.",
+      branch: V/SRV-TUTOR-impl,
+      note: "spec round 1 (bfb7047): changes; round 2 (410314b): changes; round 3 (30890d8): approve. Implementation on
+        V/SRV-TUTOR-impl (merges V/V.TUTOR-min, V/V.COMPILE-min, V/SRV-INGEST-impl, V/SRV-SEARCH-impl). Question as a
+        job, polling, aliases s1..s8 plus verbatim quotes checked by code, thinking off, byte-based reserve with ≈ 410
+        measured CLI overhead tokens; caps $0.30 per question and $3 per day; about $0.048 per L02-shaped question
+        (VEC-TUTOR-3). 2026-11-23: approved with Red (fa9b075), Green server (dca647c) and web (696ee1f), merged with
+        V.COMPILE-min's SRV-PIPELINE Green. Paired: SRV-EVENTS JobKind.priority (tutor 100), SRV-AUTH jobs seam
+        and lists, WEB-RENDER linksAsText, WEB-NOTEBOOK aside mount, WEB-UI Services.tutor and the axe dev
+        dependency. The tutor calls the real SRV-AGENT AgentProvider (FR-AGENT-12/13 options). Tests: tutor server
+        suite green (unit, bench generator, db incl. stalls through the real adapter, api), vitest 140, Playwright 6
+        incl. the axe check. Not run: the [live] check (READER_LIVE, spends test budget) and the bench (NFR-TUTOR-1..3,
+        the first bench run is NFR-TUTOR-3's measurement). Code review round 1 (25a5920): changes — five untested
+        rules (owner filter on span reads, the ledger's per-user lock, the finish guard, the first kept source and
+        NFC, the job key through the real queue), all pinned by tests checked against mutants; non-blocking applied,
+        including the runnable bench driver (reader.tutor.bench, e2e/web/tutor/bench_questions.py). Round 2:
+        approve. Its non-blocking items applied: thinking tokens on SRV-AGENT's settle rows (agent_0002) and in the
+        bench; an empty assertion removed. First live run (V.live, 2026-11-23): 3 answered, 2 grounded; investigator:
+        the third was correctly insufficient, its fact one span away from the top hit's primary span. Revision on
+        V/SRV-TUTOR-chunks (from V/live-slice): whole-chunk sources, prompt_bytes_max 29000 and system_bytes_max 2000
+        from spikes/tutor-chunks (reserve $0.148, two attempts within the kept $0.30), usage over GET, t01 replaces v03,
+        n >= 40 bench over HTTP (owner slice step tutor-bench). Chunks review round 1: changes, applied — primaries
+        of every hit before any neighbour, sources_max 88 (bytes bind first); the bench set is questions-v2 with
+        v03 → t01 (40 iid questions, per-chapter breakdown, gate on exactly those 40), asked from L02 without a cell;
+        per-run record files merged before the summary; resume forwarded through slice.sh (--tutor-bench-dir,
+        --tutor-bench-from). Round 2 approve; its pre-bench items applied: gold_in_top8 and gold_cited per record,
+        grounded split by gold_in_top8 (retrieval predictor: 25 of 39 gold pages in the top 8), mean_usd over answered
+        and spent expired questions, slice.sh resolves and confines --tutor-bench-dir, bench.yaml keeps failed,
+        refused and timed-out questions in the 40 as not grounded; typical cost without a cell $0.046 (bench ≈ $1.8).
+        Next: the live agent merges V/SRV-TUTOR-chunks into V/live-slice and runs the bench.",
+      review: "code review by deep-reviewer (Fable): round 1 (25a5920) changes, round 2 approve (2026-11-23);
+        chunks revision (V/SRV-TUTOR-chunks): round 1 changes (reserve math confirmed), round 2 approve (2026-11-23)" }
+  - { id: S0.spike.tutor-chunks, stage: V, kind: spike, status: done, needs: [],
+      result: "2026-11-23, read-only, no spend (the stack's own converter and chunker on the pilot; 665 s): 9,463 spans,
+        2,247 chunks; bytes as sent: whole chunk mean 2,145 (p50 2,206, p90 3,119, p95 3,422, max 5,462), primary
+        span mean 942; spans per chunk mean 5 (p90 9). spikes/tutor-chunks/RESULT.md." }
+  - { id: S0.spike.tutor-call, stage: V, kind: spike, status: done, needs: [],
+      result: "2026-11-22, 10 Sonnet 5.5 calls, $0.0383 (owner permission budget.tutor_spike_by_agent): 0 thinking tokens
+        in both modes, 92–310 output tokens, 1.5–3.5 s, JSON 10/10; a custom system_prompt replaces the CLI's 6,803-token
+        prompt (745–867 prompt tokens in total, ≈ 410 fixed); prices recompute within $0.000004; the CLI writes one-shot
+        prompts to the 1-hour cache at 2× input. spikes/tutor-call/RESULT.md." }
+  - { id: V.live, stage: V, kind: live, status: done, branch: V/live-slice,
+      final: "2026-11-23: the slice ran end to end on the owner's Mac (results below and in e2e/live/results/). One quality
+        gate fails, NFR-TUTOR-3 (grounded 0.625 < 0.8), carried by V.tutor-retrieval; thinking tokens with thinking off
+        carried by V.agent-thinking. Live script review: deep-reviewer round on 63227ea changes, fixed in a6c57f5.
+        Specs stay approved: `implemented` is the owner's after this live check (H3).",
       needs: [V.SRV-JOBS-min, V.SRV-INGEST-min, V.SRV-SEARCH-min, V.SRV-LESSON-min, V.KERNEL-min, V.WEB-min, V.COMPILE-min, V.TUTOR-min],
-      what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor" }
+      what: "e2e/live/slice.sh: PDF → ingest → search → compile L02 → open in the browser and run cells → ask the tutor",
+      note: "2026-11-23 first live run (agent, worktree from V/slice-integration 744997e, fresh volumes). reader up 64 s,
+        11 services healthy, reader doctor all ok (first doctor waited on a macOS Keychain prompt until the owner
+        clicked Allow). verify-all.sh 53/53 PASS (stage-1 117 s, browser 11 s; CDP virtual passkey register and
+        sign-in for live-check). Owner session (owner's choice (a), 2026-11-23): verify-all.sh --slice STEPS runs
+        web_live.py --owner (the owner's bootstrap link through the existing helper, no new exec; refused once the
+        owner has a passkey unless --reset-owner-passkeys) and e2e/web/live/owner.slice.ts; e2e/live/slice.sh runs
+        reader-ingest then verify-all --slice. Step `routes` PASS (owner registered with a virtual passkey; materials
+        200, search 200 with 0 hits, course import 409 no_material before the import, unknown compile/run/ask 404);
+        anonymous curl: the seven slice routes 401, healthz 200. deep-reviewer (Fable) one round on 63227ea: changes
+        (2 blocking: the tutor loop matched the previous answer; the run left the owner's virtual passkey behind),
+        fixed in a6c57f5: per-question wait on its own POST 202 and the answering notice, results keyed by
+        question_id; web_live.py --owner removes the run's owner passkey and sessions in a finally. Non-blocking
+        applied: fragment guard, stale results cleared, rc != 0 without a failing test is a FAIL, process-group kill,
+        timeout 210 min matching the suite, results written after every test, --out required and outside the repo,
+        pages/min only when reader-ingest converted, lab state scoped to .lab-controls. Re-run of `routes` twice:
+        PASS both, the second without --reset-owner-passkeys (cleanup proven); the owner has no passkey left, so
+        `reader bootstrap` in Safari still works. Not reachable through
+        the allowed interfaces: tutor bench (runs in the worker over docker exec) and tutor cost per question (no API
+        exposes agent_spend). The route names differ from the brief: compile is POST /api/lessons/{id}/compile, the
+        course import POST /api/pipeline/courses.
+        Import approved 2026-11-23; merged origin/V/slice-integration 8477c4f. Run 1 (slice.sh, full): import PASS —
+        converter r2, 935 pages in 698 s host wall = 80.4 pages/min, 9,463 spans, 494 outline entries, peak RSS
+        4,247,060,480 B, code boxes 360 (exact 343, majority-cell 7, indentation fallback 10, multi-box 0); embed FAIL
+        after 75.3 min: search.embed was never enqueued (SRV-SEARCH declared the paired SRV-INGEST enqueue; reader.ingest
+        never had it; the embed service encoded no passage). Fixed spec-first: FR-INGEST-13 (the import enqueues
+        search.embed; ConnectorException transient) and FR-SEARCH-9 (on_worker_start enqueues never-enqueued keys, which
+        recovered the imported pilot without exec); deep-reviewer (Fable) round 1 changes, round 2 approve (8e8cfd5);
+        server suites 547 passed. Run 2 (slice.sh --no-ingest, after reader up): all PASS. Embed 12.0 min from worker
+        start. Search v2 on the real spans: 27/40 at 10, recall@10 0.675, recall@1 0.300, MRR 0.400, p95 173 ms
+        (NFR-SEARCH-1 holds). L02 compile converged in 210 s, $1.2587 (draft 0.6233 / 156.8 s, fact_check 0.2284 /
+        18.3 s, review 0.4070 / 20.0 s, lab verification 3.7 s); G2 not publishable: deltas.mismatch only, 0 blocking
+        open, 4 open findings; 27 cells (10 explain, 1 lab). Browser: notebook renders, 149 references as 'title, p. N'
+        (follow-up: identical references repeat when one cell cites several spans of one page), lab cell done in 1.9 s
+        with output. Tutor: 3/3 answered, grounded 2/3 = 0.667 (below NFR-TUTOR-3's 0.8 on this small sample),
+        latency 8.4/8.4/13.5 s (p95 13.5 ≤ 30). Not measured: tutor cost per question (no interface), the tutor bench
+        (docker exec). Follow-ups: G2 deltas.mismatch on a converged run (investigate); shared :local image tags are
+        retagged and pruned by other worktrees' sessions (another session moved every tag mid-run). Results:
+        e2e/live/results/2026-11-23-slice.json; screenshots stay in the session scratchpad. After the run: merged
+        origin/V/slice-integration c1d7e61 (OPS-DOD; no conflict, both sides of web_live.py kept, owner/slice lines moved
+        to the label-TAB-detail grammar in 2fa9422); verify-all.sh again 53/53 PASS (stage-1 116 s, browser 11 s), log
+        in the DoD grammar.
+        G2 deltas.mismatch (investigator, 2026-11-23): a pipeline bug, content correct. G2 (d) compared F as stored,
+        where nbformat splits every appended open cell's source into a list of lines, with the recomputed notebook in
+        memory, where source is one string, so every run that appended a findings cell failed (d). Fix on this branch:
+        FR-PIPELINE-8 (d) compares the canonical form (SRV-LESSON canonical bytes, FR-LESSON-2); Red 32b29fb, Green
+        eb3e01d; deep-reviewer (Fable) VERDICT approve on eb3e01d (via the coordinator). Non-blocking items applied
+        (Red 8b94945 + Green): a notebook without a canonical form (LessonWriteError, UnicodeEncodeError) counts as
+        deltas.mismatch instead of failing the step; spec wording 'canonical form of F'; this history moved here from
+        the spec. After reader up on 80c48f7: L02 recompile (run cf9b9f35) converged, $0 (draft, fact_check and
+        review reused), steps 4.8 s (wall 15 s at the 15 s poll), G2 publishable true, failing [], final sha256
+        542521481e88…a39db9 (same as run 2); browser recheck PASS (149 references, lab cell done in 3.0 s).
+        Tutor grounding: investigated; fix merged from origin/V/SRV-TUTOR-chunks 906b084 (whole chunks sent, bench over
+        HTTP). Merged origin/V/WEB-polish 0cbb571 and SRV-TUTOR-chunks (conflicts in SRV-TUTOR.yaml review line,
+        slice.sh and owner.slice.ts resolved keeping both sides: ui and tutor-bench steps); verify-all --slice now
+        accepts hyphenated step names (66fba58; 'tutor-bench' exited 2 before any request). Gate PASS. Tutor bench
+        2026-11-23 (40 questions, one run, no daily-cap stop): 39 answered, 1 failed (v18, error code not in the
+        bench record); grounded_share 0.625 (NFR-TUTOR-3 ≥ 0.8: FAIL), insufficient_share 0.275,
+        verified_block_share 0.870, gold_cited_share 0.575, grounded given gold in top 8: 21/26 = 0.808, not in top 8:
+        4/14 = 0.286 (retrieval bounds grounding); latency p50 5.65 s, p95 9.26 s (NFR-TUTOR-1 pass), mean_usd 0.0267
+        (NFR-TUTOR-2 pass), total $1.0870. Follow-up: 4 answers carried thinking tokens (88–533) with thinking off
+        (FR-AGENT-13). Results: e2e/live/results/2026-11-23-tutor-bench.json." }
+  - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
+      next: "2026-11-23: run experiments E0–E6 (plan below, ≈ $14.5 of the test budget; $8.74 of $30 spent so far): E0
+        baseline with the timings and ledger producers feeding docs/dod/report.json, then one lever per experiment with
+        before/after numbers.",
+      what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
+        (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a
+        before/after number: (1) compile: one cache breakpoint right after the source so all stages share the 1-hour
+        cached source (spike: every stage re-wrote 31–47k tokens, the largest cost); (2) model per stage where quality
+        holds on the fact-check fixture set (cheaper model for fact-check/revise only if verdict agreement ≥ the baseline);
+        (3) cap output tokens per stage; (4) tutor: retrieval top-k and answer length budgets, cache the lesson context;
+        (5) ingest/embed: reuse embeddings by content hash, batch sizes from the embed spike; (6) web: lazy chunks;
+        (7) RAG in the compile pipeline (owner 2026-11-22: 'use RAG via the embeddings of the whole PDF'): fact-check
+        retrieves the spans behind each claim from the whole-book index (SRV-SEARCH) instead of re-sending the full
+        chapter, and review/revise are A/B-measured with retrieved spans + the lesson; the draft keeps the full chapter
+        (coverage: dense recall@10 is 0.675, so top-k alone would drop topics). Each variant is kept only if G2 and the
+        fact-check verdict agreement on the fixture set do not regress, with tokens and $ per stage before and after.
+        Quality gates must not regress (G2 report, search recall on questions-v2). Cost math is a complex area: full review.
+        Research (docs/research/cost-per-page.md on V/research-cost-per-page, 2026-11-22): baseline $0.097–0.119/page;
+        56% of run 1 is 1-hour cache writes nobody re-reads, 44% output. Ranked levers (estimates, not measured):
+        L1 identical per-model system prefix + 5-min TTL (CLAUDE_CODE_PROMPT_CACHE_TTL=5m) −$0.96–1.02/lesson;
+        L2 gate the revise loop on source-confirmed blocking findings ≈ −$0.75; L3 fact-check on Haiku 5.5 with
+        escalation + 10% Sonnet audit −$0.26 after L1; L4 patch-only revise −$0.12–0.34; L5 review on Sonnet/lower effort
+        −$0.20–0.26. Stack ≈ $0.035–0.047/page (−50–60%). RAG (lever 7) saves < $0.001/page after L1 but is tested for
+        quality (LaRA). Batch API not reachable via the Agent SDK (would need an ADR). Plan E0–E6 ≈ $14.5 of the test budget." }
+  - { id: V.DOD-index, stage: V, kind: module, track: engineering, status: done, needs: [V.live],
+      branch: V/OPS-DOD-impl,
+      final: "2026-11-23: tooling merged (7bfff84) and the first report committed in docs/dod/ (INDEX.md, report.json)
+        from the live verify-all log and fresh pytest, Vitest and Playwright results; axe.json, timings.jsonl and
+        ledger.jsonl have no producer, so every budget and page cell reports MISSING. Tests: tools/dod/*.test.mjs (105),
+        tools/hooks/pre-write.test.mjs. Reviews: spec round 1 changes, round 2 approve (4b03d67). Closing the declared
+        and evidence gaps until every operation is enforced moves to V.DOD-gaps.",
+      what: "Owner 2026-11-22: Definition-of-Done index of every user operation, verified automatically; feeds
+        V.cost-optimize (spec OPS-DOD).",
+      review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review).
+        Recheck on V/slice-integration 744997e (2026-11-23): spec review round 1 of cd6be04 changes (8 blocking, all
+        applied, plus the non-blocking items); round 2 on 4b03d67: VERDICT approve; spec approved by agent 2026-11-23.
+        Green (2026-11-23): tools/dod/index.mjs (FR-DOD-1/2 shape, T10, waiver rule, P8 ratchet), tools/dod/report.mjs
+        (report, INDEX.md, report.json, exit codes), T10 in check.mjs, P8 in guard-tests.mjs, H4 in pre-write.mjs,
+        TAB details in web_live.py and passkey_check.py, ci-local.sh and ci.yml steps; 105 node tests pass. Not yet
+        done (follow-up, needs a live run and the e2e/live secret-handling review): verify-all.sh writing the FR-DOD-4
+        inputs (pytest xunit1, vitest and Playwright JSON) and running report.mjs into docs/dod/; slice.live.ts
+        writing axe.json; docs/dod/ committed with the final PR",
+      note: "spec rechecked 2026-11-23 against the integrated code (every other spec approved). Index: 30 operations × 8
+        criteria = 240 cells, 44 na, 49 missing (declared gaps only). Closed: lesson.compile_resume × cost (the run's
+        stored cap). Opened by review round 1: search.query × observability (no test asserts FR-SEARCH-8's line),
+        cell.run/interrupt/reset/run_all × observability (INV-KERNEL-6 is privacy), auth.bootstrap and auth.signin ×
+        a11y (no axe run there), lesson.findings × recovery narrowed (absent G2 report untested). Every mapped item is
+        traced. axe.json, timings.jsonl and ledger.jsonl have no producer yet: Green adds axe.json (slice.live.ts);
+        timings and ledger are V.cost-optimize's first step. Fixed drift: material and compile routes renamed, POST
+        /api/search and GET /api/lessons/{lesson_id}/questions mapped, GET /api/spend gone, tutor items renumbered
+        (FR-TUTOR-11 Ask panel with axe, FR-TUTOR-12 logging), tutor cap 0.30, ledger usd from settled_usd (settle rows
+        only) plus thinking. FOR THE OWNER'S REVIEW-AFTER: not_user_facing gains `reader-server` (container entrypoint;
+        only the owner adds these entries); hand-rolled positional subcommands (outside argparse add_parser) escape T10's
+        CLI registry; ADR-0001 (proposed) content amended with T10, P8 (ratchet, trailer DoD-Owner-Change), H4 (waiver
+        hook) and tools/dod tests, status unchanged.
+        Paired tools changes in Red/Green: repo.mjs TEST_PATTERNS ^tools/dod/.+\\.test\\.mjs$; check.mjs T10; guard-tests
+        ratchet; pre-write hook refuses new or changed waived cells; ci runs node --test \"tools/dod/*.test.mjs\";
+        verify-all.sh inputs and report; web_live.py and passkey_check.py details after a TAB; slice.live.ts writes
+        axe.json. Cross-spec: SRV-TUTOR FR-TUTOR-13 (dod.yaml) becomes a pointer to this index at its next
+        revision. This entry duplicates the one on V/owner-housekeeping; keep this one when merging." }
+  - { id: V.WEB-polish, stage: V, kind: fix, track: product, status: done, needs: [V.WEB-min, V.live],
+      branch: V/WEB-polish,
+      what: "Owner 2026-11-23: 'the right padding, UI and UX implementation' — a polish pass on the web app against the
+        live L02 (Bashir pilot). Specs amended: WEB-NOTEBOOK FR-NOTEBOOK-1/2/3/9 and new -10/-11/-12, WEB-UI FR-UI-6 and
+        new FR-UI-10/-11, SRV-TUTOR FR-TUTOR-11 (web only). Live `ui` step added to e2e/web/live/owner.slice.ts and to
+        slice.sh's default steps (spends nothing).",
+      findings: "From the live screenshots (1280/1024/390, 2026-11-23): (1) explain cells listed up to 29 references,
+        e.g. 16 × '…, p. 70'; route source_refs had no title and showed 64-hex span ids, overflowing at 390 px; tutor
+        answers repeated the full title per span. (2) 8 recall cells and the notes cell rendered as bare labels (content in
+        metadata); the diagnostic questions were never shown. (3) open cells read 'open open'. (4) 27 cells, ~17,000 px,
+        no contents, no way back, the tutor at the very bottom. (5) ~90 Cyrillic characters per line (46rem at 16px).
+        (6) one serif for prose and chrome, ad-hoc rem spacing. (7) list rows ran status and date into the title.
+        (8) the tutor panel had no styles (inline label, ~200px text area). (9) lab code soft-wrapped at 390 px.
+        (10) bare 'Loading…', error without Retry or a way back. (11) no skip link; focus rings on library buttons only.
+        Outside the WEB specs: the sign-in and bootstrap pages are SRV-AUTH's unstyled server HTML; no compile-progress UI
+        exists (owner API only).",
+      review: "deep-reviewer (Fable) single round on the spec diff d5e59b1 (outside the complex areas): changes, 5
+        blocking, fixed without a second round (coordinator 2026-11-23). B1 FR-NOTEBOOK-11 responsive nav: below 60rem the
+        closed list is display:none (out of tab order and the accessibility tree), at 60rem+ the Contents button is
+        display:none and the list always shows, the sticky column is capped at the viewport height with overflow-y:auto;
+        fix: stated in the spec, app.css, and [live] checks in the `ui` step (390: links hidden before the toggle, visible
+        after, an entry focuses and scrolls to its cell and closes the list; 1280/1024: button hidden, nav visible) — PASS.
+        B2 borrowed title: LessonView test 'names an untitled route source after an explain cell of the same material'.
+        B3 grouping edge cases (span without ':' is its own material; citations with neither span nor url dropped; only
+        integer pages ≥ 1, no numeric strings): spec text and the 'ignores …' test cases. B4 FR-UI-10 live checks: the
+        `ui` step asserts p font-size 17px, line-height 28.05px ±0.1, family starting ui-serif, h1 36px (30px at 390),
+        widest p > 0 and ≤ 608px; `ui` joins slice.sh's default steps and SLICE_TIMEOUT_S grows 210 → 220 min; the
+        characters-per-line figure is recorded, not asserted. B5 one `main`: the shell renders a single
+        main#content tabIndex -1 around the router outlet and not-found; aria-busy moved to the page container; unit
+        tests on /, a loaded lesson, a failed lesson and /no-such-page; live: the skip link focuses main#content.
+        Non-blocking, all applied: rem type sizes, the named serif stack, no web font for text (KaTeX math fonts only);
+        styles.test scans color-mix and border/outline/box-shadow/fill/caret colours and the top/right/bottom/left
+        offsets; skeletons are the library Skeleton in role=status with visually hidden text; FR-NOTEBOOK-10 declares
+        native details as a deviation from the library collapsible, `back` is plain text, tests for no back and for a
+        non-empty source; contents headings come from the remark parse (a '#' inside a fence is not one, tested), labs
+        numbered 'Lab 1…', only unanswered open questions counted, the nav sits inside main before the cells, cells
+        have tabIndex -1; FR-NOTEBOOK-12: a 404 shows 'Lesson not found' with only a way back, other errors Retry;
+        formatCitation lost its dead span branch (URLs only); synthetic titles and headings in AskPanel.test; the
+        owner.slice.ts header comment names the ui/data files that hold book text. Found during Green: a scrolling
+        markdown table is an axe serious issue (scrollable-region-focusable) and a 6-column L02 table was 697px wide at
+        break-word, so tables wrap anywhere and fit the column (FR-UI-10 text updated).",
+      measured: "Live `ui` step after (2026-11-23, stack rebuilt by `reader up` from V/WEB-polish, only caddy recreated):
+        axe serious/critical 0 on the list and L02 at 1280/1024/390; horizontal overflow 0 everywhere; prose 17px /
+        28.05px, column 608px (358px at 390); characters per line, median estimate 60 at 1280/1024 and 35 at 390; the
+        PASS line 'browser: ui: review screenshots and axe at 1280, 1024 and 390 px'. Sign-in page axe (report only):
+        0 serious/critical at all widths. Unit: 176 Vitest tests pass; NFR-UI-1 initial chunk unchanged in budget.",
+      follow_up: "SRV-AUTH amendment (auth is a complex area, full review): style the sign-in and bootstrap pages
+        (currently browser-default HTML, 8px margin, Times) with a same-origin stylesheet under the existing CSP, or move
+        the ceremony into the SPA as WEB-UI's stage-4b defer plans; axe is clean there today. No library change needed.",
+      code_review: "deep-reviewer on c0ccb05: VERDICT approve. 16 surviving mutants, all test gaps, closed in b42a170 with
+        paired spec wording: numeric page sort ([100, 9, 10, 99] → pp. 9–10, 99–100); one 'Recall cards (n)' entry
+        for 2+ recall cells; two-colon spans grouped by the part before the last colon; title precedence (cell over
+        lesson, first of two in a cell; first per material for the lesson); cell-level citations[]; a citation with url
+        and span is a URL citation (specified); a diagnostic whose source holds one of two questions still lists both;
+        table-driven firstHeading/cellLabels (html, empty first heading, whitespace, code-cell '#', GFM and math,
+        nested headings, recall with a heading); jsdom focus tests for a contents entry and the skip link. Code and spec:
+        FR-NOTEBOOK-11 'top-level headings'; loading states are a role=status with hidden text and an aria-hidden
+        skeleton, no aria-busy (FR-UI-11, FR-NOTEBOOK-12); no nav and no Contents button without entries;
+        Number.isSafeInteger pages and empty material ids dropped; stories for the lesson skeleton, the 5xx state with
+        Retry and the shell loading state; role=list on the unbulleted lists. Live: overflow measured against
+        clientWidth; the scroll test follows the last entry and asserts its target is out of view before the click;
+        the numbers-only ui object is committed to e2e/live/results/2026-11-23-slice.json (web_polish_ui); live ui
+        step PASS on b42a170. Unit: 207 Vitest tests pass.",
+      note: "Screenshots and the L02 replay data stay outside the repository (book text). The stack now runs from the
+        V/WEB-polish worktree (reader up); the live agent's next `reader up` from its own worktree restores its build." }
+  # Follow-ups from the final slice PR (2026-11-23)
+  - { id: V.tutor-retrieval, stage: V, kind: fix, track: ai, status: todo, needs: [V.live],
+      what: "NFR-TUTOR-3 fails on the live bench: grounded 0.625 against 0.8. Grounding given gold in the top 8 is 0.808
+        (21/26), but only 26 of 40 questions get a gold page into the top 8; search recall@10 is 0.675. Candidates, each
+        measured on questions-v2 with the bench: k > 8 within prompt_bytes_max, a reranker, the RAG ideas in
+        V.cost-optimize (lever 7). Spec change to SRV-TUTOR / SRV-SEARCH with review; the bench is paid
+        (budget.test_budget_usd)." }
+  - { id: V.agent-thinking, stage: V, kind: fix, track: ai, status: todo, needs: [V.live],
+      what: "4 tutor answers in the live bench carried thinking tokens (88–533) although MAX_THINKING_TOKENS=0 is set,
+        contradicting SRV-AGENT FR-AGENT-13 (thinking off). Investigate with the investigator (SDK/CLI version, the
+        option's path to the request), then fix spec-first; the settle rows' `thinking` column (agent_0002) is the
+        evidence." }
+  - { id: V.auth-page-style, stage: V, kind: module, track: product, status: todo, needs: [V.WEB-polish],
+      what: "SRV-AUTH amendment (complex area, full review): style the sign-in and bootstrap pages (browser-default HTML
+        today) with a same-origin stylesheet under the existing CSP, or move the ceremony into the SPA (WEB-UI stage-4b
+        defer). Add axe runs on both pages, which also closes auth.bootstrap and auth.signin × a11y in the DoD index." }
+  - { id: V.DOD-gaps, stage: V, kind: module, track: engineering, status: todo, needs: [V.DOD-index],
+      what: "Close the Definition-of-Done gaps in docs/dod/INDEX.md: the 49 declared `missing` cells (latency budgets,
+        log lines and tests asserting them, privacy canaries for lesson, material and course text, the backup-restore
+        drill after S1.OPS-CLI-restore-seed, an add-passkey page, axe on the auth pages) and the evidence producers
+        (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
+        timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
+        latest live run (OPS-DOD owner note)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
