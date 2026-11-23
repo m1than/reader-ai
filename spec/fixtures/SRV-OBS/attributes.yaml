@@ -1,0 +1,76 @@
+# VEC-OBS-1. The allow-list of SRV-OBS FR-OBS-2: everything the api and worker may export, as data.
+# Hand-derived from FR-OBS-3, -5 and -6. A value rule is one of:
+#   enum: [..]           exact members
+#   enum_from: <name>    members computed at setup from code-declared catalogs (never from request data):
+#                        route_templates = every Route/WsRoute path of reader.api.app.ROUTERS plus "other";
+#                        job_kinds = the worker catalog's kind names (SRV-EVENTS FR-EVENTS-1);
+#                        pipeline_stages = SRV-PIPELINE's declared stage names; tasks = reader.yaml `tasks` keys;
+#                        models = the pricing table's full model ids (SRV-AGENT);
+#                        error_codes = the union of the declared error catalogues (the `errors` lists of SRV-AGENT,
+#                        SRV-TUTOR and SRV-PIPELINE, SRV-EVENTS' job codes exhausted, stalled, orphaned, timeout,
+#                        session_lost, wrapper_error, unknown_kind, no_key_row, and obs_retention_failed)
+#   pattern: <regex>     matched with fullmatch
+#   range: [min, max]    inclusive, for int and float
+# Every string value is at most 128 characters after its rule.
+version: 1
+
+span_names:
+  - { pattern: "^(GET|HEAD|POST|PUT|PATCH|DELETE|OPTIONS|TRACE|CONNECT|_OTHER) <route>$", route: route_templates }
+  - { pattern: "^WS <route>$", route: route_templates }
+  - { pattern: "^job <kind>$", kind: job_kinds }
+  - { pattern: "^agent\\.call$" }
+fallback_name: reader.unlisted
+
+attributes:
+  http.request.method: { type: string, enum: [GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE, CONNECT, _OTHER] }
+  http.route: { type: string, enum_from: route_templates }
+  http.response.status_code: { type: int, range: [100, 599] }
+  reader.ws.close_code: { type: int, range: [1000, 4999] }
+  reader.job.kind: { type: string, enum_from: job_kinds }
+  reader.job.id: { type: int, range: [1, 9223372036854775807] }
+  reader.job.attempt: { type: int, range: [0, 1000] }
+  reader.job.outcome: { type: string, enum: [succeeded, skipped, failed, dead, aborted] }
+  reader.error_code: { type: string, enum_from: error_codes }
+  # FR-EVENTS-6 records a non-catalogue failure as the exception's class name: a code identifier, never a message.
+  reader.error_class: { type: string, pattern: "^[A-Z][A-Za-z0-9]{1,63}$" }
+  reader.run_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+  reader.step: { type: int, range: [0, 999] }
+  reader.stage: { type: string, enum_from: pipeline_stages }
+  reader.question_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+  reader.ingest_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+  reader.material_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.task: { type: string, enum_from: tasks }
+  gen_ai.request.model: { type: string, enum_from: models }
+  gen_ai.usage.input_tokens: { type: int, range: [0, 1000000000] }
+  gen_ai.usage.output_tokens: { type: int, range: [0, 1000000000] }
+  gen_ai.usage.cache_read_input_tokens: { type: int, range: [0, 1000000000] }
+  gen_ai.usage.cache_creation_input_tokens: { type: int, range: [0, 1000000000] }
+  reader.cost_usd: { type: float, range: [0, 1000] }
+  reader.stop_reason: { type: string, enum: [end_turn, max_tokens, stop_sequence, tool_use, pause_turn, refusal] }
+
+# Which span may carry which key (a listed key on another span is removed too).
+keys_by_span:
+  http: [http.request.method, http.route, http.response.status_code]
+  ws: [http.request.method, http.route, reader.ws.close_code]
+  job: [reader.job.kind, reader.job.id, reader.job.attempt, reader.job.outcome, reader.error_code, reader.error_class,
+    reader.run_id,
+    reader.step, reader.stage, reader.question_id, reader.ingest_id, reader.material_sha256]
+  agent.call: [reader.task, reader.stage, gen_ai.request.model, gen_ai.usage.input_tokens, gen_ai.usage.output_tokens,
+    gen_ai.usage.cache_read_input_tokens, gen_ai.usage.cache_creation_input_tokens, reader.cost_usd,
+    reader.stop_reason, reader.error_code]
+
+# FR-OBS-5 (b): argument fields copied from a job's validated args to its root span. No other field is ever read.
+job_args:
+  pipeline.stage: { run_id: reader.run_id, step: reader.step, stage: reader.stage }
+  pipeline.verify: { run_id: reader.run_id, step: reader.step, stage: reader.stage }
+  tutor.answer: { question_id: reader.question_id }
+  ingest.import: { material_sha256: reader.material_sha256 }
+  search.embed: { material_sha256: reader.material_sha256, ingest_id: reader.ingest_id }
+  obs.retention: {}
+
+resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
+instrumentation_scope: { name: reader, version: null }
+events: none
+status_description: never
+link_attributes: never
+tracestate: never   # cleared on spans and links

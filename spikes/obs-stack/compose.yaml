@@ -1,0 +1,108 @@
+# Spike obs-stack (never shipped; SRV-OBS): Rotel → MLflow (minimal configuration, hardened, persistent store) and
+# Caddy forward_auth in front of the MLflow UI. One backend store per run: profile `sqlite` (a named volume) or
+# `postgres` (a spike-only Postgres with a throwaway password; never a real secret). No published ports: the driver
+# runs inside the networks. Started only by run.sh under its own project name; never touches the `reader` stack.
+name: reader-spike-obs
+
+x-mlflow: &mlflow
+  image: reader-spike-mlflow:local
+  build: { context: ., dockerfile: mlflow.Dockerfile }
+  user: "10004:10004"
+  read_only: true
+  tmpfs: ["/tmp:size=64m,uid=10004"]
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  mem_limit: 1g
+  memswap_limit: 1g
+  environment:
+    MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+  networks: [obs, obs-ui]
+
+services:
+  rotel:
+    # The image's entrypoint is `/rotel start --otlp-grpc-endpoint 0.0.0.0:4317 --otlp-http-endpoint 0.0.0.0:4318` and
+    # its user is root; repeating an endpoint flag fails ("cannot be used multiple times").
+    image: streamfold/rotel:v0.2.7
+    user: "10005:10005"
+    read_only: true
+    tmpfs: ["/tmp:size=16m,uid=10005"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    command:
+      - --exporter=otlp
+      - --otlp-exporter-endpoint=http://mlflow:5000
+      - --otlp-exporter-protocol=http
+      - --otlp-exporter-custom-headers=x-mlflow-experiment-id=0
+    networks: [obs]
+
+  mlflow-sqlite:
+    <<: *mlflow
+    profiles: [sqlite]
+    hostname: mlflow
+    networks: { obs: { aliases: [mlflow] }, obs-ui: { aliases: [mlflow] } }
+    volumes: ["mlflow_data:/var/lib/mlflow"]
+    command: >-
+      mlflow server --host 0.0.0.0 --port 5000 --workers 1
+      --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db
+      --artifacts-destination /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/
+      --allowed-hosts localhost:8443,localhost:8445,localhost:8446,mlflow:5000,mlflow
+
+  pg:
+    image: postgres:18-trixie
+    profiles: [postgres]
+    environment: { POSTGRES_PASSWORD: spike-only-not-a-secret, POSTGRES_DB: mlflow }
+    mem_limit: 1g
+    networks: [obs]
+
+  mlflow-postgres:
+    # Round 1 used `postgresql://`: MLflow exited at start with "No module named 'psycopg'" (SQLAlchemy's default
+    # dialect for that scheme is psycopg 3, which the image lacks too); the driver must be named.
+    <<: *mlflow
+    profiles: [postgres]
+    networks: { obs: { aliases: [mlflow] }, obs-ui: { aliases: [mlflow] } }
+    volumes: ["mlflow_data:/var/lib/mlflow"]
+    depends_on: [pg]
+    command: >-
+      sh -c 'until python -c "import socket; socket.create_connection((\"pg\", 5432), 1)"; do sleep 1; done;
+      exec mlflow server --host 0.0.0.0 --port 5000 --workers 1
+      --backend-store-uri postgresql+psycopg2://postgres:spike-only-not-a-secret@pg:5432/mlflow
+      --artifacts-destination /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/
+      --allowed-hosts localhost:8443,mlflow:5000,mlflow'
+
+  gate:
+    # Stand-in for the api's owner gate (GET /api/auth/owner-gate): 204 for the owner cookie, 403 learner, 401 none.
+    image: python:3.14-slim-trixie
+    command: ["python", "-I", "/spike/gate.py"]
+    volumes: ["./gate.py:/spike/gate.py:ro"]
+    environment: { EXPECT_ORIGINS: "http://localhost:8443,http://localhost:8445,http://localhost:8446" }
+    read_only: true
+    networks: [obs-ui]
+
+  caddy:
+    image: caddy:2.11.9-alpine
+    volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro"]
+    environment: { CSP_CANDIDATE: "${CSP_CANDIDATE:-default-src 'self'}" }
+    networks: [obs-ui]
+
+  driver:
+    image: reader-spike-obs-driver:local
+    build: { context: ., dockerfile: driver.Dockerfile }
+    profiles: [driver]
+    environment:
+      DURATION_S: ${DURATION_S:-480}
+      BULK_LESSONS: ${BULK_LESSONS:-20}
+      BACKEND: ${BACKEND:-sqlite}
+      KEEP_TRACES: ${KEEP_TRACES:-}
+    volumes: ["mlflow_data:/mlflowdata:ro", "${OUT:?}:/out"]
+    networks: [obs, obs-ui]
+
+networks:
+  # Explicit subnets: on the owner's Docker Desktop every predefined address pool is already subnetted (measured
+  # 2026-11-24: creating a pool-allocated network failed with "all predefined address pools have been fully subnetted").
+  obs: { internal: true, ipam: { config: [{ subnet: 10.232.250.0/24 }] } }
+  obs-ui: { internal: true, ipam: { config: [{ subnet: 10.232.251.0/24 }] } }
+
+volumes:
+  mlflow_data: {}

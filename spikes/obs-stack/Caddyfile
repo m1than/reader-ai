@@ -1,0 +1,64 @@
+# Spike Caddyfile: the shape SRV-OBS proposes for https://localhost:8443 (plain HTTP here; TLS is not under test).
+# Every request is authorized by the owner gate first; MLflow's ingest, gateway, assistant and MCP routes are not
+# exposed through the edge; no cookie or credential goes up to MLflow, no cookie or CORS header comes down.
+# Sites: :8443 the strictest CSP (SRV-OBS FR-OBS-9 base); :8445 no CSP (baseline); :8446 the candidate CSP under test
+# ({$CSP_CANDIDATE}, spike only).
+{
+	admin off
+	auto_https off
+}
+
+(gated) {
+	forward_auth gate:9000 {
+		uri /api/auth/owner-gate
+	}
+
+	# Round 2 finding: `respond @blocked 404` next to a catch-all `handle` never ran (Caddy orders `handle` before
+	# `respond`), so /v1/traces reached MLflow (422) and the other "404"s were MLflow's own. A `handle` block with the
+	# matcher is mutually exclusive with the catch-all one.
+	@blocked path /v1/* /gateway/* /ajax-api/*/mlflow/assistant/* /ajax-api/*/mlflow/gateway-proxy* /mcp* /api/*/mlflow/gateway/*
+	handle @blocked {
+		respond "blocked" 404
+	}
+
+	handle /__echo* {
+		reverse_proxy gate:9001 {
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+			header_down -Access-Control-*
+		}
+	}
+
+	handle {
+		reverse_proxy mlflow:5000 {
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+			header_down -Access-Control-*
+		}
+	}
+}
+
+:8443 {
+	header Content-Security-Policy "default-src 'self'; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'"
+	import gated
+}
+
+:8445 {
+	import gated
+}
+
+:8446 {
+	header Content-Security-Policy "{$CSP_CANDIDATE}"
+	import gated
+}
+
+# Round 3 (review N1): a stand-in for the app's /observability page on another port of the same site. It is not
+# gated; its link opens the dashboard's deep link given in its own fragment, and the browser script adds
+# subresource and fetch requests to :8443 from it.
+:8447 {
+	header Content-Type "text/html; charset=utf-8"
+	respond `<!doctype html><title>app</title><a id="go" href="#">open trace</a>
+<script>document.getElementById('go').href = 'http://localhost:8446' + decodeURIComponent(location.hash.slice(1));</script>` 200
+}
