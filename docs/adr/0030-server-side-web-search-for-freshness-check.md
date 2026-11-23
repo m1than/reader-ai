@@ -1,7 +1,7 @@
 ---
 id: ADR-0030
 title: Server-side web search for the source freshness check — one task-scoped tool allowance in agent-proxy; every other request keeps "tools must be empty"
-status: proposed
+status: accepted
 date: 2026-11-23
 verified_by: "SRV-AGENT tests: any token without a `web_search` allowance (every task but `freshness_web`, and a `freshness_web` token without one) gets 403 `tools_mismatch` for non-empty `tools`; an allowance token forwards only the two pinned shapes, rewrites `max_uses` to min(1, remaining), refuses `search_cap` and `request_cap`, and refuses any other model; credential injection still never applies to a non-provider host. SRV-FRESH tests: queries are only code-planned ones (canary INV-FRESH-1); every stored URL is a URL string the searches returned (INV-FRESH-3); ledger rows carry web_search_requests and the per-search fee"
 revisit_when: "The owner adds an `anthropic-api` provider (the direct Messages path becomes available); or the CLI pin changes or a stub or live run shows other WebSearch shapes or a web search version other than web_search_20250305; or a freshness check costs more than its $1.00 run cap twice; or agent-proxy needs a second tool allowance for another task"
