@@ -1,7 +1,7 @@
 ---
 id: ADR-0031
 title: Open self-service sign-up with owner approval
-status: proposed
+status: accepted
 date: 2026-11-23
 verified_by: "SRV-AUTH FR-AUTH-23..32 and INV-AUTH-10..15 ([db], [browser] and the [live] `signup` step run with `sharing.signup: \"open\"`); WEB-ACCOUNTS FR-ACCOUNTS-1..5"
 revisit_when: "The stack listens on anything other than 127.0.0.1 (LAN name, tunnel or VPS): that ADR must add per-client limiting; more than 20 pending sign-ups in a week; the global sign-up limit is used up by anything other than the owner's live check; SRV-SHARE (stage 8) gives approved learners access to shared courses; SRV-NOTIFY exists"
