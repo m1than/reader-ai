@@ -8,6 +8,8 @@ revisit_when: "Ingestion moves into Docker (ADR-0021's 51 s per formula bound is
 supersedes: []
 ---
 
+> Amendment (owner, 2026-11-24), from the upload code review: the inbox quota is checked after the body is received and after the duplicate check (a re-upload of an open file is answered with its view even when the quota is full), not before the body with Content-Length. The cap of 200 MiB is still enforced before and while streaming, and only one body streams at a time under the upload lock, so the transient overshoot is at most one 200 MiB temporary file above the 1 GiB of stored open uploads.
+
 > Amendment (owner, 2026-11-23), from SRV-INGEST revision 2 review rounds 4–6 and spikes/ingest-sysctl:
 > - **The inode channel is open under every profile tried.** `fsgetpath()` on a directory's inode returns its path, and `chdir` into a known path is allowed. Neither is stopped by denying `file-read-metadata` below the work root (measured, 2026-11-23); the mechanism is not identified. A confined child that scans the inode numbers near its own work directory finds a sibling run's (measured: a ±2,000 scan).
 > - **Decision 3's edits close the process channels only:** another process's arguments and environment (`kern.procargs2`, `kern.procargs`), its entry in the process table (`kern.proc.pid`, `kern.proc.all`), its cwd and executable path (`proc_pidinfo`, `proc_pidpath`) and the process list (`proc_listallpids`). They do not close the inode channel.
