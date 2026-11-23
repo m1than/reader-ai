@@ -61,10 +61,39 @@ const Notebook = v.looseObject({
 
 const Session = v.object({ session_id: v.string(), lesson_id: v.optional(v.string()) });
 
+// SRV-PIPELINE FR-PIPELINE-11, -16, -17 (WEB-UI FR-UI-15): a run's status; only the fields the app reads are checked.
+const CompileStatus = v.looseObject({
+  run_id: v.string(),
+  lesson_id: v.string(),
+  state: v.string(),
+  cap_usd: v.string(),
+  steps: v.array(v.looseObject({ step: v.number(), stage: v.string(), status: v.optional(v.string()) })),
+  spent_usd: v.string(),
+  refusals: v.array(v.string()),
+  latest_sha256: v.nullable(sha),
+  error: v.optional(v.nullable(v.string())),
+});
+const OpenRuns = v.object({ runs: v.array(CompileStatus) });
+const Started = v.object({ run_id: v.string() });
+// SRV-PLAN FR-PLAN-13.
+const usd = v.pipe(v.string(), v.regex(/^\d+\.\d{2}$/));
+const Estimate = v.object({
+  lesson_id: v.string(),
+  kchars: v.pipe(v.string(), v.regex(/^\d+\.\d{3}$/)),
+  low_usd: usd,
+  high_usd: usd,
+  run_cap_usd: usd,
+  basis: v.string(),
+  basis_kchars: v.pipe(v.string(), v.regex(/^\d+(\.\d+)?$/)),
+  extrapolated: v.boolean(),
+});
+
 export type Me = v.InferOutput<typeof Me>;
 export type LessonSummary = v.InferOutput<typeof LessonSummary>;
 export type Lesson = v.InferOutput<typeof Lesson>;
 export type Notebook = v.InferOutput<typeof Notebook>;
+export type CompileStatus = v.InferOutput<typeof CompileStatus>;
+export type LessonEstimate = v.InferOutput<typeof Estimate>;
 
 export interface ApiDeps {
   fetch: typeof fetch;
@@ -110,6 +139,21 @@ export const createApi = (deps: ApiDeps) => {
     createSession: (lessonId: string) => call('POST', '/api/kernel/sessions', Session, { lesson_id: lessonId }),
     interrupt: (sessionId: string) => call('POST', `/api/kernel/sessions/${seg(sessionId)}/interrupt`, null),
     resetKernel: () => call('POST', '/api/kernel/reset', null),
+    // WEB-UI FR-UI-15: the owner's compile routes.
+    openCompiles: () => call('GET', '/api/compiles', OpenRuns),
+    /** The lesson's latest run, or null when it has none (404). */
+    latestCompile: async (lessonId: string): Promise<CompileStatus | null> => {
+      try {
+        return await call('GET', `/api/lessons/${seg(lessonId)}/compile`, CompileStatus);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) return null;
+        throw e;
+      }
+    },
+    /** Bodiless: the server's default cap (SRV-PIPELINE FR-PIPELINE-11). */
+    startCompile: (lessonId: string) => call('POST', `/api/lessons/${seg(lessonId)}/compile`, Started),
+    resumeCompile: (runId: string) => call('POST', `/api/compiles/${seg(runId)}/resume`, CompileStatus),
+    lessonEstimate: (lessonId: string) => call('GET', `/api/lessons/${seg(lessonId)}/estimate`, Estimate),
   };
 };
 

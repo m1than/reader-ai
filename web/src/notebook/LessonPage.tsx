@@ -5,8 +5,9 @@ import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useMemo } from 'react';
+import { type ReactNode, useEffect, useMemo } from 'react';
 import { ApiError, SIGN_IN_URL } from '../app/api';
+import { CompileControl } from '../app/compile/CompileControl';
 import { useServices } from '../app/context';
 import { queries } from '../app/queries';
 import { AskPanel } from '../tutor/AskPanel';
@@ -53,7 +54,17 @@ const Failed = ({ error, retry }: { error: unknown; retry: () => void }) => {
   );
 };
 
-function Lesson({ lessonId, notebook, revision }: { lessonId: string; notebook: Notebook; revision: string }) {
+function Lesson({
+  lessonId,
+  notebook,
+  revision,
+  banner,
+}: {
+  lessonId: string;
+  notebook: Notebook;
+  revision: string;
+  banner?: ReactNode;
+}) {
   const { api, notify, navigateAway, tutor } = useServices();
   const controller = useMemo(
     () =>
@@ -80,6 +91,7 @@ function Lesson({ lessonId, notebook, revision }: { lessonId: string; notebook: 
     : undefined;
   return (
     <div className="page lesson-page">
+      {banner}
       <LessonView notebook={notebook} controller={controller} aside={aside} back={<BackLink />} />
     </div>
   );
@@ -88,6 +100,8 @@ function Lesson({ lessonId, notebook, revision }: { lessonId: string; notebook: 
 export function LessonPage({ lessonId }: { lessonId: string }) {
   const { api } = useServices();
   const q = queries(api);
+  const me = useQuery(q.me());
+  const owner = me.data?.role === 'owner';
   const meta = useQuery(q.lesson(lessonId));
   const sha = meta.data?.lesson.latest_sha256 ?? null;
   const rev = useQuery({ ...q.revision(lessonId, sha ?? ''), enabled: sha !== null });
@@ -99,9 +113,21 @@ export function LessonPage({ lessonId }: { lessonId: string }) {
         <BackLink />
         <h1>{meta.data.lesson.title}</h1>
         <p className="muted">This lesson is not published yet.</p>
+        {/* FR-NOTEBOOK-12 (amended): the owner's compile control under the text. */}
+        {owner && (
+          <p className="compile-line">
+            <CompileControl lesson={meta.data.lesson} source="page" />
+          </p>
+        )}
       </div>
     );
   if (rev.isPending) return <LessonSkeleton />;
   if (rev.isError) return <Failed error={rev.error} retry={() => void rev.refetch()} />;
-  return <Lesson lessonId={lessonId} notebook={rev.data as unknown as Notebook} revision={sha} />;
+  // FR-NOTEBOOK-12 (amended): a published draft whose compile is not finished shows the control above the cells.
+  const banner = owner ? (
+    <div className="compile-line">
+      <CompileControl lesson={meta.data.lesson} source="page" />
+    </div>
+  ) : undefined;
+  return <Lesson lessonId={lessonId} notebook={rev.data as unknown as Notebook} revision={sha} banner={banner} />;
 }

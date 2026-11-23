@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from reader.agent import ledger
 from reader.agent.pricing import resolve_model
 from reader.jobs import idempotency_key
+from reader.jobs.queue import dead_error_code_of
 from reader.lessons.store import current_sha256
 from reader.pipeline import runtime as runtime_mod
 from reader.pipeline.courses import lock_course
@@ -30,6 +31,20 @@ from reader.pipeline.runtime import Runtime
 from reader.pipeline.source import Source, render
 from reader.pipeline.stages import Done, next_stage
 
+# FR-PIPELINE-16: the permanent SRV-AGENT codes a stopped step may report (FR-AGENT-10 and the
+# ledger's two refusals).
+STAGE_ERROR_CODES: Final = frozenset(
+    {
+        "sdk_error",
+        "tools_mismatch",
+        "unknown_model",
+        "provider_missing",
+        "usage_unmapped",
+        "settle_refused",
+        "void_refused",
+    }
+)
+OPEN_RUNS_MAX: Final = 100  # bounds.open_runs_max (FR-PIPELINE-17)
 KIND_STAGE: Final = "pipeline.stage"
 KIND_VERIFY: Final = "pipeline.verify"
 NOTEBOOK_STAGES: Final = frozenset({"draft", "revise"})
@@ -66,6 +81,7 @@ class RunRow:
     finished_at: Any
     g2: Mapping[str, Any] | None
     final_sha256: str | None
+    stage_error: Mapping[str, Any] | None = None  # FR-PIPELINE-16: {step, input_sha256, code}
 
 
 @dataclass(frozen=True)
@@ -82,14 +98,16 @@ async def load_run(
         await conn.execute(
             text(
                 "SELECT id, owner_id, lesson_id, cap_usd, task_budgets, budget_refused, finished_at, g2,"
-                " final_sha256 FROM compile_runs WHERE id = :r"
+                " final_sha256, stage_error FROM compile_runs WHERE id = :r"
             ),
             {"r": run_id},
         )
     ).first()
     if row is None or (owner_id is not None and row[1] != owner_id):
         return None
-    return RunRow(row[0], row[1], row[2], Decimal(row[3]), row[4] or {}, row[5], row[6], row[7], row[8])
+    return RunRow(
+        row[0], row[1], row[2], Decimal(row[3]), row[4] or {}, row[5], row[6], row[7], row[8], row[9]
+    )
 
 
 async def load_steps(conn: AsyncConnection, run_id: uuid.UUID) -> list[StepRow]:
@@ -205,6 +223,7 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
         steps = await load_steps(conn, run_id)
         latest = await current_sha256(conn, run.lesson_id)
         pending: dict[str, Any] | None = None
+        error: str | None = None
         if run.finished_at is not None:
             g2 = run.g2 or {}
             if run.budget_refused:
@@ -225,7 +244,10 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
                 status = "none"
                 if args is not None:
                     kind = kind_for(stage)
-                    status = await jobs.job_status(kind, idempotency_key(jobs.catalog[kind], args))
+                    key = idempotency_key(jobs.catalog[kind], args)
+                    status = await jobs.job_status(kind, key)
+                    if status == "dead":
+                        error = await _stage_error(conn, run, args, kind, key)
                 state = {"queued": "running", "running": "running", "dead": "stage_failed"}.get(
                     status, "stalled"
                 )
@@ -261,8 +283,59 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
         "refusals": [run.budget_refused] if run.budget_refused else [],
         "g2": run.g2,
         "latest_sha256": latest,
+        "error": error,
         "_pending": pending,
     }
+
+
+async def _stage_error(
+    conn: AsyncConnection, run: RunRow, args: Mapping[str, Any], kind: str, key: str
+) -> str | None:
+    """FR-PIPELINE-16: the recorded code, only for this step and input and a key dead of an AgentError."""
+    record = run.stage_error
+    if not record or record.get("step") != args["step"] or record.get("input_sha256") != args["input_sha256"]:
+        return None
+    code = record.get("code")
+    if code not in STAGE_ERROR_CODES:
+        return None
+    if await dead_error_code_of(conn, kind, key) != "AgentError":
+        return None
+    return str(code)
+
+
+async def record_stage_error(engine: AsyncEngine, run_id: uuid.UUID, value: Mapping[str, Any] | None) -> None:
+    """FR-PIPELINE-16: written on its own connection, committed at once (the FR-AGENT-9 allowance)."""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("UPDATE compile_runs SET stage_error = CAST(:e AS jsonb) WHERE id = :r"),
+            {"e": None if value is None else json.dumps(dict(value)), "r": run_id},
+        )
+
+
+async def open_runs(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID) -> list[dict[str, Any]]:
+    """FR-PIPELINE-17: the latest run of each lesson, unfinished or budget-stopped, newest first, bounded."""
+    async with engine.connect() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT id FROM (SELECT DISTINCT ON (lesson_id) id, created_at, finished_at,"
+                    " budget_refused FROM compile_runs WHERE owner_id = :o"
+                    " ORDER BY lesson_id, created_at DESC, id DESC) latest"
+                    " WHERE finished_at IS NULL OR budget_refused IS NOT NULL"
+                    " ORDER BY created_at DESC, id DESC LIMIT :n"
+                ),
+                {"o": owner_id, "n": OPEN_RUNS_MAX},
+            )
+        ).all()
+    out = []
+    for (run_id,) in rows:
+        try:
+            result = await status(engine, jobs, owner_id, run_id)
+        except PipelineError:
+            continue
+        if result["state"] not in ("converged", "open_findings"):
+            out.append(result)
+    return out
 
 
 async def ensure(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uuid.UUID) -> dict[str, Any]:

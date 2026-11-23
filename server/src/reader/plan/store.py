@@ -47,6 +47,36 @@ async def page_chars(
     return ingest_id, tuple(chars), tuple(spans)
 
 
+async def lesson_chars(conn: AsyncConnection, owner_id: uuid.UUID, lesson_id: uuid.UUID) -> int | None:
+    """FR-PLAN-13: span characters of the lesson's pages, from the owner's own ingest of its material.
+
+    None for a lesson without a `course_plans` row of this owner or a material without an ingest.
+    """
+    row = (
+        await conn.execute(
+            text(
+                "SELECT i.id, p.pdf_first, p.pdf_last FROM course_plans p"
+                " JOIN materials m ON m.owner_id = p.owner_id AND m.sha256 = p.material_sha256"
+                " JOIN ingests i ON i.material_id = m.id AND i.owner_id = p.owner_id"
+                " WHERE p.owner_id = :o AND p.lesson_id = :l"
+            ),
+            {"o": owner_id, "l": lesson_id},
+        )
+    ).first()
+    if row is None:
+        return None
+    total = (
+        await conn.execute(
+            text(
+                "SELECT coalesce(sum(char_length(text)), 0) FROM material_spans"
+                " WHERE ingest_id = :i AND owner_id = :o AND page BETWEEN :f AND :t"
+            ),
+            {"i": row[0], "o": owner_id, "f": row[1], "t": row[2]},
+        )
+    ).scalar()
+    return int(total or 0)
+
+
 async def outline_entries(
     conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID
 ) -> tuple[tuple[int, int | None, str], ...]:

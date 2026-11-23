@@ -14,6 +14,10 @@ const CATALOGUE: Record<string, string> = {
   too_many_kernels: 'too many open lessons; close one or reset',
   connect_failed: 'Could not connect to the kernel. The lesson may be open in other tabs.',
   sign_out_failed: 'Signing out failed; try again.',
+  // WEB-UI FR-UI-15: a compile request the server answered with a run that already exists.
+  compile_running: 'A compile of this lesson is already running.',
+  already_started: 'A lesson of this course is already compiled or compiling.',
+  not_failed: 'This compile is no longer stopped.',
   network: 'The network connection was lost.',
   bad_response: 'The server sent something unexpected.',
   unknown: 'Something went wrong.',

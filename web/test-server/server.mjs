@@ -30,12 +30,63 @@ const TYPES = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.map': 'application/json',
 };
 
+// WEB-UI FR-UI-15: a compile of w02 shaped like a real one. No run until the POST; then `running` at fact_check with
+// the draft's revision already set for two reads; then `converged` (w02 leaves GET /api/compiles). Global state, so
+// the Playwright config runs one worker; `POST /__test__/reset[?w02=stopped]` restores a start.
+const DRAFT_SHA = '4'.repeat(64);
+const compile = { phase: 'none', reads: 0 };
+const resetCompile = (mode) => Object.assign(compile, { phase: mode === 'stopped' ? 'stopped' : 'none', reads: 0 });
+const draftDone = { step: 1, stage: 'draft', model: 'claude-opus-5-5', cost_usd: '0.600000', duration_s: 157, reused: false };
+const runOf = (state, steps, extra = {}) => ({
+  run_id: 'run-w02', lesson_id: 'w02', state, cap_usd: '8.00', steps, spent_usd: '0.60', task_budgets: {}, refusals: [],
+  g2: null, latest_sha256: DRAFT_SHA, error: null, ...extra,
+});
+/** One read of w02's run state: advances the running sequence. */
+const readRun = () => {
+  if (compile.phase === 'running') {
+    compile.reads += 1;
+    if (compile.reads > 2) compile.phase = 'converged';
+  }
+  if (compile.phase === 'running') return runOf('running', [draftDone, { step: 2, stage: 'fact_check', status: 'running', reused: false }]);
+  if (compile.phase === 'stopped')
+    return runOf('stage_failed', [draftDone, { step: 2, stage: 'fact_check', status: 'dead', reused: false }], { error: 'provider_missing' });
+  if (compile.phase === 'converged') return runOf('converged', [draftDone]);
+  return null;
+};
+const withDraft = (l) => (l.lesson_id === 'w02' && compile.phase !== 'none' ? { ...l, latest_sha256: DRAFT_SHA } : l);
+const lessonsList = () => ({ lessons: fixtures.list.lessons.map(withDraft) });
+
+const compileRoute = (method, path) => {
+  if (method === 'GET' && path === '/api/compiles') {
+    const r = readRun();
+    return [200, { runs: r && r.state !== 'converged' ? [r] : [] }];
+  }
+  if (method === 'GET' && path === '/api/lessons/w02/compile') {
+    const r = readRun();
+    return r ? [200, r] : [404, { error: 'not_found' }];
+  }
+  if (method === 'GET' && /^\/api\/lessons\/[^/]+\/compile$/.test(path)) return [404, { error: 'not_found' }];
+  if (method === 'POST' && path === '/api/lessons/w02/compile') {
+    if (compile.phase === 'running') return [409, { error: 'compile_running' }];
+    Object.assign(compile, { phase: 'running', reads: 0 });
+    return [202, { run_id: 'run-w02' }];
+  }
+  if (method === 'POST' && path === '/api/compiles/run-w02/resume') {
+    if (compile.phase !== 'stopped') return [409, { error: 'not_failed' }];
+    Object.assign(compile, { phase: 'running', reads: 0 });
+    return [202, runOf('running', [draftDone, { step: 2, stage: 'fact_check', status: 'queued', reused: false }])];
+  }
+  if (method === 'GET' && path === '/api/lessons/w02/estimate')
+    return [200, { lesson_id: 'w02', kchars: '22.104', low_usd: '0.47', high_usd: '1.11', run_cap_usd: '8.00', basis: 'L02', basis_kchars: '58.938', extrapolated: true }];
+  return null;
+};
+
 const api = (method, path) => {
   if (method === 'GET' && path === '/api/me') return [200, me];
-  if (method === 'GET' && path === '/api/lessons') return [200, fixtures.list];
+  if (method === 'GET' && path === '/api/lessons') return [200, lessonsList()];
   const lesson = /^\/api\/lessons\/([^/]+)$/.exec(path);
   if (method === 'GET' && lesson) {
-    const s = fixtures.list.lessons.find((l) => l.lesson_id === decodeURIComponent(lesson[1]));
+    const s = lessonsList().lessons.find((l) => l.lesson_id === decodeURIComponent(lesson[1]));
     // SRV-LESSON FR-LESSON-8: metadata nested under `lesson`.
     const revisions = s?.latest_sha256
       ? [{ sha256: s.latest_sha256, byte_size: 1, cell_count: 1, created_at: s.updated_at, stages: ['fixture'] }]
@@ -116,6 +167,11 @@ createServer((req, res) => {
     res.end(readFileSync(join(AUTH_STATIC, name)));
     return;
   }
+  if (req.method === 'POST' && path === '/__test__/reset') {
+    resetCompile(url.searchParams.get('w02'));
+    res.writeHead(204).end();
+    return;
+  }
   if (path.startsWith('/api/')) {
     apiRequests.push(`${req.method} ${path}`);
     const chunks = [];
@@ -127,7 +183,7 @@ createServer((req, res) => {
       } catch {
         parsed = {};
       }
-      const [status, body] = planRoute(req.method, path, parsed) ?? api(req.method, path);
+      const [status, body] = compileRoute(req.method, path) ?? planRoute(req.method, path, parsed) ?? api(req.method, path);
       res.writeHead(status, body === null ? {} : { 'Content-Type': 'application/json' });
       res.end(body === null ? undefined : JSON.stringify(body));
     });

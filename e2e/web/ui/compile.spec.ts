@@ -29,6 +29,10 @@ const serious = async (page: Page) =>
     .filter((v) => v.impact === 'serious' || v.impact === 'critical')
     .map((v) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
 
+/** axe reads colours as rendered: wait for the dialog's open transition (mid-fade text fails contrast). */
+const settled = (page: Page) =>
+  page.getByRole('dialog').evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
+
 const overflow = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
 
 for (const width of WIDTHS) {
@@ -48,6 +52,7 @@ for (const width of WIDTHS) {
     await expect(dialog.getByRole('heading', { name: 'Compile lesson 2?' })).toBeVisible();
     await expect(dialog.getByText(/^Estimate: \$\d+\.\d{2}–\$\d+\.\d{2}$/)).toBeVisible();
     await expect(dialog.getByText('Stops at $8.00.')).toBeVisible();
+    await settled(page);
     expect(await serious(page)).toEqual([]);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/compile-confirm-${width}.png`, fullPage: true });

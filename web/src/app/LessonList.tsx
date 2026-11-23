@@ -1,6 +1,8 @@
-// Lesson list (WEB-UI FR-UI-6): grouped by course; published lessons link to their view.
+// Lesson list (WEB-UI FR-UI-6): grouped by course; published lessons link to their view. For the owner, each row
+// also carries the compile control (FR-UI-15): run state, the draft chip, Compile or Retry.
 import { Link } from '@tanstack/react-router';
 import type { LessonSummary } from './api';
+import { CompileControl } from './compile/CompileControl';
 import { groupLessons } from './lessons';
 
 const date = (iso: string, locale: string) => {
@@ -8,7 +10,7 @@ const date = (iso: string, locale: string) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-export function LessonList({ lessons, locale }: { lessons: LessonSummary[]; locale: string }) {
+export function LessonList({ lessons, locale, owner = false }: { lessons: LessonSummary[]; locale: string; owner?: boolean }) {
   if (lessons.length === 0) return <p className="empty">No lessons yet</p>;
   return (
     <div className="lesson-list">
@@ -32,7 +34,11 @@ export function LessonList({ lessons, locale }: { lessons: LessonSummary[]; loca
                   )}
                 </span>
                 <span className="lesson-meta">
-                  {!l.latest_sha256 && <span className="lesson-status">not published yet</span>}
+                  {owner ? (
+                    <CompileControl lesson={l} source="list" />
+                  ) : (
+                    !l.latest_sha256 && <span className="lesson-status">not published yet</span>
+                  )}
                   <time dateTime={l.updated_at}>{date(l.updated_at, locale)}</time>
                 </span>
               </li>

@@ -29,7 +29,20 @@ const lesson = (id: string, ordinal: number, sha: string | null = null, course =
   latest_sha256: sha,
 });
 
-const run = (state: string, steps: unknown[], extra: Record<string, unknown> = {}) => ({
+type Step = { step: number; stage: string; status?: string; [k: string]: unknown };
+type Run = {
+  run_id: string;
+  lesson_id: string;
+  state: string;
+  cap_usd: string;
+  steps: Step[];
+  spent_usd: string;
+  refusals: string[];
+  latest_sha256: string | null;
+  error?: string | null;
+  [k: string]: unknown;
+};
+const run = (state: string, steps: Step[], extra: Record<string, unknown> = {}): Run => ({
   run_id: 'run-1',
   lesson_id: 'w02',
   state,

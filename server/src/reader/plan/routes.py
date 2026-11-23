@@ -354,8 +354,26 @@ async def get_plan(ctx: Ctx) -> Response:
     )
 
 
+async def lesson_estimate(ctx: Ctx) -> Response:
+    """FR-PLAN-13: one lesson's compile estimate, read-only."""
+    try:
+        _owner_only(ctx)
+        try:
+            lesson = uuid.UUID(ctx.request.path_params["lesson_id"])
+        except ValueError:
+            raise _Refused(404, "not_found") from None
+        async with ctx.engine.connect() as conn:
+            chars = await store.lesson_chars(conn, ctx.signed_in.id, lesson)
+        if chars is None:
+            raise _Refused(404, "not_found")
+    except _Refused as e:
+        return error(e.status, e.code)
+    return JSONResponse({"lesson_id": str(lesson), **estimate.lesson_estimate(chars)})
+
+
 ROUTES: tuple[Route, ...] = (
     Route("POST", "/api/plans/preview", "session", preview),
     Route("POST", "/api/plans/confirm", "session", confirm),
     Route("GET", "/api/plans", "session", get_plan),
+    Route("GET", "/api/lessons/{lesson_id}/estimate", "session", lesson_estimate),
 )

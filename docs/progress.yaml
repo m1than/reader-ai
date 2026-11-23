@@ -1137,8 +1137,11 @@ tasks:
         draft step writes a revision); new FR-PIPELINE-17 GET /api/compiles (the owner's open runs) replaces the
         10 per-lesson reads; a 'draft, compile not finished' chip; FR-PIPELINE-16 records {step, input_sha256, code}
         from an allow-list and reports it only for a dead AgentError key of that input; FR-PLAN-13 gets a pure
-        lesson_estimate with band-edge vectors. Waiting for deep-reviewer round 2, then Green and
-        BASE=origin/main bash tools/ci-local.sh. No compile is started by the agent (spend); no live step.",
+        lesson_estimate with band-edge vectors. Round 2 on 08534df: VERDICT approve; folded in SRV-EVENTS
+        FR-EVENTS-17 dead_error_code_of, off-list codes clear the record, the open-runs cost notes and a 101-run test.
+        Green built (server routes, migration pipeline_0003, CompileControl, list chip, page control, test-server
+        stub); browser suite 211 passed incl. e2e/web/ui/compile.spec.ts at 1280/1024/390 (axe 0 serious/critical,
+        no horizontal scroll, no CSP violation). Next: code review. No compile is started by the agent; no live step.",
       note: "Coordination (coordinator, 2026-11-23): this item is FR-UI-15. FR-UI-13 stays the upload track's id
         (V/onboarding, left untouched here): it keeps its first-run bullet and drops its compile-status bullet at merge,
         which FR-UI-15 supersedes. FR-UI-14 is V/signup's; FR-UI-16 and above are the design pass's." }
