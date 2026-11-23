@@ -1050,6 +1050,44 @@ tasks:
         (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
         timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
         latest live run (OPS-DOD owner note)." }
+  - { id: V.ingest-profile-v2, stage: V, kind: fix, track: engineering, status: in_progress, branch: V/ingest-profile-v2,
+      needs: [V.live],
+      what: "Security fix to the current converter profile (SRV-INGEST FR-INGEST-4, INV-INGEST-4), found in the
+        SRV-INGEST revision 2 review (round 3, 2026-11-23) and measured in spikes/ingest-sysctl on V/onboarding: under
+        `(allow sysctl-read)` and with no process-info rule, a confined converter child read every same-uid process's
+        arguments and environment (kern.procargs2) and cwd (proc_pidinfo). Fix: a sysctl allow-list (kern.hostname
+        kept: os.uname needs it) plus process-info limited to self; both are needed (either alone, or a deny by name,
+        leaves kern.procargs2 open); kern.iossupportversion added after the in-sandbox sweep. Not closed by any
+        profile tried: fsgetpath of another directory's inode and chdir into a known path (recorded by the [host]
+        probe). Control for that, as in ADR-0029's amendment note (V/onboarding 421d290): one converter run at a
+        time, `convert.lock` for the CLI (FR-INGEST-1), with stale cleanup over every record when it is taken.
+        Residual on this branch: a concurrent run's WORK path can be learned and chdir succeeds, reads and writes
+        there stay denied; the host name is readable (kern.hostname). Merges only after the owner has applied the
+        ADR-0029 amendment note.",
+      gate: "NFR-INGEST-1 [local] full pilot, 2026-11-23 (spikes/ingest-sysctl/fullrun.py on V/onboarding; the gate
+        ran the spike profile converter-v2.sb, rule-identical to the product profile except kern.iossupportversion,
+        added after the run): 935/935 pages in 961.6 s = 58.3 pages/min (≥ 10: PASS). About 10 % slower than the
+        2026-11-22 run (65.5 pages/min); the profile's share is not excluded: converter r1 vs r2, and the CPU was
+        shared with other tests for the run's first minutes. Peak RSS 3,590.8 MiB summed over the converter's
+        processes sampled at 1 s, against 4,025.5 MiB for the child alone then: the RSS methods differ. Span count
+        9,463 under both. Denied sysctl names: none observed, but the unified log showed no sandbox reports to this
+        user (2 lines), so that check is inconclusive; the in-sandbox sweep (spikes/ingest-sysctl/sweep.py,
+        results/sweep.json) lists the names each profile refuses instead (v2: 1,279 of 2,085, including
+        kern.proc.pid.<pid> and kern.procargs2.<pid>). Under the final product profile on this branch: all 7
+        [host]/[local] converter tests passed (136.1 s), test_cross_process_probes fails under the old profile
+        (fails closed); ingest unit tests 218 passed, ruff and mypy clean.",
+      review: "deep-reviewer (Fable) re-review on 47aa55a: VERDICT approve, conditional on the owner applying the
+        ADR-0029 amendment note (V/onboarding docs/adr/0029-amendment-note.txt) before the merge; its small items
+        applied after (status-under-lock behaviour stated in FR-INGEST-1, the requeue test asserts exit 0 and the
+        requeue call, the watcher as a forward reference, INV-INGEST-4's residual reworded, the transition note).",
+      merge_condition: "met: the owner applied the ADR-0029 amendment note on V/onboarding in 949bd1e (2026-11-23).",
+      next: "Merged into V/slice-integration (the PR #39 line) after the condition was met. Transition: a reader-ingest run from a checkout older than this change
+        takes no convert.lock, so start no new run while such a run is live.",
+      followups: "(1) Run the cross-process probe at `reader-ingest --setup`, record kern.osversion in setup.json and
+        report setup_stale when the macOS build changes (FR-INGEST-3 change with tests). (2) Byte-compare spans.jsonl
+        of the full pilot under the old and the new profile. (3) The in-sandbox sweep refused `kern.proc.pid.<self>`
+        by name (sysctlbyname), while the positive control allows the same query for the own pid by MIB; a
+        pid-scoped sysctl rule is not possible, and the converter does not need the by-name form (tests pass)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
