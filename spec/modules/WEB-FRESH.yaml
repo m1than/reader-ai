@@ -12,9 +12,10 @@
 # subject, kind, confidence, page, span, cell: {lesson_id, cell_id}|null}]|null, claim_status: [{id, status, note,
 # citations}]|null, recommendations|null, topics: [{id, title}]|null, dropped: {reason: count}|null}` with citations
 # `{url, host, title}`. Error bodies are `{error, …}`: `estimate` (409 estimate_changed), `daily_cap_usd` and
-# `spent_usd` (409 daily_budget_exhausted), `field` (400 bibliography_invalid). Page links (FR-FRESHUI-5) are app
-# links built by code from an integer page or a validated lesson and cell id, never from a report string;
-# INV-FRESHUI-1 governs the web links.
+# `spent_usd` (429 daily_budget_exhausted, the status SRV-TUTOR's daily cap uses; coordinator check 2026-11-23),
+# `field` (400 bibliography_invalid). Page links (FR-FRESHUI-5) are same-origin app links built by code from an
+# integer page or a validated lesson and cell id, never from a report string; every link to another site is a
+# FR-FRESHUI-6 safe external link (INV-FRESHUI-1).
 #
 # The card (one component, `FreshnessCard`, given a material id) shows:
 #   1. the bibliography the check will search for, editable (FR-FRESHUI-2);

@@ -66,6 +66,20 @@ REPORT_KEYS = {
 }
 
 
+def test_read_shapes_equal_the_web_fixture() -> None:
+    """FR-FRESH-10/-11: the keys the server pins are the keys WEB-FRESH's card reads (VEC-FRESHUI-1), and
+    the daily cap refusal has the same status on both sides (429, as SRV-TUTOR's daily cap)."""
+    repo = Path(__file__).resolve().parents[3]
+    web = json.loads((repo / "spec" / "fixtures" / "WEB-FRESH" / "bodies.json").read_text(encoding="utf-8"))
+    for state in web["states"].values():
+        body = state.get("body", state)
+        assert set(body) == GET_KEYS
+        if body["report"] is not None:
+            assert set(body["report"]) == REPORT_KEYS
+    assert web["errors"]["daily_budget_exhausted"]["status"] == 429
+    assert set(web["errors"]["daily_budget_exhausted"]["body"]) == {"error", "daily_cap_usd", "spent_usd"}
+
+
 def links(i: int) -> list[tuple[str, str]]:
     return [(f"Result {i}a", f"https://site{i}.example/a"), (f"Result {i}b", f"https://site{i}.example/b")]
 
@@ -243,7 +257,7 @@ async def test_daily_cap_pre_check_carries_the_numbers(pg: Pg, tmp_path: Path) -
     await spend_today(w, "tutor", "5.00")  # another task does not count
     async with client(w, jobs=FakeJobs()) as c:
         refused = await post_check(c, w)
-    assert refused.status_code == 409
+    assert refused.status_code == 429  # as SRV-TUTOR's daily cap
     assert refused.json() == {"error": "daily_budget_exhausted", "daily_cap_usd": "2.00", "spent_usd": "1.90"}
 
 

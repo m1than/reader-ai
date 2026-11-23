@@ -195,7 +195,7 @@ async def post_freshness(ctx: Ctx) -> Response:
                 "daily_cap_usd": str(params.DAILY_CAP_USD),
                 "spent_usd": str(spent.quantize(params.DAILY_CAP_USD)),
             },
-            status_code=409,
+            status_code=429,  # as SRV-TUTOR's daily cap
         )
     try:
         report_id = await store.insert(

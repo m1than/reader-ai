@@ -325,7 +325,8 @@ requirements:
       applies, in that order; only for a `done` report), bibliography: {…FR-FRESH-1 fields, source: owner|scan,
       sha256}|null, scan_bibliography: {…fields, sha256}|null (the latest report's that has one), estimate: {low_usd,
       high_usd, cap_usd}, daily_cap_usd}`; `PUT …/bibliography` → that `bibliography` object. Error bodies are
-      `{error, …}`: 409 `estimate_changed` carries `estimate`; 409 `daily_budget_exhausted` (POST, when today's spend
+      `{error, …}`: 409 `estimate_changed` carries `estimate`; 429 `daily_budget_exhausted` (the status SRV-TUTOR's
+      daily cap uses; POST, when today's spend
       over the three tasks plus `high_usd` exceeds `daily_cap_usd`) carries `daily_cap_usd` and `spent_usd`; 400
       `bibliography_invalid` carries `field`. A POST body that is not an object or whose `high_usd` is not the
       current string gets `estimate_changed`; a `bibliography_sha256` that is not the latest scan bibliography's
@@ -479,7 +480,7 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   Revision 4, with the promotion (paired change with WEB-FRESH, whose card and VEC-FRESHUI-1 already fix the
   response shapes): FR-FRESH-10 states the report's read shape (progress, claims with span and a null cell,
   citations `{url, host, title}`, topics, dropped) and FR-FRESH-11 the GET body (`stale_reason`, `daily_cap_usd`),
-  the error bodies (409 `estimate_changed` with `estimate`, 409 `daily_budget_exhausted` with `daily_cap_usd` and
+  the error bodies (409 `estimate_changed` with `estimate`, 429 `daily_budget_exhausted` with `daily_cap_usd` and
   `spent_usd` as a POST pre-check, 400 `bibliography_invalid` with `field`), `{id}` as uuid or reader.yaml id and
   503 `config_unavailable`; FR-FRESH-7 names the search statuses; FR-FRESH-9 names the estimate's constants (new
   bounds `scan_output_tokens`, `report_prompt_tokens_max` and the `expected_*` values, all from REF-FRESH-2 § 4)
@@ -487,4 +488,6 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   scan-only check; FR-FRESH-8's prompt file is `prompts/verdict.<version>.md` (the agent session's file tools
   refuse to create a file named `report.*`). No bound, cap or safety rule changed. Paired changes, each noted in
   its spec: SRV-EVENTS KIND_MODULES, SRV-AUTH ROUTERS, VERSION_LOCATIONS and `Route.method` PUT, OPS-DEPLOY's
-  example tasks, OPS-DOD's material.freshness cells."
+  example tasks, OPS-DOD's material.freshness cells.
+  Coordinator check (2026-11-23): `daily_budget_exhausted` is 429, aligned with SRV-TUTOR FR-TUTOR's daily cap
+  (WEB-FRESH VEC-FRESHUI-1 paired)."

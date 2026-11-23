@@ -20,7 +20,7 @@
     "freshness_running": { "status": 409, "body": { "error": "freshness_running" } },
     "bibliography_unconfirmed": { "status": 409, "body": { "error": "bibliography_unconfirmed" } },
     "nothing_to_confirm": { "status": 409, "body": { "error": "nothing_to_confirm" } },
-    "daily_budget_exhausted": { "status": 409, "body": { "error": "daily_budget_exhausted", "daily_cap_usd": "2.00", "spent_usd": "1.84" } },
+    "daily_budget_exhausted": { "status": 429, "body": { "error": "daily_budget_exhausted", "daily_cap_usd": "2.00", "spent_usd": "1.84" } },
     "bibliography_invalid": { "status": 400, "body": { "error": "bibliography_invalid", "field": "isbn" } }
   },
   "states": {
