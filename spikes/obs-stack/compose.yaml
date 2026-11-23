@@ -47,7 +47,7 @@ services:
       mlflow server --host 0.0.0.0 --port 5000 --workers 1
       --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db
       --artifacts-destination /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/
-      --allowed-hosts localhost:8443,mlflow:5000,mlflow
+      --allowed-hosts localhost:8443,localhost:8445,localhost:8446,mlflow:5000,mlflow
 
   pg:
     image: postgres:18-trixie
@@ -76,12 +76,14 @@ services:
     image: python:3.14-slim-trixie
     command: ["python", "-I", "/spike/gate.py"]
     volumes: ["./gate.py:/spike/gate.py:ro"]
+    environment: { EXPECT_ORIGINS: "http://localhost:8443,http://localhost:8445,http://localhost:8446" }
     read_only: true
     networks: [obs-ui]
 
   caddy:
     image: caddy:2.11.9-alpine
     volumes: ["./Caddyfile:/etc/caddy/Caddyfile:ro"]
+    environment: { CSP_CANDIDATE: "${CSP_CANDIDATE:-default-src 'self'}" }
     networks: [obs-ui]
 
   driver:
@@ -92,6 +94,7 @@ services:
       DURATION_S: ${DURATION_S:-480}
       BULK_LESSONS: ${BULK_LESSONS:-20}
       BACKEND: ${BACKEND:-sqlite}
+      KEEP_TRACES: ${KEEP_TRACES:-}
     volumes: ["mlflow_data:/mlflowdata:ro", "${OUT:?}:/out"]
     networks: [obs, obs-ui]
 

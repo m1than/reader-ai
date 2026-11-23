@@ -102,11 +102,73 @@ The gate received `X-Forwarded-Method` and `X-Forwarded-Uri` for every request, 
 7. **Storage is small.** A whole-book compile (≈ 11,000 spans, ADR-0018) is ≈ 10 MB in SQLite. Retention is not a
    storage problem.
 
+## Round 2 (SRV-OBS design review B2–B4, B6), 2026-11-24
+
+- **Command:** `bash spikes/obs-stack/run-browser.sh`, with `CSP_CANDIDATE` for the candidate policy on :8446.
+- **Results:** `results/20261124T012202-round2/` (`driver.json`, `browser.json`, `shots/`, `gate.log`,
+  `caddy-adapt.json`).
+- **Setup changes:**
+  - Networks split as SRV-OBS FR-OBS-8 now has them: `obs` = rotel, mlflow, driver; `obs-ui` = caddy, mlflow, gate,
+    driver.
+  - The gate implements the Origin rules.
+  - Caddy strips `Cookie` and `Authorization` going up, and `Set-Cookie` and `Access-Control-*` coming down.
+  - An echo upstream (`gate.py` on :9001) sits behind the same proxy settings.
+  - Three Caddy sites differ only in CSP: :8443 strict base, :8445 none, :8446 candidate.
+
+**Gate and edge** (owner cookie unless noted; the dashboard origin is `http://localhost:8443` in the spike):
+
+| Request | Status |
+| --- | --- |
+| POST search, `Origin` = dashboard | 200 |
+| POST search, no `Origin` | 403 |
+| POST search, `Origin: http://localhost:3000` | 403 |
+| POST search, `Origin: https://localhost` (the app) | 403 |
+| GET search, `Origin: http://localhost:3000` | 403 |
+| GET search, same origin | 200, no `Access-Control-Allow-Origin` |
+| **Direct to MLflow** (no edge), GET, `Origin: http://localhost:3000` | **200 with `Access-Control-Allow-Origin: http://localhost:3000`**: MLflow trusts every localhost origin with credentials; this is the threat the gate's Origin rule closes |
+| POST `text/plain` to experiments search (edge, and direct) | 400 |
+| POST `text/plain` to delete-traces (direct) | 400 |
+| Echo upstream, owner cookie plus `Authorization` | the upstream saw `accept-encoding, host, origin, user-agent, via, x-forwarded-for, x-forwarded-host, x-forwarded-proto`: no cookie, no authorization. No `Set-Cookie` and no ACAO reached the client, though the echo sent both |
+| `/v1/traces`, `/gateway/x`, `/ajax-api/3.0/mlflow/assistant/x`, `/mcp`, `/api/2.0/mlflow/gateway/x` | 404 from Caddy itself (7-byte body `blocked`) |
+
+**Finding: a blocked-path bug in round 1.**
+- **Symptom:** in round 1 and the first round-2 run, `respond @blocked 404` sat next to a catch-all `handle`, and
+  Caddy runs `handle` before `respond`. So `/v1/traces` reached MLflow (422), and the other "404"s were MLflow's own
+  (207 bytes).
+- **Fix:** a `handle @blocked { respond … 404 }` block.
+- **Test:** the paired `caddy adapt` test must assert the handler order, not just the presence of a `respond`.
+
+**Retention with a real cutoff:**
+- **Setup:** a trace with a 40-day-old timestamp and a fresh one, both ingested through Rotel.
+- **First call:** REST `delete-traces` with the 30-day cutoff and `max_traces: 1` deleted 1 trace in 0.01 s.
+- **Second call:** without `max_traces` it deleted 0 traces in 0.002 s.
+- **After:** the old trace is gone and the fresh one stays. MLflow's handler sets no server-side cap on
+  `max_traces`; the SQL query applies `LIMIT max_traces` only when it is given.
+
+**Browser pass** (headless Chromium 1.65.1 in the caddy container's network namespace; owner cookie as an extra
+header):
+
+| Site | CSP violations (UI, traces list, two trace details) | Requests to another host | Renders the trace detail |
+| --- | --- | --- | --- |
+| :8443 strict `default-src 'self'; connect-src 'self'; …` | inline styles only (`style-src-elem 'inline'`), on every page | none | yes, but the Links tab text did not render |
+| :8445 no CSP | — | none | yes |
+| :8446 candidate `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'` | **none** | none | yes, identical to no CSP |
+
+- **CSP:** the UI needs no script relaxation, no `'unsafe-eval'` and no other host. The candidate is within the
+  ceiling SRV-OBS FR-OBS-9 sets.
+- **Deep link:** `#/experiments/0/traces?selectedEvaluationId=tr-<trace id>` opens the trace's detail with its span
+  tree (`job tutor.answer` → `agent.call` → `claude_code.interaction` → `claude_code.llm_request`).
+  `selectedTraceId` opens only the list.
+- **Span links:** shown as a badge on the span and a "Links 1" tab (`shots/candidate-deep_selectedEvaluationId.png`).
+- **The UI's own failing calls**, the same with and without CSP:
+  - `404 /ajax-api/2.0/mlflow/users/current` (MLflow has no auth app);
+  - `404 /ajax-api/3.0/mlflow/assistant/config` and `/providers` (blocked at the edge). The UI still renders.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.
-- **Browser:** none was used. The UI's CSP needs and its deep-link parameter are unverified (SRV-OBS FR-OBS-9 and
-  FR-OBS-10 check them at Green).
+- **Browser:** headless Chromium only, plain HTTP, on four pages. Interactions such as editing assessments or
+  deleting from the UI were not exercised under the candidate CSP.
 - **TLS:** Caddy served plain HTTP here; `tls internal` on 8443 is the same mechanism as the main site (ADR-0024).
 - **Volume permissions:** the volume was fresh each run. Ownership through the image directory is the OPS-DEPLOY
   blobs pattern.

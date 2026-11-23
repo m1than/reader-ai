@@ -2,7 +2,9 @@
 # Source: spikes/cli-otel-content/results/20261124T002020/report.json, mode agent-env (claude-agent-sdk 0.2.187,
 # CLI 2.1.330, one query with tools=[] against a stub upstream). Keys only; values were ids, model names, counts,
 # timings and booleans, except `user_prompt`, which was the literal "<REDACTED>".
-cli: { sdk: claude-agent-sdk==0.2.187, cli_version: 2.1.330 }
+# FR-OBS-6 (a): a unit test compares `cli.sdk` with the claude-agent-sdk version locked in server/uv.lock.
+cli: { package: claude-agent-sdk, sdk: "0.2.187", cli_version: 2.1.330 }
+measured_under: "stub upstream, fake credential, tools=[]; the owner's real account is checked by the [live] step"
 scope: com.anthropic.claude_code.tracing
 resource_keys: [host.arch, os.type, os.version, service.name, service.version]
 spans:

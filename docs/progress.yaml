@@ -1139,7 +1139,12 @@ tasks:
         env; no canary with content flags off; the positive control finds the prompt), spikes/obs-stack (hardened Rotel
         and MLflow, SQLite vs Postgres memory over an 8-minute lesson replay, the gate path, storage per span, deletion).
         Paired changes are listed in the spec (OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS, SRV-AGENT, SRV-CONFIG)
-        and not edited here, because active branches change those files. Next: deep-reviewer rounds (complex areas: OTel
+        and not edited here, because active branches change those files. Design review round 1 (2026-11-24): changes,
+        7 blockers (networks, gate Origin rules, cookie stripping, CSP and deep link measured, CLI pin test, retention
+        order and cutoff test, cost from the ledger) plus non-blocking items, all applied; spikes/obs-stack round 2
+        measured the gate, header stripping, MLflow's credentialed CORS for any localhost origin, text/plain 400,
+        retention with a real cutoff, a blocked-path ordering bug in the round-1 Caddyfile, and the CSP and deep link in
+        a headless browser. Next: deep-reviewer round 2 (complex areas: OTel
         propagation, auth, secrets) before approval. On main S2.SRV-EVENTS still reads todo; its slice revision is
         approved and implemented (FR-EVENTS-1..16), which is what this spec builds on." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }

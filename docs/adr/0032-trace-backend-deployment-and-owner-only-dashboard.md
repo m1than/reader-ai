@@ -69,25 +69,30 @@ Measurements behind this ADR, all zero credit:
 
 ## Decision
 
-1. **Store:** MLflow keeps SQLite on its own volume `obs_mlflow` (option A). Rotel and MLflow run in Compose profile `observability`, on two internal networks with explicit subnets:
+1. **Store:** MLflow keeps SQLite on its own volume `obs_mlflow` (option A), excluded from `reader backup` (traces are diagnostic and rebuildable going forward; the data of record is in Postgres). Rotel and MLflow run in Compose profile `observability`, on three internal networks with explicit subnets:
    - `otel`: api, worker and rotel;
-   - `obs`: rotel, mlflow, caddy, and the worker for retention.
+   - `obs`: rotel, mlflow and the worker (retention only);
+   - `obs-ui`: caddy and mlflow.
 
-   Neither service has a secret, a published port or egress. Both run non-root with a read-only root, `cap_drop: [ALL]` and equal memory and swap limits.
+   So caddy never reaches rotel or the worker, and the worker never reaches caddy. Neither service has a secret, a published port or egress. Both run non-root with a read-only root, `cap_drop: [ALL]` and equal memory and swap limits.
+
+   **Amends ADR-0025 rule 5 (routes):** the worker also reaches `mlflow`, for the retention job's delete calls only. ADR-0025 already lists Rotel among the worker's routes.
 2. **Access:** the UI is served only at `https://localhost:8443`, through Caddy, after `forward_auth` to the api's `GET /api/obs/gate`:
    - 204 for the owner;
    - 401 without a session;
    - 403 for any other user.
 
-   MLflow's ingest, gateway, assistant and MCP paths answer 404 at the edge, and MLflow's `--allowed-hosts` accepts only `localhost:8443` from the edge (option A).
+   The gate also checks where a request comes from, because MLflow 3.18.0 answers any `http(s)://localhost:*` Origin with credentialed CORS (measured: `Access-Control-Allow-Origin: http://localhost:3000` on a direct request). It answers 403 when an `Origin` header is present and is not `https://localhost:8443`, and when the original method is not GET or HEAD and `Origin` is not exactly that value. Caddy strips every `Access-Control-*` header from MLflow's responses, removes `Cookie` and `Authorization` on the way up and `Set-Cookie` on the way down, and answers 404 itself for MLflow's ingest, gateway, assistant and MCP paths. MLflow's `--allowed-hosts` accepts only `localhost:8443` from the edge (option A). Port 8443 is published only while the profile is active (`reader up`'s override).
+
+   The site's CSP was measured in a headless browser. MLflow's UI renders with no violation under `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'`, and makes no request to any other host. The ceiling stays: no script relaxation, no other host, `connect-src 'self'`. An MLflow upgrade that needs more waits for the owner.
 3. **Trace shape:** one trace per job, with a link to the span that enqueued it (option A). The CLI's spans nest under our `agent.call` span through `TRACEPARENT`.
 4. **The owner's views:** a summary API over reader-ai's own tables, plus an owner page that links into MLflow (option A).
 5. **Privacy:**
    - **Our spans:** one exporter rebuilds every span against a declared allow-list.
    - **The CLI's spans** pass outside that exporter. They are bounded by the CLI's own flags:
-     - the content flags are set to 0;
+     - the content flags are set to 0 (raw API bodies left unset);
      - detailed beta tracing is never enabled;
-     - a canary test reruns on every SDK pin change.
+     - a unit test fails CI when the locked `claude-agent-sdk` differs from the version the canary fixture was measured on, so a pin change reruns the canary; it also reruns if any call ever declares tools.
 
      Measured on CLI 2.1.330: no prompt, system prompt, response or credential canary appears in the export, and the positive control finds the prompt canary.
 6. **Retention:** traces older than 30 days (configurable from 1 to 365) are deleted by a daily worker job through MLflow's `delete-traces` API.
@@ -120,7 +125,7 @@ Measurements behind this ADR, all zero credit:
   - Switching to Phoenix changes only Rotel's exporter flags and the gate's upstream. Phoenix's own auth (on by default since v21) would need a key, delivered as a secret.
 - **Harder:**
   - The owner trusts a second loopback port (same certificate, same host).
-  - `reader backup` gains one volume.
+  - Resource cost when on (the default): about 1.25 GiB of memory limits (mlflow 1g, rotel 256m) and two image pulls.
 - **Forbidden:**
   - MLflow reachable other than through the gate.
   - MLflow on a network with postgres, embed, agent-proxy or any kernel.
