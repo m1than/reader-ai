@@ -232,10 +232,12 @@ class Watcher:
     def _run(self, container: str, c: Claim) -> None:
         log.info("upload_claimed id=%s sha=%s size=%d", c.id, c.sha256[:12], c.size)
         started = self.d.clock()
-        self._set_busy("claim")
-        awake = self.d.caffeinate()
         phase = ["fetch"]
         cancelled = threading.Event()
+        awake: Awake | None = None
+        heart: TimerHandle | None = None
+        name: str | None = None
+        run_dir, work_root = self.d.data_dir / "ingest" / "run", self.d.data_dir / "ingest" / "work"
 
         def call(args: list[str], timeout: float, shape: Callable[[Any], bool]) -> tuple[str, Any]:
             kind, obj = reply(self._inbox(container, args, timeout), shape)
@@ -250,13 +252,15 @@ class Watcher:
                 log.info("upload_cancelled id=%s phase=%s", c.id, phase[0])
                 self.d.abort()
 
-        heart = self.d.timer(params.HEARTBEAT_S, beat)
-        run_dir, work_root = self.d.data_dir / "ingest" / "run", self.d.data_dir / "ingest" / "work"
-        name = records.new_run(run_dir, work_root, c.sha256, upload_id=c.id)
-        work = work_root / name
+        # The try begins before the first resource, so a setup failure (busy, caffeinate, the heartbeat, the
+        # run record) still releases what exists and fails the claim (code review round 2).
         try:
             try:
-                code = self._convert_and_send(container, c, work, phase, call, cancelled)
+                self._set_busy("claim")
+                awake = self.d.caffeinate()
+                heart = self.d.timer(params.HEARTBEAT_S, beat)
+                name = records.new_run(run_dir, work_root, c.sha256, upload_id=c.id)
+                code = self._convert_and_send(container, c, work_root / name, phase, call, cancelled)
             except OSError as error:  # with the claim held: fail it, never leave it to the lease
                 log.warning("run_error id=%s errno=%s", c.id, error.errno)
                 code = "convert_failed"
@@ -267,9 +271,12 @@ class Watcher:
                 call([*self._claim_args("fail", c), "--code", code], EXEC_TIMEOUT["fail"], _ok_shape)
                 log.info("upload_failed id=%s code=%s s=%.1f", c.id, code, self.d.clock() - started)
         finally:
-            heart.cancel()
-            awake.stop()
-            records.end_run(run_dir, work_root, name)
+            if heart is not None:
+                heart.cancel()
+            if awake is not None:
+                awake.stop()
+            if name is not None:
+                records.end_run(run_dir, work_root, name)
             self._set_busy("none")
 
     @staticmethod

@@ -244,8 +244,9 @@ def test_setup_missing_never_claims_and_never_spins(tmp_path: Path) -> None:
     h = Harness(tmp_path)
     h.setup_state = "setup_missing"
     w = h.watcher()
-    while h.clock.now < 60:
+    for _ in range(6):  # a fixed number of steps: a step that never waits fails the clock check, not hangs
         w.step()
+    assert h.clock.now >= 6 * 10  # each step waited at least 10 s
     assert len(h.stack.calls) <= 6
     assert all("--peek" in a for a in h.stack.calls)
     assert "lock" not in h.events
@@ -772,6 +773,27 @@ def test_an_oserror_in_a_run_fails_the_claim_and_the_loop_continues(tmp_path: Pa
     at = h2.clock.now
     h2.watcher().step()  # an OSError outside a claim: logged, then 10 s, never raised
     assert h2.clock.now - at >= 10
+
+
+def test_a_setup_failure_releases_what_exists_and_fails_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 2: the run record's creation raises; nothing leaks and the claim is failed exactly once."""
+    records = need("reader.ingest.host.records")
+    h = Harness(tmp_path)
+
+    def no_record(*_: Any, **__: Any) -> str:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(records, "new_run", no_record)
+    w = h.watcher()
+    w.step()
+    assert len(h.timers) == 1 and h.timers[0].cancelled
+    assert "awake-stop" in h.events
+    assert h.events.index("caffeinate") < h.events.index("awake-stop")
+    assert "convert" not in h.events
+    assert w.busy == "none"
+    assert h.stack.failed() == ["convert_failed"]
 
 
 def test_a_code_outside_fail_s_list_is_reported_as_convert_failed(tmp_path: Path) -> None:

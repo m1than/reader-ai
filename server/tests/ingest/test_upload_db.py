@@ -824,6 +824,10 @@ async def test_receive_under_a_claim_imports_the_upload(pg: Pg, tmp_path: Path) 
             seen = (await c.get(f"/api/materials/uploads/{view['id']}")).json()
             outline = await c.get(f"/api/materials/{material_id}/outline")
             spans = await c.get(f"/api/materials/{material_id}/spans?page=1")
+            # round 2: with this upload present (its id answers 200), LIKE wildcards in an id match nothing
+            for bad in ("up-____________", "up-%25", "up-%25%25"):
+                assert (await c.get(f"/api/materials/{bad}/outline")).status_code == 404
+                assert (await c.get(f"/api/materials/{bad}/spans?page=1")).status_code == 404
         assert seen["state"] == "indexing"
         assert [m["source"] for m in listed["materials"]] == ["config", "config", "upload"]
         mine = listed["materials"][-1]

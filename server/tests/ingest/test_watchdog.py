@@ -15,6 +15,7 @@ import textwrap
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -333,6 +334,28 @@ def test_a_tick_that_raises_fails_the_run_after_three(tmp_path: Path) -> None:
     assert "kill" in child.events
 
 
+def test_a_failed_kill_all_still_kills_the_group_and_logs_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cli = need("reader.ingest.host.cli")
+    child = SlowChild()
+
+    class Blind:
+        def check(self) -> str | None:
+            raise OSError("ps failed")
+
+        def kill_all(self) -> None:
+            raise OSError("ps failed")
+
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: Blind()
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert "kill" in child.events
+    assert "watchdog_failed kill=group_only" in caplog.text
+
+
 def test_an_empty_ps_while_the_child_lives_is_a_failed_tick(tmp_path: Path) -> None:
     wd = need("reader.ingest.host.watchdog")
 
@@ -346,6 +369,52 @@ def test_an_empty_ps_while_the_child_lives_is_a_failed_tick(tmp_path: Path) -> N
         dog.check()
     gone = EmptyPs({})  # the child has exited: an empty set is the end of the run, not a blind tick
     assert wd.Watchdog(run(), gone, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path).check() is None
+
+
+def test_an_empty_snapshot_without_a_start_time_while_the_child_object_lives_is_a_failed_tick(
+    tmp_path: Path,
+) -> None:
+    """Round 2: liveness comes from the child process itself, never from `ps` (which here knows nothing)."""
+    wd = need("reader.ingest.host.watchdog")
+
+    class EmptyPs(FakeInspect):
+        def snapshot(self) -> list[Any]:
+            return []
+
+    blind = EmptyPs({})  # no start time either: `ps` cannot tell whether the child lives
+    dog = wd.Watchdog(run(), blind, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path, alive=lambda: True)
+    with pytest.raises(wd.WatchdogBlind):
+        dog.check()
+    ended = wd.Watchdog(
+        run(), blind, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path, alive=lambda: False
+    )
+    assert ended.check() is None
+
+
+def test_ps_that_fails_or_prints_nothing_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    wd = need("reader.ingest.host.watchdog")
+    line = "  1     0 Mon Nov 24 10:00:00 2026   100 /sbin/launchd\n"
+    for code, out in ((0, ""), (1, line), (0, "garbage\n")):
+        done = subprocess.CompletedProcess(args=[], returncode=code, stdout=out, stderr="")
+        monkeypatch.setattr(wd.subprocess, "run", lambda *a, _d=done, **k: _d)
+        with pytest.raises(OSError, match="ps exited"):
+            wd.SystemInspect().snapshot()
+    ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=line, stderr="")
+    monkeypatch.setattr(wd.subprocess, "run", lambda *a, **k: ok)
+    assert [p.pid for p in wd.SystemInspect().snapshot()] == [1]
+
+
+def test_child_alive_reads_the_child_process() -> None:
+    cli = need("reader.ingest.host.cli")
+    proc = subprocess.Popen(["/bin/sleep", "30"])
+    child = SimpleNamespace(pid=proc.pid, process=proc)
+    try:
+        assert cli.child_alive(child) is True
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+    assert cli.child_alive(child) is False
+    assert cli.child_alive(SimpleNamespace(pid=proc.pid)) is False  # reaped: kill(pid, 0) finds nothing
 
 
 def test_a_missing_start_time_refuses_the_run(tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ import fcntl
 import hashlib
 import io
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -32,6 +33,8 @@ from reader.ingest import artifact, params, tarstream
 from reader.ingest.artifact import ArtifactError
 from reader.ingest.host import records, sandbox, setup, watchdog
 from reader.ingest.host.mapping import parse_progress, render_code_line
+
+log = logging.getLogger("reader.ingest.host")
 
 CHILD_TIMEOUT_S: Final = 4 * 3600.0  # ADR-0021's 10 pages/min gives 94 min for the pilot (spec header)
 CHILD_GRACE_S: Final = 10.0
@@ -164,16 +167,36 @@ def system_watchdog(deps: Deps, child: Child, work: Path) -> watchdog.Watchdog:
     start = deps.start_time(child.pid)
     if not start:  # fail closed: no accounting without the child's start time (FR-INGEST-22)
         raise Stop("watchdog_failed", 5)
-    run = watchdog.Run(
-        child_sid=child.pid,
-        child_start=start,
-        work=os.path.realpath(work),
-        exclude=watchdog.ancestors(os.getpid(), inspect.snapshot()),
-    )
+    try:
+        exclude = watchdog.ancestors(os.getpid(), inspect.snapshot())
+    except OSError:  # an empty or failed `ps` at the start: fail closed too
+        raise Stop("watchdog_failed", 5) from None
+    run = watchdog.Run(child_sid=child.pid, child_start=start, work=os.path.realpath(work), exclude=exclude)
     converter = os.path.realpath(deps.pyroot / "bin" / "python3.14")
     return watchdog.Watchdog(
-        run, inspect, converter, rss_max=params.RSS_MAX, work_max=params.WORK_BYTES_MAX, work=Path(work)
+        run,
+        inspect,
+        converter,
+        rss_max=params.RSS_MAX,
+        work_max=params.WORK_BYTES_MAX,
+        work=Path(work),
+        alive=lambda: child_alive(child),
     )
+
+
+def child_alive(child: Child) -> bool:
+    """Whether the child lives, from the child process itself (code review round 2): `poll()` when it is our
+    Popen, else `kill(pid, 0)`."""
+    process = getattr(child, "process", None)
+    if isinstance(process, subprocess.Popen):
+        return process.poll() is None
+    try:
+        os.kill(child.pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def resolve_paths(deps: Deps, data_dir: Path) -> None:
@@ -239,8 +262,10 @@ def convert_members(
                 failed += 1
                 code = "watchdog_failed" if failed >= WATCHDOG_FAILED_TICKS else None
                 if code is not None:
-                    with contextlib.suppress(Exception):
+                    try:
                         dog.kill_all()
+                    except Exception:  # the child's session still dies below (killpg)
+                        log.warning("watchdog_failed kill=group_only")
             if code is not None:
                 tripped.append(code)
                 if child is not None:
@@ -280,7 +305,11 @@ def convert_members(
         if child is not None:
             child.kill()  # the whole session, so nothing the child started still writes into WORK
         if dog is not None:
-            dog.kill_all()  # every member, re-verified, at the end of every run (a setsid'd descendant too)
+            try:
+                dog.kill_all()  # every member, re-verified, at the end of every run (setsid'd ones too)
+            except Exception:  # fail closed: an unverified end of run is not a success (round 2)
+                log.warning("watchdog_failed kill=group_only")
+                tripped.append("watchdog_failed")
     if tripped:
         raise Stop(tripped[0], 5)
     if code != 0:  # the 4 h wall clock included (FR-INGEST-10: a timeout is convert_failed)

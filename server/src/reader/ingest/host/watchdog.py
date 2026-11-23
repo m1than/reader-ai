@@ -18,7 +18,7 @@ import re
 import signal
 import subprocess
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -134,10 +134,21 @@ class WatchdogBlind(Exception):
 
 class Watchdog:
     def __init__(
-        self, run: Run, inspect: Inspect, converter_exe: str, *, rss_max: int, work_max: int, work: Path
+        self,
+        run: Run,
+        inspect: Inspect,
+        converter_exe: str,
+        *,
+        rss_max: int,
+        work_max: int,
+        work: Path,
+        alive: Callable[[], bool] | None = None,
     ) -> None:
+        """`alive`: whether the child lives, read from the child process itself (never from `ps`, which may
+        print nothing: code review round 2); without it, the child's start time is asked."""
         self.run, self.inspect, self.converter_exe = run, inspect, converter_exe
         self.rss_max, self.work_max, self.work = rss_max, work_max, work
+        self.alive = alive
         self.peak_rss = 0
 
     def _snapshot(self) -> tuple[dict[int, Proc], dict[int, str | None]]:
@@ -145,6 +156,8 @@ class Watchdog:
         return found, {pid: self.inspect.exe(pid) for pid in found}
 
     def _child_alive(self) -> bool:
+        if self.alive is not None:
+            return self.alive()
         start = self.inspect.start(self.run.child_sid)
         return start is not None and " ".join(start.split()) == " ".join(self.run.child_start.split())
 
@@ -204,7 +217,10 @@ class SystemInspect:
             ["/bin/ps", "-A", "-o", "pid=,ppid=,lstart=,rss=,comm="],
             capture_output=True, text=True, check=False, env=PS_ENV,
         )
-        return parse_ps(done.stdout)
+        procs = parse_ps(done.stdout)
+        if done.returncode != 0 or not procs:  # `ps -A` always lists this process: nothing is a failed tick
+            raise OSError(f"ps exited {done.returncode} with {len(procs)} processes")
+        return procs
 
     def sid(self, pid: int) -> int | None:
         try:
