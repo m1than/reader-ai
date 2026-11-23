@@ -48,7 +48,7 @@ title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skele
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate. Paired change from SRV-INGEST (2026-11-22, coordinator-scheduled, reviewed in SRV-INGEST's code review): `reader/ingest/migrations` joins VERSION_LOCATIONS (after jobs, before procrastinate) and `reader.ingest.routes` joins ROUTERS (owner-only rule checked inside its handlers); no behaviour of this module changed. Integration with SRV-AGENT and SRV-PIPELINE (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline; the two SRV-AUTH tests take these unions, plus one comment shortened for line length. Paired change from SRV-SEARCH (2026-11-22, coordinator-scheduled, reviewed in SRV-SEARCH's code review): `reader/search/migrations` joins VERSION_LOCATIONS before procrastinate's directory, `reader.search.routes` joins ROUTERS, the engine sets `hide_parameters=True` (FR-AUTH-1, FR-AUTH-10 notes); the auth tests' database image is the pgvector-enabled pin. Green: the hide_parameters test reads `engine.sync_engine.hide_parameters` (an AsyncEngine proxies it there), and `test_database_failure_while_api_runs`, which migrates as a non-superuser role, creates the `vector` extension as the superuser first, because CREATE EXTENSION vector needs a superuser (the SRV-SEARCH FR-SEARCH-4 note for a dedicated role); the test's oracle is unchanged. Integration with SRV-SEARCH (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, search, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline, search. Paired change from SRV-TUTOR (2026-11-23, reviewed in SRV-TUTOR's code review): ROUTERS appends `reader.tutor.routes`, VERSION_LOCATIONS adds `reader/tutor/migrations` after agent, and the FR-AUTH-10 `jobs` seam (planned with SRV-PIPELINE) is implemented: `create_app(..., jobs=None)` puts it on `app.state.jobs`; the api role builds one SRV-EVENTS `Jobs` (declared catalog, own procrastinate app opened in the serve coroutine, the database password as its secret value); tests updated for both lists. Integration with SRV-TUTOR (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, search, agent, pipeline, tutor, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, search, pipeline, tutor (SRV-TUTOR's order). Amendment 2026-11-23 (V.auth-page-style, owner request): FR-AUTH-14 states that the ceremony is unchanged; new FR-AUTH-19 (page look, tokens copied from WEB-UI's calm.css and the vendored library with a drift test), FR-AUTH-20 (states and messages from existing signals), FR-AUTH-21 (auth.css route, no-cache, CSP unchanged, unit/browser/live checks); paths add e2e/web/auth/**. Complex area (auth): deep-reviewer rounds until approve, run by the coordinator. Round 1 on 418312a: changes — leak review, fragment handling and asset route clean; blocking fixed: (1) `expired` only for a 400 on bootstrap options, a 400 on bootstrap verify is the retryable `not_registered` (the token stays usable, FR-AUTH-5, INV-AUTH-7), with its browser case; (2) the unreachable `known` state removed, InvalidStateError falls to `failed`; (3) the request oracle: every non-GET request recorded with page.on('request') against each case's exact list with content-type, no other /api request, the WebAuthn stub's publicKey compared with the server options; (4) `done` asserted while the navigation to / is held; (5) route registries: test_route_table_is_declared_as_data updated with the spec, the OPS-DOD operations index gains auth.css for both operations in the Green commit, the a11y cells stay missing (not pages evidence); (6) both live files named with their lines. Non-blocking applied: fragment check after every state, the no-cache wording, an unsupported case without the parse function and toJSON implied, focus after a ceremony, the token test's layer match, var fallbacks and colour-literal scan, a distinctive server body and exception text absent from #status, the font regex, asserted versus design numbers, `auth` in slice.sh's default steps, the test server's fixed map. Round 2 on faf5b2e: VERDICT approve; its non-blocking items folded in with Green (named colour keywords in the scan, the full /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done, the OPS-DOD route addition in the same commit as the Route). Approved by agent 2026-11-23. Code review round 1 on 83d4ef6: changes (ceremony verified unchanged, no server text reaches the DOM; 6 surviving mutants): browser cases for Retry-After 60, 0, 1.5, an HTTP-date and seven digits, a 500 on options, a 429 with another code and a 400 signin_failed on options; non-blocking applied: Retry-After bounded to ^\\d{1,6}$, dark and light Playwright projects, the bootstrap copy without 'owner', static data-state=loading with the button hidden in the markup and a blocked-script case, the full request list (any path) asserted. Code review round 2 on 48ce312: VERDICT approve; its notes folded in: a static status sentence on both pages for a script that fails to load (asserted in the blocked-script case), the project names auth-dark and auth-light in this text"
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate. Paired change from SRV-INGEST (2026-11-22, coordinator-scheduled, reviewed in SRV-INGEST's code review): `reader/ingest/migrations` joins VERSION_LOCATIONS (after jobs, before procrastinate) and `reader.ingest.routes` joins ROUTERS (owner-only rule checked inside its handlers); no behaviour of this module changed. Integration with SRV-AGENT and SRV-PIPELINE (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline; the two SRV-AUTH tests take these unions, plus one comment shortened for line length. Paired change from SRV-SEARCH (2026-11-22, coordinator-scheduled, reviewed in SRV-SEARCH's code review): `reader/search/migrations` joins VERSION_LOCATIONS before procrastinate's directory, `reader.search.routes` joins ROUTERS, the engine sets `hide_parameters=True` (FR-AUTH-1, FR-AUTH-10 notes); the auth tests' database image is the pgvector-enabled pin. Green: the hide_parameters test reads `engine.sync_engine.hide_parameters` (an AsyncEngine proxies it there), and `test_database_failure_while_api_runs`, which migrates as a non-superuser role, creates the `vector` extension as the superuser first, because CREATE EXTENSION vector needs a superuser (the SRV-SEARCH FR-SEARCH-4 note for a dedicated role); the test's oracle is unchanged. Integration with SRV-SEARCH (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, search, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline, search. Paired change from SRV-TUTOR (2026-11-23, reviewed in SRV-TUTOR's code review): ROUTERS appends `reader.tutor.routes`, VERSION_LOCATIONS adds `reader/tutor/migrations` after agent, and the FR-AUTH-10 `jobs` seam (planned with SRV-PIPELINE) is implemented: `create_app(..., jobs=None)` puts it on `app.state.jobs`; the api role builds one SRV-EVENTS `Jobs` (declared catalog, own procrastinate app opened in the serve coroutine, the database password as its secret value); tests updated for both lists. Integration with SRV-TUTOR (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, search, agent, pipeline, tutor, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, search, pipeline, tutor (SRV-TUTOR's order). Amendment 2026-11-23 (V.auth-page-style, owner request): FR-AUTH-14 states that the ceremony is unchanged; new FR-AUTH-19 (page look, tokens copied from WEB-UI's calm.css and the vendored library with a drift test), FR-AUTH-20 (states and messages from existing signals), FR-AUTH-21 (auth.css route, no-cache, CSP unchanged, unit/browser/live checks); paths add e2e/web/auth/**. Complex area (auth): deep-reviewer rounds until approve, run by the coordinator. Round 1 on 418312a: changes — leak review, fragment handling and asset route clean; blocking fixed: (1) `expired` only for a 400 on bootstrap options, a 400 on bootstrap verify is the retryable `not_registered` (the token stays usable, FR-AUTH-5, INV-AUTH-7), with its browser case; (2) the unreachable `known` state removed, InvalidStateError falls to `failed`; (3) the request oracle: every non-GET request recorded with page.on('request') against each case's exact list with content-type, no other /api request, the WebAuthn stub's publicKey compared with the server options; (4) `done` asserted while the navigation to / is held; (5) route registries: test_route_table_is_declared_as_data updated with the spec, the OPS-DOD operations index gains auth.css for both operations in the Green commit, the a11y cells stay missing (not pages evidence); (6) both live files named with their lines. Non-blocking applied: fragment check after every state, the no-cache wording, an unsupported case without the parse function and toJSON implied, focus after a ceremony, the token test's layer match, var fallbacks and colour-literal scan, a distinctive server body and exception text absent from #status, the font regex, asserted versus design numbers, `auth` in slice.sh's default steps, the test server's fixed map. Round 2 on faf5b2e: VERDICT approve; its non-blocking items folded in with Green (named colour keywords in the scan, the full /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done, the OPS-DOD route addition in the same commit as the Route). Approved by agent 2026-11-23. Code review round 1 on 83d4ef6: changes (ceremony verified unchanged, no server text reaches the DOM; 6 surviving mutants): browser cases for Retry-After 60, 0, 1.5, an HTTP-date and seven digits, a 500 on options, a 429 with another code and a 400 signin_failed on options; non-blocking applied: Retry-After bounded to ^\\d{1,6}$, dark and light Playwright projects, the bootstrap copy without 'owner', static data-state=loading with the button hidden in the markup and a blocked-script case, the full request list (any path) asserted. Code review round 2 on 48ce312: VERDICT approve; its notes folded in: a static status sentence on both pages for a script that fails to load (asserted in the blocked-script case), the project names auth-dark and auth-light in this text. Amendment 2026-11-23 (V.signup, ADR-0031 open sign-up with owner approval, accepted by the owner 2026-11-23): FR-AUTH-23..32 and INV-AUTH-10..15, `policy.signup`, the signup migration's columns in `tables`, `signup_not_supported` widened. Complex area (auth): ADR and spec deep-reviewer rounds 1 (changes: per-client limit removed, skeleton index on sign-up rows only, pending loses to config, display-name categories, a real live oracle), 2 (changes: i→l in the skeleton, raw `next` comparison against one constant) and 3 (VERDICT approve, three clauses folded in: live mode by FR-AUTH-23's rule, best-effort signup_superseded, reject cancels other open ceremonies). Promoted from `proposed_*` keys and approved by agent with the Red tests (2026-11-23); code review rounds follow Green"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
@@ -103,16 +103,37 @@ policy:
   cookies:
     session: __Host-reader_session
     ceremony: __Host-reader_ceremony
+  # Sign-up (ADR-0031, FR-AUTH-23..32; promoted 2026-11-23).
+  signup:
+    switch_values: ["off", "open"]        # `false` is read as "off"; absent: "open" on localhost only (FR-AUTH-23)
+    # One global limit on signup/options calls that pass it (FR-AUTH-26). On 127.0.0.1 every client looks the same,
+    # so there is no per-client limit; the VPS ADR adds one. 60 per hour leaves room for the live check (two calls a
+    # run) and real sign-ups; no global number stops a local script from using it up in seconds (owner note 4).
+    global_limit: { max: 60, window_s: 3600 }
+    failure_limit: { max: 100, window_s: 3600 }   # scope `signup` of auth_failures; FR-AUTH-11 keeps scope `auth`
+    pending_max: 20                       # structural: a list the owner reads in one screen
+    pending_ttl_s: 604800                 # 7 days, then the pending account is deleted (FR-AUTH-30)
+    handle_pattern: "^[a-z][a-z0-9-]{2,31}$"      # plus: no "--", no trailing "-"
+    # Skeleton (FR-AUTH-25), in this order: (1) lower-case; (2) remove every "-"; (3) scanning left to right without
+    # overlap, replace "rn" with "m" and "vv" with "w"; (4) replace "0" with "o", and "1" and "i" with "l".
+    reserved_handles: [owner, admin, administrator, root, system, support, help, security, staff, moderator, reader,
+      reader-ai, readerai, api, auth, signin, signup, signout, bootstrap, register, login, logout, mcp, live-check,
+      "null", undefined, anonymous, me, settings, static, assets, signups]
+    display_name_max: 64                  # Unicode code points after NFC and trimming
+    display_name_refused_categories: [Cc, Cf, Cs, Co, Cn, Zl, Zp]
+    errors: [handle_unavailable, display_name_invalid, signup_full, signup_failed, pending_approval, owner_only,
+      not_found]
 
 # Tables of the first migration. `owner_id` is NOT NULL with a foreign key to users.id. System tables carry no
 # user-owned content; INV-AUTH-8 checks every other table.
 tables:
-  users: { system: true, columns: "id uuid pk, handle text unique, role text CHECK (role IN ('owner','learner')), webauthn_user_id bytea unique CHECK (octet_length = 64), display_name text, consent_evaluation bool, consent_tuning bool, disabled_at timestamptz null, created_at" }
+  users: { system: true, columns: "id uuid pk, handle text unique, role text CHECK (role IN ('owner','learner')), webauthn_user_id bytea unique CHECK (octet_length = 64), display_name text, consent_evaluation bool, consent_tuning bool, disabled_at timestamptz null, created_at; signup migration (FR-AUTH-24): source text NOT NULL DEFAULT 'config' CHECK (source IN ('config','signup')), state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','pending')), handle_skeleton text NOT NULL, partial unique index users_signup_skeleton ON users (handle_skeleton) WHERE source = 'signup'" }
   webauthn_credentials: { owner_id: true, columns: "credential_id bytea pk, public_key bytea, sign_count bigint CHECK (>= 0), transports text[], aaguid uuid, backed_up bool, created_at, last_used_at" }
   sessions: { owner_id: true, columns: "id_sha256 bytea pk, created_at, expires_at, revoked_at" }
-  auth_challenges: { system: true, columns: "ceremony_sha256 bytea pk, kind text CHECK (kind IN ('register','authenticate','bootstrap')), challenge bytea, user_id uuid null, bootstrap_token_sha256 bytea null, expires_at, consumed_at" }
+  auth_challenges: { system: true, columns: "ceremony_sha256 bytea pk, kind text CHECK (kind IN ('register','authenticate','bootstrap','signup')), challenge bytea, user_id uuid null, bootstrap_token_sha256 bytea null, expires_at, consumed_at; signup migration: signup_handle text null, signup_display_name text null, signup_webauthn_user_id bytea null (all three set exactly when kind = 'signup')" }
   bootstrap_tokens: { system: true, columns: "token_sha256 bytea pk, user_id uuid, expires_at, consumed_at, revoked_at" }
-  auth_failures: { system: true, columns: "id bigserial, reason text, at timestamptz" }
+  auth_failures: { system: true, columns: "id bigserial, reason text, at timestamptz; signup migration: scope text NOT NULL DEFAULT 'auth' CHECK (scope IN ('auth','signup'))" }
+  signup_attempts: { system: true, columns: "id bigserial, at timestamptz (signup migration)" }
   invitations: { owner_id: true, columns: "id uuid pk, created_at (stub; stage 8)" }
 
 # Internal failure reasons of the verify seam and the routes (FR-AUTH-15). Logged as the enum name only; never
@@ -140,7 +161,9 @@ config_errors:
       `1234` or `0x7f.1`)" }
   - { code: owner_count, when: "the number of users[] entries with role owner is not 1" }
   - { code: unknown_role, when: "a users[] role is not owner or learner" }
-  - { code: signup_not_supported, when: "sharing.signup is present and not boolean false" }
+  - { code: signup_not_supported, when: "sharing.signup is present and not one of false, \"off\", \"open\" (FR-AUTH-23; was: not boolean false)" }
+# Post-migration startup code (needs the database, so it is not a config_errors row checked before connecting):
+# `handle_taken_by_signup <handle>` (FR-AUTH-24, FR-AUTH-2).
 
 requirements:
   - id: FR-AUTH-1
@@ -482,80 +505,6 @@ requirements:
       Logging. A failed ceremony logs one record with the route and the `failure_reasons` member, and nothing else from
       the request or the response.
 
-invariants:
-  - id: INV-AUTH-1
-    text: >-
-      A challenge is used at most once: concurrent or repeated verifies of one ceremony yield at most one success
-      (consume is a single `UPDATE … WHERE consumed_at IS NULL AND expires_at > now() RETURNING`). An expired, consumed,
-      unknown or other-kind ceremony never verifies, and a ceremony created for one user never registers a credential
-      for another.
-  - id: INV-AUTH-2
-    text: >-
-      No session row is created and no session cookie is set except by a successful bootstrap, add-passkey or sign-in
-      verification in the same request.
-  - id: INV-AUTH-3
-    text: >-
-      A response that sets the session cookie always sets `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, the
-      `__Host-` prefix and no `Domain`; the ceremony cookie has the same attributes and `Max-Age=challenge_ttl_s`.
-  - id: INV-AUTH-4
-    text: >-
-      Through the verify seam, a valid recorded response (VEC-AUTH-1) passes, and each single mutation below, re-signed
-      by the software authenticator so that only the mutated field is wrong, fails with its own reason: origin
-      (`origin_mismatch`), RP ID hash (`rp_id_mismatch`), challenge (`challenge_mismatch`), the UP flag cleared
-      (`user_present_missing`), the UV flag cleared (`user_verified_missing`), `clientDataJSON.type` swapped between
-      `webauthn.create` and `webauthn.get` (`wrong_type`), the signature without re-signing (`bad_signature`), the
-      userHandle set to another user's id (`user_handle_mismatch`), the userHandle absent (`user_handle_missing`), and
-      an attestation fmt other than `none` (`attestation_format_refused`).
-  - id: INV-AUTH-5
-    text: >-
-      Session ids, ceremony ids and bootstrap tokens are stored only as SHA-256. They and the database password never
-      appear in any log record, error body, exception message or traceback — canary test across: Uvicorn access logs,
-      captured logging, HTTP responses, startup failure, connection refused, authentication failed, `--healthcheck`
-      output and `bootstrap-link` stderr. Challenges are public by design and stored raw.
-  - id: INV-AUTH-6
-    text: >-
-      A stored `sign_count` never decreases, and each row of `counter_cases` holds (one test per row).
-  - id: INV-AUTH-7
-    text: >-
-      No bootstrap registers a credential while the user has a credential, so at most one bootstrap succeeds until the
-      user's credentials are deleted (owner note 1): a token revoked after its options fails; a token expiring between
-      options and verify fails; two concurrent `bootstrap-link` runs followed by two concurrent verifies (one per
-      token) leave exactly one credential; a bad response with a valid token, then a good one with the same token,
-      succeeds and leaves exactly one `auth_failures` row (FR-AUTH-5 failure path; likewise for add-passkey with its
-      challenge, FR-AUTH-6).
-  - id: INV-AUTH-8
-    text: >-
-      Every table in the migrated schema has a NOT NULL `owner_id` column with a foreign key to `users.id`, except the
-      system tables declared by any spec (checked against the live schema after `alembic upgrade heads`; the test reads
-      the `tables` entries with `system: true` from every spec in spec/modules/, and a `procrastinate_*` prefix entry
-      covers every table it matches). Here: users, auth_challenges, bootstrap_tokens, auth_failures; SRV-EVENTS
-      declares job_keys and procrastinate_*.
-  - id: INV-AUTH-9
-    text: >-
-      A user whose handle is removed from `users[]` is disabled at the next api startup: its sessions are revoked, its
-      session cookies no longer authenticate, its sign-in fails, and all its rows remain.
-
-nfr: []
-
-vectors:
-  - id: VEC-AUTH-1
-    source: >-
-      Software authenticator (server/tests/auth/softauthn.py, committed with Red; it also generates the fixture): a
-      P-256 key from the fixed 32-byte scalar 0x01…01, `none` attestation, flags UP|UV|BE|BS, sign count 0, AAGUID all
-      zero, RP ID `localhost`, origin `https://localhost`, challenge 32 bytes of 0x02, userHandle 64 bytes of 0x03; one
-      registration and one authentication response. It models the shape the spike recorded for Apple Passwords
-      (REF-AUTH-5); it is a regression oracle for this code, not evidence of browser behaviour. The real-authenticator
-      oracle is the stage-1 owner live check (Safari, Apple Passwords).
-    file: spec/fixtures/SRV-AUTH/softauthn-es256.json
-  - id: VEC-AUTH-2
-    source: >-
-      py_webauthn 3.0.1 test vectors (BSD-3-Clause, copied with attribution in the file, each with its upstream test
-      name, challenge, origin and RP ID), run through the verify seam only (FR-AUTH-15), with expected results: the
-      `none`-attestation registration vector of tests/test_verify_registration_response.py passes; the RSA
-      authentication vector of tests/test_verify_authentication_response.py passes; its EC2 and OKP authentication
-      vectors fail with `user_verified_missing` (recorded without UV; this module requires UV).
-    file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json
-
 # Stage-1 live check (S1.live; e2e/live/stage-1.sh is written in that task). The automated part uses the software
 # authenticator against `https://localhost` for the learner `live-check`, declared in the owner's reader.yaml and shown
 # in deploy/reader.example.yaml. Each run first deletes `live-check`'s credentials and sessions through `docker compose
@@ -571,8 +520,10 @@ vectors:
 # Dependencies added to server/pyproject.toml with Green: fastapi, uvicorn, sqlalchemy[asyncio], asyncpg, alembic,
 # webauthn==3.0.1; test-only: httpx (testcontainers Postgres is already in dev).
 
-# ---- Amendment (DRAFT, 2026-11-23, V/signup, for ADR-0031 "Open self-service sign-up with owner approval",
-# proposed). Owner request 2026-11-23: a "Sign up" page from the sign-in screen, open sign-up, with rate limiting and
+# ---- Amendment (2026-11-23, V/signup, ADR-0031 "Open self-service sign-up with owner approval", accepted by the
+# owner 2026-11-23). PROMOTED with the Red tests: the items below continue the `requirements` list (FR-AUTH-23..32)
+# and open the `invariants` list (INV-AUTH-10..15 after INV-AUTH-1..9); the policy, tables and config errors moved
+# into `policy.signup`, `tables` and `config_errors` above. The history of the draft follows. Owner request 2026-11-23: a "Sign up" page from the sign-in screen, open sign-up, with rate limiting and
 # owner approval. Owner answers (2026-11-23): default `open`; approval required; lower-case Latin handles with the
 # lookalike check and the reserved list; this Mac only for now; an empty lesson list before stage 8 is acceptable.
 # Revision 1 (2026-11-23) after ADR-0031 review round 1: per-client limit removed (one global limit), skeleton index
@@ -643,41 +594,7 @@ vectors:
 #   7. A rejected or expired sign-up leaves its passkey on the person's device; it names an account that no longer
 #      exists and signs in to nothing (`unknown_credential`).
 
-proposed_policy:
-  # Policy values, not measurements (like `policy` above); changing one is a spec change.
-  signup:
-    switch_values: ["off", "open"]        # `false` is read as "off"; default "open" (owner, 2026-11-23)
-    # One global limit on signup/options calls that pass it (FR-AUTH-26). On 127.0.0.1 every client looks the same,
-    # so there is no per-client limit; the VPS ADR adds one. 60 per hour leaves room for the live check (two calls a
-    # run) and real sign-ups; no global number stops a local script from using it up in seconds (owner note 4).
-    global_limit: { max: 60, window_s: 3600 }
-    failure_limit: { max: 100, window_s: 3600 }   # scope `signup` of auth_failures; FR-AUTH-11 keeps scope `auth`
-    pending_max: 20                       # structural: a list the owner reads in one screen
-    pending_ttl_s: 604800                 # 7 days, then the pending account is deleted (FR-AUTH-30)
-    handle_pattern: "^[a-z][a-z0-9-]{2,31}$"      # plus: no "--", no trailing "-"
-    # Skeleton (FR-AUTH-25), in this order: (1) lower-case; (2) remove every "-"; (3) scanning left to right without
-    # overlap, replace "rn" with "m" and "vv" with "w"; (4) replace "0" with "o", and "1" and "i" with "l".
-    reserved_handles: [owner, admin, administrator, root, system, support, help, security, staff, moderator, reader,
-      reader-ai, readerai, api, auth, signin, signup, signout, bootstrap, register, login, logout, mcp, live-check,
-      "null", undefined, anonymous, me, settings, static, assets, signups]
-    display_name_max: 64                  # Unicode code points after NFC and trimming
-    display_name_refused_categories: [Cc, Cf, Cs, Co, Cn, Zl, Zp]
-
-proposed_tables:
-  users: "adds source text NOT NULL DEFAULT 'config' CHECK (source IN ('config','signup')), state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','pending')), handle_skeleton text NOT NULL (backfilled for existing rows; sync_users writes it for config rows too), and the partial unique index users_signup_skeleton ON users (handle_skeleton) WHERE source = 'signup' (config rows may share a skeleton with each other)"
-  auth_challenges: "kind CHECK adds 'signup'; adds signup_handle text null, signup_display_name text null, signup_webauthn_user_id bytea null (all three set exactly when kind = 'signup')"
-  auth_failures: "adds scope text NOT NULL DEFAULT 'auth' CHECK (scope IN ('auth','signup'))"
-  signup_attempts: { system: true, columns: "id bigserial, at timestamptz" }
-
-proposed_config_errors:
-  - { code: signup_not_supported, when: "sharing.signup is present and not one of false, \"off\", \"open\" (replaces the stage-1 rule)" }
-  # Post-migration startup code (needs the database, so it is not a config_errors row checked before connecting):
-  # `handle_taken_by_signup <handle>` (FR-AUTH-24, FR-AUTH-2).
-
-proposed_errors: [handle_unavailable, display_name_invalid, signup_full, signup_failed, pending_approval, owner_only,
-  not_found]
-
-proposed_requirements:
+  # ---- Sign-up (ADR-0031), promoted 2026-11-23 ----
   - id: FR-AUTH-23
     text: >-
       **Switch.** `sharing.signup` is read as `open` when it is the string `"open"`, and as `off` when `false` or the
@@ -930,7 +847,58 @@ proposed_requirements:
         `source = 'signup'`, its sessions, credentials and user row, and reports the count (1 per id, else FAIL).
       The step uses two `signup/options` calls of the global limit per run.
 
-proposed_invariants:
+invariants:
+  - id: INV-AUTH-1
+    text: >-
+      A challenge is used at most once: concurrent or repeated verifies of one ceremony yield at most one success
+      (consume is a single `UPDATE … WHERE consumed_at IS NULL AND expires_at > now() RETURNING`). An expired, consumed,
+      unknown or other-kind ceremony never verifies, and a ceremony created for one user never registers a credential
+      for another.
+  - id: INV-AUTH-2
+    text: >-
+      No session row is created and no session cookie is set except by a successful bootstrap, add-passkey or sign-in
+      verification in the same request.
+  - id: INV-AUTH-3
+    text: >-
+      A response that sets the session cookie always sets `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/`, the
+      `__Host-` prefix and no `Domain`; the ceremony cookie has the same attributes and `Max-Age=challenge_ttl_s`.
+  - id: INV-AUTH-4
+    text: >-
+      Through the verify seam, a valid recorded response (VEC-AUTH-1) passes, and each single mutation below, re-signed
+      by the software authenticator so that only the mutated field is wrong, fails with its own reason: origin
+      (`origin_mismatch`), RP ID hash (`rp_id_mismatch`), challenge (`challenge_mismatch`), the UP flag cleared
+      (`user_present_missing`), the UV flag cleared (`user_verified_missing`), `clientDataJSON.type` swapped between
+      `webauthn.create` and `webauthn.get` (`wrong_type`), the signature without re-signing (`bad_signature`), the
+      userHandle set to another user's id (`user_handle_mismatch`), the userHandle absent (`user_handle_missing`), and
+      an attestation fmt other than `none` (`attestation_format_refused`).
+  - id: INV-AUTH-5
+    text: >-
+      Session ids, ceremony ids and bootstrap tokens are stored only as SHA-256. They and the database password never
+      appear in any log record, error body, exception message or traceback — canary test across: Uvicorn access logs,
+      captured logging, HTTP responses, startup failure, connection refused, authentication failed, `--healthcheck`
+      output and `bootstrap-link` stderr. Challenges are public by design and stored raw.
+  - id: INV-AUTH-6
+    text: >-
+      A stored `sign_count` never decreases, and each row of `counter_cases` holds (one test per row).
+  - id: INV-AUTH-7
+    text: >-
+      No bootstrap registers a credential while the user has a credential, so at most one bootstrap succeeds until the
+      user's credentials are deleted (owner note 1): a token revoked after its options fails; a token expiring between
+      options and verify fails; two concurrent `bootstrap-link` runs followed by two concurrent verifies (one per
+      token) leave exactly one credential; a bad response with a valid token, then a good one with the same token,
+      succeeds and leaves exactly one `auth_failures` row (FR-AUTH-5 failure path; likewise for add-passkey with its
+      challenge, FR-AUTH-6).
+  - id: INV-AUTH-8
+    text: >-
+      Every table in the migrated schema has a NOT NULL `owner_id` column with a foreign key to `users.id`, except the
+      system tables declared by any spec (checked against the live schema after `alembic upgrade heads`; the test reads
+      the `tables` entries with `system: true` from every spec in spec/modules/, and a `procrastinate_*` prefix entry
+      covers every table it matches). Here: users, auth_challenges, bootstrap_tokens, auth_failures, signup_attempts;
+      SRV-EVENTS declares job_keys and procrastinate_*.
+  - id: INV-AUTH-9
+    text: >-
+      A user whose handle is removed from `users[]` is disabled at the next api startup: its sessions are revoked, its
+      session cookies no longer authenticate, its sign-in fails, and all its rows remain. (Sign-up accounts: INV-AUTH-13.)
   - id: INV-AUTH-10
     text: >-
       No sign-up route creates a session, a user with a role other than `learner`, or a user with `source` other than
@@ -964,3 +932,24 @@ proposed_invariants:
       Every handle FR-AUTH-25 accepts also satisfies OPS-CLI FR-CLI-4's kernel-service rule (`[a-z0-9][a-z0-9-]*`, at
       most 50 characters), so a sign-up handle can never break `reader up` if a later spec gives it a kernel. [unit]
       a property test: generated handles accepted by FR-AUTH-25 match FR-CLI-4's rule.
+
+nfr: []
+
+vectors:
+  - id: VEC-AUTH-1
+    source: >-
+      Software authenticator (server/tests/auth/softauthn.py, committed with Red; it also generates the fixture): a
+      P-256 key from the fixed 32-byte scalar 0x01…01, `none` attestation, flags UP|UV|BE|BS, sign count 0, AAGUID all
+      zero, RP ID `localhost`, origin `https://localhost`, challenge 32 bytes of 0x02, userHandle 64 bytes of 0x03; one
+      registration and one authentication response. It models the shape the spike recorded for Apple Passwords
+      (REF-AUTH-5); it is a regression oracle for this code, not evidence of browser behaviour. The real-authenticator
+      oracle is the stage-1 owner live check (Safari, Apple Passwords).
+    file: spec/fixtures/SRV-AUTH/softauthn-es256.json
+  - id: VEC-AUTH-2
+    source: >-
+      py_webauthn 3.0.1 test vectors (BSD-3-Clause, copied with attribution in the file, each with its upstream test
+      name, challenge, origin and RP ID), run through the verify seam only (FR-AUTH-15), with expected results: the
+      `none`-attestation registration vector of tests/test_verify_registration_response.py passes; the RSA
+      authentication vector of tests/test_verify_authentication_response.py passes; its EC2 and OKP authentication
+      vectors fail with `user_verified_missing` (recorded without UV; this module requires UV).
+    file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json

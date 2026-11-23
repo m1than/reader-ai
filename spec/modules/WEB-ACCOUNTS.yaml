@@ -1,8 +1,8 @@
 # WEB-ACCOUNTS — the owner's "Sign-ups" screen: pending sign-up requests with Approve and Reject, approved sign-up
-# accounts with Disable, and the header link that shows how many requests wait (ADR-0031, proposed; owner request
-# 2026-11-23, task V.signup).
+# accounts with Disable, and the header link that shows how many requests wait (ADR-0031, accepted 2026-11-23; owner
+# request 2026-11-23, task V.signup).
 #
-# Status: DRAFT. No code until the owner accepts ADR-0031 and the deep-reviewer approves this spec and SRV-AUTH's
+# Status: approved with the Red tests (2026-11-23) after the deep-reviewer's round-3 approve of ADR-0031 and SRV-AUTH's
 # FR-AUTH-23..32. The screen calls SRV-AUTH FR-AUTH-29's routes; an approval decides who can use the instance, so this
 # spec gets SRV-AUTH's full review rounds (auth is a complex area).
 # Revision 1 (2026-11-23, ADR-0031 review round 1): Disable is stated as permanent in the copy; no passkey recovery
@@ -19,11 +19,9 @@
 # `Skeleton`, lists without bullets carry `role="list"`, no HTML strings (INV-UI-2). The checks are FR-ACCOUNTS-5's.
 #
 # Cross-spec items (paired changes, written with Green):
-#   - WEB-UI: proposed FR-UI-14, drafted on this branch under WEB-UI's `proposed_requirements` (FR-UI-12 is V/plan's,
-#     FR-UI-13 is V/onboarding's): the route `/signups`, the owner's header link and the test-server stubs, in
-#     web/src/app and web/test-server under WEB-UI's paths. It must be approved before any web/src/app edit for this
-#     screen. The page-level checks are FR-ACCOUNTS-5 here. Merge note: the other branches also add that key to
-#     WEB-UI; the lists become one key when the branches meet.
+#   - WEB-UI FR-UI-14 (approved with the Red tests; FR-UI-12 is V/plan's, FR-UI-13 is V/onboarding's): the route
+#     `/signups`, the owner's header link and the test-server stubs, in web/src/app and web/test-server under WEB-UI's
+#     paths. The page-level checks are FR-ACCOUNTS-5 here.
 #   - SRV-AUTH FR-AUTH-29: the routes and bodies; `recent_session` on approve, reject and disable (401
 #     `reauth_required` for an older session). FR-AUTH-31: the sign-in page's `next=/signups` return.
 #
@@ -39,9 +37,10 @@
 
 id: WEB-ACCOUNTS
 title: Owner's Sign-ups screen — pending requests with Approve and Reject, approved sign-up accounts with Disable
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
+review: "Reviewed with ADR-0031 and SRV-AUTH FR-AUTH-23..32 (auth, complex area; deep-reviewer, Fable): round 1 changes (Disable permanent in the copy, no passkey recovery stated, [browser] on FR-ACCOUNTS-1/-3, FR-ACCOUNTS-5 for route, link, axe and overflow, return to /signups after re-auth), round 2 changes (none for this spec beyond FR-UI-14 as a proposed WEB-UI item), round 3 VERDICT approve. ADR-0031 accepted by the owner 2026-11-23. Approved by agent with the Red tests; code review rounds follow Green."
 layer: web
 track: product
 adr: [ADR-0031, ADR-0013, ADR-0012]
@@ -113,7 +112,7 @@ requirements:
   - id: FR-ACCOUNTS-5
     text: >-
       **Route, link and page checks.** The route table has `/signups` (this page, a lazy chunk, mounted by WEB-UI's
-      proposed FR-UI-14). For a user with role
+      FR-UI-14). For a user with role
       `owner` (from `/api/me`) the header shows the link "Sign-ups" (FR-ACCOUNTS-4's count); a non-owner sees no link,
       and `/signups` shows the not-found view to a non-owner without calling FR-AUTH-29's routes. At 1280, 1024 and
       390 px, in light and dark, every state of FR-ACCOUNTS-1..3 (loading, error, empty, 1 and 20 pending, a

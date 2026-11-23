@@ -2,7 +2,7 @@
 
 @trace FR-AUTH-4 FR-AUTH-5 FR-AUTH-6 FR-AUTH-7 FR-AUTH-8 FR-AUTH-9 FR-AUTH-10 FR-AUTH-11 FR-AUTH-12 FR-AUTH-13
 @trace FR-AUTH-14 FR-AUTH-18 INV-AUTH-1 INV-AUTH-2 INV-AUTH-3 INV-AUTH-5 INV-AUTH-6 INV-AUTH-7 INV-AUTH-9
-@trace FR-AUTH-21
+@trace FR-AUTH-21 FR-AUTH-23 FR-AUTH-29
 """
 
 from __future__ import annotations
@@ -677,11 +677,18 @@ def test_route_table_is_declared_as_data() -> None:
         ("GET", "/api/auth/signin"),
         ("GET", "/api/auth/static/passkey.js"),
         ("GET", "/api/auth/static/auth.css"),  # FR-AUTH-21
+        ("GET", "/api/auth/signup"),  # FR-AUTH-23, FR-AUTH-31
+        ("POST", "/api/auth/signup/options"),
+        ("POST", "/api/auth/signup/verify"),
     }
     by_path = {(r.method, r.path): r.auth for r in ROUTES}
     assert by_path[("GET", "/api/me")] == "session"
     assert by_path[("POST", "/api/auth/register/options")] == "recent_session"
     assert by_path[("POST", "/api/auth/register/verify")] == "recent_session"
+    # FR-AUTH-29: the owner's sign-up routes.
+    assert by_path[("GET", "/api/auth/signups")] == "session"
+    for action in ["approve", "reject", "disable"]:
+        assert by_path[("POST", f"/api/auth/signups/{{user_id}}/{action}")] == "recent_session"
 
 
 async def test_get_routes_write_nothing(pg: Pg, tmp_path: Path) -> None:
@@ -835,7 +842,9 @@ async def test_more_than_one_origin_header_is_refused() -> None:
 
 
 async def test_signup_routes_are_404(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    # FR-AUTH-13 as amended by FR-AUTH-23: 404 while sign-up is off.
+    settings = settings_for(tmp_path, sharing="{ signup: false }")
+    engine = await ready_engine(pg, settings)
     async with client(settings, engine) as c:
         for path in ["/api/auth/signup/options", "/api/auth/signup/verify"]:
             assert (await c.post(path, json={})).status_code == 404

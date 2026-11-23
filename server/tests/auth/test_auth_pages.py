@@ -1,6 +1,6 @@
 """SRV-AUTH pages: assets, CSP-safe markup and tokens copied from the web app (V.auth-page-style).
 
-@trace FR-AUTH-14 FR-AUTH-19 FR-AUTH-20 FR-AUTH-21
+@trace FR-AUTH-14 FR-AUTH-19 FR-AUTH-20 FR-AUTH-21 FR-AUTH-31
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ pytestmark = pytest.mark.anyio
 
 REPO = Path(__file__).resolve().parents[3]
 STATIC = REPO / "server" / "src" / "reader" / "auth" / "static"
-PAGES = ["/api/auth/bootstrap", "/api/auth/signin"]
+# FR-AUTH-31: the sign-up page joins both lists (served while sign-up is open, the default on localhost).
+PAGES = ["/api/auth/bootstrap", "/api/auth/signin", "/api/auth/signup"]
 ASSETS = {
     "/api/auth/bootstrap": "text/html",
     "/api/auth/signin": "text/html",
+    "/api/auth/signup": "text/html",
     "/api/auth/static/passkey.js": "text/javascript",
     "/api/auth/static/auth.css": "text/css",
 }

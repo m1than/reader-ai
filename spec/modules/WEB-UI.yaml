@@ -57,7 +57,7 @@ title: App shell — pinned library build, Calm tokens, routing, API client, sig
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes. Amendment 2026-11-23 (V.signup, ADR-0031 accepted by the owner): FR-UI-14 (the `/signups` route and the owner's Sign-ups header link of WEB-ACCOUNTS; test-server stubs and a fifth static auth file); reviewed with ADR-0031 and SRV-AUTH's sign-up items in deep-reviewer rounds 1–3 (round 3 approve); approved by agent with its Red tests; the Playwright config also matches e2e/web/accounts/** in the auth-dark and auth-light projects"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -230,6 +230,18 @@ requirements:
       `/no-such-page`: one `main#content` with tabindex -1 and the skip link first; following the skip link focuses
       it; [live] the `ui` step follows the skip link with the keyboard and finds focus on `main#content`; overflow is
       measured as `scrollWidth − clientWidth` of the document element. [story] the shell's loading state.
+  # FR-UI-14: V/signup (ADR-0031, accepted 2026-11-23); FR-UI-12 is V/plan's, FR-UI-13 is V/onboarding's.
+  - id: FR-UI-14
+    text: >-
+      **Sign-ups entry points (WEB-ACCOUNTS).** The route table adds `/signups`, WEB-ACCOUNTS's page as a lazy chunk.
+      For a user whose `/api/me` role is `owner`, the header shows a link "Sign-ups" to `/signups`, with the pending
+      count of WEB-ACCOUNTS FR-ACCOUNTS-4; a learner sees no link, and on `/signups` a learner gets the not-found view
+      (FR-UI-3) without any request to `/api/auth/signups`. The shell's behaviour is otherwise unchanged: one
+      `main#content` (FR-UI-11), the skip link first, the 401 redirect of FR-UI-5. `web/test-server/` stubs
+      `GET /api/auth/signups` and the three POST routes from VEC-ACCOUNTS-1, and its fixed map of static auth files
+      adds `/api/auth/signup` → signup.html (SRV-AUTH FR-AUTH-31), five entries in all. [unit] the route table, the
+      link for owner and learner, the learner's request log on `/signups`; [browser] WEB-ACCOUNTS FR-ACCOUNTS-5's
+      matrix covers the link at 1280, 1024 and 390 px in both schemes.
 
 invariants:
   - id: INV-UI-1
@@ -288,22 +300,3 @@ vectors:
 #   The slice uses the spike's adjusted Calm draft as is.
 # - The library tarball in web/vendor/ (about 354 KB) is built from the owner's tag v0.1.0 locally; nothing is pushed to
 #   the library.
-
-# ---- Amendment (DRAFT, 2026-11-23, V/signup, for ADR-0031 proposed and WEB-ACCOUNTS draft). Held under
-# `proposed_requirements` (not read by trace-check; this spec is approved) until the deep-reviewer approves it with
-# WEB-ACCOUNTS; it moves into `requirements` with its Red tests, and no web/src/app edit for the Sign-ups screen happens
-# before then. Ids: FR-UI-12 is V/plan's, FR-UI-13 is V/onboarding's. Merge note: those branches also add a
-# `proposed_requirements` key to this file; when the branches meet the lists become one key (a YAML mapping cannot
-# hold the key twice). ----
-proposed_requirements:
-  - id: FR-UI-14
-    text: >-
-      **Sign-ups entry points (WEB-ACCOUNTS).** The route table adds `/signups`, WEB-ACCOUNTS's page as a lazy chunk.
-      For a user whose `/api/me` role is `owner`, the header shows a link "Sign-ups" to `/signups`, with the pending
-      count of WEB-ACCOUNTS FR-ACCOUNTS-4; a learner sees no link, and on `/signups` a learner gets the not-found view
-      (FR-UI-3) without any request to `/api/auth/signups`. The shell's behaviour is otherwise unchanged: one
-      `main#content` (FR-UI-11), the skip link first, the 401 redirect of FR-UI-5. `web/test-server/` stubs
-      `GET /api/auth/signups` and the three POST routes from VEC-ACCOUNTS-1, and its fixed map of static auth files
-      adds `/api/auth/signup` → signup.html (SRV-AUTH FR-AUTH-31), five entries in all. [unit] the route table, the
-      link for owner and learner, the learner's request log on `/signups`; [browser] WEB-ACCOUNTS FR-ACCOUNTS-5's
-      matrix covers the link at 1280, 1024 and 390 px in both schemes.
