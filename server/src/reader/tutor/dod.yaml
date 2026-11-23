@@ -19,8 +19,9 @@ criteria:
       - test_stale_rows_are_finalised_by_reads_and_the_busy_check
       - test_prompt_fits_after_escaping_and_drops_lowest_rank_first
   - name: grounding
-    proves: "INV-TUTOR-2: every citation names a sent span, page and title from the database, quotes verified"
-    tests: [test_answer_vectors, test_grounding_property, test_quote_words_bound]
+    proves: "INV-TUTOR-2: every citation names a sent span, page and title from the database, quotes verified; a hit
+      sends its whole chunk (FR-TUTOR-5), so a fact beside the primary span can be cited"
+    tests: [test_answer_vectors, test_grounding_property, test_quote_words_bound, test_a_hit_sends_its_whole_chunk_primary_first]
   - name: injection
     proves: "INV-TUTOR-3: injected text cannot produce a rejected citation; the prompt JSON round-trips; no tools"
     tests: [test_injection_vectors, test_forged_source_in_span_text_gets_no_alias]
@@ -39,7 +40,8 @@ criteria:
     tests:
       - test_api_retry_aborts_the_call
       - test_one_question_is_answered_with_a_verified_citation_within_the_caps
-      - test_p95_is_nearest_rank
+      - "p95 is nearest rank"
+      - "thresholds come from the spec and the gate needs n >= 40"
   - name: accessibility
     proves: "FR-TUTOR-11: no serious or critical axe issue in the Ask panel"
     tests:

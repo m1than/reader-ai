@@ -178,7 +178,26 @@ async def get_question(ctx: Ctx) -> Response:
         ).first()
     if row is None:
         return _not_found()
-    return JSONResponse(_state(tuple(row)))
+    body = _state(tuple(row))
+    if body["state"] != "queued":  # FR-TUTOR-2: the question's own ledger rows (its run)
+        body["usage"] = await _usage(ctx, qid)
+    return JSONResponse(body)
+
+
+_USAGE: Final = (
+    "SELECT coalesce(sum(output), 0), sum(thinking) FROM agent_spend WHERE run_id = :q AND kind = 'settle'"
+)
+
+
+async def _usage(ctx: Ctx, question_id: uuid.UUID) -> dict[str, Any]:
+    async with ctx.engine.connect() as conn:
+        output, thinking = (await conn.execute(text(_USAGE), {"q": question_id})).one()
+    usd = await ledger.spent(ctx.engine, run_id=question_id)
+    return {
+        "usd": float(usd),
+        "output_tokens": int(output),
+        "thinking_tokens": None if thinking is None else int(thinking),
+    }
 
 
 async def list_questions(ctx: Ctx) -> Response:
