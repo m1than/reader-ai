@@ -146,12 +146,17 @@ requirements:
       for itself (`ps`, `lsof` of FR-INGEST-16) also get the allow-listed environment. [unit]
       **One converter at a time** (2026-11-23; ADR-0029 amendment note on V/onboarding at 421d290). After its
       material lock and before it writes the run record, `reader-ingest` (CLI) takes an exclusive non-blocking
-      `flock` on `<data_dir>/ingest/locks/convert.lock`; held (by the watcher's run or another CLI run) it exits 3
-      `busy` and prints "another conversion is running; try again when it ends". Taken, it first runs the lock's
+      `flock` on `<data_dir>/ingest/locks/convert.lock`; held (by another CLI run, or, once V/onboarding's watcher
+      lands, by the watcher's run: a forward reference; SRV-INGEST revision 2's FR-INGEST-21/-22 there use this
+      same path) it exits 3 `busy` and prints "another conversion is running; try again when it ends". The import
+      status (FR-INGEST-2) is checked only under the lock, so an already-imported material also answers `busy`
+      while another run holds it. **Transition:** a run started from a checkout older than this change takes no
+      lock, so no new run is started while such a run is live. Taken, it first runs the lock's
       stale cleanup over every run record, which replaces FR-INGEST-16's per-material stale cleanup. The lock fd is
       `O_CLOEXEC` and never reaches the child. `--requeue` and `--setup` do not take it (they start no converter).
       The lock is released after FR-INGEST-16's cleanup of the run. [unit] a held `convert.lock` gives exit 3 `busy`
-      before any run record or work directory exists; the lock's fd has `FD_CLOEXEC`; `--requeue` does not take it;
+      before any run record or work directory exists; the lock's fd has `FD_CLOEXEC`; `--requeue` with the lock held
+      exits 0 and calls `reader.ingest.requeue`;
       a child spawned by `system_spawn` (as the converter is) while the lock is held does not have the lock's
       descriptor open (it lists its own `/dev/fd`), and can take the lock itself once the parent releases it.
   - id: FR-INGEST-2
@@ -668,9 +673,9 @@ invariants:
         `kern.procargs2`, `kern.proc.pid`, `proc_pidpath` and `proc_pidinfo` PROC_PIDVNODEPATHINFO;
       - **recorded, allowed by design** (no profile edit tried closes them, measured): the process's own
         `kern.procargs2`; `fsgetpath()` of the other WORK's inode; `chdir` into the other WORK when its path is
-        known; listing it after that `chdir` (expected refused). **Residual on this branch:** the path of a
-        concurrent run's WORK can be learned and `chdir` into it succeeds, while reads and writes there stay denied;
-        no concurrent converter run exists, because a converter run holds `convert.lock` (FR-INGEST-1). ADR-0029
+        known; listing it after that `chdir` (expected refused). **Residual on this branch:** a concurrent run's
+        WORK path would be learnable, and `chdir` into it would succeed, if a concurrent run existed; none does under
+        `convert.lock` (FR-INGEST-1). Reads and writes there stay denied either way. ADR-0029
         (accepted, on V/onboarding at 383f1a0) and its amendment note (`docs/adr/0029-amendment-note.txt` on
         V/onboarding at 421d290) record this; this branch merges only after the owner has applied that note;
       - **the host name is readable** (`kern.hostname` stays allowed because `os.uname()` needs it), so a converted

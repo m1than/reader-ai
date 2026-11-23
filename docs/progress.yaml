@@ -1025,12 +1025,18 @@ tasks:
         kern.proc.pid.<pid> and kern.procargs2.<pid>). Under the final product profile on this branch: all 7
         [host]/[local] converter tests passed (136.1 s), test_cross_process_probes fails under the old profile
         (fails closed); ingest unit tests 218 passed, ruff and mypy clean.",
-      next: "deep-reviewer re-review (sandbox: full review); merge into the PR #39 line after the owner applies the
-        ADR-0029 amendment note.",
+      review: "deep-reviewer (Fable) re-review on 47aa55a: VERDICT approve, conditional on the owner applying the
+        ADR-0029 amendment note (V/onboarding docs/adr/0029-amendment-note.txt) before the merge; its small items
+        applied after (status-under-lock behaviour stated in FR-INGEST-1, the requeue test asserts exit 0 and the
+        requeue call, the watcher as a forward reference, INV-INGEST-4's residual reworded, the transition note).",
+      next: "Do not merge until the owner has applied the ADR-0029 amendment note; then the coordinator merges into
+        V/slice-integration (the PR #39 line). Transition: a reader-ingest run from a checkout older than this change
+        takes no convert.lock, so start no new run while such a run is live.",
       followups: "(1) Run the cross-process probe at `reader-ingest --setup`, record kern.osversion in setup.json and
         report setup_stale when the macOS build changes (FR-INGEST-3 change with tests). (2) Byte-compare spans.jsonl
-        of the full pilot under the old and the new profile. (3) kern.proc.pid.<self> stays refused (a pid-scoped
-        sysctl rule is not possible); the converter does not need it (tests pass)." }
+        of the full pilot under the old and the new profile. (3) The in-sandbox sweep refused `kern.proc.pid.<self>`
+        by name (sysctlbyname), while the positive control allows the same query for the own pid by MIB; a
+        pid-scoped sysctl rule is not possible, and the converter does not need the by-name form (tests pass)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

@@ -275,10 +275,12 @@ def test_requeue_does_not_take_the_convert_lock(tmp_path: Path) -> None:
     with (locks / "convert.lock").open("w") as held:
         fcntl.flock(held, fcntl.LOCK_EX)
         cli = need("reader.ingest.host.cli")
-        err = io.StringIO()
+        err, runner = io.StringIO(), FakeRunner()
         argv = ["m1", "--requeue", "--config", str(path)]
-        cli.ingest(argv, deps(FakeRunner(), FakeSpawn()), io.StringIO(), err)
+        code = cli.ingest(argv, deps(runner, FakeSpawn()), io.StringIO(), err)
+    assert code == 0, err.getvalue()
     assert "another conversion" not in err.getvalue()
+    assert any("reader.ingest.requeue" in " ".join(c[0]) for c in runner.calls)
 
 
 def test_convert_lock_fd_is_close_on_exec_and_not_inherited(tmp_path: Path) -> None:
