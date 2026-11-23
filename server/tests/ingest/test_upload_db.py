@@ -13,7 +13,6 @@ import io
 import json
 import logging
 import os
-import secrets
 import signal
 import socket
 import stat
@@ -126,6 +125,7 @@ def line(raw: bytes) -> Any:
 
 
 CANCEL = b'{"cancel":true}\n'
+MISSING = b'{"error":"missing"}\n'
 
 
 def host_args(state: str = "ready", busy: str = "none", strays: int = 0) -> list[str]:
@@ -166,10 +166,14 @@ async def receive_upload(w: World, body: bytes, upload_id: str, claim_token: str
     return result
 
 
+def claim_args(got: dict[str, Any]) -> tuple[str, str, str, str]:
+    return ("--upload-id", got["id"], "--claim", got["claim"])
+
+
 async def to_sending(w: World, body: bytes) -> tuple[dict[str, Any], dict[str, Any]]:
     view = await uploaded(w, body)
     got = await claim(w)
-    code, raw = await cmd(w, "progress", "--upload-id", got["id"], "--claim", got["claim"], "--phase", "sending")
+    code, raw = await cmd(w, "progress", *claim_args(got), "--phase", "sending")
     assert (code, raw) == (0, b'{"ok":true}\n')
     return view, got
 
@@ -248,8 +252,9 @@ async def test_upload_lock_is_instance_wide_and_released(pg: Pg, tmp_path: Path)
         params = need("reader.ingest.params")
         from sqlalchemy import text
 
+        key = {"k": params.UPLOAD_LOCK_KEY}
         async with w.engine.connect() as holder:
-            assert (await holder.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": params.UPLOAD_LOCK_KEY})).scalar()
+            assert (await holder.execute(text("SELECT pg_try_advisory_lock(:k)"), key)).scalar()
             async with api(w) as c:
                 response = await post(c, pdf())
             assert (response.status_code, response.json()) == (409, {"error": "upload_busy"})
@@ -258,12 +263,14 @@ async def test_upload_lock_is_instance_wide_and_released(pg: Pg, tmp_path: Path)
             assert (await post(c, pdf(b"a"))).status_code == 201
             assert (await post(c, b"junk")).status_code == 415
         async with w.engine.connect() as probe:
-            got = (await probe.execute(text("SELECT pg_try_advisory_lock(:k)"), {"k": params.UPLOAD_LOCK_KEY})).scalar()
+            got = (await probe.execute(text("SELECT pg_try_advisory_lock(:k)"), key)).scalar()
             assert got is True  # every path released it
             await probe.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": params.UPLOAD_LOCK_KEY})
 
 
-async def test_upload_dedupe_runs_before_the_quota(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_upload_dedupe_runs_before_the_quota(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async with world(pg, tmp_path) as w:
         with small_caps(monkeypatch, OPEN_MAX=2):
             first, second = pdf(b"1"), pdf(b"2")
@@ -283,14 +290,18 @@ async def test_upload_of_a_declared_material(pg: Pg, tmp_path: Path) -> None:
         body = pdf(b"declared")
         from reader.config.model import Material
 
-        declared = Material(id="declared", file="./d.pdf", sha256=sha(body), license="personal-use", language="ru")
+        declared = Material(
+            id="declared", file="./d.pdf", sha256=sha(body), license="personal-use", language="ru"
+        )
         async with api(w, ingest_materials=(*w.config.materials, declared)) as c:
             response = await post(c, body)
         assert (response.status_code, response.json()) == (200, {"material_id": "declared", "upload": None})
         assert await upload_rows(w) == 0 and inbox(w) == []
 
 
-async def test_upload_quota_by_bytes_is_exact(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_upload_quota_by_bytes_is_exact(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async with world(pg, tmp_path) as w:
         with small_caps(monkeypatch, BYTES_MAX=5000):
             await uploaded(w, pdf(b"a", size=2500))
@@ -386,10 +397,13 @@ async def test_upload_sweeps_crash_leftovers(pg: Pg, tmp_path: Path) -> None:
         names = inbox(w)
         assert ".tmp-0123456789abcdef0123456789abcdef" not in names and orphan.name not in names
         assert "notes.txt" in names
-        assert f"{(await w.scalar('SELECT sha256 FROM uploads WHERE id = :i', i=kept['id']))}.pdf" in names
+        kept_sha = await w.scalar("SELECT sha256 FROM uploads WHERE id = :i", i=kept["id"])
+        assert f"{kept_sha}.pdf" in names
 
 
-async def test_upload_canary_filename_is_never_logged(pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+async def test_upload_canary_filename_is_never_logged(
+    pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """FR-INGEST-24: the filename appears in no log record of the api or the inbox commands."""
     caplog.set_level(logging.DEBUG)
     async with world(pg, tmp_path) as w:
@@ -410,7 +424,9 @@ async def test_upload_canary_filename_is_never_logged(pg: Pg, tmp_path: Path, ca
 
 @settings(max_examples=12, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
 @given(st.binary(max_size=64).filter(lambda b: not b.startswith(b"%PDF-")))
-async def test_refused_bodies_leave_nothing(pg: Pg, tmp_path_factory: pytest.TempPathFactory, junk: bytes) -> None:
+async def test_refused_bodies_leave_nothing(
+    pg: Pg, tmp_path_factory: pytest.TempPathFactory, junk: bytes
+) -> None:
     async with world(pg, tmp_path_factory.mktemp("w")) as w:
         async with api(w) as c:
             response = await post(c, junk)
@@ -424,7 +440,38 @@ def _free_port() -> int:
         return int(s.getsockname()[1])
 
 
-async def test_killed_api_leftovers_are_swept_by_the_next_upload(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _kill_api_mid_body(argv: list[str], env: dict[str, str], port: int, cookie: str, w: World) -> bool:
+    """Start a real api process, stream part of a body, SIGKILL it while the `.tmp-*` file exists."""
+    server = subprocess.Popen(argv, env=env)
+    try:
+        for _ in range(100):
+            with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                break
+            time.sleep(0.1)
+        sock = socket.create_connection(("127.0.0.1", port))
+        head = (
+            "POST /api/materials/uploads?language=ru HTTP/1.1\r\nHost: localhost\r\n"
+            f"Origin: {ORIGIN}\r\nCookie: {SESSION_COOKIE}={cookie}\r\nContent-Type: application/pdf\r\n"
+            "X-Reader-Filename: k.pdf\r\nContent-Length: 1000000\r\n\r\n"
+        )
+        sock.sendall(head.encode() + b"%PDF-1.7\n" + b"x" * 300_000)
+        for _ in range(100):
+            if any(n.startswith(".tmp-") for n in inbox(w)):
+                break
+            time.sleep(0.05)
+        partial = any(n.startswith(".tmp-") for n in inbox(w))
+        server.send_signal(signal.SIGKILL)
+        server.wait(10)
+        sock.close()
+        return partial
+    finally:
+        if server.poll() is None:
+            server.kill()
+
+
+async def test_killed_api_leftovers_are_swept_by_the_next_upload(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async with world(pg, tmp_path) as w:
         port = _free_port()
         env = {
@@ -435,34 +482,10 @@ async def test_killed_api_leftovers_are_swept_by_the_next_upload(pg: Pg, tmp_pat
             "READER_TEST_PG_DB": pg.database,
             "READER_TEST_PG_PASSWORD": pg.password,
         }
-        server = subprocess.Popen(  # noqa: S603
-            [sys.executable, "-I", str(HERE / "upload_server.py"), str(tmp_path / "reader.yaml"), str(w.blobs), str(port)],
-            env=env,
-        )
-        try:
-            for _ in range(100):
-                with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", port), timeout=0.2):
-                    break
-                time.sleep(0.1)
-            cookie = await session_for(w, "ivan")
-            sock = socket.create_connection(("127.0.0.1", port))
-            head = (
-                f"POST /api/materials/uploads?language=ru HTTP/1.1\r\nHost: localhost\r\nOrigin: {ORIGIN}\r\n"
-                f"Cookie: {SESSION_COOKIE}={cookie}\r\nContent-Type: application/pdf\r\nX-Reader-Filename: k.pdf\r\n"
-                "Content-Length: 1000000\r\n\r\n"
-            )
-            sock.sendall(head.encode() + b"%PDF-1.7\n" + b"x" * 300_000)
-            for _ in range(100):
-                if any(n.startswith(".tmp-") for n in inbox(w)):
-                    break
-                time.sleep(0.05)
-            assert any(n.startswith(".tmp-") for n in inbox(w))
-            server.send_signal(signal.SIGKILL)
-            server.wait(10)
-            sock.close()
-        finally:
-            if server.poll() is None:
-                server.kill()
+        script = str(HERE / "upload_server.py")
+        argv = [sys.executable, "-I", script, str(tmp_path / "reader.yaml"), str(w.blobs), str(port)]
+        cookie = await session_for(w, "ivan")
+        assert await asyncio.to_thread(_kill_api_mid_body, argv, env, port, cookie, w)
         # a second crash, simulated: after the rename and before the insert
         orphan = w.blobs / "inbox" / f"{sha(pdf(b'orphan'))}.pdf"
         orphan.write_bytes(pdf(b"orphan"))
@@ -482,7 +505,7 @@ async def test_cancel_then_reupload(pg: Pg, tmp_path: Path) -> None:
         second = await uploaded(w, body)
         assert second["id"] != first["id"] and second["state"] == "queued"
         old = await claim(w)
-        code, _ = await cmd(w, "progress", "--upload-id", old["id"], "--claim", old["claim"], "--pages-done", "1", "--pages-total", "2")
+        code, _ = await cmd(w, "progress", *claim_args(old), "--pages-done", "1", "--pages-total", "2")
         assert code == 0 and (await state_of(w, old["id"]))[0] == "converting"
         async with api(w) as c:
             assert (await c.post(f"/api/materials/uploads/{old['id']}/cancel")).status_code == 200
@@ -504,17 +527,19 @@ async def test_discard_then_reupload_and_refusals_once_the_key_exists(pg: Pg, tm
         body = pdf(b"discard")
         view = await uploaded(w, body)
         got = await claim(w)
-        assert (await cmd(w, "fail", "--upload-id", got["id"], "--claim", got["claim"], "--code", "convert_failed"))[0] == 0
+        assert (await cmd(w, "fail", *claim_args(got), "--code", "convert_failed"))[0] == 0
         async with api(w) as c:
             failed = (await c.get(f"/api/materials/uploads/{view['id']}")).json()
-            assert (failed["state"], failed["code"], failed["retry"]) == ("failed", "convert_failed", "reconvert")
+            seen = (failed["state"], failed["code"], failed["retry"])
+            assert seen == ("failed", "convert_failed", "reconvert")
             assert (await c.post(f"/api/materials/uploads/{view['id']}/cancel")).status_code == 409
             assert (await c.delete(f"/api/materials/uploads/{view['id']}")).status_code == 200
         assert await upload_rows(w) == 0 and inbox(w) == []
         _, sending = await to_sending(w, body)
         assert (await receive_upload(w, body, sending["id"], sending["claim"]))["result"] == "queued"
         async with api(w) as c:
-            for request in (c.post(f"/api/materials/uploads/{sending['id']}/cancel"), c.delete(f"/api/materials/uploads/{sending['id']}")):
+            url = f"/api/materials/uploads/{sending['id']}"
+            for request in (c.post(f"{url}/cancel"), c.delete(url)):
                 response = await request
                 assert (response.status_code, response.json()) == (409, {"error": "state"})
         assert await upload_rows(w) == 1
@@ -589,7 +614,10 @@ async def test_retry_replies_for_a_dead_import_or_embed(pg: Pg, tmp_path: Path) 
 
         async with w.engine.begin() as conn:  # the embed job is never run here: let it die, then succeed
             await conn.execute(
-                text("UPDATE job_keys SET outcome = 'dead', error_code = 'EmbedUnavailable' WHERE kind = 'search.embed'")
+                text(
+                    "UPDATE job_keys SET outcome = 'dead', error_code = 'EmbedUnavailable'"
+                    " WHERE kind = 'search.embed'"
+                )
             )
             await conn.execute(
                 text(
@@ -635,7 +663,9 @@ class FakeJobs:
         ("already_done", 200, None),
     ],
 )
-async def test_retry_reply_per_requeue_result(pg: Pg, tmp_path: Path, kind: str, status: int, body: Any) -> None:
+async def test_retry_reply_per_requeue_result(
+    pg: Pg, tmp_path: Path, kind: str, status: int, body: Any
+) -> None:
     async with world(pg, tmp_path) as w:
         upload = pdf(b"reply")
         view, got = await to_sending(w, upload)
@@ -643,7 +673,8 @@ async def test_retry_reply_per_requeue_result(pg: Pg, tmp_path: Path, kind: str,
         from sqlalchemy import text
 
         async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE job_keys SET outcome = 'dead', error_code = 'x' WHERE kind = 'ingest.import'"))
+            dead = "UPDATE job_keys SET outcome = 'dead', error_code = 'x' WHERE kind = 'ingest.import'"
+            await conn.execute(text(dead))
         async with api(w, jobs=FakeJobs(kind)) as c:
             response = await c.post(f"/api/materials/uploads/{view['id']}/retry")
         assert response.status_code == status
@@ -679,8 +710,10 @@ async def test_next_peek_and_claim(pg: Pg, tmp_path: Path) -> None:
         first = await uploaded(w, pdf(b"first"))
         await uploaded(w, pdf(b"second"))
         assert line((await cmd(w, "next", "--peek", "--wait", "1", *host_args()))[1]) == {"queued": 2}
-        assert await upload_rows(w) == 2 and (await state_of(w, first["id"]))[0] == "queued"  # peek claimed nothing
-        for refused in (host_args(state="setup_missing"), host_args(busy="cli_running"), host_args(busy="claim")):
+        assert await upload_rows(w) == 2
+        assert (await state_of(w, first["id"]))[0] == "queued"  # peek claimed nothing
+        refusals = (host_args(state="setup_missing"), host_args(busy="cli_running"), host_args(busy="claim"))
+        for refused in refusals:
             code, raw = await cmd(w, "next", "--claim", "--wait", "1", *refused)
             assert code == 0 and line(raw) == {"upload": None}
         got = await claim(w)
@@ -688,7 +721,8 @@ async def test_next_peek_and_claim(pg: Pg, tmp_path: Path) -> None:
         assert len(got["claim"]) == 32 and int(got["claim"], 16) >= 0
         await claim(w)
         assert await cmd(w, "next", "--claim", "--wait", "1", *host_args()) == (0, b'{"upload":null}\n')
-        host = (await w.rows("SELECT state, strays, converter_version, watcher_sha, busy FROM ingest_hosts"))[0]
+        sql = "SELECT state, strays, converter_version, watcher_sha, busy FROM ingest_hosts"
+        host = (await w.rows(sql))[0]
         assert tuple(host) == ("ready", 0, "docling-2.151.1+r2", WATCHER_SHA, "none")
 
 
@@ -711,7 +745,7 @@ async def test_fetch_copies_exactly_the_bytes(pg: Pg, tmp_path: Path) -> None:
         assert await cmd(w, "fetch", "--upload-id", got["id"], "--claim", got["claim"]) == (0, body)
         assert await cmd(w, "fetch", "--upload-id", got["id"], "--claim", "0" * 32) == (3, CANCEL)
         (w.blobs / "inbox" / f"{got['sha256']}.pdf").unlink()
-        assert await cmd(w, "fetch", "--upload-id", got["id"], "--claim", got["claim"]) == (1, b'{"error":"missing"}\n')
+        assert await cmd(w, "fetch", *claim_args(got)) == (1, MISSING)
 
 
 async def test_fetch_refuses_a_size_that_differs_from_the_row(pg: Pg, tmp_path: Path) -> None:
@@ -722,7 +756,7 @@ async def test_fetch_refuses_a_size_that_differs_from_the_row(pg: Pg, tmp_path: 
         path = w.blobs / "inbox" / f"{got['sha256']}.pdf"
         path.chmod(0o640)
         path.write_bytes(body + b"more")
-        assert await cmd(w, "fetch", "--upload-id", got["id"], "--claim", got["claim"]) == (1, b'{"error":"missing"}\n')
+        assert await cmd(w, "fetch", *claim_args(got)) == (1, MISSING)
 
 
 async def test_fail_codes_and_argument_checks(pg: Pg, tmp_path: Path) -> None:
@@ -740,20 +774,29 @@ async def test_fail_codes_and_argument_checks(pg: Pg, tmp_path: Path) -> None:
         ]
         for argv in bad:
             code, raw = await cmd(w, *argv)
-            assert code == 1 and "error" in line(raw), argv
+            assert code == 1, argv
+            assert "error" in line(raw), argv
         assert (await state_of(w, got["id"]))[0] == "claimed"
-        for code_name in ("fetch_mismatch", "not_pdf", "inbox_missing", "memory_limit", "work_limit", "timeout", "receive_failed", "bad_reply"):
+        codes = (
+            "fetch_mismatch", "not_pdf", "inbox_missing", "memory_limit", "work_limit", "timeout",
+            "receive_failed", "bad_reply",
+        )
+        for code_name in codes:
             assert code_name in need("reader.ingest.inbox").FAIL_CODES
-        assert await cmd(w, "fail", "--upload-id", got["id"], "--claim", got["claim"], "--code", "memory_limit") == (0, b'{"ok":true}\n')
+        ok = await cmd(w, "fail", *claim_args(got), "--code", "memory_limit")
+        assert ok == (0, b'{"ok":true}\n')
         assert await state_of(w, got["id"]) == ("failed", 0, "memory_limit")
-        assert await cmd(w, "fail", "--upload-id", str(uuid.uuid4()), "--claim", got["claim"], "--code", "timeout") == (3, CANCEL)
+        other = {"id": str(uuid.uuid4()), "claim": got["claim"]}
+        gone = await cmd(w, "fail", *claim_args(other), "--code", "timeout")
+        assert gone == (3, CANCEL)
 
 
 async def test_arguments_are_checked_before_any_database_access(tmp_path: Path) -> None:
     inbox_mod = need("reader.ingest.inbox")
     out = io.BytesIO()
+    argv = ["fetch", "--upload-id", "../../etc/passwd", "--claim", "a" * 32]
     code = await inbox_mod.execute(
-        ["fetch", "--upload-id", "../../etc/passwd", "--claim", "a" * 32], engine=None, blobs_root=tmp_path, out=out
+        argv, engine=None, blobs_root=tmp_path, out=out
     )
     assert code == 1 and json.loads(out.getvalue()) == {"error": "arguments"}
 
@@ -780,7 +823,8 @@ async def test_receive_under_a_claim_imports_the_upload(pg: Pg, tmp_path: Path) 
         assert seen["state"] == "indexing"
         assert [m["source"] for m in listed["materials"]] == ["config", "config", "upload"]
         mine = listed["materials"][-1]
-        assert (mine["id"], mine["status"], mine["language"], mine["license"]) == (material_id, "imported", "ru", "personal-use")
+        fields = (mine["id"], mine["status"], mine["language"], mine["license"])
+        assert fields == (material_id, "imported", "ru", "personal-use")
         assert mine["upload"]["id"] == view["id"] and mine["title"] == "Book"
         assert outline.status_code == 200 and spans.status_code == 200
         assert spans.json()["spans"][0]["span_id"].startswith(sha(body) + ":")
@@ -800,18 +844,22 @@ async def test_receive_refusals_under_claims(pg: Pg, tmp_path: Path) -> None:
         ):
             with pytest.raises(errors.Cancel):
                 await receive_upload(w, material, upload_id, token)
-        assert not (w.blobs / "ingest").exists() or [p for p in (w.blobs / "ingest").iterdir() if not p.name.startswith(".")] == []
+        root = w.blobs / "ingest"
+        assert not root.exists() or [p for p in root.iterdir() if not p.name.startswith(".")] == []
         assert int(await w.scalar("SELECT count(*) FROM job_keys")) == 0
         # a declared material's artifact under an upload's claim is refused too
+        receive = need("reader.ingest.receive")
+        declared = receive.receive(
+            artifact_tar(MATERIAL_SHA), config=w.config, engine=w.engine, jobs=w.jobs, blobs_root=w.blobs,
+            upload_id=got["id"], claim=got["claim"],
+        )
         with pytest.raises((errors.Cancel, errors.IngestError)):
-            receive = need("reader.ingest.receive")
-            await receive.receive(
-                artifact_tar(MATERIAL_SHA), config=w.config, engine=w.engine, jobs=w.jobs, blobs_root=w.blobs,
-                upload_id=got["id"], claim=got["claim"],
-            )
+            await declared
 
 
-async def test_crash_between_enqueue_and_mark_recovers(pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+async def test_crash_between_enqueue_and_mark_recovers(
+    pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     async with world(pg, tmp_path) as w:
         body = pdf(b"crash")
         view, got = await to_sending(w, body)
@@ -841,15 +889,15 @@ def _crash() -> None:
 async def test_import_of_a_missing_upload_is_dead(pg: Pg, tmp_path: Path) -> None:
     async with world(pg, tmp_path) as w:
         body = pdf(b"vanish")
-        view, got = await to_sending(w, body)
+        _, got = await to_sending(w, body)
         await receive_upload(w, body, got["id"], got["claim"])
         from sqlalchemy import text
 
         async with w.engine.begin() as conn:
             await conn.execute(text("DELETE FROM uploads"))
         await w.work()
-        assert await w.scalar("SELECT outcome FROM job_keys WHERE kind = 'ingest.import'") == "dead"
-        assert await w.scalar("SELECT error_code FROM job_keys WHERE kind = 'ingest.import'") == "upload_missing"
+        key = await w.rows("SELECT outcome, error_code FROM job_keys WHERE kind = 'ingest.import'")
+        assert tuple(key[0]) == ("dead", "upload_missing")
         assert int(await w.scalar("SELECT count(*) FROM materials")) == 0
 
 
@@ -861,7 +909,11 @@ async def test_converter_route(pg: Pg, tmp_path: Path) -> None:
         async with api(w) as c:
             seen = (await c.get("/api/materials/converter")).json()
         assert {k: seen[k] for k in ("state", "strays", "busy", "stale", "converter_version")} == {
-            "state": "setup_missing", "strays": 2, "busy": "none", "stale": False, "converter_version": "docling-2.151.1+r2",
+            "state": "setup_missing",
+            "strays": 2,
+            "busy": "none",
+            "stale": False,
+            "converter_version": "docling-2.151.1+r2",
         }
         await cmd(w, "next", "--peek", "--wait", "1", *host_args(busy="cli_running"))
         async with api(w, converter_source_sha256="d" * 64) as c:

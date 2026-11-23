@@ -34,7 +34,9 @@ def _config(tmp_path: Path) -> Path:
         (FIXTURES / "config.yaml")
         .read_text()
         .replace("secret://op/Private/anna-claude/token", "secret://keychain/x/y")
-        .replace("secret://hostfile/tmp/reader-ai-test/anna-api-key", "secret://hostfile" + str(secret.resolve()))
+        .replace(
+            "secret://hostfile/tmp/reader-ai-test/anna-api-key", "secret://hostfile" + str(secret.resolve())
+        )
     )
     return write_config(tmp_path / "cfg", text)
 
@@ -111,19 +113,25 @@ def test_up_starts_the_ingest_watcher(tmp_path: Path, monkeypatch: pytest.Monkey
     assert len(spawns.calls) == 1
     argv, env, log_path = spawns.calls[0]
     assert argv == [str(Path(sys.executable).with_name("reader-ingest")), "--watch", "--config", str(config)]
-    assert set(env) <= ALLOWED and env == {k: v for k, v in world.ctx.env.items() if k in ALLOWED}
+    assert set(env) <= ALLOWED
+    assert env == {k: v for k, v in world.ctx.env.items() if k in ALLOWED}
     assert log_path == world.ctx.run_dir / "ingest-watch.log"
 
 
-def test_up_leaves_a_watcher_of_the_same_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any) -> None:
+def test_up_leaves_a_watcher_of_the_same_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any
+) -> None:
     world, spawns = _world(tmp_path, monkeypatch, mod)
     config = _config(tmp_path)
     with watch_lock(_data(config), lock_line(4242)):
         assert _up(world, config) == 0
-    assert spawns.calls == [] and (4242, signal.SIGTERM) not in world.kills
+    assert spawns.calls == []
+    assert (4242, signal.SIGTERM) not in world.kills
 
 
-def test_up_restarts_an_idle_watcher_of_other_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any) -> None:
+def test_up_restarts_an_idle_watcher_of_other_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any
+) -> None:
     config = _config(tmp_path)
     held: list[int] = []
 
@@ -139,10 +147,13 @@ def test_up_restarts_an_idle_watcher_of_other_code(tmp_path: Path, monkeypatch: 
     os.write(fd, lock_line(4242, OTHER).encode())
     held.append(fd)
     assert _up(world, config) == 0
-    assert (4242, signal.SIGTERM) in world.kills and len(spawns.calls) == 1
+    assert (4242, signal.SIGTERM) in world.kills
+    assert len(spawns.calls) == 1
 
 
-@pytest.mark.parametrize("content", [lock_line(4242, OTHER, "claim"), lock_line(4242, OTHER, "cli_running"), '{"pid": 42', ""])
+@pytest.mark.parametrize(
+    "content", [lock_line(4242, OTHER, "claim"), lock_line(4242, OTHER, "cli_running"), '{"pid": 42', ""]
+)
 def test_up_leaves_a_busy_watcher_of_other_code(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any, content: str
 ) -> None:
@@ -151,7 +162,8 @@ def test_up_leaves_a_busy_watcher_of_other_code(
     with watch_lock(_data(config), content):
         assert _up(world, config) == 0
         assert mod.state(_data(config), SHA) == "stale"
-    assert spawns.calls == [] and not [k for k in world.kills if k[0] == 4242]
+    assert spawns.calls == []
+    assert not [k for k in world.kills if k[0] == 4242]
     assert "ingest watcher runs older code; it restarts at the next `reader up` when idle" in world.out
 
 
@@ -165,7 +177,9 @@ def test_a_failed_spawn_does_not_fail_up(tmp_path: Path, monkeypatch: pytest.Mon
 # ---- reader status ----
 
 
-def test_status_reports_the_watcher_and_the_converter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any) -> None:
+def test_status_reports_the_watcher_and_the_converter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any
+) -> None:
     from reader.cli.commands import cmd_status
 
     world, _ = _world(tmp_path, monkeypatch, mod)
@@ -193,7 +207,9 @@ def test_status_reports_the_watcher_and_the_converter(tmp_path: Path, monkeypatc
 # ---- reader down ----
 
 
-def test_down_signals_only_a_held_lock_then_waits_15_s(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any) -> None:
+def test_down_signals_only_a_held_lock_then_waits_15_s(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any
+) -> None:
     from reader.cli.commands import cmd_down
 
     world, _ = _world(tmp_path, monkeypatch, mod)
@@ -211,7 +227,9 @@ def test_down_signals_only_a_held_lock_then_waits_15_s(tmp_path: Path, monkeypat
         assert world.clock.monotonic() - start >= 15
     downs = [i for i, e in enumerate(world.journal) if e[0] == "run" and "down" in e]
     kills = [i for i, e in enumerate(world.journal) if e[:2] == ("kill", signal.SIGKILL)]
-    assert downs and kills and kills[-1] < downs[-1]  # stopped before `docker compose down`
+    assert downs
+    assert kills
+    assert kills[-1] < downs[-1]  # stopped before `docker compose down`
 
 
 # ---- the spawn itself (real processes) ----
@@ -259,7 +277,7 @@ def test_spawn_hygiene(tmp_path: Path, mod: Any, monkeypatch: pytest.MonkeyPatch
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LANG": "C.UTF-8"}
     try:
         pid = mod.spawn([str(script), "--watch"], env, log)
-        _, status = os.waitpid(pid, 0)
+        os.waitpid(pid, 0)
     finally:
         os.close(r)
         os.close(w)
@@ -267,10 +285,12 @@ def test_spawn_hygiene(tmp_path: Path, mod: Any, monkeypatch: pytest.MonkeyPatch
     assert set(report["env"]) - {"__CF_USER_TEXT_ENCODING"} == set(env)
     assert "SECRET_CANARY" not in report["env"]
     assert report["fds"] == [0, 1, 2]
-    assert report["sid"] is True and report["tty"] is False and report["stdin_null"] is True
+    assert (report["sid"], report["tty"], report["stdin_null"]) == (True, False, True)
     assert stat.S_IMODE(log.stat().st_mode) == 0o600
     data = log.read_bytes()
-    assert len(data) <= (5 << 20) + 64 and b"KEEP-THE-TAIL" in data and data.endswith(b"to the log\n")
+    assert len(data) <= (5 << 20) + 64
+    assert b"KEEP-THE-TAIL" in data
+    assert data.endswith(b"to the log\n")
 
 
 def test_spawn_creates_the_log_0600(tmp_path: Path, mod: Any) -> None:

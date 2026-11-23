@@ -1,4 +1,4 @@
-"""Upload pieces without services: magic check, filename header, the upload state table, no parser in the stack.
+"""Upload pieces without services: magic check, filename header, the upload state table, no parser.
 
 @trace VEC-INGEST-7 VEC-INGEST-6 FR-INGEST-18 INV-INGEST-8 FR-INGEST-24
 """
@@ -143,8 +143,8 @@ def test_no_pdf_parser_importable_by_api_or_worker() -> None:
         for p in _stack_modules()
     }
     assert {k: v for k, v in offenders.items() if v} == {}
-    # and nothing the api or worker can load imports the host package (which holds the converter); the host CLI
-    # `reader` (reader/cli, OPS-CLI FR-CLI-22) runs on the Mac and may read its closure hash
+    # and nothing the api or worker can load imports the host package (which holds the converter); the host
+    # CLI `reader` (reader/cli, OPS-CLI FR-CLI-22) runs on the Mac and may read its closure hash
     importers = [
         str(p.relative_to(SRC))
         for p in _stack_modules()

@@ -72,7 +72,9 @@ async def test_uploaded_materials_take_their_upload_language(
     del gone
 
 
-async def test_current_keys_use_the_upload_language(w: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+async def test_current_keys_use_the_upload_language(
+    w: World, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     store = need("reader.search.store")
     params = need("reader.search.params")
     jobs = need("reader.search.jobs")

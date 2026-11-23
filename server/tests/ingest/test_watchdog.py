@@ -120,7 +120,10 @@ def test_two_live_runs_each_count_only_their_own() -> None:
 
 def test_a_work_path_with_a_space_matches_by_substring() -> None:
     spaced = "/Users/x/Application Support/reader/ingest/work/0123456789abcdef"
-    procs = [P(100, sid=100, cwd=spaced, start=T0), P(103, sid=103, args=f"py -m c --input {spaced}/in/material.pdf")]
+    procs = [
+        P(100, sid=100, cwd=spaced, start=T0),
+        P(103, sid=103, args=f"py -m c --input {spaced}/in/material.pdf"),
+    ]
     assert members(procs, run(100, spaced)) == {100, 103}
 
 
@@ -157,7 +160,11 @@ def test_work_directory_limit(tmp_path: Path) -> None:
 
 def test_kills_are_reverified(tmp_path: Path) -> None:
     wd = need("reader.ingest.host.watchdog")
-    procs = {100: P(100, sid=100, cwd=WORK, start=T0), 102: P(102, sid=102, cwd=WORK), 103: P(103, sid=103, cwd=WORK)}
+    procs = {
+        100: P(100, sid=100, cwd=WORK, start=T0),
+        102: P(102, sid=102, cwd=WORK),
+        103: P(103, sid=103, cwd=WORK),
+    }
     inspect = FakeInspect(procs)
     inspect.changed[102] = P(102, sid=102, cwd=WORK, start="Mon Nov 23 11:00:00 2026")  # pid reused
     inspect.changed[103] = P(103, sid=103, cwd=WORK, exe="/bin/zsh")  # exec'd something else
@@ -167,7 +174,7 @@ def test_kills_are_reverified(tmp_path: Path) -> None:
 
 
 def test_stand_in_sets_of_two_runs_end_separately(tmp_path: Path) -> None:
-    """[unit, stand-ins] the one-run lock makes two real runs impossible; the function still keeps them apart."""
+    """[unit, stand-ins] the one-run lock makes two real runs impossible; the function keeps them apart."""
     wd = need("reader.ingest.host.watchdog")
     other = "/data/ingest/work/fedcba9876543210"
     procs = {
@@ -249,7 +256,9 @@ def test_cli_converter_run_stops_at_a_watchdog_limit(tmp_path: Path) -> None:
         def kill_all(self) -> None:
             killed.append("kill_all")
 
-    deps = cli.Deps(runner=None, spawn=lambda *a: Child(), probe=None, venv=tmp_path, pyroot=tmp_path, models=tmp_path)
+    deps = cli.Deps(
+        runner=None, spawn=lambda *a: Child(), probe=None, venv=tmp_path, pyroot=tmp_path, models=tmp_path
+    )
     deps.watchdog = lambda child, work: Dog()
     deps.tick_s = 0.01
     work = tmp_path / "w"
@@ -296,20 +305,22 @@ def test_escaping_children_are_found_and_killed(tmp_path: Path, mode: str) -> No
     work.mkdir()
     script = work / "stand_in.py"
     script.write_text(STAND_IN)
-    child = subprocess.Popen([sys.executable, "-I", str(script), mode], cwd=work, start_new_session=True)  # noqa: S603
+    child = subprocess.Popen([sys.executable, "-I", str(script), mode], cwd=work, start_new_session=True)
     try:
         time.sleep(1.5)
         start = records.SystemProbe().start_time(child.pid)
-        r = wd.Run(child_sid=child.pid, child_start=start, work=str(work), exclude=frozenset({os.getpid(), os.getppid()}))
+        me = frozenset({os.getpid(), os.getppid()})
+        r = wd.Run(child_sid=child.pid, child_start=start, work=str(work), exclude=me)
         inspect = wd.SystemInspect()
         found = wd.members(r, inspect.snapshot(), inspect, os.path.realpath(sys.executable))
         assert child.pid in found and len(found) == 2, found
-        dog = wd.Watchdog(r, inspect, os.path.realpath(sys.executable), rss_max=40 << 20, work_max=2 * GiB, work=work)
+        python = os.path.realpath(sys.executable)
+        dog = wd.Watchdog(r, inspect, python, rss_max=40 << 20, work_max=2 * GiB, work=work)
         assert dog.check() == "memory_limit"
         time.sleep(0.3)
         assert all(not _alive(pid) for pid in found)
     finally:
-        with contextlib.suppress(ProcessLookupError, PermissionError):  # macOS: EPERM for a group that is gone
+        with contextlib.suppress(ProcessLookupError, PermissionError):  # macOS: EPERM for a gone group
             os.killpg(child.pid, signal.SIGKILL)
         child.wait(5)
 
@@ -319,7 +330,8 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    out = subprocess.run(["/bin/ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True, check=False)  # noqa: S603
+    argv = ["/bin/ps", "-o", "stat=", "-p", str(pid)]
+    out = subprocess.run(argv, capture_output=True, text=True, check=False)
     return bool(out.stdout.strip()) and not out.stdout.strip().startswith("Z")
 
 
@@ -345,7 +357,8 @@ PARENT = textwrap.dedent(
             "time.sleep(60)\\n"
         )
         lock_file = str(data / "ingest" / "locks" / "convert.lock")
-        child = cli.system_spawn([sys.executable, "-I", "-c", check, lock_file], {"PATH": "/usr/bin:/bin"}, work)
+        argv = [sys.executable, "-I", "-c", check, lock_file]
+        child = cli.system_spawn(argv, {"PATH": "/usr/bin:/bin"}, work)
         records.set_child(run_dir, name, child.pid, records.SystemProbe().start_time(child.pid) or "")
         print(json.dumps({"pid": child.pid, "work": str(work)}), flush=True)
         time.sleep(60)
@@ -359,7 +372,7 @@ def test_lock_is_not_inherited_and_an_orphan_is_cleaned(tmp_path: Path) -> None:
         pytest.skip("[host]: set READER_TEST_INGEST_HOST=1")
     watch = need("reader.ingest.host.watch")
     data = Path(os.path.realpath(tmp_path))
-    parent = subprocess.Popen([sys.executable, "-c", PARENT, str(data)], stdout=subprocess.PIPE)  # noqa: S603
+    parent = subprocess.Popen([sys.executable, "-c", PARENT, str(data)], stdout=subprocess.PIPE)
     assert parent.stdout is not None
     started = json.loads(parent.stdout.readline())
     time.sleep(0.5)

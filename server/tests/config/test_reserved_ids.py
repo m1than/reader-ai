@@ -15,7 +15,8 @@ SHA = "a" * 64
 
 
 def _material(material_id: str, sha: str = SHA) -> str:
-    return f'  - {{ id: "{material_id}", file: ./m.pdf, sha256: "{sha}", license: personal-use, language: ru }}\n'
+    fields = f'id: "{material_id}", file: ./m.pdf, sha256: "{sha}", license: personal-use, language: ru'
+    return f"  - {{ {fields} }}\n"
 
 
 @pytest.mark.parametrize("material_id", ["up-", "up-abc", "up-0123456789ab"])

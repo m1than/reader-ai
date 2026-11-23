@@ -24,7 +24,7 @@ def anyio_backend() -> str:
 async def through_gate(
     raw_path: bytes, method: str = "POST", content_type: str | None = "application/pdf", origin: bool = True
 ) -> tuple[int | None, bool, int]:
-    """One HTTP request through the gate: (status sent or None, app reached, body messages the gate received)."""
+    """One HTTP request through the gate: (status sent or None, app reached, body messages received)."""
     from reader.api.app import CsrfGate
 
     reached: list[bool] = []
@@ -66,14 +66,17 @@ def test_the_table_has_exactly_one_entry() -> None:
 
 async def test_the_upload_route_takes_a_pdf_and_reads_no_body() -> None:
     assert await through_gate(b"/api/materials/uploads") == (None, True, 0)
-    assert await through_gate(b"/api/materials/uploads", content_type="Application/PDF; x=1") == (None, True, 0)
+    with_params = await through_gate(b"/api/materials/uploads", content_type="Application/PDF; x=1")
+    assert with_params == (None, True, 0)
 
 
 async def test_the_upload_route_keeps_the_origin_check() -> None:
     assert (await through_gate(b"/api/materials/uploads", origin=False))[:2] == (403, False)
 
 
-@pytest.mark.parametrize("content_type", ["text/plain", "application/json", "multipart/form-data; boundary=x", None])
+@pytest.mark.parametrize(
+    "content_type", ["text/plain", "application/json", "multipart/form-data; boundary=x", None]
+)
 async def test_the_upload_route_refuses_other_media_types(content_type: str | None) -> None:
     assert (await through_gate(b"/api/materials/uploads", content_type=content_type))[:2] == (415, False)
 
@@ -96,4 +99,5 @@ async def test_pdf_elsewhere_keeps_the_json_rule(raw_path: bytes) -> None:
 
 async def test_other_methods_on_the_upload_path_keep_the_json_rule() -> None:
     assert (await through_gate(b"/api/materials/uploads", method="PUT"))[:2] == (415, False)
-    assert (await through_gate(b"/api/materials/uploads", method="GET"))[:2] == (None, True)  # safe: router answers
+    safe = await through_gate(b"/api/materials/uploads", method="GET")
+    assert safe[:2] == (None, True)  # a safe method: the router answers

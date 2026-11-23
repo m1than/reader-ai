@@ -1,5 +1,5 @@
 # @trace FR-DEPLOY-13
-"""OPS-DEPLOY [config] FR-DEPLOY-13: the upload body limit at the edge and the image's converter source hash."""
+"""OPS-DEPLOY [config] FR-DEPLOY-13: the upload body limit at the edge and the image's source hash."""
 
 import re
 
@@ -34,7 +34,8 @@ def test_one_request_body_limit_on_exactly_the_upload_path() -> None:
 def test_server_image_writes_the_converter_source_hash() -> None:
     text = (DEPLOY / "images" / "server.Dockerfile").read_text()
     run = next((ln for ln in text.splitlines() if "converter_source_sha256" in ln), "")
-    assert "reader.ingest.host.closure" in run and "source_sha256" in run
-    assert "/opt/reader/src" in run and "/usr/local/share/reader/converter_source_sha256" in run
+    target = "/usr/local/share/reader/converter_source_sha256"
+    for needed in ("reader.ingest.host.closure", "source_sha256", "/opt/reader/src", target):
+        assert needed in run
     assert run.lstrip().startswith("RUN ")
     assert text.index("converter_source_sha256") < text.index("USER 10001")

@@ -13,7 +13,7 @@ import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -32,7 +32,8 @@ BODY = pdf(b"watch")
 
 
 def claim_line(body: bytes = BODY, **over: Any) -> bytes:
-    upload = {"id": UPLOAD, "sha256": hashlib.sha256(body).hexdigest(), "size": len(body), "claim": CLAIM, **over}
+    digest = hashlib.sha256(body).hexdigest()
+    upload = {"id": UPLOAD, "sha256": digest, "size": len(body), "claim": CLAIM, **over}
     return json.dumps({"upload": upload}).encode() + b"\n"
 
 
@@ -101,7 +102,9 @@ class FakeStack:
             code, out = 0, self.claim_reply
         elif command == "fetch":
             if self.fetch_hang:
-                return execio.Exec(code=None, out=b"", total=0, stderr_bytes=0, overflow=False, timed_out=True)
+                return execio.Exec(
+                    code=None, out=b"", total=0, stderr_bytes=0, overflow=False, timed_out=True
+                )
             code, out = self.fetch_code, self.fetch_body
         elif command == "progress":
             code, out = self.progress_reply
@@ -111,10 +114,17 @@ class FakeStack:
             raise AssertionError(argv)
         overflow = len(out) > limit
         out = out[: limit + 1] if overflow else out
+        shape = {
+            "code": None if overflow else code,
+            "total": len(out),
+            "stderr_bytes": self.stderr,
+            "overflow": overflow,
+            "timed_out": False,
+        }
         if sink is not None and code == 0 and command == "fetch":
             sink(out)
-            return execio.Exec(code=None if overflow else code, out=b"", total=len(out), stderr_bytes=self.stderr, overflow=overflow, timed_out=False)
-        return execio.Exec(code=None if overflow else code, out=out, total=len(out), stderr_bytes=self.stderr, overflow=overflow, timed_out=False)
+            return execio.Exec(out=b"", **shape)
+        return execio.Exec(out=out, **shape)
 
     def commands(self) -> list[str]:
         return [" ".join(a[8:10]) if a[7] == "reader.ingest.inbox" else a[7] for a in self.calls]
@@ -202,7 +212,9 @@ class Harness:
 
 def work_left(h: Harness) -> list[str]:
     root = h.data / "ingest"
-    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.parent.name in ("work", "run")) if root.exists() else []
+    if not root.exists():
+        return []
+    return sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.parent.name in ("work", "run"))
 
 
 # ---- FR-INGEST-21: the loop ----
@@ -267,7 +279,8 @@ def test_a_claim_converts_sends_and_cleans_up(tmp_path: Path) -> None:
         "next --peek", "next --claim", "fetch --upload-id", "progress --upload-id", "progress --upload-id",
         "reader.ingest.receive",
     ]
-    phases = [a[a.index("--phase") + 1] if "--phase" in a else "pages" for a in h.stack.calls if a[8:9] == ["progress"]]
+    progress = [a for a in h.stack.calls if a[8:9] == ["progress"]]
+    phases = [a[a.index("--phase") + 1] if "--phase" in a else "pages" for a in progress]
     assert phases == ["pages", "sending"]
     pages = next(a for a in h.stack.calls if "--pages-done" in a)
     assert pages[pages.index("--pages-done") + 1 :] == ["50", "--pages-total", "100"]
@@ -417,7 +430,13 @@ def test_bad_claim_replies(tmp_path: Path, reply: bytes) -> None:
 
 @pytest.mark.parametrize(
     ("code", "raw"),
-    [(0, CANCEL), (3, b'{"ok":true}\n'), (1, b"\n"), (2, b'{"ok":true}\n'), (0, b'{"ok":true}\n{"ok":true}\n')],
+    [
+        (0, CANCEL),
+        (3, b'{"ok":true}\n'),
+        (1, b"\n"),
+        (2, b'{"ok":true}\n'),
+        (0, b'{"ok":true}\n{"ok":true}\n'),
+    ],
 )
 def test_reply_framing(code: int, raw: bytes) -> None:
     execio = need("reader.ingest.host.execio")
@@ -429,7 +448,8 @@ def test_reply_shapes() -> None:
     execio = need("reader.ingest.host.execio")
 
     def made(code: int | None, raw: bytes, **kw: Any) -> Any:
-        base = {"code": code, "out": raw, "total": len(raw), "stderr_bytes": 0, "overflow": False, "timed_out": False}
+        base = {"code": code, "out": raw, "total": len(raw), "stderr_bytes": 0}
+        base |= {"overflow": False, "timed_out": False}
         return execio.Exec(**{**base, **kw})
 
     ok = lambda obj: obj == {"ok": True}  # noqa: E731
@@ -585,7 +605,7 @@ def test_watcher_claim_after_a_crashed_cli_cleans_its_record(tmp_path: Path) -> 
     records.set_child(run_dir, name, 99999, "Mon Nov 23 10:00:00 2026")
 
     class Probe:
-        killed: list[int] = []
+        killed: ClassVar[list[int]] = []
 
         def alive(self, pid: int) -> bool:
             return True
@@ -617,7 +637,10 @@ def test_runtime_probe_copy_is_the_test_module() -> None:
     ("result", "state"),
     [
         ((0, {"other": {"kern.procargs2": "denied:errno 1", "proc_pidpath": "denied:errno 1"}}), "ready"),
-        ((0, {"other": {"kern.procargs2": "allowed:42 bytes", "proc_pidpath": "denied:errno 1"}}), "setup_missing"),
+        (
+            (0, {"other": {"kern.procargs2": "allowed:42 bytes", "proc_pidpath": "denied:errno 1"}}),
+            "setup_missing",
+        ),
         ((0, {"other": {"kern.procargs2": "denied:errno 22"}}), "setup_missing"),
         ((1, None), "setup_missing"),
         ((0, None), "setup_missing"),
