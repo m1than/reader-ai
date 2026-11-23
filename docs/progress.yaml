@@ -1085,6 +1085,27 @@ tasks:
         vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
         bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
         with axe 0 serious at 1280/1024/390." }
+  - { id: V.onboarding-upload, stage: V, kind: module, track: product, status: in_progress, branch: V/upload-impl,
+      needs: [V.live, V.WEB-polish],
+      what: "The upload track of V.onboarding (ADR-0029, accepted by the owner with its amendment note): SRV-INGEST
+        revision 2 (FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7, INV-INGEST-4's run-time probe), SRV-AUTH
+        FR-AUTH-22, OPS-DEPLOY FR-DEPLOY-13, OPS-CLI FR-CLI-22, SRV-SEARCH FR-SEARCH-10, SRV-CONFIG FR-CONFIG-17,
+        WEB-IMPORT (approved), WEB-UI FR-UI-13, OPS-DOD material.upload. Branch from V/onboarding with
+        V/slice-integration, V/plan and V/ingest-profile-v2 (not yet in slice-integration) merged in.",
+      next: "Live check (e2e/live/upload.sh) waits for the coordinator's go: it needs `reader up` from this branch (the
+        uploads migration, the new routes and the watcher), and the owner may be using the stack. Then the
+        coordinator's deep-reviewer code review (sandbox, egress and jobs: full rounds).",
+      note: "Specs promoted with Red, then Green: server (upload route, uploads state machine, inbox commands, receive
+        under a claim, routes), host (watch mode, convert.lock shared with the CLI, watchdogs by getsid plus
+        proc_pidpath plus cwd/args, bounded execs, caffeinate, run-time cross-process probe), CLI (reader up/status/
+        down), web (drop zone, progress, processing, converter state, Cancel/Retry/Discard; first-run redirect and
+        compile status). Tests 2026-11-23: server ingest 389 passed (10 skipped [host]/[local] by default), cli 243,
+        config 255, search/auth/deploy upload cases; [host] on this Mac: watchdog stand-ins (setsid, setpgid) killed at
+        the limit, lock not inherited and the orphan cleaned, the converter-level host tests 6 passed under the v2
+        profile, the run-time probe returns ready; web 306 unit, 212 browser, Storybook build. Bundles: /import lazy
+        7,910 B gzip (NFR-IMPORT-1 30,000), initial 113,752 B (NFR-UI-1 121,153). Spec corrections in Green:
+        FR-INGEST-19's busy column is the three-valued text FR-INGEST-20/-23 use; the run-time probe's package copy
+        is a data file (cross_process_probe.txt); FR-UI-12's chunk sentence points to FR-UI-13's mount." }
   - { id: V.ingest-profile-v2, stage: V, kind: fix, track: engineering, status: in_progress, branch: V/ingest-profile-v2,
       needs: [V.live],
       what: "Security fix to the current converter profile (SRV-INGEST FR-INGEST-4, INV-INGEST-4), found in the
