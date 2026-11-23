@@ -570,3 +570,278 @@ vectors:
 #
 # Dependencies added to server/pyproject.toml with Green: fastapi, uvicorn, sqlalchemy[asyncio], asyncpg, alembic,
 # webauthn==3.0.1; test-only: httpx (testcontainers Postgres is already in dev).
+
+# ---- Amendment (DRAFT, 2026-11-23, V/signup, for ADR-0031 "Open self-service sign-up with owner approval",
+# proposed). Owner request 2026-11-23: a "Sign up" page from the sign-in screen, open sign-up, with rate limiting and
+# owner approval. Held under `proposed_*` keys (trace-check reads only `requirements`, `invariants` and `vectors`;
+# this spec is approved) until the owner accepts ADR-0031 and the deep-reviewer approves; then the items move into
+# `policy`, `tables`, `config_errors`, `failure_reasons`, `requirements` and `invariants` with their Red tests.
+# Complex area (auth): full deep-reviewer rounds.
+#
+# Ids: FR-AUTH-19..21 are V/auth-page-style's, FR-AUTH-22 is V/onboarding's (raw-body routes, also held under a
+# `proposed_requirements` key in this file on that branch). Merge note: when both branches meet, the two
+# `proposed_requirements` lists become one key (a YAML mapping cannot hold the key twice).
+#
+# What changes in approved text when this moves in (stated here so the reviewer sees every touched rule):
+#   - FR-AUTH-1: `sync_users` inserts and disables only `source = 'config'` users (FR-AUTH-24).
+#   - FR-AUTH-10: the `public` list adds `GET /api/auth/signup`, `POST /api/auth/signup/options` and
+#     `POST /api/auth/signup/verify`; session routes add the owner's sign-up routes (FR-AUTH-29).
+#   - FR-AUTH-13: the sign-up routes answer 404 only while `sharing.signup` is `off` (FR-AUTH-23).
+#   - FR-AUTH-14 / FR-AUTH-20 / FR-AUTH-21: a third page and its states; FR-AUTH-14's ceremony of the two existing
+#     pages is unchanged; the sign-in page gains one link and one state (FR-AUTH-31).
+#   - FR-AUTH-16 and `config_errors`: `signup_not_supported` now fires for any `sharing.signup` other than absent,
+#     `false`, `off` or `open`; a new post-migration startup code `handle_taken_by_signup` (FR-AUTH-24).
+#   - FR-AUTH-17: the cleanup adds the FR-AUTH-30 deletions.
+#   - INV-AUTH-2: sign-up verify creates no session (INV-AUTH-10).
+#   - INV-AUTH-8: `signup_attempts` is a system table.
+#
+# Cross-spec (paired changes, written with Green):
+#   - WEB-ACCOUNTS (new, draft): the owner's "Sign-ups" screen and the header link calling FR-AUTH-29's routes.
+#   - WEB-UI: route `/signups` and the header link for the owner (WEB-ACCOUNTS, reserved id FR-UI-14); the test
+#     server's fixed map of static auth files grows from four to five entries (signup.html).
+#   - OPS-DEPLOY: deploy/reader.example.yaml shows `sharing: { signup: off }` with a comment.
+#   - OPS-DOD: operations `auth.signup` and `auth.approve` (added on this branch with every cell `missing`); their
+#     `routes` are added with the Route entries in Green (T10 refuses a route the registry lacks).
+#   - SRV-AGENT: none. A sign-up user has no `users[]` entry, so the proxy has no token for it (`provider_missing`).
+#   - SRV-NOTIFY (stage 2, not written): an event `signup.pending` for a Telegram notice, when that module exists.
+#
+# Spikes before approval: `spikes/signup-client-ip` measures the address Caddy sees for two host clients under Docker
+# Desktop (ADR-0031 hypothesis: one gateway address for all). The per-client limit is kept either way; its result
+# decides only whether the spec states it as a real per-client bound on the Mac.
+
+proposed_policy:
+  # Policy values, not measurements (like `policy` above); changing one is a spec change.
+  signup:
+    switch_values: [off, open]            # `false` is read as off; default off (ADR-0031 owner question 1)
+    global_limit: { max: 30, window_s: 3600 }     # signup/options calls that pass the limits, all clients
+    client_limit: { max: 5, window_s: 3600 }      # the same, per client key (FR-AUTH-26)
+    pending_max: 20                       # structural: a list the owner reads in one screen
+    pending_ttl_s: 604800                 # 7 days, then the pending account is deleted (FR-AUTH-30)
+    handle_pattern: "^[a-z][a-z0-9-]{2,31}$"      # plus: no "--", no trailing "-"
+    skeleton_map: { "0": "o", "1": "l", "rn": "m", "vv": "w", "-": "" }   # applied left to right, longest first
+    reserved_handles: [owner, admin, administrator, root, system, support, help, security, staff, moderator, reader,
+      reader-ai, readerai, api, auth, signin, signup, signout, bootstrap, register, login, logout, mcp, live-check,
+      null, undefined, anonymous, me, settings, static, assets, signups]
+    display_name_max: 64                  # characters after NFC and trimming
+
+proposed_tables:
+  users: "adds source text NOT NULL DEFAULT 'config' CHECK (source IN ('config','signup')), state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','pending')), handle_skeleton text UNIQUE NOT NULL (backfilled from handle for existing rows; config handles get it too), approved_at timestamptz null"
+  auth_challenges: "kind CHECK adds 'signup'; adds signup_handle text null, signup_display_name text null, signup_webauthn_user_id bytea null (all three set exactly when kind = 'signup')"
+  signup_attempts: { system: true, columns: "id bigserial, client_sha256 bytea, at timestamptz" }
+
+proposed_config_errors:
+  - { code: signup_not_supported, when: "sharing.signup is present and not one of false, off, open (replaces the stage-1 rule)" }
+  # Post-migration startup code (needs the database, so it is not a config_errors row checked before connecting):
+  # `handle_taken_by_signup` (FR-AUTH-24).
+
+proposed_errors: [handle_unavailable, display_name_invalid, signup_full, signup_failed, pending_approval, owner_only,
+  not_found]
+
+proposed_requirements:
+  - id: FR-AUTH-23
+    text: >-
+      **Switch.** `sharing.signup` is read as `off` when absent or `false`, `off` when `off`, `open` when `open`;
+      anything else stops the api with `signup_not_supported` (FR-AUTH-16 order unchanged). While `off`: `GET
+      /api/auth/signup`, `POST /api/auth/signup/options` and `POST /api/auth/signup/verify` answer 404
+      `{"error":"not_found"}` before reading the body, writing a row or applying any limit (FR-AUTH-13's behaviour),
+      and the sign-in page carries no sign-up link (FR-AUTH-31). The owner's sign-up routes of FR-AUTH-29 work in
+      both modes (pending and approved sign-up accounts remain after the switch goes `off`). The switch is read at
+      startup only; changing it needs an api restart, as every reader.yaml value does. [unit] the parse table
+      (absent, false, off, open, true, "yes", 1) and the 404s with zero rows written in `off`.
+  - id: FR-AUTH-24
+    text: >-
+      **Schema and sync.** One migration adds `proposed_tables`. Existing rows get `source = 'config'`, `state =
+      'active'` and their skeleton (FR-AUTH-25); if two existing handles share a skeleton the migration still
+      succeeds (the unique index is on sign-up rows only: `CREATE UNIQUE INDEX … ON users (handle_skeleton) WHERE
+      source = 'signup'`, and FR-AUTH-25 compares a candidate with every row). `sync_users` (FR-AUTH-1) changes in
+      two ways: (1) the disable sweep reads `… WHERE source = 'config' AND disabled_at IS NULL AND handle <>
+      ALL(:handles)`, so sign-up users are never disabled by reader.yaml; (2) before inserting, if any `users[]`
+      handle equals the handle of a `source = 'signup'` row, the api stops with `reader-server:
+      handle_taken_by_signup` (one line, no handle printed) and changes nothing; the insert's `ON CONFLICT (handle)
+      DO UPDATE` adds `WHERE users.source = 'config'` as a second guard. Reason: the agent proxy loads provider
+      tokens by handle from `users[]` (SRV-AGENT FR-AGENT-3), so adopting a sign-up row would hand a configured
+      provider token to a stranger's passkey. `reader-server bootstrap-link --handle <h>` refuses a `source =
+      'signup'` user with exit 1 `signup_user` (such a user registered its passkey through sign-up). [db] migration
+      on a database with config users (backfill, defaults); a sign-up user survives a restart whose `users[]` lacks
+      it; a `users[]` handle equal to a sign-up handle stops the api with that one line and leaves both rows as they
+      were; `bootstrap-link --handle` of a sign-up user exits 1.
+  - id: FR-AUTH-25
+    text: >-
+      **Handle and display name.** A handle is available when it is a string that matches `handle_pattern`, has no
+      `--` and no trailing `-`, is not in `reserved_handles`, and its skeleton equals neither the skeleton of a
+      reserved handle nor the `handle_skeleton` of any `users` row (any source, any state, disabled included). The
+      skeleton is the handle with `skeleton_map` applied (longest key first at each position, left to right, hyphens
+      removed). A display name is valid when it is a string that, after NFC and trimming of Unicode White_Space, has
+      1..`display_name_max` characters and no character of general category Cc or Cf. Nothing is normalised
+      silently: a handle with an upper-case letter is unavailable, not lower-cased. [unit] a table of handles —
+      `ab` (too short), 33 characters, `Ivan`, `ivan_`, `-ab`, `ab-`, `a--b`, `аbc` (Cyrillic а), `admin`, `adm1n`
+      against reserved `admin`, `rnike` against a user `mike`, `i-van` against `ivan`, `live-check`, a valid `lc-1a2b`
+      — and of display names (empty, spaces only, 65 characters, a tab, U+202E, U+200B, a valid Cyrillic name, a
+      composed and a decomposed é counted as one); [db] the skeleton is compared with config, pending, active and
+      disabled rows.
+  - id: FR-AUTH-26
+    text: >-
+      **`POST /api/auth/signup/options`** (public, `open` only), with `{handle, display_name}`. Order, first refusal
+      wins: (1) FR-AUTH-11's failure limit → 429 `rate_limited` with its Retry-After; (2) the client limit, then the
+      global limit, over `signup_attempts` rows within their windows → 429 `rate_limited`, `Retry-After` = seconds
+      until the oldest counted row leaves that window (ceil, at least 1), no row added; (3) one `signup_attempts` row
+      is inserted (committed, whatever follows); (4) a body that is not an object, or a display name that is not
+      valid → 400 `display_name_invalid` only when the handle part is a string (else 409 `handle_unavailable`); (5)
+      the count of `state = 'pending'` users ≥ `pending_max` → 429 `signup_full` with no Retry-After; (6) the handle
+      not available (FR-AUTH-25) → 409 `handle_unavailable`, the same body for taken, pending, reserved, confusable
+      and malformed handles; (7) a ceremony of kind `signup` with the handle, the NFC-trimmed display name and a fresh
+      64-byte `webauthn_user_id`, and registration options as FR-AUTH-3 (`user.name` = handle, `user.displayName` =
+      display name, `user.id` = that id, empty `excludeCredentials`), with the ceremony cookie. The client key is the
+      last address of `X-Forwarded-For` when the TCP peer is inside the `front` network (10.230.1.0/24, where only
+      Caddy and the api live), else the TCP peer's address; the stored value is SHA-256 of a 32-byte random salt
+      drawn at api start followed by the address text, so a restart resets per-client counts and no address is
+      stored or logged. Steps (2)–(3) run under `pg_advisory_xact_lock(<auth namespace>, 2)` so concurrent calls
+      cannot overshoot a limit. No failure row is written by options. [db] each refusal in order with its body and
+      headers, rows written per case; 6 calls from one client key → the 6th is 429 and adds no row; 31 calls from 31
+      keys → the 31st is 429; the cap at exactly 20 pending; X-Forwarded-For honoured only from a `front` peer
+      (a forged header from another peer is ignored); the stored key is not the address's plain hash; concurrent
+      calls at max − 1 add exactly one row.
+  - id: FR-AUTH-27
+    text: >-
+      **`POST /api/auth/signup/verify`** (public, `open` only; FR-AUTH-11's failure limit first, as for every
+      ceremony route). One transaction, in order: take `pg_advisory_xact_lock(<auth namespace>, 3)` (one sign-up
+      commit at a time, so the cap and the skeleton check are exact); consume the `signup` ceremony (INV-AUTH-1;
+      `ceremony_invalid`); verify through the seam (FR-AUTH-15, the registration checks); re-check the cap (→ 429
+      `signup_full`) and the handle (→ 409 `handle_unavailable`: another sign-up took it after this ceremony's
+      options); insert the user (`role = 'learner'`, `source = 'signup'`, `state = 'pending'`, the ceremony's
+      handle, skeleton, display name and `webauthn_user_id`, `consent_evaluation = false`, `consent_tuning = false`)
+      and the credential (`credential_id_taken` if it exists). No session row and no session cookie. Success answers
+      202 `{"status":"pending"}` and clears the ceremony cookie. A verification failure rolls back (the challenge
+      stays usable until it expires, like FR-AUTH-5), inserts the `auth_failures` row in a separate transaction and
+      answers 400 `signup_failed`; a cap or handle refusal at this step rolls back without a failure row. The role
+      is a literal in the insert; no request field reaches `role`, `source` or `state`. [db] success leaves exactly
+      one user and one credential and no session; a mutated response fails with its seam reason and leaves no user;
+      a body with `role: "owner"` (and any extra field) still yields a learner; two concurrent verifies for one
+      handle leave one user and one `handle_unavailable`; 20 pending plus two concurrent verifies leave 20; a reused
+      ceremony fails `ceremony_invalid`.
+  - id: FR-AUTH-28
+    text: >-
+      **Pending users cannot authenticate.** `signin/verify` (FR-AUTH-7) runs its checks and the seam unchanged; when
+      they pass and the credential's user has `state = 'pending'`, it answers 403 `{"error":"pending_approval"}`: the
+      challenge stays consumed, no counter update, no session, no `auth_failures` row, one log record `auth
+      pending_signin` with the user id only. The check comes after signature verification, so only the passkey's
+      holder learns the state. `session_user` (FR-AUTH-10) adds `u.state = 'active'`, so even a session row for a
+      user whose state became pending (none can be created) would not authenticate. `register/*` need a session, so
+      a pending user cannot add passkeys. [db] a pending user's valid assertion → 403 with no session row; a forged
+      assertion against a pending user's credential → 400 `signin_failed` (the signature is checked first); a
+      session row inserted directly for a pending user does not authenticate `/api/me`.
+  - id: FR-AUTH-29
+    text: >-
+      **Owner routes.** All four refuse a non-owner with 403 `owner_only` (handler check, as SRV-INGEST does).
+      `GET /api/auth/signups` (`session`) → 200 `{"pending": [{id, handle, display_name, requested_at}], "accounts":
+      [{id, handle, display_name, approved_at, disabled}]}`, pending oldest first, accounts by handle; only `source =
+      'signup'` users. `POST /api/auth/signups/{id}/approve` (`recent_session`, body `{}`) on a pending sign-up user →
+      `state = 'active'`, `approved_at = now()`, 200 `{"status":"active"}`. `POST /api/auth/signups/{id}/reject`
+      (`recent_session`) on a pending sign-up user → deletes its credentials and the user row in one transaction
+      (a pending user owns no other row), 204. `POST /api/auth/signups/{id}/disable` (`recent_session`) on an active
+      sign-up user → `disabled_at = now()` and its sessions revoked, rows kept (INV-AUTH-9's meaning), 204;
+      disabling is reversible only through the database until a later spec adds an enable route.
+      Any other target (unknown id, a malformed id, a config user, the wrong state) → 404 `not_found`, so these
+      routes never touch a configured user. An older owner session gets 401 `reauth_required` from the dispatcher.
+      Each action logs one record `auth signup_<action>` with the target id. [db] each route for owner, learner
+      (403) and no session (401); approve, reject and disable on every wrong target (404 and no change); a config
+      learner's id is 404 on all three; approve then sign-in → 200 and `/api/me` role learner; reject then the same
+      handle is available again; disable revokes the sessions; a 15-minute-old owner session → 401 `reauth_required`.
+  - id: FR-AUTH-30
+    text: >-
+      **Cleanup and logging.** FR-AUTH-17's task also deletes `signup_attempts` rows older than the larger window and
+      pending sign-up users whose `created_at` is more than `pending_ttl_s` ago, with their credentials. Signup
+      ceremonies are expired and deleted like the others. Logs (FR-AUTH-18 style): failures as `auth failure <route>
+      <reason>`; the outcomes `signup_pending <user id>`, `pending_signin <user id>` and `signup_<action> <user id>`;
+      never a handle, a display name, a client address or its key. [db] the expiry at ttl − 1 s and ttl + 1 s; the
+      log canary: a run with a distinctive handle, display name and X-Forwarded-For address finds none of them in
+      captured logs, Uvicorn access logs or error bodies (INV-AUTH-5's harness).
+  - id: FR-AUTH-31
+    text: >-
+      **The sign-up page and the states.** `GET /api/auth/signup` serves `signup.html` (FR-AUTH-14's static rules,
+      FR-AUTH-19's look, FR-AUTH-21's headers: `text/html`, `Cache-Control: no-cache`, one stylesheet, one script,
+      no inline style, script or handler). The card holds the mark, brand and tagline, the `h1` "Create an account",
+      the lead "Choose a handle and create a passkey. The owner of this reader-ai approves new accounts.", a `form`
+      with `novalidate` and no `action` (the script handles submit and calls `preventDefault`), two labelled inputs —
+      "Handle" (`id="handle"`, `autocomplete="username"`, `autocapitalize="none"`, `spellcheck="false"`,
+      `maxlength="32"`, hint "3–32 lower-case letters, digits and hyphens. The owner sees it; it need not be your
+      name.") and "Display name" (`id="display-name"`, `autocomplete="name"`, `maxlength="64"`) — the status line and
+      the primary button "Create account with a passkey", then a link "Already have an account? Sign in"
+      (`/api/auth/signin`). passkey.js runs the ceremony for `data-ceremony="signup"`: POST options with `{handle,
+      display_name}`, `navigator.credentials.create` with `parseCreationOptionsFromJSON`, POST verify with
+      `credential.toJSON()`; on 202 it shows `pending` and does not navigate. Inputs are disabled with the button in
+      `waiting`. Before sending, the script checks the handle against `handle_pattern` and the two hyphen rules and the
+      display name for emptiness; a failure shows the state without any request. New rows of FR-AUTH-20's table (the
+      existing rows apply to this page too: `ready`, `unsupported`, `waiting`, `cancelled`, `rate_limited`,
+      `unreachable`, `failed`):
+      | `handle_invalid` | the page's own check fails | "Use 3–32 lower-case letters, digits and hyphens, starting with a
+      letter." | enabled; focus to the handle input, `aria-invalid="true"` on it, the message linked with
+      `aria-describedby` |
+      | `display_name_invalid` | empty after trimming, or options answers 400 `display_name_invalid` | "Enter a display
+      name of up to 64 characters." | enabled; focus to the display-name input, `aria-invalid="true"` |
+      | `handle_unavailable` | options or verify answers 409 `handle_unavailable` | "This handle is not available.
+      Choose another." | enabled; focus to the handle input |
+      | `signup_full` | options or verify answers 429 `signup_full` | "Sign-ups are paused until the owner reviews
+      the waiting requests. Try again later." | hidden |
+      | `not_registered` (sign-up copy) | verify answers 400 `signup_failed` | "That passkey could not be registered.
+      Try again." | enabled |
+      | `pending` | verify answered 202 | "Account created. The owner must approve it before you can sign in." |
+      hidden; focus to the status line |
+      The sign-in page: while `open`, the api serves signin.html with one link after the button, "New here? Create an
+      account" (`/api/auth/signup`), by replacing a fixed comment marker with a fixed fragment chosen at startup (no
+      request data reaches the page); while `off` the marker is removed. Sign-in adds one state:
+      | `pending_approval` | signin verify answers 403 `pending_approval` | "This account is waiting for the owner's
+      approval. Try again later." | enabled |
+      No server text reaches the DOM. [unit] the pages' static rules (FR-AUTH-21's unit list extended to signup.html),
+      the sign-in page in both modes (link present exactly once / absent, bytes otherwise equal); [browser] FR-AUTH-32.
+  - id: FR-AUTH-32
+    text: >-
+      **Checks.** [browser] e2e/web/auth/signup.spec.ts against WEB-UI's test server (five static files under the
+      Caddyfile CSP), in the `auth-dark` and `auth-light` projects, every sign-up state and the sign-in
+      `pending_approval` state at 1280, 1024 and 390 px, with FR-AUTH-21's oracle: message, button state,
+      `data-state`, focus target and `aria-invalid`; axe with no serious or critical issue; `scrollWidth ≤
+      clientWidth`; no `securitypolicyviolation`; the full list of requests equals the page's static GETs followed by
+      the case's exact POSTs (method, path, `content-type: application/json`, body — the options body exactly
+      `{"handle": …, "display_name": …}`), with no request at all for `handle_invalid` and `display_name_invalid`;
+      the WebAuthn stub's `publicKey` equals the stubbed options; a distinctive server body and exception text never
+      appear in `#status`; `pending` asserted with no navigation. The sign-in page's link is asserted in both modes.
+      [live] a spend-free `signup` step in the owner suite (e2e/web/live/owner.slice.ts, run by `verify-all.sh
+      --slice`), never touching any account it did not create: (a) if `GET /api/auth/signup` is 404 it records
+      "signup off: page and routes 404" (also the two POSTs) and skips the rest with that reason; (b) if open, a second
+      browser context with its own CDP virtual authenticator signs up `lc-<8 random hex>` through the page, sees
+      `pending`, then on the sign-in page sees `pending_approval`, and `/api/me` is 401; the owner (signed in again
+      for a recent session) opens Sign-ups, finds that handle, approves it; the new context signs in, `/api/me` is
+      200 with role learner; a second run-generated handle is signed up and rejected through the screen and is
+      gone from `GET /api/auth/signups`; (c) cleanup in `finally`: for each id this run created (read from `GET
+      /api/auth/signups` by the run's exact handles; never by pattern), `docker compose exec postgres psql` deletes,
+      by that id only and only where `source = 'signup'`, its sessions, credentials and user row, and reports the
+      count (1 per id, else FAIL). A pending cap or rate limit hit by real sign-ups makes the step SKIP with the reason,
+      not FAIL. The step uses two `signup/options` calls per run, so on the Mac (one client key, ADR-0031's
+      hypothesis) at most two runs per hour.
+
+proposed_invariants:
+  - id: INV-AUTH-10
+    text: >-
+      No sign-up route creates a session, a user with a role other than `learner`, or a user with `source` other than
+      `signup` or `state` other than `pending`, whatever the request body holds; and no route other than FR-AUTH-29's
+      approve sets `state = 'active'` on a sign-up user. [db] property test over arbitrary JSON bodies to both sign-up
+      routes: after each, every `source = 'signup'` user is a pending learner and the sessions table is unchanged.
+  - id: INV-AUTH-11
+    text: >-
+      A user whose state is `pending` is never authenticated: no request with any cookie gets 200 from `/api/me` or
+      any `session` route for it, before approval or after rejection. [db] together with FR-AUTH-28's cases.
+  - id: INV-AUTH-12
+    text: >-
+      The number of pending users never exceeds `pending_max`, and the `signup_attempts` rows within a window never
+      exceed its `max`, under any interleaving of concurrent options and verify calls. [db] 40 concurrent options and
+      40 concurrent verifies against a near-full state.
+  - id: INV-AUTH-13
+    text: >-
+      reader.yaml never changes a sign-up account: api startup neither disables, re-enables nor re-roles a `source =
+      'signup'` row, and a configured handle never adopts one (FR-AUTH-24). [db] restarts with `users[]` lists that
+      omit, include (startup refused) and are unrelated to sign-up handles; rows compared before and after.
+  - id: INV-AUTH-14
+    text: >-
+      While `sharing.signup` is `off`, no request writes a `users`, `webauthn_credentials`, `auth_challenges` or
+      `signup_attempts` row through a sign-up route. [db] a property test over bodies and headers in `off` mode with
+      row counts before and after.
