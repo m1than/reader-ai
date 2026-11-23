@@ -85,6 +85,37 @@ async def test_receive_then_import(pg: Pg, tmp_path: Path) -> None:
         assert await w.scalar("SELECT count(*) FROM material_spans") == 8
 
 
+async def test_import_enqueues_search_embed_for_its_ingest(pg: Pg, tmp_path: Path) -> None:
+    """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): the import enqueues search.embed for the new ingest."""
+    from sqlalchemy import text
+
+    from reader.search.jobs import embed_args
+    from reader.search.store import fts_config_of
+
+    async with world(pg, tmp_path) as w:
+        await receive(w, tar())
+        await w.work()
+        ingest_id = await w.scalar("SELECT id FROM ingests")
+        rows = await w.rows("SELECT args, outcome FROM job_keys WHERE kind = 'search.embed'")
+        assert len(rows) == 1
+        args, outcome = rows[0]
+        async with w.engine.connect() as conn:
+            fts = await fts_config_of(conn, MATERIAL_SHA, ingest_id)
+            expected = embed_args(MATERIAL_SHA, ingest_id, fts).model_dump(mode="json")
+            queued = (
+                await conn.execute(
+                    text("SELECT count(*) FROM procrastinate_jobs WHERE task_name = 'search.embed' AND status = 'todo'")
+                )
+            ).scalar()
+        assert args == expected
+        assert outcome is None  # enqueued, not run: work() serves only the ingest queue here
+        assert queued == 1
+        again = await receive(w, tar())
+        assert again["result"] == "already_done"
+        await w.work()
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'search.embed'") == 1
+
+
 async def test_unknown_material_and_version_mismatch(pg: Pg, tmp_path: Path) -> None:
     async with world(pg, tmp_path) as w:
         assert await refused(w, tar(material_sha256="c" * 64)) == "unknown_material"

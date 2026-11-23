@@ -219,7 +219,7 @@ class World:
     async def work(self) -> None:
         """Run the worker until the queues are empty."""
         await self.app.run_worker_async(
-            queues=self.jobs.queues, wait=False, install_signal_handlers=False, listen_notify=False
+            queues=["ingest"], wait=False, install_signal_handlers=False, listen_notify=False
         )
 
 
@@ -252,12 +252,20 @@ async def world(pg: Pg, tmp: Path) -> AsyncIterator[World]:
     blobs.mkdir()
     app = make_app(target)
     await app.open_async()
-    # The kinds of reader.ingest.jobs, built for this test's blob root (JOB_KINDS uses /var/lib/reader/blobs).
-    jobs = Jobs(engine, app, Catalog(ingest_jobs.make_kinds(blobs)), [pg.password])
+    # The kinds of reader.ingest.jobs, built for this test's blob root (JOB_KINDS uses /var/lib/reader/blobs), plus
+    # search.embed, which the import handler enqueues (FR-INGEST-13) through reader.jobs.running(). work() runs only
+    # the ingest queue, so the embed job is enqueued but never executed here (no embed service in these tests).
+    from reader.jobs import worker as jobs_worker
+    from reader.search.jobs import JOB_KINDS as SEARCH_KINDS
+
+    jobs = Jobs(engine, app, Catalog((*ingest_jobs.make_kinds(blobs), *SEARCH_KINDS)), [pg.password])
     w = World(engine, settings, config, blobs, users, pg, app, jobs)
+    previous = jobs_worker._RUNNING[0]
+    jobs_worker._RUNNING[0] = jobs
     try:
         yield w
     finally:
+        jobs_worker._RUNNING[0] = previous
         await app.close_async()
         await engine.dispose()
 
