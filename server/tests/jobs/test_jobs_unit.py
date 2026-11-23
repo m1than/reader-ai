@@ -124,6 +124,17 @@ def test_kind_modules_are_a_declared_list() -> None:
     ]
 
 
+def test_start_hooks_are_the_declared_modules_on_worker_start() -> None:
+    """FR-EVENTS-1: `hooks=None` means these, in KIND_MODULES order (ingest and tutor export none)."""
+    require_jobs()
+    import reader.pipeline.jobs
+    import reader.search.jobs
+    from reader.jobs.catalog import start_hooks
+
+    assert start_hooks() == [reader.search.jobs.on_worker_start, reader.pipeline.jobs.on_worker_start]
+    assert start_hooks(()) == []
+
+
 # ---- FR-EVENTS-2, -13: keys and lock ids
 
 
