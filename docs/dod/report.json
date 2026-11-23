@@ -1,0 +1,4413 @@
+{
+  "commit": "1635505",
+  "exit_code": 0,
+  "live_fail_unmapped": 0,
+  "operations": [
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-AUTH-14",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-CLI-21",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: passkey registration through the bootstrap page (learner live-check)",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: bootstrap link issued for live-check (not printed)",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: bootstrap options",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: registration with a per-run software passkey",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-AUTH-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: POST without Origin is refused (403)",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-AUTH-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-CLI-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: bootstrap token appears in no artifact",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [
+            "no axe run on /api/auth/bootstrap (the browser suite scans only / and the lesson page)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget for the bootstrap ceremony; record timings in the live suite"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-AUTH-18",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-AUTH-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "auth.bootstrap",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Register the first passkey from a one-time bootstrap link"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-AUTH-14",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-UI-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: sign out, then sign in through the real page with the same passkey",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: sign-in options",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: sign-in with the same passkey",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: signed in again: /api/me is 200",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-AUTH-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: /api/me reports the learner; session cookie is __Host-, HttpOnly, Secure, SameSite",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: anonymous /api/me is 401",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-AUTH-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [
+            "no axe run on /api/auth/signin (the browser suite scans only / and the lesson page)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget for the sign-in ceremony; record timings in the live suite"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-AUTH-18",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-AUTH-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-9",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "auth.signin",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Sign in with a passkey"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-AUTH-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-UI-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: signed out: /api/me is 401",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-AUTH-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-3",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-AUTH-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for sign-out (FR-AUTH-18 covers failures only)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-UI-7",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "auth.signout",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Sign out"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-AUTH-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-AUTH-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AUTH-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AUTH-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-AUTH-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [
+            "no add-passkey page in the slice (api only); a page and its axe run come with stage 4b"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-AUTH-18",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-AUTH-11",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "auth.add_passkey",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Add another passkey to my account (recent session)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-INGEST-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-13",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-5",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-INGEST-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-7",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-INGEST-8",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-INGEST-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-INGEST-2",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "VEC-INGEST-3",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-INGEST-5",
+            "no evidence in this run for item FR-INGEST-7",
+            "no evidence in this run for item FR-INGEST-8",
+            "no evidence in this run for item VEC-INGEST-2",
+            "no evidence in this run for item VEC-INGEST-3"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-INGEST-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-EVENTS-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-INGEST-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-INGEST-4",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "INV-INGEST-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item INV-INGEST-4"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-INGEST-5",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item INV-INGEST-5"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-INGEST-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-5",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-INGEST-5"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-INGEST-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-16",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-INGEST-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "material.ingest",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 20,
+          "p50_ms_max": 6000,
+          "per": "page",
+          "source": "ADR-0021 revisit_when ≥ 10 pages/min = 6,000 ms/page (NFR-INGEST-1); measured 15.69–15.85 pages/min confined (spikes/ingest-confine)"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": "page"
+      },
+      "missing": 5,
+      "status": "MISSING",
+      "title": "Add a material to reader.yaml and ingest it (reader-ingest, confined native converter, import job)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-INGEST-3",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-INGEST-3",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [],
+          "gaps": [
+            "no canary check for the setup step's output"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (a multi-GB download, network dependent)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for setup"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-INGEST-3",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "ingest.setup",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Prepare the converter venv and models (reader-ingest --setup)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-EVENTS-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-12",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-EVENTS-8",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-INGEST-5",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item INV-INGEST-5"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-INGEST-12",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-EVENTS-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-INGEST-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "ingest.requeue",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Requeue a dead import (reader-ingest --requeue)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-INGEST-15",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-INGEST-17",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-INGEST-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-INGEST-15",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-INGEST-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [],
+          "gaps": [
+            "canary: span text never reaches api logs (INV-INGEST-5's [db] test reads a spans page that does not hold the canary span; a read of that span's page under caplog is needed)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for material reads"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "VEC-INGEST-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "material.browse",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Browse my materials (list, outline, spans of a page)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-SEARCH-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-SEARCH-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-SEARCH-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-SEARCH-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SEARCH-7",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-SEARCH-5",
+              "kind": "item",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item INV-SEARCH-5"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            },
+            {
+              "id": "INV-SEARCH-8",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "FR-SEARCH-8 requires the line; no test asserts it is emitted"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-SEARCH-7",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "search.query",
+      "latency": {
+        "budget": {
+          "kind": "baseline",
+          "n_min": 40,
+          "p95_ms_max": 30000,
+          "source": "SRV-SEARCH query call timeout 30 s (spec/modules/SRV-SEARCH.yaml:141: worst batch of 8 = 13.29 s + query 0.93 s, about 2× margin; spikes/embed-service); a hard deadline, so a baseline, not a target"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Search the owner's materials (hybrid dense + full text)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-LESSON-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-UI-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-UI-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: lesson list shows the fixture lesson",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-LESSON-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-LESSON-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [],
+          "gaps": [
+            "canary: lesson titles and text never reach api logs"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "INV-UI-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "/",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (NFR-UI-1 bounds bundle bytes, not time)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for lesson reads"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-UI-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "lesson.list",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 4,
+      "status": "MISSING",
+      "title": "List my lessons"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-LESSON-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-LESSON-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-RENDER-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-RENDER-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-RENDER-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-RENDER-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-NOTEBOOK-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: lesson renders: markdown, references, open finding",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-LESSON-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-NOTEBOOK-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-RENDER-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-RENDER-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-UI-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-UI-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: no Content-Security-Policy violation during the whole session",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [],
+          "gaps": [
+            "canary: lesson cell text never reaches api logs"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "INV-UI-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget for time to first render of a lesson"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for lesson reads"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-LESSON-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "lesson.open",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 4,
+      "status": "MISSING",
+      "title": "Open a lesson and read it (markdown, math, code, citations, open findings)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-KERNEL-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-KERNEL-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-KERNEL-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-SANDBOX-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-KERNEL-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: an error ends the cell in error",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: cell runs: print(1) outputs 1",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: math and code render in kernel outputs (KaTeX, Shiki)",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-KERNEL-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-KERNEL-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-KERNEL-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-KERNEL-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-KERNEL-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SANDBOX-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SANDBOX-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SANDBOX-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: HTML and SVG outputs are shown as text, never parsed",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: sandbox: no egress, no secrets, no tokens in the environment",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-KERNEL-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SANDBOX-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-14",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-NOTEBOOK-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "cell.run",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 30,
+          "p95_ms_max": 500,
+          "source": "NFR-KERNEL-1, roadmap SRV-KERNEL row; reviewer measured 47 ms median, 51 ms p95 over 30 runs direct to the gateway"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Run a lab cell"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: interrupt a busy loop",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-KERNEL-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-KERNEL-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget for interrupt-to-idle"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-8",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "cell.interrupt",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Interrupt a running cell"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-SANDBOX-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-KERNEL-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: reset with confirmation, then the cell runs again",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-KERNEL-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SANDBOX-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-SANDBOX-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-KERNEL-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-SANDBOX-9",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-14",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-KERNEL-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "cell.reset",
+      "latency": {
+        "budget": {
+          "kind": "baseline",
+          "n_min": 3,
+          "p95_ms_max": 30000,
+          "source": "FR-KERNEL-5 reset deadline (a hard deadline, so a baseline); measured 1.12–1.20 s round trips over 3 resets (docs/progress.yaml:541, OPS-SANDBOX)"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Reset the notebook kernel (fresh container)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-NOTEBOOK-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: Run all runs the lesson’s labs from their original source",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-KERNEL-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-KERNEL-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-KERNEL-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (bounded per cell by FR-KERNEL-10's 60 s timeout)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for this kernel action (INV-KERNEL-6 limits what kernel logs may hold: a privacy item)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-NOTEBOOK-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-NOTEBOOK-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "cell.run_all",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Run all cells of a lesson"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-LESSON-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [],
+          "gaps": [
+            "canary: course titles never reach api logs"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for course import"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "course.import",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Import a course plan (gate G1)"
+    },
+    {
+      "cost": {
+        "budget": {
+          "kind": "target",
+          "n_min": 1,
+          "source": "ADR-0005 per-lesson target ($100 for 23 lessons); the SRV-PIPELINE run cap is $8.00 (bounds.run_cap_usd, a declared deviation); measured $2.42–2.97 for L02",
+          "usd_per_run_max": 4.35
+        },
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-AGENT-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-LESSON-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-9",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-AGENT-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AGENT-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AGENT-1",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "INV-AGENT-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AGENT-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-PIPELINE-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item INV-AGENT-1"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-AGENT-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-PIPELINE-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [
+            {
+              "id": "cost",
+              "kind": "budget",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-AGENT-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-AGENT-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AGENT-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-AGENT-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget cost"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-AGENT-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-AGENT-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-PIPELINE-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-PIPELINE-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "lesson.compile",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 1,
+          "p95_ms_max": 2700000,
+          "source": "NFR-PIPELINE-1, 45 min per lesson (ADR-0005 / spikes/compile-cost pass criterion); measured 8.3–9.4 min for L02. n_min 1: each sample costs ≈ $2.4–3.0 (structural)"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Compile a lesson with agents (draft, fact-check, review, revise, labs, G2 report)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-11",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-PIPELINE-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "lesson.compile_status",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 1,
+      "status": "MISSING",
+      "title": "Watch a compile run (state, stages, spend)"
+    },
+    {
+      "cost": {
+        "budget": {
+          "kind": "baseline",
+          "n_min": 1,
+          "source": "SRV-PIPELINE bounds.run_cap_usd: a resume requeues the dead step of the same run, which keeps its stored cap_usd (FR-PIPELINE-11, FR-AGENT-9); a hard cap, so a baseline",
+          "usd_per_run_max": 8
+        },
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-EVENTS-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-11",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-11",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-PIPELINE-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [
+            {
+              "id": "cost",
+              "kind": "budget",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-AGENT-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-AGENT-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget cost"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-EVENTS-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-PIPELINE-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "lesson.compile_resume",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Resume a compile run with a dead step"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-NOTEBOOK-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-PIPELINE-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "browser: lesson renders: markdown, references, open finding",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-LESSON-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-PIPELINE-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-PIPELINE-5",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-PIPELINE-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [],
+          "gaps": [
+            "no spec requires a log line for reading the G2 report"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-NOTEBOOK-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-PIPELINE-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no test asserts the status routes' answer while the G2 report is absent (run running, stalled or stage_failed: g2 null, FR-PIPELINE-11)"
+          ],
+          "status": "MISSING"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "lesson.findings",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 4,
+      "status": "MISSING",
+      "title": "Read open findings and the G2 report of a compiled lesson"
+    },
+    {
+      "cost": {
+        "budget": {
+          "kind": "baseline",
+          "n_min": 20,
+          "source": "SRV-TUTOR bounds.question_cap_usd = 0.30 (derived by VEC-TUTOR-3: attempts_max × worst-case reserve), a hard cap, so a baseline; NFR-TUTOR-2 expects a mean of about $0.048",
+          "usd_per_run_max": 0.3
+        },
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-6",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-7",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-9",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-TUTOR-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-TUTOR-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-TUTOR-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-TUTOR-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-TUTOR-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-TUTOR-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [
+            {
+              "id": "cost",
+              "kind": "budget",
+              "status": "NONE"
+            },
+            {
+              "id": "INV-TUTOR-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-TUTOR-3",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget cost"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-12",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-TUTOR-5",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-TUTOR-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "tutor.ask",
+      "latency": {
+        "budget": {
+          "kind": "target",
+          "n_min": 20,
+          "p95_ms_max": 30000,
+          "source": "NFR-TUTOR-1 (20 questions on L02, idle worker)"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Ask the tutor about the open lesson"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-9",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-TUTOR-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-TUTOR-4",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "/lessons/{lesson_id}",
+              "kind": "page",
+              "status": "NONE"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for page /lessons/{lesson_id}"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-12",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-TUTOR-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-TUTOR-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-TUTOR-6",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "tutor.history",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Read a tutor answer and my earlier questions on a lesson"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-17",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "live label 'stage-1: reader backup' runs only under --drill, disabled until S1.OPS-CLI-restore-seed"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-CLI-17",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "live label 'stage-1: backup files are 0600' runs only under --drill (disabled)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (FR-CLI-17 bounds pg_dump at 600 s, a hard deadline)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-19",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-CLI-17",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.backup",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Back up the stack (reader backup DIR)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-18",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "drill labels (restore onto a fresh stack, restored passkey) disabled until S1.OPS-CLI-restore-seed"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-CLI-18",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (FR-CLI-18 bounds pg_restore at 600 s, a hard deadline)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-19",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-CLI-18",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "the backup-restore drill is disabled until S1.OPS-CLI-restore-seed"
+          ],
+          "status": "MISSING"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.restore",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 3,
+      "status": "MISSING",
+      "title": "Restore the stack from a backup (reader restore DIR)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-CLI-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-DEPLOY-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-DEPLOY-11",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "VEC-CLI-3",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: GET /api/healthz is ok",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: all services healthy (four default plus kernels), watcher running",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-DEPLOY-9",
+              "kind": "item",
+              "status": "NONE"
+            },
+            {
+              "id": "INV-CLI-8",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-DEPLOY-10",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-DEPLOY-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: api and worker run as 10001, read-only, cap-drop ALL",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: nothing below /run/secrets in docker diff",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: postgres runs as 999 with a read-only root",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: secret files 0600, owned by the service uid",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: security headers and CSP",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for item FR-DEPLOY-9"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-CLI-2",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-CONFIG-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [
+            {
+              "id": "latency",
+              "kind": "budget",
+              "status": "NONE"
+            },
+            {
+              "id": "FR-CLI-10",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [
+            "no evidence in this run for budget latency"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-13",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-CLI-19",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "INV-CLI-4",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: fails closed without the watcher, then reader up restores",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: postgres restarts without its secret file",
+              "kind": "label",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: re-delivered by the watcher after an api restart",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.up",
+      "latency": {
+        "budget": {
+          "kind": "baseline",
+          "n_min": 1,
+          "p95_ms_max": 180000,
+          "source": "FR-CLI-10 health deadline (a hard deadline, so a baseline; NFR-DEPLOY-1 120 s plus initdb)"
+        },
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Start the stack (reader up)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-CLI-7",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "INV-CLI-7",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (watcher SIGKILL at 15 s is the only bound)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-19",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-CLI-20",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.down",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 1,
+      "status": "MISSING",
+      "title": "Stop the stack (reader down, reader watcher stop)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-13",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-CLI-11",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-13",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-CLI-13",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.status",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 1,
+      "status": "MISSING",
+      "title": "Show stack health (reader status, reader watcher status)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-15",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "stage-1: reader doctor: all ok",
+              "kind": "label",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-CLI-11",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-15",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-CLI-15",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.doctor",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 1,
+      "status": "MISSING",
+      "title": "Check the host setup (reader doctor)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-16",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-CLI-16",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (owner-interactive)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-19",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [],
+          "gaps": [
+            "no live check of untrust verification (owner-run, ADR-0024)"
+          ],
+          "status": "MISSING"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "stack.trust",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 2,
+      "status": "MISSING",
+      "title": "Trust or untrust the local TLS root (reader trust, reader down --untrust)"
+    },
+    {
+      "cost": {
+        "budget": null,
+        "by_model": {},
+        "by_stage": {},
+        "cache_read_share": null,
+        "per_run_max": null,
+        "per_run_mean": null,
+        "runs": 0
+      },
+      "criteria": [
+        {
+          "criterion": "functional",
+          "evidence": [
+            {
+              "id": "FR-CLI-12",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "security",
+          "evidence": [
+            {
+              "id": "FR-CLI-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-CLI-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "privacy",
+          "evidence": [
+            {
+              "id": "INV-CLI-1",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "INV-CLI-2",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "a11y",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "latency",
+          "evidence": [],
+          "gaps": [
+            "no sourced budget (owner-interactive)"
+          ],
+          "status": "MISSING"
+        },
+        {
+          "criterion": "cost",
+          "evidence": [],
+          "gaps": [],
+          "status": "NA"
+        },
+        {
+          "criterion": "observability",
+          "evidence": [
+            {
+              "id": "FR-CLI-19",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        },
+        {
+          "criterion": "recovery",
+          "evidence": [
+            {
+              "id": "FR-CLI-12",
+              "kind": "item",
+              "status": "PASS"
+            },
+            {
+              "id": "FR-CLI-20",
+              "kind": "item",
+              "status": "PASS"
+            }
+          ],
+          "gaps": [],
+          "status": "PASS"
+        }
+      ],
+      "fail": 0,
+      "gate": "tracked",
+      "id": "secrets.set",
+      "latency": {
+        "budget": null,
+        "n": 0,
+        "p50_ms": null,
+        "p95_ms": null,
+        "per": null
+      },
+      "missing": 1,
+      "status": "MISSING",
+      "title": "Store a secret in the Keychain (reader secrets set NAME)"
+    }
+  ]
+}
