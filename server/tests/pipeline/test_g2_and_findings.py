@@ -130,6 +130,34 @@ def test_final_revision_is_the_deterministic_deltas() -> None:
     assert not g2.deltas_ok(tampered, m, problems, report)
 
 
+def test_deltas_hold_across_the_stored_form() -> None:
+    """FR-PIPELINE-8 (d): F as stored (SRV-LESSON canonical bytes, nbformat splits an appended cell's source into
+    lines) still equals the recomputed function of M; a real change still fails (V.live 2026-11-23)."""
+    findings = need("reader.pipeline.findings")
+    verify = need("reader.pipeline.verify")
+    g2 = need("reader.pipeline.g2")
+    nb_mod = need("reader.pipeline.notebook")
+    schema = need("reader.lessons.schema")
+
+    def stored(n: dict[str, Any]) -> dict[str, Any]:
+        loaded: dict[str, Any] = json.loads(schema.validate(nb_mod.to_bytes(n)).canonical)
+        return loaded
+
+    m = stored(json.loads(F01))
+    problems = [findings.Problem("adversarial_review", None, None, "line one\nline two", "adversarial_review", False)]
+    lab = next(cell for _, cell in findings.labs_of(m))
+    report = verify.LabReport(
+        findings.labs_sha256(m),
+        {"f01-lab": {"runs": 2, "passed": True, "outputs_identical": True, "input_sha256": findings.source_sha256(lab)}},
+        [],
+    )
+    final = stored(findings.stamp_labs(findings.append_findings(m, problems), report))
+    assert g2.deltas_ok(final, m, problems, report)
+    tampered = copy.deepcopy(final)
+    tampered["cells"][-1]["metadata"]["reader"]["finding"]["text"] = "edited"
+    assert not g2.deltas_ok(stored(tampered), m, problems, report)
+
+
 def _report(nb: dict[str, Any], verdicts: dict[Any, str] | None = None) -> dict[str, Any]:
     g2 = need("reader.pipeline.g2")
     findings = need("reader.pipeline.findings")
