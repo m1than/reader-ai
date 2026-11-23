@@ -140,7 +140,7 @@ requirements:
         style custom properties; app CSS picks one with `[data-theme]` and `prefers-color-scheme` exactly as `calm.css`
         does, so a theme change (WEB-UI FR-UI-16) or an OS switch recolours code without re-rendering. The scheme is no
         longer read from `matchMedia` at render time (the audit's Storybook capture showed a light code block on the
-        dark canvas).
+        dark canvas), and the highlighter takes no scheme: `highlight(code, language)`.
       - **Block header.** Every code block (a fenced block in markdown, a code cell, and the plain fallback) is a wide
         block (WEB-UI FR-UI-10) with `--radius-block`: a header row with the language in muted text (`python`, the
         fence's language name when given, else `text`) and a "Copy" ghost button (`CopyIcon`, accessible name "Copy

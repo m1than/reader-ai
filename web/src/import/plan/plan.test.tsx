@@ -123,10 +123,19 @@ describe('estimate preview (FR-IMPORT-5)', () => {
     fireEvent.change(weeks(), { target: { value: '2' } });
     await waitFor(() => expect(screen.getByText(/14 lessons, one a day/)).toBeTruthy());
     expect(api.calls).toEqual([{ material_id: 'synthetic', total_weeks: 2, minutes_per_day: 60, rate: '2.64', today: '2026-01-01' }]);
-    expect(screen.getByText('14 lessons, one a day, about 9 min each (at most 12), finish by 14 January 2026')).toBeTruthy();
+    // Design pass: the headline is the status text; the figures are a definition list; the notes follow it.
+    expect(screen.getByRole('status').textContent).toBe('Estimate updated: 14 lessons, one a day, about 9 min each (at most 12), finish by 14 January 2026');
+    const dl = document.querySelector('.plan-estimate dl') as HTMLElement;
+    const pairs = [...dl.querySelectorAll('dt')].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]);
+    expect(pairs).toEqual([
+      ['Lessons', '14'],
+      ['Each lesson', 'about 9 min, at most 12'],
+      ['Finish by', '14 January 2026'],
+      ['Compile, whole course', '$1.20–$2.80'],
+      ['Lesson 1', '$0.09–$0.20, stops at $8.00'],
+    ]);
     expect(screen.getByText('Reading time only; labs and review are not included.')).toBeTruthy();
-    expect(screen.getByText('Compile: $1.20–$2.80 for the whole course, an estimate from one measured lesson')).toBeTruthy();
-    expect(screen.getByText('Lesson 1: $0.09–$0.20, stops at $8.00')).toBeTruthy();
+    expect(screen.getByText('Costs are an estimate from one measured lesson.')).toBeTruthy();
     expect(
       screen.getByText('Lessons are 14.7× shorter than the measured one; real cost per lesson is likely higher than this range.'),
     ).toBeTruthy();
@@ -333,11 +342,125 @@ describe('your sources (FR-IMPORT-8)', () => {
     await mountPage(api);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Re-plan' })).toBeTruthy());
     expect(screen.getAllByRole('button', { name: 'Plan study time' })).toHaveLength(1);
-    expect(screen.getByText('queued')).toBeTruthy();
+    // Design pass: a not-imported status is a chip in sentence case.
+    expect(screen.getByText('Queued')).toBeTruthy();
     expect(screen.queryByText(/not imported|error/i)).toBeNull(); // a 404 is "no plan yet", not an error
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Re-plan' })));
     await waitFor(() => expect((screen.getByLabelText('Total weeks') as HTMLInputElement).value).toBe('6'));
     expect((screen.getByLabelText('Minutes per day') as HTMLInputElement).value).toBe('45');
     expect(screen.getByText('3 started lessons keep their pages.')).toBeTruthy();
+  });
+
+  it('shows not-imported statuses as sentence-case chips and marks the chosen row current (design pass)', async () => {
+    const api = fakeApi({
+      materials: vi.fn(async () => ({
+        materials: [
+          { id: 'synthetic', status: 'imported', page_count: 30 },
+          { id: 'broken', status: 'import_failed', page_count: null },
+        ],
+      })),
+    });
+    await mountPage(api);
+    const chip = await screen.findByText('Import failed');
+    expect(chip.closest('.acme-chip, [data-chip], .chip')).toBeTruthy();
+    const rows = () => [...document.querySelectorAll('.source-row')] as HTMLElement[];
+    expect(rows().map((r) => r.getAttribute('aria-current'))).toEqual([null, null]);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Plan study time' })));
+    expect(rows().map((r) => r.getAttribute('aria-current'))).toEqual(['true', null]);
+  });
+});
+
+describe('design pass (FR-IMPORT-4, FR-IMPORT-5, FR-IMPORT-6)', () => {
+  const button = () => screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement;
+  const reason = () => {
+    const id = button().getAttribute('aria-describedby');
+    return id ? document.getElementById(id)?.textContent ?? null : null;
+  };
+  const pairs = () =>
+    [...document.querySelectorAll('.plan-estimate dl dt')].map((dt) => [dt.textContent, dt.nextElementSibling?.textContent]);
+
+  it('marks the study pace disclosure with a hidden chevron icon', async () => {
+    await section(fakeApi());
+    const summary = screen.getByText('Study pace').closest('summary') as HTMLElement;
+    expect(summary.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+  });
+
+  it('lists a re-plan as started + new with the kept deadline, and omits Lesson 1 without a first lesson', async () => {
+    const api = fakeApi({
+      preview: vi.fn(async () => preview({ fixed_count: 80, new_count: 5, lesson_count: 85, end: '2026-03-25' }, { first_lesson: null })),
+    });
+    await section(api);
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    await waitFor(() => expect(pairs().length).toBeGreaterThan(0));
+    expect(pairs()).toEqual([
+      ['Lessons', '80 started + 5 new'],
+      ['Each lesson', 'about 9 min, at most 12'],
+      ['Finish by', '14 January 2026'],
+      ['Deadline kept', '25 March 2026'],
+      ['Compile, whole course', '$1.20–$2.80'],
+    ]);
+  });
+
+  it('orders the notes: reading time, fills, the cost basis, the extrapolation', async () => {
+    const api = fakeApi({ preview: vi.fn(async () => preview({ new_count: 3, spare_days: 11, days_left: 14, lesson_count: 3 })) });
+    await section(api);
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    await waitFor(() => expect(pairs().length).toBeGreaterThan(0));
+    const notes = [...document.querySelectorAll('.plan-notes p')].map((p) => p.textContent);
+    expect(notes).toEqual([
+      'Reading time only; labs and review are not included.',
+      'This source fills 3 of 14 days.',
+      'Costs are an estimate from one measured lesson.',
+      'Lessons are 14.7× shorter than the measured one; real cost per lesson is likely higher than this range.',
+    ]);
+  });
+
+  it('puts the does-not-fit callout before the figures', async () => {
+    const api = fakeApi({ preview: vi.fn(async () => preview({ fits: false, reasons: ['minutes'], minutes_max: 70, suggest: { minutes_per_day: 70, total_weeks: null } })) });
+    await section(api);
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    const notice = await screen.findByText("A day's lesson would take 70 min, more than your 60 min.");
+    const callout = notice.closest('.callout') as HTMLElement;
+    expect(callout).toBeTruthy();
+    const dl = document.querySelector('.plan-estimate dl') as HTMLElement;
+    expect(callout.compareDocumentPosition(dl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(callout.querySelector('svg[aria-hidden="true"]')).toBeTruthy();
+  });
+
+  it('says why Create the course is disabled, and nothing once it is enabled', async () => {
+    let fail = false;
+    let fits = true;
+    const api = fakeApi({
+      preview: vi.fn(async () => {
+        if (fail) throw new Error('boom');
+        return fits ? preview() : preview({ fits: false, reasons: ['days'], suggest: null });
+      }),
+    });
+    await section(api);
+    expect(button().disabled).toBe(true);
+    expect(reason()).toBe('Enter the total weeks first.');
+    fireEvent.change(minutes(), { target: { value: '7' } });
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    expect(reason()).toBe('Fix the fields above first.');
+    fireEvent.change(minutes(), { target: { value: '60' } });
+    expect(reason()).toBe('Updating the estimate…');
+    await waitFor(() => expect(button().disabled).toBe(false));
+    expect(button().getAttribute('aria-describedby')).toBeNull();
+    fail = true;
+    fireEvent.change(weeks(), { target: { value: '3' } });
+    await waitFor(() => expect(reason()).toBe('The estimate failed; change a field to try again.'));
+    fail = false;
+    fits = false;
+    fireEvent.change(weeks(), { target: { value: '4' } });
+    await waitFor(() => expect(reason()).toBe('The plan does not fit; use a suggestion or change the fields.'));
+  });
+
+  it('says Creating the course… while a confirm is in flight', async () => {
+    const api = fakeApi({ confirm: vi.fn(() => new Promise<never>(() => undefined)) });
+    await section(api);
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    await waitFor(() => expect(button().disabled).toBe(false));
+    await act(async () => fireEvent.click(button()));
+    expect(reason()).toBe('Creating the course…');
   });
 });

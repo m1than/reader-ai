@@ -90,7 +90,8 @@ requirements:
       the extrapolation line. The headline, "Deadline kept: …", "Compile: …" and "Lesson 1: …" sentences above are no
       longer drawn as sentences (their values are the rows); the headline becomes the text of the card's
       `role="status"` line once an answer is shown ("Estimate updated: <headline>"), so a screen reader hears the
-      summary. When the plan does not fit, the notices and their suggestion buttons come first in the card, as a
+      summary; while a newer preview loads it reads "Updating the estimate" as before, and before any answer it is
+      empty. When the plan does not fit, the notices and their suggestion buttons come first in the card, as a
       warning callout (`--radius-block`, a 3px `--acme-warning` inline-start bar, the `WarningIcon`), and the figures
       under it are muted. [unit] the `dl` terms and values for a fresh plan, a re-plan, a plan without a first lesson;
       the notes' order; the status text; in the does-not-fit case the callout precedes the `dl`; [story] the same five

@@ -6,14 +6,14 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: '../e2e/web',
-  testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'auth/**/*.spec.ts', 'import/**/*.spec.ts'],
+  testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'auth/**/*.spec.ts', 'import/**/*.spec.ts', 'notebook/**/*.spec.ts'],
   fullyParallel: false,
   reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:4173' },
   projects: [
     {
       name: 'chromium',
-      testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'import/**/*.spec.ts'],
+      testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'import/**/*.spec.ts', 'notebook/**/*.spec.ts'],
       use: { ...devices['Desktop Chrome'] },
     },
     // SRV-AUTH FR-AUTH-21: every auth page state in the pages' default dark scheme and in light.

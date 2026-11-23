@@ -277,7 +277,10 @@ requirements:
         while the panel is closed, and reopening shows its state. At 75rem and wider, while the panel is open, the
         lesson's contents column is hidden and the cells' container ends where the panel begins, so the panel covers no
         lesson text (the reading column may narrow, to 30rem at the 75rem viewport); below 75rem it overlays the lesson.
-      - **History.** "Earlier questions" shows the 3 most recent entries, then a button "Show <n> earlier questions"
+        `AskPanel` takes `open` and `onClose` from the lesson view's panel state (WEB-NOTEBOOK FR-NOTEBOOK-11; without
+        `open` it renders open, as a standalone panel); closed, it stays mounted with the `hidden` attribute, so a
+        question in flight keeps its polling and state.
+      - **History.** "Earlier questions" (an `h3` that labels the list) shows the 3 most recent entries, then a button "Show <n> earlier questions"
         (and "Show fewer") for the rest. Each entry is a disclosure button with the question text and its muted status;
         expanding a terminal entry fetches its state once with `GET /api/lessons/{lesson_id}/questions/{question_id}`
         and shows it with the same rendering as the current answer (blocks, citations, unsupported marks, the grounded
@@ -286,9 +289,9 @@ requirements:
       [unit] closed by default, each opener, focus on open and on close, Escape, the non-modal panel (no backdrop, a
       lesson control still clickable), polling while closed; the history cap, the toggle both ways, expanding fetches
       once and renders the answer, a failed fetch with Retry; [browser] with axe on the open panel at 1280 and 390 px,
-      and at 1280 px no `[data-markdown] p` of the lesson intersects the open panel; [story] the panel closed, open
-      empty, waiting, answered with citations, answered ungrounded, failed, and with a history of 8 (AskPanel stories,
-      Light and Dark).
+      and at 1280 px no `[data-markdown] p` of the lesson intersects the open panel; [story] `web/src/tutor/AskPanel.stories.tsx`
+      exports `Light` and `Dark` (open, answered with citations) and `Closed`, `OpenEmpty`, `Waiting`, `Ungrounded`,
+      `Failed` and `History` (8 entries), each rendered by a [unit] test through `composeStories` without an error.
   - id: FR-TUTOR-12
     text: >-
       Logging. api and worker log ids, lengths, codes, model, spent(run) and timings; never question, cell, source,

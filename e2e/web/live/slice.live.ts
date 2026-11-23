@@ -136,7 +136,9 @@ test('POST without Origin is refused (403)', async ({ playwright }) => {
 test('sign out, then sign in through the real page with the same passkey', async () => {
   stackOnly();
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Design pass (WEB-UI FR-UI-5, FR-UI-11): Sign out is an item of the user menu.
+  await page.getByRole('button', { name: /^Account menu for / }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await page.waitForURL(/\/api\/auth\/signin$/);
   expect((await page.request.get('/api/me')).status()).toBe(401);
   await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
@@ -178,8 +180,14 @@ test('lesson renders: markdown, references, open finding', async () => {
 
 // --- Notebook (SRV-KERNEL relay, OPS-SANDBOX kernel) ---------------------------------------------------------------
 const lab = () => page.locator('.lab').first();
+// Design pass (WEB-NOTEBOOK FR-NOTEBOOK-9): the lab is a CodeMirror editor ("Lab 1 code", contenteditable in a shadow
+// root that Playwright's locators pierce); the plain text area shows only until it has loaded.
 const runCode = async (code: string) => {
-  await lab().getByRole('textbox', { name: 'Lab code' }).fill(code);
+  const editor = lab().locator('.cm-content');
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.insertText(code);
   await lab().getByRole('button', { name: 'Run', exact: true }).click();
 };
 const outputs = () => lab().locator('.outputs');

@@ -20,7 +20,8 @@ test('no CSP violation on the lesson list and the W01 lesson (INV-UI-4)', async 
     if (m.type() === 'error') consoleErrors.push(m.text());
   });
   await page.goto('/');
-  await expect(page.getByText('Fixture course')).toBeVisible();
+  // Design pass: the course title also appears in the sidebar and the Continue block; wait for its list group.
+  await expect(page.locator('#content #course-c-fixture')).toBeVisible();
   await page.goto('/lessons/w01');
   await expect(page.getByRole('heading', { name: 'Digests' })).toBeVisible();
   await expect(page.locator('.katex').first()).toBeVisible();

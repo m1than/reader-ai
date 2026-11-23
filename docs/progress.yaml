@@ -998,6 +998,34 @@ tasks:
         step PASS on b42a170. Unit: 207 Vitest tests pass.",
       note: "Screenshots and the L02 replay data stay outside the repository (book text). The stack now runs from the
         V/WEB-polish worktree (reader up); the live agent's next `reader up` from its own worktree restores its build." }
+  - { id: V.design-pass, stage: V, kind: fix, track: product, status: in_progress, needs: [V.WEB-polish],
+      branch: V/design-pass,
+      what: "Owner 2026-11-23: 'pretty for each engineer', 'the same style buttons like Notion, or like this instrument'.
+        The design audit's P1 and P2 items, all approved by the owner, with CodeMirror 6 for the lab editor. Specs
+        amended: WEB-UI FR-UI-1/2/5/6/7/10/11 and new FR-UI-16 (theme) and FR-UI-17 (course sidebar); WEB-NOTEBOOK
+        FR-NOTEBOOK-1/3/7/9/10/11/12 and new NFR-NOTEBOOK-1; WEB-RENDER FR-RENDER-3/4; WEB-PLAN FR-IMPORT-4/5/6/8;
+        SRV-TUTOR FR-TUTOR-11 (web only). SRV-AUTH unchanged: the auth pages keep following the system scheme only
+        (gap documented in FR-UI-16).",
+      findings: "Audit 2026-11-23 (screenshots outside the repository): 128 list rows with 2 published lessons, L02 about
+        107 rows down; unpublished lesson pages a dead end; Russian prose under lang=en, a table word broken mid-letter;
+        inline math clipping the top of superscripts (8.2px above the box for 2^{n/2}); 32px buttons with a 12px radius
+        reading as pills, Reset kernel in red next to the title; the lab a 24-row text area without highlighting or
+        copy; the tutor after 27 cells on a 21,973px page with a 3,575px history whose answers could not be reopened;
+        error text as a 36px serif h1; the code theme read once from matchMedia. Spike codemirror-bundle: the editor
+        chunk is 125,244 B gzip, and the app CSP blocks CodeMirror's style element in the document, so the editor
+        mounts in a shadow root (adopted stylesheet, no violation).",
+      coordination: "V/compile-ui fills the compile slot (Services.compileAction) and FR-UI-15's status; V/signup adds
+        a NAV_ITEMS entry (FR-UI-14); V/onboarding owns the /import drop zone (WEB-IMPORT); V/freshness's card uses the
+        same radii and state blocks.",
+      tests: "Red 2026-11-23: 92 unit tests fail as intended across 10 files (web/src/{app,notebook,render,tutor,
+        import/plan,ui}); browser specs e2e/web/{ui/theme,notebook/editor,render,tutor/ask,ui/csp}; the live `ui` step
+        in e2e/web/live/owner.slice.ts asserts the new measured values. tsc reports only the highlight() signature
+        change until Green.",
+      review: "Pending: one deep-reviewer round on the spec diff, one on the code (outside the complex areas)." }
+  - { id: V.titles-data, stage: V, kind: fix, track: product, status: todo, needs: [V.design-pass],
+      what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
+        material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.
+        9–10') from the outline. SRV-PLAN / SRV-LESSON / SRV-INGEST amendments; the web shows whatever the API returns." }
   # Follow-ups from the final slice PR (2026-11-23)
   - { id: V.tutor-retrieval, stage: V, kind: fix, track: ai, status: todo, needs: [V.live],
       what: "NFR-TUTOR-3 fails on the live bench: grounded 0.625 against 0.8. Grounding given gold in the top 8 is 0.808

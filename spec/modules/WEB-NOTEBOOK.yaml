@@ -384,7 +384,9 @@ nfr:
       gzip size in bytes (Node zlib, level 9) of the lazy chunks that hold CodeMirror (every chunk of the `vite build`
       output whose source map lists a `@codemirror/` or `@lezer/` module), production mode; none of those modules is in
       the initial chunk (WEB-UI NFR-UI-1 unchanged). Spike codemirror-bundle (REF-NOTEBOOK-7, esbuild, 2026-11-23):
-      125,244 B; threshold = measured + 10 %. Green re-measures with Vite and records the number in the review.
+      125,244 B; threshold = measured + 10 %. Green re-measures with Vite and records the number in the review. The
+      test builds the app with `build.sourcemap: true` into a temporary directory, finds the chunks through their
+      source maps, asserts at least one exists and none is referenced by `index.html`, and sums their gzip sizes.
     threshold: 137768
     verified_by: test
 

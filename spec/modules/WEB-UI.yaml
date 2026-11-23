@@ -49,7 +49,9 @@
 # `server/src/reader/auth/static`, no other path) with the Caddyfile's Content-Security-Policy header and the api's
 # content types, and web/playwright.config.ts runs e2e/web/auth/** in two projects of its own, `auth-dark` and
 # `auth-light` (`colorScheme`), while the existing `chromium` project keeps the ui, render and tutor specs; the
-# ceremony POSTs are stubbed by the auth spec itself (page.route) (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
+# ceremony POSTs are stubbed by the auth spec itself (page.route) (Playwright's browsers are not installed by ci-local).
+# Design pass (2026-11-23): the `chromium` project also matches e2e/web/notebook/** (WEB-NOTEBOOK's lab editor under
+# the CSP, its kernel WebSocket routed by Playwright's `routeWebSocket`); [live] `e2e/live/slice.sh` against
 # `reader up`, signed in with the S1 `live-check` learner through a Chromium virtual authenticator.
 
 id: WEB-UI
@@ -251,8 +253,8 @@ requirements:
         set `hyphens: auto`. (The live L02 is Russian under `lang="en"`: no hyphenation, and the table rule below broke
         "Отказоустойчивость" mid-letter; audit 2026-11-23.)
       - **Widths.** Lesson cells sit in a container at most 50rem wide whose prose children keep the 38rem reading
-        column; wide blocks — the lab (WEB-NOTEBOOK FR-NOTEBOOK-9), code blocks (WEB-RENDER FR-RENDER-4), markdown
-        tables of 5 or more columns and display math — take the container's full width. At 60rem and wider the lesson
+        column; wide blocks (class `wide`) — the lab (WEB-NOTEBOOK FR-NOTEBOOK-9), code blocks (WEB-RENDER
+        FR-RENDER-4), markdown tables of 5 or more columns and display math — take the container's full width. At 60rem and wider the lesson
         shows its contents column beside the cells (WEB-NOTEBOOK FR-NOTEBOOK-11), at 75rem and wider also the course
         sidebar (FR-UI-17); below 60rem one column. Markdown tables fit their width (cells wrap; long words hyphenate,
         and break with `overflow-wrap: break-word` only where no hyphenation point fits, never `anywhere`; a scrolling
@@ -306,8 +308,9 @@ requirements:
       (today "Lessons" `/` and "Import" `/import` owner-only; other branches append entries, e.g. a sign-ups link with
       a count, without changing the header's code), each a ghost link with `aria-current="page"` and the
       `--acme-hover` fill when its route is the current one (`/` also for `/lessons/*`); then, at the end, the user
-      menu: a ghost button showing the `display_name` that opens the library `Menu` with the theme choice (FR-UI-16)
-      and "Sign out" (FR-UI-5). The header is one row at every width down to 360px (below 40rem the brand text and the
+      menu: a ghost button showing the `display_name`, with the accessible name "Account menu for <display_name>" (the
+      visible text is part of it, WCAG 2.5.3), that opens the library `Menu` with the theme choice (FR-UI-16) and "Sign
+      out" (FR-UI-5). The header is one row at every width down to 360px (below 40rem the brand text and the
       display name are visually hidden, their icons stay).
       **State blocks.** Every empty, not-found, not-published and error state renders one `StateBlock` component
       (`web/src/ui/StateBlock.tsx`, root class `state-block`): an
