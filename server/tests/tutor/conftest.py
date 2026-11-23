@@ -244,8 +244,9 @@ async def execute(engine: Any, sql: str, **params: Any) -> None:
 
 @dataclass(frozen=True)
 class FakeHit:
-    span_id: str
+    span_id: str  # the chunk's primary span
     page: int
+    span_ids: list[str]  # every span the chunk overlaps, in chunk order (SRV-SEARCH Hit)
 
 
 @dataclass(frozen=True)
@@ -256,17 +257,23 @@ class FakeResult:
 
 @dataclass
 class FakeSearch:
-    """SRV-SEARCH's search(engine, owner_id, query, k, material_sha256) over the world's spans, in seq order."""
+    """SRV-SEARCH's search(engine, owner_id, query, k, material_sha256) over the world's spans: by default one
+    one-span chunk per seq, in seq order; `chunks` gives (primary seq, chunk seqs) per hit instead."""
 
     seqs: list[int] = field(default_factory=lambda: [0, 1, 2])
     degraded: bool = False
+    chunks: list[tuple[int, list[int]]] | None = None
     calls: list[tuple[uuid.UUID, str, int, str | None]] = field(default_factory=list)
 
     async def __call__(
         self, engine: Any, owner_id: uuid.UUID, query: str, k: int = 10, material_sha256: str | None = None
     ) -> FakeResult:
         self.calls.append((owner_id, query, k, material_sha256))
-        hits = [FakeHit(f"{material_sha256}:{seq}", SPANS[seq][0]) for seq in self.seqs][:k]
+        chunks = self.chunks if self.chunks is not None else [(seq, [seq]) for seq in self.seqs]
+        hits = [
+            FakeHit(f"{material_sha256}:{primary}", SPANS[primary][0], [f"{material_sha256}:{s}" for s in seqs])
+            for primary, seqs in chunks
+        ][:k]
         return FakeResult(hits, self.degraded)
 
 

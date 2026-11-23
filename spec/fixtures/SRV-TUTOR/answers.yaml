@@ -43,6 +43,12 @@ cases:
   - name: insufficient
     output: {blocks: [{text: "The sources do not cover this.", spans: [], quote: ""}], insufficient: true}
     expect: {blocks: [{kept: [], supported: false}], grounded: false}
+  - name: partial-insufficient
+    # The first live run's ungrounded answer (2026-11-23): supported blocks for what the sources cover, one uncited
+    # block for the missing part, insufficient true. Pinned: not grounded, the supported block stays supported.
+    output: {blocks: [{text: "Miners search for a nonce.", spans: [s1], quote: "Miners vary the nonce until the hash"},
+                      {text: "The sources do not say how the reward is set.", spans: [], quote: ""}], insufficient: true}
+    expect: {blocks: [{kept: [s1], supported: true}, {kept: [], supported: false}], grounded: false}
   - name: json-fence-allowed
     output_text: "```json\n{\"blocks\": [{\"text\": \"x\", \"spans\": [\"s1\"], \"quote\": \"Miners vary the nonce until the hash\"}], \"insufficient\": false}\n```"
     expect: {blocks: [{kept: [s1], supported: true}], grounded: true}

@@ -1,0 +1,58 @@
+{
+ "spike": "tutor-chunks",
+ "converter_s": 664.7,
+ "spans": 9463,
+ "chunks": 2247,
+ "params": {
+  "chunk_size": 1200,
+  "chunk_overlap": 200,
+  "chunk_min": 80,
+  "span_bytes_max": 2000
+ },
+ "span_sent_bytes": {
+  "n": 9463,
+  "mean": 342,
+  "p50": 204,
+  "p90": 866,
+  "p95": 1155,
+  "p99": 1849,
+  "max": 2018
+ },
+ "spans_per_chunk": {
+  "n": 2247,
+  "mean": 5,
+  "p50": 4,
+  "p90": 9,
+  "p95": 11,
+  "p99": 17,
+  "max": 55
+ },
+ "chunk_text_bytes": {
+  "n": 2247,
+  "mean": 1675,
+  "p50": 1987,
+  "p90": 2202,
+  "p95": 2217,
+  "p99": 2231,
+  "max": 2242
+ },
+ "primary_span_sent_bytes": {
+  "n": 2247,
+  "mean": 942,
+  "p50": 842,
+  "p90": 1779,
+  "p95": 1987,
+  "p99": 2006,
+  "max": 2018
+ },
+ "whole_chunk_spans_sent_bytes": {
+  "n": 2247,
+  "mean": 2145,
+  "p50": 2206,
+  "p90": 3119,
+  "p95": 3422,
+  "p99": 4037,
+  "max": 5462
+ },
+ "spans_cut_at_span_bytes_max": 79
+}

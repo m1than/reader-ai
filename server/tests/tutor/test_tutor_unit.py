@@ -49,6 +49,9 @@ def test_bounds_match_the_spec() -> None:
     assert params.RETRIEVE_K == b["retrieve_k"]
     assert params.SPAN_BYTES_MAX == b["span_bytes_max"]
     assert params.CELL_BYTES_MAX == b["cell_bytes_max"]
+    assert params.QUESTION_CELL_BYTES_MAX == b["question_cell_bytes_max"]
+    assert params.QUESTION_CELL_BYTES_MAX == params.QUESTION_BYTES_MAX + params.CELL_BYTES_MAX + 1000
+    assert params.SOURCES_MAX == b["sources_max"]
     assert params.PROMPT_BYTES_MAX == b["prompt_bytes_max"]
     assert params.SYSTEM_BYTES_MAX == b["system_bytes_max"]
     assert list(params.QUOTE_WORDS) == b["quote_words"]
@@ -291,8 +294,9 @@ def test_question_and_cell_cut_before_sources_and_sources_cut_to_span_bytes() ->
     assert len(prompt.text.encode()) <= params.PROMPT_BYTES_MAX
     assert len(prompt.sources) == 1
     assert len(prompt.sources[0].text.encode()) <= params.SPAN_BYTES_MAX
-    small = answer.build_prompt("q", None, _spans(["a b"] * 9))
-    assert len(small.sources) == params.RETRIEVE_K
+    small = answer.build_prompt("q", None, _spans(["a b"] * (params.SOURCES_MAX + 1)))
+    assert len(small.sources) == params.SOURCES_MAX  # the alias cap (FR-TUTOR-6)
+    assert small.sources[-1].alias == f"s{params.SOURCES_MAX}"
     assert json.loads(small.text)["cell"] is None
 
 
