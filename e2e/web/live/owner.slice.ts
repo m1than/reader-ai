@@ -10,8 +10,13 @@
 //   compile  imports the course (G1), compiles L02 (POST /api/lessons/{id}/compile), polls GET /api/compiles/{run}.
 //   lesson   opens the compiled L02: screenshot, one lab cell run in the kernel, citations rendered.
 //   tutor    three questions through the Ask panel; latency and grounded per question.
+//   ui       UI review screenshots: sign-in, lesson list, L02 (top, references, lab, tutor) and not-found at 1280,
+//            1024 and 390 px into READER_LIVE_OUT/ui, with axe (serious and critical) per page and width; the L02
+//            revision and the tutor history go to READER_LIVE_OUT/ui/data (book text: outside the repository) for a
+//            local replay. Spends nothing (no Run, no Ask).
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
 // snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots (outside the repository when slice.sh runs).
+import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -289,4 +294,75 @@ test('tutor: three questions through the Ask panel', async () => {
     cost_per_question_usd: null, // no allowed interface exposes the tutor's agent_spend rows
   };
   expect(asked.every((q) => q.state === 'answered')).toBe(true);
+});
+
+const WIDTHS = [1280, 1024, 390] as const;
+
+test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser }) => {
+  only('ui');
+  test.setTimeout(10 * 60_000);
+  await ensureLesson();
+  const dir = resolve(OUT, 'ui');
+  mkdirSync(resolve(dir, 'data'), { recursive: true });
+  const meta = (await (await api.get(`/api/lessons/${lessonId}`)).json()) as { lesson: { latest_sha256: string | null } };
+  const sha = meta.lesson.latest_sha256;
+  writeFileSync(resolve(dir, 'data', 'lessons.json'), await (await api.get('/api/lessons')).text());
+  writeFileSync(resolve(dir, 'data', 'lesson.json'), JSON.stringify(meta));
+  if (sha) writeFileSync(resolve(dir, 'data', 'revision.json'), await (await api.get(`/api/lessons/${lessonId}/revisions/${sha}`)).text());
+  writeFileSync(resolve(dir, 'data', 'questions.json'), await (await api.get(`/api/lessons/${lessonId}/questions`)).text());
+  const axe: Record<string, string[]> = {};
+  const layout: Record<string, { overflow_px: number; widest_p_px: number }> = {};
+  // WEB-UI FR-UI-10: no horizontal page scroll, prose column ≤ 608 px, no serious or critical axe issue.
+  const check = async (name: string) => {
+    const r = await new AxeBuilder({ page }).analyze();
+    axe[name] = r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}:${v.nodes.length}`);
+    layout[name] = await page.evaluate(() => ({
+      overflow_px: document.documentElement.scrollWidth - window.innerWidth,
+      widest_p_px: Math.max(0, ...[...document.querySelectorAll('[data-markdown] p')].map((p) => Math.round(p.getBoundingClientRect().width))),
+    }));
+  };
+  const el = async (name: string, selector: string) => {
+    const loc = page.locator(selector).first();
+    if ((await loc.count()) === 0) return;
+    await loc.scrollIntoViewIfNeeded();
+    await loc.screenshot({ path: resolve(dir, `${name}.png`) });
+  };
+  for (const w of WIDTHS) {
+    // Sign-in page in a fresh context (no session).
+    const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
+    const p = await anon.newPage();
+    await p.goto('/api/auth/signin');
+    await p.screenshot({ path: resolve(dir, `${w}-signin.png`), fullPage: true });
+    await anon.close();
+
+    await page.setViewportSize({ width: w, height: 900 });
+    await page.goto('/');
+    await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: resolve(dir, `${w}-list.png`), fullPage: true });
+    await check(`${w}-list`);
+
+    await page.goto(`/lessons/${lessonId}`);
+    await expect(page.locator('.cell').first()).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: resolve(dir, `${w}-lesson-top.png`) });
+    if (w !== 390) await page.screenshot({ path: resolve(dir, `${w}-lesson-full.png`), fullPage: true });
+    await el(`${w}-lesson-references`, '.cell:has(.references)');
+    await el(`${w}-lesson-lab`, '.cell:has(.lab)');
+    await el(`${w}-lesson-tutor`, '.tutor');
+    await el(`${w}-lesson-open`, '.cell:has(.open-finding)');
+    await check(`${w}-lesson`);
+    // Keyboard: the first Tab stops from the top of the lesson, screenshot of the focused control.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await page.locator('body').focus();
+    for (let i = 0; i < 4; i += 1) await page.keyboard.press('Tab');
+    await page.screenshot({ path: resolve(dir, `${w}-lesson-focus.png`) });
+
+    await page.goto('/no-such-page');
+    await page.screenshot({ path: resolve(dir, `${w}-notfound.png`), fullPage: true });
+  }
+  results.ui = { widths: [...WIDTHS], axe_serious_critical: axe, layout, revision: sha };
+  for (const [name, issues] of Object.entries(axe)) expect.soft(issues, `axe ${name}`).toEqual([]);
+  for (const [name, l] of Object.entries(layout)) {
+    expect.soft(l.overflow_px, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
+    expect.soft(l.widest_p_px, `reading column ${name}`).toBeLessThanOrEqual(608);
+  }
 });

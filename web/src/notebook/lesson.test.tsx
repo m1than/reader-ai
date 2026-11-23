@@ -87,12 +87,12 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
 });
 
 describe('references and open findings (FR-NOTEBOOK-2, FR-NOTEBOOK-3)', () => {
-  it('shows numbered references under the explain cell and links only https', async () => {
+  it('shows the sources under the explain cell, one per material, and links only https', async () => {
     await view();
     const cell = document.querySelector('[data-cell-id="w01-explain"]') as HTMLElement;
-    const refs = within(cell).getByRole('list', { name: /references/i });
-    expect(within(refs).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(refs).getByText('Fixture material, p. 12')).toBeTruthy();
+    const refs = within(cell).getByRole('list', { name: /sources/i });
+    expect(within(refs).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(refs).getByText('Fixture material, pp. 12, 14')).toBeTruthy();
     expect(within(refs).getByRole('link', { name: 'en.wikipedia.org/wiki/Birthday_attack' }).getAttribute('rel')).toBe('noopener noreferrer');
     expect(within(refs).queryByRole('link', { name: /javascript/ })).toBeNull();
     const erratum = document.querySelector('[data-cell-id="w01-erratum"]') as HTMLElement;

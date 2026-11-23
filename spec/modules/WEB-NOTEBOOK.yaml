@@ -41,7 +41,11 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): the lesson view tracks
   the focused cell (the last cell focused or clicked) and takes an optional `aside(focusedCellId)` render prop shown
   after the cells; the lesson route passes the tutor's Ask panel there with the lesson id and the revision sha256; no
-  cell rendering changed"
+  cell rendering changed. Amendment 2026-11-23 (V/WEB-polish, from the live L02 screenshots): FR-NOTEBOOK-2 groups
+  span citations per material with page ranges and borrows a title from the lesson; FR-NOTEBOOK-3 shows the status
+  once; FR-NOTEBOOK-9 no-wrap editor and a status role for the run state; new FR-NOTEBOOK-10 (diagnostic questions,
+  recall front/back, empty notes), FR-NOTEBOOK-11 (header, contents list), FR-NOTEBOOK-12 (page states); the
+  `aside` render prop also receives the focused cell's contents label. Awaiting the single deep-reviewer round"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
@@ -91,17 +95,25 @@ requirements:
   - id: FR-NOTEBOOK-2
     text: >-
       Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`
-      and `citations[]` is shown in a numbered reference list under the cell, deduplicated (by `span`, or by `url`), in
-      order of first use. A span citation renders as "<material_title>, p. <page>"; without `page` as
-      "<material_title>"; without `material_title` as the span id. A URL citation renders as an external link only when
-      its scheme is http or https (text: host and path; `rel="noopener noreferrer"`, `target="_blank"`) with its
-      retrieved date; any other scheme renders as plain text. `route` cells list their `source_refs` the same way;
-      `erratum` cells also show `source_ref` and the correction. [unit] [story]
+      and `citations[]` is shown in a reference list labelled "Sources" under the cell, one entry per source, in order
+      of first use. Span citations are grouped by material (the part of `span` before the last `:`): one entry per
+      material, "<title>, p. <page>" for one distinct page and "<title>, pp. <pages>" for several, where <pages> lists
+      the distinct finite pages in ascending order with each run of consecutive pages written as a range joined by an
+      en dash ("pp. 69–70, 75"); a material whose citations carry no page renders as "<title>" alone. <title> is the
+      first `material_title` among that material's citations in the cell, else the first among span citations of the
+      same material anywhere in the lesson (the compiler's route `source_refs` carry no title, found by the live run of
+      2026-11-23), else "source <first 8 characters of the material id>". The live L02 had explain cells with up to 29
+      entries, 16 of them "…, p. 70" (live run 2026-11-23); grouping makes that one entry. URL citations stay one entry
+      per distinct `url`: an external link only when its scheme is http or https (text: host and path;
+      `rel="noopener noreferrer"`, `target="_blank"`) with its retrieved date; any other scheme renders as plain text.
+      `route` cells list their `source_refs` the same way; `erratum` cells also show `source_ref` and the correction.
+      A single grouping function is shared with SRV-TUTOR's Ask panel (FR-TUTOR-11). [unit] [story]
   - id: FR-NOTEBOOK-3
     text: >-
-      Open findings: an `open` cell whose `status` is not `answered` is shown with a visible "open" marker, its status,
-      and, when `finding.gate` is `G2`, the text "not yet confirmed" and the finding's reason as plain text. The lesson
-      header shows the count of such cells and links to the first one. [unit] [story]
+      Open findings: an `open` cell whose `status` is not `answered` is shown with a visible marker that reads its
+      status once (the marker reads "open" for status `open`; the status is not repeated beside it), and, when
+      `finding.gate` is `G2`, the text "not yet confirmed" and the finding's reason as plain text. The lesson header
+      shows the count of such cells and links to the first one. [unit] [story]
   - id: FR-NOTEBOOK-4
     text: >-
       Kernel session: opening a lesson does not start a kernel; the first Run creates the session
@@ -171,7 +183,38 @@ requirements:
     text: >-
       Lab code is editable in a plain monospace text area (Tab inserts four spaces; the edited source lives in memory
       for the open view and is what Run sends); a Revert control restores the revision's source. A cell shows its
-      execution count `[n]` after a reply. [unit] [story]
+      execution count `[n]` after a reply. The text area does not wrap lines (`wrap="off"`, horizontal scroll), so
+      Python indentation stays readable at 390 px; the run state label is in a `role="status"` element, so a screen
+      reader hears "done", "error" and the other states of VEC-NOTEBOOK-2. [unit] [story]
+  - id: FR-NOTEBOOK-10
+    text: >-
+      Kinds whose content lives in `metadata.reader` (ADR-0004), shown as plain text after the cell's source (the live
+      L02 had 8 recall cells and a notes cell with empty sources that rendered as bare labels, and a diagnostic cell
+      whose questions were not shown; live run 2026-11-23): `diagnostic` lists `questions[]` (each a string or an
+      object with a string `text`) as an ordered list, unless every question text already occurs in the source;
+      `recall` shows `front` when the source is empty, and `back` inside a native disclosure (`details`/`summary`
+      "Show answer"), closed by default; `notes` with an empty source shows "Notes are not saved in this version." in
+      the muted colour. Values of any other type are ignored. This is display only: diagnostic routing and recall
+      review stay deferred. [unit] [story]
+  - id: FR-NOTEBOOK-11
+    text: >-
+      Lesson navigation for a long lesson (L02: 27 cells, about 17,000 px at 1280 px; live run 2026-11-23). The lesson
+      header holds a "Lessons" link back to `/`, the title (`h1`) on its own line, then one row with the open-findings
+      link and the kernel controls. A contents list (`nav` labelled "Lesson contents") is built from the cells, in
+      order: one entry per markdown cell, other than recall and open cells, whose source has an ATX heading of level 1–3
+      (the first such heading's text with markdown emphasis, code and link markup removed, shown as plain text; a `#`
+      comment in code is not a heading), each lab cell as "Lab",
+      one entry "Recall cards (<n>)" at the first recall cell, one entry "Open questions (<n>)" at the first open
+      finding, and "Ask the tutor" when the panel is shown; every entry is an in-page link to `#cell-<id>` (the panel:
+      `#tutor`). At a viewport of 60rem or wider the list is a sticky column beside the cells; below 60rem it is hidden
+      behind a "Contents" button with `aria-expanded` and `aria-controls`, and following an entry closes it. [unit]
+      [story]
+  - id: FR-NOTEBOOK-12
+    text: >-
+      Lesson page states: while the lesson or its revision loads, a skeleton of a title and three text lines with
+      `aria-busy="true"` on the page; on an error, "The lesson could not be loaded." with a Retry button that refetches
+      the failed query and a "Back to lessons" link; a lesson not published yet keeps FR-NOTEBOOK-1's text and adds the
+      "Lessons" back link. [unit] [story]
 
 invariants:
   - id: INV-NOTEBOOK-1

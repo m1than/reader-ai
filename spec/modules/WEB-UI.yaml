@@ -51,7 +51,7 @@ title: App shell — pinned library build, Calm tokens, routing, API client, sig
 status: approved
 approved_by: agent
 approved_at: 2026-11-22
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). Awaiting the single deep-reviewer round"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -155,6 +155,9 @@ requirements:
       Lesson list: `GET /api/lessons`, grouped by course (`course_title`, courses sorted by title in the user's locale)
       and within a course by `ordinal`. A lesson with `latest_sha256` set is a link to `/lessons/<lesson_id>` with its
       title and updated date; a lesson with `latest_sha256: null` is shown without a link and with "not published yet".
+      Each lesson is one row: its ordinal, its title, then the status ("not published yet") and the date as separate
+      muted elements at the row's end (under the title below 40rem), so status and date never read as part of the
+      title (the live list ran them together; live run 2026-11-23).
       States: loading (skeleton), empty ("No lessons yet"), error (a calm message with Retry). [unit] [story]
   - id: FR-UI-7
     text: >-
@@ -180,6 +183,30 @@ requirements:
       it is an owner note for a library change, not an inlined asset). The test pins the number of distinct `data:`
       URLs at exactly 1 (the minifier repeats it for `-webkit-mask`), so a new library literal fails the build check
       until it is reviewed.
+  - id: FR-UI-10
+    text: >-
+      Layout and type (WEB polish, from the live screenshots of 2026-11-23). Spacing uses the library's
+      `--acme-space-1..7` steps only; colours only Calm tokens (INV-UI-1 unchanged). Prose (lesson markdown, the
+      tutor's answers) is set in the serif stack at 17px with line height 1.65 in a reading column at most 38rem wide
+      (about 70 Cyrillic characters per line; the slice's 46rem column gave about 92); headings step 2.25 / 1.5 /
+      1.2rem; UI chrome (header, labels, buttons, references, list metadata) uses the library's sans `--acme-font` at
+      0.8125–0.875rem. Widths: at 1280 and 1024 px the lesson shows its contents column beside the reading column
+      (WEB-NOTEBOOK FR-NOTEBOOK-11), below 60rem one column with 1rem page padding. Markdown tables and display math
+      scroll inside their own box. At 1280, 1024 and 390 px no page scrolls horizontally. Every interactive element
+      (links, buttons, text areas, the disclosure summary) shows a 2px `--acme-focus` outline on `:focus-visible`.
+      [unit] a scan of `web/src/ui/app.css`: no literal colour (no hex value or colour function; every `color` and
+      `background` value is `var(--acme-…)`, `transparent`, `inherit`, `currentColor` or `none`), every `padding`,
+      `margin`, `gap` and `inset` value made of `0`, `auto` and `var(--acme-space-N)` only, the
+      reading column's `max-width: 38rem`, and a `:focus-visible` rule whose outline uses `var(--acme-focus)`. [live]
+      the `ui` step of e2e/web/live/owner.slice.ts on the running stack: at each width `scrollWidth` ≤ the viewport
+      width on the list and on L02, the widest `[data-markdown] p` ≤ 608px, and axe reports no serious or critical
+      issue.
+  - id: FR-UI-11
+    text: >-
+      Keyboard and states of the shell: the first Tab stop is a "Skip to content" link (visible when focused) to the
+      page's `main` (`id="content"`, `tabIndex={-1}`); the header and every page share one horizontal padding. While
+      `/api/me` loads, the shell shows a header-height bar and a skeleton, not a bare "Loading…" line. The not-found
+      view keeps FR-UI-3's link. [unit] [story]
 
 invariants:
   - id: INV-UI-1

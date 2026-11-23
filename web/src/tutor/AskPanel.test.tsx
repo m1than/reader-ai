@@ -235,6 +235,51 @@ describe('error catalogue (VEC-TUTOR-5)', () => {
   });
 });
 
+describe('panel layout and grouped citations (FR-TUTOR-11, amended 2026-11-23)', () => {
+  const m = 'c'.repeat(64);
+  const many: QuestionState = {
+    ...answered,
+    answer: {
+      ...answered.answer!,
+      blocks: [
+        {
+          text: 'One block.', supported: true, quote: 'q',
+          citations: [60, 60, 61, 63, 60].map((page, i) => ({ span: `${m}:${i}`, page, material_title: 'Mastering Blockchain' })),
+        },
+      ],
+    },
+  };
+
+  it('shows one citation entry per material with page ranges', async () => {
+    render(<AskPanel lessonId={LESSON} revision={REV} cellId={null} api={fakeApi([many])} />);
+    await flush();
+    await ask();
+    await flush(1000);
+    const live = document.querySelector('[aria-live="polite"]') as HTMLElement;
+    expect(within(live).getByText('Mastering Blockchain, pp. 60–61, 63')).toBeTruthy();
+    expect(within(live).queryAllByText(/Mastering Blockchain/)).toHaveLength(1);
+  });
+
+  it('has the id the lesson contents link to, the heading Tutor, a shortcut hint and the focused cell label', async () => {
+    render(<AskPanel lessonId={LESSON} revision={REV} cellId="ex-intro" cellLabel="Что такое децентрализация" api={fakeApi([answered])} />);
+    await flush();
+    const panel = screen.getByRole('region', { name: 'Tutor' });
+    expect(panel.id).toBe('tutor');
+    expect(within(panel).getByRole('heading', { level: 2 }).textContent).toBe('Tutor');
+    expect(within(panel).getByText('Ctrl+Enter or ⌘+Enter to ask')).toBeTruthy();
+    expect(within(panel).getByText('About: Что такое децентрализация')).toBeTruthy();
+  });
+
+  it('names an unlabelled focused cell generically and shows nothing without a focused cell', async () => {
+    const { rerender } = render(<AskPanel lessonId={LESSON} revision={REV} cellId="x" cellLabel={null} api={fakeApi([answered])} />);
+    await flush();
+    expect(screen.getByText('About: the selected cell')).toBeTruthy();
+    rerender(<AskPanel lessonId={LESSON} revision={REV} cellId={null} cellLabel={null} api={fakeApi([answered])} />);
+    await flush();
+    expect(screen.queryByText(/^About:/)).toBeNull();
+  });
+});
+
 describe('answer text rendering (VEC-TUTOR-6)', () => {
   for (const c of renderCases()) {
     it(c.name, async () => {
