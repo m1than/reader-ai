@@ -881,6 +881,20 @@ tasks:
       follow_up: "SRV-AUTH amendment (auth is a complex area, full review): style the sign-in and bootstrap pages
         (currently browser-default HTML, 8px margin, Times) with a same-origin stylesheet under the existing CSP, or move
         the ceremony into the SPA as WEB-UI's stage-4b defer plans; axe is clean there today. No library change needed.",
+      code_review: "deep-reviewer on c0ccb05: VERDICT approve. 16 surviving mutants, all test gaps, closed in b42a170 with
+        paired spec wording: numeric page sort ([100, 9, 10, 99] → pp. 9–10, 99–100); one 'Recall cards (n)' entry
+        for 2+ recall cells; two-colon spans grouped by the part before the last colon; title precedence (cell over
+        lesson, first of two in a cell; first per material for the lesson); cell-level citations[]; a citation with url
+        and span is a URL citation (specified); a diagnostic whose source holds one of two questions still lists both;
+        table-driven firstHeading/cellLabels (html, empty first heading, whitespace, code-cell '#', GFM and math,
+        nested headings, recall with a heading); jsdom focus tests for a contents entry and the skip link. Code and spec:
+        FR-NOTEBOOK-11 'top-level headings'; loading states are a role=status with hidden text and an aria-hidden
+        skeleton, no aria-busy (FR-UI-11, FR-NOTEBOOK-12); no nav and no Contents button without entries;
+        Number.isSafeInteger pages and empty material ids dropped; stories for the lesson skeleton, the 5xx state with
+        Retry and the shell loading state; role=list on the unbulleted lists. Live: overflow measured against
+        clientWidth; the scroll test follows the last entry and asserts its target is out of view before the click;
+        the numbers-only ui object is committed to e2e/live/results/2026-11-23-slice.json (web_polish_ui); live ui
+        step PASS on b42a170. Unit: 207 Vitest tests pass.",
       note: "Screenshots and the L02 replay data stay outside the repository (book text). The stack now runs from the
         V/WEB-polish worktree (reader up); the live agent's next `reader up` from its own worktree restores its build." }
 

@@ -90,5 +90,20 @@
     "cost_per_question_usd": null,
     "cost_note": "no allowed interface exposes agent_spend; cap $0.30 per question",
     "bench_nfr_tutor": "skipped: reader.tutor.bench runs in the worker over docker exec"
+  },
+  "web_polish_ui": {
+    "what": "owner.slice.ts `ui` step (WEB-UI FR-UI-10/-11, WEB-NOTEBOOK FR-NOTEBOOK-11) on the stack rebuilt from V/WEB-polish b42a170; PASS",
+    "widths": [1280, 1024, 390],
+    "axe_serious_critical": { "1280-list": [], "1280-lesson": [], "1024-list": [], "1024-lesson": [], "390-list": [], "390-lesson": [] },
+    "signin_axe_serious_critical_report_only": { "1280-signin": [], "1024-signin": [], "390-signin": [] },
+    "layout": {
+      "1280-list": { "overflow_px": 0, "h1_px": "36px" },
+      "1280-lesson": { "overflow_px": 0, "widest_p_px": 608, "p_font_size": "17px", "p_line_height": "28.05px", "p_font_family": "ui-serif, Georgia, \"Iowan Old Style\", serif", "h1_px": "36px", "chars_per_line_median": 60 },
+      "1024-list": { "overflow_px": 0, "h1_px": "36px" },
+      "1024-lesson": { "overflow_px": 0, "widest_p_px": 608, "p_font_size": "17px", "p_line_height": "28.05px", "p_font_family": "ui-serif, Georgia, \"Iowan Old Style\", serif", "h1_px": "36px", "chars_per_line_median": 60 },
+      "390-list": { "overflow_px": 0, "h1_px": "30px" },
+      "390-lesson": { "overflow_px": 0, "widest_p_px": 358, "p_font_size": "17px", "p_line_height": "28.05px", "p_font_family": "ui-serif, Georgia, \"Iowan Old Style\", serif", "h1_px": "30px", "chars_per_line_median": 35 }
+    },
+    "revision": "542521481e88f001b773118ae2cefb25ab98be2c0758861fe540703810a39db9"
   }
 }
