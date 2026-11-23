@@ -25,7 +25,7 @@ READ: Final = 1 << 16
 @dataclass(frozen=True)
 class Exec:
     code: int | None  # None when the client was killed (overflow or timeout)
-    out: bytes  # empty when a sink received the bytes
+    out: bytes  # the first 4,097 bytes at most, also when a sink received them all
     total: int  # stdout bytes read, at most limit + 1
     stderr_bytes: int
     overflow: bool
@@ -105,10 +105,11 @@ class SystemRunner:
                 room = limit + 1 - total
                 piece = chunk[:room]
                 total += len(piece)
+                # the reply buffer keeps the first bytes even with a sink, so a refused fetch (exit 3 cancel,
+                # exit 1 `missing`) is read as its shape (FR-INGEST-21, code review round 1)
+                buffer += piece[: max(0, REPLY_LIMIT + 1 - len(buffer))]
                 if sink is not None:
                     sink(bytes(piece))
-                else:
-                    buffer += piece
                 if total > limit:
                     overflow = True
                     kill()

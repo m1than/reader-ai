@@ -11,7 +11,6 @@ stack is ever opened, and every exec argv is a list of validated values.
 from __future__ import annotations
 
 import contextlib
-import fcntl
 import hashlib
 import io
 import json
@@ -171,6 +170,15 @@ class Watcher:
             held.release()
 
     def step(self) -> None:
+        """One loop step; an OSError (a full disk, a vanished file) never ends the watcher: a held claim is
+        failed inside the run, then the loop waits 10 s and continues (code review round 1)."""
+        try:
+            self._step()
+        except OSError as error:
+            log.warning("step_error errno=%s wait_s=%d", error.errno, IDLE_WAIT_S)
+            self.d.sleep(IDLE_WAIT_S)
+
+    def _step(self) -> None:
         try:
             container = self.d.container()
         except Stop:
@@ -247,7 +255,14 @@ class Watcher:
         name = records.new_run(run_dir, work_root, c.sha256, upload_id=c.id)
         work = work_root / name
         try:
-            code = self._convert_and_send(container, c, work, phase, call, cancelled)
+            try:
+                code = self._convert_and_send(container, c, work, phase, call, cancelled)
+            except OSError as error:  # with the claim held: fail it, never leave it to the lease
+                log.warning("run_error id=%s errno=%s", c.id, error.errno)
+                code = "convert_failed"
+            if code is not None and code not in params.FAIL_CODES:
+                log.info("run_code id=%s code=%s reported=convert_failed", c.id, code)
+                code = "convert_failed"
             if code is not None and not cancelled.is_set():
                 call([*self._claim_args("fail", c), "--code", code], EXEC_TIMEOUT["fail"], _ok_shape)
                 log.info("upload_failed id=%s code=%s s=%.1f", c.id, code, self.d.clock() - started)
@@ -312,6 +327,8 @@ class Watcher:
             problem = self._fetch(container, c, work / "in" / "material.pdf")
             if problem is not None:
                 return problem
+            if cancelled.is_set():  # a heartbeat's cancel during the fetch: the converter never starts
+                return None
             phase[0] = "convert"
             last = [-1e9]
 
@@ -376,9 +393,7 @@ def try_convert_lock(data_dir: Path) -> _FdLock | None:
     locks = data_dir / "ingest" / "locks"
     locks.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(locks / "convert.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+    if not records.try_flock(fd):
         os.close(fd)
         return None
     return _FdLock(fd)
@@ -409,10 +424,8 @@ def watch_lock(data_dir: Path, pid: int, sha: str) -> Iterator[WatchLock]:
     locks.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(locks / "watch.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise Stop("busy", 3, "an ingest watcher is already running") from None
+        if not records.try_flock(fd):
+            raise Stop("busy", 3, "an ingest watcher is already running")
         lock = WatchLock(fd, pid, sha)
         lock.set_busy("none")
         yield lock
@@ -447,11 +460,37 @@ def start_caffeinate(pid: int) -> _Caffeinate:
     return _Caffeinate(process)
 
 
+SETUP_RECHECK_S: Final = 6 * 3600.0  # a full model hash at least this often (chosen)
+
+
+@dataclass
+class SetupCheck:
+    """FR-INGEST-3's check for an idle watcher: the full check (every model file hashed, about 1.2 GB) at
+    start, then per step only the cheap record comparison and the model files' sizes and mtimes; the full
+    check runs again when those change or every SETUP_RECHECK_S (code review round 1)."""
+
+    record: Callable[[], str | None]
+    full: Callable[[], str | None]
+    fingerprint: Callable[[], object]
+    clock: Callable[[], float] = time.monotonic
+    interval_s: float = SETUP_RECHECK_S
+    _seen: tuple[object, float, str | None] | None = None
+
+    def problem(self) -> str | None:
+        cheap = self.record()
+        if cheap is not None:
+            return cheap
+        mark, now = self.fingerprint(), self.clock()
+        if self._seen is None or self._seen[0] != mark or now - self._seen[1] >= self.interval_s:
+            self._seen = (mark, now, self.full())
+        return self._seen[2]
+
+
 def run_watch(data_dir: Path, deps: Any) -> int:
     """`reader-ingest --watch`: watch.lock (held: exit 3 busy), then the loop until SIGINT or SIGTERM, which
     the CLI's handler raises as Stop("interrupted") inside the current step (its run's processes are killed
     and its WORK removed on the way out; the claim's lease then expires and the upload is queued again)."""
-    from reader.ingest.host import cli, crossprobe, execio, watchdog
+    from reader.ingest.host import cli, crossprobe, execio, setup, watchdog
     from reader.ingest.host.closure import source_sha256
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -465,8 +504,14 @@ def run_watch(data_dir: Path, deps: Any) -> int:
     inspect = watchdog.SystemInspect()
     run_dir = data_dir / "ingest" / "run"
 
+    checked = SetupCheck(
+        record=lambda: setup.check_record(data_dir),
+        full=lambda: deps.check_setup(data_dir),
+        fingerprint=lambda: setup.models_fingerprint(data_dir),
+    )
+
     def setup_state() -> str:
-        if deps.check_setup(data_dir) is not None:
+        if checked.problem() is not None:
             return "setup_missing"
         if not probe:  # once per watcher start (INV-INGEST-4 at run time)
             probe.append(crossprobe.run(venv, pyroot, models, data_dir))

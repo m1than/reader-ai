@@ -269,6 +269,97 @@ def test_cli_converter_run_stops_at_a_watchdog_limit(tmp_path: Path) -> None:
     assert "kill_all" in killed
 
 
+# ---- fail closed (code review round 1) ----
+
+
+class SlowChild:
+    """A child that prints until it is killed (bounded at 10 s, so a regression fails instead of hanging)."""
+
+    pid = 4321
+
+    def __init__(self) -> None:
+        import threading
+
+        self.dead = threading.Event()
+        self.events: list[str] = []
+
+    def stdout_lines(self) -> Any:
+        for _ in range(1000):
+            if self.dead.wait(0.01):
+                return
+            yield b'{"pages_done": 1, "pages_total": 2}\n'
+
+    def wait(self, timeout: float | None = None) -> int:
+        return -9
+
+    def terminate(self) -> None:
+        self.events.append("term")
+        self.dead.set()
+
+    def kill(self) -> None:
+        self.events.append("kill")
+        self.dead.set()
+
+
+def _deps(tmp_path: Path, child: SlowChild) -> Any:
+    cli = need("reader.ingest.host.cli")
+    deps = cli.Deps(
+        runner=None, spawn=lambda *a: child, probe=None, venv=tmp_path, pyroot=tmp_path, models=tmp_path
+    )
+    deps.tick_s = 0.01
+    (tmp_path / "w" / "in").mkdir(parents=True)
+    return deps
+
+
+def test_a_tick_that_raises_fails_the_run_after_three(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    child, calls = SlowChild(), {"check": 0, "kill_all": 0}
+
+    class Broken:
+        def check(self) -> str | None:
+            calls["check"] += 1
+            raise OSError("ps failed")
+
+        def kill_all(self) -> None:
+            calls["kill_all"] += 1
+
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: Broken()
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert calls["check"] == cli.WATCHDOG_FAILED_TICKS
+    assert calls["kill_all"] >= 1
+    assert "kill" in child.events
+
+
+def test_an_empty_ps_while_the_child_lives_is_a_failed_tick(tmp_path: Path) -> None:
+    wd = need("reader.ingest.host.watchdog")
+
+    class EmptyPs(FakeInspect):
+        def snapshot(self) -> list[Any]:
+            return []
+
+    live = EmptyPs({100: P(100, sid=100, cwd=WORK, start=T0)})
+    dog = wd.Watchdog(run(), live, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path)
+    with pytest.raises(wd.WatchdogBlind):
+        dog.check()
+    gone = EmptyPs({})  # the child has exited: an empty set is the end of the run, not a blind tick
+    assert wd.Watchdog(run(), gone, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path).check() is None
+
+
+def test_a_missing_start_time_refuses_the_run(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    child = SlowChild()
+    deps = _deps(tmp_path, child)
+    deps.start_time = lambda pid: None
+    deps.watchdog = lambda c, work: cli.system_watchdog(deps, c, work)
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert "kill" in child.events
+
+
 # ---- [host] real processes ----
 
 STAND_IN = textwrap.dedent(
@@ -374,6 +465,12 @@ def test_lock_is_not_inherited_and_an_orphan_is_cleaned(tmp_path: Path) -> None:
     data = Path(os.path.realpath(tmp_path))
     parent = subprocess.Popen([sys.executable, "-c", PARENT, str(data)], stdout=subprocess.PIPE)
     assert parent.stdout is not None
+    import select
+
+    ready, _, _ = select.select([parent.stdout], [], [], 30)  # bounded: a parent that never starts fails here
+    if not ready:
+        parent.kill()
+        pytest.fail("the stand-in parent did not report its child within 30 s")
     started = json.loads(parent.stdout.readline())
     time.sleep(0.5)
     assert watch.try_convert_lock(data) is None  # held by the parent

@@ -8,6 +8,7 @@ owner's uploads, newest first. Every read of an upload applies lease expiry firs
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from collections.abc import Sequence
 from pathlib import Path
@@ -28,6 +29,7 @@ from reader.jobs.queue import job_status_of
 
 DEFAULT_CONFIG: Final = "/etc/reader/reader.yaml"
 PAGE_DIGITS: Final = 5  # page_count <= 5,000 (artifact caps)
+UPLOAD_ID: Final = re.compile(r"up-[0-9a-f]{12}")  # FR-INGEST-23
 # Written at image build from FR-INGEST-3's closure function (OPS-DEPLOY FR-DEPLOY-13), so the api never
 # imports reader.ingest.host to compare the watcher's code with its own.
 SOURCE_SHA_FILE: Final = Path("/usr/local/share/reader/converter_source_sha256")
@@ -121,13 +123,15 @@ async def list_materials(ctx: Ctx) -> Response:
 
 async def _material_sha(ctx: Ctx, conn: AsyncConnection, material_id: str) -> str | None:
     if material_id.startswith("up-"):
+        if not UPLOAD_ID.fullmatch(material_id):  # before any LIKE: no wildcard ever reaches the pattern
+            return None
         found = (
             await conn.execute(
                 text("SELECT sha256 FROM uploads WHERE owner_id = :o AND sha256 LIKE :p"),
                 {"o": ctx.signed_in.id, "p": material_id[3:] + "%"},
             )
         ).all()
-        return found[0][0] if len(found) == 1 and len(material_id) == 15 else None
+        return found[0][0] if len(found) == 1 else None
     material = next((m for m in _materials(ctx) if m.id == material_id), None)
     return None if material is None else material.sha256
 

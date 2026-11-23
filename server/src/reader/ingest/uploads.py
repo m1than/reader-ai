@@ -9,6 +9,7 @@ command and every api read.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import secrets
@@ -30,7 +31,7 @@ log = logging.getLogger("reader.ingest")
 
 LIVE: Final = ("claimed", "converting", "sending")
 OPEN: Final = ("queued", *LIVE, "failed")
-UNDER_AUTHORITY: Final = (*LIVE, "failed")
+UNDER_AUTHORITY: Final = ("queued", *LIVE, "failed")  # `queued`: code review round 1
 EMBED_KIND: Final = "search.embed"
 VIEW_KEYS: Final = (
     "id", "material_id", "filename", "size", "language", "state", "code", "pages_done", "pages_total",
@@ -329,10 +330,18 @@ async def upload_lock(engine: AsyncEngine) -> AsyncIterator[AsyncConnection]:
         try:
             yield conn
         finally:
-            with contextlib.suppress(Exception):
-                await conn.rollback()
-            await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": params.UPLOAD_LOCK_KEY})
-            await conn.commit()
+            try:  # shielded: a cancelled request still unlocks; a failed unlock closes the session instead
+                await asyncio.shield(_unlock(conn))
+            except BaseException:
+                await conn.invalidate()  # the session (and its advisory lock) ends with the connection
+                raise
+
+
+async def _unlock(conn: AsyncConnection) -> None:
+    with contextlib.suppress(Exception):
+        await conn.rollback()
+    await conn.execute(text("SELECT pg_advisory_unlock(:k)"), {"k": params.UPLOAD_LOCK_KEY})
+    await conn.commit()
 
 
 # ---- owner transitions (routes) ----
@@ -350,9 +359,12 @@ async def cancel_or_discard(
             row = await row_by_id(conn, upload_id, lock=True)
             if row is None or row.owner_id != owner:
                 raise LookupError
-            if await _authority(conn, row.id, row.state, row.sha256) or row.state not in allowed:
-                raise StateRefused
-            await conn.execute(text("DELETE FROM uploads WHERE id = :i"), {"i": row.id})
+            # decided inside, refused after the commit, so the authority's `received` mark is kept (round 1)
+            refused = await _authority(conn, row.id, row.state, row.sha256) or row.state not in allowed
+            if not refused:
+                await conn.execute(text("DELETE FROM uploads WHERE id = :i"), {"i": row.id})
+        if refused:
+            raise StateRefused
         with contextlib.suppress(FileNotFoundError):
             (inbox_dir / f"{row.sha256}.pdf").unlink()  # a crash before this is swept by the next upload
         log.info("upload_deleted id=%s sha=%s", row.id, row.sha256[:12])
@@ -419,16 +431,18 @@ async def queued_count(conn: AsyncConnection) -> int:
 
 
 async def claim_next(conn: AsyncConnection) -> dict[str, Any] | None:
-    row = (
-        await conn.execute(
-            text(
-                "SELECT id, sha256, size FROM uploads WHERE state = 'queued' ORDER BY created_at, id LIMIT 1"
-                " FOR UPDATE SKIP LOCKED"
-            )
-        )
-    ).first()
-    if row is None:
-        return None
+    """The oldest `queued` upload; one whose import key exists is marked `received` and skipped
+    (FR-INGEST-19)."""
+    sql = (
+        "SELECT id, sha256, size FROM uploads WHERE state = 'queued' ORDER BY created_at, id LIMIT 1"
+        " FOR UPDATE SKIP LOCKED"
+    )
+    while True:
+        row = (await conn.execute(text(sql))).first()
+        if row is None:
+            return None
+        if not await _authority(conn, row[0], "queued", row[1]):
+            break
     token = secrets.token_hex(16)
     await conn.execute(
         text(

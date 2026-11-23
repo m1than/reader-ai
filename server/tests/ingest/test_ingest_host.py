@@ -281,6 +281,20 @@ def test_requeue_does_not_take_the_convert_lock(tmp_path: Path) -> None:
     assert "another conversion" not in err.getvalue()
 
 
+def test_requeue_cleans_no_record(tmp_path: Path) -> None:
+    """FR-INGEST-16 (code review round 1): a watch-mode run of an upload holds no material lock, so --requeue
+    leaves every record, its own material's included."""
+    records = need("reader.ingest.host.records")
+    cli = need("reader.ingest.host.cli")
+    path = config(tmp_path)
+    run_dir, work_root = data(tmp_path) / "run", data(tmp_path) / "work"
+    name = records.new_run(run_dir, work_root, SHA, upload_id="6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b")
+    argv = ["m1", "--requeue", "--config", str(path)]
+    cli.ingest(argv, deps(FakeRunner(), FakeSpawn()), io.StringIO(), io.StringIO())
+    assert (run_dir / f"{name}.json").exists()
+    assert (work_root / name).is_dir()
+
+
 def test_convert_lock_fd_is_close_on_exec_and_not_inherited(tmp_path: Path) -> None:
     import fcntl
 

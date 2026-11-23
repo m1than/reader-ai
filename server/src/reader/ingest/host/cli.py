@@ -35,6 +35,7 @@ from reader.ingest.host.mapping import parse_progress, render_code_line
 
 CHILD_TIMEOUT_S: Final = 4 * 3600.0  # ADR-0021's 10 pages/min gives 94 min for the pilot (spec header)
 CHILD_GRACE_S: Final = 10.0
+WATCHDOG_FAILED_TICKS: Final = 3  # consecutive failed ticks before the run is killed (FR-INGEST-22, chosen)
 STATUS_TIMEOUT_S: Final = 60.0
 RECEIVE_TIMEOUT_S: Final = 330.0  # receive ends itself at 300 s
 DOCKER_TIMEOUT_S: Final = 30.0
@@ -160,9 +161,12 @@ def system_watchdog(deps: Deps, child: Child, work: Path) -> watchdog.Watchdog:
     Python as the kernel reports it, and the parent with its ancestors excluded."""
     inspect = watchdog.SystemInspect()
     assert deps.pyroot is not None  # noqa: S101 (resolved before the child starts)
+    start = deps.start_time(child.pid)
+    if not start:  # fail closed: no accounting without the child's start time (FR-INGEST-22)
+        raise Stop("watchdog_failed", 5)
     run = watchdog.Run(
         child_sid=child.pid,
-        child_start=deps.start_time(child.pid) or "",
+        child_start=start,
         work=os.path.realpath(work),
         exclude=watchdog.ancestors(os.getpid(), inspect.snapshot()),
     )
@@ -226,8 +230,17 @@ def convert_members(
             child.kill()
 
     def watch() -> None:  # FR-INGEST-22: one snapshot per tick; a limit kills every member of the run
+        failed = 0
         while not stop.wait(deps.tick_s):
-            code = dog.check()
+            try:
+                code = dog.check()
+                failed = 0
+            except Exception:  # fail closed: a tick that raises or cannot see the live child counts
+                failed += 1
+                code = "watchdog_failed" if failed >= WATCHDOG_FAILED_TICKS else None
+                if code is not None:
+                    with contextlib.suppress(Exception):
+                        dog.kill_all()
             if code is not None:
                 tripped.append(code)
                 if child is not None:
@@ -411,10 +424,8 @@ def convert_lock(data_dir: Path) -> Iterator[int]:
     locks.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(locks / CONVERT_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise Stop("busy", 3, "another conversion is running; try again when it ends") from None
+        if not records.try_flock(fd):  # one retry: `reader status` probes the lock with a short shared lock
+            raise Stop("busy", 3, "another conversion is running; try again when it ends")
         yield fd
     finally:
         os.close(fd)
@@ -459,8 +470,7 @@ def _ingest(material: Material, deps: Deps, requeue: bool, out: TextIO) -> int:
     ingest_root = material.data_dir / "ingest"
     run_dir, work_root = ingest_root / "run", ingest_root / "work"
     with _material_lock(material.data_dir, material.sha256):
-        if requeue:  # starts no converter: no convert.lock, and only this material's records are cleaned
-            records.cleanup_stale(run_dir, work_root, material.sha256, deps.probe)
+        if requeue:  # starts no converter: no convert.lock, and it cleans no record (FR-INGEST-16, round 1)
             container = worker_container(deps)
             args = ["--material-sha256", material.sha256]
             code, reply = _exec(deps, container, "reader.ingest.requeue", args, STATUS_TIMEOUT_S)

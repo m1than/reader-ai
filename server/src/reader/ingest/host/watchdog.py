@@ -128,6 +128,10 @@ def work_bytes(work: Path, max_entries: int = params.WORK_ENTRIES_MAX) -> int:
     return total
 
 
+class WatchdogBlind(Exception):
+    """A tick whose member set lacks the child while the child lives (FR-INGEST-22, fail closed)."""
+
+
 class Watchdog:
     def __init__(
         self, run: Run, inspect: Inspect, converter_exe: str, *, rss_max: int, work_max: int, work: Path
@@ -140,9 +144,17 @@ class Watchdog:
         found = members(self.run, self.inspect.snapshot(), self.inspect, self.converter_exe)
         return found, {pid: self.inspect.exe(pid) for pid in found}
 
+    def _child_alive(self) -> bool:
+        start = self.inspect.start(self.run.child_sid)
+        return start is not None and " ".join(start.split()) == " ".join(self.run.child_start.split())
+
     def check(self) -> str | None:
+        """A limit's code, or None. Raises WatchdogBlind when the snapshot misses the live child (an empty or
+        truncated `ps`): the caller counts that tick as failed (fail closed)."""
         started = time.monotonic()
         found, exes = self._snapshot()
+        if self.run.child_sid not in found and self._child_alive():
+            raise WatchdogBlind
         rss = sum(p.rss_kb for p in found.values()) * 1024
         self.peak_rss = max(self.peak_rss, rss)
         code = None

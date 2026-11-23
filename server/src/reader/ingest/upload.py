@@ -100,6 +100,12 @@ def _write_body(path: Path) -> int:
     return os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
 
 
+def _write_all(fd: int, data: bytes) -> None:
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view) :]
+
+
 async def _stream(ctx: Ctx, body: Body) -> None:
     fd = _write_body(body.path)
     digest = hashlib.sha256()
@@ -110,13 +116,13 @@ async def _stream(ctx: Ctx, body: Body) -> None:
                     piece = chunk[start : start + params.CHUNK]
                     if body.size + len(piece) > params.UPLOAD_BYTES_MAX:
                         raise Refused(413, "too_large")
-                    os.write(fd, piece)
+                    await asyncio.to_thread(_write_all, fd, piece)  # off the event loop (code review round 1)
                     digest.update(piece)
                     if len(body.head) < 8:
                         body.head = (body.head + piece)[:8]
                     body.tail = (body.tail + piece)[-magic.TAIL_BYTES :]
                     body.size += len(piece)
-        os.fsync(fd)
+        await asyncio.to_thread(os.fsync, fd)
     except TimeoutError:
         raise Refused(408, "body_timeout") from None
     finally:

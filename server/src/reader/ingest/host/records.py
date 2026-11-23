@@ -9,14 +9,31 @@ work directory, because a pid can be reused by an unrelated process.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import secrets
 import shutil
 import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Final, Protocol
+
+LOCK_RETRY_S: Final = 0.2
+
+
+def try_flock(fd: int) -> bool:
+    """An exclusive non-blocking flock, retried once after 0.2 s: `reader status` probes the ingest locks with
+    a short shared lock (OPS-CLI FR-CLI-22), which must not make a real run read `busy`."""
+    for attempt in (0, 1):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if attempt == 0:
+                time.sleep(LOCK_RETRY_S)
+    return False
 
 
 class Probe(Protocol):

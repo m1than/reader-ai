@@ -444,11 +444,15 @@ def _kill_api_mid_body(argv: list[str], env: dict[str, str], port: int, cookie: 
     """Start a real api process, stream part of a body, SIGKILL it while the `.tmp-*` file exists."""
     server = subprocess.Popen(argv, env=env)
     try:
-        for _ in range(100):
+        listening = False
+        for _ in range(100):  # bounded: about 30 s for the api process to listen
             with contextlib.suppress(OSError), socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                listening = True
                 break
             time.sleep(0.1)
-        sock = socket.create_connection(("127.0.0.1", port))
+        if not listening:
+            return False
+        sock = socket.create_connection(("127.0.0.1", port), timeout=10)
         head = (
             "POST /api/materials/uploads?language=ru HTTP/1.1\r\nHost: localhost\r\n"
             f"Origin: {ORIGIN}\r\nCookie: {SESSION_COOKIE}={cookie}\r\nContent-Type: application/pdf\r\n"
@@ -732,7 +736,7 @@ async def test_next_peek_waits_for_a_notify(pg: Pg, tmp_path: Path) -> None:
         waiting = asyncio.create_task(cmd(w, "next", "--peek", "--wait", "5", *host_args()))
         await asyncio.sleep(0.5)
         await uploaded(w, pdf(b"notify"))
-        code, raw = await waiting
+        code, raw = await asyncio.wait_for(waiting, 15)  # bounded: a lost NOTIFY fails instead of hanging
         assert (code, line(raw)) == (0, {"queued": 1})
         assert time.monotonic() - started < 4
 
@@ -943,3 +947,119 @@ async def test_upload_routes_are_owner_only(pg: Pg, tmp_path: Path) -> None:
         async with api(w) as c:
             assert (await c.get("/api/materials/uploads/not-a-uuid")).status_code == 404
             assert (await c.get(f"/api/materials/uploads/{uuid.uuid4()}")).status_code == 404
+            for bad in ("up-%25", "up-____________", "up-0123456789aB", "up-0123456789abc"):
+                assert (await c.get(f"/api/materials/{bad}/outline")).status_code == 404
+
+
+# ---- code review round 1: guards with an oracle ----
+
+
+async def _key_row(w: World, sha256: str) -> None:
+    """The upload's `ingest.import` key row, inserted directly (receive enqueued, then crashed)."""
+    uploads = need("reader.ingest.uploads")
+    from sqlalchemy import text
+
+    async with w.engine.begin() as conn:
+        key = await uploads.import_key(conn, sha256)
+        await conn.execute(
+            text("INSERT INTO job_keys (kind, key, args, attempts) VALUES ('ingest.import', :k, '{}', 0)"),
+            {"k": key},
+        )
+
+
+async def test_discard_of_a_failed_row_with_its_key_is_refused_and_marks_received(
+    pg: Pg, tmp_path: Path
+) -> None:
+    async with world(pg, tmp_path) as w:
+        view = await uploaded(w, pdf(b"keyed"))
+        got = await claim(w)
+        assert (await cmd(w, "fail", *claim_args(got), "--code", "convert_failed"))[0] == 0
+        await _key_row(w, got["sha256"])
+        async with api(w) as c:  # no read of the upload in between: the DELETE itself applies the authority
+            response = await c.delete(f"/api/materials/uploads/{view['id']}")
+        assert (response.status_code, response.json()) == (409, {"error": "state"})
+        assert (await state_of(w, view["id"]))[0] == "received"
+
+
+async def test_a_claim_skips_a_queued_row_whose_key_exists(pg: Pg, tmp_path: Path) -> None:
+    async with world(pg, tmp_path) as w:
+        view = await uploaded(w, pdf(b"queued-keyed"))
+        await _key_row(w, sha(pdf(b"queued-keyed")))
+        assert await cmd(w, "next", "--claim", "--wait", "1", *host_args()) == (0, b'{"upload":null}\n')
+        assert (await state_of(w, view["id"]))[0] == "received"
+
+
+async def test_cancel_while_an_upload_streams_is_upload_busy(pg: Pg, tmp_path: Path) -> None:
+    async with world(pg, tmp_path) as w:
+        waiting = await uploaded(w, pdf(b"waiting"))
+        release = asyncio.Event()
+
+        async def slow() -> AsyncIterator[bytes]:
+            yield b"%PDF-1.7\n"
+            await release.wait()
+            yield b"x" * 100 + b"\n%%EOF\n"
+
+        async with api(w) as c:
+            streaming = asyncio.create_task(post(c, slow(), name="Streaming.pdf"))
+            try:
+                for _ in range(100):  # until the streaming upload holds the instance's lock
+                    sql = "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted"
+                    held = await w.scalar(sql)
+                    if held:
+                        break
+                    await asyncio.sleep(0.05)
+                response = await c.post(f"/api/materials/uploads/{waiting['id']}/cancel")
+                assert (response.status_code, response.json()) == (409, {"error": "upload_busy"})
+            finally:
+                release.set()
+                done = await asyncio.wait_for(streaming, 15)
+        assert done.status_code == 201
+        assert (await state_of(w, waiting["id"]))[0] == "queued"
+
+
+async def test_json_to_a_spelled_upload_path_is_refused_by_the_handler(pg: Pg, tmp_path: Path) -> None:
+    """`/api/materials/%75ploads` is not FR-AUTH-22's exact path, so the gate's JSON rule lets
+    `application/json` through; the router decodes the path to the upload route, whose own check is 415."""
+    async with world(pg, tmp_path) as w:
+        from reader.api.app import CsrfGate, create_app
+
+        cookie = await session_for(w, "ivan")
+        headers = [
+            (b"origin", ORIGIN.encode()),
+            (b"content-type", b"application/json"),
+            (b"content-length", b"2"),
+            (b"x-reader-filename", b"Book.pdf"),
+            (b"cookie", f"{SESSION_COOKIE}={cookie}".encode()),
+            (b"host", b"localhost"),
+        ]
+        scope = {
+            "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST",
+            "scheme": "https",
+            "path": "/api/materials/uploads", "raw_path": b"/api/materials/%75ploads",
+            "query_string": b"language=ru", "headers": headers, "server": ("localhost", 443), "client": None,
+            "root_path": "",
+        }
+
+        async def receive() -> dict[str, Any]:
+            return {"type": "http.request", "body": b"{}", "more_body": False}
+
+        reached: list[bool] = []
+
+        async def passthrough(_s: Any, _r: Any, _send: Any) -> None:
+            reached.append(True)
+
+        await CsrfGate(passthrough, ORIGIN)(scope, receive, lambda _m: asyncio.sleep(0))
+        assert reached == [True]  # the gate let it through: the 415 below is the handler's
+        app = create_app(w.settings, w.engine, run_cleanup_task=False, jobs=w.jobs)
+        app.state.blobs_root = w.blobs
+        app.state.ingest_materials = w.config.materials
+        sent: list[dict[str, Any]] = []
+
+        async def send(message: dict[str, Any]) -> None:
+            sent.append(message)
+
+        await app(scope, receive, send)
+        start = next(m for m in sent if m["type"] == "http.response.start")
+        body = b"".join(m.get("body", b"") for m in sent if m["type"] == "http.response.body")
+        assert (start["status"], json.loads(body)) == (415, {"error": "content_type"})
+        assert inbox(w) == [] and await upload_rows(w) == 0

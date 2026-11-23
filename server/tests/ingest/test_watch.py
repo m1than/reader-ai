@@ -74,6 +74,8 @@ class FakeStack:
     calls: list[list[str]] = field(default_factory=list)
     timeouts: dict[str, float] = field(default_factory=dict)
     stdin: dict[str, bytes] = field(default_factory=dict)
+    on_fetch: Callable[[], None] | None = None  # runs while the fetch is in flight (a heartbeat may fire)
+    raise_on: str = ""  # an inbox command whose exec raises OSError
 
     def run(
         self,
@@ -92,6 +94,10 @@ class FakeStack:
         self.timeouts[command if module == "reader.ingest.inbox" else module] = timeout
         if stdin is not None:
             self.stdin[module] = stdin
+        if command and command == self.raise_on:
+            raise OSError(28, "No space left on device")
+        if command == "fetch" and self.on_fetch is not None:
+            self.on_fetch()
         if module == "reader.ingest.receive":
             code, out = self.receive_reply
         elif command == "next" and "--peek" in argv:
@@ -121,10 +127,10 @@ class FakeStack:
             "overflow": overflow,
             "timed_out": False,
         }
-        if sink is not None and code == 0 and command == "fetch":
+        # mirrors the real runner: a sink receives every byte read, and `out` keeps the first 4,097 (round 1)
+        if sink is not None:
             sink(out)
-            return execio.Exec(out=b"", **shape)
-        return execio.Exec(out=out, **shape)
+        return execio.Exec(out=out[: execio.REPLY_LIMIT + 1], **shape)
 
     def commands(self) -> list[str]:
         return [" ".join(a[8:10]) if a[7] == "reader.ingest.inbox" else a[7] for a in self.calls]
@@ -204,6 +210,7 @@ class Harness:
             clock=self.clock.time,
             sleep=self.clock.sleep,
             watcher_sha="c" * 64,
+            abort=lambda: self.events.append("abort"),
         )
 
     def watcher(self) -> Any:
@@ -656,3 +663,139 @@ def test_runtime_probe_decides_the_host_state(
     assert probe.judge(code, raw) == state
     if payload and state == "setup_missing" and code == 0:
         assert "kern.procargs2" in caplog.text and "allowed:42" not in caplog.text
+
+
+# ---- code review round 1 ----
+
+
+class ShellRunner:
+    """The real SystemRunner, with the fetch exec replaced by a shell script (no Docker)."""
+
+    def __init__(self, script: str) -> None:
+        self.script = script
+
+    def run(self, argv: list[str], env: dict[str, str], timeout: float, limit: int,
+            stdin: bytes | None = None, sink: Callable[[bytes], None] | None = None) -> Any:
+        execio = need("reader.ingest.host.execio")
+        shell = ["/bin/sh", "-c", self.script]
+        return execio.SystemRunner().run(shell, {"PATH": "/usr/bin:/bin"}, timeout, limit, stdin, sink)
+
+
+def _fetch_through(tmp_path: Path, script: str) -> Any:
+    watch = need("reader.ingest.host.watch")
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    h = Harness(tmp_path)
+    deps = h.deps()
+    deps.runner = ShellRunner(script)
+    claim = watch.Claim(id=UPLOAD, sha256=hashlib.sha256(BODY).hexdigest(), size=len(BODY), claim=CLAIM)
+    target = tmp_path / "work" / "in" / "material.pdf"
+    target.parent.mkdir(parents=True)
+    return watch.Watcher(deps)._fetch("cid", claim, target)
+
+
+def test_a_refused_fetch_is_read_through_the_real_runner(tmp_path: Path) -> None:
+    watch = need("reader.ingest.host.watch")
+    with pytest.raises(watch.Cancelled):
+        _fetch_through(tmp_path / "a", "printf '{\"cancel\":true}\\n'; exit 3")
+    assert _fetch_through(tmp_path / "b", "printf '{\"error\":\"missing\"}\\n'; exit 1") == "inbox_missing"
+
+
+def test_setup_models_are_hashed_at_start_then_only_on_change(tmp_path: Path) -> None:
+    watch = need("reader.ingest.host.watch")
+    clock = Clock()
+    hashed, mark, record = [0], ["a"], [None]
+
+    def full() -> str | None:
+        hashed[0] += 1
+        return None
+
+    check = watch.SetupCheck(
+        record=lambda: record[0], full=full, fingerprint=lambda: mark[0], clock=clock.time
+    )
+    for _ in range(20):  # idle steps: the cheap record comparison only
+        assert check.problem() is None
+        clock.sleep(25)
+    assert hashed == [1]
+    mark[0] = "b"  # a model file's size or mtime changed
+    check.problem()
+    assert hashed == [2]
+    clock.sleep(watch.SETUP_RECHECK_S)
+    check.problem()
+    assert hashed == [3]
+    record[0] = "setup_stale"  # the record differs: reported at once, no hashing
+    assert check.problem() == "setup_stale"
+    assert hashed == [3]
+
+
+def test_heartbeat_cancel_aborts_without_the_converter_raising(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+
+    def cancelled_mid_run(_: Path) -> None:
+        h.stack.progress_reply = (3, CANCEL)
+        h.timers[-1].fn()  # the heartbeat gets the cancel shape; the converter returns normally
+
+    h.convert_hook = cancelled_mid_run
+    h.watcher().step()
+    assert "abort" in h.events
+    assert h.stack.failed() == []
+    assert "reader.ingest.receive" not in h.stack.commands()
+    assert not any("--phase" in a and a[a.index("--phase") + 1] == "sending" for a in h.stack.calls)
+
+
+def test_a_cancel_during_the_fetch_never_starts_the_converter(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+
+    def beat_cancelled() -> None:
+        h.stack.progress_reply = (3, CANCEL)
+        h.timers[-1].fn()
+
+    h.stack.on_fetch = beat_cancelled
+    h.watcher().step()
+    assert "convert" not in h.events
+    assert h.stack.failed() == []
+    assert work_left(h) == []
+
+
+def test_an_oserror_in_a_run_fails_the_claim_and_the_loop_continues(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+
+    def disk_full(_: Path) -> None:
+        raise OSError(28, "No space left on device")
+
+    h.convert_hook = disk_full
+    h.watcher().step()
+    assert h.stack.failed() == ["convert_failed"]
+    assert h.events[-2:] == ["awake-stop", "unlock"]
+    (tmp_path / "second").mkdir()
+    h2 = Harness(tmp_path / "second")
+    h2.stack.raise_on = "next"
+    at = h2.clock.now
+    h2.watcher().step()  # an OSError outside a claim: logged, then 10 s, never raised
+    assert h2.clock.now - at >= 10
+
+
+def test_a_code_outside_fail_s_list_is_reported_as_convert_failed(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    h = Harness(tmp_path)
+
+    def blind(_: Path) -> None:
+        raise cli.Stop("watchdog_failed", 5)
+
+    h.convert_hook = blind
+    h.watcher().step()
+    assert h.stack.failed() == ["convert_failed"]
+
+
+def test_a_status_probe_does_not_make_the_lock_busy(tmp_path: Path) -> None:
+    import fcntl
+    import threading
+
+    watch = need("reader.ingest.host.watch")
+    locks = tmp_path / "ingest" / "locks"
+    locks.mkdir(parents=True)
+    probe = os.open(locks / "convert.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    fcntl.flock(probe, fcntl.LOCK_SH | fcntl.LOCK_NB)  # `reader status` probing at that moment
+    threading.Timer(0.05, lambda: os.close(probe)).start()
+    held = watch.try_convert_lock(tmp_path)
+    assert held is not None
+    held.release()
