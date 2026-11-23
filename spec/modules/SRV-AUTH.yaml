@@ -438,3 +438,23 @@ vectors:
 #
 # Dependencies added to server/pyproject.toml with Green: fastapi, uvicorn, sqlalchemy[asyncio], asyncpg, alembic,
 # webauthn==3.0.1; test-only: httpx (testcontainers Postgres is already in dev).
+
+# ---- Paired change (DRAFT, 2026-11-23, V/onboarding, for SRV-INGEST revision 2 and ADR-0029, proposed). Held under
+# `proposed_requirements` (trace-check does not read it; this spec is approved) until the owner accepts ADR-0029 and
+# the deep-reviewer approves; it moves into `requirements` with its Red tests. FR-AUTH-12 is unchanged for every
+# other route. ----
+proposed_requirements:
+  - id: FR-AUTH-19
+    text: >-
+      **Raw-body routes.** `reader.auth.csrf.RAW_BODY_ROUTES` is an exact allow-list of (method, route template,
+      media type) with one entry: (`POST`, `/api/materials/uploads`, `application/pdf`). For a request matching an
+      entry by method and by the matched route template (never by a path prefix or a pattern):
+      - the Origin check of FR-AUTH-12 applies unchanged (403 `origin`, before the handler);
+      - the Content-Type must be exactly that entry's media type (compared per REF-AUTH-7, parameters ignored), else
+        415 `content_type`; `application/json` is refused there too;
+      - FR-AUTH-12's 64 KiB JSON-body rule does not apply: the middleware does not read the body, and the handler
+        streams it under its own bound (SRV-INGEST FR-INGEST-18).
+      Every other route keeps FR-AUTH-12 exactly. [unit] the table has exactly one entry; the upload route without
+      Origin is 403, with `text/plain`, `application/json` or `multipart/form-data` is 415; `application/pdf` on any
+      other route (a JSON route, `/api/materials/uploads/x`, `/api/materials/uploads/` with a trailing slash, GET of
+      the upload route) is 415 or 405 as today; the middleware reads 0 body bytes for the upload route.

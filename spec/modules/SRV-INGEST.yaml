@@ -30,11 +30,14 @@
 # change; no secrets) claims an upload by long-polling the worker over `docker exec`, fetches its bytes on the exec's
 # stdout, checks sha256 and size against the claim, converts it under the unchanged profile, and returns the artifact
 # over the existing receive with the claim. Progress, cancel, retry and the converter's online state reach the UI
-# through the `uploads` row and the existing jobs. Items FR-INGEST-18..25, INV-INGEST-8..10, VEC-INGEST-6..7.
-# Cross-spec for revision 2: SRV-AUTH (FR-AUTH-12 Content-Type exception for the upload route), OPS-DEPLOY (Caddy
-# `request_body max_size 200MB` and a body read timeout on that path), OPS-CLI (`reader up` starts the ingest watcher
-# as its own detached program with its own lock; `reader status` reports it; `reader down` stops it), SRV-SEARCH
-# (fts_config of uploaded materials), SRV-PLAN (FR-INGEST-24).
+# through the `uploads` row and the existing jobs. Items FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7, plus
+# `proposed_adr` and `proposed_defers`. Revision 2 is promoted only after the owner accepts ADR-0029 and only together
+# with its Red tests; SRV-PLAN on declared materials does not depend on it and can go first.
+# Cross-spec for revision 2, each drafted as `proposed_requirements` in its own spec: SRV-AUTH FR-AUTH-19 (the
+# raw-body route allow-list), OPS-DEPLOY FR-DEPLOY-13 (Caddy `request_body max_size 200MiB` on the upload path; the
+# numeric body timeout lives in the api), OPS-CLI FR-CLI-22 (`reader up` starts the ingest watcher by default, owner
+# 2026-11-23; `reader status` reports it; `reader down` stops it). Still to draft at promotion: SRV-SEARCH
+# (fts_config of uploaded materials).
 #
 # Declared deviations:
 #   - The roadmap's slice says "Upload the Bashir PDF". The PDF is declared in reader.yaml and ingested with a host
@@ -87,7 +90,8 @@ approved_at: 2026-11-22
 layer: server
 track: engineering
 slice: V.SRV-INGEST-min
-adr: [ADR-0021, ADR-0027, ADR-0029, ADR-0008, ADR-0006, ADR-0007, ADR-0011, ADR-0017, ADR-0026]
+adr: [ADR-0021, ADR-0027, ADR-0008, ADR-0006, ADR-0007, ADR-0011, ADR-0017, ADR-0026]
+proposed_adr: [ADR-0029]   # revision 2 (draft); joins `adr` at promotion
 
 paths:
   - server/src/reader/ingest/**
@@ -132,10 +136,11 @@ normative:
 #   Docling page batches of 50. Reason: the spike's full run used 50-page batches (Docker; 5,005 MiB peak).
 #   Import job: max_attempts 3, timeout_s 600. Reason: the import is one transaction of row inserts (no conversion);
 #     600 s covers 500,000 spans at an assumed 1,000 rows/s, itself a structural assumption, not a measurement.
-#   Revision 2 (draft, ADR-0029): `inbox.upload_bytes_max` 200 MiB (≈ 10× the 20.9 MB pilot), `inbox.open_max` 5,
-#     `inbox.bytes_max` 1 GiB, lease 120 s, 3 attempts, long-poll 25 s, progress at most every 30 s, converter
-#     online while seen in the last 60 s, `convert.rss_max` 8 GiB (2 × the pilot's measured 4,025 MiB child peak),
-#     `convert.work_bytes_max` 2 GiB. All structural except the RSS basis. Constants in `reader.ingest.params`.
+#   Revision 2 (draft, ADR-0029): `inbox.upload_bytes_max` 200 MiB (209,715,200 bytes, ≈ 10× the 20.9 MB pilot;
+#     owner 2026-11-23), `inbox.open_max` 5 and `inbox.bytes_max` 1 GiB over open uploads only, body deadline 300 s,
+#     lease 120 s renewed by a 30 s heartbeat (4 missed beats), 3 attempts, long-poll 25 s, converter online while
+#     seen in the last 60 s, replies ≤ 4,096 bytes, `convert.rss_max` 8 GiB (2 × the pilot's measured 4,025 MiB child
+#     peak), `convert.work_bytes_max` 2 GiB. All structural except the RSS basis. Constants in `reader.ingest.params`.
 #   receive: 300 s internal deadline; host-side exec timeouts: receive 330 s, status and requeue 60 s. Reason:
 #     validation and an 80 MiB copy take seconds; a host-side timeout does not stop a process inside the container,
 #     so receive bounds itself, and the host waits slightly longer than that bound.
@@ -565,134 +570,231 @@ requirements:
       [db]
 
 # ---- Revision 2 (DRAFT, 2026-11-23, V/onboarding): browser upload and host pickup, ADR-0029 (proposed). ----
-# FR-INGEST-18..25, INV-INGEST-8..10 and VEC-INGEST-6..7 are held under `proposed_*` keys, which trace-check does
+# FR-INGEST-18..24, INV-INGEST-8..10 and VEC-INGEST-6..7 are held under `proposed_*` keys, which trace-check does
 # not read, because this spec is approved and T5 requires a test for every item it holds. On approval they move into
 # `requirements`, `invariants` and `vectors` together with their Red tests. No code until the deep-reviewer approves
 # this revision (the area is sandbox and egress, AGENTS.md "Complex work"). Items 1–17 are unchanged.
 proposed_requirements:
   - id: FR-INGEST-18
     text: >-
-      **Upload route** (ADR-0029 Decision 1). `POST /api/materials/uploads?filename=F&language=L` in
-      `reader.ingest.routes`, owner role only (403 `owner_only`), body the raw PDF with `Content-Type:
-      application/pdf` (SRV-AUTH FR-AUTH-12 exception, paired change). `F` is 1..200 characters after NFC and after
-      removing C0/C1 controls, `/`, `\` and NUL (else 400 `filename`); `L` is `ru`, `en` or `other` (else 400
-      `language`; `other` maps to the `simple` full-text configuration). The handler:
-      - takes the owner's upload lock (`pg_try_advisory_lock` on a constant key plus the owner id; held: 409
-        `upload_busy`) and checks the quota before reading the body: at most `inbox.open_max` (5) uploads in a state
-        other than `ready`, `failed`, `cancelled`, and at most `inbox.bytes_max` (1 GiB) in the inbox (409
-        `inbox_full`);
-      - streams the body in chunks of at most 1 MiB into `<BLOBS_DIR>/inbox/.tmp-<32 random hex>` (created with
-        `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0640), hashing as it writes; at `inbox.upload_bytes_max` (200 MiB) + 1 byte
-        it stops with 413 `too_large`; a client disconnect or an empty body (400 `empty`) removes the file;
-      - checks the magic (VEC-INGEST-7): the first 8 bytes match `%PDF-1.[0-7]` or are `%PDF-2.0`, and the last
-        1,024 bytes contain `%%EOF`; else 415 `not_pdf`. Nothing else in the file is read;
-      - dedupes: if a declared material (reader.yaml) or an upload of this owner has the sha256, it removes the
-        temporary file and answers 200 with `{upload: <existing view> | null, material_id}`;
-      - otherwise fsyncs the file, renames it to `<BLOBS_DIR>/inbox/<sha256>.pdf`, chmods 0440, fsyncs the
-        directory, inserts the `uploads` row (FR-INGEST-19) in state `queued`, sends `NOTIFY reader_inbox`, and
-        answers 201 with the upload view (FR-INGEST-23).
-      Every failure path removes the temporary file (`finally`). [db]
+      **Upload route** (ADR-0029 Decision 1). `POST /api/materials/uploads?language=L` in `reader.ingest.routes`,
+      owner role only (403 `owner_only`), body the raw PDF with `Content-Type: application/pdf` (SRV-AUTH proposed
+      FR-AUTH-19). `L` is `ru`, `en` or `other` (else 400 `language`; `other` maps to the `simple` full-text
+      configuration).
+      **Filename** in the header `X-Reader-Filename`, never in the URL: percent-encoded UTF-8 (RFC 3986), decoded
+      strictly (an invalid escape or invalid UTF-8 is 400 `filename`), then NFC, then C0 and C1 controls, NUL, `/`,
+      `\` and the bidi controls U+061C, U+200E, U+200F, U+202A–U+202E and U+2066–U+2069 are removed; 1..200
+      characters remain (else 400 `filename`). It is display metadata only, never a path, and never logged
+      (FR-INGEST-24; Caddyfile has no `log` directive and uvicorn's access log holds the path and query only).
+      **The handler, in order:**
+      1. takes the instance's upload lock (`pg_try_advisory_lock(UPLOAD_LOCK_KEY)`, a constant; held: 409
+         `upload_busy`). One upload is in flight for the whole instance: v1 has one owner who may upload;
+      2. **sweeps crash leftovers** under that lock: every `<BLOBS_DIR>/inbox/.tmp-*` file is removed (its writer
+         would hold this lock, so none is live), and every `<BLOBS_DIR>/inbox/<64 hex>.pdf` with no `uploads` row of
+         that sha256 is removed (a crash between rename and insert, or between a cancel's commit and its unlink).
+         Names matching neither pattern are left alone and counted in the log line;
+      3. **checks the quota.** Open uploads are rows in `queued`, `claimed`, `converting`, `sending` or `failed`
+         whose `ingest.import` key does not exist (FR-INGEST-19). With `n` open uploads and `B` = the sum of their
+         sizes: `n ≥ inbox.open_max` (5), or `B + Content-Length > inbox.bytes_max` (1 GiB) when the header is
+         present, is 409 `inbox_full` before any byte is read; while streaming, `B + written > inbox.bytes_max` is
+         409 `inbox_full`. So open files never exceed 1 GiB, with no overshoot. Files of received uploads are the
+         owner's retained originals (ADR-0029 Decision 5) and are outside the quota; their total is reported as
+         `inbox_retained_bytes` by `GET /api/materials`. Remedy shown for `inbox_full`: Discard failed uploads,
+         cancel queued ones, or wait for them to finish;
+      4. streams the body in chunks of at most 1 MiB into `<BLOBS_DIR>/inbox/.tmp-<32 random hex>` (created with
+         `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0640), hashing as it writes, under a 300 s deadline for the whole body
+         (408 `body_timeout`; the numeric read timeout lives here, OPS-DEPLOY proposed FR-DEPLOY-13). At
+         `inbox.upload_bytes_max` (200 MiB = 209,715,200 bytes) + 1 byte it stops with 413 `too_large`; an empty
+         body is 400 `empty`;
+      5. checks the magic (VEC-INGEST-7): the first 8 bytes match `%PDF-1.[0-7]` or are `%PDF-2.0`, and the last
+         1,024 bytes (the whole body when it is shorter) contain `%%EOF`; else 415 `not_pdf`. Nothing else in the
+         file is read;
+      6. dedupes: a declared material (reader.yaml) with this sha256 gives 200 `{material_id, upload: null}`; an
+         `uploads` row with this sha256 gives 200 with its view (a failed one offers Retry). A cancelled or
+         discarded upload has no row (FR-INGEST-19), so the same bytes uploaded again become a new upload;
+      7. refuses an id collision: `up-<first 12 hex>` equal to a declared material's id, or to another upload's id
+         with a different sha256, is 409 `id_collision`;
+      8. fsyncs the file, renames it to `<BLOBS_DIR>/inbox/<sha256>.pdf`, chmods 0440, fsyncs the directory, inserts
+         the `uploads` row in state `queued`, sends `NOTIFY reader_inbox`, and answers 201 with the upload view
+         (FR-INGEST-23).
+      Every failure path, a client disconnect included, removes the temporary file (`finally`) and releases the lock.
+      [db]; [live] a body of exactly 209,715,200 bytes (a valid header, padding and `%%EOF`) passes Caddy and the api
+      (201), and is then converted, fails `convert_failed` and is discarded, which also measures fetch throughput
+      (ADR-0029 hypotheses); 209,715,201 bytes is 413 at Caddy.
   - id: FR-INGEST-19
     text: >-
       **Uploads table** (migration `reader/ingest/migrations/<rev>_uploads.py`, `down_revision` the ingest base):
       `uploads(id uuid pk, owner_id → users.id, sha256 text CHECK 64 lowercase hex, size bigint CHECK > 0,
       filename text, language text CHECK in (ru, en, other), state text CHECK in (queued, claimed, converting,
-      sending, received, failed, cancelled), code text null, attempts int default 0, claim text null, lease_until
-      timestamptz null, pages_done int null, pages_total int null, created_at, updated_at)`, unique (owner_id,
-      sha256); `ingest_hosts(singleton bool pk CHECK true, seen_at timestamptz, state text CHECK in (ready,
-      setup_missing), converter_version text)`. Transitions, each one guarded `UPDATE … WHERE state = <from>`:
-      - queued → claimed (`next`), claimed → converting (first `progress`), converting → sending (`progress
-        --sending`), sending → received (receive, FR-INGEST-23);
-      - claimed | converting | sending → queued with `attempts + 1` when `lease_until` has passed (checked by every
-        `next` before it claims), or → failed `host_lost` when that makes `attempts` 3;
-      - claimed | converting | sending → failed `<code>` (`inbox fail`, FR-INGEST-20);
-      - queued | claimed | converting → cancelled (owner); failed → queued with `attempts = 0` (owner Retry);
-      - failed → deleted row and file (owner Discard).
+      sending, received, failed), code text null, attempts int default 0, claim text null, lease_until
+      timestamptz null, pages_done int null, pages_total int null, created_at, updated_at)`, unique (sha256);
+      `ingest_hosts(singleton bool pk CHECK true, seen_at timestamptz, state text CHECK in (ready, setup_missing,
+      degraded), converter_version text)`. There is no `cancelled` state: **cancel and Discard delete the row**, then
+      the file after the commit (a crash in between leaves an orphan file, which the next upload's sweep removes).
+      **The import key is authoritative.** The key is `ingest.import` (material sha256, the material's frozen
+      version or `CONVERTER_VERSION`). Before any transition out of `claimed`, `converting`, `sending` or `failed`
+      (lease expiry, `fail`, a new claim, Retry, Discard, cancel), the same transaction checks for that key; if it
+      exists, the row is set `received` (idempotent) and the requested transition is refused (routes 409 `state`,
+      commands the cancel reply of FR-INGEST-20). This closes the window in which receive has enqueued but crashed
+      before marking the row (FR-INGEST-23).
+      **Transitions**, each a guarded `UPDATE … WHERE id = … AND state = <from> [AND claim = C]`:
+      - queued → claimed (`next`); claimed → converting (first page progress); converting → sending (`progress
+        --phase sending`); sending → received (receive, FR-INGEST-23);
+      - claimed | converting | sending → queued with `attempts + 1` and `claim = null` once `lease_until` has passed,
+        or → failed `host_lost` when that makes `attempts` 3. **Expiry is derived by the stack itself**: every `next`
+        and every api read of an upload view or of the list applies it in its own transaction, so a dead host is
+        noticed without any watcher running;
+      - claimed | converting | sending → failed `<code>` (`fail`, FR-INGEST-20);
+      - queued | claimed | converting → row deleted (owner cancel); failed → queued with `attempts = 0`, `code =
+        null` (owner Retry); failed → row deleted (owner Discard).
       `received` is the last state the row holds; `importing`, `indexing`, `ready` and job failures are derived
       (VEC-INGEST-6). [db]
   - id: FR-INGEST-20
     text: >-
-      **Inbox commands** in the worker image, `python -I -m reader.ingest.inbox <cmd>`, each printing exactly one JSON
-      line of at most 4 KiB, exit 0, or `{"error": code}` with exit 1; each has a 60 s internal deadline except
-      `next` (`--wait` + 10 s) and `fetch` (300 s):
-      - `next --wait S --host-state ready|setup_missing --converter-version V` (S in 1..25): upserts `ingest_hosts`;
-        expires leases; with `ready`, claims the oldest `queued` upload `FOR UPDATE SKIP LOCKED` (claim = 32 random
-        hex, `lease_until = now() + 120 s`) and prints `{"upload": {"id", "sha256", "size", "claim"}}`; if none, it
-        `LISTEN`s on `reader_inbox` for up to S seconds, tries once more, then prints `{"upload": null}`. With
-        `setup_missing` it claims nothing.
+      **Inbox commands** in the worker image, `python -I -m reader.ingest.inbox <cmd>`.
+      **Framing, one shape for each outcome:**
+      - success: exit 0 and exactly one JSON line of at most 4,096 bytes (for `fetch`: exactly the row's `size`
+        bytes and nothing else);
+      - cancel: exit 3 and exactly the line `{"cancel":true}`. It is the only cancel shape, used by every command
+        when the row is gone (cancelled or discarded), when it is not under C (a newer claim, an expired lease) or
+        when its import key exists (FR-INGEST-19);
+      - error: exit 1 and one line `{"error":"<code>"}`;
+      - `fetch` decides every refusal before its first byte; an I/O error after it exits 1 and writes nothing more,
+        so the host, which checks the exit code first, never uses a partial body;
+      - stderr carries nothing the host reads (FR-INGEST-21).
+      **Deadlines** (in the container, each through `asyncio.timeout` and a SIGALRM for blocking I/O): `next`
+      `--wait` + 10 s, `fetch` 300 s, the others 15 s.
+      **Commands:**
+      - `next --wait S --host-state ready|setup_missing|degraded --converter-version V` (S in 1..25): upserts
+        `ingest_hosts.seen_at` and state; applies lease expiry; with `ready`, claims the oldest `queued` upload `FOR
+        UPDATE SKIP LOCKED` (claim = 32 random hex, `lease_until = now() + 120 s`) and prints `{"upload": {"id",
+        "sha256", "size", "claim"}}`; if none, it `LISTEN`s on `reader_inbox` for up to S seconds, tries once more,
+        then prints `{"upload": null}`. Any other host state claims nothing.
       - `fetch --upload-id U --claim C`: for an upload in `claimed` or `converting` under C, copies
         `<BLOBS_DIR>/inbox/<sha256>.pdf` (opened `O_RDONLY|O_NOFOLLOW`, `fstat` a regular file whose size equals the
-        row's) to stdout in 1 MiB chunks, with no JSON line; any refusal prints the error line on stdout before any
-        byte and exits 1 (`claim`, `cancelled`, `missing`).
-      - `progress --upload-id U --claim C (--pages-done n --pages-total m | --sending)`: renews the lease, moves the
-        state forward as FR-INGEST-19 says, stores the counts (0 ≤ n ≤ m ≤ 5,000), and prints `{"ok": true}` or
-        `{"cancel": true}` when the upload is `cancelled` or no longer under C.
+        row's, else `missing`) to stdout in 1 MiB chunks.
+      - `progress --upload-id U --claim C (--pages-done n --pages-total m | --phase fetch|load|convert|sending|receive)`:
+        renews the lease (`now() + 120 s`), updates `ingest_hosts.seen_at`, moves the state forward as FR-INGEST-19
+        says, stores the counts (0 ≤ n ≤ m ≤ 5,000), and prints `{"ok":true}`.
       - `fail --upload-id U --claim C --code K` with K from the fixed list `fetch_mismatch`, `not_pdf`,
-        `convert_failed`, `memory_limit`, `work_limit`, `timeout`, `receive_failed`: sets `failed` and the code.
-      Arguments are validated before any database access: U a UUID, C `^[0-9a-f]{32}$`, codes from the list. [db]
+        `convert_failed`, `memory_limit`, `work_limit`, `timeout`, `receive_failed`, `bad_reply`: sets `failed` and
+        the code.
+      Arguments are validated before any database access: U a UUID, C `^[0-9a-f]{32}$`, V the converter-version
+      pattern, codes from the list. [db]
   - id: FR-INGEST-21
     text: >-
       **Host watch mode** `reader-ingest --watch [--config PATH]` (ADR-0029 Decision 2). It takes an exclusive
-      non-blocking `flock` on `<data_dir>/ingest/locks/watch.lock` (held: exit 3 `busy`), holds no secret and reads no
-      Keychain item. In a loop:
-      - checks the setup (FR-INGEST-3) without exiting: the host state is `ready` or `setup_missing`;
+      non-blocking `flock` on `<data_dir>/ingest/locks/watch.lock` and writes its pid into it (held: exit 3 `busy`),
+      holds no secret and reads no Keychain item. It is started by `reader up` (OPS-CLI proposed FR-CLI-22) or by
+      hand.
+      **Stale cleanup at start**, under `watch.lock`: every run record carrying an `upload_id` is stale (a free
+      `watch.lock` proves no live watcher owns it). Each one is handled exactly as FR-INGEST-16's stale records are:
+      its session is killed only after the pid, start-time and cwd checks, then its work directory and record are
+      removed. Records without `upload_id` (CLI runs, under their material locks) are never touched. [unit] cases: a
+      stale upload record with a live verified child is killed and removed; one whose pid now belongs to another
+      process is not signalled and is removed; a CLI record is left alone.
+      **Reading every exec** (the `docker exec -i` client is a subprocess with stdin, stdout and stderr pipes):
+      - stdout through a bounded reader: at most 4,097 bytes for a reply, `size` + 1 for `fetch`. Reaching the bound
+        kills the exec client (SIGKILL) and is `bad_reply` (reply) or `fetch_mismatch` (fetch); the in-container
+        command then ends on its broken pipe or its own deadline;
+      - stderr drained concurrently into a counter: its bytes are counted, never stored, forwarded or logged;
+      - the exit code is checked before stdout is used: 0 → parse the success shape; 3 → it must be exactly the
+        cancel line; 1 → it must be an error line; anything else, or a line that does not parse against its exact
+        schema, is `bad_reply`;
+      - host-side exec timeouts, each above the command's own deadline: `next` 45 s, `fetch` 330 s, `progress` and
+        `fail` 20 s, receive 330 s (FR-INGEST-11). A timeout kills the exec client and is `timeout`.
+      **Loop:**
+      - checks the setup (FR-INGEST-3) without exiting: the host state is `ready`, `setup_missing`, or `degraded`
+        after stray processes were reported (FR-INGEST-22);
       - checks the stack (FR-INGEST-2's `reader status --json` and worker resolution); unhealthy: waits 10 s and
         retries, never exits for it;
-      - runs `next --wait 25` (exec timeout 45 s) and parses the line against the exact schema (a UUID, 64 lowercase
-        hex, an integer 1..`upload_bytes_max`, 32 hex); anything else is logged as `bad_reply` and the loop waits
-        10 s;
-      - for a claim: creates the run record and work directory as FR-INGEST-1 (with `upload_id` in the record),
-        runs `fetch`, reading at most `size` + 1 bytes into `<work>/in/material.pdf` (0400) while hashing; a stream
-        that is longer or shorter than `size`, a sha256 other than the claim's, or a failed magic check is
-        `fetch_mismatch` (reported with `fail`, nothing converted);
-      - runs the converter exactly as FR-INGEST-4..10, relaying each validated progress line with `progress` at
-        most every 30 s and after each batch; a `{"cancel": true}` reply kills the child's session (FR-INGEST-16's
-        SIGTERM then SIGKILL) and abandons the run without `fail`;
-      - on success calls `progress --sending`, then receive with `--upload-id U --claim C` (FR-INGEST-23); on any
-        error reports `fail` with its code;
-      - removes the work directory and run record on every path (FR-INGEST-16), and processes one upload at a time.
+      - runs `next --wait 25`; the claim schema is exact (a UUID, 64 lowercase hex, an integer
+        1..`upload_bytes_max`, 32 lowercase hex, no other key); `bad_reply` waits 10 s;
+      - **for a claim:** starts the **heartbeat**, a timer that runs `progress --phase <current phase>` every 30 s
+        from the claim until receive's reply (through fetch, model load, conversion, sending and receive), so the
+        120 s lease never depends on the converter's output; a cancel reply to any call kills the child's session
+        (FR-INGEST-16's SIGTERM, then SIGKILL after 10 s) and abandons the run without `fail`;
+      - creates the run record (with `upload_id`) and work directory as FR-INGEST-1, runs `fetch` into
+        `<work>/in/material.pdf` (0400) while hashing. It converts only if the exit code is 0, the byte count equals
+        `size`, the sha256 equals the claim's and the magic check passes; otherwise `fetch_mismatch` (or `not_pdf`),
+        reported with `fail`, nothing converted;
+      - runs the converter exactly as FR-INGEST-4..10 with FR-INGEST-22's watchdogs, relaying each validated page
+        progress line at most every 30 s and after each batch;
+      - on success calls `progress --phase sending`, then receive with `--upload-id U --claim C` (FR-INGEST-23);
+        on any error reports `fail` with its code;
+      - stops the heartbeat, removes the work directory and run record on every path (FR-INGEST-16), and processes
+        one upload at a time.
       In watch mode the host never opens a path that came from the stack, and builds every exec argv as a list from
       validated values. SIGINT or SIGTERM stops the loop after the current child is killed; the claim's lease then
       expires and the upload returns to `queued`. [unit, fake runner]
   - id: FR-INGEST-22
     text: >-
-      **Host watchdogs** for every converter child (CLI and watch mode): every 2 s the parent reads the child's
-      session's resident memory (`ps -o rss= -g <sid>`, summed) and the work directory's size (a `os.scandir` walk
-      under WORK with `follow_symlinks=False`, counting regular files' `st_size`). Over `convert.rss_max` (8 GiB: the
-      pilot's measured child peak of 4,025 MiB × 2, NFR-INGEST-1) it kills the session with `memory_limit`; over
-      `convert.work_bytes_max` (2 GiB, structural) with `work_limit`. The walk stops at 100,000 entries and treats
-      more as `work_limit`. [unit, fake child; local]
+      **Host watchdogs** for every converter child (CLI and watch mode), every 2 s.
+      **The run's processes.** A process belongs to the run if it is in the child's session (`ps -o pid= -g
+      <sid>`), or if all of these hold, which catches a descendant that called `setsid()` and left the session
+      (measured by the reviewer: such a child escapes `killpg` and per-session accounting):
+      - its executable path (`ps -o comm=`, realpath) is one of the two the profile lets the child exec,
+        `<VENV>/bin/python` or `<PYROOT>/bin/python3.14`, compared by realpath;
+      - its start time is at or after `child_start`;
+      - it is not the watcher or one of its ancestors;
+      - its cwd (`lsof -a -d cwd -p <pid> -Fn`, realpath) lies under WORK, or its argv contains
+        `reader.ingest.host.convert`.
+      **Limits.** The sum of the run's resident memory (`ps -o rss=`) over `convert.rss_max` (8 GiB: the pilot's
+      measured child peak of 4,025 MiB × 2, NFR-INGEST-1) kills every run process with `memory_limit`; the work
+      directory's size (an `os.scandir` walk under WORK with `follow_symlinks=False`, summing regular files'
+      `st_size`, stopping at 100,000 entries, which counts as over) over `convert.work_bytes_max` (2 GiB, structural)
+      kills them with `work_limit`. The same set is killed at the end of every run.
+      **Residual (stated in ADR-0029's threat table).** An exploited child that calls `setsid()`, changes its cwd out
+      of WORK and rewrites its argv escapes this set. It stays under the sandbox profile, which a process cannot
+      leave: no network, no sockets, writes only into a WORK that is deleted. It can hold memory and CPU until it is
+      killed. At start and after every run the watcher lists processes with the converter's executable, parent pid 1,
+      started after its first `child_start`, that are not in any live run; it never kills them (they are
+      unverified), logs `stray_processes` with their count and reports host state `degraded`, which the Import page
+      shows with the advice to restart the Mac session.
+      **Hypothesis:** `ps -o rss=` on macOS reports resident memory including the child's compressed pages closely
+      enough to bound it; macOS's compressor and swap make RSS lower than the memory a process holds. [local] check:
+      a child under the product profile that allocates and touches 9 GiB is killed with `memory_limit`, and the
+      measured peak is recorded.
+      **Tests:** [unit, fake ps] the membership rules (a setsid'd child with cwd under WORK is counted; an unrelated
+      python started earlier, the watcher itself and a process with another executable are not); [host] a converter
+      stand-in that forks a child which calls `setsid()` and allocates memory past a test limit: both are killed and
+      the run fails `memory_limit`; [local] the 9 GiB case above.
   - id: FR-INGEST-23
     text: >-
       **Uploaded materials** (ADR-0029). An upload is a material with id `up-<first 12 hex of sha256>`, license
       `personal-use`, its upload's language, and its filename without a trailing `.pdf` as display title.
-      - **Receive** gains `--upload-id U --claim C`: the artifact's `material_sha256` must equal the upload's, and
-        the upload must be `sending` under C (else `upload_claim`, or `upload_cancelled` for a cancelled one);
-        storage then sets the row `received` in the same transaction as the enqueue (FR-INGEST-11's phases are
-        unchanged). The content check "material_sha256 equals a materials[].sha256 in reader.yaml" becomes "… or
-        is the sha256 of the upload named by `--upload-id`". The import job's `material_id` is the upload's id.
+      - **Receive** gains `--upload-id U --claim C`. The content check "material_sha256 equals a
+        materials[].sha256 in reader.yaml" becomes "… or is the sha256 of the upload named by `--upload-id`". The
+        import job's `material_id` is the upload's id. A receive cannot hold one transaction across storage and
+        enqueue (the enqueue commits on its own, SRV-EVENTS), so its order is fixed and each step is idempotent:
+        1. **claim check** (read only): the row exists, has the artifact's sha256, and is `sending` under C, or its
+           import key already exists. Otherwise exit 3 with the cancel line (FR-INGEST-20's one shape);
+        2. **store** as FR-INGEST-11 (an existing valid directory is kept);
+        3. **enqueue** `ingest.import` (it commits; a repeat returns the key's state);
+        4. **mark**: `UPDATE uploads SET state = 'received' WHERE id = U AND state <> 'received'` (idempotent).
+        A crash after 3 and before 4 leaves the row in `sending` with the key present; the key-authority rule of
+        FR-INGEST-19 then marks it `received` at the next transition attempt or view read, and a receive under a
+        newer claim passes step 1 on the key and repeats 2–4 harmlessly. Discard and cancel are refused once the key
+        exists.
       - **Routes** (owner only, as FR-INGEST-15): `GET /api/materials` also lists uploaded materials after the
-        declared ones, newest first, with `source: "upload"` (declared ones `source: "config"`) and the upload view;
-        `GET /api/materials/uploads/{id}` returns the upload view `{id, material_id, filename, size, language, state,
-        code, pages_done, pages_total, attempts, created_at}` with `state` from VEC-INGEST-6; `POST
-        /api/materials/uploads/{id}/cancel`, `/retry` and `DELETE /api/materials/uploads/{id}` (Discard, `failed`
-        only) apply FR-INGEST-19's transitions (409 `state` otherwise; cancel and discard delete the inbox file
-        after the commit); `GET /api/materials/converter` returns `{state: online | offline | setup_missing,
-        seen_at, converter_version}` (online while `seen_at` is under 60 s old).
+        declared ones, newest first, with `source: "upload"` (declared ones `source: "config"`), the upload view, and
+        `inbox_retained_bytes` (FR-INGEST-18); `GET /api/materials/uploads/{id}` returns the upload view `{id,
+        material_id, filename, size, language, state, code, pages_done, pages_total, attempts, created_at}` with
+        `state` from VEC-INGEST-6; `POST /api/materials/uploads/{id}/cancel` (queued, claimed, converting),
+        `POST …/{id}/retry` (failed) and `DELETE /api/materials/uploads/{id}` (Discard, failed) apply FR-INGEST-19's
+        transitions (409 `state` otherwise, and always once the import key exists; cancel and Discard unlink the
+        file after the commit); `GET /api/materials/converter` returns `{state: online | offline | setup_missing |
+        degraded, seen_at, converter_version}` (`offline` when `seen_at` is 60 s old or more, else the host's
+        reported state). Both reads apply lease expiry first (FR-INGEST-19).
       - **Search** (SRV-SEARCH paired change): an uploaded material's `fts_config` is `russian`, `english` or
         `simple` from its upload's language.
       - The outline and spans routes accept `up-…` ids. [db]
   - id: FR-INGEST-24
     text: >-
-      **For the planner** (SRV-PLAN): `reader.ingest.store.page_chars(conn, owner_id, material_sha256) ->
-      (ingest_id, tuple[int, ...])`, the sum of `char_length(text)` of the material's spans per page, pages 1..
-      page_count (0 for a page with no span), and `outline_entries(conn, owner_id, ingest_id)` → `(level, page,
-      title)` in seq order. Both read only the owner's rows. [db]
-  - id: FR-INGEST-25
-    text: >-
       **Logging.** Upload, inbox commands and watch mode log only: event, upload id, sha256 prefix (12 hex), size,
-      state, code, attempts, pages counts and durations. The filename is never logged (it is the owner's text and
-      may name the book). [unit, db]
+      state, code, attempts, page counts, byte counts (stderr included) and durations. The filename is never logged:
+      it is the owner's text and may name the book. [unit, db] a canary filename appears in no log record of the api,
+      the worker or the watcher, and in no request URL the client builds.
 
 invariants:
   - id: INV-INGEST-1
@@ -803,19 +905,34 @@ proposed_invariants:
       1,024 bytes) and FR-INGEST-20's byte copy (source scan for opens of the inbox path). [unit]
   - id: INV-INGEST-9
     text: >-
-      (Revision 2, draft.) A refused upload leaves nothing: for every refusal of FR-INGEST-18 (each code, a client
-      disconnect mid-body, a body of exactly cap + 1 bytes) no file other than the removed temporary one exists under
-      `<BLOBS_DIR>/inbox/`, no `uploads` row is written and the lock is released; the same bytes uploaded twice give
-      one file and one row; a body of exactly the cap is accepted. Property test over generated bodies from
-      VEC-INGEST-7. [db]
+      (Revision 2, draft.) A refused upload leaves nothing, and crash leftovers do not survive the next upload:
+      - for every refusal of FR-INGEST-18 (each code, a client disconnect mid-body, a body of exactly cap + 1 bytes,
+        `inbox_full` reached mid-body) no file other than the removed temporary one exists under
+        `<BLOBS_DIR>/inbox/`, no `uploads` row is written and the lock is released;
+      - **kill mid-body:** the api process is killed (SIGKILL, a subprocess server in the [db] test) while it streams
+        a body, leaving a `.tmp-*` file; a second crash is simulated after the rename and before the insert, leaving
+        an orphan `<sha>.pdf`. The next upload removes both before its quota check, and its quota sees neither;
+      - the same bytes uploaded twice give one file and one row; a body of exactly the cap is accepted;
+      - **cancel then re-upload:** an upload cancelled in `queued`, and one cancelled in `converting`, have no row and
+        no file afterwards; uploading the same bytes again gives a new `queued` upload with a new id and a new
+        claim, and the old claim's `progress`, `fetch` and receive all get the cancel line;
+      - Discard then re-upload behaves the same; Discard and cancel are refused once the import key exists.
+      Property test over generated bodies from VEC-INGEST-7. [db]
   - id: INV-INGEST-10
     text: >-
-      (Revision 2, draft.) Confused deputy: in watch mode the converter starts only when the fetched bytes' sha256 and
-      length equal the claim's, and receive stores an uploaded material's artifact only under a live claim of that
-      upload with an equal sha256. Fake-runner cases: a fetch of other bytes, one byte more, one byte less; a reply
-      line with an extra key, a path, a 63-hex sha256, a negative size; a claim that was cancelled between `next` and
-      `fetch`, and during conversion; receive with a stale claim, with another upload's claim, and for a cancelled
-      upload. Each case converts nothing (or stores nothing) and writes the expected code. [unit, fake runner; db]
+      (Revision 2, draft.) Confused deputy and framing: in watch mode the converter starts only when the fetched bytes'
+      sha256 and length equal the claim's and `fetch` exited 0, and receive stores an uploaded material's artifact
+      only under a live claim of that upload with an equal sha256 (or when its import key exists). Fake-runner cases,
+      each converting nothing (or storing nothing) and writing the expected code:
+      - fetch: other bytes; one byte more (the exec is killed at size + 1); one byte less; exit 1 after a partial
+        body; exit 3 with the cancel line; a hang past 330 s (killed, `timeout`); 1 MiB on stderr (counted, never
+        stored);
+      - replies: a line with an extra key, a path in a field, a 63-hex sha256, a negative size, 4,097 bytes without a
+        newline (the exec is killed), exit 0 with the cancel line, exit 3 with any other line, two lines;
+      - claims: cancelled between `next` and `fetch`, during conversion (the heartbeat's cancel kills the child), and
+        during receive; a lease that expired while the watcher was stopped (the api's read re-queues it);
+      - receive: a stale claim, another upload's claim, a deleted upload, and a crash between enqueue and mark
+        (recovered to `received` by the next view read). [unit, fake runner; db]
 
 nfr:
   - id: NFR-INGEST-1
@@ -908,23 +1025,32 @@ vectors:
 proposed_vectors:
   - id: VEC-INGEST-6
     source: >-
-      (Revision 2, draft.) Upload state table for FR-INGEST-23's view: inputs are the row's state and the SRV-EVENTS
-      status of the `ingest.import` key and of the material's `search.embed` key; outputs are `queued`, `claimed`,
-      `converting`, `sending`, `importing`, `indexing`, `ready`, `failed` (with the row's or the dead job's code) and
-      `cancelled`. `received` with no import key yet maps to `importing`.
+      (Revision 2, draft.) Upload state table for FR-INGEST-23's view: inputs are the row's state, whether its lease
+      has expired, and the SRV-EVENTS status of the `ingest.import` key and of the material's `search.embed` key;
+      outputs are `queued`, `claimed`, `converting`, `sending`, `importing`, `indexing`, `ready` and `failed` (with
+      the row's or the dead job's code). An existing import key wins over the row's state (FR-INGEST-19): `sending`
+      or `failed` with a queued key maps to `importing`; `received` with no import key yet maps to `importing`. A
+      deleted row has no view (404 `not_found`).
     file: spec/fixtures/SRV-INGEST/upload-states.yaml
   - id: VEC-INGEST-7
     source: >-
       (Revision 2, draft.) Magic-check cases as generator rules, no real documents: valid headers %PDF-1.0..1.7 and
-      %PDF-2.0 with %%EOF at the end, 1,023 bytes from the end and followed by a newline; refused: %PDF-1.8, %PDF-3.0,
-      a BOM or a space before the header, %%EOF only 1,025 bytes from the end, a ZIP and a PNG header, an empty body.
-      The synthetic upload for the live check is VEC-INGEST-2's generator output.
+      %PDF-2.0 with %%EOF at the end, 1,023 bytes from the end and followed by a newline, and a whole body shorter
+      than 1,024 bytes (`%PDF-1.7` + `%%EOF`, 14 bytes); refused: %PDF-1.8, %PDF-3.0, a BOM, a space or any other
+      junk before the header (the header must be at offset 0, stricter than readers that scan the first 1,024
+      bytes), %%EOF only 1,025 bytes from the end, a body shorter than 8 bytes, a ZIP and a PNG header, an empty
+      body. [local] the pilot PDF passes the check (sha256-matched, read on the owner's Mac). The synthetic upload for
+      the live check is VEC-INGEST-2's generator output.
     file: spec/fixtures/SRV-INGEST/magic-cases.yaml
 
-defers:
+proposed_defers:   # revision 2 (draft): at promotion these replace the first `defers` entry
   - "Upload formats other than PDF, and a browser preview of the uploaded file (ADR-0029 keeps every parser out of the stack and the browser)."
-  - "Deleting an imported material and its spans, lessons and inbox file."
+  - "Deleting an imported material and its spans, lessons and inbox file (received uploads' files are kept outside the inbox quota)."
   - "Server-sent events for upload and job progress (the Import page polls)."
+  - "A host-side rate limit on conversions (ADR-0029 threat table residual)."
+
+defers:
+  - "Browser upload of materials (roadmap slice wording); this revision declares materials in reader.yaml and ingests with a host command (ADR-0027 revisit_when)."
   - "Re-ingesting a material under a new converter_version. Obligation when it arrives: it must map every old span id `<sha>:<seq>` to its new span, or keep the old spans, so that no lesson citation ever resolves to different text (FR-INGEST-17)."
   - "OCR for pages without a text layer (ADR-0008 resolved question 1; EasyOCR ru+en). The manifest lists such pages; the pilot has 6."
   - "Non-PDF formats (EPUB, DOCX, HTML, web and git snapshots; ADR-0008 Decision 2)."

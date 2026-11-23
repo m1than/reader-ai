@@ -429,3 +429,30 @@ vectors:
 #   single use are SRV-AUTH's.
 # - The pair-pool size is not a reader.yaml field; v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
 # - The power assertion (`caffeinate`) from the roadmap's risk table belongs to the job runner (stage 2+), not here.
+
+# ---- Paired change (DRAFT, 2026-11-23, V/onboarding, for SRV-INGEST revision 2 and ADR-0029, proposed). Held under
+# `proposed_requirements` until the owner accepts ADR-0029 and the deep-reviewer approves (secrets area: full review);
+# then it moves into `requirements` with its Red tests. ----
+proposed_requirements:
+  - id: FR-CLI-22
+    text: >-
+      **The ingest watcher** (SRV-INGEST FR-INGEST-21). By default (owner 2026-11-23), `reader up`, after its step
+      (7) succeeded, starts `reader-ingest --watch --config <the resolved reader.yaml>` unless its lock
+      `<data_dir>/ingest/locks/watch.lock` is held (then it leaves the running one). The spawn, unlike the secret
+      watcher's (FR-CLI-8), passes nothing:
+      - argv: the `reader-ingest` console script of the same environment as `reader`, as a list;
+      - env: exactly FR-INGEST-2's allow-list (PATH, HOME, LANG, DOCKER_HOST when set), never the inherited one;
+      - `close_fds=True` and `pass_fds=()`: no fd 3 or 4 (the secret bundle and readiness pipes of FR-CLI-8 are
+        never inherited), only 0, 1 and 2 are open;
+      - stdin `/dev/null`; stdout and stderr appended to `~/Library/Application Support/reader-ai/run/ingest-watch.log`
+        (0600, created 0600 in the 0700 run directory, truncated to its last 5 MiB at each start);
+      - `start_new_session=True`, so it has its own session and no controlling terminal.
+      `reader status` (and `--json` as `"ingest_watcher": "running" | "stopped"`) probes the lock as FR-CLI-7 probes
+      the secret watcher's. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
+      lock file, only while the lock is held, then up to 15 s for the lock to be released, then SIGKILL (the
+      watcher's own handler kills its converter child first, FR-INGEST-21). A failed spawn is reported and does not
+      fail `up`: the stack runs and uploads wait as `queued` (ADR-0029 Decision 6).
+      [unit] a fake `reader-ingest` records its environment, its open file descriptors (`/dev/fd`), `os.getsid(0) ==
+      os.getpid()` and that opening `/dev/tty` fails: the environment equals the allow-list exactly (a canary
+      variable set in the parent is absent), the open fds are exactly {0, 1, 2}, stdin is `/dev/null`; `reader down`
+      signals only a pid whose lock is held; `reader up` with the lock held starts nothing.

@@ -387,3 +387,22 @@ vectors:
 #   fallback (worker holds the token) would change FR-DEPLOY-10's consumer list and INV-DEPLOY-5.
 # - The lab egress proxy (ADR-0014) is OPS-SANDBOX's.
 # - ADR-0021: if M1 sends ingestion native, the worker needs a route to the host converter; not added until decided.
+
+# ---- Paired change (DRAFT, 2026-11-23, V/onboarding, for SRV-INGEST revision 2 and ADR-0029, proposed). Held under
+# `proposed_requirements` until the owner accepts ADR-0029 and the deep-reviewer approves; then it moves into
+# `requirements` with its Red tests. ----
+proposed_requirements:
+  - id: FR-DEPLOY-13
+    text: >-
+      **Upload body limit.** The Caddyfile's site block gains, before `handle /api/*`, a `handle
+      /api/materials/uploads` with `request_body { max_size 200MiB }` and the same `reverse_proxy` as `/api/*`, so a
+      body over 209,715,200 bytes is refused with 413 at the edge (owner 2026-11-23: 200 MiB). The path matcher is
+      exact, so `/api/materials/uploads/{id}` routes keep the `/api/*` handler.
+      **Read timeout: in the api, numerically 300 s for the whole body** (SRV-INGEST FR-INGEST-18, 408
+      `body_timeout`). It is not set in Caddy: Caddy's `servers { timeouts { read_body … } }` is server-wide, so it
+      would also bound every other request, including the WebSocket kernel relays (SRV-KERNEL), and whether it is
+      cleared after the upgrade is not verified. 300 s is structural: v1 serves only `localhost` (ADR-0012), where a
+      200 MiB body takes seconds, and the bound limits how long a stalled client holds the single upload lock.
+      [unit] the config check parses the Caddyfile: exactly one `request_body` block, on exactly that path, with
+      `max_size 200MiB`, and no server-wide `read_body`; [live] 209,715,200 bytes pass and 209,715,201 bytes are 413
+      (SRV-INGEST FR-INGEST-18's live case).
