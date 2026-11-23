@@ -28,7 +28,7 @@
 # Revision 2 (DRAFT, 2026-11-23, owner request, ADR-0029 proposed): browser upload into an inbox on the blobs volume
 # that no service in the stack parses; a host process `reader-ingest --watch` (started by `reader up`, OPS-CLI paired
 # change; no secrets) claims an upload by long-polling the worker over `docker exec`, fetches its bytes on the exec's
-# stdout, checks sha256 and size against the claim, converts it under the unchanged profile, and returns the artifact
+# stdout, checks sha256 and size against the claim, converts it under the profile with two edits (proposed amendment of FR-INGEST-4), and returns the artifact
 # over the existing receive with the claim. Progress, cancel, retry and the converter's online state reach the UI
 # through the `uploads` row and the existing jobs. Items FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7, plus
 # `proposed_adr` and `proposed_defers`. Revision 2 is promoted only after the owner accepts ADR-0029 and only together
@@ -587,36 +587,47 @@ proposed_requirements:
       characters remain (else 400 `filename`). It is display metadata only, never a path, and never logged
       (FR-INGEST-24; Caddyfile has no `log` directive and uvicorn's access log holds the path and query only).
       **The handler, in order:**
-      1. takes the instance's upload lock (`pg_try_advisory_lock(UPLOAD_LOCK_KEY)`, a constant; held: 409
+      1. requires the request's Content-Type media type to be `application/pdf` itself (415 `content_type`),
+         independently of FR-AUTH-22's middleware check;
+      2. takes the instance's upload lock (`pg_try_advisory_lock(UPLOAD_LOCK_KEY)`, a constant; held: 409
          `upload_busy`). One upload is in flight for the whole instance: v1 has one owner who may upload;
-      2. **sweeps crash leftovers** under that lock: every `<BLOBS_DIR>/inbox/.tmp-*` file is removed (its writer
+      3. **ensures the inbox directory:** `<BLOBS_DIR>/inbox/` is created by the api on first use (`mkdir`, mode
+         0750, under the lock); an existing entry must `lstat` as a directory owned by the service uid, not a symlink
+         (else 500 `inbox_invalid`, logged). `<BLOBS_DIR>` itself is created 10001-owned by the server image
+         (OPS-DEPLOY FR-DEPLOY-5's paired change for SRV-INGEST);
+      4. **sweeps crash leftovers** under that lock: every `<BLOBS_DIR>/inbox/.tmp-*` file is removed (its writer
          would hold this lock, so none is live), and every `<BLOBS_DIR>/inbox/<64 hex>.pdf` with no `uploads` row of
          that sha256 is removed (a crash between rename and insert, or between a cancel's commit and its unlink).
          Names matching neither pattern are left alone and counted in the log line;
-      3. **checks the quota.** Open uploads are rows in `queued`, `claimed`, `converting`, `sending` or `failed`
-         whose `ingest.import` key does not exist (FR-INGEST-19). With `n` open uploads and `B` = the sum of their
-         sizes: `n ≥ inbox.open_max` (5), or `B + Content-Length > inbox.bytes_max` (1 GiB) when the header is
-         present, is 409 `inbox_full` before any byte is read; while streaming, `B + written > inbox.bytes_max` is
-         409 `inbox_full`. So open files never exceed 1 GiB, with no overshoot. Files of received uploads are the
-         owner's retained originals (ADR-0029 Decision 5) and are outside the quota; their total is reported as
-         `inbox_retained_bytes` by `GET /api/materials`. Remedy shown for `inbox_full`: Discard failed uploads,
-         cancel queued ones, or wait for them to finish;
-      4. streams the body in chunks of at most 1 MiB into `<BLOBS_DIR>/inbox/.tmp-<32 random hex>` (created with
+      5. **loads reader.yaml** (SRV-CONFIG `load_config`), which the dedupe and the id check need: when it cannot be
+         loaded the answer is 503 `config_unavailable` before any byte is read, as FR-INGEST-15's routes answer;
+      6. streams the body in chunks of at most 1 MiB into `<BLOBS_DIR>/inbox/.tmp-<32 random hex>` (created with
          `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0640), hashing as it writes, under a 300 s deadline for the whole body
          (408 `body_timeout`; the numeric read timeout lives here, OPS-DEPLOY proposed FR-DEPLOY-13). At
          `inbox.upload_bytes_max` (200 MiB = 209,715,200 bytes) + 1 byte it stops with 413 `too_large`; an empty
          body is 400 `empty`;
-      5. checks the magic (VEC-INGEST-7): the first 8 bytes match `%PDF-1.[0-7]` or are `%PDF-2.0`, and the last
+      7. checks the magic (VEC-INGEST-7): the first 8 bytes match `%PDF-1.[0-7]` or are `%PDF-2.0`, and the last
          1,024 bytes (the whole body when it is shorter) contain `%%EOF`; else 415 `not_pdf`. Nothing else in the
          file is read;
-      6. dedupes: a declared material (reader.yaml) with this sha256 gives 200 `{material_id, upload: null}`; an
-         `uploads` row with this sha256 gives 200 with its view (a failed one offers Retry). A cancelled or
-         discarded upload has no row (FR-INGEST-19), so the same bytes uploaded again become a new upload;
-      7. refuses an id collision: `up-<first 12 hex>` equal to a declared material's id, or to another upload's id
-         with a different sha256, is 409 `id_collision`;
-      8. fsyncs the file, renames it to `<BLOBS_DIR>/inbox/<sha256>.pdf`, chmods 0440, fsyncs the directory, inserts
-         the `uploads` row in state `queued`, sends `NOTIFY reader_inbox`, and answers 201 with the upload view
-         (FR-INGEST-23).
+      8. **dedupes before the quota**, so a duplicate is never refused for space: a declared material with this
+         sha256 gives 200 `{material_id, upload: null}`; an `uploads` row with this sha256 gives 200 with its view (a
+         failed one offers Retry). A cancelled or discarded upload has no row (FR-INGEST-19), so the same bytes
+         uploaded again become a new upload;
+      9. **checks the quota.** Open uploads are rows in `queued`, `claimed`, `converting`, `sending` or `failed`
+         whose `ingest.import` key does not exist (FR-INGEST-19). With `n` open uploads and `B` = the sum of their
+         sizes, `n + 1 > inbox.open_max` (5) or `B + size > inbox.bytes_max` (1 GiB) is 409 `inbox_full`, and the
+         temporary file is removed. **Arithmetic:** the stored open files never exceed 1 GiB; while one body streams,
+         the disk holds at most 1 GiB + 200 MiB of inbox files (one temporary file, at most the cap), and only one
+         body streams at a time (step 2). Files of received uploads are the owner's retained originals (ADR-0029
+         Decision 5) and are outside the quota; their total is reported as `inbox_retained_bytes` by `GET
+         /api/materials`. Remedy shown for `inbox_full`: Discard failed uploads, cancel queued ones, or wait for them
+         to finish;
+      10. refuses an id collision: `up-<first 12 hex>` equal to a declared material's id (also refused at config
+          load by SRV-CONFIG proposed FR-CONFIG-17), or to another upload's id with a different sha256, is 409
+          `id_collision`;
+      11. fsyncs the file, renames it to `<BLOBS_DIR>/inbox/<sha256>.pdf`, chmods 0440, fsyncs the directory,
+          inserts the `uploads` row in state `queued`, sends `NOTIFY reader_inbox`, and answers 201 with the upload
+          view (FR-INGEST-23).
       Every failure path, a client disconnect included, removes the temporary file (`finally`) and releases the lock.
       [db]; [live] a body of exactly 209,715,200 bytes (a valid header, padding and `%%EOF`) passes Caddy and the api
       (201), and is then converted, fails `convert_failed` and is discarded, which also measures fetch throughput
@@ -630,7 +641,7 @@ proposed_requirements:
       sending, received, failed), code text null, attempts int default 0, claim text null, lease_until
       timestamptz null, pages_done int null, pages_total int null, created_at, updated_at)`, unique (sha256);
       `ingest_hosts(singleton bool pk CHECK true, seen_at timestamptz, state text CHECK in (ready, setup_missing),
-      strays int CHECK ≥ 0, converter_version text)`. There is no `cancelled` state: **cancel and Discard delete the
+      strays int CHECK ≥ 0, converter_version text, watcher_sha text, busy bool)`. There is no `cancelled` state: **cancel and Discard delete the
       row and then unlink the file, both under the instance's upload lock** (FR-INGEST-18's `UPLOAD_LOCK_KEY`, taken
       with `pg_try_advisory_lock`; held: 409 `upload_busy`), so no upload of the same bytes can rename a new file into
       that path between the delete and the unlink. A crash between the commit and the unlink leaves an orphan file,
@@ -646,21 +657,35 @@ proposed_requirements:
         (`progress --phase sending`; a material whose conversion printed no page line still reaches `sending`);
         sending → received (receive, FR-INGEST-23);
       - claimed | converting | sending → queued with `attempts + 1` and `claim = null` once `lease_until` has passed,
-        or → failed `host_lost` when that makes `attempts` 3. **Expiry is derived by the stack itself**: every `next`
-        and every api read of an upload view or of the list applies it in its own transaction, so a dead host is
-        noticed without any watcher running;
+        or → failed `host_lost` when that makes `attempts` 3. **Expiry is derived by the stack itself**: every `next`,
+        every `progress`, `fetch` and `fail` under a claim, receive's claim check, and every api read of an upload
+        view or of the list applies it first, in its own transaction, so a dead host is noticed without any watcher
+        running. **Renew or cancel, never resurrect:** a `progress` whose claim's lease has passed is not a renewal,
+        even when no reader has applied the expiry yet; it applies the expiry itself and answers the cancel shape.
+        [db] a `progress` 121 s after the last renewal with no read in between gets the cancel line and the row is
+        `queued` with `attempts + 1`; one at 119 s renews;
       - claimed | converting | sending → failed `<code>` (`fail`, FR-INGEST-20);
       - queued | claimed | converting → row deleted (owner cancel); failed → queued with `attempts = 0`, `code =
         null` (owner Retry, reconvert); failed → row deleted (owner Discard).
       `received` is the last state the row holds; `importing`, `indexing`, `ready` and job failures are derived
-      (VEC-INGEST-6).
-      **Recovery of a dead job after receive** (the import key exists, so the transitions above are refused): when the
-      view is `failed` because the material's `ingest.import` key or its `search.embed` key (SRV-SEARCH FR-SEARCH-5)
-      is `dead`, the owner's Retry calls SRV-EVENTS `requeue_dead(kind, key)` for that key (the import first when both
-      are dead), with no reconversion: the artifact is already on the blobs volume, as for `reader-ingest --requeue`
-      (FR-INGEST-12). The row stays `received`. A dead import whose artifact is invalid stays failed after its
-      attempts, as for the CLI path (FR-INGEST-12). [db] a dead import and a dead embed of an upload are each
-      requeued by Retry and reach `ready`; Discard and cancel stay refused.
+      (VEC-INGEST-6). A `received` row with no import key and no `ingests` row (a key removed by an operator) is
+      `failed` with `retry: reconvert`, and Retry moves it `received → queued` with `attempts = 0` (the only
+      transition out of `received`, allowed only in that case).
+      **Recovery of a dead job after receive** (the import key exists, so the transitions above are refused):
+      - **The keys that count.** The import key is the one above. The embed key is SRV-SEARCH FR-SEARCH-5's key for
+        the material's frozen ingest (its one `ingests` row) under the current params (`params_sha256` of today's
+        chunking, model and `fts_config`). A dead embed key of an ingest that never existed, or of older params, does
+        not make the view `failed`.
+      - **Retry** (`POST /api/materials/uploads/{id}/retry`, owner only) calls SRV-EVENTS `requeue_dead(kind, key)`
+        for the dead key (the import first when both are dead), with no reconversion: the artifact is already on the
+        blobs volume, as for `reader-ingest --requeue` (FR-INGEST-12). The row stays `received`. Replies, one per
+        `requeue_dead` result (FR-EVENTS-8): `queued` → 202 `{"retry": "requeued"}`; `already_queued` → 202
+        `{"retry": "already_queued"}`; `running` (the key's lock is held) → 409 `busy`; `already_done` → 200 with
+        the current view; `unknown_key` → 409 `state`.
+      - A dead import whose artifact is invalid stays failed after its attempts, as for the CLI path (FR-INGEST-12).
+      [db] a dead import and a dead embed of an upload are each requeued by Retry and reach `ready`; each reply above
+      is produced; Discard and cancel stay refused; a dead embed key under a never-existing ingest leaves the view
+      `ready`.
   - id: FR-INGEST-20
     text: >-
       **Inbox commands** in the worker image, `python -I -m reader.ingest.inbox <cmd>`.
@@ -677,8 +702,9 @@ proposed_requirements:
       **Deadlines** (in the container, each through `asyncio.timeout` and a SIGALRM for blocking I/O): `next`
       `--wait` + 10 s, `fetch` 300 s, the others 15 s.
       **Commands:**
-      - `next --wait S --host-state ready|setup_missing --strays N --converter-version V` (S in 1..25, N in
-        0..10,000): upserts `ingest_hosts.seen_at`, state and strays; applies lease expiry; with `ready`, claims the
+      - `next --wait S --host-state ready|setup_missing --strays N --converter-version V --watcher-sha H --busy B`
+        (S in 1..25, N in 0..10,000, H 64 lowercase hex, B 0 or 1): upserts `ingest_hosts.seen_at`, state, strays,
+        versions and busy; applies lease expiry; with `ready`, claims the
         oldest `queued` upload `FOR
         UPDATE SKIP LOCKED` (claim = 32 random hex, `lease_until = now() + 120 s`) and prints `{"upload": {"id",
         "sha256", "size", "claim"}}`; if none, it `LISTEN`s on `reader_inbox` for up to S seconds, tries once more,
@@ -732,7 +758,15 @@ proposed_requirements:
       - **keeps the Mac awake** while it holds a claim: it starts `/usr/bin/caffeinate -i -w <watcher pid>` (an
         idle-sleep assertion that also ends if the watcher dies) at the claim and kills it when the claim ends. Residual
         (ADR-0029): closing the lid or a forced sleep still suspends the Mac; on wake the lease has usually expired, so
-        the upload is re-queued with `attempts + 1` and converted again;
+        the upload is re-queued with `attempts + 1` and converted again. [unit, fake runner] caffeinate's argv is
+        exactly `["/usr/bin/caffeinate", "-i", "-w", "<watcher pid>"]` with the FR-INGEST-2 allow-listed environment,
+        `close_fds` and stdin, stdout and stderr on `/dev/null`; it is started once per claim and killed (and
+        reaped) when the claim ends by success, by `fail`, by a cancel reply, and by SIGTERM to the watcher;
+      - **reports its version:** every `next` sends `--converter-version` (CONVERTER_VERSION) and `--watcher-sha`
+        (FR-INGEST-3's `converter_source_sha256` of the code it runs) and whether it holds a claim (`--busy 0|1`);
+        `ingest_hosts` stores them, and the watcher keeps `watch.lock`'s content as one JSON line `{pid, sha, busy}`,
+        rewritten in place at every claim and release (OPS-CLI proposed FR-CLI-22 restarts an idle watcher whose sha
+        differs from the checkout's);
       - creates the run record (with `upload_id`) and work directory as FR-INGEST-1, runs `fetch` into
         `<work>/in/material.pdf` (0400) while hashing. It converts only if the exit code is 0, the byte count equals
         `size`, the sha256 equals the claim's and the magic check passes; otherwise `fetch_mismatch` (or `not_pdf`),
@@ -748,56 +782,80 @@ proposed_requirements:
       expires and the upload returns to `queued`. [unit, fake runner]
   - id: FR-INGEST-22
     text: >-
-      **Host watchdogs** for every converter child (CLI and watch mode), every 2 s.
-      **The run's processes.** A process belongs to *this* run if it is in the child's session (`ps -o pid= -g
-      <sid>`), or if all of these hold, which catches a descendant that called `setsid()` and left the session
-      (measured by the reviewer: such a child escapes `killpg` and per-session accounting):
+      **Host watchdogs** for every converter child (CLI and watch mode), once per tick of 2 s (a chosen interval). The
+      watcher records each tick's time in its log line.
+      **One snapshot per tick:** one `ps -A -o pid=,ppid=,lstart=,rss=,comm=` and one `ps -A -o pid=,args=` (the
+      args are read for the candidates only), one `lsof -a -d cwd -Fpn -u <uid>` (cwd of every process of the
+      owner's uid), and, for each candidate, `os.getsid(pid)` and the kernel's executable path from libproc's
+      `proc_pidpath` (the vnode the kernel executed, resolved, which the process cannot rewrite; measured: the
+      converter launched as `<VENV>/bin/python` reports the shared uv CPython `…/bin/python3.14`).
+      **The run's processes.** A process belongs to *this* run if `os.getsid(pid)` equals the child's session id
+      (`ps -g` selects by process group on macOS, not by session, so it is not used; a descendant that called
+      `setpgid` without `setsid` stays in the session and is counted), or if all of these hold, which catches a
+      descendant that called `setsid()` (measured by the round-2 reviewer: such a child escapes `killpg` and
+      per-session accounting):
+      - its kernel executable path is `realpath(<PYROOT>/bin/python3.14)`, the only binary the profile lets the
+        child execute (both allowed exec paths resolve to it), so an owner shell or editor is never a candidate;
       - its start time is at or after this run's `child_start`;
       - it is not the watcher, the CLI parent or one of their ancestors;
-      - it is bound to this run's work directory: its cwd (`lsof -a -d cwd -p <pid> -Fn`, realpath) lies under this
-        run's realpath'd WORK, or its argv contains this run's realpath'd WORK as a path prefix of an argument
-        (FR-INGEST-4 passes `--input`, `--models` and `--out` with realpath'd values, so the converter's own argv
-        holds `<WORK>/in/material.pdf` and `<WORK>/out`).
-      WORK names are random and unique per run (FR-INGEST-1), so a concurrent run's converter (another upload, or a
-      CLI run of `reader-ingest <material>`) is never counted or killed by this run. No executable test is needed for
-      membership; the executable matters only for strays, below.
-      **Limits.** The sum of the run's resident memory (`ps -o rss=`) over `convert.rss_max` (8 GiB: the pilot's
-      measured child peak of 4,025 MiB × 2, NFR-INGEST-1) kills every run process with `memory_limit`; the work
-      directory's size (an `os.scandir` walk under WORK with `follow_symlinks=False`, summing regular files'
-      `st_size`, stopping at 100,000 entries, which counts as over) over `convert.work_bytes_max` (2 GiB, structural)
-      kills them with `work_limit`. The same set is killed at the end of every run.
-      **Residual (stated in ADR-0029's threat table).** An exploited child that calls `setsid()`, changes its cwd out
-      of WORK and rewrites its argv escapes this set. It stays under the sandbox profile, which a process cannot
-      leave: no network, no sockets, writes only into a WORK that is deleted. It can hold memory and CPU until it is
-      killed.
-      **Strays, a warning only.** At start and after every run the watcher counts processes whose `ps -o comm=`,
-      **unresolved**, equals the converter venv's `<VENV>/bin/python` exactly, with parent pid 1, that belong to no
-      live run of this host (its own runs, and CLI runs found through their run records). Other worktrees' and
-      tools' detached Python 3.14 processes, and the secret watcher, run from other paths (they resolve to the
-      shared uv CPython, but their unresolved `comm` is not the converter venv's), so they are never counted. The
-      count goes to `ingest_hosts.strays` with every `next` and is logged as `stray_processes`; the watcher never
-      kills these (they are unverified) and keeps claiming. The Import page shows a warning when it is above 0.
-      **Residual of the stray count:** an escaped child that re-execs `<PYROOT>/bin/python3.14` (the profile allows
-      that exec) has a different `comm` and is not counted.
-      **Hypotheses**, each with a [local] check:
-      - `ps -o comm=` on macOS reports the path the converter child was exec'd with (`<VENV>/bin/python`), not its
-        symlink target. Check: the converter child started by the watcher shows `<VENV>/bin/python`. If it shows the
-        resolved path, the stray count is dropped (membership does not use the executable) and the residual grows;
-      - `ps -o rss=` reports resident memory closely enough to bound the run; macOS's compressor and swap make RSS
-        lower than the memory a process holds. Check: a child under the product profile that allocates and touches
-        9 GiB is killed with `memory_limit`, and the measured peak is recorded.
+      - it is bound to this run's work directory: its cwd (realpath) is this run's realpath'd WORK or lies under it,
+        or its args string contains `realpath(WORK) + "/"` as a substring (FR-INGEST-4 passes `--input` and
+        `--out` with realpath'd values under WORK; the match is on the joined args string, so a WORK path holding a
+        space still matches).
+      **Limits.** The sum of the run's resident memory (`rss`) over `convert.rss_max` (8 GiB: the pilot's measured
+      child peak of 4,025 MiB × 2, NFR-INGEST-1) kills every run process with `memory_limit`; the work directory's
+      size (an `os.scandir` walk under WORK with `follow_symlinks=False`, summing regular files' `st_size`, stopping
+      at 100,000 entries, a chosen bound, which counts as over) over `convert.work_bytes_max` (2 GiB, structural)
+      kills them with `work_limit`.
+      **Killing only verified processes.** At a limit and at the end of every run, each member is re-verified
+      immediately before its SIGKILL (same start time, same kernel executable path, still a member); a pid that no
+      longer verifies is skipped. Residuals: the window between that check and the signal (pid reuse within
+      microseconds) is not closed; a Python 3.14 process of the owner (not a shell, which the executable check
+      excludes) started after the child with its cwd inside WORK would be counted and killed.
+      **What this guarantees, honestly.** For non-malicious runs, a concurrent run's converter (another upload, or a
+      CLI run) is never counted or killed: WORK names are random per run (FR-INGEST-1). Against an exploited child:
+      - **learning another run's WORK** is closed by the profile (proposed FR-INGEST-4 amendment: no process-info
+        about other processes and no `kern.proc*`/`kern.procargs*` sysctls; measured in spikes/ingest-sysctl). The
+        WORK parent is not listable (measured). A WORK name is 16 random hex characters (64 bits);
+      - if a WORK path leaked by another channel, the cwd and args arms are spoofable (measured: under the product
+        profile a confined child may `chdir` into another WORK, `setsid`, and rewrite its args; it then becomes a
+        member of the other run and can push that run over `memory_limit`). The residual is a denial of service of one
+        conversion, retried by the owner;
+      - a child that calls `setsid()`, moves its cwd out of WORK and rewrites its args escapes accounting and
+        killing. It stays under the profile, which a process cannot leave: no network, no sockets, no information
+        about other processes, writes only into a WORK that is deleted. It can hold memory and CPU until it is killed.
+      **Strays, a warning only.** At start and after every run the watcher counts processes whose `ps -o comm=`
+      equals the converter venv's `<VENV>/bin/python` exactly, with parent pid 1, that belong to no live run of this
+      host (its own runs, and CLI runs found through their run records). **Measured on macOS 27.2** (round-3
+      reviewer, 2026-11-23): `comm` shows the unresolved exec path, `<VENV>/bin/python`, for the converter, and a
+      process can rewrite it by rewriting its args. Other worktrees' and tools' detached Python 3.14 processes, and the
+      secret watcher, run from other paths, so they are never counted. The count goes to `ingest_hosts.strays` with
+      every `next` and is logged as `stray_processes`; the watcher never kills these (unverified) and keeps
+      claiming. The Import page shows a warning when it is above 0. **Residual of the stray count:** an escaped
+      child that rewrites its args or re-execs `<PYROOT>/bin/python3.14` (the profile allows that exec) is not
+      counted.
+      **Hypothesis**, with a [local] check: `rss` reports resident memory closely enough to bound the run; macOS's
+      compressor and swap make RSS lower than the memory a process holds. Check: a child under the product profile
+      that allocates and touches 9 GiB is killed with `memory_limit`, and the measured peak is recorded.
       **Tests:**
       - [unit, fake ps] membership: a setsid'd child with cwd under this WORK is counted; one with this WORK in its
-        argv and its cwd elsewhere is counted; with **two live runs**, each run's set holds only its own processes
-        (cwd and argv under the other WORK are excluded); a process started before `child_start`, the watcher and
-        its ancestors are not counted;
+        args and its cwd elsewhere is counted; a child that called `setpgid` only is counted through `getsid`; with
+        **two live runs**, each run's set holds only its own processes; a WORK path containing a space matches by
+        substring; a process started before `child_start`, the watcher and its ancestors, and a shell (`/bin/zsh`)
+        whose cwd is inside WORK are not counted; a member whose start time changed between snapshot and kill is
+        skipped;
       - [unit, fake ps] strays: an unrelated detached `python3.14` with ppid 1 whose `comm` is the shared uv CPython
         path is not a stray; the secret watcher is not a stray; a `<VENV>/bin/python` with ppid 1 outside any live run
         is one, and claims continue;
-      - [host] a converter stand-in that forks a child which calls `setsid()` and allocates memory past a test limit:
-        both are killed and the run fails `memory_limit`; **two concurrent runs** in different WORKs: when the first
-        run ends and kills its set, the second converter survives and finishes;
-      - [local] the 9 GiB case and the `comm` check above.
+      - [host] a converter stand-in that forks a child which calls `setpgid`, and another that calls `setsid()`, both
+        allocating memory past a test limit: all are found through `getsid` or the arms, killed, and the run fails
+        `memory_limit`; **two concurrent runs** in different WORKs: when the first run ends and kills its set, the
+        second converter survives and finishes;
+      - [host] **the round-3 attack must fail:** spikes/ingest-sysctl's probe, run under the product profile as a
+        concurrent run A next to a run B, tries every channel to learn WORK_B (`kern.procargs2`, `kern.procargs`,
+        `kern.proc.pid`, `kern.proc.all`, `proc_pidinfo` cwd, `proc_pidpath`, `proc_listallpids`, listing WORK's
+        parent); every one is refused, and its forked, setsid'd, args-rewriting child is not a member of run B;
+      - [local] the 9 GiB case above.
   - id: FR-INGEST-23
     text: >-
       **Uploaded materials** (ADR-0029). An upload is a material with id `up-<first 12 hex of sha256>`, license
@@ -810,7 +868,9 @@ proposed_requirements:
            import key already exists. Otherwise exit 3 with the cancel line (FR-INGEST-20's one shape);
         2. **store** as FR-INGEST-11 (an existing valid directory is kept);
         3. **enqueue** `ingest.import` (it commits; a repeat returns the key's state);
-        4. **mark**: `UPDATE uploads SET state = 'received' WHERE id = U AND state <> 'received'` (idempotent).
+        4. **mark**: `UPDATE uploads SET state = 'received' WHERE id = U AND state <> 'received'` (idempotent). A
+           zero-row update (already received, or the row was deleted in between) is logged as `mark_noop` with the
+           upload id, and receive still answers its enqueue result.
         A crash after 3 and before 4 leaves the row in `sending` with the key present; the key-authority rule of
         FR-INGEST-19 then marks it `received` at the next transition attempt or view read, and a receive under a
         newer claim passes step 1 on the key and repeats 2–4 harmlessly. Discard and cancel are refused once the key
@@ -831,6 +891,13 @@ proposed_requirements:
         (FR-INGEST-19).
       - **Search** (SRV-SEARCH proposed FR-SEARCH-10): an uploaded material's `fts_config` is `russian`, `english`
         or `simple` from its upload's language.
+      - **Import of an uploaded material** (FR-INGEST-13's handler): a `material_id` starting with `up-` whose
+        `uploads` row with the args' sha256 does not exist fails permanently with `upload_missing` (nothing
+        written; the key goes `dead`), because the material's language and title come from that row.
+      - **Converter freshness:** `GET /api/materials/converter` also returns `stale: true` when
+        `ingest_hosts.watcher_sha` differs from the `converter_source_sha256` the api computes for its own code with
+        FR-INGEST-3's closure function; the Import page then shows "The converter on your Mac runs older code;
+        `reader up` restarts it when it is idle".
       - The outline and spans routes accept `up-…` ids. [db]
   - id: FR-INGEST-24
     text: >-
@@ -939,6 +1006,39 @@ invariants:
       `material_sha256 + ":" + str(seq)`, and are the same before and after any number of further receives, imports,
       requeues and api restarts. [db]
 
+# Proposed amendments of approved items (revision 2, draft). On promotion each replaces the named item's text in
+# `requirements` / `invariants`, together with its changed tests (H2: an approved item's tests change only with it).
+# Measured in spikes/ingest-sysctl (RESULT.md): the product profile lets a confined child read another same-uid
+# process's argv, cwd and path; the change below refuses every channel tried and the converter tests pass under it.
+proposed_amendments:
+  - id: FR-INGEST-4
+    change: >-
+      **Profile.** `converter.sb` is the spike profile minus SCRIPTS (unchanged) with two edits, each cited to
+      spikes/ingest-sysctl/converter-v2.sb:
+      - `(allow sysctl-read)` becomes an allow-list: name prefixes `hw.`, `machdep.`, `vm.`, `sysctl.`,
+        `security.mac.`, `kern.os`, and the names `kern.version`, `kern.hostname`, `kern.boottime`, `kern.argmax`,
+        `kern.maxfiles`, `kern.maxfilesperproc`, `kern.ngroups`, `kern.secure_kernel`, `kern.usrstack64`,
+        `kern.clockrate`, `kern.hv_vmm_present`, `kern.willshutdown`, `kern.memorystatus_level`. Nothing under
+        `kern.proc` or `kern.procargs`;
+      - `(deny process-info*)` and `(allow process-info* (target self))`: no `proc_pidinfo`, `proc_pidpath` or
+        `proc_listpids` of another process.
+      Both are needed: measured, a sysctl deny by name, or either edit alone, leaves `kern.procargs2` of another pid
+      readable; together they refuse it. The rule-for-rule unit test compares the profile against the spike
+      profile's copy plus exactly these two edits (the fixture `spec/fixtures/SRV-INGEST/spike-converter.sb` gains a
+      sibling `profile-edits.sb`). **No version bump:** `CONVERTER_VERSION`'s `r` number covers FR-INGEST-5..9 (the
+      output), and the profile does not change the output (the 20 pilot pages and the outline pass unchanged under
+      it). No setup staleness either: the profile is read from the checkout's package at every run
+      (`reader.ingest.host.sandbox.PROFILE`), never from the converter venv, so a checkout with the new profile uses
+      it at once; `reader up` restarts an idle watcher running older code (OPS-CLI proposed FR-CLI-22).
+  - id: INV-INGEST-4
+    change: >-
+      **Added probes**, [host] under the product profile, each against a second confined process of the same uid
+      whose argv and cwd name its own WORK: `kern.procargs2`, `kern.procargs`, `kern.proc.pid` and `kern.proc.all`
+      by sysctl MIB; `proc_pidinfo` (PROC_PIDVNODEPATHINFO), `proc_pidpath` and `proc_listallpids`; listing WORK's
+      parent directory. Every one is refused (EPERM). The round-3 attack (FR-INGEST-22's [host] case) runs in the same
+      test. **Allowed by design and recorded:** reading the process's own `kern.procargs2`, and `chdir` into a path
+      the process already knows (the global `file-read-metadata`).
+
 proposed_invariants:
   - id: INV-INGEST-8
     text: >-
@@ -949,8 +1049,10 @@ proposed_invariants:
   - id: INV-INGEST-9
     text: >-
       (Revision 2, draft.) A refused upload leaves nothing, and crash leftovers do not survive the next upload:
+      - a duplicate of an existing upload or declared material is answered 200 even when the quota is full (dedupe
+        runs before the quota); a missing or broken reader.yaml is 503 `config_unavailable` with no byte read;
       - for every refusal of FR-INGEST-18 (each code, a client disconnect mid-body, a body of exactly cap + 1 bytes,
-        `inbox_full` reached mid-body) no file other than the removed temporary one exists under
+        `inbox_full` after the body) no file other than the removed temporary one exists under
         `<BLOBS_DIR>/inbox/`, no `uploads` row is written and the lock is released;
       - **kill mid-body:** the api process is killed (SIGKILL, a subprocess server in the [db] test) while it streams
         a body, leaving a `.tmp-*` file; a second crash is simulated after the rename and before the insert, leaving
@@ -1072,10 +1174,12 @@ proposed_vectors:
       has expired, and the SRV-EVENTS status of the `ingest.import` key and of the material's `search.embed` key;
       outputs are `queued`, `claimed`, `converting`, `sending`, `importing`, `indexing`, `ready` and `failed` (with
       the row's or the dead job's code). An existing import key wins over the row's state (FR-INGEST-19): `sending`
-      or `failed` with a queued key maps to `importing`; `received` with no import key yet maps to `importing`. A
-      deleted row has no view (404 `not_found`). The view's `retry` output: `reconvert` for a `failed` row with no
-      import key; `requeue` for `received` with a `dead` import key, or a succeeded import and a `dead` embed key;
-      null otherwise.
+      or `failed` with a queued key maps to `importing`; `received` with no import key and no `ingests` row maps to
+      `failed` with `retry: reconvert` (FR-INGEST-19); `received` with no import key but an `ingests` row maps by the
+      embed key. A deleted row has no view (404 `not_found`). The view's `retry` output: `reconvert` for a `failed`
+      row with no import key and for the `received`-without-key case; `requeue` for `received` with a `dead` import
+      key, or a succeeded import and a `dead` embed key of the frozen ingest under the current params; null
+      otherwise. A `dead` embed key of an ingest that never existed, or of older params, is ignored.
     file: spec/fixtures/SRV-INGEST/upload-states.yaml
   - id: VEC-INGEST-7
     source: >-
@@ -1114,6 +1218,6 @@ owner_notes:
   - "4. `reader-ingest --setup` creates a separate converter venv (Docling 2.151.1 with torch, several GB) and fetches 1.2 GB of models under `<data_dir>`."
   - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
   - "6. NFR-INGEST-2's rule-B count may be 3 of 20 against a threshold of 2: page 378 (known miss), page 133 (a curve-constant line labelled code) and page 468 (a filename label labelled a list item), all measured 2026-11-22. The owner judges these pages before the first full import, because the converter version freezes at that import. Owner judgement, 2026-11-23: rule B is 1 of 20 (page 378); pages 133 and 468 are label noise, not rule-B misses. The owner also chose to fix code-block indentation before the first full import (FR-INGEST-7, converter r2)."
-  - "7. (Revision 2, draft.) Browser upload per ADR-0029 (proposed; your acceptance needed): the converter keeps running on your Mac under the same sandbox profile, now started by `reader-ingest --watch`, which `reader up` launches. While it is not running, uploads wait as `queued` and the Import page says so. Uploads are capped at 200 MiB, 5 open uploads and 1 GiB of inbox."
+  - "7. (Revision 2, draft.) Browser upload per ADR-0029 (proposed; your acceptance needed): the converter keeps running on your Mac under the sandbox profile, tightened so it can no longer see other processes' arguments or working directories (spikes/ingest-sysctl), now started by `reader-ingest --watch`, which `reader up` launches. While it is not running, uploads wait as `queued` and the Import page says so. Uploads are capped at 200 MiB, 5 open uploads and 1 GiB of inbox."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. Owner change 2026-11-23: code-block indentation (FR-INGEST-7, converter r2), the synthetic code block nested 0/4/8/0 (VEC-INGEST-2), hand-recorded indents and independently re-derived hashes (VEC-INGEST-3), owner note 6's judgement; one deep-reviewer round requested. Indentation review (ad0da76): changes — blocking: a median (or smallest) step halves indents in one-letter-token code; unit tests did not pin the design. Fixed: the cell is the font advance (pdfium loose char box, one width within 2%), every step and offset a whole number of cells within the chosen 0.25 bound; unit tests for one-letter code, majority 2-cell steps, an indented first line, line-count mismatch with real indents, residuals 0.24/0.26; non-blocking items applied (dedent stated, multi-box known limit with counts in FR-INGEST-5's code line, generator independent as code only, four hand-counted blocks, presence check). Round 2 (c6ae789): VERDICT approve. Majority-cell rule (2026-11-23, coordinator after the fallback diagnosis: 15 of 17 fallbacks were width spreads, mostly italic comments in Ubuntu Mono Italic): modal advance, 80% in band within 2%, steps checked between in-band glyphs only, every line offset still on the grid; version stays r2 (no r2 artifact outside test runs). VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says. Revision 2 (2026-11-23, V/onboarding): browser upload and host pickup per ADR-0029 (proposed), FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7; DRAFT. Round 1 (62a86b2): changes; B1–B10 fixed on V/onboarding: a 30 s heartbeat from claim to receive's reply and stack-side lease expiry; receive's fixed order with the import key authoritative; cancel and Discard delete the row (re-upload works); the crash sweep under a single instance-wide upload lock; the exact quota over open uploads; 200MiB at Caddy with the exact-cap live case; paired FR-AUTH-22, FR-DEPLOY-13, FR-CLI-22 as proposed items; one cancel shape, bounded reads, stderr counted, exit codes first, exec timeouts; watch-mode stale cleanup; setsid accounting with the residual stated and the RSS hypothesis; non-blocking: proposed_adr and proposed_defers, the filename in a header with a log canary, id collisions 409, more magic cases, bidi controls removed, page_chars moved to the plan track (FR-INGEST-24 is now logging). Round 2 (eb1dc8b, with 013149b's FR-AUTH-22 renumbering): changes; B1–B9 closed. Fixed: run membership bound to this run's realpath'd WORK (cwd or argv), with two-run [unit] and [host] tests; strays narrowed to the unresolved `<VENV>/bin/python` and made a warning (option a; `degraded` removed, claims continue), with the re-exec residual and the `comm` hypothesis; Retry on a view failed by a dead import or embed key calls requeue_dead, no reconversion (VEC-INGEST-6 `retry`, WEB-IMPORT INV-IMPORT-2). Non-blocking: `--phase sending` from claimed or converting; cancel and Discard delete and unlink under the upload lock; fetch `missing` → `inbox_missing`; caffeinate while a claim is held, with the sleep residual; FR-AUTH-22 matches the exact path string and method; the live 413 no longer asserts Caddy; SRV-SEARCH FR-SEARCH-10 drafted as proposed. Awaits round 3."
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. Owner change 2026-11-23: code-block indentation (FR-INGEST-7, converter r2), the synthetic code block nested 0/4/8/0 (VEC-INGEST-2), hand-recorded indents and independently re-derived hashes (VEC-INGEST-3), owner note 6's judgement; one deep-reviewer round requested. Indentation review (ad0da76): changes — blocking: a median (or smallest) step halves indents in one-letter-token code; unit tests did not pin the design. Fixed: the cell is the font advance (pdfium loose char box, one width within 2%), every step and offset a whole number of cells within the chosen 0.25 bound; unit tests for one-letter code, majority 2-cell steps, an indented first line, line-count mismatch with real indents, residuals 0.24/0.26; non-blocking items applied (dedent stated, multi-box known limit with counts in FR-INGEST-5's code line, generator independent as code only, four hand-counted blocks, presence check). Round 2 (c6ae789): VERDICT approve. Majority-cell rule (2026-11-23, coordinator after the fallback diagnosis: 15 of 17 fallbacks were width spreads, mostly italic comments in Ubuntu Mono Italic): modal advance, 80% in band within 2%, steps checked between in-band glyphs only, every line offset still on the grid; version stays r2 (no r2 artifact outside test runs). VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says. Revision 2 (2026-11-23, V/onboarding): browser upload and host pickup per ADR-0029 (proposed), FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7; DRAFT. Round 1 (62a86b2): changes; B1–B10 fixed on V/onboarding: a 30 s heartbeat from claim to receive's reply and stack-side lease expiry; receive's fixed order with the import key authoritative; cancel and Discard delete the row (re-upload works); the crash sweep under a single instance-wide upload lock; the exact quota over open uploads; 200MiB at Caddy with the exact-cap live case; paired FR-AUTH-22, FR-DEPLOY-13, FR-CLI-22 as proposed items; one cancel shape, bounded reads, stderr counted, exit codes first, exec timeouts; watch-mode stale cleanup; setsid accounting with the residual stated and the RSS hypothesis; non-blocking: proposed_adr and proposed_defers, the filename in a header with a log canary, id collisions 409, more magic cases, bidi controls removed, page_chars moved to the plan track (FR-INGEST-24 is now logging). Round 2 (eb1dc8b, with 013149b's FR-AUTH-22 renumbering): changes; B1–B9 closed. Fixed: run membership bound to this run's realpath'd WORK (cwd or argv), with two-run [unit] and [host] tests; strays narrowed to the unresolved `<VENV>/bin/python` and made a warning (option a; `degraded` removed, claims continue), with the re-exec residual and the `comm` hypothesis; Retry on a view failed by a dead import or embed key calls requeue_dead, no reconversion (VEC-INGEST-6 `retry`, WEB-IMPORT INV-IMPORT-2). Non-blocking: `--phase sending` from claimed or converting; cancel and Discard delete and unlink under the upload lock; fetch `missing` → `inbox_missing`; caffeinate while a claim is held, with the sleep residual; FR-AUTH-22 matches the exact path string and method; the live 413 no longer asserts Caddy; SRV-SEARCH FR-SEARCH-10 drafted as proposed. Round 3 (9d5b2ca): changes — the reviewer's measured attack (a confined child read a concurrent run's argv through kern.procargs2, joined that run by setsid, chdir and an args rewrite, and pushed it over memory_limit). Fix 1 taken and measured in spikes/ingest-sysctl: a deny by sysctl name does not stop kern.procargs2; the sysctl allow-list plus process-info limited to self refuses all seven channels tried, and the five converter [host]/[local] tests pass under it (proposed amendments of FR-INGEST-4 and INV-INGEST-4; no CONVERTER_VERSION bump: output unchanged; the profile is read from the checkout). The attack is pinned as a [host] test that must fail. Non-blocking: getsid instead of ps -g (setpgid case), the kernel executable path for the arms, substring args match with a space case, one ps/lsof snapshot per tick with chosen bounds, re-verified kills with the residuals stated, the comm finding recorded as measured, caffeinate fake-runner cases, renew-or-cancel on a late progress, requeue replies and the embed key that counts, received without key → reconvert, upload_missing in the import, mark_noop, watcher sha and busy with the stale state, the handler's own Content-Type check, dedupe before quota with the arithmetic, 503 on an unreadable reader.yaml, the api creates inbox/. FR-CONFIG-17 added (moved from V/plan). Awaits round 4."

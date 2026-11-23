@@ -459,4 +459,7 @@ proposed_requirements:
       Every other route keeps FR-AUTH-12 exactly. [unit] the table has exactly one entry; the upload route without
       Origin is 403, with `text/plain`, `application/json` or `multipart/form-data` is 415; `application/pdf` on any
       other route (a JSON route, `/api/materials/uploads/x`, `/api/materials/uploads/` with a trailing slash, GET of
-      the upload route) is 415 or 405 as today; the middleware reads 0 body bytes for the upload route.
+      the upload route) is 415 or 405 as today; a percent-encoded spelling of the path (`/api/materials/%75ploads`,
+      `/api/materials%2Fuploads`, `/api//materials/uploads`) is not the entry's exact string, so it keeps
+      FR-AUTH-12's JSON rule (415 for `application/pdf`) whatever the router later does with it; the middleware reads
+      0 body bytes for the upload route. The handler checks the media type again (SRV-INGEST FR-INGEST-18 step 1).

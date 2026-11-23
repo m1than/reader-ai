@@ -1,0 +1,36 @@
+(version 1)
+; Spike ingest-sysctl: the product profile (server/src/reader/ingest/host/converter.sb, SRV-INGEST FR-INGEST-4)
+; plus one rule that denies reading other processes' arguments and process tables through sysctl.
+; Reason (SRV-INGEST rev 2 review round 3, 2026-11-23): with an unrestricted (allow sysctl-read), a confined child
+; read a concurrent run's argv (kern.procargs2) and so learned its WORK.
+(deny default)
+
+; Program and runtime: read and map, never write.
+(allow file-read* file-map-executable
+  (subpath (param "PYROOT"))
+  (subpath (param "VENV"))
+  (subpath "/usr/lib")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld"))
+(allow file-read* (subpath (param "MODELS")))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/null"))
+(allow file-read* (literal "/"))                                ; added: dyld aborts in CacheFinder without it
+(allow file-read* (literal "/private/etc/apache2/mime.types"))  ; added: stdlib mimetypes opens it on import
+(allow file-read-metadata)
+
+; The only writable tree.
+(allow file-read* file-write* (subpath (param "WORK")))
+(allow file-write-data (literal "/dev/null"))
+
+; Processes: the venv python (a symlink) and the interpreter it resolves to; nothing else can be executed.
+(allow process-exec
+  (literal (string-append (param "VENV") "/bin/python"))
+  (literal (string-append (param "PYROOT") "/bin/python3.14")))   ; added: exec checks the resolved target
+(allow process-fork)
+(allow sysctl-read)
+; New: no process arguments, environments or process tables (the last matching rule wins).
+(deny sysctl-read
+  (sysctl-name-prefix "kern.procargs")
+  (sysctl-name "kern.proc")
+  (sysctl-name-prefix "kern.proc."))
