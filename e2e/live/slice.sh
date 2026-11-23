@@ -2,26 +2,28 @@
 # The vertical slice live check (V.live): PDF → ingest → embed → search bench → compile L02 → lesson in the browser
 # (lab cell, citations) → tutor. Precondition: `reader up --config PATH` and a healthy stack.
 #
-#   bash e2e/live/slice.sh --config PATH [--steps LIST] [--out DIR] [--no-ingest] [--reset-owner-passkeys]
+#   bash e2e/live/slice.sh --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]
 #
 #   --steps   default: routes,import,embed,bench,compile,lesson,tutor (see e2e/web/live/owner.slice.ts).
 #             `routes` alone, or `bench`, spends nothing; `compile` spends up to the run cap ($8), `tutor` up to
 #             3 × $0.30.
-#   --out     where results and screenshots go (default e2e/live/out-slice, git-ignored). Keep it outside the
-#             repository: screenshots show book text.
+#   --out     required, outside the repository: screenshots and Playwright's failure snapshots show book text.
+#             Only OUT/slice-results.json and OUT/ingest.json (numbers and ids) are meant for e2e/live/results/.
 #   --no-ingest  skip `reader-ingest` (the material is already imported).
+#   --reset-owner-passkeys  only when a previous run died before removing its owner passkey: deletes every passkey
+#             and session of the owner, including a real one made in Safari.
 #
 # Uses only the product's interfaces: `reader-ingest` (host converter, then the worker's receive) and
 # `verify-all.sh --slice` (owner session with a CDP virtual passkey, Playwright, HTTP API). Writes
-# OUT/ingest.json (wall time, pages per minute, peak RSS of the converter) and OUT/slice-results.json, numbers
+# OUT/ingest.json (wall time, peak RSS of the converter, whether it converted) and OUT/slice-results.json, numbers
 # and ids only. Never prints a secret, a token, the environment or book text.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-USAGE="usage: $0 --config PATH [--steps LIST] [--out DIR] [--no-ingest] [--reset-owner-passkeys]"
+USAGE="usage: $0 --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]"
 CONFIG=""
 STEPS="routes,import,embed,bench,compile,lesson,tutor"
-OUT="$ROOT/e2e/live/out-slice"
+OUT=""
 INGEST=1
 RESET=()
 while (($#)); do
@@ -35,12 +37,17 @@ while (($#)); do
   esac
 done
 [[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "$USAGE  (reader.yaml not found)" >&2; exit 2; }
+[[ -n "$OUT" ]] || { echo "$USAGE  (--out is required)" >&2; exit 2; }
 command -v reader-ingest >/dev/null || { [[ -x "$ROOT/server/.venv/bin/reader-ingest" ]] && export PATH="$ROOT/server/.venv/bin:$PATH"; }
 for tool in reader reader-ingest jq; do
   command -v "$tool" >/dev/null || { echo "missing tool: $tool" >&2; exit 2; }
 done
 mkdir -p "$OUT"
 chmod 700 "$OUT"
+case "$(cd "$OUT" && pwd -P)/" in
+  "$(cd "$ROOT" && pwd -P)/"*) echo "--out must be outside the repository (screenshots show book text)" >&2; exit 2 ;;
+esac
+rm -f "$OUT/ingest.json"   # never pair a previous run's ingest numbers with this run
 MATERIAL=bashir-2025
 
 if ((INGEST)) && [[ ",$STEPS," == *",import,"* ]]; then
@@ -51,18 +58,24 @@ if ((INGEST)) && [[ ",$STEPS," == *",import,"* ]]; then
   /usr/bin/time -l reader-ingest "$MATERIAL" --config "$CONFIG" </dev/null >"$OUT/ingest.log" 2>"$OUT/ingest.time" || rc=$?
   wall=$(( $(date +%s) - t0 ))
   peak=$(awk '/maximum resident set size/ {print $1}' "$OUT/ingest.time")
-  jq -n --argjson rc "$rc" --argjson wall "$wall" --arg peak "${peak:-}" \
-    '{exit: $rc, wall_s: $wall, peak_rss_bytes: (if $peak == "" then null else ($peak | tonumber) end)}' >"$OUT/ingest.json"
-  grep -E '^reader-ingest: ' "$OUT/ingest.log" "$OUT/ingest.time" | sed 's/^[^:]*://' || true
+  # Exit 0 also means "already ingested" or "import in progress" (no conversion): no throughput then.
+  converted=true
+  if grep -qE '^(already ingested|import in progress)' "$OUT/ingest.log"; then converted=false; fi
+  jq -n --argjson rc "$rc" --argjson wall "$wall" --arg peak "${peak:-}" --argjson converted "$converted" \
+    '{exit: $rc, converted: $converted, wall_s: $wall,
+      peak_rss_bytes: (if $peak == "" then null else ($peak | tonumber) end)}' >"$OUT/ingest.json"
+  grep -hE '^reader-ingest: ' "$OUT/ingest.log" "$OUT/ingest.time" || true
   if ((rc != 0)); then echo "FAIL ingest: reader-ingest exited $rc"; exit 1; fi
-  echo "PASS ingest: ${wall}s, peak RSS ${peak:-?} bytes"
+  echo "PASS ingest: ${wall}s, converted $converted, peak RSS ${peak:-?} bytes"
 fi
 
 rc=0
 bash "$ROOT/e2e/live/verify-all.sh" --config "$CONFIG" --slice "$STEPS" --out "$OUT" ${RESET[@]+"${RESET[@]}"} || rc=$?
-if [[ -f "$OUT/ingest.json" && -f "$OUT/slice-results.json" ]]; then
+if [[ -f "$OUT/ingest.json" && -f "$OUT/slice-results.json" ]] && jq -e '.converted' "$OUT/ingest.json" >/dev/null; then
   pages=$(jq '.import.page_count // empty' "$OUT/slice-results.json")
   wall=$(jq '.wall_s' "$OUT/ingest.json")
-  [[ -n "$pages" && "$wall" -gt 0 ]] && echo "ingest: $(jq -n "$pages * 60 / $wall | . * 10 | round / 10") pages/min over $pages pages"
+  if [[ -n "$pages" && "$wall" -gt 0 ]]; then
+    echo "ingest: $(jq -n "$pages * 60 / $wall | . * 10 | round / 10") pages/min over $pages pages (host wall time incl. receive)"
+  fi
 fi
 exit "$rc"

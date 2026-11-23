@@ -2,6 +2,8 @@
 // Steps are chosen by READER_SLICE_STEPS (comma-separated); each test skips unless its step is listed:
 //   routes   sign in as the owner (bootstrap + CDP virtual passkey), then the owner routes answer: materials, search,
 //            course import (409 no_material before an import), compile/ask/run on unknown ids (404). Spends nothing.
+//            Once the material is imported, the course POST creates the course and its lessons: that is the
+//            owner's G1 approval (SRV-PIPELINE FR-PIPELINE-1); it is idempotent, so reruns change nothing.
 //   import   the pilot material is imported (polls GET /api/materials); page, span and outline counts.
 //   embed    search.embed has finished: polls POST /api/search until it returns hits; minutes from this test's start.
 //   bench    questions-v2 (40) through POST /api/search, k 10: recall@1/@10, MRR, latency. Spends nothing.
@@ -79,8 +81,12 @@ test.beforeAll(async ({ browser }) => {
   });
 });
 
+// After every test, so a later timeout or kill keeps the numbers already measured (e.g. after the compile spend).
+const save = () => writeFileSync(resolve(OUT, 'slice-results.json'), `${JSON.stringify(results, null, 2)}\n`);
+test.afterEach(save);
+
 test.afterAll(async () => {
-  writeFileSync(resolve(OUT, 'slice-results.json'), `${JSON.stringify(results, null, 2)}\n`);
+  save();
   await context.close();
 });
 
@@ -91,6 +97,7 @@ test('owner passkey registration through the bootstrap page', async () => {
   await page.evaluate((t) => history.replaceState(null, '', `/api/auth/bootstrap#${t}`), token);
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Register your passkey' })).toBeVisible();
+  expect(page.url(), 'passkey.js clears the fragment').not.toContain('#');
   await page.getByRole('button', { name: 'Register passkey' }).click();
   await page.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
   const me = await api.get('/api/me');
@@ -123,7 +130,7 @@ test('import: the pilot material is imported', async () => {
   for (const deadline = now() + 9 * 60_000; now() < deadline; await sleep(5_000)) {
     const listed = ((await (await api.get('/api/materials')).json()) as { materials: Record<string, unknown>[] }).materials;
     row = listed.find((m) => m.id === MATERIAL_ID);
-    if (row && (row.status === 'imported' || row.status === 'failed' || row.status === 'dead')) break;
+    if (row && (row.status === 'imported' || row.status === 'dead')) break; // store.api_status's terminal states
   }
   results.import = {
     status: row?.status, converter_version: row?.converter_version, page_count: row?.page_count,
@@ -229,8 +236,10 @@ test('lesson: L02 renders, a lab cell runs, citations render', async () => {
   await lab().scrollIntoViewIfNeeded();
   const t = now();
   await lab().getByRole('button', { name: 'Run', exact: true }).click();
-  await expect(lab().getByText(/^(done|error|timed out)$/)).toBeVisible({ timeout: 120_000 });
-  const state = (await lab().getByText(/^(done|error|timed out)$/).first().textContent())?.trim();
+  // Scoped to the controls: an output reading exactly "done" must not match the state label.
+  const label = lab().locator('.lab-controls').getByText(/^(done|error|timed out)$/);
+  await expect(label).toBeVisible({ timeout: 120_000 });
+  const state = (await label.first().textContent())?.trim();
   const outputs = await lab().locator('.outputs').innerText().catch(() => '');
   results.lesson = { references, labs, lab_state: state, lab_output_chars: outputs.length, lab_run_s: +((now() - t) / 1000).toFixed(1) };
   await shot('slice-02-l02-lab-run');
@@ -246,26 +255,38 @@ test('tutor: three questions through the Ask panel', async () => {
   const panel = page.getByRole('region', { name: 'Tutor' });
   await expect(panel).toBeVisible({ timeout: 30_000 });
   const v03 = questions().find((q) => q.id === 'v03')!;
-  const asked: { n: number; latency_s: number; outcome: string }[] = [];
+  type Asked = { n: number; question_id: string | null; ask_status: number; latency_s: number | null;
+    state: string | null; grounded: boolean | null; error_code: string | null };
+  const asked: Asked[] = [];
+  const waiting = panel.getByText('The tutor is answering…');
   for (const [i, q] of [v03.question, ...TUTOR_EXTRA].entries()) {
     await panel.getByLabel('Ask the tutor').fill(q);
     const t = now();
+    // This question's own POST, not the previous answer still on screen (deep-reviewer, 2026-11-23).
+    const posted = page.waitForResponse((r) => r.request().method() === 'POST' && /\/api\/lessons\/[^/]+\/ask$/.test(r.url()));
     await panel.getByRole('button', { name: 'Ask' }).click();
-    const done = panel.locator('.tutor-result .tutor-answer, .tutor-result p:not(.muted)');
-    await expect(done.first()).toBeVisible({ timeout: 90_000 });
-    asked.push({ n: i + 1, latency_s: +((now() - t) / 1000).toFixed(1), outcome: (await panel.locator('.tutor-answer').count()) ? 'answer' : 'message' });
+    const res = await posted;
+    const qid = res.status() === 202 ? ((await res.json()) as { question_id: string }).question_id : null;
+    const entry: Asked = { n: i + 1, question_id: qid, ask_status: res.status(), latency_s: null, state: null, grounded: null, error_code: null };
+    asked.push(entry);
+    if (!qid) continue;
+    // Server TTL is 600 s (tutor params); spike tutor-call measured 1.5–3.5 s per call, so 180 s is generous.
+    await expect(waiting).toBeHidden({ timeout: 180_000 });
+    // The panel polls on a 1/2/5 s backoff, so these latencies are quantised up to about 5 s (upper bounds).
+    entry.latency_s = +((now() - t) / 1000).toFixed(1);
+    const st = (await (await api.get(`/api/lessons/${lessonId}/questions/${qid}`)).json()) as {
+      state: string; grounded?: boolean | null; error_code?: string | null;
+    };
+    Object.assign(entry, { state: st.state, grounded: st.grounded ?? null, error_code: st.error_code ?? null });
     if (i === 0) await shot('slice-03-tutor-answer');
   }
-  const listed = (await (await api.get(`/api/lessons/${lessonId}/questions`)).json()) as {
-    questions: { state: string; grounded: boolean | null; error_code: string | null }[];
-  };
-  const mine = listed.questions.slice(0, asked.length);
-  const latencies = asked.map((a) => a.latency_s).sort((a, b) => a - b);
+  const latencies = asked.flatMap((a) => (a.latency_s === null ? [] : [a.latency_s])).sort((a, b) => a - b);
   results.tutor = {
-    asked, states: mine.map((q) => q.state), grounded: mine.map((q) => q.grounded), error_codes: mine.map((q) => q.error_code),
-    grounded_rate: +(mine.filter((q) => q.grounded === true).length / asked.length).toFixed(3),
-    p95_latency_s: latencies[Math.ceil(latencies.length * 0.95) - 1],
+    asked,
+    grounded_rate: +(asked.filter((q) => q.grounded === true).length / asked.length).toFixed(3),
+    p95_latency_s: latencies.length ? latencies[Math.ceil(latencies.length * 0.95) - 1] : null,
+    latency_note: 'UI wall time from click to the answering notice clearing; quantised by the 1/2/5 s poll',
     cost_per_question_usd: null, // no allowed interface exposes the tutor's agent_spend rows
   };
-  expect(mine.every((q) => q.state === 'answered')).toBe(true);
+  expect(asked.every((q) => q.state === 'answered')).toBe(true);
 });

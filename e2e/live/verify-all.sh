@@ -18,12 +18,13 @@ READER_URL="${READER_URL:-https://localhost}"
 
 #
 # Slice mode (owner's choice, 2026-11-23; e2e/live/slice.sh calls it):
-#   bash e2e/live/verify-all.sh --config PATH --slice STEPS [--out DIR] [--reset-owner-passkeys]
-# runs only the owner session (web_live.py --owner: the owner's bootstrap link, CDP virtual passkey) and the slice
-# suite e2e/web/live/owner.slice.ts with the comma-separated STEPS (routes, import, embed, bench, compile, lesson,
-# tutor). The owner's link is refused once the owner has a passkey; --reset-owner-passkeys deletes every passkey and
-# session of the owner first (including one made in Safari). Stage 1 and the learner suite are not run.
-USAGE="usage: $0 --config PATH [--slice STEPS [--out DIR] [--reset-owner-passkeys]]"
+#   bash e2e/live/verify-all.sh --config PATH --slice STEPS --out DIR [--reset-owner-passkeys]
+# runs only the owner session (web_live.py --owner: the owner's bootstrap link, CDP virtual passkey, removed again
+# after the run) and the slice suite e2e/web/live/owner.slice.ts with the comma-separated STEPS (routes, import,
+# embed, bench, compile, lesson, tutor). DIR must be outside the repository (screenshots show book text). The
+# owner's link is refused once the owner has a passkey; --reset-owner-passkeys deletes every passkey and session of
+# the owner first (including one made in Safari). Stage 1 and the learner suite are not run.
+USAGE="usage: $0 --config PATH [--slice STEPS --out DIR [--reset-owner-passkeys]]"
 CONFIG=""
 SLICE=""
 SLICE_OUT=""
@@ -64,9 +65,13 @@ PROJECT="$(jq -r '.project // "reader"' <<<"$status_json")"
 # --- Slice mode: the owner session and the slice suite only ---------------------------------------------------------
 if [[ -n "$SLICE" ]]; then
   [[ "$SLICE" =~ ^[a-z]+(,[a-z]+)*$ ]] || { echo "$USAGE  (STEPS: comma-separated names)" >&2; exit 2; }
-  OUT="${SLICE_OUT:-$ROOT/e2e/live/out-slice}"
+  [[ -n "$SLICE_OUT" ]] || { echo "$USAGE  (--slice needs --out)" >&2; exit 2; }
+  OUT="$SLICE_OUT"
   mkdir -p "$OUT"
   chmod 700 "$OUT"
+  case "$(cd "$OUT" && pwd -P)/" in
+    "$(cd "$ROOT" && pwd -P)/"*) echo "--out must be outside the repository (screenshots show book text)" >&2; exit 2 ;;
+  esac
   [[ -d "$SUITE/node_modules" ]] || (cd "$SUITE" && npm ci --no-audit --no-fund --silent)
   owner_args=(--owner --slice-steps "$SLICE")
   ((RESET_OWNER)) && owner_args+=(--reset-owner-passkeys)

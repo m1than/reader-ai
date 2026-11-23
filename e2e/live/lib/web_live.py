@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -41,7 +42,7 @@ from passkey_check import EXISTS_SQL, RESET_SQL, bootstrap_token, compose, psql 
 
 HANDLE = "live-check"
 PLAYWRIGHT_TIMEOUT_S = 20 * 60  # whole browser suite; each step inside is bounded by its own timeout
-SLICE_TIMEOUT_S = 150 * 60  # --owner: embed wait (≤ 60 min) + compile (≤ 45 min) + lesson, tutor and search bench
+SLICE_TIMEOUT_S = 210 * 60  # --owner: owner.slice.ts budgets import 10 + embed 80 + bench 20 + compile 75 + 11
 REPO = Path(__file__).resolve().parents[3]
 OWNER_PASSKEYS_SQL = (
     "SELECT count(*) FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id WHERE u.role = 'owner';"
@@ -199,21 +200,37 @@ def main() -> int:
     if not spki:
         return failures
 
-    extra: dict[str, str] = {}
+    for stale in ("playwright.json", "slice-results.json"):  # never report a previous run's results
+        (out / stale).unlink(missing_ok=True)
     if args.owner:
         if not prepare_owner(args.project, args.reset_owner_passkeys):
             return failures
+        try:
+            run_suite(args, out, suite, spki, root_pem, "owner")
+        finally:
+            # The virtual passkey dies with the browser: remove it and the run's sessions so the owner's own
+            # `reader bootstrap` (Safari) is not refused with owner_has_credential (deep-reviewer, 2026-11-23).
+            code, _ = psql(args.project, OWNER_RESET_SQL)
+            line("PASS" if code == 0 else "FAIL", "browser: the run's owner passkey and sessions removed")
+        return failures
+    code, count = psql(args.project, EXISTS_SQL)
+    if code != 0 or count != "1":
+        line("FAIL", "browser: live-check is a configured learner")
+        return failures
+    code, _ = psql(args.project, RESET_SQL)
+    line("PASS" if code == 0 else "FAIL", "browser: live-check reset for a fresh passkey")
+    line("PASS" if load_fixture(args.project) else "FAIL", "browser: fixture lesson F01 loaded for live-check")
+    return run_suite(args, out, suite, spki, root_pem, "learner")
+
+
+def run_suite(args: argparse.Namespace, out: Path, suite: Path, spki: str, root_pem: Path, who: str) -> int:
+    """Issue the link, run Playwright with the token in its environment only, then guard every artifact."""
+    extra: dict[str, str] = {}
+    if who == "owner":
         extra = slice_inputs(out, args.slice_steps)
         token = bootstrap_token(args.project, args.url, handle=None)
         config, budget = "playwright.slice.config.ts", SLICE_TIMEOUT_S
     else:
-        code, count = psql(args.project, EXISTS_SQL)
-        if code != 0 or count != "1":
-            line("FAIL", "browser: live-check is a configured learner")
-            return failures
-        code, _ = psql(args.project, RESET_SQL)
-        line("PASS" if code == 0 else "FAIL", "browser: live-check reset for a fresh passkey")
-        line("PASS" if load_fixture(args.project) else "FAIL", "browser: fixture lesson F01 loaded for live-check")
         token = bootstrap_token(args.project, args.url)
         config, budget = "playwright.live.config.ts", PLAYWRIGHT_TIMEOUT_S
 
@@ -236,12 +253,18 @@ def main() -> int:
     del token
     started = time.monotonic()
     with (out / "playwright.log").open("wb") as log:
+        # Own process group, so a timeout stops Playwright's runner and browsers too, not only npx.
+        proc = subprocess.Popen(["npx", "playwright", "test", "-c", config], cwd=suite, env=env, stdout=log,
+                                stderr=subprocess.STDOUT, start_new_session=True)
         try:
-            done = subprocess.run(["npx", "playwright", "test", "-c", config], cwd=suite,
-                                  env=env, stdout=log, stderr=subprocess.STDOUT, timeout=budget,
-                                  check=False)
-            rc = done.returncode
+            rc = proc.wait(timeout=budget)
         except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGTERM)
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait()
             rc = -1
     env.pop("READER_BOOTSTRAP_TOKEN")
     elapsed = time.monotonic() - started
@@ -259,10 +282,13 @@ def main() -> int:
         line("FAIL", f"browser: Playwright produced no report (exit {rc}, {elapsed:.0f}s)")
         return failures
     data = json.loads(report.read_text("utf-8"))
-    for status, title, seconds in walk_results(data):
+    walked = walk_results(data)
+    for status, title, seconds in walked:
         line(status, f"browser: {title}", f"({seconds:.1f}s)")
     if rc == -1:
         line("FAIL", f"browser: suite exceeded {budget}s")
+    elif rc != 0 and not any(status == "FAIL" for status, _, _ in walked):
+        line("FAIL", f"browser: Playwright exited {rc} without a failing test (see playwright.log)")
     return failures
 
 
