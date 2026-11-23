@@ -1066,6 +1066,25 @@ tasks:
         1,000 characters, pilot ≈ $39–93 (spikes/study-rate/RESULT.md). Paired changes to schedule: SRV-AUTH (upload Content-Type), OPS-DEPLOY (Caddy request_body),
         OPS-CLI (reader up starts reader-ingest --watch), SRV-SEARCH (fts_config of uploads), SRV-CONFIG
         (planner.study_minutes_per_kchar), SRV-LESSON (delete_unstarted_lesson, reorder_lessons)." }
+  - { id: V.onboarding-plan, stage: V, kind: module, track: product, status: in_progress, branch: V/plan,
+      needs: [V.live, V.WEB-polish],
+      what: "The course-planning track of V.onboarding, split from the upload track (coordinator 2026-11-23): SRV-PLAN
+        (planner, estimate, preview/confirm/GET routes, study_plans), SRV-PIPELINE FR-PIPELINE-14/15 (course lock,
+        study-plan import, create_run under the lock), SRV-LESSON FR-LESSON-15, WEB-UI FR-UI-12 (/import route, owner
+        Import link), WEB-PLAN (FR-IMPORT-4/5/6/8 moved verbatim from WEB-IMPORT), OPS-DOD course.plan.",
+      next: "Owner review of /import on the stack (running from V/plan). Live check PASS 32/32 (2026-11-23,
+        e2e/live/results/2026-11-23-plan.json): the whole pilot at 12 weeks × 60 min does not fit (5,357 reading
+        minutes, a day's lesson up to 86 min) and the page suggests 90 min a day or 15 weeks; 15 weeks gives 105
+        lessons of about 51 min (at most 60), compile estimate $43.34–102.32 flagged as an extrapolation (mean lesson
+        24 kchars, 0.4× L02); preview p95 18–28 ms over 20 calls; confirm without compile, replay, re-plan and back
+        all PASS; axe 0 serious at 1280/1024/390; the owner's passkey and session counts unchanged. The stack keeps a
+        15-week plan course for bashir-2025 (105 unpublished lessons, no compile run).",
+      note: "Specs: SRV-PLAN and WEB-PLAN approved by agent after deep-reviewer (Fable) rounds 1–4, VERDICT approve on
+        d9f655a. Owner decisions recorded in SRV-PLAN: even spread over total_weeks × 7 days (3), re-plan keeps the
+        deadline (4, decided by the coordinator for the owner; overrulable). Tests: server 46 plan tests (planner
+        vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
+        bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
+        with axe 0 serious at 1280/1024/390." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

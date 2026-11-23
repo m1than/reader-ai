@@ -23,6 +23,7 @@ from reader.agent.pricing import resolve_model
 from reader.jobs import idempotency_key
 from reader.lessons.store import current_sha256
 from reader.pipeline import runtime as runtime_mod
+from reader.pipeline.courses import lock_course
 from reader.pipeline.errors import PipelineError
 from reader.pipeline.prompts import canonical_sha256, input_sha256
 from reader.pipeline.runtime import Runtime
@@ -302,16 +303,47 @@ def task_budgets(rt: Runtime) -> dict[str, str]:
 
 
 async def create_run(
-    engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, lesson_id: uuid.UUID, cap_usd: Decimal
+    engine: AsyncEngine,
+    jobs: Any,
+    owner_id: uuid.UUID,
+    lesson_id: uuid.UUID,
+    cap_usd: Decimal,
+    *,
+    require_course_unstarted: bool = False,
 ) -> uuid.UUID:
-    """A new run of the lesson; `compile_running` while another is running or stalled (FR-PIPELINE-11)."""
+    """A new run of the lesson; `compile_running` while another is running or stalled (FR-PIPELINE-11).
+
+    FR-PIPELINE-15: the lesson's course lock first, then the lesson lock; the lesson is read after both, so a
+    lesson removed by a concurrent re-plan is `lesson_unknown`. With `require_course_unstarted`, any run in
+    the same plan course is `already_started`.
+    """
     rt = runtime_mod.get(engine)
     async with engine.begin() as conn:
+        course = (
+            await conn.execute(
+                text("SELECT plan_course_id FROM course_plans WHERE lesson_id = :l AND owner_id = :o"),
+                {"l": lesson_id, "o": owner_id},
+            )
+        ).scalar()
+        if course is not None:
+            await lock_course(conn, owner_id, str(course))
         await conn.execute(
             text("SELECT pg_advisory_xact_lock(:ns, hashtext(:l))"),
             {"ns": LOCK_NAMESPACE, "l": str(lesson_id)},
         )
         lesson = await load_lesson(conn, rt, owner_id, lesson_id)
+        if require_course_unstarted and course is not None:
+            other = (
+                await conn.execute(
+                    text(
+                        "SELECT 1 FROM compile_runs r JOIN course_plans p ON p.lesson_id = r.lesson_id"
+                        " WHERE p.owner_id = :o AND p.plan_course_id = :c LIMIT 1"
+                    ),
+                    {"o": owner_id, "c": course},
+                )
+            ).first()
+            if other is not None:
+                raise PipelineError("already_started")
         unfinished = (
             await conn.execute(
                 text("SELECT id FROM compile_runs WHERE lesson_id = :l AND finished_at IS NULL"),

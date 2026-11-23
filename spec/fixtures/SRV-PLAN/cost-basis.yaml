@@ -1,0 +1,40 @@
+# VEC-PLAN-2: the compile estimate's constants and their sources, and hand-computed estimate cases (SRV-PLAN FR-PLAN-8).
+# Arithmetic in decimal: per lesson low = kchars × 1.2587 / 58.938, high = min(kchars × 2.9714 / 58.938, 8.00);
+# sums unrounded, then rounded to cents half up. No book text.
+constants:
+  L02_LOW_USD: "1.2587"     # converged product run, docs/progress.yaml V.live 2026-11-23 (REF-PLAN-4)
+  L02_HIGH_USD: "2.9714"    # dearest spike run, one loop, not converged (spikes/compile-cost/RESULT.md)
+  L02_KCHARS: "58.938"      # L02's span characters (spikes/study-rate step 1b)
+  RUN_CAP_USD: "8.00"       # SRV-PIPELINE bounds.run_cap_usd
+  BAND: ["0.5", "2"]        # chosen: extrapolated outside 0.5×–2× of L02_KCHARS
+
+cases:
+  - name: L02 itself
+    free_chars: [58938]
+    expect: { course_low_usd: "1.26", course_high_usd: "2.97", first_low_usd: "1.26", first_high_usd: "2.97",
+              mean_lesson_kchars: "58.938", extrapolated: false }
+  - name: a 1,000-kchar course in ten lessons
+    free_chars: [100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000, 100000]
+    # 1000 × 1.2587 / 58.938 = 21.3564; 1000 × 2.9714 / 58.938 = 50.4157 (no lesson reaches the cap)
+    expect: { course_low_usd: "21.36", course_high_usd: "50.42", first_low_usd: "2.14", first_high_usd: "5.04",
+              mean_lesson_kchars: "100.000", extrapolated: false }
+  - name: one lesson cut at the run cap
+    free_chars: [200000]
+    # high 200 × 2.9714 / 58.938 = 10.08, cut at 8.00
+    expect: { course_low_usd: "4.27", course_high_usd: "8.00", first_low_usd: "4.27", first_high_usd: "8.00",
+              mean_lesson_kchars: "200.000", extrapolated: true }
+  - name: band lower edge inside
+    free_chars: [29469]
+    expect: { mean_lesson_kchars: "29.469", extrapolated: false }
+  - name: band lower edge outside
+    free_chars: [29468]
+    expect: { mean_lesson_kchars: "29.468", extrapolated: true }
+  - name: band upper edge inside
+    free_chars: [117876]
+    expect: { mean_lesson_kchars: "117.876", extrapolated: false }
+  - name: band upper edge outside
+    free_chars: [117877]
+    expect: { mean_lesson_kchars: "117.877", extrapolated: true }
+  - name: no free lessons
+    free_chars: []
+    expect: { course_low_usd: "0.00", course_high_usd: "0.00", mean_lesson_kchars: null, extrapolated: false }

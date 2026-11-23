@@ -7,10 +7,13 @@
 #   1. Source: a drop zone and a "Choose a PDF" button; client checks; language; upload with a progress bar.
 #   2. Processing: the upload's state from SRV-INGEST FR-INGEST-23 (polled), the converter's online state, Cancel,
 #      Retry and Discard.
-#   3. Study time: total weeks and minutes per day (default 60, ADR-0010), an optional study pace; validation; a live
-#      preview "≈ N lessons, ~M min each, finish by <date>, compile ≈ $X–Y" from SRV-PLAN's preview.
-#   4. Confirm: "Create the course" with "Start compiling lesson 1 now (≈ $x)"; then the lesson list, where the new
-#      course's first lesson shows "Compiling".
+#   3. Study time: total weeks and minutes per day (default 60, the owner's decision of 2026-11-06), an optional study
+#      pace; validation; a live preview "N lessons, about M min a day, finish by <date>" with the compile estimate
+#      range from SRV-PLAN's preview (revision 2: the source is spread evenly over every study day).
+#   4. Confirm: "Create the course" with "Start compiling lesson 1 now ($low–$high, stops at $8.00)"; then the lesson
+#      list, where the new course's first lesson shows "Compiling".
+# Sections 3 and 4 (FR-IMPORT-4..8) are the course-planning track (V/plan); they also serve a declared material that
+# is already imported (the pilot), chosen from "Your sources", so they do not wait for the upload sections.
 # First run: an owner with no lessons and no materials lands on `/import` (WEB-UI paired change FR-UI-12).
 #
 # Design: the same Calm system and polish rules as WEB-UI FR-UI-10/-11 (tokens only, the library's spacing steps,
@@ -39,8 +42,8 @@ track: product
 adr: [ADR-0029, ADR-0010, ADR-0013]
 
 paths:
-  - web/src/import/**
-  - e2e/web/import/**
+  - web/src/import/*            # files directly in import/; the plan/ subtree is WEB-PLAN's
+  - e2e/web/import/*
   - spec/fixtures/WEB-IMPORT/**
 
 normative:
@@ -61,7 +64,6 @@ bounds:
   upload_bytes_max: 209715200   # 200 MiB, SRV-INGEST FR-INGEST-18
   poll_ms: 2000                 # upload view while not terminal (ADR-0029 Decision 4)
   converter_poll_ms: 10000      # converter state while an upload waits
-  preview_debounce_ms: 300      # structural: one preview per pause in typing
 
 requirements:
   - id: FR-IMPORT-1
@@ -112,47 +114,13 @@ requirements:
       202 `requeued` or `already_queued` → "Restarted" and polling resumes; 200 → the returned view; 409 `busy` →
       "Already restarting; try again in a moment"; 409 `state` or `upload_busy` → the view is refreshed. Polling stops when the page is
       hidden (`document.visibilityState`) and resumes when visible. [unit] [story: each state]
-  - id: FR-IMPORT-4
-    text: >-
-      **Study-time form**, shown when the upload is `ready` (or for a ready material chosen from the list,
-      FR-IMPORT-8): "How long do you want to study this?" with two required integer fields, total weeks (1–104) and
-      minutes per day (10–240, step 5, default 60), and a collapsed "Study pace" disclosure with minutes per 1,000
-      characters (0.10–20.00, two decimals; default the value the first preview returns). Native constraint
-      attributes plus the same checks in code; each invalid field gets `aria-invalid="true"` and a message linked by
-      `aria-describedby`, shown on blur and on submit, never while typing the first character. [unit] [story]
-  - id: FR-IMPORT-5
-    text: >-
-      **Estimate preview.** On valid input, after `preview_debounce_ms` without change, `POST /api/plans/preview` with
-      the material id, the fields and `start_date` = the browser's local date (YYYY-MM-DD). The estimate card shows
-      "≈ N lessons, ~M min each, finish by <date>" (the date in the user's locale, long form), "compile ≈ $low–$high
-      for the whole course" and "lesson 1 ≈ $x", plus the review days when the plan fits. When it does not fit, a
-      calm notice "At M min a day this needs N days, more than W weeks" with up to two buttons from `suggest` ("Use X
-      min a day", "Use Y weeks") that set the field and preview again. A collapsed "Lessons" disclosure lists each
-      lesson's title, pages and minutes. Out-of-order responses are dropped (only the latest request's answer is
-      shown); while a new one loads, the card keeps the previous estimate, dimmed, and its `role="status"` line reads
-      "Updating the estimate". [unit]
-      [story: fits, does not fit, loading, error]
-  - id: FR-IMPORT-6
-    text: >-
-      **Confirm.** "Create the course" with a checkbox "Start compiling lesson 1 now (≈ $x)", checked by default and
-      showing the amount from the current estimate (owner decision: confirm → the first lesson compiling). It posts
-      `POST /api/plans/confirm` with the inputs, the shown `plan_sha256` and `compile_first`. 409 `plan_changed`
-      replaces the estimate with the returned plan and asks again ("The plan changed; check it and confirm again");
-      the button is disabled while a request is in flight. On success the app navigates to `/` and the new course's
-      lessons appear in the list in plan order, the first one with "Compiling" (WEB-UI FR-UI-12); a compile error in
-      the response (budget, `compile_running`) is shown as a notice there, the course still created. [unit]
+  # FR-IMPORT-4, -5, -6 and -8 (study-time form, estimate, confirm, "Your sources") moved verbatim to WEB-PLAN
+  # (2026-11-23, coordinator decision (B)).
   - id: FR-IMPORT-7
     text: >-
       **Messages.** Every message is plain text from one catalogue keyed by code (client checks, SRV-INGEST and
       SRV-PLAN codes, `network`, `bad_response`, an `unknown` fallback); no server text is rendered; numbers and dates
       are formatted with `Intl` in the user's locale; the filename is shown as text only. [unit]
-  - id: FR-IMPORT-8
-    text: >-
-      **Existing sources.** Below the drop zone, "Your sources" lists `GET /api/materials` with `source: "upload"`
-      (title, state, created date): a ready material without a study plan offers "Plan study time", one with a plan
-      offers "Re-plan" (the form pre-filled from `GET /api/plans/{course_id}`), and an unfinished upload links to its
-      processing view. Re-planning shows which lessons are already started and stay as they are ("3 started lessons
-      keep their pages"). [unit] [story]
   - id: FR-IMPORT-9
     text: >-
       **Layout and accessibility** (WEB-UI FR-UI-10/-11 rules): sections inside the shell's `main#content` (no
@@ -196,7 +164,6 @@ vectors:
     file: spec/fixtures/WEB-IMPORT/responses.json
 
 defers:
-  - "Choosing a page range or chapters in the form (SRV-PLAN accepts `pages`; the form leaves it at the whole material)."
   - "Formats other than PDF, URLs and repositories (ADR-0008)."
   - "Several uploads at once (SRV-INGEST allows one in flight)."
   - "Server-sent events instead of polling."
@@ -205,4 +172,4 @@ owner_notes:
   - "1. The live check uploads a small synthetic PDF and confirms with 'Start compiling lesson 1' unchecked, so it spends no credit; the Bashir pilot stays as it is."
   - "2. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it."
 
-review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer."
+review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer. 2026-11-23 (V/plan, coordinator decision (B)): FR-IMPORT-4, -5, -6, -8 and `preview_debounce_ms` moved verbatim to WEB-PLAN (approved after the plan track's rounds 1–4); `paths` narrowed to files directly in `web/src/import/` and `e2e/web/import/`, so the `plan/` subtree is WEB-PLAN's."

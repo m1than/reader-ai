@@ -27,6 +27,7 @@ STATUS: Final = {
     "plan_invalid": 400,
     "no_source_spans": 409,
     "source_too_large": 409,
+    "origin_conflict": 409,  # FR-PIPELINE-14
 }
 
 log = logging.getLogger("reader.pipeline")
