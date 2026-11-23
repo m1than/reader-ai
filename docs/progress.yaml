@@ -1062,8 +1062,11 @@ tasks:
         startup note (ADR guard from 'this Mac only'); reject deletes challenges by signup_handle, sync leaves them to
         expire (verify re-checks); collisions name the first handle in users[] order; `signup_superseded <user id>`
         log record; the live SKIP is exactly a full pending cap or a 429 on the first options call; ZWNJ/ZWJ refusal
-        stated as a known limit; WEB-UI proposed FR-UI-14 drafted (12 is V/plan's, 13 V/onboarding's). Awaits
-        round 3.",
+        stated as a known limit; WEB-UI proposed FR-UI-14 drafted (12 is V/plan's, 13 V/onboarding's). Round 3
+        (b0b4808): VERDICT approve. Folded in after it: FR-AUTH-32's live mode derived with FR-AUTH-23's rule (absent
+        key on a non-localhost host = off); owner note 5's signup_superseded record is best-effort; FR-AUTH-29 reject
+        also cancels another person's open ceremony for the same handle (signup_failed). ADR-0031 stays proposed: the
+        owner accepts it; Red and Green start only after that and the coordinator's go.",
       notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
         disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
         need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding also adds a

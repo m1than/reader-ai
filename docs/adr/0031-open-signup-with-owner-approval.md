@@ -19,6 +19,11 @@ supersedes: []
 > Revision 2 (2026-11-23), after review round 2: `i`→`l` in the skeleton; the sign-in `next` compared raw against
 > one constant; the `open` default applies only on `localhost`; collisions name the first handle in `users[]` order;
 > the ZWNJ/ZWJ limit stated.
+>
+> Review round 3 (2026-11-23, deep-reviewer): `VERDICT: approve`. Three clauses folded in afterwards, in SRV-AUTH
+> only: the live step derives its expected mode with FR-AUTH-23's rule; the `signup_superseded` record is best-effort;
+> a reject also cancels another person's open ceremony for the same handle. Status stays `proposed` until the owner
+> decides.
 
 ## Context
 

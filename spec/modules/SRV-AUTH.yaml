@@ -634,7 +634,9 @@ vectors:
 #      or disabled sign-up account holds (the first such handle in `users[]` order; fix it and start again to see the
 #      next). Recovery: rename that `users[]` entry, or delete the sign-up account
 #      (`docker compose exec postgres psql`: its sessions, credentials and user row, by id), then start again. A
-#      pending sign-up with that handle never stops the api: it is deleted (FR-AUTH-24). The check is exact-handle
+#      pending sign-up with that handle never stops the api: it is deleted (FR-AUTH-24), and the `auth
+#      signup_superseded <user id>` record is best-effort: it is written once serving starts, so it is lost if the api
+#      dies between the sync commit and serving (the deletion itself is committed either way). The check is exact-handle
 #      only; a configured handle that merely shares a skeleton with a sign-up handle is allowed.
 #   6. A sign-up user who loses every passkey has no recovery (bootstrap links refuse sign-up users); the owner can
 #      disable the account, and the person signs up again under another handle.
@@ -817,7 +819,10 @@ proposed_requirements:
       /api/auth/signups/{id}/reject` (`recent_session`) on a pending sign-up user → deletes its credentials, its
       unconsumed `signup` challenges for its handle (`DELETE FROM auth_challenges WHERE kind = 'signup' AND
       signup_handle = :handle AND consumed_at IS NULL`, so an open ceremony cannot recreate the account without new
-      options) and the user row (a pending user owns no other row), 204. `POST
+      options) and the user row (a pending user owns no other row), 204. That deletion also cancels any other
+      person's open ceremony for the same handle (options issued after this account's, still waiting for verify):
+      that person's verify finds no ceremony (`ceremony_invalid`) and sees 400 `signup_failed`, then may start again.
+      `POST
       /api/auth/signups/{id}/disable` (`recent_session`) on an active, not yet disabled sign-up user → in one
       transaction `disabled_at = now()` and every session revoked, rows kept (INV-AUTH-9's meaning), 204. Disable
       cannot be undone in the product (no enable route; the owner's database is the only way back). Any other target
@@ -903,7 +908,8 @@ proposed_requirements:
       `?next=/signups/x`, `?next=/signups&next=/x` and `?x=1&next=/signups` each navigate to `/`; the bootstrap page opened with `?next=/signups` and a token fragment navigates to `/` after `done`.
       [live] a spend-free `signup` step in the owner suite (e2e/web/live/owner.slice.ts, run by `verify-all.sh
       --slice`), never touching any account it did not create. The step reads the mode it expects from the owner's
-      reader.yaml (`sharing.signup`, default `open`) and asserts the stack matches it; a mismatch is FAIL.
+      reader.yaml with FR-AUTH-23's rule (`"open"` → open; `false` or `"off"` → off; an absent key → open only when
+      `instance.url`'s host is `localhost`, else off) and asserts the stack matches it; a mismatch is FAIL.
       - Mode `open` (the run behind `implemented` and behind the OPS-DOD cells of `auth.signup` and `auth.approve`):
         a second browser context with its own CDP virtual authenticator signs up `lc-<8 random hex>` through the
         page and sees `pending`; on the sign-in page it sees `pending_approval`, and `/api/me` is 401; the owner
