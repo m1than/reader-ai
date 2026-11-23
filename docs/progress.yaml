@@ -1020,7 +1020,11 @@ tasks:
         the main loop only while total_cost_usd/model_usage include the nested request and the $0.01 fee; the main
         loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Estimate (not measured):
         ≈ $0.27 per check, worst ≈ $0.39 by formula.",
-      next: "1) deep-reviewer round 3 on revision 3 (round 2: changes, 3 blocking, fixed). 2) The owner runs
+      review: "deep-reviewer (Fable) on ADR-0030, SRV-FRESH, WEB-FRESH and the SRV-AGENT amendment: round 1 changes
+        (12 blocking), round 2 changes (3 blocking), round 3 VERDICT approve (2026-11-23). Round 3's three fixes applied
+        without a new round: the Haiku tier jump in the tail cost, the cross-check's lower-tier rule with `tier_unknown`
+        and the tier part of H-WS-6, and the combined worst case ≈ $0.84–0.87 under the $1.00 cap.",
+      next: "1) Done: deep-reviewer approve (round 3). 2) The owner runs
         `bash spikes/web-search/run-live.sh` at d9f96f0 (≤ $0.10, Haiku; H-WS-1..6, H-FRESH-2, observed once); the result
         goes into RESULT.md § 5b and budget.ledger. 3) After that run, a separate commit hardens the script (round-2
         list: no Sonnet option, non-SSE usage or worst case, a killed run counted, handle_error prints the exception

@@ -114,7 +114,10 @@ Still hypotheses:
   shows 6,039 input tokens for one search including the prompt). **t cannot be enforced**: the API adds the results
   server-side. § 5b records t for every live search.
 - **H-WS-6 (real upstream)** — `total_cost_usd` and `model_usage` equal the sum of the per-request usage that the
-  proxy records, per model.
+  proxy records, per model; and `total_cost_usd` knows Haiku 5.5's two tiers (a request over 100k prompt tokens
+  priced at the higher tier). The live call's prompts stay below 100k, so it shows the first part only. The tier part
+  stays open until a request over 100k is observed; until then SRV-AGENT's cross-check flags such requests
+  (FR-AGENT-16).
 - **H-FRESH-2** — the search run passes the planned query verbatim (SRV-FRESH FR-FRESH-6 denies anything else). The
   denial rate is measured in § 5b.
 
@@ -175,14 +178,23 @@ Six runs: ≤ $0.103.
 - The cap would even fit one paid retry of every stage ($0.78).
 - A reservation without a settle row counts as paid, so it is never retried (FR-FRESH-12).
 - A worker restart restarts the web job: at most one more web stage, ≤ $0.22.
+- **Combined worst case** (a restart plus a paid report retry in each attempt): $0.170 + 2 × ($0.103 + 2 ×
+  $0.116) ≈ $0.84. With the reserve floors ($0.02 per search run): $0.170 + 2 × ($0.12 + 2 × $0.116) ≈ $0.87. Both
+  are under $1.00 (FR-FRESH-12).
 
 **Expected ≈ $0.27:**
 - scan $0.13;
 - 6 × (fee $0.01 + ≈ 6,000 tokens of results at Haiku rates ≈ $0.002) ≈ $0.07;
 - report ≈ 12,000 × $4/M + 2,500 × $10/M ≈ $0.07.
 
-If t exceeds t_max, a search run overshoots its reserve by (t − 20,000) × $0.20/M. Even t = 200,000 adds $0.036.
-The run-cap check before the next call stops further spend.
+**Tail: t above t_max.** If t exceeds t_max, a search run overshoots its reserve, and past 100,000 prompt tokens
+Haiku 5.5's **tier jump** applies (§ 2). A nested prompt over 100k tokens is billed in full at the higher tier:
+$0.50/M plain input, or $1.00/M as a 1-hour write, which this uncached request does not use. At t = 200,000 that
+request costs ≈ 200,500 × $0.50/M ≈ $0.10, plus output and the fee. That is not the +$0.036 the lower tier would
+give.
+
+This tail cannot be enforced: the API adds the results server-side. It is bounded per call only by what one search
+returns. The run-cap check before the next call stops any further spend.
 
 The daily cap of $2.00 holds ≥ 5 worst-case checks. It relies on one running check per user and worker concurrency 1
 (SRV-EVENTS FR-EVENTS-9).

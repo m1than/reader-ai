@@ -265,8 +265,10 @@ requirements:
       call's reserve > `daily_cap_usd`, and each call passes `run_cap_usd` as its run cap (SRV-AGENT FR-AGENT-9) and
       `daily_cap_usd` as `daily_budget_usd` (FR-AGENT-12). A refusal ends the check `budget_refused` with the code.
       The daily sum is exact only because a user runs one check at a time (FR-FRESH-11) and the worker runs one job at
-      a time (SRV-EVENTS FR-EVENTS-9); overshoot of either cap is bounded by one call's reserve (INV-AGENT-4), plus
-      (t − `t_max_tokens`) × the input rate for a search whose results exceed the chosen bound (not enforceable).
+      a time (SRV-EVENTS FR-EVENTS-9). Overshoot of either cap is bounded by one call's reserve (INV-AGENT-4), plus an
+      unenforceable tail for a search whose results exceed the chosen `t_max_tokens`. Past 100,000 prompt tokens
+      Haiku 5.5 bills the whole nested request at its higher tier ($0.50/M input), so t = 200,000 costs ≈ $0.10 for that
+      request (REF-FRESH-2 § 4). The run-cap check before the next call stops any further spend.
   - id: FR-FRESH-10
     text: >-
       Storage and staleness. One `freshness_reports` row per check, never updated after `done`, `failed` or
@@ -304,8 +306,9 @@ requirements:
       retry** (worst $0.39 + $0.116 = $0.51 ≤ the $1.00 cap).
 
       **Job-level attempts:** `max_attempts` 2. A second attempt (after a timeout or a worker restart) **restarts the
-      check's stage (b) from its first search**, because R is gone. Its calls reserve and settle again; the cap
-      (≤ $0.39 + one more stage b+c of ≤ $0.22) still holds.
+      check's stage (b) from its first search**, because R is gone. Its calls reserve and settle again. Combined worst
+      case — a restart plus a paid report retry in each attempt — is $0.170 + 2 × ($0.103 + 2 × $0.116) ≈ $0.84, or
+      ≈ $0.87 with the $0.02 search reserve floors, under the $1.00 cap (REF-FRESH-2 § 4).
 
       Status: `running` while a key is queued or running; `failed` with the error code when a key is dead or R is
       empty; `budget_refused`; `done`.
@@ -425,4 +428,8 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
     results per search and host and title bounds, so L is enforced;
   - urlsplit `ValueError` and idna `UnicodeError` map to `dropped.url_unsafe`;
   - the hook allows one WebSearch per run;
-  - a reservation without a settle row is final."
+  - a reservation without a settle row is final.
+  Round 3 (2026-11-23): VERDICT approve, with three fixes applied: the Haiku tier jump in the tail cost
+  (FR-FRESH-9, REF-FRESH-2 § 4); the cross-check's tier rule and the open tier part of H-WS-6 (SRV-AGENT
+  FR-AGENT-16); and the combined worst case of ≈ $0.84–0.87 (FR-FRESH-12). The Red gate still needs the owner's
+  acceptance of ADR-0030 and the live call."

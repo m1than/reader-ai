@@ -401,7 +401,11 @@ proposed_requirements:
       `ResultMessage.usage` covers the main loop only, while `total_cost_usd` and `model_usage` include the nested
       request and the fee (measured against the stub, spikes/web-search § 3a); so for a tool call the settle row's
       usage fields and `web_search_requests` come from the sum over `model_usage` entries, and the cross-check
-      (FR-AGENT-8) recomputes from that sum. For a `freshness_web` token several 2xx are expected: when the record
+      (FR-AGENT-8) recomputes from that sum at the **lower** Haiku tier. `model_usage` is a per-model sum, not a
+      per-request one, so it cannot say which request crossed 100,000 prompt tokens. When the summed prompt tokens of
+      a Haiku entry exceed 100,000, the cross-check logs an INFO `tier_unknown` (model, summed prompt tokens) beside
+      any `cost_crosscheck` warning, and the settle amount stays the SDK's. Whether `total_cost_usd` knows the Haiku
+      tiers is part of H-WS-6 and stays open until a request over 100k is observed. For a `freshness_web` token several 2xx are expected: when the record
       shows no refusal, nothing in flight or failed, requests ≤ `requests_max`, and the SDK reports a cost, the settle
       amount is `total_cost_usd`; every other case keeps FR-AGENT-9's rule (the reserve when the outcome is unknown).
       **H-WS-6** (the live call): if `model_usage` does not match the proxy-observed requests per model within the
