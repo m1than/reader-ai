@@ -74,8 +74,8 @@ async def _unless_stopped[T](work: Awaitable[T], stop: asyncio.Event) -> tuple[b
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await task
-    if task.cancelled():
-        return True, None
+    if task.cancelled():  # by the stop above, or the work cancelled itself: only a set `stop` is a stop
+        return stop.is_set(), None
     return False, task.result()
 
 

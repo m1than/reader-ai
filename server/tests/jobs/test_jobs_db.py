@@ -912,6 +912,47 @@ async def test_a_failing_start_sweep_returns_1(pg: Pg, monkeypatch: Any) -> None
         with anyio.fail_after(15):
             assert await run(env.engine, target(pg), asyncio.Event(), env.jobs.catalog, hooks=()) == 1
 
+        # A stop that arrives while the start sweep fails is a stop: 0, not the failure's 1 (FR-EVENTS-9).
+        stop = asyncio.Event()
+
+        async def stopped_then_broken(self: Any, *_args: Any, **_kw: Any) -> Any:
+            stop.set()
+            raise RuntimeError("sweep failed")
+
+        monkeypatch.setattr(Jobs, "sweep", stopped_then_broken)
+        with anyio.fail_after(15):
+            assert await run(env.engine, target(pg), stop, env.jobs.catalog, hooks=()) == 0
+
+
+async def test_a_hook_that_cancels_itself_does_not_end_the_worker(pg: Pg) -> None:
+    """FR-EVENTS-1: hook failure is isolated, a self-cancelled hook included; only `stop` ends the start."""
+    from reader.jobs.worker import run
+
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "selfcancel"})
+        calls: list[str] = []
+
+        async def cancels_itself(_jobs: Any) -> None:
+            calls.append("cancels")
+            raise asyncio.CancelledError
+
+        async def next_hook(_jobs: Any) -> None:
+            calls.append("next")
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            run(env.engine, target(pg), stop, env.jobs.catalog, hooks=[cancels_itself, next_hook])
+        )
+
+        async def served() -> bool:
+            return (await env.key_row("selfcancel")).outcome == "succeeded"
+
+        await _until(served)
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+        assert calls == ["cancels", "next"]
+
 
 # ---- FR-EVENTS-9: the worker entry
 
