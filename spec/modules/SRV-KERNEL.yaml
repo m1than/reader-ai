@@ -33,7 +33,9 @@
 # channel `reader`, `msg_type` `reader_notice`, content `{code, parent_msg_id?}` (FR-KERNEL-11).
 #
 # Test levels: [unit] the relay and session logic against a fake Kernel Gateway and a fake control endpoint (test
-# servers in-process) with a fake clock; [image] against `reader-kernel:local` started by the test; [live] in
+# servers in-process) with a fake clock; [image] against the kernel image built from sandbox/ under a per-run tag
+# `reader-kernel:test-<pid>.<random>` and removed at the end of the module (never `reader-kernel:local`, the live
+# stack's tag; OPS-SANDBOX header, test image, 2026-11-23), started by the test; [live] in
 # `e2e/live/slice.sh` against `reader up` with the stage-1 `live-check` software-authenticator session (SRV-AUTH).
 
 id: SRV-KERNEL

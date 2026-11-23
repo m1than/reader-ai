@@ -1,5 +1,5 @@
 # @trace FR-KERNEL-2, FR-KERNEL-5, FR-KERNEL-10
-"""SRV-KERNEL against the real kernel image (OPS-SANDBOX's reader-kernel:local), run with the x-kernel flags
+"""SRV-KERNEL against the real kernel image (OPS-SANDBOX's, under a per-run tag), run with the x-kernel flags
 and `--restart always`, its ports published on 127.0.0.1: first use resets the container (a new nonce), a cell
 runs through the relay, and an interrupted long cell (sleep and a busy loop) replies within the 5 s grace."""
 
@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from collections.abc import Iterator
@@ -17,7 +18,9 @@ import pytest
 from .conftest import REPO, FakeBrowser, execute, load, requires_docker, settle
 
 pytestmark = [pytest.mark.anyio, requires_docker]
-IMAGE = "reader-kernel:local"
+# A per-run tag (OPS-SANDBOX header, test image): never `reader-kernel:local`, the live stack's tag. Removed
+# at the end of the module; the sandbox session-start sweep untags it if this process died first.
+IMAGE = f"reader-kernel:test-{os.getpid()}.{uuid.uuid4().hex[:8]}"
 LABEL = "org.reader-ai.test=srv-kernel"
 
 
@@ -56,17 +59,19 @@ def _template_flags() -> list[str]:
 def kernel() -> Iterator[tuple[int, int]]:
     sandbox = REPO / "sandbox"
     dockerfile = str(sandbox / "Dockerfile")
-    build = _docker(
-        "build", "-q", "--platform", "linux/arm64", "-t", IMAGE, "-f", dockerfile, str(sandbox), timeout=1800
-    )
-    assert build.returncode == 0, build.stderr
     name = f"rk-srvkernel-{uuid.uuid4().hex[:8]}"
-    # Fixed host ports: an ephemeral published port is chosen anew on every restart, and the reset restarts.
-    gw, ctl = _free_port(), _free_port()
-    run = _docker("run", "-d", "--name", name, "--label", LABEL, "-p", f"127.0.0.1:{gw}:8888",
-                  "-p", f"127.0.0.1:{ctl}:8889", *_template_flags(), IMAGE)
-    assert run.returncode == 0, run.stderr
     try:
+        build = _docker(
+            "build", "-q", "--platform", "linux/arm64", "-t", IMAGE, "-f", dockerfile, str(sandbox),
+            timeout=1800,
+        )
+        assert build.returncode == 0, build.stderr
+        # Fixed host ports: an ephemeral published port is chosen anew on every restart, and the reset
+        # restarts.
+        gw, ctl = _free_port(), _free_port()
+        run = _docker("run", "-d", "--name", name, "--label", LABEL, "-p", f"127.0.0.1:{gw}:8888",
+                      "-p", f"127.0.0.1:{ctl}:8889", *_template_flags(), IMAGE)
+        assert run.returncode == 0, run.stderr
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             probe = _docker("exec", name, "/usr/local/bin/reader-kernel-health")
@@ -76,6 +81,7 @@ def kernel() -> Iterator[tuple[int, int]]:
         yield gw, ctl
     finally:
         _docker("rm", "-f", name)
+        _docker("image", "rm", IMAGE)  # untags; layers another tag uses stay
 
 
 def _service(ports: tuple[int, int]) -> Any:
