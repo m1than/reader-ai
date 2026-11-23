@@ -164,6 +164,16 @@ requirements:
       `material_not_a_file`; `--setup` failures exit 2 with `setup_*` codes; a receive or requeue reply that is not
       FR-INGEST-11's or FR-INGEST-12's exits 5 `receive_failed` or `requeue_failed`. Subprocesses the parent runs
       for itself (`ps`, `lsof` of FR-INGEST-16) also get the allow-listed environment. [unit]
+      **One converter at a time** (2026-11-23; ADR-0029 amendment note on V/onboarding at 421d290). After its
+      material lock and before it writes the run record, `reader-ingest` (CLI) takes an exclusive non-blocking
+      `flock` on `<data_dir>/ingest/locks/convert.lock`; held (by the watcher's run or another CLI run) it exits 3
+      `busy` and prints "another conversion is running; try again when it ends". Taken, it first runs the lock's
+      stale cleanup over every run record, which replaces FR-INGEST-16's per-material stale cleanup. The lock fd is
+      `O_CLOEXEC` and never reaches the child. `--requeue` and `--setup` do not take it (they start no converter).
+      The lock is released after FR-INGEST-16's cleanup of the run. [unit] a held `convert.lock` gives exit 3 `busy`
+      before any run record or work directory exists; the lock's fd has `FD_CLOEXEC`; `--requeue` does not take it;
+      a child spawned by `system_spawn` (as the converter is) while the lock is held does not have the lock's
+      descriptor open (it lists its own `/dev/fd`), and can take the lock itself once the parent releases it.
   - id: FR-INGEST-2
     text: >-
       Before converting, `reader-ingest` runs `reader status --json` (OPS-CLI FR-CLI-13); any exit other than 0 gives
@@ -238,7 +248,20 @@ requirements:
       - `process-exec` of exactly `<VENV>/bin/python` and `<PYROOT>/bin/python3.14`, the resolved symlink target
         (:28–30);
       - `process-fork` (:31);
-      - `sysctl-read` (:32).
+      - `sysctl-read` (:32), **replaced** (2026-11-23, ADR-0029 Decision 3, spikes/ingest-sysctl) by the rules of
+        `spec/fixtures/SRV-INGEST/profile-edits.sb`: `sysctl-read` only for the name prefixes `hw.`, `machdep.`,
+        `vm.`, `sysctl.`, `security.mac.`, `kern.os` and the names `kern.version`, `kern.hostname`, `kern.boottime`,
+        `kern.argmax`, `kern.maxfiles`, `kern.maxfilesperproc`, `kern.ngroups`, `kern.secure_kernel`,
+        `kern.usrstack64`, `kern.clockrate`, `kern.hv_vmm_present`, `kern.willshutdown`, `kern.memorystatus_level`
+        (nothing under `kern.proc` or `kern.procargs`; `kern.hostname` stays because `os.uname()`, called by `import
+        ctypes`, needs it); then `(deny process-info*)` and `(allow process-info* (target self))`. Reason, measured:
+        under the unrestricted rule and with no process-info rule, a confined child read every same-uid process's
+        arguments and environment (`kern.procargs2`) and cwd (`proc_pidinfo`); both edits are needed, since either
+        alone, or a deny by sysctl name, leaves `kern.procargs2` of another pid readable. `kern.iossupportversion`
+        (an OS-identity string the runtime was seen requesting; spikes/ingest-sysctl sweep) is also allowed. The
+        edits restrict what the child may query, not how it converts; whether they change the output was not
+        compared byte for byte (the full pilot's span count was 9,463 under both profiles), so `CONVERTER_VERSION`
+        stays and a byte comparison of `spans.jsonl` is a follow-up (docs/progress.yaml V.ingest-profile-v2).
       There is no rule for `network*`, `mach-lookup`, `iokit-open`, `ipc-posix*` or `signal`, so they all stay
       denied. The spike shows POSIX semaphores and shared memory are not needed.
       **Child process setup:**
@@ -255,7 +278,9 @@ requirements:
       **Tests:**
       - [unit] the argv, the environment and the realpaths;
       - [unit] a rule-for-rule comparison, comments ignored, of the profile against the copy of the spike's profile
-        at `spec/fixtures/SRV-INGEST/spike-converter.sb`, minus its SCRIPTS line;
+        at `spec/fixtures/SRV-INGEST/spike-converter.sb`, minus its SCRIPTS line, with its `(allow sysctl-read)`
+        replaced by `profile-edits.sb`'s rules in order; no `sysctl-name-prefix` value is a prefix of
+        `kern.procargs2` or of `kern.proc.pid`, and no `sysctl-name` value starts with `kern.proc`;
       - [local] the profile's behaviour.
   - id: FR-INGEST-5
     text: >-
@@ -535,7 +560,10 @@ requirements:
       **Run record.** Once the child has started, the record holds:
       - `child_sid`: the child's session id, which equals its pid because it leads a new session;
       - `child_start`: the child's start time, read with `ps -o lstart= -p <pid>` (no new dependency).
-      **Stale cleanup at start.**
+      **Stale cleanup at start.** (Amended 2026-11-23 with FR-INGEST-1's `convert.lock`: a converter run, holding
+      `convert.lock`, first cleans **every** run record, because a free `convert.lock` proves that no live run owns
+      any record; the per-material scope below remains for `--requeue`, which starts no converter. [unit] with the
+      lock taken, a record of another material whose child is verified is killed and removed.)
       - Once it holds the material lock, every run record whose `material_sha256` is this material's is stale. A free
         lock proves that no live run of this material owns it.
       - Records of other materials are never read for cleanup, signalled or removed; their own runs clean them under
@@ -1047,6 +1075,26 @@ invariants:
       - reading a canary in `<data_dir>` outside WORK and the models, and reading the original material path;
       - the environment equals FR-INGEST-4's list and holds no canary variable set in the parent's environment;
       - no listening socket (`lsof -a -p <pid> -i`).
+      **Added with the profile edits** (2026-11-23, spikes/ingest-sysctl), [host], through
+      `server/tests/ingest/cross_process_probe.py` run by `test_cross_process_probes`, against a second confined
+      process of the same uid whose argv and cwd name its own WORK, which must still be alive after the probe; the
+      probe must exit 0:
+      - **refused with exactly EPERM (errno 1)**, never another errno (sysctls use a size query first, so a large
+        table cannot fail with ENOMEM instead): `kern.procargs2`, `kern.procargs`, `kern.proc.pid`, `kern.proc.pgrp`,
+        `kern.proc.tty`, `kern.proc.uid`, `kern.proc.ruid` and `kern.proc.all` by sysctl MIB; `proc_pidpath`,
+        `proc_name`, `proc_pid_rusage`, `proc_pidfdinfo`, and `proc_pidinfo` with PROC_PIDLISTFDS, PROC_PIDTBSDINFO
+        and PROC_PIDVNODEPATHINFO; `proc_listallpids`; listing that WORK's parent;
+      - **allowed, as positive controls** against the probe's own pid (they also show `(target self)` works):
+        `kern.procargs2`, `kern.proc.pid`, `proc_pidpath` and `proc_pidinfo` PROC_PIDVNODEPATHINFO;
+      - **recorded, allowed by design** (no profile edit tried closes them, measured): the process's own
+        `kern.procargs2`; `fsgetpath()` of the other WORK's inode; `chdir` into the other WORK when its path is
+        known; listing it after that `chdir` (expected refused). **Residual on this branch:** the path of a
+        concurrent run's WORK can be learned and `chdir` into it succeeds, while reads and writes there stay denied;
+        no concurrent converter run exists, because a converter run holds `convert.lock` (FR-INGEST-1). ADR-0029
+        (accepted, on V/onboarding at 383f1a0) and its amendment note (`docs/adr/0029-amendment-note.txt` on
+        V/onboarding at 421d290) record this; this branch merges only after the owner has applied that note;
+      - **the host name is readable** (`kern.hostname` stays allowed because `os.uname()` needs it), so a converted
+        artifact could carry the Mac's host name: a low-value residual, recorded.
       **Allowed by design:** `socketpair()` (no external endpoint), and files, symlinks and FIFOs inside WORK, which the
       parent treats as untrusted.
       [local; the probes run as a test-only module under the product profile]
@@ -1177,8 +1225,13 @@ nfr:
     note: "Bound from ADR-0021 Consequences ('≥ 10 pages/min, peak memory recorded'). Measured under the profile:
       15.69 and 15.85 pages/min on the formula-heavy 20-page sample (spikes/ingest-confine, conf3 and conf4); full
       pilot run 2026-11-22: 935 pages in 856.3 s = 65.5 pages/min, child peak RSS 4,025 MiB
-      (spec/fixtures/SRV-INGEST/pilot-fullrun.json, numbers only). [local], full run, records
-      peak RSS of the child."
+      (spec/fixtures/SRV-INGEST/pilot-fullrun.json, numbers only). Under the edited profile of FR-INGEST-4
+      (2026-11-23, converter r2; the gate ran the spike profile spikes/ingest-sysctl/converter-v2.sb, rule-identical
+      to the product profile except `kern.iossupportversion`): 935 pages in 961.6 s = 58.3 pages/min, about 10 %
+      slower than 2026-11-22's r1 run (the profile's share is not excluded: converter r1 vs r2, and the CPU was
+      shared with other tests for the run's first minutes), peak RSS 3,590.8 MiB summed over the converter's
+      processes sampled at 1 s (the r1 figure was the child's own peak; the RSS methods differ); span count 9,463.
+      [local], full run, records peak RSS of the child."
   - id: NFR-INGEST-2
     metric: pilot pages misread out of the 20-page fidelity sample, rule B (owner live check with an agent judge)
     threshold: 2
