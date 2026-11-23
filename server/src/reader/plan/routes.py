@@ -28,7 +28,7 @@ from reader.pipeline.errors import PipelineError
 from reader.plan import estimate, params, planner, store
 
 DEFAULT_CONFIG: Final = "/etc/reader/reader.yaml"
-RATE: Final = re.compile(r"\d{1,2}(\.\d{1,2})?")
+RATE: Final = re.compile(r"[0-9]{1,2}(\.[0-9]{1,2})?")  # ASCII digits only (`\d` also matches other scripts)
 log = logging.getLogger("reader.plan")
 
 
