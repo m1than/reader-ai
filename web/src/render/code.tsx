@@ -62,13 +62,16 @@ export function Code({ code, language }: { code: string; language: string }) {
         </span>
         <CopyCode code={code} />
       </div>
-      {tree ? (
-        hastToReact(tree)
-      ) : (
-        <pre data-code="plain">
-          <code>{code}</code>
-        </pre>
-      )}
+      {/* A scroll region keyboard users can reach (axe scrollable-region-focusable): long lines scroll here. */}
+      <div className="code-scroll" data-render-chrome="" tabIndex={0} role="region" aria-label={`${language || 'text'} code`}>
+        {tree ? (
+          hastToReact(tree)
+        ) : (
+          <pre data-code="plain">
+            <code>{code}</code>
+          </pre>
+        )}
+      </div>
     </div>
   );
 }

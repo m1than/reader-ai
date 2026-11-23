@@ -1017,10 +1017,19 @@ tasks:
       coordination: "V/compile-ui fills the compile slot (Services.compileAction) and FR-UI-15's status; V/signup adds
         a NAV_ITEMS entry (FR-UI-14); V/onboarding owns the /import drop zone (WEB-IMPORT); V/freshness's card uses the
         same radii and state blocks.",
-      tests: "Red 2026-11-23: 92 unit tests fail as intended across 10 files (web/src/{app,notebook,render,tutor,
-        import/plan,ui}); browser specs e2e/web/{ui/theme,notebook/editor,render,tutor/ask,ui/csp}; the live `ui` step
-        in e2e/web/live/owner.slice.ts asserts the new measured values. tsc reports only the highlight() signature
-        change until Green.",
+      tests: "Red 2026-11-23: 92 unit tests failed as intended across 10 files. Green 2026-11-24: 322 Vitest tests pass
+        (27 files); 14 Playwright [browser] specs pass in the chromium project (editor under the CSP with no violation,
+        theme on first frame, tutor panel axe and no overlap, render, import, CSP); the live `ui` step (owner.slice.ts)
+        and slice.live.ts are updated but not run (the owner is using the stack; run with the coordinator's go-ahead).",
+      measured: "Vite production build 2026-11-24: initial JS 114,881 B gzip (NFR-UI-1 limit 121,153; 111,507 before
+        the pass); CodeMirror editor chunk 122,538 B gzip in 1 lazy chunk (NFR-NOTEBOOK-1 limit 137,768; the esbuild
+        spike measured 125,244). After-screenshots on the replayed owner data (read-only capture; owner counts 1/1/1
+        before and after): 46 pages at 1280/1024/390 in light and dark with 0 serious or critical axe issues, 0
+        horizontal overflow, 0 CSP violations. Found and fixed while capturing: a Continue row's long course title and
+        L02's 7-column table overflowed 390 px (table-layout fixed below 40rem), code and editor scrollers were not
+        focusable scroll regions (a labelled region with tabindex 0; tabindex on the editor content), Cyrillic in code
+        fell back to a serif (app-level --acme-font-mono order), and CodeMirror's .cm-highlightTab data: literal
+        (reviewed in FR-UI-9).",
       review: "Spec: deep-reviewer (Fable) single round on 04e396b..d3c0a68, VERDICT changes; every finding applied
         without a second round (coordinator, 2026-11-23). Findings and fixes —
         B1 bundle (initial chunk 111,507 of 121,153 B; menu, drawer and icons about +18 KB): the user menu and the

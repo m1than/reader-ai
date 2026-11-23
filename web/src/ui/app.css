@@ -7,6 +7,9 @@
   --radius-block: 8px;
   --radius-panel: 12px;
   --serif: ui-serif, Georgia, 'Iowan Old Style', serif;
+  /* The library's mono stack led with fonts Chromium could not use for Cyrillic, so Russian comments and strings in
+     code fell back to a serif and broke the columns (after-screenshots 2026-11-24); the system monospace comes first. */
+  --acme-font-mono: ui-monospace, Menlo, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
   font-family: var(--acme-font);
   line-height: 1.5;
 }
@@ -443,7 +446,6 @@ h4 {
   align-items: baseline;
   padding: var(--acme-space-2) var(--acme-space-2);
   border-bottom: 1px solid var(--acme-border);
-  border-radius: var(--radius-control);
   transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease);
 }
 
@@ -481,7 +483,6 @@ h4 {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: var(--radius-control);
 }
 
 .row-link:hover {
@@ -493,6 +494,13 @@ h4 {
   align-items: baseline;
   gap: var(--acme-space-3);
   white-space: nowrap;
+}
+
+/* A Continue row's course title may be long (a full bibliographic title): it wraps. */
+.continue .lesson-meta {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
 }
 
 /* The compile slot's action: revealed on hover and focus-within, always on touch screens. */
@@ -1002,14 +1010,28 @@ h4 {
   font-family: var(--acme-font-mono);
 }
 
+.code-scroll {
+  overflow-x: auto;
+  border-radius: 0 0 var(--radius-block) var(--radius-block);
+}
+
 .code-block pre,
 .outputs pre,
 pre[data-code='plain'] {
   margin: 0;
   padding: var(--acme-space-3);
-  overflow-x: auto;
   font-size: 0.8125rem;
   line-height: 1.55;
+}
+
+.code-block pre {
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+
+.outputs pre {
+  overflow-x: auto;
 }
 
 .outputs pre {
@@ -1311,6 +1333,20 @@ kbd {
   .lesson-meta,
   .row-action {
     grid-column: 2;
+  }
+
+  .continue .lesson-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .continue .lesson-meta {
+    grid-column: 1;
+  }
+
+  /* Below 40rem a table's columns share the width, so break-word applies inside cells (automatic layout sizes a
+     column to its longest word and a 7-column table overflowed 390 px; FR-UI-10). */
+  [data-markdown] table {
+    table-layout: fixed;
   }
 
   .lesson-controls {

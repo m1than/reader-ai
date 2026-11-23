@@ -82,7 +82,9 @@ export const mountEditor = (host: HTMLElement, { doc, label, onChange, onRun }: 
         python(),
         syntaxHighlighting(highlight),
         theme,
-        EditorView.contentAttributes.of({ 'aria-label': label, 'aria-describedby': hintId, 'aria-multiline': 'true' }),
+        // tabindex 0: the content already is a tab stop (contenteditable); stated so axe sees the scroller's focusable
+        // content (scrollable-region-focusable).
+        EditorView.contentAttributes.of({ 'aria-label': label, 'aria-describedby': hintId, 'aria-multiline': 'true', tabindex: '0' }),
         keymap.of([{ key: 'Shift-Enter', run }, { key: 'Mod-Enter', run }, indentWithTab, ...defaultKeymap, ...historyKeymap]),
         EditorView.updateListener.of((u) => {
           if (u.docChanged) onChange(u.state.doc.toString());

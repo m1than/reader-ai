@@ -94,8 +94,10 @@ requirements:
       empty. When the plan does not fit, the notices and their suggestion buttons come first in the card, as a
       warning callout (`--radius-block`, a 3px `--acme-warning` inline-start bar, the `WarningIcon`), and the figures
       under it are muted. [unit] the `dl` terms and values for a fresh plan, a re-plan, a plan without a first lesson;
-      the notes' order; the status text; in the does-not-fit case the callout precedes the `dl`; [story] the same five
-      states, Light and Dark.
+      the notes' order; the status text; in the does-not-fit case the callout precedes the `dl`; [browser]
+      e2e/web/import/plan/import.spec.ts finds the estimate by its status line and its "Lessons" figure (the header's
+      "Lessons" link and the figure's term share the word, so the disclosure is found as a `summary`); [story] the same
+      five states, Light and Dark.
   - id: FR-IMPORT-6
     text: >-
       **Confirm.** "Create the course" with a checkbox "Start compiling lesson 1 now ($low–$high, stops at $8.00)",
