@@ -128,9 +128,15 @@ def materials() -> tuple[Any, ...]:
 
 
 @asynccontextmanager
-async def plan_env(pg: Pg, tmp: Path) -> AsyncIterator[Env]:
-    async with pipeline_env(pg, tmp) as env:
+async def plan_env(database: Pg, tmp: Path) -> AsyncIterator[Env]:
+    async with pipeline_env(database, tmp) as env:
         await import_plan_material(env.engine, env.users["ivan"])
+        # The pipeline's fake span reader serves spans by page; give it this material's pages so a planned
+        # lesson can start a (fake, free) compile run.
+        source = need("reader.pipeline.source")
+        env.spans.spans = [
+            source.Span(f"{PLAN_SHA}:{p}", p, "text", "x" * n) for p, n in enumerate(PAGE_CHARS, start=1) if n
+        ]
         yield env
 
 
@@ -153,4 +159,10 @@ async def client(env: Env, handle: str | None = "ivan") -> AsyncIterator[Any]:
 
 
 def body(weeks: int = 2, minutes: int = 60, **extra: Any) -> dict[str, Any]:
-    return {"material_id": MATERIAL_ID, "total_weeks": weeks, "minutes_per_day": minutes, "today": today(), **extra}
+    return {
+        "material_id": MATERIAL_ID,
+        "total_weeks": weeks,
+        "minutes_per_day": minutes,
+        "today": today(),
+        **extra,
+    }

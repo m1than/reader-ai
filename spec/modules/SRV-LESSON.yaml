@@ -55,7 +55,7 @@ layer: server
 track: product
 adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
 slice: V.SRV-LESSON-min
-review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22)"
+review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed."
 
 paths:
   - server/src/reader/lessons/**

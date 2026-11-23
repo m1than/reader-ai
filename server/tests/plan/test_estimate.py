@@ -16,11 +16,11 @@ BASIS = load_yaml(FIXTURES / "cost-basis.yaml")
 def test_constants() -> None:
     params = need("reader.plan.params")
     c = BASIS["constants"]
-    assert params.L02_LOW_USD == Decimal(c["L02_LOW_USD"])
-    assert params.L02_HIGH_USD == Decimal(c["L02_HIGH_USD"])
-    assert params.L02_KCHARS == Decimal(c["L02_KCHARS"])
-    assert params.RUN_CAP_USD == Decimal(c["RUN_CAP_USD"])
-    assert params.ESTIMATE_BAND == (Decimal(c["BAND"][0]), Decimal(c["BAND"][1]))
+    assert Decimal(c["L02_LOW_USD"]) == params.L02_LOW_USD
+    assert Decimal(c["L02_HIGH_USD"]) == params.L02_HIGH_USD
+    assert Decimal(c["L02_KCHARS"]) == params.L02_KCHARS
+    assert Decimal(c["RUN_CAP_USD"]) == params.RUN_CAP_USD
+    assert (Decimal(c["BAND"][0]), Decimal(c["BAND"][1])) == params.ESTIMATE_BAND
     pipeline_routes = need("reader.pipeline.routes")
     assert params.RUN_CAP_USD == pipeline_routes.RUN_CAP_USD
 
@@ -35,12 +35,19 @@ def test_cases(case: dict[str, Any]) -> None:
         if key in expect:
             assert out[key] == expect[key], key
     if "first_low_usd" in expect:
-        assert out["first_lesson"] == {"low_usd": expect["first_low_usd"], "high_usd": expect["first_high_usd"]}
-    assert out["basis"] == "L02" and out["basis_kchars"] == "58.938" and out["run_cap_usd"] == "8.00"
+        assert out["first_lesson"] == {
+            "low_usd": expect["first_low_usd"],
+            "high_usd": expect["first_high_usd"],
+        }
+    assert out["basis"] == "L02"
+    assert out["basis_kchars"] == "58.938"
+    assert out["run_cap_usd"] == "8.00"
 
 
 def test_no_float_and_no_first_lesson() -> None:
     estimate = need("reader.plan.estimate")
     out = estimate.estimate([], None)
-    assert out["first_lesson"] is None and out["mean_lesson_kchars"] is None and out["extrapolated"] is False
+    assert out["first_lesson"] is None
+    assert out["mean_lesson_kchars"] is None
+    assert out["extrapolated"] is False
     assert all(not isinstance(v, float) for v in out.values())

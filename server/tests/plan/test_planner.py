@@ -76,8 +76,11 @@ def test_bounds_and_input_errors() -> None:
     p = need("reader.plan.planner")
     b = spec_bounds()
     assert (p.MINUTES_MIN, p.MINUTES_MAX, p.MINUTES_STEP) == (10, 240, 5)
-    assert (p.WEEKS_MIN, p.WEEKS_MAX, p.WEEK_DAYS) == (1, 104, b["week_days"])
-    assert (p.SPAN_HEADER_CHARS, p.LESSON_SOURCE_CHARS_MAX) == (b["span_header_chars"], b["lesson_source_chars_max"])
+    assert (1, 104, b["week_days"]) == (p.WEEKS_MIN, p.WEEKS_MAX, p.WEEK_DAYS)
+    assert (
+        b["span_header_chars"],
+        b["lesson_source_chars_max"],
+    ) == (p.SPAN_HEADER_CHARS, p.LESSON_SOURCE_CHARS_MAX)
     base = _input({"page_chars": [1000, 1000, 1000]})
     for field, value, code in (
         ("minutes_per_day", 5, "minutes_per_day"),
@@ -152,7 +155,11 @@ def test_plan_hash_is_canonical_and_titles_free() -> None:
         "start_date": "2026-01-01",
         "today": "2026-01-01",
     }
-    assert pre["lessons"][0] == {"id": "p1-1", "pages": [1, 1], "minutes": 1}
+    # K 3, C 6000: t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end → dropped
+    assert pre["lessons"] == [
+        {"id": "p1-2", "pages": [1, 2], "minutes": 3},
+        {"id": "p3-3", "pages": [3, 3], "minutes": 3},
+    ]
     raw = json.dumps(pre, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     assert p.plan_sha256("ab" * 32, "ing", result) == hashlib.sha256(raw).hexdigest()
 

@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import itertools
 import json
 from typing import Any
 
@@ -74,7 +75,8 @@ def test_determinism(inp: Any) -> None:
     assert a == b
     one = json.dumps(p.preimage("ab" * 32, "i", a), sort_keys=True, separators=(",", ":"))
     two = json.dumps(p.preimage("ab" * 32, "i", b), sort_keys=True, separators=(",", ":"))
-    assert one == two and a.summary_json() == b.summary_json()
+    assert one == two
+    assert a.summary_json() == b.summary_json()
 
 
 def _free_intervals(inp: Any) -> list[tuple[int, int]]:
@@ -103,7 +105,7 @@ def test_coverage_and_no_empty_free_lesson(inp: Any) -> None:
     if result is None:
         return
     lessons = result.lessons
-    assert all(a.last < b.first for a, b in zip(lessons, lessons[1:], strict=False))
+    assert all(a.last < b.first for a, b in itertools.pairwise(lessons))
     planned = {page for x in lessons for page in range(x.first, x.last + 1)}
     skipped = set(range(1, len(inp.page_chars) + 1)) - planned
     covered = {page for f in inp.fixed for page in range(f.first, f.last + 1)}
@@ -162,6 +164,12 @@ def test_suggestions_fit(inp: Any) -> None:
         return
     m, w = s["suggest"]["minutes_per_day"], s["suggest"]["total_weeks"]
     if m is not None:
-        assert m > inp.minutes_per_day and p.plan(dataclasses.replace(inp, minutes_per_day=m)).summary_json()["fits"]
+        assert (
+            m > inp.minutes_per_day
+        )
+        assert (
+            p.plan(dataclasses.replace(inp, minutes_per_day=m)).summary_json()["fits"]
+        )
     if w is not None:
-        assert w > inp.total_weeks and p.plan(dataclasses.replace(inp, total_weeks=w)).summary_json()["fits"]
+        assert w > inp.total_weeks
+        assert p.plan(dataclasses.replace(inp, total_weeks=w)).summary_json()["fits"]

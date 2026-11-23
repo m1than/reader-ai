@@ -24,7 +24,10 @@ CAP = Decimal("8.00")
 def _plan(ranges: list[tuple[int, int]]) -> Any:
     courses = need("reader.pipeline.courses")
     return courses.Plan(
-        COURSE, MATERIAL_ID, PLAN_SHA, [courses.PlanLesson(f"p{a}-{b}", f"Lesson {a}", a, b) for a, b in ranges]
+        COURSE,
+        MATERIAL_ID,
+        PLAN_SHA,
+        [courses.PlanLesson(f"p{a}-{b}", f"Lesson {a}", a, b) for a, b in ranges],
     )
 
 
@@ -44,7 +47,8 @@ async def test_study_plan_import_removes_unstarted_and_renumbers(pg: Pg, tmp_pat
         ids = {p: lid for p, lid, _ in first.lessons}
         assert [o for _, _, o in first.lessons] == [1, 2, 3]
         again = await _import(env, [(1, 10), (11, 20), (21, 30)])
-        assert again.lessons == first.lessons and (again.created, again.removed) == (0, 0)
+        assert again.lessons == first.lessons
+        assert (again.created, again.removed) == (0, 0)
         # lesson 2 starts; a re-plan that keeps it re-packs the rest and renumbers in plan order
         await runs.create_run(env.engine, env.jobs, env.users["ivan"], ids["p11-20"], CAP)
         second = await _import(env, [(1, 5), (6, 10), (11, 20), (21, 25), (26, 30)])
@@ -69,11 +73,14 @@ async def test_manifest_route_unchanged_and_origins_do_not_mix(pg: Pg, tmp_path:
     async with plan_env(pg, tmp_path) as env:
         async with client(env) as c:
             r = await c.post("/api/pipeline/courses", json=manifest_plan())
-            assert r.status_code == 200 and set(r.json()) == {"course_id", "lessons"}
+            assert r.status_code == 200
+            assert set(r.json()) == {"course_id", "lessons"}
             assert [set(x) for x in r.json()["lessons"]] == [{"plan_lesson_id", "lesson_id"}] * 2
             again = await c.post("/api/pipeline/courses", json=manifest_plan())
             assert again.json() == r.json()
-        origins = await env.rows("SELECT DISTINCT origin FROM course_plans WHERE plan_course_id = 'synthetic'")
+        origins = await env.rows(
+            "SELECT DISTINCT origin FROM course_plans WHERE plan_course_id = 'synthetic'"
+        )
         assert origins == [("manifest",)]
         mixed = courses.Plan("synthetic", "x", "ab" * 32, [courses.PlanLesson("L09", "t", 61, 62)])
         async with env.engine.begin() as conn:
@@ -84,7 +91,9 @@ async def test_manifest_route_unchanged_and_origins_do_not_mix(pg: Pg, tmp_path:
         assert courses.COURSE_LOCK_NAMESPACE != need("reader.pipeline.runs").LOCK_NAMESPACE
 
 
-async def test_create_run_takes_the_course_lock_and_can_require_an_unstarted_course(pg: Pg, tmp_path: Path) -> None:
+async def test_create_run_takes_the_course_lock_and_can_require_an_unstarted_course(
+    pg: Pg, tmp_path: Path
+) -> None:
     courses = need("reader.pipeline.courses")
     runs = need("reader.pipeline.runs")
     errors = need("reader.pipeline.errors")
@@ -132,7 +141,9 @@ async def test_lesson_store_started_delete_and_reorder(pg: Pg, tmp_path: Path) -
                 await store.reorder_lessons(conn, owner, course, lessons[:2])
             assert raised.value.code == "lessons_mismatch"
             await store.reorder_lessons(conn, owner, course, list(reversed(lessons)))
-        ordinals = await env.rows("SELECT id, ordinal FROM lessons WHERE course_id = :c ORDER BY ordinal", c=course)
+        ordinals = await env.rows(
+            "SELECT id, ordinal FROM lessons WHERE course_id = :c ORDER BY ordinal", c=course
+        )
         assert [r[0] for r in ordinals] == list(reversed(lessons))
         # a course_plans row still present refers to the lesson: it counts as a reference only through the FK
         async with env.engine.begin() as conn:
@@ -141,7 +152,7 @@ async def test_lesson_store_started_delete_and_reorder(pg: Pg, tmp_path: Path) -
             assert raised.value.code == "lesson_started"
         # every foreign key to lessons blocks the delete and is not deferrable
         rows = await env.rows(
-            "SELECT conrelid::regclass::text, confdeltype, condeferrable FROM pg_constraint"
+            "SELECT conrelid::regclass::text, confdeltype::text, condeferrable FROM pg_constraint"
             " WHERE contype = 'f' AND confrelid = 'lessons'::regclass"
         )
         assert rows and all(t in ("r", "a") and not d for _, t, d in rows), rows
