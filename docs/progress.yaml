@@ -408,13 +408,35 @@ tasks:
         dry-run only (no stack)." }
 
   # Vertical slice (owner, 2026-11-20): one thin end-to-end path before widening stages 2–6
-  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: in_progress, needs: [S1.live],
+  - { id: V.SRV-JOBS-min, stage: V, kind: module, track: engineering, status: done, needs: [S1.live],
+      verdict: "Final code review (deep-reviewer, 2026-11-23): round 1 on 2924dcf changes, round 2 on 40900db changes
+        (one test short), round 3 on 6eeb576 VERDICT approve. Done: the earlier code review rounds 1–2 (4719a0e,
+        3650190) are superseded by this approve.",
       final: "2026-11-23 (final slice PR): merged into V/slice-integration (2a138f6) and exercised by the live slice
         (ingest.import, search.embed, pipeline steps and tutor.answer all ran as SRV-EVENTS jobs). Tests:
         server/tests/jobs (41 at Green, plus the code-review tests). Reviews: spec deep-reviewer rounds 1–3 changes,
         round 4 approve; code review round 1 changes (4719a0e), round 2 changes (3650190), both applied. No approve
         verdict for the code is on record, and jobs and idempotency is a complex area (AGENTS.md), so the task stays
         in_progress until a final deep-reviewer round returns approve (listed for the owner's review-after).",
+      final_review: "Final code review on 2924dcf (deep-reviewer, 2026-11-23): changes — no live correctness bug; 3
+        blocking (start hooks untested and tied to `catalog is None`; the reconcile wrote dead/unknown_kind outside
+        FR-EVENTS-15, overriding 'cancelled: no action'; FR-EVENTS-7's unknown-kind dead untested with the lock free)
+        plus non-blocking. Applied on branch V/SRV-EVENTS-final, spec then Red (a8169f2, 9 failing) then Green:
+        worker.run(hooks=) with HOOK_TIMEOUT_S 30 s (chosen bound), each hook once after the start sweep with
+        running() set, failure isolated, stop observed during the start sweep and hooks, a failing start sweep returns
+        1, running() cleared in the finally; reconcile skips unknown-kind keys; sweep enqueues guarded; the key computed
+        inside the wrapper's try; the lost-run log names count or re-enqueue. Tests: server/tests/jobs 68 passed (41
+        db + 27 unit), new: hooks (a)-(c), hook timeout and stop, failing start sweep, unknown-kind reconcile skip,
+        failing sweep enqueue, FR-EVENTS-7 unknown kind with the lock free, wrapper_error, the worker's own re-enqueue
+        after a lost run, requeue_dead without outcome or job, stored sweep priority. Round 2 (40900db): one test
+        short of approve, every round-1 item fixed and killed by mutants; the production default hooks=None was
+        untested (mutant `[] if hooks is None` survived). Added [unit] start_hooks() = search's and pipeline's
+        on_worker_start in KIND_MODULES order, empty for no modules, and [db] run without hooks awaits the declared
+        hooks once (kills that mutant, checked); HOOK_TIMEOUT_S 30 s in SRV-EVENTS bounds with its limit;
+        _unless_stopped cancels its task in the finally; a start sweep failing while stop is set returns 0. Round 3
+        (6eeb576): VERDICT approve; its items applied: a test where the start sweep sets stop then raises (run
+        returns 0, kills M36), and a self-cancelled hook is a stop only when stop is set, so the next hook and the
+        worker still run (_unless_stopped returns stop.is_set()), with a test. server/tests/jobs 71 passed.",
       note: "green locally; code review next (complex area: full review). Spec SRV-EVENTS approved with Red (deep-reviewer
         rounds 1–3 changes, round 4 approve). 41 tests (21 unit incl. a Hypothesis state machine, 20 db on testcontainers
         Postgres with the OPS-DEPLOY digest); all 41 failed on their own assertion at Red; two mutations (exhaustion
@@ -988,10 +1010,39 @@ tasks:
         contradicting SRV-AGENT FR-AGENT-13 (thinking off). Investigate with the investigator (SDK/CLI version, the
         option's path to the request), then fix spec-first; the settle rows' `thinking` column (agent_0002) is the
         evidence." }
-  - { id: V.auth-page-style, stage: V, kind: module, track: product, status: todo, needs: [V.WEB-polish],
+  - { id: V.auth-page-style, stage: V, kind: module, track: product, status: in_progress, needs: [V.WEB-polish],
+      branch: V/auth-page-style,
       what: "SRV-AUTH amendment (complex area, full review): style the sign-in and bootstrap pages (browser-default HTML
         today) with a same-origin stylesheet under the existing CSP, or move the ceremony into the SPA (WEB-UI stage-4b
-        defer). Add axe runs on both pages, which also closes auth.bootstrap and auth.signin × a11y in the DoD index." }
+        defer). Owner 2026-11-23: 'a fully pretty log in page for this instrument'.",
+      review: "deep-reviewer (Fable), auth is a complex area. Spec round 1 on 418312a: changes (6 blocking: expired only
+        on bootstrap options with a retryable not_registered on verify; the unreachable `known` state removed; a real
+        request oracle; `done` asserted before navigation; route registries; both live files named), all fixed in
+        faf5b2e with the non-blocking items. Spec round 2 on faf5b2e: VERDICT approve; spec approved by agent
+        2026-11-23. Round-2 non-blocking items folded into Green: named colour keywords in the colour scan, the full
+        /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done.",
+      exit: "Green's exit condition: OPS-DOD's operations index gains `GET /api/auth/static/auth.css` in the routes of
+        auth.bootstrap and auth.signin in the same commit as the `Route(...)` (T10 refuses a route the registry lacks).
+        The two auth a11y cells stay missing: OPS-DOD takes only live `pages` evidence (axe.json, no producer yet), not
+        the [browser] axe runs; that stays with V.DOD-gaps.",
+      green: "83d4ef6: pages, auth.css (tokens copied, drift test), passkey.js states, the auth.css route with
+        no-cache, OPS-DOD routes, the test-server map, the live `auth` step. Checks: 48 server tests, 69 [browser]
+        cases, verify-all --slice auth PASS (owner bootstrap, pages at 3 widths with 0 serious/critical axe and 0
+        overflow, real sign-out and sign-in), full verify-all 53/53 PASS (learner bootstrap and sign-in through the
+        pages), LOCAL CI PASS.",
+      code_review: "Round 1 on 83d4ef6: changes — ceremony verified unchanged in the code, no server text reaches the
+        DOM; 6 surviving mutants closed with browser cases: Retry-After 60 and 0 (1 minute), 1.5 and an HTTP-date
+        (later), a 500 on options (unreachable), a 429 with another code and a 400 signin_failed on options (failed).
+        Non-blocking applied: Retry-After bounded to ^\\d{1,6}$ with a seven-digit case; auth-dark and auth-light
+        Playwright projects (every state axe-checked in both schemes); the bootstrap copy without 'owner' (the link
+        also serves learners); static markup data-state=loading with the button hidden until the script runs, and a
+        blocked-script case; the full request list of every path asserted (a beacon fails). Round 2 on 48ce312: VERDICT
+        approve; its notes folded in (a static status sentence for a script that fails to load, asserted; the spec's
+        project names auth-dark and auth-light). Merged into V/slice-integration afterwards (coordinator).",
+      process_note: "For the PR description: in 83d4ef6 the deferred OPS-DOD routes edit was re-applied with `git apply`
+        of the agent's own earlier diff (written with the Edit tool, reverted while T10 could not yet pass). That is a
+        shell write, which AGENTS.md asks to avoid; the content is the two-line routes change, checked by T10 and the
+        P8 ratchet." }
   - { id: V.DOD-gaps, stage: V, kind: module, track: engineering, status: todo, needs: [V.DOD-index],
       what: "Close the Definition-of-Done gaps in docs/dod/INDEX.md: the 49 declared `missing` cells (latency budgets,
         log lines and tests asserting them, privacy canaries for lesson, material and course text, the backup-restore

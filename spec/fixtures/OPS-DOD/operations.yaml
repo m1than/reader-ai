@@ -46,7 +46,8 @@ operations:
     title: Register the first passkey from a one-time bootstrap link
     surface: [cli, web]
     specs: [SRV-AUTH, OPS-CLI]
-    routes: ["GET /api/auth/bootstrap", "POST /api/auth/bootstrap/options", "POST /api/auth/bootstrap/verify"]
+    routes: ["GET /api/auth/bootstrap", "GET /api/auth/static/auth.css", "POST /api/auth/bootstrap/options",
+             "POST /api/auth/bootstrap/verify"]
     commands: ["reader bootstrap"]
     gate: tracked
     criteria:
@@ -71,7 +72,8 @@ operations:
     title: Sign in with a passkey
     surface: [web]
     specs: [SRV-AUTH, WEB-UI]
-    routes: ["GET /api/auth/signin", "POST /api/auth/signin/options", "POST /api/auth/signin/verify", "GET /api/me"]
+    routes: ["GET /api/auth/signin", "GET /api/auth/static/auth.css", "POST /api/auth/signin/options",
+             "POST /api/auth/signin/verify", "GET /api/me"]
     gate: tracked
     criteria:
       functional:

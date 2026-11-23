@@ -22,7 +22,7 @@ async def main() -> None:
     target = DbTarget(spec["host"], spec["port"], spec["user"], spec["database"], Secret(spec["password"]))
     engine = make_engine(target)
     print("started", flush=True)
-    await run(engine, target, asyncio.Event(), Catalog([effect_kind(timeout_s=600.0)]))
+    await run(engine, target, asyncio.Event(), Catalog([effect_kind(timeout_s=600.0)]), hooks=())
 
 
 if __name__ == "__main__":

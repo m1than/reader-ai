@@ -47,8 +47,8 @@ id: SRV-AUTH
 title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skeleton (db, api, reader-server)
 status: approved
 approved_by: agent
-approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate. Paired change from SRV-INGEST (2026-11-22, coordinator-scheduled, reviewed in SRV-INGEST's code review): `reader/ingest/migrations` joins VERSION_LOCATIONS (after jobs, before procrastinate) and `reader.ingest.routes` joins ROUTERS (owner-only rule checked inside its handlers); no behaviour of this module changed. Integration with SRV-AGENT and SRV-PIPELINE (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline; the two SRV-AUTH tests take these unions, plus one comment shortened for line length. Paired change from SRV-SEARCH (2026-11-22, coordinator-scheduled, reviewed in SRV-SEARCH's code review): `reader/search/migrations` joins VERSION_LOCATIONS before procrastinate's directory, `reader.search.routes` joins ROUTERS, the engine sets `hide_parameters=True` (FR-AUTH-1, FR-AUTH-10 notes); the auth tests' database image is the pgvector-enabled pin. Green: the hide_parameters test reads `engine.sync_engine.hide_parameters` (an AsyncEngine proxies it there), and `test_database_failure_while_api_runs`, which migrates as a non-superuser role, creates the `vector` extension as the superuser first, because CREATE EXTENSION vector needs a superuser (the SRV-SEARCH FR-SEARCH-4 note for a dedicated role); the test's oracle is unchanged. Integration with SRV-SEARCH (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, search, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline, search. Paired change from SRV-TUTOR (2026-11-23, reviewed in SRV-TUTOR's code review): ROUTERS appends `reader.tutor.routes`, VERSION_LOCATIONS adds `reader/tutor/migrations` after agent, and the FR-AUTH-10 `jobs` seam (planned with SRV-PIPELINE) is implemented: `create_app(..., jobs=None)` puts it on `app.state.jobs`; the api role builds one SRV-EVENTS `Jobs` (declared catalog, own procrastinate app opened in the serve coroutine, the database password as its secret value); tests updated for both lists. Integration with SRV-TUTOR (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, search, agent, pipeline, tutor, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, search, pipeline, tutor (SRV-TUTOR's order)"
+approved_at: 2026-11-23
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate. Paired change from SRV-INGEST (2026-11-22, coordinator-scheduled, reviewed in SRV-INGEST's code review): `reader/ingest/migrations` joins VERSION_LOCATIONS (after jobs, before procrastinate) and `reader.ingest.routes` joins ROUTERS (owner-only rule checked inside its handlers); no behaviour of this module changed. Integration with SRV-AGENT and SRV-PIPELINE (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline; the two SRV-AUTH tests take these unions, plus one comment shortened for line length. Paired change from SRV-SEARCH (2026-11-22, coordinator-scheduled, reviewed in SRV-SEARCH's code review): `reader/search/migrations` joins VERSION_LOCATIONS before procrastinate's directory, `reader.search.routes` joins ROUTERS, the engine sets `hide_parameters=True` (FR-AUTH-1, FR-AUTH-10 notes); the auth tests' database image is the pgvector-enabled pin. Green: the hide_parameters test reads `engine.sync_engine.hide_parameters` (an AsyncEngine proxies it there), and `test_database_failure_while_api_runs`, which migrates as a non-superuser role, creates the `vector` extension as the superuser first, because CREATE EXTENSION vector needs a superuser (the SRV-SEARCH FR-SEARCH-4 note for a dedicated role); the test's oracle is unchanged. Integration with SRV-SEARCH (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, search, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline, search. Paired change from SRV-TUTOR (2026-11-23, reviewed in SRV-TUTOR's code review): ROUTERS appends `reader.tutor.routes`, VERSION_LOCATIONS adds `reader/tutor/migrations` after agent, and the FR-AUTH-10 `jobs` seam (planned with SRV-PIPELINE) is implemented: `create_app(..., jobs=None)` puts it on `app.state.jobs`; the api role builds one SRV-EVENTS `Jobs` (declared catalog, own procrastinate app opened in the serve coroutine, the database password as its secret value); tests updated for both lists. Integration with SRV-TUTOR (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, search, agent, pipeline, tutor, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, search, pipeline, tutor (SRV-TUTOR's order). Amendment 2026-11-23 (V.auth-page-style, owner request): FR-AUTH-14 states that the ceremony is unchanged; new FR-AUTH-19 (page look, tokens copied from WEB-UI's calm.css and the vendored library with a drift test), FR-AUTH-20 (states and messages from existing signals), FR-AUTH-21 (auth.css route, no-cache, CSP unchanged, unit/browser/live checks); paths add e2e/web/auth/**. Complex area (auth): deep-reviewer rounds until approve, run by the coordinator. Round 1 on 418312a: changes — leak review, fragment handling and asset route clean; blocking fixed: (1) `expired` only for a 400 on bootstrap options, a 400 on bootstrap verify is the retryable `not_registered` (the token stays usable, FR-AUTH-5, INV-AUTH-7), with its browser case; (2) the unreachable `known` state removed, InvalidStateError falls to `failed`; (3) the request oracle: every non-GET request recorded with page.on('request') against each case's exact list with content-type, no other /api request, the WebAuthn stub's publicKey compared with the server options; (4) `done` asserted while the navigation to / is held; (5) route registries: test_route_table_is_declared_as_data updated with the spec, the OPS-DOD operations index gains auth.css for both operations in the Green commit, the a11y cells stay missing (not pages evidence); (6) both live files named with their lines. Non-blocking applied: fragment check after every state, the no-cache wording, an unsupported case without the parse function and toJSON implied, focus after a ceremony, the token test's layer match, var fallbacks and colour-literal scan, a distinctive server body and exception text absent from #status, the font regex, asserted versus design numbers, `auth` in slice.sh's default steps, the test server's fixed map. Round 2 on faf5b2e: VERDICT approve; its non-blocking items folded in with Green (named colour keywords in the scan, the full /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done, the OPS-DOD route addition in the same commit as the Route). Approved by agent 2026-11-23. Code review round 1 on 83d4ef6: changes (ceremony verified unchanged, no server text reaches the DOM; 6 surviving mutants): browser cases for Retry-After 60, 0, 1.5, an HTTP-date and seven digits, a 500 on options, a 429 with another code and a 400 signin_failed on options; non-blocking applied: Retry-After bounded to ^\\d{1,6}$, dark and light Playwright projects, the bootstrap copy without 'owner', static data-state=loading with the button hidden in the markup and a blocked-script case, the full request list (any path) asserted. Code review round 2 on 48ce312: VERDICT approve; its notes folded in: a static status sentence on both pages for a script that fails to load (asserted in the blocked-script case), the project names auth-dark and auth-light in this text"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
@@ -60,6 +60,7 @@ paths:
   - server/src/reader/serve/**
   - server/tests/auth/**
   - spec/fixtures/SRV-AUTH/**
+  - e2e/web/auth/**
 
 normative:
   - id: REF-AUTH-1
@@ -308,7 +309,138 @@ requirements:
       (`/api/auth/static/passkey.js`, no inline script, so a `script-src 'self'` CSP holds). The bootstrap page reads
       the token from the URL fragment and clears it at once with `history.replaceState`; both pages run the ceremonies
       with `PublicKeyCredential.parse*OptionsFromJSON` and `toJSON()` and on success navigate to `/`. WEB-UI replaces
-      them in stage 4.
+      them in stage 4. Amendment 2026-11-23 (V.auth-page-style, owner: "a fully pretty log in page"): FR-AUTH-19..21
+      change only the pages' look, their copy and how the script reports a failure; the ceremony is unchanged — the
+      same routes in the same order (bootstrap: `POST /api/auth/bootstrap/options` with `{token}`, then
+      `navigator.credentials.create`, then `POST /api/auth/bootstrap/verify` with `credential.toJSON()`; sign-in: `POST
+      /api/auth/signin/options` with `{}`, then `navigator.credentials.get`, then `POST /api/auth/signin/verify` with
+      `credential.toJSON()`), the same request headers and `credentials: "same-origin"`, the same fragment handling, the
+      same cookies set by the server, and `location.assign("/")` on success. [unit] the existing page test; [browser]
+      FR-AUTH-21's recorded request sequence; [live] the real passkey flow (FR-AUTH-21).
+  - id: FR-AUTH-19
+    text: >-
+      Page look (both pages; they match the web app, WEB-UI FR-UI-10). Each page links exactly one stylesheet,
+      `<link rel="stylesheet" href="/api/auth/static/auth.css">`, before the script. Markup: `main.auth` centres one
+      card (`section.auth-card`, at most 26rem wide, the Calm surface-raised colour, 1px border, radius
+      `--acme-radius-lg`, padding `--acme-space-6`, `--acme-space-5` below 30rem) horizontally and vertically in the
+      viewport (`min-height: 100vh` grid). The card holds, in order: a mark (an inline `<svg>` of 32px with
+      `aria-hidden="true"` and `focusable="false"`, drawn only with presentation attributes and `currentColor`, no
+      `style` attribute, in the accent colour), the product name "reader-ai" (a `p.auth-brand`, not a heading), the
+      tagline "Study material, turned into verified courses.", the `h1` ("Sign in"; on bootstrap "Register your
+      passkey"), one lead sentence (sign-in: "Use the passkey saved on this device or on your phone."; bootstrap:
+      "Create your passkey for this reader-ai. You do this once." — the bootstrap link also serves configured learners,
+      so the copy does not say "owner"), the status line (FR-AUTH-20) and one
+      full-width primary button (sign-in: "Sign in with a passkey"; bootstrap: "Create your passkey"), with the
+      library's solid button metrics: height `--acme-control-lg`, radius `--acme-radius`, weight 600, accent fill,
+      on-tone text, opacity 0.45 and `cursor: not-allowed` while disabled. Type: the library sans `--acme-font` for
+      everything (h1 1.5rem, body 0.9375rem, line height 1.5); no web font is fetched. Colours: the Calm tokens, dark
+      by default and light under `prefers-color-scheme: light`, exactly as WEB-UI's calm.css (the auth pages have no
+      theme switch). Focus: a 2px `--acme-focus` outline, offset 2px, on `:focus-visible` of every interactive
+      element. Motion: transitions only on the button's colours, none under `prefers-reduced-motion: reduce`.
+      Tokens are copied, not fetched: auth.css declares every `--acme-*` property it uses, with values equal to WEB-UI's
+      committed `web/src/ui/tokens/calm.css` (colours, both schemes) and to the vendored library's
+      `package/dist/styles.css` inside `web/vendor/acme-ui-v0.1.0.tgz` (font, space, radius, control and text sizes,
+      duration, ease), so the auth pages never load the SPA bundle and cannot drift silently; outside its token blocks
+      auth.css holds no colour literal (no hex value and no colour function), only `var(--acme-…)` references. Asserted
+      numbers: card width ≤ 26rem and centred, button height 48px (`--acme-control-lg`) and radius 12px
+      (`--acme-radius`), h1 1.5rem, the font family starting with Manrope, the 2px solid focus outline; the remaining
+      sizes (paddings, the 32px mark, body size and line height, the 30rem breakpoint) are design values, not asserted.
+      [unit] a test parses auth.css and both sources (the `@layer acme.tokens` block found by pattern, whatever its
+      whitespace; `var(--x, fallback)` counted as a use of `--x`) and compares every declared value, and scans auth.css
+      outside the token blocks for colour literals (hex values, colour functions and named colour keywords such as
+      `white` or `black`); [browser] FR-AUTH-21.
+  - id: FR-AUTH-20
+    text: >-
+      States and messages (copy only; driven by the signals the script already receives). The status line is
+      `<p id="status" role="status" aria-live="polite">`. The static markup carries `data-state="loading"` (no state of
+      the table, so a page whose script did not run shows the card with no button: the button is hidden in the markup
+      of both pages and only the script shows it), and the status line of both pages holds the static text
+      "Preparing… If nothing happens, reload the page.", which the script replaces with its first state's message, so
+      a page whose script failed to load is never blank; the script sets `data-state` on `main.auth` to one of the
+      states below (auth.css styles each; an error state shows the message in the danger colour with a 3px danger
+      border on its start side). Messages are plain text from one fixed table in passkey.js; no server or exception text
+      is ever shown. A state is retryable when its button is enabled. Focus: after a ceremony ends in a retryable
+      state, focus returns to the button; after it ends in a state that hides the button, focus moves to the status
+      line (`tabindex="-1"`); states set at page load move no focus, and `waiting` and `done` move no focus (the
+      script calls no `focus()`; the status line is not focused). The bootstrap token never returns to the URL: the
+      fragment stays cleared in every state.
+      | state | when | message | button |
+      | `ready` | the page loaded (bootstrap: with a token) and the browser supports passkeys | "" | shown, enabled |
+      | `unsupported` | `window.PublicKeyCredential` is missing, or the page's `parseCreationOptionsFromJSON` (bootstrap)
+      or `parseRequestOptionsFromJSON` (sign-in) is not a function; `credential.toJSON()` is implied by them (WebAuthn
+      Level 3 ships the three together) and not probed | "This browser cannot use passkeys here. Use a current Safari,
+      Chrome, Edge or Firefox." | hidden |
+      | `no_token` | bootstrap without a fragment token | "This setup link is incomplete. Run `reader bootstrap` again
+      for a new link." | hidden |
+      | `waiting` | after a click, until the ceremony ends | "Waiting for your passkey…" | shown, disabled |
+      | `cancelled` | the WebAuthn call rejects with `NotAllowedError` or `AbortError` | "The passkey request was
+      cancelled or timed out. Try again when you are ready." | enabled |
+      | `rejected` | sign-in verify (not options) answers 400 `signin_failed` | "That passkey was not accepted here. Try again, or use
+      another passkey saved for this site." | enabled |
+      | `expired` | bootstrap options answers 400 `bootstrap_failed` (the token is unknown, expired or used) | "This
+      setup link has expired or was already used. Run `reader bootstrap` again for a new link." | hidden |
+      | `not_registered` | bootstrap verify answers 400 `bootstrap_failed` (the token stays usable after a failed
+      verify, FR-AUTH-5, INV-AUTH-7) | "That passkey could not be registered. Try again; if it keeps failing, run
+      `reader bootstrap` again." | enabled |
+      | `rate_limited` | any ceremony POST answers 429 `rate_limited` | "Too many attempts. Try again in <n> minutes."
+      with n = ceil(Retry-After / 60), at least 1 ("1 minute" when n is 1, so `0` and `60` both read "1 minute"),
+      where Retry-After must match `^\d{1,6}$` (whole seconds, at most six digits; FR-AUTH-11's limit is at most an
+      hour); any other value (absent, a fraction, an HTTP-date, more digits) gives "Too many attempts. Try again
+      later." A 429 with any other code is `failed`. | enabled |
+      | `unreachable` | a POST fails without a response (network) or answers 5xx | "reader-ai could not be reached.
+      Check that it is running, then try again." | enabled |
+      | `failed` | anything else (another status or code, another exception, `InvalidStateError` included: bootstrap
+      refuses once the owner has a credential, so `excludeCredentials` is always empty and that error is not
+      expected) | "Something went wrong. Try again." | enabled |
+      | `done` | verify succeeded | "Signed in. Opening reader-ai…" (bootstrap: "Passkey created. Opening reader-ai…"),
+      then `location.assign("/")` | disabled |
+      [browser] each state at 1280, 1024 and 390 px (FR-AUTH-21), with the request routes stubbed and the WebAuthn
+      calls replaced in the page.
+  - id: FR-AUTH-21
+    text: >-
+      Assets, CSP and checks. `GET /api/auth/static/auth.css` is a fourth public static route (FR-AUTH-14's list),
+      `text/css; charset=utf-8`; the four static GET routes (two pages, passkey.js, auth.css) answer with
+      `Cache-Control: no-cache`: a cache must revalidate before each reuse, and since the routes send no validator
+      (no ETag or Last-Modified) that means the browser fetches the file again on every load — a few kilobytes, never
+      stale after an upgrade. The edge CSP in deploy/Caddyfile does not change (it is OPS-DEPLOY's and already allows
+      same-origin styles and scripts through `default-src 'self'`); the pages use no `<style>` element, no `style`
+      attribute, no inline script or event handler attribute, no `@import`, no `url(` in auth.css, and no external
+      origin. Route registries (paired changes): `test_route_table_is_declared_as_data` lists the new public route, and
+      OPS-DOD's spec/fixtures/OPS-DOD/operations.yaml adds `GET /api/auth/static/auth.css` to the `routes` of both
+      `auth.bootstrap` and `auth.signin` (no `not_user_facing` entry). The two auth `a11y` cells there stay `missing`:
+      OPS-DOD accepts only `pages` evidence from the live run's `axe.json` for a web operation's a11y, the [browser]
+      axe runs below are not that evidence, and `axe.json` has no producer yet (OPS-DOD's follow-up).
+      [unit] pytest in server/tests/auth: content types and `Cache-Control` of the four routes; the pages' single
+      stylesheet and single script, no inline style, script or handler, the svg without `style`; auth.css without
+      `@import` or `url(`; the Caddyfile CSP string equals the one pinned in the test; the token test of FR-AUTH-19;
+      the route table.
+      [browser] e2e/web/auth/pages.spec.ts against WEB-UI's test server, which serves the four files under the
+      Caddyfile CSP, in two Playwright projects, `auth-dark` (the pages' default scheme) and `auth-light`
+      (`colorScheme`). For
+      every FR-AUTH-20 state at 1280, 1024 and 390 px in each scheme: its message, button state, `data-state` and
+      focus target; axe with no serious or critical issue; `scrollWidth ≤ clientWidth`; no `securitypolicyviolation`
+      event; the URL without a fragment. The request oracle: every non-GET request is recorded with
+      `page.on('request')` and equals the case's exact expected list (method, path, `content-type: application/json`,
+      body; FR-AUTH-14's sequence cut where the case stops), and the full list of every request the page makes (any
+      path, so a same-origin beacon fails) equals the page's static GETs (the page, auth.css, passkey.js) followed by
+      those POSTs (and, for `done`, the navigation to `/`). The rate-limit and failure mapping has a case for each
+      edge: Retry-After `60`, `0`, `1.5`, an HTTP-date and seven digits; a 500 on options; a 429 with another code; a
+      400 `signin_failed` on sign-in options. A case blocks passkey.js and asserts `data-state="loading"` with the
+      button hidden and the static status text shown; an `unsupported` case without the parse
+      function exists for both pages; the WebAuthn stub records the `publicKey` argument it receives and it equals the options
+      the stubbed server returned. `done` is asserted (state, message, disabled button, focus, no fragment) from a
+      snapshot the page reports through an exposed function the moment `data-state` becomes `done` (Playwright's
+      locators wait for a pending navigation), while the response to the navigation to `/` is held, then released. A case with a distinctive server error body and a distinctive
+      exception message asserts that neither appears in `#status`. Look: card ≤ 26rem and centred, button 48px high
+      with radius 12px, h1 1.5rem, the font family matching `/^["']?Manrope/`, a 2px solid outline after a keyboard Tab.
+      [live] (a) e2e/web/live/slice.live.ts, the learner suite of `verify-all.sh`: line 103 clicks the bootstrap button
+      by its old name "Register passkey" and changes to "Create your passkey"; its existing test "sign out, then sign
+      in through the real page with the same passkey" is the real sign-in proof and is unchanged. (b)
+      e2e/web/live/owner.slice.ts, the owner suite of `verify-all.sh --slice`: line 113 makes the same button-name
+      change; a new spend-free `auth` step (added to slice.sh's default steps) screenshots both pages at three widths
+      outside the repository with axe, overflow and focus checks, then repeats slice.live.ts's sign-out and sign-in
+      sequence for the owner (the same calls: Sign out in the app, wait for `/api/auth/signin`, `/api/me` 401, click
+      "Sign in with a passkey" with the CDP virtual passkey, `/api/me` 200) — the passkey flow proven unchanged.
   - id: FR-AUTH-15
     text: >-
       Verify seam. `reader.auth.webauthn.verify_registration(rp_id, origin, challenge, response)` and

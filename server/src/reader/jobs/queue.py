@@ -247,8 +247,9 @@ class Jobs:
     async def _run(self, kind: JobKind, context: procrastinate.JobContext, payload: dict[str, Any]) -> None:
         job_id = context.job.id
         assert job_id is not None  # noqa: S101
-        key = idempotency_key(kind, payload)
+        key: str | None = None
         try:
+            key = idempotency_key(kind, payload)
             failure = await self._attempt(kind, key, payload, job_id)
             if failure is not None:
                 error, timed_out, lost = failure
@@ -263,7 +264,8 @@ class Jobs:
             raise  # JobFailed carries only a code; cancellation is a shutdown abort (procrastinate: aborted)
         except Exception:  # a database or wrapper failure: never let its message or args out
             log.warning("job wrapper failed: kind=%s job_id=%s", kind.name, job_id)
-            await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
+            if key is not None:  # without a key (payload not keyable) there is no key row to count against
+                await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
             raise JobFailed("wrapper_error") from None
 
     async def _count_lost_run(
@@ -276,6 +278,7 @@ class Jobs:
         stall (dead when exhausted, else enqueued again at once). When that connection fails too, nothing is
         counted here; the job ends `failed` and FR-EVENTS-15 counts it after 60 s.
         """
+        step = "count"
         try:
             enqueue = False
             async with self.engine.begin() as conn:
@@ -291,9 +294,13 @@ class Jobs:
                 counted = await _count(conn, kind, key, code, job_id)
                 enqueue = counted is not None and not counted[1]
             if enqueue:
+                step = "re-enqueue"
                 await self._defer(kind, key, payload, {"outcome": None, "job_id": None}, 0)
-        except Exception:  # the database is unreachable again: FR-EVENTS-15 counts the run later
-            log.warning("lost run not counted: kind=%s job_id=%s", kind.name, job_id)
+        except Exception:  # the database is unreachable again: FR-EVENTS-15 takes the key after 60 s
+            if step == "count":
+                log.warning("lost run not counted: kind=%s job_id=%s", kind.name, job_id)
+            else:
+                log.warning("lost run counted, re-enqueue failed: kind=%s job_id=%s", kind.name, job_id)
 
     async def _attempt(
         self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int
@@ -415,6 +422,16 @@ class Jobs:
             return False
         return True
 
+    async def _sweep_defer(self, kind: JobKind, key: str, args: dict[str, Any]) -> bool:
+        """A sweep's enqueue (FR-EVENTS-7, -15): a failure is logged with the kind only and ends nothing; the
+        key is left with no todo job, so reconciliation takes it once its row is 60 s old."""
+        try:
+            await self._defer(kind, key, args, {"outcome": None, "job_id": None}, 0)
+        except Exception:
+            log.warning("sweep re-enqueue failed: kind=%s", kind.name)
+            return False
+        return True
+
     async def sweep(
         self, stalled_after_s: float = STALLED_AFTER_S, reconcile_age_s: float = RECONCILE_AGE_S
     ) -> SweepReport:
@@ -461,8 +478,7 @@ class Jobs:
                         report.dead.append(key)
                     else:
                         enqueue = True
-            if enqueue and row is not None:
-                await self._defer(kind, key, row["args"], {"outcome": None, "job_id": None}, 0)
+            if enqueue and row is not None and await self._sweep_defer(kind, key, row["args"]):
                 report.reenqueued.append(key)
             if await self._finish(job, finish_status):
                 report.finished.append(job_id)
@@ -492,9 +508,7 @@ class Jobs:
                 statuses = await self._job_statuses(conn, key)
                 if row is None or row["outcome"] is not None or any(s in LIVE_STATUSES for _, s in statuses):
                     continue
-                if kind is None:
-                    await _set_outcome(conn, kind_name, key, "dead", "unknown_kind", None)
-                    report.dead.append(key)
+                if kind is None:  # another worker version's kind: skipped, never decided here (FR-EVENTS-15)
                     continue
                 action = status_of(deciding_status(statuses), None, True)[1]
                 if action == RECONCILE_STALL_LIKE:
@@ -505,8 +519,12 @@ class Jobs:
                         action = "-"
                     else:
                         action = RECONCILE_ENQUEUE
-            if action == RECONCILE_ENQUEUE and kind is not None and row is not None:
-                await self._defer(kind, key, row["args"], {"outcome": None, "job_id": None}, 0)
+            if (
+                action == RECONCILE_ENQUEUE
+                and kind is not None
+                and row is not None
+                and await self._sweep_defer(kind, key, row["args"])
+            ):
                 report.reenqueued.append(key)
 
     async def _cancel_unknown(self, report: SweepReport) -> None:

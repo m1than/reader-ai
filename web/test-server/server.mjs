@@ -62,9 +62,25 @@ const file = (root, path) => {
 
 export const apiRequests = [];
 
+// SRV-AUTH FR-AUTH-21 (paired WEB-UI change): exactly SRV-AUTH's four static auth files, under the same CSP and with
+// the api's content types. No other path is served from that directory.
+const AUTH_STATIC = join(repo, 'server/src/reader/auth/static');
+const AUTH_FILES = {
+  '/api/auth/signin': ['signin.html', 'text/html; charset=utf-8'],
+  '/api/auth/bootstrap': ['bootstrap.html', 'text/html; charset=utf-8'],
+  '/api/auth/static/passkey.js': ['passkey.js', 'text/javascript; charset=utf-8'],
+  '/api/auth/static/auth.css': ['auth.css', 'text/css; charset=utf-8'],
+};
+
 createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1');
   const path = url.pathname;
+  if (req.method === 'GET' && Object.hasOwn(AUTH_FILES, path)) {
+    const [name, type] = AUTH_FILES[path];
+    res.writeHead(200, { 'Content-Type': type, 'Content-Security-Policy': CSP, 'Cache-Control': 'no-cache' });
+    res.end(readFileSync(join(AUTH_STATIC, name)));
+    return;
+  }
   if (path.startsWith('/api/')) {
     apiRequests.push(`${req.method} ${path}`);
     const [status, body] = api(req.method, path);
