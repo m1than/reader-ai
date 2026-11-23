@@ -77,7 +77,7 @@ async def test_receive_then_import(pg: Pg, tmp_path: Path) -> None:
         assert await w.scalar("SELECT count(*) FROM material_spans WHERE owner_id = :o", o=owner) == 8
         assert await w.scalar("SELECT count(*) FROM material_outline WHERE owner_id = :o", o=owner) == 2
         version = await w.scalar("SELECT converter_version FROM ingests")
-        assert version == "docling-2.151.1+r1"
+        assert version == "docling-2.151.1+r2"
         again = await receive(w, tar())
         assert again["result"] == "already_done"
         await w.work()
@@ -99,18 +99,18 @@ async def test_frozen_version_is_refused_at_receive_and_import(
     async with world(pg, tmp_path) as w:
         await receive(w, tar())
         await w.work()
-        monkeypatch.setattr(ingest, "CONVERTER_VERSION", "docling-2.151.1+r2")
-        assert await refused(w, tar(converter_version="docling-2.151.1+r2")) == "version_frozen"
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", "docling-2.151.1+r3")
+        assert await refused(w, tar(converter_version="docling-2.151.1+r3")) == "version_frozen"
         status = need("reader.ingest.status")
         report = await status.status(w.engine, w.jobs, MATERIAL_SHA)
-        assert report == {"status": "succeeded", "converter_version": "docling-2.151.1+r1"}
+        assert report == {"status": "succeeded", "converter_version": "docling-2.151.1+r2"}
         # A job under another version reaching the import is refused permanently.
         artifact = next(iter(stored(w)))
         await w.jobs.enqueue(
             "ingest.import",
             {
                 "material_sha256": MATERIAL_SHA,
-                "converter_version": "docling-2.151.1+r2",
+                "converter_version": "docling-2.151.1+r3",
                 "artifact_id": artifact,
                 "material_id": "synthetic",
             },

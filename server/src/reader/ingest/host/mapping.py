@@ -1,11 +1,13 @@
-"""From converter items to spans and an outline, without Docling (SRV-INGEST FR-INGEST-5, -6, -8, -9).
+"""From converter items to spans and an outline, without Docling (SRV-INGEST FR-INGEST-5..9).
 
 Stdlib only, so the reading-order rule, the mapping and the batch loop are unit-tested with fake items.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -49,6 +51,87 @@ class Item:
     @property
     def top(self) -> float:
         return self.boxes[0][1][1]
+
+
+BASELINE_PT: Final = 1.0  # FR-INGEST-7: glyphs within 1 pt of a line's first baseline share the line
+INDENT_TOLERANCE: Final = 0.25  # FR-INGEST-7, a chosen bound: |q - n| allowed, in cells (pilot: 0.00)
+MONO_SPREAD: Final = 0.02  # FR-INGEST-7, a chosen bound: a glyph within 2% of the modal advance is in band
+MONO_SHARE: Final = 0.8  # FR-INGEST-7, a chosen bound: at least 80% of a box's glyphs in band
+Glyph = tuple[float, float, float]  # origin x, baseline y (bottom-left origin), advance; points
+
+
+@dataclass(frozen=True)
+class Grid:
+    """FR-INGEST-7: a box's monospace cell and the modal advance that defines the band."""
+
+    cell: float
+    mode: float
+    complete: bool  # every glyph in band (False: recovered by the majority cell)
+
+    def in_band(self, advance: float) -> bool:
+        return abs(advance - self.mode) <= MONO_SPREAD * self.mode
+
+
+def visual_lines(glyphs: Sequence[Glyph]) -> list[list[tuple[float, float]]]:
+    """FR-INGEST-7: glyphs grouped into lines by baseline, top line first; each line is its glyphs'
+    (origin x, advance), sorted by x."""
+    lines: list[tuple[float, list[tuple[float, float]]]] = []
+    for x, y, advance in sorted(glyphs, key=lambda g: -g[1]):
+        if lines and abs(lines[-1][0] - y) <= BASELINE_PT:
+            lines[-1][1].append((x, advance))
+        else:
+            lines.append((y, [(x, advance)]))
+    return [sorted(line) for _, line in lines]
+
+
+def grid_of(advances: Sequence[float]) -> Grid | None:
+    """FR-INGEST-7: the modal advance (0.01 pt; the smaller on a tie) and the mean in-band advance as the
+    cell, or None if fewer than MONO_SHARE of the glyphs are in band."""
+    if not advances or min(advances) <= 0:
+        return None
+    counts = Counter(round(a, 2) for a in advances)
+    mode = min(counts, key=lambda width: (-counts[width], width))
+    band = [a for a in advances if abs(a - mode) <= MONO_SPREAD * mode]
+    if len(band) < MONO_SHARE * len(advances):
+        return None
+    return Grid(cell=sum(band) / len(band), mode=mode, complete=len(band) == len(advances))
+
+
+def indentation(lines: Sequence[Sequence[tuple[float, float]]], grid: Grid | None) -> list[int] | None:
+    """FR-INGEST-7: leading spaces per visual line, or None when the rule is not well defined: each step
+    between two consecutive in-band glyphs, and every line's offset, must be a whole number of cells.
+    The cell comes from the font's advance, never from the steps (one-letter tokens make every step 2 cells).
+    """
+    if grid is None or not lines:
+        return None
+
+    def cells(distance: float) -> int | None:
+        q = distance / grid.cell
+        n = round(q)
+        return n if abs(q - n) <= INDENT_TOLERANCE else None
+
+    for line in lines:
+        for (xa, aa), (xb, ab) in itertools.pairwise(line):
+            if grid.in_band(aa) and grid.in_band(ab) and cells(xb - xa) is None:
+                return None  # not on one monospace grid
+    left = min(line[0][0] for line in lines)  # dedent to the leftmost line
+    counts = [cells(line[0][0] - left) for line in lines]
+    return None if None in counts else [n for n in counts if n is not None]
+
+
+def reindent(text: str, glyphs: Sequence[Glyph]) -> tuple[str, str]:
+    """FR-INGEST-7: replace each non-empty text line's leading whitespace by its measured indentation.
+    Returns the text and how: `exact`, `majority` (out-of-band glyphs skipped) or `fallback` (the text
+    layer's own indentation: rule undefined or line counts differ)."""
+    rows = text.replace("\r\n", "\n").split("\n")
+    filled = [i for i, row in enumerate(rows) if row.strip()]
+    grid = grid_of([g[2] for g in glyphs])
+    counts = indentation(visual_lines(glyphs), grid)
+    if grid is None or counts is None or len(counts) != len(filled):
+        return text, "fallback"
+    for i, n in zip(filled, counts, strict=True):
+        rows[i] = " " * n + rows[i].lstrip()
+    return "\n".join(rows), "exact" if grid.complete else "majority"
 
 
 class BatchFailed(Exception):
@@ -158,6 +241,35 @@ def outline(
 
 def progress_line(done: int, total: int) -> str:
     return json.dumps({"pages_done": done, "pages_total": total}, separators=(",", ":"))
+
+
+CODE_KEYS: Final = ("code_boxes", "indent_fallbacks", "majority_cell", "multi_box_code")
+MAX_CODE_BOXES: Final = 1_000_000
+
+
+def code_line(boxes: int, fallbacks: int, majority: int, multi_box: int) -> str:
+    """FR-INGEST-5: the converter's one code line after the last batch, numbers only."""
+    values = (boxes, fallbacks, majority, multi_box)
+    return json.dumps(dict(zip(CODE_KEYS, values, strict=True)), separators=(",", ":"))
+
+
+def render_code_line(line: bytes) -> str | None:
+    """FR-INGEST-5: the code line rendered for the owner, only if it is exactly its schema and bounds."""
+    try:
+        data = json.loads(line.decode("utf-8"))
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) != set(CODE_KEYS):
+        return None
+    boxes, fallbacks, majority, multi = (data[k] for k in CODE_KEYS)
+    if any(type(v) is not int for v in (boxes, fallbacks, majority, multi)):
+        return None
+    if not (0 <= fallbacks <= boxes <= MAX_CODE_BOXES and 0 <= majority <= boxes and 0 <= multi <= boxes):
+        return None
+    return (
+        f"code boxes {boxes}, indentation fallbacks {fallbacks}, majority-cell boxes {majority},"
+        f" multi-box code items {multi}"
+    )
 
 
 def parse_progress(line: bytes) -> tuple[int, int] | None:

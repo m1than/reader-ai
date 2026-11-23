@@ -78,7 +78,10 @@ def test_synthetic_pdf_converts_as_expected(tmp_path: Path) -> None:
     manifest = artifact.validate_dir(out)
     assert manifest["page_count"] == manifest["pages_converted"] == expected["page_count"]
     assert manifest["material_sha256"] == expected["pdf_sha256"]
-    assert progress[-1] == "page 2/2"
+    assert progress[-2:] == [
+        "page 2/2",
+        "code boxes 1, indentation fallbacks 0, majority-cell boxes 0, multi-box code items 0",  # FR-INGEST-5
+    ]
     spans = spans_of(out)
     headings = [s for s in spans if s["kind"] == "heading"]
     assert [h["text"] for h in headings] == expected["headings"]
@@ -210,9 +213,27 @@ def test_pilot_page_expectations(tmp_path: Path) -> None:
                 failures.append(f"page {page}: tables {shapes} != {want['tables']}")
         if "order" in want:
             failures.extend(order_failures(int(page), got, want))
+        counted = [(i, want["code"][int(i)]["box"], n) for i, n in want.get("indents", {}).items()]
+        counted += [(f"box{k}", b["box"], b["indents"]) for k, b in enumerate(want.get("indent_boxes", []))]
+        for index, box, counts in counted:  # FR-INGEST-7, counted by eye
+            found = [s for s in code if _inside(s, box)]
+            measured = (
+                [len(line) - len(line.lstrip(" ")) for line in found[0]["text"].split("\n")]
+                if len(found) == 1
+                else None
+            )
+            if measured != counts:
+                failures.append(f"page {page}: block {index} indents {measured} != {counts}")
     known = set(expectations.get("known_misses", []))
     unexpected = [f for f in failures if int(f.split()[1].rstrip(":")) not in known]
     assert not unexpected, unexpected
+    # Page 468's Solidity block must keep more than one indentation level (owner, 2026-11-23).
+    assert len(set(expectations["pages"]["468"]["indents"]["3"])) > 1
+    # The hand-counted blocks are all present: a dropped key must not silently skip its check.
+    hand_counted = {(p, b) for p, w in expectations["pages"].items() for b in w.get("indents", {})}
+    for p, w in expectations["pages"].items():
+        hand_counted |= {(p, f"box{k}") for k in range(len(w.get("indent_boxes", [])))}
+    assert hand_counted == {("133", "2"), ("419", "box0"), ("461", "0"), ("468", "0"), ("468", "3")}
 
 
 @pytest.mark.ingest_host

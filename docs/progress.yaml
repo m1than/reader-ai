@@ -432,7 +432,39 @@ tasks:
         non-blocking items applied with paired tests: FR-INGEST-8 non-code items keep exactly Docling's order (code
         only reattached by bbox top); FR-INGEST-7 states the 1.0 pt CODE_MARGIN_PT; a driver connect TimeoutError
         maps to database_unreachable (only the deadline scope's expiry is timeout); the system_spawn test checks
-        os.getsid while the child is alive.",
+        os.getsid while the child is alive.
+        Owner judgement 2026-11-23 (SRV-INGEST owner note 6): NFR-INGEST-2 rule B is 1 of 20 (page 378); pages 133
+        and 468 are label noise, not rule-B misses. The owner chose to fix code-block indentation before the first
+        full import: FR-INGEST-7 now rebuilds leading spaces from glyph origins, converter docling-2.151.1+r2.
+        Indentation review of ad0da76 (deep-reviewer, Fable): changes — the median step halved indents in
+        one-letter-token code. Fixed: the cell is the font advance (pdfium loose char box width, one width within
+        2%), every step and line offset a whole number of cells within the chosen 0.25 bound, dedent to the
+        leftmost line, no tabs, text-layer fallback when undefined; [unit] tests pin each choice. Measured
+        2026-11-23 on the 20 pilot code blocks: cell 4.05 pt, spread 0.000, residual 0.00; hand counts equal the
+        converter's on four blocks (468 Solidity 0,0,0,0,0,2,4,4,4,4,4,2,0; 468 first 0,0,0,0,0,0,3; 461 first
+        0,2,...,6,...,2,0; 133 output 0,0,2,2,2,0). Full book under r2 (confined, CPU): 935 pages in 642.2 s; code
+        boxes 360, indentation fallbacks 17 (kept the text layer), multi-box code items 0, so FR-INGEST-7's
+        per-box known limit does not touch the pilot. Owner: `reader-ingest --setup` builds the r2 venv; the old
+        <data_dir>/ingest/venv-docling-2.151.1+r1 (several GB) can be deleted.
+        Indentation review: round 1 changes (ad0da76), round 2 VERDICT approve (c6ae789), deep-reviewer (Fable).
+        Gate at c6ae789: LOCAL CI FAIL only in tests/sandbox (15 tests: test_session_sweep_spares_other_runs and 14
+        in test_supervisor.py), the identical set failing on clean origin/V/slice-integration 744997e; each passes
+        alone (order-dependent, not SRV-INGEST).
+        Majority-cell rule (FR-INGEST-7, still r2: no r2 artifact outside test runs): modal advance, at least 80%
+        of glyphs within 2%, steps checked between in-band glyphs only, every line offset on the grid. Full book
+        2026-11-23: 935 pages in 634.7 s; code boxes 360: exact 343, majority cell 7 (pages 419, 429, 431 x2,
+        432 x2, 859), fallbacks 10. The fallbacks with page, reason, modal advance, in-band share: 105 below 80%
+        3.43 0.114; 133 below 80% 4.80 0.731; 341 below 80% 5.33 0.286; 341 below 80% 3.43 0.133; 369 below 80%
+        4.82 0.373; 418 below 80% 4.05 0.789; 425 below 80% 4.05 0.756; 460 off grid 4.05 1.000; 469 off grid
+        4.05 0.994 (also 12 visual vs 11 text lines); 568 below 80% 4.05 0.566. Pages 418, 425 and 568 are short
+        (3-4 line) boxes whose italic comments exceed 20% of the glyphs. Page 419's italic-comment block counted
+        by eye (0,4,4,4,4,4,8,8,12,12,8,4,0) equals the converter's. Gate: FAIL only on the same 15 sandbox tests.
+        Indentation review round 3 (d703f21, deep-reviewer, Fable): VERDICT approve; its items applied (offset-only
+        out-of-band test, 4.14 out of band and [0.0] -> None, the digit-dominated known limit, page 419 kept out
+        of the rule-B tally). For the owner, code blocks that import with the text layer's indentation (0-1 leading
+        space): pages 418, 425 and 568 (italic comments push the box below the 80% floor) and pages 460 and 469
+        (a line off the monospace grid); the other five fallbacks (105, 133, 341 x2, 369) are proportional text
+        Docling labels as code. Both full-book r2 runs removed their own work directories; nothing of them remains.",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line

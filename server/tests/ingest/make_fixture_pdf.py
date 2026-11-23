@@ -27,11 +27,11 @@ PARAGRAPH: Final = (
     "Строка с мягким переносом: inter­national standard, и ещё немного текста.",
 )
 STEP_1: Final = "1. Установите пакет и инициализируйте проект."
-CODE: Final = (
-    "$ pip install example==1.0",
-    "$ example --init",
-    "# creates config.yaml",
+CODE: Final = (  # nested 0/4/8/0 spaces (FR-INGEST-7); drawn at indented x, never as space glyphs
     "$ example run --fast",
+    "    --retries 3",
+    "        --timeout 30s",
+    "$ example report --json",
 )
 STEP_2: Final = "2. Запустите проверку и посмотрите отчёт."
 TABLE: Final = (
@@ -79,9 +79,13 @@ def build() -> bytes:
         return y - size * 2.2
 
     def lines(y: float, texts: tuple[str, ...], font: str, size: int, x: float = 72) -> float:
+        from reportlab.pdfbase.pdfmetrics import stringWidth
+
         canvas.setFont(fonts[font], size)
+        cell = stringWidth(" ", fonts[font], size)
         for text in texts:
-            canvas.drawString(x, y, text)
+            body = text.lstrip(" ")  # leading spaces become an x offset, as typeset PDFs place them
+            canvas.drawString(x + (len(text) - len(body)) * cell, y, body)
             y -= size * 1.5
         return y - size
 
