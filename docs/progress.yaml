@@ -988,10 +988,39 @@ tasks:
         contradicting SRV-AGENT FR-AGENT-13 (thinking off). Investigate with the investigator (SDK/CLI version, the
         option's path to the request), then fix spec-first; the settle rows' `thinking` column (agent_0002) is the
         evidence." }
-  - { id: V.auth-page-style, stage: V, kind: module, track: product, status: todo, needs: [V.WEB-polish],
+  - { id: V.auth-page-style, stage: V, kind: module, track: product, status: in_progress, needs: [V.WEB-polish],
+      branch: V/auth-page-style,
       what: "SRV-AUTH amendment (complex area, full review): style the sign-in and bootstrap pages (browser-default HTML
         today) with a same-origin stylesheet under the existing CSP, or move the ceremony into the SPA (WEB-UI stage-4b
-        defer). Add axe runs on both pages, which also closes auth.bootstrap and auth.signin × a11y in the DoD index." }
+        defer). Owner 2026-11-23: 'a fully pretty log in page for this instrument'.",
+      review: "deep-reviewer (Fable), auth is a complex area. Spec round 1 on 418312a: changes (6 blocking: expired only
+        on bootstrap options with a retryable not_registered on verify; the unreachable `known` state removed; a real
+        request oracle; `done` asserted before navigation; route registries; both live files named), all fixed in
+        faf5b2e with the non-blocking items. Spec round 2 on faf5b2e: VERDICT approve; spec approved by agent
+        2026-11-23. Round-2 non-blocking items folded into Green: named colour keywords in the colour scan, the full
+        /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done.",
+      exit: "Green's exit condition: OPS-DOD's operations index gains `GET /api/auth/static/auth.css` in the routes of
+        auth.bootstrap and auth.signin in the same commit as the `Route(...)` (T10 refuses a route the registry lacks).
+        The two auth a11y cells stay missing: OPS-DOD takes only live `pages` evidence (axe.json, no producer yet), not
+        the [browser] axe runs; that stays with V.DOD-gaps.",
+      green: "83d4ef6: pages, auth.css (tokens copied, drift test), passkey.js states, the auth.css route with
+        no-cache, OPS-DOD routes, the test-server map, the live `auth` step. Checks: 48 server tests, 69 [browser]
+        cases, verify-all --slice auth PASS (owner bootstrap, pages at 3 widths with 0 serious/critical axe and 0
+        overflow, real sign-out and sign-in), full verify-all 53/53 PASS (learner bootstrap and sign-in through the
+        pages), LOCAL CI PASS.",
+      code_review: "Round 1 on 83d4ef6: changes — ceremony verified unchanged in the code, no server text reaches the
+        DOM; 6 surviving mutants closed with browser cases: Retry-After 60 and 0 (1 minute), 1.5 and an HTTP-date
+        (later), a 500 on options (unreachable), a 429 with another code and a 400 signin_failed on options (failed).
+        Non-blocking applied: Retry-After bounded to ^\\d{1,6}$ with a seven-digit case; auth-dark and auth-light
+        Playwright projects (every state axe-checked in both schemes); the bootstrap copy without 'owner' (the link
+        also serves learners); static markup data-state=loading with the button hidden until the script runs, and a
+        blocked-script case; the full request list of every path asserted (a beacon fails). Round 2 on 48ce312: VERDICT
+        approve; its notes folded in (a static status sentence for a script that fails to load, asserted; the spec's
+        project names auth-dark and auth-light). Merged into V/slice-integration afterwards (coordinator).",
+      process_note: "For the PR description: in 83d4ef6 the deferred OPS-DOD routes edit was re-applied with `git apply`
+        of the agent's own earlier diff (written with the Edit tool, reverted while T10 could not yet pass). That is a
+        shell write, which AGENTS.md asks to avoid; the content is the two-line routes change, checked by T10 and the
+        P8 ratchet." }
   - { id: V.DOD-gaps, stage: V, kind: module, track: engineering, status: todo, needs: [V.DOD-index],
       what: "Close the Definition-of-Done gaps in docs/dod/INDEX.md: the 49 declared `missing` cells (latency budgets,
         log lines and tests asserting them, privacy canaries for lesson, material and course text, the backup-restore
