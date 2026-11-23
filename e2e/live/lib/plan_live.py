@@ -93,9 +93,23 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
     timings.sort()
     results["preview_p95_ms"] = round(timings[18], 1)
     report("plan: preview p95 ≤ 500 ms over 20 calls (NFR-PLAN-1)", timings[18] <= 500, f"{timings[18]:.0f} ms")
+    weeks = 12
     if not s["fits"]:
-        report("plan: the 12-week plan fits", False, ",".join(s["reasons"]))
-        return results
+        # The whole pilot at the owner's rate needs more than 84 hours: the plan must say so and suggest a fit.
+        sug = s["suggest"] or {}
+        results["suggest_at_12_weeks"] = sug
+        if not report("plan: 12 weeks × 60 min does not fit and a weeks suggestion is given",
+                      isinstance(sug.get("total_weeks"), int), ",".join(s["reasons"])):
+            return results
+        weeks = sug["total_weeks"]
+        body = body | {"total_weeks": weeks}
+        r = c.post("/api/plans/preview", json=body)
+        p = r.json()
+        results["preview_suggested"] = {k: p["summary"][k] for k in ("lesson_count", "new_count", "study_days",
+                                                                     "minutes_mean", "minutes_max", "fits")}
+        if not report(f"plan: the suggested {weeks} weeks fit", r.status_code == 200 and p["summary"]["fits"]):
+            return results
+    results["weeks"] = weeks
     already = c.get("/api/plans", params={"material_id": mid})
     results["stored_before"] = already.status_code
     r = c.post("/api/plans/confirm", json=body | {"plan_sha256": p["plan_sha256"], "compile_first": False})
@@ -112,10 +126,10 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
            and r.json()["lessons"] == conf["lessons"])
     r = c.get("/api/plans", params={"material_id": mid})
     report("plan: GET /api/plans returns the stored plan", r.status_code == 200 and r.json()["plan_sha256"] == p["plan_sha256"])
-    # re-plan: 16 weeks, the deadline moves from the stored start
-    body16 = body | {"total_weeks": 16}
+    # re-plan: 4 more weeks, the deadline moves from the stored start
+    body16 = body | {"total_weeks": weeks + 4}
     r = c.post("/api/plans/preview", json=body16)
-    ok = report("plan: re-plan preview 16 weeks answers 200", r.status_code == 200)
+    ok = report("plan: re-plan preview with 4 more weeks answers 200", r.status_code == 200)
     if ok:
         p16 = r.json()
         results["replan_preview"] = {k: p16["summary"][k] for k in ("lesson_count", "fixed_count", "new_count", "study_days", "fits")}
@@ -125,17 +139,20 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
             rc = r.json()
             results["replan_confirm"] = {k: rc[k] for k in ("created", "removed", "replayed")} | {"lessons": len(rc["lessons"])}
             got = c.get("/api/plans", params={"material_id": mid}).json()
-            report("plan: the stored plan is the 16-week one, start date kept",
-                   got["inputs"]["total_weeks"] == 16 and got["inputs"]["start_date"] == p["inputs"]["start_date"])
-    # back to the 12-week plan the owner previewed first, so the stack is left with it
+            report("plan: the stored plan is the re-planned one, start date kept",
+                   got["inputs"]["total_weeks"] == weeks + 4 and got["inputs"]["start_date"] == p["inputs"]["start_date"])
+    # back to the first confirmed plan, so the stack is left with it
     p12 = c.post("/api/plans/preview", json=body).json()
     r = c.post("/api/plans/confirm", json=body | {"plan_sha256": p12["plan_sha256"], "compile_first": False})
-    report("plan: back to 12 weeks", r.status_code == 200)
+    report(f"plan: back to {weeks} weeks", r.status_code == 200)
+    if r.status_code == 200:
+        results["final"] = {k: r.json()[k] for k in ("created", "removed")} | {"lessons": len(r.json()["lessons"])}
     return results
 
 
-def shots(url: str, spki: str, root_pem: Path, token: str, out: Path, shots_dir: str) -> None:
+def shots(url: str, spki: str, root_pem: Path, token: str, out: Path, shots_dir: str, weeks: int) -> None:
     env = {
+        "PLAN_WEEKS": str(weeks),
         "PATH": node_path(),
         "HOME": os.environ.get("HOME", ""),
         "READER_URL": url,
@@ -186,7 +203,7 @@ def main() -> int:
             report("plan: the session is the owner's", c.get("/api/me").json().get("role") == "owner")
             results = check_api(c, out)
         if args.shots:
-            shots(args.url, spki, root_pem, token, out, args.shots)
+            shots(args.url, spki, root_pem, token, out, args.shots, int(results.get("weeks", 12)))
     finally:
         code, _ = psql(args.project, delete)
         report("plan: this run's session deleted (by id; no other session or passkey touched)", code == 0)
