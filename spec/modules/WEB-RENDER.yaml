@@ -146,11 +146,14 @@ requirements:
         fence's language name when given, else `text`) and a "Copy" ghost button (`CopyIcon`, accessible name "Copy
         code") that writes the code's text exactly (`navigator.clipboard.writeText`) and then reads "Copied" for 2 s
         with a visually hidden `role="status"` "Code copied" ("Copy failed" on failure); the code below in
-        `--acme-font-mono` at 0.8125rem with line height 1.55, scrolling horizontally inside the block. Output blocks
-        (FR-RENDER-5) keep their plain look without a header.
+        `--acme-font-mono` at 0.8125rem with line height 1.55, scrolling horizontally inside the block. The block is a
+        `role="group"` labelled "<language> code"; its scroll container takes `tabIndex={0}` only while its content is
+        wider than it (measured on mount and on resize), so a block that does not scroll adds no tab stop and a block
+        that does is a scroll region keyboard users can reach (axe `scrollable-region-focusable`; code review). Output
+        blocks (FR-RENDER-5) keep their plain look without a header.
       [unit] both custom properties on tokens and the `pre`, no `matchMedia` call during render, the header's language
-      for python, a named fence and none, Copy's written text, "Copied", the status texts and failure, with a stub
-      clipboard; [browser] the computed colour of a python keyword differs between `data-theme="light"` and `"dark"`
+      for python, a named fence and none, Copy's written text, the button's exact text "Copy" then "Copied", the status
+      texts and failure, with a stub clipboard, the group role and label, no tab stop without overflow and one with it; [browser] the computed colour of a python keyword differs between `data-theme="light"` and `"dark"`
       on one rendered block without a re-render; [story] Light and Dark.
   - id: FR-RENDER-5
     text: >-
@@ -172,8 +175,9 @@ invariants:
       FR-RENDER-2's allowance except on elements KaTeX and Shiki create and on this module's own chrome (design pass:
       the code block's wrapper and header with its Copy button and status, FR-RENDER-4, and the wide-table wrapper,
       WEB-UI FR-UI-10), built from no input, where every element that carries a class carries `data-render-chrome`
-      itself (the test trusts that element only, never its descendants); and no `href` whose scheme is not http,
-      https, mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
+      itself (the test trusts that element only, never its descendants; input cannot forge the mark: a raw
+      `<p data-render-chrome class="x">` in markdown stays text, and a test case says so, next to a 5-column table whose
+      wrapper is the trusted chrome); and no `href` whose scheme is not http, https, mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
       cases and VEC-NOTEBOOK-1's explain cell]
   - id: INV-RENDER-2
     text: >-

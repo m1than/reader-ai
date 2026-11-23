@@ -60,7 +60,7 @@ const row = (n: number, published: boolean): L => ({
   lesson_id: `p-${n}`, course_id: 'c1', course_title: 'Sample course', ordinal: n, title: `Sample lesson ${n}`,
   updated_at: '2026-11-20T09:00:00Z', latest_sha256: published ? 'a'.repeat(64) : null,
 });
-type Slot = (l: L) => { status: ReactNode | null; action: ReactNode | null } | null;
+type Slot = { Status?: (p: { lesson: L }) => ReactNode; Action?: (p: { lesson: L }) => ReactNode };
 const mountPage = async (path: string, list: L[], route: (url: string) => Response | Promise<Response>, compileSlot?: Slot) => {
   const { AppRoot } = await load(() => import('../app/AppRoot'));
   expect(AppRoot).toBeTypeOf('function');
@@ -106,22 +106,24 @@ describe('not-published page (FR-NOTEBOOK-1, design pass)', () => {
     expect(within(page()).queryByRole('link', { name: /^(Previous|Next):/ })).toBeNull();
   });
 
-  it("takes the compile slot's status in place of the chip and shows its action; null keeps the chip", async () => {
-    const slot = vi.fn<Slot>((l) => ({ status: <span>{`Compiling ${l.lesson_id}`}</span>, action: <button type="button">{`Compile ${l.lesson_id}`}</button> }));
+  it("takes the compile slot's Status in place of the chip and shows its Action, in a div; an empty Status keeps the chip", async () => {
+    const slot: Slot = {
+      Status: ({ lesson }) => <span>{`Compiling ${lesson.lesson_id}`}</span>,
+      Action: ({ lesson }) => <button type="button">{`Compile ${lesson.lesson_id}`}</button>,
+    };
     await mountPage('/lessons/p-3', list, at(3), slot);
     await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
-    expect(within(page()).getByRole('button', { name: 'Compile p-3' })).toBeTruthy();
-    expect(within(page()).getByText('Compiling p-3')).toBeTruthy();
-    expect(within(page()).queryByText('Not published yet')).toBeNull();
+    const button = within(page()).getByRole('button', { name: 'Compile p-3' });
+    expect(button.closest('div.state-status')).toBeTruthy();
+    expect(button.closest('p')).toBeNull();
+    expect(within(page()).getByText('Compiling p-3').closest('.slot-status')).toBeTruthy();
+    expect((page().querySelector('.slot-status') as HTMLElement).matches(':empty')).toBe(false);
     cleanup();
-    await mountPage('/lessons/p-3', list, at(3), () => null);
+    await mountPage('/lessons/p-3', list, at(3), { Status: () => null, Action: () => <button type="button">Compile now</button> });
     await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
-    expect(within(page()).getByText('Not published yet')).toBeTruthy();
-    expect(within(page()).queryByRole('button', { name: /^Compile/ })).toBeNull();
-    cleanup();
-    await mountPage('/lessons/p-3', list, at(3), () => ({ status: null, action: <button type="button">Compile now</button> }));
-    await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
-    expect(within(page()).getByText('Not published yet')).toBeTruthy();
+    // The Status rendered nothing: .slot-status is empty and app.css shows the default chip beside it.
+    expect((page().querySelector('.slot-status') as HTMLElement).matches(':empty')).toBe(true);
+    expect(within(page().querySelector('.status-default') as HTMLElement).getByText('Not published yet')).toBeTruthy();
     expect(within(page()).getByRole('button', { name: 'Compile now' })).toBeTruthy();
     cleanup();
     await mountPage('/lessons/p-3', list, at(3));
@@ -179,6 +181,33 @@ describe('lab block (FR-NOTEBOOK-9, design pass)', () => {
     expect((within(lab()).getByRole('button', { name: /revert/i }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('reads exactly "Copy" before copying', async () => {
+    await view();
+    expect(within(lab()).getByRole('button', { name: /^copy$/i }).textContent).toBe('Copy');
+  });
+
+  it('keeps the typed text and the focus when the editor replaces the text area', async () => {
+    let resolve: (m: unknown) => void = () => undefined;
+    const handle = { setDoc: vi.fn(), focus: vi.fn(), destroy: vi.fn() };
+    const mountEditor = vi.fn((_host: HTMLElement, _opts: { doc: string }) => handle);
+    await view(notebook(), { loadEditor: () => new Promise((r) => (resolve = r)) });
+    const area = within(lab()).getByRole('textbox', { name: 'Lab 1 code' }) as HTMLTextAreaElement;
+    area.focus();
+    fireEvent.change(area, { target: { value: 'typed before the chunk' } });
+    await act(async () => resolve({ mountEditor }));
+    await waitFor(() => expect(mountEditor).toHaveBeenCalledTimes(1));
+    expect(mountEditor.mock.calls[0]![1].doc).toBe('typed before the chunk');
+    expect(handle.focus).toHaveBeenCalled();
+  });
+
+  it('does not take focus when the editor arrives and the text area was not focused', async () => {
+    let resolve: (m: unknown) => void = () => undefined;
+    const handle = { setDoc: vi.fn(), focus: vi.fn(), destroy: vi.fn() };
+    await view(notebook(), { loadEditor: () => new Promise((r) => (resolve = r)) });
+    await act(async () => resolve({ mountEditor: () => handle }));
+    expect(handle.focus).not.toHaveBeenCalled();
+  });
+
   it('shows Interrupt while running', async () => {
     await view(notebook(), { cells: { 'w01-lab': { state: 'running', outputs: [], executionCount: null, marker: null, notes: [] } } });
     expect(within(lab()).getByRole('button', { name: /interrupt/i })).toBeTruthy();
@@ -192,7 +221,7 @@ describe('lab block (FR-NOTEBOOK-9, design pass)', () => {
       fireEvent.click(within(lab()).getByRole('button', { name: /^copy$/i }));
     });
     expect(writeText).toHaveBeenCalledWith('x = 1');
-    expect(within(lab()).getByRole('button', { name: /^copied$/i })).toBeTruthy();
+    expect(within(lab()).getByRole('button', { name: /^copied$/i }).textContent).toBe('Copied');
     expect(within(lab()).getAllByRole('status').some((s) => s.textContent === 'Code copied')).toBe(true);
   });
 
@@ -420,6 +449,47 @@ describe('navigation (FR-NOTEBOOK-11, design pass)', () => {
     expect(aside.mock.calls.every((c) => c[2].open === false)).toBe(true);
   });
 
+  it('matches / and ? by their physical key on a Russian layout, and / prevents the default', async () => {
+    const aside = vi.fn<Aside>(() => null);
+    await view(notebook(), { aside });
+    const slash = new KeyboardEvent('keydown', { key: '.', code: 'Slash', bubbles: true, cancelable: true });
+    act(() => {
+      document.body.dispatchEvent(slash);
+    });
+    expect(slash.defaultPrevented).toBe(true);
+    expect(aside.mock.calls.at(-1)![2].open).toBe(true);
+    fireEvent.keyDown(document.body, { key: ',', code: 'Slash', shiftKey: true });
+    expect(await screen.findByRole('dialog', { name: 'Keyboard shortcuts' })).toBeTruthy();
+  });
+
+  it('ignores shortcuts with Alt or Meta, and inside an input, a select or an alertdialog', async () => {
+    const aside = vi.fn<Aside>(() => null);
+    await view(notebook(), { aside });
+    const route = cellEl('w01-route');
+    route.focus();
+    for (const mod of [{ altKey: true }, { metaKey: true }]) {
+      fireEvent.keyDown(route, { key: 'j', code: 'KeyJ', ...mod });
+      expect(document.activeElement).toBe(route);
+    }
+    for (const make of [() => document.createElement('input'), () => document.createElement('select')]) {
+      const el = make();
+      document.body.append(el);
+      el.focus();
+      fireEvent.keyDown(el, { key: 'j', code: 'KeyJ' });
+      fireEvent.keyDown(el, { key: '/', code: 'Slash' });
+      expect(document.activeElement).toBe(el);
+      el.remove();
+    }
+    const alert = document.createElement('div');
+    alert.setAttribute('role', 'alertdialog');
+    alert.tabIndex = -1;
+    document.body.append(alert);
+    alert.focus();
+    fireEvent.keyDown(alert, { key: '/', code: 'Slash' });
+    alert.remove();
+    expect(aside.mock.calls.every((c) => c[2].open === false)).toBe(true);
+  });
+
   it('ignores shortcuts while the shortcuts dialog is open', async () => {
     const aside = vi.fn<Aside>(() => null);
     await view(notebook(), { aside });
@@ -476,6 +546,11 @@ describe('lesson language (FR-UI-10, design pass)', () => {
     expect(lessonLang({ cells: [md('Mostly English with одно слово.')] })).toBe('en');
     expect(lessonLang({ cells: [md('Plain English text.')], metadata: { reader: { language: 'ru' } } })).toBe('en');
     expect(lessonLang({ cells: [{ cell_type: 'code', source: 'печать = 1' }, md('English prose here.')] })).toBe('en');
+    // Code cells do not count, even when their Cyrillic outweighs the prose.
+    expect(lessonLang({ cells: [{ cell_type: 'code', source: '# '.concat('очень длинный русский комментарий '.repeat(20)) }, md('Short English prose.')] })).toBe('en');
+    // Exactly half is not a majority.
+    expect(lessonLang({ cells: [md('абв abc')] })).toBe('en');
+    expect(lessonLang({ cells: [md('абвг abc')] })).toBe('ru');
     expect(lessonLang({ cells: [] })).toBe('en');
   });
 

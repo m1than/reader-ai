@@ -65,8 +65,35 @@ describe('code block header (FR-RENDER-4, design pass)', () => {
       fireEvent.click(within(block).getByRole('button', { name: 'Copy code' }));
     });
     expect(writeText).toHaveBeenCalledWith(code);
-    expect(within(block).getByText('Copied')).toBeTruthy();
+    expect(within(block).getByRole('button', { name: 'Copy code' }).textContent).toBe('Copied');
     expect(within(block).getByRole('status').textContent).toBe('Code copied');
+  });
+
+  it('reads exactly "Copy" and is a group labelled by its language', async () => {
+    const { Code } = await load(() => import('./code'));
+    const { container } = render(<Code code={'x'} language="python" />);
+    const block = container.querySelector('.code-block') as HTMLElement;
+    expect(block.getAttribute('role')).toBe('group');
+    expect(block.getAttribute('aria-label')).toBe('python code');
+    expect(within(block).getByRole('button', { name: 'Copy code' }).textContent).toBe('Copy');
+  });
+
+  it('adds a tab stop to the scroller only while its lines overflow', async () => {
+    const { Code } = await load(() => import('./code'));
+    const { container, unmount } = render(<Code code={'short'} language="text" />);
+    expect(container.querySelector('.code-scroll')?.hasAttribute('tabindex')).toBe(false);
+    unmount();
+    const sw = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    const cw = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get: () => 900 });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 300 });
+    try {
+      const wide = render(<Code code={'x'.repeat(400)} language="text" />);
+      expect(wide.container.querySelector('.code-scroll')?.getAttribute('tabindex')).toBe('0');
+    } finally {
+      if (sw) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', sw);
+      if (cw) Object.defineProperty(HTMLElement.prototype, 'clientWidth', cw);
+    }
   });
 
   it('says when copying failed', async () => {

@@ -159,6 +159,21 @@ describe('side panel (FR-TUTOR-11, design pass)', () => {
     await flush();
     expect(document.activeElement).toBe(within(document.querySelector('.lesson-toolbar') as HTMLElement).getByRole('button', { name: 'Ask the tutor' }));
   });
+
+  it('falls back to the toolbar\'s "Ask the tutor" when the opener cannot take focus (hidden contents entry, code review B2)', async () => {
+    await lessonWithPanel();
+    const entry = within(screen.getByRole('navigation', { name: 'Lesson contents' })).getByRole('link', { name: 'Ask the tutor' });
+    entry.focus();
+    fireEvent.click(entry);
+    await flush();
+    // Below 60rem the contents list is display:none, so focus() on its entry does nothing; jsdom applies no CSS,
+    // so the entry refuses focus here the same way.
+    entry.focus = () => undefined;
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.click(screen.getByRole('button', { name: 'Close the tutor' }));
+    await flush();
+    expect(document.activeElement).toBe(within(document.querySelector('.lesson-toolbar') as HTMLElement).getByRole('button', { name: 'Ask the tutor' }));
+  });
 });
 
 describe('history (FR-TUTOR-11, design pass)', () => {
@@ -241,6 +256,27 @@ describe('history (FR-TUTOR-11, design pass)', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+
+  it('keeps fetching a queued entry while it is open, then shows its answer (code review)', async () => {
+    const resumed = { ...item(3, 'queued'), question_id: qid(3) };
+    const queued = { ...item(1, 'queued'), question_id: qid(1) };
+    let calls = 0;
+    const api = fakeApi([item(2), resumed, queued], (id) => {
+      if (id !== qid(1)) return { state: 'queued' } as QuestionState;
+      calls += 1;
+      return calls < 3 ? ({ state: 'queued' } as QuestionState) : answer('Finally a synthetic answer.');
+    });
+    render(panel({ lessonId: LESSON, revision: REV, cellId: null, api }));
+    await flush();
+    const entry = entries().find((e) => e.textContent?.includes('Synthetic question 1?'))!;
+    fireEvent.click(within(entry).getByRole('button', { name: /Synthetic question 1\?/ }));
+    await flush();
+    expect(within(entry).getByText('Waiting for the answer')).toBeTruthy();
+    await flush(1000);
+    await flush(2000);
+    expect(calls).toBe(3);
+    expect(within(entry).getByText('Finally a synthetic answer.')).toBeTruthy();
   });
 
   it('expands a queued entry to "Waiting for the answer"', async () => {

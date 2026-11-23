@@ -114,4 +114,13 @@ describe('the app stylesheets (FR-UI-10)', () => {
     expect(where('overflow-wrap', /^break-word$/).some((x) => /\btable\b|\btd\b/.test(x.selector))).toBe(true);
     expect(app()).not.toMatch(/overflow-wrap:\s*anywhere/);
   });
+
+  it('show the compile slot default only while the Status renders nothing, both above the row link (FR-UI-6)', () => {
+    const r = rules(app());
+    const has = (sel: RegExp, prop: string, value: RegExp) => r.some((x) => sel.test(x.selector) && x.decls.some((d) => d.prop === prop && value.test(d.value)));
+    expect(has(/^\.slot-status:empty$/, 'display', /^none$/)).toBe(true);
+    expect(has(/^\.slot-status:not\(:empty\) \+ \.status-default$/, 'display', /^none$/)).toBe(true);
+    expect(has(/^\.lesson-status$/, 'z-index', /^1$/)).toBe(true);
+    expect(has(/^\.row-action$/, 'z-index', /^1$/)).toBe(true);
+  });
 });

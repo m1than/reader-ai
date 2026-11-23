@@ -133,12 +133,12 @@ requirements:
       **Not-published page (design pass; the live page was a title and one sentence, a dead end):** the breadcrumbs of
       FR-NOTEBOOK-11, then WEB-UI FR-UI-11's `StateBlock` with the lesson title as its `h1`, the line "Lesson <ordinal>
       of <course title> is not published yet.", the status — the neutral chip "Not published yet", replaced by the
-      compile slot's `status` when that is non-null (WEB-UI FR-UI-6's `compileSlot`, the shape FR-UI-15 fills) — and the
-      slot's `action` when non-null (always visible here), and links "Previous: <title>" and "Next: <title>" to the
+      compile slot's `Status` component when that renders something (WEB-UI FR-UI-6's `compileSlot`, the shape
+      FR-UI-15 fills) — and the slot's `Action` component (always visible here), both inside a `div`, and links "Previous: <title>" and "Next: <title>" to the
       nearest published lessons of the same course by ordinal (from the cached `GET /api/lessons`; each omitted when
       there is none) and "All lessons of <course title>" to `/#course-<course_id>`. [unit] the label rule, the
-      not-published page (text, the default chip, a slot's status replacing it and its action, a `null` slot result,
-      no slot, both neighbours, none, one side); [story]
+      not-published page (text, the default chip, a slot's `Status` replacing it and its `Action`, a `Status` rendering
+      `null`, no slot, the parts in a `div`, both neighbours, none, one side); [story]
   - id: FR-NOTEBOOK-2
     text: >-
       Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`
@@ -262,6 +262,8 @@ requirements:
       - **Editor.** CodeMirror 6 (state, view, commands, language, lang-python, lezer highlight; REF-NOTEBOOK-6), loaded
         as a lazy chunk on the lesson route the first time a lab is rendered. Until it has loaded, and if it fails to
         load, the plain text area above is shown with the same source and rules, so a lab can always be edited and run.
+        When the editor replaces the text area while it has focus (the user started typing before the chunk
+        arrived), the editor takes the text area's current text and receives focus (code review).
         The editor is mounted in an open shadow root with `EditorView({root})` (REF-NOTEBOOK-7: in the document,
         style-mod injects a `<style>` element that the app CSP blocks and the editor renders unstyled; in a shadow root
         it uses an adopted stylesheet); its theme is `EditorView.theme` over `var(--acme-…)` and `var(--acme-font-mono)`
@@ -362,14 +364,16 @@ requirements:
         `textarea`, an `input`, a `select`, an element with `isContentEditable` (the editor's content), or an element
         with `role="dialog"`, `role="menu"` or `role="alertdialog"`. Otherwise: `j` and `k` focus the next and previous
         cell (`tabIndex={-1}` targets, scrolled into view), matched by `event.code` `KeyJ` and `KeyK` so they work on a
-        Russian layout (where those keys type "о" and "л"); `/` (`event.key` `/`) opens the tutor panel and focuses its
-        text area; `?` (`event.key` `?`) opens a dialog "Keyboard shortcuts" listing these keys, Shift+Enter (run a
+        Russian layout (where those keys type "о" and "л"); `/` (`event.key` `/`, or `event.code` `Slash` without Shift,
+        which types "." on a Russian layout) opens the tutor panel and focuses its text area; `?` (`event.key` `?`, or
+        `event.code` `Slash` with Shift, "," on a Russian layout) opens a dialog "Keyboard shortcuts" listing these keys, Shift+Enter (run a
         lab), Ctrl+Enter or ⌘+Enter (ask the tutor) and Escape (close a panel or dialog); a handled key calls
         `preventDefault`.
       [unit] [story] the current-section rule with a stub `IntersectionObserver` (one current entry, moves with the
       reported targets), the toolbar's buttons, copy text, code-cell toolbar without Copy, the roving tab index, each
-      shortcut, `j` matched by `code` with a Cyrillic `key`, shortcuts ignored inside a text area, a contenteditable,
-      with a modifier, with `defaultPrevented`, inside a `role="menu"` element and while the shortcuts dialog is open;
+      shortcut, `j`, `/` and `?` matched by `code` with Russian-layout `key`s, `/` calling `preventDefault`, shortcuts
+      ignored inside a text area, an input, a select, a contenteditable, with Ctrl, Alt or Meta, with
+      `defaultPrevented`, inside a `role="menu"` or `role="alertdialog"` element and while the shortcuts dialog is open;
       [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and visible after
       it; at every width following the last entry, whose target is not in the viewport before the click, scrolls to that
       target and focuses it; at 1280 and 1024 px the button is hidden and the nav is visible; after the scroll exactly

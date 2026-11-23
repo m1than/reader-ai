@@ -275,8 +275,10 @@ requirements:
         Opening focuses the text area; Close, and Escape while focus is inside the panel or anywhere on the lesson page
         outside an editable field (a text area, an input, a contenteditable such as the lab editor) and outside an open
         dialog or menu (review: below 30rem the panel covers the page, so Escape must reach it from anywhere), close it
-        and return focus to the control that opened it, or to the lesson toolbar's "Ask the tutor" when that control is
-        no longer in the document (focus-return fallback). Asking, polling and the answer are unchanged; a question in flight keeps polling
+        and return focus to the control that opened it, or to the lesson toolbar's "Ask the tutor" when that control
+        cannot take focus: it left the document, or it is hidden (below 60rem the contents entry sits in the closed
+        contents list), so `document.activeElement` is not that control after `focus()` (focus-return fallback; code
+        review B2). Asking, polling and the answer are unchanged; a question in flight keeps polling
         while the panel is closed, and reopening shows its state. At 75rem and wider, while the panel is open, the
         lesson's contents column is hidden and the cells' container ends where the panel begins, so the panel covers no
         lesson text (the reading column may narrow, to 30rem at the 75rem viewport); below 75rem it overlays the lesson.
@@ -287,12 +289,14 @@ requirements:
         (and "Show fewer") for the rest. Each entry is a disclosure button with the question text and its muted status;
         expanding a terminal entry fetches its state once with `GET /api/lessons/{lesson_id}/questions/{question_id}`
         and shows it with the same rendering as the current answer (blocks, citations, unsupported marks, the grounded
-        notice, or its message); a failed fetch shows `tutor_failed`'s message and a Retry. A queued entry expands to
-        "Waiting for the answer" (on load the first queued question resumes as the current one, as before, so a queued
-        entry in the history is a later one). An expanded answer renders through the same pipeline as the current one, links as
+        notice, or its message); a failed fetch shows `tutor_failed`'s message and a Retry. A queued entry (a question
+        still waiting when a newer one was asked, or a later queued one on load: the first resumes as the current one)
+        fetches its state when expanded and, while it is still queued and expanded, again with `poll_backoff_ms`,
+        showing "Waiting for the answer" until a terminal state, which it then shows like any other entry (code review:
+        a queued question moved into the history keeps being fetched). An expanded answer renders through the same pipeline as the current one, links as
         plain text and no image (VEC-TUTOR-6), so a stored answer cannot inject a link or fetch a resource.
       [unit] closed by default, each opener, focus on open and on close (and the fallback to the toolbar's "Ask the
-      tutor"), Escape inside the panel and from the page outside an editable field, not from inside a text area, the
+      tutor" when the opener was removed and when it is hidden), Escape inside the panel and from the page outside an editable field, not from inside a text area, the
       non-modal panel (no backdrop, a lesson control still clickable), polling while closed; the history cap, the
       toggle both ways, expanding fetches once and renders the answer, a failed fetch with Retry, an expanded answer
       whose text holds `[x](https://example.test)` and `![i](https://example.test/i.png)` renders zero `a` and zero

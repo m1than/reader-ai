@@ -14,17 +14,15 @@ const large = Array.from({ length: 30 }, (_, i) => ({
 }));
 
 /** A stub compile slot (the shape WEB-UI FR-UI-15 fills): a status and a Compile action on unpublished rows. */
-const stubSlot: CompileSlot = (l) =>
-  l.latest_sha256
-    ? null
-    : {
-        status: <span className="chip">not compiled yet</span>,
-        action: (
-          <button type="button" className="acme-button" data-variant="ghost" data-color="neutral" data-size="sm">
-            Compile
-          </button>
-        ),
-      };
+const stubSlot: CompileSlot = {
+  Status: ({ lesson }) => (lesson.latest_sha256 ? null : <span className="chip">not compiled yet</span>),
+  Action: ({ lesson }) =>
+    lesson.latest_sha256 ? null : (
+      <button type="button" className="acme-button" data-variant="ghost" data-color="neutral" data-size="sm">
+        Compile
+      </button>
+    ),
+};
 const withSlot: Decorator = (Story) => (
   <ServicesContext.Provider value={{ api: {} as never, notify: () => undefined, navigateAway: () => undefined, compileSlot: stubSlot }}>
     <Story />

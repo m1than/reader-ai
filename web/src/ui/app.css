@@ -503,6 +503,23 @@ h4 {
   overflow-wrap: break-word;
 }
 
+/* The compile slot (FR-UI-6): its Status above the row link, the default chip only while Status renders nothing. */
+.lesson-status {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+}
+
+.slot-status:empty {
+  display: none;
+}
+
+.slot-status:not(:empty) + .status-default {
+  display: none;
+}
+
 /* The compile slot's action: revealed on hover and focus-within, always on touch screens. */
 .row-action {
   position: relative;

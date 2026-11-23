@@ -172,6 +172,8 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
   const [code, setCode] = useState(original);
   const [editorModule, setEditorModule] = useState<EditorModule | null>(null);
   const host = useRef<HTMLDivElement>(null);
+  const area = useRef<HTMLTextAreaElement>(null);
+  const hadFocus = useRef(false);
   const handle = useRef<EditorHandle | null>(null);
   const latest = useRef({ resetting, run: (src: string) => controller.run(id, src) });
   latest.current = { resetting, run: (src: string) => controller.run(id, src) };
@@ -182,7 +184,11 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
     let live = true;
     loadEditor()
       .then((m) => {
-        if (live) setEditorModule(m);
+        if (!live) return;
+        // FR-NOTEBOOK-9 (code review): the user may be typing in the fallback; keep the text and the focus.
+        hadFocus.current = document.activeElement !== null && document.activeElement === area.current;
+        if (area.current) setCode(area.current.value);
+        setEditorModule(m);
       })
       .catch(() => undefined); // the text area stays: a lab can always be edited and run
     return () => {
@@ -201,6 +207,7 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
       },
     });
     handle.current = h;
+    if (hadFocus.current) h.focus();
     return () => {
       h.destroy();
       handle.current = null;
@@ -262,6 +269,7 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
         <div ref={host} className="lab-editor" />
       ) : (
         <textarea
+          ref={area}
           aria-label={codeLabel}
           spellCheck={false}
           wrap="off"
@@ -549,9 +557,11 @@ export function LessonView({
   const closeTutor = useCallback(() => {
     setTutorOpen(false);
     window.setTimeout(() => {
+      // SRV-TUTOR FR-TUTOR-11 (code review B2): back to the opener, unless it cannot take focus (removed, or hidden
+      // like the contents entry below 60rem); then the toolbar's "Ask the tutor".
       const o = opener.current;
       if (o && o.isConnected) o.focus();
-      else askButton.current?.focus();
+      if (!o || document.activeElement !== o) askButton.current?.focus();
     }, 0);
   }, []);
   const askAbout = (id: string, e: MouseEvent<HTMLButtonElement>) => {
@@ -579,12 +589,14 @@ export function LessonView({
         e.preventDefault();
         target.focus({ preventScroll: true });
         target.scrollIntoView?.({ block: 'start' });
-      } else if (e.key === '/' && aside) {
-        e.preventDefault();
-        openTutor(document.activeElement instanceof HTMLElement ? document.activeElement : null);
-      } else if (e.key === '?') {
+      } else if (e.key === '?' || (e.code === 'Slash' && e.shiftKey)) {
+        // `?`, also by its physical key: Shift+Slash types "," on a Russian layout.
         e.preventDefault();
         setShortcuts(true);
+      } else if ((e.key === '/' || e.code === 'Slash') && aside) {
+        // `/`, also by its physical key: Slash types "." on a Russian layout.
+        e.preventDefault();
+        openTutor(document.activeElement instanceof HTMLElement ? document.activeElement : null);
       }
     };
     document.addEventListener('keydown', onKey);

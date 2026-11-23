@@ -406,6 +406,18 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(dir, `${w}-list.png`), fullPage: true });
     await check(`${w}-list`);
+    if (w === WIDTHS[0]) {
+      // FR-UI-16 (code review B1): the production image serves /theme.js, and a stored Dark applies on reload.
+      const theme = await page.request.get('/theme.js');
+      expect.soft(theme.status(), 'GET /theme.js').toBe(200);
+      expect.soft(theme.headers()['content-type'] ?? '', '/theme.js content type').toMatch(/javascript/);
+      await page.evaluate(() => localStorage.setItem('reader-ai.theme', 'dark'));
+      await page.reload();
+      await expect.soft(page.locator('html'), 'stored dark applies on reload').toHaveAttribute('data-theme', 'dark');
+      await page.evaluate(() => localStorage.removeItem('reader-ai.theme'));
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
+    }
     // Design pass, FR-UI-6: every published lesson is a visible link on `/` before any click; a group of more than 12
     // lessons starts collapsed with exactly its published rows.
     for (const l of listed.filter((x) => x.latest_sha256))

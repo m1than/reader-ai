@@ -84,7 +84,9 @@ const Failed = ({ error, retry }: { error: unknown; retry: () => void }) => {
 function NotPublished({ lesson }: { lesson: LessonSummary }) {
   const { api, compileSlot } = useServices();
   const list = useQuery(queries(api).lessons());
-  const parts = compileSlot ? compileSlot(lesson) : null;
+  const Status = compileSlot?.Status;
+  const Action = compileSlot?.Action;
+  const chip = <span className="chip">Not published yet</span>;
   const siblings = (list.data?.lessons ?? []).filter((l) => l.course_id === lesson.course_id && l.latest_sha256 !== null);
   const previous = siblings.filter((l) => l.ordinal < lesson.ordinal).sort((a, b) => b.ordinal - a.ordinal)[0];
   const next = siblings.filter((l) => l.ordinal > lesson.ordinal).sort((a, b) => a.ordinal - b.ordinal)[0];
@@ -112,10 +114,21 @@ function NotPublished({ lesson }: { lesson: LessonSummary }) {
         }
       >
         <p className="muted">{`Lesson ${lesson.ordinal} of ${lesson.course_title} is not published yet.`}</p>
-        <p className="state-status">
-          {parts?.status ?? <span className="chip">Not published yet</span>}
-          {parts?.action ?? null}
-        </p>
+        {/* WEB-UI FR-UI-6: a div (the slot's parts may be block or interactive); the default chip shows while the
+            slot's Status renders nothing. */}
+        <div className="state-status">
+          {Status ? (
+            <span className="lesson-status">
+              <span className="slot-status">
+                <Status lesson={lesson} />
+              </span>
+              <span className="status-default">{chip}</span>
+            </span>
+          ) : (
+            chip
+          )}
+          {Action ? <Action lesson={lesson} /> : null}
+        </div>
       </StateBlock>
     </div>
   );

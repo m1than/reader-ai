@@ -71,6 +71,12 @@ describe('build (FR-UI-9)', () => {
     expect(joined).not.toMatch(/katex|KaTeX/);
     expect(joined).not.toMatch(/createHighlighterCore|shiki/);
   });
+
+  it('copies theme.js from src/public to the build root, where index.html loads it (FR-UI-16, code review B1)', () => {
+    expect(existsSync(join(outDir, 'theme.js'))).toBe(true);
+    expect(readFileSync(join(outDir, 'theme.js'), 'utf8')).toContain("localStorage.getItem('reader-ai.theme')");
+    expect(readFileSync(join(outDir, 'index.html'), 'utf8')).toMatch(/<head>[\s\S]*<script src="\/theme\.js"><\/script>[\s\S]*<\/head>/);
+  });
 });
 
 describe('bundle budget (NFR-UI-1)', () => {

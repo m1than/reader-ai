@@ -1,4 +1,4 @@
-// The theme choice (WEB-UI FR-UI-16): System, Light or Dark, stored under one key. web/public/theme.js applies the
+// The theme choice (WEB-UI FR-UI-16): System, Light or Dark, stored under one key. web/src/public/theme.js applies the
 // stored value before first paint with the same rule; this module reads, applies and stores later changes.
 export type Theme = 'system' | 'light' | 'dark';
 

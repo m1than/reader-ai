@@ -1061,7 +1061,31 @@ tasks:
         code-cell toolbars; j/k by event.code (Russian layout case tested); no compile slot in the sidebar and distinct
         sidebar-/drawer- id prefixes; scope: shortcuts, cell toolbar, recall deck and current section marked
         owner-approved in FR-NOTEBOOK-11; NFR-UI-1 and NFR-NOTEBOOK-1 share one build (sourcemap hidden), bundle.test.ts
-        removed. Code: one deep-reviewer round to follow." }
+        removed.",
+      code_review: "deep-reviewer code review of c1e3103 (single round, outside the complex areas): changes, 2 blocking;
+        every finding applied without a second round (coordinator, 2026-11-24). Findings and fixes —
+        B1 theme.js never reached the production image (the Caddy build copies src only, so /theme.js fell back to
+        index.html and was refused under nosniff): moved to web/src/public with `publicDir: 'src/public'`
+        (vite.config.ts), WEB-UI `paths` updated; build.test finds theme.js at the build root; the live `ui` step asserts
+        GET /theme.js 200 with a JavaScript content type and that a stored dark applies on reload; FR-UI-16 names the
+        index.html regex as the placement oracle.
+        B2 closing the tutor dropped focus to <body> below 60rem when it was opened from the hidden contents entry:
+        after focus() the lesson view falls back to the toolbar's Ask the tutor whenever document.activeElement is not
+        the opener (FR-TUTOR-11 wording: 'cannot take focus'); panel.design.test.tsx case with an opener that refuses
+        focus.
+        Non-blocking — drawer popup id course-drawer named by aria-controls (asserted); mutants killed: Alt and Meta,
+        input and select, alertdialog, / calling preventDefault, / and ? by code Slash with Russian-layout keys, lang at
+        exactly half and with a Cyrillic-heavy code cell, an action on a published row, exact Copy texts (lab and code
+        block), INV-RENDER-1 with a 5-column table and a forged data-render-chrome in raw HTML (stays text); compile
+        slot as `{Status, Action}` components (stateful component test), an empty Status falls back to the chip via
+        .slot-status:empty CSS (rules checked by the CSS scan), status and action above the row link (z-index), a div on
+        the not-published page (FR-UI-6, FR-NOTEBOOK-1); nav badge with hidden words and a hidden ', ' so the link reads
+        'Sign-ups, 3 waiting'; code blocks are role=group with a tab stop only while they overflow (ResizeObserver);
+        error boundaries keep the plain triggers when the user-menu or drawer chunk fails (lazy.test.tsx); the editor
+        takes the fallback's text and focus when it arrives mid-typing; a queued question in the history keeps being
+        fetched with the panel's backoff until terminal.
+        Checks: 335 Vitest tests, 212 Playwright tests (chromium, auth-dark, auth-light; run on port 4174 because another
+        worktree's test server held 4173), LOCAL CI below." }
   - { id: V.titles-data, stage: V, kind: fix, track: product, status: todo, needs: [V.design-pass],
       what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
         material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.

@@ -2,12 +2,24 @@
 // The user menu and the course drawer are lazy chunks loaded on their triggers' first activation (review B1); until
 // then the triggers are plain buttons styled like the library's ghost buttons.
 import { Link } from '@tanstack/react-router';
-import { lazy, Suspense, useRef, useState } from 'react';
+import { Component, lazy, Suspense, useRef, useState, type ReactNode } from 'react';
 import { MarkIcon, MenuIcon } from '../ui/icons';
 import { isCurrent, NAV_ITEMS } from './nav';
 
 const UserMenu = lazy(() => import('./UserMenu'));
 const CourseDrawer = lazy(() => import('./CourseDrawer'));
+
+/** A lazy chunk that fails to load (FR-UI-11, code review) shows its fallback, the plain trigger, instead of
+ * removing it. */
+class LazyBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  override state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  override render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 const ghost = { className: 'acme-button', 'data-variant': 'ghost', 'data-color': 'neutral', 'data-size': 'sm' } as const;
 
@@ -75,24 +87,34 @@ export function Header({
           return (
             <Link key={item.to} to={item.to} className="nav-link" aria-current={current ? 'page' : undefined}>
               {item.label}
-              {item.badge ? item.badge() : null}
+              {item.badge ? (
+                <>
+                  {/* FR-UI-11: the link reads "<label>, <badge's words>"; the badge shows its number. */}
+                  <span className="visually-hidden">, </span>
+                  {item.badge()}
+                </>
+              ) : null}
             </Link>
           );
         })}
       </nav>
       <span className="header-end">
         {menuLoaded ? (
-          <Suspense fallback={<PlainUserTrigger displayName={displayName} />}>
-            <UserMenu displayName={displayName} defaultOpen onSignOut={onSignOut} />
-          </Suspense>
+          <LazyBoundary fallback={<PlainUserTrigger displayName={displayName} />}>
+            <Suspense fallback={<PlainUserTrigger displayName={displayName} />}>
+              <UserMenu displayName={displayName} defaultOpen onSignOut={onSignOut} />
+            </Suspense>
+          </LazyBoundary>
         ) : (
           <PlainUserTrigger displayName={displayName} onClick={() => setMenuLoaded(true)} />
         )}
       </span>
       {drawerLoaded ? (
-        <Suspense fallback={null}>
-          <CourseDrawer open={drawerOpen} onClose={closeDrawer} current={currentLesson} />
-        </Suspense>
+        <LazyBoundary fallback={null}>
+          <Suspense fallback={null}>
+            <CourseDrawer open={drawerOpen} onClose={closeDrawer} current={currentLesson} />
+          </Suspense>
+        </LazyBoundary>
       ) : null}
     </header>
   );

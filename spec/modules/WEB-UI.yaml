@@ -59,7 +59,7 @@ title: App shell — pinned library build, Calm tokens, routing, API client, sig
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes. Amendment 2026-11-23 (V/design-pass, the owner's approval of the design audit's P1 and P2 items): FR-UI-1 entries (breadcrumbs, menu, drawer, icon; tree-view and collapsible rejected, reasons in the text), FR-UI-2 and FR-UI-5 wording for the theme and the user menu, FR-UI-6 (Continue block, course groups with progress and the 12-row rule, full-width rows, compile slot), FR-UI-7 (catalogue sentence case, icon, +n more), FR-UI-10 (two typefaces, heading scale, figures, lesson lang and hyphens, wide blocks, table breaking, radii, button sizes and variants, motion), FR-UI-11 (header with NAV_ITEMS and user menu, state blocks), new FR-UI-16 (theme choice) and FR-UI-17 (course sidebar). deep-reviewer (Fable) single round on the spec diff (04e396b..d3c0a68, outside the complex areas): changes; all findings applied without a second round (coordinator, 2026-11-23), each with its fix in docs/progress.yaml V.design-pass `review`: B1 the user menu and the drawer load lazily on first open and the initial chunk holds no menu, drawer or icon module (FR-UI-11, FR-UI-17, NFR-UI-1 check; the initial chunk was 111,507 B of 121,153 and those modules add about 18 KB); B2 the compile slot is `{status, action}` called on every row (FR-UI-6, FR-UI-15's shape); B3 `NAV_ITEMS` entries take an optional `badge`; B5 the stored theme is applied before first paint by the classic external script web/public/theme.js (FR-UI-16, claimed in `paths`); non-blocking: one disclosure control per course group (the button under the list), lang on the lesson container from the Cyrillic rule only, named live hooks, the 56px header bound sourced, the dark overflow claim narrowed, no compile slot in the sidebar and distinct ids for its two copies, the 12/13-row, all-published, hash-scroll and drawer focus tests, one shared Vite build for NFR-UI-1 and NOTEBOOK's NFR-NOTEBOOK-1. Approved by agent (coordinator, 2026-11-23)"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes. Amendment 2026-11-23 (V/design-pass, the owner's approval of the design audit's P1 and P2 items): FR-UI-1 entries (breadcrumbs, menu, drawer, icon; tree-view and collapsible rejected, reasons in the text), FR-UI-2 and FR-UI-5 wording for the theme and the user menu, FR-UI-6 (Continue block, course groups with progress and the 12-row rule, full-width rows, compile slot), FR-UI-7 (catalogue sentence case, icon, +n more), FR-UI-10 (two typefaces, heading scale, figures, lesson lang and hyphens, wide blocks, table breaking, radii, button sizes and variants, motion), FR-UI-11 (header with NAV_ITEMS and user menu, state blocks), new FR-UI-16 (theme choice) and FR-UI-17 (course sidebar). deep-reviewer (Fable) single round on the spec diff (04e396b..d3c0a68, outside the complex areas): changes; all findings applied without a second round (coordinator, 2026-11-23), each with its fix in docs/progress.yaml V.design-pass `review`: B1 the user menu and the drawer load lazily on first open and the initial chunk holds no menu, drawer or icon module (FR-UI-11, FR-UI-17, NFR-UI-1 check; the initial chunk was 111,507 B of 121,153 and those modules add about 18 KB); B2 the compile slot is `{status, action}` called on every row (FR-UI-6, FR-UI-15's shape); B3 `NAV_ITEMS` entries take an optional `badge`; B5 the stored theme is applied before first paint by the classic external script web/public/theme.js (FR-UI-16, claimed in `paths`); non-blocking: one disclosure control per course group (the button under the list), lang on the lesson container from the Cyrillic rule only, named live hooks, the 56px header bound sourced, the dark overflow claim narrowed, no compile slot in the sidebar and distinct ids for its two copies, the 12/13-row, all-published, hash-scroll and drawer focus tests, one shared Vite build for NFR-UI-1 and NOTEBOOK's NFR-NOTEBOOK-1. Approved by agent (coordinator, 2026-11-23). Code review of c1e3103 (single round, outside the complex areas): changes, all applied without a second round (findings and fixes in docs/progress.yaml V.design-pass `code_review`): B1 theme.js moves to web/src/public with `publicDir: 'src/public'` (the production Caddy image copies src only) plus live asserts; non-blocking: the compile slot as `{Status, Action}` components with the empty-status fallback, the drawer popup id named by aria-controls, the nav badge's hidden words, error boundaries around the lazy menu and drawer, and the extra mutant-killing cases"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -72,7 +72,7 @@ paths:
   - web/scripts/**
   - web/vendor/**
   - web/index.html
-  - web/public/theme.js
+  - web/src/public/**
   - web/package.json
   - web/package-lock.json
   - web/vite.config.ts
@@ -193,20 +193,28 @@ requirements:
       - **Rows.** A row is full width with a hairline `--acme-border` separator and a `--acme-hover` fill on hover; a
         published row's link covers the whole row (its hit area is the row). Ordinal, date and metadata use tabular
         figures. The default status of an unpublished row is the neutral chip "not published yet"; an unpublished
-        title is muted. **Compile slot (shaped for FR-UI-15):** the app's `Services` carry an optional
-        `compileSlot?: (lesson: LessonSummary) => { status: ReactNode | null; action: ReactNode | null } | null`
-        (`AppRoot` takes it as a prop and puts it there). When present it is called for **every** row of the list,
-        published ones included, and for the not-published page (WEB-NOTEBOOK FR-NOTEBOOK-1); a `null` result, or a
-        `null` part, renders nothing of that part. A non-null `status` replaces the default status (the chip of an
-        unpublished row; nothing on a published one) and is always visible; a non-null `action` sits at the row's end,
-        revealed on row hover and `:focus-within` and always shown under `(hover: none)`. Without the slot, rows show
-        the default status. The course sidebar (FR-UI-17) renders no slot (review). This pass renders no Compile
-        control of its own.
+        title is muted. **Compile slot (shaped for FR-UI-15; code review: components, so V/compile-ui's stateful
+        control fits):** the app's `Services` carry an optional `compileSlot?: { Status?: ComponentType<{ lesson:
+        LessonSummary }>; Action?: ComponentType<{ lesson: LessonSummary }> }` (`AppRoot` takes it as a prop and puts it
+        there). When present, both are rendered as React components for **every** row of the list, published ones
+        included, and on the not-published page (WEB-NOTEBOOK FR-NOTEBOOK-1). Constraints:
+        - `Status` renders inside `span.slot-status`, followed by the default status in `span.status-default` (the chip
+          of an unpublished row; nothing on a published one); app.css hides the default while `.slot-status` is not
+          `:empty` and hides `.slot-status` while it is, so a `Status` that renders nothing (`null`) falls back to the
+          chip. The status is always visible and sits above the row link's hit area (`position: relative`,
+          `z-index: 1`), so a link or button inside it stays clickable;
+        - `Action` renders inside `span.row-action` at the row's end, also above the row link, revealed on row hover
+          and `:focus-within` and always shown under `(hover: none)`; interactive controls belong in `Action`;
+        - on the not-published page the parts render inside a `div` (not a `p`), with the action always visible.
+        Without the slot, rows show the default status. The course sidebar (FR-UI-17) renders no slot. This pass
+        renders no Compile control of its own.
       States: loading (skeleton), empty ("No lessons yet"), error (FR-UI-11's state block with Retry). [unit] the
       Continue block (order, cap, absence), the summary text, the 12-row rule at 12 and at 13 lessons, published rows
       visible while collapsed, the toggle both ways with its `aria-expanded` and `aria-controls`, no toggle on an
-      all-published group, the hash expand and its `scrollIntoView`, the compile slot called for every row (published
-      ones included) with status and action rendered, a `null` result and a `null` part, and absent; [story] Light,
+      all-published group, the hash expand and its `scrollIntoView`, the compile slot's `Status` and `Action` rendered
+      for every row (published ones included, an action on a published row too), a `Status` rendering `null` leaving
+      `.slot-status` empty beside the default chip (with app.css's two hiding rules checked by the CSS scan test), a
+      stateful slot component keeping its state across re-renders, and no slot; [story] Light,
       Dark, Empty, a large course (30 lessons, 2 published) and WithCompileSlot (a stub slot); [live] the `ui` step:
       on `/` every published lesson of `GET /api/lessons` has a visible `a[href="/lessons/<id>"]` before any click,
       and each group of more than 12 lessons starts collapsed with exactly its published rows shown.
@@ -325,12 +333,14 @@ requirements:
       mark, SRV-AUTH FR-AUTH-19); a `nav` labelled "Main" whose links come from one declared array `NAV_ITEMS` of
       `{label, to, owner_only, badge?}` (today "Lessons" `/` and "Import" `/import` owner-only; other branches append
       entries without changing the header's code; `badge` is an optional `() => ReactNode` rendered inside the link
-      after its label, for example V/signup's count), each a ghost link with `aria-current="page"` and the
+      after its label, for example V/signup's count; the badge carries visually hidden words so the link reads as a
+      phrase, e.g. "Sign-ups, 3 waiting", while showing "3"), each a ghost link with `aria-current="page"` and the
       `--acme-hover` fill when its route is the current one (`/` also for `/lessons/*`); then, at the end, the user
       menu: a plain ghost button showing the `display_name`, with the accessible name "Account menu for
       <display_name>" (the visible text is part of it, WCAG 2.5.3) and `aria-haspopup="menu"`, whose first activation
       loads the library `Menu` as a lazy chunk and opens it, holding the theme choice (FR-UI-16) and "Sign out"
-      (FR-UI-5). **Initial chunk (review B1):** the header and the shell import no `@acme/ui/menu`, `@acme/ui/drawer`
+      (FR-UI-5). If a lazy chunk (the user menu, the course drawer) fails to load, an error boundary keeps the plain
+      trigger on screen (code review) instead of removing it. **Initial chunk (review B1):** the header and the shell import no `@acme/ui/menu`, `@acme/ui/drawer`
       or `@acme/ui/icon` module statically (the initial chunk measured 111,507 B against NFR-UI-1's 121,153 B, and those
       modules add about 18 KB); icons in the shell are app-owned inline SVGs. The header is one row at every width
       down to 360px (below 40rem the brand text and the display name are visually hidden, their icons stay); its
@@ -369,7 +379,9 @@ requirements:
       Light and Dark set `data-theme` to `light` or `dark`. The choice is stored in `localStorage` under
       `reader-ai.theme` as `system`, `light` or `dark` (a display preference, not a credential: FR-UI-5's rule is about
       credentials). **Before first paint (review B5):** `web/index.html` loads the classic external script
-      `/theme.js` (`web/public/theme.js`, copied to the build's root; `<script src="/theme.js"></script>` in `<head>`,
+      `/theme.js` (`web/src/public/theme.js`; vite.config.ts sets `publicDir: 'src/public'`, so the file is copied to
+      the build's root and reaches the production image, whose Caddy build copies `src` but not `web/public` — code
+      review B1; `<script src="/theme.js"></script>` in `<head>`,
       before any stylesheet and the module script, no inline script, so the app CSP's `script-src 'self'` allows it),
       which reads the stored value and sets the attribute synchronously while the document is parsed, so the first
       painted frame already has the chosen scheme; the app's `web/src/ui/theme.ts` (`readTheme`, `applyTheme`) applies
@@ -380,7 +392,9 @@ requirements:
       apply function for each stored value, a throwing storage, the menu's radio state and the attribute after a
       choice; `theme.js` run in a `node:vm` context with a fake document and storage gives the same attribute as
       `applyTheme` for every stored value and a throwing storage; `index.html` loads it from `<head>` before the module
-      script and has no inline script; [browser] with `colorScheme: 'dark'` and Light stored, `documentElement.dataset.theme`
+      script and has no inline script (this regex check on index.html is the oracle for the placement; the build test
+      also finds `theme.js` at the build's root); [live] the `ui` step: `GET /theme.js` answers 200 with a JavaScript
+      content type, and with `dark` stored a reload gives `html[data-theme="dark"]`; [browser] with `colorScheme: 'dark'` and Light stored, `documentElement.dataset.theme`
       read in the first `requestAnimationFrame` (an `addInitScript` hook) is `light`, `html`'s computed background is
       the light `--acme-canvas`, and a python code token's colour changes without a reload after Dark is chosen; [story]
       the user menu open in Light and Dark.
@@ -402,7 +416,8 @@ requirements:
       the viewport height tall and scrolling inside itself; below 75rem it is not displayed, and the header's "Courses"
       button (FR-UI-11, a plain button) loads the library `Drawer` as a lazy chunk on its first activation (review B1)
       and opens the sidebar in it (side inline-start, modal, Escape and the backdrop close it, following a link closes
-      it and focus returns to the button). The static column and the drawer's copy derive their element ids from
+      it and focus returns to the button; the drawer's popup has `id="course-drawer"`, which the open button's
+      `aria-controls` names). The static column and the drawer's copy derive their element ids from
       distinct prefixes (`sidebar-` and `drawer-`), so no id repeats in the document. [unit] grouping, counts, current
       lesson, expansion, the 12-row rule, no compile slot, the drawer open, close, close-on-navigate and focus back on
       the Courses button, no duplicate id with the drawer open; [story] Light, Dark, a large course; [live] the `ui`

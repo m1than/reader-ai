@@ -1,17 +1,17 @@
 // App-wide services handed to routes and the lesson view.
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useContext, type ComponentType } from 'react';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
 import type { Api, LessonSummary } from './api';
 
-/** What the compile slot renders for one lesson (WEB-UI FR-UI-6, the shape FR-UI-15 fills). */
-export interface CompileSlotParts {
-  /** Replaces the default status when non-null; always visible. */
-  status: ReactNode | null;
-  /** Shown at the row's end, revealed on hover and focus-within. */
-  action: ReactNode | null;
+/** The compile slot (WEB-UI FR-UI-6, the shape FR-UI-15 fills): components, rendered for every lesson row and on the
+ * not-published page, so a stateful control fits. */
+export interface CompileSlot {
+  /** Replaces the default status while it renders something; always visible. */
+  Status?: ComponentType<{ lesson: LessonSummary }>;
+  /** At the row's end, revealed on hover and focus-within; interactive controls belong here. */
+  Action?: ComponentType<{ lesson: LessonSummary }>;
 }
-export type CompileSlot = (lesson: LessonSummary) => CompileSlotParts | null;
 
 export interface Services {
   api: Api;

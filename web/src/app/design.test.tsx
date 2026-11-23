@@ -3,7 +3,7 @@
 // compile slot, notices, the header with NAV_ITEMS and the user menu, state blocks, the theme choice and the course
 // sidebar. Synthetic lessons only.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { load } from './testing/load';
 
@@ -53,7 +53,7 @@ const big = () => course('big', 'Big course', 30, [1, 17]);
 const small = () => course('small', 'Small course', 3, [2], 1);
 const lessons = () => [...big(), ...small()];
 
-type Slot = (l: L) => { status: ReactNode | null; action: ReactNode | null } | null;
+type Slot = { Status?: (p: { lesson: L }) => ReactNode; Action?: (p: { lesson: L }) => ReactNode };
 const mount = async (path: string, opts: { me?: unknown; list?: L[]; compileSlot?: Slot; lesson?: unknown } = {}) => {
   const { AppRoot } = await load(() => import('./AppRoot'));
   expect(AppRoot).toBeTypeOf('function');
@@ -181,27 +181,44 @@ describe('lesson list (FR-UI-6, design pass)', () => {
     }
   });
 
-  it('calls the compile slot for every row, published ones included, showing its status and action', async () => {
-    const slot = vi.fn<Slot>((l) =>
-      l.lesson_id === 'small-3'
-        ? null
-        : { status: <span>{`status ${l.lesson_id}`}</span>, action: l.latest_sha256 ? null : <button type="button">{`Compile ${l.lesson_id}`}</button> },
-    );
+  it('renders the slot Status and Action components for every row, published ones included', async () => {
+    const seen: string[] = [];
+    const slot: Slot = {
+      Status: ({ lesson }) => {
+        seen.push(lesson.lesson_id);
+        return lesson.lesson_id === 'small-3' ? null : <span>{`status ${lesson.lesson_id}`}</span>;
+      },
+      Action: ({ lesson }) => <button type="button">{`Compile ${lesson.lesson_id}`}</button>,
+    };
     await mount('/', { list: small(), compileSlot: slot });
     await waitFor(() => expect(group('small')).toBeTruthy());
     const g = group('small');
-    expect(slot.mock.calls.map((c) => c[0].lesson_id)).toEqual(expect.arrayContaining(['small-1', 'small-2', 'small-3']));
-    // small-1: unpublished, slot status replaces the default chip, action shown.
-    expect(within(g).getByText('status small-1')).toBeTruthy();
-    expect(within(g).getByRole('button', { name: 'Compile small-1' })).toBeTruthy();
-    // small-2: published, status shown, null action renders nothing.
-    expect(within(g).getByText('status small-2')).toBeTruthy();
-    expect(within(g).queryByRole('button', { name: 'Compile small-2' })).toBeNull();
-    // small-3: a null result keeps the default chip.
-    const row3 = within(g).getByText('Small course lesson 3').closest('li') as HTMLElement;
-    expect(within(row3).getByText('not published yet')).toBeTruthy();
-    const row1 = within(g).getByText('Small course lesson 1').closest('li') as HTMLElement;
-    expect(within(row1).queryByText('not published yet')).toBeNull();
+    expect(seen).toEqual(expect.arrayContaining(['small-1', 'small-2', 'small-3']));
+    const row = (n: number) => within(g).getByText(`Small course lesson ${n}`).closest('li') as HTMLElement;
+    // small-1: unpublished; the slot's status fills .slot-status, so app.css hides the default chip.
+    expect(within(row(1)).getByText('status small-1').closest('.slot-status')).toBeTruthy();
+    expect((row(1).querySelector('.slot-status') as HTMLElement).matches(':empty')).toBe(false);
+    expect(within(row(1)).getByRole('button', { name: 'Compile small-1' }).closest('.row-action')).toBeTruthy();
+    // small-2: published; status and an action on a published row too, no default chip at all.
+    expect(within(row(2)).getByText('status small-2')).toBeTruthy();
+    expect(within(row(2)).getByRole('button', { name: 'Compile small-2' })).toBeTruthy();
+    expect(row(2).querySelector('.status-default')).toBeNull();
+    // small-3: Status rendered null, so .slot-status is empty beside the default chip (shown by app.css).
+    expect((row(3).querySelector('.slot-status') as HTMLElement).matches(':empty')).toBe(true);
+    expect(within(row(3).querySelector('.status-default') as HTMLElement).getByText('not published yet')).toBeTruthy();
+  });
+
+  it('keeps a stateful slot component\'s state across re-renders', async () => {
+    const Action = ({ lesson }: { lesson: L }) => {
+      const [n, setN] = useState(0);
+      return <button type="button" onClick={() => setN((x) => x + 1)}>{`Compile ${lesson.lesson_id} ${n}`}</button>;
+    };
+    await mount('/', { list: course('big', 'Big course', 30, [1, 17]), compileSlot: { Action } });
+    await waitFor(() => expect(group('big')).toBeTruthy());
+    fireEvent.click(within(group('big')).getByRole('button', { name: 'Compile big-1 0' }));
+    expect(within(group('big')).getByRole('button', { name: 'Compile big-1 1' })).toBeTruthy();
+    fireEvent.click(within(group('big')).getByRole('button', { name: 'Show all 30 lessons' }));
+    expect(within(group('big')).getByRole('button', { name: 'Compile big-1 1' })).toBeTruthy();
   });
 
   it('shows only the default status without a compile slot', async () => {
@@ -260,13 +277,22 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
     ]);
     if (!mod.NAV_ITEMS) return;
     // An appended entry with a badge (V/signup's count) appears without changes to the header.
-    mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false, badge: () => <span className="nav-badge">7</span> });
+    // The badge shows its number and carries hidden words; the header adds the hidden ", " (code review).
+    const badge = () => (
+      <span className="nav-badge">
+        7<span className="visually-hidden"> waiting</span>
+      </span>
+    );
+    mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false, badge });
     try {
       await mount('/');
       const nav = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
       const links = within(nav).getAllByRole('link');
-      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Test entry7']);
-      expect(links[2]!.querySelector('.nav-badge')?.textContent).toBe('7');
+      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Test entry, 7 waiting']);
+      // The accessible name joins the parts (jsdom's name computation drops the spaces between inline parts, which a
+      // browser keeps: "Test entry, 7 waiting"), so compare without whitespace.
+      expect(within(nav).getByRole('link', { name: (n) => n.replace(/\s+/g, '') === 'Testentry,7waiting' })).toBe(links[2]);
+      expect(links[2]!.querySelector('.nav-badge')?.firstChild?.textContent).toBe('7');
       mod.NAV_ITEMS.pop();
       mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false });
       cleanup();
@@ -398,7 +424,7 @@ describe('theme (FR-UI-16)', () => {
     const { applyTheme } = await dyn<ThemeModule>('../ui/theme');
     expect(applyTheme).toBeTypeOf('function');
     if (!applyTheme) return;
-    const src = readText('web/public/theme.js');
+    const src = readText('web/src/public/theme.js');
     const run = (getItem: () => string | null) => {
       const attrs = new Map<string, string>();
       const documentElement = {
@@ -456,7 +482,10 @@ describe('course sidebar (FR-UI-17)', () => {
   });
 
   it('closed groups show no rows; opening one shows all of a small course, without the compile slot', async () => {
-    const slot = vi.fn<Slot>((l) => ({ status: <span>{`status ${l.lesson_id}`}</span>, action: <button type="button">{`Compile ${l.lesson_id}`}</button> }));
+    const slot: Slot = {
+      Status: ({ lesson }) => <span>{`status ${lesson.lesson_id}`}</span>,
+      Action: ({ lesson }) => <button type="button">{`Compile ${lesson.lesson_id}`}</button>,
+    };
     await mount('/lessons/big-1', { compileSlot: slot });
     const btn = await waitFor(() => within(sidebar()).getByRole('button', { name: /Small course/ }));
     const list = document.getElementById(btn.getAttribute('aria-controls') ?? '');
@@ -478,6 +507,9 @@ describe('course sidebar (FR-UI-17)', () => {
     });
     expect(open.getAttribute('aria-expanded')).toBe('true');
     const dialog = await screen.findByRole('dialog');
+    // aria-controls names the drawer's popup (code review).
+    expect(open.getAttribute('aria-controls')).toBe('course-drawer');
+    expect(document.getElementById('course-drawer')).toBeTruthy();
     const navInDrawer = within(dialog).getByRole('navigation', { name: 'Courses' });
     // The static column and the drawer's copy share no id.
     const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);

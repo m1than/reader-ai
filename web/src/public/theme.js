@@ -1,6 +1,7 @@
 // WEB-UI FR-UI-16: the stored theme on <html> before first paint. A classic external script loaded from <head> (the
-// app CSP allows 'self' scripts and no inline one). Same rule as web/src/ui/theme.ts: light or dark set data-theme,
-// anything else (or a blocked storage) leaves the system scheme.
+// app CSP allows 'self' scripts and no inline one); it lives in src/public (Vite's publicDir), so the production image,
+// which copies src, serves it at /theme.js. Same rule as web/src/ui/theme.ts: light or dark set data-theme, anything
+// else (or a blocked storage) leaves the system scheme.
 (function () {
   var value = null;
   try {

@@ -79,8 +79,9 @@ function HistoryEntry({ item, lessonId, api }: { item: HistoryItem; lessonId: st
           ? 'answered, not fully grounded'
           : 'answered'
         : messageFor(item.error_code ?? (item.state === 'expired' ? 'expired' : 'tutor_failed'));
+  const [polls, setPolls] = useState(0);
   const fetchOnce = () => {
-    setLoaded({ kind: 'loading' });
+    setLoaded((l) => (l.kind === 'done' ? l : { kind: 'loading' }));
     api.getQuestion(lessonId, item.question_id).then(
       (state) =>
         setLoaded({
@@ -90,10 +91,20 @@ function HistoryEntry({ item, lessonId, api }: { item: HistoryItem; lessonId: st
       () => setLoaded({ kind: 'failed' }),
     );
   };
+  // A queued entry keeps being fetched with the panel's backoff while it is open and still waiting (code review).
+  const waiting = loaded.kind === 'done' && loaded.shown.kind === 'waiting';
+  useEffect(() => {
+    if (!open || !waiting) return undefined;
+    const t = setTimeout(() => {
+      setPolls((n) => n + 1);
+      fetchOnce();
+    }, POLL_BACKOFF_MS[Math.min(polls, POLL_BACKOFF_MS.length - 1)]);
+    return () => clearTimeout(t);
+  }, [open, waiting, loaded]);
   const toggle = () => {
     const next = !open;
     setOpen(next);
-    if (next && item.state !== 'queued' && loaded.kind === 'idle') fetchOnce();
+    if (next && (loaded.kind === 'idle' || waiting)) fetchOnce();
   };
   return (
     <li>
@@ -101,7 +112,7 @@ function HistoryEntry({ item, lessonId, api }: { item: HistoryItem; lessonId: st
         <span>{item.question}</span> <span className="muted">{status}</span>
       </button>
       <div id={panelId} className="history-answer" hidden={!open}>
-        {!open ? null : item.state === 'queued' ? (
+        {!open ? null : loaded.kind === 'done' && loaded.shown.kind === 'waiting' ? (
           <p className="muted">Waiting for the answer</p>
         ) : loaded.kind === 'done' ? (
           <Result shown={loaded.shown} />

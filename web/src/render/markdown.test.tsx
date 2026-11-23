@@ -81,11 +81,19 @@ describe('markdown pipeline (FR-RENDER-2)', () => {
     const hostile = cases()
       .map((c) => c.output.data?.['text/markdown'])
       .filter((s): s is string => typeof s === 'string');
-    for (const source of [explainSource(), ...hostile]) {
+    // Design pass (INV-RENDER-1, code review): a 5-column table, whose wrapper is the module's trusted chrome, and a
+    // forged chrome mark in raw HTML, which stays text.
+    const table = '| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |';
+    const forgery = '<p data-render-chrome class="x">forged</p>';
+    for (const source of [explainSource(), ...hostile, table, forgery]) {
       const { container, unmount } = render(<Markdown source={source} />);
       expect(violations(container)).toEqual([]);
       unmount();
     }
+    const { container } = render(<Markdown source={`${table}\n\n${forgery}`} />);
+    expect(container.querySelector('.table-wide[data-render-chrome] > table')).toBeTruthy();
+    expect(container.querySelector('.x, p[data-render-chrome]')).toBeNull();
+    expect(container.textContent).toContain('<p data-render-chrome class="x">forged</p>');
   });
 });
 

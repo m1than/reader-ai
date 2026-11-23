@@ -17,10 +17,23 @@ const date = (iso: string, locale: string) => {
 };
 const published = (l: LessonSummary) => l.latest_sha256 !== null;
 
+/** FR-UI-6: the slot's Status, then the default status; app.css shows the default only while `.slot-status` is empty. */
+export function RowStatus({ lesson, slot }: { lesson: LessonSummary; slot: CompileSlot | undefined }) {
+  const fallback = published(lesson) ? null : <span className="chip">not published yet</span>;
+  if (!slot?.Status) return fallback ? <span className="lesson-status">{fallback}</span> : null;
+  const { Status } = slot;
+  return (
+    <span className="lesson-status">
+      <span className="slot-status">
+        <Status lesson={lesson} />
+      </span>
+      {fallback ? <span className="status-default">{fallback}</span> : null}
+    </span>
+  );
+}
+
 function Row({ lesson, locale, slot }: { lesson: LessonSummary; locale: string; slot: CompileSlot | undefined }) {
-  const parts = slot ? slot(lesson) : null;
-  const status = parts?.status ?? (published(lesson) ? null : <span className="chip">not published yet</span>);
-  const action = parts?.action ?? null;
+  const Action = slot?.Action;
   return (
     <li className={published(lesson) ? 'lesson-row published' : 'lesson-row'}>
       <span className="lesson-ordinal" aria-hidden="true">
@@ -36,10 +49,14 @@ function Row({ lesson, locale, slot }: { lesson: LessonSummary; locale: string; 
         )}
       </span>
       <span className="lesson-meta">
-        {status ? <span className="lesson-status">{status}</span> : null}
+        <RowStatus lesson={lesson} slot={slot} />
         <time dateTime={lesson.updated_at}>{date(lesson.updated_at, locale)}</time>
       </span>
-      {action ? <span className="row-action">{action}</span> : null}
+      {Action ? (
+        <span className="row-action">
+          <Action lesson={lesson} />
+        </span>
+      ) : null}
     </li>
   );
 }
