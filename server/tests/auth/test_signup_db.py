@@ -296,6 +296,8 @@ async def test_global_limit(pg: Pg, tmp_path: Path) -> None:
         assert await count(engine, "signup_attempts") == 60
     await execute(engine, "DELETE FROM signup_attempts")
     await execute(engine, "INSERT INTO signup_attempts (at) SELECT now() FROM generate_series(1, 59)")
+    # Probabilistic: 80 concurrent calls race for the last row; the oracle holds for every interleaving, but a
+    # run exercises only the interleavings the scheduler produces (a lock regression may pass by luck once).
     async with client(s, engine) as c:
         statuses: list[int] = []
 
@@ -690,7 +692,8 @@ async def test_expiry_skips_a_row_an_approve_holds(pg: Pg, tmp_path: Path) -> No
     old = await insert_pending(engine, "lc-held", age_s=PENDING_TTL_S + 1)
     async with engine.begin() as conn:
         await conn.execute(text("SELECT 1 FROM users WHERE id = :u FOR UPDATE"), {"u": old})
-        await cleanup(engine)  # SKIP LOCKED: does not wait, does not delete
+        with anyio.fail_after(30):  # SKIP LOCKED: does not wait (a regression fails here, never hangs)
+            await cleanup(engine)  # and does not delete
         await conn.execute(text("UPDATE users SET state = 'active' WHERE id = :u"), {"u": old})
     assert await count(engine, "users", "id = :u AND state = 'active'", u=old) == 1
     await engine.dispose()

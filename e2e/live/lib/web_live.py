@@ -229,18 +229,21 @@ def cleanup_signups(project: str, out: Path) -> None:
     if not path.exists():
         return
     created = json.loads(path.read_text("utf-8"))
-    handles = [h for h in created.get("handles", []) if RUN_HANDLE_RE.match(h)]
-    ids = {i for i in created.get("ids", []) if UUID_RE.match(i)}
+    handles = [h for h in created.get("handles", []) if isinstance(h, str) and RUN_HANDLE_RE.fullmatch(h)]
+    ids = {i for i in created.get("ids", []) if isinstance(i, str) and UUID_RE.fullmatch(i)}
     for handle in handles:
         code, found = psql(project, f"SELECT id FROM users WHERE handle = '{handle}' AND source = 'signup';")
-        if code == 0 and UUID_RE.match(found.strip()):
+        if code == 0 and UUID_RE.fullmatch(found.strip()):
             ids.add(found.strip())
     removed = 0
     for uid in sorted(ids):
+        # Every delete is guarded by source = 'signup': an id that names a configured user deletes nothing.
+        mine = f"(SELECT id FROM users WHERE id = '{uid}' AND source = 'signup')"
         code, count = psql(
             project,
-            f"DELETE FROM sessions WHERE owner_id = '{uid}'; DELETE FROM webauthn_credentials WHERE owner_id = "
-            f"'{uid}'; WITH d AS (DELETE FROM users WHERE id = '{uid}' AND source = 'signup' RETURNING 1) "
+            f"DELETE FROM sessions WHERE owner_id IN {mine}; "
+            f"DELETE FROM webauthn_credentials WHERE owner_id IN {mine}; "
+            f"WITH d AS (DELETE FROM users WHERE id = '{uid}' AND source = 'signup' RETURNING 1) "
             "SELECT count(*) FROM d;",
         )
         if code != 0:

@@ -1100,9 +1100,17 @@ tasks:
         (screen, client, stories), the header link and /signups route; test server; owner.slice.ts `signup` step,
         web_live.py id-only cleanup and expected mode, verify-all --config, slice.sh default steps; example config;
         OPS-DOD operations mapped to their traced items. Green test corrections (spec review note): the CLI test binds
-        a free port; the sign-up tests wrapped to 110 columns. Checks: 273 auth tests, 236 web unit tests, 414
-        [browser] tests (auth-dark and auth-light at three widths), ci-local (see the PR notes). Live step written,
-        not run: the owner tests the stack by hand; the coordinator decides when.",
+        a free port; the sign-up tests refactored for the 110-column limit. Checks: 273 auth tests, 236 web unit
+        tests, 414 [browser] tests (auth-dark and auth-light at three widths), LOCAL CI: PASS (209589e). Live step
+        written, not run: the owner tests the stack by hand; the coordinator decides when.",
+      code_review: "Round 1 on 209589e: changes (39 of 41 server mutants killed, 2 equivalent). Blocking fixed:
+        web_live.py's cleanup guards the sessions and credentials deletes by `owner_id IN (SELECT id FROM users WHERE
+        id = <uid> AND source = 'signup')` and uses fullmatch for handles and ids; new [db] test
+        server/tests/auth/test_signup_live_cleanup.py runs the cleanup with psql through the test container: a
+        configured user's id deletes nothing, the run's accounts are deleted by id, malformed entries are ignored.
+        Non-blocking applied: anyio.fail_after on the SKIP LOCKED test; display names trimmed of Unicode White_Space
+        only (U+001F + name refused); review note says refactored; FR-AUTH-32's cleanup sentence matches the code;
+        the 80-way race test noted as probabilistic. Awaits round 2.",
       notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
         disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
         need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding and V/plan add

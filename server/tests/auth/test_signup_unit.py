@@ -133,6 +133,8 @@ THUMB, SKIN = chr(0x1F44D), chr(0x1F3FD)
         ("a" * 65, None),
         ("  Анна Петрова  ", "Анна Петрова"),
         ("a\tb", None),
+        (chr(0x1F) + "Anna", None),  # Cc at the edge: refused, not trimmed (str.strip() would trim it)
+        (chr(0x3000) + "Anna" + chr(0x2028), "Anna"),  # White_Space at both edges is trimmed
         ("evil" + chr(0x202E) + "abc", None),  # Cf, a bidi override
         ("zero" + chr(0x200B) + "width", None),  # Cf
         ("x" + chr(0xD800) + "y", None),  # Cs, a lone surrogate (JSON "\ud800")

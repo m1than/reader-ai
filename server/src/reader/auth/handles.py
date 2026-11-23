@@ -10,6 +10,15 @@ from reader.auth.policy import DISPLAY_NAME_MAX, RESERVED_HANDLES
 
 HANDLE_PATTERN: Final = re.compile(r"[a-z][a-z0-9-]{2,31}")
 REFUSED_CATEGORIES: Final = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+# The Unicode White_Space property (PropList.txt), as code points. Python's str.strip() would also strip
+# U+001C..U+001F, which are Cc and must be refused, not trimmed.
+WHITE_SPACE: Final = "".join(
+    chr(c)
+    for c in (
+        *range(0x09, 0x0E), 0x20, 0x85, 0xA0, 0x1680, *range(0x2000, 0x200B), 0x2028, 0x2029, 0x202F,
+        0x205F, 0x3000,
+    )
+)
 _DIGITS: Final = str.maketrans("01i", "oll")
 
 
@@ -50,7 +59,7 @@ def display_name(value: object) -> str | None:
     """The NFC-normalised, trimmed display name, or None when it is not valid (FR-AUTH-25)."""
     if not isinstance(value, str):
         return None
-    normalized = unicodedata.normalize("NFC", value).strip()
+    normalized = unicodedata.normalize("NFC", value).strip(WHITE_SPACE)
     if not 1 <= len(normalized) <= DISPLAY_NAME_MAX:
         return None
     if any(unicodedata.category(ch) in REFUSED_CATEGORIES for ch in normalized):
