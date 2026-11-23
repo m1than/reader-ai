@@ -715,7 +715,9 @@ proposed_requirements:
         row's, else the error `missing`, which the host reports with `fail --code inbox_missing`) to stdout in 1 MiB
         chunks.
       - `progress --upload-id U --claim C (--pages-done n --pages-total m | --phase fetch|load|convert|sending|receive)`:
-        renews the lease (`now() + 120 s`), updates `ingest_hosts.seen_at`, moves the state forward as FR-INGEST-19
+        renews the lease (`now() + 120 s`), updates `ingest_hosts.seen_at` and sets `ingest_hosts.busy = claim` (the
+        watcher sends no `next` while it holds a claim, so `progress` is what keeps `busy` true; the next `next`
+        resets it), moves the state forward as FR-INGEST-19
         says, stores the counts (0 ≤ n ≤ m ≤ 5,000), and prints `{"ok":true}`.
       - `fail --upload-id U --claim C --code K` with K from the fixed list `fetch_mismatch`, `not_pdf`,
         `inbox_missing`, `convert_failed`, `memory_limit`, `work_limit`, `timeout`, `receive_failed`, `bad_reply`:
@@ -746,14 +748,24 @@ proposed_requirements:
         the current stray count (FR-INGEST-22), which is a warning only and never stops claims;
       - checks the stack (FR-INGEST-2's `reader status --json` and worker resolution); unhealthy: waits 10 s and
         retries, never exits for it;
+      - **at start**, once: takes `convert.lock` without blocking, runs its stale cleanup (FR-INGEST-22) and releases
+        it, so a run left by a crashed CLI is cleaned even before any upload arrives (held: skipped, its holder is
+        live);
       - **waits without the lock:** runs `next --peek --wait 25 --busy none` (claims nothing, holds no lock), so an
         idle watcher never holds `convert.lock` and never starves a CLI run;
-      - when `queued` > 0, tries `convert.lock` without blocking (FR-INGEST-22). Held by a CLI run: sends `next
-        --peek --wait 1 --busy cli_running` (claims nothing; the Import page then says "a command-line conversion is
-        running"), waits 10 s and tries again. Taken: runs the lock's stale cleanup (FR-INGEST-22), then `next
-        --claim --wait 1 --busy none`; with no upload left it releases the lock. The claim schema is exact (a UUID,
-        64 lowercase hex, an integer 1..`upload_bytes_max`, 32 lowercase hex, no other key); `bad_reply` releases
-        the lock and waits 10 s. From the claim on, the lock is held until the run's cleanup has ended;
+      - **unless the host state is `ready`** (for instance `setup_missing`, the first-run default), it never tries
+        the lock and never sends `--claim`: after each peek that reports `queued` > 0 it waits 10 s, so a queued
+        upload costs at most one exec per 10 s;
+      - with `ready` and `queued` > 0, tries `convert.lock` without blocking (FR-INGEST-22). Held by a CLI run:
+        sends `next --peek --wait 1 --busy cli_running` (claims nothing; the Import page then says "a command-line
+        conversion is running"), waits 10 s and tries again. Taken: runs the lock's stale cleanup (FR-INGEST-22),
+        then `next --claim --wait 1 --busy none`; a claim that returns `{"upload": null}` (another reader took it,
+        or it was cancelled) releases the lock and **waits 10 s** before the next peek. The claim schema is exact (a
+        UUID, 64 lowercase hex, an integer 1..`upload_bytes_max`, 32 lowercase hex, no other key); `bad_reply`
+        releases the lock and waits 10 s. From the claim on, the lock is held until the run's cleanup has ended.
+        [unit, fake runner] `setup_missing` with a queued upload: over 60 s of fake time at most 6 execs, all
+        `--peek`, and the lock is never taken; a `--claim` returning null is followed by 10 s without an exec; at
+        start the lock is taken, cleaned and released once;
       - **for a claim:** starts the **heartbeat**, a timer that runs `progress --phase <current phase>` every 30 s
         from the claim until receive's reply (through fetch, model load, conversion, sending and receive), so the
         120 s lease never depends on the converter's output; a cancel reply to any call kills the run's processes
@@ -847,11 +859,12 @@ proposed_requirements:
       - **residual across runs:** a child that escaped an earlier run (it called `setsid()`, left WORK and rewrote its
         args, so it was neither counted nor killed) survives, still confined, and can find each later run's WORK
         through `fsgetpath`, `chdir` into it or name it in its args, become a member of that run, and push it over
-        `memory_limit`. So one escaped process can fail **every** later conversion until the Mac session restarts.
+        `memory_limit`. So one escaped process can fail **every** later conversion until the Mac restarts (whether
+        logging out also ends it is not measured).
         There is **no reliable signal**: the same args rewrite that hides it from accounting hides it from the stray
         count. The symptom is the signal: repeated `memory_limit` failures on files that converted before. The
         Import page names it next to `memory_limit` (WEB-IMPORT FR-IMPORT-3): "If files that used to convert now
-        fail with this, restart your Mac session". A later spike (`sandbox_check(pid)` from the watcher, to find
+        fail with this, restart your Mac". A later spike (`sandbox_check(pid)` from the watcher, to find
         processes still under the converter's sandbox whatever their args) may replace the `comm` rule; it does not
         block this revision;
       - such an escaped child stays under the profile, which a process cannot leave: no network, no sockets, no

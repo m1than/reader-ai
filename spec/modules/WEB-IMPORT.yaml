@@ -99,12 +99,12 @@ requirements:
       command-line conversion is running on your Mac; this upload starts when it ends"; offline → "The converter on your Mac is not
       running. Start it with `reader up`."; setup_missing → "The converter is not set up. Run `reader-ingest
       --setup`." (commands in `<code>`, copyable as text); and, whatever the state, when `strays` > 0 a non-blocking
-      warning "Earlier conversions left processes running on your Mac; restarting your Mac session clears them", and
+      warning "Earlier conversions left processes running on your Mac; restarting your Mac clears them", and
       when `stale` is true the warning "The converter on your Mac runs older code; `reader up` restarts it when it is
       idle".
       Cancel is shown in queued, claimed and converting (a confirm dialog first; cancel deletes the upload, so the
       same file can be uploaded again). A failure with code `memory_limit` adds the remedy "If files that used to
-      convert now fail with this, restart your Mac session" (SRV-INGEST FR-INGEST-22's cross-run residual: an escaped
+      convert now fail with this, restart your Mac" (SRV-INGEST FR-INGEST-22's cross-run residual: an escaped
       process from an earlier conversion can fail later ones, with no other signal). On failed, the view's `retry`
       decides the controls: `reconvert` shows Retry
       and Discard; `requeue` (the import or indexing job died after the file was converted) shows Retry only, which
