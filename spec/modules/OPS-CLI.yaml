@@ -27,7 +27,7 @@ title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bo
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20). Amended 2026-11-22 for V.OPS-CLI-kernels and V.OPS-CLI-agents (FR-CLI-4 bind to agent-proxy, FR-CLI-5 profiles, FR-CLI-8 step 0; paired with OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3); deep-reviewer review pending (secrets: full)."
+review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20). Amended 2026-11-22 for V.OPS-CLI-kernels and V.OPS-CLI-agents (FR-CLI-4 bind to agent-proxy, FR-CLI-5 profiles, FR-CLI-8 step 0; paired with OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3); deep-reviewer review pending (secrets: full). Paired change FR-CLI-22 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner): the ingest watcher started by `reader up`, reported by `reader status`, stopped by `reader down`; drafted on V/onboarding and reviewed in its deep-reviewer rounds 1–7 (secrets area: full rounds), promoted on V/upload-impl with its Red tests."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -334,6 +334,41 @@ requirements:
       local processes of the same user for the call's duration) because it is a short-lived, single-use token minted by
       SRV-AUTH, not a long-lived secret, and the browser needs the URL; it is not a resolved value, so INV-CLI-2 does not
       cover it.
+  - id: FR-CLI-22   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23)
+    text: >-
+      **The ingest watcher** (SRV-INGEST FR-INGEST-21). By default (owner 2026-11-23), `reader up`, after its step
+      (7) succeeded, starts `reader-ingest --watch --config <the resolved reader.yaml>` unless its lock
+      `<data_dir>/ingest/locks/watch.lock` is held. **A running watcher of other code:** the lock file holds the
+      watcher's pid and the `converter_source_sha256` of the code it runs (SRV-INGEST FR-INGEST-21). When that sha
+      differs from the checkout's and the watcher is idle (the lock file's `busy` field, which the watcher rewrites
+      at every claim and release; a lock file that does not parse as exactly `{pid, sha, busy}`, for instance one
+      caught mid-rewrite, counts as busy), `reader up` stops it as `reader down` does and starts the new one;
+      when it is busy, `reader up` leaves it, prints "ingest watcher runs older code; it restarts at the next `reader
+      up` when idle", and `reader status` shows `"ingest_watcher": "stale"`. Otherwise it leaves the running one.
+      The spawn, unlike the secret
+      watcher's (FR-CLI-8), passes nothing:
+      - argv: the `reader-ingest` console script of the same environment as `reader`, as a list;
+      - env: exactly FR-INGEST-2's allow-list (PATH, HOME, LANG, DOCKER_HOST when set), never the inherited one;
+      - `close_fds=True` and `pass_fds=()`: no fd 3 or 4 (the secret bundle and readiness pipes of FR-CLI-8 are
+        never inherited), only 0, 1 and 2 are open;
+      - stdin `/dev/null`; stdout and stderr appended to `~/Library/Application Support/reader-ai/run/ingest-watch.log`
+        (0600, created 0600 in the 0700 run directory, truncated to its last 5 MiB at each start);
+      - `start_new_session=True`, so it has its own session and no controlling terminal.
+      `reader status` (and `--json` as `"ingest_watcher": "running" | "stale" | "stopped"`) probes the lock as FR-CLI-7 probes
+      the secret watcher's, and reports `"converter": "running" | "idle"` by probing `<data_dir>/ingest/locks/
+      convert.lock` the same way (SRV-INGEST FR-INGEST-22: one converter run on the host at a time; a CLI
+      `reader-ingest` exits 3 `busy` while it is held, SRV-INGEST FR-INGEST-1). An idle watcher waits without
+      the lock (`next --peek`), so it reads `idle`; `running` means a conversion is under way. [unit] an idle
+      watcher's lock state reads `idle`; a held lock reads `running`. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
+      lock file, only while the lock is held, then up to 15 s for the lock to be released, then SIGKILL (the
+      watcher's own handler kills its converter child first, FR-INGEST-21). A failed spawn is reported and does not
+      fail `up`: the stack runs and uploads wait as `queued` (ADR-0029 Decision 6).
+      [unit] a fake `reader-ingest` records its environment, its open file descriptors (`/dev/fd`), `os.getsid(0) ==
+      os.getpid()` and that opening `/dev/tty` fails: the environment equals the allow-list exactly (a canary
+      variable set in the parent is absent), the open fds are exactly {0, 1, 2}, stdin is `/dev/null`; `reader down`
+      signals only a pid whose lock is held; `reader up` with the lock held by a watcher of the same sha starts
+      nothing; with a different sha and an idle watcher it stops and restarts it; with a busy one it leaves it and
+      reports `stale`.
 
 invariants:
   - id: INV-CLI-1
@@ -429,43 +464,3 @@ vectors:
 #   single use are SRV-AUTH's.
 # - The pair-pool size is not a reader.yaml field; v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
 # - The power assertion (`caffeinate`) from the roadmap's risk table belongs to the job runner (stage 2+), not here.
-
-# ---- Paired change (DRAFT, 2026-11-23, V/onboarding, for SRV-INGEST revision 2 and ADR-0029, proposed). Held under
-# `proposed_requirements` until the owner accepts ADR-0029 and the deep-reviewer approves (secrets area: full review);
-# then it moves into `requirements` with its Red tests. ----
-proposed_requirements:
-  - id: FR-CLI-22
-    text: >-
-      **The ingest watcher** (SRV-INGEST FR-INGEST-21). By default (owner 2026-11-23), `reader up`, after its step
-      (7) succeeded, starts `reader-ingest --watch --config <the resolved reader.yaml>` unless its lock
-      `<data_dir>/ingest/locks/watch.lock` is held. **A running watcher of other code:** the lock file holds the
-      watcher's pid and the `converter_source_sha256` of the code it runs (SRV-INGEST FR-INGEST-21). When that sha
-      differs from the checkout's and the watcher is idle (the lock file's `busy` field, which the watcher rewrites
-      at every claim and release; a lock file that does not parse as exactly `{pid, sha, busy}`, for instance one
-      caught mid-rewrite, counts as busy), `reader up` stops it as `reader down` does and starts the new one;
-      when it is busy, `reader up` leaves it, prints "ingest watcher runs older code; it restarts at the next `reader
-      up` when idle", and `reader status` shows `"ingest_watcher": "stale"`. Otherwise it leaves the running one.
-      The spawn, unlike the secret
-      watcher's (FR-CLI-8), passes nothing:
-      - argv: the `reader-ingest` console script of the same environment as `reader`, as a list;
-      - env: exactly FR-INGEST-2's allow-list (PATH, HOME, LANG, DOCKER_HOST when set), never the inherited one;
-      - `close_fds=True` and `pass_fds=()`: no fd 3 or 4 (the secret bundle and readiness pipes of FR-CLI-8 are
-        never inherited), only 0, 1 and 2 are open;
-      - stdin `/dev/null`; stdout and stderr appended to `~/Library/Application Support/reader-ai/run/ingest-watch.log`
-        (0600, created 0600 in the 0700 run directory, truncated to its last 5 MiB at each start);
-      - `start_new_session=True`, so it has its own session and no controlling terminal.
-      `reader status` (and `--json` as `"ingest_watcher": "running" | "stale" | "stopped"`) probes the lock as FR-CLI-7 probes
-      the secret watcher's, and reports `"converter": "running" | "idle"` by probing `<data_dir>/ingest/locks/
-      convert.lock` the same way (SRV-INGEST FR-INGEST-22: one converter run on the host at a time; a CLI
-      `reader-ingest` exits 3 `busy` while it is held, proposed FR-INGEST-1 amendment). An idle watcher waits without
-      the lock (`next --peek`), so it reads `idle`; `running` means a conversion is under way. [unit] an idle
-      watcher's lock state reads `idle`; a held lock reads `running`. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
-      lock file, only while the lock is held, then up to 15 s for the lock to be released, then SIGKILL (the
-      watcher's own handler kills its converter child first, FR-INGEST-21). A failed spawn is reported and does not
-      fail `up`: the stack runs and uploads wait as `queued` (ADR-0029 Decision 6).
-      [unit] a fake `reader-ingest` records its environment, its open file descriptors (`/dev/fd`), `os.getsid(0) ==
-      os.getpid()` and that opening `/dev/tty` fails: the environment equals the allow-list exactly (a canary
-      variable set in the parent is absent), the open fds are exactly {0, 1, 2}, stdin is `/dev/null`; `reader down`
-      signals only a pid whose lock is held; `reader up` with the lock held by a watcher of the same sha starts
-      nothing; with a different sha and an idle watcher it stops and restarts it; with a busy one it leaves it and
-      reports `stale`.
