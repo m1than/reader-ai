@@ -1,0 +1,8 @@
+# VEC-DOD-2 — the test files that @trace each synthetic item (stands in for repo.mjs loadRepo, FR-DOD-6).
+FR-X-1: [server/tests/test_a.py, web/src/a.test.ts]
+FR-X-2: [e2e/web/x.spec.ts]
+FR-X-3: [web/src/b.test.ts]
+FR-X-4: [server/tests/test_a.py]
+FR-X-5: [server/tests/test_b.py]
+FR-X-6: [server/tests/test_none.py]
+FR-X-7: [server/tests/test_a.py, server/tests/test_c.py]

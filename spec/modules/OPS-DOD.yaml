@@ -43,7 +43,8 @@
 #   waiver rule as a pure function the hook calls, the ratchet) live in tools/dod/*.test.mjs and are traced;
 # - tools/trace/check.mjs gains T10 (FR-DOD-3), using tools/dod/index.mjs; the "T1–T9" wording in tools/ci-local.sh,
 #   .github/workflows/ci.yml and AGENTS.md becomes "T0–T10";
-# - tools/trace/guard-tests.mjs gains the ratchet (FR-DOD-13);
+# - tools/trace/guard-tests.mjs gains the ratchet P8 (FR-DOD-13); AGENTS.md names P8 in "Checks before every PR" and
+#   says, under "Gates you never cross", that the agent never writes the `DoD-Owner-Change` trailer;
 # - tools/hooks/pre-write.mjs refuses agent writes that add `waived` (FR-DOD-12), with a case in
 #   tools/hooks/pre-write.test.mjs;
 # - tools/ci-local.sh and ci.yml run `node --test "tools/dod/*.test.mjs"`;
@@ -61,9 +62,15 @@
 
 id: OPS-DOD
 title: Definition-of-Done index of user operations — data, trace-check T10, ratchet, verifier and cost/latency report
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
+review: "deep-reviewer round 1 on the first draft (V/V.DOD-index): changes, all applied. Recheck on V/slice-integration
+  744997e (cd6be04): spec review round 1 changes (8 blocking: na quoting, live.log grammar, producers and attribution,
+  search and kernel observability, lesson.findings recovery, CLI registry and disabled labels, waiver sets; plus
+  non-blocking), all applied in 4b03d67; round 2 on 4b03d67: VERDICT approve. Folded in at approval (round 2
+  non-blocking): resumed run ids recorded by the ledger producer (FR-DOD-10), the ratchet named P8 (FR-DOD-13,
+  AGENTS.md), the agent never writes DoD-Owner-Change (AGENTS.md gates), a Red case for passkey_check.py's FAIL format."
 layer: ops
 track: engineering
 adr: [ADR-0001, ADR-0019, ADR-0005]
@@ -222,8 +229,10 @@ requirements:
       bench ≈ $1 (cap n × $0.30 ≤ $6.30), so a full measured run is ≈ $4, at most $14.30.
       **Attribution.** The ledger producer sets `operation` from the settle row: task `tutor` → tutor.ask (run_id =
       question_id, FR-TUTOR-7); every compile task → lesson.compile, except that all rows of a run any of whose job
-      keys was requeued by a resume (FR-PIPELINE-11, FR-EVENTS-8) → lesson.compile_resume. A run therefore counts
-      in exactly one operation, and a resumed run is measured whole against the run cap. Timings use the same
+      keys was requeued by a resume (FR-PIPELINE-11, FR-EVENTS-8) → lesson.compile_resume. `requeue_dead` leaves
+      no marker in the database, so the ledger producer records the run ids it resumes itself (it is the caller of
+      the resume route) and attributes from that record. A run therefore counts in exactly one operation, and a
+      resumed run is measured whole against the run cap. Timings use the same
       operation ids.
   - id: FR-DOD-11
     text: >-
@@ -241,7 +250,7 @@ requirements:
       and a date.
   - id: FR-DOD-13
     text: >-
-      Ratchet in tools/trace/guard-tests.mjs, comparing the index at `--base` with HEAD: an error for an operation
+      Ratchet P8 (ADR-0001, AGENTS.md "Checks before every PR") in tools/trace/guard-tests.mjs, comparing the index at `--base` with HEAD: an error for an operation
       that goes from enforced to tracked, a removed operation, a removed item or live label on an enforced
       operation, a loosened budget (a larger max or a smaller n_min, or kind target → baseline), a new
       `not_user_facing` entry, a new or changed `waived` cell, and a cell of an enforced operation that becomes `na`.
@@ -289,7 +298,8 @@ vectors:
     source: >-
       Synthetic results for a three-operation index (pytest xunit1 XML, Vitest and Playwright JSON incl. flaky and
       todo, live.log with ANSI, duplicate labels, TAB details, labels ending in their own parenthetical, indented
-      output and summary lines, an unmapped FAIL line, axe.json, timings and ledger) with the expected INDEX.md and
+      output and summary lines, an unmapped FAIL line, passkey_check.py's pre-TAB FAIL format `FAIL <label>:
+      <detail>`, axe.json, timings and ledger) with the expected INDEX.md and
       report.json, written in Red
     file: spec/fixtures/OPS-DOD/results/
   - id: VEC-DOD-3
