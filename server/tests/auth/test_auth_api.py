@@ -649,6 +649,7 @@ def test_routers_are_a_declared_list() -> None:
         "reader.search.routes",
         "reader.pipeline.routes",
         "reader.tutor.routes",
+        "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
         "reader.freshness.routes",
     ]
 

@@ -29,4 +29,34 @@
   (literal (string-append (param "VENV") "/bin/python"))
   (literal (string-append (param "PYROOT") "/bin/python3.14")))   ; added: exec checks the resolved target
 (allow process-fork)
-(allow sysctl-read)
+
+; Edits of spikes/ingest-sysctl (2026-11-23; ADR-0029 Decision 3), listed in spec/fixtures/SRV-INGEST/profile-edits.sb.
+; With an unrestricted (allow sysctl-read) and no process-info rule, a confined child read every same-uid process's
+; arguments and environment (kern.procargs2) and cwd (proc_pidinfo). Both edits are needed: either alone, or a deny
+; by sysctl name, leaves kern.procargs2 of another pid readable (measured).
+; 1. sysctl: hardware, VM and OS identity only; nothing under kern.proc or kern.procargs. kern.hostname stays:
+;    os.uname() needs it, and `import ctypes` calls os.uname().
+(allow sysctl-read
+  (sysctl-name-prefix "hw.")
+  (sysctl-name-prefix "machdep.")
+  (sysctl-name-prefix "vm.")
+  (sysctl-name-prefix "sysctl.")
+  (sysctl-name-prefix "security.mac.")
+  (sysctl-name-prefix "kern.os")
+  (sysctl-name "kern.version")
+  (sysctl-name "kern.iossupportversion")   ; seen requested by the runtime; an OS-identity string
+  (sysctl-name "kern.hostname")            ; residual: the child can read the Mac's host name
+  (sysctl-name "kern.boottime")
+  (sysctl-name "kern.argmax")
+  (sysctl-name "kern.maxfiles")
+  (sysctl-name "kern.maxfilesperproc")
+  (sysctl-name "kern.ngroups")
+  (sysctl-name "kern.secure_kernel")
+  (sysctl-name "kern.usrstack64")
+  (sysctl-name "kern.clockrate")
+  (sysctl-name "kern.hv_vmm_present")
+  (sysctl-name "kern.willshutdown")
+  (sysctl-name "kern.memorystatus_level"))
+; 2. process-info: the process itself only (no proc_pidinfo, proc_pidpath or proc_listpids of another process).
+(deny process-info*)
+(allow process-info* (target self))

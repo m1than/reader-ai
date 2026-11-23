@@ -230,6 +230,39 @@ requirements:
       `/no-such-page`: one `main#content` with tabindex -1 and the skip link first; following the skip link focuses
       it; [live] the `ui` step follows the skip link with the keyboard and finds focus on `main#content`; overflow is
       measured as `scrollWidth − clientWidth` of the document element. [story] the shell's loading state.
+  # Amendment (2026-11-23, V/plan; reviewed with SRV-PLAN, deep-reviewer round 4 approve on d9f655a), promoted with
+  # its Red tests. Until the upload track lands, `/import` shows WEB-PLAN's "Your sources" list and the study-time
+  # and plan steps for already-imported materials; the drop zone joins later.
+  - id: FR-UI-12
+    text: >-
+      **Import route and link.** The route table adds `/import` (the page component in `web/src/import/plan/`,
+      WEB-PLAN, loaded as a lazy chunk) and the header an "Import" link, shown only for a user with role `owner` (from
+      `/api/me`); a non-owner who opens `/import` sees the app's not-found view (web/src/app/routes.tsx `NotFound`).
+      The page renders inside the shell's `main#content`. [unit] the link for owner and learner, the lazy route;
+      [browser] `/import` under the production CSP.
+
+
+# ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for WEB-IMPORT). Held under `proposed_requirements` (not read by
+# trace-check; this spec is approved) until reviewed; then it moves into `requirements` with its Red tests.
+# FR-UI-12 (route and header link) was promoted on V/plan; FR-UI-13 stays with V/onboarding. ----
+proposed_requirements:
+  - id: FR-UI-13
+    text: >-
+      **Import first run and compile status.**
+      - **First run:** on `/`, when `GET /api/lessons` returns no lessons and the user is the owner, the app asks
+        `GET /api/materials`; if it lists no material at all (neither declared nor uploaded), the app replaces the
+        location with `/import` (history `replace`, so Back does not loop). Any error of that call keeps the empty
+        lesson list. A non-owner never calls it.
+      - **Compile status in the list:** for each lesson with `latest_sha256: null`, at most 10 per render in list
+        order (structural: one plan confirm starts one compile), the list asks `GET /api/lessons/{lesson_id}/compile`
+        (SRV-PIPELINE FR-PIPELINE-11); 404 shows "not compiled yet", a `running` or `stalled` run "Compiling", a
+        `stage_failed` or `budget_exhausted` run "Compile stopped", replacing "not published yet" in FR-UI-6's status
+        slot. While any shown lesson is compiling, these queries refetch every 10 s.
+      - `web/test-server/` stubs WEB-IMPORT's routes from VEC-IMPORT-1 and `/api/materials` with an empty and a
+        non-empty list.
+      [unit] the redirect (owner with nothing, owner with a material, non-owner, an error), the status mapping; [live]
+      the owner slice suite sees the new course's first lesson as "Compiling" or later after a confirm with compile,
+      run only with the owner's consent to spend; without it, "not compiled yet".
 
 invariants:
   - id: INV-UI-1

@@ -5,6 +5,7 @@ import { Skeleton } from '@acme/ui/skeleton';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { createPlanApi } from '../import/plan/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ServicesContext, useServices, type Services } from './context';
@@ -22,7 +23,7 @@ export interface AppRootProps {
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-function Header({ displayName, queryClient }: { displayName: string; queryClient: QueryClient }) {
+function Header({ displayName, owner, queryClient }: { displayName: string; owner: boolean; queryClient: QueryClient }) {
   const { api, notify, navigateAway } = useServices();
   const signOut = async () => {
     try {
@@ -39,6 +40,8 @@ function Header({ displayName, queryClient }: { displayName: string; queryClient
       <a className="brand" href="/">
         reader
       </a>
+      {/* FR-UI-12: the Import link, for the owner only. */}
+      {owner ? <a href="/import">Import</a> : null}
       <span className="who">{displayName}</span>
       <Button variant="ghost" color="neutral" size="sm" onClick={() => void signOut()}>
         Sign out
@@ -89,7 +92,7 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
   return (
     <>
       <SkipLink />
-      <Header displayName={me.data.display_name} queryClient={queryClient} />
+      <Header displayName={me.data.display_name} owner={me.data.role === 'owner'} queryClient={queryClient} />
       <main id="content" tabIndex={-1}>
         {isBadLessonPath(path) ? (
           <div className="page">
@@ -119,7 +122,14 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       fetch: fetchFn ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a)),
       onUnauthorized: () => navigateAway(SIGN_IN_URL),
     };
-    return { api: createApi(deps), tutor: createTutorApi(deps), http: deps, notify, navigateAway };
+    return {
+      api: createApi(deps),
+      tutor: createTutorApi(deps),
+      plan: createPlanApi(deps),
+      http: deps,
+      notify,
+      navigateAway,
+    };
   }, [fetchFn, navigateAway, notify]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');

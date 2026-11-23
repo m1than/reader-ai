@@ -1,5 +1,6 @@
-// Route table (WEB-UI FR-UI-3): `/` the lesson list, `/lessons/$lessonId` the lesson view (lazy),
-// `/materials/$materialId/freshness` the freshness card (lazy; WEB-FRESH), anything else not-found. A lesson id outside the pattern renders not-found without a request.
+// Route table (WEB-UI FR-UI-3, FR-UI-12): `/` the lesson list, `/lessons/$lessonId` the lesson view (lazy),
+// `/import` the import page for the owner (lazy), `/materials/$materialId/freshness` the freshness card (lazy;
+// WEB-FRESH), anything else not-found. A lesson id outside the pattern renders not-found without a request.
 import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
@@ -14,6 +15,7 @@ const LESSON_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 export const isLessonId = (id: string): boolean => LESSON_ID.test(id) && id !== '.' && id !== '..';
 
 const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ default: m.LessonPage })));
+const ImportPage = lazy(() => import('../import/plan/ImportPage').then((m) => ({ default: m.ImportPage })));
 
 // WEB-FRESH (paired change): the freshness card's own lazy route until it mounts in the sources list.
 const MATERIAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -97,6 +99,29 @@ const lessonRoute = createRoute({
   },
 });
 
+// FR-UI-12: the owner's import page; anyone else sees not-found.
+const importRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/import',
+  component: function ImportRoute() {
+    const { api } = useServices();
+    const me = useQuery(queries(api).me());
+    if (me.isPending) return null;
+    if (me.data?.role !== 'owner') return <NotFound />;
+    return (
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading label="Loading the import page" />
+          </div>
+        }
+      >
+        <ImportPage />
+      </Suspense>
+    );
+  },
+});
+
 const freshnessRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/materials/$materialId/freshness',
@@ -117,7 +142,7 @@ const freshnessRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, lessonRoute, freshnessRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, lessonRoute, importRoute, freshnessRoute]);
 
 export const createAppRouter = (history: RouterHistory) =>
   createRouter({ routeTree, history, defaultNotFoundComponent: NotFound });

@@ -1,0 +1,22 @@
+{
+  "check": "bash e2e/live/plan.sh (SRV-PLAN, WEB-PLAN), stack from V/plan 21eb374 + live-check fixes, pilot bashir-2025 (sha256 61e8d4c3…), compile_first false throughout ($0)",
+  "result": "PASS 32 of 32 (third run); first run of the confirm path: created 105, removed 0, replayed false",
+  "first_confirm": { "created": 105, "removed": 0, "replayed": false, "lessons": 105, "compile": null },
+  "confirm_replay": { "created": 0, "removed": 0, "replayed": true, "lessons": 105, "compile": null },
+  "replan_plus_4_weeks": { "created": 130, "removed": 102, "replayed": false, "lessons": 133 },
+  "back_to_15_weeks": { "created": 102, "removed": 130, "lessons": 105 },
+  "material_id": "bashir-2025",
+  "plan_course_id": "plan-61e8d4c390ba",
+  "owner_passkeys_and_live_sessions": { "before": "0 0", "after": "0 0" },
+  "preview_12_weeks_60_min": {
+    "course_high_usd": "102.32", "course_low_usd": "43.34", "days_left": 84, "extrapolated": true,
+    "first_lesson": { "high_usd": "1.64", "low_usd": "0.69" }, "fits": false, "fixed_count": 0, "lesson_count": 84,
+    "mean_lesson_kchars": "24.162", "minutes_max": 86, "minutes_mean": 64, "new_count": 84, "reasons": ["minutes"],
+    "required_minutes": 5357, "study_days": 84
+  },
+  "suggest_at_12_weeks": { "minutes_per_day": 90, "total_weeks": 15 },
+  "preview_15_weeks_60_min": { "fits": true, "lesson_count": 105, "minutes_max": 60, "minutes_mean": 51, "new_count": 105, "study_days": 105 },
+  "replan_preview_19_weeks": { "fits": true, "fixed_count": 0, "lesson_count": 133, "new_count": 133, "study_days": 133 },
+  "preview_p95_ms_over_20": { "run_1": 17.9, "run_2": 27.7, "run_3": 20.2, "threshold": 500 },
+  "axe_serious_or_critical": { "estimate": 0, "does_not_fit": 0, "widths_px": [1280, 1024, 390] }
+}
