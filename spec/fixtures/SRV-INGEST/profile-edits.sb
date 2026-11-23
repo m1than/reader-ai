@@ -8,6 +8,7 @@
   (sysctl-name-prefix "security.mac.")
   (sysctl-name-prefix "kern.os")
   (sysctl-name "kern.version")
+  (sysctl-name "kern.iossupportversion")
   (sysctl-name "kern.hostname")
   (sysctl-name "kern.boottime")
   (sysctl-name "kern.argmax")

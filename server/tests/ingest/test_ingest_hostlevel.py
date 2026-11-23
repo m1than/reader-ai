@@ -364,22 +364,43 @@ def test_cross_process_probes(tmp_path: Path) -> None:
             timeout=60,
             check=False,
         )
+        target_alive = other.poll() is None
     finally:
         other.kill()
         other.wait()
+    assert done.returncode == 0, done.stderr[-500:]
+    assert target_alive
     results = json.loads(done.stdout)
-    channels = {k: v for k, v in results.items() if not k.startswith("recorded ")}
-    assert set(channels) == {
+    assert set(results["other"]) == {
         "kern.procargs2",
         "kern.procargs",
         "kern.proc.pid",
+        "kern.proc.pgrp",
+        "kern.proc.tty",
+        "kern.proc.uid",
+        "kern.proc.ruid",
         "kern.proc.all",
         "proc_pidpath",
-        "proc_pidinfo cwd",
+        "proc_name",
+        "proc_pid_rusage",
+        "proc_pidfdinfo",
+        "PROC_PIDLISTFDS",
+        "PROC_PIDTBSDINFO",
+        "PROC_PIDVNODEPATHINFO",
         "proc_listallpids",
         "list WORK parent",
     }
-    assert all(v.startswith("denied:") for v in channels.values()), channels
+    assert all(v == "denied:errno 1" for v in results["other"].values()), results["other"]
+    controls = {"kern.procargs2", "kern.proc.pid", "proc_pidpath", "PROC_PIDVNODEPATHINFO"}
+    assert set(results["self"]) == controls
+    assert all(v.startswith("allowed") for v in results["self"].values()), results["self"]
+    assert set(results["recorded"]) == {
+        "fsgetpath of the other WORK",
+        "chdir into the other WORK (path known)",
+        "list the other WORK after chdir",
+        "own kern.procargs2",
+    }
+    assert results["recorded"]["list the other WORK after chdir"] == "denied:errno 1"
 
 
 @pytest.mark.ingest_host

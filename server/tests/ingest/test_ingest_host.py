@@ -10,6 +10,8 @@ import io
 import json
 import os
 import re
+import subprocess
+import sys
 import textwrap
 from collections.abc import Iterator
 from dataclasses import dataclass, field
@@ -246,6 +248,64 @@ def test_material_lock_makes_a_second_run_busy(tmp_path: Path) -> None:
     assert code == 3 and "busy" in err.getvalue() and spawn.started == []
 
 
+def test_convert_lock_held_gives_busy_before_any_run_record(tmp_path: Path) -> None:
+    """FR-INGEST-1, one converter at a time: a held convert.lock (another run's) makes this run busy."""
+    import fcntl
+
+    path = config(tmp_path)
+    locks = data(tmp_path) / "locks"
+    locks.mkdir(parents=True)
+    with (locks / "convert.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        cli = need("reader.ingest.host.cli")
+        spawn, err = FakeSpawn(), io.StringIO()
+        code = cli.ingest(["m1", "--config", str(path)], deps(FakeRunner(), spawn), io.StringIO(), err)
+    assert code == 3 and "busy" in err.getvalue() and "another conversion" in err.getvalue()
+    assert spawn.started == []
+    assert not (data(tmp_path) / "run").exists() or not any((data(tmp_path) / "run").iterdir())
+    assert not (data(tmp_path) / "work").exists() or not any((data(tmp_path) / "work").iterdir())
+
+
+def test_requeue_does_not_take_the_convert_lock(tmp_path: Path) -> None:
+    import fcntl
+
+    path = config(tmp_path)
+    locks = data(tmp_path) / "locks"
+    locks.mkdir(parents=True)
+    with (locks / "convert.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        cli = need("reader.ingest.host.cli")
+        err = io.StringIO()
+        argv = ["m1", "--requeue", "--config", str(path)]
+        cli.ingest(argv, deps(FakeRunner(), FakeSpawn()), io.StringIO(), err)
+    assert "another conversion" not in err.getvalue()
+
+
+def test_convert_lock_fd_is_close_on_exec_and_not_inherited(tmp_path: Path) -> None:
+    import fcntl
+
+    cli = need("reader.ingest.host.cli")
+    with cli.convert_lock(tmp_path) as fd:
+        assert fcntl.fcntl(fd, fcntl.F_GETFD) & fcntl.FD_CLOEXEC
+        script = (
+            "import fcntl, os, sys\n"
+            "fds = sorted(int(n) for n in os.listdir('/dev/fd'))\n"
+            "print(' '.join(map(str, fds)))\n"
+        )
+        child = cli.system_spawn([sys.executable, "-I", "-c", script], {"PATH": "/usr/bin:/bin"}, tmp_path)
+        listed = b"".join(child.stdout_lines()).decode().split()
+        child.wait(30)
+        assert str(fd) not in listed
+    # once released, a child can take it (nothing else holds it)
+    probe = (
+        "import fcntl, os, sys\n"
+        f"fd = os.open({str(tmp_path / 'ingest' / 'locks' / 'convert.lock')!r}, os.O_RDWR)\n"
+        "fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+    )
+    done = subprocess.run([sys.executable, "-I", "-c", probe], capture_output=True, check=False)
+    assert done.returncode == 0
+
+
 def test_run_record_is_written_before_the_work_directory(tmp_path: Path) -> None:
     records = need("reader.ingest.host.records")
     run_dir, work_root = tmp_path / "run", tmp_path / "work"
@@ -426,6 +486,13 @@ def test_profile_equals_the_spike_profile_minus_scripts() -> None:
     assert all("network" not in r and "mach-lookup" not in r and "iokit" not in r for r in ours)
     assert not any("kern.proc" in r for r in ours)
     assert ours[-2:] == ["(deny process-info*)", "(allow process-info* (target self))"]
+    text = sandbox.PROFILE.read_text()
+    prefixes = re.findall(r'\(sysctl-name-prefix "([^"]*)"\)', text)
+    names = re.findall(r'\(sysctl-name "([^"]*)"\)', text)
+    assert prefixes and names
+    for guarded in ("kern.procargs2", "kern.proc.pid"):
+        assert not any(guarded.startswith(p) for p in prefixes), (guarded, prefixes)
+    assert not any(n.startswith("kern.proc") for n in names), names
 
 
 # ---- FR-INGEST-16: stale cleanup ----
@@ -465,6 +532,16 @@ def test_cleanup_leaves_other_materials_alone(tmp_path: Path) -> None:
     probe = FakeProbe({103: ("T3", os.path.realpath(work))})
     records.cleanup_stale(tmp_path / "run", tmp_path / "work", SHA, probe)
     assert probe.killed == [] and rec.exists() and work.exists()
+
+
+def test_cleanup_under_the_convert_lock_cleans_every_material(tmp_path: Path) -> None:
+    """FR-INGEST-16 as amended: a converter run holding convert.lock cleans every record, any material."""
+    records = need("reader.ingest.host.records")
+    other = "e" * 64
+    rec, work = make_record(tmp_path, other, 103, "T3")
+    probe = FakeProbe({103: ("T3", os.path.realpath(work))})
+    records.cleanup_stale(tmp_path / "run", tmp_path / "work", None, probe)
+    assert probe.killed == [103] and not rec.exists() and not work.exists()
 
 
 def test_cleanup_never_removes_outside_the_work_root(tmp_path: Path) -> None:
