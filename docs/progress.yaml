@@ -1128,7 +1128,20 @@ tasks:
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
-  - { id: S2.SRV-OBS, stage: 2, kind: module, track: engineering, status: todo, needs: [S2.SRV-EVENTS, S0.spike.trace-backend] }
+  - { id: S2.SRV-OBS, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [S2.SRV-EVENTS, S0.spike.trace-backend], branch: V/obs,
+      what: "Owner 2026-11-24: 'the tracing system via dashboard for this system'.",
+      note: "Draft spec spec/modules/SRV-OBS.yaml and ADR-0032 (proposed): MLflow on its own SQLite volume, the UI on
+        https://localhost:8443 behind Caddy forward_auth to GET /api/obs/gate (owner only), one trace per job linked to
+        its enqueuer, an attribute allow-list exporter, the CLI's content flags at 0, 30-day retention by a worker job,
+        the owner's views from reader-ai's own tables (MLflow 3.18.0 cannot group cost by stage or failures by code).
+        ADR-0018 is still proposed. Spikes (zero credit): spikes/cli-otel-content (CLI 2.1.330 exports under SRV-AGENT's
+        env; no canary with content flags off; the positive control finds the prompt), spikes/obs-stack (hardened Rotel
+        and MLflow, SQLite vs Postgres memory over an 8-minute lesson replay, the gate path, storage per span, deletion).
+        Paired changes are listed in the spec (OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS, SRV-AGENT, SRV-CONFIG)
+        and not edited here, because active branches change those files. Next: deep-reviewer rounds (complex areas: OTel
+        propagation, auth, secrets) before approval. On main S2.SRV-EVENTS still reads todo; its slice revision is
+        approved and implemented (FR-EVENTS-1..16), which is what this spec builds on." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
