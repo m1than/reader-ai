@@ -175,29 +175,23 @@ operations:
       observability: { items: [FR-INGEST-12] }
       recovery: { items: [FR-EVENTS-8, INV-INGEST-2] }
 
-  # Added 2026-11-23 (V/onboarding) from the DRAFT items of SRV-INGEST revision 2, SRV-PLAN and WEB-IMPORT
-  # (ADR-0029 proposed). No route or command is named yet: they enter the registry only when implemented, and are
-  # added here then (POST /api/materials/uploads, GET /api/materials/uploads/{id}, …/cancel, …/retry, DELETE …,
-  # GET /api/materials/converter; reader-ingest --watch; POST /api/plans/preview, POST /api/plans/confirm,
-  # GET /api/plans?material_id=…). Every cell without a test or a live label is `missing`.
+  # Added 2026-11-23 (V/onboarding) from the items of SRV-INGEST revision 2 and WEB-IMPORT (ADR-0029, accepted by
+  # the owner); cells filled on V/upload-impl when the items were promoted with their tests. Routes and commands are
+  # named here in the Green commit that adds them to the registry.
   - id: material.upload
     title: Upload a PDF in the browser, follow its host-side conversion and indexing, cancel or retry it
     surface: [web, api]
-    specs: [SRV-INGEST, WEB-IMPORT]
+    specs: [SRV-INGEST, WEB-IMPORT, WEB-UI, SRV-AUTH, OPS-DEPLOY, OPS-CLI, SRV-SEARCH, SRV-CONFIG]
     gate: tracked
     criteria:
-      functional: { items: [FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3] }
-      security:
-        items: [INV-IMPORT-1, INV-IMPORT-3]
-        missing: "proposed, under review, no test yet: SRV-INGEST FR-INGEST-18 (upload checks), FR-INGEST-21/-22 (framing, watchdogs, setsid accounting), INV-INGEST-8..10, INV-INGEST-4 for a watcher-started child; SRV-AUTH FR-AUTH-22 (raw-body allow-list); OPS-DEPLOY FR-DEPLOY-13 (200MiB at Caddy); OPS-CLI FR-CLI-22 (watcher spawn env and fds)"
-      privacy: { missing: "proposed SRV-INGEST FR-INGEST-24 (filename canary in logs and URLs) and INV-INGEST-5 extended to the upload path; no test yet" }
-      a11y: { missing: "no axe run on /import yet (WEB-IMPORT FR-IMPORT-9; pages /import at 1280, 1024 and 390 px once implemented)" }
-      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher; fetch throughput is an ADR-0029 hypothesis" }
+      functional: { items: [FR-INGEST-18, FR-INGEST-20, FR-INGEST-21, FR-INGEST-23, VEC-INGEST-6, VEC-INGEST-7, FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3, FR-UI-13, FR-CLI-22] }
+      security: { items: [FR-INGEST-22, INV-INGEST-4, INV-INGEST-8, INV-INGEST-9, INV-INGEST-10, FR-AUTH-22, FR-DEPLOY-13, FR-CONFIG-17, INV-IMPORT-1, INV-IMPORT-3] }
+      privacy: { items: [FR-INGEST-24, INV-INGEST-5, FR-IMPORT-7] }
+      a11y: { missing: "axe runs on /import in the [browser] test (WEB-IMPORT FR-IMPORT-9, e2e/web/import/upload.spec.ts at 1280, 1024 and 390 px), but no live pages evidence of /import is produced yet" }
+      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher; fetch throughput is an ADR-0029 hypothesis that the [live] exact-cap case records" }
       cost: { na: no provider call (local converter) }
-      observability: { missing: "proposed SRV-INGEST FR-INGEST-24; no test yet" }
-      recovery:
-        items: [INV-IMPORT-2]
-        missing: "proposed SRV-INGEST FR-INGEST-19..21, FR-INGEST-23 (lease and heartbeat, stack-side expiry, import-key authority, receive order, delete on cancel under the upload lock, crash sweep, watch-mode stale cleanup, Retry requeueing a dead import or embed key); SRV-SEARCH FR-SEARCH-10 (language of uploads); no test yet"
+      observability: { items: [FR-INGEST-24] }
+      recovery: { items: [FR-INGEST-19, FR-INGEST-21, FR-INGEST-23, FR-SEARCH-10, INV-IMPORT-2] }
 
   - id: course.plan
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course

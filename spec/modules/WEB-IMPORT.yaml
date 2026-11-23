@@ -1,7 +1,8 @@
 # WEB-IMPORT — the "Import source" page: drag-and-drop a PDF, follow its conversion and indexing, answer the
 # study-time question, preview the plan and its estimate, confirm (owner request 2026-11-23, task V.onboarding).
 #
-# Status: DRAFT. No code until the deep-reviewer approves.
+# Status: approved by agent (2026-11-23) after the onboarding deep-reviewer rounds 1–7 and the owner's acceptance of
+# ADR-0029; promoted on V/upload-impl with its Red tests. This spec now holds the upload sections (1 and 2) only.
 #
 # Flow (one page, `/import`, four sections that unlock in order):
 #   1. Source: a drop zone and a "Choose a PDF" button; client checks; language; upload with a progress bar.
@@ -34,9 +35,9 @@
 
 id: WEB-IMPORT
 title: Import source page — drag-and-drop upload, processing progress, the study-time form with its estimate, confirm
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
 layer: web
 track: product
 adr: [ADR-0029, ADR-0010, ADR-0013]
@@ -80,7 +81,7 @@ requirements:
     text: >-
       **Upload.** "Upload" sends the file with XMLHttpRequest (`POST /api/materials/uploads?language=…` with the
       language through `URLSearchParams`; the file name in the header `X-Reader-Filename`, percent-encoded with
-      `encodeURIComponent`, never in the URL (SRV-INGEST proposed FR-INGEST-18); `Content-Type: application/pdf`;
+      `encodeURIComponent`, never in the URL (SRV-INGEST FR-INGEST-18); `Content-Type: application/pdf`;
       same origin, credentials same-origin), showing a determinate progress bar from `upload.onprogress` with its
       percentage as text, and a Cancel button that aborts the request. Responses: 201 or 200 (dedupe: "Already
       imported" with a link to its state) move to Processing; 401 navigates to sign-in (WEB-UI FR-UI-5); 403, 408,
@@ -172,4 +173,4 @@ owner_notes:
   - "1. The live check uploads a small synthetic PDF and confirms with 'Start compiling lesson 1' unchecked, so it spends no credit; the Bashir pilot stays as it is."
   - "2. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it."
 
-review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer. 2026-11-23 (V/plan, coordinator decision (B)): FR-IMPORT-4, -5, -6, -8 and `preview_debounce_ms` moved verbatim to WEB-PLAN (approved after the plan track's rounds 1–4); `paths` narrowed to files directly in `web/src/import/` and `e2e/web/import/`, so the `plan/` subtree is WEB-PLAN's."
+review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer. 2026-11-23 (V/plan, coordinator decision (B)): FR-IMPORT-4, -5, -6, -8 and `preview_debounce_ms` moved verbatim to WEB-PLAN (approved after the plan track's rounds 1–4); `paths` narrowed to files directly in `web/src/import/` and `e2e/web/import/`, so the `plan/` subtree is WEB-PLAN's. Reviewed with SRV-INGEST revision 2 in the onboarding deep-reviewer rounds 1–7 (round 2: Retry by the view's `retry`; round 4: Retry replies, `stale`, 503/415/500 codes; rounds 5–6: `busy: cli_running` and the 'restart your Mac' remedy); the owner accepted ADR-0029 with its amendment note. Approved by agent 2026-11-23 on V/upload-impl with the Red tests. VEC-IMPORT-1's fixture holds the upload part; the plan responses it once named are WEB-PLAN's own fixtures since decision (B). Mount: `web/src/import/ImportPage.tsx` renders WEB-PLAN's page, then this spec's sections (WEB-UI FR-UI-13 mount note)."
