@@ -313,6 +313,13 @@ requirements:
       `python -I -m reader.search.ensure <material id or sha256>` (run in the worker container) computes the current key,
       enqueues the job, or requeues it through SRV-EVENTS FR-EVENTS-8 when it is `dead`, and prints the resulting status;
       with no imported ingest it prints `no_ingest` and exits 1. [db]
+      **At worker start** (`reader.search.jobs.on_worker_start(jobs)`, SRV-EVENTS's start hooks): for every imported
+      ingest (every owner), when the current key's job status is `none` (never enqueued), the job is enqueued. Keys
+      that are queued, running, succeeded or `dead` are left alone (a dead key is requeued only by `ensure`, so a
+      permanent failure is not retried on every restart). A failure for one ingest is logged by code and does not
+      stop the others. This recovers an enqueue that never happened: the V.live run of 2026-11-23 imported the pilot
+      before SRV-INGEST enqueued `search.embed` (FR-INGEST-13), and nothing else would enqueue it without
+      docker exec. [db]
 
 invariants:
   - id: INV-SEARCH-1

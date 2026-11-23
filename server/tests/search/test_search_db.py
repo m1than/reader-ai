@@ -27,6 +27,7 @@ from .conftest import (
     Pg,
     World,
     add_material,
+    current_fts,
     embed_material,
     fixture,
     need,
@@ -519,5 +520,45 @@ async def test_status_and_ensure(w: World, pg: Pg, monkeypatch: pytest.MonkeyPat
         assert await scalar(w.engine, "SELECT outcome FROM job_keys WHERE key = :k", k=key) is None
         await embed_material(w, ingest, MAT_RU)
         assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "ready"
+    finally:
+        await app.close_async()
+
+
+async def test_worker_start_enqueues_only_never_enqueued_keys(
+    w: World, pg: Pg, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-SEARCH-9 at worker start: `none` keys are enqueued; dead and existing keys are left alone."""
+    jobs = need("reader.search.jobs")
+    from reader.config import Secret
+    from reader.db import DbTarget
+    from reader.jobs.catalog import Catalog
+    from reader.jobs.queue import Jobs
+    from reader.jobs.worker import make_app
+
+    app = make_app(DbTarget(pg.host, pg.port, pg.user, pg.database, Secret(pg.password)))
+    await app.open_async()
+    try:
+        queue = Jobs(w.engine, app, Catalog(jobs.JOB_KINDS))
+        await add_material(w, "ivan", MAT_RU, RU_SPANS)
+        dead_ingest = await add_material(w, "anna", MAT_EN, RU_SPANS, config_id="book-en")
+        assert await jobs.ensure(queue, w.users["anna"], MAT_EN) == "queued"
+        dead_key = jobs._key(jobs.embed_args(MAT_EN, dead_ingest, await current_fts(w, MAT_EN)))
+        async with w.engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE job_keys SET outcome = 'dead', attempts = 3 WHERE key = :k"), {"k": dead_key}
+            )
+            await conn.execute(
+                text("UPDATE procrastinate_jobs SET status = 'failed' WHERE lock = :k"), {"k": dead_key}
+            )
+        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "none"
+        assert callable(getattr(jobs, "on_worker_start", None)), "reader.search.jobs declares on_worker_start"
+        await jobs.on_worker_start(queue)
+        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "queued"
+        assert await jobs.search_status(queue, w.users["anna"], MAT_EN) == "dead"
+        count = "SELECT count(*) FROM job_keys WHERE kind = 'search.embed'"
+        assert await scalar(w.engine, count) == 2
+        await jobs.on_worker_start(queue)  # a second start adds nothing and leaves the dead key dead
+        assert await scalar(w.engine, count) == 2
+        assert await jobs.search_status(queue, w.users["anna"], MAT_EN) == "dead"
     finally:
         await app.close_async()
