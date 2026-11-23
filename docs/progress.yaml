@@ -435,12 +435,17 @@ tasks:
         os.getsid while the child is alive.
         Owner judgement 2026-11-23 (SRV-INGEST owner note 6): NFR-INGEST-2 rule B is 1 of 20 (page 378); pages 133
         and 468 are label noise, not rule-B misses. The owner chose to fix code-block indentation before the first
-        full import: FR-INGEST-7 now rebuilds leading spaces from glyph origins (whole monospace cells from the
-        block's leftmost line, round half up, 0.25-cell tolerance, no tabs, text-layer fallback when undefined);
-        converter version bumped to docling-2.151.1+r2. Measured on the 20 pilot code blocks: advance 4.05 pt,
-        residual 0.00; page 468's Solidity block 0,0,0,0,0,2,4,4,4,4,4,2,0 and page 133's output block 0,0,2,2,2,0,
-        both equal to the counts recorded by eye. VEC-INGEST-3 hashes re-derived by the generator's own
-        implementation; the synthetic PDF's code block is nested 0/4/8/0 and round-trips exactly.",
+        full import: FR-INGEST-7 now rebuilds leading spaces from glyph origins, converter docling-2.151.1+r2.
+        Indentation review of ad0da76 (deep-reviewer, Fable): changes — the median step halved indents in
+        one-letter-token code. Fixed: the cell is the font advance (pdfium loose char box width, one width within
+        2%), every step and line offset a whole number of cells within the chosen 0.25 bound, dedent to the
+        leftmost line, no tabs, text-layer fallback when undefined; [unit] tests pin each choice. Measured
+        2026-11-23 on the 20 pilot code blocks: cell 4.05 pt, spread 0.000, residual 0.00; hand counts equal the
+        converter's on four blocks (468 Solidity 0,0,0,0,0,2,4,4,4,4,4,2,0; 468 first 0,0,0,0,0,0,3; 461 first
+        0,2,...,6,...,2,0; 133 output 0,0,2,2,2,0). Full book under r2 (confined, CPU): 935 pages in 642.2 s; code
+        boxes 360, indentation fallbacks 17 (kept the text layer), multi-box code items 0, so FR-INGEST-7's
+        per-box known limit does not touch the pilot. Owner: `reader-ingest --setup` builds the r2 venv; the old
+        <data_dir>/ingest/venv-docling-2.151.1+r1 (several GB) can be deleted.",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line

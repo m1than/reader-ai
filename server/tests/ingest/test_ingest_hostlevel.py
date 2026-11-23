@@ -78,7 +78,10 @@ def test_synthetic_pdf_converts_as_expected(tmp_path: Path) -> None:
     manifest = artifact.validate_dir(out)
     assert manifest["page_count"] == manifest["pages_converted"] == expected["page_count"]
     assert manifest["material_sha256"] == expected["pdf_sha256"]
-    assert progress[-1] == "page 2/2"
+    assert progress[-2:] == [
+        "page 2/2",
+        "code boxes 1, indentation fallbacks 0, multi-box code items 0",  # FR-INGEST-5's code line
+    ]
     spans = spans_of(out)
     headings = [s for s in spans if s["kind"] == "heading"]
     assert [h["text"] for h in headings] == expected["headings"]
@@ -225,6 +228,9 @@ def test_pilot_page_expectations(tmp_path: Path) -> None:
     assert not unexpected, unexpected
     # Page 468's Solidity block must keep more than one indentation level (owner, 2026-11-23).
     assert len(set(expectations["pages"]["468"]["indents"]["3"])) > 1
+    # The hand-counted blocks are all present: a dropped key must not silently skip its check.
+    hand_counted = {(p, b) for p, w in expectations["pages"].items() for b in w.get("indents", {})}
+    assert hand_counted == {("133", "2"), ("461", "0"), ("468", "0"), ("468", "3")}
 
 
 @pytest.mark.ingest_host

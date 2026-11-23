@@ -2,7 +2,7 @@
   "known_misses": [
     378
   ],
-  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. indents maps a code block index to its lines' leading-space counts, counted by eye on 3x page renders on 2026-11-23 (FR-INGEST-7). Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
+  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. indents maps a code block index to its lines' leading-space counts, counted by eye on 3x page renders on 2026-11-23 (FR-INGEST-7); no sample block has an indented first line. Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
   "pages": {
     "128": {
       "formulas_decoded": 2
@@ -23,7 +23,7 @@
             87.0
           ],
           "lines": 1,
-          "sha256": "d9588a92e898692fdca147c338635dfb67e2ad6226682eb7da970e0c33194dce"
+          "sha256": "fdf62f1f167f014ee87e83c563c7595fc3186de05bd47fd281397e4e65e29cbf"
         },
         {
           "box": [
@@ -208,6 +208,30 @@
           "sha256": "2e1caf4b5ccc865c159f41cfe2b087a948c09e694239837bcc748092b8341301"
         }
       ],
+      "indents": {
+        "0": [
+          0,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          4,
+          6,
+          6,
+          6,
+          4,
+          4,
+          6,
+          6,
+          6,
+          4,
+          2,
+          0
+        ]
+      },
       "order": [
         [
           0,
@@ -296,6 +320,15 @@
         }
       ],
       "indents": {
+        "0": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          3
+        ],
         "3": [
           0,
           0,

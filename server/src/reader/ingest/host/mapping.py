@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import itertools
 import json
-import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -54,7 +53,8 @@ class Item:
 
 
 BASELINE_PT: Final = 1.0  # FR-INGEST-7: glyphs within 1 pt of a line's first baseline share the line
-INDENT_TOLERANCE: Final = 0.25  # FR-INGEST-7: |q - n| allowed, in advances (the pilot's residual is 0.00)
+INDENT_TOLERANCE: Final = 0.25  # FR-INGEST-7, a chosen bound: |q - n| allowed, in cells (pilot: 0.00)
+MONO_SPREAD: Final = 0.02  # FR-INGEST-7, a chosen bound: advances within 2% of the largest are one cell
 
 
 def visual_lines(glyphs: Sequence[tuple[float, float]]) -> list[list[float]]:
@@ -69,34 +69,44 @@ def visual_lines(glyphs: Sequence[tuple[float, float]]) -> list[list[float]]:
     return [sorted(xs) for _, xs in lines]
 
 
-def indentation(lines: Sequence[Sequence[float]]) -> list[int] | None:
-    """FR-INGEST-7: leading spaces per visual line, or None when the rule is not well defined."""
-    steps = [b - a for xs in lines for a, b in itertools.pairwise(xs) if b - a > 0.01]
-    if not lines or not steps:
+def cell_of(advances: Sequence[float]) -> float | None:
+    """FR-INGEST-7: the monospace cell (mean advance), or None if the advances are not one width."""
+    if not advances or min(advances) <= 0 or max(advances) - min(advances) > MONO_SPREAD * max(advances):
         return None
-    advance = statistics.median(steps)
-    left = min(xs[0] for xs in lines)
-    counts = []
-    for xs in lines:
-        q = (xs[0] - left) / advance
-        n = int(q + 0.5)  # q >= 0: round half up
-        if abs(q - n) > INDENT_TOLERANCE:
-            return None
-        counts.append(n)
-    return counts
+    return sum(advances) / len(advances)
 
 
-def reindent(text: str, lines: Sequence[Sequence[float]]) -> str:
-    """FR-INGEST-7: replace each non-empty text line's leading whitespace by its measured indentation; the
-    text stays as the text layer gives it when the rule is not well defined or the line counts differ."""
+def indentation(lines: Sequence[Sequence[float]], cell: float | None) -> list[int] | None:
+    """FR-INGEST-7: leading spaces per visual line, or None when the rule is not well defined: every step
+    between successive origins and every line offset must be a whole number of cells within the tolerance.
+    The cell comes from the font's advance, never from the steps (one-letter tokens make every step 2 cells).
+    """
+    if cell is None or not lines:
+        return None
+
+    def cells(distance: float) -> int | None:
+        q = distance / cell
+        n = round(q)
+        return n if abs(q - n) <= INDENT_TOLERANCE else None
+
+    if any(cells(b - a) is None for xs in lines for a, b in itertools.pairwise(xs)):
+        return None  # not on one monospace grid
+    left = min(xs[0] for xs in lines)  # dedent to the leftmost line
+    counts = [cells(xs[0] - left) for xs in lines]
+    return None if None in counts else [n for n in counts if n is not None]
+
+
+def reindent(text: str, lines: Sequence[Sequence[float]], cell: float | None) -> tuple[str, bool]:
+    """FR-INGEST-7: replace each non-empty text line's leading whitespace by its measured indentation.
+    Returns the text and whether it fell back to the text layer (rule undefined or line counts differ)."""
     rows = text.replace("\r\n", "\n").split("\n")
     filled = [i for i, row in enumerate(rows) if row.strip()]
-    counts = indentation(lines)
+    counts = indentation(lines, cell)
     if counts is None or len(counts) != len(filled):
-        return text
+        return text, True
     for i, n in zip(filled, counts, strict=True):
         rows[i] = " " * n + rows[i].lstrip()
-    return "\n".join(rows)
+    return "\n".join(rows), False
 
 
 class BatchFailed(Exception):
@@ -206,6 +216,31 @@ def outline(
 
 def progress_line(done: int, total: int) -> str:
     return json.dumps({"pages_done": done, "pages_total": total}, separators=(",", ":"))
+
+
+CODE_KEYS: Final = ("code_boxes", "indent_fallbacks", "multi_box_code")
+MAX_CODE_BOXES: Final = 1_000_000
+
+
+def code_line(boxes: int, fallbacks: int, multi_box: int) -> str:
+    """FR-INGEST-5: the converter's one code line after the last batch, numbers only."""
+    return json.dumps(dict(zip(CODE_KEYS, (boxes, fallbacks, multi_box), strict=True)), separators=(",", ":"))
+
+
+def render_code_line(line: bytes) -> str | None:
+    """FR-INGEST-5: the code line rendered for the owner, only if it is exactly its schema and bounds."""
+    try:
+        data = json.loads(line.decode("utf-8"))
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) != set(CODE_KEYS):
+        return None
+    boxes, fallbacks, multi = (data[k] for k in CODE_KEYS)
+    if any(type(v) is not int for v in (boxes, fallbacks, multi)):
+        return None
+    if not (0 <= fallbacks <= boxes <= MAX_CODE_BOXES and 0 <= multi <= boxes):
+        return None
+    return f"code boxes {boxes}, indentation fallbacks {fallbacks}, multi-box code items {multi}"
 
 
 def parse_progress(line: bytes) -> tuple[int, int] | None:

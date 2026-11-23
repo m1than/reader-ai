@@ -91,18 +91,19 @@ def candidates(pdf_path: str, scratch: str) -> None:
 
 
 def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
-    """FR-INGEST-7's indentation, written independently of reader.ingest.host: glyph origins inside the
-    top-left-origin `box`, lines by baseline (1 pt), the median origin step as the cell, round half up,
-    0.25-cell tolerance; the text is returned unchanged when the rule does not apply."""
+    """FR-INGEST-7's indentation, written again here as code (not imported from reader.ingest.host); it is
+    the same rule, so it guards the implementation, not the rule. Glyph origins inside the top-left-origin
+    `box`, lines by baseline (1 pt), the cell from the loose-box advance (one width within 2%), every step
+    and offset a whole number of cells within 0.25; the text is returned unchanged when the rule fails."""
     import ctypes
-    import math
-    import statistics
 
     import pypdfium2.raw as raw
 
     x0, y0, x1, y1 = box
     rows: list[list[float]] = []  # [baseline from the top, x, x, ...]
+    widths: list[float] = []
     ox, oy = ctypes.c_double(), ctypes.c_double()
+    rect = raw.FS_RECTF()
     for index in range(text_page.count_chars()):
         if chr(raw.FPDFText_GetUnicode(text_page, index)).isspace():
             continue
@@ -110,6 +111,8 @@ def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
         if not (x0 <= (left + right) / 2 <= x1 and y0 <= height - (bottom + top) / 2 <= y1):
             continue
         raw.FPDFText_GetCharOrigin(text_page, index, ox, oy)
+        raw.FPDFText_GetLooseCharBox(text_page, index, rect)
+        widths.append(rect.right - rect.left)
         baseline = height - oy.value
         row = next((r for r in rows if abs(r[0] - baseline) <= 1.0), None)
         if row is None:
@@ -118,19 +121,26 @@ def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
             row.append(ox.value)
     rows.sort(key=lambda r: r[0])
     xs_by_row = [sorted(r[1:]) for r in rows]
-    gaps = [xs[k + 1] - xs[k] for xs in xs_by_row for k in range(len(xs) - 1) if xs[k + 1] - xs[k] > 0.01]
     lines = text.replace("\r\n", "\n").split("\n")
     filled = [i for i, line in enumerate(lines) if line.strip()]
-    if not gaps or len(filled) != len(xs_by_row):
+    if not widths or min(widths) <= 0 or (max(widths) - min(widths)) / max(widths) > 0.02:
         return text
-    cell = statistics.median(gaps)
+    if len(filled) != len(xs_by_row):
+        return text
+    cell = sum(widths) / len(widths)
+
+    def whole(distance: float) -> int | None:
+        n = int(distance / cell + 0.5) if distance >= 0 else -int(-distance / cell + 0.5)
+        return n if abs(distance / cell - n) <= 0.25 else None
+
+    if any(whole(xs[k + 1] - xs[k]) is None for xs in xs_by_row for k in range(len(xs) - 1)):
+        return text
     origin = min(xs[0] for xs in xs_by_row)
-    for i, xs in zip(filled, xs_by_row, strict=True):
-        q = (xs[0] - origin) / cell
-        n = math.floor(q + 0.5)
-        if abs(q - n) > 0.25:
-            return text
-        lines[i] = " " * n + lines[i].lstrip()
+    counts = [whole(xs[0] - origin) for xs in xs_by_row]
+    if None in counts:
+        return text
+    for i, n in zip(filled, counts, strict=True):
+        lines[i] = " " * (n or 0) + lines[i].lstrip()
     return "\n".join(lines)
 
 
