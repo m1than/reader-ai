@@ -16,14 +16,31 @@ OUT="$ROOT/e2e/live/out"
 SUITE="$ROOT/e2e/web/live"
 READER_URL="${READER_URL:-https://localhost}"
 
+#
+# Slice mode (owner's choice, 2026-11-23; e2e/live/slice.sh calls it):
+#   bash e2e/live/verify-all.sh --config PATH --slice STEPS [--out DIR] [--reset-owner-passkeys]
+# runs only the owner session (web_live.py --owner: the owner's bootstrap link, CDP virtual passkey) and the slice
+# suite e2e/web/live/owner.slice.ts with the comma-separated STEPS (routes, import, embed, bench, compile, lesson,
+# tutor). The owner's link is refused once the owner has a passkey; --reset-owner-passkeys deletes every passkey and
+# session of the owner first (including one made in Safari). Stage 1 and the learner suite are not run.
+USAGE="usage: $0 --config PATH [--slice STEPS [--out DIR] [--reset-owner-passkeys]]"
 CONFIG=""
+SLICE=""
+SLICE_OUT=""
+RESET_OWNER=0
 while (($#)); do
   case "$1" in
     --config) CONFIG="$2"; shift 2 ;;
-    *) echo "usage: $0 --config PATH" >&2; exit 2 ;;
+    --slice) SLICE="$2"; shift 2 ;;
+    --out) SLICE_OUT="$2"; shift 2 ;;
+    --reset-owner-passkeys) RESET_OWNER=1; shift ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
   esac
 done
-[[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "usage: $0 --config PATH  (reader.yaml not found)" >&2; exit 2; }
+[[ -n "$CONFIG" && -f "$CONFIG" ]] || { echo "$USAGE  (reader.yaml not found)" >&2; exit 2; }
+if [[ -z "$SLICE" ]] && { [[ -n "$SLICE_OUT" ]] || ((RESET_OWNER)); }; then
+  echo "$USAGE  (--out and --reset-owner-passkeys need --slice)" >&2; exit 2
+fi
 # The project's own `reader` (server/.venv, created by `uv sync`) when none is installed globally; stage-1.sh inherits it.
 command -v reader >/dev/null || { [[ -x "$ROOT/server/.venv/bin/reader" ]] && export PATH="$ROOT/server/.venv/bin:$PATH"; }
 for tool in reader docker jq curl uv; do
@@ -43,6 +60,24 @@ if ! jq -e '.watcher == "running" and ([.services[] | select(.state == "running"
   exit 2
 fi
 PROJECT="$(jq -r '.project // "reader"' <<<"$status_json")"
+
+# --- Slice mode: the owner session and the slice suite only ---------------------------------------------------------
+if [[ -n "$SLICE" ]]; then
+  [[ "$SLICE" =~ ^[a-z]+(,[a-z]+)*$ ]] || { echo "$USAGE  (STEPS: comma-separated names)" >&2; exit 2; }
+  OUT="${SLICE_OUT:-$ROOT/e2e/live/out-slice}"
+  mkdir -p "$OUT"
+  chmod 700 "$OUT"
+  [[ -d "$SUITE/node_modules" ]] || (cd "$SUITE" && npm ci --no-audit --no-fund --silent)
+  owner_args=(--owner --slice-steps "$SLICE")
+  ((RESET_OWNER)) && owner_args+=(--reset-owner-passkeys)
+  rc=0
+  (cd "$ROOT/server" && uv run --quiet python -I "$ROOT/e2e/live/lib/web_live.py" \
+    --project "$PROJECT" --url "$READER_URL" --out "$OUT" --suite "$SUITE" "${owner_args[@]}") >"$OUT/browser.txt" 2>&1 || rc=$?
+  grep -E '^(PASS|FAIL|SKIP) ' "$OUT/browser.txt" || echo "FAIL slice: helper produced no result lines (exit $rc)"
+  echo "results: $OUT/slice-results.json"
+  ((rc == 0)) && ! grep -q '^FAIL ' "$OUT/browser.txt"
+  exit $?
+fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT"

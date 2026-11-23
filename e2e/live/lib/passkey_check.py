@@ -54,9 +54,11 @@ def psql(project: str, sql: str) -> tuple[int, str]:
     return done.returncode, done.stdout.decode("utf-8", "replace").strip()
 
 
-def bootstrap_token(project: str, url: str) -> str | None:
-    """The token from the link; the link itself never leaves this function."""
-    done = compose(project, "exec", "-T", "api", "reader-server", "bootstrap-link", "--handle", HANDLE)
+def bootstrap_token(project: str, url: str, handle: str | None = HANDLE) -> str | None:
+    """The token from the link; the link itself never leaves this function. `handle=None` is the owner's link,
+    as `reader bootstrap` issues it (FR-DEPLOY-11); it is refused once the owner has a passkey."""
+    argv = ["exec", "-T", "api", "reader-server", "bootstrap-link"] + (["--handle", handle] if handle else [])
+    done = compose(project, *argv)
     if done.returncode != 0:
         return None
     lines = done.stdout.decode("utf-8", "replace").strip().splitlines()

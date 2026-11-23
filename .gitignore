@@ -10,6 +10,7 @@ build/
 storybook-static/
 web/test-results/
 e2e/live/out/
+e2e/live/out-slice/
 e2e/web/live/out/
 e2e/web/live/test-results/
 .env

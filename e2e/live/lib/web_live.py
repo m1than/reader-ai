@@ -11,6 +11,12 @@ Steps:
      process through its environment only; the full environment of this process is never passed on.
   4. After the run, every artifact is scanned for the token (zip members included). Any hit is scrubbed and is a FAIL.
      Cookie and session-cookie values in the trace are redacted.
+
+--owner (verify-all.sh --slice; owner's choice 2026-11-23): the same steps for the owner instead of live-check, then
+the slice suite (e2e/web/live/owner.slice.ts). No reset and no fixture: the owner's link is refused once the owner
+has a passkey, so a second run needs --reset-owner-passkeys, which deletes every passkey and session of the owner
+(including a real one from Safari). The course plan and questions-v2 are handed over as JSON files in the out
+directory, which is never committed.
 """
 
 from __future__ import annotations
@@ -35,6 +41,15 @@ from passkey_check import EXISTS_SQL, RESET_SQL, bootstrap_token, compose, psql 
 
 HANDLE = "live-check"
 PLAYWRIGHT_TIMEOUT_S = 20 * 60  # whole browser suite; each step inside is bounded by its own timeout
+SLICE_TIMEOUT_S = 150 * 60  # --owner: embed wait (≤ 60 min) + compile (≤ 45 min) + lesson, tutor and search bench
+REPO = Path(__file__).resolve().parents[3]
+OWNER_PASSKEYS_SQL = (
+    "SELECT count(*) FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id WHERE u.role = 'owner';"
+)
+OWNER_RESET_SQL = (
+    "DELETE FROM sessions WHERE owner_id = (SELECT id FROM users WHERE role = 'owner'); "
+    "DELETE FROM webauthn_credentials WHERE owner_id = (SELECT id FROM users WHERE role = 'owner');"
+)
 COOKIE_RES = [
     re.compile(rb'("name"\s*:\s*"(?:[Cc]ookie|[Ss]et-[Cc]ookie)"\s*,\s*"value"\s*:\s*")[^"]*'),
     re.compile(rb'("name"\s*:\s*"__Host-[^"]*"\s*,\s*"value"\s*:\s*")[^"]*'),
@@ -128,12 +143,51 @@ def walk_results(node: dict[str, object], prefix: str = "") -> list[tuple[str, s
     return found
 
 
+def prepare_owner(project: str, reset: bool) -> bool:
+    """The owner may receive a bootstrap link only without a passkey (SRV-AUTH owner_has_credential)."""
+    code, count = psql(project, OWNER_PASSKEYS_SQL)
+    if code != 0 or not count.isdigit():
+        line("FAIL", "browser: owner passkeys counted")
+        return False
+    if count != "0" and not reset:
+        line("FAIL", f"browser: the owner has no passkey yet (found {count}; --reset-owner-passkeys deletes them all)")
+        return False
+    if count != "0":
+        code, _ = psql(project, OWNER_RESET_SQL)
+        line("PASS" if code == 0 else "FAIL", f"browser: owner passkeys and sessions deleted ({count})")
+        return code == 0
+    line("PASS", "browser: the owner has no passkey yet")
+    return True
+
+
+def slice_inputs(out: Path, steps: str) -> dict[str, str]:
+    """The pilot plan (pilot/bashir/course.yaml) and questions-v2 as JSON for the slice suite; ids, pages, questions."""
+    from ruamel.yaml import YAML
+
+    yaml = YAML(typ="safe")
+    plan = yaml.load((REPO / "pilot" / "bashir" / "course.yaml").read_text("utf-8"))
+    questions = yaml.load((REPO / "spikes" / "embeddings-local" / "questions-v2.yaml").read_text("utf-8"))
+    plan_path, questions_path = out / "slice-plan.json", out / "slice-questions.json"
+    plan_path.write_text(json.dumps(plan, ensure_ascii=False, default=str), "utf-8")
+    picked = [{"id": q["id"], "gold_pages": q["gold_pages"], "question": q["question"]} for q in questions["questions"]]
+    questions_path.write_text(json.dumps(picked, ensure_ascii=False), "utf-8")
+    return {
+        "READER_SLICE_STEPS": steps,
+        "READER_SLICE_PLAN": str(plan_path.resolve()),
+        "READER_SLICE_QUESTIONS": str(questions_path.resolve()),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--project", required=True)
     parser.add_argument("--url", default="https://localhost")
     parser.add_argument("--out", required=True)
     parser.add_argument("--suite", required=True, help="e2e/web/live")
+    parser.add_argument("--owner", action="store_true", help="owner session and the slice suite (verify-all --slice)")
+    parser.add_argument("--reset-owner-passkeys", action="store_true",
+                        help="with --owner: delete every passkey and session of the owner first")
+    parser.add_argument("--slice-steps", default="routes", help="with --owner: comma-separated slice steps")
     args = parser.parse_args()
     out = Path(args.out)
     suite = Path(args.suite)
@@ -145,15 +199,24 @@ def main() -> int:
     if not spki:
         return failures
 
-    code, count = psql(args.project, EXISTS_SQL)
-    if code != 0 or count != "1":
-        line("FAIL", "browser: live-check is a configured learner")
-        return failures
-    code, _ = psql(args.project, RESET_SQL)
-    line("PASS" if code == 0 else "FAIL", "browser: live-check reset for a fresh passkey")
-    line("PASS" if load_fixture(args.project) else "FAIL", "browser: fixture lesson F01 loaded for live-check")
+    extra: dict[str, str] = {}
+    if args.owner:
+        if not prepare_owner(args.project, args.reset_owner_passkeys):
+            return failures
+        extra = slice_inputs(out, args.slice_steps)
+        token = bootstrap_token(args.project, args.url, handle=None)
+        config, budget = "playwright.slice.config.ts", SLICE_TIMEOUT_S
+    else:
+        code, count = psql(args.project, EXISTS_SQL)
+        if code != 0 or count != "1":
+            line("FAIL", "browser: live-check is a configured learner")
+            return failures
+        code, _ = psql(args.project, RESET_SQL)
+        line("PASS" if code == 0 else "FAIL", "browser: live-check reset for a fresh passkey")
+        line("PASS" if load_fixture(args.project) else "FAIL", "browser: fixture lesson F01 loaded for live-check")
+        token = bootstrap_token(args.project, args.url)
+        config, budget = "playwright.live.config.ts", PLAYWRIGHT_TIMEOUT_S
 
-    token = bootstrap_token(args.project, args.url)
     line("PASS" if token else "FAIL", "browser: bootstrap link issued (not printed)")
     if not token:
         return failures
@@ -168,13 +231,14 @@ def main() -> int:
         "READER_CA_SPKI": spki,
         "NODE_EXTRA_CA_CERTS": str(root_pem.resolve()),
         "READER_BOOTSTRAP_TOKEN": token,
+        **extra,
     }
     del token
     started = time.monotonic()
     with (out / "playwright.log").open("wb") as log:
         try:
-            done = subprocess.run(["npx", "playwright", "test", "-c", "playwright.live.config.ts"], cwd=suite,
-                                  env=env, stdout=log, stderr=subprocess.STDOUT, timeout=PLAYWRIGHT_TIMEOUT_S,
+            done = subprocess.run(["npx", "playwright", "test", "-c", config], cwd=suite,
+                                  env=env, stdout=log, stderr=subprocess.STDOUT, timeout=budget,
                                   check=False)
             rc = done.returncode
         except subprocess.TimeoutExpired:
@@ -198,7 +262,7 @@ def main() -> int:
     for status, title, seconds in walk_results(data):
         line(status, f"browser: {title}", f"({seconds:.1f}s)")
     if rc == -1:
-        line("FAIL", f"browser: suite exceeded {PLAYWRIGHT_TIMEOUT_S}s")
+        line("FAIL", f"browser: suite exceeded {budget}s")
     return failures
 
 
