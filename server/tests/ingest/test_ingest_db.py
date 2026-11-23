@@ -115,6 +115,37 @@ async def test_import_enqueues_search_embed_for_its_ingest(pg: Pg, tmp_path: Pat
         assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'search.embed'") == 1
 
 
+@pytest.mark.parametrize(("error", "dead"), [("connector", False), ("config", True)])
+async def test_enqueue_error_fails_the_attempt_and_commits_nothing(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, error: str, dead: bool
+) -> None:
+    """FR-INGEST-13: an embed enqueue error fails the attempt; transient is retried, permanent is dead."""
+    from procrastinate.exceptions import ConnectorException
+
+    from reader.config import ConfigError
+
+    async with world(pg, tmp_path) as w:
+        original = w.jobs.enqueue
+
+        async def failing(kind: str, args: Any, schedule_in: int = 0) -> Any:
+            if kind == "search.embed":
+                if error == "connector":
+                    raise ConnectorException("pool blip")
+                raise ConfigError(())
+            return await original(kind, args, schedule_in)
+
+        monkeypatch.setattr(w.jobs, "enqueue", failing)
+        await receive(w, tar())
+        await w.work()
+        rows = await w.rows("SELECT attempts, outcome FROM job_keys WHERE kind = 'ingest.import'")
+        assert len(rows) == 1
+        attempts, outcome = rows[0]
+        assert attempts == 1
+        assert (outcome == "dead") is dead
+        assert await w.scalar("SELECT count(*) FROM ingests") == 0
+        assert await w.scalar("SELECT count(*) FROM material_spans") == 0
+
+
 async def test_unknown_material_and_version_mismatch(pg: Pg, tmp_path: Path) -> None:
     async with world(pg, tmp_path) as w:
         assert await refused(w, tar(material_sha256="c" * 64)) == "unknown_material"

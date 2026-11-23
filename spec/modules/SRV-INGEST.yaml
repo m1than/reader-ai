@@ -448,8 +448,9 @@ requirements:
       - **key:** `[material_sha256, converter_version]`.
       - **max_attempts:** 3.
       - **transient:** asyncpg's connection errors (`asyncpg.exceptions.ConnectionDoesNotExistError`,
-        `asyncpg.exceptions.CannotConnectNowError`, `ConnectionRefusedError`). `FileNotFoundError`,
-        `PermissionError` and validation errors are permanent.
+        `asyncpg.exceptions.CannotConnectNowError`, `ConnectionRefusedError`) and
+        `procrastinate.exceptions.ConnectorException` (procrastinate wraps every psycopg error of the `search.embed`
+        defer below in it). `FileNotFoundError`, `PermissionError` and validation errors are permanent.
       - **timeout_s:** 600.
       **The handler:**
       - reads the artifact from `<BLOBS_DIR>/ingest/<artifact_id>/` and re-validates it with FR-INGEST-11's validator;
@@ -462,11 +463,14 @@ requirements:
         SRV-SEARCH's `embed_args(material_sha256, ingest_id, fts_config_of(conn, material_sha256, ingest_id))`. The
         enqueue is idempotent by FR-SEARCH-5's key and commits on its own connection: if the import's run then rolls
         back, the embed job finds no ingest (IngestNotReady, then dead after its attempts) and a later successful
-        import enqueues under its new ingest id. An enqueue error propagates and fails this import attempt (the
-        connection errors above are transient; a missing or broken reader.yaml, read for the material's language,
-        fails it as it fails the api). [db] exactly one `search.embed` key per ingest, with FR-SEARCH-5's args;
-        a repeated receive adds none. Found by the V.live run 2026-11-23: without this, nothing in the slice ever
-        enqueued `search.embed` (75 min, no embed call).
+        import enqueues under its new ingest id. An enqueue error propagates and fails this import attempt, so a
+        committed ingest always has its embed key: a transient error above is retried; any other (a missing or
+        broken reader.yaml, read for the material's language, raises ConfigError) ends the import dead with
+        nothing committed, recovered by `reader-ingest --requeue`. [db] exactly one `search.embed` key per ingest,
+        with FR-SEARCH-5's args; a repeated receive adds none; an injected transient enqueue error leaves the
+        import retryable (not dead) with no ingest committed; an injected permanent one ends it dead with no
+        ingest committed. Found by the V.live run 2026-11-23: without this, nothing in the slice ever enqueued
+        `search.embed` (75 min, no embed call).
       It never commits itself (SRV-EVENTS FR-EVENTS-5). The sha256 of the stored manifest bytes must equal
       `artifact_id` (else `artifact_mismatch`). Memory is bounded at the caps: it holds the validated member bytes
       (at most 64 MiB of spans) and parses and inserts the spans 1,000 lines at a time, never all spans as objects. The owner is the one `users` row with role `owner`
