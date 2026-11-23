@@ -38,6 +38,18 @@ test('a sibling worktree is gated like the main checkout', (t) => {
   assert.match(h3.stderr, /^\[H3\]/);
 });
 
+test('H4 (OPS-DOD FR-DOD-12): the agent cannot add or change a waiver in the Definition-of-Done index', () => {
+  const file = join(repo, 'spec/fixtures/OPS-DOD/operations.yaml');
+  const cell = 'latency: { missing: "no sourced budget for the bootstrap ceremony; record timings in the live suite" }';
+  const waived = 'latency: { waived: { reason: "owner accepted", by: owner, date: "2026-11-23" } }';
+  const added = run({ file_path: file, old_string: cell, new_string: waived });
+  assert.equal(added.status, 2);
+  assert.match(added.stderr, /^\[H4\]/);
+  // An edit that touches no waiver passes.
+  const neutral = run({ file_path: file, old_string: cell, new_string: cell.replace('no sourced', 'still no sourced') });
+  assert.equal(neutral.status, 0, neutral.stderr);
+});
+
 test('files outside every checkout of this repository are not gated', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hook-out-'));
   try {

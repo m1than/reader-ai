@@ -788,18 +788,36 @@ tasks:
         −$0.20–0.26. Stack ≈ $0.035–0.047/page (−50–60%). RAG (lever 7) saves < $0.001/page after L1 but is tested for
         quality (LaRA). Batch API not reachable via the Agent SDK (would need an ADR). Plan E0–E6 ≈ $14.5 of the test budget." }
   - { id: V.DOD-index, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.live],
-      branch: V/V.DOD-index,
+      branch: V/OPS-DOD-impl,
       what: "Owner 2026-11-22: Definition-of-Done index of every user operation, verified automatically; feeds
         V.cost-optimize (spec OPS-DOD).",
-      review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review)",
-      note: "spec revised after review. Index: 30 operations × 8 criteria = 240 cells, 44 na, 44 missing (ingest.setup,
-        material.browse, lesson.list, lesson.open, course.import, lesson.findings, stack.backup, stack.restore 3 each;
-        auth.signout, auth.add_passkey, lesson.compile_resume, stack.trust 2 each; 12 operations with 1; material.ingest,
-        cell.run, cell.reset, lesson.compile, tutor.ask, stack.up 0). 81 mapped items untraced, all in draft specs.
+      review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review).
+        Recheck on V/slice-integration 744997e (2026-11-23): spec review round 1 of cd6be04 changes (8 blocking, all
+        applied, plus the non-blocking items); round 2 on 4b03d67: VERDICT approve; spec approved by agent 2026-11-23.
+        Green (2026-11-23): tools/dod/index.mjs (FR-DOD-1/2 shape, T10, waiver rule, P8 ratchet), tools/dod/report.mjs
+        (report, INDEX.md, report.json, exit codes), T10 in check.mjs, P8 in guard-tests.mjs, H4 in pre-write.mjs,
+        TAB details in web_live.py and passkey_check.py, ci-local.sh and ci.yml steps; 105 node tests pass. Not yet
+        done (follow-up, needs a live run and the e2e/live secret-handling review): verify-all.sh writing the FR-DOD-4
+        inputs (pytest xunit1, vitest and Playwright JSON) and running report.mjs into docs/dod/; slice.live.ts
+        writing axe.json; docs/dod/ committed with the final PR",
+      note: "spec rechecked 2026-11-23 against the integrated code (every other spec approved). Index: 30 operations × 8
+        criteria = 240 cells, 44 na, 49 missing (declared gaps only). Closed: lesson.compile_resume × cost (the run's
+        stored cap). Opened by review round 1: search.query × observability (no test asserts FR-SEARCH-8's line),
+        cell.run/interrupt/reset/run_all × observability (INV-KERNEL-6 is privacy), auth.bootstrap and auth.signin ×
+        a11y (no axe run there), lesson.findings × recovery narrowed (absent G2 report untested). Every mapped item is
+        traced. axe.json, timings.jsonl and ledger.jsonl have no producer yet: Green adds axe.json (slice.live.ts);
+        timings and ledger are V.cost-optimize's first step. Fixed drift: material and compile routes renamed, POST
+        /api/search and GET /api/lessons/{lesson_id}/questions mapped, GET /api/spend gone, tutor items renumbered
+        (FR-TUTOR-11 Ask panel with axe, FR-TUTOR-12 logging), tutor cap 0.30, ledger usd from settled_usd (settle rows
+        only) plus thinking. FOR THE OWNER'S REVIEW-AFTER: not_user_facing gains `reader-server` (container entrypoint;
+        only the owner adds these entries); hand-rolled positional subcommands (outside argparse add_parser) escape T10's
+        CLI registry; ADR-0001 (proposed) content amended with T10, P8 (ratchet, trailer DoD-Owner-Change), H4 (waiver
+        hook) and tools/dod tests, status unchanged.
         Paired tools changes in Red/Green: repo.mjs TEST_PATTERNS ^tools/dod/.+\\.test\\.mjs$; check.mjs T10; guard-tests
-        ratchet; pre-write hook refuses agent `waived`; ci runs node --test \"tools/dod/*.test.mjs\"; verify-all.sh
-        inputs and report. Cross-spec: SRV-TUTOR FR-TUTOR-11 becomes a pointer to this index. This entry duplicates the
-        one on V/owner-housekeeping; keep this one when merging." }
+        ratchet; pre-write hook refuses new or changed waived cells; ci runs node --test \"tools/dod/*.test.mjs\";
+        verify-all.sh inputs and report; web_live.py and passkey_check.py details after a TAB; slice.live.ts writes
+        axe.json. Cross-spec: SRV-TUTOR FR-TUTOR-13 (dod.yaml) becomes a pointer to this index at its next
+        revision. This entry duplicates the one on V/owner-housekeeping; keep this one when merging." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

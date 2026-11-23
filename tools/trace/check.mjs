@@ -8,8 +8,10 @@ import {
   loadRepo, isImplFile, claimsOf, MODULE_ID, ITEM_ID, ADR_ID,
   SPEC_STATUSES, LOCKED_SPEC_STATUSES, ADR_STATUSES, TRACKS,
 } from '../lib/repo.mjs';
+import { INDEX_FILE, parseIndex, repoContext, t10Repo } from '../dod/index.mjs';
 
 const TASK_STATUSES = ['todo', 'in_progress', 'blocked', 'done'];
+const dodInfo = []; // T10 information lines (tracked operations), printed after the rules
 
 const root = resolve(process.argv[2] ?? '.');
 const repo = loadRepo(root);
@@ -112,6 +114,21 @@ const rules = {
       ]),
     ];
   },
+
+  // T10: the Definition-of-Done index matches the specs, tests, live labels and registries (OPS-DOD FR-DOD-3)
+  'T10 dod-index': (r) => {
+    const path = join(root, INDEX_FILE);
+    const status = r.specs.find((s) => s.doc.id === 'OPS-DOD')?.doc.status ?? 'draft';
+    let index = null;
+    if (existsSync(path)) {
+      const parsed = parseIndex(readFileSync(path, 'utf8'));
+      if (parsed.error) return [`${INDEX_FILE}: does not parse: ${parsed.error}`];
+      index = parsed.index;
+    }
+    const { errors, info } = t10Repo(index, repoContext(root, r), status);
+    dodInfo.push(...info);
+    return errors.map((e) => `${INDEX_FILE}: ${e}`);
+  },
 };
 
 const report = Object.entries(rules)
@@ -122,6 +139,7 @@ const lines = report.flatMap(({ name, errors }) => [
   ...errors.map((e) => `    ${e}`),
 ]);
 console.log(lines.join('\n'));
+if (dodInfo.length) console.log(['\nT10 information (tracked operations):', ...dodInfo.map((l) => `    ${l}`)].join('\n'));
 
 const total = report.reduce((n, r) => n + r.errors.length, 0);
 console.log(`\nspecs: ${repo.specs.length}, tests: ${repo.tests.length}, ADRs: ${repo.adrs.length}, errors: ${total}`);

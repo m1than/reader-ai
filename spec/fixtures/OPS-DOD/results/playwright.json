@@ -1,0 +1,1 @@
+{"config":{"rootDir":"/repo/e2e/web"},"suites":[{"title":"x.spec.ts","file":"x.spec.ts","specs":[{"title":"CANARY spec","file":"x.spec.ts","ok":true,"tests":[{"status":"flaky","projectName":"chromium","results":[{"status":"failed","error":{"message":"CANARY failure"},"attachments":[{"name":"CANARY attachment"}]},{"status":"passed","attachments":[]}]}]}],"suites":[]}],"errors":[]}

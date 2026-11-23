@@ -1,0 +1,4 @@
+[
+  { "page": "/lessons/{lesson_id}", "violations": { "minor": 2, "moderate": 1, "serious": 0, "critical": 0 } },
+  { "page": "/", "violations": { "minor": 0, "moderate": 0, "serious": 1, "critical": 0 } }
+]

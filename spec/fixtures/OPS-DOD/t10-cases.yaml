@@ -1,0 +1,364 @@
+# VEC-DOD-3 — hand-written invalid indexes and index changes with the expected errors (OPS-DOD FR-DOD-1, -2, -3,
+# -12, -13; INV-DOD-4). Written in Red, 2026-11-23.
+#
+# `context` stands in for the repository: module specs with their status and items, the item ids some test traces,
+# the labels each live key's scripts emit, the disabled labels, the route registry and the CLI registry (entries,
+# and the options each `reader` leaf subparser declares). `base_yaml` is a valid index: T10 over it gives no error
+# and the `info` lines below. A case changes the base by text (`replace`: [old, new] pairs on base_yaml, applied
+# in order, each old string occurring exactly once) and/or by `patch` on the parsed index ({path, value} sets,
+# {path, delete: true} deletes; a path is a list of keys and list indexes), and may patch the context
+# (`context_patch`). `errors` is the exact error list, compared as a set sorted by UTF-16 code unit.
+# `ratchet` cases patch the base into a `--base` index (`base_patch`, default none) and a HEAD index (`head_patch`);
+# `base_absent: true` means the base has no index. `waivers` cases patch the base into the current file
+# (`before_patch`) and the written result (`after_patch`) and give the hook's error list (FR-DOD-12).
+
+context:
+  specs:
+    SRV-A: { status: approved, items: [FR-A-1, FR-A-2, INV-A-1] }
+    SRV-B: { status: draft, items: [FR-B-1] }
+    OPS-T: { status: approved, items: [FR-T-1] }
+  traced: [FR-A-1, INV-A-1, FR-B-1]
+  labels:
+    stage-1: ["reader up ok", "reader backup"]
+    browser: ["page loads"]
+  disabled:
+    - { label: "stage-1: reader backup", reason: S1.X }
+  routes: ["GET /api/a", "POST /api/a", "GET /api/healthz"]
+  cli:
+    entries: ["reader up", "reader down", "reader watcher status", "reader-x", "reader-x --setup", "reader-srv",
+              "reader-srv --healthcheck"]
+    flags:
+      reader up: []
+      reader down: ["--untrust"]
+      reader watcher status: []
+
+base_yaml: |
+  version: 1
+  criteria:
+    functional: does what the spec says
+    security: holds
+    privacy: no leak
+    a11y: no serious axe issue
+    latency: within budget
+    cost: within budget
+    observability: a log line
+    recovery: failure path tested
+  not_user_facing:
+    - { spec: OPS-T, reason: tooling }
+    - { route: "GET /api/healthz", reason: probe }
+    - { command: reader-srv, reason: entrypoint }
+  operations:
+    - id: web.read
+      title: Read a page
+      surface: [web, api]
+      specs: [SRV-A]
+      routes: ["GET /api/a", "POST /api/a"]
+      gate: enforced
+      criteria:
+        functional: { items: [FR-A-1], live: ["browser: page loads"] }
+        security: { items: [INV-A-1] }
+        privacy: { items: [FR-A-1] }
+        a11y: { pages: ["/"] }
+        latency: { budget: { p95_ms_max: 500, n_min: 3, kind: target, source: "structural: test" } }
+        cost: { na: "no provider call" }
+        observability: { items: [FR-A-1] }
+        recovery: { items: [INV-A-1] }
+    - id: stack.run
+      title: Run the stack
+      surface: [cli]
+      specs: [SRV-A, SRV-B]
+      commands: ["reader up", "reader down", "reader down --untrust", "reader watcher status", "reader-x",
+                 "reader-x --setup"]
+      gate: tracked
+      criteria:
+        functional: { items: [FR-B-1, FR-A-2], live: ["stage-1: reader up ok"] }
+        security: { missing: "no isolation test" }
+        privacy: { waived: { reason: "owner accepted", by: owner, date: "2026-11-23" } }
+        a11y: { na: "no web surface" }
+        latency: { missing: "no budget" }
+        cost: { budget: { usd_per_run_max: 1.5, n_min: 1, kind: baseline, source: ADR-0005 } }
+        observability: { missing: "no log line" }
+        recovery: { items: [FR-A-1] }
+
+info:   # tracked operations only (FR-DOD-3)
+  - "stack.run: 3 missing; untraced: FR-A-2"
+
+cases:
+  # FR-DOD-1 shape
+  - name: an unquoted comma inside a flow mapping splits an na reason into a second key
+    replace: [['a11y: { na: "no web surface" }', 'a11y: { na: no web surface, cli only }']]
+    errors: ['stack.run × a11y: unknown key "cli only"']
+  - name: unknown top-level key
+    patch: [{ path: [extra], value: 1 }]
+    errors: ['index: unknown key "extra"']
+  - name: wrong version
+    patch: [{ path: [version], value: 2 }]
+    errors: ["index: version must be 1"]
+  - name: criteria keys not exactly the eight
+    patch: [{ path: [criteria, recovery], delete: true }]
+    errors: ["criteria: keys must be exactly functional, security, privacy, a11y, latency, cost, observability, recovery"]
+  - name: an operation lacks a criterion
+    patch: [{ path: [operations, 0, criteria, recovery], delete: true }]
+    errors: ["web.read: criteria must hold exactly functional, security, privacy, a11y, latency, cost, observability, recovery"]
+  - name: unknown operation key
+    patch: [{ path: [operations, 0, owner], value: me }]
+    errors: ['web.read: unknown key "owner"']
+  - name: bad operation id
+    patch: [{ path: [operations, 0, id], value: Web.Read }]
+    errors: ['operations[0]: id "Web.Read" does not match ^[a-z]+\.[a-z_]+$']
+  - name: duplicate operation id
+    patch: [{ path: [operations, 1, id], value: web.read }]
+    errors: ["web.read: duplicate operation id"]
+  - name: unknown surface
+    patch: [{ path: [operations, 0, surface], value: [web, mobile] }]
+    errors: ['web.read: surface "mobile" is not one of web, api, cli']
+  - name: bad gate
+    patch: [{ path: [operations, 0, gate], value: done }]
+    errors: ["web.read: gate must be tracked or enforced"]
+  - name: malformed route
+    patch: [{ path: [operations, 0, routes], value: ["GET /api/a", "POST /api/a", "/api/a"] }]
+    errors: ['web.read: route "/api/a" must be "<METHOD|WS> <path>"']
+  - name: an empty list
+    patch: [{ path: [operations, 0, criteria, security, items], value: [] }]
+    errors: ["web.read × security: items must be a non-empty list"]
+  - name: an empty string
+    patch: [{ path: [operations, 1, criteria, security, missing], value: "" }]
+    errors: ["stack.run × security: missing must be a non-empty string"]
+  - name: an empty cell
+    patch: [{ path: [operations, 0, criteria, security], value: {} }]
+    errors: ["web.read × security: empty entry"]
+  - name: na with another key
+    patch: [{ path: [operations, 1, criteria, a11y], value: { na: x, items: [FR-A-1] } }]
+    errors: ["stack.run × a11y: na excludes every other key"]
+  - name: waived with another key
+    patch: [{ path: [operations, 1, criteria, privacy, items], value: [FR-A-1] }]
+    errors: ["stack.run × privacy: waived excludes every other key"]
+  - name: a waiver not by the owner
+    patch: [{ path: [operations, 1, criteria, privacy, waived, by], value: agent }]
+    errors: ["stack.run × privacy: waived needs reason, by: owner and a date YYYY-MM-DD"]
+  - name: a waiver without a date
+    patch: [{ path: [operations, 1, criteria, privacy, waived, date], delete: true }]
+    errors: ["stack.run × privacy: waived needs reason, by: owner and a date YYYY-MM-DD"]
+  - name: malformed item id
+    patch: [{ path: [operations, 0, criteria, security, items], value: [inv-a-1] }]
+    errors: ['web.read × security: item "inv-a-1" is not an item id']
+  - name: a page not starting with a slash
+    patch: [{ path: [operations, 0, criteria, a11y, pages], value: [lessons] }]
+    errors: ['web.read × a11y: page "lessons" must start with /']
+  - name: a not_user_facing entry with two kinds
+    patch: [{ path: [not_user_facing, 0, route], value: "GET /api/a" }]
+    errors: ["not_user_facing[0]: needs exactly one of spec, route, command and a reason"]
+
+  # FR-DOD-2 placement
+  - name: na on a11y of a web operation
+    patch: [{ path: [operations, 0, criteria, a11y], value: { na: x } }]
+    errors: ["web.read × a11y: na is not allowed here"]
+  - name: na on functional
+    patch: [{ path: [operations, 1, criteria, functional], value: { na: x } }]
+    errors: ["stack.run × functional: na is not allowed here"]
+  - name: pages outside a11y
+    patch: [{ path: [operations, 0, criteria, functional, pages], value: ["/"] }]
+    errors: ["web.read × functional: pages only on a11y"]
+  - name: budget outside latency and cost
+    patch: [{ path: [operations, 0, criteria, security, budget], value: { p95_ms_max: 1, n_min: 1, kind: target, source: x } }]
+    errors: ["web.read × security: budget only on latency or cost"]
+  - name: latency with neither budget nor missing
+    patch: [{ path: [operations, 0, criteria, latency], value: { items: [FR-A-1] } }]
+    errors: ["web.read × latency: needs a budget or missing"]
+  - name: a11y of a web operation with neither pages nor missing
+    patch: [{ path: [operations, 0, criteria, a11y], value: { items: [FR-A-1] } }]
+    errors: ["web.read × a11y: needs pages or missing"]
+  - name: budget n_min not a positive integer
+    patch: [{ path: [operations, 0, criteria, latency, budget, n_min], value: 0 }]
+    errors: ["web.read × latency: budget n_min must be a positive integer"]
+  - name: budget kind unknown
+    patch: [{ path: [operations, 0, criteria, latency, budget, kind], value: goal }]
+    errors: ["web.read × latency: budget kind must be target or baseline"]
+  - name: budget without a source
+    patch: [{ path: [operations, 0, criteria, latency, budget, source], delete: true }]
+    errors: ["web.read × latency: budget source must be a non-empty string"]
+  - name: latency budget without a maximum
+    patch: [{ path: [operations, 0, criteria, latency, budget, p95_ms_max], delete: true }]
+    errors: ["web.read × latency: budget needs p95_ms_max or p50_ms_max"]
+  - name: latency maximum not a positive integer
+    patch: [{ path: [operations, 0, criteria, latency, budget, p95_ms_max], value: 1.5 }]
+    errors: ["web.read × latency: budget p95_ms_max must be a positive integer"]
+  - name: latency budget per something other than page
+    patch: [{ path: [operations, 0, criteria, latency, budget, per], value: run }]
+    errors: ["web.read × latency: budget per must be page"]
+  - name: a cost field in a latency budget
+    patch: [{ path: [operations, 0, criteria, latency, budget, usd_per_run_max], value: 1 }]
+    errors: ['web.read × latency: budget: unknown key "usd_per_run_max"']
+  - name: cost budget without a maximum
+    patch: [{ path: [operations, 1, criteria, cost, budget, usd_per_run_max], delete: true }]
+    errors: ["stack.run × cost: budget needs usd_per_run_max or tokens_per_run_max"]
+  - name: cost maximum not positive
+    patch: [{ path: [operations, 1, criteria, cost, budget, usd_per_run_max], value: 0 }]
+    errors: ["stack.run × cost: budget usd_per_run_max must be a positive number"]
+
+  # FR-DOD-3 against the repository
+  - name: an unknown spec
+    patch: [{ path: [operations, 0, specs], value: [SRV-A, SRV-Z] }]
+    errors: ["web.read: spec SRV-Z is not a module spec"]
+  - name: an enforced operation without specs
+    patch: [{ path: [operations, 0, specs], delete: true }]
+    errors:
+      - "web.read: enforced with no specs"
+      - "web.read × functional: item FR-A-1 belongs to SRV-A, which the operation does not name"
+      - "web.read × security: item INV-A-1 belongs to SRV-A, which the operation does not name"
+      - "web.read × privacy: item FR-A-1 belongs to SRV-A, which the operation does not name"
+      - "web.read × observability: item FR-A-1 belongs to SRV-A, which the operation does not name"
+      - "web.read × recovery: item INV-A-1 belongs to SRV-A, which the operation does not name"
+  - name: an undeclared item
+    patch: [{ path: [operations, 0, criteria, functional, items], value: [FR-A-9] }]
+    errors: ["web.read × functional: item FR-A-9 is not declared"]
+  - name: an item of a spec the operation does not name, which is also draft on an enforced operation
+    patch: [{ path: [operations, 0, criteria, security, items], value: [FR-B-1] }]
+    errors:
+      - "web.read × security: item FR-B-1 belongs to SRV-B, which the operation does not name"
+      - "web.read × security: item FR-B-1 belongs to draft spec SRV-B"
+  - name: a label its scripts do not emit
+    patch: [{ path: [operations, 0, criteria, functional, live], value: ["browser: gone"] }]
+    errors: ['web.read × functional: live label "browser: gone" is not emitted by its scripts']
+  - name: a label with an unknown key
+    patch: [{ path: [operations, 1, criteria, functional, live], value: ["stage-9: reader up ok"] }]
+    errors: ['stack.run × functional: live label "stage-9: reader up ok" has an unknown key']
+  - name: a registry route in no operation
+    patch: [{ path: [operations, 0, routes], value: ["GET /api/a"] }]
+    errors: ['route "POST /api/a" is in no operation and not in not_user_facing']
+  - name: a stale route
+    patch: [{ path: [operations, 0, routes], value: ["GET /api/a", "POST /api/a", "GET /api/b"] }]
+    errors: ['web.read: route "GET /api/b" is not in the registry']
+  - name: a stale not_user_facing route
+    patch: [{ path: [not_user_facing, 1, route], value: "GET /api/old" }]
+    errors:
+      - 'not_user_facing: route "GET /api/old" is not in the registry'
+      - 'route "GET /api/healthz" is in no operation and not in not_user_facing'
+  - name: a registry command in no operation
+    patch: [{ path: [operations, 1, commands], value: ["reader up", "reader down", "reader-x", "reader-x --setup"] }]
+    errors: ['command "reader watcher status" is in no operation and not in not_user_facing']
+  - name: a non-leaf command
+    replace: [['"reader watcher status", "reader-x",', '"reader watcher", "reader-x",']]
+    errors:
+      - 'stack.run: command "reader watcher" is not in the CLI registry'
+      - 'command "reader watcher status" is in no operation and not in not_user_facing'
+  - name: a flag its subparser does not declare
+    patch: [{ path: [operations, 1, commands, 6], value: "reader up --untrust" }]
+    errors: ['stack.run: command "reader up --untrust" is not in the CLI registry']
+  - name: a not_user_facing command removed uncovers its entries
+    patch: [{ path: [not_user_facing, 2], delete: true }]
+    errors:
+      - 'command "reader-srv" is in no operation and not in not_user_facing'
+      - 'command "reader-srv --healthcheck" is in no operation and not in not_user_facing'
+  - name: a stale not_user_facing command
+    patch: [{ path: [not_user_facing, 2, command], value: reader-gone }]
+    errors:
+      - 'not_user_facing: command "reader-gone" covers no registry entry'
+      - 'command "reader-srv" is in no operation and not in not_user_facing'
+      - 'command "reader-srv --healthcheck" is in no operation and not in not_user_facing'
+  - name: an approved spec named nowhere
+    patch: [{ path: [not_user_facing, 0], delete: true }]
+    errors: ["spec OPS-T (approved) is named by no operation and not in not_user_facing"]
+  - name: a not_user_facing spec that is not a module spec
+    patch: [{ path: [not_user_facing, 0, spec], value: OPS-GONE }]
+    errors:
+      - "not_user_facing: spec OPS-GONE is not a module spec"
+      - "spec OPS-T (approved) is named by no operation and not in not_user_facing"
+  - name: a missing cell on an enforced operation
+    patch: [{ path: [operations, 0, criteria, latency], value: { missing: "no budget" } }]
+    errors: ["web.read × latency: missing on an enforced operation"]
+  - name: an untraced item on an enforced operation
+    patch: [{ path: [operations, 0, criteria, functional, items], value: [FR-A-2] }]
+    errors: ["web.read × functional: item FR-A-2 is traced by no test"]
+  - name: a disabled label on an enforced operation
+    patch: [{ path: [operations, 0, criteria, functional, live], value: ["stage-1: reader backup"] }]
+    errors: ['web.read × functional: live label "stage-1: reader backup" is disabled (S1.X)']
+  - name: a disabled label on a tracked operation is information, not an error
+    patch: [{ path: [operations, 1, criteria, functional, live], value: ["stage-1: reader up ok", "stage-1: reader backup"] }]
+    errors: []
+  - name: a declared disabled label no script emits
+    context_patch: [{ path: [disabled, 1], value: { label: "stage-1: gone", reason: S1.Y } }]
+    errors: ['disabled label "stage-1: gone" is not emitted by its scripts']
+
+ratchet:
+  - name: the change that introduces the index
+    base_absent: true
+    head_patch: []
+    errors: []
+  - name: no change
+    head_patch: []
+    errors: []
+  - name: enforced to tracked
+    head_patch: [{ path: [operations, 0, gate], value: tracked }]
+    errors: ["web.read: enforced → tracked"]
+  - name: an operation removed
+    head_patch: [{ path: [operations, 1], delete: true }]
+    errors: ["stack.run: operation removed"]
+  - name: an item removed from an enforced operation
+    head_patch: [{ path: [operations, 0, criteria, functional, items], value: [FR-A-2] }]
+    errors: ["web.read × functional: item FR-A-1 removed"]
+  - name: a live label removed from an enforced operation
+    head_patch: [{ path: [operations, 0, criteria, functional, live], delete: true }]
+    errors: ['web.read × functional: live label "browser: page loads" removed']
+  - name: an item removed from a tracked operation is allowed
+    head_patch: [{ path: [operations, 1, criteria, functional, items], value: [FR-B-1] }]
+    errors: []
+  - name: a larger maximum
+    head_patch: [{ path: [operations, 0, criteria, latency, budget, p95_ms_max], value: 600 }]
+    errors: ["web.read × latency: budget p95_ms_max loosened (500 → 600)"]
+  - name: a maximum dropped
+    head_patch:
+      - { path: [operations, 0, criteria, latency, budget, p95_ms_max], delete: true }
+      - { path: [operations, 0, criteria, latency, budget, p50_ms_max], value: 100 }
+    errors: ["web.read × latency: budget p95_ms_max loosened (500 → none)"]
+  - name: a smaller n_min
+    head_patch: [{ path: [operations, 0, criteria, latency, budget, n_min], value: 2 }]
+    errors: ["web.read × latency: budget n_min loosened (3 → 2)"]
+  - name: target to baseline
+    head_patch: [{ path: [operations, 0, criteria, latency, budget, kind], value: baseline }]
+    errors: ["web.read × latency: budget kind loosened (target → baseline)"]
+  - name: a budget removed
+    head_patch: [{ path: [operations, 1, criteria, cost], value: { missing: "no budget" } }]
+    errors: ["stack.run × cost: budget removed"]
+  - name: a tightened budget is allowed
+    head_patch:
+      - { path: [operations, 0, criteria, latency, budget, p95_ms_max], value: 400 }
+      - { path: [operations, 0, criteria, latency, budget, n_min], value: 5 }
+    errors: []
+  - name: a new not_user_facing entry
+    head_patch: [{ path: [not_user_facing, 3], value: { route: "GET /api/a", reason: x } }]
+    errors: ['not_user_facing: new entry route "GET /api/a"']
+  - name: a removed not_user_facing entry is allowed
+    head_patch: [{ path: [not_user_facing, 2], delete: true }]
+    errors: []
+  - name: a new waiver
+    head_patch: [{ path: [operations, 1, criteria, security], value: { waived: { reason: r, by: owner, date: "2026-11-23" } } }]
+    errors: ["stack.run × security: waiver added"]
+  - name: a changed waiver
+    head_patch: [{ path: [operations, 1, criteria, privacy, waived, reason], value: "other reason" }]
+    errors: ["stack.run × privacy: waiver changed"]
+  - name: a removed waiver is allowed
+    head_patch: [{ path: [operations, 1, criteria, privacy], value: { missing: "privacy canary" } }]
+    errors: []
+  - name: a cell of an enforced operation becomes na
+    head_patch: [{ path: [operations, 0, criteria, a11y], value: { na: "no web" } }]
+    errors: ["web.read × a11y: becomes na on an enforced operation"]
+
+waivers:
+  - name: no change
+    after_patch: []
+    errors: []
+  - name: a new waiver
+    after_patch: [{ path: [operations, 0, criteria, security], value: { waived: { reason: r, by: owner, date: "2026-11-23" } } }]
+    errors: ["web.read × security: waiver added"]
+  - name: a waiver moved to another cell (the count stays one)
+    after_patch:
+      - { path: [operations, 1, criteria, security], value: { waived: { reason: "owner accepted", by: owner, date: "2026-11-23" } } }
+      - { path: [operations, 1, criteria, privacy], value: { missing: "privacy canary" } }
+    errors: ["stack.run × security: waiver added"]
+  - name: a changed waiver
+    after_patch: [{ path: [operations, 1, criteria, privacy, waived, date], value: "2026-12-01" }]
+    errors: ["stack.run × privacy: waiver changed"]
+  - name: a removed waiver
+    after_patch: [{ path: [operations, 1, criteria, privacy], value: { missing: "privacy canary" } }]
+    errors: []
