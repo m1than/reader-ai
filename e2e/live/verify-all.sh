@@ -64,7 +64,8 @@ PROJECT="$(jq -r '.project // "reader"' <<<"$status_json")"
 
 # --- Slice mode: the owner session and the slice suite only ---------------------------------------------------------
 if [[ -n "$SLICE" ]]; then
-  [[ "$SLICE" =~ ^[a-z]+(,[a-z]+)*$ ]] || { echo "$USAGE  (STEPS: comma-separated names)" >&2; exit 2; }
+  # step names are lowercase words joined by hyphens (tutor-bench), comma-separated
+  [[ "$SLICE" =~ ^[a-z]+(-[a-z]+)*(,[a-z]+(-[a-z]+)*)*$ ]] || { echo "$USAGE  (STEPS: comma-separated names)" >&2; exit 2; }
   [[ -n "$SLICE_OUT" ]] || { echo "$USAGE  (--slice needs --out)" >&2; exit 2; }
   OUT="$SLICE_OUT"
   mkdir -p "$OUT"
