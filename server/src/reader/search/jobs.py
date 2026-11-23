@@ -207,3 +207,21 @@ async def ensure(queue: Any, owner_id: UUID, material_sha256: str) -> str:
     else:
         await queue.enqueue(KIND, args)
     return await search_status(queue, owner_id, material_sha256)
+
+
+async def on_worker_start(queue: Any) -> None:
+    """FR-SEARCH-9 at worker start: enqueue each imported ingest's current key whose job was never enqueued.
+
+    Dead keys stay dead (only `ensure` requeues them), so a permanent failure is not retried on every restart.
+    One ingest's failure is logged by its exception type and does not stop the others.
+    """
+    imported = "SELECT DISTINCT i.owner_id, m.sha256 FROM ingests i JOIN materials m ON m.id = i.material_id"
+    async with queue.engine.connect() as conn:
+        rows = (await conn.execute(text(imported))).all()
+    for owner_id, material_sha256 in rows:
+        try:
+            args = await _current_args(queue, owner_id, material_sha256)
+            if args is not None and str(await queue.job_status(KIND, _key(args))) == "none":
+                await queue.enqueue(KIND, args)
+        except Exception as failure:  # FR-SEARCH-9: log by code, keep going
+            log.warning("search start hook: enqueue failed: %s", type(failure).__name__)
