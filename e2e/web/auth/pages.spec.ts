@@ -244,6 +244,7 @@ for (const width of WIDTHS) {
       await page.goto(`/api/auth/${name}`);
       await expect(page.locator('main.auth')).toHaveAttribute('data-state', 'loading');
       await expect(page.locator('#go')).toBeHidden();
+      await expect(page.locator('#status')).toHaveText('Preparing… If nothing happens, reload the page.');
       const axe = await new AxeBuilder({ page }).analyze();
       expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id)).toEqual([]);
     });

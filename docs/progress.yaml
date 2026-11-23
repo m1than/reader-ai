@@ -1014,7 +1014,9 @@ tasks:
         Non-blocking applied: Retry-After bounded to ^\\d{1,6}$ with a seven-digit case; auth-dark and auth-light
         Playwright projects (every state axe-checked in both schemes); the bootstrap copy without 'owner' (the link
         also serves learners); static markup data-state=loading with the button hidden until the script runs, and a
-        blocked-script case; the full request list of every path asserted (a beacon fails).",
+        blocked-script case; the full request list of every path asserted (a beacon fails). Round 2 on 48ce312: VERDICT
+        approve; its notes folded in (a static status sentence for a script that fails to load, asserted; the spec's
+        project names auth-dark and auth-light). Merged into V/slice-integration afterwards (coordinator).",
       process_note: "For the PR description: in 83d4ef6 the deferred OPS-DOD routes edit was re-applied with `git apply`
         of the agent's own earlier diff (written with the Edit tool, reverted while T10 could not yet pass). That is a
         shell write, which AGENTS.md asks to avoid; the content is the two-line routes change, checked by T10 and the
