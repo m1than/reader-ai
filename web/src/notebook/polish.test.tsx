@@ -29,6 +29,19 @@ const view = async (nb: unknown = notebook(), opts: { cells?: Record<string, unk
 
 const cellEl = (id: string) => document.querySelector(`[data-cell-id="${id}"]`) as HTMLElement;
 
+describe('borrowed source titles (FR-NOTEBOOK-2, amended)', () => {
+  it('names an untitled route source after an explain cell of the same material', async () => {
+    const m = 'e'.repeat(64);
+    const cells = [
+      { cell_type: 'markdown', id: 'rt', source: 'Read first.', metadata: { reader: { kind: 'route', source_refs: [{ span: `${m}:1`, page: 60 }, { span: `${m}:2`, page: 60 }] } } },
+      { cell_type: 'markdown', id: 'ex', source: 'Explained.', metadata: { reader: { kind: 'explain', claims: [{ text: 't', citations: [{ span: `${m}:9`, page: 61, material_title: 'Sample material' }] }] } } },
+    ];
+    await view({ ...notebook(), cells });
+    const sources = within(cellEl('rt')).getByRole('list', { name: 'Sources' });
+    expect(within(sources).getAllByRole('listitem').map((li) => li.textContent)).toEqual(['Sample material, p. 60']);
+  });
+});
+
 describe('open marker (FR-NOTEBOOK-3, amended)', () => {
   it('reads the status once', async () => {
     await view();
@@ -78,6 +91,21 @@ describe('metadata-only kinds (FR-NOTEBOOK-10)', () => {
     expect(within(details).getByText('Back side.')).toBeTruthy();
   });
 
+  it('prefers a non-empty recall source to front, shows back as plain text, and has no disclosure without back', async () => {
+    const cells = [
+      { cell_type: 'markdown', id: 'r1', source: 'Source **side**', metadata: { reader: { kind: 'recall', front: 'Front side?', back: '**not bold**' } } },
+      { cell_type: 'markdown', id: 'r2', source: '', metadata: { reader: { kind: 'recall', front: 'Lonely front?' } } },
+      { cell_type: 'markdown', id: 'r3', source: '', metadata: { reader: { kind: 'recall', front: 'Empty back?', back: '' } } },
+    ];
+    await view({ ...notebook(), cells });
+    expect(within(cellEl('r1')).getByText('side').tagName).toBe('STRONG');
+    expect(within(cellEl('r1')).queryByText('Front side?')).toBeNull();
+    expect(within(cellEl('r1')).getByText('**not bold**')).toBeTruthy();
+    expect(within(cellEl('r2')).getByText('Lonely front?')).toBeTruthy();
+    expect(cellEl('r2').querySelector('details')).toBeNull();
+    expect(cellEl('r3').querySelector('details')).toBeNull();
+  });
+
   it('marks an empty notes cell as not saved', async () => {
     await view(nb());
     expect(within(cellEl('n')).getByText('Notes are not saved in this version.')).toBeTruthy();
@@ -92,7 +120,7 @@ describe('lesson contents (FR-NOTEBOOK-11)', () => {
     expect(links.map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
       ['Before you start', '#cell-w01-diagnostic'],
       ['Digests', '#cell-w01-explain'],
-      ['Lab', '#cell-w01-lab'],
+      ['Lab 1', '#cell-w01-lab'],
       ['Recall cards (1)', '#cell-w01-recall'],
       ['Open questions (1)', '#cell-w01-open'],
       ['Ask the tutor', '#tutor'],
@@ -104,6 +132,34 @@ describe('lesson contents (FR-NOTEBOOK-11)', () => {
     await view(nb);
     const nav = screen.getByRole('navigation', { name: 'Lesson contents' });
     expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['The bold code link end']);
+  });
+
+  it('skips # lines in code fences, numbers labs and counts only unanswered open questions', async () => {
+    const cells = [
+      { cell_type: 'markdown', id: 'f', source: '```python\n# a comment, not a heading\n```\n\nText.', metadata: { reader: { kind: 'explain' } } },
+      { cell_type: 'code', id: 'l1', source: '# Lab comment\nprint(1)', metadata: { reader: { kind: 'lab' } } },
+      { cell_type: 'markdown', id: 'h', source: '#### Too deep\n\n## Shallow', metadata: { reader: { kind: 'explain' } } },
+      { cell_type: 'code', id: 'l2', source: 'print(2)', metadata: { reader: { kind: 'lab' } } },
+      { cell_type: 'markdown', id: 'oa', source: '## Answered', metadata: { reader: { kind: 'open', status: 'answered' } } },
+      { cell_type: 'markdown', id: 'o1', source: '## First open', metadata: { reader: { kind: 'open', status: 'open' } } },
+      { cell_type: 'markdown', id: 'o2', source: 'x', metadata: { reader: { kind: 'open', status: 'open' } } },
+    ];
+    await view({ ...notebook(), cells });
+    const nav = screen.getByRole('navigation', { name: 'Lesson contents' });
+    expect(within(nav).getAllByRole('link').map((a) => [a.textContent, a.getAttribute('href')])).toEqual([
+      ['Lab 1', '#cell-l1'],
+      ['Shallow', '#cell-h'],
+      ['Lab 2', '#cell-l2'],
+      ['Open questions (2)', '#cell-o1'],
+    ]);
+  });
+
+  it('puts the nav before the cells and makes every cell a focus target', async () => {
+    await view();
+    const nav = screen.getByRole('navigation', { name: 'Lesson contents' });
+    const first = document.querySelector('[data-cell-id]') as HTMLElement;
+    expect(nav.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    for (const cell of document.querySelectorAll('[data-cell-id]')) expect(cell.getAttribute('tabindex')).toBe('-1');
   });
 
   it('toggles behind a Contents button that reports its state and closes on an entry', async () => {
@@ -148,17 +204,27 @@ describe('lesson page header and states (FR-NOTEBOOK-11, FR-NOTEBOOK-12)', () =>
     await mount((url) => (url === '/api/lessons/w01' ? json(200, lessons().lesson) : url.endsWith(sha) ? json(200, notebook()) : json(404, {})));
     await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toBeTruthy());
     expect(screen.getByRole('link', { name: 'Lessons' }).getAttribute('href')).toBe('/');
+    expect(document.querySelectorAll('main')).toHaveLength(1);
   });
 
-  it('shows a busy skeleton while the lesson loads', async () => {
+  it('shows a busy skeleton with a status while the lesson loads', async () => {
     await mount(() => new Promise<Response>(() => undefined));
-    await waitFor(() => expect(document.querySelector('main[aria-busy="true"]')).toBeTruthy());
+    await waitFor(() => expect(document.querySelector('[aria-busy="true"][role="status"]')).toBeTruthy());
+    expect(document.querySelector('[aria-busy="true"][role="status"]')?.textContent).toContain('Loading the lesson');
+  });
+
+  it('shows "Lesson not found" with only a way back on a 404', async () => {
+    await mount(() => json(404, { error: 'not_found' }));
+    await waitFor(() => expect(screen.getByText('Lesson not found')).toBeTruthy());
+    expect(screen.getByRole('link', { name: 'Back to lessons' }).getAttribute('href')).toBe('/');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('offers Retry and a way back when the lesson fails, and Retry refetches', async () => {
     const urls = await mount(() => json(500, { error: 'internal' }));
     await waitFor(() => expect(screen.getByText('The lesson could not be loaded.')).toBeTruthy());
     expect(screen.getByRole('link', { name: 'Back to lessons' }).getAttribute('href')).toBe('/');
+    expect(document.querySelectorAll('main')).toHaveLength(1);
     const before = urls.filter((u) => u === '/api/lessons/w01').length;
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Retry' }));

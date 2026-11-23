@@ -50,8 +50,8 @@ id: WEB-UI
 title: App shell — pinned library build, Calm tokens, routing, API client, sign-in redirect and lesson list
 status: approved
 approved_by: agent
-approved_at: 2026-11-22
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). Awaiting the single deep-reviewer round"
+approved_at: 2026-11-23
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23)"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -187,26 +187,36 @@ requirements:
     text: >-
       Layout and type (WEB polish, from the live screenshots of 2026-11-23). Spacing uses the library's
       `--acme-space-1..7` steps only; colours only Calm tokens (INV-UI-1 unchanged). Prose (lesson markdown, the
-      tutor's answers) is set in the serif stack at 17px with line height 1.65 in a reading column at most 38rem wide
-      (about 70 Cyrillic characters per line; the slice's 46rem column gave about 92); headings step 2.25 / 1.5 /
-      1.2rem; UI chrome (header, labels, buttons, references, list metadata) uses the library's sans `--acme-font` at
-      0.8125–0.875rem. Widths: at 1280 and 1024 px the lesson shows its contents column beside the reading column
-      (WEB-NOTEBOOK FR-NOTEBOOK-11), below 60rem one column with 1rem page padding. Markdown tables and display math
-      scroll inside their own box. At 1280, 1024 and 390 px no page scrolls horizontally. Every interactive element
-      (links, buttons, text areas, the disclosure summary) shows a 2px `--acme-focus` outline on `:focus-visible`.
-      [unit] a scan of `web/src/ui/app.css`: no literal colour (no hex value or colour function; every `color` and
-      `background` value is `var(--acme-…)`, `transparent`, `inherit`, `currentColor` or `none`), every `padding`,
-      `margin`, `gap` and `inset` value made of `0`, `auto` and `var(--acme-space-N)` only, the
-      reading column's `max-width: 38rem`, and a `:focus-visible` rule whose outline uses `var(--acme-focus)`. [live]
-      the `ui` step of e2e/web/live/owner.slice.ts on the running stack: at each width `scrollWidth` ≤ the viewport
-      width on the list and on L02, the widest `[data-markdown] p` ≤ 608px, and axe reports no serious or critical
-      issue.
+      tutor's answers) is set in the serif stack `ui-serif, Georgia, 'Iowan Old Style', serif` (system fonts only: no
+      web font is fetched) at 1.0625rem (17px) with line height 1.65, in a reading column at most 38rem wide (an
+      estimate of about 70 Cyrillic characters per line against about 92 in the slice's 46rem column; the `ui` step
+      records the measured median in slice-results.json, not asserted); the lesson `h1` is 2.25rem, markdown headings
+      1.5 and 1.2rem; UI chrome (header, labels, buttons, references, list metadata) uses the library's sans
+      `--acme-font` at 0.8125–0.875rem. Widths: at 1280 and 1024 px the lesson shows its contents column beside the
+      reading column (WEB-NOTEBOOK FR-NOTEBOOK-11), below 60rem one column. Markdown tables and display math scroll
+      inside their own box. At 1280, 1024 and 390 px no page scrolls horizontally. Every interactive element (links,
+      buttons, text areas, the disclosure summary, the skip link) shows a 2px `--acme-focus` outline on
+      `:focus-visible`.
+      [unit] a scan of `web/src/ui/app.css`: no literal colour (no hex value and no colour function, `color-mix`
+      included; every value of `color`, `background`, `background-color`, `border`, `border-*`, `outline`,
+      `outline-color`, `box-shadow`, `fill` and `caret-color` uses colours only as `var(--acme-…)`, `transparent`,
+      `inherit` or `currentColor`), every `padding`, `margin`, `gap`, `inset`, `top`, `right`, `bottom` and `left`
+      value made of `0`, `auto` and `var(--acme-space-N)` only, the reading column's `max-width: 38rem`, and a
+      `:focus-visible` rule whose outline is `2px solid var(--acme-focus)`. [live] the `ui` step of
+      e2e/web/live/owner.slice.ts on the running stack: at each width `scrollWidth` ≤ the viewport width on the list
+      and on L02; on L02 the widest `[data-markdown] p` is > 0 and ≤ 608px, its computed `font-size` is 17px, its
+      `line-height` 28.05px (± 0.1) and its `font-family` begins with `ui-serif`, and the `h1` is 36px; axe reports no
+      serious or critical issue.
   - id: FR-UI-11
     text: >-
-      Keyboard and states of the shell: the first Tab stop is a "Skip to content" link (visible when focused) to the
-      page's `main` (`id="content"`, `tabIndex={-1}`); the header and every page share one horizontal padding. While
-      `/api/me` loads, the shell shows a header-height bar and a skeleton, not a bare "Loading…" line. The not-found
-      view keeps FR-UI-3's link. [unit] [story]
+      Keyboard and states of the shell: the shell renders exactly one `<main id="content" tabIndex={-1}>`, around the
+      router outlet and around the not-found view; pages render sections inside it, never a `main` of their own. The
+      first Tab stop is a "Skip to content" link (visible when focused) to `#content`. While `/api/me` loads, the shell
+      shows a header-height bar and the library's `Skeleton` in a container with `aria-busy="true"` and `role="status"`
+      holding the visually hidden text "Loading", not a bare "Loading…" line. The not-found view keeps FR-UI-3's link.
+      [unit] on `/`, `/lessons/w01` (loaded and error states) and `/no-such-page`: one `main#content` with tabindex -1
+      and the skip link first; [live] the `ui` step follows the skip link with the keyboard and finds focus on
+      `main#content`. [story]
 
 invariants:
   - id: INV-UI-1

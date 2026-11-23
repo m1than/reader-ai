@@ -33,21 +33,52 @@ describe('lesson rows (FR-UI-6, amended)', () => {
   });
 });
 
-describe('skip link and shell loading (FR-UI-11)', () => {
-  it('makes "Skip to content" the first link, pointing at a focusable main', async () => {
+const fixture = () => readJson<{ lesson: { lesson: { latest_sha256: string } } }>('spec/fixtures/WEB-UI/lessons.json');
+const nb = () => readJson<unknown>('spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb');
+
+const shellTarget = () => {
+  const first = document.querySelector('a') as HTMLAnchorElement;
+  expect(first.textContent).toBe('Skip to content');
+  expect(first.getAttribute('href')).toBe('#content');
+  const mains = document.querySelectorAll('main');
+  expect(mains).toHaveLength(1);
+  expect(mains[0]!.id).toBe('content');
+  expect(mains[0]!.getAttribute('tabindex')).toBe('-1');
+};
+
+describe('skip link, one main and shell loading (FR-UI-11)', () => {
+  it('on the lesson list', async () => {
     await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
     await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
-    const first = document.querySelector('a') as HTMLAnchorElement;
-    expect(first.textContent).toBe('Skip to content');
-    expect(first.getAttribute('href')).toBe('#content');
-    const main = document.getElementById('content') as HTMLElement;
-    expect(main.tagName).toBe('MAIN');
-    expect(main.getAttribute('tabindex')).toBe('-1');
+    shellTarget();
   });
 
-  it('shows a busy skeleton, not a bare line, while /api/me loads', async () => {
+  it('on a loaded lesson', async () => {
+    const sha = fixture().lesson.lesson.latest_sha256;
+    await mount('/lessons/w01', (url) =>
+      url === '/api/me' ? json(200, me) : url === '/api/lessons/w01' ? json(200, fixture().lesson) : url.endsWith(sha) ? json(200, nb()) : json(404, {}),
+    );
+    await waitFor(() => expect(screen.getByText('Digests', { selector: 'h2' })).toBeTruthy());
+    shellTarget();
+  });
+
+  it('on a lesson that failed to load', async () => {
+    await mount('/lessons/w01', (url) => (url === '/api/me' ? json(200, me) : json(500, { error: 'internal' })));
+    await waitFor(() => expect(screen.getByText('The lesson could not be loaded.')).toBeTruthy());
+    shellTarget();
+  });
+
+  it('on the not-found view', async () => {
+    await mount('/no-such-page', (url) => (url === '/api/me' ? json(200, me) : json(404, {})));
+    await waitFor(() => expect(screen.getByText(/not found/i)).toBeTruthy());
+    shellTarget();
+  });
+
+  it('shows a busy skeleton with a status, not a bare line, while /api/me loads', async () => {
     await mount('/', () => new Promise<Response>(() => undefined));
-    expect(document.querySelector('[aria-busy="true"]')).toBeTruthy();
+    const busy = document.querySelector('[aria-busy="true"][role="status"]') as HTMLElement;
+    expect(busy).toBeTruthy();
+    expect(busy.textContent).toContain('Loading');
     expect(screen.queryByText('Loading…')).toBeNull();
   });
 });

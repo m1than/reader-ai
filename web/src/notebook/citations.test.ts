@@ -8,13 +8,13 @@ const cell = (id: string) =>
   readJson<{ cells: Cell[] }>('spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb').cells.find((c) => c.id === id)!;
 
 describe('citations (FR-NOTEBOOK-2)', () => {
-  it('formats span citations with title and page, title only, or the span id', async () => {
-    const { formatCitation } = await load(() => import('./citations'));
-    expect(formatCitation).toBeTypeOf('function');
+  it('formats span citations with title and page, title only, or "source" and the material id prefix', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
     const span = 'a'.repeat(64) + ':12';
-    expect(formatCitation({ span, page: 12, material_title: 'Book' })).toEqual({ kind: 'text', text: 'Book, p. 12' });
-    expect(formatCitation({ span, material_title: 'Book' })).toEqual({ kind: 'text', text: 'Book' });
-    expect(formatCitation({ span })).toEqual({ kind: 'text', text: span });
+    expect(groupCitations([{ span, page: 12, material_title: 'Book' }])).toEqual([{ kind: 'text', text: 'Book, p. 12' }]);
+    expect(groupCitations([{ span, material_title: 'Book' }])).toEqual([{ kind: 'text', text: 'Book' }]);
+    expect(groupCitations([{ span }])).toEqual([{ kind: 'text', text: 'source aaaaaaaa' }]);
   });
 
   it('links only http and https URLs, with host and path as text and the retrieved date', async () => {
@@ -104,13 +104,26 @@ describe('grouped references (FR-NOTEBOOK-2, amended 2026-11-23)', () => {
     expect(groupCitations([span(N, 2)]).map((r) => r.text)).toEqual(['source dddddddd']);
   });
 
-  it('ignores pages that are not finite numbers', async () => {
+  it('ignores pages that are not integers ≥ 1 and citations without span or url; a span without ":" is its own material', async () => {
     const { groupCitations } = await load(() => import('./citations'));
     expect(groupCitations).toBeTypeOf('function');
     const odd = [
       { span: `${M}:1`, page: Number.NaN, material_title: 'Book' },
       { span: `${M}:2`, page: '7', material_title: 'Book' },
+      { span: `${M}:3`, page: 0, material_title: 'Book' },
+      { span: `${M}:4`, page: -2, material_title: 'Book' },
+      { span: `${M}:5`, page: 2.5, material_title: 'Book' },
+      { span: `${M}:6`, page: Number.POSITIVE_INFINITY, material_title: 'Book' },
     ];
     expect(groupCitations(odd).map((r) => r.text)).toEqual(['Book']);
+    expect(groupCitations([...odd, { span: `${M}:7`, page: 3, material_title: 'Book' }]).map((r) => r.text)).toEqual(['Book, p. 3']);
+    expect(groupCitations([{ page: 4, material_title: 'Ghost' }, {}, { span: '', url: '' }, { span: 7 }]).map((r) => r.text)).toEqual([]);
+    expect(
+      groupCitations([
+        { span: 'nocolon', page: 3, material_title: 'Plain' },
+        { span: 'nocolon', page: 4 },
+        { span: 'other' },
+      ]).map((r) => r.text),
+    ).toEqual(['Plain, pp. 3–4', 'source other']);
   });
 });

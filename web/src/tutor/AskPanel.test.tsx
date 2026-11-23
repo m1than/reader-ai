@@ -23,7 +23,7 @@ const answered: QuestionState = {
   grounded: false,
   answer: {
     blocks: [
-      { text: 'Miners vary the **nonce**.', supported: true, quote: 'Miners vary the nonce until the hash', citations: [{ span: `${'c'.repeat(64)}:0`, page: 61, material_title: 'Mastering Blockchain' }] },
+      { text: 'Miners vary the **nonce**.', supported: true, quote: 'Miners vary the nonce until the hash', citations: [{ span: `${'c'.repeat(64)}:0`, page: 61, material_title: 'Sample material' }] },
       { text: 'An invented claim.', supported: false, quote: 'nothing like it', citations: [] },
     ],
     insufficient: false,
@@ -135,7 +135,7 @@ describe('AskPanel (FR-TUTOR-11)', () => {
     const live = document.querySelector('[aria-live="polite"]') as HTMLElement;
     expect(live).toBeTruthy();
     expect(within(live).getByText('nonce').tagName).toBe('STRONG');
-    expect(within(live).getByText('Mastering Blockchain, p. 61')).toBeTruthy();
+    expect(within(live).getByText('Sample material, p. 61')).toBeTruthy();
     expect(within(live).getByText('not supported by the source')).toBeTruthy();
     expect(within(live).getByText('This answer is not fully grounded in the book.')).toBeTruthy();
   });
@@ -244,7 +244,7 @@ describe('panel layout and grouped citations (FR-TUTOR-11, amended 2026-11-23)',
       blocks: [
         {
           text: 'One block.', supported: true, quote: 'q',
-          citations: [60, 60, 61, 63, 60].map((page, i) => ({ span: `${m}:${i}`, page, material_title: 'Mastering Blockchain' })),
+          citations: [60, 60, 61, 63, 60].map((page, i) => ({ span: `${m}:${i}`, page, material_title: 'Sample material' })),
         },
       ],
     },
@@ -256,18 +256,18 @@ describe('panel layout and grouped citations (FR-TUTOR-11, amended 2026-11-23)',
     await ask();
     await flush(1000);
     const live = document.querySelector('[aria-live="polite"]') as HTMLElement;
-    expect(within(live).getByText('Mastering Blockchain, pp. 60–61, 63')).toBeTruthy();
-    expect(within(live).queryAllByText(/Mastering Blockchain/)).toHaveLength(1);
+    expect(within(live).getByText('Sample material, pp. 60–61, 63')).toBeTruthy();
+    expect(within(live).queryAllByText(/Sample material/)).toHaveLength(1);
   });
 
   it('has the id the lesson contents link to, the heading Tutor, a shortcut hint and the focused cell label', async () => {
-    render(<AskPanel lessonId={LESSON} revision={REV} cellId="ex-intro" cellLabel="Что такое децентрализация" api={fakeApi([answered])} />);
+    render(<AskPanel lessonId={LESSON} revision={REV} cellId="ex-intro" cellLabel="Sample heading" api={fakeApi([answered])} />);
     await flush();
     const panel = screen.getByRole('region', { name: 'Tutor' });
     expect(panel.id).toBe('tutor');
     expect(within(panel).getByRole('heading', { level: 2 }).textContent).toBe('Tutor');
     expect(within(panel).getByText('Ctrl+Enter or ⌘+Enter to ask')).toBeTruthy();
-    expect(within(panel).getByText('About: Что такое децентрализация')).toBeTruthy();
+    expect(within(panel).getByText('About: Sample heading')).toBeTruthy();
   });
 
   it('names an unlabelled focused cell generically and shows nothing without a focused cell', async () => {
