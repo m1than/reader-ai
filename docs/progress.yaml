@@ -1098,8 +1098,8 @@ tasks:
       note: "Specs promoted with Red, then Green: server (upload route, uploads state machine, inbox commands, receive
         under a claim, routes), host (watch mode, convert.lock shared with the CLI, watchdogs by getsid plus
         proc_pidpath plus cwd/args, bounded execs, caffeinate, run-time cross-process probe), CLI (reader up/status/
-        down), web (drop zone, progress, processing, converter state, Cancel/Retry/Discard; first-run redirect and
-        compile status). Tests 2026-11-23: server ingest 389 passed (10 skipped [host]/[local] by default), cli 243,
+        down), web (drop zone, progress, processing, converter state, Cancel/Retry/Discard; first-run redirect). The
+        compile status in the lesson list moved to V/compile-ui as FR-UI-15 (coordinator 2026-11-23). Tests 2026-11-23: server ingest 389 passed (10 skipped [host]/[local] by default), cli 243,
         config 255, search/auth/deploy upload cases; [host] on this Mac: watchdog stand-ins (setsid, setpgid) killed at
         the limit, lock not inherited and the orphan cleaned, the converter-level host tests 6 passed under the v2
         profile, the run-time probe returns ready; web 306 unit, 212 browser, Storybook build. Bundles: /import lazy

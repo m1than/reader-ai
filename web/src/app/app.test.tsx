@@ -82,8 +82,7 @@ describe('lesson list (FR-UI-6)', () => {
     expect(w01?.getAttribute('href')).toBe('/lessons/w01');
     const w02 = screen.getByText('Fixture lesson W02: not compiled yet');
     expect(w02.closest('a')).toBeNull();
-    // FR-UI-13: with no compile run (the stub's 404) the status slot reads "not compiled yet"
-    await waitFor(() => expect(screen.getByText('not compiled yet')).toBeTruthy());
+    expect(screen.getByText(/not published yet/i)).toBeTruthy();
     const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
     expect(headings).toEqual(['Another course', 'Fixture course']);
   });

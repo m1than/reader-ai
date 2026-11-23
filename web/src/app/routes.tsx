@@ -3,7 +3,7 @@
 // not-found without a request.
 import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate, type RouterHistory } from '@tanstack/react-router';
 import { lazy, Suspense, useEffect } from 'react';
 import type { LessonSummary } from './api';
@@ -18,19 +18,6 @@ export const isLessonId = (id: string): boolean => LESSON_ID.test(id) && id !== 
 const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ default: m.LessonPage })));
 // FR-UI-13 mount note: WEB-IMPORT's page composes WEB-PLAN's page with the upload sections.
 const ImportPage = lazy(() => import('../import/ImportPage').then((m) => ({ default: m.ImportPage })));
-
-// FR-UI-13: at most 10 compile queries per render (one plan confirm starts one compile); 10 s while compiling.
-const COMPILE_QUERIES = 10;
-const COMPILE_REFETCH_MS = 10_000;
-const COMPILING = new Set(['running', 'stalled']);
-const STOPPED = new Set(['stage_failed', 'budget_exhausted']);
-
-export const compileLabel = (state: string | null | undefined): string => {
-  if (state === null) return 'not compiled yet';
-  if (state !== undefined && COMPILING.has(state)) return 'Compiling';
-  if (state !== undefined && STOPPED.has(state)) return 'Compile stopped';
-  return 'not published yet';
-};
 
 /** FR-UI-13 first run: an owner with no lessons and no material at all lands on /import (history replace). */
 function useFirstRun(lessons: LessonSummary[] | undefined) {
@@ -47,20 +34,6 @@ function useFirstRun(lessons: LessonSummary[] | undefined) {
   useEffect(() => {
     if (empty) void navigate({ to: '/import', replace: true });
   }, [empty, navigate]);
-}
-
-function useCompileStatus(lessons: LessonSummary[]): Record<string, string> {
-  const { api } = useServices();
-  const asked = lessons.filter((l) => !l.latest_sha256).slice(0, COMPILE_QUERIES);
-  const results = useQueries({
-    queries: asked.map((l) => ({
-      queryKey: ['compile', l.lesson_id],
-      queryFn: () => api.compileState(l.lesson_id),
-      refetchInterval: (q: { state: { data: string | null | undefined } }) =>
-        q.state.data && COMPILING.has(q.state.data) ? COMPILE_REFETCH_MS : false,
-    })),
-  });
-  return Object.fromEntries(asked.map((l, i) => [l.lesson_id, compileLabel(results[i]?.isSuccess ? results[i].data : undefined)]));
 }
 
 const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
@@ -99,7 +72,6 @@ function ListPage() {
   const { api } = useServices();
   const q = useQuery(queries(api).lessons());
   useFirstRun(q.data?.lessons);
-  const status = useCompileStatus(q.data?.lessons ?? []);
   return (
     <div className="page">
       <h1>Lessons</h1>
@@ -113,7 +85,7 @@ function ListPage() {
           </Button>
         </div>
       ) : (
-        <LessonList lessons={q.data.lessons} locale={locale()} status={status} />
+        <LessonList lessons={q.data.lessons} locale={locale()} />
       )}
     </div>
   );

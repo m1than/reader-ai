@@ -35,10 +35,6 @@ const LessonSummary = v.object({
 });
 
 const LessonList = v.object({ lessons: v.array(LessonSummary) });
-
-// SRV-PIPELINE FR-PIPELINE-11's run view: only its state is read here (FR-UI-13).
-const CompileRun = v.looseObject({ state: v.string() });
-
 // SRV-LESSON FR-LESSON-8: the metadata is nested under `lesson`.
 const Lesson = v.object({
   lesson: LessonSummary,
@@ -113,15 +109,6 @@ export const createApi = (deps: ApiDeps) => {
     createSession: (lessonId: string) => call('POST', '/api/kernel/sessions', Session, { lesson_id: lessonId }),
     interrupt: (sessionId: string) => call('POST', `/api/kernel/sessions/${seg(sessionId)}/interrupt`, null),
     resetKernel: () => call('POST', '/api/kernel/reset', null),
-    /** FR-UI-13: the latest compile run's state (SRV-PIPELINE FR-PIPELINE-11), or null when none exists (404). */
-    compileState: async (lessonId: string): Promise<string | null> => {
-      try {
-        return (await call('GET', `/api/lessons/${seg(lessonId)}/compile`, CompileRun)).state;
-      } catch (e) {
-        if (e instanceof ApiError && e.status === 404) return null;
-        throw e;
-      }
-    },
   };
 };
 

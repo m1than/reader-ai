@@ -8,8 +8,7 @@ const date = (iso: string, locale: string) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleDateString(locale, { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
-/** `status`: FR-UI-13's compile label per unpublished lesson id; "not published yet" otherwise (FR-UI-6). */
-export function LessonList({ lessons, locale, status = {} }: { lessons: LessonSummary[]; locale: string; status?: Record<string, string> }) {
+export function LessonList({ lessons, locale }: { lessons: LessonSummary[]; locale: string }) {
   if (lessons.length === 0) return <p className="empty">No lessons yet</p>;
   return (
     <div className="lesson-list">
@@ -33,7 +32,7 @@ export function LessonList({ lessons, locale, status = {} }: { lessons: LessonSu
                   )}
                 </span>
                 <span className="lesson-meta">
-                  {!l.latest_sha256 && <span className="lesson-status">{status[l.lesson_id] ?? 'not published yet'}</span>}
+                  {!l.latest_sha256 && <span className="lesson-status">not published yet</span>}
                   <time dateTime={l.updated_at}>{date(l.updated_at, locale)}</time>
                 </span>
               </li>
