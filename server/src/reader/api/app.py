@@ -35,6 +35,7 @@ ROUTERS: Final = (
     "reader.search.routes",
     "reader.pipeline.routes",
     "reader.tutor.routes",  # SRV-TUTOR paired change (FR-AUTH-10 note)
+    "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
 )
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES

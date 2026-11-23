@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { createSignupsApi, SIGNUPS_KEY } from '../accounts/api';
+import { createPlanApi } from '../import/plan/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ServicesContext, useServices, type Services } from './context';
@@ -76,6 +77,8 @@ function Header({
       <a className="brand" href="/">
         reader
       </a>
+      {/* FR-UI-12: the Import link, for the owner only. */}
+      {owner ? <a href="/import">Import</a> : null}
       {owner ? <SignupsLink router={router} /> : null}
       <span className="who">{displayName}</span>
       <Button variant="ghost" color="neutral" size="sm" onClick={() => void signOut()}>
@@ -157,7 +160,14 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       fetch: fetchFn ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a)),
       onUnauthorized: () => navigateAway(SIGN_IN_URL),
     };
-    return { api: createApi(deps), tutor: createTutorApi(deps), signups: createSignupsApi(deps), notify, navigateAway };
+    return {
+      api: createApi(deps),
+      tutor: createTutorApi(deps),
+      plan: createPlanApi(deps),
+      signups: createSignupsApi(deps),
+      notify,
+      navigateAway,
+    };
   }, [fetchFn, navigateAway, notify]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');

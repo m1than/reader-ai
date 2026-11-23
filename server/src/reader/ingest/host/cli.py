@@ -347,6 +347,28 @@ def _material_lock(data_dir: Path, sha256: str) -> Iterator[None]:
         os.close(fd)
 
 
+CONVERT_LOCK: Final = "convert.lock"
+
+
+@contextlib.contextmanager
+def convert_lock(data_dir: Path) -> Iterator[int]:
+    """One converter run on the host at a time (FR-INGEST-1; ADR-0029 amendment). Yields the lock's fd.
+
+    The fd is O_CLOEXEC, so no child holds the lock: a crashed holder releases it with its own exit.
+    """
+    locks = data_dir / "ingest" / "locks"
+    locks.mkdir(parents=True, exist_ok=True, mode=0o700)
+    fd = os.open(locks / CONVERT_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop("busy", 3, "another conversion is running; try again when it ends") from None
+        yield fd
+    finally:
+        os.close(fd)
+
+
 def _status(deps: Deps, container: str, sha256: str, out: TextIO) -> str:
     code, reply = _exec(
         deps, container, "reader.ingest.status", ["--material-sha256", sha256], STATUS_TIMEOUT_S
@@ -386,8 +408,8 @@ def _ingest(material: Material, deps: Deps, requeue: bool, out: TextIO) -> int:
     ingest_root = material.data_dir / "ingest"
     run_dir, work_root = ingest_root / "run", ingest_root / "work"
     with _material_lock(material.data_dir, material.sha256):
-        records.cleanup_stale(run_dir, work_root, material.sha256, deps.probe)
-        if requeue:
+        if requeue:  # starts no converter: no convert.lock, and only this material's records are cleaned
+            records.cleanup_stale(run_dir, work_root, material.sha256, deps.probe)
             container = worker_container(deps)
             args = ["--material-sha256", material.sha256]
             code, reply = _exec(deps, container, "reader.ingest.requeue", args, STATUS_TIMEOUT_S)
@@ -395,27 +417,34 @@ def _ingest(material: Material, deps: Deps, requeue: bool, out: TextIO) -> int:
                 raise Stop("requeue_failed", 5)
             out.write(f"requeue: {reply['result']}\n")
             return 0
-        problem = deps.check_setup(material.data_dir)
-        if problem is not None:
-            raise Stop(problem, 2, "run `reader-ingest --setup`")
-        resolve_paths(deps, material.data_dir)
-        name = records.new_run(run_dir, work_root, material.sha256)
-        work = work_root / name
-        try:
-            _copy(material, work / "in" / "material.pdf")
-            container = worker_container(deps)
-            if _status(deps, container, material.sha256, out) != "none":
-                return 0
+        with convert_lock(material.data_dir):
+            # a free convert.lock proves that no live run owns any record, of any material
+            records.cleanup_stale(run_dir, work_root, None, deps.probe)
+            return _convert_run(material, deps, run_dir, work_root, out)
 
-            def record_child(child: Child) -> None:
-                records.set_child(run_dir, name, child.pid, deps.start_time(child.pid) or "")
 
-            members, meta = convert_members(work, deps, _printer(out), record_child)
-            if meta["material_sha256"] != material.sha256:
-                raise Stop("convert_failed", 5)
-            return _receive(deps, container, members, out)
-        finally:
-            records.end_run(run_dir, work_root, name)
+def _convert_run(material: Material, deps: Deps, run_dir: Path, work_root: Path, out: TextIO) -> int:
+    problem = deps.check_setup(material.data_dir)
+    if problem is not None:
+        raise Stop(problem, 2, "run `reader-ingest --setup`")
+    resolve_paths(deps, material.data_dir)
+    name = records.new_run(run_dir, work_root, material.sha256)
+    work = work_root / name
+    try:
+        _copy(material, work / "in" / "material.pdf")
+        container = worker_container(deps)
+        if _status(deps, container, material.sha256, out) != "none":
+            return 0
+
+        def record_child(child: Child) -> None:
+            records.set_child(run_dir, name, child.pid, deps.start_time(child.pid) or "")
+
+        members, meta = convert_members(work, deps, _printer(out), record_child)
+        if meta["material_sha256"] != material.sha256:
+            raise Stop("convert_failed", 5)
+        return _receive(deps, container, members, out)
+    finally:
+        records.end_run(run_dir, work_root, name)
 
 
 def _parser() -> argparse.ArgumentParser:

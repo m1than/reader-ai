@@ -101,6 +101,10 @@ known-first-party = ["reader"]
 # @trace lines stay whole; SIM300 bounds compare module constants (UPPER_CASE) to spec values; PT017 the parse
 # property asserts the code of the one exception type it allows.
 "tests/tutor/**" = ["S101", "PT018", "S603", "S607", "E501", "SIM300", "PT017"]
+# SRV-PLAN: PT018 compound expectations on one result; E501 long SQL and @trace lines; RUF001/RUF002 the en dash
+# and multiplication sign are the titles' and the spec's own characters; PT017 the property test checks the one
+# allowed planner error inline.
+"tests/plan/**" = ["S101", "PT018", "E501", "RUF001", "RUF002", "PT017"]
 
 [tool.mypy]
 strict = true

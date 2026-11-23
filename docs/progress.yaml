@@ -1116,6 +1116,81 @@ tasks:
         need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding and V/plan add
         `proposed_requirements` keys to SRV-AUTH (FR-AUTH-22) and WEB-UI (FR-UI-12/-13); this branch has none left,
         so their keys merge without a duplicate." }
+  - { id: V.ingest-profile-v2, stage: V, kind: fix, track: engineering, status: in_progress, branch: V/ingest-profile-v2,
+      needs: [V.live],
+      what: "Security fix to the current converter profile (SRV-INGEST FR-INGEST-4, INV-INGEST-4), found in the
+        SRV-INGEST revision 2 review (round 3, 2026-11-23) and measured in spikes/ingest-sysctl on V/onboarding: under
+        `(allow sysctl-read)` and with no process-info rule, a confined converter child read every same-uid process's
+        arguments and environment (kern.procargs2) and cwd (proc_pidinfo). Fix: a sysctl allow-list (kern.hostname
+        kept: os.uname needs it) plus process-info limited to self; both are needed (either alone, or a deny by name,
+        leaves kern.procargs2 open); kern.iossupportversion added after the in-sandbox sweep. Not closed by any
+        profile tried: fsgetpath of another directory's inode and chdir into a known path (recorded by the [host]
+        probe). Control for that, as in ADR-0029's amendment note (V/onboarding 421d290): one converter run at a
+        time, `convert.lock` for the CLI (FR-INGEST-1), with stale cleanup over every record when it is taken.
+        Residual on this branch: a concurrent run's WORK path can be learned and chdir succeeds, reads and writes
+        there stay denied; the host name is readable (kern.hostname). Merges only after the owner has applied the
+        ADR-0029 amendment note.",
+      gate: "NFR-INGEST-1 [local] full pilot, 2026-11-23 (spikes/ingest-sysctl/fullrun.py on V/onboarding; the gate
+        ran the spike profile converter-v2.sb, rule-identical to the product profile except kern.iossupportversion,
+        added after the run): 935/935 pages in 961.6 s = 58.3 pages/min (≥ 10: PASS). About 10 % slower than the
+        2026-11-22 run (65.5 pages/min); the profile's share is not excluded: converter r1 vs r2, and the CPU was
+        shared with other tests for the run's first minutes. Peak RSS 3,590.8 MiB summed over the converter's
+        processes sampled at 1 s, against 4,025.5 MiB for the child alone then: the RSS methods differ. Span count
+        9,463 under both. Denied sysctl names: none observed, but the unified log showed no sandbox reports to this
+        user (2 lines), so that check is inconclusive; the in-sandbox sweep (spikes/ingest-sysctl/sweep.py,
+        results/sweep.json) lists the names each profile refuses instead (v2: 1,279 of 2,085, including
+        kern.proc.pid.<pid> and kern.procargs2.<pid>). Under the final product profile on this branch: all 7
+        [host]/[local] converter tests passed (136.1 s), test_cross_process_probes fails under the old profile
+        (fails closed); ingest unit tests 218 passed, ruff and mypy clean.",
+      review: "deep-reviewer (Fable) re-review on 47aa55a: VERDICT approve, conditional on the owner applying the
+        ADR-0029 amendment note (V/onboarding docs/adr/0029-amendment-note.txt) before the merge; its small items
+        applied after (status-under-lock behaviour stated in FR-INGEST-1, the requeue test asserts exit 0 and the
+        requeue call, the watcher as a forward reference, INV-INGEST-4's residual reworded, the transition note).",
+      merge_condition: "met: the owner applied the ADR-0029 amendment note on V/onboarding in 949bd1e (2026-11-23).",
+      next: "Merged into V/slice-integration (the PR #39 line) after the condition was met. Transition: a reader-ingest run from a checkout older than this change
+        takes no convert.lock, so start no new run while such a run is live.",
+      followups: "(1) Run the cross-process probe at `reader-ingest --setup`, record kern.osversion in setup.json and
+        report setup_stale when the macOS build changes (FR-INGEST-3 change with tests). (2) Byte-compare spans.jsonl
+        of the full pilot under the old and the new profile. (3) The in-sandbox sweep refused `kern.proc.pid.<self>`
+        by name (sysctlbyname), while the positive control allows the same query for the own pid by MIB; a
+        pid-scoped sysctl rule is not possible, and the converter does not need the by-name form (tests pass)." }
+  - { id: V.onboarding, stage: V, kind: module, track: product, status: in_progress, branch: V/onboarding,
+      needs: [V.live, V.WEB-polish],
+      what: "Owner 2026-11-23: a first step that imports a source in the browser and asks how long to study it.
+        Decision 1: total weeks and minutes per day (default 60, ADR-0010) give the plan; the UI shows ≈ N lessons,
+        ~M min each, finish by <date>, compile ≈ $X before confirming. Decision 2: browser upload, host-side confined
+        conversion picked up from a server queue; a new ADR (proposed) because it changes ADR-0027's flow.",
+      next: "Drafts on V/onboarding await the coordinator's deep-reviewer rounds: ADR-0029 (proposed), SRV-INGEST
+        revision 2 and the SRV-PIPELINE and WEB-UI amendments (held under proposed_* keys until approved), new specs
+        SRV-PLAN and WEB-IMPORT (draft), OPS-DOD material.upload and course.plan (tracked, missing where no evidence).
+        After approval: Red, Green, Storybook, live checks with a synthetic PDF and compile_first false (no credit).",
+      note: "spikes/study-rate step 1 (no spend): the owner's pilot plan budgets 81 theory hours for 890 PDF pages =
+        5.46 min/page = 2.58 min per 1,000 text-layer characters; step 1b on the stack's spans (the planner's basis):
+        2.64 min per 1,000 characters (per stage 1.40–5.30), L02 58,938 characters → compile $0.0214–0.0504 per
+        1,000 characters, pilot ≈ $39–93 (spikes/study-rate/RESULT.md). Paired changes to schedule: SRV-AUTH (upload Content-Type), OPS-DEPLOY (Caddy request_body),
+        OPS-CLI (reader up starts reader-ingest --watch), SRV-SEARCH (fts_config of uploads), SRV-CONFIG
+        (planner.study_minutes_per_kchar), SRV-LESSON (delete_unstarted_lesson, reorder_lessons)." }
+  - { id: V.onboarding-plan, stage: V, kind: module, track: product, status: in_progress, branch: V/plan,
+      needs: [V.live, V.WEB-polish],
+      what: "The course-planning track of V.onboarding, split from the upload track (coordinator 2026-11-23): SRV-PLAN
+        (planner, estimate, preview/confirm/GET routes, study_plans), SRV-PIPELINE FR-PIPELINE-14/15 (course lock,
+        study-plan import, create_run under the lock), SRV-LESSON FR-LESSON-15, WEB-UI FR-UI-12 (/import route, owner
+        Import link), WEB-PLAN (FR-IMPORT-4/5/6/8 moved verbatim from WEB-IMPORT), OPS-DOD course.plan.",
+      next: "Merged into V/slice-integration (the PR #39 line); owner review of /import by hand. Live check PASS 32/32 (2026-11-23,
+        e2e/live/results/2026-11-23-plan.json): the whole pilot at 12 weeks × 60 min does not fit (5,357 reading
+        minutes, a day's lesson up to 86 min) and the page suggests 90 min a day or 15 weeks; 15 weeks gives 105
+        lessons of about 51 min (at most 60), compile estimate $43.34–102.32 flagged as an extrapolation (mean lesson
+        24 kchars, 0.4× L02); preview p95 18–28 ms over 20 calls; confirm without compile, replay, re-plan and back
+        all PASS; axe 0 serious at 1280/1024/390; the owner's passkey and session counts unchanged. The stack keeps a
+        15-week plan course for bashir-2025 (105 unpublished lessons, no compile run).",
+      note: "Code review: round 1 on e244aa4 changes (stale plan_sha256 on confirm, route-lock and owner-only tests,
+        two vectors, live restore), all fixed; round 2 on a8a0408 VERDICT approve, every mutant killed.
+        Specs: SRV-PLAN and WEB-PLAN approved by agent after deep-reviewer (Fable) rounds 1–4, VERDICT approve on
+        d9f655a. Owner decisions recorded in SRV-PLAN: even spread over total_weeks × 7 days (3), re-plan keeps the
+        deadline (4, decided by the coordinator for the owner; overrulable). Tests: server 46 plan tests (planner
+        vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
+        bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
+        with axe 0 serious at 1280/1024/390." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

@@ -55,7 +55,42 @@ const api = (method, path) => {
   if (method === 'POST' && path === '/api/kernel/sessions') return [201, { session_id: 'a'.repeat(32), lesson_id: 'w01' }];
   if (method === 'POST' && (/\/interrupt$/.test(path) || path === '/api/kernel/reset')) return [204, null];
   if (method === 'POST' && path === '/api/auth/signout') return [204, null];
+  // WEB-UI FR-UI-12 / WEB-PLAN: one imported synthetic source without a stored plan.
+  if (method === 'GET' && path === '/api/materials')
+    return [200, { materials: [{ id: 'synthetic-plan', status: 'imported', page_count: 30 }, { id: 'queued-one', status: 'queued', page_count: null }] }];
   return [404, { error: 'not_found' }];
+};
+
+/** WEB-PLAN preview and confirm stubs: a synthetic 30-page plan; fits from 2 weeks at 30 min or more a day. */
+const planPreview = (body) => {
+  const weeks = Number(body.total_weeks);
+  const minutes = Number(body.minutes_per_day);
+  const days = weeks * 7;
+  const count = Math.min(days, 28);
+  const each = Math.round(150 / count);
+  const fits = each <= minutes && count <= days;
+  return {
+    plan_sha256: 'c'.repeat(64),
+    inputs: { material_id: body.material_id, total_weeks: weeks, minutes_per_day: minutes, rate: body.rate, start_date: body.today, today: body.today },
+    lessons: Array.from({ length: count }, (_, i) => ({ id: `p${i + 1}-${i + 1}`, pages: [i + 1, i + 1], minutes: each, fixed: false, title: `Synthetic chapter ${Math.floor(i / 5) + 1}` })),
+    summary: {
+      lesson_count: count, fixed_count: 0, new_count: count, study_days: days, start_date: body.today, end: body.today,
+      days_left: days, spare_days: Math.max(0, days - count), minutes_mean: each, minutes_max: each + 1,
+      required_minutes: each * count, finish_by: body.today, fits, reasons: fits ? [] : ['minutes'],
+      suggest: fits ? null : { minutes_per_day: Math.ceil((each + 1) / 5) * 5, total_weeks: weeks + 1 },
+    },
+    estimate: {
+      course_low_usd: '1.23', course_high_usd: '2.90', first_lesson: { low_usd: '0.04', high_usd: '0.10' }, run_cap_usd: '8.00',
+      basis: 'L02', basis_kchars: '58.938', mean_lesson_kchars: '2.143', extrapolated: true,
+    },
+  };
+};
+
+const planRoute = (method, path, body) => {
+  if (method === 'POST' && path === '/api/plans/preview') return [200, planPreview(body)];
+  if (method === 'POST' && path === '/api/plans/confirm')
+    return [200, { course_id: 'c', plan_course_id: 'plan-cccccccccccc', lessons: [{ plan_lesson_id: 'p1-1', lesson_id: 'l1', ordinal: 1 }], created: 1, removed: 0, replayed: false, compile: null }];
+  return null;
 };
 
 const file = (root, path) => {
@@ -101,9 +136,19 @@ createServer((req, res) => {
   }
   if (path.startsWith('/api/')) {
     apiRequests.push(`${req.method} ${path}`);
-    const [status, body] = api(req.method, path);
-    res.writeHead(status, body === null ? {} : { 'Content-Type': 'application/json' });
-    res.end(body === null ? undefined : JSON.stringify(body));
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      let parsed = {};
+      try {
+        parsed = chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {};
+      } catch {
+        parsed = {};
+      }
+      const [status, body] = planRoute(req.method, path, parsed) ?? api(req.method, path);
+      res.writeHead(status, body === null ? {} : { 'Content-Type': 'application/json' });
+      res.end(body === null ? undefined : JSON.stringify(body));
+    });
     return;
   }
   if (path.startsWith('/storybook/')) {

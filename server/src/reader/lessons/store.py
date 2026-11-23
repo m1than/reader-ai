@@ -14,6 +14,7 @@ from typing import Any, Final
 
 import anyio.to_thread
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader import blobs
@@ -21,7 +22,102 @@ from reader.config import Secret
 from reader.lessons.access import lesson_uuid
 from reader.lessons.schema import STAGES, LessonWriteError, notes_ids, validate
 
-__all__ = ["LessonWriteError", "create_course", "current_sha256", "ensure_lesson", "write_revision"]
+__all__ = [
+    "LessonWriteError",
+    "create_course",
+    "current_sha256",
+    "delete_unstarted_lesson",
+    "ensure_lesson",
+    "reorder_lessons",
+    "started_lessons",
+    "write_revision",
+]
+
+# FR-LESSON-15: the referring (table, column) pairs come from the catalog, so a later table counts by itself.
+# `course_plans` is the plan's own row, not a sign that the lesson started.
+_REFERENCES: Final = text(
+    "SELECT c.conrelid::regclass::text, a.attname FROM pg_constraint c"
+    " CROSS JOIN LATERAL unnest(c.conkey, c.confkey) AS k(src, dst)"
+    " JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = k.src"
+    " JOIN pg_attribute b ON b.attrelid = c.confrelid AND b.attnum = k.dst"
+    " WHERE c.contype = 'f' AND c.confrelid = 'lessons'::regclass AND b.attname = 'id'"
+    " AND c.conrelid::regclass::text <> 'course_plans' ORDER BY 1, 2"
+)
+
+
+def _ident(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
+async def started_lessons(
+    conn: AsyncConnection, owner_id: uuid.UUID, course_id: uuid.UUID
+) -> frozenset[uuid.UUID]:
+    """FR-LESSON-15: the course's lessons that any row other than their `course_plans` row refers to."""
+    refs = (await conn.execute(_REFERENCES)).all()
+    if not refs:
+        return frozenset()
+    # Names come from the catalog, never from input: tables as regclass text, columns quoted here.
+    exists = " OR ".join(
+        f"EXISTS (SELECT 1 FROM {table} t WHERE t.{_ident(col)} = l.id)"  # noqa: S608
+        for table, col in refs
+    )
+    rows = await conn.execute(
+        text(f"SELECT l.id FROM lessons l WHERE l.course_id = :c AND l.owner_id = :o AND ({exists})"),  # noqa: S608
+        {"c": course_id, "o": owner_id},
+    )
+    return frozenset(r[0] for r in rows)
+
+
+async def delete_unstarted_lesson(conn: AsyncConnection, owner_id: uuid.UUID, lesson_id: uuid.UUID) -> None:
+    """FR-LESSON-15: delete the owner's lesson only if it has not started (its plan row is gone)."""
+    course = (
+        await conn.execute(
+            text("SELECT course_id FROM lessons WHERE id = :l AND owner_id = :o"),
+            {"l": lesson_id, "o": owner_id},
+        )
+    ).scalar()
+    if course is None:
+        raise LessonWriteError("unknown_lesson")
+    if lesson_id in await started_lessons(conn, owner_id, course):
+        raise LessonWriteError("lesson_started")
+    try:
+        async with conn.begin_nested():
+            await conn.execute(
+                text("DELETE FROM lessons WHERE id = :l AND owner_id = :o"), {"l": lesson_id, "o": owner_id}
+            )
+    except IntegrityError:
+        raise LessonWriteError("lesson_started") from None
+
+
+async def reorder_lessons(
+    conn: AsyncConnection, owner_id: uuid.UUID, course_id: uuid.UUID, lesson_ids: list[uuid.UUID]
+) -> None:
+    """FR-LESSON-15: ordinals 1..n in list order, in two passes (the unique constraint is not deferrable)."""
+    current = {
+        r[0]: int(r[1])
+        for r in await conn.execute(
+            text("SELECT id, ordinal FROM lessons WHERE course_id = :c AND owner_id = :o"),
+            {"c": course_id, "o": owner_id},
+        )
+    }
+    if set(lesson_ids) != set(current) or len(lesson_ids) != len(current):
+        raise LessonWriteError("lessons_mismatch")
+    if [current[x] for x in lesson_ids] == list(range(1, len(lesson_ids) + 1)):
+        return
+    offset = max(current.values(), default=0) + len(lesson_ids)
+    await conn.execute(
+        text("UPDATE lessons SET ordinal = ordinal + :d WHERE course_id = :c AND owner_id = :o"),
+        {"d": offset, "c": course_id, "o": owner_id},
+    )
+    await conn.execute(
+        text(
+            "UPDATE lessons SET ordinal = v.n"
+            " FROM unnest(CAST(:ids AS uuid[]), CAST(:ns AS int[])) AS v(id, n)"
+            " WHERE lessons.id = v.id AND lessons.course_id = :c"
+        ),
+        {"ids": lesson_ids, "ns": list(range(1, len(lesson_ids) + 1)), "c": course_id},
+    )
+
 
 TITLE_MAX_CHARS: Final = 200
 PROVENANCE_MAX_BYTES: Final = 16384
@@ -116,9 +212,7 @@ async def ensure_lesson(
 async def current_sha256(conn: AsyncConnection, lesson_id: uuid.UUID) -> str | None:
     """The lesson's current revision: the sha256 of its most recent stage record (FR-LESSON-4)."""
     row = await conn.execute(
-        text(
-            "SELECT sha256 FROM lesson_revision_stages WHERE lesson_id = :l ORDER BY id DESC LIMIT 1"
-        ),
+        text("SELECT sha256 FROM lesson_revision_stages WHERE lesson_id = :l ORDER BY id DESC LIMIT 1"),
         {"l": lesson_id},
     )
     sha256: str | None = row.scalar()

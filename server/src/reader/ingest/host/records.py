@@ -68,8 +68,9 @@ def _inside(path: Path, root: Path) -> bool:
         return False
 
 
-def cleanup_stale(run_dir: Path, work_root: Path, material_sha256: str, probe: Probe) -> int:
-    """Clean every record of this material (the caller holds its lock); returns how many were cleaned."""
+def cleanup_stale(run_dir: Path, work_root: Path, material_sha256: str | None, probe: Probe) -> int:
+    """Clean every record of this material (the caller holds its lock), or every record when `material_sha256`
+    is None (the caller holds `convert.lock`, FR-INGEST-1); returns how many were cleaned."""
     if not run_dir.is_dir():
         return 0
     cleaned = 0
@@ -78,7 +79,9 @@ def cleanup_stale(run_dir: Path, work_root: Path, material_sha256: str, probe: P
             record = json.loads(path.read_text(encoding="utf-8"))
         except OSError, ValueError:
             continue
-        if not isinstance(record, dict) or record.get("material_sha256") != material_sha256:
+        if not isinstance(record, dict):
+            continue
+        if material_sha256 is not None and record.get("material_sha256") != material_sha256:
             continue
         work = Path(str(record.get("work", "")))
         sid, start = record.get("child_sid"), record.get("child_start")

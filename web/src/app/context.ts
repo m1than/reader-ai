@@ -1,6 +1,7 @@
 // App-wide services handed to routes and the lesson view.
 import { createContext, useContext } from 'react';
 import type { SignupsApi } from '../accounts/api';
+import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
 import type { Api } from './api';
 
@@ -10,6 +11,8 @@ export interface Services {
   navigateAway: (url: string) => void;
   /** SRV-TUTOR's client; the lesson view shows the Ask panel only when it is present. */
   tutor?: TutorApi;
+  /** SRV-PLAN's client for the /import page (FR-UI-12, WEB-PLAN). */
+  plan?: PlanApi;
   /** WEB-ACCOUNTS's client (FR-UI-14): the owner's Sign-ups screen and header count. */
   signups?: SignupsApi;
 }

@@ -219,6 +219,46 @@ operations:
       observability: { items: [FR-INGEST-12] }
       recovery: { items: [FR-EVENTS-8, INV-INGEST-2] }
 
+  # Added 2026-11-23 (V/onboarding) from the DRAFT items of SRV-INGEST revision 2, SRV-PLAN and WEB-IMPORT
+  # (ADR-0029 proposed). No route or command is named yet: they enter the registry only when implemented, and are
+  # added here then (POST /api/materials/uploads, GET /api/materials/uploads/{id}, …/cancel, …/retry, DELETE …,
+  # GET /api/materials/converter; reader-ingest --watch; POST /api/plans/preview, POST /api/plans/confirm,
+  # GET /api/plans?material_id=…). Every cell without a test or a live label is `missing`.
+  - id: material.upload
+    title: Upload a PDF in the browser, follow its host-side conversion and indexing, cancel or retry it
+    surface: [web, api]
+    specs: [SRV-INGEST, WEB-IMPORT]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3] }
+      security: { missing: "SRV-INGEST proposed FR-INGEST-18, FR-INGEST-22, INV-INGEST-8..10 (under review) plus INV-INGEST-4 for a watcher-started child, and WEB-IMPORT INV-IMPORT-1/-3; no test yet" }
+      privacy: { missing: "SRV-INGEST proposed FR-INGEST-25 and INV-INGEST-5 extended to the upload path; no canary test yet" }
+      a11y: { missing: "no axe run on /import yet (WEB-IMPORT FR-IMPORT-9; pages /import at 1280, 1024 and 390 px once implemented)" }
+      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher" }
+      cost: { na: no provider call (local converter) }
+      observability: { missing: "SRV-INGEST proposed FR-INGEST-25; no test yet" }
+      recovery: { missing: "SRV-INGEST proposed FR-INGEST-19..21 (lease, cancel, retry) and WEB-IMPORT INV-IMPORT-2; no test yet" }
+
+  - id: course.plan
+    title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
+    surface: [web, api]
+    specs: [SRV-PLAN, SRV-PIPELINE, SRV-LESSON, WEB-PLAN, WEB-UI]
+    routes: ["POST /api/plans/preview", "POST /api/plans/confirm", "GET /api/plans"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-PLAN-1, FR-PLAN-3, FR-PLAN-4, FR-PLAN-6, FR-PLAN-7, FR-PLAN-9, INV-PLAN-2, INV-PLAN-3, VEC-PLAN-1, FR-PIPELINE-14, FR-LESSON-15, FR-UI-12, FR-IMPORT-4, FR-IMPORT-5, FR-IMPORT-6, FR-IMPORT-8]
+      security: { items: [FR-PLAN-9, INV-PLAN-5] }
+      privacy: { items: [INV-PLAN-4, FR-PLAN-10, FR-PLAN-12] }
+      a11y: { pages: ["/import"] }   # e2e/web/import/plan: axe, no serious or critical issue at 1280, 1024 and 390 px
+      latency:
+        items: [NFR-PLAN-1]
+        budget: { p95_ms_max: 500, n_min: 20, kind: target,
+                  source: "SRV-PLAN NFR-PLAN-1: preview of a pilot-sized material (935 pages, 494 outline entries) including the suggestion search; a chosen interactive target" }
+      cost: { missing: "the estimate (FR-PLAN-8, VEC-PLAN-2) scales one measured lesson and is not a bound; confirm with compile_first spends under SRV-PIPELINE's $8.00 cap and the live check never sets it, so no spend through this operation is measured yet" }
+      observability: { items: [FR-PLAN-12] }
+      recovery: { items: [FR-PLAN-9, INV-PLAN-5, FR-PIPELINE-14, FR-PIPELINE-15, FR-IMPORT-6] }
+
   - id: material.browse
     title: Browse my materials (list, outline, spans of a page)
     surface: [api]
