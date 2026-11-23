@@ -441,7 +441,8 @@ proposed_requirements:
       `<data_dir>/ingest/locks/watch.lock` is held. **A running watcher of other code:** the lock file holds the
       watcher's pid and the `converter_source_sha256` of the code it runs (SRV-INGEST FR-INGEST-21). When that sha
       differs from the checkout's and the watcher is idle (the lock file's `busy` field, which the watcher rewrites
-      at every claim and release), `reader up` stops it as `reader down` does and starts the new one;
+      at every claim and release; a lock file that does not parse as exactly `{pid, sha, busy}`, for instance one
+      caught mid-rewrite, counts as busy), `reader up` stops it as `reader down` does and starts the new one;
       when it is busy, `reader up` leaves it, prints "ingest watcher runs older code; it restarts at the next `reader
       up` when idle", and `reader status` shows `"ingest_watcher": "stale"`. Otherwise it leaves the running one.
       The spawn, unlike the secret

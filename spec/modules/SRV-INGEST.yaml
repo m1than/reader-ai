@@ -784,11 +784,14 @@ proposed_requirements:
     text: >-
       **Host watchdogs** for every converter child (CLI and watch mode), once per tick of 2 s (a chosen interval). The
       watcher records each tick's time in its log line.
-      **One snapshot per tick:** one `ps -A -o pid=,ppid=,lstart=,rss=,comm=` and one `ps -A -o pid=,args=` (the
-      args are read for the candidates only), one `lsof -a -d cwd -Fpn -u <uid>` (cwd of every process of the
-      owner's uid), and, for each candidate, `os.getsid(pid)` and the kernel's executable path from libproc's
+      **One snapshot per tick:** one `ps -A -o pid=,ppid=,lstart=,rss=,comm=`; then, only for the candidates
+      (processes started at or after `child_start`), `os.getsid(pid)` and the kernel's executable path from libproc's
       `proc_pidpath` (the vnode the kernel executed, resolved, which the process cannot rewrite; measured: the
-      converter launched as `<VENV>/bin/python` reports the shared uv CPython `…/bin/python3.14`).
+      converter launched as `<VENV>/bin/python` reports the shared uv CPython `…/bin/python3.14`); then, only for the
+      candidates whose executable is the converter's Python, the cwd through `proc_pidinfo(PROC_PIDVNODEPATHINFO)`
+      and the args through `sysctl kern.procargs2` (the unconfined watcher may read both). No `lsof` per tick. The
+      tick has a budget of 1 s; a tick that overruns is logged with its duration and the next tick starts 2 s after
+      it ended.
       **The run's processes.** A process belongs to *this* run if `os.getsid(pid)` equals the child's session id
       (`ps -g` selects by process group on macOS, not by session, so it is not used; a descendant that called
       `setpgid` without `setsid` stays in the session and is counted), or if all of these hold, which catches a
@@ -895,8 +898,11 @@ proposed_requirements:
         `uploads` row with the args' sha256 does not exist fails permanently with `upload_missing` (nothing
         written; the key goes `dead`), because the material's language and title come from that row.
       - **Converter freshness:** `GET /api/materials/converter` also returns `stale: true` when
-        `ingest_hosts.watcher_sha` differs from the `converter_source_sha256` the api computes for its own code with
-        FR-INGEST-3's closure function; the Import page then shows "The converter on your Mac runs older code;
+        `ingest_hosts.watcher_sha` differs from the image's `converter_source_sha256`. That value is computed at
+        image build (FR-INGEST-3's closure function, run by the server Dockerfile over the copied `reader` sources,
+        written to `/usr/local/share/reader/converter_source_sha256`, an OPS-DEPLOY paired line), so no api or
+        worker process imports `reader.ingest.host` at run time (INV-INGEST-8's import graph stays clean); the
+        Import page then shows "The converter on your Mac runs older code;
         `reader up` restarts it when it is idle".
       - The outline and spans routes accept `up-…` ids. [db]
   - id: FR-INGEST-24
@@ -1019,7 +1025,12 @@ proposed_amendments:
         `security.mac.`, `kern.os`, and the names `kern.version`, `kern.hostname`, `kern.boottime`, `kern.argmax`,
         `kern.maxfiles`, `kern.maxfilesperproc`, `kern.ngroups`, `kern.secure_kernel`, `kern.usrstack64`,
         `kern.clockrate`, `kern.hv_vmm_present`, `kern.willshutdown`, `kern.memorystatus_level`. Nothing under
-        `kern.proc` or `kern.procargs`;
+        `kern.proc` or `kern.procargs`. `kern.hostname` stays (measured: without it `os.uname()` fails, and `import
+        ctypes` calls it; spikes/ingest-sysctl round 4). The [local] full run records, once, the
+        distinct sysctl names the profile denied, read from macOS's unified log (`log show` over the run's time
+        window, Sandbox sender, the child's pid); an empty log is recorded as such (the spike's `log show` returned no
+        sandbox reports, so whether denials are logged on this Mac is itself checked there). An allow-list gap then
+        shows as data, not as a silent fallback;
       - `(deny process-info*)` and `(allow process-info* (target self))`: no `proc_pidinfo`, `proc_pidpath` or
         `proc_listpids` of another process.
       Both are needed: measured, a sysctl deny by name, or either edit alone, leaves `kern.procargs2` of another pid
@@ -1035,9 +1046,22 @@ proposed_amendments:
       **Added probes**, [host] under the product profile, each against a second confined process of the same uid
       whose argv and cwd name its own WORK: `kern.procargs2`, `kern.procargs`, `kern.proc.pid` and `kern.proc.all`
       by sysctl MIB; `proc_pidinfo` (PROC_PIDVNODEPATHINFO), `proc_pidpath` and `proc_listallpids`; listing WORK's
-      parent directory. Every one is refused (EPERM). The round-3 attack (FR-INGEST-22's [host] case) runs in the same
-      test. **Allowed by design and recorded:** reading the process's own `kern.procargs2`, and `chdir` into a path
-      the process already knows (the global `file-read-metadata`).
+      parent directory; and the inode channels: listing `/.vol/<dev>/<ino>` of the shared WORK parent (whose inode
+      the child can `stat`), opening `/.vol/<dev>/<ino>` of another WORK and asking `F_GETPATH`, `getattrlist` with
+      `ATTR_CMN_FULLPATH` on that path, `fsgetpath` on another WORK's inode, and `searchfs` on the volume. Every
+      process channel is refused (EPERM), and so are the `/.vol` listing and open. **`fsgetpath` is not:** measured
+      (spikes/ingest-sysctl round 4), it returns another WORK's path from its inode under every profile tried, a
+      metadata wall below WORKROOT included, and a scan of ±2,000 inode numbers around the child's own WORK finds a
+      sibling WORK. `chdir` into a known WORK is also allowed. So the inode channel stays open, and FR-INGEST-22's
+      cwd and args arms remain spoofable while two converter runs coexist. **Open decision for the coordinator and
+      the owner** (gate: the product profile does not change until this is settled): (A) one converter run on the
+      host at a time, so no concurrent run exists to join, or (B) membership by session id only. The round-3 attack (FR-INGEST-22's [host] case) runs in the
+      same test, with spikes/ingest-sysctl's probe copied to `server/tests/ingest/cross_process_probe.py` (with
+      Red). **At run time too:** `reader-ingest --setup` and every watcher start run the cross-process probes once
+      under the product profile; any probe that is not refused makes the host state `setup_missing` (logged with the
+      probe's name), so no conversion runs under a profile that leaks. **Allowed by design and recorded:** reading
+      the process's own `kern.procargs2`, and `chdir` into a path the process already knows (the global
+      `file-read-metadata`).
 
 proposed_invariants:
   - id: INV-INGEST-8
