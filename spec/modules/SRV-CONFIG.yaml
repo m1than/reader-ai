@@ -17,7 +17,7 @@ title: reader.yaml settings, JSON Schema export, secret references and the conta
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording"
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change FR-CONFIG-17 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner): drafted on V/plan, reviewed in the onboarding deep-reviewer rounds 3–7, promoted with SRV-SEARCH FR-SEARCH-10 on V/upload-impl with its Red test"
 layer: server
 track: engineering
 adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026]
@@ -230,6 +230,15 @@ requirements:
     text: >-
       This module's own log calls never include a resolved value or an input scalar; they log references, codes and key
       paths only. Redaction in the shared logger and event serializer is a dependency on SRV-OBS and SRV-EVENTS.
+  - id: FR-CONFIG-17   # paired change for SRV-INGEST revision 2 (ADR-0029); promoted with SRV-SEARCH FR-SEARCH-10
+    text: >-
+      **Reserved material ids.** A `materials[].id` that starts with `up-` is a validation problem with code
+      `reserved_id` and the message "material ids starting with up- are reserved for uploads" (SRV-INGEST
+      FR-INGEST-23 names uploaded materials `up-<first 12 hex of sha256>`; SRV-SEARCH FR-SEARCH-10 reads an
+      `up-` material's language from its upload, never from reader.yaml). The match is case-sensitive, on the id's
+      characters as written, with no normalisation. The problem is reported like every other FR-CONFIG-10 problem
+      (at the item's path and line, collected with the others). [unit] refused: `up-`, `up-abc`; accepted: `upx`,
+      `upload-notes`, `Up-x`.
 
 invariants:
   - id: INV-CONFIG-1
@@ -310,17 +319,3 @@ vectors:
 # - An empty port (`https://x:`) is accepted as a URL without a port; this is harmless.
 # - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
 #   1+0j), matching the loader.
-
-# ---- Paired change (DRAFT, 2026-11-23, V/onboarding; drafted on V/plan and moved here by the coordinator). Held
-# under `proposed_requirements` (trace-check does not read it; this spec is approved). Promoted together with
-# SRV-SEARCH proposed FR-SEARCH-10, after the owner accepts ADR-0029, with its Red tests. ----
-proposed_requirements:
-  - id: FR-CONFIG-17
-    text: >-
-      **Reserved material ids.** A `materials[].id` that starts with `up-` is a validation problem with code
-      `reserved_id` and the message "material ids starting with up- are reserved for uploads" (SRV-INGEST proposed
-      FR-INGEST-23 names uploaded materials `up-<first 12 hex of sha256>`; SRV-SEARCH proposed FR-SEARCH-10 reads an
-      `up-` material's language from its upload, never from reader.yaml). The match is case-sensitive, on the id's
-      characters as written, with no normalisation. The problem is reported like every other FR-CONFIG-10 problem
-      (at the item's path and line, collected with the others). [unit] refused: `up-`, `up-abc`; accepted: `upx`,
-      `upload-notes`, `Up-x`.
