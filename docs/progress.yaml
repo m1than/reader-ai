@@ -768,7 +768,18 @@ tasks:
         e2e/live/results/2026-11-23-slice.json; screenshots stay in the session scratchpad. After the run: merged
         origin/V/slice-integration c1d7e61 (OPS-DOD; no conflict, both sides of web_live.py kept, owner/slice lines moved
         to the label-TAB-detail grammar in 2fa9422); verify-all.sh again 53/53 PASS (stage-1 116 s, browser 11 s), log
-        in the DoD grammar." }
+        in the DoD grammar.
+        G2 deltas.mismatch (investigator, 2026-11-23): a pipeline bug, content correct. G2 (d) compared F as stored,
+        where nbformat splits every appended open cell's source into a list of lines, with the recomputed notebook in
+        memory, where source is one string, so every run that appended a findings cell failed (d). Fix on this branch:
+        FR-PIPELINE-8 (d) compares the canonical form (SRV-LESSON canonical bytes, FR-LESSON-2); Red 32b29fb, Green
+        eb3e01d; deep-reviewer (Fable) VERDICT approve on eb3e01d (via the coordinator). Non-blocking items applied
+        (Red 8b94945 + Green): a notebook without a canonical form (LessonWriteError, UnicodeEncodeError) counts as
+        deltas.mismatch instead of failing the step; spec wording 'canonical form of F'; this history moved here from
+        the spec. After reader up on 80c48f7: L02 recompile (run cf9b9f35) converged, $0 (draft, fact_check and
+        review reused), steps 4.8 s (wall 15 s at the 15 s poll), G2 publishable true, failing [], final sha256
+        542521481e88…a39db9 (same as run 2); browser recheck PASS (149 references, lab cell done in 3.0 s).
+        Tutor grounding: a second investigation is running; no tutor change until it reports." }
   - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
       what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
         (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a

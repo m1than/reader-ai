@@ -7,17 +7,20 @@ final revision is not the deterministic function of the last model-written one).
 
 from __future__ import annotations
 
-import json
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
+from reader.lessons.schema import LessonWriteError, validate
+from reader.pipeline import notebook as nb_mod
 from reader.pipeline.findings import Problem, append_findings, labs_of, labs_sha256, source_sha256, stamp_labs
 from reader.pipeline.reports import Key
 from reader.pipeline.verify import LabReport
 
 
-def _canonical(notebook: Mapping[str, Any]) -> str:
-    return json.dumps(notebook, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+def _canonical(notebook: Mapping[str, Any]) -> bytes:
+    """FR-PIPELINE-8 (d): the canonical form, SRV-LESSON's canonical bytes (FR-LESSON-2), so nbformat's
+    split of an appended cell's source into lines is not a delta."""
+    return validate(nb_mod.to_bytes(notebook)).canonical
 
 
 def deltas_ok(
@@ -26,8 +29,12 @@ def deltas_ok(
     problems: Sequence[Problem],
     lab_report: LabReport,
 ) -> bool:
+    """False also when either notebook has no canonical form: `deltas.mismatch`, never a failed step."""
     expected = stamp_labs(append_findings(model_written, problems), lab_report)
-    return _canonical(final) == _canonical(expected)
+    try:
+        return _canonical(final) == _canonical(expected)
+    except (LessonWriteError, UnicodeEncodeError):
+        return False
 
 
 def _verified(cell: Mapping[str, Any]) -> bool:
