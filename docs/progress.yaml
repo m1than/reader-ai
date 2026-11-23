@@ -1110,7 +1110,9 @@ tasks:
         configured user's id deletes nothing, the run's accounts are deleted by id, malformed entries are ignored.
         Non-blocking applied: anyio.fail_after on the SKIP LOCKED test; display names trimmed of Unicode White_Space
         only (U+001F + name refused); review note says refactored; FR-AUTH-32's cleanup sentence matches the code;
-        the 80-way race test noted as probabilistic. Awaits round 2.",
+        the 80-way race test noted as probabilistic. Round 2 on 2eb4f42: VERDICT approve; its note applied (a
+        `<uuid>\\n` id and a newline-suffixed handle join the cleanup test's malformed entries). Next: merged into
+        V/slice-integration; the live `signup` step waits for the coordinator's batched restart with the owner's OK.",
       notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
         disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
         need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding and V/plan add

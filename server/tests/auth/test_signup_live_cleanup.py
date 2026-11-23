@@ -119,12 +119,13 @@ def test_run_accounts_are_deleted_by_id_and_nothing_else(
     ids = _seed(pg, tmp_path)
     out = tmp_path / "out"
     # The pending id is learned by handle only; the active id is given; a configured id is mixed in; malformed
-    # entries (a pattern, an upper-case handle, a non-string, a uuid with a suffix) are ignored.
+    # entries (a pattern, an upper-case handle, a non-string, a uuid with a suffix or a trailing newline,
+    # which `$` alone would accept) are ignored.
     _created(
         out,
         {
-            "handles": ["lc-0a1b2c3d", "lc-9f8e7d6c", "lc-%", "LC-0A1B2C3D", 7],
-            "ids": [ids["active"], ids["config"], f"{ids['pending']}x", None],
+            "handles": ["lc-0a1b2c3d", "lc-9f8e7d6c", "lc-%", "LC-0A1B2C3D", 7, "lc-0a1b2c3d" + chr(10)],
+            "ids": [ids["active"], ids["config"], f"{ids['pending']}x", ids["pending"] + chr(10), None],
         },
     )
     fake_psql.cleanup_signups("project", out)
