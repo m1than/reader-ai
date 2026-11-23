@@ -91,9 +91,14 @@ def _check_claim(claim: object) -> None:
         raise OutputInvalid
     if not isinstance(claim["id"], str) or not isinstance(claim["note"], str):
         raise OutputInvalid
-    if claim["status"] not in STATUSES:
+    if not _member(claim["status"], STATUSES):
         raise OutputInvalid
     _ids(claim["citations"])
+
+
+def _member(value: object, allowed: frozenset[str]) -> bool:
+    """An enum check that never hashes a list or a dict (a TypeError would escape as a crash)."""
+    return isinstance(value, str) and value in allowed
 
 
 def _check_recommendation(rec: object) -> None:
@@ -101,7 +106,7 @@ def _check_recommendation(rec: object) -> None:
         raise OutputInvalid
     if not isinstance(rec["source"], str) or not isinstance(rec["why"], str):
         raise OutputInvalid
-    if rec["kind"] not in REC_KINDS:
+    if not _member(rec["kind"], REC_KINDS):
         raise OutputInvalid
     if rec.get("date") is not None and not isinstance(rec["date"], str):
         raise OutputInvalid
@@ -114,7 +119,7 @@ def parse(text: str) -> dict[str, Any]:
     """The output's schema, strictly: unknown keys, a wrong enum or type, or a missing key is
     `output_invalid`."""
     data = load_json(text)
-    if not isinstance(data, dict) or set(data) != TOP_KEYS or data["verdict"] not in VERDICTS:
+    if not isinstance(data, dict) or set(data) != TOP_KEYS or not _member(data["verdict"], VERDICTS):
         raise OutputInvalid
     for key in ("reasons", "claims", "recommendations"):
         if not isinstance(data[key], list):

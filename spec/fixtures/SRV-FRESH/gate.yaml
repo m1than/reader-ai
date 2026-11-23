@@ -24,6 +24,19 @@ cases:
     calls: [{ tool: WebSearch, input: { query: ["Practical Distributed Ledgers Example new edition 2019"] }, allow: false }]
   - name: another_tool
     calls: [{ tool: Bash, input: { command: "echo" }, allow: false }]
+  # The match is exact (FR-FRESH-6): no prefix or suffix, no case folding, and only the tool named WebSearch.
+  - name: planned_plus_suffix
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019 pdf" }, allow: false }]
+  - name: prefix_plus_planned
+    calls: [{ tool: WebSearch, input: { query: "free Practical Distributed Ledgers Example new edition 2019" }, allow: false }]
+  - name: case_changed
+    calls: [{ tool: WebSearch, input: { query: "practical distributed ledgers example new edition 2019" }, allow: false }]
+  - name: another_tool_with_the_planned_query
+    calls: [{ tool: WebFetch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: false }]
+  - name: tool_name_case_changed
+    calls: [{ tool: websearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: false }]
+  - name: extra_key_beside_the_query
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019", max_uses: 1 }, allow: false }]
   - name: one_per_run
     calls:
       - { tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: true }

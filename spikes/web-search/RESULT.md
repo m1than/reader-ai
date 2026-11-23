@@ -181,6 +181,11 @@ Six runs: ≤ $0.103.
 - **Combined worst case** (a restart plus a paid report retry in each attempt): $0.170 + 2 × ($0.103 + 2 ×
   $0.116) ≈ $0.84. With the reserve floors ($0.02 per search run): $0.170 + 2 × ($0.12 + 2 × $0.116) ≈ $0.87. Both
   are under $1.00 (FR-FRESH-12).
+- **With a restart of a paid scan** (code review round 1, 2026-11-24): the scan job also has two attempts, so a
+  scan that settled and was then lost to a timeout or a worker restart is paid again: 2 × $0.170 + 2 × ($0.12 +
+  2 × $0.116) ≈ $1.04. That is over the $1.00 cap, so the cap is not a bound by formula here: the ledger's run cap
+  (SRV-AGENT FR-AGENT-9) refuses the call that would cross $1.00 and the check ends `budget_refused`, at most one
+  reserve over (INV-AGENT-4).
 
 **Expected ≈ $0.27:**
 - scan $0.13;

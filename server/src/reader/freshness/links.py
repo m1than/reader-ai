@@ -4,13 +4,17 @@
 The first `results_per_search_max` content items of a search become entries `r1`, `r2`, ... (numbered
 across the check). An item is dropped (`url_unsafe`) when its URL is not a string, is longer than
 `url_chars_max`, holds a control, whitespace, zero-width or bidi character, `urllib.parse.urlsplit` raises
-`ValueError` or gives a scheme other than http/https, userinfo, or no host, the host's `idna` encoding raises
-`UnicodeError`, or the ASCII host is longer than `result_host_chars_max`. Each entry keeps the URL string as
-returned, the ASCII host and the sanitised title. The summary is kept sanitised and cut, in memory only.
+`ValueError` or gives a scheme other than http/https, userinfo, or no host, the port is not an integer in
+0..65535, the host holds a character other than a Unicode letter or digit, `-` or `.` (so no `%`), the host's
+`idna` encoding raises `UnicodeError`, the ASCII host is longer than `result_host_chars_max`, or one of
+its labels is not LDH (letters, digits, hyphens; 1 to 63 characters; no hyphen at either end). Each entry
+keeps the URL string as returned, the ASCII host and the sanitised title. The summary is kept sanitised
+and cut, in memory only.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final
@@ -20,6 +24,8 @@ from reader.freshness import params
 from reader.freshness.text import has_removed, sanitise
 
 SCHEMES: Final = frozenset({"http", "https"})
+# One label of the ASCII host: letters, digits and hyphens, 1 to 63 characters, no hyphen at either end (LDH).
+LDH_LABEL: Final = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 SEARCH_ERROR_PREFIX: Final = "Web search error:"
 
 
@@ -53,13 +59,16 @@ def ascii_host(url: object) -> str | None:
         parts = urlsplit(url)
         if parts.scheme not in SCHEMES or parts.username is not None or parts.password is not None:
             return None
+        _ = parts.port  # ValueError unless absent or an integer in 0..65535
         host = parts.hostname
-        if not host:
+        if not host or not all(ch.isalnum() or ch in "-." for ch in host):  # no `%`, `_`, brackets or symbols
             return None
         encoded = host.encode("idna").decode("ascii")
     except ValueError, UnicodeError:
         return None
     if not encoded or len(encoded) > params.RESULT_HOST_CHARS_MAX:
+        return None
+    if not all(LDH_LABEL.match(label) for label in encoded.split(".")):
         return None
     return encoded
 

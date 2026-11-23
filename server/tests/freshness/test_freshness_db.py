@@ -468,6 +468,85 @@ async def test_report_is_not_retried_twice(pg: Pg, tmp_path: Path) -> None:
     assert len([c for c in provider.calls if c.stage == "report"]) == 2
 
 
+async def test_a_reservation_without_a_settle_row_is_final(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-12: a transient failure whose reservation has no settle row counts as paid: no retry."""
+    w = await world(pg, tmp_path)
+    searches = [Reply(code="provider_unavailable", paid=False, settle=False), *searches_ok(4)]
+    report = [Reply(text=REPORT_OUT.replace('"r3"', '"r1"').replace('"r5"', '"r1"'))]
+    provider = FakeProvider(w.engine, _replies(searches, report))
+    report_id, _ = await full_check(w, tmp_path, provider)
+    row = await report_row(w, report_id)
+    assert [s["status"] for s in row["searches"]] == ["failed", "ok", "ok", "ok", "ok"]
+    assert len([c for c in provider.calls if c.stage == "search"]) == 5  # the unsettled one was not retried
+
+
+async def test_no_retry_when_the_job_time_left_is_short(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-12: a $0 transient failure is retried only when the job's remaining time covers the call's
+    budget; with less left, later searches do not start either."""
+    params = need("reader.freshness.params")
+    w = await world(pg, tmp_path)
+    now = [0.0]
+
+    def advance(call: Any) -> None:
+        if call.stage == "search":  # the first search call ends with less than one call budget left
+            now[0] = params.WEB_JOB_TIMEOUT_S - params.SEARCH_CALL_BUDGET_S + 1
+
+    searches = [Reply(code="provider_unavailable", paid=False), *searches_ok(4)]
+    provider = FakeProvider(w.engine, _replies(searches), on_run=advance)
+    jobs = FakeJobs()
+    async with client(w, jobs=jobs) as c:
+        await c.put(path(w) + "/bibliography", json=BIB)
+        report_id = (await post_check(c, w)).json()["report_id"]
+    d = deps(w, provider, jobs, clock=lambda: now[0])
+    await run_job(w, "freshness.scan", uuid.UUID(report_id), d)
+    await run_job(w, "freshness.web", uuid.UUID(report_id), d)
+    row = await report_row(w, report_id)
+    assert len([c for c in provider.calls if c.stage == "search"]) == 1
+    assert [s["status"] for s in row["searches"]] == ["failed"] * 5
+    assert (row["status"], row["error"]) == ("failed", "no_results")
+
+
+async def test_a_scan_is_reused_only_with_the_same_scan_inputs(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-3: reuse needs an equal scan_inputs_sha256, not just the same material."""
+    w = await world(pg, tmp_path)
+    first_id, _ = await _scan_only(w)
+    jobs = FakeJobs()
+    async with client(w, jobs=jobs) as c:
+        second_id = (await post_check(c, w)).json()["report_id"]
+    sql = "UPDATE freshness_reports SET scan_inputs_sha256 = :s WHERE id = :r"
+    await execute(w.engine, sql, s="0" * 64, r=second_id)
+    provider = FakeProvider(w.engine, _replies())
+    await run_job(w, "freshness.scan", uuid.UUID(second_id), deps(w, provider, jobs))
+    assert [c.stage for c in provider.calls] == ["scan"]  # scanned again, not copied from first_id
+    assert (await report_row(w, second_id))["scan_reused_from"] is None
+    assert first_id != second_id
+
+
+async def test_a_report_is_read_only_through_its_own_material(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-11: the report route is scoped to the material in the path (store.load_owned), even for the
+    same owner."""
+    w = await world(pg, tmp_path)
+    report_id, _ = await full_check(w, tmp_path, FakeProvider(w.engine, _replies()))
+    other, _ = await add_material(w, "ivan", "f" * 64, [], [], config_id="other")
+    async with client(w) as c:
+        wrong = await c.get(f"/api/materials/{other}/freshness/{report_id}")
+        right = await c.get(path(w) + f"/freshness/{report_id}")
+    assert (wrong.status_code, wrong.json()) == (404, {"error": "not_found"})
+    assert right.status_code == 200
+
+
+async def test_put_without_origin_is_refused(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-11 with SRV-AUTH FR-AUTH-12: the bibliography PUT passes the CSRF gate (exact Origin)."""
+    w = await world(pg, tmp_path)
+    async with client(w) as c:
+        del c.headers["Origin"]
+        refused = await c.put(path(w) + "/bibliography", json=BIB)
+        wrong = await c.put(path(w) + "/bibliography", json=BIB, headers={"Origin": "https://evil.example"})
+    assert (refused.status_code, refused.json()) == (403, {"error": "origin"})
+    assert wrong.status_code == 403
+    assert await scalar(w.engine, "SELECT count(*) FROM material_bibliography") == 0
+
+
 async def test_scan_output_invalid_after_a_paid_call_is_final(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     jobs = FakeJobs()

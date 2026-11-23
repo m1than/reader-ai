@@ -5,7 +5,8 @@ Span k of the sample (1-based, in `seq` order) gets the alias `s<k>`; each rende
 `⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧` and its text, with the marker brackets replaced so span text
 cannot forge a marker.
 Code expands aliases to span ids and pages and drops a claim with an unknown alias, or with a subject over
-`subject_words_max` words or `subject_chars_max` characters (counted in `dropped`).
+`subject_words_max` words (Unicode `\\w+` tokens, as INV-FRESH-1 counts them, so `a-b-c` is three words) or
+`subject_chars_max` characters (counted in `dropped`).
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from reader.freshness import params
 from reader.freshness.bibliography import FIELDS, from_scan
 from reader.freshness.errors import OutputInvalid
 from reader.freshness.prompts import Prompt
+from reader.freshness.queries import subject_ok
 from reader.freshness.sample import Picked, Sample, span_id
 from reader.freshness.text import clean, sanitise
 
@@ -107,9 +109,7 @@ def parse(text: str, aliases: Mapping[str, Picked], material_sha256: str, today:
             drop("claim_span_unknown")
             continue
         subject = clean(item["subject"])
-        if not subject or len(subject.split(" ")) > params.SUBJECT_WORDS_MAX or (
-            len(subject) > params.SUBJECT_CHARS_MAX
-        ):
+        if not subject_ok(subject):
             drop("subject_too_long")
             continue
         kept.append(

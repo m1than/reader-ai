@@ -278,7 +278,8 @@ class Reply:
 
     `paid` decides the ledger row: the reserve settles at `sdk_usd` (paid) or $0. For a search,
     `tool_input` is what the fake CLI passes to the PreToolUse hook (None: the planned query verbatim); when
-    the hook allows it, the run returns `links` as its structured result.
+    the hook allows it, the run returns `links` as its structured result. `settle=False` leaves the
+    reservation without a settle row (a worker killed between the two).
     """
 
     text: str = ""
@@ -288,6 +289,7 @@ class Reply:
     links: Sequence[tuple[str, str]] = ()
     summary: str = "A short summary."
     tool_input: dict[str, Any] | None = None
+    settle: bool = True
 
 
 @dataclass
@@ -300,6 +302,7 @@ class FakeProvider:
     calls: list[Any] = field(default_factory=list)
     allowed_queries: list[str] = field(default_factory=list)
     hook_outputs: list[dict[str, Any]] = field(default_factory=list)
+    on_run: Any = None  # called with each StageCall before it runs (a test's clock, for example)
 
     async def run(self, call: Any) -> Any:
         from reader.agent import ledger
@@ -308,6 +311,8 @@ class FakeProvider:
         from reader.agent.provider import StageResult
 
         self.calls.append(call)
+        if self.on_run is not None:
+            self.on_run(call)
         queue = self.replies.get(call.stage, [])
         reply = queue.pop(0) if queue else Reply()
         model = "claude-haiku-5-5" if call.stage == "search" else "claude-sonnet-5-5"
@@ -328,7 +333,8 @@ class FakeProvider:
                 tool_results = (search_result(query, reply.links, reply.summary),)
                 searches = 1
         usage = Usage(2, 200, 0, 900, 0, None, searches if call.web_search is not None else None)
-        await ledger.settle(self.engine, rid, settled, settled, settled, usage, record)
+        if reply.settle:
+            await ledger.settle(self.engine, rid, settled, settled, settled, usage, record)
         if reply.code is not None:
             raise agent_error(reply.code)
         return StageResult(reply.text, usage, settled, model, "end_turn", tool_results)
@@ -352,7 +358,8 @@ class FakeJobs:
         return self.statuses.get(key, "none")
 
 
-def deps(w: World, provider: Any, jobs: Any = None, today: Any = None) -> Any:
+def deps(w: World, provider: Any, jobs: Any = None, today: Any = None, clock: Any = None) -> Any:
+    import time
     from datetime import date
 
     fjobs = need("reader.freshness.jobs")
@@ -361,6 +368,7 @@ def deps(w: World, provider: Any, jobs: Any = None, today: Any = None) -> Any:
         config=lambda: w.config,
         jobs=lambda: jobs if jobs is not None else FakeJobs(),
         today=today or (lambda: date(2026, 11, 23)),
+        clock=clock or time.monotonic,
     )
 
 

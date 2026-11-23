@@ -22,6 +22,19 @@ entries:
   - { url: 42, host: null }                                                 # not a string
   - { url_repeat: { prefix: "https://example.org/", char: "a", length: 2049 }, host: null }  # over url_chars_max
   - { url_repeat: { prefix: "https://example.org/", char: "a", length: 2048 }, host: example.org }
+  # Host and port rules (the web's URL Standard check compares hosts, so the server keeps only plain ones):
+  - { url: "https://example.org:443/a", host: example.org }                  # a port in range is kept
+  - { url: "https://example.org:65535/", host: example.org }
+  - { url: "https://example.org:65536/", host: null }                       # port out of 0..65535
+  - { url: "https://example.org:http/", host: null }                        # port not an integer
+  - { url: "https://exa%6Dple.org/", host: null }                           # percent in the host
+  - { url: "https://ex_ample.org/", host: null }                            # not LDH
+  - { url: "https://-bad.example/", host: null }                            # hyphen at a label's start
+  - { url: "https://bad-.example/", host: null }                            # hyphen at a label's end
+  - { url: "https://example.org./", host: null }                            # an empty label
+  - { url: "https://☃.example/", host: null }                               # a symbol, not a letter or digit
+  - { url: "https://[::1]/", host: null }                                   # an IPv6 literal is not LDH
+  - { url: "https://192.0.2.1/x", host: 192.0.2.1 }                         # IPv4 digits are LDH
 
 search:
   # One run's UserMessage.tool_use_result with 12 links (spikes/web-search § 3a shape): the first 10 become

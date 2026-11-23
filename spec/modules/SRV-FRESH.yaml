@@ -190,7 +190,8 @@ requirements:
       fields}, claims: [{span: "s<k>", subject, kind: version|api|protocol|standard|tool|statistic|law|other, why,
       confidence: low|medium|high}]}` with at most `claims_max` claims. Code expands aliases to span ids and pages and
       drops a claim with an unknown alias or a subject over `subject_words_max` words or `subject_chars_max`
-      characters (counted in `dropped`). Invalid JSON or schema → `output_invalid` (transient).
+      characters, or with no word (counted in `dropped`). Words are counted as INV-FRESH-1 counts them: the Unicode
+      `\w+` tokens of `reader.freshness.text.words`, so `one-two.three/four` is four words, not one. Invalid JSON or schema → `output_invalid` (transient).
       **Reuse:** `scan_inputs_sha256` = sha256 of the canonical JSON of (ingest id, sample span ids, the scan prompt's
       version and file sha256, resolved model id); it excludes the bibliography. A new check whose
       `scan_inputs_sha256` equals that of any earlier report of the same material with stored `claims` (whatever that
@@ -210,18 +211,28 @@ requirements:
       surname, publisher, "new edition", year; (3–5) `claim` — for the three kept claims of highest confidence (then
       lowest page), the subject plus the kind's words ("latest version", "current specification", "official
       documentation"); (6) `books` — the first level-1 topic, "book" and the current year. Missing claims are replaced
-      by `topic_docs` queries (a level-1 topic plus "official documentation"), in topic order. Each query is NFC,
+      by `topic_docs` queries (a level-1 topic plus "official documentation"), in topic order. `plan` applies
+      FR-FRESH-3's subject rule again, so a stored or reused claim meets it too: a claim whose subject fails it is
+      skipped before the ranking (`dropped.subject_too_long`). Each query is NFC,
       whitespace-collapsed, and cut at a word boundary of its variable parts to `query_chars_max`. A planned query is
       dropped (`dropped.query_unsafe`) when, after masking the bibliography and topic strings it contains, it holds a
-      `shingle_words`-word run of any non-front sampled span.
+      `shingle_words`-word run of any non-front sampled span. Masking removes the exempt word sequences from both
+      sides, the query's words and each span's words, before the runs are compared; an exempt word inside a copied
+      run therefore cannot hide it (a 7-word copy with a topic word in the middle is still caught).
   - id: FR-FRESH-6
     text: >-
       Query gate. Each search run gets one planned query q and a `PreToolUse` hook (the adapter passes a string prompt,
       so a hook and not `can_use_tool`; spikes/web-search § 3a shows a hook deny stops the search before any nested
-      request). The hook allows a `WebSearch` call only when its `query`, trimmed, equals q exactly, it carries no
-      `allowed_domains` or `blocked_domains`, and no `WebSearch` call was allowed earlier in this run (one per run);
+      request). The hook allows a call only when the tool name is exactly `WebSearch`, its input holds only the
+      `query` key (so no `allowed_domains`, `blocked_domains` or any other key), that `query` is a string which,
+      trimmed, equals q exactly (case-sensitive; no prefix or suffix), and no `WebSearch` call was allowed earlier in
+      this run (one per run);
       anything else is denied with a fixed reason (the query is not echoed)
-      and counted in `dropped.query_denied`; the run then ends at `search_max_turns` without a search. H-FRESH-2
+      and counted in `dropped.query_denied`; the run then ends at `search_max_turns` without a search. **Lost
+      search (accepted):** if the model makes a second tool call after the allowed search, that call is denied and
+      the run hits `search_max_turns` with an error result, so the adapter raises and the first search's results
+      are lost although its fee is paid (the search is recorded `failed`); the live call observed one call per run.
+      H-FRESH-2
       (how often the model passes q verbatim) is measured by the live call; if it is low, the search prompt changes,
       never the gate.
   - id: FR-FRESH-7
@@ -235,10 +246,14 @@ requirements:
       from the structured `UserMessage.tool_use_result` (`{query, results: [{tool_use_id, content: [{title, url}]},
       "<summary>"], searchCount}`; spikes/web-search § 3a). **Link set R:** the first `results_per_search_max` content
       items of each search, in order, become R entries with ids `r1`, `r2`, … numbered across the check. An item is
-      dropped before any prompt (`dropped.url_unsafe`) when its URL is longer than `url_chars_max`,
-      `urllib.parse.urlsplit` raises `ValueError` or gives a scheme other than `http`/`https`, a username or password,
-      or no host, the hostname's `idna` encoding raises `UnicodeError`, or the ASCII host is longer than
-      `result_host_chars_max`. Each entry keeps the URL string as returned, the ASCII `host`, and the title sanitised
+      dropped before any prompt (`dropped.url_unsafe`) when its URL is not a string or is longer than `url_chars_max`,
+      holds whitespace, a C0/C1 control or any other character FR-FRESH-8's sanitising removes (zero-width, line
+      and paragraph separators, the bidi formatting characters of REF-FRESH-6), `urllib.parse.urlsplit` raises
+      `ValueError` or gives a scheme other than `http`/`https`, a username or password, or no host, its port is not
+      absent or an integer in 0–65535, the hostname holds a character other than a Unicode letter or digit, `-` or
+      `.` (so no `%`, `_` or brackets: the web's URL Standard parse must give the same host), the hostname's `idna`
+      encoding raises `UnicodeError`, the ASCII host is longer than `result_host_chars_max`, or a label of the
+      ASCII host is not LDH (letters, digits and hyphens, 1–63 characters, no hyphen at either end). Each entry keeps the URL string as returned, the ASCII `host`, and the title sanitised
       and cut to `result_title_chars_max`. The summary string, sanitised and cut to `summary_chars_max`, is kept with
       its search. **R and the summaries live only in the memory of the `freshness.web` job (FR-FRESH-12) and are never
       stored.** The model's own reply is discarded. A run that fails, is denied, or is refused by a cap is recorded
@@ -317,8 +332,9 @@ requirements:
       `nothing_to_confirm`; a value that is not the latest scan bibliography's sha256 → 409
       `bibliography_unconfirmed`. Without an owner bibliography and without a matching confirmation, the check stops
       after stage (a) as `done` with `verdict` null, so the owner can confirm or correct it and run again (the scan is
-      reused, FR-FRESH-3). `GET /api/materials/{id}/freshness/{report_id}` → that report. JSON bodies ≤ 64 KiB
-      (SRV-AUTH FR-AUTH-12).
+      reused, FR-FRESH-3). `GET /api/materials/{id}/freshness/{report_id}` → that report, only when it is a report
+      of that material and owner (a report id of another material, even the same owner's, gets the 404). JSON bodies
+      ≤ 64 KiB; the PUT and the POST pass SRV-AUTH's CSRF gate (FR-AUTH-12: exact `Origin`, else 403 `origin`).
       **Shapes** (fixed by WEB-FRESH VEC-FRESHUI-1, paired change): `{id}` is the material's uuid or its reader.yaml
       id (`materials.config_id`). `GET …/freshness` → `{report|null (the latest report of the material, any status,
       FR-FRESH-10's read shape), stale: bool, stale_reason: reingested|bibliography_changed|ttl|null (the first that
@@ -348,7 +364,13 @@ requirements:
       **Job-level attempts:** `max_attempts` 2. A second attempt (after a timeout or a worker restart) **restarts the
       check's stage (b) from its first search**, because R is gone. Its calls reserve and settle again. Combined worst
       case — a restart plus a paid report retry in each attempt — is $0.170 + 2 × ($0.103 + 2 × $0.116) ≈ $0.84, or
-      ≈ $0.87 with the $0.02 search reserve floors, under the $1.00 cap (REF-FRESH-2 § 4).
+      ≈ $0.87 with the $0.02 search reserve floors, under the $1.00 cap (REF-FRESH-2 § 4). The scan job has
+      `max_attempts` 2 as well: a restart of a **paid** scan (the first attempt's scan call settled, then the job
+      timed out or the worker restarted before the claims were stored) pays the scan again, so the worst case with
+      everything restarted is 2 × $0.170 + 2 × ($0.12 + 2 × $0.116) ≈ $1.04. That exceeds the $1.00 run cap; the
+      ledger's run cap (SRV-AGENT FR-AGENT-9, one call's reserve of overshoot at most, INV-AGENT-4) refuses the call
+      that would cross it, and the check ends `budget_refused`. Spend for one check therefore stays ≤ $1.00 plus
+      at most one reserve.
 
       Status: `running` while a key is queued or running; `failed` with the error code when a key is dead or R is
       empty; `budget_refused`; `done`. The handlers write every final status themselves; a read that finds a
@@ -377,11 +399,16 @@ invariants:
       owner-visible metadata, which may also occur in spans) and at most one claim subject of ≤ `subject_words_max`
       words. Hence: (a) at most `subject_words_max` words per query come from non-front spans other than through
       exempt strings; (b) no query holds a `shingle_words`-word run of a non-front sampled span once its exempt
-      strings are masked; (c) no other text of the book can reach it. Test: canary sentences of ≥ 6 unique words are
+      strings are masked (FR-FRESH-5: removed from both word sequences); (c) no other text of the book can reach it.
+      Words are `\w+` tokens everywhere (FR-FRESH-3). Test: canary sentences of ≥ 6 unique words are
       planted in non-front spans and never in the outline or the bibliography; a fake scan may copy up to 5 canary
-      words into a subject; asserted for every query `plan` returns, every query the hook allows, and every body
+      words into a subject; the generator also joins subject words with punctuation (`-`, `.`, `/`, `,`) and up to
+      8 words, and plants sentences that hold a topic or bibliography word and end with the claim template's own
+      words; asserted for every query `plan` returns, every query the hook allows, and every body
       agent-proxy forwards to the stub during stage (b): no 6-word canary run appears and at most 5 canary words
-      appear per query.
+      appear per query. The [agent] part runs the real adapter (`AgentProvider`, the bundled CLI in
+      `reader-server:local`) through a real agent-proxy (`create_app`) to the stub's `websearch` scenario with the
+      ledger's reserve and settle replaced in memory (the image test has no database, `--network none`).
   - id: INV-FRESH-2
     text: >-
       A stored report holds only FR-FRESH-8's and FR-FRESH-10's fields within their bounds, and no `cited_text`,
@@ -390,7 +417,8 @@ invariants:
   - id: INV-FRESH-3
     text: >-
       Every stored URL, host and title is byte-equal to those of the R entry its `r<k>` id names; every R entry has
-      scheme `http` or `https`, no userinfo, a host whose ASCII form is ≤ `result_host_chars_max`, and a URL of ≤
+      scheme `http` or `https`, no userinfo, a port absent or in 0–65535, a host whose ASCII form is ≤
+      `result_host_chars_max` with LDH labels only, and a URL of ≤
       `url_chars_max` characters; parser errors drop the entry and never escape (property test over generated search
       results and model outputs, including `javascript:`, `data:`, userinfo, IDN, invalid IPv6 brackets, over-long
       labels, fragments, look-alike hosts and model-written URLs).
@@ -408,19 +436,19 @@ nfr: []
 
 vectors:
   - id: VEC-FRESH-1
-    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, extra keys, over-long strings, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
+    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, a list or an object where an enum string belongs, extra keys, over-long strings, punctuation-joined subjects, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
     file: spec/fixtures/SRV-FRESH/outputs.yaml
   - id: VEC-FRESH-2
     source: Injection cases in search titles, summaries and model output (instructions, delimiter forgery, bidi overrides, zero-width characters, markup, a URL not searched, a model title differing from R's) with the sanitised stored result
     file: spec/fixtures/SRV-FRESH/injection.yaml
   - id: VEC-FRESH-3
-    source: Search-result URL cases for R entry creation (schemes, userinfo, IDN to ASCII, urlsplit ValueError, idna UnicodeError, host and URL length, more than 10 results) and id resolution (unknown ids, a model-written URL instead of an id)
+    source: Search-result URL cases for R entry creation (schemes, userinfo, IDN to ASCII, urlsplit ValueError, idna UnicodeError, host and URL length, ports in and out of 0–65535, percent, underscore, symbols and empty or hyphen-edged labels in the host, IP literals, more than 10 results) and id resolution (unknown ids, a model-written URL instead of an id)
     file: spec/fixtures/SRV-FRESH/urls.yaml
   - id: VEC-FRESH-4
     source: Synthetic materials (spans, outlines, no book text) with their expected samples, including more sections than the budget holds and a material without an outline, plus topics and scan_inputs_sha256
     file: spec/fixtures/SRV-FRESH/sample.yaml
   - id: VEC-FRESH-5
-    source: Gate cases (the planned query verbatim, with surrounding spaces, altered by one word, with allowed_domains, with blocked_domains, empty)
+    source: Gate cases (the planned query verbatim, with surrounding spaces, altered by one word, with a suffix, with a prefix, in another case, with allowed_domains, with blocked_domains, with another key, empty, another tool name with the planned query)
     file: spec/fixtures/SRV-FRESH/gate.yaml
   - id: VEC-FRESH-6
     source: Estimate cases from sample sizes and the pricing table, recomputed by hand from REF-FRESH-2 § 4

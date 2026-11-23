@@ -45,6 +45,17 @@ scan:
         - { id: c1, span: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0", page: 1,
             subject: "five words is the limit", kind: tool, confidence: low }
       dropped: { claim_span_unknown: 1, subject_too_long: 2 }
+  - name: punctuation_joined_subjects_count_every_word
+    # Words are \w+ tokens (INV-FRESH-1): "one-two.three/four,five six" is six words, so it is dropped; "v1.2 API"
+    # is three words (v1, 2, api) and kept; "---" has no word and is dropped.
+    output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s1", "subject": "one-two.three/four,five six", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s1", "subject": "alpha-beta-gamma-delta-epsilon-zeta", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s1", "subject": "---", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s2", "subject": "v1.2 API", "kind": "api", "why": "w", "confidence": "high"}]}'
+    expect:
+      bibliography: { title: "T", authors: [], edition: null, year: null, publisher: null, isbn: null,
+                      original_title: null, original_authors: null, original_edition: null, original_year: null }
+      claims:
+        - { id: c1, span: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:5", page: 12,
+            subject: "v1.2 API", kind: api, confidence: high }
+      dropped: { subject_too_long: 3 }
   - { name: missing_claims_key, output: '{"bibliography": {"title": "T"}}', error: output_invalid }
   - { name: extra_top_key, output: '{"bibliography": {"title": "T"}, "claims": [], "notes": "x"}', error: output_invalid }
   - { name: unknown_bibliography_key, output: '{"bibliography": {"title": "T", "url": "https://x.example/"}, "claims": []}', error: output_invalid }
@@ -52,6 +63,8 @@ scan:
   - { name: wrong_confidence, output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s1", "subject": "a", "kind": "tool", "why": "w", "confidence": "sure"}]}', error: output_invalid }
   - { name: claim_extra_key, output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s1", "subject": "a", "kind": "tool", "why": "w", "confidence": "low", "quote": "book text"}]}', error: output_invalid }
   - { name: not_json, output: "The book is current.", error: output_invalid }
+  - { name: kind_is_a_list, output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s1", "subject": "a", "kind": ["tool"], "why": "w", "confidence": "low"}]}', error: output_invalid }
+  - { name: confidence_is_an_object, output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s1", "subject": "a", "kind": "tool", "why": "w", "confidence": {"c": "low"}}]}', error: output_invalid }
 
 report:
   r:
@@ -107,3 +120,10 @@ report:
     - { name: wrong_status, output: '{"verdict": "current", "reasons": [], "claims": [{"id": "c1", "status": "maybe", "note": "n", "citations": []}], "recommendations": []}', error: output_invalid }
     - { name: covers_not_ints, output: '{"verdict": "current", "reasons": [], "claims": [], "recommendations": [{"source": "r1", "kind": "book", "why": "w", "covers": ["1"]}]}', error: output_invalid }
     - { name: citation_not_string, output: '{"verdict": "current", "reasons": [{"text": "t", "citations": [1]}], "claims": [], "recommendations": []}', error: output_invalid }
+    # Unhashable enum values: a list or an object where an enum string belongs is output_invalid, never a crash.
+    - { name: verdict_is_a_list, output: '{"verdict": ["current"], "reasons": [], "claims": [], "recommendations": []}', error: output_invalid }
+    - { name: verdict_is_an_object, output: '{"verdict": {"v": "current"}, "reasons": [], "claims": [], "recommendations": []}', error: output_invalid }
+    - { name: status_is_a_list, output: '{"verdict": "current", "reasons": [], "claims": [{"id": "c1", "status": ["changed"], "note": "n", "citations": []}], "recommendations": []}', error: output_invalid }
+    - { name: status_is_an_object, output: '{"verdict": "current", "reasons": [], "claims": [{"id": "c1", "status": {}, "note": "n", "citations": []}], "recommendations": []}', error: output_invalid }
+    - { name: kind_is_a_list, output: '{"verdict": "current", "reasons": [], "claims": [], "recommendations": [{"source": "r1", "kind": ["book"], "why": "w", "covers": []}]}', error: output_invalid }
+    - { name: kind_is_an_object, output: '{"verdict": "current", "reasons": [], "claims": [], "recommendations": [{"source": "r1", "kind": {"k": "book"}, "why": "w", "covers": []}]}', error: output_invalid }

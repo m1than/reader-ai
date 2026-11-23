@@ -8,6 +8,7 @@ properties."""
 from __future__ import annotations
 
 import json
+import re
 import string
 from datetime import date
 from decimal import Decimal
@@ -178,6 +179,19 @@ def test_sample_vectors(case: dict[str, Any]) -> None:
     if "topics" in case["expect"]:
         found = [[t.id, t.title, t.level] for t in sample.topics(outline)]
         assert found == case["expect"]["topics"]
+
+
+def test_sample_ties_rank_by_seq() -> None:
+    """FR-FRESH-2: inside a section, equal scores rank by `seq`, so the budget keeps the lowest seqs; a higher
+    score goes first whatever its seq."""
+    sample, params = _mods().sample, _mods().params
+    plain = "plain " * (params.SPAN_CHARS_MAX // 6)  # 1,500 characters, no dated-claim signal
+    dated = "version 1.2 " * (params.SPAN_CHARS_MAX // 12)  # 1,500 characters, the highest score
+    fits = params.SAMPLE_CHARS_MAX // params.SPAN_CHARS_MAX  # 40 spans
+    spans = [sample.SpanRow(seq, 10, "text", plain) for seq in range(fits + 5)]
+    spans.append(sample.SpanRow(fits + 5, 10, "text", dated))
+    built = sample.build(spans, [], 20, "en")  # one section: page 10 only
+    assert built.seqs == [*range(fits - 1), fits + 5]
 
 
 def test_topics_are_capped_and_cut() -> None:
@@ -478,6 +492,26 @@ def test_resolution_vectors(case: dict[str, Any]) -> None:
     assert dict(resolved.dropped) == case["dropped"]
 
 
+def test_recommendation_why_and_claim_note_are_sanitised() -> None:
+    """FR-FRESH-8: every stored string is sanitised and cut, `why` and `note` included."""
+    m = _mods()
+    entries = _entries(fixture("outputs.yaml")["report"]["r"])
+    dirty = "Read‮ this\x00 ​now\n\n please" + " x" * 400
+    output = json.dumps(
+        {
+            "verdict": "outdated",
+            "reasons": [],
+            "claims": [{"id": "c1", "status": "changed", "note": dirty, "citations": []}],
+            "recommendations": [{"source": "r1", "kind": "book", "why": dirty, "covers": []}],
+        }
+    )
+    resolved = m.verdict.resolve(m.verdict.parse(output), entries, {"c1"}, set(), TODAY)
+    for value in (resolved.recommendations[0]["why"], resolved.claim_status[0]["note"]):
+        assert value.startswith("Read this now please x x")
+        assert len(value) <= bounds()["text_chars_max"]
+        assert not m.text.has_removed(value)
+
+
 def test_report_prompt_bounds_the_links_part() -> None:
     m = _mods()
     entries = tuple(m.links.Entry(f"r{i}", "https://x.example/", "h" * 100, "t" * 120) for i in range(1, 11))
@@ -530,42 +564,75 @@ def test_worst_case_fits_the_run_cap() -> None:
     )
     assert worst <= params.RUN_CAP_USD
     assert worst == Decimal("0.875600")
+    # FR-FRESH-12: a restart of a paid scan pays the scan twice; that sum is over the cap, so the ledger's run
+    # cap (not this budget) is what bounds it, refusing the call that would cross $1.00.
+    with_scan_restart = worst + est.scan_reserve(SONNET, 63000)
+    assert with_scan_restart == Decimal("1.045600")
+    assert with_scan_restart > params.RUN_CAP_USD
 
 
 # ---- INV-FRESH-1: what can reach a query -----------------------------------------------------------------
 
 CANARY_WORDS = [f"canary{chr(97 + i)}{chr(97 + j)}" for i in range(6) for j in range(6)]
+# Owner-visible words a canary sentence may also hold: topic titles, the title, the surname, the year.
+EXEMPT_WORDS = ["Ledgers", "Blocks", "Practical Ledgers", "Example", "2019"]
+KIND_KEYS = {"version": "latest_version", "api": "latest_version", "protocol": "current_specification",
+             "statistic": "official_documentation", "law": "current_specification"}
 
 
-@settings(max_examples=80, deadline=None)
+@settings(max_examples=150, deadline=None)
 @given(
-    picks=st.lists(st.integers(0, len(CANARY_WORDS) - 6), min_size=1, max_size=4),
-    subject_len=st.integers(1, 5),
+    picks=st.lists(st.integers(0, len(CANARY_WORDS) - 8), min_size=1, max_size=4),
+    subject_len=st.integers(1, 8),
+    joiners=st.lists(st.sampled_from([" ", "-", ".", "/", ","]), min_size=7, max_size=7),
     kinds=st.lists(
         st.sampled_from(["version", "api", "protocol", "statistic", "law"]), min_size=3, max_size=3
     ),
     lang=st.sampled_from(["en", "ru"]),
+    inserted=st.one_of(st.none(), st.tuples(st.sampled_from(EXEMPT_WORDS), st.integers(1, 5))),
+    template_tail=st.booleans(),
 )
 def test_no_canary_run_reaches_any_query(
-    picks: list[int], subject_len: int, kinds: list[str], lang: str
+    picks: list[int],
+    subject_len: int,
+    joiners: list[str],
+    kinds: list[str],
+    lang: str,
+    inserted: tuple[str, int] | None,
+    template_tail: bool,
 ) -> None:
+    """INV-FRESH-1 over plan(): canary sentences in non-front spans, optionally holding an exempt word and
+    ending with the claim template's own words; a fake scan copies a run of the sentence (punctuation-joined,
+    up to 8 words) into each subject. No query holds a 6-word run of a sentence or more than 5 canary
+    words."""
     m = _mods()
-    sentences = [" ".join(CANARY_WORDS[p : p + 6]) for p in picks]
-    non_front = [f"Intro {s} outro." for s in sentences]
+    sentences: list[list[str]] = []
+    for i, p in enumerate(picks):
+        words = CANARY_WORDS[p : p + 8]
+        if inserted is not None:
+            words = [*words[: inserted[1]], *inserted[0].split(), *words[inserted[1] :]]
+        if template_tail:
+            words = [*words, *m.queries.template_words(lang, KIND_KEYS[kinds[i % 3]]).split()]
+        sentences.append(words)
+    non_front = [f"Intro {' '.join(s)} outro." for s in sentences]
+
+    def subject(words: list[str]) -> str:
+        head = words[:subject_len]
+        return head[0] + "".join(j + w for j, w in zip(joiners, head[1:], strict=False))
+
     claims = [
-        {"id": f"c{i + 1}", "subject": " ".join(CANARY_WORDS[p : p + subject_len]), "kind": kinds[i % 3],
-         "confidence": "high", "page": 10 + i}
-        for i, p in enumerate(picks[:3])
+        {"id": f"c{i + 1}", "subject": subject(s), "kind": kinds[i % 3], "confidence": "high", "page": 10 + i}
+        for i, s in enumerate(sentences[:3])
     ]
     bib = {"title": "Practical Ledgers", "authors": ["Ada Example"], "year": 2019}
     topics = [m.sample.Topic(0, "Ledgers", 1), m.sample.Topic(1, "Blocks", 1)]
     plan = m.queries.plan(bib, topics, claims, lang, TODAY, non_front)
     canary = set(CANARY_WORDS)
-    runs = m.queries.shingles(sentences)
+    runs = m.queries.shingles([" ".join(s) for s in sentences])
     for query in plan.queries:
         tokens = m.text.words(query.text)
-        assert sum(1 for t in tokens if t in canary) <= bounds()["subject_words_max"]
-        assert not any(tuple(tokens[i : i + 6]) in runs for i in range(len(tokens) - 5))
+        assert sum(1 for t in tokens if t in canary) <= bounds()["subject_words_max"], query.text
+        assert not any(tuple(tokens[i : i + 6]) in runs for i in range(len(tokens) - 5)), query.text
 
 
 @pytest.mark.anyio
@@ -595,7 +662,7 @@ url_parts = st.one_of(
             "https://a.example/x", "http://b.example", "javascript:alert(1)", "data:text/html,x",
             "https://u:p@c.example/", "https://[::1/x", "https://bücher.example/", f"https://ex{CYRILLIC_A}mple.org/",
             "https:///x", "ftp://d.example/", "https://" + "a" * 64 + ".example/", "https://e.example/#frag",
-            f"https://e.example/{RLO}",
+            f"https://e.example/{RLO}", "https://e.example:99999/", "https://exa%6dple.org/", "https://a_b.example/",
         ]
     ),
     st.text(max_size=60).map(lambda s: "https://" + s),
@@ -626,6 +693,9 @@ def test_stored_fields_are_bounded_and_resolved_from_r(
         assert len(e.url) <= params.URL_CHARS_MAX
         assert len(e.host) <= params.RESULT_HOST_CHARS_MAX
         assert e.host.isascii()
+        ldh = r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?"
+        assert all(re.fullmatch(ldh, label) for label in e.host.split("."))
+        assert parts.port is None or 0 <= parts.port <= 65535
         assert not m.text.has_removed(e.title)
     entries = {e.id: e for e in found.entries}
     output = json.dumps(

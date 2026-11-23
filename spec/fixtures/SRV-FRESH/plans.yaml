@@ -5,7 +5,8 @@
 # lowest page; missing claims → topic_docs = a level-1 topic + "official documentation", in topic order;
 # (6) books = the first level-1 topic + "book" + the current year. Template words are the material's language plus
 # English. Over 120 characters, words go from the end of the longest variable part. A query holding a 6-word run of
-# a non-front span, once bibliography strings, surnames and topic titles are masked, is dropped (`query_unsafe`).
+# a non-front span, once bibliography strings, surnames and topic titles are masked (removed from the query's and the
+# span's words alike), is dropped (`query_unsafe`). A claim failing the subject rule is skipped (`subject_too_long`).
 # Topics are [id, title, level]. No book text: every string is synthetic.
 
 cases:
@@ -86,3 +87,42 @@ cases:
         - [topic_docs, "Proof of work chains explained official documentation"]
         - [books, "Proof of work chains explained book 2026"]
       dropped: { query_unsafe: 1 }
+
+  - name: exempt_word_inside_a_copied_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[1, "Ledgers", 1]]
+    claims:
+      - { id: c1, subject: "alpha beta gamma Ledgers delta", kind: version, confidence: high, page: 5 }
+    # The claim query "alpha beta gamma Ledgers delta latest version" is a 7-word copy of the span with the topic
+    # word in the middle. Masking removes "ledgers" from both sides, leaving the 6-word run "alpha beta gamma delta
+    # latest version" in both: dropped. (Masking that only skipped runs touching a masked word let it through.)
+    non_front: ["Then alpha beta gamma Ledgers delta latest version shipped."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 1 }
+
+  - name: stored_claims_held_to_the_subject_rule
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1], [1, "Blocks", 1]]
+    # Claims as stored or reused (not from this scan): a punctuation-joined subject of six \w+ words and a subject
+    # over 60 characters are skipped before the ranking, so the low-confidence claim takes a slot.
+    claims:
+      - { id: c1, subject: "one-two-three-four-five-six", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "averyveryverylongwordnumberone averyveryverylongwordnumbertwo x", kind: api, confidence: high, page: 2 }
+      - { id: c3, subject: "wallet format", kind: standard, confidence: low, page: 10 }
+    non_front: []
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "wallet format current specification"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [topic_docs, "Blocks official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_too_long: 2 }

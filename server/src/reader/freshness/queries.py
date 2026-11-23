@@ -7,10 +7,15 @@ fields, topic titles, one claim subject and the template's own words (the materi
   (3 to 5) claim: the three kept claims of highest confidence, then lowest page; missing ones become
         topic_docs queries over the level-1 topics in topic order;
   (6) books: the first level-1 topic, "book" and the current year.
+A claim whose subject fails the scan's own subject rule (`subject_ok`: 1 to `subject_words_max` `\\w+` words,
+at most `subject_chars_max` characters) is skipped (`subject_too_long`), so a stored or reused claim is held
+to the same rule as a fresh scan's.
 Each query is NFC, whitespace-collapsed and cut to `query_chars_max` by removing words from the end of its
 longest variable part. A query is dropped (`query_unsafe`) when, with the bibliography strings, author
 surnames and topic titles masked, it still holds a `shingle_words`-word run of a non-front sampled span
-(INV-FRESH-1 b). A query equal to an earlier one is dropped (`query_duplicate`).
+(INV-FRESH-1 b). Masking removes the exempt words from both word sequences, the query's and each span's,
+before the runs are compared; so an exempt word inside a copied run cannot hide the run. A query equal to an
+earlier one is dropped (`query_duplicate`).
 """
 
 from __future__ import annotations
@@ -172,22 +177,38 @@ def _masked(tokens: list[str], exempt: list[list[str]]) -> list[bool]:
     return mask
 
 
-def shingles(texts: Sequence[str], n: int = params.SHINGLE_WORDS) -> set[tuple[str, ...]]:
+def _unmasked(value: str, exempt: list[list[str]]) -> list[str]:
+    """The word tokens of `value` with every exempt sequence removed (INV-FRESH-1 b's masking)."""
+    tokens = words(value)
+    mask = _masked(tokens, exempt)
+    return [token for token, masked in zip(tokens, mask, strict=True) if not masked]
+
+
+def shingles(
+    texts: Sequence[str], n: int = params.SHINGLE_WORDS, exempt: list[list[str]] | None = None
+) -> set[tuple[str, ...]]:
+    """Every `n`-word run of the texts, after the exempt sequences are removed (none by default)."""
     found: set[tuple[str, ...]] = set()
     for value in texts:
-        tokens = words(value)
+        tokens = _unmasked(value, exempt or [])
         for i in range(len(tokens) - n + 1):
             found.add(tuple(tokens[i : i + n]))
     return found
 
 
 def unsafe(query: str, exempt: list[list[str]], book: set[tuple[str, ...]]) -> bool:
-    """True when an unmasked `shingle_words`-word run of the query is a run of a non-front span."""
-    tokens = words(query)
-    mask = _masked(tokens, exempt)
+    """True when a `shingle_words`-word run of the query, its exempt sequences removed, is a run of a
+    non-front span with the same sequences removed (`book` = `shingles(non_front, exempt=exempt)`)."""
+    tokens = _unmasked(query, exempt)
     n = params.SHINGLE_WORDS
-    runs = (tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1) if not any(mask[i : i + n]))
-    return any(run in book for run in runs)
+    return any(tuple(tokens[i : i + n]) in book for i in range(len(tokens) - n + 1))
+
+
+def subject_ok(subject: str) -> bool:
+    """FR-FRESH-3's subject rule, shared by the scan and the plan: 1 to `subject_words_max` `\\w+` words
+    and at most `subject_chars_max` characters, after `clean`."""
+    cleaned = clean(subject)
+    return 0 < len(words(cleaned)) <= params.SUBJECT_WORDS_MAX and len(cleaned) <= params.SUBJECT_CHARS_MAX
 
 
 def _rank(item: tuple[int, Mapping[str, Any]]) -> tuple[int, int, int]:
@@ -228,7 +249,11 @@ def plan(
     if bibliography.get("original_title"):
         planned.append(Query("original_edition", build_query("original_edition", base, lang)))
     planned.append(Query("edition", build_query("edition", base, lang)))
-    chosen = _claims(claims)
+    dropped: dict[str, int] = {}
+    eligible = [c for c in claims if subject_ok(str(c.get("subject") or ""))]
+    if len(eligible) < len(claims):
+        dropped["subject_too_long"] = len(claims) - len(eligible)
+    chosen = _claims(eligible)
     for claim in chosen:
         subject, kind = str(claim.get("subject") or ""), str(claim.get("kind") or "other")
         context = {**base, "subject": subject, "kind": kind}
@@ -238,8 +263,7 @@ def plan(
     if level1:
         planned.append(Query("books", build_query("books", {**base, "topic": level1[0]}, lang)))
     exempt = _exempt(bibliography, topics)
-    book = shingles(non_front_texts)
-    dropped: dict[str, int] = {}
+    book = shingles(non_front_texts, exempt=exempt)
     kept: list[Query] = []
     seen: set[str] = set()
     for query in planned:
