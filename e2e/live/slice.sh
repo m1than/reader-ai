@@ -3,10 +3,15 @@
 # (lab cell, citations) → tutor. Precondition: `reader up --config PATH` and a healthy stack.
 #
 #   bash e2e/live/slice.sh --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]
+#                          [--tutor-bench-dir DIR] [--tutor-bench-from N]
 #
 #   --steps   default: routes,import,embed,bench,compile,lesson,tutor (see e2e/web/live/owner.slice.ts).
 #             `routes` alone, or `bench`, spends nothing; `compile` spends up to the run cap ($8), `tutor` up to
-#             3 × $0.30.
+#             3 × $0.30; `tutor-bench` (not in the default) asks SRV-TUTOR's 40 bench questions: about 40 × $0.052
+#             ≈ $2.1, at most 40 × $0.30, stopping at the $3 daily cap.
+#   --tutor-bench-dir  where tutor-bench keeps one record file per run (default: OUT); point day 2 at day 1's
+#             directory to resume: only questions not yet recorded there are asked, and the summary merges all runs.
+#   --tutor-bench-from N  also skip the first N bench questions.
 #   --out     required, outside the repository: screenshots and Playwright's failure snapshots show book text.
 #             Only OUT/slice-results.json and OUT/ingest.json (numbers and ids) are meant for e2e/live/results/.
 #   --no-ingest  skip `reader-ingest` (the material is already imported).
@@ -20,7 +25,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-USAGE="usage: $0 --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]"
+USAGE="usage: $0 --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys] [--tutor-bench-dir DIR] [--tutor-bench-from N]"
 CONFIG=""
 STEPS="routes,import,embed,bench,compile,lesson,tutor"
 OUT=""
@@ -33,6 +38,9 @@ while (($#)); do
     --out) OUT="$2"; shift 2 ;;
     --no-ingest) INGEST=0; shift ;;
     --reset-owner-passkeys) RESET=(--reset-owner-passkeys); shift ;;
+    # SRV-TUTOR's bench resume: read by web_live.py's slice_inputs, which passes them to Playwright.
+    --tutor-bench-dir) export READER_TUTOR_BENCH_DIR="$2"; shift 2 ;;
+    --tutor-bench-from) [[ "$2" =~ ^[0-9]+$ ]] || { echo "$USAGE" >&2; exit 2; }; export READER_TUTOR_BENCH_FROM="$2"; shift 2 ;;
     *) echo "$USAGE" >&2; exit 2 ;;
   esac
 done

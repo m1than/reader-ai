@@ -53,10 +53,10 @@ class Hit(Protocol):
 
 
 def candidate_span_ids(hits: list[Any]) -> list[str]:
-    """FR-TUTOR-5: hits in rank order; within one, its primary span, then its chunk's others; no repeats."""
-    ordered: list[str] = []
+    """FR-TUTOR-5: every hit's primary span in rank order, then every hit's other chunk spans in rank order,
+    no repeats; the budget drops from the end, so neighbours go before any primary."""
+    ordered = [hit.span_id for hit in hits]
     for hit in hits:
-        ordered.append(hit.span_id)
         ordered.extend(s for s in hit.span_ids if s != hit.span_id)
     return list(dict.fromkeys(ordered))
 

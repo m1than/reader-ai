@@ -17,11 +17,11 @@ inputs:
   max_output_tokens: 2000        # spikes/tutor-call: 92–310 measured
   attempts_max: 2
   daily_cap_usd: 3.00
-  typical:                       # an L02-shaped question, extrapolated from spikes/tutor-call's measured rates
+  typical:                       # one bench question, extrapolated from spikes/tutor-call's measured rates
     prompt_tokens: 11000         # 8 whole chunks (mean 2,145 bytes, spikes/tutor-chunks) + question and cell ≈ 20,900
                                  # bytes of Russian at 1.9 bytes/token (measured on q3)
-    fixed_tokens: 900            # system prompt (~800 bytes) + ≈ 410 overhead, rounded up
-    output_tokens: 400           # measured 92–310 on short sources; rounded up for 8 sources
+    fixed_tokens: 900            # answer-v1.md (1,440 bytes of English ≈ 360 tokens) + ≈ 410 overhead, rounded up
+    output_tokens: 400           # measured 92–310 on short sources; rounded up for 8 whole chunks
                                  # every new question writes its whole prompt to the 1-hour cache (measured: the first
                                  # call of each question read nothing from the cache)
 derived_by_test:                 # USD, for readers

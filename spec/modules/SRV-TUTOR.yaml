@@ -101,10 +101,13 @@ bounds:
   span_bytes_max: 2000          # structural: a span's text cut at the last whitespace within 2000 bytes, hard cut if none
   cell_bytes_max: 4000          # structural: the focused cell's source text, cut the same way
   question_cell_bytes_max: 8000 # question + cell + JSON overhead (3000 + 4000 + 1000), escaped
-  sources_max: 40               # REF-TUTOR-9: one alias per span; 8 hits × a mean of 5 spans per chunk
+  sources_max: 88               # REF-TUTOR-9: one alias per span; 8 hits × the p95 of 11 spans per chunk, so the
+                                # byte budget, not the alias count, is the limit that binds (an alias's JSON, about
+                                # 37 bytes, is inside prompt_bytes_max and so inside the reserve)
   prompt_bytes_max: 29000       # REF-TUTOR-9: the largest prompt whose reserve lets attempts_max attempts fit
                                 # question_cap_usd (≤ $0.15 each); sources get 29000 − 8000 = 21000 = 8 × 2625, i.e.
-                                # 8 median whole chunks (2206); at p90 (3119) about 6–7 hits, the lowest ranks dropped
+                                # 8 median whole chunks (2206); at p90 (3119) the neighbours of the lowest ranks are
+                                # dropped first, primaries last (FR-TUTOR-5)
   system_bytes_max: 2000        # the versioned system prompt file (1,440 bytes); a test asserts its size
   quote_words: [5, 30]          # structural: a verifiable excerpt, short enough not to copy the source wholesale
   spans_per_block_max: 3        # structural
@@ -182,8 +185,10 @@ requirements:
       `search(owner_id, question, k = retrieve_k, material_sha256)` (SRV-SEARCH FR-SEARCH-7) returns no result, the row
       is `failed` / `sources_unavailable` and no model is called. Otherwise the candidate spans are every result's
       whole chunk (revised 2026-11-23, live run: the primary span alone missed the fact in a neighbouring span of the
-      top chunk): results in rank order, and within a result its primary `span_id` first, then the other `span_ids`
-      in chunk order; a span already taken by a higher-ranked result is not repeated. Each candidate span is loaded
+      top chunk): first every result's primary `span_id` in rank order, then every result's other `span_ids` (in
+      chunk order) in rank order, a span already taken not repeated; so the budget drops neighbours before any
+      primary, and the sent set always contains every primary the primary-only rule sent (review round 1: live gold
+      pages sat at ranks 5–8 in 6 of 26 questions). Each candidate span is loaded
       (text, page) and cut to `span_bytes_max`; a `degraded` search is used and recorded. The focused cell (id, kind
       `metadata.reader.kind`, source text) is read from the revision's notebook blob (SRV-LESSON). [db] with a fake
       search
@@ -226,7 +231,9 @@ requirements:
       else is `output_invalid` (transient). Then, by code: aliases outside the sent set are removed and duplicates
       collapsed; a block is supported iff it keeps ≥ 1 alias and its `quote` has `quote_words` words and, after
       collapsing whitespace and NFC, is a substring of its first kept source's text as sent; otherwise the block is
-      `unsupported`. `grounded` is true iff `insufficient` is false and every block is supported. Each kept alias is
+      `unsupported`. A quote is checked against one span only, so a quote that crosses a span boundary (now that a
+      chunk's neighbouring spans are sent as separate sources) is unsupported; the bench's `verified_block_share`
+      watches for it. `grounded` is true iff `insufficient` is false and every block is supported. Each kept alias is
       rendered as a citation `{span, page, material_title}` read from the database (FR-TUTOR-9). [unit]
   - id: FR-TUTOR-9
     text: >-
@@ -308,17 +315,19 @@ invariants:
 nfr:
   - id: NFR-TUTOR-1
     metric: >-
-      p95 by nearest rank, rank ceil(0.95 × n), over the n bench samples (VEC-TUTOR-7; n = 40 generated + 1 fixed),
-      seconds from the ask (POST) to the terminal state, polled every 0.5 s over the HTTP API, idle worker, against
-      L02 ([live]). Bench spend ≤ n × question_cap_usd (≤ $12.30; expected ≈ $2) from budget.test_budget_usd, inside
-      the normal daily cap: a run stops at the first daily_budget_exhausted and the next UTC day resumes it, the
-      samples of both days counting together. The bench also records thinking tokens per call, the share of blocks
-      with a verified quote and the share of insufficient answers
+      p95 by nearest rank, rank ceil(0.95 × n), over the n = 40 bench samples (VEC-TUTOR-7), seconds from the ask
+      (POST) to the terminal state, polled every 0.5 s over the HTTP API, idle worker, all asked from the L02 lesson
+      ([live]). Bench spend ≤ 40 × question_cap_usd (≤ $12.00; expected ≈ 40 × $0.052 ≈ $2.1) from
+      budget.test_budget_usd, inside the normal daily cap: a run stops at the first 429 whose body is
+      daily_budget_exhausted, each run writes its own record file, the next UTC day resumes with the questions not yet
+      recorded, and the runs are merged by question id before the summary. The bench also records thinking tokens per
+      call, the share of blocks with a verified quote, the share of insufficient answers and a per-chapter breakdown
     threshold: 30
     verified_by: bench
   - id: NFR-TUTOR-2
     metric: >-
-      mean USD per question over the NFR-TUTOR-1 run (ledger spent(run), read over HTTP as FR-TUTOR-2's `usage`);
+      mean USD per answered or expired question over the NFR-TUTOR-1 run (failed and refused ones excluded; ledger
+      spent(run), read over HTTP as FR-TUTOR-2's `usage`);
       expected about $0.052 for an L02-shaped
       prompt (VEC-TUTOR-3, extrapolated from REF-TUTOR-7's measured rates; every new question writes its whole prompt
       to the 1-hour cache)
@@ -326,9 +335,10 @@ nfr:
     verified_by: bench
   - id: NFR-TUTOR-3
     metric: >-
-      share of NFR-TUTOR-1 answers with grounded = true, over n ≥ 40 bench answers (the gate: with n = 40 a tutor
-      whose true share is 0.9 passes 98.5 % of the time and one at 0.7 passes 11 %; the first live run's n = 3, 2
-      grounded, decides nothing). No spike measured it (REF-TUTOR-7 used synthetic sources): the first full bench is
+      share of NFR-TUTOR-1 answers with grounded = true, over exactly the 40 bench questions (the gate: they are 40
+      independent questions over all 23 chapters, so as iid samples a tutor whose true share is 0.9 passes 98.5 % of
+      the time and one at 0.7 passes 11 %; the first live run's n = 3, 2 grounded, decides nothing; per-cell template
+      questions were dropped in review round 1 as correlated, an effective n of about 10–16). No spike measured it (REF-TUTOR-7 used synthetic sources): the first full bench is
       its measurement, and a miss there reopens retrieval or the prompt before the slice's live check, not the
       threshold. The bench reports `insufficient_share` beside it, so a miss is attributed to missing sources or to
       unsupported quotes
@@ -356,15 +366,15 @@ vectors:
     file: spec/fixtures/SRV-TUTOR/render.yaml
   - id: VEC-TUTOR-7
     source: >-
-      bench questions: for each `explain` cell of the compiled L02 revision in cell order, the four templates of
-      bench.yaml in order, the first 40, generated at run time from the cell title (the titles are not committed; only
-      the generator `web/src/tutor/bench.ts` is), plus the fixed question `t01` (spec/fixtures/SRV-TUTOR/bench-fixed.yaml,
-      replacing questions-v2 `v03`, whose premise the book does not support). The generator reads the explain cells
-      and their titles (the first markdown heading of the cell source) from the compiled revision under test and stops
-      with an error, before any question is asked, when fewer than 40 questions result or a selected cell has no
-      title. The driver is the owner slice suite's step `tutor-bench` (e2e/web/live/owner.slice.ts, run by
-      e2e/live/slice.sh: owner session over the HTTP API, no docker exec): each question is asked on its cell and
-      polled every 0.5 s to a terminal state; it writes numbers, states and ids only
+      bench questions: the curated questions-v2 set (spikes/embeddings-local/questions-v2.yaml: 40 independent,
+      paraphrased questions over all 23 chapters, gold pages checked) with `v03`, whose premise the book does not
+      support, replaced by `t01` (spec/fixtures/SRV-TUTOR/bench-fixed.yaml, same discipline); `web/src/tutor/bench.ts`
+      builds it and refuses anything but exactly those 40. The tutor retrieves over the whole material, so every
+      question is asked from the L02 lesson without a cell. The driver is the owner slice suite's step `tutor-bench`
+      (e2e/web/live/owner.slice.ts, run by e2e/live/slice.sh: owner session over the HTTP API, no docker exec): each
+      question not yet recorded is asked in turn and polled every 0.5 s to a terminal state; each run writes its own
+      record file (`tutor-bench-<UTC time>.json` in READER_TUTOR_BENCH_DIR), and the summary merges every run file
+      there by question id. Numbers, states and ids only
     file: spec/fixtures/SRV-TUTOR/bench.yaml
 
 defers:
@@ -386,4 +396,4 @@ owner_notes:
   - "An answer says when it is not grounded in the book instead of hiding it."
   - "Model choice: with Opus 5.5 as `tasks.tutor.model` the worst-case reserve is $0.296 per attempt (8.00 and 20.00 per million tokens), so a second attempt no longer fits the $0.30 question cap (it is refused as budget_exhausted) and the $3 daily cap allows about 10 questions; Sonnet 5.5 is the example's choice."
 
-review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 (30890d8): approve. Approved by agent with Red (2026-11-23), the round-3 notes folded in: FR-TUTOR-7's stalled-provider outcomes stated exactly as FR-AGENT-9/-13 settle them, with two [db] tests through the real adapter, and SRV-AGENT's `upstream_retry` / `deadline_exceeded` recorded as `provider_unavailable`; NFR-TUTOR-3's first bench run is its measurement; the bench generator confirms explain-cell titles on the compiled revision. Also: SRV-AGENT's remaining codes mapped (FR-TUTOR-3), priority 100 through the SRV-EVENTS amendment, enqueue through `app.state.jobs`. Green (2026-11-23): test corrections, no oracle weakened — the stale-row test's history order follows FR-TUTOR-2's newest-first; the Ask panel test reads the button's DOM `disabled` property (the web tests have no jest-dom matchers). Code review round 1 (25a5920): changes — five untested rules, all now pinned by tests: (1) span reads filter by owner (two owners with different text and page at one span id each see only their own); (2) SRV-AGENT's per-user lock (concurrent reserves, tests/agent); (3) the `finish` guard (a finished row refuses `answered`; a row flipped during the call is not overwritten); (4) VEC-TUTOR-1 cases for the first kept source and NFC; (5) the job key through the real SRV-EVENTS `Jobs`. Non-blocking applied: the Opus owner note, `ledger.spent(day=True)`, an insert-race 409 test, the handler logs the real `finish` outcome, the agent-proxy client closed after each call, VEC-TUTOR-4's queued + succeeded row, canary tests on the output_invalid and search-failure paths, the bench driver, citations through WEB-NOTEBOOK's formatter, the ask body read before a database connection, the stop-reason note. The new [db] tests are in server/tests/tutor/test_tutor_review_db.py; the Provider fakes became async context managers (Deps.provider). Code review round 2: approve (deep-reviewer, Fable); its non-blocking items applied: the bench records thinking tokens from SRV-AGENT's settle rows (`agent_spend.thinking`, paired SRV-AGENT change), and an empty assertion was removed from the search-failure canary test. Revision 2026-11-23 after the first live run (3 answered, 2 grounded; investigator: the ungrounded answer was correctly `insufficient`, its fact sat in a neighbouring span of the top chunk, never sent): FR-TUTOR-5 sends each hit's whole chunk (primary first, deduplicated, one alias per span); FR-TUTOR-6 caps aliases at sources_max 40; prompt_bytes_max 24000 → 29000 and system_bytes_max 4000 → 2000 from spikes/tutor-chunks (REF-TUTOR-9: reserve $0.148, two attempts $0.296 within the kept $0.30 cap; the sources budget is smaller than 8 hits at p95, said so in bounds); FR-TUTOR-2's GET adds the question's usage; VEC-TUTOR-1 pins partial-insufficient; VEC-TUTOR-7 replaces v03 (premise unsupported) with t01, four templates per explain cell for n = 40 + 1, and an HTTP driver in the owner slice suite; NFR-TUTOR-1/-3 gate on n ≥ 40 and report insufficient_share. Awaits deep-reviewer (cost math, new numbers); the prompt (answer-v1.md) is unchanged."
+review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 (30890d8): approve. Approved by agent with Red (2026-11-23), the round-3 notes folded in: FR-TUTOR-7's stalled-provider outcomes stated exactly as FR-AGENT-9/-13 settle them, with two [db] tests through the real adapter, and SRV-AGENT's `upstream_retry` / `deadline_exceeded` recorded as `provider_unavailable`; NFR-TUTOR-3's first bench run is its measurement; the bench generator confirms explain-cell titles on the compiled revision. Also: SRV-AGENT's remaining codes mapped (FR-TUTOR-3), priority 100 through the SRV-EVENTS amendment, enqueue through `app.state.jobs`. Green (2026-11-23): test corrections, no oracle weakened — the stale-row test's history order follows FR-TUTOR-2's newest-first; the Ask panel test reads the button's DOM `disabled` property (the web tests have no jest-dom matchers). Code review round 1 (25a5920): changes — five untested rules, all now pinned by tests: (1) span reads filter by owner (two owners with different text and page at one span id each see only their own); (2) SRV-AGENT's per-user lock (concurrent reserves, tests/agent); (3) the `finish` guard (a finished row refuses `answered`; a row flipped during the call is not overwritten); (4) VEC-TUTOR-1 cases for the first kept source and NFC; (5) the job key through the real SRV-EVENTS `Jobs`. Non-blocking applied: the Opus owner note, `ledger.spent(day=True)`, an insert-race 409 test, the handler logs the real `finish` outcome, the agent-proxy client closed after each call, VEC-TUTOR-4's queued + succeeded row, canary tests on the output_invalid and search-failure paths, the bench driver, citations through WEB-NOTEBOOK's formatter, the ask body read before a database connection, the stop-reason note. The new [db] tests are in server/tests/tutor/test_tutor_review_db.py; the Provider fakes became async context managers (Deps.provider). Code review round 2: approve (deep-reviewer, Fable); its non-blocking items applied: the bench records thinking tokens from SRV-AGENT's settle rows (`agent_spend.thinking`, paired SRV-AGENT change), and an empty assertion was removed from the search-failure canary test. Revision 2026-11-23 after the first live run (3 answered, 2 grounded; investigator: the ungrounded answer was correctly `insufficient`, its fact sat in a neighbouring span of the top chunk, never sent): FR-TUTOR-5 sends each hit's whole chunk (primary first, deduplicated, one alias per span); FR-TUTOR-6 caps aliases at sources_max 40; prompt_bytes_max 24000 → 29000 and system_bytes_max 4000 → 2000 from spikes/tutor-chunks (REF-TUTOR-9: reserve $0.148, two attempts $0.296 within the kept $0.30 cap; the sources budget is smaller than 8 hits at p95, said so in bounds); FR-TUTOR-2's GET adds the question's usage; VEC-TUTOR-1 pins partial-insufficient; VEC-TUTOR-7 replaces v03 (premise unsupported) with t01, four templates per explain cell for n = 40 + 1, and an HTTP driver in the owner slice suite; NFR-TUTOR-1/-3 gate on n ≥ 40 and report insufficient_share. Awaits deep-reviewer (cost math, new numbers); the prompt (answer-v1.md) is unchanged. Chunks review round 1: changes (the reserve math checked: $0.148, two attempts $0.296) — B1 alias cap: candidates are all primaries by rank first, then neighbours by rank, and sources_max 40 → 88 (8 × p95 spans per chunk) so only bytes bind; test: 8 hits of 9 small spans send all 8 primaries; B2 bench resume: READER_TUTOR_BENCH_FROM and READER_TUTOR_BENCH_DIR forwarded through slice.sh and slice_inputs, one record file per run, merged before summary() (unit test); B3 bench validity: the bench set is questions-v2 with v03 → t01 (40 independent questions, all 23 chapters), asked from L02 without a cell, gate on exactly those 40, a per-chapter breakdown; cell templates dropped. Non-blocking: a [db] test that a dropped alias's citation is removed, the prompt_bytes_max boundary pinned from below, a 429 counts as the daily cap only by its body code, mean_usd over answered and expired only, _USAGE filtered by owner, stale texts fixed, the one-span quote note."

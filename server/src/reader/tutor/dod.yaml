@@ -41,7 +41,8 @@ criteria:
       - test_api_retry_aborts_the_call
       - test_one_question_is_answered_with_a_verified_citation_within_the_caps
       - "p95 is nearest rank"
-      - "thresholds come from the spec and the gate needs n >= 40"
+      - "thresholds come from the spec and the gate is exactly the 40"
+      - "runs merge by question id, a later run replacing an earlier record"
   - name: accessibility
     proves: "FR-TUTOR-11: no serious or critical axe issue in the Ask panel"
     tests:

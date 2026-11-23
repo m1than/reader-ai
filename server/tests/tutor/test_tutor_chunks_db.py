@@ -52,14 +52,39 @@ async def test_a_hit_sends_its_whole_chunk_primary_first(pg: Pg, tmp_path: Path)
     assert stored["blocks"][0]["citations"] == [{"span": f"{MAT}:0", "page": SPANS[0][0], "material_title": "Book of ivan"}]
 
 
-async def test_spans_shared_by_hits_are_sent_once_in_rank_order(pg: Pg, tmp_path: Path) -> None:
+async def test_spans_shared_by_hits_are_sent_once_primaries_first(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     qid = await insert_question(w)
     provider = FakeProvider()
     await run_handler(w, qid, deps(w, provider, FakeSearch(chunks=[(1, [0, 1]), (2, [1, 2]), (0, [0])])))
     sent = json.loads(provider.calls[0].prompt)["sources"]
-    assert [s["text"] for s in sent] == [SPANS[1][1], SPANS[0][1], SPANS[2][1]]
+    # primaries 1, 2, 0 in rank order; the neighbours (0 and 1) were already taken
+    assert [s["text"] for s in sent] == [SPANS[1][1], SPANS[2][1], SPANS[0][1]]
     assert [s["id"] for s in sent] == ["s1", "s2", "s3"]
+
+
+async def test_a_citation_of_a_dropped_alias_is_removed(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The budget drops the last candidate (s3); a model citing s3 anyway gets no citation and no support."""
+    from reader.tutor import answer as answer_module
+    from reader.tutor import params
+
+    w = await world(pg, tmp_path)
+    qid = await insert_question(w)
+    texts = [SPANS[1][1], SPANS[0][1], SPANS[2][1]]
+    spans = [answer_module.Span(f"{MAT}:{i}", 60, t) for i, t in zip((1, 0, 2), texts, strict=True)]
+    two = len(answer_module.build_prompt("Why do miners vary the nonce?", None, spans[:2]).text.encode())
+    monkeypatch.setattr(params, "PROMPT_BYTES_MAX", two)  # room for exactly two sources
+    blocks = [{"text": "About the target.", "spans": ["s3"], "quote": "The target is adjusted every 2016 blocks"}]
+    provider = FakeProvider([Reply(text=answer_json(blocks))])
+    await run_handler(w, qid, deps(w, provider, FakeSearch(chunks=[(1, [0, 1, 2])])))
+    assert [s["id"] for s in json.loads(provider.calls[0].prompt)["sources"]] == ["s1", "s2"]
+    state, stored, grounded, _, _ = await question_row(w, qid)
+    assert (state, grounded) == ("answered", False)
+    assert stored["blocks"] == [
+        {"text": "About the target.", "supported": False, "quote": blocks[0]["quote"], "citations": []}
+    ]
 
 
 async def _ledger(w: object, question_id: uuid.UUID, settled: str, output: int, thinking: int | None) -> None:

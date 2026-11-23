@@ -1,54 +1,37 @@
-// The tutor bench (SRV-TUTOR VEC-TUTOR-7, NFR-TUTOR-1..3): the question generator over a compiled revision and the
-// summary of a run. Used by the owner slice suite's `tutor-bench` step (e2e/web/live/owner.slice.ts), which asks
-// over the HTTP API. Pure functions; nothing here sees an answer's text.
+// The tutor bench (SRV-TUTOR VEC-TUTOR-7, NFR-TUTOR-1..3): the question set (questions-v2, 40 independent
+// questions over all 23 chapters, with v03 replaced by t01), the merge of runs over several UTC days, and the
+// summary. Used by the owner slice suite's `tutor-bench` step (e2e/web/live/owner.slice.ts), which asks over the
+// HTTP API. Pure functions; nothing here sees an answer's text.
 
-export const TEMPLATES: readonly string[] = [
-  'Explain in your own words: {cell_title}',
-  'Why does it matter: {cell_title}?',
-  'Give a concrete example for: {cell_title}',
-  'What is easy to get wrong about: {cell_title}?',
-];
-export const TAKE = 40;
-export const GATE_N = 40; // n >= 40: a 0.9 tutor passes the 0.8 bar 98.5 % of the time, a 0.7 tutor 11 %
+export const GATE_N = 40; // exactly the 40: a 0.9 tutor passes the 0.8 bar 98.5 % of the time, a 0.7 tutor 11 % (iid)
+export const REPLACE: Readonly<Record<string, string>> = { v03: 't01' }; // v03's premise is not in the book
 export const THRESHOLDS = { p95_s: 30, mean_usd: 0.06, grounded_share: 0.8 } as const; // NFR-TUTOR-1, -2, -3
 
 export class BenchError extends Error {
   override name = 'BenchError';
 }
 
-interface NbCell {
-  id?: unknown;
-  source?: unknown;
-  metadata?: unknown;
+export interface BenchQuestion {
+  id: string;
+  chapter: number;
+  gold_pages: number[];
+  question: string;
 }
 
-const sourceOf = (c: NbCell): string =>
-  Array.isArray(c.source) ? c.source.map(String).join('') : typeof c.source === 'string' ? c.source : '';
-
-const kindOf = (c: NbCell): unknown => {
-  const reader = (c.metadata as { reader?: { kind?: unknown } } | undefined)?.reader;
-  return reader?.kind;
-};
-
-/** The first markdown heading of the cell source, without its #s. */
-export const titleOf = (c: NbCell): string | null => {
-  for (const line of sourceOf(c).split('\n')) {
-    if (line.startsWith('#')) return line.replace(/^#+/, '').trim() || null;
+/** questions-v2 in its order, each replaced id swapped for its fixed question; exactly GATE_N unique ids. */
+export const benchSet = (v2: BenchQuestion[], fixed: BenchQuestion[]): BenchQuestion[] => {
+  const byId = new Map(fixed.map((q) => [q.id, q]));
+  const set = v2.map((q) => {
+    const replacement = REPLACE[q.id];
+    if (replacement === undefined) return q;
+    const f = byId.get(replacement);
+    if (f === undefined) throw new BenchError(`fixed question ${replacement} missing`);
+    return f;
+  });
+  if (set.length !== GATE_N || new Set(set.map((q) => q.id)).size !== GATE_N) {
+    throw new BenchError(`the bench set must be exactly ${GATE_N} unique questions`);
   }
-  return null;
-};
-
-/** For each explain cell in notebook order, every template in order; the first TAKE, or BenchError before any. */
-export const benchQuestions = (notebook: { cells?: NbCell[] }): { cellId: string; question: string }[] => {
-  const out: { cellId: string; question: string }[] = [];
-  for (const c of notebook.cells ?? []) {
-    if (kindOf(c) !== 'explain' || out.length >= TAKE) continue;
-    const title = titleOf(c);
-    if (title === null || typeof c.id !== 'string') throw new BenchError('an explain cell has no title or id');
-    for (const t of TEMPLATES) out.push({ cellId: c.id, question: t.replace('{cell_title}', title) });
-  }
-  if (out.length < TAKE) throw new BenchError(`only ${out.length} questions; the gate needs ${TAKE}`);
-  return out.slice(0, TAKE);
+  return set;
 };
 
 /** Nearest rank: rank ceil(0.95 n) of the samples sorted ascending. */
@@ -59,6 +42,7 @@ export const p95 = (xs: number[]): number => {
 
 export interface BenchRecord {
   id: string;
+  chapter: number;
   question_id: string | null;
   state: string | null;
   wall_s: number;
@@ -71,24 +55,47 @@ export interface BenchRecord {
   blocks_with_verified_quote: number;
 }
 
-const round = (x: number, digits: number) => +x.toFixed(digits);
+/** The records of several runs (oldest first), one per question id: a later run's record replaces an earlier one. */
+export const mergeRuns = (runs: BenchRecord[][]): BenchRecord[] => {
+  const byId = new Map<string, BenchRecord>();
+  for (const run of runs) {
+    for (const r of run) {
+      byId.delete(r.id);
+      byId.set(r.id, r);
+    }
+  }
+  return [...byId.values()];
+};
 
-export const summary = (records: BenchRecord[]) => {
+const round = (x: number, digits: number) => +x.toFixed(digits);
+const COSTED = new Set(['answered', 'expired']); // failed and refused records do not describe a question's cost
+
+/** The numbers of the merged runs; NFRs are decided only when the records are exactly the bench set's ids. */
+export const summary = (records: BenchRecord[], setIds: string[]) => {
   const n = records.length;
+  const ids = new Set(records.map((r) => r.id));
+  const gate_n_met =
+    n === GATE_N && ids.size === GATE_N && setIds.length === GATE_N && setIds.every((id) => ids.has(id));
   const blocks = records.reduce((a, r) => a + r.blocks, 0);
   const verified = records.reduce((a, r) => a + r.blocks_with_verified_quote, 0);
+  const costed = records.filter((r) => COSTED.has(r.state ?? ''));
   const p95_s = n ? p95(records.map((r) => r.wall_s)) : null;
-  const mean_usd = n ? round(records.reduce((a, r) => a + r.usd, 0) / n, 6) : null;
+  const mean_usd = costed.length ? round(costed.reduce((a, r) => a + r.usd, 0) / costed.length, 6) : null;
   const grounded_share = n ? round(records.filter((r) => r.grounded).length / n, 4) : null;
-  const insufficient_share = n ? round(records.filter((r) => r.insufficient).length / n, 4) : null;
-  const gate_n_met = n >= GATE_N;
+  const per_chapter: Record<string, { n: number; grounded: number }> = {};
+  for (const r of records) {
+    const c = (per_chapter[String(r.chapter)] ??= { n: 0, grounded: 0 });
+    c.n += 1;
+    if (r.grounded) c.grounded += 1;
+  }
   return {
     n,
     p95_s,
     mean_usd,
     grounded_share,
-    insufficient_share,
+    insufficient_share: n ? round(records.filter((r) => r.insufficient).length / n, 4) : null,
     verified_block_share: blocks ? round(verified / blocks, 4) : null,
+    per_chapter,
     gate_n_met,
     pass: {
       'NFR-TUTOR-1': gate_n_met && p95_s !== null && p95_s <= THRESHOLDS.p95_s,

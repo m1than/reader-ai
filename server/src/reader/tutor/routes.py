@@ -185,13 +185,16 @@ async def get_question(ctx: Ctx) -> Response:
 
 
 _USAGE: Final = (
-    "SELECT coalesce(sum(output), 0), sum(thinking) FROM agent_spend WHERE run_id = :q AND kind = 'settle'"
+    "SELECT coalesce(sum(output), 0), sum(thinking) FROM agent_spend"
+    " WHERE run_id = :q AND owner_id = :u AND kind = 'settle'"
 )
 
 
 async def _usage(ctx: Ctx, question_id: uuid.UUID) -> dict[str, Any]:
+    """The question's own ledger rows; the row was already checked to be this user's."""
     async with ctx.engine.connect() as conn:
-        output, thinking = (await conn.execute(text(_USAGE), {"q": question_id})).one()
+        params_ = {"q": question_id, "u": ctx.signed_in.id}
+        output, thinking = (await conn.execute(text(_USAGE), params_)).one()
     usd = await ledger.spent(ctx.engine, run_id=question_id)
     return {
         "usd": float(usd),

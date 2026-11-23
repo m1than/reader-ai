@@ -1,7 +1,7 @@
 """SRV-TUTOR [unit]: bounds, the error catalogue and its outcomes, answer validation, grounding, injection, prompt
 sizing, the system prompt, cost derivation, the state map and the DoD hook.
 
-@trace FR-TUTOR-3 FR-TUTOR-6 FR-TUTOR-7 FR-TUTOR-8 FR-TUTOR-10 FR-TUTOR-13
+@trace FR-TUTOR-3 FR-TUTOR-5 FR-TUTOR-6 FR-TUTOR-7 FR-TUTOR-8 FR-TUTOR-10 FR-TUTOR-13
 @trace INV-TUTOR-2 INV-TUTOR-3
 @trace VEC-TUTOR-1 VEC-TUTOR-2 VEC-TUTOR-3 VEC-TUTOR-4 VEC-TUTOR-5
 """
@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import re
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -308,6 +309,63 @@ def test_no_source_is_sources_unavailable() -> None:
     assert failure.value.code == "sources_unavailable"
 
 
+# ---- FR-TUTOR-5 / -6: primaries before neighbours, so only bytes bind
+
+
+@dataclass(frozen=True)
+class _Hit:
+    span_id: str
+    span_ids: list[str]
+
+
+def _hits(n_hits: int, per_chunk: int, primary_at: int) -> list[_Hit]:
+    """n_hits disjoint chunks of per_chunk spans each; the primary is the chunk's span number primary_at."""
+    out = []
+    for h in range(n_hits):
+        ids = [f"{'a' * 64}:{h * per_chunk + i}" for i in range(per_chunk)]
+        out.append(_Hit(ids[primary_at], ids))
+    return out
+
+
+@pytest.mark.parametrize("span_text", ["a b c", "w " * 200], ids=["small-spans", "bytes-bind"])
+def test_every_primary_is_sent_before_any_neighbour(span_text: str) -> None:
+    jobs = need("reader.tutor.jobs")
+    answer = need("reader.tutor.answer")
+    params = need("reader.tutor.params")
+    hits = _hits(8, 9, primary_at=4)
+    ordered = jobs.candidate_span_ids(hits)
+    assert ordered[:8] == [h.span_id for h in hits]  # every primary, in rank order
+    assert ordered[8:16] == [s for s in hits[0].span_ids if s != hits[0].span_id]  # then the top hit's 8 neighbours
+    assert len(ordered) == 72
+    spans = [answer.Span(s, 60, span_text) for s in ordered[: params.SOURCES_MAX]]
+    prompt = answer.build_prompt("q", None, spans)
+    sent = [s.span_id for s in prompt.sources]
+    assert sent[:8] == [h.span_id for h in hits]  # all 8 primaries, whatever the budget drops
+    if span_text == "a b c":
+        assert len(sent) == 72  # small spans: neither the alias cap nor the bytes bind
+    else:
+        assert 8 <= len(sent) < 72  # 72 x ~400 bytes > the sources budget: neighbours of the lowest ranks dropped
+        assert len(prompt.text.encode()) <= params.PROMPT_BYTES_MAX
+
+
+def test_shared_spans_keep_their_first_alias() -> None:
+    jobs = need("reader.tutor.jobs")
+    a, b = "x" * 64 + ":1", "x" * 64 + ":2"
+    assert jobs.candidate_span_ids([_Hit(a, [a, b]), _Hit(b, [a, b])]) == [a, b]
+
+
+def test_prompt_bytes_max_is_inclusive(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pinned from below: a prompt of exactly prompt_bytes_max keeps all its sources; one byte less drops one."""
+    answer = need("reader.tutor.answer")
+    params = need("reader.tutor.params")
+    spans = _spans(["first source text", "second source text"])
+    exact = len(answer.build_prompt("q", None, spans).text.encode())
+    monkeypatch.setattr(params, "PROMPT_BYTES_MAX", exact)
+    assert len(answer.build_prompt("q", None, spans).sources) == 2
+    monkeypatch.setattr(params, "PROMPT_BYTES_MAX", exact - 1)
+    assert [s.alias for s in answer.build_prompt("q", None, spans).sources] == ["s1"]
+
+
 def test_system_prompt_file() -> None:
     answer = need("reader.tutor.answer")
     params = need("reader.tutor.params")
@@ -352,7 +410,9 @@ def test_cost_derivation() -> None:
     ) / D(10**6)
     nfr = next(n for n in spec()["nfr"] if n["id"] == "NFR-TUTOR-2")
     assert usd <= D(str(nfr["threshold"]))
-    assert math.floor(params.DAILY_CAP_USD / reserve) >= 20  # a bench run (≤ 21 questions) fits in one day
+    # The 40-question bench (VEC-TUTOR-7): typically one UTC day, at worst-case reserves at most two.
+    assert math.floor(params.DAILY_CAP_USD / usd) >= 40
+    assert 2 * math.floor(params.DAILY_CAP_USD / reserve) >= 40
 
 
 # ---- VEC-TUTOR-4: question state

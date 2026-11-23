@@ -722,9 +722,13 @@ tasks:
         the third was correctly insufficient, its fact one span away from the top hit's primary span. Revision on
         V/SRV-TUTOR-chunks (from V/live-slice): whole-chunk sources, prompt_bytes_max 29000 and system_bytes_max 2000
         from spikes/tutor-chunks (reserve $0.148, two attempts within the kept $0.30), usage over GET, t01 replaces v03,
-        n >= 40 bench over HTTP (owner slice step tutor-bench). Awaits deep-reviewer; the bench runs after approval.",
+        n >= 40 bench over HTTP (owner slice step tutor-bench). Chunks review round 1: changes, applied — primaries
+        of every hit before any neighbour, sources_max 88 (bytes bind first); the bench set is questions-v2 with
+        v03 → t01 (40 iid questions, per-chapter breakdown, gate on exactly those 40), asked from L02 without a cell;
+        per-run record files merged before the summary; resume forwarded through slice.sh (--tutor-bench-dir,
+        --tutor-bench-from). The bench (≈ $2.1) runs after approval.",
       review: "code review by deep-reviewer (Fable): round 1 (25a5920) changes, round 2 approve (2026-11-23);
-        the chunks revision awaits deep-reviewer (cost math, new numbers)" }
+        chunks revision: round 1 changes (reserve math confirmed), round 2 next" }
   - { id: S0.spike.tutor-chunks, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-23, read-only, no spend (the stack's own converter and chunker on the pilot; 665 s): 9,463 spans,
         2,247 chunks; bytes as sent: whole chunk mean 2,145 (p50 2,206, p90 3,119, p95 3,422, max 5,462), primary
