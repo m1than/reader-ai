@@ -121,3 +121,25 @@ async def test_open_runs(pg: Pg, tmp_path: Path) -> None:
         async with client(env, "anna") as c:
             r = await c.get("/api/compiles")
             assert (r.status_code, r.json()) == (404, {"error": "not_found"})
+
+
+async def test_open_runs_are_bounded_newest_first(pg: Pg, tmp_path: Path) -> None:
+    """bounds.open_runs_max = 100: 101 budget-refused runs of 101 lessons give 100 entries, the oldest cut."""
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        manifest = {
+            "course": {"id": "many", "title": "Many", "material_sha256": MATERIAL},
+            "lessons": [
+                {"id": f"M{i:03d}", "title": f"M{i}", "chapter": 1, "pages": {"pdf": [61, 61]}} for i in range(101)
+            ],
+        }
+        async with client(env) as c:
+            r = await c.post("/api/pipeline/courses", json=manifest)
+            assert r.status_code == 200, r.text
+            ids = [x["lesson_id"] for x in r.json()["lessons"]]
+            for i, lesson in enumerate(ids):  # M000 is the oldest
+                await _finished_run(
+                    env, env.users["ivan"], uuid.UUID(lesson), dt.timedelta(minutes=200 - i), refused="budget_exhausted"
+                )
+            listed = (await c.get("/api/compiles")).json()["runs"]
+            assert len(listed) == 100
+            assert [x["lesson_id"] for x in listed] == list(reversed(ids[1:]))

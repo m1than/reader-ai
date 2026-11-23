@@ -59,8 +59,9 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   role=list, status regions without aria-busy, the live scroll test on the last entry. Amendment 2026-11-23
   (V/compile-ui, paired with WEB-UI FR-UI-15): FR-NOTEBOOK-12's not-published page offers the owner WEB-UI's
   CompileControl and renders the lesson once a compile has written a revision; FR-NOTEBOOK-1's \"nothing else\" now
-  points there. Learners see no change. Self-approved by agent with its Red test; the coordinator runs one
-  deep-reviewer round before Green"
+  points there. Learners see no change. Round 1 (cc817d0, changes): the owner's page reads the run state for any
+  lesson and shows the control above a published draft while its run is open. Round 2 on 08534df: VERDICT approve
+  (deep-reviewer, run by the coordinator). Approved by agent"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]

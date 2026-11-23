@@ -138,6 +138,8 @@ async def test_only_allow_listed_codes_are_recorded(pg: Pg, tmp_path: Path, code
         _raise_on_issue(env, code)
         async with client(env) as c:
             run = (await c.post(f"/api/lessons/{lesson}/compile")).json()["run_id"]
+            # a stale record from an earlier failure: an off-list permanent code must clear it (null)
+            await _set_stage_error(env, run, '{"step": 9, "input_sha256": "' + "0" * 64 + '", "code": "sdk_error"}')
             await env.work()
             body = (await c.get(f"/api/compiles/{run}")).json()
             assert body["state"] == "stage_failed", code
