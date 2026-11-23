@@ -1,7 +1,7 @@
 ---
 id: ADR-0032
 title: Trace backend deployment — MLflow on its own SQLite volume, the dashboard on a second origin behind the api's owner gate, one trace per job
-status: proposed
+status: accepted
 date: 2026-11-24
 verified_by: "SRV-OBS tests: INV-OBS-5 (401/403 through Caddy before MLflow; no edge route to ingest), INV-OBS-4 (one linked trace per job), INV-OBS-2 (no canary in any export, CLI included), FR-OBS-8 [image] start-up; the stage-2 live check finds a tutor trace through MLflow's API"
 revisit_when: "MLflow's idle or peak memory exceeds its 1g limit in the stage-2 live check; or a second user needs the dashboard (ADR-0016/0017); or a reader-ai least-privilege Postgres role exists (then the Postgres store is reconsidered)"
