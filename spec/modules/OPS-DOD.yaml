@@ -12,18 +12,21 @@
 #   with per-operation cost and latency columns (FR-DOD-7) that are V.cost-optimize's baseline. verify-all.sh runs it
 #   last (FR-DOD-10).
 #
-# Initial index (2026-11-22, after merging V/slice-integration, V/live-e2e, V/V.TUTOR-min and V/V.COMPILE-min):
-# 30 operations × 8 criteria = 240 cells; 44 `na`, 44 `missing`. Missing per operation:
-#   ingest.setup 3, material.browse 3, lesson.list 3, lesson.open 3, course.import 3, lesson.findings 3,
-#   stack.backup 3, stack.restore 3; auth.signout 2, auth.add_passkey 2, lesson.compile_resume 2, stack.trust 2;
-#   auth.bootstrap 1, auth.signin 1, ingest.requeue 1, search.query 1, cell.interrupt 1, cell.run_all 1,
-#   lesson.compile_status 1, tutor.history 1, stack.down 1, stack.status 1, stack.doctor 1, secrets.set 1;
-#   material.ingest 0, cell.run 0, cell.reset 0, lesson.compile 0, tutor.ask 0, stack.up 0.
-# The gaps are mostly latency (no sourced budget), observability (no required log line), privacy canaries for
-# lesson, material and course text, and the backup-restore drill (disabled until S1.OPS-CLI-restore-seed). 81 mapped
-# items are not traced by any test yet; all of them belong to draft specs (SRV-INGEST 33, SRV-PIPELINE 35, SRV-TUTOR
-# 26, SRV-AGENT 13, SRV-SEARCH 8, counted per mapping) and are reported, not errors, while their operations are
-# tracked. Bench-only items (NFR-*) are never mapped; their numbers are budget sources instead.
+# Initial index (2026-11-22, after merging V/slice-integration, V/live-e2e, V/V.TUTOR-min and V/V.COMPILE-min;
+# rechecked 2026-11-23 on V/slice-integration 744997e, where every other spec is approved and implemented in code):
+# 30 operations × 8 criteria = 240 cells; 44 `na`, 41 `missing`. Missing per operation:
+#   ingest.setup 3, material.browse 3, lesson.list 3, lesson.open 3, course.import 3, stack.backup 3,
+#   stack.restore 3; auth.signout 2, auth.add_passkey 2, lesson.findings 2, stack.trust 2;
+#   auth.bootstrap 1, auth.signin 1, ingest.requeue 1, cell.interrupt 1, cell.run_all 1, lesson.compile_status 1,
+#   lesson.compile_resume 1, tutor.history 1, stack.down 1, stack.status 1, stack.doctor 1, secrets.set 1;
+#   material.ingest 0, search.query 0, cell.run 0, cell.reset 0, lesson.compile 0, tutor.ask 0, stack.up 0.
+# Closed by the recheck: search.query × observability (FR-SEARCH-8 logs lengths and the result count, never `q`),
+# lesson.compile_resume × cost (the resumed step runs under the run's stored cap, FR-PIPELINE-11 and FR-AGENT-9),
+# lesson.findings × recovery (FR-PIPELINE-6's derived state and FR-PIPELINE-11's status routes return the G2 report
+# only after lab verification; FR-NOTEBOOK-1 shows "not published yet"). The remaining gaps are mostly latency (no
+# sourced budget), observability (no required log line), privacy canaries for lesson, material and course text, and
+# the backup-restore drill (disabled until S1.OPS-CLI-restore-seed). Every mapped item is traced by at least one test
+# file. Bench-only items (NFR-*) are never mapped; their numbers are budget sources instead.
 #
 # Gate placement: everything here is tooling outside the spec gate (tools/** and docs/** are neither implementation
 # nor tests to tools/lib/repo.mjs); this spec still owns it through `paths`. Paired tools changes, all in this module's
@@ -38,8 +41,11 @@
 # - tools/ci-local.sh and ci.yml run `node --test "tools/dod/*.test.mjs"`;
 # - e2e/live/verify-all.sh writes the FR-DOD-4 inputs (pytest with `-o junit_family=xunit1`) and runs report.mjs last.
 #
-# Cross-spec: SRV-TUTOR FR-TUTOR-11 declared its own `reader/tutor/dod.yaml`. There is one index: FR-TUTOR-11 becomes
-# a pointer to `tutor.ask` and `tutor.history` here (the tutor spec's author revises it).
+# Cross-spec: the approved SRV-TUTOR keeps its own DoD hook, FR-TUTOR-13 (server/src/reader/tutor/dod.yaml, operation
+# `ask_tutor`, criteria with test function names, checked by a SRV-TUTOR unit test). There is one index: `tutor.ask`
+# and `tutor.history` here map the same requirements (FR-TUTOR-1..12, INV-TUTOR-1..6, NFR-TUTOR-1/2 as budget
+# sources), and T10 does not read dod.yaml. When SRV-TUTOR is next revised, FR-TUTOR-13 becomes a pointer to these two
+# operations (its author's change; this spec does not edit an approved spec).
 
 id: OPS-DOD
 title: Definition-of-Done index of user operations — data, trace-check T10, ratchet, verifier and cost/latency report
@@ -99,11 +105,17 @@ requirements:
       is not declared, or its owner spec is not in the operation's `specs`; a `live` label is not emitted by its
       key's scripts (the map is data in index.mjs: `stage-1` = `check "<label>"` in e2e/live/stage-1.sh and
       `report("<label>"` in e2e/live/lib/passkey_check.py; `browser` = literal `browser: <label>` lines in
-      e2e/live/lib/web_live.py and top-level `test('<label>'` titles in e2e/web/live/slice.live.ts); a route in the
-      registry (each `Route(METHOD, path, …)` and `WsRoute(path, …)` of the modules in reader.api.app.ROUTERS) or a
-      command in the CLI registry (the `add_parser` tree of reader.cli.app and the console scripts' documented
-      flags) is in no operation and not in `not_user_facing`; an approved spec is named by no operation and not in
-      `not_user_facing`. For an `enforced` operation also: a `missing` cell; an `items` id of a draft spec; an
+      e2e/live/lib/web_live.py, except format strings holding `{`, and top-level `test('<label>'` titles in
+      e2e/web/live/slice.live.ts); a route in the registry (each `Route(METHOD, path, …)` and `WsRoute(path, …)` of
+      the modules in reader.api.app.ROUTERS, read from their source files) or a command in the CLI registry is in no
+      operation and not in `not_user_facing`; a route or command the index names is not in its registry (stale);
+      an approved spec is named by no operation and not in `not_user_facing`. The CLI registry is: `reader` followed
+      by every subcommand path of the `add_parser` tree in server/src/reader/cli/app.py (`reader watcher status`);
+      every other `[project.scripts]` name of server/pyproject.toml; and `<name> <flag>` for every `store_true` flag
+      of that script's parser module. Options of `reader` subcommands (`--config`, `--json`, `--handle`) and value
+      options of other scripts are not registry entries. An index
+      command is a registry entry or a registry entry followed by ` --<flag>` (`reader down --untrust`); a
+      `not_user_facing` command covers every registry entry it is a prefix of, up to a space. For an `enforced` operation also: a `missing` cell; an `items` id of a draft spec; an
       `items` id that no test file traces; a live label under a disabled section. For tracked operations T10
       prints, as information, the missing count and the untraced items per operation.
   - id: FR-DOD-4
@@ -112,9 +124,9 @@ requirements:
       junit_family=xunit1`, REF-DOD-1), `vitest.json` (REF-DOD-2), `playwright.json` (REF-DOD-3; the Playwright
       [browser] tests of e2e/**/*.spec.ts), `live.log` (lines `PASS|FAIL|SKIP <key>: <label>`), `axe.json` (per
       page: {page, violations: {minor, moderate, serious, critical}} counts), `timings.jsonl` ({operation, ms, run,
-      per?}), `ledger.jsonl` ({operation, run_id, stage, attempt, model, input, output, cache_write_5m,
-      cache_write_1h, cache_read, usd}, usd a decimal string copied from SRV-AGENT's `sdk_usd`) and the `--commit
-      <sha>` argument. Test file paths are normalised to repo-relative POSIX paths; an absolute path outside the
+      per?}), `ledger.jsonl` (one row per SRV-AGENT `agent_spend` settle row: {operation, run_id, stage, attempt,
+      model, input, output, cache_write_5m, cache_write_1h, cache_read, usd}, usd a decimal string copied from
+      `settled_usd`, the amount SRV-AGENT counts as spent, FR-AGENT-9) and the `--commit <sha>` argument. Test file paths are normalised to repo-relative POSIX paths; an absolute path outside the
       repository stops the report with exit 2. A missing input file means its evidence is absent, not failed.
   - id: FR-DOD-5
     text: >-
@@ -174,7 +186,8 @@ requirements:
       Ratchet in tools/trace/guard-tests.mjs, comparing the index at `--base` with HEAD: an error for an operation
       that goes from enforced to tracked, a removed operation, a removed item or live label on an enforced
       operation, a loosened budget (a larger max or a smaller n_min, or kind target → baseline), a new
-      `not_user_facing` entry, and a cell of an enforced operation that becomes `na`.
+      `not_user_facing` entry, and a cell of an enforced operation that becomes `na`. When `--base` has no index (the
+      change that introduces it), the ratchet has nothing to compare and passes.
 
 invariants:
   - id: INV-DOD-1
@@ -223,7 +236,7 @@ vectors:
     file: spec/fixtures/OPS-DOD/t10-cases.yaml
 
 defers:
-  - The checks that close the 44 missing cells live in their own modules (latency budgets and timings, log lines,
+  - The checks that close the 41 missing cells live in their own modules (latency budgets and timings, log lines,
     text canaries, the drill, an add-passkey page); this spec indexes and verifies them.
   - V.cost-optimize consumes report.json's cost and latency columns; optimisation itself is not here.
   - Per-test-case traceability would need @trace on test functions; v1 is per file, so it errs toward FAIL.

@@ -3,6 +3,10 @@
 # V/V.COMPILE-min, the route registry (ROUTES/WS_ROUTES of the modules in reader.api.app.ROUTERS) and the CLI command
 # registry (reader.cli.app), and the live labels of e2e/live (stage-1.sh incl. passkey_check.py; web_live.py and
 # e2e/web/live/slice.live.ts under key `browser`).
+# Rechecked 2026-11-23 on V/slice-integration (744997e; every other spec approved): routes renamed by SRV-INGEST and
+# SRV-PIPELINE, the tutor items renumbered by SRV-TUTOR, the compile cap and the ledger's settled amount; three
+# missing cells closed by new spec items and their tests (search.query × observability, lesson.compile_resume × cost,
+# lesson.findings × recovery). 41 missing, 44 na; every mapped item is traced by a test.
 #
 # A cell (operation × criterion) holds any of:
 #   items:   [spec item ids]     evidence = the test files that @trace them (FR-DOD-6); bench-only items are not used
@@ -32,7 +36,7 @@ not_user_facing:
   - { spec: OPS-DOD, reason: "tooling: this index and its verifier" }
   - { route: "GET /api/healthz", reason: "container health probe (FR-AUTH-2), not a user action" }
   - { route: "GET /api/auth/static/passkey.js", reason: "static asset of the bootstrap and sign-in pages" }
-  - { route: "GET /api/spend", reason: "deferred by SRV-AGENT round 2 (spend shown in compile status)" }
+  - { command: "reader-server", reason: "container entrypoint: the api, worker and mcp roles and --healthcheck (OPS-DEPLOY); its bootstrap-link runs only through `reader bootstrap` (FR-CLI-21)" }
 
 operations:
   - id: auth.bootstrap
@@ -170,12 +174,12 @@ operations:
     title: Browse my materials (list, outline, spans of a page)
     surface: [api]
     specs: [SRV-INGEST]
-    routes: ["GET /api/materials", "GET /api/materials/{material_sha256}/outline", "GET /api/materials/{material_sha256}/pages/{page}/spans"]
+    routes: ["GET /api/materials", "GET /api/materials/{material_id}/outline", "GET /api/materials/{material_id}/spans"]
     gate: tracked
     criteria:
       functional: { items: [FR-INGEST-15, FR-INGEST-17, VEC-INGEST-5] }
       security: { items: [FR-INGEST-15, INV-INGEST-6] }
-      privacy: { missing: "canary: span text never reaches api logs" }
+      privacy: { missing: "canary: span text never reaches api logs (INV-INGEST-5's [db] test reads a spans page that does not hold the canary span; a read of that span's page under caplog is needed)" }
       a11y: { na: no web surface in the slice (api only) }
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call }
@@ -198,7 +202,7 @@ operations:
         budget: { p95_ms_max: 30000, n_min: 40, kind: baseline,
                   source: "SRV-SEARCH query timeout 30 s on V/SRV-SEARCH-impl (worst batch of 8 = 13.29 s + query 0.93 s, ×2; spikes/embed-service); a hard deadline, so a baseline, not a target" }
       cost: { na: local embedding model, no provider spend }
-      observability: { missing: "no spec requires a search request log line (route, k, result count, duration)" }
+      observability: { items: [FR-SEARCH-8] }
       recovery: { items: [FR-SEARCH-7] }
 
   - id: lesson.list
@@ -353,7 +357,7 @@ operations:
       cost:
         items: [FR-AGENT-8, FR-AGENT-9, INV-AGENT-4, VEC-AGENT-1]
         budget: { usd_per_run_max: 4.35, n_min: 1, kind: target,
-                  source: "ADR-0005 per-lesson target (SRV-PIPELINE run cap); measured $2.42–2.97 for L02" }
+                  source: "ADR-0005 per-lesson target ($100 for 23 lessons); the SRV-PIPELINE run cap is $8.00 (bounds.run_cap_usd, a declared deviation); measured $2.42–2.97 for L02" }
       observability: { items: [FR-AGENT-5, FR-PIPELINE-6] }
       recovery: { items: [FR-PIPELINE-6, INV-PIPELINE-2, VEC-PIPELINE-2, FR-AGENT-10] }
 
@@ -361,7 +365,7 @@ operations:
     title: Watch a compile run (state, stages, spend)
     surface: [api]
     specs: [SRV-PIPELINE]
-    routes: ["GET /api/lessons/{lesson_id}/compile/{run_id}"]
+    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile"]
     gate: tracked
     criteria:
       functional: { items: [FR-PIPELINE-6, FR-PIPELINE-11] }
@@ -376,8 +380,8 @@ operations:
   - id: lesson.compile_resume
     title: Resume a compile run with a dead step
     surface: [api]
-    specs: [SRV-PIPELINE, SRV-EVENTS]
-    routes: ["POST /api/lessons/{lesson_id}/compile/{run_id}/resume"]
+    specs: [SRV-PIPELINE, SRV-EVENTS, SRV-AGENT]
+    routes: ["POST /api/compiles/{run_id}/resume"]
     gate: tracked
     criteria:
       functional: { items: [FR-PIPELINE-11, FR-EVENTS-8] }
@@ -385,7 +389,10 @@ operations:
       privacy: { items: [INV-PIPELINE-4] }
       a11y: { na: no web surface in the slice (owner route) }
       latency: { missing: "no sourced budget" }
-      cost: { missing: "resumed steps spend under the run's cap; no separate budget yet" }
+      cost:
+        items: [FR-AGENT-9, INV-AGENT-4]
+        budget: { usd_per_run_max: 8.00, n_min: 1, kind: baseline,
+                  source: "SRV-PIPELINE bounds.run_cap_usd: a resume requeues the dead step of the same run, which keeps its stored cap_usd (FR-PIPELINE-11, FR-AGENT-9); a hard cap, so a baseline" }
       observability: { items: [FR-PIPELINE-6] }
       recovery: { items: [INV-PIPELINE-2, FR-EVENTS-8] }
 
@@ -393,10 +400,11 @@ operations:
     title: Read open findings and the G2 report of a compiled lesson
     surface: [web, api]
     specs: [SRV-PIPELINE, WEB-NOTEBOOK, SRV-LESSON]
+    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile"]
     gate: tracked
     criteria:
       functional:
-        items: [FR-PIPELINE-8, FR-PIPELINE-10, FR-NOTEBOOK-3, VEC-PIPELINE-3]
+        items: [FR-PIPELINE-8, FR-PIPELINE-10, FR-PIPELINE-11, FR-NOTEBOOK-3, VEC-PIPELINE-3]
         live: ["browser: lesson renders: markdown, references, open finding"]
       security: { items: [INV-PIPELINE-3, INV-PIPELINE-5, INV-LESSON-4] }
       privacy: { items: [INV-PIPELINE-4] }
@@ -404,7 +412,7 @@ operations:
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call (the findings step is deterministic) }
       observability: { missing: "no spec requires a log line for reading the G2 report" }
-      recovery: { missing: "no defined behaviour when the G2 report is absent or the run is still running" }
+      recovery: { items: [FR-PIPELINE-6, FR-PIPELINE-11, FR-NOTEBOOK-1] }
 
   - id: tutor.ask
     title: Ask the tutor about the open lesson
@@ -413,34 +421,34 @@ operations:
     routes: ["POST /api/lessons/{lesson_id}/ask"]
     gate: tracked
     criteria:
-      functional: { items: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-4, FR-TUTOR-5, FR-TUTOR-6, FR-TUTOR-7, FR-TUTOR-8, FR-TUTOR-9, VEC-TUTOR-1] }
+      functional: { items: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-4, FR-TUTOR-5, FR-TUTOR-6, FR-TUTOR-7, FR-TUTOR-8, FR-TUTOR-9, FR-TUTOR-11, VEC-TUTOR-1] }
       security: { items: [INV-TUTOR-1, INV-TUTOR-2, INV-TUTOR-3, VEC-TUTOR-2] }
       privacy: { items: [INV-TUTOR-4] }
-      a11y: { pages: ["/lessons/{lesson_id}"] }
+      a11y: { items: [FR-TUTOR-11], pages: ["/lessons/{lesson_id}"] }
       latency:
         budget: { p95_ms_max: 30000, n_min: 20, kind: target, source: "NFR-TUTOR-1 (20 questions on L02, idle worker)" }
       cost:
         items: [INV-TUTOR-5, VEC-TUTOR-3]
-        budget: { usd_per_run_max: 0.20, n_min: 20, kind: target,
-                  source: "SRV-TUTOR bounds.question_cap_usd (VEC-TUTOR-3); NFR-TUTOR-2 mean ≤ $0.06" }
-      observability: { items: [FR-TUTOR-10] }
-      recovery: { items: [FR-TUTOR-3, INV-TUTOR-5] }
+        budget: { usd_per_run_max: 0.30, n_min: 20, kind: baseline,
+                  source: "SRV-TUTOR bounds.question_cap_usd = 0.30 (derived by VEC-TUTOR-3: attempts_max × worst-case reserve), a hard cap, so a baseline; NFR-TUTOR-2 expects a mean of about $0.048" }
+      observability: { items: [FR-TUTOR-12] }
+      recovery: { items: [FR-TUTOR-3, FR-TUTOR-10, INV-TUTOR-5, INV-TUTOR-6] }
 
   - id: tutor.history
     title: Read a tutor answer and my earlier questions on a lesson
     surface: [web]
     specs: [SRV-TUTOR]
-    routes: ["GET /api/lessons/{lesson_id}/questions/{question_id}"]
+    routes: ["GET /api/lessons/{lesson_id}/questions/{question_id}", "GET /api/lessons/{lesson_id}/questions"]
     gate: tracked
     criteria:
-      functional: { items: [FR-TUTOR-2, FR-TUTOR-9] }
-      security: { items: [INV-TUTOR-1, INV-TUTOR-6] }
+      functional: { items: [FR-TUTOR-2, FR-TUTOR-9, FR-TUTOR-11] }
+      security: { items: [INV-TUTOR-1] }
       privacy: { items: [INV-TUTOR-4] }
-      a11y: { pages: ["/lessons/{lesson_id}"] }
+      a11y: { items: [FR-TUTOR-11], pages: ["/lessons/{lesson_id}"] }
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call (reads stored answers) }
-      observability: { items: [FR-TUTOR-10] }
-      recovery: { items: [FR-TUTOR-2] }
+      observability: { items: [FR-TUTOR-12] }
+      recovery: { items: [FR-TUTOR-2, FR-TUTOR-10, INV-TUTOR-6] }
 
   - id: stack.backup
     title: Back up the stack (reader backup DIR)
