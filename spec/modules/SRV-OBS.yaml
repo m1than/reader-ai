@@ -64,9 +64,26 @@
 
 id: SRV-OBS
 title: Tracing with an attribute allow-list, Rotel and MLflow behind an owner-only gate, retention and the owner's views
+# Review verdict: approve (round 4, 2026-11-24). The status stays `draft` on V/obs because trace-check blocks an
+# approved spec without coverage: T5 needs a traced test for every FR/INV/VEC (Red), and T10 needs SRV-OBS named in
+# spec/fixtures/OPS-DOD/operations.yaml (the paired OPS-DOD change, a file active branches edit). The flip to
+# `approved` / `approved_by: agent` lands in the Red commit on the integration base, with the `obs.view` operation,
+# as SRV-EVENTS did ("approved with Red").
 status: draft
 approved_by: null
 approved_at: null
+review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431aa22): changes, 7 blockers (B1 three
+  networks and VEC-DEPLOY-2 pairs, ADR-0025 rule 5 amended; B2 gate Origin rules and Access-Control-* stripped; B3 no
+  Cookie/Authorization up, no Set-Cookie down; B4 CSP and deep link measured in a browser; B5 CLI pin test and key-subset
+  checks; B6 retention order and real-cutoff test; B7 cost from the ledger) plus non-blocking items, applied in fc208f8
+  with spikes/obs-stack round 2. Round 2 (fc208f8): changes, 3 blockers (N1 same-site top-level navigation; N2 a wrong
+  fixture trace id, ids now generated; N3 job_keys only through published SRV-EVENTS reads, FR-EVENTS-18 paired) plus
+  non-blocking items, applied in dfa6f9e with spike round 3 (cross-port click). Round 3 (dfa6f9e): changes, 1 blocker
+  (R1 fixture keys were placeholders; real FR-EVENTS-2 keys, spot-checked against idempotency_key) plus non-blocking
+  items, applied in 5677fb3. Round 4 (5677fb3): VERDICT approve; its three nits applied at approval (view (c)'s
+  key_rows_of for failed questions, one kind per stage in view (a), 'more rows may exist'). Status flips to approved with Red (T5, T10).
+  ADR-0032 and ADR-0018 stay proposed (owner's decision); implementation waits for the owner's acceptance of
+  ADR-0032, which amends accepted ADR-0025 rule 5, and lands on V/slice-integration's versions of the paired specs."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
@@ -328,18 +345,20 @@ requirements:
       rows of (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at), and `recent_keys_of`
       also a `truncated` flag that is true when it returned `limit` rows. The keys this module asks for are computed
       with SRV-EVENTS' `idempotency_key` (FR-EVENTS-2) from the owner's own rows. What each view runs: (a) one query
-      for the runs, one for their spend, one for their steps, then one `key_rows_of` for all steps' keys of both
-      pipeline kinds; (b) one query for the questions, one for the tutor settle rows, then one `key_rows_of` for the
-      slowest 10; (c) one `recent_keys_of` over every kind, one query for the owner's runs, questions and materials
-      used to scope it, and one for failed questions; (d) one `recent_keys_of` for `ingest.import` and one query for
+      for the runs, one for their spend, one for their steps, then one `key_rows_of` for all steps' keys, one key per
+      step under the one kind SRV-PIPELINE enqueues for that stage (`pipeline.verify` for lab verification,
+      `pipeline.stage` for every other stage); (b) one query for the questions, one for the tutor settle rows, then one
+      `key_rows_of` for the slowest 10; (c) one `recent_keys_of` over every kind, one query for the owner's runs,
+      questions and materials used to scope it, one for failed questions, and one `key_rows_of` for those failed
+      questions' `tutor.answer` keys (their trace ids); (d) one `recent_keys_of` for `ingest.import` and one query for
       the owner's materials. `recent_keys_of` limits before owner scoping, so a view built from it carries
-      `truncated` and the page shows "more rows exist than shown" when it is true:
+      `truncated` and the page shows "more rows may exist" when it is true:
       (a) `compile_runs`: the newest 50 runs started in the window, each with lesson id, started and finished times,
       `spent_usd` = SRV-AGENT's spent(run) (FR-AGENT-9: settled_usd of settle rows plus the usd of reserves with neither
       a settle nor a void, over `agent_spend` rows of the run_id), and its steps from `compile_steps` (stage, cost_usd,
       duration_s, model; the per-step cost stays the step's own record) with `trace_id`: FR-OBS-5's derivation from
-      the key row of `pipeline.stage` or `pipeline.verify` whose key is `idempotency_key` of the step's (run_id, step,
-      stage, input_sha256), using that row's `job_id` (the newest job that ran the key) and `key`; null when no row
+      the key row whose key is `idempotency_key` of the step's (run_id, step, stage, input_sha256) under the stage's
+      one kind (above), using that row's `job_id` (the newest job that ran the key) and `key`; null when no row
       or no job id exists;
       (b) `tutor`: count, latency p50 and p95 in ms (`finished_at − created_at` of answered questions, nearest-rank
       percentiles), `cost_usd_sum` = the sum of `settled_usd` over the owner's `agent_spend` settle rows of task
