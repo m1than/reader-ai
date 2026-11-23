@@ -47,7 +47,9 @@
 #
 # Test levels: [unit] pure Python, Hypothesis for the invariants; [db] testcontainers Postgres (as SRV-PIPELINE);
 # [live] e2e/live against `reader up` with the already-imported pilot, preview and confirm with `compile_first: false`
-# (no compile, no credit).
+# (no compile, no credit): `bash e2e/live/plan.sh`. Its owner session is one row it creates and deletes by id
+# (e2e/live/lib/plan_live.py; the owner's own passkeys and sessions are never touched), pinned against a fake owner
+# session in server/tests/plan/test_live_session_db.py.
 
 id: SRV-PLAN
 title: Course planning — the study-time question, a deterministic planner that spreads the material over the study days within the daily minutes, the estimate and confirm
