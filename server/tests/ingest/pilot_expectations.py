@@ -93,14 +93,15 @@ def candidates(pdf_path: str, scratch: str) -> None:
 def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
     """FR-INGEST-7's indentation, written again here as code (not imported from reader.ingest.host); it is
     the same rule, so it guards the implementation, not the rule. Glyph origins inside the top-left-origin
-    `box`, lines by baseline (1 pt), the cell from the loose-box advance (one width within 2%), every step
-    and offset a whole number of cells within 0.25; the text is returned unchanged when the rule fails."""
+    `box`, lines by baseline (1 pt), the cell from the modal loose-box advance (80% of glyphs within 2%),
+    steps between in-band glyphs and every line offset a whole number of cells within 0.25; the text is
+    returned unchanged when the rule fails."""
     import ctypes
 
     import pypdfium2.raw as raw
 
     x0, y0, x1, y1 = box
-    rows: list[list[float]] = []  # [baseline from the top, x, x, ...]
+    rows: list[list[Any]] = []  # [baseline from the top, (x, width), (x, width), ...]
     widths: list[float] = []
     ox, oy = ctypes.c_double(), ctypes.c_double()
     rect = raw.FS_RECTF()
@@ -112,31 +113,44 @@ def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
             continue
         raw.FPDFText_GetCharOrigin(text_page, index, ox, oy)
         raw.FPDFText_GetLooseCharBox(text_page, index, rect)
-        widths.append(rect.right - rect.left)
+        width = rect.right - rect.left
+        widths.append(width)
         baseline = height - oy.value
         row = next((r for r in rows if abs(r[0] - baseline) <= 1.0), None)
         if row is None:
-            rows.append([baseline, ox.value])
+            rows.append([baseline, (ox.value, width)])
         else:
-            row.append(ox.value)
+            row.append((ox.value, width))
     rows.sort(key=lambda r: r[0])
-    xs_by_row = [sorted(r[1:]) for r in rows]
+    glyph_rows = [sorted(r[1:]) for r in rows]
     lines = text.replace("\r\n", "\n").split("\n")
     filled = [i for i, line in enumerate(lines) if line.strip()]
-    if not widths or min(widths) <= 0 or (max(widths) - min(widths)) / max(widths) > 0.02:
+    if not widths or min(widths) <= 0 or len(filled) != len(glyph_rows):
         return text
-    if len(filled) != len(xs_by_row):
+    tally: dict[float, int] = {}
+    for w in widths:
+        tally[round(w, 2)] = tally.get(round(w, 2), 0) + 1
+    best = max(tally.values())
+    mode = min(w for w, n in tally.items() if n == best)
+    band = [w for w in widths if abs(w - mode) <= 0.02 * mode]
+    if len(band) < 0.8 * len(widths):
         return text
-    cell = sum(widths) / len(widths)
+    cell = sum(band) / len(band)
 
     def whole(distance: float) -> int | None:
         n = int(distance / cell + 0.5) if distance >= 0 else -int(-distance / cell + 0.5)
         return n if abs(distance / cell - n) <= 0.25 else None
 
-    if any(whole(xs[k + 1] - xs[k]) is None for xs in xs_by_row for k in range(len(xs) - 1)):
-        return text
-    origin = min(xs[0] for xs in xs_by_row)
-    counts = [whole(xs[0] - origin) for xs in xs_by_row]
+    def banded(width: float) -> bool:
+        return abs(width - mode) <= 0.02 * mode
+
+    for row in glyph_rows:
+        for k in range(len(row) - 1):
+            (xa, wa), (xb, wb) = row[k], row[k + 1]
+            if banded(wa) and banded(wb) and whole(xb - xa) is None:
+                return text
+    origin = min(row[0][0] for row in glyph_rows)
+    counts = [whole(row[0][0] - origin) for row in glyph_rows]
     if None in counts:
         return text
     for i, n in zip(filled, counts, strict=True):
@@ -194,7 +208,7 @@ def build(pdf_path: str, boxes_path: str) -> None:
         entry: dict[str, Any] = {}
         if "code_boxes" in want:
             entry["code"] = [_code_entry(pdf, int(number), [float(v) for v in b]) for b in want["code_boxes"]]
-        for key in ("formulas_decoded", "tables", "steps", "order", "indents"):
+        for key in ("formulas_decoded", "tables", "steps", "order", "indents", "indent_boxes"):
             if key in want:
                 entry[key] = want[key]
         pages[str(number)] = entry

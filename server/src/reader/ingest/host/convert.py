@@ -19,14 +19,13 @@ from typing import Any, Final
 from reader.ingest.artifact import write_artifact
 from reader.ingest.host.mapping import (
     BatchFailed,
+    Glyph,
     Item,
-    cell_of,
     code_line,
     outline,
     reindent,
     run_batches,
     spans,
-    visual_lines,
 )
 
 TEXTLESS_BELOW: Final = 200  # characters in a page's text layer (the ingest-docling spike's threshold)
@@ -66,18 +65,15 @@ def read_outline(path: str | Path) -> list[dict[str, Any]]:
     return outline(marks, [], page_count)[0] if marks else []
 
 
-def _glyphs(
-    text_page: Any, box: tuple[float, float, float, float]
-) -> tuple[list[tuple[float, float]], list[float]]:
-    """FR-INGEST-7: the origins (pen x, baseline y) and advances (loose-box widths) of the non-whitespace
-    characters whose glyph-box centre lies inside `box` (left, bottom, right, top; bottom-left origin)."""
+def _glyphs(text_page: Any, box: tuple[float, float, float, float]) -> list[Glyph]:
+    """FR-INGEST-7: (origin x, baseline y, advance as the loose-box width) of the non-whitespace characters
+    whose glyph-box centre lies inside `box` (left, bottom, right, top; bottom-left origin)."""
     import ctypes
 
     import pypdfium2.raw as pdfium_c
 
     left, bottom, right, top = box
-    origins: list[tuple[float, float]] = []
-    advances: list[float] = []
+    glyphs: list[Glyph] = []
     x, y = ctypes.c_double(), ctypes.c_double()
     loose = pdfium_c.FS_RECTF()
     for index in range(text_page.count_chars()):
@@ -90,14 +86,14 @@ def _glyphs(
         if pdfium_c.FPDFText_GetCharOrigin(text_page, index, x, y) and pdfium_c.FPDFText_GetLooseCharBox(
             text_page, index, loose
         ):
-            origins.append((float(x.value), float(y.value)))
-            advances.append(float(loose.right - loose.left))
-    return origins, advances
+            glyphs.append((float(x.value), float(y.value), float(loose.right - loose.left)))
+    return glyphs
 
 
 def _code_text(pdf: Any, prov: list[Any], heights: dict[int, float], stats: dict[str, int]) -> str:
     """FR-INGEST-7: the text layer inside every provenance box, reindented, in order, joined with newlines;
-    `stats` counts the boxes and those that kept the text layer's indentation."""
+    `stats` counts the boxes, those that kept the text layer's indentation and those the majority cell
+    recovered."""
     parts: list[str] = []
     for p in prov:
         box = p.bbox.to_bottom_left_origin(heights[p.page_no])
@@ -107,11 +103,11 @@ def _code_text(pdf: Any, prov: list[Any], heights: dict[int, float], stats: dict
         bottom, top = min(box.b, box.t) - CODE_MARGIN_PT, max(box.b, box.t) + CODE_MARGIN_PT
         try:
             text = text_page.get_text_bounded(left=left, bottom=bottom, right=right, top=top)
-            origins, advances = _glyphs(text_page, (left, bottom, right, top))
-            reindented, fell_back = reindent(text, visual_lines(origins), cell_of(advances))
+            reindented, how = reindent(text, _glyphs(text_page, (left, bottom, right, top)))
             parts.append(reindented)
             stats["code_boxes"] += 1
-            stats["indent_fallbacks"] += int(fell_back)
+            stats["indent_fallbacks"] += int(how == "fallback")
+            stats["majority_cell"] += int(how == "majority")
         finally:
             text_page.close()
             page.close()
@@ -197,7 +193,7 @@ def convert(source: Path, models: Path, out: Path, report: Any = None) -> int:
             text_page.close()
             page.close()
         marks = bookmarks(pdf)
-        stats = {"code_boxes": 0, "indent_fallbacks": 0}
+        stats = {"code_boxes": 0, "indent_fallbacks": 0, "majority_cell": 0}
 
         def batch(first: int, last: int) -> tuple[str, list[Item]]:
             result = converter.convert(source, page_range=(first, last), raises_on_error=False)
@@ -209,7 +205,7 @@ def convert(source: Path, models: Path, out: Path, report: Any = None) -> int:
         except BatchFailed:
             return 3
         multi_box = sum(1 for i in items if i.label == "code" and len(i.boxes) > 1)
-        report(code_line(stats["code_boxes"], stats["indent_fallbacks"], multi_box))
+        report(code_line(stats["code_boxes"], stats["indent_fallbacks"], stats["majority_cell"], multi_box))
         rows = spans(items)
         entries, source_kind = outline(marks, rows, page_count)
         write_artifact(

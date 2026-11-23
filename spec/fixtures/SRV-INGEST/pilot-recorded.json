@@ -1,5 +1,5 @@
 {
-  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. indents maps a code block index to its lines' leading-space counts, counted by eye on 3x page renders on 2026-11-23 (FR-INGEST-7); no sample block has an indented first line. Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
+  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. indents maps a code block index to its lines' leading-space counts, counted by eye on 3x page renders on 2026-11-23 (FR-INGEST-7); no sample block has an indented first line. indent_boxes (page 419, outside the 20-page sample, added 2026-11-23) holds a block with an italic comment line, recorded by its box and counts only, so the page adds no code-count or hash expectation. Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
   "known_misses": [378],
   "pages": {
     "128": {"formulas_decoded": 2},
@@ -14,6 +14,7 @@
     "143": {"code_boxes": [[43, 97, 411, 111], [43, 144, 411, 465]]},
     "378": {"code_boxes": [[56, 135, 425, 279], [56, 474, 425, 618]]},
     "381": {"code_boxes": [[43, 97, 411, 135], [43, 168, 411, 182], [43, 302, 411, 363], [43, 433, 411, 459], [43, 492, 411, 623]]},
+    "419": {"indent_boxes": [{"box": [43, 58, 411, 216], "indents": [0, 4, 4, 4, 4, 4, 8, 8, 12, 12, 8, 4, 0]}]},
     "461": {
       "code_boxes": [[44, 122, 411, 361], [71, 431, 411, 552], [71, 597, 411, 623]],
       "steps": {"3": [52, 62, 412, 85], "4": [52, 87, 412, 110], "5": [52, 408, 412, 421], "6": [52, 562, 412, 585]},

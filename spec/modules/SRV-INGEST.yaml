@@ -251,9 +251,9 @@ requirements:
       **Progress output.** Stdout carries only progress lines, one per finished batch: `{"pages_done": n,
       "pages_total": m}`. The parent renders a line only if it parses as exactly that schema with 0 ≤ n ≤ m ≤ 5,000.
       After the last batch the converter prints one code line, numbers only: `{"code_boxes": b,
-      "indent_fallbacks": f, "multi_box_code": k}` (FR-INGEST-7), rendered as `code boxes b, indentation
-      fallbacks f, multi-box code items k` only if it is exactly that schema with integers 0 ≤ f ≤ b ≤ 1,000,000
-      and 0 ≤ k ≤ b. The parent drops anything else, and never forwards the child's stderr, keeping only its byte count for the error
+      "indent_fallbacks": f, "majority_cell": r, "multi_box_code": k}` (FR-INGEST-7), rendered as `code boxes b,
+      indentation fallbacks f, majority-cell boxes r, multi-box code items k` only if it is exactly that schema
+      with integers 0 ≤ f ≤ b ≤ 1,000,000, 0 ≤ r ≤ b and 0 ≤ k ≤ b. The parent drops anything else, and never forwards the child's stderr, keeping only its byte count for the error
       message.
       **Tests:** [host]; [unit] for rendering; [unit] with a fake Docling result per status, checking
       `pages_converted`, the missing manifest and the exit code.
@@ -292,15 +292,24 @@ requirements:
       - The glyphs are the box's non-whitespace characters whose glyph-box centre lies inside the widened box.
         They form visual lines by baseline: the y of each glyph's origin (pen position); a glyph starts a new line
         when its baseline differs from the line's first glyph by more than 1 pt.
-      - The cell `a` is the glyphs' advance width, read per character as the width of pdfium's loose character
-        box (`FPDFText_GetLooseCharBox`), which spans the pen advance. The box is monospace only if all its
-        glyphs' advances agree within 2% of the largest (a chosen bound; the pilot's spread is 0.000, while a
-        proportional line on page 133 spans 4.80–5.63 pt); `a` is then their mean. The cell is not taken from
-        the steps between glyphs: in code of one-letter tokens (`a = b + c`) every step crosses a space and
-        is 2 cells, so any statistic of the steps (median, smallest) halves every indent.
-      - The steps are the differences between successive glyph origins x within a line. Every step must be a
-        whole number of cells (0 for an overprinted glyph) within the tolerance, so text placed off the grid
-        keeps the text layer (below).
+      - Each glyph's advance is read as the width of pdfium's loose character box (`FPDFText_GetLooseCharBox`),
+        which spans the pen advance for upright glyphs (4.05 pt on every monospace glyph of the pilot sample).
+        Italic glyphs of the same monospace font measure wider (4.07–4.2 pt in the pilot's italic comments,
+        Ubuntu Mono Italic), and a second font (such as proportional Cyrillic inside a code line) differs more.
+      - The cell `a` is the modal advance (advances rounded to 0.01 pt; on a tie, the smaller width). A glyph
+        is in band if its advance is within 2% of the modal advance. The box is monospace only if at least 80%
+        of its glyphs are in band (both chosen bounds: the full pilot's mixed boxes have 1–3 italic or
+        second-font lines among monospace ones, while proportional prose labelled as code has no width holding
+        80%); `a` is then the mean of the in-band advances. The cell is not taken from the steps between
+        glyphs: in code of one-letter tokens (`a = b + c`) every step crosses a space and is 2 cells, so any
+        statistic of the steps (median, smallest) halves every indent.
+      - The steps are the differences between successive glyph origins x within a line. Each step between two
+        consecutive in-band glyphs must be a whole number of cells (0 for an overprinted glyph) within the
+        tolerance, so text placed off the grid keeps the text layer (below). Steps that touch an out-of-band
+        glyph (an italic comment, a second font) are not checked.
+      - Line offsets are checked for every line, out-of-band lines included: a glyph's origin x is the pen
+        position, which a monospace layout puts on the grid whatever the glyph's face. A box with out-of-band
+        glyphs that passes is counted as recovered by the majority cell (FR-INGEST-5's code line).
       - The block's left edge `x_min` is the smallest first-glyph origin x over its lines: the box is dedented to
         its leftmost line, so a line indented in the PDF relative to Docling's box but leftmost in the block gets
         0 spaces, and a block whose first line is indented keeps that line's indent relative to the others.
@@ -310,8 +319,8 @@ requirements:
         (measured 2026-11-23).
       - The line's leading whitespace from the text layer is replaced by `n` spaces. Tabs are not
         reconstructed: indentation is always spaces.
-      - The rule applies only when it is well defined. If the box has no glyph, if its advances differ by more
-        than 2%, if a step or a line exceeds the tolerance, or if the number of visual lines differs from the number of non-empty
+      - The rule applies only when it is well defined. If the box has no glyph, if fewer than 80% of its glyphs
+        are in band, if a checked step or any line exceeds the tolerance, or if the number of visual lines differs from the number of non-empty
         text-layer lines, the box's text keeps the text layer's own leading whitespace. The converter reports how
         many boxes fell back (FR-INGEST-5's code line).
       - **Known limit:** a code item with several provenance boxes (a block split across a page or column break)
@@ -349,8 +358,11 @@ requirements:
       - `spans.jsonl`: one span per line, `{seq, page, kind, level, decoded, text, bbox}`.
       - `outline.json`: a JSON array of `{seq, level, title, page}`.
       **Converter version.** `converter_version` is the constant `reader.ingest.CONVERTER_VERSION` =
-      "docling-2.151.1+r2"; the `r` number rises with any change to FR-INGEST-5..9 (r2, 2026-11-23: FR-INGEST-7's
-      indentation and FR-INGEST-8's exact Docling order; no artifact or import of r1 exists outside test runs).
+      "docling-2.151.1+r2"; the `r` number rises with any change to FR-INGEST-5..9 once an artifact of the current
+      version may exist outside test runs, so that no stale artifact or import is reused (r2, 2026-11-23:
+      FR-INGEST-7's indentation and FR-INGEST-8's exact Docling order; no artifact or import of r1 exists outside
+      test runs). r2 itself was revised before any r2 artifact left a test run (the majority-cell rule of
+      FR-INGEST-7, 2026-11-23), so it stays r2: no stored artifact, `ingests` row or frozen version carries r2.
       **Artifact id.** The sha256 of the exact `manifest.json` bytes, which are canonical JSON (sorted keys, separators
       `,` and `:`, UTF-8, non-ASCII unescaped).
       **Parent checks before sending.**
@@ -678,7 +690,9 @@ vectors:
         converter's spans, for four blocks: page 468's 13-line Solidity block 0,0,0,0,0,2,4,4,4,4,4,2,0 (it must
         have more than one level), page 468's first block 0,0,0,0,0,0,3, page 461's first block
         0,2,2,2,2,2,2,2,4,6,6,6,4,4,6,6,6,4,2,0, and page 133's output block 0,0,2,2,2,0. No sample block has
-        an indented first line; that case is covered by [unit] tests;
+        an indented first line; that case is covered by [unit] tests. One block outside the sample, page 419's
+        first (an italic comment line among upright code, recovered by FR-INGEST-7's majority cell), is
+        recorded by box and counts only (0,4,4,4,4,4,8,8,12,12,8,4,0), adding no code-count or hash expectation;
       - on pages 461 and 468, each block's index relative to its list steps (ADR-0021's wording, relational): the
         block comes after the step before it and before the next step, with the steps anchored by hand-recorded
         boxes. Other list items on the page (such as a filename label Docling labels as a list item) do not count.
@@ -726,4 +740,4 @@ owner_notes:
   - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
   - "6. NFR-INGEST-2's rule-B count may be 3 of 20 against a threshold of 2: page 378 (known miss), page 133 (a curve-constant line labelled code) and page 468 (a filename label labelled a list item), all measured 2026-11-22. The owner judges these pages before the first full import, because the converter version freezes at that import. Owner judgement, 2026-11-23: rule B is 1 of 20 (page 378); pages 133 and 468 are label noise, not rule-B misses. The owner also chose to fix code-block indentation before the first full import (FR-INGEST-7, converter r2)."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. Owner change 2026-11-23: code-block indentation (FR-INGEST-7, converter r2), the synthetic code block nested 0/4/8/0 (VEC-INGEST-2), hand-recorded indents and independently re-derived hashes (VEC-INGEST-3), owner note 6's judgement; one deep-reviewer round requested. Indentation review (ad0da76): changes — blocking: a median (or smallest) step halves indents in one-letter-token code; unit tests did not pin the design. Fixed: the cell is the font advance (pdfium loose char box, one width within 2%), every step and offset a whole number of cells within the chosen 0.25 bound; unit tests for one-letter code, majority 2-cell steps, an indented first line, line-count mismatch with real indents, residuals 0.24/0.26; non-blocking items applied (dedent stated, multi-box known limit with counts in FR-INGEST-5's code line, generator independent as code only, four hand-counted blocks, presence check). VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says."
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. Owner change 2026-11-23: code-block indentation (FR-INGEST-7, converter r2), the synthetic code block nested 0/4/8/0 (VEC-INGEST-2), hand-recorded indents and independently re-derived hashes (VEC-INGEST-3), owner note 6's judgement; one deep-reviewer round requested. Indentation review (ad0da76): changes — blocking: a median (or smallest) step halves indents in one-letter-token code; unit tests did not pin the design. Fixed: the cell is the font advance (pdfium loose char box, one width within 2%), every step and offset a whole number of cells within the chosen 0.25 bound; unit tests for one-letter code, majority 2-cell steps, an indented first line, line-count mismatch with real indents, residuals 0.24/0.26; non-blocking items applied (dedent stated, multi-box known limit with counts in FR-INGEST-5's code line, generator independent as code only, four hand-counted blocks, presence check). Round 2 (c6ae789): VERDICT approve. Majority-cell rule (2026-11-23, coordinator after the fallback diagnosis: 15 of 17 fallbacks were width spreads, mostly italic comments in Ubuntu Mono Italic): modal advance, 80% in band within 2%, steps checked between in-band glyphs only, every line offset still on the grid; version stays r2 (no r2 artifact outside test runs). VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says."

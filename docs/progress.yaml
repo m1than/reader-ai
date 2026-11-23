@@ -449,7 +449,16 @@ tasks:
         Indentation review: round 1 changes (ad0da76), round 2 VERDICT approve (c6ae789), deep-reviewer (Fable).
         Gate at c6ae789: LOCAL CI FAIL only in tests/sandbox (15 tests: test_session_sweep_spares_other_runs and 14
         in test_supervisor.py), the identical set failing on clean origin/V/slice-integration 744997e; each passes
-        alone (order-dependent, not SRV-INGEST).",
+        alone (order-dependent, not SRV-INGEST).
+        Majority-cell rule (FR-INGEST-7, still r2: no r2 artifact outside test runs): modal advance, at least 80%
+        of glyphs within 2%, steps checked between in-band glyphs only, every line offset on the grid. Full book
+        2026-11-23: 935 pages in 634.7 s; code boxes 360: exact 343, majority cell 7 (pages 419, 429, 431 x2,
+        432 x2, 859), fallbacks 10. The fallbacks with page, reason, modal advance, in-band share: 105 below 80%
+        3.43 0.114; 133 below 80% 4.80 0.731; 341 below 80% 5.33 0.286; 341 below 80% 3.43 0.133; 369 below 80%
+        4.82 0.373; 418 below 80% 4.05 0.789; 425 below 80% 4.05 0.756; 460 off grid 4.05 1.000; 469 off grid
+        4.05 0.994 (also 12 visual vs 11 text lines); 568 below 80% 4.05 0.566. Pages 418, 425 and 568 are short
+        (3-4 line) boxes whose italic comments exceed 20% of the glyphs. Page 419's italic-comment block counted
+        by eye (0,4,4,4,4,4,8,8,12,12,8,4,0) equals the converter's. Gate: FAIL only on the same 15 sandbox tests.",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line
