@@ -12,6 +12,11 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Light: Story = { decorators: [themed('light')] };
 export const Dark: Story = { decorators: [themed('dark')] };
+/** FR-NOTEBOOK-11: with the tutor slot, so the contents end with "Ask the tutor". */
+export const WithAside: Story = {
+  args: { aside: (id: string | null, label: string | null) => <section id="tutor">{`Focused: ${id ?? 'none'} ${label ?? ''}`}</section> },
+  decorators: [themed('light')],
+};
 export const Running: Story = {
   args: {
     controller: staticController({

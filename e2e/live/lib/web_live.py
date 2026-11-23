@@ -42,7 +42,7 @@ from passkey_check import EXISTS_SQL, RESET_SQL, bootstrap_token, compose, psql 
 
 HANDLE = "live-check"
 PLAYWRIGHT_TIMEOUT_S = 20 * 60  # whole browser suite; each step inside is bounded by its own timeout
-SLICE_TIMEOUT_S = 210 * 60  # --owner: owner.slice.ts budgets import 10 + embed 80 + bench 20 + compile 75 + 11
+SLICE_TIMEOUT_S = 220 * 60  # --owner: owner.slice.ts budgets import 10 + embed 80 + bench 20 + compile 75 + 11 + ui 10
 REPO = Path(__file__).resolve().parents[3]
 OWNER_PASSKEYS_SQL = (
     "SELECT count(*) FROM webauthn_credentials c JOIN users u ON u.id = c.owner_id WHERE u.role = 'owner';"

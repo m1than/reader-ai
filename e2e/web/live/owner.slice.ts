@@ -10,12 +10,15 @@
 //   compile  imports the course (G1), compiles L02 (POST /api/lessons/{id}/compile), polls GET /api/compiles/{run}.
 //   lesson   opens the compiled L02: screenshot, one lab cell run in the kernel, citations rendered.
 //   tutor    three questions through the Ask panel; latency and grounded per question.
-//   ui       UI review screenshots: sign-in, lesson list, L02 (top, references, lab, tutor) and not-found at 1280,
-//            1024 and 390 px into READER_LIVE_OUT/ui, with axe (serious and critical) per page and width; the L02
-//            revision and the tutor history go to READER_LIVE_OUT/ui/data (book text: outside the repository) for a
-//            local replay. Spends nothing (no Run, no Ask).
+//   ui       WEB-UI FR-UI-10/-11 and WEB-NOTEBOOK FR-NOTEBOOK-11 on the real L02 at 1280, 1024 and 390 px: axe
+//            (serious and critical) on the list and the lesson, no horizontal scroll, prose type and column, the
+//            skip link and the contents (toggle at 390, column at 1280 and 1024, an entry focuses its cell). Review
+//            screenshots (sign-in, list, L02 parts, not-found) go to READER_LIVE_OUT/ui. Spends nothing (no Run, no Ask).
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
-// snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots (outside the repository when slice.sh runs).
+// snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots and READER_LIVE_OUT/ui, and the `ui` step also
+// writes the L02 revision, the lesson list and the tutor history (they hold book text and questions) to
+// READER_LIVE_OUT/ui/data for a local replay; slice.sh refuses an OUT inside the repository, so none of it is
+// committed.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -311,15 +314,37 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   if (sha) writeFileSync(resolve(dir, 'data', 'revision.json'), await (await api.get(`/api/lessons/${lessonId}/revisions/${sha}`)).text());
   writeFileSync(resolve(dir, 'data', 'questions.json'), await (await api.get(`/api/lessons/${lessonId}/questions`)).text());
   const axe: Record<string, string[]> = {};
-  const layout: Record<string, { overflow_px: number; widest_p_px: number }> = {};
-  // WEB-UI FR-UI-10: no horizontal page scroll, prose column ≤ 608 px, no serious or critical axe issue.
+  const signinAxe: Record<string, string[]> = {}; // SRV-AUTH's own page: recorded only (follow-up amendment)
+  type Layout = { overflow_px: number; widest_p_px: number; p_font_size: string; p_line_height: string; p_font_family: string; h1_px: string; chars_per_line_median: number | null };
+  const layout: Record<string, Layout> = {};
+  const serious = (r: { violations: { impact?: string | null; id: string; nodes: unknown[] }[] }) =>
+    r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}:${v.nodes.length}`);
+  // WEB-UI FR-UI-10: no horizontal page scroll, prose column, type, no serious or critical axe issue.
   const check = async (name: string) => {
-    const r = await new AxeBuilder({ page }).analyze();
-    axe[name] = r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}:${v.nodes.length}`);
-    layout[name] = await page.evaluate(() => ({
-      overflow_px: document.documentElement.scrollWidth - window.innerWidth,
-      widest_p_px: Math.max(0, ...[...document.querySelectorAll('[data-markdown] p')].map((p) => Math.round(p.getBoundingClientRect().width))),
-    }));
+    axe[name] = serious(await new AxeBuilder({ page }).analyze());
+    layout[name] = await page.evaluate(() => {
+      const ps = [...document.querySelectorAll('[data-markdown] p')] as HTMLElement[];
+      const cs = ps[0] ? getComputedStyle(ps[0]) : null;
+      // Characters per line, an estimate: text length over line count for paragraphs of 3 or more lines.
+      const perLine = ps
+        .map((p) => {
+          const lh = parseFloat(getComputedStyle(p).lineHeight);
+          const lines = Math.round(p.getBoundingClientRect().height / lh);
+          return lines >= 3 ? (p.textContent ?? '').length / lines : null;
+        })
+        .filter((x): x is number => x !== null)
+        .sort((a, b) => a - b);
+      const h1 = document.querySelector('h1');
+      return {
+        overflow_px: document.documentElement.scrollWidth - window.innerWidth,
+        widest_p_px: Math.max(0, ...ps.map((p) => Math.round(p.getBoundingClientRect().width))),
+        p_font_size: cs?.fontSize ?? '',
+        p_line_height: cs?.lineHeight ?? '',
+        p_font_family: cs?.fontFamily ?? '',
+        h1_px: h1 ? getComputedStyle(h1).fontSize : '',
+        chars_per_line_median: perLine.length ? Math.round(perLine[Math.floor(perLine.length / 2)]!) : null,
+      };
+    });
   };
   const el = async (name: string, selector: string) => {
     const loc = page.locator(selector).first();
@@ -327,12 +352,15 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await loc.scrollIntoViewIfNeeded();
     await loc.screenshot({ path: resolve(dir, `${name}.png`) });
   };
+  const nav = () => page.getByRole('navigation', { name: 'Lesson contents' });
+  const toggle = () => page.getByRole('button', { name: 'Contents' });
   for (const w of WIDTHS) {
     // Sign-in page in a fresh context (no session).
     const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
     const p = await anon.newPage();
     await p.goto('/api/auth/signin');
     await p.screenshot({ path: resolve(dir, `${w}-signin.png`), fullPage: true });
+    signinAxe[`${w}-signin`] = serious(await new AxeBuilder({ page: p }).analyze());
     await anon.close();
 
     await page.setViewportSize({ width: w, height: 900 });
@@ -340,6 +368,13 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(dir, `${w}-list.png`), fullPage: true });
     await check(`${w}-list`);
+    // FR-UI-11: the skip link is the first Tab stop and moves focus to main#content.
+    await page.locator('body').focus();
+    await page.keyboard.press('Tab');
+    await expect.soft(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
+    await page.screenshot({ path: resolve(dir, `${w}-skip-link.png`) });
+    await page.keyboard.press('Enter');
+    await expect.soft(page.locator('main#content')).toBeFocused();
 
     await page.goto(`/lessons/${lessonId}`);
     await expect(page.locator('.cell').first()).toBeVisible({ timeout: 30_000 });
@@ -349,7 +384,26 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await el(`${w}-lesson-lab`, '.cell:has(.lab)');
     await el(`${w}-lesson-tutor`, '.tutor');
     await el(`${w}-lesson-open`, '.cell:has(.open-finding)');
+    await el(`${w}-lesson-recall`, '.cell[data-kind="recall"]');
     await check(`${w}-lesson`);
+    // WEB-NOTEBOOK FR-NOTEBOOK-11: the contents column at 1280 and 1024, behind the toggle at 390.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    const firstEntry = nav().getByRole('link').first();
+    if (w === 390) {
+      await expect.soft(firstEntry, 'contents hidden before the toggle (390)').toBeHidden();
+      await toggle().click();
+      await expect.soft(firstEntry, 'contents visible after the toggle (390)').toBeVisible();
+      await page.screenshot({ path: resolve(dir, `${w}-lesson-contents-open.png`) });
+    } else {
+      await expect.soft(toggle(), `no Contents button (${w})`).toBeHidden();
+      await expect.soft(firstEntry, `contents visible (${w})`).toBeVisible();
+    }
+    // Following an entry scrolls to its cell and focuses it.
+    const href = (await firstEntry.getAttribute('href')) ?? '';
+    await firstEntry.click();
+    await expect.soft(page.locator(href), `${href} focused (${w})`).toBeFocused();
+    await expect.soft(page.locator(href), `${href} in view (${w})`).toBeInViewport();
+    if (w === 390) await expect.soft(firstEntry, 'contents close after an entry (390)').toBeHidden();
     // Keyboard: the first Tab stops from the top of the lesson, screenshot of the focused control.
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('body').focus();
@@ -359,10 +413,17 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await page.goto('/no-such-page');
     await page.screenshot({ path: resolve(dir, `${w}-notfound.png`), fullPage: true });
   }
-  results.ui = { widths: [...WIDTHS], axe_serious_critical: axe, layout, revision: sha };
+  results.ui = { widths: [...WIDTHS], axe_serious_critical: axe, signin_axe_serious_critical_report_only: signinAxe, layout, revision: sha };
   for (const [name, issues] of Object.entries(axe)) expect.soft(issues, `axe ${name}`).toEqual([]);
   for (const [name, l] of Object.entries(layout)) {
     expect.soft(l.overflow_px, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
-    expect.soft(l.widest_p_px, `reading column ${name}`).toBeLessThanOrEqual(608);
+    if (!name.endsWith('-lesson')) continue;
+    const w = Number(name.split('-')[0]);
+    expect.soft(l.widest_p_px, `reading column > 0 ${name}`).toBeGreaterThan(0);
+    expect.soft(l.widest_p_px, `reading column ≤ 608 ${name}`).toBeLessThanOrEqual(608);
+    expect.soft(l.p_font_size, `prose size ${name}`).toBe('17px');
+    expect.soft(Math.abs(parseFloat(l.p_line_height) - 28.05), `prose line height ${name}`).toBeLessThanOrEqual(0.1);
+    expect.soft(l.p_font_family.startsWith('ui-serif'), `prose family ${name}`).toBe(true);
+    expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '30px' : '36px');
   }
 });

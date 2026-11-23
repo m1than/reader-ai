@@ -17,23 +17,28 @@ const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ de
 
 const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 
+// Pages render inside the shell's single `main#content` (FR-UI-11).
 function NotFound() {
   return (
-    <main className="page">
+    <div className="page">
       <h1>Not found</h1>
       <p>
         <Link to="/">Back to lessons</Link>
       </p>
-    </main>
+    </div>
   );
 }
 
-function Loading() {
+function Loading({ label }: { label: string }) {
   return (
-    <Skeleton.Root aria-label="Loading">
-      <Skeleton.Item variant="text" width="60%" />
-      <Skeleton.Item variant="text" width="40%" />
-    </Skeleton.Root>
+    <div aria-busy="true" role="status">
+      <span className="visually-hidden">{label}</span>
+      <Skeleton.Root>
+        <Skeleton.Item variant="text" width="60%" />
+        <Skeleton.Item variant="text" width="80%" />
+        <Skeleton.Item variant="text" width="40%" />
+      </Skeleton.Root>
+    </div>
   );
 }
 
@@ -41,12 +46,12 @@ function ListPage() {
   const { api } = useServices();
   const q = useQuery(queries(api).lessons());
   return (
-    <main className="page">
+    <div className="page">
       <h1>Lessons</h1>
       {q.isPending ? (
-        <Loading />
+        <Loading label="Loading the lessons" />
       ) : q.isError ? (
-        <div className="error">
+        <div className="error state-actions">
           <p>The lessons could not be loaded.</p>
           <Button variant="outline" color="neutral" onClick={() => void q.refetch()}>
             Retry
@@ -55,7 +60,7 @@ function ListPage() {
       ) : (
         <LessonList lessons={q.data.lessons} locale={locale()} />
       )}
-    </main>
+    </div>
   );
 }
 
@@ -70,7 +75,13 @@ const lessonRoute = createRoute({
     const { lessonId } = lessonRoute.useParams();
     if (!isLessonId(lessonId)) return <NotFound />;
     return (
-      <Suspense fallback={<Loading />}>
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading label="Loading the lesson" />
+          </div>
+        }
+      >
         <LessonPage lessonId={lessonId} />
       </Suspense>
     );

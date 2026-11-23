@@ -53,7 +53,8 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     await act(async () => {
       render(<AppRoot initialPath="/lessons/w01" fetch={fetchFn as unknown as typeof fetch} navigateAway={vi.fn()} />);
     });
-    await waitFor(() => expect(screen.getByText('Digests')).toBeTruthy());
+    // The heading also appears in the lesson contents (FR-NOTEBOOK-11); the cell renders it as an h2.
+    await waitFor(() => expect(screen.getByText('Digests', { selector: 'h2' })).toBeTruthy());
     expect(urls).toEqual(expect.arrayContaining(['/api/lessons/w01', `/api/lessons/w01/revisions/${sha}`]));
     for (const label of ['diagnostic', 'reading route', 'explanation', 'what changed', 'erratum', 'trade-off', 'lab', 'recall', 'notes', 'open question'])
       expect(screen.getAllByText(label).length, label).toBeGreaterThan(0);

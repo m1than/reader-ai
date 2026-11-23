@@ -188,13 +188,15 @@ requirements:
       Layout and type (WEB polish, from the live screenshots of 2026-11-23). Spacing uses the library's
       `--acme-space-1..7` steps only; colours only Calm tokens (INV-UI-1 unchanged). Prose (lesson markdown, the
       tutor's answers) is set in the serif stack `ui-serif, Georgia, 'Iowan Old Style', serif` (system fonts only: no
-      web font is fetched) at 1.0625rem (17px) with line height 1.65, in a reading column at most 38rem wide (an
+      web font is fetched for text; KaTeX's bundled math fonts are the only font files, FR-UI-9) at 1.0625rem (17px) with line height 1.65, in a reading column at most 38rem wide (an
       estimate of about 70 Cyrillic characters per line against about 92 in the slice's 46rem column; the `ui` step
-      records the measured median in slice-results.json, not asserted); the lesson `h1` is 2.25rem, markdown headings
+      records the measured median in slice-results.json, not asserted); the lesson `h1` is 2.25rem (1.875rem below
+      40rem), markdown headings
       1.5 and 1.2rem; UI chrome (header, labels, buttons, references, list metadata) uses the library's sans
       `--acme-font` at 0.8125–0.875rem. Widths: at 1280 and 1024 px the lesson shows its contents column beside the
-      reading column (WEB-NOTEBOOK FR-NOTEBOOK-11), below 60rem one column. Markdown tables and display math scroll
-      inside their own box. At 1280, 1024 and 390 px no page scrolls horizontally. Every interactive element (links,
+      reading column (WEB-NOTEBOOK FR-NOTEBOOK-11), below 60rem one column. Markdown tables fit the column (cells
+      wrap and long words break; a scrolling table is a scroll region keyboard users cannot reach, axe
+      `scrollable-region-focusable`, measured on L02 2026-11-23); display math scrolls inside its own box. At 1280, 1024 and 390 px no page scrolls horizontally. Every interactive element (links,
       buttons, text areas, the disclosure summary, the skip link) shows a 2px `--acme-focus` outline on
       `:focus-visible`.
       [unit] a scan of `web/src/ui/app.css`: no literal colour (no hex value and no colour function, `color-mix`
@@ -205,7 +207,8 @@ requirements:
       `:focus-visible` rule whose outline is `2px solid var(--acme-focus)`. [live] the `ui` step of
       e2e/web/live/owner.slice.ts on the running stack: at each width `scrollWidth` ≤ the viewport width on the list
       and on L02; on L02 the widest `[data-markdown] p` is > 0 and ≤ 608px, its computed `font-size` is 17px, its
-      `line-height` 28.05px (± 0.1) and its `font-family` begins with `ui-serif`, and the `h1` is 36px; axe reports no
+      `line-height` 28.05px (± 0.1) and its `font-family` begins with `ui-serif`, and the `h1` is 36px at 1280 and
+      1024 px and 30px at 390 px; axe reports no
       serious or critical issue.
   - id: FR-UI-11
     text: >-

@@ -99,7 +99,9 @@ requirements:
       its kind as a quiet label (diagnostic, reading route, explanation, what changed, erratum, trade-off, lab, recall,
       notes, open question) and its source: markdown cells through WEB-RENDER's markdown component, code cells as
       highlighted code (WEB-RENDER). A cell without `metadata.reader.kind`, or with an unknown kind, renders as a plain
-      markdown or code cell without a label. Stored outputs of code cells render through WEB-RENDER. [unit] [story]
+      markdown or code cell without a label. Stored outputs of code cells render through WEB-RENDER. (A cell's heading
+      text also appears in the lesson contents, FR-NOTEBOOK-11, so tests find the cell's own heading by its element.)
+      [unit] [story]
   - id: FR-NOTEBOOK-2
     text: >-
       Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`

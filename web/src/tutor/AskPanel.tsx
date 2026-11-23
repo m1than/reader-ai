@@ -1,9 +1,9 @@
 // The tutor's Ask panel (SRV-TUTOR FR-TUTOR-11): a question about the open lesson (and the focused cell), polled
 // until a terminal state; the answer is shown only after the server has checked it (no streaming).
 import { Button } from '@acme/ui/button';
-import { useEffect, useId, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useId, useState, type KeyboardEvent } from 'react';
 import { ApiError } from '../app/api';
-import { formatCitation } from '../notebook/citations';
+import { groupCitations } from '../notebook/citations';
 import type { AnswerBlock, AskBody, HistoryItem, QuestionState, TutorApi } from './api';
 import { messageFor } from './messages';
 import { TutorText } from './TutorText';
@@ -31,11 +31,12 @@ function Block({ block }: { block: AnswerBlock }) {
       <TutorText text={block.text} />
       {block.citations.length > 0 && (
         <p className="muted tutor-citations">
-          {block.citations.map((c, i) => (
-            <span key={i}>
+          {/* One entry per material with page ranges, text only (WEB-NOTEBOOK FR-NOTEBOOK-2). */}
+          {groupCitations(block.citations).map((r, i) => (
+            <Fragment key={i}>
               {i > 0 ? '; ' : ''}
-              {formatCitation(c).text /* span citations are text only (WEB-NOTEBOOK FR-NOTEBOOK-2) */}
-            </span>
+              <span>{r.text}</span>
+            </Fragment>
           ))}
         </p>
       )}
@@ -79,11 +80,14 @@ export interface AskPanelProps {
   lessonId: string;
   revision: string | null;
   cellId: string | null;
+  /** The focused cell's lesson-contents label (WEB-NOTEBOOK FR-NOTEBOOK-11), shown as "About: …". */
+  cellLabel?: string | null;
   api: TutorApi;
 }
 
-export function AskPanel({ lessonId, revision, cellId, api }: AskPanelProps) {
+export function AskPanel({ lessonId, revision, cellId, cellLabel = null, api }: AskPanelProps) {
   const inputId = useId();
+  const hintId = useId();
   const [text, setText] = useState('');
   const [asking, setAsking] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -205,12 +209,16 @@ export function AskPanel({ lessonId, revision, cellId, api }: AskPanelProps) {
   };
 
   return (
-    <section className="tutor" aria-label="Tutor">
-      <h2>Ask the tutor</h2>
+    <section className="tutor" id="tutor" aria-label="Tutor" tabIndex={-1}>
+      <h2>Tutor</h2>
+      {cellId !== null && <p className="muted tutor-about">{`About: ${cellLabel ?? 'the selected cell'}`}</p>}
       <label htmlFor={inputId}>Ask the tutor</label>
-      <textarea id={inputId} value={text} rows={3} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
+      <textarea id={inputId} value={text} rows={3} aria-describedby={hintId} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
       <div className="tutor-controls">
-        <span className="muted" aria-live="off">{`${text.length} / ${QUESTION_CHARS_MAX}`}</span>
+        <span className="muted tutor-count" aria-live="off">{`${text.length} / ${QUESTION_CHARS_MAX}`}</span>
+        <span className="muted tutor-hint" id={hintId}>
+          Ctrl+Enter or ⌘+Enter to ask
+        </span>
         <Button size="sm" disabled={!valid || asking} onClick={() => void submit()}>
           Ask
         </Button>

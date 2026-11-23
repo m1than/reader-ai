@@ -1,6 +1,7 @@
 // The app shell (WEB-UI FR-UI-3, FR-UI-5, FR-UI-7): checks the session with /api/me first, then routes; the header
 // shows the signed-in name and Sign out; notices are collected in one region.
 import { Button } from '@acme/ui/button';
+import { Skeleton } from '@acme/ui/skeleton';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
@@ -46,21 +47,56 @@ function Header({ displayName, queryClient }: { displayName: string; queryClient
   );
 }
 
+/** FR-UI-11: the first Tab stop; following it focuses the shell's single `main`. */
+function SkipLink() {
+  return (
+    <a
+      className="skip-link"
+      href="#content"
+      onClick={() => {
+        const main = document.getElementById('content');
+        if (main) window.setTimeout(() => main.focus({ preventScroll: true }), 0);
+      }}
+    >
+      Skip to content
+    </a>
+  );
+}
+
 function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: string; router: ReturnType<typeof createAppRouter> }) {
   const { api } = useServices();
   const me = useQuery(queries(api).me());
-  if (me.isPending) return <p className="page muted">Loading…</p>;
+  if (me.isPending)
+    return (
+      <>
+        <div className="app-header" aria-hidden="true" />
+        <div className="page" aria-busy="true" role="status">
+          <span className="visually-hidden">Loading</span>
+          <Skeleton.Root>
+            <Skeleton.Item variant="text" width="40%" height="2.25rem" />
+            <Skeleton.Item variant="text" width="90%" />
+            <Skeleton.Item variant="text" width="75%" />
+          </Skeleton.Root>
+        </div>
+      </>
+    );
   if (me.isError) return <p className="page muted">Signing in…</p>;
   return (
     <>
+      <SkipLink />
       <Header displayName={me.data.display_name} queryClient={queryClient} />
-      {isBadLessonPath(path) ? (
-        <main className="page">
-          <h1>Not found</h1>
-        </main>
-      ) : (
-        <RouterProvider router={router} />
-      )}
+      <main id="content" tabIndex={-1}>
+        {isBadLessonPath(path) ? (
+          <div className="page">
+            <h1>Not found</h1>
+            <p>
+              <a href="/">Back to lessons</a>
+            </p>
+          </div>
+        ) : (
+          <RouterProvider router={router} />
+        )}
+      </main>
     </>
   );
 }

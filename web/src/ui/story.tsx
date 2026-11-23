@@ -79,11 +79,30 @@ export const sampleNotebook = {
   metadata: { reader: { title: 'Hashing' } },
   cells: [
     {
-      cell_type: 'markdown', id: 'e', source: '## Digests\n\nA collision is expected after about $2^{n/2}$ tries.',
-      metadata: { reader: { kind: 'explain', claims: [{ text: 't', citations: [{ span: `${'a'.repeat(64)}:12`, page: 12, material_title: 'Sample material' }] }] } },
+      cell_type: 'markdown', id: 'd', source: 'Before you start, answer these.',
+      metadata: { reader: { kind: 'diagnostic', questions: [{ id: 'q1', text: 'What does a digest map its input to?' }, { id: 'q2', text: 'Bits or bytes?' }] } },
     },
+    {
+      cell_type: 'markdown', id: 'r', source: 'Read the chapter on digests first.',
+      metadata: { reader: { kind: 'route', source_refs: [{ span: `${'a'.repeat(64)}:10`, page: 11 }, { span: `${'a'.repeat(64)}:11`, page: 11 }] } },
+    },
+    {
+      cell_type: 'markdown', id: 'e', source: '## Digests\n\nA collision is expected after about $2^{n/2}$ tries.',
+      metadata: {
+        reader: {
+          kind: 'explain',
+          claims: [{ text: 't', citations: [12, 12, 13, 14, 16].map((page, i) => ({ span: `${'a'.repeat(64)}:${12 + i}`, page, material_title: 'Sample material' })) }],
+        },
+      },
+    },
+    { cell_type: 'markdown', id: 'rc', source: '', metadata: { reader: { kind: 'recall', front: 'Collision bound for an n-bit digest?', back: 'About 2^(n/2) tries.' } } },
+    { cell_type: 'markdown', id: 'n', source: '', metadata: { reader: { kind: 'notes' } } },
     { cell_type: 'code', id: 'l', source: 'print(1)', execution_count: 1, outputs: [{ output_type: 'stream', name: 'stdout', text: '1\n' }], metadata: { reader: { kind: 'lab' } } },
     { cell_type: 'markdown', id: 'o', source: 'Open: bits or bytes?', metadata: { reader: { kind: 'open', status: 'open', finding: { gate: 'G2', reason: 'not confirmed by fact-check' } } } },
   ],
 };
-export const sampleLesson = { ...sampleLessons.lessons[0], revisions: [{ sha256: sampleSha, created_at: '2026-11-21T09:00:00Z' }] };
+// SRV-LESSON FR-LESSON-8: the metadata nested under `lesson`.
+export const sampleLesson = {
+  lesson: sampleLessons.lessons[0],
+  revisions: [{ sha256: sampleSha, byte_size: 1, cell_count: 7, created_at: '2026-11-21T09:00:00Z', stages: ['sample'] }],
+};

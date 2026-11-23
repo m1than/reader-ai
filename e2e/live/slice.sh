@@ -4,8 +4,8 @@
 #
 #   bash e2e/live/slice.sh --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]
 #
-#   --steps   default: routes,import,embed,bench,compile,lesson,tutor (see e2e/web/live/owner.slice.ts).
-#             `routes` alone, or `bench`, spends nothing; `compile` spends up to the run cap ($8), `tutor` up to
+#   --steps   default: routes,import,embed,bench,compile,lesson,tutor,ui (see e2e/web/live/owner.slice.ts).
+#             `routes` alone, `bench` or `ui` spends nothing; `compile` spends up to the run cap ($8), `tutor` up to
 #             3 × $0.30.
 #   --out     required, outside the repository: screenshots and Playwright's failure snapshots show book text.
 #             Only OUT/slice-results.json and OUT/ingest.json (numbers and ids) are meant for e2e/live/results/.
@@ -22,7 +22,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 USAGE="usage: $0 --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]"
 CONFIG=""
-STEPS="routes,import,embed,bench,compile,lesson,tutor"
+STEPS="routes,import,embed,bench,compile,lesson,tutor,ui"
 OUT=""
 INGEST=1
 RESET=()
