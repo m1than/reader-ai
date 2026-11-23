@@ -1,5 +1,5 @@
 # @trace FR-PIPELINE-16
-"""A stopped step's SRV-AGENT error code in the compile status routes (for WEB-UI FR-UI-13). [db]
+"""A stopped step's SRV-AGENT error code in the compile status routes (for WEB-UI FR-UI-15). [db]
 
 The fake agent-proxy client refuses to issue a run token for a handle in `missing`, as the real proxy answers 409
 `provider_missing` for a user without a loaded token; no credit is spent anywhere.

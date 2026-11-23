@@ -1,4 +1,4 @@
-// @trace FR-UI-13
+// @trace FR-UI-15
 // The owner's Compile action and compile status in the lesson list (V/compile-ui). Everything runs against a stub
 // fetch; nothing here starts a real compile.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';

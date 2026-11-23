@@ -1,5 +1,5 @@
 // @trace FR-NOTEBOOK-12
-// The not-published lesson page offers the owner WEB-UI FR-UI-13's compile control and renders the lesson once a
+// The not-published lesson page offers the owner WEB-UI FR-UI-15's compile control and renders the lesson once a
 // compile has written a revision; a learner's page is unchanged. Stub fetch only; nothing starts a real compile.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';

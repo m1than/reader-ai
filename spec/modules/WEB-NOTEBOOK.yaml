@@ -57,7 +57,7 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   surviving mutants closed as test gaps with paired wording — url wins over span, empty material ids dropped, safe
   integer pages, numeric page order, top-level non-empty headings, one recall entry, no nav without entries,
   role=list, status regions without aria-busy, the live scroll test on the last entry. Amendment 2026-11-23
-  (V/compile-ui, paired with WEB-UI FR-UI-13): FR-NOTEBOOK-12's not-published page offers the owner WEB-UI's
+  (V/compile-ui, paired with WEB-UI FR-UI-15): FR-NOTEBOOK-12's not-published page offers the owner WEB-UI's
   CompileControl and renders the lesson once a compile has written a revision; FR-NOTEBOOK-1's \"nothing else\" now
   points there. Learners see no change. Self-approved by agent with its Red test; the coordinator runs one
   deep-reviewer round before Green"
@@ -255,7 +255,7 @@ requirements:
       lessons" link; any other error shows "The lesson could not be loaded." with a Retry button that refetches the
       failed query and a "Back to lessons" link; a lesson not published yet keeps FR-NOTEBOOK-1's text and adds the
       "Lessons" back link. For a user with role `owner` (from `/api/me`) the not-published page also shows WEB-UI
-      FR-UI-13's `CompileControl` for this lesson under that text: its status read (always, the page shows one
+      FR-UI-15's `CompileControl` for this lesson under that text: its status read (always, the page shows one
       lesson), the "Compile" or "Retry" button, the same confirm dialog, error copy and polling. When that control
       invalidates `['lesson', id]` and the refetched lesson has a `latest_sha256`, the page loads that revision and
       renders the lesson. A learner's page is unchanged and makes no compile or estimate request.

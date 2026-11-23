@@ -54,7 +54,7 @@
 # re-checked under the lock, and renumbering for origin `study_plan`) and FR-PIPELINE-15 (run creation takes the same
 # course lock and can refuse `already_started`), for SRV-PLAN. Paired: SRV-LESSON FR-LESSON-15. Promoted with their
 # Red tests.
-# Amendment (2026-11-23, V/compile-ui, for WEB-UI FR-UI-13): FR-PIPELINE-16, a stopped step's SRV-AGENT error code in
+# Amendment (2026-11-23, V/compile-ui, for WEB-UI FR-UI-15): FR-PIPELINE-16, a stopped step's SRV-AGENT error code in
 # the status routes, so the owner's list can say "No AI provider is connected" instead of only "Compile stopped".
 # Today a permanent agent error reaches SRV-EVENTS as the exception's class name (`AgentError`, FR-EVENTS-6), so
 # `provider_missing` is not recoverable from the job key. Self-approved by agent with its Red test; jobs and the

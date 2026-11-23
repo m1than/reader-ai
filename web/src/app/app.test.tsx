@@ -75,7 +75,7 @@ describe('sign-in and header (FR-UI-5)', () => {
 
 describe('lesson list (FR-UI-6)', () => {
   it('groups by course, orders by ordinal, links published lessons only', async () => {
-    // A learner: the owner's unpublished rows carry FR-UI-13's compile status instead of "not published yet".
+    // A learner: the owner's unpublished rows carry FR-UI-15's compile status instead of "not published yet".
     await mount('/', { '/api/me': () => json(200, { ...me, role: 'learner' }), '/api/lessons': () => json(200, fx().list) });
     await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
     expect(screen.getByText('Another course')).toBeTruthy();

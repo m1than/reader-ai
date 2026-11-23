@@ -2,7 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { sampleLessons, sampleMe, themed, withServices } from '../../ui/story';
 import { CompileControl } from './CompileControl';
 
-// WEB-UI FR-UI-13: the owner's compile control in each state, and its confirm dialog.
+// WEB-UI FR-UI-15: the owner's compile control in each state, and its confirm dialog.
 const lesson = sampleLessons.lessons[1]!;
 const status = (state: string, extra: Record<string, unknown> = {}) => ({
   run_id: 'run-1', lesson_id: lesson.lesson_id, state, cap_usd: '8.00',
