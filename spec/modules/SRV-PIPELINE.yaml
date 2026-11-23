@@ -54,6 +54,11 @@
 # re-checked under the lock, and renumbering for origin `study_plan`) and FR-PIPELINE-15 (run creation takes the same
 # course lock and can refuse `already_started`), for SRV-PLAN. Paired: SRV-LESSON FR-LESSON-15. Promoted with their
 # Red tests.
+# Amendment (2026-11-23, V/compile-ui, for WEB-UI FR-UI-13): FR-PIPELINE-16, a stopped step's SRV-AGENT error code in
+# the status routes, so the owner's list can say "No AI provider is connected" instead of only "Compile stopped".
+# Today a permanent agent error reaches SRV-EVENTS as the exception's class name (`AgentError`, FR-EVENTS-6), so
+# `provider_missing` is not recoverable from the job key. Self-approved by agent with its Red test; jobs and the
+# compile pipeline are complex areas, so the coordinator's deep-reviewer round must approve it before Green.
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).
@@ -113,7 +118,7 @@ bounds:
 
 tables:
   course_plans: { owner_id: true, columns: "owner_id, plan_course_id text, plan_lesson_id text, lesson_id uuid → lessons, material_sha256, pdf_first int, pdf_last int, g1_at timestamptz; unique (owner_id, plan_course_id, plan_lesson_id); unique (lesson_id)" }
-  compile_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, cap_usd numeric(8,2), task_budgets jsonb (snapshot of the tasks' budget_usd_per_lesson at start), budget_refused text null (the first refusal code), loops int, base_sha256 text null, last_model_sha256 text null, final_sha256 text null, g2 jsonb null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id)" }
+  compile_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, cap_usd numeric(8,2), task_budgets jsonb (snapshot of the tasks' budget_usd_per_lesson at start), budget_refused text null (the first refusal code), stage_error jsonb null ({step, code}, FR-PIPELINE-16; migration pipeline_0003), loops int, base_sha256 text null, last_model_sha256 text null, final_sha256 text null, g2 jsonb null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id)" }
   compile_steps: { owner_id: true, columns: "id bigint identity pk, owner_id, run_id → compile_runs, step int, stage text, input_sha256 text, output_sha256 text null, report jsonb null, reused_from bigint null → compile_steps, model text null, cost_usd numeric(12,6), duration_s numeric, created_at; unique (run_id, step); index (owner_id, stage, input_sha256)" }
 
 errors: [no_material, no_source_spans, source_too_large, lesson_unknown, compile_running, output_invalid,
@@ -302,6 +307,23 @@ requirements:
       `require_course_unstarted`, any compile run of any lesson of the same plan course raises `already_started`
       (SRV-PLAN's compile-first target). `compile_running` and SRV-AGENT's budget refusals are unchanged; the route
       passes the default and behaves as before. [db]
+  - id: FR-PIPELINE-16
+    text: >-
+      **A stopped step's error code.** When a model step's provider call raises a permanent SRV-AGENT error (an
+      `AgentError` that is neither transient nor a budget refusal, FR-AGENT-10: `sdk_error`, `tools_mismatch`,
+      `unknown_model`, `provider_missing`, `usage_unmapped`), the handler records `{"step": <step>, "code": <code>}`
+      in `compile_runs.stage_error` (jsonb null; migration `pipeline_0003`, whose downgrade drops the column) in a
+      transaction of its own, then re-raises the same exception, so SRV-EVENTS judges it as before (`dead`). The
+      handler's own transaction rolls back with the failure; up to the model call it has only read, so the second
+      transaction waits on no lock the first holds. The status routes (FR-PIPELINE-11) add `error`: the recorded code
+      when the run is `stage_failed` and its failed (pending) step is the recorded `step`, else null.
+      `POST /api/compiles/{run_id}/resume` sets `stage_error` to null in the transaction before it requeues. The code
+      is fixed text from SRV-AGENT's catalogue, never a message. [db] server/tests/pipeline/test_stage_error_db.py:
+      an owner without a provider (`provider_missing` at `draft`) gives `stage_failed` with `error:
+      "provider_missing"`; after resume, `error` is null and the column is null; a step that dies of exhausted
+      transient attempts (`output_invalid`) gives `stage_failed` with `error: null`; a code recorded for step 1 is
+      not reported when step 2 is the one that stopped; the resumed run converges with `error: null`; the job key's
+      own `error_code` stays the class name (SRV-EVENTS unchanged).
 
 invariants:
   - id: INV-PIPELINE-1

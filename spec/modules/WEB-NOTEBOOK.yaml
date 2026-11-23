@@ -56,7 +56,11 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   focusable by link, 404 'Lesson not found'. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16
   surviving mutants closed as test gaps with paired wording — url wins over span, empty material ids dropped, safe
   integer pages, numeric page order, top-level non-empty headings, one recall entry, no nav without entries,
-  role=list, status regions without aria-busy, the live scroll test on the last entry"
+  role=list, status regions without aria-busy, the live scroll test on the last entry. Amendment 2026-11-23
+  (V/compile-ui, paired with WEB-UI FR-UI-13): FR-NOTEBOOK-12's not-published page offers the owner WEB-UI's
+  CompileControl and renders the lesson once a compile has written a revision; FR-NOTEBOOK-1's \"nothing else\" now
+  points there. Learners see no change. Self-approved by agent with its Red test; the coordinator runs one
+  deep-reviewer round before Green"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
@@ -97,7 +101,7 @@ requirements:
   - id: FR-NOTEBOOK-1
     text: >-
       The lesson view loads `GET /api/lessons/{lesson_id}`; when `latest_sha256` is null it shows "not published yet"
-      and nothing else; otherwise it loads `GET /api/lessons/{lesson_id}/revisions/{latest_sha256}` (cached for the life
+      and nothing else (FR-NOTEBOOK-12 adds the back link and, for the owner, the compile control); otherwise it loads `GET /api/lessons/{lesson_id}/revisions/{latest_sha256}` (cached for the life
       of the page under that sha256, since a revision is immutable) and renders the cells in order. Each cell shows
       its kind as a quiet label (diagnostic, reading route, explanation, what changed, erratum, trade-off, lab, recall,
       notes, open question) and its source: markdown cells through WEB-RENDER's markdown component, code cells as
@@ -250,7 +254,14 @@ requirements:
       hidden from assistive technology; a 404 for the lesson shows "Lesson not found" with only a "Back to
       lessons" link; any other error shows "The lesson could not be loaded." with a Retry button that refetches the
       failed query and a "Back to lessons" link; a lesson not published yet keeps FR-NOTEBOOK-1's text and adds the
-      "Lessons" back link. [unit] [story]
+      "Lessons" back link. For a user with role `owner` (from `/api/me`) the not-published page also shows WEB-UI
+      FR-UI-13's `CompileControl` for this lesson under that text: its status read (always, the page shows one
+      lesson), the "Compile" or "Retry" button, the same confirm dialog, error copy and polling. When that control
+      invalidates `['lesson', id]` and the refetched lesson has a `latest_sha256`, the page loads that revision and
+      renders the lesson. A learner's page is unchanged and makes no compile or estimate request.
+      [unit] [story] the page states; [unit] web/src/notebook/compile.test.tsx: owner (button, confirm, the revision rendered after the status
+      reports one) and learner (no button, no compile request); [story] LessonPage's not-published state for the
+      owner.
 
 invariants:
   - id: INV-NOTEBOOK-1

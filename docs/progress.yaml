@@ -1125,6 +1125,18 @@ tasks:
         vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
         bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
         with axe 0 serious at 1280/1024/390." }
+  - { id: V.compile-ui, stage: V, kind: module, track: product, status: in_progress, branch: V/compile-ui,
+      needs: [V.onboarding-plan],
+      what: "The owner cannot study the 105 planned lessons: the list links only published lessons and the only UI path
+        that starts a compile is /import's 'Start compiling lesson 1'. An owner-only Compile action with a confirm
+        (per-lesson estimate, stops at $8.00) and compile status in the list (FR-UI-13) and on the not-published page
+        (FR-NOTEBOOK-12). Two server pieces were missing and are added: a per-lesson estimate route (SRV-PLAN
+        FR-PLAN-13; no route exposed a lesson's characters) and a stopped step's error code in the status (SRV-PIPELINE
+        FR-PIPELINE-16; `provider_missing` reached SRV-EVENTS only as the class name AgentError).",
+      next: "Spec amendments and Red tests committed; waiting for the coordinator's deep-reviewer round, then Green and
+        BASE=origin/main bash tools/ci-local.sh. No compile is started by the agent (spend); no live step.",
+      note: "Coordination: FR-UI-13 takes the compile-status bullet of V/onboarding's draft (WEB-UI proposed FR-UI-13);
+        the upload track drops that bullet at merge and keeps its first-run bullet as proposed FR-UI-14." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

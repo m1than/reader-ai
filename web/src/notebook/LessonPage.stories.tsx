@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { failingFetch, pendingFetch, sampleLesson, sampleNotebook, sampleSha, themed, withRouter, withServices } from '../ui/story';
+import { failingFetch, pendingFetch, sampleLesson, sampleLessons, sampleMe, sampleNotebook, sampleSha, themed, withRouter, withServices } from '../ui/story';
 import { LessonPage } from './LessonPage';
 
 const routes = { '/api/lessons/w01': sampleLesson, [`/api/lessons/w01/revisions/${sampleSha}`]: sampleNotebook };
@@ -22,3 +22,8 @@ export const NotFound: Story = { args: { lessonId: 'missing' }, decorators: [the
 export const Loading: Story = { decorators: [withServices({}, pendingFetch), themed('light')] };
 /** FR-NOTEBOOK-12: a server error — the message, Retry and a way back. */
 export const ServerError: Story = { decorators: [withServices({}, failingFetch), themed('light')] };
+/** FR-NOTEBOOK-12 (amended): a lesson not published yet, for the owner — WEB-UI FR-UI-13's compile control. */
+export const NotPublishedOwner: Story = {
+  args: { lessonId: 'w02' },
+  decorators: [withServices({ '/api/me': sampleMe, '/api/lessons/w02': { lesson: sampleLessons.lessons[1], revisions: [] } }), themed('light')],
+};
