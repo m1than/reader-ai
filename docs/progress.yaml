@@ -1141,7 +1141,10 @@ tasks:
         FR-EVENTS-17 dead_error_code_of, off-list codes clear the record, the open-runs cost notes and a 101-run test.
         Green built (server routes, migration pipeline_0003, CompileControl, list chip, page control, test-server
         stub); browser suite 211 passed incl. e2e/web/ui/compile.spec.ts at 1280/1024/390 (axe 0 serious/critical,
-        no horizontal scroll, no CSP violation). Next: code review. No compile is started by the agent; no live step.",
+        no horizontal scroll, no CSP violation). Code review on cb81aff: VERDICT approve; its items applied with
+        paired tests (submitAction, polling window restart on any new run, AgentError in derive, id tie-break, owner
+        filter with the other owner first, axe on the Resume dialog and in dark). Merged into V/slice-integration;
+        live checks batched by the coordinator after the owner's OK. No compile started by the agent; no live step.",
       note: "Coordination (coordinator, 2026-11-23): this item is FR-UI-15. FR-UI-13 stays the upload track's id
         (V/onboarding, left untouched here): it keeps its first-run bullet and drops its compile-status bullet at merge,
         which FR-UI-15 supersedes. FR-UI-14 is V/signup's; FR-UI-16 and above are the design pass's." }
