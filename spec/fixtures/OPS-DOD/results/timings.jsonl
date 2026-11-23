@@ -1,0 +1,8 @@
+{"operation": "lesson.read", "ms": 50, "run": "r1"}
+{"operation": "lesson.read", "ms": 70, "run": "r1"}
+{"operation": "lesson.read", "ms": 60, "run": "r1"}
+{"operation": "tutor.ask", "ms": 12000, "run": "r1"}
+{"operation": "tutor.ask", "ms": 15000, "run": "r1"}
+{"operation": "stack.up", "ms": 900, "run": "r1", "per": "page"}
+{"operation": "stack.up", "ms": 1200, "run": "r1", "per": "page"}
+{"operation": "stack.up", "ms": 99999, "run": "r1"}

@@ -34,7 +34,7 @@ Unknown numbers are measured before the spec is approved, in `spikes/<name>/` wi
 | Module | `(SRV|WEB|OPS)-<NAME>` | `SRV-INGEST`, `WEB-NOTEBOOK`, `OPS-DEPLOY` |
 | Item | `(REF|FR|INV|NFR|VEC)-<NAME>-<n>` | `FR-INGEST-3` |
 | ADR | `ADR-NNNN` | `ADR-0009` |
-| Tests | `server/tests/**/test_*.py`, `web/**/*.test.ts(x)`, `e2e/**/*.spec.ts` | |
+| Tests | `server/tests/**/test_*.py`, `web/**/*.test.ts(x)`, `e2e/**/*.spec.ts`, `tools/dod/*.test.mjs` (node:test, OPS-DOD) | |
 | Implementation | `server/src/**`, `web/src/**`, `sandbox/**`, `deploy/**` | |
 
 Every spec declares `paths`: globs of the files the module owns.
@@ -59,7 +59,9 @@ Every spec also declares a `track`, so that planning, review and the backlog kee
 | T6 | ADR is well-formed; accepted requires verified_by and revisit_when |
 | T7 | Specs reference only existing ADRs |
 | T8 | Spec-first: every implementation file is claimed by the `paths` of an approved/implemented spec |
+| T10 | The Definition-of-Done index (spec/fixtures/OPS-DOD/operations.yaml) is well-formed and matches the specs, tests, live labels and the route and CLI registries; an `enforced` operation has no `missing` cell (OPS-DOD FR-DOD-3) |
 | P7 | On a PR, a test traced to an approved spec changes only together with that spec; escape hatch: commit trailer `Spec-Neutral: <reason>` |
+| P8 | On a PR, the Definition of Done is not loosened (an operation demoted or removed, a budget loosened, a new `not_user_facing` entry, a new or changed waiver, …); owner's path: commit trailer `DoD-Owner-Change: <reason>` (OPS-DOD FR-DOD-13) |
 
 ## Hook rules (tools/hooks/pre-write.mjs, Write/Edit/MultiEdit)
 
@@ -68,6 +70,7 @@ Every spec also declares a `track`, so that planning, review and the backlog kee
 | H1 | Spec-first: an implementation file is writable only if an approved/implemented spec claims it |
 | H2 | A test traced to an approved spec changes only if the spec is modified in the working tree |
 | H3 | The agent never raises status: spec to approved/implemented, ADR to accepted/rejected/superseded |
+| H4 | The agent never adds or changes a waiver: a write of the Definition-of-Done index whose set of `waived` cells gains or changes a cell is refused (OPS-DOD FR-DOD-12) |
 
 The hook fails closed when its dependencies are missing. Writes through Bash bypass the hook; T8 and P7 in CI close that gap, and CLAUDE.md forbids project writes through Bash.
 
