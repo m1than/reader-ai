@@ -1,16 +1,21 @@
 // @trace FR-UI-15
-// The owner's Compile action and compile status in the lesson list (V/compile-ui). Everything runs against a stub
-// fetch; nothing here starts a real compile.
+// The owner's Compile action and compile state in the lesson list (V/compile-ui). Run state, not `latest_sha256`,
+// says whether a compile finished: the draft step already writes a revision. Everything runs against a stub fetch;
+// nothing here starts a real compile.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readYaml } from './testing/fixtures';
 import { load } from './testing/load';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const owner = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
 const learner = { ...owner, handle: 'anna', role: 'learner', display_name: 'Anna' };
 const SHA = '3'.repeat(64);
+const CHIP = 'draft, compile not finished';
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
@@ -35,10 +40,12 @@ const run = (state: string, steps: unknown[], extra: Record<string, unknown> = {
   refusals: [],
   g2: null,
   latest_sha256: null,
+  error: null,
   ...extra,
 });
 const done = (step: number, stage: string) => ({ step, stage, model: 'claude-opus-5-5', cost_usd: '0.600000', duration_s: 12.5, reused: false });
 const pending = (step: number, stage: string, status: string) => ({ step, stage, status, reused: false });
+const runs = (...rs: unknown[]) => ({ runs: rs });
 
 const estimate = (kchars = '22.104', extrapolated = true) => ({
   lesson_id: 'w02',
@@ -69,35 +76,81 @@ const mount = async (path: string, handler: Handler) => {
 };
 
 const listOf = (lessons: unknown[]) => ({ lessons });
-const w02List = () => listOf([lesson('w01', 1, '1'.repeat(64)), lesson('w02', 2)]);
+const w02List = (sha: string | null = null) => listOf([lesson('w01', 1, '1'.repeat(64)), lesson('w02', 2, sha)]);
+
+/** The owner's list with a fixed open-runs answer. */
+const ownerList = (list: unknown, open: unknown = runs()): Handler => (url) =>
+  url === '/api/me' ? json(200, owner) : url === '/api/lessons' ? json(200, list) : url === '/api/compiles' ? json(200, open) : json(404, { error: 'not_found' });
 
 const rowOf = (title: string) => screen.getByText(title).closest('li') as HTMLElement;
 
-describe('who sees the Compile action', () => {
+describe('who sees the Compile action, and where the run state comes from', () => {
   it('a learner sees FR-UI-6 unchanged and makes no compile or estimate request', async () => {
     const calls = await mount('/', (url) => (url === '/api/me' ? json(200, learner) : url === '/api/lessons' ? json(200, w02List()) : json(404, { error: 'not_found' })));
     await waitFor(() => expect(screen.getByText('Lesson w02')).toBeTruthy());
     expect(within(rowOf('Lesson w02')).getByText('not published yet')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Compile' })).toBeNull();
-    expect(calls.filter((c) => /\/compile$|\/estimate$|\/api\/compiles\//.test(c.url))).toEqual([]);
+    expect(screen.queryByText(CHIP)).toBeNull();
+    expect(calls.filter((c) => /\/compile$|\/compiles|\/estimate$/.test(c.url))).toEqual([]);
   });
 
-  it('the owner gets a Compile button and "not compiled yet" for an unpublished lesson without a run', async () => {
-    await mount('/', (url) => (url === '/api/me' ? json(200, owner) : url === '/api/lessons' ? json(200, w02List()) : json(404, { error: 'not_found' })));
+  it('the owner list reads GET /api/compiles once and no per-lesson status', async () => {
+    const many = listOf(Array.from({ length: 30 }, (_, i) => lesson(`u${String(i + 1).padStart(2, '0')}`, i + 1)));
+    const calls = await mount('/', ownerList(many));
+    await waitFor(() => expect(screen.getAllByText('not compiled yet')).toHaveLength(30));
+    expect(calls.filter((c) => c.url === '/api/compiles')).toHaveLength(1);
+    expect(calls.filter((c) => /\/api\/lessons\/[^/]+\/compile$/.test(c.url))).toEqual([]);
+    expect(screen.getAllByRole('button', { name: 'Compile' })).toHaveLength(30);
+  });
+
+  it('no open run: "not compiled yet" and Compile when unpublished, nothing extra when linked', async () => {
+    await mount('/', ownerList(w02List()));
     await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('not compiled yet')).toBeTruthy());
     expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Compile' })).toBeTruthy();
     expect(within(rowOf('Lesson w01')).queryByRole('button')).toBeNull();
+    expect(within(rowOf('Lesson w01')).queryByText(CHIP)).toBeNull();
   });
 
-  it('reads the status of at most 10 unpublished lessons, in list order; the rest keep "not published yet" and a button', async () => {
-    const many = listOf(Array.from({ length: 12 }, (_, i) => lesson(`u${String(i + 1).padStart(2, '0')}`, i + 1)));
-    const calls = await mount('/', (url) => (url === '/api/me' ? json(200, owner) : url === '/api/lessons' ? json(200, many) : json(404, { error: 'not_found' })));
-    await waitFor(() => expect(screen.getAllByText('not compiled yet')).toHaveLength(10));
-    const reads = calls.filter((c) => c.method === 'GET' && c.url.endsWith('/compile')).map((c) => c.url);
-    expect(reads).toEqual(Array.from({ length: 10 }, (_, i) => `/api/lessons/u${String(i + 1).padStart(2, '0')}/compile`));
-    expect(within(rowOf('Lesson u11')).getByText('not published yet')).toBeTruthy();
-    expect(within(rowOf('Lesson u12')).getByRole('button', { name: 'Compile' })).toBeTruthy();
-    expect(screen.getAllByRole('button', { name: 'Compile' })).toHaveLength(12);
+  it('a failed run-state read leaves "not published yet" and the Compile button', async () => {
+    await mount('/', (url) => (url === '/api/me' ? json(200, owner) : url === '/api/lessons' ? json(200, w02List()) : json(500, { error: 'internal' })));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Compile' })).toBeTruthy());
+    expect(within(rowOf('Lesson w02')).getByText('not published yet')).toBeTruthy();
+  });
+});
+
+describe('linked rows with an open run (a revision is not a finished compile)', () => {
+  const linked = (r: unknown) => mount('/', ownerList(w02List(SHA), runs(r)));
+
+  it('running with a revision: the link, the chip and "Compiling"', async () => {
+    await linked(run('running', [done(1, 'draft'), pending(2, 'fact_check', 'running')], { latest_sha256: SHA }));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('Compiling: checking facts')).toBeTruthy());
+    const row = rowOf('Lesson w02');
+    expect(within(row).getByRole('link', { name: 'Lesson w02' }).getAttribute('href')).toBe('/lessons/w02');
+    expect(within(row).getByText(CHIP)).toBeTruthy();
+    expect(within(row).queryByRole('button')).toBeNull();
+  });
+
+  it('stage_failed with a revision: the chip, the reason and Retry', async () => {
+    await linked(run('stage_failed', [done(1, 'draft'), pending(2, 'fact_check', 'dead')], { latest_sha256: SHA, error: 'provider_missing' }));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Retry' })).toBeTruthy());
+    const row = rowOf('Lesson w02');
+    expect(within(row).getByText(CHIP)).toBeTruthy();
+    expect(within(row).getByText('Compile stopped at checking facts. No AI provider is connected for your account. Connect one, then retry.')).toBeTruthy();
+    expect(within(row).getByRole('link', { name: 'Lesson w02' })).toBeTruthy();
+  });
+
+  it('budget_exhausted with a revision: the chip, the refusal and Compile', async () => {
+    await linked(run('budget_exhausted', [done(1, 'draft'), done(2, 'fact_check')], { latest_sha256: SHA, refusals: ['budget_exhausted'], spent_usd: '7.95' }));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Compile' })).toBeTruthy());
+    const row = rowOf('Lesson w02');
+    expect(within(row).getByText(CHIP)).toBeTruthy();
+    expect(within(row).getByText('Compile stopped: it reached its $8.00 cap. Spent $7.95.')).toBeTruthy();
+  });
+
+  it('an unpublished row with an open run has no chip', async () => {
+    await mount('/', ownerList(w02List(), runs(run('running', [pending(1, 'draft', 'running')]))));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('Compiling: drafting')).toBeTruthy());
+    expect(within(rowOf('Lesson w02')).queryByText(CHIP)).toBeNull();
   });
 });
 
@@ -119,56 +172,88 @@ describe('status mapping', () => {
       expect(describeRun(run('running', [done(1, 'draft'), pending(2, stage, 'running')]))).toEqual({ text: `Compiling: ${label}`, action: null });
     }
     expect(describeRun(run('stalled', [done(1, 'draft'), pending(2, 'fact_check', 'none')])).text).toBe('Compiling: checking facts');
-    // no pending row: the last step's stage
     expect(describeRun(run('running', [done(1, 'draft')])).text).toBe('Compiling: drafting');
   });
 
-  it('maps not compiled, stopped (with and without a code), budget refusals and finished runs', async () => {
+  it('maps no run, stopped (with and without a code), budget refusals and finished runs, with or without a revision', async () => {
     const { describeRun } = await model();
     expect(describeRun(null)).toEqual({ text: 'not compiled yet', action: 'compile' });
-    const failed = (error: string | null) => run('stage_failed', [pending(1, 'draft', 'dead')], { error });
-    expect(describeRun(failed('provider_missing'))).toEqual({
-      text: 'Compile stopped at drafting. No AI provider is connected for your account. Connect one, then retry.',
-      action: 'retry',
-    });
-    expect(describeRun(failed(null))).toEqual({ text: 'Compile stopped at drafting', action: 'retry' });
-    expect(describeRun(failed('sdk_error'))).toEqual({ text: 'Compile stopped at drafting', action: 'retry' });
-    // a status without the `error` field (a server before FR-PIPELINE-16) maps the same way
-    const { error: _omit, ...noField } = failed(null) as Record<string, unknown>;
-    expect(describeRun(noField as never)).toEqual({ text: 'Compile stopped at drafting', action: 'retry' });
-    const budget = (code: string) => run('budget_exhausted', [done(1, 'draft')], { refusals: [code], spent_usd: '7.95' });
-    expect(describeRun(budget('budget_exhausted'))).toEqual({ text: 'Compile stopped: it reached its $8.00 cap. Spent $7.95.', action: 'compile' });
-    expect(describeRun(budget('task_budget_exhausted')).text).toBe('Compile stopped: a stage reached its own budget. Spent $7.95.');
-    expect(describeRun(budget('monthly_budget_exhausted')).text).toBe('Compile stopped: the monthly budget is used up. Spent $7.95.');
-    expect(describeRun(budget('daily_budget_exhausted')).text).toBe('Compile stopped: the daily budget is used up. Spent $7.95.');
-    expect(describeRun(budget('something_new')).text).toBe('Compile stopped: a budget was reached. Spent $7.95.');
-    for (const state of ['converged', 'open_findings']) expect(describeRun(run(state, [done(1, 'draft')]))).toEqual({ text: null, action: null });
+    for (const latest_sha256 of [null, SHA]) {
+      const failed = (error: string | null) => run('stage_failed', [pending(1, 'draft', 'dead')], { error, latest_sha256 });
+      expect(describeRun(failed('provider_missing'))).toEqual({
+        text: 'Compile stopped at drafting. No AI provider is connected for your account. Connect one, then retry.',
+        action: 'retry',
+      });
+      expect(describeRun(failed(null))).toEqual({ text: 'Compile stopped at drafting', action: 'retry' });
+      expect(describeRun(failed('sdk_error'))).toEqual({ text: 'Compile stopped at drafting', action: 'retry' });
+      const { error: _omit, ...noField } = failed(null) as Record<string, unknown>;
+      expect(describeRun(noField as never)).toEqual({ text: 'Compile stopped at drafting', action: 'retry' });
+      const budget = (code: string) => run('budget_exhausted', [done(1, 'draft')], { refusals: [code], spent_usd: '7.95', latest_sha256 });
+      expect(describeRun(budget('budget_exhausted'))).toEqual({ text: 'Compile stopped: it reached its $8.00 cap. Spent $7.95.', action: 'compile' });
+      expect(describeRun(budget('task_budget_exhausted')).text).toBe('Compile stopped: a stage reached its own budget. Spent $7.95.');
+      expect(describeRun(budget('monthly_budget_exhausted')).text).toBe('Compile stopped: the monthly budget is used up. Spent $7.95.');
+      expect(describeRun(budget('daily_budget_exhausted')).text).toBe('Compile stopped: the daily budget is used up. Spent $7.95.');
+      expect(describeRun(budget('something_new')).text).toBe('Compile stopped: a budget was reached. Spent $7.95.');
+    }
+    for (const state of ['converged', 'open_findings']) expect(describeRun(run(state, [done(1, 'draft')], { latest_sha256: SHA }))).toEqual({ text: null, action: null });
   });
 
-  it('polls only a running or stalled run, every 5 s', async () => {
-    const { pollInterval, COMPILE_POLL_MS } = await model();
+  it('isOpen: the chip states', async () => {
+    const { isOpen } = await model();
+    expect(isOpen).toBeTypeOf('function');
+    for (const s of ['running', 'stalled', 'stage_failed', 'budget_exhausted']) expect(isOpen(s)).toBe(true);
+    for (const s of ['converged', 'open_findings']) expect(isOpen(s)).toBe(false);
+  });
+
+  it('polls a running or stalled run every 5 s for at most 30 minutes', async () => {
+    const { pollInterval, COMPILE_POLL_MS, COMPILE_POLL_MAX_MS } = await model();
     expect(COMPILE_POLL_MS).toBe(5000);
-    expect(pollInterval('running')).toBe(5000);
-    expect(pollInterval('stalled')).toBe(5000);
-    for (const s of ['stage_failed', 'budget_exhausted', 'converged', 'open_findings', null]) expect(pollInterval(s)).toBe(false);
+    expect(COMPILE_POLL_MAX_MS).toBe(30 * 60 * 1000);
+    expect(pollInterval('running', 0, 0)).toBe(5000);
+    expect(pollInterval('stalled', 0, COMPILE_POLL_MAX_MS - 1)).toBe(5000);
+    expect(pollInterval('running', 0, COMPILE_POLL_MAX_MS)).toBe(false);
+    for (const s of ['stage_failed', 'budget_exhausted', 'converged', 'open_findings', null]) expect(pollInterval(s, 0, 0)).toBe(false);
   });
 
-  it('pins RUN_CAP_USD to SRV-PIPELINE bounds.run_cap_usd and the status bound to 10', async () => {
-    const { RUN_CAP_USD, STATUS_READS_MAX } = await model();
+  it('pins RUN_CAP_USD to SRV-PIPELINE bounds.run_cap_usd', async () => {
+    const { RUN_CAP_USD } = await model();
     const spec = readYaml<{ bounds: { run_cap_usd: number } }>('spec/modules/SRV-PIPELINE.yaml');
     expect(RUN_CAP_USD).toBe(spec.bounds.run_cap_usd.toFixed(2));
-    expect(STATUS_READS_MAX).toBe(10);
   });
+
+  it('stops polling after 30 minutes and offers Refresh, which reads once more', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const t0 = new Date('2026-11-23T10:00:00Z').getTime();
+    vi.setSystemTime(t0);
+    const calls = await mount('/', ownerList(w02List(), runs(run('running', [pending(1, 'draft', 'running')]))));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('Compiling: drafting')).toBeTruthy());
+    vi.setSystemTime(t0 + 31 * 60 * 1000);
+    const refresh = await within(rowOf('Lesson w02')).findByRole('button', { name: 'Refresh' }, { timeout: 8000 });
+    const before = calls.filter((c) => c.url === '/api/compiles').length;
+    await act(async () => {
+      fireEvent.click(refresh);
+    });
+    await waitFor(() => expect(calls.filter((c) => c.url === '/api/compiles').length).toBe(before + 1));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).queryByRole('button', { name: 'Refresh' })).toBeNull());
+  }, 15_000);
 });
 
 describe('the confirm', () => {
-  const ownerRoutes = (over: Record<string, Handler> = {}): Handler => (url, init) => {
-    const key = `${init?.method ?? 'GET'} ${url}`;
-    if (over[key]) return over[key](url, init);
-    if (url === '/api/me') return json(200, owner);
-    if (url === '/api/lessons') return json(200, w02List());
-    if (url === '/api/lessons/w02/estimate') return json(200, estimate());
-    return json(404, { error: 'not_found' });
+  /** The owner's list; w02 gets an open run after a POST, from GET /api/compiles. */
+  const ownerRoutes = (over: Record<string, Handler> = {}): Handler => {
+    let posted = false;
+    return (url, init) => {
+      const key = `${init?.method ?? 'GET'} ${url}`;
+      if (over[key]) {
+        if (init?.method === 'POST') posted = true;
+        return over[key](url, init);
+      }
+      if (url === '/api/me') return json(200, owner);
+      if (url === '/api/lessons') return json(200, w02List());
+      if (url === '/api/compiles') return json(200, posted ? runs(run('running', [pending(1, 'draft', 'running')])) : runs());
+      if (url === '/api/lessons/w02/estimate') return json(200, estimate());
+      return json(404, { error: 'not_found' });
+    };
   };
 
   const openDialog = async () => {
@@ -180,17 +265,7 @@ describe('the confirm', () => {
   };
 
   it('shows the lesson, the estimate labelled as one, the extrapolation and the cap, then posts without a body', async () => {
-    let posted = false;
-    const calls = await mount(
-      '/',
-      ownerRoutes({
-        'POST /api/lessons/w02/compile': () => {
-          posted = true;
-          return json(202, { run_id: 'run-1' });
-        },
-        'GET /api/lessons/w02/compile': () => (posted ? json(200, run('running', [pending(1, 'draft', 'running')])) : json(404, { error: 'not_found' })),
-      }),
-    );
+    const calls = await mount('/', ownerRoutes({ 'POST /api/lessons/w02/compile': () => json(202, { run_id: 'run-1' }) }));
     const dialog = await openDialog();
     expect(within(dialog).getByRole('heading', { name: 'Compile lesson 2?' })).toBeTruthy();
     expect(within(dialog).getByText('Lesson w02')).toBeTruthy();
@@ -201,15 +276,15 @@ describe('the confirm', () => {
     await act(async () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Compile' }));
     });
-    const posts = calls.filter((c) => c.method === 'POST');
-    expect(posts).toEqual([{ method: 'POST', url: '/api/lessons/w02/compile', body: undefined }]);
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([{ method: 'POST', url: '/api/lessons/w02/compile', body: undefined }]);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     const status = await within(rowOf('Lesson w02')).findByText('Compiling: drafting');
-    expect(document.activeElement).toBe(status);
+    await waitFor(() => expect(document.activeElement).toBe(status));
     expect(status.getAttribute('tabindex')).toBe('-1');
+    expect(calls.filter((c) => c.url === '/api/compiles').length).toBeGreaterThanOrEqual(2);
   });
 
-  it('says when the lesson is longer than the measured one, and when there is no estimate', async () => {
+  it('says when the lesson is longer, when there is no estimate, and refuses a lesson without text', async () => {
     await mount('/', ownerRoutes({ 'GET /api/lessons/w02/estimate': () => json(200, estimate('150.000', true)) }));
     let dialog = await openDialog();
     await waitFor(() => expect(within(dialog).getByText('This lesson is 2.5× longer than the measured one; the real cost may differ from this range.')).toBeTruthy());
@@ -223,14 +298,22 @@ describe('the confirm', () => {
     dialog = await openDialog();
     await waitFor(() => expect(within(dialog).getByText('No estimate for this lesson.')).toBeTruthy());
     expect(within(dialog).getByText('Stops at $8.00.')).toBeTruthy();
+    expect((within(dialog).getByRole('button', { name: 'Compile' }) as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
+    const calls = await mount('/', ownerRoutes({ 'GET /api/lessons/w02/estimate': () => json(200, { ...estimate('0.000', true), low_usd: '0.00', high_usd: '0.00' }) }));
+    dialog = await openDialog();
+    await waitFor(() => expect(within(dialog).getByText("This lesson's pages have no text to compile.")).toBeTruthy());
+    const confirm = within(dialog).getByRole('button', { name: 'Compile' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
   });
 
-  it('sends one request for a double click and cancels without one', async () => {
+  it('sends one request for two clicks in one act, and cancels without one', async () => {
     let release: (r: Response) => void = () => undefined;
-    const calls = await mount(
-      '/',
-      ownerRoutes({ 'POST /api/lessons/w02/compile': () => new Promise<Response>((r) => (release = r)) }),
-    );
+    const calls = await mount('/', ownerRoutes({ 'POST /api/lessons/w02/compile': () => new Promise<Response>((r) => (release = r)) }));
     let dialog = await openDialog();
     await act(async () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
@@ -241,9 +324,7 @@ describe('the confirm', () => {
     const confirm = within(dialog).getByRole('button', { name: 'Compile' });
     await act(async () => {
       fireEvent.click(confirm);
-    });
-    await act(async () => {
-      fireEvent.click(confirm);
+      fireEvent.click(confirm); // before the disabled state renders: the in-flight ref guards it
     });
     expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
     await act(async () => {
@@ -256,14 +337,7 @@ describe('the confirm', () => {
       ['compile_running', 'A compile of this lesson is already running.'],
       ['already_started', 'A lesson of this course is already compiled or compiling.'],
     ] as const) {
-      let reads = 0;
-      await mount(
-        '/',
-        ownerRoutes({
-          'POST /api/lessons/w02/compile': () => json(409, { error: code }),
-          'GET /api/lessons/w02/compile': () => (++reads > 1 ? json(200, run('running', [pending(1, 'draft', 'running')])) : json(404, { error: 'not_found' })),
-        }),
-      );
+      await mount('/', ownerRoutes({ 'POST /api/lessons/w02/compile': () => json(409, { error: code }) }));
       const dialog = await openDialog();
       await act(async () => {
         fireEvent.click(within(dialog).getByRole('button', { name: 'Compile' }));
@@ -314,24 +388,24 @@ describe('the confirm', () => {
   });
 });
 
-describe('retry, polling and the link', () => {
+describe('retry and the link', () => {
   it('resumes a stopped run through its own confirm', async () => {
     let resumed = false;
     const calls = await mount('/', (url, init) => {
       if (url === '/api/me') return json(200, owner);
-      if (url === '/api/lessons') return json(200, w02List());
+      if (url === '/api/lessons') return json(200, w02List(SHA));
       if (init?.method === 'POST' && url === '/api/compiles/run-1/resume') {
         resumed = true;
-        return json(202, run('running', [pending(1, 'draft', 'queued')]));
+        return json(202, run('running', [done(1, 'draft'), pending(2, 'fact_check', 'queued')], { latest_sha256: SHA }));
       }
-      if (url === '/api/lessons/w02/compile')
-        return json(200, resumed ? run('running', [pending(1, 'draft', 'queued')]) : run('stage_failed', [pending(1, 'draft', 'dead')], { error: 'provider_missing' }));
+      if (url === '/api/compiles')
+        return json(200, runs(resumed
+          ? run('running', [done(1, 'draft'), pending(2, 'fact_check', 'queued')], { latest_sha256: SHA })
+          : run('stage_failed', [done(1, 'draft'), pending(2, 'fact_check', 'dead')], { latest_sha256: SHA, error: 'provider_missing' })));
       return json(404, { error: 'not_found' });
     });
     const row = () => rowOf('Lesson w02');
-    await waitFor(() =>
-      expect(within(row()).getByText('Compile stopped at drafting. No AI provider is connected for your account. Connect one, then retry.')).toBeTruthy(),
-    );
+    await waitFor(() => expect(within(row()).getByRole('button', { name: 'Retry' })).toBeTruthy());
     await act(async () => {
       fireEvent.click(within(row()).getByRole('button', { name: 'Retry' }));
     });
@@ -344,7 +418,8 @@ describe('retry, polling and the link', () => {
       fireEvent.click(within(dialog).getByRole('button', { name: 'Resume' }));
     });
     expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/compiles/run-1/resume']);
-    expect(await within(row()).findByText('Compiling: drafting')).toBeTruthy();
+    expect(await within(row()).findByText('Compiling: checking facts')).toBeTruthy();
+    expect(within(row()).getByText(CHIP)).toBeTruthy();
   });
 
   it('closes on not_failed with a notice', async () => {
@@ -352,11 +427,12 @@ describe('retry, polling and the link', () => {
       if (url === '/api/me') return json(200, owner);
       if (url === '/api/lessons') return json(200, w02List());
       if (init?.method === 'POST') return json(409, { error: 'not_failed' });
-      if (url === '/api/lessons/w02/compile') return json(200, run('stage_failed', [pending(1, 'draft', 'dead')]));
+      if (url === '/api/compiles') return json(200, runs(run('stage_failed', [pending(1, 'draft', 'dead')])));
       return json(404, { error: 'not_found' });
     });
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Retry' })).toBeTruthy());
     await act(async () => {
-      fireEvent.click(await within(rowOf('Lesson w02')).findByRole('button', { name: 'Retry' }));
+      fireEvent.click(within(rowOf('Lesson w02')).getByRole('button', { name: 'Retry' }));
     });
     const dialog = await screen.findByRole('dialog');
     await act(async () => {
@@ -366,34 +442,39 @@ describe('retry, polling and the link', () => {
     expect(await screen.findByText('This compile is no longer stopped.')).toBeTruthy();
   });
 
-  it('turns the row into a link when the status reports a revision, and refetches the list', async () => {
-    let published = false;
+  it('refetches the list when a run reports a revision the row lacks: the row becomes a link with the chip', async () => {
+    let reported = false;
     const calls = await mount('/', (url) => {
       if (url === '/api/me') return json(200, owner);
-      if (url === '/api/lessons') return json(200, listOf([lesson('w01', 1, '1'.repeat(64)), lesson('w02', 2, published ? SHA : null)]));
-      if (url === '/api/lessons/w02/compile') {
-        published = true;
-        return json(200, run('converged', [done(1, 'draft')], { latest_sha256: SHA }));
+      if (url === '/api/lessons') return json(200, w02List(reported ? SHA : null));
+      if (url === '/api/compiles') {
+        reported = true;
+        return json(200, runs(run('running', [done(1, 'draft'), pending(2, 'fact_check', 'running')], { latest_sha256: SHA })));
       }
       return json(404, { error: 'not_found' });
     });
     await waitFor(() => expect(screen.getByText('Lesson w02').closest('a')?.getAttribute('href')).toBe('/lessons/w02'));
     expect(calls.filter((c) => c.url === '/api/lessons').length).toBeGreaterThanOrEqual(2);
-    expect(within(rowOf('Lesson w02')).queryByRole('button')).toBeNull();
+    expect(within(rowOf('Lesson w02')).getByText(CHIP)).toBeTruthy();
+    expect(within(rowOf('Lesson w02')).getByText('Compiling: checking facts')).toBeTruthy();
   });
 
-  it('keeps "Compiling" after the link while a run with a revision still runs', async () => {
+  it('polls a running run and, when it leaves the open runs (converged), refetches the list and drops the chip', async () => {
     let reads = 0;
-    await mount('/', (url) => {
+    const calls = await mount('/', (url) => {
       if (url === '/api/me') return json(200, owner);
-      if (url === '/api/lessons') return json(200, listOf([lesson('w02', 2, reads > 0 ? SHA : null)]));
-      if (url === '/api/lessons/w02/compile') {
+      if (url === '/api/lessons') return json(200, w02List(SHA));
+      if (url === '/api/compiles') {
         reads += 1;
-        return json(200, run('running', [done(1, 'draft'), pending(2, 'fact_check', 'running')], { latest_sha256: SHA }));
+        return json(200, reads === 1 ? runs(run('running', [done(1, 'draft'), pending(2, 'fact_check', 'running')], { latest_sha256: SHA })) : runs());
       }
       return json(404, { error: 'not_found' });
     });
-    await waitFor(() => expect(screen.getByText('Lesson w02').closest('a')).toBeTruthy());
-    expect(within(rowOf('Lesson w02')).getByText('Compiling: checking facts')).toBeTruthy();
-  });
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByText(CHIP)).toBeTruthy());
+    const before = calls.filter((c) => c.url === '/api/lessons').length;
+    await waitFor(() => expect(within(rowOf('Lesson w02')).queryByText(CHIP)).toBeNull(), { timeout: 8000 });
+    expect(calls.filter((c) => c.url === '/api/compiles')).toHaveLength(2); // one poll at 5 s, then none
+    expect(calls.filter((c) => c.url === '/api/lessons').length).toBe(before + 1);
+    expect(within(rowOf('Lesson w02')).getByRole('link', { name: 'Lesson w02' })).toBeTruthy();
+  }, 15_000);
 });

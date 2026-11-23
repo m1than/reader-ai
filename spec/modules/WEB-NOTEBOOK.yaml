@@ -254,13 +254,22 @@ requirements:
       hidden from assistive technology; a 404 for the lesson shows "Lesson not found" with only a "Back to
       lessons" link; any other error shows "The lesson could not be loaded." with a Retry button that refetches the
       failed query and a "Back to lessons" link; a lesson not published yet keeps FR-NOTEBOOK-1's text and adds the
-      "Lessons" back link. For a user with role `owner` (from `/api/me`) the not-published page also shows WEB-UI
-      FR-UI-15's `CompileControl` for this lesson under that text: its status read (always, the page shows one
-      lesson), the "Compile" or "Retry" button, the same confirm dialog, error copy and polling. When that control
-      invalidates `['lesson', id]` and the refetched lesson has a `latest_sha256`, the page loads that revision and
-      renders the lesson. A learner's page is unchanged and makes no compile or estimate request.
-      [unit] [story] the page states; [unit] web/src/notebook/compile.test.tsx: owner (button, confirm, the revision rendered after the status
-      reports one) and learner (no button, no compile request); [story] LessonPage's not-published state for the
+      "Lessons" back link.
+      **Owner's compile state (WEB-UI FR-UI-15).** For a user with role `owner` (from `/api/me`), the lesson page,
+      published or not, reads `GET /api/lessons/{lesson_id}/compile` once (and polls it per FR-UI-15 while the run is
+      `running` or `stalled`), because a revision exists from the `draft` step on, long before the run ends:
+      - not published: FR-UI-15's `CompileControl` under the not-published text, always (status, "Compile" or
+        "Retry", the same confirm, error copy and polling);
+      - published, while the run is `running`, `stalled`, `stage_failed` or `budget_exhausted`: the same control in a
+        line above the lesson view, inside the page, led by the chip "draft, compile not finished"; for no run,
+        `converged` or `open_findings`, or a failed read, nothing is added;
+      - when the control invalidates `['lesson', id]` and the refetched lesson has a newer `latest_sha256`, the page
+        loads that revision and renders it.
+      A learner's page is unchanged and makes no compile or estimate request.
+      [unit] [story] the page states; [unit] web/src/notebook/compile.test.tsx: owner not published (button, confirm,
+      the revision rendered after the status reports one), owner published with a running and with a stopped run
+      (chip, status, Retry above the cells), owner published and converged (nothing added), learner (no control, no
+      compile request); [story] LessonPage's not-published and published-with-a-running-compile states for the
       owner.
 
 invariants:

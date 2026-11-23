@@ -8,6 +8,8 @@ export default defineConfig({
   testDir: '../e2e/web',
   testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'auth/**/*.spec.ts', 'import/**/*.spec.ts'],
   fullyParallel: false,
+  // WEB-UI FR-UI-15: the test server's compile stub keeps global state, so one worker.
+  workers: 1,
   reporter: 'list',
   use: { baseURL: 'http://127.0.0.1:4173' },
   projects: [

@@ -92,5 +92,57 @@ describe('not-published page (FR-NOTEBOOK-12, amended)', () => {
     });
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Digests' })).toBeTruthy());
     expect(screen.queryByText('This lesson is not published yet.')).toBeNull();
+    expect(screen.queryByText('draft, compile not finished')).toBeNull(); // converged: nothing added
+  });
+});
+
+describe('published page with an unfinished compile (FR-NOTEBOOK-12, amended)', () => {
+  const published = (status: () => Response) => (url: string) => {
+    if (url === '/api/me') return json(200, owner);
+    if (url === '/api/lessons/w02')
+      return json(200, { lesson: { ...base(), latest_sha256: SHA }, revisions: [{ sha256: SHA, byte_size: 1, cell_count: 1, created_at: '2026-11-23T09:00:00Z', stages: ['draft'] }] });
+    if (url === '/api/lessons/w02/compile') return status();
+    if (url === `/api/lessons/w02/revisions/${SHA}`) return json(200, notebook());
+    return json(404, { error: 'not_found' });
+  };
+  const draftSteps = (status: string) => [
+    { step: 1, stage: 'draft', model: 'm', cost_usd: '0.6', duration_s: 1, reused: false },
+    { step: 2, stage: 'fact_check', status, reused: false },
+  ];
+
+  /** The control's line precedes the first cell heading in document order. */
+  const before = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+
+  it('a running compile: the lesson, and above it the chip and "Compiling"', async () => {
+    const calls = await mount(published(() => json(200, run('running', { latest_sha256: SHA, steps: draftSteps('running') }))));
+    await waitFor(() => expect(screen.getByText('Compiling: checking facts')).toBeTruthy());
+    const chip = screen.getByText('draft, compile not finished');
+    const heading = screen.getByRole('heading', { name: 'Digests' });
+    expect(before(chip, heading)).toBe(true);
+    expect(calls.filter((c) => c.url === '/api/lessons/w02/compile').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('a stopped compile: the chip, the reason and Retry above the lesson', async () => {
+    await mount(published(() => json(200, run('stage_failed', { latest_sha256: SHA, steps: draftSteps('dead'), error: 'provider_missing' }))));
+    const retry = await screen.findByRole('button', { name: 'Retry' });
+    expect(screen.getByText('draft, compile not finished')).toBeTruthy();
+    expect(screen.getByText(/^Compile stopped at checking facts\. No AI provider is connected/)).toBeTruthy();
+    expect(before(retry, screen.getByRole('heading', { name: 'Digests' }))).toBe(true);
+  });
+
+  it('no run, or a failed read: nothing is added to a published lesson', async () => {
+    for (const status of [() => json(404, { error: 'not_found' }), () => json(500, { error: 'internal' })]) {
+      await mount(published(status));
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Digests' })).toBeTruthy());
+      expect(screen.queryByText('draft, compile not finished')).toBeNull();
+      expect(screen.queryByRole('button', { name: /^(Compile|Retry)$/ })).toBeNull();
+      cleanup();
+    }
+  });
+
+  it('a learner reading a published lesson makes no compile request', async () => {
+    const calls = await mount((url) => (url === '/api/me' ? json(200, learner) : published(() => json(404, {}))(url)));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Digests' })).toBeTruthy());
+    expect(calls.filter((c) => /\/compile$|\/compiles|\/estimate$/.test(c.url))).toEqual([]);
   });
 });
