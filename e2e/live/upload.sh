@@ -5,7 +5,12 @@
 # cancelled upload leaves no row and no file; exactly 209,715,200 bytes pass and are fetched (time recorded); one
 # byte more is 413. Spends nothing. Cleans up only what it created, by id.
 #
-#   bash e2e/live/upload.sh --out DIR [--project NAME]
+#   bash e2e/live/upload.sh --out DIR [--project NAME] [--with-offline --config READER_YAML]
+#
+# --with-offline (opt-in, ADR-0029 verified_by): stops only the ingest watcher (SIGTERM to its lock's pid; never the
+# stack), checks that a new upload stays `queued` and the converter reads `offline` after 60 s, then starts the
+# watcher again exactly as `reader up` does (FR-CLI-22's spawn, also on failure) and waits for it to be online.
+# --config is the reader.yaml `reader up` used (it locates the watcher's lock under data_dir).
 #
 # DIR must be outside the repository. OUT/upload-results.json holds numbers and ids only.
 set -euo pipefail
@@ -14,11 +19,14 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/e2e/live/lib.sh"
 OUT=""
 PROJECT="reader"
+EXTRA=()
 while (($#)); do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --project) PROJECT="$2"; shift 2 ;;
-    *) echo "usage: $0 --out DIR [--project NAME]" >&2; exit 2 ;;
+    --with-offline) EXTRA+=(--with-offline); shift ;;
+    --config) EXTRA+=(--config "$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
+    *) echo "usage: $0 --out DIR [--project NAME] [--with-offline --config READER_YAML]" >&2; exit 2 ;;
   esac
 done
 [[ -n "$OUT" ]] || { echo "--out is required" >&2; exit 2; }
@@ -33,7 +41,7 @@ check "reader status reports the ingest watcher running" \
   bash -c "cd '$ROOT/server' && uv run reader status --json | grep -q '\"ingest_watcher\": \"running\"'"
 rc=0
 (cd "$ROOT" && uv run --project server python e2e/live/lib/upload_live.py --project "$PROJECT" --url "$READER_URL" \
-  --out "$OUT") >"$OUT/upload.txt" 2>&1 || rc=$?
+  --out "$OUT" ${EXTRA[@]+"${EXTRA[@]}"}) >"$OUT/upload.txt" 2>&1 || rc=$?
 while IFS= read -r l; do
   case "$l" in
     PASS\ *) printf '  \033[32mPASS\033[0m %s\n' "${l#PASS }"; LIVE_PASS=$((LIVE_PASS + 1)) ;;

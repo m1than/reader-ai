@@ -154,6 +154,56 @@ def browser_upload(url: str, spki: str, root_pem: Path, token: str, out: Path) -
     (out / "upload-page.txt").write_bytes(done.stdout)
 
 
+def offline_case(c: httpx.Client, args: argparse.Namespace, created: list[tuple[str, str]]) -> dict[str, Any]:
+    """Opt-in (`--with-offline`): stop only the ingest watcher (never the stack), check that an upload stays
+    `queued` and the converter reads `offline`, then start the watcher again as `reader up` does (OPS-CLI
+    FR-CLI-22's spawn) and see it come back online. The watcher is restarted on every path."""
+    from types import SimpleNamespace
+
+    from reader.cli import ingest_watch
+    from reader.config import load_config
+
+    results: dict[str, Any] = {}
+    config = Path(args.config).resolve()
+    data_dir = ingest_watch.data_dir_of(load_config(config), config)
+    held = ingest_watch.holder(data_dir)
+    if not report("offline: the ingest watcher runs and is idle", held is not None and held.busy == "none"):
+        return results
+    ctx = SimpleNamespace(kill=os.kill, monotonic=time.monotonic, sleep=time.sleep)
+    uid: str | None = None
+    try:
+        stopped = ingest_watch.stop(ctx, data_dir)  # SIGTERM to the lock's pid only; SIGKILL after 15 s
+        report("offline: the ingest watcher stopped", stopped and ingest_watch.holder(data_dir) is None)
+        body = pdf(4096)
+        r = post(c, body, "Synthetic offline.pdf")
+        if report("offline: an upload is accepted with the watcher stopped (201)", r.status_code == 201, str(r.status_code)):
+            uid = r.json()["id"]
+            created.append((uid, hashlib.sha256(body).hexdigest()))
+            time.sleep(65)  # the converter is offline once its last heartbeat is 60 s old (FR-INGEST-23)
+            state = c.get("/api/materials/converter").json().get("state")
+            report("offline: the converter reads offline", state == "offline", str(state))
+            seen = c.get(f"/api/materials/uploads/{uid}").json()
+            report("offline: the upload stays queued", seen.get("state") == "queued", str(seen.get("state")))
+    finally:
+        env = {k: v for k, v in os.environ.items() if k in ingest_watch.ALLOWED}
+        run_dir = Path.home() / "Library" / "Application Support" / "reader-ai" / "run"
+        restarted = True
+        try:
+            ingest_watch.spawn(ingest_watch.watcher_argv(config), env, run_dir / ingest_watch.LOG_NAME)
+        except OSError:
+            restarted = False
+        deadline = time.monotonic() + 180  # the watcher's start includes the run-time cross-process probe
+        online = False
+        while restarted and time.monotonic() < deadline and not online:
+            time.sleep(5)
+            online = c.get("/api/materials/converter").json().get("state") == "online"
+        report("offline: the ingest watcher restarted and is online again", online)
+    if uid is not None:  # junk pages: the restarted watcher converts it and it fails; cleanup removes it by id
+        done = wait_state(c, uid, {"failed", "ready"}, args.cap_wait_s)
+        results["offline_upload_after_restart"] = None if done is None else done.get("state")
+    return results
+
+
 def run(c: httpx.Client, args: argparse.Namespace, spki: str, root_pem: Path, token: str, out: Path) -> dict[str, Any]:
     results: dict[str, Any] = {}
     created: list[tuple[str, str]] = []
@@ -210,6 +260,8 @@ def run(c: httpx.Client, args: argparse.Namespace, spki: str, root_pem: Path, to
         del body
         r = post(c, pdf(CAP + 1), "Synthetic over.pdf")
         report("upload: 209,715,201 bytes are 413", r.status_code == 413, str(r.status_code))
+        if args.with_offline:
+            results |= offline_case(c, args, created)
     finally:
         for uid, sha in created:
             report(f"upload: cleanup of {uid[:8]}", cleanup(args.project, uid, sha))
@@ -224,7 +276,11 @@ def main() -> int:
     parser.add_argument("--url", default="https://localhost")
     parser.add_argument("--out", required=True)
     parser.add_argument("--cap-wait-s", type=float, default=1800.0)
+    parser.add_argument("--with-offline", action="store_true", help="also stop and restart only the ingest watcher")
+    parser.add_argument("--config", default="", help="the reader.yaml `reader up` used (needed by --with-offline)")
     args = parser.parse_args()
+    if args.with_offline and not args.config:
+        parser.error("--with-offline needs --config (the reader.yaml `reader up` used)")
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     root_pem = out / "caddy-root.crt"
