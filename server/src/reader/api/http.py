@@ -63,7 +63,7 @@ Handler = Callable[[Ctx], Awaitable[Response]]
 
 @dataclass(frozen=True)
 class Route:
-    method: Literal["GET", "POST", "DELETE"]
+    method: Literal["GET", "POST", "PUT", "DELETE"]  # PUT: SRV-FRESH paired change (FR-AUTH-10 note)
     path: str
     auth: Auth
     handler: Handler

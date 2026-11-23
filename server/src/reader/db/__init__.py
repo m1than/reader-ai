@@ -37,7 +37,7 @@ def _procrastinate_versions() -> Path:
 
 
 # Declared list of version directories (no scan): SRV-AUTH's, SRV-LESSON's, SRV-EVENTS's, SRV-INGEST's,
-# SRV-SEARCH's, SRV-AGENT's, SRV-PIPELINE's, SRV-TUTOR's, procrastinate's.
+# SRV-SEARCH's, SRV-AGENT's, SRV-PIPELINE's, SRV-TUTOR's, SRV-FRESH's, procrastinate's.
 VERSION_LOCATIONS: Final[list[Path]] = [
     SCRIPT_LOCATION / "versions",
     _HERE.parent / "lessons" / "migrations",
@@ -47,6 +47,7 @@ VERSION_LOCATIONS: Final[list[Path]] = [
     _HERE.parent / "agent" / "migrations",
     _HERE.parent / "pipeline" / "migrations",
     _HERE.parent / "tutor" / "migrations",  # SRV-TUTOR paired change (FR-AUTH-1 note)
+    _HERE.parent / "freshness" / "migrations",  # SRV-FRESH paired change (FR-AUTH-1 note)
     _procrastinate_versions(),
 ]
 # pg_advisory_lock(namespace, key): this namespace is for migrations only ("RDMG"); SRV-EVENTS uses another.
