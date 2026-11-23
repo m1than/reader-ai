@@ -90,10 +90,19 @@ def _props(block: str) -> dict[str, str]:
     return {m.group(1): " ".join(m.group(2).split()) for m in found}
 
 
-def _block(css: str, start: str) -> str:
-    """The body of the first `{…}` block that follows `start` (one nesting level for @media)."""
-    i = css.index(start)
-    j = css.index("{", i)
+ROOT = r":root\s*\{"
+LIGHT = r"@media\s*\(\s*prefers-color-scheme\s*:\s*light\s*\)\s*\{"
+LAYER = r"@layer\s+acme\.tokens\s*\{"
+
+
+def _span(css: str, start: str) -> tuple[int, int, str]:
+    """(start, end, body) of the first `{…}` block whose opening matches the regex `start`.
+
+    The match ends with the block's `{`; nested blocks are counted.
+    """
+    m = re.search(start, css)
+    assert m is not None, f"no block matching {start}"
+    j = m.end() - 1
     depth, k = 0, j
     while True:
         if css[k] == "{":
@@ -101,8 +110,12 @@ def _block(css: str, start: str) -> str:
         elif css[k] == "}":
             depth -= 1
             if depth == 0:
-                return css[j + 1 : k]
+                return m.start(), k + 1, css[j + 1 : k]
         k += 1
+
+
+def _block(css: str, start: str) -> str:
+    return _span(css, start)[2]
 
 
 def _strip_comments(css: str) -> str:
@@ -114,18 +127,19 @@ def _library_tokens() -> dict[str, str]:
         member = tar.extractfile("package/dist/styles.css")
         assert member is not None
         css = _strip_comments(member.read().decode("utf-8"))
-    return _props(_block(_block(css, "@layer acme.tokens"), ":root"))
+    return _props(_block(_block(css, LAYER), ROOT))
 
 
 def test_tokens_equal_the_web_apps() -> None:
     auth = _strip_comments((STATIC / "auth.css").read_text("utf-8"))
     calm = _strip_comments((REPO / "web" / "src" / "ui" / "tokens" / "calm.css").read_text("utf-8"))
-    dark, light = _props(_block(auth, ":root")), _props(_block(auth, "@media (prefers-color-scheme: light)"))
-    calm_dark = _props(_block(calm, ":root"))
-    calm_light = _props(_block(calm, "@media (prefers-color-scheme: light)"))
+    dark, light = _props(_block(auth, ROOT)), _props(_block(auth, LIGHT))
+    calm_dark = _props(_block(calm, ROOT))
+    calm_light = _props(_block(calm, LIGHT))
     library = _library_tokens()
     assert dark, "auth.css declares tokens"
-    used = set(re.findall(r"var\((--acme-[a-z0-9-]+)\)", auth))
+    # `var(--x)` and `var(--x, fallback)` both use --x.
+    used = set(re.findall(r"var\(\s*(--acme-[a-z0-9-]+)\s*[,)]", auth))
     assert used <= set(dark), f"every used token is declared: {sorted(used - set(dark))}"
     for name, value in dark.items():
         source = calm_dark.get(name, library.get(name))
@@ -137,25 +151,37 @@ def test_tokens_equal_the_web_apps() -> None:
     assert set(light) == {n for n in dark if n in calm_dark}, "the light block overrides every colour token"
 
 
+def test_no_colour_literal_outside_the_token_blocks() -> None:
+    css = _strip_comments((STATIC / "auth.css").read_text("utf-8"))
+    for pattern in (LIGHT, ROOT):
+        start, end, _ = _span(css, pattern)
+        css = css[:start] + css[end:]
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", css)
+    assert not re.search(r"\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix|color)\(", css)
+
+
 # FR-AUTH-20 ---------------------------------------------------------------------------------------------
+
+STATES = [
+    "ready",
+    "unsupported",
+    "no_token",
+    "waiting",
+    "cancelled",
+    "rejected",
+    "expired",
+    "not_registered",
+    "rate_limited",
+    "unreachable",
+    "failed",
+    "done",
+]
 
 
 def test_script_maps_every_state_from_a_fixed_table() -> None:
     js = (STATIC / "passkey.js").read_text("utf-8")
-    for state in [
-        "ready",
-        "unsupported",
-        "no_token",
-        "waiting",
-        "cancelled",
-        "known",
-        "rejected",
-        "expired",
-        "rate_limited",
-        "unreachable",
-        "failed",
-        "done",
-    ]:
+    for state in STATES:
         assert re.search(rf"\b{state}\s*:", js), state
+    assert not re.search(r"\bknown\s*:", js), "no unreachable `known` state"
     assert "failure.message" not in js, "no exception text reaches the page"
     assert "innerHTML" not in js and "insertAdjacentHTML" not in js

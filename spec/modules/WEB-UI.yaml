@@ -44,9 +44,11 @@
 # Playwright (Chromium) against `vite preview` behind the committed test server (`web/test-server/`), which reads the
 # CSP header from `deploy/Caddyfile` and stubs `/api/me` and the lesson routes with VEC-UI-2, run on request and in the
 # slice live check. Paired SRV-AUTH change (2026-11-23, FR-AUTH-21): the test server also serves SRV-AUTH's four
-# static auth files (`GET /api/auth/signin`, `/api/auth/bootstrap`, `/api/auth/static/passkey.js`,
-# `/api/auth/static/auth.css`) from `server/src/reader/auth/static` under the same CSP, and web/playwright.config.ts
-# also matches e2e/web/auth/**; the ceremony POSTs are stubbed by the auth spec itself (page.route) (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
+# static auth files from a fixed map of exactly four entries (`GET /api/auth/signin` → signin.html,
+# `/api/auth/bootstrap` → bootstrap.html, `/api/auth/static/passkey.js`, `/api/auth/static/auth.css`, read from
+# `server/src/reader/auth/static`, no other path) with the Caddyfile's Content-Security-Policy header and the api's
+# content types, and web/playwright.config.ts also matches e2e/web/auth/**; the ceremony POSTs are stubbed by the
+# auth spec itself (page.route) (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
 # `reader up`, signed in with the S1 `live-check` learner through a Chromium virtual authenticator.
 
 id: WEB-UI

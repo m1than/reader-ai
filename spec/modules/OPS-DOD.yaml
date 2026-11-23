@@ -70,7 +70,11 @@ review: "deep-reviewer round 1 on the first draft (V/V.DOD-index): changes, all 
   search and kernel observability, lesson.findings recovery, CLI registry and disabled labels, waiver sets; plus
   non-blocking), all applied in 4b03d67; round 2 on 4b03d67: VERDICT approve. Folded in at approval (round 2
   non-blocking): resumed run ids recorded by the ledger producer (FR-DOD-10), the ratchet named P8 (FR-DOD-13,
-  AGENTS.md), the agent never writes DoD-Owner-Change (AGENTS.md gates), a Red case for passkey_check.py's FAIL format."
+  AGENTS.md), the agent never writes DoD-Owner-Change (AGENTS.md gates), a Red case for passkey_check.py's FAIL format.
+  Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the
+  operations index adds `GET /api/auth/static/auth.css` to the routes of auth.bootstrap and auth.signin (in the
+  Green commit, with the route itself: T10 refuses a route that the registry does not have yet); their a11y
+  cells stay `missing` (the new [browser] axe runs are not `pages` evidence and axe.json has no producer yet)."
 layer: ops
 track: engineering
 adr: [ADR-0001, ADR-0019, ADR-0005]
