@@ -161,6 +161,11 @@ def test_only_server_roles_have_environment() -> None:
             env = svc.get("environment") or {}
             if name in SERVER_ROLES:
                 assert env == {"READER_CONFIG": "/etc/reader/reader.yaml"}, name
+            elif name == "mlflow":  # FR-DEPLOY-13: mlflow's two non-secret entries
+                assert env == {
+                    "MLFLOW_SERVER_ENABLE_JOB_EXECUTION": "false",
+                    "MLFLOW_DISABLE_TELEMETRY": "true",
+                }
             else:
                 assert not env, name
 

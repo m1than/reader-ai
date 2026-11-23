@@ -123,7 +123,10 @@ tasks:
   review:     { model: opus,   budget_usd_per_lesson: 4.0 }
 budgets: { monthly_usd: 200, warn_at: 0.8 }
 sharing: {}
+observability: { enabled: false }
 """
+# FR-AGENT-14 (paired SRV-OBS change): tracing is off here, so FR-AGENT-6's environment stays exact for these tests;
+# test_obs_env.py turns it on.
 
 
 def write_config(tmp: Path, text: str = CONFIG) -> Path:

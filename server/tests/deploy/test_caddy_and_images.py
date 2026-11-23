@@ -1,4 +1,4 @@
-# @trace FR-DEPLOY-2, FR-DEPLOY-7, FR-DEPLOY-9
+# @trace FR-DEPLOY-2, FR-DEPLOY-7, FR-DEPLOY-9, FR-DEPLOY-13
 """OPS-DEPLOY [config] Caddyfile text and the derived caddy image, [image] checks (`caddy adapt`, postgres
 uid), the [image: registry] check (arm64 manifests; only with READER_TEST_REGISTRY=1) and the [image: build]
 check of reader-caddy:local (only with READER_TEST_IMAGE_BUILD=1)."""
@@ -145,6 +145,33 @@ def _path_upstreams(nodes: list[dict[str, Any]]) -> dict[str, set[str]]:
     return mapping
 
 
+BLOCKED = [
+    "/v1/*", "/gateway/*", "/ajax-api/*/mlflow/assistant/*", "/ajax-api/*/mlflow/gateway-proxy*", "/mcp*",
+    "/api/*/mlflow/gateway/*",
+]
+
+
+def _check_dashboard_site(config: dict[str, Any]) -> None:
+    """FR-DEPLOY-13 / SRV-OBS FR-OBS-9: on :8443 the gate runs first, then the blocked paths answer Caddy's
+    own 404 in a `handle` placed before the MLflow proxy, which strips cookies, credentials, CORS headers."""
+    servers = config["apps"]["http"]["servers"]
+    (site,) = [s for s in servers.values() if ":8443" in s.get("listen", [])]
+    text = json.dumps(site)
+    assert '"uri": "/api/obs/gate' in text.replace("?", "")  # forward_auth's rewrite to the gate
+    order = [text.index(marker) for marker in ('"10.230.1.10:8000"', '"static_response"', '"mlflow:5000"')]
+    assert order == sorted(order), "gate, then the blocked 404, then the MLflow proxy"
+    for path in BLOCKED:
+        assert json.dumps(path) in text, path
+    nodes = _walk(site)
+    (blocked,) = [n for n in nodes if n.get("handler") == "static_response"]
+    assert blocked.get("status_code") in (404, "404")
+    (mlflow,) = [n for n in nodes if n.get("handler") == "reverse_proxy"
+                 and any(u.get("dial") == "mlflow:5000" for u in n.get("upstreams", []))]
+    headers = mlflow.get("headers", {})
+    assert set(headers["request"]["delete"]) == {"Cookie", "Authorization"}
+    assert set(headers["response"]["delete"]) == {"Set-Cookie", "Access-Control-*"}
+
+
 @requires_docker_daemon
 def test_caddy_adapt_in_pinned_image() -> None:
     caddy_image = _caddy_runtime_image()
@@ -160,9 +187,11 @@ def test_caddy_adapt_in_pinned_image() -> None:
     assert "forward_proxy" not in handlers
     proxies = [n for n in nodes if n.get("handler") == "reverse_proxy"]
     upstreams = {u["dial"] for n in proxies for u in n.get("upstreams", [])}
-    assert upstreams == {"10.230.1.10:8000", "mcp:8001"}
+    # FR-DEPLOY-13 (paired SRV-OBS change): the 8443 site adds forward_auth to the api and the MLflow proxy.
+    assert upstreams == {"10.230.1.10:8000", "mcp:8001", "mlflow:5000"}
     proxied = {path: ups for path, ups in _path_upstreams(nodes).items() if ups}
     assert proxied == {"/api/*": {"10.230.1.10:8000"}, "/mcp": {"mcp:8001"}}
+    _check_dashboard_site(config)
     assert any(n.get("handler") == "file_server" for n in nodes)
     assert "/index.html" in json.dumps(config), "SPA fallback (try_files) missing"
     assert '"/assets/*"' in json.dumps(config), "assets route missing"

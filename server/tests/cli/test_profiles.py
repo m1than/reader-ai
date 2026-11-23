@@ -18,7 +18,10 @@ instance: {url: https://localhost, data_dir: ./data}
 users:
   - {handle: ivan, role: owner}
   - {handle: anna, role: learner}
+observability: {enabled: false}
 """
+# FR-CLI-22: `observability` is off in these profile tests (and in VEC-CLI-1), so the profile sets stay as
+# written; test_observability.py turns it on.
 
 
 def _world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, agents_in_model: bool) -> World:

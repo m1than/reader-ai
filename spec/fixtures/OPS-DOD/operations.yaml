@@ -543,6 +543,22 @@ operations:
       observability: { items: [FR-TUTOR-12] }
       recovery: { items: [FR-TUTOR-2, FR-TUTOR-10, INV-TUTOR-6] }
 
+  # Added 2026-11-24 (SRV-OBS, ADR-0032): the traces dashboard on https://localhost:8443 and the owner's page.
+  - id: obs.view
+    title: Open the traces dashboard and the observability page
+    surface: [web]
+    specs: [SRV-OBS, OPS-DEPLOY, WEB-UI]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-OBS-9, FR-OBS-10, FR-UI-18] }
+      security: { items: [INV-OBS-5, FR-OBS-9] }
+      privacy: { items: [INV-OBS-1, INV-OBS-2] }
+      a11y: { items: [FR-UI-18], pages: ["/observability"] }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-OBS-4] }
+      recovery: { items: [INV-OBS-3, FR-OBS-11] }
+
   - id: stack.backup
     title: Back up the stack (reader backup DIR)
     surface: [cli]

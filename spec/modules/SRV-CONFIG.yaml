@@ -17,7 +17,7 @@ title: reader.yaml settings, JSON Schema export, secret references and the conta
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording"
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CONFIG-17, the `observability` section, reviewed in SRV-OBS's code review"
 layer: server
 track: engineering
 adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026]
@@ -79,6 +79,9 @@ fields:
   - { path: "materials[].language", type: str, required: true, constraint: "non-empty, open set" }
   - { path: sectors, type: "opaque mapping", required: false, constraint: "any core-schema value; schema owned by later specs (ADR-0016/0017)" }
   - { path: sharing, type: "opaque mapping", required: false, constraint: "any core-schema value; schema owned by later specs (ADR-0016)" }
+  - { path: observability, type: mapping, required: false, constraint: "keys: enabled, retention_days (FR-CONFIG-17)" }
+  - { path: observability.enabled, type: bool, required: false, constraint: "YAML boolean; default true" }
+  - { path: observability.retention_days, type: "int (YAML int only)", required: false, constraint: "1..365; default 30" }
 
 requirements:
   # Loading and validation
@@ -230,6 +233,15 @@ requirements:
     text: >-
       This module's own log calls never include a resolved value or an input scalar; they log references, codes and key
       paths only. Redaction in the shared logger and event serializer is a dependency on SRV-OBS and SRV-EVENTS.
+  - id: FR-CONFIG-17
+    text: >-
+      Observability (paired SRV-OBS change, ADR-0032 accepted 2026-11-24). A tenth top-level section
+      `observability`, optional, a mapping with exactly two optional keys: `enabled` (a YAML boolean, default true) and
+      `retention_days` (a YAML int, 1 ≤ n ≤ 365, default 30). The field table gains these rows; `ReaderConfig` gains
+      `observability: Observability` with those defaults (an absent section equals `{}`), and the committed JSON Schema
+      is regenerated (FR-CONFIG-4). Codes: a non-boolean `enabled` or a non-int `retention_days` (a float, a string, a
+      boolean) is `wrong_type`; an int outside 1..365 is `out_of_range`; any other key is `unknown_key`. [unit]
+      server/tests/config/test_observability.py.
 
 invariants:
   - id: INV-CONFIG-1

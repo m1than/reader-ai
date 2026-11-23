@@ -23,11 +23,17 @@ seed:
     - { id: 5, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000001, task: fact_check, attempt: 2, kind: reserve, usd: 0.50 }
     - { id: 6, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000001, task: fact_check, attempt: 2, kind: settle, reservation_id: 5, settled_usd: 0.21 }
     - { id: 7, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000001, task: review, attempt: 1, kind: reserve, usd: 0.80 }
-    - { id: 8, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000001, task: tutor, kind: settle, settled_usd: 0.03 }
-    - { id: 9, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000002, task: tutor, kind: settle, settled_usd: 0.05 }
-    - { id: 10, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000003, task: tutor, kind: settle, settled_usd: 0.04 }
-    - { id: 11, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000004, task: tutor, kind: settle, settled_usd: 0.01 }   # failed answer, billed
-    - { id: 12, owner_id: 00000000-0000-4000-8000-000000000002, run_id: 30000000-0000-4000-8000-000000000009, task: tutor, kind: settle, settled_usd: 9.99 }
+    # Tutor calls: one reserve (13..17) and one settle (8..12) each; only settled_usd counts as tutor cost.
+    - { id: 13, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000001, task: tutor, kind: reserve, usd: 0.30 }
+    - { id: 14, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000002, task: tutor, kind: reserve, usd: 0.30 }
+    - { id: 15, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000003, task: tutor, kind: reserve, usd: 0.30 }
+    - { id: 16, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000004, task: tutor, kind: reserve, usd: 0.30 }
+    - { id: 17, owner_id: 00000000-0000-4000-8000-000000000002, run_id: 30000000-0000-4000-8000-000000000009, task: tutor, kind: reserve, usd: 0.30 }
+    - { id: 8, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000001, task: tutor, kind: settle, reservation_id: 13, settled_usd: 0.03 }
+    - { id: 9, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000002, task: tutor, kind: settle, reservation_id: 14, settled_usd: 0.05 }
+    - { id: 10, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000003, task: tutor, kind: settle, reservation_id: 15, settled_usd: 0.04 }
+    - { id: 11, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000004, task: tutor, kind: settle, reservation_id: 16, settled_usd: 0.01 }   # failed answer, billed
+    - { id: 12, owner_id: 00000000-0000-4000-8000-000000000002, run_id: 30000000-0000-4000-8000-000000000009, task: tutor, kind: settle, reservation_id: 17, settled_usd: 9.99 }
   tutor_questions:   # latency = finished_at − created_at
     - { id: 30000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:00:00.000Z", finished_at: "2026-11-24T11:00:02.000Z" }
     - { id: 30000000-0000-4000-8000-000000000002, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:01:00.000Z", finished_at: "2026-11-24T11:01:04.000Z" }
@@ -60,10 +66,13 @@ seed:
 expected:
   compile_runs:
     - run_id: 10000000-0000-4000-8000-000000000001
+      lesson_id: 20000000-0000-4000-8000-000000000001
+      started_at: "2026-11-24T10:00:00+00:00"
+      finished_at: null
       spent_usd: 1.86            # 0.62 + 0.23 + 0.21 settled + 0.80 unsettled reserve; the failed attempt's 0.23 counts
       steps:
-        - { step: 1, stage: draft, cost_usd: 0.62, duration_s: 95, job: 101, trace_id: cf8a1cbe5cc23a546382dc30e5e2b16a }
-        - { step: 2, stage: fact_check, cost_usd: 0.21, duration_s: 40, job: 104, trace_id: 3a271ca9f9843c931881cdac01a154be }   # the key row's job_id: the newest job
+        - { step: 1, stage: draft, cost_usd: 0.62, duration_s: 95, model: claude-sonnet-5-5, job: 101, trace_id: cf8a1cbe5cc23a546382dc30e5e2b16a }
+        - { step: 2, stage: fact_check, cost_usd: 0.21, duration_s: 40, model: claude-sonnet-5-5, job: 104, trace_id: 3a271ca9f9843c931881cdac01a154be }   # the key row's job_id: the newest job
   tutor:
     count: 3
     p50_ms: 4000                 # nearest rank over [2000, 4000, 9000]: ceil(0.50 × 3) = 2nd
@@ -76,9 +85,11 @@ expected:
       - { question_id: 30000000-0000-4000-8000-000000000001, ms: 2000, job: 201, trace_id: 92c3332accbc4bdf45924ae427a4c0cb }
   failures:
     truncated: false             # recent_keys_of returned fewer rows than its limit
-    jobs:   # user kinds scoped to the owner's runs, questions and materials; system kinds unscoped (FR-OBS-10 c)
-      - { kind: pipeline.stage, error_code: exhausted, count: 1, jobs: [106], trace_ids: [85b524475f9f651f8b30426af5fbb218] }
+    # User kinds scoped to the owner's runs, questions and materials; system kinds unscoped (FR-OBS-10 c).
+    # Ordered by count (descending), then kind, then error code.
+    jobs:
       - { kind: ingest.import, error_code: ValueError, count: 1, system: true, jobs: [302], trace_ids: [f751ff316a35f92486a722815c09d412] }
+      - { kind: pipeline.stage, error_code: exhausted, count: 1, system: false, jobs: [106], trace_ids: [85b524475f9f651f8b30426af5fbb218] }
       - { kind: search.embed, error_code: exhausted, count: 1, system: true, jobs: [401], trace_ids: [c049c37c22fa5a48cbefc90389647cef] }
     tutor:
       - { error_code: provider_unavailable, count: 1, jobs: [204], trace_ids: [8f76441a086e06da18ab6655ef8f50a1] }

@@ -36,11 +36,10 @@
 #     the round-1 Caddyfile, and a headless-browser pass for the UI's CSP and the deep link. Numbers in its RESULT.md
 #     and in `bounds`.
 #
-# ADR status: ADR-0018 (agent bus and traces) is PROPOSED, not accepted; this spec follows its text as the current
-# design, as the owner directed for the proposed stage-0 ADRs, and deviates from it in one place, declared in
-# ADR-0032 (proposed): MLflow keeps its own SQLite volume instead of "one server on our Postgres". ADR-0032 also amends
-# ADR-0025 rule 5 (the worker reaches mlflow, for retention only). ADR-0011 (proposed), ADR-0012 (proposed),
-# ADR-0024, ADR-0025 and ADR-0026 (accepted) bind as written.
+# ADR status: ADR-0018 (agent bus and traces) and ADR-0032 (this module's deployment, accepted with ADR-0018 by the
+# owner on 2026-11-24): MLflow keeps its own SQLite volume instead of ADR-0018's "one server on our Postgres", and
+# ADR-0032 amends ADR-0025 rule 5 (the worker reaches mlflow, for retention only). ADR-0011 (proposed), ADR-0012
+# (proposed), ADR-0024, ADR-0025 and ADR-0026 (accepted) bind as written.
 #
 # Deviations from the roadmap row (docs/roadmap.md stage 2, SRV-OBS), declared:
 #   - "structlog JSON": not added. Log lines keep reader-server's one-line `key=value` format (SRV-AUTH serving_logs)
@@ -53,25 +52,21 @@
 # `dead_error_code_of` and states that no module queries `job_keys` directly, so FR-OBS-10 reads key rows only through
 # the paired FR-EVENTS-18 functions.
 #
-# Paired changes in other specs (proposed in `paired_changes` below, applied in those specs at this spec's approval,
-# each with its own tests; none of their files is edited by this draft, because active branches V/upload-impl,
-# V/freshness, V/compile-ui and V/design-pass change them): OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS,
-# SRV-AGENT, SRV-CONFIG, WEB-UI.
+# Paired changes (listed in `paired_changes` below as designed) are applied in their own specs with their tests:
+# OPS-DEPLOY FR-DEPLOY-13 and VEC-DEPLOY-2, OPS-CLI FR-CLI-22, SRV-CONFIG FR-CONFIG-17, SRV-AUTH FR-AUTH-33, SRV-EVENTS
+# FR-EVENTS-18/-19, SRV-AGENT FR-AGENT-14, WEB-UI FR-UI-18, and the OPS-DOD operation `obs.view`.
 #
-# PR note: approving this spec lets the paired OPS-DEPLOY/OPS-CLI changes publish 127.0.0.1:8443 before the owner
-# answers ADR-0032's open question 1 (a second loopback port). The default `observability.enabled: true` follows the
-# owner's request; it costs about 1.25 GiB of memory limits (mlflow 1g, rotel 256m) and two image pulls.
+# The default `observability.enabled: true` follows the owner's request; it costs about 1.25 GiB of memory limits
+# (mlflow 1g, rotel 256m) and two image pulls.
 
 id: SRV-OBS
 title: Tracing with an attribute allow-list, Rotel and MLflow behind an owner-only gate, retention and the owner's views
-# Review verdict: approve (round 4, 2026-11-24). The status stays `draft` on V/obs because trace-check blocks an
-# approved spec without coverage: T5 needs a traced test for every FR/INV/VEC (Red), and T10 needs SRV-OBS named in
-# spec/fixtures/OPS-DOD/operations.yaml (the paired OPS-DOD change, a file active branches edit). The flip to
-# `approved` / `approved_by: agent` lands in the Red commit on the integration base, with the `obs.view` operation,
-# as SRV-EVENTS did ("approved with Red").
-status: draft
-approved_by: null
-approved_at: null
+# Approved with Red on V/obs-impl (from V/slice-integration 04b2563), with the `obs.view` operation and the paired
+# items applied: OPS-DEPLOY FR-DEPLOY-13, OPS-CLI FR-CLI-22, SRV-CONFIG FR-CONFIG-17, SRV-AUTH FR-AUTH-33, SRV-EVENTS
+# FR-EVENTS-18/-19, SRV-AGENT FR-AGENT-14, WEB-UI FR-UI-18.
+status: approved
+approved_by: agent
+approved_at: 2026-11-24
 review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431aa22): changes, 7 blockers (B1 three
   networks and VEC-DEPLOY-2 pairs, ADR-0025 rule 5 amended; B2 gate Origin rules and Access-Control-* stripped; B3 no
   Cookie/Authorization up, no Set-Cookie down; B4 CSP and deep link measured in a browser; B5 CLI pin test and key-subset
@@ -81,9 +76,9 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   non-blocking items, applied in dfa6f9e with spike round 3 (cross-port click). Round 3 (dfa6f9e): changes, 1 blocker
   (R1 fixture keys were placeholders; real FR-EVENTS-2 keys, spot-checked against idempotency_key) plus non-blocking
   items, applied in 5677fb3. Round 4 (5677fb3): VERDICT approve; its three nits applied at approval (view (c)'s
-  key_rows_of for failed questions, one kind per stage in view (a), 'more rows may exist'). Status flips to approved with Red (T5, T10).
-  ADR-0032 and ADR-0018 stay proposed (owner's decision); implementation waits for the owner's acceptance of
-  ADR-0032, which amends accepted ADR-0025 rule 5, and lands on V/slice-integration's versions of the paired specs."
+  key_rows_of for failed questions, one kind per stage in view (a), 'more rows may exist'). The owner accepted ADR-0018 and
+  ADR-0032 on 2026-11-24 (973cd62). Approved by agent with Red on V/obs-impl (2026-11-24); the paired items live in
+  their own specs."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
@@ -390,7 +385,9 @@ requirements:
       MLflow 3.18.0 sets no server cap and one call deleted 178 traces in 0.05 s, measured). `on_worker_start`
       enqueues today's key. With tracing disabled the kind is still declared and its handler returns at once after
       enqueuing the next day (so a disabled profile never leaves dead keys). MLflow unreachable is transient; any other
-      HTTP failure is `dead` with `error_code` `obs_retention_failed`. SQLite does not shrink on delete (measured);
+      HTTP failure raises `RetentionFailed`, so the day's key ends `dead` with `error_code` `RetentionFailed` (FR-EVENTS-6
+      records a permanent failure by its class name; amended at Red, 2026-11-24, from `obs_retention_failed`, which no
+      job wrapper can write). SQLite does not shrink on delete (measured);
       freed pages are reused, so the store's size stays bounded by the retained traces.
 
 invariants:

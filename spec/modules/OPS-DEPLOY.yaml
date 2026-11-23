@@ -36,7 +36,11 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   (the precheck now maps the checkpoint; 3g kept, memory.peak 2,114 MiB cold, memory.events max 0) and `init: true`
   added; the config test checks `init`. Round 2 (approve, 2026-11-23): the limit is sized on memory.stat anon
   (max 1,192 MiB), not memory.peak, which counts the reclaimable mapped weights; embed.Dockerfile fetches the model
-  before copying the service (FR-DEPLOY-2, -9)."
+  before copying the service (FR-DEPLOY-2, -9).
+  Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted by the owner; SRV-OBS design review rounds 1–4, approve):
+  FR-DEPLOY-13 adds profile `observability` (rotel, mlflow), networks otel/obs/obs-ui, volume obs_mlflow, the 8443
+  Caddy site, mlflow's environment allow-list; FR-DEPLOY-12's example gains `observability`; VEC-DEPLOY-2 extended.
+  Reviewed in SRV-OBS's code review."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -280,10 +284,33 @@ requirements:
     text: >-
       `deploy/reader.example.yaml` is the single documented example configuration: it loads through SRV-CONFIG's
       `load_config` without errors, holds secret references only, uses `instance.url: https://localhost`, and contains
-      all nine top-level sections of SRV-CONFIG's field table (version, instance, users, tasks, budgets, kernels,
-      materials, sectors, sharing). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
+      all ten top-level sections of SRV-CONFIG's field table (version, instance, users, tasks, budgets, kernels,
+      materials, sectors, sharing, observability). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
       sized for two worst-case calls each (paired SRV-AGENT/SRV-PIPELINE change, 2026-11-22): draft 4.0, fact_check
-      2.0, review 4.0.
+      2.0, review 4.0. Paired SRV-OBS change (2026-11-24): a tenth section `observability` (SRV-CONFIG FR-CONFIG-17),
+      so the example has all ten sections.
+  - id: FR-DEPLOY-13
+    text: >-
+      Observability (paired SRV-OBS change, ADR-0032 accepted 2026-11-24; this item amends FR-DEPLOY-1, -3, -5, -6, -7,
+      -9, -11 and INV-DEPLOY-2, -3, -4 for these services only). Profile `observability`: `rotel`
+      (`streamfold/rotel:v0.2.7@sha256:7a12878dae3dc494c27def53ebcccbdc18e13389ececf33abf116af3a07c3427`, the image's
+      entrypoint, command exactly `[--exporter, otlp, --otlp-exporter-endpoint, "http://mlflow:5000",
+      --otlp-exporter-protocol, http, --otlp-exporter-custom-headers, x-mlflow-experiment-id=0]`, `user: "10005:10005"`,
+      mem 256m) and `mlflow` (`reader-mlflow:local` built from SRV-OBS's `deploy/otel/mlflow.Dockerfile`, `pull_policy:
+      build`, `user: "10004:10004"`, mem 1g, command SRV-OBS FR-OBS-8's, environment exactly
+      `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` and `MLFLOW_DISABLE_TELEMETRY=true`, volume `obs_mlflow` at
+      `/var/lib/mlflow`, label `org.reader-ai.backup=exclude`). Both `read_only: true`, tmpfs `/tmp`, `cap_drop: [ALL]`,
+      `no-new-privileges`, `restart: unless-stopped`, `memswap_limit` equal to `mem_limit`, no `ports`, no secrets, and
+      the healthchecks of FR-OBS-8 with the server roles' timing. Networks, internal with explicit subnets: `otel`
+      10.230.2.0/24 = {api, worker, rotel}; `obs` 10.230.3.0/24 = {rotel, mlflow, worker}; `obs-ui` 10.230.4.0/24 =
+      {caddy, mlflow}. VEC-DEPLOY-2 gains exactly api–rotel, worker–rotel, rotel–mlflow, worker–mlflow and caddy–mlflow,
+      and the `never` pairs of SRV-OBS's paired change. The base compose.yaml publishes only 443; caddy's
+      `127.0.0.1:8443:8443` comes from OPS-CLI's override (FR-CLI-22). The Caddyfile gains the site `localhost:8443` of
+      SRV-OBS FR-OBS-9 (forward_auth to `10.230.1.10:8000` uri `/api/obs/gate`, the blocked patterns in a `handle`
+      block, the MLflow reverse proxy with `header_up -Cookie`, `header_up -Authorization`, `header_down -Set-Cookie`,
+      `header_down -Access-Control-*`, and its CSP); `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001,
+      mlflow:5000}. INV-DEPLOY-2 (1)'s only environment entries become READER_CONFIG on the server roles plus mlflow's
+      two. [config; image: `caddy adapt`]
 
 invariants:
   - id: INV-DEPLOY-1
@@ -296,7 +323,7 @@ invariants:
       `secrets`, no service `secrets` and no `env_file`, and the tmpfs `/run/secrets` (service uid, 0700, 256k) is on
       exactly the consumers of FR-DEPLOY-10 (b), each of which has `memswap_limit` equal to `mem_limit` (FR-DEPLOY-9).
       The only `environment` entry of any rendered service is `READER_CONFIG=/etc/reader/reader.yaml`, on exactly the
-      server roles (FR-DEPLOY-5). [config] (2) The source text of `deploy/compose.yaml` contains no `$` that is not
+      server roles (FR-DEPLOY-5), plus mlflow's two non-secret entries (FR-DEPLOY-13). [config] (2) The source text of `deploy/compose.yaml` contains no `$` that is not
       followed by another `$` (which rejects `${NAME}` and unbraced `$NAME` under any key, and allows only the escape
       `$$`); the allow-list of non-secret variables is empty for stage 1 (the reader.yaml path arrives through the
       override, FR-DEPLOY-5). Dockerfiles and scripts under `deploy/images/**` are out of this rule's

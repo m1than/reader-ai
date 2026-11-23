@@ -562,6 +562,19 @@ requirements:
       the Courses button, no duplicate id with the drawer open; [story] Light, Dark, a large course; [live] the `ui`
       step: at 1280 px the sidebar is visible on `/` and on L02 with L02's link `aria-current="page"`; at 1024 and 390
       px it is hidden and the "Courses" button opens it.
+  - id: FR-UI-18
+    text: >-
+      Observability page (paired SRV-OBS change, FR-OBS-10; ADR-0032 accepted 2026-11-24). Route `/observability`, a
+      lazy chunk in `web/src/app/observability/`, for the owner only: anyone else gets not-found without any request
+      to /api/obs/*. It loads `GET /api/obs/summary?days=7`, validates the body, and renders four sections with
+      headings "Compile runs", "Tutor", "Failures" and "Ingest": runs with spent USD and their steps (stage, cost,
+      seconds, model); tutor count, p50 and p95 in ms, cost sum and mean per settled call, the slowest answers;
+      failures by kind and code (a `system` row marked "system"); imports with pages and pages per minute. Every
+      trace id renders as a link to `https://localhost:8443/#/experiments/0/traces?selectedEvaluationId=tr-<id>`
+      (text "Trace", `rel="noopener noreferrer"`); a section whose data carries `truncated: true` shows "More rows
+      may exist." Values render as text only. A load failure shows a retry block; a 401 goes to the shell's sign-in
+      redirect (FR-UI-5). The header shows an "Observability" link for the owner. [unit]
+      web/src/app/observability/observability.test.tsx; [story] the page with fixture data.
 
 
 # ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for WEB-IMPORT). Held under `proposed_requirements` (not read by

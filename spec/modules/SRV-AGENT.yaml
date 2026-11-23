@@ -280,6 +280,15 @@ requirements:
       Live: one `claude-sonnet-5-5` call with `max_turns=1` and a one-word answer through agent-proxy with a run_token
       succeeds against the real upstream, and its reservation and settlement land in the ledger (about 7k input tokens
       written once: ≈ $0.03). [live]
+  - id: FR-AGENT-14
+    text: >-
+      Tracing (paired SRV-OBS change, FR-OBS-6; ADR-0032 accepted 2026-11-24). `AgentProvider.run` runs the whole call
+      inside SRV-OBS's `agent_call_span(task, stage, model)` so the span is current while the CLI starts (the SDK then
+      injects TRACEPARENT); after settlement the span records the call's usage tokens, `reader.cost_usd` = the settled
+      amount, the stop reason and the error code. When `config.observability.enabled`, FR-AGENT-6's environment gains
+      exactly SRV-OBS's `cli_env_additions()` (telemetry on, traces only, OTLP to http://rotel:4318, four content flags
+      `0`); `OTEL_LOG_RAW_API_BODIES`, `ENABLE_BETA_TRACING_DETAILED` and `BETA_TRACING_ENDPOINT` stay blank like every
+      other variable. When disabled, the environment is exactly FR-AGENT-6's. [unit] server/tests/agent/test_obs_env.py.
 
 invariants:
   - id: INV-AGENT-1

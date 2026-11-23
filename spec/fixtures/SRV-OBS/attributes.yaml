@@ -8,7 +8,7 @@
 #                        models = the pricing table's full model ids (SRV-AGENT);
 #                        error_codes = the union of the declared error catalogues (the `errors` lists of SRV-AGENT,
 #                        SRV-TUTOR and SRV-PIPELINE, SRV-EVENTS' job codes exhausted, stalled, orphaned, timeout,
-#                        session_lost, wrapper_error, unknown_kind, no_key_row, and obs_retention_failed)
+#                        session_lost, wrapper_error, unknown_kind and no_key_row)
 #   pattern: <regex>     matched with fullmatch
 #   range: [min, max]    inclusive, for int and float
 # Every string value is at most 128 characters after its rule.

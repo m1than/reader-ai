@@ -1,4 +1,4 @@
-# @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3
+# @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3, FR-DEPLOY-13
 """OPS-DEPLOY [config]: networks, the api bind address, kernel isolation and the reachability matrix."""
 
 from .conftest import (
@@ -36,6 +36,10 @@ def test_network_membership() -> None:
     assert members["embed"] == {"api", "worker", "embed"}
     assert networks_of(model["services"]["embed"]) == {"embed"}
     assert model["networks"]["embed"].get("internal") is True
+    # Paired SRV-OBS change (FR-DEPLOY-13, ADR-0032): otel, obs and obs-ui.
+    assert members["otel"] == {"api", "worker", "rotel"}
+    assert members["obs"] == {"rotel", "mlflow", "worker"}
+    assert members["obs-ui"] == {"caddy", "mlflow"}
     front = model["networks"]["front"]
     assert front["ipam"]["config"] == [{"subnet": "10.230.1.0/24", "ip_range": "10.230.1.128/25"}]
     assert model["services"]["api"]["networks"]["front"]["ipv4_address"] == API_FRONT
