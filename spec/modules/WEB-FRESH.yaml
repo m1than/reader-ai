@@ -1,0 +1,131 @@
+# WEB-FRESH — the "Source freshness" card for a material (owner request 2026-11-23; server side SRV-FRESH,
+# ADR-0030 proposed).
+#
+# Status: DRAFT. No code until SRV-FRESH is approved and the deep-reviewer approves this spec.
+#
+# The card (one component, `FreshnessCard`, given a material id) shows:
+#   1. the bibliography the check will search for, editable (FR-FRESHUI-2);
+#   2. "Run check" with its cost estimate and cap, and a confirmation (FR-FRESHUI-3);
+#   3. progress while a check runs, then the verdict badge `Current` / `Partly outdated` / `Outdated`, the date
+#      checked and a `Stale` label after the TTL (FR-FRESHUI-4);
+#   4. the reasons with their citations, the flagged claims with links to their pages (FR-FRESHUI-5);
+#   5. the recommendations as cards: title, host, date "as reported", kind, why, covered sections (FR-FRESHUI-6).
+#
+# Where it mounts is not this spec's to decide: WEB-IMPORT's "Your sources" list and the course page belong to
+# V/onboarding and V/plan (paired changes for later: a "Freshness" link per material row, and the card on the course
+# page under the lesson list). Until then the card has its own lazy route `/materials/{id}/freshness`.
+#
+# Design: the Calm system and polish rules of WEB-UI FR-UI-10/-11 (tokens only, the library's spacing steps, 2px focus
+# outline, role=status loading states, no HTML strings, axe with no serious or critical issue at 1280, 1024 and
+# 390 px). Web text (titles, reasons) is rendered as text nodes only (WEB-UI INV-UI-2: no innerHTML).
+#
+# Cross-spec: WEB-UI (route registration in the shell, `web/test-server/` stubs from VEC-FRESHUI-1); WEB-NOTEBOOK
+# (page links reuse its lesson-page anchor if a lesson covers the page; otherwise the SRV-INGEST spans view);
+# OPS-DEPLOY: no CSP change (links are navigations, not fetches).
+#
+# Test levels: [unit] Vitest in jsdom; [story] Storybook Light and Dark; [browser] Playwright against the WEB-UI test
+# server; [live] the owner slice suite against `reader up` showing a stored report (no new check is run by the
+# browser live step, so it spends nothing).
+
+id: WEB-FRESH
+title: Source freshness card — bibliography, run with cost estimate, verdict badge, flagged claims with page links, recommendations with safe links
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: product
+adr: [ADR-0030, ADR-0013]
+
+paths:
+  - web/src/fresh/**
+
+normative:
+  - id: REF-FRESHUI-1
+    title: SRV-FRESH — routes, report schema and bounds this card shows
+    url: spec/modules/SRV-FRESH.yaml
+  - id: REF-FRESHUI-2
+    title: WHATWG URL Standard (host serialisation; IDNA to ASCII)
+    url: https://url.spec.whatwg.org/
+  - id: REF-FRESHUI-3
+    title: "HTML Standard — link types noopener, noreferrer, nofollow"
+    url: https://html.spec.whatwg.org/multipage/links.html#linkTypes
+  - id: REF-FRESHUI-4
+    title: WCAG 2.2 (1.4.1 use of colour, 2.4.4 link purpose, 4.1.3 status messages)
+    url: https://www.w3.org/TR/WCAG22/
+
+requirements:
+  - id: FR-FRESHUI-1
+    text: >-
+      Data. The card loads `GET /api/materials/{id}/freshness` (SRV-FRESH FR-FRESH-11) and validates the body at run
+      time (WEB-UI's client pattern); an invalid body shows the error state with Retry. Loading is a role=status
+      skeleton with visually hidden text.
+  - id: FR-FRESHUI-2
+    text: >-
+      Bibliography. Shows title, authors, edition, year, publisher, ISBN, and the original's title, edition and year,
+      with its source ("from you" or "read from the book's first pages"). "Edit" opens a form with those fields and
+      SRV-FRESH FR-FRESH-1's limits as client checks; Save sends `PUT …/bibliography`; a 400 shows the field's error.
+      A scan-read bibliography shows "Check these details before the web search" with a "Looks right" checkbox that
+      sets `confirm_bibliography`.
+  - id: FR-FRESHUI-3
+    text: >-
+      Run. "Run check" shows the estimate as "About $low–$high, at most $cap" from `estimate` and needs a second click
+      "Run for up to $high" to post `POST …/freshness {"high_usd", "confirm_bibliography"}`. A 409 `estimate_changed`
+      shows the new estimate and asks again; 409 `freshness_running` switches to progress; `daily_budget_exhausted`
+      says "Daily limit for freshness checks reached ($2.00); try again tomorrow" with the server's numbers. Money is
+      shown from the server's decimal strings, never recomputed in the browser.
+  - id: FR-FRESHUI-4
+    text: >-
+      Status and verdict. While running, a role=status line "Checking: reading the book" / "Searching the web" polls
+      every 3 s until a final status. A done report shows a badge with text and icon, never colour alone: `Current`,
+      `Partly outdated`, `Outdated` (REF-FRESHUI-4 1.4.1); "Checked <date>"; `Stale` with its reason (older than 90
+      days, re-imported, details changed) and "Run again". `failed` and `budget_refused` show their code's message and
+      "Run again". A scan-only report (`verdict` null) says the bibliography needs a check.
+  - id: FR-FRESHUI-5
+    text: >-
+      Reasons and claims. Reasons are a list of text with their citations as links (FR-FRESHUI-6's link rule). Each
+      flagged claim shows its subject, kind, confidence, the web status (`changed`, `unchanged`, `unknown`) with its
+      note, and "p. N" linking to that page's spans view (or the lesson cell citing it when one exists). Book text is
+      not repeated in the card; the page link is the way to it.
+  - id: FR-FRESHUI-6
+    text: >-
+      Recommendations and links. Each recommendation is a card: title as the link text, the ASCII host from the report
+      (`host`) beside it in a monospace label, the date as "<date> (as reported)", kind, why, and "Covers: <section
+      titles>" resolved from the outline. Every link: `href` is the report's URL string only if it parses (URL
+      Standard) with scheme `http:` or `https:` and its parsed host serialises to the report's `host`, else the URL is
+      shown as text without a link; `rel="noopener noreferrer nofollow"`, `target="_blank"`, and an accessible name
+      that says it opens a new tab. A `dropped` summary says how many links or recommendations were removed and why
+      ("not found in this check's search results", "not a web link"). "Add as source" is not shown (SRV-FRESH defers).
+  - id: FR-FRESHUI-7
+    text: >-
+      Accessibility and layout. axe with no serious or critical issue at 1280, 1024 and 390 px on the card in each
+      state (empty, estimate, running, current, outdated with 5 recommendations, failed); no horizontal overflow at
+      390 px for a 2,048-character URL (it wraps anywhere); headings in order inside the card. [browser]
+
+invariants:
+  - id: INV-FRESHUI-1
+    text: >-
+      For any report, every rendered anchor has an `http:` or `https:` href equal to a URL of the report whose host
+      matches its `host` field, and `rel` containing noopener, noreferrer and nofollow; no other anchor is created
+      from report data (property test over generated reports, incl. `javascript:`, `data:`, userinfo, IDN, bidi and
+      markup in titles).
+  - id: INV-FRESHUI-2
+    text: >-
+      Report strings are rendered only as text nodes: no element, attribute or style comes from report data except
+      the anchors of INV-FRESHUI-1 (unit test with markup and script strings in every field).
+
+nfr:
+  # Chosen bound, not measured: one card of text, links and a form with no new dependency; the Red build measures it.
+  - id: NFR-FRESHUI-1
+    metric: gzip bytes of the lazy `/materials/{id}/freshness` chunk (it does not grow NFR-UI-1's initial chunk)
+    threshold: 20000
+    verified_by: test
+
+vectors:
+  - id: VEC-FRESHUI-1
+    source: Route bodies for every card state (no report, estimate, running, current, partly outdated, outdated with 5 recommendations, stale, failed, budget_refused, scan-only), synthetic, no book text; reused by web/test-server
+    file: spec/fixtures/WEB-FRESH/bodies.json
+
+defers:
+  - "Add as source (multi-source courses, SRV-FRESH defers)."
+  - "An `Outdated` marker on lesson cells whose cited pages are flagged (WEB-NOTEBOOK change, SRV-FRESH defers)."
+  - "Mounting in WEB-IMPORT's source list and the course page (paired changes for V/onboarding and V/plan)."
