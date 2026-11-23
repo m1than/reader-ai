@@ -131,8 +131,8 @@ def test_final_revision_is_the_deterministic_deltas() -> None:
 
 
 def test_deltas_hold_across_the_stored_form() -> None:
-    """FR-PIPELINE-8 (d): F as stored (SRV-LESSON canonical bytes, nbformat splits an appended cell's source into
-    lines) still equals the recomputed function of M; a real change still fails (V.live 2026-11-23)."""
+    """FR-PIPELINE-8 (d): the canonical form of F (SRV-LESSON canonical bytes; nbformat splits an appended cell's
+    source into lines) still equals that of the recomputed function of M; a real change still fails."""
     findings = need("reader.pipeline.findings")
     verify = need("reader.pipeline.verify")
     g2 = need("reader.pipeline.g2")
@@ -156,6 +156,21 @@ def test_deltas_hold_across_the_stored_form() -> None:
     tampered = copy.deepcopy(final)
     tampered["cells"][-1]["metadata"]["reader"]["finding"]["text"] = "edited"
     assert not g2.deltas_ok(stored(tampered), m, problems, report)
+
+
+def test_deltas_without_a_canonical_form_are_a_mismatch_not_a_crash() -> None:
+    """FR-PIPELINE-8 (d): a recomputed notebook the validator refuses counts as `deltas.mismatch`."""
+    findings = need("reader.pipeline.findings")
+    verify = need("reader.pipeline.verify")
+    g2 = need("reader.pipeline.g2")
+    m = json.loads(F01)
+    report = verify.LabReport(findings.labs_sha256(m), {}, [])
+    bad = [findings.Problem("adversarial_review", None, None, "x", "not_a_stage", False)]
+    try:
+        result: object = g2.deltas_ok(m, m, bad, report)
+    except Exception as raised:  # the outcome under test: a raise is the failure this test pins
+        result = raised
+    assert result is False, f"deltas_ok raised or returned {result!r}"
 
 
 def _report(nb: dict[str, Any], verdicts: dict[Any, str] | None = None) -> dict[str, Any]:

@@ -201,11 +201,11 @@ requirements:
       uncited claims, where an `explain` cell with no claims counts as uncited, plus `changed` and `erratum` cells without
       a supported verdict, and blocking open cells, where `wontfix` still counts as blocking; (c) stages — whether
       `fact_check` and `adversarial_review` stage records exist on M; (d) deltas — F equals the deterministic function
-      `stamp_labs(append_findings(M, reports), lab_report)` recomputed from the stored inputs, compared on the stored
+      `stamp_labs(append_findings(M, reports), lab_report)` recomputed from the stored inputs, compared on the canonical
       form: the SRV-LESSON canonical bytes (FR-LESSON-2) of F equal those of the recomputed notebook (nbformat stores an
-      appended cell's `source` as a list of lines; an in-memory string must not count as a delta; found by the V.live
-      run 2026-11-23, where every run that appended a findings cell reported `deltas.mismatch`). `publishable` is true
-      only when (a)–(d) are all clean.
+      appended cell's `source` as a list of lines; an in-memory string must not count as a delta). A notebook that
+      cannot be put in canonical form (a LessonWriteError or UnicodeEncodeError from the validator) counts as a delta:
+      `deltas.mismatch`, never a failed step. `publishable` is true only when (a)–(d) are all clean.
   - id: FR-PIPELINE-9
     text: >-
       Lab verification (`reader.pipeline.verify`). The worker-side client talks to `kernel-verify` through the SRV-KERNEL
