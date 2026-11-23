@@ -388,14 +388,14 @@ async def test_self_terminating_handler_is_bounded(pg: Pg) -> None:
 
     kind = dataclasses.replace(effect_kind(), handler=kills_own_session)
     async with jobs_env(pg, kinds=[kind]) as env:
-        results = []
-        for _ in range(6):
-            results.append((await env.jobs.enqueue(KIND, {"name": "self"})).kind)
-            await env.work()
+        # One enqueue only: every later run comes from the worker's own re-enqueue after a lost run.
+        assert (await env.jobs.enqueue(KIND, {"name": "self"})).kind == "queued"
+        await env.work()
         row = await env.key_row("self")
         assert (row.attempts, row.outcome, row.error_code) == (3, "dead", "session_lost")
-        assert env.runs("self") <= 3
-        assert results[-1] == "dead"
+        assert env.runs("self") == 3
+        assert await env.job_statuses("self") == ["failed", "failed", "failed"]
+        assert (await env.jobs.enqueue(KIND, {"name": "self"})).kind == "dead"
 
 
 async def test_exhausted_at_claim_never_runs(pg: Pg) -> None:
@@ -613,6 +613,347 @@ async def test_unknown_kind_and_orphan_jobs(pg: Pg) -> None:
         assert status == "failed"
 
 
+# ---- final code review (2924dcf): unknown kinds, lost runs, requeue, sweep robustness
+
+
+async def _claim(env: Any) -> Any:
+    """Fetch the next job as a live worker would, without running it (the test calls the wrapper itself)."""
+    worker_id = await env.app.job_manager.register_worker()
+    job = await env.app.job_manager.fetch_job(queues=None, worker_id=worker_id)
+    assert job is not None
+    return job
+
+
+async def _run_claimed(env: Any, kind: Any, job: Any) -> str:
+    """Run the wrapper on a claimed job; returns the JobFailed code. The job stays `doing` until finished."""
+    from types import SimpleNamespace
+
+    jobs = require_jobs()
+    with pytest.raises(jobs.JobFailed) as failed:
+        await env.jobs._run(kind, SimpleNamespace(job=job), job.task_kwargs["payload"])
+    await env.app.job_manager.finish_job(job, _failed(), delete_job=False)
+    return str(failed.value.code)
+
+
+async def _other_version(env: Any, pg: Pg) -> Any:
+    """A Jobs runtime of a worker version whose catalog lacks the test kind (a deploy rollback)."""
+    from reader.jobs.queue import Jobs
+    from reader.jobs.worker import make_app
+
+    other = make_app(target(pg))
+    await other.open_async()
+    return other, Jobs(env.engine, other, require_jobs().Catalog([]))
+
+
+async def test_unknown_kind_stalled_with_the_lock_free_is_dead(pg: Pg) -> None:
+    """FR-EVENTS-7: a stalled job of a kind this worker does not know, lock free, gets dead unknown_kind."""
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "ukd"})
+        job = await env.stall_next()
+        other, old = await _other_version(env, pg)
+        try:
+            report = await old.sweep()
+        finally:
+            await other.close_async()
+        assert job.id in report.finished
+        row = await env.key_row("ukd")
+        assert (row.outcome, row.error_code) == ("dead", "unknown_kind")
+        assert await env.job_statuses("ukd") == ["failed"]
+
+
+async def test_reconcile_skips_keys_of_an_unknown_kind(pg: Pg) -> None:
+    """FR-EVENTS-15: after a rollback-style cancel, reconcile never marks an unknown kind's key dead."""
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "rb"})
+        other, old = await _other_version(env, pg)
+        try:
+            await old.sweep()  # cancels the todo job of a kind it does not know
+            assert await env.job_statuses("rb") == ["cancelled"]
+            await env.age_keys()  # the key row is now older than 60 s
+            later = await old.sweep()
+            again = await old.sweep(reconcile_age_s=0)
+        finally:
+            await other.close_async()
+        assert env.key("rb") not in later.dead
+        assert env.key("rb") not in again.dead
+        row = await env.key_row("rb")
+        assert (row.attempts, row.outcome, row.error_code) == (0, None, None)
+
+
+async def test_wrapper_error_counts_one_attempt_and_reenqueues(pg: Pg, monkeypatch: Any) -> None:
+    """FR-EVENTS-4: a failure of the wrapper itself (here _judge) is counted once; the key is queued again."""
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "we", "mode": "permanent"})
+        job = await _claim(env)
+
+        async def broken(*_args: Any, **_kw: Any) -> None:
+            raise RuntimeError("judge unavailable")
+
+        monkeypatch.setattr(env.jobs, "_judge", broken)
+        assert await _run_claimed(env, env.kind, job) == "wrapper_error"
+        row = await env.key_row("we")
+        assert (row.attempts, row.outcome) == (1, None)
+        assert await env.job_statuses("we") == ["failed", "todo"]
+
+
+async def test_lost_run_is_reenqueued_by_the_worker(pg: Pg) -> None:
+    """FR-EVENTS-4: the worker itself counts a run whose session died and enqueues the key again."""
+    import dataclasses
+
+    from sqlalchemy import text
+
+    from .conftest import effect_kind
+
+    async def kills_own_session(args: Any, conn: Any, ctx: Any) -> None:
+        await conn.execute(text("SELECT pg_terminate_backend(pg_backend_pid())"))
+
+    kind = dataclasses.replace(effect_kind(), handler=kills_own_session)
+    async with jobs_env(pg, kinds=[kind]) as env:
+        await env.jobs.enqueue(KIND, {"name": "lost"})
+        job = await _claim(env)
+        assert await _run_claimed(env, kind, job) == "session_lost"
+        row = await env.key_row("lost")
+        assert (row.attempts, row.outcome) == (1, None)
+        assert await env.job_statuses("lost") == ["failed", "todo"]
+
+
+async def test_requeue_dead_on_a_key_without_outcome_or_job(pg: Pg) -> None:
+    """FR-EVENTS-8: with no outcome, requeue_dead returns FR-EVENTS-3's result for the stored args."""
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "nj"})
+        await env.execute("DELETE FROM procrastinate_jobs WHERE lock = :k", k=env.key("nj"))
+        assert (await env.jobs.requeue_dead(KIND, env.key("nj"))).kind == "queued"
+        assert await env.job_statuses("nj") == ["todo"]
+        assert (await env.key_row("nj")).attempts == 0
+
+
+async def test_sweep_job_is_stored_with_the_sweep_priority(pg: Pg) -> None:
+    """FR-EVENTS-7: jobs.sweep runs with the highest priority and its own queueing lock."""
+    from reader.jobs.catalog import SWEEP_PRIORITY
+
+    async with jobs_env(pg) as env:
+        await env.app.tasks["jobs.sweep"].defer_async(timestamp=0)
+        rows = await env.rows(
+            "SELECT priority, queueing_lock FROM procrastinate_jobs WHERE task_name = 'jobs.sweep'"
+        )
+        assert [tuple(r) for r in rows] == [(SWEEP_PRIORITY, "jobs.sweep")]
+
+
+async def test_a_failing_enqueue_does_not_end_the_sweep_round(pg: Pg, monkeypatch: Any) -> None:
+    """FR-EVENTS-15: one failing re-enqueue is logged and the round goes on; the key is taken later."""
+    async with jobs_env(pg) as env:
+        for name in ("d1", "d2"):
+            await env.jobs.enqueue(KIND, {"name": name})
+        await env.execute(
+            "DELETE FROM procrastinate_jobs WHERE lock IN (:a, :b)", a=env.key("d1"), b=env.key("d2")
+        )
+        await env.age_keys()
+        real = env.jobs._defer
+        calls: list[str] = []
+
+        async def first_fails(kind: Any, key: str, *args: Any, **kw: Any) -> Any:
+            calls.append(key)
+            if len(calls) == 1:
+                raise RuntimeError("defer unavailable")
+            return await real(kind, key, *args, **kw)
+
+        monkeypatch.setattr(env.jobs, "_defer", first_fails)
+        report = await env.jobs.sweep()
+        assert len(calls) == 2
+        assert report.reenqueued == [calls[1]]
+        monkeypatch.setattr(env.jobs, "_defer", real)
+        await env.age_keys()
+        later = await env.jobs.sweep()
+        assert later.reenqueued == [calls[0]]
+
+
+# ---- FR-EVENTS-1, -9: start hooks and running()
+
+
+async def _until(predicate: Any, timeout_s: float = 20.0) -> None:
+    with anyio.fail_after(timeout_s):  # polls database state: there is no event to wait on
+        while not await predicate():  # noqa: ASYNC110
+            await asyncio.sleep(0.05)
+
+
+async def test_start_hook_runs_once_after_the_start_sweep_with_running_set(pg: Pg) -> None:
+    jobs = require_jobs()
+    from reader.jobs.worker import run, running
+
+    with pytest.raises(jobs.JobError) as before:
+        running()
+    assert before.value.code == "no_worker"
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "hk"})
+        await env.stall_next()  # the start sweep finishes this job failed and enqueues the key again
+        seen: list[tuple[bool, list[str]]] = []
+
+        async def hook(given: Any) -> None:
+            seen.append((given is running(), await env.job_statuses("hk")))
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog, hooks=[hook]))
+
+        async def served() -> bool:
+            return (await env.key_row("hk")).outcome == "succeeded"
+
+        await _until(served)
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+    assert len(seen) == 1
+    is_running, statuses = seen[0]
+    assert is_running
+    assert statuses[0] == "failed"  # the stalled job was swept before the hook ran
+    with pytest.raises(jobs.JobError) as after:
+        running()  # cleared in run's finally
+    assert after.value.code == "no_worker"
+
+
+async def test_a_failing_hook_does_not_stop_the_next_hook_or_the_worker(pg: Pg) -> None:
+    from reader.jobs.worker import run
+
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "after"})
+        calls: list[str] = []
+
+        async def bad(_jobs: Any) -> None:
+            calls.append("bad")
+            raise RuntimeError("hook failed")
+
+        async def good(_jobs: Any) -> None:
+            calls.append("good")
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog, hooks=[bad, good]))
+
+        async def served() -> bool:
+            return (await env.key_row("after")).outcome == "succeeded"
+
+        await _until(served)
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+        assert calls == ["bad", "good"]
+
+
+async def test_hook_timeout_and_stop_during_a_hook(pg: Pg, monkeypatch: Any) -> None:
+    from reader.jobs import worker
+
+    async with jobs_env(pg) as env:
+        monkeypatch.setattr(worker, "HOOK_TIMEOUT_S", 0.2)
+        await env.jobs.enqueue(KIND, {"name": "slow"})
+
+        async def hangs(_jobs: Any) -> None:
+            await asyncio.sleep(3600)
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(worker.run(env.engine, target(pg), stop, env.jobs.catalog, hooks=[hangs]))
+
+        async def served() -> bool:
+            return (await env.key_row("slow")).outcome == "succeeded"
+
+        await _until(served)  # the hook timed out and the worker served
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+
+        monkeypatch.setattr(worker, "HOOK_TIMEOUT_S", 3600.0)
+        started = asyncio.Event()
+
+        async def waits(_jobs: Any) -> None:
+            started.set()
+            await asyncio.sleep(3600)
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(worker.run(env.engine, target(pg), stop, env.jobs.catalog, hooks=[waits]))
+        with anyio.fail_after(15):
+            await started.wait()
+        stop.set()
+        with anyio.fail_after(5):
+            assert await task == 0  # stop is observed inside a hook
+
+
+async def test_run_without_hooks_awaits_the_declared_start_hooks(pg: Pg, monkeypatch: Any) -> None:
+    """FR-EVENTS-1: the production default `hooks=None` runs `start_hooks()`'s hooks, each once."""
+    from reader.jobs import worker
+
+    calls: list[Any] = []
+
+    async def recording(given: Any) -> None:
+        calls.append(given)
+
+    monkeypatch.setattr(worker, "start_hooks", lambda: [recording])
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "dflt"})
+        stop = asyncio.Event()
+        task = asyncio.create_task(worker.run(env.engine, target(pg), stop, env.jobs.catalog))
+
+        async def served() -> bool:
+            return (await env.key_row("dflt")).outcome == "succeeded"
+
+        await _until(served)
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+    assert len(calls) == 1
+    assert calls[0].catalog is not None  # the worker's Jobs
+
+
+async def test_a_failing_start_sweep_returns_1(pg: Pg, monkeypatch: Any) -> None:
+    from reader.jobs.queue import Jobs
+    from reader.jobs.worker import run
+
+    async def broken(self: Any, *_args: Any, **_kw: Any) -> Any:
+        raise RuntimeError("sweep failed")
+
+    async with jobs_env(pg) as env:
+        monkeypatch.setattr(Jobs, "sweep", broken)
+        with anyio.fail_after(15):
+            assert await run(env.engine, target(pg), asyncio.Event(), env.jobs.catalog, hooks=()) == 1
+
+        # A stop that arrives while the start sweep fails is a stop: 0, not the failure's 1 (FR-EVENTS-9).
+        stop = asyncio.Event()
+
+        async def stopped_then_broken(self: Any, *_args: Any, **_kw: Any) -> Any:
+            stop.set()
+            raise RuntimeError("sweep failed")
+
+        monkeypatch.setattr(Jobs, "sweep", stopped_then_broken)
+        with anyio.fail_after(15):
+            assert await run(env.engine, target(pg), stop, env.jobs.catalog, hooks=()) == 0
+
+
+async def test_a_hook_that_cancels_itself_does_not_end_the_worker(pg: Pg) -> None:
+    """FR-EVENTS-1: hook failure is isolated, a self-cancelled hook included; only `stop` ends the start."""
+    from reader.jobs.worker import run
+
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "selfcancel"})
+        calls: list[str] = []
+
+        async def cancels_itself(_jobs: Any) -> None:
+            calls.append("cancels")
+            raise asyncio.CancelledError
+
+        async def next_hook(_jobs: Any) -> None:
+            calls.append("next")
+
+        stop = asyncio.Event()
+        task = asyncio.create_task(
+            run(env.engine, target(pg), stop, env.jobs.catalog, hooks=[cancels_itself, next_hook])
+        )
+
+        async def served() -> bool:
+            return (await env.key_row("selfcancel")).outcome == "succeeded"
+
+        await _until(served)
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+        assert calls == ["cancels", "next"]
+
+
 # ---- FR-EVENTS-9: the worker entry
 
 
@@ -625,7 +966,7 @@ async def test_worker_run_returns_0_after_stop_and_1_when_unreachable(pg: Pg) ->
 
     async with jobs_env(pg) as env:
         stop = asyncio.Event()
-        task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog))
+        task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog, hooks=()))
         await asyncio.sleep(1.0)
         stop.set()
         with anyio.fail_after(15):
@@ -634,7 +975,7 @@ async def test_worker_run_returns_0_after_stop_and_1_when_unreachable(pg: Pg) ->
     engine = make_engine(bad)
     try:
         with anyio.fail_after(30):
-            assert await run(engine, bad, asyncio.Event()) == 1
+            assert await run(engine, bad, asyncio.Event(), hooks=()) == 1
     finally:
         await engine.dispose()
 
@@ -654,7 +995,7 @@ async def test_worker_run_stop_with_running_job(pg: Pg) -> None:
         async with jobs_env(pg) as env:
             await env.jobs.enqueue(KIND, {"name": "stopme", "sleep_s": 60})
             stop = asyncio.Event()
-            task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog))
+            task = asyncio.create_task(run(env.engine, target(pg), stop, env.jobs.catalog, hooks=()))
             for _ in range(200):
                 if await env.job_statuses("stopme") == ["doing"]:
                     break
