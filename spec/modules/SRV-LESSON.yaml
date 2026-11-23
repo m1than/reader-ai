@@ -55,7 +55,7 @@ layer: server
 track: product
 adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
 slice: V.SRV-LESSON-min
-review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22)"
+review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed."
 
 paths:
   - server/src/reader/lessons/**
@@ -114,7 +114,8 @@ tables:
 
 # Fixed error codes. The write path (FR-LESSON-4) raises `LessonWriteError(code)`; routes answer JSON `{"error": code}`.
 write_errors: [not_utf8, not_nbformat, duplicate_cell_id, missing_reader_metadata, cell_schema, cell_type_mismatch,
-  too_large, too_many_cells, notes_cell_removed, bad_provenance, not_owner, unknown_lesson]
+  too_large, too_many_cells, notes_cell_removed, bad_provenance, not_owner, unknown_lesson, lesson_started,
+  lessons_mismatch]
 route_errors: [not_found, unknown_revision, blob_unavailable]
 
 requirements:
@@ -250,6 +251,26 @@ requirements:
       foreign keys, the partial unique index and the immutability trigger; `alembic downgrade lessons@-1` drops them
       and leaves SRV-AUTH's tables. Routes are declared as
       data in `reader.lessons.routes` (method, path, auth) and reach the app through SRV-AUTH's `ROUTERS` list.
+  # Paired amendment for SRV-PIPELINE FR-PIPELINE-14 and SRV-PLAN (2026-11-23, V/plan; reviewed with SRV-PLAN,
+  # deep-reviewer round 4 approve on d9f655a), promoted with its Red tests.
+  - id: FR-LESSON-15
+    text: >-
+      **Unstarted lessons and order.**
+      - `store.started_lessons(conn, owner_id, course_id) -> frozenset[uuid]` lists the course's lessons that any row
+        refers to, other than a `course_plans` row: the referring tables and columns are read from the catalog
+        (`pg_constraint` foreign keys whose referenced table is `lessons`, excluding `course_plans`), so a table added
+        later counts without a change here. SRV-PLAN's preview and the delete below use this one function.
+      - `store.delete_unstarted_lesson(conn, owner_id, lesson_id)` deletes the owner's lesson only when it is not in
+        `started_lessons` (re-checked in the same transaction, immediately before the DELETE), else raises
+        `LessonWriteError("lesson_started")`; a foreign-key violation from the DELETE (inside a savepoint) raises the
+        same; an absent lesson raises `LessonWriteError("unknown_lesson")`. The caller removes the `course_plans` row
+        first.
+      - Red pins, from the catalog after all migrations, that every foreign key referring to `lessons` blocks the
+        delete: `confdeltype` is `r` (RESTRICT) or `a` (NO ACTION) and the constraint is not deferrable.
+      - `store.reorder_lessons(conn, owner_id, course_id, lesson_ids)` sets the ordinals of the listed lessons, which
+      must be exactly the course's lessons, to 1..n in list order, in two statements: first every ordinal +
+      (current max + n), then the final values, because `UNIQUE (course_id, ordinal)` is not deferrable and `ordinal
+      ≥ 1`; a list that is not the course's lessons raises `LessonWriteError("lessons_mismatch")`. [db]
 
 invariants:
   - id: INV-LESSON-1

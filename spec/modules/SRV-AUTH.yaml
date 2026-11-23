@@ -278,7 +278,10 @@ requirements:
       (paired change). Paired SRV-SEARCH change (2026-11-22): ROUTERS appends `reader.search.routes`. Paired
       SRV-TUTOR change (2026-11-23): ROUTERS appends `reader.tutor.routes`, and `reader/tutor/migrations` joins
       VERSION_LOCATIONS after `pipeline`; the tutor's ask route enqueues through the same `app.state.jobs`.
-      Integrated order: api, auth, lessons, kernels, ingest, search, pipeline, tutor.
+      Integrated order: api, auth, lessons, kernels, ingest, search, pipeline, tutor. Paired SRV-PLAN change
+      (2026-11-23, V/plan; reviewed with SRV-PLAN, deep-reviewer round 4 approve on d9f655a): ROUTERS appends
+      `reader.plan.routes`, and `reader/plan/migrations` joins VERSION_LOCATIONS after `tutor`, before procrastinate's
+      directory; no behaviour of this module changes, and the two list tests take the new lists.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

@@ -31,6 +31,7 @@ def test_version_locations_are_a_declared_list() -> None:
         "agent/migrations",
         "pipeline/migrations",
         "tutor/migrations",
+        "plan/migrations",  # SRV-PLAN paired change (FR-AUTH-10 note)
     ]
     assert [p.as_posix().rsplit("/procrastinate/", 1)[1] for p in theirs] == ["contrib/alembic/versions"]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)

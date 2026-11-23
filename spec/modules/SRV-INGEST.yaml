@@ -25,9 +25,20 @@
 # on CPU at 15.69–15.85 pages/min, against 15.85–16.57 unconfined on the same 20 pages, with identical output (6
 # formulas, 11 tables). Every negative probe was denied. The dedicated-macOS-user fallback is not needed.
 #
+# Revision 2 (DRAFT, 2026-11-23, owner request, ADR-0029 proposed): browser upload into an inbox on the blobs volume
+# that no service in the stack parses; a host process `reader-ingest --watch` (started by `reader up`, OPS-CLI paired
+# change; no secrets) claims an upload by long-polling the worker over `docker exec`, fetches its bytes on the exec's
+# stdout, checks sha256 and size against the claim, converts it under the unchanged profile, and returns the artifact
+# over the existing receive with the claim. Progress, cancel, retry and the converter's online state reach the UI
+# through the `uploads` row and the existing jobs. Items FR-INGEST-18..25, INV-INGEST-8..10, VEC-INGEST-6..7.
+# Cross-spec for revision 2: SRV-AUTH (FR-AUTH-12 Content-Type exception for the upload route), OPS-DEPLOY (Caddy
+# `request_body max_size 200MB` and a body read timeout on that path), OPS-CLI (`reader up` starts the ingest watcher
+# as its own detached program with its own lock; `reader status` reports it; `reader down` stops it), SRV-SEARCH
+# (fts_config of uploaded materials), SRV-PLAN (FR-INGEST-24).
+#
 # Declared deviations:
 #   - The roadmap's slice says "Upload the Bashir PDF". The PDF is declared in reader.yaml and ingested with a host
-#     command; browser upload is deferred (owner note 1).
+#     command; browser upload is deferred (owner note 1). Revision 2 adds browser upload; the CLI path stays.
 #   - ADR-0008 (proposed) names pypdf for bookmarks. This spec reads bookmarks and the text layer with pypdfium2, which
 #     Docling already depends on, so one PDF library serves both and no second parser enters the host install.
 #
@@ -76,7 +87,7 @@ approved_at: 2026-11-22
 layer: server
 track: engineering
 slice: V.SRV-INGEST-min
-adr: [ADR-0021, ADR-0027, ADR-0008, ADR-0006, ADR-0007, ADR-0011, ADR-0017, ADR-0026]
+adr: [ADR-0021, ADR-0027, ADR-0029, ADR-0008, ADR-0006, ADR-0007, ADR-0011, ADR-0017, ADR-0026]
 
 paths:
   - server/src/reader/ingest/**
@@ -121,6 +132,10 @@ normative:
 #   Docling page batches of 50. Reason: the spike's full run used 50-page batches (Docker; 5,005 MiB peak).
 #   Import job: max_attempts 3, timeout_s 600. Reason: the import is one transaction of row inserts (no conversion);
 #     600 s covers 500,000 spans at an assumed 1,000 rows/s, itself a structural assumption, not a measurement.
+#   Revision 2 (draft, ADR-0029): `inbox.upload_bytes_max` 200 MiB (≈ 10× the 20.9 MB pilot), `inbox.open_max` 5,
+#     `inbox.bytes_max` 1 GiB, lease 120 s, 3 attempts, long-poll 25 s, progress at most every 30 s, converter
+#     online while seen in the last 60 s, `convert.rss_max` 8 GiB (2 × the pilot's measured 4,025 MiB child peak),
+#     `convert.work_bytes_max` 2 GiB. All structural except the RSS basis. Constants in `reader.ingest.params`.
 #   receive: 300 s internal deadline; host-side exec timeouts: receive 330 s, status and requeue 60 s. Reason:
 #     validation and an 80 MiB copy take seconds; a host-side timeout does not stop a process inside the container,
 #     so receive bounds itself, and the host waits slightly longer than that bound.
@@ -582,6 +597,136 @@ requirements:
       - FR-INGEST-12 reports the frozen version, so `reader-ingest` never converts a frozen material again.
       [db]
 
+# ---- Revision 2 (DRAFT, 2026-11-23, V/onboarding): browser upload and host pickup, ADR-0029 (proposed). ----
+# FR-INGEST-18..25, INV-INGEST-8..10 and VEC-INGEST-6..7 are held under `proposed_*` keys, which trace-check does
+# not read, because this spec is approved and T5 requires a test for every item it holds. On approval they move into
+# `requirements`, `invariants` and `vectors` together with their Red tests. No code until the deep-reviewer approves
+# this revision (the area is sandbox and egress, AGENTS.md "Complex work"). Items 1–17 are unchanged.
+proposed_requirements:
+  - id: FR-INGEST-18
+    text: >-
+      **Upload route** (ADR-0029 Decision 1). `POST /api/materials/uploads?filename=F&language=L` in
+      `reader.ingest.routes`, owner role only (403 `owner_only`), body the raw PDF with `Content-Type:
+      application/pdf` (SRV-AUTH FR-AUTH-12 exception, paired change). `F` is 1..200 characters after NFC and after
+      removing C0/C1 controls, `/`, `\` and NUL (else 400 `filename`); `L` is `ru`, `en` or `other` (else 400
+      `language`; `other` maps to the `simple` full-text configuration). The handler:
+      - takes the owner's upload lock (`pg_try_advisory_lock` on a constant key plus the owner id; held: 409
+        `upload_busy`) and checks the quota before reading the body: at most `inbox.open_max` (5) uploads in a state
+        other than `ready`, `failed`, `cancelled`, and at most `inbox.bytes_max` (1 GiB) in the inbox (409
+        `inbox_full`);
+      - streams the body in chunks of at most 1 MiB into `<BLOBS_DIR>/inbox/.tmp-<32 random hex>` (created with
+        `O_CREAT|O_EXCL|O_NOFOLLOW`, mode 0640), hashing as it writes; at `inbox.upload_bytes_max` (200 MiB) + 1 byte
+        it stops with 413 `too_large`; a client disconnect or an empty body (400 `empty`) removes the file;
+      - checks the magic (VEC-INGEST-7): the first 8 bytes match `%PDF-1.[0-7]` or are `%PDF-2.0`, and the last
+        1,024 bytes contain `%%EOF`; else 415 `not_pdf`. Nothing else in the file is read;
+      - dedupes: if a declared material (reader.yaml) or an upload of this owner has the sha256, it removes the
+        temporary file and answers 200 with `{upload: <existing view> | null, material_id}`;
+      - otherwise fsyncs the file, renames it to `<BLOBS_DIR>/inbox/<sha256>.pdf`, chmods 0440, fsyncs the
+        directory, inserts the `uploads` row (FR-INGEST-19) in state `queued`, sends `NOTIFY reader_inbox`, and
+        answers 201 with the upload view (FR-INGEST-23).
+      Every failure path removes the temporary file (`finally`). [db]
+  - id: FR-INGEST-19
+    text: >-
+      **Uploads table** (migration `reader/ingest/migrations/<rev>_uploads.py`, `down_revision` the ingest base):
+      `uploads(id uuid pk, owner_id → users.id, sha256 text CHECK 64 lowercase hex, size bigint CHECK > 0,
+      filename text, language text CHECK in (ru, en, other), state text CHECK in (queued, claimed, converting,
+      sending, received, failed, cancelled), code text null, attempts int default 0, claim text null, lease_until
+      timestamptz null, pages_done int null, pages_total int null, created_at, updated_at)`, unique (owner_id,
+      sha256); `ingest_hosts(singleton bool pk CHECK true, seen_at timestamptz, state text CHECK in (ready,
+      setup_missing), converter_version text)`. Transitions, each one guarded `UPDATE … WHERE state = <from>`:
+      - queued → claimed (`next`), claimed → converting (first `progress`), converting → sending (`progress
+        --sending`), sending → received (receive, FR-INGEST-23);
+      - claimed | converting | sending → queued with `attempts + 1` when `lease_until` has passed (checked by every
+        `next` before it claims), or → failed `host_lost` when that makes `attempts` 3;
+      - claimed | converting | sending → failed `<code>` (`inbox fail`, FR-INGEST-20);
+      - queued | claimed | converting → cancelled (owner); failed → queued with `attempts = 0` (owner Retry);
+      - failed → deleted row and file (owner Discard).
+      `received` is the last state the row holds; `importing`, `indexing`, `ready` and job failures are derived
+      (VEC-INGEST-6). [db]
+  - id: FR-INGEST-20
+    text: >-
+      **Inbox commands** in the worker image, `python -I -m reader.ingest.inbox <cmd>`, each printing exactly one JSON
+      line of at most 4 KiB, exit 0, or `{"error": code}` with exit 1; each has a 60 s internal deadline except
+      `next` (`--wait` + 10 s) and `fetch` (300 s):
+      - `next --wait S --host-state ready|setup_missing --converter-version V` (S in 1..25): upserts `ingest_hosts`;
+        expires leases; with `ready`, claims the oldest `queued` upload `FOR UPDATE SKIP LOCKED` (claim = 32 random
+        hex, `lease_until = now() + 120 s`) and prints `{"upload": {"id", "sha256", "size", "claim"}}`; if none, it
+        `LISTEN`s on `reader_inbox` for up to S seconds, tries once more, then prints `{"upload": null}`. With
+        `setup_missing` it claims nothing.
+      - `fetch --upload-id U --claim C`: for an upload in `claimed` or `converting` under C, copies
+        `<BLOBS_DIR>/inbox/<sha256>.pdf` (opened `O_RDONLY|O_NOFOLLOW`, `fstat` a regular file whose size equals the
+        row's) to stdout in 1 MiB chunks, with no JSON line; any refusal prints the error line on stdout before any
+        byte and exits 1 (`claim`, `cancelled`, `missing`).
+      - `progress --upload-id U --claim C (--pages-done n --pages-total m | --sending)`: renews the lease, moves the
+        state forward as FR-INGEST-19 says, stores the counts (0 ≤ n ≤ m ≤ 5,000), and prints `{"ok": true}` or
+        `{"cancel": true}` when the upload is `cancelled` or no longer under C.
+      - `fail --upload-id U --claim C --code K` with K from the fixed list `fetch_mismatch`, `not_pdf`,
+        `convert_failed`, `memory_limit`, `work_limit`, `timeout`, `receive_failed`: sets `failed` and the code.
+      Arguments are validated before any database access: U a UUID, C `^[0-9a-f]{32}$`, codes from the list. [db]
+  - id: FR-INGEST-21
+    text: >-
+      **Host watch mode** `reader-ingest --watch [--config PATH]` (ADR-0029 Decision 2). It takes an exclusive
+      non-blocking `flock` on `<data_dir>/ingest/locks/watch.lock` (held: exit 3 `busy`), holds no secret and reads no
+      Keychain item. In a loop:
+      - checks the setup (FR-INGEST-3) without exiting: the host state is `ready` or `setup_missing`;
+      - checks the stack (FR-INGEST-2's `reader status --json` and worker resolution); unhealthy: waits 10 s and
+        retries, never exits for it;
+      - runs `next --wait 25` (exec timeout 45 s) and parses the line against the exact schema (a UUID, 64 lowercase
+        hex, an integer 1..`upload_bytes_max`, 32 hex); anything else is logged as `bad_reply` and the loop waits
+        10 s;
+      - for a claim: creates the run record and work directory as FR-INGEST-1 (with `upload_id` in the record),
+        runs `fetch`, reading at most `size` + 1 bytes into `<work>/in/material.pdf` (0400) while hashing; a stream
+        that is longer or shorter than `size`, a sha256 other than the claim's, or a failed magic check is
+        `fetch_mismatch` (reported with `fail`, nothing converted);
+      - runs the converter exactly as FR-INGEST-4..10, relaying each validated progress line with `progress` at
+        most every 30 s and after each batch; a `{"cancel": true}` reply kills the child's session (FR-INGEST-16's
+        SIGTERM then SIGKILL) and abandons the run without `fail`;
+      - on success calls `progress --sending`, then receive with `--upload-id U --claim C` (FR-INGEST-23); on any
+        error reports `fail` with its code;
+      - removes the work directory and run record on every path (FR-INGEST-16), and processes one upload at a time.
+      In watch mode the host never opens a path that came from the stack, and builds every exec argv as a list from
+      validated values. SIGINT or SIGTERM stops the loop after the current child is killed; the claim's lease then
+      expires and the upload returns to `queued`. [unit, fake runner]
+  - id: FR-INGEST-22
+    text: >-
+      **Host watchdogs** for every converter child (CLI and watch mode): every 2 s the parent reads the child's
+      session's resident memory (`ps -o rss= -g <sid>`, summed) and the work directory's size (a `os.scandir` walk
+      under WORK with `follow_symlinks=False`, counting regular files' `st_size`). Over `convert.rss_max` (8 GiB: the
+      pilot's measured child peak of 4,025 MiB × 2, NFR-INGEST-1) it kills the session with `memory_limit`; over
+      `convert.work_bytes_max` (2 GiB, structural) with `work_limit`. The walk stops at 100,000 entries and treats
+      more as `work_limit`. [unit, fake child; local]
+  - id: FR-INGEST-23
+    text: >-
+      **Uploaded materials** (ADR-0029). An upload is a material with id `up-<first 12 hex of sha256>`, license
+      `personal-use`, its upload's language, and its filename without a trailing `.pdf` as display title.
+      - **Receive** gains `--upload-id U --claim C`: the artifact's `material_sha256` must equal the upload's, and
+        the upload must be `sending` under C (else `upload_claim`, or `upload_cancelled` for a cancelled one);
+        storage then sets the row `received` in the same transaction as the enqueue (FR-INGEST-11's phases are
+        unchanged). The content check "material_sha256 equals a materials[].sha256 in reader.yaml" becomes "… or
+        is the sha256 of the upload named by `--upload-id`". The import job's `material_id` is the upload's id.
+      - **Routes** (owner only, as FR-INGEST-15): `GET /api/materials` also lists uploaded materials after the
+        declared ones, newest first, with `source: "upload"` (declared ones `source: "config"`) and the upload view;
+        `GET /api/materials/uploads/{id}` returns the upload view `{id, material_id, filename, size, language, state,
+        code, pages_done, pages_total, attempts, created_at}` with `state` from VEC-INGEST-6; `POST
+        /api/materials/uploads/{id}/cancel`, `/retry` and `DELETE /api/materials/uploads/{id}` (Discard, `failed`
+        only) apply FR-INGEST-19's transitions (409 `state` otherwise; cancel and discard delete the inbox file
+        after the commit); `GET /api/materials/converter` returns `{state: online | offline | setup_missing,
+        seen_at, converter_version}` (online while `seen_at` is under 60 s old).
+      - **Search** (SRV-SEARCH paired change): an uploaded material's `fts_config` is `russian`, `english` or
+        `simple` from its upload's language.
+      - The outline and spans routes accept `up-…` ids. [db]
+  - id: FR-INGEST-24
+    text: >-
+      **For the planner** (SRV-PLAN): `reader.ingest.store.page_chars(conn, owner_id, material_sha256) ->
+      (ingest_id, tuple[int, ...])`, the sum of `char_length(text)` of the material's spans per page, pages 1..
+      page_count (0 for a page with no span), and `outline_entries(conn, owner_id, ingest_id)` → `(level, page,
+      title)` in seq order. Both read only the owner's rows. [db]
+  - id: FR-INGEST-25
+    text: >-
+      **Logging.** Upload, inbox commands and watch mode log only: event, upload id, sha256 prefix (12 hex), size,
+      state, code, attempts, pages counts and durations. The filename is never logged (it is the owner's text and
+      may name the book). [unit, db]
+
 invariants:
   - id: INV-INGEST-1
     text: >-
@@ -702,6 +847,29 @@ invariants:
       `material_sha256 + ":" + str(seq)`, and are the same before and after any number of further receives, imports,
       requeues and api restarts. [db]
 
+proposed_invariants:
+  - id: INV-INGEST-8
+    text: >-
+      (Revision 2, draft.) No parser of an uploaded file runs in the stack: no module importable by the api or worker
+      roles imports `pypdfium2`, `pypdf`, `docling`, `fitz` or `pdfminer` (import-graph test over `reader.*` minus
+      `reader.ingest.host`), and the only reads of an inbox file are FR-INGEST-18's magic check (first 8 and last
+      1,024 bytes) and FR-INGEST-20's byte copy (source scan for opens of the inbox path). [unit]
+  - id: INV-INGEST-9
+    text: >-
+      (Revision 2, draft.) A refused upload leaves nothing: for every refusal of FR-INGEST-18 (each code, a client
+      disconnect mid-body, a body of exactly cap + 1 bytes) no file other than the removed temporary one exists under
+      `<BLOBS_DIR>/inbox/`, no `uploads` row is written and the lock is released; the same bytes uploaded twice give
+      one file and one row; a body of exactly the cap is accepted. Property test over generated bodies from
+      VEC-INGEST-7. [db]
+  - id: INV-INGEST-10
+    text: >-
+      (Revision 2, draft.) Confused deputy: in watch mode the converter starts only when the fetched bytes' sha256 and
+      length equal the claim's, and receive stores an uploaded material's artifact only under a live claim of that
+      upload with an equal sha256. Fake-runner cases: a fetch of other bytes, one byte more, one byte less; a reply
+      line with an extra key, a path, a 63-hex sha256, a negative size; a claim that was cancelled between `next` and
+      `fetch`, and during conversion; receive with a stale claim, with another upload's claim, and for a cancelled
+      upload. Each case converts nothing (or stores nothing) and writes the expected code. [unit, fake runner; db]
+
 nfr:
   - id: NFR-INGEST-1
     metric: native full-run throughput of the pilot PDF under the sandbox profile on CPU, formula model on, pages/min
@@ -795,8 +963,26 @@ vectors:
       `inconsistent`.
     file: spec/fixtures/SRV-INGEST/status-map.yaml
 
+proposed_vectors:
+  - id: VEC-INGEST-6
+    source: >-
+      (Revision 2, draft.) Upload state table for FR-INGEST-23's view: inputs are the row's state and the SRV-EVENTS
+      status of the `ingest.import` key and of the material's `search.embed` key; outputs are `queued`, `claimed`,
+      `converting`, `sending`, `importing`, `indexing`, `ready`, `failed` (with the row's or the dead job's code) and
+      `cancelled`. `received` with no import key yet maps to `importing`.
+    file: spec/fixtures/SRV-INGEST/upload-states.yaml
+  - id: VEC-INGEST-7
+    source: >-
+      (Revision 2, draft.) Magic-check cases as generator rules, no real documents: valid headers %PDF-1.0..1.7 and
+      %PDF-2.0 with %%EOF at the end, 1,023 bytes from the end and followed by a newline; refused: %PDF-1.8, %PDF-3.0,
+      a BOM or a space before the header, %%EOF only 1,025 bytes from the end, a ZIP and a PNG header, an empty body.
+      The synthetic upload for the live check is VEC-INGEST-2's generator output.
+    file: spec/fixtures/SRV-INGEST/magic-cases.yaml
+
 defers:
-  - "Browser upload of materials (roadmap slice wording); this revision declares materials in reader.yaml and ingests with a host command (ADR-0027 revisit_when)."
+  - "Upload formats other than PDF, and a browser preview of the uploaded file (ADR-0029 keeps every parser out of the stack and the browser)."
+  - "Deleting an imported material and its spans, lessons and inbox file."
+  - "Server-sent events for upload and job progress (the Import page polls)."
   - "Re-ingesting a material under a new converter_version. Obligation when it arrives: it must map every old span id `<sha>:<seq>` to its new span, or keep the old spans, so that no lesson citation ever resolves to different text (FR-INGEST-17)."
   - "OCR for pages without a text layer (ADR-0008 resolved question 1; EasyOCR ru+en). The manifest lists such pages; the pilot has 6."
   - "Non-PDF formats (EPUB, DOCX, HTML, web and git snapshots; ADR-0008 Decision 2)."
@@ -815,5 +1001,6 @@ owner_notes:
   - "4. `reader-ingest --setup` creates a separate converter venv (Docling 2.151.1 with torch, several GB) and fetches 1.2 GB of models under `<data_dir>`."
   - "5. The converter version freezes at the first import (FR-INGEST-17), so no converter fix reaches the pilot after its first import without the deferred re-ingest. Run the 20-page fidelity loop (VEC-INGEST-3 [local] and NFR-INGEST-2's owner check) to its target before the first full import of the Bashir PDF."
   - "6. NFR-INGEST-2's rule-B count may be 3 of 20 against a threshold of 2: page 378 (known miss), page 133 (a curve-constant line labelled code) and page 468 (a filename label labelled a list item), all measured 2026-11-22. The owner judges these pages before the first full import, because the converter version freezes at that import. Owner judgement, 2026-11-23: rule B is 1 of 20 (page 378); pages 133 and 468 are label noise, not rule-B misses. The owner also chose to fix code-block indentation before the first full import (FR-INGEST-7, converter r2)."
+  - "7. (Revision 2, draft.) Browser upload per ADR-0029 (proposed; your acceptance needed): the converter keeps running on your Mac under the same sandbox profile, now started by `reader-ingest --watch`, which `reader up` launches. While it is not running, uploads wait as `queued` and the Import page says so. Uploads are capped at 200 MiB, 5 open uploads and 1 GiB of inbox."
 
-review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. Owner change 2026-11-23: code-block indentation (FR-INGEST-7, converter r2), the synthetic code block nested 0/4/8/0 (VEC-INGEST-2), hand-recorded indents and independently re-derived hashes (VEC-INGEST-3), owner note 6's judgement; one deep-reviewer round requested. Indentation review (ad0da76): changes — blocking: a median (or smallest) step halves indents in one-letter-token code; unit tests did not pin the design. Fixed: the cell is the font advance (pdfium loose char box, one width within 2%), every step and offset a whole number of cells within the chosen 0.25 bound; unit tests for one-letter code, majority 2-cell steps, an indented first line, line-count mismatch with real indents, residuals 0.24/0.26; non-blocking items applied (dedent stated, multi-box known limit with counts in FR-INGEST-5's code line, generator independent as code only, four hand-counted blocks, presence check). Round 2 (c6ae789): VERDICT approve. Majority-cell rule (2026-11-23, coordinator after the fallback diagnosis: 15 of 17 fallbacks were width spreads, mostly italic comments in Ubuntu Mono Italic): modal advance, 80% in band within 2%, steps checked between in-band glyphs only, every line offset still on the grid; version stays r2 (no r2 artifact outside test runs). VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says."
+review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers; spec 7 blockers, revised; span-id and frozen-version decisions folded in. spikes/ingest-confine merged (1024ac7) and cited: profile pinned to converter.sb, separate non-editable converter venv, NFR-INGEST-1 source, measured probes. Owner accepted ADR-0027 in chat. Round 2 (fb9814e): B1–B3, B5–B7 closed; two B4 holes (post-storage timeout, non-SUCCESS batches) fixed with the non-blocking items. Round 3 (05540ce): changes (stale cleanup could signal a reused process group; records lacked the material), fixed in 2d2bd15. Round 4 (2d2bd15): VERDICT approve for SRV-INGEST and ADR-0027; nits applied. History: rounds 1–3 changes, round 4 approve. Approved by agent 2026-11-22 with Red on V/SRV-INGEST-impl (from V/slice-integration: SRV-AUTH and SRV-EVENTS implemented, ADR-0027 accepted by the owner). Green (2026-11-22), test-harness corrections paired with this note, no oracle weakened: the host tests' config helper creates its directory. Green implementation additions are now stated in FR-INGEST-1, -6, -11, -15 (list markers, 503 `config_unavailable`, extra fixed codes). Code review round 1 (9222276): changes (VEC-INGEST-3 pinning, read-once members, strict tar numeric fields, deadline after storage, plus non-blocking items), applied with paired tests. Code review round 2 (6aa0409): VERDICT approve; its four non-blocking items (FR-INGEST-8 exact Docling order for non-code items, FR-INGEST-7's 1.0 pt margin, driver connect timeout → `database_unreachable`, a live getsid check) applied with paired tests. Owner change 2026-11-23: code-block indentation (FR-INGEST-7, converter r2), the synthetic code block nested 0/4/8/0 (VEC-INGEST-2), hand-recorded indents and independently re-derived hashes (VEC-INGEST-3), owner note 6's judgement; one deep-reviewer round requested. Indentation review (ad0da76): changes — blocking: a median (or smallest) step halves indents in one-letter-token code; unit tests did not pin the design. Fixed: the cell is the font advance (pdfium loose char box, one width within 2%), every step and offset a whole number of cells within the chosen 0.25 bound; unit tests for one-letter code, majority 2-cell steps, an indented first line, line-count mismatch with real indents, residuals 0.24/0.26; non-blocking items applied (dedent stated, multi-box known limit with counts in FR-INGEST-5's code line, generator independent as code only, four hand-counted blocks, presence check). Round 2 (c6ae789): VERDICT approve. Majority-cell rule (2026-11-23, coordinator after the fallback diagnosis: 15 of 17 fallbacks were width spreads, mostly italic comments in Ubuntu Mono Italic): modal advance, 80% in band within 2%, steps checked between in-band glyphs only, every line offset still on the grid; version stays r2 (no r2 artifact outside test runs). VEC-INGEST-3/-4 were generated on the owner's Mac by server/tests/ingest/pilot_expectations.py from the recorded input spec/fixtures/SRV-INGEST/pilot-recorded.json; the outline's level-1 count measured 27 (front and back matter included), 494 entries on 3 levels as ADR-0008 says. Revision 2 (2026-11-23, V/onboarding): browser upload and host pickup per ADR-0029 (proposed), FR-INGEST-18..25, INV-INGEST-8..10, VEC-INGEST-6..7; DRAFT, awaits deep-reviewer (sandbox and egress)."

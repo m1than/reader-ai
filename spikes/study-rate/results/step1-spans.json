@@ -1,0 +1,148 @@
+{
+  "basis": "spans",
+  "pdf_pages": 935,
+  "planned_pages": 890,
+  "planned_kchars": 1841.091,
+  "theory_min": 4860.0,
+  "min_per_page": 5.4607,
+  "min_per_kchar": 2.6397,
+  "min_per_kchar_by_stage": {
+    "min": 1.3974,
+    "median": 2.3577,
+    "max": 5.299
+  },
+  "chars_per_page": {
+    "mean": 2068.6,
+    "p10": 1189.2,
+    "median": 2149.0,
+    "p90": 2747.8
+  },
+  "l02": {
+    "pdf_pages": [
+      60,
+      84
+    ],
+    "kchars": 58.938
+  },
+  "per_stage": [
+    {
+      "stage": "S01",
+      "pages": 58,
+      "kchars": 128.81,
+      "theory_min": 180.0,
+      "min_per_kchar": 1.3974
+    },
+    {
+      "stage": "S02a",
+      "pages": 31,
+      "kchars": 56.508,
+      "theory_min": 240.0,
+      "min_per_kchar": 4.2472
+    },
+    {
+      "stage": "S02b",
+      "pages": 44,
+      "kchars": 84.921,
+      "theory_min": 450.0,
+      "min_per_kchar": 5.299
+    },
+    {
+      "stage": "S03",
+      "pages": 74,
+      "kchars": 151.678,
+      "theory_min": 300.0,
+      "min_per_kchar": 1.9779
+    },
+    {
+      "stage": "S04",
+      "pages": 43,
+      "kchars": 93.767,
+      "theory_min": 360.0,
+      "min_per_kchar": 3.8393
+    },
+    {
+      "stage": "S05",
+      "pages": 128,
+      "kchars": 242.323,
+      "theory_min": 600.0,
+      "min_per_kchar": 2.476
+    },
+    {
+      "stage": "S06",
+      "pages": 69,
+      "kchars": 108.091,
+      "theory_min": 300.0,
+      "min_per_kchar": 2.7754
+    },
+    {
+      "stage": "S07",
+      "pages": 42,
+      "kchars": 97.948,
+      "theory_min": 240.0,
+      "min_per_kchar": 2.4503
+    },
+    {
+      "stage": "S08",
+      "pages": 33,
+      "kchars": 65.196,
+      "theory_min": 150.0,
+      "min_per_kchar": 2.3008
+    },
+    {
+      "stage": "S09",
+      "pages": 45,
+      "kchars": 112.06,
+      "theory_min": 240.0,
+      "min_per_kchar": 2.1417
+    },
+    {
+      "stage": "S10",
+      "pages": 42,
+      "kchars": 101.794,
+      "theory_min": 240.0,
+      "min_per_kchar": 2.3577
+    },
+    {
+      "stage": "S11",
+      "pages": 42,
+      "kchars": 92.253,
+      "theory_min": 360.0,
+      "min_per_kchar": 3.9023
+    },
+    {
+      "stage": "S12",
+      "pages": 34,
+      "kchars": 77.261,
+      "theory_min": 180.0,
+      "min_per_kchar": 2.3298
+    },
+    {
+      "stage": "S13",
+      "pages": 41,
+      "kchars": 93.221,
+      "theory_min": 210.0,
+      "min_per_kchar": 2.2527
+    },
+    {
+      "stage": "S14",
+      "pages": 86,
+      "kchars": 173.404,
+      "theory_min": 390.0,
+      "min_per_kchar": 2.2491
+    },
+    {
+      "stage": "S15",
+      "pages": 39,
+      "kchars": 80.886,
+      "theory_min": 180.0,
+      "min_per_kchar": 2.2254
+    },
+    {
+      "stage": "S16",
+      "pages": 39,
+      "kchars": 80.97,
+      "theory_min": 240.0,
+      "min_per_kchar": 2.9641
+    }
+  ]
+}
