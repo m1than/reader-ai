@@ -704,7 +704,7 @@ proposed_requirements:
       **Commands:**
       - `next --wait S --host-state ready|setup_missing --strays N --converter-version V --watcher-sha H --busy B`
         (S in 1..25, N in 0..10,000, H 64 lowercase hex, B 0 or 1): upserts `ingest_hosts.seen_at`, state, strays,
-        versions and busy; applies lease expiry; with `ready`, claims the
+        versions and busy; applies lease expiry; with `ready` and `--busy 0`, claims the
         oldest `queued` upload `FOR
         UPDATE SKIP LOCKED` (claim = 32 random hex, `lease_until = now() + 120 s`) and prints `{"upload": {"id",
         "sha256", "size", "claim"}}`; if none, it `LISTEN`s on `reader_inbox` for up to S seconds, tries once more,
@@ -749,7 +749,10 @@ proposed_requirements:
         the current stray count (FR-INGEST-22), which is a warning only and never stops claims;
       - checks the stack (FR-INGEST-2's `reader status --json` and worker resolution); unhealthy: waits 10 s and
         retries, never exits for it;
-      - runs `next --wait 25`; the claim schema is exact (a UUID, 64 lowercase hex, an integer
+      - takes `convert.lock` (FR-INGEST-22: one converter run on the host at a time) without blocking; while another
+        run holds it, sends a heartbeat-only `next --wait 1 --host-state <state> --busy 1` that claims nothing (so the
+        converter stays `online`), waits 10 s and tries again. Holding it, runs `next --wait 25`, releasing the lock
+        again when no upload was claimed; the claim schema is exact (a UUID, 64 lowercase hex, an integer
         1..`upload_bytes_max`, 32 lowercase hex, no other key); `bad_reply` waits 10 s;
       - **for a claim:** starts the **heartbeat**, a timer that runs `progress --phase <current phase>` every 30 s
         from the claim until receive's reply (through fetch, model load, conversion, sending and receive), so the
@@ -815,18 +818,27 @@ proposed_requirements:
       longer verifies is skipped. Residuals: the window between that check and the signal (pid reuse within
       microseconds) is not closed; a Python 3.14 process of the owner (not a shell, which the executable check
       excludes) started after the child with its cwd inside WORK would be counted and killed.
-      **What this guarantees, honestly.** For non-malicious runs, a concurrent run's converter (another upload, or a
-      CLI run) is never counted or killed: WORK names are random per run (FR-INGEST-1). Against an exploited child:
-      - **learning another run's WORK** is closed by the profile (proposed FR-INGEST-4 amendment: no process-info
-        about other processes and no `kern.proc*`/`kern.procargs*` sysctls; measured in spikes/ingest-sysctl). The
-        WORK parent is not listable (measured). A WORK name is 16 random hex characters (64 bits);
-      - if a WORK path leaked by another channel, the cwd and args arms are spoofable (measured: under the product
-        profile a confined child may `chdir` into another WORK, `setsid`, and rewrite its args; it then becomes a
-        member of the other run and can push that run over `memory_limit`). The residual is a denial of service of one
-        conversion, retried by the owner;
-      - a child that calls `setsid()`, moves its cwd out of WORK and rewrites its args escapes accounting and
-        killing. It stays under the profile, which a process cannot leave: no network, no sockets, no information
-        about other processes, writes only into a WORK that is deleted. It can hold memory and CPU until it is killed.
+      **One converter run on the host at a time** (coordinator decision (A), 2026-11-23, after the round-4 inode
+      finding). Every converter run, CLI (`reader-ingest <material>`, proposed FR-INGEST-1 amendment) and watch mode
+      alike, holds an exclusive non-blocking `flock` on `<data_dir>/ingest/locks/convert.lock` from before the child
+      starts until its run processes are killed and its work directory is removed. The CLI exits 3 `busy` when the
+      lock is held; the watcher does not run `next` (claims nothing) while it is held and tries again after 10 s. So
+      no two converter children ever coexist, and no live run exists for another run's child to join. Cost: none in
+      practice, since the owner converts one book at a time and each run peaks at about 4 GiB (NFR-INGEST-1).
+      **What this guarantees, honestly.** For non-malicious runs nothing is counted or killed across runs, because
+      there is only one run. Against an exploited child:
+      - **learning another process's arguments, environment or cwd** is closed by the profile (proposed FR-INGEST-4
+        amendment, measured in spikes/ingest-sysctl). **Learning another directory's path is not:** `fsgetpath()` on
+        an inode returns its path under every profile tried, and `chdir` into a known directory is allowed
+        (measured, round 4). With one run at a time this gives an attacker no concurrent run to join;
+      - **residual across runs:** a child that escaped an earlier run (it called `setsid()`, left WORK and rewrote its
+        args, so it was neither counted nor killed) survives, still confined, and can find a later run's WORK through
+        `fsgetpath`, `chdir` into it or name it in its args, become a member of that run, and push it over
+        `memory_limit`: a denial of service of one later conversion, retried by the owner. The stray warning
+        (below) is the only signal; restarting the Mac session clears such a process;
+      - such an escaped child stays under the profile, which a process cannot leave: no network, no sockets, no
+        information about other processes, writes only into a WORK that is deleted. It can hold memory and CPU until
+        it is killed.
       **Strays, a warning only.** At start and after every run the watcher counts processes whose `ps -o comm=`
       equals the converter venv's `<VENV>/bin/python` exactly, with parent pid 1, that belong to no live run of this
       host (its own runs, and CLI runs found through their run records). **Measured on macOS 27.2** (round-3
@@ -854,10 +866,15 @@ proposed_requirements:
         allocating memory past a test limit: all are found through `getsid` or the arms, killed, and the run fails
         `memory_limit`; **two concurrent runs** in different WORKs: when the first run ends and kills its set, the
         second converter survives and finishes;
-      - [host] **the round-3 attack must fail:** spikes/ingest-sysctl's probe, run under the product profile as a
-        concurrent run A next to a run B, tries every channel to learn WORK_B (`kern.procargs2`, `kern.procargs`,
-        `kern.proc.pid`, `kern.proc.all`, `proc_pidinfo` cwd, `proc_pidpath`, `proc_listallpids`, listing WORK's
-        parent); every one is refused, and its forked, setsid'd, args-rewriting child is not a member of run B;
+      - [host] **the round-3 attack, replayed:** spikes/ingest-sysctl's probe (copied to
+        `server/tests/ingest/cross_process_probe.py`), run under the product profile next to a second confined process
+        B, finds every process channel refused (`kern.procargs2`, `kern.procargs`, `kern.proc.pid`, `kern.proc.all`,
+        `proc_pidinfo` cwd, `proc_pidpath`, `proc_listallpids`, listing WORK's parent) and records `fsgetpath` as
+        allowed by design;
+      - [unit, fake lock] **one run at a time:** with `convert.lock` held by a watcher run, the CLI exits 3 `busy`
+        before creating a run record or work directory; with it held by a CLI run, the watcher's loop runs no `next`
+        and claims nothing; the lock is released only after the run's processes are killed and WORK is removed;
+        [host] a second real converter run started while one holds the lock never starts its child;
       - [local] the 9 GiB case above.
   - id: FR-INGEST-23
     text: >-
@@ -1017,6 +1034,13 @@ invariants:
 # Measured in spikes/ingest-sysctl (RESULT.md): the product profile lets a confined child read another same-uid
 # process's argv, cwd and path; the change below refuses every channel tried and the converter tests pass under it.
 proposed_amendments:
+  - id: FR-INGEST-1
+    change: >-
+      **One converter at a time.** After its material lock and before it writes the run record, `reader-ingest`
+      (CLI) takes an exclusive non-blocking `flock` on `<data_dir>/ingest/locks/convert.lock` (FR-INGEST-22, decision
+      (A)); held (by the watcher's run or another CLI run) it exits 3 `busy` and prints "another conversion is
+      running; try again when it ends". `--requeue` and `--setup` do not take it (they start no converter). The lock
+      is released after FR-INGEST-16's cleanup of the run.
   - id: FR-INGEST-4
     change: >-
       **Profile.** `converter.sb` is the spike profile minus SCRIPTS (unchanged) with two edits, each cited to
@@ -1052,10 +1076,10 @@ proposed_amendments:
       process channel is refused (EPERM), and so are the `/.vol` listing and open. **`fsgetpath` is not:** measured
       (spikes/ingest-sysctl round 4), it returns another WORK's path from its inode under every profile tried, a
       metadata wall below WORKROOT included, and a scan of ±2,000 inode numbers around the child's own WORK finds a
-      sibling WORK. `chdir` into a known WORK is also allowed. So the inode channel stays open, and FR-INGEST-22's
-      cwd and args arms remain spoofable while two converter runs coexist. **Open decision for the coordinator and
-      the owner** (gate: the product profile does not change until this is settled): (A) one converter run on the
-      host at a time, so no concurrent run exists to join, or (B) membership by session id only. The round-3 attack (FR-INGEST-22's [host] case) runs in the
+      sibling WORK. `chdir` into a known WORK is also allowed. So the inode channel stays open; FR-INGEST-22 answers
+      it structurally with one converter run on the host at a time (`convert.lock`, decision (A)), so no concurrent
+      run exists to join, and states the cross-run residual. The probes record `fsgetpath` as allowed by design and
+      fail if any process channel opens again. The round-3 attack (FR-INGEST-22's [host] case) runs in the
       same test, with spikes/ingest-sysctl's probe copied to `server/tests/ingest/cross_process_probe.py` (with
       Red). **At run time too:** `reader-ingest --setup` and every watcher start run the cross-process probes once
       under the product profile; any probe that is not refused makes the host state `setup_missing` (logged with the
