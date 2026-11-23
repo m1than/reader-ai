@@ -4,7 +4,9 @@ The image is built once per session from sandbox/ under this session's own tag
 `reader-kernel:test-<pid>.<random>` (the stack's `reader-kernel:local` is never built, tagged or removed by
 tests; a shared tag was retagged by concurrent sessions mid-run). Each test starts its own kernel
 container with `docker run` flags equal to OPS-DEPLOY's `x-kernel` template (read from the source of
-deploy/compose.yaml) plus `--restart always`, on a throwaway `--internal` network under the alias `kernel`.
+deploy/compose.yaml) plus `--restart always`, on a throwaway `--internal` network under the alias `kernel`;
+the network takes an explicit /28 in 10.231.0.0/16 (`create_network`), since the live stack can exhaust
+Docker's default address pools.
 "From inside the container" means `docker exec` as uid 1000 (the same uid, namespaces, capabilities and
 seccomp as a cell) or a cell run through Kernel Gateway. "The caller" is a probe container on the same
 network. Everything a test creates carries this session's own label
@@ -21,6 +23,7 @@ body.
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import time
@@ -65,6 +68,26 @@ def docker(*args: str, timeout: float = 300) -> subprocess.CompletedProcess[str]
     return subprocess.run(  # noqa: S603
         ["docker", *args], capture_output=True, text=True, check=False, timeout=timeout,  # noqa: S607
     )
+
+
+TEST_SUBNETS = "10.231.0.0/16"  # explicit test subnets, outside Docker's default address pools
+
+
+def create_network(name: str, label: str, attempts: int = 20) -> None:
+    """An `--internal` network on a random /28 of 10.231.0.0/16 (OPS-SANDBOX header, test networks).
+
+    The live stack can use up Docker's default address pools, so test networks never draw from them. A random
+    /28 can collide with a concurrent session's; "Pool overlaps" is retried with another one."""
+    last = ""
+    for _ in range(attempts):
+        subnet = f"10.231.{secrets.randbelow(256)}.{16 * secrets.randbelow(16)}/28"
+        proc = docker("network", "create", "--internal", "--subnet", subnet, "--label", label, name)
+        if proc.returncode == 0:
+            return
+        last = proc.stderr
+        if "overlap" not in last.lower():
+            break
+    raise AssertionError(f"network create {name} failed: {last}")
 
 
 def load_yaml(path: Path) -> Any:
@@ -235,8 +258,7 @@ class Sandbox:
     def _net(self) -> str:
         if self.network is None:
             net = f"rk-net-{self.tag}"
-            proc = docker("network", "create", "--internal", "--label", LABEL, net)
-            assert proc.returncode == 0, proc.stderr
+            create_network(net, LABEL)
             self.network = net
         return self.network
 

@@ -1,11 +1,13 @@
 # @trace FR-PIPELINE-9
-"""Lab verification: the time bound (pure) and [image] runs of F01's lab against `reader-kernel:local` with the
-x-kernel flags, its ports published on 127.0.0.1 (as SRV-KERNEL's image test does)."""
+"""Lab verification: the time bound (pure) and [image] runs of F01's lab against the kernel image (built under a
+per-run tag, never the live stack's `reader-kernel:local`) with the x-kernel flags, its ports published on
+127.0.0.1 (as SRV-KERNEL's image test does)."""
 
 from __future__ import annotations
 
 import copy
 import json
+import os
 import socket
 import subprocess
 import time
@@ -18,7 +20,9 @@ import pytest
 from .conftest import DOCKER, F01, REPO, need, spec_bounds
 
 pytestmark = pytest.mark.anyio
-IMAGE = "reader-kernel:local"
+# A per-run tag (OPS-SANDBOX header, test image): never `reader-kernel:local`, the live stack's tag. Removed at the
+# end of the module; the sandbox session-start sweep untags it if this process died first.
+IMAGE = f"reader-kernel:test-{os.getpid()}.{uuid.uuid4().hex[:8]}"
 
 
 def _lab_nb(asserts: list[str], source: str | None = None, n: int = 1) -> dict[str, Any]:
@@ -249,8 +253,8 @@ def kernel() -> Iterator[tuple[int, int]]:
         *flags,
         IMAGE,
     )
-    assert run.returncode == 0, run.stderr
     try:
+        assert run.returncode == 0, run.stderr
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:
             if _docker("exec", name, "/usr/local/bin/reader-kernel-health").returncode == 0:
@@ -259,6 +263,7 @@ def kernel() -> Iterator[tuple[int, int]]:
         yield gw, ctl
     finally:
         _docker("rm", "-f", name)
+        _docker("image", "rm", IMAGE)  # untags; layers another tag uses stay
 
 
 def _client(ports: tuple[int, int], timeout_s: float | None = None) -> Any:
