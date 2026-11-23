@@ -359,7 +359,7 @@ h1 {
 [data-markdown] table {
   width: 100%;
   border-collapse: collapse;
-  overflow-wrap: break-word;
+  overflow-wrap: anywhere; /* L02 has a 6-column table 697px wide at break-word (measured 2026-11-23) */
   font-size: 0.9375rem;
   line-height: 1.45;
 }
@@ -651,11 +651,6 @@ pre.shiki {
   .lesson-meta {
     grid-column: 2;
   }
-
-  [data-markdown] table {
-    overflow-wrap: anywhere;
-  }
-
   .lesson-controls {
     margin-left: 0;
   }

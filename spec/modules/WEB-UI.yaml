@@ -188,9 +188,9 @@ requirements:
       Layout and type (WEB polish, from the live screenshots of 2026-11-23). Spacing uses the library's
       `--acme-space-1..7` steps only; colours only Calm tokens (INV-UI-1 unchanged). Prose (lesson markdown, the
       tutor's answers) is set in the serif stack `ui-serif, Georgia, 'Iowan Old Style', serif` (system fonts only: no
-      web font is fetched for text; KaTeX's bundled math fonts are the only font files, FR-UI-9) at 1.0625rem (17px) with line height 1.65, in a reading column at most 38rem wide (an
-      estimate of about 70 Cyrillic characters per line against about 92 in the slice's 46rem column; the `ui` step
-      records the measured median in slice-results.json, not asserted); the lesson `h1` is 2.25rem (1.875rem below
+      web font is fetched for text; KaTeX's bundled math fonts are the only font files, FR-UI-9) at 1.0625rem (17px) with line height 1.65, in a reading column at most 38rem wide (the `ui` step
+      records an estimated median of characters per line in slice-results.json, not asserted: 60 at 1280 and 1024 px
+      and 35 at 390 px on L02, 2026-11-23; the slice's 46rem column at 16px was estimated at about 90); the lesson `h1` is 2.25rem (1.875rem below
       40rem), markdown headings
       1.5 and 1.2rem; UI chrome (header, labels, buttons, references, list metadata) uses the library's sans
       `--acme-font` at 0.8125–0.875rem. Widths: at 1280 and 1024 px the lesson shows its contents column beside the
