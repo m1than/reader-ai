@@ -164,6 +164,31 @@ header):
   - `404 /ajax-api/2.0/mlflow/users/current` (MLflow has no auth app);
   - `404 /ajax-api/3.0/mlflow/assistant/config` and `/providers` (blocked at the edge). The UI still renders.
 
+## Round 3 (SRV-OBS review round 2, N1), 2026-11-24
+
+- **Command:** the same, with the candidate CSP.
+- **Results:** `results/20261124T013500-round3/` (`browser.json` → `click`, `gate.log`,
+  `shots/click-from-app-port.png`).
+- **Gate rule added:** a `Sec-Fetch-Site` other than `same-origin`/`none` is refused, unless it is `same-site` with
+  `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document` and a forwarded GET.
+- **Blocked list:** gains `/ajax-api/*/mlflow/gateway-proxy*`, and the assistant pattern now uses the `*` form.
+- **The test:** a stand-in for the app's `/observability` page is served (ungated) on :8447, another port of the same
+  site, with a link to the dashboard's deep link on :8446. The real browser clicks it, then issues subresource and
+  fetch requests from that page.
+
+| Request from the :8447 page | Sec-Fetch (site, mode, dest) | Gate | Browser outcome |
+| --- | --- | --- | --- |
+| Click on the trace link | same-site, navigate, document | 204 | the trace's span tree rendered (`job tutor.answer`, `agent.call`, `claude_code.interaction`, `claude_code.llm_request`) |
+| `<img src=…/ajax-api/…>` | same-site, no-cors, image | 403 | error |
+| `<script src=…/ajax-api/…>` | same-site, no-cors, script | 403 | error |
+| `fetch(…, {mode: 'no-cors', credentials: 'include'})` | same-site, no-cors, empty | 403 | opaque |
+| `fetch(…, {credentials: 'include'})`, Origin `http://localhost:8447` | same-site, cors, empty | 403 (Origin rule first) | rejected |
+
+- **Requests after the navigation**, from the dashboard's own page: `same-origin`, and they pass.
+- **Query strings:** Caddy's `forward_auth` appends the original query string to the gate's URI
+  (`/api/auth/owner-gate?max_results=1&probe=img`), so the gate must ignore its own query.
+- **Blocked paths:** all five probes, the spec's `*` forms included, answered Caddy's own 404.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.

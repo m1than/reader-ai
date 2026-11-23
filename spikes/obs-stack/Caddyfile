@@ -16,7 +16,7 @@
 	# Round 2 finding: `respond @blocked 404` next to a catch-all `handle` never ran (Caddy orders `handle` before
 	# `respond`), so /v1/traces reached MLflow (422) and the other "404"s were MLflow's own. A `handle` block with the
 	# matcher is mutually exclusive with the catch-all one.
-	@blocked path /v1/* /gateway/* /ajax-api/3.0/mlflow/assistant/* /mcp* /api/*/mlflow/gateway/*
+	@blocked path /v1/* /gateway/* /ajax-api/*/mlflow/assistant/* /ajax-api/*/mlflow/gateway-proxy* /mcp* /api/*/mlflow/gateway/*
 	handle @blocked {
 		respond "blocked" 404
 	}
@@ -52,4 +52,13 @@
 :8446 {
 	header Content-Security-Policy "{$CSP_CANDIDATE}"
 	import gated
+}
+
+# Round 3 (review N1): a stand-in for the app's /observability page on another port of the same site. It is not
+# gated; its link opens the dashboard's deep link given in its own fragment, and the browser script adds
+# subresource and fetch requests to :8443 from it.
+:8447 {
+	header Content-Type "text/html; charset=utf-8"
+	respond `<!doctype html><title>app</title><a id="go" href="#">open trace</a>
+<script>document.getElementById('go').href = 'http://localhost:8446' + decodeURIComponent(location.hash.slice(1));</script>` 200
 }

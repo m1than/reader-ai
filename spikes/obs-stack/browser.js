@@ -57,6 +57,44 @@ const NAMES = ['pipeline.stage', 'job tutor.answer', 'agent.call', 'claude_code.
     out.sites[label] = rec;
     await ctx.close();
   }
+  // Round 3 (review N1): a click from another port of the same site (the app's /observability stand-in on :8447)
+  // to the dashboard's deep link, then subresource and fetch requests from that page to the dashboard. The gate log
+  // (gate.log) shows each request's Sec-Fetch-* triple and the gate's answer; `probe=` names each one.
+  {
+    const ctx = await browser.newContext({ extraHTTPHeaders: { Cookie: '__Host-reader_session=owner' } });
+    const page = await ctx.newPage();
+    const deep = `/#/experiments/0/traces?selectedEvaluationId=tr-${ids.job_trace}`;
+    const click = {};
+    try {
+      await page.goto(`http://localhost:8447/#${encodeURIComponent(deep)}`, { waitUntil: 'domcontentloaded' });
+      await Promise.all([page.waitForURL(/localhost:8446/, { timeout: 30000 }), page.click('#go')]);
+      await page.waitForTimeout(8000);
+      const text = await page.evaluate(() => document.body.innerText);
+      click.url = page.url();
+      click.names_visible = NAMES.filter((n) => text.includes(n));
+      await page.screenshot({ path: '/out/shots/click-from-app-port.png' });
+      await page.goto('http://localhost:8447/', { waitUntil: 'domcontentloaded' });
+      click.subresources = await page.evaluate(async () => {
+        const u = (p) => `http://localhost:8446/ajax-api/2.0/mlflow/experiments/search?max_results=1&probe=${p}`;
+        const load = (tag, p) => new Promise((res) => {
+          const el = document.createElement(tag);
+          el.onload = () => res('load'); el.onerror = () => res('error');
+          el.src = u(p); document.body.appendChild(el);
+        });
+        const r = { img: await load('img', 'img'), script: await load('script', 'script') };
+        try { const f = await fetch(u('fetch-no-cors'), { mode: 'no-cors', credentials: 'include' }); r.fetch_no_cors = f.type; }
+        catch (e) { r.fetch_no_cors = 'rejected'; }
+        try { const f = await fetch(u('fetch-cors'), { credentials: 'include' }); r.fetch_cors = f.status; }
+        catch (e) { r.fetch_cors = 'rejected'; }
+        return r;
+      });
+    } catch (e) {
+      click.error = String(e).slice(0, 200);
+    }
+    out.click = click;
+    console.log('click', JSON.stringify(click));
+    await ctx.close();
+  }
   await browser.close();
   fs.writeFileSync('/out/browser.json', JSON.stringify(out, null, 2));
   for (const [l, r] of Object.entries(out.sites)) {

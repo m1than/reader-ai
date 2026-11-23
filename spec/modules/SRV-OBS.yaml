@@ -49,6 +49,10 @@
 #     reader-ai's own tables (FR-OBS-10); OTel metrics export stays off (ADR-0018 rule 1: the ledger and run records
 #     never come from telemetry).
 #
+# SRV-EVENTS is read as origin/V/slice-integration has it (cc6f300 and later): FR-EVENTS-17 publishes
+# `dead_error_code_of` and states that no module queries `job_keys` directly, so FR-OBS-10 reads key rows only through
+# the paired FR-EVENTS-18 functions.
+#
 # Paired changes in other specs (proposed in `paired_changes` below, applied in those specs at this spec's approval,
 # each with its own tests; none of their files is edited by this draft, because active branches V/upload-impl,
 # V/freshness, V/compile-ui and V/design-pass change them): OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS,
@@ -178,11 +182,12 @@ requirements:
       sampled, and omit it otherwise; `job_keys.args`, the idempotency key and FR-EVENTS-10's payload checks are
       unchanged (`trace` is not part of `args`). (b) Run: the wrapper opens the job's root span `job <kind>` (kind
       CONSUMER) in a new trace, with exactly one link to the parsed `trace` context when it parses and is valid, and
-      none otherwise; parsing never raises. Its trace id is derived, not random: the first 16 bytes of
-      `sha256("reader.job\0" + <job_id> + "\0" + <idempotency key>)`, an all-zero result replaced by the next 16
-      bytes, through the `IdGenerator` FR-OBS-1 installs (a context variable set only around the root span's creation;
-      every other span gets a random id). So the owner's views (FR-OBS-10) compute any job's trace id from
-      `job_keys.job_id` and `job_keys.key` without storing it. Attributes: `reader.job.kind`, `reader.job.id`,
+      none otherwise; parsing never raises. Its trace id is derived, not random: the first 16 bytes of the SHA-256
+      of the bytes `reader.job`, NUL, the job id written as decimal ASCII digits (no sign, no leading zeros), NUL,
+      and the idempotency key encoded UTF-8; an all-zero result is replaced by bytes 16..31 (VEC-OBS-3's ids are
+      checked by `spec/fixtures/SRV-OBS/trace-ids.mjs`, never hand-written); installed through the `IdGenerator` FR-OBS-1 installs (a context variable set only around the root span's creation;
+      every other span gets a random id). So the owner's views (FR-OBS-10) compute any job's trace id from a key row's
+      `job_id` and `key` (read through SRV-EVENTS' published functions) without storing it. Attributes: `reader.job.kind`, `reader.job.id`,
       `reader.job.attempt` (the key's attempt count at claim), the per-kind argument attributes of VEC-OBS-1
       `job_args` (no other argument is read), and at the end `reader.job.outcome` ∈ {succeeded, skipped, failed,
       dead, aborted} with `reader.error_code` (FR-OBS-2's catalog rule) or `reader.error_class` (the exception class
@@ -268,7 +273,8 @@ requirements:
       10.230.1.10:8000 { uri /api/obs/gate }`. Then, in this order, as mutually exclusive `handle` blocks (a `respond`
       next to a catch-all `handle` never runs, because Caddy orders `handle` first: measured, spikes/obs-stack round
       2, where /v1/traces reached MLflow): `handle @blocked { respond 404 }` for the paths `/v1/*`, `/gateway/*`,
-      `/mcp*`, `/ajax-api/*/mlflow/assistant/*` and `/api/*/mlflow/gateway/*`; and `handle { reverse_proxy mlflow:5000
+      `/mcp*`, `/ajax-api/*/mlflow/assistant/*`, `/ajax-api/*/mlflow/gateway-proxy*` and `/api/*/mlflow/gateway/*`
+      (exactly these patterns in the Caddyfile; the adapt test checks each in this form); and `handle { reverse_proxy mlflow:5000
       { header_up -Cookie; header_up -Authorization; header_down -Set-Cookie; header_down -Access-Control-* } }` with
       the Host header unchanged (MLflow's `--allowed-hosts` accepts only `localhost:8443` from the edge). The site's
       response headers are the main site's except the Content-Security-Policy, which is exactly `default-src 'self';
@@ -283,40 +289,61 @@ requirements:
       when `X-Forwarded-Method` is not GET or HEAD and `Origin` is not exactly `https://localhost:8443` (MLflow 3.18.0
       answers every localhost origin with credentialed CORS: measured, `Access-Control-Allow-Origin:
       http://localhost:3000` on a direct request, so a page on any other localhost port could otherwise read or write
-      with the owner's cookie); 403 when `Sec-Fetch-Site` is present and is neither `same-origin` nor `none`; then 204
-      with no body for a session (SRV-AUTH's cookie lookup) whose user has role `owner`, 401 without a valid session,
-      403 for any other user. It never sets or refreshes a cookie, never extends a session, is GET only (forward_auth
-      always sends GET), and is neither traced nor logged per request (FR-OBS-3, -4). A 401 is returned to the browser
+      with the owner's cookie); 403 when `Sec-Fetch-Site` is present and is neither `same-origin` nor `none`, except a
+      top-level navigation: `Sec-Fetch-Site: same-site` together with `Sec-Fetch-Mode: navigate`,
+      `Sec-Fetch-Dest: document` and a forwarded method of GET passes on (a click from
+      https://localhost/observability arrives `same-site`); every other `same-site` or `cross-site` request (an image,
+      script, worker or fetch included) is 403; then 204 with no body for a session (SRV-AUTH's cookie lookup) whose
+      user has role `owner`, 401 without a valid session, 403 for any other user. Measured in a real browser
+      (spikes/obs-stack round 3, from a page on another port of the same site): the click arrived
+      `same-site/navigate/document`, passed, and opened the trace's span tree; an `<img>`, a `<script>`, a no-cors
+      fetch and a CORS fetch from that page arrived `same-site` with Dest `image`, `script`, `empty`, `empty` and were
+      all refused. Caddy appends the original query string to the gate's URI (measured), so the gate ignores its own
+      query. It never sets or refreshes a cookie, never extends a session, is GET only (forward_auth always sends GET),
+      and is neither traced nor logged per request (FR-OBS-3, -4). A 401 is returned to the browser
       as is: the dashboard does not redirect to sign-in; the owner signs in at https://localhost and reloads (owner
       note). The same route is also reachable as https://localhost/api/obs/gate through the main site, where it tells
-      a caller only whether its own session is the owner's, which `GET /api/me` already does. MLflow rejects a
-      `text/plain` body with 400 on the measured JSON endpoints (experiments search, delete-traces), so a CORS-simple
-      cross-site POST cannot drive them even before the gate.
+      a caller only whether its own session is the owner's, which `GET /api/me` already does. Defence in depth only,
+      not relied on: MLflow 3.18.0 answered a `text/plain` body with 400 on the two measured JSON endpoints
+      (experiments search, delete-traces); other endpoints were not measured, and the gate's Origin rules are what
+      refuse a cross-origin POST.
   - id: FR-OBS-10
     text: >-
       The owner's views. MLflow 3.18.0's trace metrics group span cost only by model name or provider and trace counts
       only by trace name or status (REF-OBS-5), so cost per stage per lesson and failures by error code cannot be
       expressed there. `GET /api/obs/summary?days=<1..90, default 7>` (owner only: 401 without a session, 403 for
-      another role) returns JSON computed from reader-ai's own tables, read-only, over the window, scoped to the owner's
-      own rows (`owner_id` = the caller's id on every user-owned table; `job_keys` is a system table, joined only
-      through those rows), one SQL query per view, each served by an existing index or one this module's migration
-      adds (named in Green):
+      another role) returns JSON computed from reader-ai's own tables, read-only, over the window. User-owned tables
+      are read with `owner_id` = the caller's id. `job_keys` is never queried by SQL from this module (SRV-EVENTS
+      FR-EVENTS-17: no module queries it directly): its rows come only through the read functions the paired
+      FR-EVENTS-18 publishes next to `job_status_of` and `dead_error_code_of`, `key_rows_of(conn, kind_name, keys)` and
+      `recent_keys_of(conn, kind_names, outcome, since, limit)`, each returning (kind, key, args, outcome, error_code,
+      job_id, attempts, created_at, finished_at); the keys this module asks for are computed with SRV-EVENTS'
+      `idempotency_key` (FR-EVENTS-2) from the owner's own rows. Each view is one query on the user-owned tables plus
+      at most one published read, served by an existing index or the one FR-EVENTS-18 adds on (kind, outcome,
+      finished_at):
       (a) `compile_runs`: the newest 50 runs started in the window, each with lesson id, started and finished times,
       `spent_usd` = SRV-AGENT's spent(run) (FR-AGENT-9: settled_usd of settle rows plus the usd of reserves with neither
       a settle nor a void, over `agent_spend` rows of the run_id), and its steps from `compile_steps` (stage, cost_usd,
       duration_s, model; the per-step cost stays the step's own record) with `trace_id`: FR-OBS-5's derivation from
-      the `job_keys` row of kind `pipeline.stage` or `pipeline.verify` whose args run_id and step match the step, using
-      that row's `job_id` (the newest job that ran the key) and `key`; null when no row or no job id exists;
+      the key row of `pipeline.stage` or `pipeline.verify` whose key is `idempotency_key` of the step's (run_id, step,
+      stage, input_sha256), using that row's `job_id` (the newest job that ran the key) and `key`; null when no row
+      or no job id exists;
       (b) `tutor`: count, latency p50 and p95 in ms (`finished_at − created_at` of answered questions, nearest-rank
-      percentiles), cost sum and mean from `settled_usd` of `agent_spend` settle rows of task `tutor`, and the slowest
-      10 with their trace ids (the `tutor.answer` key row matching the question id);
-      (c) `failures`: counts by (kind, error_code) of `job_keys` rows with outcome `dead` finished in the window and
-      reachable from the owner's rows, and by error_code of failed `tutor_questions`, each with up to 5 most recent
-      trace ids;
-      (d) `ingest`: the newest 50 `ingest.import` keys that succeeded in the window, each with the material's
-      `page_count`, the import job's duration (`job_keys.created_at` to `finished_at`, which includes queue wait) and
-      `pages_per_min_import` = page_count over that duration (the in-stack import only; host-side conversion time is
-      not included). No text column (questions, answers, reports, titles) is read. A web page `/observability`
+      percentiles), `cost_usd_sum` = the sum of `settled_usd` over the owner's `agent_spend` settle rows of task
+      `tutor` in the window, `cost_usd_mean_per_settled_call` = that sum divided by the number of those settle rows
+      (one per billed provider call, failed answers included; null when there are none), and the slowest 10 with their
+      trace ids (the `tutor.answer` key of the question id);
+      (c) `failures`: counts by (kind, error_code) of key rows with outcome `dead` finished in the window, from
+      `recent_keys_of(all kinds, dead, …)`. User kinds are scoped: `pipeline.*` rows count when their args run_id is one
+      of the owner's runs, `tutor.answer` rows when their question_id is one of the owner's questions, `ingest.import`
+      rows when a materials row of the owner has their material_sha256. System rows are shown unscoped and marked
+      `system: true` on this owner-only page (`ingest.import` with no materials row, `search.embed`, `obs.retention`,
+      and any kind not listed here); key rows hold ids, codes and times, no text. Plus counts by error_code of the
+      owner's failed `tutor_questions`. Each group carries up to 5 most recent trace ids;
+      (d) `ingest`: the newest 50 `ingest.import` key rows that succeeded in the window and belong to the owner's
+      materials, each with the material's `page_count`, the import job's duration (`created_at` to `finished_at` of the
+      key row, which includes queue wait) and `pages_per_min_import` = page_count over that duration in minutes (the
+      in-stack import only; host-side conversion time is not included). No text column (questions, answers, reports, titles) is read. A web page `/observability`
       (paired WEB-UI change, owner only) renders the four views and links every trace id to
       `https://localhost:8443/#/experiments/0/traces?selectedEvaluationId=tr-<trace id>` (measured: this opens the
       trace's detail with its span tree; `selectedTraceId` does not).
@@ -324,8 +351,9 @@ requirements:
     text: >-
       Retention. Job kind `obs.retention` (`reader.obs.jobs`, listed in SRV-EVENTS' KIND_MODULES; args `{day:
       YYYY-MM-DD}`, key `[day]`, max_attempts 3, transient connection errors, timeout 60 s). Its handler first enqueues
-      the next day's key with `schedule_in` the seconds to the next 03:00 UTC (the containers' clock), so a day that
-      ends dead never stops the chain; then it calls MLflow's REST `POST http://mlflow:5000/api/2.0/mlflow/traces/delete-traces`
+      the next day's key, whose day is the argument day + 1 (a calendar day in UTC, never "today + 1", so a late or
+      retried run cannot skip or repeat a day), with `schedule_in` the seconds from now to 03:00 UTC of that day (0
+      when already past), so a day that ends dead never stops the chain (the enqueue is idempotent per key); then it calls MLflow's REST `POST http://mlflow:5000/api/2.0/mlflow/traces/delete-traces`
       once with `{"experiment_id": "0", "max_timestamp_millis": now − retention_days × 86,400,000}` (no `max_traces`:
       MLflow 3.18.0 sets no server cap and one call deleted 178 traces in 0.05 s, measured). `on_worker_start`
       enqueues today's key. With tracing disabled the kind is still declared and its handler returns at once after
@@ -367,7 +395,10 @@ invariants:
       Owner-only, through Caddy on localhost:8443, before any byte reaches MLflow: every path answers 401 without a
       session cookie and 403 with a learner's session; with the owner's cookie, a POST whose Origin is a foreign
       localhost origin (`https://localhost:3000`), the app origin (`https://localhost`) or absent answers 403, a GET
-      with a foreign Origin answers 403, and a POST with `Origin: https://localhost:8443` reaches MLflow; no response
+      with a foreign Origin answers 403, and a POST with `Origin: https://localhost:8443` reaches MLflow; by the
+      gate's decision table, `Sec-Fetch-Site: same-site` with Mode `navigate`, Dest `document` and method GET gives
+      204, and `same-site` with Dest `script`, `image` or `empty` (or Mode other than `navigate`) gives 403, as does
+      any `cross-site`; no response
       carries an `Access-Control-*` header or `Set-Cookie`, and an echo upstream behind the same proxy settings sees
       no `Cookie` or `Authorization`; every blocked pattern answers Caddy's own 404. The app's side holds too: a POST to
       https://localhost/api/* and the kernel WebSocket upgrade with `Origin: https://localhost:8443` and the owner's
@@ -397,8 +428,9 @@ vectors:
 #   [unit]   pure Python with OTel's in-memory pieces and an in-test OTLP/HTTP receiver (no Docker): the allow-list
 #            (FR-OBS-2, INV-OBS-1, Hypothesis), the middleware with a test app (FR-OBS-3, -4), the derived trace ids and
 #            link parsing (FR-OBS-5, INV-OBS-4), the CLI environment builder and the uv.lock pin check against VEC-OBS-2
-#            (FR-OBS-6 a), the gate's decision table over (Origin, X-Forwarded-Method, Sec-Fetch-Site, session role)
-#            (FR-OBS-9), the summary's percentile and join functions over rows (FR-OBS-10), the retention cutoff and the
+#            (FR-OBS-6 a), the gate's decision table over (Origin, X-Forwarded-Method, Sec-Fetch-Site/-Mode/-Dest,
+#            session role) (FR-OBS-9, INV-OBS-5), the summary's percentile, scoping and join functions over rows
+#            (FR-OBS-10), VEC-OBS-3's trace ids recomputed from FR-OBS-5's derivation, the retention cutoff and the
 #            next-day-first order (FR-OBS-11), the canary for our process (INV-OBS-2 first half), failure isolation
 #            (INV-OBS-3).
 #   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
@@ -418,6 +450,11 @@ vectors:
 #            produces a `job tutor.answer` trace found through MLflow's REST get-trace within NFR-OBS-1, nested job →
 #            agent.call → claude_code.interaction → claude_code.llm_request; the CLI spans' keys are a subset of
 #            VEC-OBS-2 under the real account (FR-OBS-6 c); the canary question text is absent from the trace JSON.
+#            In the browser (Playwright, real Chromium over TLS): clicking that trace's link on /observability opens
+#            https://localhost:8443 with the span tree visible (N1's same-site navigation through the real gate); no
+#            CSP violation (securitypolicyviolation events and console) on the UI, the traces list and the trace's
+#            detail under FR-OBS-9's policy; and one write action in the UI under that policy (adding a tag or an
+#            assessment to the trace, then deleting it) succeeds with no violation.
 test_levels:
   FR-OBS-1: unit
   FR-OBS-2: unit
@@ -443,7 +480,7 @@ paired_changes:
       - "FR-DEPLOY-1: profile `observability` with `rotel` and `mlflow` (FR-OBS-8)."
       - "FR-DEPLOY-2: `deploy/otel/mlflow.Dockerfile` is under the same pin, allow-list and no-ADD rules; it copies nothing; its `.dockerignore` excludes `**`; rotel's image is third-party and pinned by digest."
       - "FR-DEPLOY-3: networks `otel` 10.230.2.0/24 (api, worker, rotel), `obs` 10.230.3.0/24 (rotel, mlflow, worker) and `obs-ui` 10.230.4.0/24 (caddy, mlflow), all internal with explicit subnets."
-      - "VEC-DEPLOY-2 gains exactly these allowed pairs: api–rotel, worker–rotel (otel); rotel–mlflow, worker–mlflow (obs); caddy–mlflow (obs-ui). And these `never` pairs: caddy–rotel, caddy–worker (unchanged), mlflow–api, mlflow–postgres, mlflow–embed, mlflow–agent-proxy, mlflow–mcp, mlflow–kernel-* and mlflow–kernel-user-*, rotel–postgres, rotel–embed, rotel–agent-proxy, rotel–mcp, rotel–caddy, rotel–kernel-* and rotel–kernel-user-*."
+      - "VEC-DEPLOY-2 gains exactly these allowed pairs: api–rotel, worker–rotel (otel); rotel–mlflow, worker–mlflow (obs); caddy–mlflow (obs-ui). And these `never` pairs: caddy–rotel, caddy–worker (unchanged), mlflow–api, mlflow–postgres, mlflow–embed, mlflow–agent-proxy, mlflow–mcp, mlflow–kernel-* and mlflow–kernel-user-*, rotel–postgres, rotel–embed, rotel–agent-proxy, rotel–mcp, rotel–kernel-* and rotel–kernel-user-*."
       - "FR-DEPLOY-5: volume `obs_mlflow` (mlflow only, `org.reader-ai.backup=exclude`)."
       - "FR-DEPLOY-6: the base compose.yaml still publishes only `127.0.0.1:443:443`; `127.0.0.1:8443:8443` on caddy comes from OPS-CLI's override when `observability` is active (VEC-DEPLOY-3 gains a variant with it). INV-DEPLOY-6 unchanged (127.0.0.1 only)."
       - "FR-DEPLOY-7: the second Caddy site of FR-OBS-9. `server/tests/deploy/test_caddy_and_images.py`: the upstream set becomes {10.230.1.10:8000, mcp:8001, mlflow:5000} (forward_auth to 10.230.1.10:8000 on 8443 included), the proxied map gains the 8443 catch-all → mlflow:5000, and new asserts cover the handle order, every blocked pattern answering 404 in Caddy's own handler, the header_up/header_down removals and the 8443 CSP string."
@@ -471,7 +508,8 @@ paired_changes:
     items:
       - "FR-EVENTS-3/-6/-4: `_defer` passes the `trace` kwarg of FR-OBS-5 (a); the registered task accepts `trace: str | None = None`; `_run` wraps `_attempt` and `_judge` in FR-OBS-5 (b)'s root span; the sweep's defers pass none (c)."
       - "FR-EVENTS-1: KIND_MODULES lists `reader.obs.jobs` (kind `obs.retention`, an `on_worker_start` hook)."
-      - "FR-EVENTS-16: procrastinate log records gain no trace field; the scrubber also removes `trace` from `record.job['task_kwargs']` handling (already removed whole); unchanged behaviour."
+      - "FR-EVENTS-16: procrastinate log records gain no trace field; the scrubber already removes `task_kwargs` whole, so `trace` never reaches a log; unchanged behaviour."
+      - "New FR-EVENTS-18 (based on origin/V/slice-integration's SRV-EVENTS, which has FR-EVENTS-17 `dead_error_code_of` and the rule that no module queries `job_keys` directly): published reads next to `job_status_of` and `dead_error_code_of`, on an open connection without a procrastinate app, read-only: `key_rows_of(conn, kind_name, keys) -> list[KeyRow]` and `recent_keys_of(conn, kind_names, outcome, since, limit) -> list[KeyRow]` (newest `finished_at` first; `limit` ≤ 500), `KeyRow = (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at)`; a migration `jobs_0002` adds an index on job_keys (kind, outcome, finished_at). [db] tests: unknown keys omitted, outcome filter, window and limit, ordering, the index used (EXPLAIN shows an index scan on a seeded table)."
       - "Owner note: the stage-2 outbox must store the traceparent with the enqueue it defers (FR-OBS-5 d)."
   - spec: SRV-AGENT
     items:
@@ -490,4 +528,5 @@ owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."
   - "If 8443 shows 401, you are not signed in: open https://localhost, sign in with your passkey, and reload the dashboard. It does not redirect to the sign-in page itself."
   - "Turning tracing off: `observability: {enabled: false}` in reader.yaml, then `reader up`; rotel and mlflow are removed, port 8443 is closed and the api and worker stop exporting. The traces volume stays (not backed up) until you delete it; turning tracing on again shows the old traces until retention trims them."
+  - "With open sign-up (ADR-0031), other users' jobs are traced too: the dashboard at 8443 shows every user's job traces (ids, costs, timings, error codes; no handles, no text), and the summary page shows other users' dead system jobs marked `system`. Only you can open either."
   - "What the traces never hold: book text, prompts, answers, notebook code or output, tokens, secrets, user handles. What they hold: route templates, job kinds and ids, lesson/run/question ids, stage names, model ids, token counts, cost, durations, status and error codes."

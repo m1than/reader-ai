@@ -1,20 +1,20 @@
 # VEC-OBS-3. Seeded rows and the expected GET /api/obs/summary?days=7 for SRV-OBS FR-OBS-10.
-# Hand-derived from FR-OBS-10, SRV-AGENT FR-AGENT-9 (spent = settle.settled_usd + reserves with neither a settle
-# nor a void) and FR-OBS-5's derivation: trace_id = sha256("reader.job\0" + job_id + "\0" + key)[:16] as hex
-# (computed with Python hashlib). Clock: now = 2026-11-24T12:00:00Z; every row is inside the 7-day window.
+# Hand-derived from FR-OBS-10 and SRV-AGENT FR-AGENT-9 (spent = settle.settled_usd + reserves with neither a settle
+# nor a void). Trace ids are NOT hand-written: every one is checked by `node spec/fixtures/SRV-OBS/trace-ids.mjs`
+# against FR-OBS-5's derivation (job id hashed as decimal ASCII) from the seeded job_keys row named by `job`/`jobs`.
+# Clock: now = 2026-11-24T12:00:00Z; every row is inside the 7-day window.
 owner: 00000000-0000-4000-8000-000000000001
-other_owner: 00000000-0000-4000-8000-000000000002   # its rows must not appear anywhere in the result
-# Symbols: run1 = 10000000-0000-4000-8000-000000000001; q1..q4, q9 and m1 stand for uuids / a sha256 the test generates.
+other_owner: 00000000-0000-4000-8000-000000000002   # its user-owned rows must not appear anywhere in the result
+# Symbols: run1 = 10000000-0000-4000-8000-000000000001, run9 = …0009 (other owner); q1..q4, q9 and m1, m9 stand for
+# uuids / sha256 values the test generates.
 
 seed:
   compile_runs:
-    - { id: 10000000-0000-4000-8000-000000000001, owner_id: owner, lesson_id: 20000000-0000-4000-8000-000000000001,
-        created_at: "2026-11-24T10:00:00Z", finished_at: null }
-    - { id: 10000000-0000-4000-8000-000000000009, owner_id: other_owner, lesson_id: 20000000-0000-4000-8000-000000000009,
-        created_at: "2026-11-24T10:00:00Z", finished_at: null }
+    - { id: run1, owner_id: owner, lesson_id: 20000000-0000-4000-8000-000000000001, created_at: "2026-11-24T10:00:00Z", finished_at: null }
+    - { id: run9, owner_id: other_owner, lesson_id: 20000000-0000-4000-8000-000000000009, created_at: "2026-11-24T10:00:00Z", finished_at: null }
   compile_steps:
-    - { run_id: 10000000-0000-4000-8000-000000000001, step: 1, stage: draft, cost_usd: 0.62, duration_s: 95, model: claude-sonnet-5-5 }
-    - { run_id: 10000000-0000-4000-8000-000000000001, step: 2, stage: fact_check, cost_usd: 0.21, duration_s: 40, model: claude-sonnet-5-5 }
+    - { run_id: run1, step: 1, stage: draft, input_sha256: "1111111111111111111111111111111111111111111111111111111111111111", cost_usd: 0.62, duration_s: 95, model: claude-sonnet-5-5 }
+    - { run_id: run1, step: 2, stage: fact_check, input_sha256: "2222222222222222222222222222222222222222222222222222222222222222", cost_usd: 0.21, duration_s: 40, model: claude-sonnet-5-5 }
   agent_spend:   # run 1: step 2's first attempt failed after billing 0.23; step 3 holds an unsettled reserve
     - { id: 1, owner_id: owner, run_id: run1, task: draft, attempt: 1, kind: reserve, usd: 1.00 }
     - { id: 2, owner_id: owner, run_id: run1, task: draft, attempt: 1, kind: settle, reservation_id: 1, settled_usd: 0.62 }
@@ -33,37 +33,46 @@ seed:
     - { id: q2, owner_id: owner, state: answered, created_at: "2026-11-24T11:01:00.000Z", finished_at: "2026-11-24T11:01:04.000Z" }
     - { id: q3, owner_id: owner, state: answered, created_at: "2026-11-24T11:02:00.000Z", finished_at: "2026-11-24T11:02:09.000Z" }
     - { id: q4, owner_id: owner, state: failed, error_code: provider_unavailable, created_at: "2026-11-24T11:03:00.000Z", finished_at: "2026-11-24T11:03:01.000Z" }
+  # Read through SRV-EVENTS' published functions (FR-OBS-10, paired FR-EVENTS-18), never by SQL from SRV-OBS.
   job_keys:
     - { kind: pipeline.stage, key: "pipeline.stage:1111111111111111111111111111111111111111111111111111111111111111", args: { run_id: run1, step: 1, stage: draft }, outcome: succeeded, job_id: 101 }
     - { kind: pipeline.stage, key: "pipeline.stage:2222222222222222222222222222222222222222222222222222222222222222", args: { run_id: run1, step: 2, stage: fact_check }, outcome: succeeded, job_id: 104, attempts: 2 }   # jobs 103 (failed) then 104
     - { kind: pipeline.stage, key: "pipeline.stage:3333333333333333333333333333333333333333333333333333333333333333", args: { run_id: run1, step: 3, stage: review }, outcome: dead, error_code: exhausted, job_id: 106, finished_at: "2026-11-24T11:30:00Z" }
+    - { kind: pipeline.stage, key: "pipeline.stage:9999999999999999999999999999999999999999999999999999999999999999", args: { run_id: run9, step: 1, stage: draft }, outcome: dead, error_code: timeout, job_id: 109, finished_at: "2026-11-24T11:30:00Z" }   # other owner's run: not shown
     - { kind: tutor.answer, key: "tutor.answer:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", args: { question_id: q1 }, outcome: succeeded, job_id: 201 }
     - { kind: tutor.answer, key: "tutor.answer:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", args: { question_id: q2 }, outcome: succeeded, job_id: 202 }
     - { kind: tutor.answer, key: "tutor.answer:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", args: { question_id: q3 }, outcome: succeeded, job_id: 203 }
     - { kind: tutor.answer, key: "tutor.answer:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", args: { question_id: q4 }, outcome: succeeded, job_id: 204 }   # the job succeeded; the question failed
     - { kind: ingest.import, key: "ingest.import:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", args: { material_sha256: m1 }, outcome: succeeded, job_id: 301, created_at: "2026-11-24T10:00:00Z", finished_at: "2026-11-24T10:02:00Z" }
+    - { kind: ingest.import, key: "ingest.import:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff", args: { material_sha256: m9 }, outcome: dead, error_code: ValueError, job_id: 302, finished_at: "2026-11-24T10:05:00Z" }   # no materials row: a system job, shown
+    - { kind: search.embed, key: "search.embed:0000000000000000000000000000000000000000000000000000000000000001", args: { material_sha256: m1 }, outcome: dead, error_code: exhausted, job_id: 401, finished_at: "2026-11-24T10:10:00Z" }   # system job, shown
   materials:
     - { sha256: m1, owner_id: owner, page_count: 594 }
 
 expected:
   compile_runs:
-    - run_id: 10000000-0000-4000-8000-000000000001
+    - run_id: run1
       spent_usd: 1.86            # 0.62 + 0.23 + 0.21 settled + 0.80 unsettled reserve; the failed attempt's 0.23 counts
       steps:
-        - { step: 1, stage: draft, cost_usd: 0.62, duration_s: 95, trace_id: 6b552a4b5ed48785fa9c748067e03f17 }
-        - { step: 2, stage: fact_check, cost_usd: 0.21, duration_s: 40, trace_id: 9510f9e6107e77ca011be71ec8de5e5c }   # job 104, the newest
+        - { step: 1, stage: draft, cost_usd: 0.62, duration_s: 95, job: 101, trace_id: 6b552a4b5ed48785fa9c748067e03f17 }
+        - { step: 2, stage: fact_check, cost_usd: 0.21, duration_s: 40, job: 104, trace_id: 9510f9e6107e77ca011be71ec8de5e5c }   # the key row's job_id: the newest job
   tutor:
     count: 3
     p50_ms: 4000                 # nearest rank over [2000, 4000, 9000]: ceil(0.50 × 3) = 2nd
     p95_ms: 9000                 # ceil(0.95 × 3) = 3rd
-    cost_usd_sum: 0.13           # settle rows of task tutor, the failed question's 0.01 included; other owner excluded
-    cost_usd_mean: 0.0325        # over the 4 settle rows
-    slowest: [{ question_id: q3, ms: 9000, trace_id: 5e649d4ae4796b982e1b2bc44b94c203 },
-      { question_id: q2, ms: 4000, trace_id: 07c8dc8925090517d73ac26811485b35 },
-      { question_id: q1, ms: 2000, trace_id: 8d735ac1a6c8b3a717673a233e2bc87f }]
+    cost_usd_sum: 0.13           # settled_usd of the owner's settle rows of task tutor (the failed question's 0.01 included)
+    cost_usd_mean_per_settled_call: 0.0325   # 0.13 over the 4 settle rows (one per billed provider call)
+    slowest:
+      - { question_id: q3, ms: 9000, job: 203, trace_id: 5e649d4ae4796b982e1b2bc44b94c203 }
+      - { question_id: q2, ms: 4000, job: 202, trace_id: 07c8dc8925090517d73ac26811485b35 }
+      - { question_id: q1, ms: 2000, job: 201, trace_id: 8d735ac1a6c8b3a717673a233e2bc87f }
   failures:
-    jobs: [{ kind: pipeline.stage, error_code: exhausted, count: 1, trace_ids: [e09c85288551115e22f6ffaf96776029] }]
-    tutor: [{ error_code: provider_unavailable, count: 1, trace_ids: [37b657e533c68160f6e6f49237780e4f] }]
+    jobs:   # user kinds scoped to the owner's runs and questions; system kinds unscoped (FR-OBS-10 c)
+      - { kind: pipeline.stage, error_code: exhausted, count: 1, jobs: [106], trace_ids: [bdbfdddf961a1e378abeab94160df164] }
+      - { kind: ingest.import, error_code: ValueError, count: 1, system: true, jobs: [302], trace_ids: [fccae2dc7f43c76458feb21f354f2fc0] }
+      - { kind: search.embed, error_code: exhausted, count: 1, system: true, jobs: [401], trace_ids: [b4dbcf9446f8e2ad810cdb0d2edef5bf] }
+    tutor:
+      - { error_code: provider_unavailable, count: 1, jobs: [204], trace_ids: [37b657e533c68160f6e6f49237780e4f] }
   ingest:
-    - { material_sha256: m1, page_count: 594, import_s: 120, pages_per_min_import: 297.0,
+    - { material_sha256: m1, page_count: 594, import_s: 120, pages_per_min_import: 297.0, job: 301,
         trace_id: c8c0ff6102935d9b75900f9cfa697e67 }

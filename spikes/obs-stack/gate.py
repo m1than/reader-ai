@@ -28,14 +28,21 @@ class Gate(BaseHTTPRequestHandler):
         who = cookies.get("__Host-reader_session")
         origin = self.headers.get("Origin")
         method = (self.headers.get("X-Forwarded-Method") or "GET").upper()
+        site = self.headers.get("Sec-Fetch-Site")
+        mode = self.headers.get("Sec-Fetch-Mode")
+        dest = self.headers.get("Sec-Fetch-Dest")
+        top_nav = site == "same-site" and mode == "navigate" and dest == "document" and method == "GET"
         if origin is not None and origin not in ALLOWED:
             status = 403
         elif method not in ("GET", "HEAD") and origin not in ALLOWED:
             status = 403
+        elif site is not None and site not in ("same-origin", "none") and not top_nav:
+            status = 403  # review round 2 N1: only a top-level GET navigation may arrive same-site
         else:
             status = 204 if who == "owner" else 403 if who == "learner" else 401
         print(json.dumps({"path": self.path, "status": status, "fwd_method": method, "origin": origin,
-                          "fwd_uri": self.headers.get("X-Forwarded-Uri")}), file=sys.stderr, flush=True)
+                          "sec_fetch": [site, mode, dest], "fwd_uri": self.headers.get("X-Forwarded-Uri")}),
+              file=sys.stderr, flush=True)
         self.send_response(status)
         self.send_header("Content-Length", "0")
         self.end_headers()
