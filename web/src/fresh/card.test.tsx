@@ -210,7 +210,7 @@ describe('bibliography (FR-FRESHUI-2)', () => {
     await click(/^Run (check|again)$/);
     await click('Run for up to $0.33');
     expect(api.run).toHaveBeenCalledWith(s.material_id, { high_usd: '0.33' });
-    expect(Object.keys(api.run.mock.calls[0]![1] as object)).toEqual(['high_usd']);
+    expect(Object.keys((api.run.mock.calls[0] as unknown[])[1] as object)).toEqual(['high_usd']);
   });
 
   it('an owner bibliography shows no confirmation', async () => {

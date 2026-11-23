@@ -119,7 +119,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       fetch: fetchFn ?? ((...a: Parameters<typeof fetch>) => globalThis.fetch(...a)),
       onUnauthorized: () => navigateAway(SIGN_IN_URL),
     };
-    return { api: createApi(deps), tutor: createTutorApi(deps), notify, navigateAway };
+    return { api: createApi(deps), tutor: createTutorApi(deps), http: deps, notify, navigateAway };
   }, [fetchFn, navigateAway, notify]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');

@@ -83,7 +83,7 @@ describe('every anchor from report data is safe (INV-FRESHUI-1)', () => {
             recommendations: r.recommendations.map((l) => ({ ...l, date: null, date_source: 'model', kind: 'other', why: 'w', covers: [] })),
           },
         };
-        const api = { get: async () => body, saveBibliography: async () => body.bibliography, run: async () => ({ report_id: 'x' }) };
+        const api = { get: async () => body, saveBibliography: async () => base.body.bibliography, run: async () => ({ report_id: 'x' }) };
         let container!: HTMLElement;
         await act(async () => {
           container = render(<FreshnessCard materialId={base.material_id} api={api as never} />).container;

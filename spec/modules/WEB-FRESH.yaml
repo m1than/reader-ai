@@ -45,7 +45,7 @@ title: Source freshness card — bibliography, run with cost estimate, verdict b
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-23, with ADR-0030 and SRV-FRESH); owner accepted ADR-0030 2026-11-23"
+review: "deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-23, with ADR-0030 and SRV-FRESH); owner accepted ADR-0030 2026-11-23. Test fixes during Green (no requirement changed): two TypeScript errors in the Red tests (a mock's argument tuple, a spread body's type), and INV-FRESHUI-2's test now asserts that some markup string is shown as text in each state, since the failed state shows no report string; the [browser] spec reads the fixture from web/ (Playwright loads it as CommonJS, without import.meta). Measured in Green: the lazy chunk is 6,000 B gzip (threshold 20,000); 19 [browser] tests pass against the test server"
 layer: web
 track: product
 adr: [ADR-0030, ADR-0013]

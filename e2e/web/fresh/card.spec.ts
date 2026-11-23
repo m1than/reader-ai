@@ -2,10 +2,12 @@
 // [browser] Run on request: `cd web && npm run build && npm run e2e -- fresh/`. The test server stubs the freshness
 // routes from VEC-FRESHUI-1 (spec/fixtures/WEB-FRESH/bodies.json); nothing is spent.
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
 
-const bodies = JSON.parse(readFileSync(new URL('../../../spec/fixtures/WEB-FRESH/bodies.json', import.meta.url), 'utf8')) as {
+// `npm run e2e` runs in web/.
+const bodies = JSON.parse(readFileSync(resolve(process.cwd(), '../spec/fixtures/WEB-FRESH/bodies.json'), 'utf8')) as {
   states: Record<string, { material_id: string }>;
 };
 

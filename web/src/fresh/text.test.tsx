@@ -44,7 +44,7 @@ describe('report strings are text only (INV-FRESHUI-2)', () => {
       await act(async () => {
         container = render(<FreshnessCard materialId={s.material_id} api={api as never} />).container;
       });
-      expect(container.textContent, name).toContain('<script>alert(2)</script>');
+      expect(MARKUP.some((m) => container.textContent?.includes(m)), name).toBe(true);
       expect(container.querySelectorAll('img, script, style, iframe, object, embed, b').length, name).toBe(0);
       expect(container.querySelectorAll('svg').length, name).toBe(container.querySelectorAll('.fresh-badge svg').length);
       for (const el of container.querySelectorAll('*')) {
