@@ -1,0 +1,191 @@
+/* SRV-AUTH FR-AUTH-19: the sign-in and bootstrap pages, styled like the web app (WEB-UI FR-UI-10).
+   The token blocks below are copies: colours from web/src/ui/tokens/calm.css (dark by default, light under
+   prefers-color-scheme), everything else from the vendored library's styles.css (web/vendor/acme-ui-v0.1.0.tgz).
+   server/tests/auth/test_auth_pages.py fails if any value drifts. Outside the token blocks: var() only, no colour
+   literal, no imported sheet or fetched resource, no web font. */
+
+:root {
+  color-scheme: dark;
+  --acme-canvas: #1b1a18;
+  --acme-surface-raised: #2a2927;
+  --acme-text: #ece9e2;
+  --acme-text-muted: #bdb8ad;
+  --acme-border: #3a3835;
+  --acme-accent: #a1c6c4;
+  --acme-on-tone: #14211f;
+  --acme-danger: #f0b6af;
+  --acme-focus: #a1c6c4;
+  --acme-font: 'Manrope', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --acme-text-sm: 13px;
+  --acme-text-md: 14px;
+  --acme-space-1: 4px;
+  --acme-space-2: 8px;
+  --acme-space-3: 12px;
+  --acme-space-4: 16px;
+  --acme-space-5: 24px;
+  --acme-space-6: 32px;
+  --acme-control-lg: 48px;
+  --acme-radius: 12px;
+  --acme-radius-lg: 20px;
+  --acme-duration: 160ms;
+  --acme-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --acme-canvas: #f6f4ef;
+    --acme-surface-raised: #ffffff;
+    --acme-text: #22211e;
+    --acme-text-muted: #5e5a52;
+    --acme-border: #e2ded5;
+    --acme-accent: #315c5f;
+    --acme-on-tone: #ffffff;
+    --acme-danger: #943229;
+    --acme-focus: #315c5f;
+  }
+}
+
+html {
+  background: var(--acme-canvas);
+  color: var(--acme-text);
+}
+
+body {
+  margin: 0;
+  font-family: var(--acme-font);
+  font-size: 0.9375rem;
+  line-height: 1.5;
+}
+
+.auth {
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--acme-space-5);
+}
+
+.auth-card {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 26rem;
+  padding: var(--acme-space-6);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--acme-radius-lg);
+  background: var(--acme-surface-raised);
+}
+
+.auth-mark {
+  display: block;
+  margin: 0 0 var(--acme-space-4);
+  color: var(--acme-accent);
+}
+
+.auth-brand {
+  margin: 0;
+  font-size: var(--acme-text-md);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.auth-tagline {
+  margin: var(--acme-space-1) 0 var(--acme-space-6);
+  color: var(--acme-text-muted);
+  font-size: var(--acme-text-sm);
+}
+
+h1 {
+  margin: 0 0 var(--acme-space-2);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.auth-lead {
+  margin: 0 0 var(--acme-space-5);
+  color: var(--acme-text-muted);
+}
+
+/* FR-AUTH-20: the status line; errors in the danger colour with a 3px bar on the start side. */
+.auth-status {
+  margin: 0 0 var(--acme-space-4);
+  color: var(--acme-text-muted);
+}
+
+.auth-status:empty {
+  margin: 0;
+}
+
+.auth:is(
+    [data-state='unsupported'],
+    [data-state='no_token'],
+    [data-state='rejected'],
+    [data-state='expired'],
+    [data-state='not_registered'],
+    [data-state='rate_limited'],
+    [data-state='unreachable'],
+    [data-state='failed']
+  )
+  .auth-status {
+  padding: var(--acme-space-1) 0 var(--acme-space-1) var(--acme-space-3);
+  border-inline-start: 3px solid var(--acme-danger);
+  color: var(--acme-danger);
+}
+
+.auth[data-state='done'] .auth-status {
+  color: var(--acme-text);
+}
+
+/* The library's solid button (styles.css .acme-button[data-variant='solid'], size lg). */
+.auth-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-block-size: var(--acme-control-lg);
+  padding: 0 var(--acme-space-4);
+  border: 1px solid transparent;
+  border-radius: var(--acme-radius);
+  background: var(--acme-accent);
+  color: var(--acme-on-tone);
+  font: 600 var(--acme-text-md) / 1.2 var(--acme-font);
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition:
+    background-color var(--acme-duration) var(--acme-ease),
+    opacity var(--acme-duration) var(--acme-ease);
+}
+
+.auth-button[hidden] {
+  display: none;
+}
+
+.auth-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.auth-button:focus-visible,
+.auth-status:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+@media (max-width: 30rem) {
+  .auth {
+    padding: var(--acme-space-4);
+  }
+
+  .auth-card {
+    padding: var(--acme-space-5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-button {
+    transition: none;
+  }
+}

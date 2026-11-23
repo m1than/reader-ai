@@ -5,8 +5,8 @@
 #   bash e2e/live/slice.sh --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys]
 #                          [--tutor-bench-dir DIR] [--tutor-bench-from N]
 #
-#   --steps   default: routes,import,embed,bench,compile,lesson,tutor,ui (see e2e/web/live/owner.slice.ts).
-#             `routes` alone, `bench` or `ui` spends nothing; `compile` spends up to the run cap ($8), `tutor` up to
+#   --steps   default: routes,import,embed,bench,compile,lesson,tutor,ui,auth (see e2e/web/live/owner.slice.ts).
+#             `routes` alone, `bench`, `ui` or `auth` spends nothing; `compile` spends up to the run cap ($8), `tutor` up to
 #             3 × $0.30; `tutor-bench` (not in the default) asks SRV-TUTOR's 40 bench questions without a cell:
 #             about 40 × $0.046 ≈ $1.8, at most 40 × $0.30, stopping at the $3 daily cap.
 #   --tutor-bench-dir  where tutor-bench keeps one record file per run (default: OUT), resolved to an absolute path
@@ -30,7 +30,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 USAGE="usage: $0 --config PATH --out DIR [--steps LIST] [--no-ingest] [--reset-owner-passkeys] [--tutor-bench-dir DIR] [--tutor-bench-from N]"
 CONFIG=""
-STEPS="routes,import,embed,bench,compile,lesson,tutor,ui"
+STEPS="routes,import,embed,bench,compile,lesson,tutor,ui,auth"
 OUT=""
 INGEST=1
 RESET=()

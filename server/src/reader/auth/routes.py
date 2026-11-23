@@ -127,7 +127,8 @@ def _static(name: str, media_type: str) -> Handler:
         except OSError:  # a damaged install, not a database failure
             log.warning("static_unavailable %s", ctx.request.url.path)
             return error(503, "unavailable")
-        return Response(content, media_type=media_type)
+        # FR-AUTH-21: revalidate before each reuse; with no validator sent, the browser refetches.
+        return Response(content, media_type=media_type, headers={"Cache-Control": "no-cache"})
 
     return serve
 
@@ -143,4 +144,5 @@ ROUTES: tuple[Route, ...] = (
     Route("GET", "/api/auth/bootstrap", "public", _static("bootstrap.html", "text/html")),
     Route("GET", "/api/auth/signin", "public", _static("signin.html", "text/html")),
     Route("GET", "/api/auth/static/passkey.js", "public", _static("passkey.js", "text/javascript")),
+    Route("GET", "/api/auth/static/auth.css", "public", _static("auth.css", "text/css")),  # FR-AUTH-21
 )
