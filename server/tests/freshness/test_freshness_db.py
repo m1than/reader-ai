@@ -1,5 +1,5 @@
 # @trace FR-FRESH-1 FR-FRESH-3 FR-FRESH-7 FR-FRESH-8 FR-FRESH-9 FR-FRESH-10 FR-FRESH-11 FR-FRESH-12
-# @trace FR-FRESH-13 INV-FRESH-2 INV-FRESH-4
+# @trace FR-FRESH-13 FR-FRESH-14 INV-FRESH-2 INV-FRESH-4
 """[db] The routes, the two jobs and the store against a migrated Postgres, with a fake Provider that writes
 real ledger rows and drives the search gate, and fake Jobs. No provider call leaves the process."""
 
@@ -668,3 +668,35 @@ async def test_ledger_rows_are_scoped_to_the_report(pg: Pg, tmp_path: Path) -> N
         " ORDER BY task", r=uuid.UUID(report_id),
     )
     assert [tuple(t) for t in tasks] == [("freshness_report", 1), ("freshness_scan", 1), ("freshness_web", 5)]
+
+
+async def test_the_live_check_calls_the_routes_in_process(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-14's route steps without spend: the live module's in-process caller reaches the declared
+    route handlers as the owner (GET the estimate, POST with it, GET the stored report) and reads the same
+    bodies as the HTTP client."""
+    live = need("reader.freshness.live")
+    w = await world(pg, tmp_path)
+    async with client(w) as c:
+        await c.put(path(w) + "/bibliography", json=BIB)
+    user, material_id = await live._owner(w.engine, "ivan")
+    assert material_id == w.materials["ivan"]
+    caller = live.Caller(w.engine, w.config, user, live.Queue())
+    ids = {"material_id": str(material_id)}
+    status, before = await caller.call("GET", "/freshness", ids)
+    assert status == 200
+    assert set(before) == GET_KEYS
+    echo = {"high_usd": before["estimate"]["high_usd"]}
+    status, started = await caller.call("POST", "/freshness", ids, echo)
+    assert status == 202
+    assert caller.queue.kinds == ["freshness.scan"]
+    report_id = started["report_id"]
+    jobs = FakeJobs()
+    d = deps(w, FakeProvider(w.engine, _replies()), jobs)
+    await run_job(w, "freshness.scan", uuid.UUID(report_id), d)
+    await run_job(w, "freshness.web", uuid.UUID(report_id), d)
+    status, report = await caller.call("GET", "/freshness/{report_id}", {**ids, "report_id": report_id})
+    assert status == 200
+    assert report["status"] == "done"
+    async with client(w) as c:
+        assert (await c.get(path(w) + f"/freshness/{report_id}")).json() == report
+    assert [r["url"] for r in report["recommendations"]]  # stored URLs to compare with R in the live run

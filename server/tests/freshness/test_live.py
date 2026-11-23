@@ -1,10 +1,11 @@
 # @trace FR-FRESH-14
 """[live] against the running stack (`reader up` with profile `agents`, the pilot imported, an owner-entered
 bibliography). Skipped unless READER_LIVE=1: one check spends about $0.27 (at most $1.00, the run cap) of
-budget.test_budget_usd. `reader.freshness.live` runs in the worker container, starts one check the way the
-POST route does, runs it to a final status and prints ids, counts, flags, costs and per search the gate's
-decision and input tokens only: no query, title, URL, bibliography field or model text leaves the
-container."""
+budget.test_budget_usd. `reader.freshness.live` runs in the worker container, in-process because R lives only
+in memory: it calls the route handlers as the owner (a free GET of the estimate, the POST, the job handlers, a
+free GET of the stored report), and prints ids, counts, flags, costs and per search the gate's decision and
+the run's summed input tokens only: no query, title, URL, bibliography field or model text leaves the
+container. Not run by the agent: it spends money."""
 
 from __future__ import annotations
 
@@ -41,9 +42,11 @@ def test_one_check_completes_within_the_caps() -> None:
     assert report["status"] == "done"
     assert report["verdict"] in ("current", "partly_outdated", "outdated")
     assert report["searches_with_results"] >= 1
+    assert report["stored_urls"] >= 1
     assert report["stored_urls_in_r"] is True
     assert 0 < report["usd"] <= 1.00
     assert report["ledger_rows_with_web_search_requests"] >= 1
     assert report["crosscheck_ok"] is True
     for search in report["searches"]:
-        assert set(search) == {"gate", "nested_input_tokens", "status"}
+        # run_input_tokens: the run's summed input (main loop + nested request), an upper bound of t (H-WS-3)
+        assert set(search) == {"gate", "run_input_tokens", "status"}

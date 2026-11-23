@@ -383,13 +383,19 @@ requirements:
       or model output.
   - id: FR-FRESH-14
     text: >-
-      Live: on the pilot with an owner-entered bibliography, one check through the routes completes `done` with a
-      verdict, ≥ 1 search with results, every stored URL in that check's R, cost ≤ `run_cap_usd`, ledger rows carrying
+      Live: on the pilot with an owner-entered bibliography, one check completes `done` with a verdict, ≥ 1 search
+      with results, ≥ 1 stored URL and every stored URL in that check's R, cost ≤ `run_cap_usd`, ledger rows carrying
       `web_search_requests`, and the settled amount within SRV-AGENT's cross-check tolerance of the proxy-recorded
-      usage (H-WS-6); for every search the live result records the gate's decision (H-FRESH-2) and the nested
-      request's input tokens (t, H-WS-3). The owner judges the flagged claims and recommendations (H-FRESH-1). All of
-      this is recorded in docs/progress.yaml as observed in this one run. Expected ≈ $0.27 from
-      `budget.test_budget_usd`. [live]
+      usage (H-WS-6); for every search the live result records the gate's decision (H-FRESH-2) and
+      `run_input_tokens`, the search run's summed input tokens from `model_usage` (main loop plus nested request):
+      an upper bound of t, not t itself (H-WS-3). It runs **in-process** in the worker container
+      (`python -I -m reader.freshness.live`), because R exists only in the memory of the process that runs the
+      searches: it calls the handlers of `reader.freshness.routes.ROUTES` directly as the owner — a free GET of the
+      estimate, the POST that echoes its `high_usd`, the scan and web job handlers, and a free GET of the stored
+      report, whose URLs are compared with R — without the HTTP dispatcher (its session lookup and CSRF gate are
+      covered by [db] tests). It reaches the database through public API only. The owner judges the flagged claims
+      and recommendations (H-FRESH-1). All of this is recorded in docs/progress.yaml as observed in this one run.
+      Expected ≈ $0.27 from `budget.test_budget_usd`. [live]
 
 invariants:
   - id: INV-FRESH-1

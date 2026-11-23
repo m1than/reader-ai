@@ -1076,7 +1076,10 @@ tasks:
         the main loop only while total_cost_usd/model_usage include the nested request and the $0.01 fee; the main
         loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Live call, observed once
         (owner, 2026-11-23, spikes/web-search/results/20261123T214429/live.json, $0.012588): Haiku 5.5, 3 requests,
-        nested model Haiku, t ≈ 13,950 (nested input 14,452) under the 20,000 planning bound, fee inside the SDK cost,
+        nested model Haiku; H-WS-3: the nested request's input was 14,452 tokens as recorded per request by the
+        proxy, so t (the tokens the search results add) ≈ 13,950 after the ≈ 500-token search prompt, an estimate since
+        no field reports t alone, under the 20,000 planning bound (FR-FRESH-14's live check records
+        `run_input_tokens`, the run's summed model_usage input, 14,456 here: an upper bound of t); fee inside the SDK cost,
         SDK = proxy (18,518 input-side tokens, 1,147 output, 1 search, same dollars), query passed verbatim (denial rate
         0), max_uses rewrite accepted (200), thinking 152 (main) + 290 (nested) tokens with MAX_THINKING_TOKENS=0; fee
         vs subscription credit unknown. No spec bound changes. Estimate (not measured): ≈ $0.27 per check, worst
@@ -1098,8 +1101,17 @@ tasks:
         977d55b), paired registrations (0cb3701: SRV-EVENTS KIND_MODULES, SRV-AUTH ROUTERS, VERSION_LOCATIONS and PUT
         in Route.method, OPS-DEPLOY example tasks), OPS-DOD material.freshness routes and items (0dbb759); 429
         daily_budget_exhausted aligned with SRV-TUTOR on both sides and the read keys pinned to WEB-FRESH's fixture
-        (8d4458e). Merged origin/V/slice-integration (plan and onboarding: registration lists combined).",
-      next: "1) Code review (coordinator; full rounds for the proxy, cost and security parts). 2) Before any live check
+        (8d4458e). Merged origin/V/slice-integration (plan and onboarding: registration lists combined).
+        Code review round 1 fixes (2026-11-24, 5c3ba73 and later on V/freshness): subject words as \\w+ tokens in the
+        scan and again in the plan; masking removes exempt words from query and span alike; enum checks never hash a
+        list or dict; R hosts need a 0–65535 port, a letter/digit charset and LDH labels; gate exact-match cases; an
+        ungated WebSearchCall is tools_mismatch; oracles for placeholder pins, error-result settlement, the 100k tier
+        boundary, the summed lower tier, the TTL breakdown, the fee in the reserve, a reservation without a settle row,
+        the time-left guard and scan_inputs reuse; FR-FRESH-12 states the ≈ $1.04 paid-scan-restart case (the run cap
+        refuses); the live check runs in-process through the route handlers (free GET before and after), records
+        run_input_tokens and requires ≥ 1 stored URL (not run); INV-FRESH-1 [agent] test through the real CLI and a real
+        agent-proxy against the stub (zero credit).",
+      next: "1) Code review round 2 (coordinator; full rounds for the proxy, cost and security parts). 2) Before any live check
         or `reader up`: the coordinator's approval (a real check ≈ $0.27). 3) WEB-IMPORT and the course page mount the
         card; SRV-INGEST PDF Info dictionary (later, paired).",
       paired_later: "SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount the card
