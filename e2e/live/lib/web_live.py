@@ -43,10 +43,11 @@ failures = 0
 
 
 def line(status: str, name: str, extra: str = "") -> None:
+    """One `<STATUS> browser: <label>` line; any detail follows a TAB, so the label stays exact (OPS-DOD FR-DOD-4)."""
     global failures
     if status == "FAIL":
         failures += 1
-    print(f"{status} {name}" + (f" {extra}" if extra else ""), flush=True)
+    print(f"{status} {name}" + (f"\t{extra}" if extra else ""), flush=True)
 
 
 def node_path() -> str:

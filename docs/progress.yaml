@@ -708,7 +708,13 @@ tasks:
         V.cost-optimize (spec OPS-DOD).",
       review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review).
         Recheck on V/slice-integration 744997e (2026-11-23): spec review round 1 of cd6be04 changes (8 blocking, all
-        applied, plus the non-blocking items); round 2 pending",
+        applied, plus the non-blocking items); round 2 on 4b03d67: VERDICT approve; spec approved by agent 2026-11-23.
+        Green (2026-11-23): tools/dod/index.mjs (FR-DOD-1/2 shape, T10, waiver rule, P8 ratchet), tools/dod/report.mjs
+        (report, INDEX.md, report.json, exit codes), T10 in check.mjs, P8 in guard-tests.mjs, H4 in pre-write.mjs,
+        TAB details in web_live.py and passkey_check.py, ci-local.sh and ci.yml steps; 105 node tests pass. Not yet
+        done (follow-up, needs a live run and the e2e/live secret-handling review): verify-all.sh writing the FR-DOD-4
+        inputs (pytest xunit1, vitest and Playwright JSON) and running report.mjs into docs/dod/; slice.live.ts
+        writing axe.json; docs/dod/ committed with the final PR",
       note: "spec rechecked 2026-11-23 against the integrated code (every other spec approved). Index: 30 operations × 8
         criteria = 240 cells, 44 na, 49 missing (declared gaps only). Closed: lesson.compile_resume × cost (the run's
         stored cap). Opened by review round 1: search.query × observability (no test asserts FR-SEARCH-8's line),

@@ -33,12 +33,13 @@ failures = 0
 
 
 def report(name: str, ok: bool, detail: str = "") -> bool:
+    """One `<STATUS> <label>` line; any detail follows a TAB, so the label stays exact (OPS-DOD FR-DOD-4)."""
     global failures
     if ok:
         print(f"PASS {name}")
     else:
         failures += 1
-        print(f"FAIL {name}" + (f": {detail}" if detail else ""))
+        print(f"FAIL {name}" + (f"\t{detail}" if detail else ""))
     return ok
 
 

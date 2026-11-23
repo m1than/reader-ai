@@ -4,7 +4,9 @@
 //   H1 spec-first: an implementation file is writable only if an approved/implemented
 //      spec claims it through `paths` (spikes/ is outside the gate);
 //   H2 a test traced to an approved spec changes only together with the spec (P7);
-//   H3 owner gates (ADR-0019): spec `implemented` and any ADR decision; the agent may approve specs.
+//   H3 owner gates (ADR-0019): spec `implemented` and any ADR decision; the agent may approve specs;
+//   H4 waivers are the owner's (OPS-DOD FR-DOD-12): a write of the Definition-of-Done index that adds or changes
+//      a `waived` cell is refused.
 // Bash writes are invisible to this hook; CI (tools/trace) closes that gap.
 import { readFileSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -114,6 +116,25 @@ const checks = [
       + 'Leave the status as is, record the request in docs/progress.yaml and notify the owner.',
   },
 ];
+
+// H4: compare the sets of waived (operation, criterion) cells before and after the write. When either text does
+// not parse, fall back to counting `waived:` keys, so an unparsable write cannot slip a waiver through.
+const dod = await import('../dod/index.mjs').catch(() => {
+  process.stderr.write('[hook] tools/dod/index.mjs cannot load: run `npm ci --prefix tools`.\n');
+  process.exit(2);
+});
+checks.push({
+  id: 'H4',
+  when: () => {
+    if (rel !== dod.INDEX_FILE) return false;
+    const after = dod.nextText(current, input);
+    const [a, b] = [dod.parseIndex(current), dod.parseIndex(after)];
+    if (a.error || b.error) return (after.match(/\bwaived:/g) ?? []).length > (current.match(/\bwaived:/g) ?? []).length;
+    return dod.waiverViolations(a.index, b.index).length > 0;
+  },
+  why: () => `${rel}: waivers are the owner's (OPS-DOD FR-DOD-12). Do not add, move or change a \`waived\` cell; `
+    + 'keep the gap as `missing`, record the request in docs/progress.yaml and notify the owner.',
+});
 
 const failed = checks.find((check) => check.when());
 if (failed) {
