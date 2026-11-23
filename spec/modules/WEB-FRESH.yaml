@@ -105,7 +105,11 @@ requirements:
       Reasons and claims. Reasons are a list of text with their citations as links (FR-FRESHUI-6's link rule). Each
       flagged claim shows its subject, kind, confidence, the web status (`changed`, `unchanged`, `unknown`) with its
       note, and "p. N" linking to that page's spans view (or the lesson cell citing it when one exists). Book text is
-      not repeated in the card; the page link is the way to it.
+      not repeated in the card; the page link is the way to it. The cell link `/lessons/<lesson_id>#cell-<cell_id>`
+      is built only when the claim's `cell` holds a lesson id matching `[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}` (not `.`
+      or `..`) and a cell id matching `[A-Za-z0-9._-]{1,128}`; anything else gets the spans view link
+      `/api/materials/<material id, URI-encoded>/spans?page=<N>`. SRV-FRESH sends `cell: null` until WEB-NOTEBOOK
+      links cells, so a unit test pins both branches (code review round 1, 2026-11-24).
   - id: FR-FRESHUI-6
     text: >-
       Recommendations and links. Each recommendation is a card: title as the link text, the ASCII host from the report

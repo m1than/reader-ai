@@ -1,6 +1,6 @@
-// @trace FR-FRESHUI-6 INV-FRESHUI-1
+// @trace FR-FRESHUI-5 FR-FRESHUI-6 INV-FRESHUI-1
 // The link rule: an anchor only for an http(s) URL whose parsed host is the report's `host`; every anchor from report
-// data opens in a new tab with noopener noreferrer nofollow.
+// data opens in a new tab with noopener noreferrer nofollow. Page links: the lesson cell only for valid ids.
 import { act, cleanup, render } from '@testing-library/react';
 import fc from 'fast-check';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,31 @@ import { load } from '../app/testing/load';
 afterEach(cleanup);
 
 const bodies = () => readJson<{ states: Record<string, { material_id: string; body: Record<string, unknown> }> }>('spec/fixtures/WEB-FRESH/bodies.json');
+
+describe('pageHref (FR-FRESHUI-5)', () => {
+  const material = '0b9c2c7e-0000-4000-8000-000000000001';
+  const spans = (page: number) => `/api/materials/${material}/spans?page=${page}`;
+
+  it('links the lesson cell only when both ids are valid, else the page spans view', async () => {
+    const { pageHref } = await load(() => import('./links'));
+    expect(pageHref(material, 12, null)).toBe(spans(12));
+    expect(pageHref(material, 12, { lesson_id: 'L02', cell_id: 'c-3.a' })).toBe('/lessons/L02#cell-c-3.a');
+    expect(pageHref(material, 12, { lesson_id: 'a'.repeat(128), cell_id: 'x' })).toBe(`/lessons/${'a'.repeat(128)}#cell-x`);
+    for (const cell of [
+      { lesson_id: '.', cell_id: 'c1' },
+      { lesson_id: '..', cell_id: 'c1' },
+      { lesson_id: '.hidden', cell_id: 'c1' },
+      { lesson_id: 'a'.repeat(129), cell_id: 'c1' },
+      { lesson_id: 'L02/../admin', cell_id: 'c1' },
+      { lesson_id: 'L02', cell_id: '' },
+      { lesson_id: 'L02', cell_id: 'c1#x' },
+      { lesson_id: 'L02', cell_id: '<script>' },
+      { lesson_id: 'L02', cell_id: 'c'.repeat(129) },
+    ])
+      expect(pageHref(material, 12, cell), JSON.stringify(cell)).toBe(spans(12));
+    expect(pageHref('a/b?c', 3, null)).toBe('/api/materials/a%2Fb%3Fc/spans?page=3');
+  });
+});
 
 describe('safeHref (FR-FRESHUI-6)', () => {
   it('returns the report URL string only for http(s) with a matching host', async () => {
