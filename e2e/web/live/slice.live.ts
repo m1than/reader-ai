@@ -100,7 +100,7 @@ test('passkey registration through the bootstrap page (learner live-check)', asy
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Register your passkey' })).toBeVisible();
   expect(page.url(), 'passkey.js clears the fragment').not.toContain('#');
-  await page.getByRole('button', { name: 'Register passkey' }).click();
+  await page.getByRole('button', { name: 'Create your passkey' }).click(); // SRV-AUTH FR-AUTH-19 (was "Register passkey")
   await page.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
   const { credentials } = await cdp!.send('WebAuthn.getCredentials', { authenticatorId });
   expect(credentials).toHaveLength(1);

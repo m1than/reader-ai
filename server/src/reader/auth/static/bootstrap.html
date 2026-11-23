@@ -5,12 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
 <title>reader-ai — register a passkey</title>
+<link rel="stylesheet" href="/api/auth/static/auth.css">
 </head>
 <body data-ceremony="bootstrap">
-<main>
-<h1>Register your passkey</h1>
-<p id="status">Preparing…</p>
-<button id="go" type="button" hidden>Register passkey</button>
+<main class="auth" data-state="ready">
+<section class="auth-card" aria-labelledby="title">
+<svg class="auth-mark" aria-hidden="true" focusable="false" width="32" height="32" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5c3.5-1.5 8-1.5 12 1.5v17c-4-3-8.5-3-12-1.5z"/><path d="M28 7.5c-3.5-1.5-8-1.5-12 1.5v17c4-3 8.5-3 12-1.5z"/><path d="M19.5 15.5l2 2 4-4.5"/></svg>
+<p class="auth-brand">reader-ai</p>
+<p class="auth-tagline">Study material, turned into verified courses.</p>
+<h1 id="title">Register your passkey</h1>
+<p class="auth-lead">Create the owner's passkey for this reader-ai. You do this once.</p>
+<p id="status" class="auth-status" role="status" aria-live="polite" tabindex="-1">Preparing…</p>
+<button id="go" class="auth-button" type="button" hidden>Create your passkey</button>
+</section>
 </main>
 <script src="/api/auth/static/passkey.js"></script>
 </body>

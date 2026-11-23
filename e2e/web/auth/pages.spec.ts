@@ -19,7 +19,7 @@ const SECRET_BODY = 'SERVER-SAYS-zq81';
 const SECRET_EXCEPTION = 'EXCEPTION-SAYS-zq82';
 
 type Reply = { status: number; body: unknown; headers?: Record<string, string> };
-type Mode = 'ok' | 'pending' | 'NotAllowedError' | 'AbortError' | 'InvalidStateError' | 'unsupported' | 'noparse';
+type Mode = 'ok' | 'pending' | 'NotAllowedError' | 'AbortError' | 'InvalidStateError' | 'unsupported' | 'noparse' | 'noparse-create';
 type Post = { method: string; path: string; contentType: string | undefined; body: unknown };
 interface Case {
   name: string;
@@ -64,6 +64,7 @@ const CASES: Case[] = [
   { name: 'sign-in unsupported', page: 'signin', mode: 'unsupported', click: false, state: 'unsupported', message: 'This browser cannot use passkeys here. Use a current Safari, Chrome, Edge or Firefox.', button: 'hidden', posts: [], webauthn: false },
   { name: 'sign-in without the parse function', page: 'signin', mode: 'noparse', click: false, state: 'unsupported', message: /cannot use passkeys here/, button: 'hidden', posts: [], webauthn: false },
   { name: 'bootstrap ready', page: 'bootstrap', hash: '#tok3n', mode: 'ok', click: false, state: 'ready', message: '', button: 'enabled', posts: [], webauthn: false },
+  { name: 'bootstrap without the parse function', page: 'bootstrap', hash: '#tok3n', mode: 'noparse-create', click: false, state: 'unsupported', message: /cannot use passkeys here/, button: 'hidden', posts: [], webauthn: false },
   { name: 'bootstrap no token', page: 'bootstrap', mode: 'ok', click: false, state: 'no_token', message: 'This setup link is incomplete. Run `reader bootstrap` again for a new link.', button: 'hidden', posts: [], webauthn: false },
   { name: 'bootstrap expired', page: 'bootstrap', hash: '#tok3n', options: { status: 400, body: { error: 'bootstrap_failed' } }, mode: 'ok', click: true, state: 'expired', message: 'This setup link has expired or was already used. Run `reader bootstrap` again for a new link.', button: 'hidden', focus: 'status', posts: [BOOT_OPTIONS], webauthn: false },
   { name: 'bootstrap verify refused', page: 'bootstrap', hash: '#tok3n', options: ok(), verify: { status: 400, body: { error: 'bootstrap_failed' } }, mode: 'ok', click: true, state: 'not_registered', message: 'That passkey could not be registered. Try again; if it keeps failing, run `reader bootstrap` again.', button: 'enabled', focus: 'button', posts: [BOOT_OPTIONS, BOOT_VERIFY], webauthn: true },
@@ -84,6 +85,7 @@ const stubWebAuthn = ({ mode, exception }: { mode: Mode; exception: string }) =>
   pkc.parseCreationOptionsFromJSON = (o: unknown) => o;
   pkc.parseRequestOptionsFromJSON = (o: unknown) => o;
   if (mode === 'noparse') delete pkc.parseRequestOptionsFromJSON;
+  if (mode === 'noparse-create') delete pkc.parseCreationOptionsFromJSON;
   const credential = { toJSON: () => ({ id: 'cred', rawId: 'cred', type: 'public-key', response: { clientDataJSON: 'x' } }) };
   const call = (arg: { publicKey: unknown }) => {
     w.__publicKey.push(arg.publicKey);
@@ -97,8 +99,10 @@ const stubWebAuthn = ({ mode, exception }: { mode: Mode; exception: string }) =>
 const prepare = async (page: Page, c: Case) => {
   const posts: Post[] = [];
   const apiGets: string[] = [];
+  const api: string[] = [];
   page.on('request', (r) => {
     const path = new URL(r.url()).pathname;
+    if (path.startsWith('/api/')) api.push(`${r.method()} ${path}`);
     if (r.method() === 'GET') {
       if (path.startsWith('/api/')) apiGets.push(path);
       return;
@@ -117,7 +121,9 @@ const prepare = async (page: Page, c: Case) => {
   };
   await page.route(`**/api/auth/${c.page}/options`, reply(c.options));
   await page.route(`**/api/auth/${c.page}/verify`, reply(c.verify));
-  // A successful ceremony navigates to `/`: the response is held until `release()`, so `done` is asserted first.
+  // A successful ceremony navigates to `/`: the response is held until `release()`. Playwright's locators wait for a
+  // pending navigation, so the page reports its `done` snapshot itself, the moment `data-state` becomes `done`
+  // (before `location.assign` can unload it), through an exposed function.
   let release: () => void = () => undefined;
   const held = new Promise<void>((done) => (release = done));
   await page.route(
@@ -127,17 +133,67 @@ const prepare = async (page: Page, c: Case) => {
       await route.fulfill({ status: 200, contentType: 'text/plain', body: 'home' });
     },
   );
-  return { posts, apiGets, release: () => release() };
+  let snapshot: (s: Snapshot) => void = () => undefined;
+  const done = new Promise<Snapshot>((resolve) => (snapshot = resolve));
+  await page.exposeFunction('__doneSnapshot', (s: Snapshot) => snapshot(s));
+  await page.addInitScript(() => {
+    document.addEventListener('DOMContentLoaded', () => {
+      const main = document.querySelector('main.auth');
+      if (!main) return;
+      new MutationObserver(() => {
+        if (main.getAttribute('data-state') !== 'done') return;
+        const button = document.getElementById('go') as HTMLButtonElement;
+        const status = document.getElementById('status')!;
+        const w = window as unknown as { __doneSnapshot: (s: unknown) => void; __publicKey: unknown[] };
+        w.__doneSnapshot({
+          state: 'done',
+          message: status.textContent,
+          disabled: button.disabled,
+          hidden: button.hidden,
+          statusFocused: document.activeElement === status,
+          url: location.href,
+          publicKey: w.__publicKey,
+        });
+      }).observe(main, { attributes: true, attributeFilter: ['data-state'] });
+    });
+  });
+  return { posts, apiGets, api, release: () => release(), done };
+};
+
+type Snapshot = {
+  state: string;
+  message: string;
+  disabled: boolean;
+  hidden: boolean;
+  statusFocused: boolean;
+  url: string;
+  publicKey: unknown[];
 };
 
 for (const width of WIDTHS) {
   for (const c of CASES) {
     test(`${c.name} at ${width} px (FR-AUTH-20, FR-AUTH-21)`, async ({ page }) => {
       await page.setViewportSize({ width, height: 800 });
-      const { posts, apiGets, release } = await prepare(page, c);
+      const { posts, apiGets, api, release, done } = await prepare(page, c);
       await page.goto(`/api/auth/${c.page}${c.hash ?? ''}`);
       const button = page.locator('#go');
       const status = page.locator('#status');
+      const statics = [`GET /api/auth/${c.page}`, 'GET /api/auth/static/auth.css', 'GET /api/auth/static/passkey.js'];
+      if (c.state === 'done') {
+        // `done`: state, message, disabled button and focus come from the page's own snapshot, taken before the
+        // navigation to `/` (held, then released); then the request oracle as for every case.
+        await button.click();
+        const s = await done;
+        expect(s).toMatchObject({ state: 'done', message: c.message, disabled: true, hidden: false, statusFocused: false });
+        expect(s.url).not.toContain('#');
+        expect(s.publicKey).toEqual([OPTIONS]);
+        release();
+        await page.waitForURL((u) => u.pathname === '/');
+        expect(posts).toEqual(c.posts);
+        expect([...api.slice(0, 3)].sort()).toEqual([...statics].sort());
+        expect(api.slice(3)).toEqual(c.posts.map((p) => `${p.method} ${p.path}`));
+        return;
+      }
       if (c.click) await button.click();
       await expect(page.locator('main.auth')).toHaveAttribute('data-state', c.state);
       if (c.message === '') await expect(status).toHaveText('');
@@ -147,6 +203,7 @@ for (const width of WIDTHS) {
       else await expect(button).toBeEnabled();
       if (c.focus === 'button') await expect(button).toBeFocused();
       if (c.focus === 'status') await expect(status).toBeFocused();
+      if (c.state === 'waiting' || c.state === 'done') await expect(status).not.toBeFocused();
       expect(page.url(), 'the fragment stays cleared').not.toContain('#');
       await expect(status).not.toContainText(SECRET_BODY);
       await expect(status).not.toContainText(SECRET_EXCEPTION);
@@ -157,12 +214,11 @@ for (const width of WIDTHS) {
       // FR-AUTH-14: the exact request sequence, and the options handed to WebAuthn unchanged.
       expect(posts).toEqual(c.posts);
       expect(apiGets.filter((p) => !STATIC_GETS.has(p))).toEqual([]);
+      // The full /api list: the page's three static GETs (in any order), then exactly the case's POSTs.
+      expect([...api.slice(0, 3)].sort()).toEqual([...statics].sort());
+      expect(api.slice(3)).toEqual(c.posts.map((p) => `${p.method} ${p.path}`));
       const seen = await page.evaluate(() => (window as unknown as { __publicKey: unknown[] }).__publicKey);
       expect(seen).toEqual(c.webauthn ? [OPTIONS] : []);
-      if (c.state === 'done') {
-        release();
-        await page.waitForURL((u) => u.pathname === '/');
-      }
     });
   }
 

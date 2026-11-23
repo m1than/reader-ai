@@ -158,6 +158,13 @@ def test_no_colour_literal_outside_the_token_blocks() -> None:
         css = css[:start] + css[end:]
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", css)
     assert not re.search(r"\b(rgba?|hsla?|hwb|lab|lch|oklab|oklch|color-mix|color)\(", css)
+    keywords = {
+        "white", "black", "red", "green", "blue", "gray", "grey", "silver", "maroon", "navy", "teal", "olive",
+        "purple", "orange", "yellow", "lime", "aqua", "fuchsia", "pink", "brown", "gold", "beige", "ivory",
+    }  # fmt: skip
+    values = re.findall(r"[a-z-]+\s*:\s*([^;{}]+);", css)
+    named = {w for v in values for w in re.findall(r"\b[a-z]+\b", v.lower()) if w in keywords}
+    assert named == set(), f"named colours: {sorted(named)}"
 
 
 # FR-AUTH-20 ---------------------------------------------------------------------------------------------
