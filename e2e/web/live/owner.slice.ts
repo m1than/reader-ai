@@ -14,6 +14,10 @@
 //            (serious and critical) on the list and the lesson, no horizontal scroll, prose type and column, the
 //            skip link and the contents (toggle at 390, column at 1280 and 1024, an entry focuses its cell). Review
 //            screenshots (sign-in, list, L02 parts, not-found) go to READER_LIVE_OUT/ui. Spends nothing (no Run, no Ask).
+//   auth     SRV-AUTH FR-AUTH-19..21 on the running stack: the sign-in and bootstrap pages at 1280, 1024 and 390 px
+//            (axe, overflow, the button's focus outline; screenshots to READER_LIVE_OUT/auth), then slice.live.ts's
+//            sign-out and sign-in sequence for the owner with the same CDP virtual passkey (/api/me 401, then 200).
+//            Spends nothing.
 //   tutor-bench  SRV-TUTOR's bench (VEC-TUTOR-7): questions-v2 with v03 → t01 (40) over the HTTP API; ≈ $1.8.
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
 // snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots and READER_LIVE_OUT/ui, and the `ui` step also
@@ -110,7 +114,7 @@ test('owner passkey registration through the bootstrap page', async () => {
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Register your passkey' })).toBeVisible();
   expect(page.url(), 'passkey.js clears the fragment').not.toContain('#');
-  await page.getByRole('button', { name: 'Register passkey' }).click();
+  await page.getByRole('button', { name: 'Create your passkey' }).click(); // SRV-AUTH FR-AUTH-19 (was "Register passkey")
   await page.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
   const me = await api.get('/api/me');
   expect(me.status()).toBe(200);
@@ -434,6 +438,53 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     expect.soft(l.p_font_family.startsWith('ui-serif'), `prose family ${name}`).toBe(true);
     expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '30px' : '36px');
   }
+});
+
+// SRV-AUTH FR-AUTH-21 [live]: the restyled pages on the running stack, and the passkey flow proven unchanged.
+test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', async ({ browser }) => {
+  only('auth');
+  test.setTimeout(5 * 60_000);
+  const dir = resolve(OUT, 'auth');
+  mkdirSync(dir, { recursive: true });
+  const axe: Record<string, string[]> = {};
+  const overflow: Record<string, number> = {};
+  for (const w of WIDTHS) {
+    // A fresh context per page: no session, so the pages render as a visitor sees them. The bootstrap page is
+    // opened without a token (the no-token state), so no bootstrap request is made.
+    for (const name of ['signin', 'bootstrap'] as const) {
+      const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
+      const p = await anon.newPage();
+      await p.goto(`/api/auth/${name}`);
+      await expect(p.locator('main.auth')).toHaveAttribute('data-state', name === 'signin' ? 'ready' : 'no_token');
+      await p.screenshot({ path: resolve(dir, `${w}-${name}.png`) });
+      const r = await new AxeBuilder({ page: p }).analyze();
+      axe[`${w}-${name}`] = r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => v.id);
+      overflow[`${w}-${name}`] = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      if (name === 'signin') {
+        await p.keyboard.press('Tab');
+        await expect.soft(p.locator('#go'), `button focused (${w})`).toBeFocused();
+        const outline = await p.locator('#go').evaluate((b) => `${getComputedStyle(b).outlineWidth} ${getComputedStyle(b).outlineStyle}`);
+        expect.soft(outline, `focus outline (${w})`).toBe('2px solid');
+        await p.screenshot({ path: resolve(dir, `${w}-signin-focus.png`) });
+      }
+      await anon.close();
+    }
+  }
+  // slice.live.ts's sequence ("sign out, then sign in through the real page with the same passkey"), for the owner.
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.waitForURL(/\/api\/auth\/signin$/);
+  expect((await api.get('/api/me')).status(), 'signed out').toBe(401);
+  await page.screenshot({ path: resolve(dir, 'signed-out.png') });
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await page.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
+  const me = await api.get('/api/me');
+  expect(me.status(), 'signed in again through the page').toBe(200);
+  expect(((await me.json()) as { role: string }).role).toBe('owner');
+  results.auth = { widths: [...WIDTHS], axe_serious_critical: axe, overflow_px: overflow, signin_again: me.status() };
+  for (const [k, v] of Object.entries(axe)) expect.soft(v, `axe ${k}`).toEqual([]);
+  for (const [k, v] of Object.entries(overflow)) expect.soft(v, `overflow ${k}`).toBeLessThanOrEqual(0);
 });
 
 // SRV-TUTOR NFR-TUTOR-1..3 over the HTTP API (VEC-TUTOR-7): questions-v2 with v03 → t01 (40 independent questions),

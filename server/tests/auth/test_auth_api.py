@@ -2,6 +2,7 @@
 
 @trace FR-AUTH-4 FR-AUTH-5 FR-AUTH-6 FR-AUTH-7 FR-AUTH-8 FR-AUTH-9 FR-AUTH-10 FR-AUTH-11 FR-AUTH-12 FR-AUTH-13
 @trace FR-AUTH-14 FR-AUTH-18 INV-AUTH-1 INV-AUTH-2 INV-AUTH-3 INV-AUTH-5 INV-AUTH-6 INV-AUTH-7 INV-AUTH-9
+@trace FR-AUTH-21
 """
 
 from __future__ import annotations
@@ -648,6 +649,7 @@ def test_routers_are_a_declared_list() -> None:
         "reader.search.routes",
         "reader.pipeline.routes",
         "reader.tutor.routes",
+        "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
     ]
 
 
@@ -675,6 +677,7 @@ def test_route_table_is_declared_as_data() -> None:
         ("GET", "/api/auth/bootstrap"),
         ("GET", "/api/auth/signin"),
         ("GET", "/api/auth/static/passkey.js"),
+        ("GET", "/api/auth/static/auth.css"),  # FR-AUTH-21
     }
     by_path = {(r.method, r.path): r.auth for r in ROUTES}
     assert by_path[("GET", "/api/me")] == "session"

@@ -1,0 +1,160 @@
+/* The planning part of /import (WEB-PLAN) under Calm: tokens only, the library's --acme-space-* steps,
+   UI chrome in the library sans, the 2px focus outline (WEB-UI FR-UI-10). */
+.import-page h2 {
+  margin: var(--acme-space-6) 0 var(--acme-space-3);
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.import-page h2:focus {
+  outline: none;
+}
+
+.source-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: var(--acme-space-3);
+  align-items: center;
+  padding: var(--acme-space-3) 0;
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.source-title {
+  overflow-wrap: anywhere;
+}
+
+.source-meta,
+.plan-hint,
+.plan-lesson-meta {
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-4);
+}
+
+.plan-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-4);
+}
+
+.plan-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-1);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.plan-field input {
+  width: 9rem;
+  padding: var(--acme-space-2) var(--acme-space-3);
+  border: 1px solid var(--acme-control-border);
+  border-radius: 6px;
+  background: var(--acme-surface);
+  color: var(--acme-text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-field input[aria-invalid='true'] {
+  border-color: var(--acme-danger);
+}
+
+.plan input:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+.plan-hint,
+.plan-error {
+  margin: 0;
+}
+
+.plan-error {
+  color: var(--acme-danger);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.plan-pace summary,
+.plan-lessons summary {
+  cursor: pointer;
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.plan-pace .plan-field {
+  margin-top: var(--acme-space-3);
+}
+
+.plan-estimate {
+  padding: var(--acme-space-4);
+  border: 1px solid var(--acme-border);
+  border-radius: 8px;
+  background: var(--acme-surface-raised);
+}
+
+.plan-estimate p {
+  margin: 0 0 var(--acme-space-2);
+}
+
+.plan-estimate.is-updating {
+  opacity: 0.6;
+}
+
+.plan-headline {
+  font-size: 1.125rem;
+  font-weight: 600;
+}
+
+.plan-notice {
+  margin: var(--acme-space-3) 0;
+  padding: var(--acme-space-3);
+  border-left: 3px solid var(--acme-warning);
+  background: var(--acme-surface);
+}
+
+.plan-lessons ol {
+  margin: var(--acme-space-2) 0 0;
+  padding-left: var(--acme-space-5);
+  font-size: 0.9375rem;
+}
+
+.plan-lessons li {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--acme-space-3);
+  padding: var(--acme-space-1) 0;
+}
+
+.plan-confirm {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--acme-space-3);
+}
+
+.plan-check {
+  display: flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.plan-done p {
+  margin: 0 0 var(--acme-space-1);
+}

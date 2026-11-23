@@ -1,0 +1,117 @@
+# WEB-PLAN — the course-planning part of the "Import a source" page: "Your sources", the study-time form, the estimate
+# preview and confirm (owner request 2026-11-23; split out of WEB-IMPORT on 2026-11-23, coordinator decision (B), so that
+# only reviewed items are approved).
+#
+# FR-IMPORT-4, -5, -6 and -8 are moved here verbatim from WEB-IMPORT (their ids are kept, so every reference to them
+# still resolves). WEB-IMPORT keeps the upload items (FR-IMPORT-1..3), the shared page chrome (FR-IMPORT-7 messages,
+# FR-IMPORT-9 layout), its invariants and VEC-IMPORT-1, and stays a draft with the upload track.
+#
+# The `/import` route component (WEB-UI FR-UI-12) lives under `web/src/import/plan/` until the upload track lands its
+# sections; it renders "Your sources" and, for a chosen imported material, the study-time form, the estimate and
+# confirm. Page chrome follows WEB-UI FR-UI-10/-11 (approved): tokens only, one `main#content` from the shell, 2px
+# focus outline, role=status loading states, no HTML strings.
+#
+# Test levels: [unit] Vitest in jsdom; [story] Storybook stories Light and Dark (WEB-UI FR-UI-8); [live] the
+# e2e/live check against `reader up` with the already-imported pilot (preview, confirm with `compile_first: false`,
+# re-plan; no credit).
+
+id: WEB-PLAN
+title: Import page, planning part — "Your sources", the study-time form, the estimate preview and confirm
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
+layer: web
+track: product
+adr: [ADR-0010, ADR-0013]
+
+paths:
+  - web/src/import/plan/**
+  - e2e/web/import/plan/**
+
+normative:
+  - id: REF-WPLAN-1
+    title: SRV-PLAN — the routes, bodies, summary, estimate and codes this page shows
+    url: spec/modules/SRV-PLAN.yaml
+  - id: REF-WPLAN-2
+    title: WCAG 2.2 — 3.3.1 Error Identification, 3.3.3 Error Suggestion, 4.1.3 Status Messages
+    url: https://www.w3.org/TR/WCAG22/
+
+bounds:
+  preview_debounce_ms: 300      # structural: one preview per pause in typing
+
+requirements:
+  - id: FR-IMPORT-4
+    text: >-
+      **Study-time form**, shown when the upload is `ready` (or for an imported material chosen from the list,
+      FR-IMPORT-8): "How long do you want to study this source?" with two required integer fields, total weeks
+      (1–104, no default: the learner answers) and minutes per day (10–240, step 5, default 60), and a collapsed
+      "Study pace" disclosure with minutes per 1,000 characters (0.10–20.00, two decimals; default "2.64", SRV-PLAN
+      `study_minutes_per_kchar_default`, with the hint "from your own pilot plan"). Native constraint
+      attributes plus the same checks in code; each invalid field gets `aria-invalid="true"` and a message linked by
+      `aria-describedby`, shown on blur and on submit, never while typing the first character. [unit] [story]
+  - id: FR-IMPORT-5
+    text: >-
+      **Estimate preview.** On valid input, after `preview_debounce_ms` without change, `POST /api/plans/preview` with
+      the material id, the fields and `today` = the browser's local date (YYYY-MM-DD); no page range is sent.
+      The estimate card shows:
+      - "N lessons, one a day, about M min each (at most X), finish by <date>" (`new_count`, `minutes_mean`,
+        `minutes_max`, `finish_by`; the date in the user's locale, long form); on a re-plan the count reads "F started
+        + K new" (`fixed_count`, `new_count`) and the deadline `end` is shown ("Deadline kept: <date>"); under it
+        "Reading time only; labs and review are not included.";
+      - when `spare_days` > 0: "This source fills <new_count> of <days_left> days." (owner decision: a small source
+        gets fewer lessons);
+      - "Compile: $low–$high for the whole course, an estimate from one measured lesson" and "Lesson 1: $low–$high,
+        stops at $8.00" (`estimate.first_lesson` and `run_cap_usd`), both as ranges, never as one number or a bound;
+        when `estimate.extrapolated`, also "Lessons are R× shorter than the measured one; real cost per lesson is likely
+        higher than this range." (R = `basis_kchars / mean_lesson_kchars`, one decimal) or, for longer lessons,
+        "Lessons are R× longer than the measured one; real cost per lesson may differ from this range." (R =
+        `mean_lesson_kchars / basis_kchars`);
+      - when it does not fit, a calm notice per reason (`minutes`: "A day's lesson would take X min, more than your
+        M min"; `days`: "This needs more lessons than the days left before the deadline" or, when `days_left < 1`,
+        "The deadline has passed"; `source_size`: "A day's lesson would be too long to compile") with up to two buttons
+        from `suggest` ("Use X min a day", "Use Y weeks") that set the field and preview again, or "Choose more weeks
+        or more minutes a day" when both are null.
+      A collapsed "Lessons" disclosure lists each lesson's title, pages and minutes, started ones marked "Started,
+      stays as it is". Out-of-order responses are dropped (only the latest request's answer is shown); while a new one
+      loads, the card keeps the previous estimate, dimmed, and its `role="status"` line reads "Updating the
+      estimate". 404, 422 `no_text` ("This source has no text layer to plan from") show the code's message in place of the card. [unit]
+      [story: fits, small source, does not fit, loading, error]
+  - id: FR-IMPORT-6
+    text: >-
+      **Confirm.** "Create the course" with a checkbox "Start compiling lesson 1 now ($low–$high, stops at $8.00)",
+      checked by default and showing the range from the current estimate (owner decision: confirm → the first lesson
+      compiling). The button is disabled, and Enter does nothing, unless the shown preview's inputs equal the current
+      valid fields with no preview pending (debounce or request) and no preview error, and the plan fits; it is also
+      disabled while a confirm is in flight. It posts `POST /api/plans/confirm` with the inputs the shown preview was
+      made from (never the live fields), its `plan_sha256` and `compile_first`. The checkbox is hidden and
+      `compile_first` false when the stored plan has a started lesson (the server would answer `already_started`).
+      409 `plan_changed` asks for a new preview (the 409 body carries no titles) and asks again ("The plan changed;
+      check it and confirm again"); 422 `does_not_fit` shows its message. On success (also `replayed: true`) the
+      page shows "Course created: N lessons" ("1 lesson" for one)
+      with a link to the lesson list, and a compile result: "Lesson 1 is compiling" for `{run_id}`, or the code's
+      message for `{error}` (`already_started`: "A lesson of this course is already compiled or compiling";
+      `compile_running`; budget refusals), the course still created. [unit]
+  - id: FR-IMPORT-8
+    text: >-
+      **Existing sources.** Below the drop zone, "Your sources" lists `GET /api/materials` (id, status, page count):
+      an imported material offers "Plan study time", which opens the study-time form for it; when `GET
+      /api/plans?material_id=<id>` (SRV-PLAN FR-PLAN-9) returns a stored plan, the button reads "Re-plan" and the form
+      is pre-filled with its inputs; a 404 there means "no plan yet" and is not shown as an error (an unfinished
+      upload's processing link is the upload track's, FR-IMPORT-3).
+      Re-planning shows which lessons are already started and stay as they are ("3 started lessons keep their
+      pages"). [unit] [story]
+
+invariants: []
+
+nfr: []
+
+vectors: []
+
+defers:
+  - "Choosing a page range or chapters in the form (SRV-PLAN plans the whole material)."
+  - "The upload sections of the page (WEB-IMPORT FR-IMPORT-1..3); until they land, the page shows only these items."
+
+owner_notes:
+  - "1. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it as a range. The live check confirms with it unchecked, so it spends no credit."
+
+review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent. Tests (2026-11-23): [unit] web/src/import/plan/plan.test.tsx; [story] web/src/import/plan/ImportPage.stories.tsx. Code review of e244aa4 (changes): confirm could post the live fields with a stale plan_sha256 during the debounce or after a failed preview (a same-day re-plan would replay the old plan) — FR-IMPORT-6 now confirms only the shown preview's own inputs, with unit tests for Enter inside the debounce and after a failed preview; the 409 text matches the re-preview; compile-first hidden once a lesson started; '1 lesson'. Code review round 2 on a8a0408: VERDICT approve, every mutant killed."

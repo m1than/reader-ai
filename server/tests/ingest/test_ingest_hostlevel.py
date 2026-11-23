@@ -323,6 +323,87 @@ print(json.dumps(results))
 
 
 @pytest.mark.ingest_host
+def test_cross_process_probes(tmp_path: Path) -> None:
+    """INV-INGEST-4 (profile edits): a confined child learns nothing about another confined process."""
+    sandbox = need("reader.ingest.host.sandbox")
+    setup = need("reader.ingest.host.setup")
+    data = data_dir()
+    root = Path(os.path.realpath(tmp_path))
+    work_a, work_b = root / "a" / "w", root / "b" / "w"
+    for w in (work_a, work_b):
+        for sub in ("in", "home", "tmp"):
+            (w / sub).mkdir(parents=True)
+    probe = work_a / "cross_process_probe.py"
+    probe.write_text((HERE / "cross_process_probe.py").read_text())
+    venv = setup.venv_dir(data)
+
+    def confined(work: Path, tail: list[str]) -> list[str]:
+        argv = sandbox.child_argv(venv, setup.pyroot_of(venv), setup.models_dir(data), work)
+        python_at = max(i for i, a in enumerate(argv) if a == "-D") + 2
+        return [*argv[: python_at + 1], "-I", *tail]
+
+    other = subprocess.Popen(
+        confined(work_b, ["-c", "import time; time.sleep(30)", "--input", f"{work_b}/in/material.pdf"]),
+        env=sandbox.child_env(work_b, 1),
+        cwd=work_b,
+        start_new_session=True,
+    )
+    try:
+        time.sleep(1.5)
+        cfg = {
+            "target": other.pid,
+            "work_b": str(work_b),
+            "work_b_dev": os.stat(work_b).st_dev,
+            "work_b_ino": os.stat(work_b).st_ino,
+        }
+        done = subprocess.run(
+            confined(work_a, [str(probe), json.dumps(cfg)]),
+            env=sandbox.child_env(work_a, 1),
+            cwd=work_a,
+            capture_output=True,
+            timeout=60,
+            check=False,
+        )
+        target_alive = other.poll() is None
+    finally:
+        other.kill()
+        other.wait()
+    assert done.returncode == 0, done.stderr[-500:]
+    assert target_alive
+    results = json.loads(done.stdout)
+    assert set(results["other"]) == {
+        "kern.procargs2",
+        "kern.procargs",
+        "kern.proc.pid",
+        "kern.proc.pgrp",
+        "kern.proc.tty",
+        "kern.proc.uid",
+        "kern.proc.ruid",
+        "kern.proc.all",
+        "proc_pidpath",
+        "proc_name",
+        "proc_pid_rusage",
+        "proc_pidfdinfo",
+        "PROC_PIDLISTFDS",
+        "PROC_PIDTBSDINFO",
+        "PROC_PIDVNODEPATHINFO",
+        "proc_listallpids",
+        "list WORK parent",
+    }
+    assert all(v == "denied:errno 1" for v in results["other"].values()), results["other"]
+    controls = {"kern.procargs2", "kern.proc.pid", "proc_pidpath", "PROC_PIDVNODEPATHINFO"}
+    assert set(results["self"]) == controls
+    assert all(v.startswith("allowed") for v in results["self"].values()), results["self"]
+    assert set(results["recorded"]) == {
+        "fsgetpath of the other WORK",
+        "chdir into the other WORK (path known)",
+        "list the other WORK after chdir",
+        "own kern.procargs2",
+    }
+    assert results["recorded"]["list the other WORK after chdir"] == "denied:errno 1"
+
+
+@pytest.mark.ingest_host
 def test_confinement_probes(tmp_path: Path) -> None:
     pilot_path = pilot()
     sandbox = need("reader.ingest.host.sandbox")

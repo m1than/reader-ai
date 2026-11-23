@@ -1,10 +1,13 @@
-"""Course import, gate G1 (SRV-PIPELINE FR-PIPELINE-1).
+"""Course import, gate G1 (SRV-PIPELINE FR-PIPELINE-1, FR-PIPELINE-14).
 
 A plan shaped like pilot/bashir/course.yaml (as JSON): `course` (an id string, or {id, title,
 material_sha256}), `material` {sha256, title?} when `course` is a string, and `lessons` (or
 `stages[].lessons`) with `id`, `title` and `pages.pdf` [first, last]. One `course_plans` row per lesson,
 upserted by (owner, course id, lesson id); the lesson uuid never changes on a later import. The POST is the
 owner's G1 approval.
+
+FR-PIPELINE-14: every import runs under a per-course advisory lock; SRV-PLAN's study-plan import (origin
+`study_plan`) also removes unstarted lessons absent from the plan and renumbers the course in plan order.
 """
 
 from __future__ import annotations
@@ -18,11 +21,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader.lessons import store
+from reader.lessons.schema import LessonWriteError
 from reader.pipeline.errors import PipelineError
 from reader.pipeline.source import material_imported
 
 SHA256: Final = re.compile(r"[0-9a-f]{64}")
 TITLE_MAX: Final = 200
+# pg_advisory_xact_lock(namespace, hashtext(owner:course)): one writer per plan course ("RCPC"); taken before
+# FR-PIPELINE-11's per-lesson lock everywhere.
+COURSE_LOCK_NAMESPACE: Final = 0x52435043
 
 
 @dataclass(frozen=True)
@@ -39,6 +46,14 @@ class Plan:
     title: str
     material_sha256: str
     lessons: list[PlanLesson]
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    course_id: uuid.UUID
+    lessons: list[tuple[str, uuid.UUID, int]]  # (plan lesson id, lesson id, ordinal) in plan order
+    created: int
+    removed: int
 
 
 def _text(value: Any) -> str:
@@ -82,29 +97,77 @@ def parse_plan(raw: Any) -> Plan:
     return Plan(_text(course_id), _text(title), sha, lessons)
 
 
-async def import_plan(conn: AsyncConnection, owner_id: uuid.UUID, raw: Any) -> dict[str, Any]:
-    plan = parse_plan(raw)
+async def lock_course(conn: AsyncConnection, owner_id: uuid.UUID, plan_course_id: str) -> None:
+    """The per-course lock, held to the end of the caller's transaction (FR-PIPELINE-14)."""
+    await conn.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, hashtext(:k))"),
+        {"ns": COURSE_LOCK_NAMESPACE, "k": f"{owner_id}:{plan_course_id}"},
+    )
+
+
+async def _remove_unstarted(
+    conn: AsyncConnection,
+    owner_id: uuid.UUID,
+    plan: Plan,
+    course_id: uuid.UUID,
+    known: dict[str, tuple[uuid.UUID, int, int]],
+) -> int:
+    """Origin `study_plan`: absent lessons go when they have not started; started ones never move."""
+    wanted = {lesson.id: (lesson.first, lesson.last) for lesson in plan.lessons}
+    started = await store.started_lessons(conn, owner_id, course_id)
+    removed = 0
+    for plan_lesson_id, (lesson_id, first, last) in known.items():
+        kept = plan_lesson_id in wanted
+        if lesson_id in started and (not kept or wanted[plan_lesson_id] != (first, last)):
+            raise PipelineError("started_lesson_dropped")
+        if kept:
+            continue
+        await conn.execute(
+            text(
+                "DELETE FROM course_plans WHERE owner_id = :o AND plan_course_id = :c AND plan_lesson_id = :p"
+            ),
+            {"o": owner_id, "c": plan.course_id, "p": plan_lesson_id},
+        )
+        try:
+            await store.delete_unstarted_lesson(conn, owner_id, lesson_id)  # re-checks "not started"
+        except LessonWriteError:
+            raise PipelineError("started_lesson_dropped") from None
+        removed += 1
+    return removed
+
+
+async def import_course_plan(
+    conn: AsyncConnection, owner_id: uuid.UUID, plan: Plan, *, origin: str
+) -> ImportResult:
+    """FR-PIPELINE-1's import as a function; the caller holds `lock_course` for this course."""
     if not await material_imported(conn, owner_id, plan.material_sha256):
         raise PipelineError("no_material")
-    known = {
-        r[0]: (r[1], r[2], r[3])
-        for r in await conn.execute(
+    rows = (
+        await conn.execute(
             text(
-                "SELECT plan_lesson_id, lesson_id, pdf_first, pdf_last FROM course_plans"
+                "SELECT plan_lesson_id, lesson_id, pdf_first, pdf_last, origin FROM course_plans"
                 " WHERE owner_id = :o AND plan_course_id = :c"
             ),
             {"o": owner_id, "c": plan.course_id},
         )
-    }
-    course_id: uuid.UUID | None = None
+    ).all()
+    if any(r[4] != origin for r in rows):
+        raise PipelineError("origin_conflict")
+    known: dict[str, tuple[uuid.UUID, int, int]] = {r[0]: (r[1], r[2], r[3]) for r in rows}
     if known:
         first_lesson = next(iter(known.values()))[0]
-        course_id = (
+        course_id: uuid.UUID = (
             await conn.execute(text("SELECT course_id FROM lessons WHERE id = :l"), {"l": first_lesson})
         ).scalar_one()
     else:
         course_id = await store.create_course(conn, owner_id, plan.title, plan.material_sha256)
-    out = []
+    removed = 0
+    if origin == "study_plan":
+        removed = await _remove_unstarted(conn, owner_id, plan, course_id, known)
+        wanted = {lesson.id for lesson in plan.lessons}
+        known = {k: v for k, v in known.items() if k in wanted}
+    created = 0
+    ids: list[tuple[str, uuid.UUID]] = []
     # S5: lessons map by plan lesson id; a new one takes the next free ordinal, never an existing lesson's.
     next_ordinal = int(
         (
@@ -126,11 +189,12 @@ async def import_plan(conn: AsyncConnection, owner_id: uuid.UUID, raw: Any) -> d
                 )
         else:
             next_ordinal += 1
+            created += 1
             lesson_id = await store.ensure_lesson(conn, owner_id, course_id, next_ordinal, lesson.title)
             await conn.execute(
                 text(
                     "INSERT INTO course_plans (owner_id, plan_course_id, plan_lesson_id, lesson_id,"
-                    " material_sha256, pdf_first, pdf_last) VALUES (:o, :c, :p, :l, :m, :f, :t)"
+                    " material_sha256, pdf_first, pdf_last, origin) VALUES (:o, :c, :p, :l, :m, :f, :t, :g)"
                 ),
                 {
                     "o": owner_id,
@@ -140,7 +204,27 @@ async def import_plan(conn: AsyncConnection, owner_id: uuid.UUID, raw: Any) -> d
                     "m": plan.material_sha256,
                     "f": lesson.first,
                     "t": lesson.last,
+                    "g": origin,
                 },
             )
-        out.append({"plan_lesson_id": lesson.id, "lesson_id": str(lesson_id)})
-    return {"course_id": str(course_id), "lessons": out}
+        ids.append((lesson.id, lesson_id))
+    if origin == "study_plan":
+        await store.reorder_lessons(conn, owner_id, course_id, [lesson_id for _, lesson_id in ids])
+    ordinals = {
+        r[0]: int(r[1])
+        for r in await conn.execute(
+            text("SELECT id, ordinal FROM lessons WHERE course_id = :c"), {"c": course_id}
+        )
+    }
+    return ImportResult(course_id, [(p, lid, ordinals[lid]) for p, lid in ids], created, removed)
+
+
+async def import_plan(conn: AsyncConnection, owner_id: uuid.UUID, raw: Any) -> dict[str, Any]:
+    """The manifest route's import (FR-PIPELINE-1): behaviour unchanged, now under the course lock."""
+    plan = parse_plan(raw)
+    await lock_course(conn, owner_id, plan.course_id)
+    result = await import_course_plan(conn, owner_id, plan, origin="manifest")
+    return {
+        "course_id": str(result.course_id),
+        "lessons": [{"plan_lesson_id": p, "lesson_id": str(lid)} for p, lid, _ in result.lessons],
+    }
