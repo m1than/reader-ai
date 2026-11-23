@@ -31,7 +31,7 @@ from reader.config import ConfigError, load_config
 from reader.ingest import artifact, tarstream
 from reader.ingest.artifact import ArtifactError
 from reader.ingest.host import records, sandbox, setup
-from reader.ingest.host.mapping import parse_progress
+from reader.ingest.host.mapping import parse_progress, render_code_line
 
 CHILD_TIMEOUT_S: Final = 4 * 3600.0  # ADR-0021's 10 pages/min gives 94 min for the pilot (spec header)
 CHILD_GRACE_S: Final = 10.0
@@ -204,8 +204,9 @@ def convert_members(
         timer.start()
         for line in child.stdout_lines():
             parsed = parse_progress(line.strip())
-            if parsed is not None:
-                report(f"page {parsed[0]}/{parsed[1]}")
+            rendered = f"page {parsed[0]}/{parsed[1]}" if parsed else render_code_line(line.strip())
+            if rendered is not None:
+                report(rendered)
         code = child.wait()
     except BaseException:
         if child is not None:

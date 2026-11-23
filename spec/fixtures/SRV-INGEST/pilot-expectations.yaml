@@ -2,7 +2,7 @@
   "known_misses": [
     378
   ],
-  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
+  "note": "Recorded by the agent on 2026-11-22 from 2x renders of the pilot's sample pages (pilot_expectations.py candidates). Boxes are regions in PDF points, top-left origin: code_boxes the shaded code regions (page 133's first one is the curve-constant line Docling labels as code, measured 2026-11-22), steps the numbered list steps by their number. order lists [code block index, step it follows, step it precedes or null]. indents maps a code block index to its lines' leading-space counts, counted by eye on 3x page renders on 2026-11-23 (FR-INGEST-7); no sample block has an indented first line. indent_boxes (page 419, outside the 20-page sample, added 2026-11-23) holds a block with an italic comment line, recorded by its box and counts only, so the page adds no code-count or hash expectation; it is not one of the 20 sample pages and stays outside NFR-INGEST-2's rule-B tally (SRV-INGEST owner note 6). Table shapes are rows (header included) x columns, counted on the rendered pages; formula counts are the M1 run's (spikes/ingest-docling RESULT.md). Numbers only, no book text.",
   "pages": {
     "128": {
       "formulas_decoded": 2
@@ -43,10 +43,20 @@
             618.0
           ],
           "lines": 6,
-          "sha256": "1f5a5815299e4428c775fc525e36a073b947cd012b6229a9a154d208725a9377"
+          "sha256": "a25b8e983a3de63b6ee798571fe5776c22251c6ce1670e1d59b00f7d53b61088"
         }
       ],
-      "formulas_decoded": 1
+      "formulas_decoded": 1,
+      "indents": {
+        "2": [
+          0,
+          0,
+          2,
+          2,
+          2,
+          0
+        ]
+      }
     },
     "141": {
       "code": [
@@ -83,7 +93,7 @@
             465.0
           ],
           "lines": 27,
-          "sha256": "c2b7a123c2813f35ec6acbc25cd37bb91e7d1c056dac0b15e22c399feca6ef15"
+          "sha256": "f68101133e5c3baaa133e922bd441b3967bc95c6086561b5099d26e0fdece618"
         }
       ]
     },
@@ -165,6 +175,33 @@
         }
       ]
     },
+    "419": {
+      "indent_boxes": [
+        {
+          "box": [
+            43,
+            58,
+            411,
+            216
+          ],
+          "indents": [
+            0,
+            4,
+            4,
+            4,
+            4,
+            4,
+            8,
+            8,
+            12,
+            12,
+            8,
+            4,
+            0
+          ]
+        }
+      ]
+    },
     "461": {
       "code": [
         {
@@ -175,7 +212,7 @@
             361.0
           ],
           "lines": 20,
-          "sha256": "97a63288d7650da43448a76a5896b81062e552550a98739b2230d5962ef964e8"
+          "sha256": "ace78f68e8d6df866067517bcfc2ccb1b1749fe4cb5ad42c0d3a3ad15278af48"
         },
         {
           "box": [
@@ -185,7 +222,7 @@
             552.0
           ],
           "lines": 10,
-          "sha256": "2b987b5169e65e6032396344250eaf17b8a308f6af544ac5b2b3a55490a6a582"
+          "sha256": "9da119508e1a3013d4fc9ff4fee76c7b09432b99dae55fb9a80b4d52469d9471"
         },
         {
           "box": [
@@ -198,6 +235,30 @@
           "sha256": "2e1caf4b5ccc865c159f41cfe2b087a948c09e694239837bcc748092b8341301"
         }
       ],
+      "indents": {
+        "0": [
+          0,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          4,
+          6,
+          6,
+          6,
+          4,
+          4,
+          6,
+          6,
+          6,
+          4,
+          2,
+          0
+        ]
+      },
       "order": [
         [
           0,
@@ -252,7 +313,7 @@
             169.0
           ],
           "lines": 7,
-          "sha256": "53c7cc010cb572cc47cf4b783fb6ed4e1b284674962c02b35620b072a60d1bc3"
+          "sha256": "43fc31fae8d5faa9359c8b1ed26ac6233e8a2d956c0d852d6b0bfd8d14b3a45e"
         },
         {
           "box": [
@@ -282,9 +343,35 @@
             575.0
           ],
           "lines": 13,
-          "sha256": "df7c7e24abc48abf5cf56521ecf20dd1145a59b9427fcbaf24764fd7fa668f87"
+          "sha256": "4f1a8ebdbdb018abfe1e9ec492ad4a456c381aab18695da7d85187503771e86b"
         }
       ],
+      "indents": {
+        "0": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          3
+        ],
+        "3": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          2,
+          4,
+          4,
+          4,
+          4,
+          4,
+          2,
+          0
+        ]
+      },
       "order": [
         [
           0,

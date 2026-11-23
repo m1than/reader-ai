@@ -90,12 +90,81 @@ def candidates(pdf_path: str, scratch: str) -> None:
     print(json.dumps(report))
 
 
+def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
+    """FR-INGEST-7's indentation, written again here as code (not imported from reader.ingest.host); it is
+    the same rule, so it guards the implementation, not the rule. Glyph origins inside the top-left-origin
+    `box`, lines by baseline (1 pt), the cell from the modal loose-box advance (80% of glyphs within 2%),
+    steps between in-band glyphs and every line offset a whole number of cells within 0.25; the text is
+    returned unchanged when the rule fails."""
+    import ctypes
+
+    import pypdfium2.raw as raw
+
+    x0, y0, x1, y1 = box
+    rows: list[list[Any]] = []  # [baseline from the top, (x, width), (x, width), ...]
+    widths: list[float] = []
+    ox, oy = ctypes.c_double(), ctypes.c_double()
+    rect = raw.FS_RECTF()
+    for index in range(text_page.count_chars()):
+        if chr(raw.FPDFText_GetUnicode(text_page, index)).isspace():
+            continue
+        left, bottom, right, top = text_page.get_charbox(index)
+        if not (x0 <= (left + right) / 2 <= x1 and y0 <= height - (bottom + top) / 2 <= y1):
+            continue
+        raw.FPDFText_GetCharOrigin(text_page, index, ox, oy)
+        raw.FPDFText_GetLooseCharBox(text_page, index, rect)
+        width = rect.right - rect.left
+        widths.append(width)
+        baseline = height - oy.value
+        row = next((r for r in rows if abs(r[0] - baseline) <= 1.0), None)
+        if row is None:
+            rows.append([baseline, (ox.value, width)])
+        else:
+            row.append((ox.value, width))
+    rows.sort(key=lambda r: r[0])
+    glyph_rows = [sorted(r[1:]) for r in rows]
+    lines = text.replace("\r\n", "\n").split("\n")
+    filled = [i for i, line in enumerate(lines) if line.strip()]
+    if not widths or min(widths) <= 0 or len(filled) != len(glyph_rows):
+        return text
+    tally: dict[float, int] = {}
+    for w in widths:
+        tally[round(w, 2)] = tally.get(round(w, 2), 0) + 1
+    best = max(tally.values())
+    mode = min(w for w, n in tally.items() if n == best)
+    band = [w for w in widths if abs(w - mode) <= 0.02 * mode]
+    if len(band) < 0.8 * len(widths):
+        return text
+    cell = sum(band) / len(band)
+
+    def whole(distance: float) -> int | None:
+        n = int(distance / cell + 0.5) if distance >= 0 else -int(-distance / cell + 0.5)
+        return n if abs(distance / cell - n) <= 0.25 else None
+
+    def banded(width: float) -> bool:
+        return abs(width - mode) <= 0.02 * mode
+
+    for row in glyph_rows:
+        for k in range(len(row) - 1):
+            (xa, wa), (xb, wb) = row[k], row[k + 1]
+            if banded(wa) and banded(wb) and whole(xb - xa) is None:
+                return text
+    origin = min(row[0][0] for row in glyph_rows)
+    counts = [whole(row[0][0] - origin) for row in glyph_rows]
+    if None in counts:
+        return text
+    for i, n in zip(filled, counts, strict=True):
+        lines[i] = " " * (n or 0) + lines[i].lstrip()
+    return "\n".join(lines)
+
+
 def _code_entry(pdf: Any, number: int, box: list[float]) -> dict[str, Any]:
     page = pdf[number - 1]
     height = page.get_height()
     text_page = page.get_textpage()
     x0, y0, x1, y1 = box
     text = text_page.get_text_bounded(left=x0, bottom=height - y1, right=x1, top=height - y0)
+    text = _indent(text_page, height, box, text)
     text_page.close()
     page.close()
     normalised = normalise_code(text)
@@ -139,7 +208,7 @@ def build(pdf_path: str, boxes_path: str) -> None:
         entry: dict[str, Any] = {}
         if "code_boxes" in want:
             entry["code"] = [_code_entry(pdf, int(number), [float(v) for v in b]) for b in want["code_boxes"]]
-        for key in ("formulas_decoded", "tables", "steps", "order"):
+        for key in ("formulas_decoded", "tables", "steps", "order", "indents", "indent_boxes"):
             if key in want:
                 entry[key] = want[key]
         pages[str(number)] = entry

@@ -73,7 +73,7 @@ class FakeRunner:
             body = [{"Id": argv[2], "State": {"Running": True}, "Config": {"Labels": labels}}]
             return 0, json.dumps(body).encode()
         if "reader.ingest.status" in joined:
-            reply = {"status": self.import_status, "converter_version": "docling-2.151.1+r1"}
+            reply = {"status": self.import_status, "converter_version": "docling-2.151.1+r2"}
             return 0, json.dumps(reply).encode()
         if "reader.ingest.receive" in joined:
             return self.receive_exit, self.receive_out

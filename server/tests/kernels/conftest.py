@@ -4,7 +4,8 @@
 REST API, the supervisor's control endpoint and the kernel channels WebSocket; `FakeBrowser` for a browser
 connection; `FakeClock` for time. The real HTTP client and WebSocket connect (`reader.kernels.upstream`) are
 tested against local servers in test_upstream.py; route tests use Postgres (as SRV-AUTH's tests do); [image]
-tests use `reader-kernel:local`.
+tests build the kernel image under a per-run tag `reader-kernel:test-<pid>.<random>` and remove it at the end
+(never `reader-kernel:local`, the live stack's tag; OPS-SANDBOX header, test image).
 
 The modules under test are imported inside test bodies through `load`, which asserts that the module exists,
 so in the Red phase every test fails on an assertion of its own.

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Final
 
 # FR-INGEST-10: the `r` number rises with any change to FR-INGEST-5..9.
-CONVERTER_VERSION: Final = "docling-2.151.1+r1"
+CONVERTER_VERSION: Final = "docling-2.151.1+r2"
 # FR-INGEST-11: the mount path of the `blobs` volume in OPS-DEPLOY's compose.yaml.
 BLOBS_DIR: Final = Path("/var/lib/reader/blobs")
 MIGRATIONS: Final = Path(__file__).resolve().parent / "migrations"

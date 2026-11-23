@@ -1,6 +1,6 @@
-"""Item mapping, reading order, outline, batches and progress lines, without Docling (SRV-INGEST).
+"""Item mapping, code indentation, reading order, outline, batches and progress, without Docling (SRV-INGEST).
 
-@trace FR-INGEST-5 FR-INGEST-6 FR-INGEST-8 FR-INGEST-9
+@trace FR-INGEST-5 FR-INGEST-6 FR-INGEST-7 FR-INGEST-8 FR-INGEST-9
 """
 
 from __future__ import annotations
@@ -140,6 +140,245 @@ def test_non_code_items_keep_docling_order_across_pages() -> None:
     ordered = [i.text for i in mapping.order(seq)]
     assert [t for t in ordered if t != "c1"] == ["a1", "b2", "a1-float", "b2-more"]
     assert ordered.index("c1") == ordered.index("a1") + 1  # after the last page-1 item above it
+
+
+# ---- FR-INGEST-7: indentation from glyph origins ----
+
+CELL = 4.05  # the pilot's monospace advance
+
+
+ITALIC = 4.12  # within 2% of 4.05: in band
+ITALIC_MEASURED = (4.07, 4.12, 4.16, 4.2)  # the pilot's italic comment glyphs, same monospace face
+SECOND_FONT = (3.32, 3.58, 2.3, 4.6, 3.9)  # proportional advances of a second font (page 859's Cyrillic)
+
+
+def typeset(
+    code: str,
+    left: float = 96.38,
+    top: float = 700.0,
+    italic_rows: tuple[int, ...] = (),
+    second_font: dict[int, int] | None = None,
+    italic: tuple[float, ...] = (ITALIC,),
+) -> list[tuple[float, float, float]]:
+    """Glyphs (origin x, baseline y, advance) of monospace `code` as a PDF places them: each non-space
+    character at its column, no space glyphs; baselines 12 pt apart with a little jitter. Rows in
+    `italic_rows` measure `italic` widths (cycled) on the same grid; in a row of `second_font`, characters
+    from that column on are set in a proportional font that advances by its own widths."""
+    glyphs = []
+    for row, line in enumerate(code.split("\n")):
+        y = top - row * 12.0
+        switch = (second_font or {}).get(row)
+        x_second = None
+        for col, char in enumerate(line):
+            if switch is not None and col >= switch:
+                x_second = left + col * CELL if x_second is None else x_second
+                width = SECOND_FONT[col % len(SECOND_FONT)]
+                if not char.isspace():
+                    glyphs.append((x_second, y, width))
+                x_second += width
+            elif not char.isspace():
+                width = italic[col % len(italic)] if row in italic_rows else CELL
+                glyphs.append((left + col * CELL, y + (0.3 if col % 2 else 0.0), width))
+    return glyphs
+
+
+def on_grid(*xs: float) -> list[tuple[float, float]]:
+    return [(x, CELL) for x in xs]
+
+
+def text_layer(code: str) -> str:
+    """What pdfium's bounded text gives for such code: leading whitespace reduced to 0 or 1 space."""
+    return "\n".join((" " if i % 2 else "") + line.lstrip() for i, line in enumerate(code.split("\n")))
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "a b c\n    d e f\n        g h",  # 0/4/8, one-letter tokens: most steps are 2 cells
+        "a b c\n  d e f\n    g h",  # 0/2/4
+        "a = b + c\n    d = e + f",
+        "if (a < b) {\n    c = a + b;\n}",
+        "pragma x;\ncontract C {\n  function f() public {\n    uint v = 200;\n  }\n}",
+    ],
+)
+def test_code_round_trips_exactly(code: str) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    assert mapping.reindent(text_layer(code), typeset(code)) == (code, "exact")
+
+
+def test_cell_is_the_font_advance_not_a_statistic_of_the_steps() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    lines = [on_grid(0.0, 2 * CELL, 4 * CELL, 6 * CELL, 8 * CELL, 9 * CELL), on_grid(4 * CELL, 6 * CELL)]
+    grid = mapping.grid_of([CELL] * 9)
+    assert grid.cell == pytest.approx(CELL) and grid.complete
+    assert mapping.indentation(lines, grid) == [0, 4]  # the 2-cell steps are the majority
+
+
+ITALIC_BLOCK = "\n".join(
+    [
+        "module.exports = {",
+        "  // first comment line",
+        "  // second comment line",
+        "  // third comment line",
+        "  networks: {",
+        "    development: {",
+        '      host: "127.0.0.1",',
+        "      port: 7545,",
+        '      network_id: "*"',
+        "    },",
+        "    test: {",
+        '      host: "127.0.0.1",',
+        "      port: 7545,",
+        '      network_id: "*"',
+        "    }",
+        "  },",
+        "};",
+    ]
+)
+
+
+@pytest.mark.parametrize(("italic", "how"), [((ITALIC,), "exact"), (ITALIC_MEASURED, "majority")])
+def test_italic_comment_lines_keep_exact_indents(italic: tuple[float, ...], how: str) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    glyphs = typeset(ITALIC_BLOCK, italic_rows=(1, 2, 3), italic=italic)
+    assert mapping.reindent(text_layer(ITALIC_BLOCK), glyphs) == (ITALIC_BLOCK, how)
+
+
+SECOND_FONT_BLOCK = "\n".join(
+    [f"{'    ' * (row % 3)}value_{row} = compute({row})" for row in range(28)]
+    + ["    total = 0  # second-font comment here"]
+)
+
+
+def test_a_second_font_line_among_monospace_lines_is_recovered() -> None:  # page 859's case
+    mapping = need("reader.ingest.host.mapping")
+    glyphs = typeset(SECOND_FONT_BLOCK, second_font={28: 17})
+    assert mapping.reindent(text_layer(SECOND_FONT_BLOCK), glyphs) == (SECOND_FONT_BLOCK, "majority")
+
+
+@pytest.mark.parametrize(("in_band", "monospace"), [(79, False), (80, True), (81, True)])
+def test_monospace_needs_eighty_percent_in_band(in_band: int, monospace: bool) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of([CELL] * in_band + [4.5] * (100 - in_band))
+    assert (grid is not None) is monospace
+    if grid is not None:
+        assert grid.cell == pytest.approx(CELL) and not grid.complete
+
+
+@pytest.mark.parametrize(
+    ("advances", "mode"),
+    [([4.05, 4.05, 4.12], 4.05), ([4.05, 4.12, 4.12, 4.05], 4.05), ([4.12, 4.12, 4.05], 4.12)],
+)
+def test_band_is_two_percent_of_the_modal_advance_smaller_on_a_tie(
+    advances: list[float], mode: float
+) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of(advances)
+    assert grid is not None and grid.mode == mode and grid.complete
+
+
+@pytest.mark.parametrize(
+    ("advances", "expected"),
+    [([CELL] * 9 + [4.14], "majority"), ([CELL] * 9 + [4.13], "complete"), ([0.0], None), ([], None)],
+)
+def test_band_edges_and_degenerate_advances(advances: list[float], expected: str | None) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of(advances)  # 4.14 is 2.2% above 4.05: out of band; 4.13 is 1.98%: in band
+    assert (None if grid is None else "complete" if grid.complete else "majority") == expected
+
+
+def test_proportional_prose_still_falls_back() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    prose = "Field constants of the curve are listed in the table below"
+    glyphs = typeset(prose, second_font={0: 0})  # the whole line in a proportional font
+    assert mapping.reindent(prose, glyphs) == (prose, "fallback")
+
+
+def test_dedent_is_to_the_leftmost_line_not_the_first() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of([CELL])
+    lines = [on_grid(4 * CELL, 5 * CELL), on_grid(0.0, CELL), on_grid(4 * CELL, 5 * CELL)]
+    assert mapping.indentation(lines, grid) == [4, 0, 4]
+
+
+def test_reindent_replaces_leading_whitespace_and_never_writes_tabs() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    code = "a = 1\n    b = 2\n        c = 3\n\nd"
+    text = "a = 1\r\n b = 2\n\t\tc = 3\n\nd"
+    assert mapping.reindent(text, typeset(code)) == (code, "exact")
+
+
+@pytest.mark.parametrize(
+    ("glyphs", "text"),
+    [
+        ([], "ab\n cd"),  # no glyph
+        ([(10.0, 700.0, CELL), (10.0 + CELL, 700.0, CELL), (10.0 + 1.5 * CELL, 688.0, CELL)], "ab\n c"),
+        ([(10.0, 700.0, CELL), (10.0 + CELL, 700.0, CELL), (10.0 + 2.6 * CELL, 700.0, CELL)], "abc"),
+        (typeset("ab\n    cd"), "ab\ncd\nef"),  # line counts differ while the lines carry indents
+        (typeset("ab\n    cd", italic_rows=(1,), italic=(4.5,)), "ab\n cd"),  # half out of band: < 80%
+    ],
+)
+def test_reindent_keeps_the_text_layer_when_the_rule_is_undefined(
+    glyphs: list[tuple[float, float, float]], text: str
+) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    assert mapping.reindent(text, glyphs) == (text, "fallback")
+
+
+@pytest.mark.parametrize(("offset_cells", "how"), [(2.0, "majority"), (2.5, "fallback")])
+def test_an_out_of_band_line_still_needs_an_on_grid_offset(offset_cells: float, how: str) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    glyphs = typeset("abcdefghij\nklmnopqrst\nuvwxyzabcd\nefghijklmn\nop")
+    glyphs += [(96.38 + offset_cells * CELL, 640.0, 4.2)]  # one italic glyph, out of band, on its own line
+    grid = mapping.grid_of([g[2] for g in glyphs])
+    assert grid is not None and not grid.complete  # >= 80% in band: only the offset decides
+    assert mapping.reindent("a\nb\nc\nd\ne\nf", glyphs)[1] == how
+
+
+@pytest.mark.parametrize(("residual", "expected"), [(0.24, [0, 2]), (0.26, None)])
+def test_tolerance_is_a_quarter_cell_for_offsets_and_steps(
+    residual: float, expected: list[int] | None
+) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of([CELL])
+    offset = [on_grid(0.0, CELL), on_grid((2 + residual) * CELL, (3 + residual) * CELL)]
+    step = [on_grid(0.0, CELL, (3 + residual) * CELL), on_grid(2 * CELL, 3 * CELL)]
+    assert mapping.indentation(offset, grid) == expected
+    assert mapping.indentation(step, grid) == (None if expected is None else [0, 2])
+
+
+def test_steps_touching_an_out_of_band_glyph_are_not_checked() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of([CELL] * 9 + [ITALIC])
+    line = [(0.0, CELL), (CELL, CELL), (1.6 * CELL, 3.3), (3.0 * CELL, CELL)]  # off-grid only via 3.3
+    assert mapping.indentation([line, on_grid(4 * CELL, 5 * CELL)], grid) == [0, 4]
+
+
+def test_an_overprinted_glyph_is_a_zero_cell_step() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of([CELL])
+    lines = [on_grid(0.0, 0.3, CELL, 2 * CELL), on_grid(4 * CELL, 4 * CELL + 0.5, 5 * CELL)]
+    assert mapping.indentation(lines, grid) == [0, 4]
+
+
+@pytest.mark.parametrize(
+    ("line", "rendered"),
+    [
+        (b'{"code_boxes":20,"indent_fallbacks":1,"majority_cell":3,"multi_box_code":2}',
+         "code boxes 20, indentation fallbacks 1, majority-cell boxes 3, multi-box code items 2"),
+        (b'{"code_boxes":1,"indent_fallbacks":2,"majority_cell":0,"multi_box_code":0}', None),
+        (b'{"code_boxes":1,"indent_fallbacks":0,"majority_cell":2,"multi_box_code":0}', None),
+        (b'{"code_boxes":1,"indent_fallbacks":0,"majority_cell":0,"multi_box_code":0,"x":1}', None),
+        (b'{"code_boxes":1,"indent_fallbacks":0,"majority_cell":0,"multi_box_code":true}', None),
+        (b'{"code_boxes":1,"indent_fallbacks":0,"multi_box_code":0}', None),
+        (b"code boxes 1", None),
+    ],
+)
+def test_code_line_is_rendered_only_when_valid(line: bytes, rendered: str | None) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    assert mapping.render_code_line(line) == rendered
+    if rendered is not None:
+        assert mapping.code_line(20, 1, 3, 2).encode() == line
 
 
 def test_out_of_range_bookmark_page_is_null() -> None:
