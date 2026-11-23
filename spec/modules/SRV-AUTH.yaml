@@ -444,7 +444,7 @@ vectors:
 # the deep-reviewer approves; it moves into `requirements` with its Red tests. FR-AUTH-12 is unchanged for every
 # other route. ----
 proposed_requirements:
-  - id: FR-AUTH-19
+  - id: FR-AUTH-22   # FR-AUTH-19..21 are taken by V/auth-page-style (PR #39)
     text: >-
       **Raw-body routes.** `reader.auth.csrf.RAW_BODY_ROUTES` is an exact allow-list of (method, route template,
       media type) with one entry: (`POST`, `/api/materials/uploads`, `application/pdf`). For a request matching an
