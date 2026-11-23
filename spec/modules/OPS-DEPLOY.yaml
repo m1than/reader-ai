@@ -36,7 +36,10 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   (the precheck now maps the checkpoint; 3g kept, memory.peak 2,114 MiB cold, memory.events max 0) and `init: true`
   added; the config test checks `init`. Round 2 (approve, 2026-11-23): the limit is sized on memory.stat anon
   (max 1,192 MiB), not memory.peak, which counts the reclaimable mapped weights; embed.Dockerfile fetches the model
-  before copying the service (FR-DEPLOY-2, -9)."
+  before copying the service (FR-DEPLOY-2, -9).
+  Paired change 2026-11-23 (for SRV-INGEST revision 2, ADR-0029 accepted by the owner): FR-DEPLOY-13, drafted on
+  V/onboarding and reviewed in its deep-reviewer rounds 1–7, promoted on V/upload-impl with its Red tests; it also
+  states the converter-source-hash line of server.Dockerfile that SRV-INGEST FR-INGEST-23 names (round 4)."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -284,6 +287,26 @@ requirements:
       materials, sectors, sharing). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
       sized for two worst-case calls each (paired SRV-AGENT/SRV-PIPELINE change, 2026-11-22): draft 4.0, fact_check
       2.0, review 4.0.
+  - id: FR-DEPLOY-13   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23)
+    text: >-
+      **Upload body limit.** The Caddyfile's site block gains, before `handle /api/*`, a `handle
+      /api/materials/uploads` with `request_body { max_size 200MiB }` and the same `reverse_proxy` as `/api/*`, so a
+      body over 209,715,200 bytes is refused with 413 at the edge (owner 2026-11-23: 200 MiB). The path matcher is
+      exact, so `/api/materials/uploads/{id}` routes keep the `/api/*` handler.
+      **Read timeout: in the api, numerically 300 s for the whole body** (SRV-INGEST FR-INGEST-18, 408
+      `body_timeout`). It is not set in Caddy: Caddy's `servers { timeouts { read_body … } }` is server-wide, so it
+      would also bound every other request, including the WebSocket kernel relays (SRV-KERNEL), and whether it is
+      cleared after the upgrade is not verified. 300 s is structural: v1 serves only `localhost` (ADR-0012), where a
+      200 MiB body takes seconds, and the bound limits how long a stalled client holds the single upload lock.
+      **Converter source hash** (the paired line SRV-INGEST FR-INGEST-23 names): `server.Dockerfile` runs SRV-INGEST
+      FR-INGEST-3's closure function (`reader.ingest.host.closure.source_sha256`) over the copied `/opt/reader/src`
+      at build and writes the hex digest to `/usr/local/share/reader/converter_source_sha256` (0444), so the api
+      compares the watcher's sha with it without importing `reader.ingest.host` at run time.
+      [unit] the config check parses the Caddyfile: exactly one `request_body` block, on exactly that path, with
+      `max_size 200MiB`, and no server-wide `read_body`; the Dockerfile writes that file from that function; [live]
+      209,715,200 bytes pass the edge and the api, and 209,715,201 bytes are 413 (SRV-INGEST FR-INGEST-18's live
+      case). The live check does not assert which of Caddy or the api answered the 413: both enforce the same cap,
+      and the config check above pins Caddy's.
 
 invariants:
   - id: INV-DEPLOY-1
@@ -387,23 +410,3 @@ vectors:
 #   fallback (worker holds the token) would change FR-DEPLOY-10's consumer list and INV-DEPLOY-5.
 # - The lab egress proxy (ADR-0014) is OPS-SANDBOX's.
 # - ADR-0021: if M1 sends ingestion native, the worker needs a route to the host converter; not added until decided.
-
-# ---- Paired change (DRAFT, 2026-11-23, V/onboarding, for SRV-INGEST revision 2 and ADR-0029, proposed). Held under
-# `proposed_requirements` until the owner accepts ADR-0029 and the deep-reviewer approves; then it moves into
-# `requirements` with its Red tests. ----
-proposed_requirements:
-  - id: FR-DEPLOY-13
-    text: >-
-      **Upload body limit.** The Caddyfile's site block gains, before `handle /api/*`, a `handle
-      /api/materials/uploads` with `request_body { max_size 200MiB }` and the same `reverse_proxy` as `/api/*`, so a
-      body over 209,715,200 bytes is refused with 413 at the edge (owner 2026-11-23: 200 MiB). The path matcher is
-      exact, so `/api/materials/uploads/{id}` routes keep the `/api/*` handler.
-      **Read timeout: in the api, numerically 300 s for the whole body** (SRV-INGEST FR-INGEST-18, 408
-      `body_timeout`). It is not set in Caddy: Caddy's `servers { timeouts { read_body … } }` is server-wide, so it
-      would also bound every other request, including the WebSocket kernel relays (SRV-KERNEL), and whether it is
-      cleared after the upgrade is not verified. 300 s is structural: v1 serves only `localhost` (ADR-0012), where a
-      200 MiB body takes seconds, and the bound limits how long a stalled client holds the single upload lock.
-      [unit] the config check parses the Caddyfile: exactly one `request_body` block, on exactly that path, with
-      `max_size 200MiB`, and no server-wide `read_body`; [live] 209,715,200 bytes pass the edge and the api, and
-      209,715,201 bytes are 413 (SRV-INGEST FR-INGEST-18's live case). The live check does not assert which of Caddy
-      or the api answered the 413: both enforce the same cap, and the config check above pins Caddy's.
