@@ -1193,6 +1193,26 @@ tasks:
         vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
         bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
         with axe 0 serious at 1280/1024/390." }
+  - { id: V.compile-ui, stage: V, kind: module, track: product, status: in_progress, branch: V/compile-ui,
+      needs: [V.onboarding-plan],
+      what: "The owner cannot study the 105 planned lessons: the list links only published lessons and the only UI path
+        that starts a compile is /import's 'Start compiling lesson 1'. An owner-only Compile action with a confirm
+        (per-lesson estimate, stops at $8.00) and compile status in the list (FR-UI-15) and on the not-published page
+        (FR-NOTEBOOK-12). Two server pieces were missing and are added: a per-lesson estimate route (SRV-PLAN
+        FR-PLAN-13; no route exposed a lesson's characters) and a stopped step's error code in the status (SRV-PIPELINE
+        FR-PIPELINE-16; `provider_missing` reached SRV-EVENTS only as the class name AgentError).",
+      next: "Round 1 (cc817d0) changes applied with Red tests: run state, not latest_sha256, decides 'finished' (the
+        draft step writes a revision); new FR-PIPELINE-17 GET /api/compiles (the owner's open runs) replaces the
+        10 per-lesson reads; a 'draft, compile not finished' chip; FR-PIPELINE-16 records {step, input_sha256, code}
+        from an allow-list and reports it only for a dead AgentError key of that input; FR-PLAN-13 gets a pure
+        lesson_estimate with band-edge vectors. Round 2 on 08534df: VERDICT approve; folded in SRV-EVENTS
+        FR-EVENTS-17 dead_error_code_of, off-list codes clear the record, the open-runs cost notes and a 101-run test.
+        Green built (server routes, migration pipeline_0003, CompileControl, list chip, page control, test-server
+        stub); browser suite 211 passed incl. e2e/web/ui/compile.spec.ts at 1280/1024/390 (axe 0 serious/critical,
+        no horizontal scroll, no CSP violation). Next: code review. No compile is started by the agent; no live step.",
+      note: "Coordination (coordinator, 2026-11-23): this item is FR-UI-15. FR-UI-13 stays the upload track's id
+        (V/onboarding, left untouched here): it keeps its first-run bullet and drops its compile-status bullet at merge,
+        which FR-UI-15 supersedes. FR-UI-14 is V/signup's; FR-UI-16 and above are the design pass's." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

@@ -57,7 +57,7 @@ title: App shell — pinned library build, Calm tokens, routing, API client, sig
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes. Amendment 2026-11-23 (V.signup, ADR-0031 accepted by the owner): FR-UI-14 (the `/signups` route and the owner's Sign-ups header link of WEB-ACCOUNTS; test-server stubs and a fifth static auth file); reviewed with ADR-0031 and SRV-AUTH's sign-up items in deep-reviewer rounds 1–3 (round 3 approve); approved by agent with its Red tests; the Playwright config also matches e2e/web/accounts/** in the auth-dark and auth-light projects"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes. Amendment 2026-11-23 (V.signup, ADR-0031 accepted by the owner): FR-UI-14 (the `/signups` route and the owner's Sign-ups header link of WEB-ACCOUNTS; test-server stubs and a fifth static auth file); reviewed with ADR-0031 and SRV-AUTH's sign-up items in deep-reviewer rounds 1–3 (round 3 approve); approved by agent with its Red tests; the Playwright config also matches e2e/web/accounts/** in the auth-dark and auth-light projects. Amendment 2026-11-23 (V/compile-ui): FR-UI-15 (the owner's Compile action and compile status in the list; base: the compile-status bullet of V/onboarding's proposed FR-UI-13, which stays the upload track's id; the upload track drops that bullet at merge), paired with WEB-NOTEBOOK FR-NOTEBOOK-12, SRV-PLAN FR-PLAN-13 (per-lesson estimate route) and SRV-PIPELINE FR-PIPELINE-16 (a stopped step's error code). Round 1 (cc817d0, changes): the control is keyed on run state, not on `latest_sha256` (the draft step writes a revision); the list reads the owner's open runs from FR-PIPELINE-17 instead of 10 per-lesson reads; a draft chip on linked rows with an open run; zero-character lessons; an in-flight guard; a 30-minute polling stop with Refresh; a realistic test-server sequence and `workers: 1`; the FR-UI-6 pointer. Round 2 on 08534df: VERDICT approve (deep-reviewer, run by the coordinator). Approved by agent. Green (2026-11-23): web/src/app/compile.test.tsx's `run` helper gets explicit step and run types so `npm run typecheck` accepts it against the client's `CompileStatus`; e2e/web/ui/compile.spec.ts waits for the dialog's open animations to finish before axe (mid-fade text measured 2.3–3.4:1; settled, none); no oracle or requirement changed. Code review (2026-11-24, on cb81aff): VERDICT approve; items applied with paired tests — `submitAction` (no POST while closed, resume without a run closes and never compiles), the polling window restarts when any run starts (a run started after 31 idle minutes is polled; kills mutant W19), axe on the Resume dialog and in dark, the 280 ms fade stated and the wait bounded at 2 s"
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -164,7 +164,9 @@ requirements:
       Each lesson is one row: its ordinal, its title, then the status ("not published yet") and the date as separate
       muted elements at the row's end (under the title below 40rem), so status and date never read as part of the
       title (the live list ran them together; live run 2026-11-23).
-      States: loading (skeleton), empty ("No lessons yet"), error (a calm message with Retry). [unit] [story]
+      States: loading (skeleton), empty ("No lessons yet"), error (a calm message with Retry). For a user with role
+      `owner`, FR-UI-15 adds each lesson's compile state, a draft chip and the Compile and Retry actions to the rows;
+      everything above holds for everyone else unchanged. [unit] [story]
   - id: FR-UI-7
     text: >-
       Notices: one toast region for app-level messages (sign-out failure, network loss, the notebook's kernel notices
@@ -252,6 +254,126 @@ requirements:
       adds `/api/auth/signup` → signup.html (SRV-AUTH FR-AUTH-31), five entries in all. [unit] the route table, the
       link for owner and learner, the learner's request log on `/signups`; [browser] WEB-ACCOUNTS FR-ACCOUNTS-5's
       matrix covers the link at 1280, 1024 and 390 px in both schemes.
+  # Amendment (2026-11-23, V/compile-ui): the owner could not study the 105 planned lessons, because the list links
+  # only published lessons and the only UI path that starts a compile is /import's "Start compiling lesson 1". Base:
+  # the "compile status in the list" bullet of V/onboarding's draft FR-UI-13 (WEB-UI.yaml `proposed_requirements`),
+  # extended with the Compile action. Ids (coordinator, 2026-11-23): FR-UI-13 stays the upload track's id, FR-UI-14 is
+  # V/signup's, FR-UI-16 and above are the design pass's. The upload track keeps its FR-UI-13 (first run) and drops
+  # its compile-status bullet at merge; this item supersedes it.
+  - id: FR-UI-15
+    text: >-
+      **Compile from the lesson list (owner).** One component, `CompileControl` in `web/src/app/compile/` (with its
+      status mapping and copy there; the five client functions `openCompiles`, `latestCompile`, `startCompile`,
+      `resumeCompile` and `lessonEstimate` join FR-UI-4's API module, validated at run time like the others), used by
+      the list rows and by WEB-NOTEBOOK FR-NOTEBOOK-12.
+      - **"Has a revision" is not "compiled".** The `draft` step writes a revision (L02: about 157 s into a 210 s
+        compile), so `latest_sha256` turns a row into FR-UI-6's link long before the run ends, and a run that stops
+        later leaves a linked draft behind. The control is therefore keyed on the run's state, never on
+        `latest_sha256` alone.
+      - **Who:** only for a user with role `owner` (from `/api/me`). For anyone else the list is FR-UI-6 unchanged: no
+        button, no status, no chip, and no request to a compile or estimate route.
+      - **The list's run-state source:** one `GET /api/compiles` (SRV-PIPELINE FR-PIPELINE-17) per list view gives
+        the owner's open runs: the latest run of each lesson whose state is not `converged` or `open_findings`.
+        A lesson in that answer shows its run's state; a lesson absent from it has no open run: "not compiled yet"
+        and a "Compile" button when `latest_sha256` is null, nothing beyond FR-UI-6 when it is set. The list makes
+        no per-lesson status read.
+      - **Draft chip:** a linked row (with `latest_sha256`) whose lesson has an open run shows, after the link, a
+        muted chip "draft, compile not finished" before its status text, so a draft whose compile still runs or has
+        stopped never reads as finished (owner feedback 2026-11-23: plan lesson 1 looked published, with open
+        findings, while its compile was not finished).
+      - **Status**, in FR-UI-6's status slot instead of "not published yet" (the stage labels: `draft` drafting,
+        `fact_check` checking facts, `adversarial_review` reviewing, `revise` revising, `findings` collecting
+        findings, `lab_verification` verifying labs; the stage is that of the last listed step that carries a
+        `status`, else of the last step), the same with or without `latest_sha256`:
+        - no run: "not compiled yet" and a "Compile" button;
+        - `running` or `stalled`: "Compiling: <stage label>", no button;
+        - `stage_failed`: "Compile stopped at <stage label>", then the message of the status's `error` code when it
+          has one (SRV-PIPELINE FR-PIPELINE-16; `provider_missing`: "No AI provider is connected for your account.
+          Connect one, then retry."; any other code: no extra text), and a "Retry" button;
+        - `budget_exhausted`: "Compile stopped:" and the message of `refusals[0]` (`budget_exhausted`: "it reached
+          its $<cap_usd> cap"; `task_budget_exhausted`: "a stage reached its own budget"; `monthly_budget_exhausted`:
+          "the monthly budget is used up"; `daily_budget_exhausted`: "the daily budget is used up"; any other:
+          "a budget was reached"), then "Spent $<spent_usd>.", and a "Compile" button (a new run);
+        - `converged` or `open_findings` (the lesson page's single read only; the list never sees them): nothing
+          beyond FR-UI-6;
+        - a failed read of the run state: no status text of its own (an unpublished row keeps "not published yet")
+          and, on an unpublished row, the "Compile" button (a running compile then answers 409, below).
+      - **Polling:** while any run in the list's answer (or the lesson page's run) is `running` or `stalled`, that
+        query refetches every `COMPILE_POLL_MS` = 5,000 ms (chosen: a stage takes tens of seconds, L02's whole
+        compile 210 s); otherwise never. TanStack Query does not refetch in a background tab. Polling stops
+        `COMPILE_POLL_MAX_MS` = 30 min (chosen: more than eight times L02's compile) after the query was last started
+        or refreshed; the status then adds a "Refresh" button that refetches once and restarts the window. The window
+        also restarts whenever a run starts, from any source: after this control's own POST, and whenever the
+        query's answer holds a `running` or `stalled` run whose `run_id` that query has not polled before (a run
+        started on another page or in another tab). So a run started after 30 idle minutes is polled. A status
+        read calls SRV-PIPELINE's `ensure` (FR-PIPELINE-6, -11, -17), so an owner's page view can re-enqueue a
+        stalled run; that is the server's recovery path, not a side effect to avoid.
+      - **Revisions:** when a run's `latest_sha256` is not null and differs from the row's (or the page's), or a run
+        leaves the answer or leaves `running`/`stalled`, the app invalidates the `['lessons']` and `['lesson', id]`
+        queries, so the row becomes FR-UI-6's link (with the chip while its run is open) and the lesson page loads
+        the newer revision.
+      - **Confirm:** "Compile" opens a dialog (the library's `Dialog`) titled "Compile lesson <ordinal>?" with the
+        lesson title, then:
+        - the estimate from `GET /api/lessons/{lesson_id}/estimate` (SRV-PLAN FR-PLAN-13, the plan's own per-lesson
+          formula, FR-PLAN-8): "Estimate: $<low_usd>–$<high_usd>" and "An estimate from one measured lesson (L02),
+          scaled by this lesson's <kchars> thousand characters; not a bound." (kchars with one decimal); when
+          `extrapolated`, also "This lesson is R× shorter than the measured one; the real cost is likely higher than
+          this range." (R = `basis_kchars / kchars`, one decimal) or, when longer, "This lesson is R× longer than the
+          measured one; the real cost may differ from this range." (R = `kchars / basis_kchars`); "Estimating…" while
+          it loads; "No estimate for this lesson." on 404 or any error; when `kchars` is "0.000", instead "This
+          lesson's pages have no text to compile." and the dialog's "Compile" is disabled (the server would answer
+          `no_source_spans`);
+        - "Stops at $<run_cap_usd>." (the estimate's `run_cap_usd`, else the client constant `RUN_CAP_USD` = "8.00",
+          which a unit test pins to SRV-PIPELINE `bounds.run_cap_usd`);
+        - "Compile" and "Cancel". "Compile" sends `POST /api/lessons/{lesson_id}/compile` with no body (the default
+          cap, FR-PIPELINE-11; bodiless, FR-UI-4) and is disabled while the request is in flight; an in-flight ref
+          guards it too, so two clicks in the same event-loop turn (before the disabled state renders) or Enter send
+          one request.
+        "Retry" opens the same dialog titled "Resume the compile of lesson <ordinal>?" with "Spent so far: $<spent_usd>
+        of $<cap_usd>." in place of the estimate and "Stops at $<cap_usd>."; its "Resume" sends
+        `POST /api/compiles/{run_id}/resume`. The decision is a pure function `submitAction(open, mode, run)`:
+        nothing while the dialog is not open; in resume mode with no run (the run left the state after the dialog
+        opened) it closes the dialog and posts nothing, never a new compile; otherwise resume or compile.
+      - **After the request:** a 202 closes the dialog, refetches the run state (the list's `GET /api/compiles`, or
+        the page's status) and moves focus to the row's (or page's) status text (`tabIndex={-1}`; the button that
+        opened the dialog is gone). `compile_running` (409),
+        `already_started` (409; not sent by this route today, FR-PIPELINE-15, mapped for completeness) and
+        `not_failed` (409, resume) close the dialog the same way, so the row shows the run, and add a notice (FR-UI-7)
+        "A compile of this lesson is already running.", "A lesson of this course is already compiled or compiling.",
+        "This compile is no longer stopped.". Any other error keeps the dialog open with a `role="alert"` line:
+        `lesson_unknown` and `not_found` "This lesson no longer exists. Reload the list." (and the list is
+        invalidated), `no_material` "The source of this lesson is not imported.", `no_source_spans` "This lesson's
+        pages have no text to compile.", `source_too_large` "This lesson is too long to compile in one run.",
+        `network` "The server could not be reached. Check the connection and try again.", anything else "Something
+        went wrong. Try again.". Budget refusals and `provider_missing` never come from these POSTs (a step meets
+        them); they reach the row through the status above.
+      - **Polish:** FR-UI-10 holds for the new CSS (tokens and spacing steps only, the 2px focus outline); the row's
+        buttons are the library's small outline buttons. At 1280, 1024 and 390 px no page scrolls horizontally and
+        axe reports no serious or critical issue on the list with a compiling row, a stopped row, the Compile dialog
+        and the Resume dialog open, in light and in dark. The library's dialog fades in over `--acme-duration-slow`
+        (280 ms in the library, 0 under `prefers-reduced-motion`; Calm does not change it), so the [browser] test
+        runs axe only after the dialog's animations have finished, waiting at most 2 s (a longer fade fails the test).
+      - **Test server:** `web/test-server/` serves, for the owner fixture, `GET /api/lessons/w02/estimate`, and a
+        compile of `w02` shaped like a real one: no run until `POST /api/lessons/w02/compile` (202); then `running`
+        at `fact_check` with a `latest_sha256` already set (the draft's revision) for two reads, while
+        `GET /api/lessons` lists w02 with that sha256 (a link with the draft chip); then `converged`, when w02 leaves
+        `GET /api/compiles`. `GET /api/compiles` and `GET /api/lessons/w02/compile` answer from the same state.
+        `POST /__test__/reset` (204) restores the start; `POST /__test__/reset?w02=stopped` starts from a
+        `stage_failed` run at `fact_check` with the draft's `latest_sha256` set and `error: "provider_missing"`.
+        Every other lesson has no run. Because this state is global, web/playwright.config.ts runs with
+        `workers: 1`.
+      [unit] web/src/app/compile.test.tsx: owner and learner, one `GET /api/compiles` and no per-lesson status read
+      on the list, every status and refusal mapping with and without `latest_sha256` (`stage_failed` and
+      `budget_exhausted` on a linked row keep the chip and their button), the chip only for open runs, the stage of
+      the last step with a `status`, the poll interval per state and its 30-minute stop with Refresh, a run started
+      after 31 idle minutes is polled, `submitAction` (closed dialog, resume without a run, resume, compile), the
+      confirm (estimate, extrapolated in both directions, missing estimate, zero characters, the cap, the bodiless
+      POST, two clicks inside one `act` send one request), resume, every error mapping, focus after success, the list refetch
+      that turns the row into a link, `RUN_CAP_USD` against SRV-PIPELINE's bounds; [story] CompileControl in each
+      state and the dialog, Light and Dark; [browser] e2e/web/ui/compile.spec.ts at 1280, 1024 and 390 px against
+      the test server: Compile, confirm, a link with the draft chip and "Compiling: checking facts", then the chip
+      gone; the stopped state with the chip, Retry and the Resume dialog; light and dark; axe and horizontal scroll as
+      above; no CSP violation.
 
 
 # ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for WEB-IMPORT). Held under `proposed_requirements` (not read by

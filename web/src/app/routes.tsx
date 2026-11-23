@@ -54,6 +54,7 @@ function Loading({ label }: { label: string }) {
 function ListPage() {
   const { api } = useServices();
   const q = useQuery(queries(api).lessons());
+  const me = useQuery(queries(api).me());
   return (
     <div className="page">
       <h1>Lessons</h1>
@@ -67,7 +68,7 @@ function ListPage() {
           </Button>
         </div>
       ) : (
-        <LessonList lessons={q.data.lessons} locale={locale()} />
+        <LessonList lessons={q.data.lessons} locale={locale()} owner={me.data?.role === 'owner'} />
       )}
     </div>
   );

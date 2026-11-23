@@ -230,8 +230,39 @@ h1 {
 
 .lesson-meta {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: baseline;
   gap: var(--acme-space-3);
   white-space: nowrap;
+}
+
+/* The owner's compile control (FR-UI-15): status, draft chip and actions wrap inside the row. */
+.compile-control {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  max-width: 24rem;
+  white-space: normal;
+}
+
+.compile-status {
+  color: var(--acme-text-muted);
+}
+
+.compile-line {
+  margin: var(--acme-space-3) 0;
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+}
+
+.compile-line:empty {
+  display: none;
+}
+
+.compile-alert {
+  font-weight: 600;
 }
 
 /* Lesson page: one 38rem reading column; at 60rem and wider the contents sit beside it (FR-NOTEBOOK-11). */

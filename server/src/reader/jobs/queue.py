@@ -564,3 +564,14 @@ async def job_status_of(conn: AsyncConnection, kind_name: str, key: str) -> str:
     row = await _row(conn, kind_name, key)
     deciding = deciding_status(await _job_statuses(conn, key))
     return status_of(deciding, row["outcome"] if row else None, row is not None)[0]
+
+
+async def dead_error_code_of(conn: AsyncConnection, kind_name: str, key: str) -> str | None:
+    """FR-EVENTS-17: the key's `error_code` when its outcome is `dead`; None for no row or another outcome."""
+    code = (
+        await conn.execute(
+            text("SELECT error_code FROM job_keys WHERE kind = :kind AND key = :key AND outcome = 'dead'"),
+            {"kind": kind_name, "key": key},
+        )
+    ).scalar()
+    return None if code is None else str(code)

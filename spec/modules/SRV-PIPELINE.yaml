@@ -54,6 +54,19 @@
 # re-checked under the lock, and renumbering for origin `study_plan`) and FR-PIPELINE-15 (run creation takes the same
 # course lock and can refuse `already_started`), for SRV-PLAN. Paired: SRV-LESSON FR-LESSON-15. Promoted with their
 # Red tests.
+# Amendment (2026-11-23, V/compile-ui, for WEB-UI FR-UI-15): FR-PIPELINE-16, a stopped step's SRV-AGENT error code in
+# the status routes, so the owner's list can say "No AI provider is connected" instead of only "Compile stopped".
+# Today a permanent agent error reaches SRV-EVENTS as the exception's class name (`AgentError`, FR-EVENTS-6), so
+# `provider_missing` is not recoverable from the job key. Round 1 (cc817d0, changes): the record carries the
+# step's input_sha256 and is reported only for a dead `AgentError` key of that input; an allow-list of codes; and
+# FR-PIPELINE-17 (`GET /api/compiles`, the owner's open runs) because a revision exists from the draft step on, so
+# the list cannot tell a finished compile from `latest_sha256`. Round 2 on 08534df: VERDICT approve (deep-reviewer,
+# run by the coordinator). Folded in before Green at the coordinator's request: the key's code through SRV-EVENTS
+# FR-EVENTS-17 `dead_error_code_of`, an off-list permanent code writes null, `runs.record_stage_error` named, the
+# open-runs route's query cost and unloadable-lesson limit recorded, a 101-run bound test. Approved by agent.
+# Code review (2026-11-24, on cb81aff): VERDICT approve; applied with tests — `derive` treats an `AgentError` from
+# `step_input` as "no args" (an unpriced model cannot 500 the list), and FR-PIPELINE-17 breaks ties by id ascending
+# like `GET /api/lessons/{lesson_id}/compile`.
 #   - SRV-LESSON: provenance stage enum adds `findings`; writes only through `write_revision`; the G2 report takes over
 #     its `defers` (a)–(c). `finding.stage` uses its existing values `fact_check`, `adversarial_review`,
 #     `lab_verification` (no change).
@@ -98,6 +111,7 @@ normative:
 
 bounds:
   run_cap_usd: 8.00          # owner's budget.compile_cap_usd, 2026-11-22 (docs/progress.yaml)
+  open_runs_max: 100         # structural (FR-PIPELINE-17): one run per lesson at a time, each started by an owner click
   max_revise_loops: 1        # see header; ADR-0009's 3 projects over ADR-0005's per-lesson target (REF-PIPELINE-2)
   items_max_per_report: 400  # structural: L02 drafts had 59–94 claims; 400 bounds a 39-page chapter at 4× L02's density
   source_max_chars: 300000   # 2.2× the largest pilot chapter (135,935 characters, ADR-0005); at the 2.0 chars/token
@@ -113,7 +127,7 @@ bounds:
 
 tables:
   course_plans: { owner_id: true, columns: "owner_id, plan_course_id text, plan_lesson_id text, lesson_id uuid → lessons, material_sha256, pdf_first int, pdf_last int, g1_at timestamptz; unique (owner_id, plan_course_id, plan_lesson_id); unique (lesson_id)" }
-  compile_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, cap_usd numeric(8,2), task_budgets jsonb (snapshot of the tasks' budget_usd_per_lesson at start), budget_refused text null (the first refusal code), loops int, base_sha256 text null, last_model_sha256 text null, final_sha256 text null, g2 jsonb null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id)" }
+  compile_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, cap_usd numeric(8,2), task_budgets jsonb (snapshot of the tasks' budget_usd_per_lesson at start), budget_refused text null (the first refusal code), stage_error jsonb null ({step, code}, FR-PIPELINE-16; migration pipeline_0003), loops int, base_sha256 text null, last_model_sha256 text null, final_sha256 text null, g2 jsonb null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id)" }
   compile_steps: { owner_id: true, columns: "id bigint identity pk, owner_id, run_id → compile_runs, step int, stage text, input_sha256 text, output_sha256 text null, report jsonb null, reused_from bigint null → compile_steps, model text null, cost_usd numeric(12,6), duration_s numeric, created_at; unique (run_id, step); index (owner_id, stage, input_sha256)" }
 
 errors: [no_material, no_source_spans, source_too_large, lesson_unknown, compile_running, output_invalid,
@@ -302,6 +316,71 @@ requirements:
       `require_course_unstarted`, any compile run of any lesson of the same plan course raises `already_started`
       (SRV-PLAN's compile-first target). `compile_running` and SRV-AGENT's budget refusals are unchanged; the route
       passes the default and behaves as before. [db]
+  - id: FR-PIPELINE-16
+    text: >-
+      **A stopped step's error code.**
+      - **Recording.** When a model step raises a permanent SRV-AGENT error (an `AgentError` that is neither a
+        `TransientAgentError` nor a `BudgetRefused`) whose code is in the declared allow-list
+        `reader.pipeline.runs.STAGE_ERROR_CODES` = {`sdk_error`, `tools_mismatch`, `unknown_model`,
+        `provider_missing`, `usage_unmapped`, `settle_refused`, `void_refused`} (FR-AGENT-10's permanent codes plus
+        the ledger's two refusals), the handler records `{"step": <step>, "input_sha256": <the step args'
+        input_sha256>, "code": <code>}` in `compile_runs.stage_error` (jsonb null; migration `pipeline_0003`, whose
+        downgrade drops the column), then re-raises the same exception, so SRV-EVENTS judges it as before (`dead`,
+        `error_code` `AgentError`). A permanent `AgentError` whose code is outside the list writes null instead, so a
+        stale code from an earlier failure is cleared. The write is
+        `reader.pipeline.runs.record_stage_error(engine, run_id, value: dict | None)`, which the handler calls through
+        the module attribute (`runs.record_stage_error`, not a name imported into the handler's module), so tests can
+        replace it. It runs on a separate connection,
+        committed at once, the same allowance SRV-AGENT FR-AGENT-9 uses for its reservations (the handler's own
+        transaction rolls back with the failure; up to the model call it has only read, so the second transaction
+        waits on no lock the first holds). If that write fails, the handler logs one line with the run id and the
+        code only and re-raises the original exception, never the write's.
+      - **Reporting.** The status routes (FR-PIPELINE-11, -17) add `error`: the recorded code only when all hold —
+        the run is `stage_failed`; its pending step's number and its args' `input_sha256` equal the recorded `step`
+        and `input_sha256`; and that step's dead job key has `error_code` `AgentError`. Otherwise null. The key's code
+        comes from SRV-EVENTS FR-EVENTS-17 `dead_error_code_of(conn, kind, key)` (paired amendment, the published
+        read); the pipeline never queries `job_keys` itself. So a code recorded for another step, for an earlier input of
+        the same step, or before a later death of another kind (a transient exhaustion, a timeout) is never shown.
+      - **Resume.** `POST /api/compiles/{run_id}/resume` sets `stage_error` to null in a committed transaction before
+        `requeue_dead`. If the process dies between the two, the run stays `stage_failed` with `error: null` (the
+        code is lost and the UI shows the generic stopped copy); a second resume works as before.
+      The code is fixed text from the allow-list, never a message. [db] server/tests/pipeline/test_stage_error_db.py:
+      an owner without a provider (`provider_missing` at `draft`) gives `stage_failed` with `error:
+      "provider_missing"` and the stored `{step, input_sha256, code}`; after resume, `error` and the column are null
+      and the run converges; a step that dies of exhausted transient attempts gives `error: null` and nothing
+      stored; a recorded code whose `input_sha256` differs from the pending step's (a changed input at the same
+      step) is not reported; a code recorded for the pending step's own input is not reported when the key died of
+      a transient exhaustion; a code recorded for step 1 is not reported when step 2 stopped; a code outside the
+      allow-list is not recorded and clears a stale record (null); a failing `runs.record_stage_error` (replaced by
+      the test) still lets the original exception through, with one log line naming only the run and code; the job
+      key's own `error_code` stays `AgentError`; the migration's downgrade drops the column.
+  # Amendment (2026-11-23, V/compile-ui round 2): the list's run-state source for WEB-UI FR-UI-15. A revision exists
+  # from the draft step on, so `latest_sha256` cannot tell an owner whether a lesson's compile finished.
+  - id: FR-PIPELINE-17
+    text: >-
+      **Open runs.** `GET /api/compiles` (owner role only, others 404, as FR-PIPELINE-11) returns `{"runs": [...]}`:
+      for each of the owner's lessons its latest run (`created_at` descending, ties broken by `id` ascending, the
+      order FR-PIPELINE-11's `GET /api/lessons/{lesson_id}/compile` uses), kept when it is unfinished
+      (`finished_at` null) or ended with a budget refusal (`budget_refused` set), in that same order, at most
+      `bounds.open_runs_max` = 100 (structural: one run per lesson at a time, started by the owner's own clicks;
+      more are cut, newest kept). Each entry is that run's FR-PIPELINE-11 status (with FR-PIPELINE-16's `error`),
+      so the derived state is one of `running`, `stalled`, `stage_failed` or `budget_exhausted`; a run whose derived
+      state is `converged` or `open_findings` is dropped. Like the other status routes it calls `ensure` per run, so
+      a list view re-enqueues a stalled run.
+      Known costs and limits (recorded, accepted for v1): every read derives each open run, about 8 queries per run
+      (run, steps, current revision, job status, dead code, ledger, and ensure's re-derive), on every list poll while
+      a run is `running` or `stalled`, so 100 open runs mean about 800 queries per 5 s poll; a run whose next step's
+      input cannot be computed (its lesson cannot be loaded, a `PipelineError`, or its stage's model cannot be
+      resolved or priced, an SRV-AGENT `AgentError` from `step_input`; FR-PIPELINE-6's `derive` treats both as "no
+      args", so neither turns the read into a 500) stays `stalled`, is never re-enqueued and shows "Compiling" in
+      the list until FR-UI-15's 30-minute polling stop.
+      [db] server/tests/pipeline/test_open_runs_db.py: a running run, a
+      stage_failed run, a budget-refused run and a converged run of four lessons give the first three, newest first;
+      a lesson's older stopped run under a newer converged run is not listed; another owner's runs (rows under a
+      second owner id) are not listed; a learner gets 404; a stalled run is re-enqueued by the read; 101 lessons with
+      a budget-refused run each give exactly 100 entries, the oldest cut; two runs with the same `created_at` list in
+      `id` order, the same one `GET /api/lessons/{lesson_id}/compile` returns; a stage whose `step_input` raises
+      `AgentError` leaves the read 200 with that run `stalled`.
 
 invariants:
   - id: INV-PIPELINE-1

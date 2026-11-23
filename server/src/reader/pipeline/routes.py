@@ -134,15 +134,24 @@ async def resume(ctx: Ctx) -> Response:
     if state["state"] != "stage_failed" or pending is None or pending["args"] is None:
         return error(409, "not_failed")
     kind = runs.kind_for(pending["stage"])
+    await runs.record_stage_error(ctx.engine, run, None)  # FR-PIPELINE-16: committed before the requeue
     await jobs.requeue_dead(kind, idempotency_key(jobs.catalog[kind], pending["args"]))
     result = await runs.status(ctx.engine, jobs, ctx.signed_in.id, run)
     return JSONResponse(result, status_code=202)
+
+
+async def open_runs(ctx: Ctx) -> Response:
+    """FR-PIPELINE-17: the owner's open runs (unfinished or budget-stopped), for the lesson list."""
+    if not _owner(ctx):
+        return error(404, "not_found")
+    return JSONResponse({"runs": await runs.open_runs(ctx.engine, _jobs(ctx), ctx.signed_in.id)})
 
 
 ROUTES: tuple[Route, ...] = (
     Route("POST", "/api/pipeline/courses", "session", import_course),
     Route("POST", "/api/lessons/{lesson_id}/compile", "session", compile_lesson),
     Route("GET", "/api/lessons/{lesson_id}/compile", "session", latest_run),
+    Route("GET", "/api/compiles", "session", open_runs),
     Route("GET", "/api/compiles/{run_id}", "session", get_run),
     Route("POST", "/api/compiles/{run_id}/resume", "session", resume),
 )

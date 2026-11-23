@@ -21,12 +21,13 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader import blobs
-from reader.agent.errors import BudgetRefused
+from reader.agent.errors import AgentError, BudgetRefused, TransientAgentError
 from reader.agent.provider import StageCall
 from reader.jobs import JobContext
 from reader.lessons.store import write_revision
 from reader.pipeline import g2 as g2_mod
 from reader.pipeline import notebook as nb_mod
+from reader.pipeline import runs
 from reader.pipeline import runtime as runtime_mod
 from reader.pipeline.errors import InputNotReady
 from reader.pipeline.findings import Problem, append_findings, problems_from, stamp_labs
@@ -167,6 +168,23 @@ async def _model_step(
     return None, report, result.model, result.sdk_usd
 
 
+async def _record_stage_error(
+    conn: AsyncConnection, run: RunRow, step: int, input_sha: str, code: str
+) -> None:
+    """FR-PIPELINE-16: an allow-listed code is recorded, any other permanent code clears the record.
+
+    Called through the `runs` module so tests can replace it; a failed write is logged (run and code only)
+    and swallowed, so the caller re-raises the original exception.
+    """
+    value = (
+        {"step": step, "input_sha256": input_sha, "code": code} if code in runs.STAGE_ERROR_CODES else None
+    )
+    try:
+        await runs.record_stage_error(conn.engine, run.id, value)
+    except Exception:  # the original failure matters, not the record's
+        log.warning("compile_stage_error_not_recorded run=%s code=%s", run.id, code)
+
+
 async def _handle(conn: AsyncConnection, run: RunRow) -> str:
     handle = (
         await conn.execute(text("SELECT handle FROM users WHERE id = :u"), {"u": run.owner_id})
@@ -233,6 +251,11 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
                 await _refused(conn, jobs, rt, run, lesson, steps, refused.code)
                 log.info("compile_budget_refused run=%s stage=%s code=%s", run.id, stage, refused.code)
                 return
+            except TransientAgentError:
+                raise
+            except AgentError as failure:  # FR-PIPELINE-16: a permanent code, recorded for the status routes
+                await _record_stage_error(conn, run, args.step, args.input_sha256, failure.code)
+                raise
         if notebook is None:
             notebook = current
         if stage in ("fact_check", "adversarial_review"):

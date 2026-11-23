@@ -270,6 +270,40 @@ requirements:
       **Logging.** Preview and confirm log one structured line each: event, material sha256 prefix (12 hex),
       lesson_count, fits, plan_sha256 prefix, duration_ms, and for confirm `replayed`, the created and removed lesson
       counts and whether a compile run was created. [unit]
+  # Amendment (2026-11-23, V/compile-ui, for WEB-UI FR-UI-15): the owner's Compile confirm shows a per-lesson
+  # estimate. No existing route gives a lesson's characters (`GET /api/lessons` has none; the preview's lessons carry
+  # pages and minutes only, and a re-plan may move unstarted lessons), so this one read-only route is added.
+  - id: FR-PLAN-13
+    text: >-
+      **Per-lesson estimate.**
+      - **The function** `reader.plan.estimate.lesson_estimate(chars: int) -> dict` (pure, `decimal.Decimal`)
+        returns `{kchars, low_usd, high_usd, run_cap_usd, basis, basis_kchars, extrapolated}`: `low_usd` and
+        `high_usd` are FR-PLAN-8's per-lesson `low` and `high` of `chars` (the same functions, the high end at most
+        `run_cap_usd`), rounded to cents half up; `kchars` is `chars / 1000` with three decimals, half up;
+        `run_cap_usd`, `basis` ("L02") and `basis_kchars` as FR-PLAN-8; `extrapolated` is true when `chars / 1000`
+        lies outside `estimate_band` × `basis_kchars` (29.469–117.876, inclusive). [unit]
+        server/tests/plan/test_lesson_estimate.py, vectors: 29,468 → extrapolated true; 29,469 → false; 117,876 →
+        false; 117,877 → true; 58,938 → "1.26"–"2.97", false; 200,000 → kchars "200.000", low "4.27", high "8.00"
+        (the cap), true; 0 → "0.000", "0.00"–"0.00", true; and for every vector, FR-PLAN-8's `first_lesson` of a
+        one-lesson plan of the same characters gives the same low and high.
+      - **The characters** `reader.plan.store.lesson_chars(conn, owner_id, lesson_id) -> int | None`: for one of the
+        owner's lessons that has a `course_plans` row of that owner (SRV-PIPELINE FR-PIPELINE-1, both origins, so the
+        pilot's manifest lessons too), the sum of `char_length(text)` over the spans of that owner's ingest of the
+        row's material (`material_sha256`) on pages `pdf_first..pdf_last` (0 when there are none): the same per-page
+        sum as FR-PLAN-9's `page_chars`, so for a study plan's lesson it equals that lesson's FR-PLAN-5 `chars`.
+        None for a lesson without such a row or a material without an ingest. Every table is filtered by `owner_id`.
+      - **The route** `GET /api/lessons/{lesson_id}/estimate` (in `reader.plan.routes.ROUTES`; a session; role
+        `owner`, else 403 `owner_only`, as FR-PLAN-9) returns `{lesson_id}` plus `lesson_estimate(lesson_chars(…))`;
+        a lesson id that is not a UUID, or `lesson_chars` None, is 404 `not_found`. Read-only: it writes nothing and
+        starts nothing.
+      [db] server/tests/plan/test_lesson_estimate_db.py pins the wiring: a planned lesson's answer equals
+      `lesson_estimate` of its pages' characters (and, for the plan's first lesson, the preview's
+      `estimate.first_lesson`); a manifest lesson; a lesson whose pages have no spans; rows of the same material and
+      pages under a second owner id (a material with the same sha256, its ingest and spans with other text lengths,
+      inserted before the owner's own, so they are the first rows a query without the owner filter would meet;
+      `course_plans` cannot name another owner's lesson, its foreign key is (lesson_id, owner_id)) change nothing
+      for the owner, and `lesson_chars` with the second owner's id is None; 404 for a non-UUID id, an
+      unknown id and a lesson whose `course_plans` row is gone; 403 for a learner; no row written.
 
 invariants:
   - id: INV-PLAN-1
@@ -360,4 +394,4 @@ owner_notes:
   - "4. A re-plan keeps your deadline: the start date of your first plan stays, started lessons stay as they are, and the rest of the source is spread over the days left until the deadline. Past the deadline the page suggests more weeks; changing the weeks moves the deadline from the original start. A lesson you start ahead of its calendar day takes no day, so compiling ahead leaves more days for the rest. This rule was decided by the coordinator for you (owner decision 4); you can overrule it, for example to restart the deadline from the re-plan day."
   - "5. Confirm with 'compile lesson 1' spends credit (about the first lesson's estimate) under your existing compile cap and monthly budget; the checkbox shows the amount."
 
-review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent. Green (2026-11-23): one Red oracle was a hand error and is corrected — the hash test's pages (1000, 2000, 3000) pack into [1-2], [3] (t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end, is dropped), not [1], [2], [3]; no requirement changed. Code review of e244aa4 (changes): VEC-PLAN-1 adds the ceil-vs-floor and `days`-reason cases; [db] tests pin that confirm and the manifest route wait for the course lock, owner-only on confirm and GET with nothing written, and the store's owner filters; INV-PLAN-5(c) names `lesson_unknown` and marks the race test's second half sequential; the live check restores an existing owner plan; the confirm UI fix is WEB-PLAN's. Code review round 2 on a8a0408: VERDICT approve, every mutant killed. Before the merge: the live check previews the owner's stored inputs first and skips its mutating steps when that plan does not fit today, so the restore cannot fail halfway (fake-tested)."
+review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent. Green (2026-11-23): one Red oracle was a hand error and is corrected — the hash test's pages (1000, 2000, 3000) pack into [1-2], [3] (t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end, is dropped), not [1], [2], [3]; no requirement changed. Code review of e244aa4 (changes): VEC-PLAN-1 adds the ceil-vs-floor and `days`-reason cases; [db] tests pin that confirm and the manifest route wait for the course lock, owner-only on confirm and GET with nothing written, and the store's owner filters; INV-PLAN-5(c) names `lesson_unknown` and marks the race test's second half sequential; the live check restores an existing owner plan; the confirm UI fix is WEB-PLAN's. Code review round 2 on a8a0408: VERDICT approve, every mutant killed. Before the merge: the live check previews the owner's stored inputs first and skips its mutating steps when that plan does not fit today, so the restore cannot fail halfway (fake-tested). Amendment 2026-11-23 (V/compile-ui): FR-PLAN-13, a read-only per-lesson estimate route for WEB-UI FR-UI-15's Compile confirm, reusing FR-PLAN-8's functions. Round 1 (cc817d0, changes): a pure `lesson_estimate(chars)` with band-edge and cap vectors, `lesson_chars` with owner filters pinned by a second owner's rows; the [db] test pins only the wiring. Round 2 on 08534df: VERDICT approve (deep-reviewer, run by the coordinator). Approved by agent. Code review (2026-11-24, on cb81aff): VERDICT approve; the owner-filter test now inserts the second owner's material first."
