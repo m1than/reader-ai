@@ -15,8 +15,19 @@ The proxy on 127.0.0.1:8080 (ANTHROPIC_BASE_URL) forwards only `POST /v1/message
   - every request is refused with 403 once spent + its worst case would pass CAP_USD (default 0.10): worst case =
     body characters / 2.0 tokens at the model's 1-hour cache-write rate + max_tokens at the output rate, plus, for a
     search request, $0.01 and T_MAX = 20,000 result tokens at the 1-hour rate (H-WS-3's chosen upper end);
-  - only models in RATES are forwarded (Haiku 5.5 and Sonnet 5.5); anything else gets 403 and is recorded.
-The SDK's own `max_budget_usd` is the same cap as a second guard.
+  - only Haiku 5.5 is forwarded; anything else gets 403 and is recorded;
+  - a request whose `tools` hold any server tool (an entry with a `type`) other than `web_search_20250305`, or a
+    non-empty `mcp_servers`, gets 403;
+  - before forwarding, a `reserve` line (the request's worst case) is appended to /out/numbers/ledger.jsonl and
+    flushed; after the response, a `settle` line with the cost. A 200 that is not an SSE stream is parsed as JSON for
+    its usage; if no usage can be read, or the upstream call fails after sending, the settle line carries the worst
+    case. A run killed in between leaves its reserve lines, which run-live.sh counts as spent.
+The SDK run aborts as soon as the init tool list is not exactly ["WebSearch"]. The proxy server's error handler prints
+only the exception type, never a traceback with request data. The SDK's own `max_budget_usd` is the same cap as a
+second guard.
+
+Hardened 2026-11-23 after the owner's run at d9f96f0 (deep-reviewer round 2 list); the run's results came from the
+unhardened version.
 """
 
 import asyncio
@@ -24,6 +35,7 @@ import http.client
 import json
 import os
 import ssl
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -34,21 +46,24 @@ UPSTREAM = "api.anthropic.com"
 DRY_PORT = int(os.environ.get("DRY_UPSTREAM_PORT", "0") or 0)
 PROXY_PORT = int(os.environ.get("PROXY_PORT", "8080"))
 CAP_USD = float(os.environ.get("CAP_USD", "0.10"))
-MODEL = os.environ.get("MODEL", "claude-haiku-5-5")
+MODEL = "claude-haiku-5-5"            # fixed: the owner approved Haiku only (2026-11-23)
+SEARCH_TOOL_TYPE = "web_search_20250305"
 SEARCHES_MAX = 1
 REQUESTS_MAX = 6
 T_MAX = 20000
 MAX_OUT = "1000"
 OUT = Path("/out/numbers")
 # $/MTok (spikes/web-search/RESULT.md § 2, platform pricing page fetched 2026-11-23)
+# Haiku 5.5's higher tier (prompts over 100k tokens) is used for every worst case, so the cap holds in either tier.
 RATES = {
     "claude-haiku-5-5": {"in": 0.10, "w5m": 0.125, "w1h": 0.20, "read": 0.01, "out": 0.50},
-    "claude-sonnet-5-5": {"in": 2.0, "w5m": 2.50, "w1h": 4.0, "read": 0.10, "out": 10.0},
 }
+RATES_HIGH = {"claude-haiku-5-5": {"in": 0.50, "w5m": 0.625, "w1h": 1.00, "read": 0.05, "out": 2.50}}
+LEDGER = OUT / "ledger.jsonl"
 FEE = 0.01
 FORWARD_HEADERS = {"accept", "anthropic-beta", "anthropic-dangerous-direct-browser-access", "anthropic-version",
                    "authorization", "content-type", "user-agent", "x-app", "x-claude-code-session-id"}
-LOCK = threading.Lock()
+LOCK = threading.RLock()   # re-entrant: refuse() is also called while the lock is held
 STATE: dict = {"spent_usd": 0.0, "searches": 0, "requests": 0, "records": [], "refused": []}
 
 # For comparison only (the gate decides on the verbatim planned query): the vocabulary of the prompt's metadata plus
@@ -79,7 +94,7 @@ def in_vocab(tok: str) -> bool:
 
 
 def worst_usd(payload: dict, body_len: int) -> float:
-    r = RATES[payload.get("model", "")]
+    r = RATES_HIGH[payload.get("model", "")]
     w = body_len / 2.0 * r["w1h"] / 1e6 + int(payload.get("max_tokens") or 0) * r["out"] / 1e6
     if is_search(payload):
         w += FEE + T_MAX * r["w1h"] / 1e6
@@ -90,8 +105,25 @@ def is_search(payload: dict) -> bool:
     return any(str(t.get("type", "")).startswith("web_search") for t in payload.get("tools") or [])
 
 
+def foreign_server_tool(payload: dict) -> bool:
+    return bool(payload.get("mcp_servers")) or any(
+        "type" in t and t.get("type") != SEARCH_TOOL_TYPE for t in payload.get("tools") or [])
+
+
+def ledger(line: dict) -> None:
+    with LOCK, open(LEDGER, "a") as f:
+        f.write(json.dumps(line) + "\n")
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def prompt_tokens(usage: dict) -> int:
+    return ((usage.get("input_tokens") or 0) + (usage.get("cache_creation_input_tokens") or 0)
+            + (usage.get("cache_read_input_tokens") or 0))
+
+
 def cost_of(model: str, usage: dict) -> float:
-    r = RATES[model]
+    r = (RATES_HIGH if prompt_tokens(usage) > 100_000 else RATES)[model]
     cc = usage.get("cache_creation") or {}
     w5, w1 = cc.get("ephemeral_5m_input_tokens"), cc.get("ephemeral_1h_input_tokens")
     if w5 is None and w1 is None:
@@ -141,6 +173,12 @@ def parse_sse(raw: bytes) -> dict:
             "search_results": results, "keys": keys}
 
 
+class QuietServer(ThreadingHTTPServer):
+    def handle_error(self, request: object, client_address: object) -> None:
+        # The default prints a traceback, whose frames could hold request data; print the type only.
+        print(f"proxy error: {sys.exc_info()[0].__name__ if sys.exc_info()[0] else 'unknown'}", file=sys.stderr)
+
+
 class Proxy(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -171,6 +209,8 @@ class Proxy(BaseHTTPRequestHandler):
         model = payload.get("model", "")
         if model not in RATES:
             return self.refuse("model")
+        if foreign_server_tool(payload):
+            return self.refuse("server_tool")
         search = is_search(payload)
         rec = {"kind": "search" if search else "main", "model": model, "max_tokens": payload.get("max_tokens"),
                "top_level_keys": sorted(payload.keys()), "thinking": payload.get("thinking"),
@@ -183,37 +223,62 @@ class Proxy(BaseHTTPRequestHandler):
                 return self.refuse("request_cap")
             if search and STATE["searches"] >= SEARCHES_MAX:
                 return self.refuse("search_cap")
-            if STATE["spent_usd"] + worst_usd(payload, len(body)) > CAP_USD:
+            worst = worst_usd(payload, len(body))
+            if STATE["spent_usd"] + worst > CAP_USD:
                 return self.refuse("cap_usd")
             STATE["requests"] += 1
+            n = STATE["requests"]
+            STATE["spent_usd"] += worst          # held at the worst case until the response settles it
             if search:
                 STATE["searches"] += 1
                 for t in payload["tools"]:
                     if str(t.get("type", "")).startswith("web_search"):
                         t["max_uses"] = 1
                 body = json.dumps(payload).encode()
+        ledger({"reserve": n, "usd": round(worst, 6)})
         headers = {k: v for k, v in self.headers.items() if k.lower() in FORWARD_HEADERS
                    or k.lower().startswith("x-stainless-")}
         headers["Content-Length"] = str(len(body))
         t0 = time.monotonic()
         conn = (http.client.HTTPConnection("127.0.0.1", DRY_PORT, timeout=300) if DRY_PORT else
                 http.client.HTTPSConnection(UPSTREAM, 443, timeout=300, context=ssl.create_default_context()))
-        conn.request("POST", self.path, body=body, headers=headers)
-        resp = conn.getresponse()
-        raw = resp.read()
+        try:
+            conn.request("POST", self.path, body=body, headers=headers)
+            resp = conn.getresponse()
+            raw = resp.read()
+        except Exception as exc:  # sent or not, the outcome is unknown: settle at the worst case
+            rec.update({"status": None, "error_type": type(exc).__name__, "usd": round(worst, 6),
+                        "usd_basis": "worst_case"})
+            with LOCK:
+                STATE["records"].append(rec)
+            ledger({"settle": n, "usd": round(worst, 6), "basis": "worst_case"})
+            conn.close()
+            return self.refuse("upstream_failed")
         rec["status"] = resp.status
         rec["seconds"] = round(time.monotonic() - t0, 2)
-        if resp.status == 200 and "event-stream" in (resp.getheader("Content-Type") or ""):
+        ctype = resp.getheader("Content-Type") or ""
+        if resp.status == 200 and "event-stream" in ctype:
             rec.update(parse_sse(raw))
-            rec["usd"] = round(cost_of(model, rec["usage"]), 6)
+        elif resp.status == 200:
+            try:
+                rec["usage"] = json.loads(raw).get("usage") or {}
+            except (ValueError, AttributeError):
+                rec["usage"] = {}
         else:
             try:
                 rec["error_type"] = (json.loads(raw).get("error") or {}).get("type")
-            except ValueError:
+            except (ValueError, AttributeError):
                 rec["error_type"] = None
+        if resp.status == 200 and rec.get("usage"):
+            rec["usd"], rec["usd_basis"] = round(cost_of(model, rec["usage"]), 6), "usage"
+        elif resp.status == 200:
+            rec["usd"], rec["usd_basis"] = round(worst, 6), "worst_case"   # a 200 without readable usage
+        else:
+            rec["usd"], rec["usd_basis"] = 0.0, "error_status"
         with LOCK:
-            STATE["spent_usd"] += rec.get("usd", 0.0)
+            STATE["spent_usd"] += rec["usd"] - worst
             STATE["records"].append(rec)
+        ledger({"settle": n, "usd": rec["usd"], "basis": rec["usd_basis"]})
         self.send_response(resp.status)
         for k in ("Content-Type", "request-id", "retry-after"):
             if resp.getheader(k):
@@ -257,6 +322,9 @@ async def run() -> dict:
                            options=opts):
         if type(msg).__name__ == "SystemMessage" and getattr(msg, "subtype", None) == "init":
             out["init_tools"] = (getattr(msg, "data", {}) or {}).get("tools")
+            if out["init_tools"] != ["WebSearch"]:
+                out["aborted"] = "init_tools_mismatch"
+                break                          # stop before reading any assistant output (SRV-AGENT FR-AGENT-7)
         if isinstance(msg, UserMessage) and isinstance(getattr(msg, "tool_use_result", None), dict):
             tur = msg.tool_use_result
             out["tool_use_result_keys"].append(sorted(tur.keys()))
@@ -273,7 +341,7 @@ async def run() -> dict:
 
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
-    srv = ThreadingHTTPServer(("127.0.0.1", PROXY_PORT), Proxy)
+    srv = QuietServer(("127.0.0.1", PROXY_PORT), Proxy)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     t0 = time.monotonic()
     try:
@@ -284,6 +352,8 @@ def main() -> None:
     srv.shutdown()
     recs = STATE["records"]
     proxy_sum = round(sum(r.get("usd", 0.0) for r in recs), 6)
+    if (sdk.get("aborted")) and error is None:
+        error = sdk["aborted"]
     by_model: dict = {}
     for r in recs:
         m = by_model.setdefault(r["model"], {"requests": 0, "input": 0, "output": 0, "web_search_requests": 0})
