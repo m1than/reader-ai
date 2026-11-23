@@ -160,7 +160,7 @@ requirements:
       capitalised and `_` shown as a space; the status is not repeated beside it), and, when `finding.gate` is `G2`, the
       text "Not yet confirmed by the source:" followed by the finding's reason as plain text, muted. The lesson header
       shows the count of such cells and links to the first one.
-      Design pass: the cell is a callout block (`--acme-surface` background, `--radius-block`, a 3px `--acme-warning`
+      Design pass: the cell is a callout block (class `callout`, `--acme-surface` background, `--radius-block`, a 3px `--acme-warning`
       bar at the inline start inside the block, so the bar no longer runs across the cell separators): a title row with
       the warning icon (`aria-hidden`), "Open question" and the status chip, then the G2 line, then the source. The header's count is a link styled as a warning chip ("4 open findings"). [unit] the chip
       text, the G2 line, the reason as text; [story]
@@ -261,8 +261,12 @@ requirements:
         the slice's 24-row text area scrolled inside itself); a 4-space indent unit; Tab and Shift+Tab indent and
         dedent (`indentWithTab`), Escape then Tab moves focus out of the editor (CodeMirror's rule, stated in a visually
         hidden hint linked by `aria-describedby`); Shift+Enter and Mod+Enter run the lab with the editor's text; the
-        content element has the accessible name "Lab <n> code". The edited text lives in memory for the open view as
+        content element, and the fallback text area, have the accessible name "Lab <n> code". The edited text lives in memory for the open view as
         before; Revert replaces the editor's text with the revision's source.
+      The lesson view takes the chunk loader as an optional prop `loadEditor` (default: the lazy import of
+      `web/src/notebook/editor.ts`), so tests and stories can hold it pending, fail it or hand in a stub editor; the
+      chunk exports `mountEditor(host: HTMLElement, {doc, label, onChange(text), onRun(text)})` returning
+      `{setDoc(text), focus(), destroy()}`; it attaches the open shadow root to `host` and mounts the editor there.
       [unit] the block header (texts, which buttons are visible in each run state, Revert disabled until an edit, Copy
       with a stub clipboard: written text, "Copied", the status texts, failure), the fallback text area before the chunk
       resolves and after it rejects, Shift+Enter and Mod+Enter calling `run` with the edited text through the editor
@@ -283,7 +287,7 @@ requirements:
       not the library's collapsible (`details` is keyboard- and screen-reader-operable without script, and a card's
       answer needs no animation). This is display only: diagnostic routing and recall review stay deferred.
       **Recall deck (design pass; L02's 8 recall cells were 8 full-height cells in a row):** each run of adjacent recall
-      cells renders as one deck: a `section` with the heading (`h2`, sans) "Recall cards (<n>)" and a toggle button
+      cells renders as one deck: a `section` (class `recall-deck`) with the heading (`h2`, sans) "Recall cards (<n>)" and a toggle button
       "Show all answers" / "Hide all answers" (it opens or closes every card's disclosure in the deck; shown only when
       at least one card has a `back`), then the cards in a grid (two columns at 40rem and wider, one below), each card
       a block (`--radius-block`, `--acme-border`) holding the front and its "Show answer" disclosure. Each card keeps
@@ -325,6 +329,9 @@ requirements:
         `navigator.clipboard.writeText` and announces "Cell text copied" in a visually hidden `role="status"`) and "Ask"
         (accessible name "Ask the tutor about this cell"; focuses the cell, so the tutor's "About:" names it, and opens
         the tutor panel). Hidden toolbars are `opacity: 0` (still in the tab order, so `:focus-within` reveals them).
+      - **Tutor panel state.** The lesson view owns the tutor panel's open state (SRV-TUTOR FR-TUTOR-11) and passes
+        `{open, close}` as the third argument of the `aside` render prop, after the focused cell's id and label; the
+        toolbar's "Ask the tutor" (ghost), the contents entry, a cell toolbar's "Ask" and `/` set it open.
       - **Keyboard shortcuts.** On the lesson page, outside an editable field (a text area, an input, the editor) and
         without Ctrl, Alt or Meta: `j` and `k` focus the next and previous cell (`tabIndex={-1}` targets, scrolled into
         view); `/` opens the tutor panel and focuses its text area; `?` opens a dialog "Keyboard shortcuts" listing

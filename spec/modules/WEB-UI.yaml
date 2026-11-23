@@ -309,7 +309,8 @@ requirements:
       menu: a ghost button showing the `display_name` that opens the library `Menu` with the theme choice (FR-UI-16)
       and "Sign out" (FR-UI-5). The header is one row at every width down to 360px (below 40rem the brand text and the
       display name are visually hidden, their icons stay).
-      **State blocks.** Every empty, not-found, not-published and error state renders one `StateBlock` component: an
+      **State blocks.** Every empty, not-found, not-published and error state renders one `StateBlock` component
+      (`web/src/ui/StateBlock.tsx`, root class `state-block`): an
       icon (`aria-hidden`), its `h1` in the app page title style (FR-UI-10), a muted explanation line and its actions
       in one row (Retry as the default-size outline button, links as ghost links). No error text is an `h1` in the
       serif (the audit found "The lesson could not be loaded." as a 36px serif heading).
@@ -357,7 +358,10 @@ requirements:
       `--acme-hover` fill; unpublished rows are muted text with FR-UI-6's compile slot. A closed group shows no rows; an
       open group of at most 12 lessons shows them all; an open group of more than 12 shows its published rows and the
       current one, plus "Show all <N>" (then "Show fewer"), as FR-UI-6. The group holding the current lesson starts
-      open, the others closed. It is links in disclosure lists, not the library's `tree-view` (FR-UI-1). Placement: at 75rem and wider a sticky column (15rem) at the inline start of every app page, at most
+      open, the others closed. It is links in disclosure lists, not the library's `tree-view` (FR-UI-1). While the
+      lessons load, the sidebar shows the library `Skeleton` hidden from assistive technology and no `role="status"`
+      (the page's own status speaks, FR-UI-11); if the query fails it shows "Courses could not be loaded." with a
+      Retry ghost button. Placement: at 75rem and wider a sticky column (15rem) at the inline start of every app page, at most
       the viewport height tall and scrolling inside itself; below 75rem it is not displayed, and the header's "Courses"
       button (FR-UI-11) opens it in the library `Drawer` (side inline-start, modal, Escape and the backdrop close it,
       following a link closes it and focus returns to the button). [unit] grouping, counts, current lesson, expansion,
