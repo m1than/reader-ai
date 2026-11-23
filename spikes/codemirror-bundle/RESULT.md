@@ -27,7 +27,8 @@ shared with nothing else in the app today). The number is the order of magnitude
 
 `style-mod` (CodeMirror's style injector, `src/style-mod.js` line 119) uses constructable stylesheets
 (`adoptedStyleSheets`) only when the root has no `head`, that is a shadow root; mounted in the document it appends a
-`<style>` element. Probe (`probe.mjs` in the scratchpad, Chromium from Playwright, page and bundle served with the
+`<style>` element. Probe (`spikes/codemirror-bundle/probe.mjs`, **Chromium only**, from Playwright; Safari and
+Firefox are unmeasured, though both ship `adoptedStyleSheets`; page and bundle served with the
 exact app CSP of `deploy/Caddyfile`, one editor mounted in a plain `div` and one in an open shadow root with
 `EditorView({root: shadowRoot})`):
 

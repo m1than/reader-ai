@@ -1,5 +1,8 @@
-// @trace FR-UI-9 NFR-UI-1
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+// @trace FR-UI-9 NFR-UI-1 FR-UI-11 NFR-NOTEBOOK-1
+// One production build for the build checks, WEB-UI's initial-chunk budget and WEB-NOTEBOOK's editor-chunk budget
+// (design pass review: shared build). `sourcemap: 'hidden'` writes maps without a sourceMappingURL comment, so the
+// measured bytes are the served ones.
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
@@ -15,7 +18,13 @@ beforeAll(async () => {
   const previous = process.env.NODE_ENV;
   process.env.NODE_ENV = 'production';
   try {
-    await build({ root: webRoot, configFile: `${webRoot}vite.config.ts`, mode: 'production', logLevel: 'silent', build: { outDir, emptyOutDir: true } });
+    await build({
+      root: webRoot,
+      configFile: `${webRoot}vite.config.ts`,
+      mode: 'production',
+      logLevel: 'silent',
+      build: { outDir, emptyOutDir: true, sourcemap: 'hidden' },
+    });
   } finally {
     process.env.NODE_ENV = previous;
   }
@@ -62,6 +71,43 @@ describe('bundle budget (NFR-UI-1)', () => {
     const size = initial.reduce((sum, f) => sum + gzipSync(readFileSync(join(outDir, f)), { level: 9 }).length, 0);
     console.info(`NFR-UI-1 initial JS gzip ${size} B over ${initial.length} chunks`);
     expect(threshold).toBeGreaterThan(0);
+    expect(size).toBeLessThanOrEqual(threshold);
+  });
+});
+
+// Every chunk's sources, from its hidden source map.
+const sourcesOf = (asset: string): string[] => {
+  const map = join(outDir, `${asset}.map`);
+  return existsSync(map) ? (JSON.parse(readFileSync(map, 'utf8')) as { sources: string[] }).sources : [];
+};
+const initialChunks = () => {
+  const html = readFileSync(join(outDir, 'index.html'), 'utf8');
+  return [...html.matchAll(/(?:src|href)="\/(assets\/[^"]+\.js)"/g)].map((m) => m[1]!);
+};
+
+describe('lazy menu, drawer and icons (FR-UI-11, design pass review B1)', () => {
+  it('keeps the library menu, drawer and icon entries, and CodeMirror, out of the initial chunks', () => {
+    const initial = initialChunks();
+    expect(initial.length).toBeGreaterThan(0);
+    const sources = initial.flatMap(sourcesOf);
+    expect(sources.length).toBeGreaterThan(10);
+    expect(sources.filter((s) => /@acme\/ui\/dist\/esm\/(menu|drawer|icon)\.js$/.test(s))).toEqual([]);
+    expect(sources.filter((s) => /node_modules\/@(codemirror|lezer)\//.test(s))).toEqual([]);
+  });
+});
+
+describe('editor chunk budget (NFR-NOTEBOOK-1)', () => {
+  it('puts CodeMirror in lazy chunks only, within the spec threshold', () => {
+    const spec = readYaml<{ nfr: Array<{ id: string; threshold: number }> }>('spec/modules/WEB-NOTEBOOK.yaml');
+    const threshold = spec.nfr.find((n) => n.id === 'NFR-NOTEBOOK-1')?.threshold ?? 0;
+    const assets = readdirSync(join(outDir, 'assets')).filter((f) => f.endsWith('.js')).map((f) => `assets/${f}`);
+    const chunks = assets.filter((a) => sourcesOf(a).some((s) => /node_modules\/@(codemirror|lezer)\//.test(s)));
+    expect(chunks.length).toBeGreaterThan(0);
+    const initial = new Set(initialChunks());
+    for (const c of chunks) expect(initial.has(c), c).toBe(false);
+    const size = chunks.reduce((sum, f) => sum + gzipSync(readFileSync(join(outDir, f)), { level: 9 }).length, 0);
+    console.info(`NFR-NOTEBOOK-1 editor chunks gzip ${size} B over ${chunks.length} chunks`);
+    expect(threshold).toBe(137768);
     expect(size).toBeLessThanOrEqual(threshold);
   });
 });

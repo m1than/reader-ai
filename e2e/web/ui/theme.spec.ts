@@ -16,10 +16,14 @@ test('a stored Light wins over a dark system scheme, and Dark from the menu reco
       localStorage.setItem('reader-ai.theme', 'light');
       sessionStorage.setItem('seeded', '1');
     }
-    (window as unknown as { __loads: number }).__loads = ((window as unknown as { __loads?: number }).__loads ?? 0) + 1;
+    // Review B5: the attribute must already be set in the first animation frame (before first paint).
+    requestAnimationFrame(() => {
+      (window as unknown as { __firstFrame: string | null }).__firstFrame = document.documentElement.dataset.theme ?? null;
+    });
   });
   await page.goto('/lessons/w01');
   await expect(page.getByRole('heading', { name: 'Digests' })).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __firstFrame?: string | null }).__firstFrame)).toBe('light');
   const canvas = () => page.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);
   expect(await canvas()).toBe(LIGHT_CANVAS);
   const keyword = page.locator('pre.shiki span', { hasText: /^import$/ }).first();

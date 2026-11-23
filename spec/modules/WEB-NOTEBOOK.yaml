@@ -63,7 +63,15 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   CodeMirror 6 editor in a shadow root (spike codemirror-bundle: the app CSP blocks style-mod's style element in the
   document), fallback text area; FR-NOTEBOOK-10 recall deck; FR-NOTEBOOK-11 breadcrumbs, current section, cell toolbar,
   keyboard shortcuts (the deferred editor and cell navigation leave `defers`); FR-NOTEBOOK-12 state blocks; new
-  NFR-NOTEBOOK-1 editor chunk budget. Pending: one deep-reviewer round on the spec diff (outside the complex areas)"
+  NFR-NOTEBOOK-1 editor chunk budget. deep-reviewer (Fable) single round on the spec diff (04e396b..d3c0a68, outside
+  the complex areas): changes; all findings applied without a second round (coordinator, 2026-11-23), each with its
+  fix in docs/progress.yaml V.design-pass `review`: B2 the not-published page takes the compile slot's status and
+  action; B4 the shortcut guard over the composed path (text fields, contenteditable, dialogs, menus,
+  defaultPrevented) with unit and browser cases; non-blocking: the editor's hint and focus outline inside its shadow
+  root with role and description checked in the browser and an axe run over the lab, the probe committed (Chromium
+  only), app-owned play and more icons, roving tab index and no Copy on code-cell toolbars, `j`/`k` by `event.code`,
+  every design-pass item marked as owner-approved, one shared build with WEB-UI's build test. Approved by agent
+  (coordinator, 2026-11-23)"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
@@ -102,7 +110,7 @@ normative:
     title: CodeMirror 6 reference manual (EditorView `root`, keymaps, `indentWithTab` and the Escape-then-Tab focus rule)
     url: https://codemirror.net/docs/ref/
   - id: REF-NOTEBOOK-7
-    title: spikes/codemirror-bundle/RESULT.md — editor chunk 125,244 B gzip; style-mod needs a shadow root under the app CSP
+    title: spikes/codemirror-bundle/RESULT.md — editor chunk 125,244 B gzip; style-mod needs a shadow root under the app CSP (probe.mjs committed; Chromium only, Safari unmeasured)
     url: spikes/codemirror-bundle/RESULT.md
   - id: REF-NOTEBOOK-8
     title: WAI-ARIA Authoring Practices — Disclosure Navigation Menu; Breadcrumb
@@ -124,12 +132,13 @@ requirements:
       cell's own heading by its element.)
       **Not-published page (design pass; the live page was a title and one sentence, a dead end):** the breadcrumbs of
       FR-NOTEBOOK-11, then WEB-UI FR-UI-11's `StateBlock` with the lesson title as its `h1`, the line "Lesson <ordinal>
-      of <course title> is not published yet.", a neutral status chip "Not published yet" (WEB-UI FR-UI-15's compile
-      status replaces its text), the compile slot (WEB-UI FR-UI-6's `compileAction`, nothing when absent), and links
-      "Previous: <title>" and "Next: <title>" to the nearest published lessons of the same course by ordinal (from the
-      cached `GET /api/lessons`; each omitted when there is none) and "All lessons of <course title>" to
-      `/#course-<course_id>`. [unit] the label rule, the not-published page (text, chip, slot present and absent, both
-      neighbours, none, one side); [story]
+      of <course title> is not published yet.", the status — the neutral chip "Not published yet", replaced by the
+      compile slot's `status` when that is non-null (WEB-UI FR-UI-6's `compileSlot`, the shape FR-UI-15 fills) — and the
+      slot's `action` when non-null (always visible here), and links "Previous: <title>" and "Next: <title>" to the
+      nearest published lessons of the same course by ordinal (from the cached `GET /api/lessons`; each omitted when
+      there is none) and "All lessons of <course title>" to `/#course-<course_id>`. [unit] the label rule, the
+      not-published page (text, the default chip, a slot's status replacing it and its action, a `null` slot result,
+      no slot, both neighbours, none, one side); [story]
   - id: FR-NOTEBOOK-2
     text: >-
       Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`
@@ -199,10 +208,11 @@ requirements:
       kernel asks for confirmation in a dialog that says it clears every open lesson's kernel state (SRV-KERNEL owner
       note), then calls `POST /api/kernel/reset` with no body. While a reset runs, Run (button and Shift+Enter) and
       Run all are disabled. A reset that fails (503 or any error other than 401) leaves a "Retry reset" control that
-      calls the reset again. Design pass: "Run all" is a ghost button with the play icon in the lesson toolbar; "Reset
-      kernel…" is an item of the toolbar's "More" menu (a ghost icon button with the library `MoreIcon` and the
-      accessible name "More lesson actions", the library `Menu`), shown in the danger colour, still opening the same
-      dialog; "Retry" and "Retry reset" stay visible toolbar buttons when they apply. [unit] the menu item opens the
+      calls the reset again. Design pass: "Run all" is a ghost button with the play icon (an app-owned inline SVG,
+      `aria-hidden`; the library has no play glyph) in the lesson toolbar; "Reset kernel…" is an item of the toolbar's
+      "More" menu (a ghost icon button with an app-owned "more" SVG and the accessible name "More lesson actions",
+      opening the library `Menu`, which ships in the lazy lesson-route chunk, not the initial one), shown in the danger
+      colour, still opening the same dialog; "Retry" and "Retry reset" stay visible toolbar buttons when they apply. [unit] the menu item opens the
       dialog, no solid button in the toolbar; [story]
   - id: FR-NOTEBOOK-8
     text: >-
@@ -245,8 +255,8 @@ requirements:
       - **Block.** A lab is a wide block (WEB-UI FR-UI-10) with `--radius-block` and a `--acme-border` border: a header
         row — "Python · Lab <n>" (n as in FR-NOTEBOOK-11), the execution count `[n]` and the run state (`role="status"`)
         muted, then at the end "Copy" (ghost, `CopyIcon`), "Revert" (ghost, disabled while the code equals the
-        revision's source), "Interrupt" (outline, only while running) and "Run" (solid, the play icon, `title` "Run
-        (Shift+Enter)") — then the editor, then the outputs inside the same block. Copy writes the editor's current text
+        revision's source), "Interrupt" (outline, only while running) and "Run" (solid, the app-owned inline SVG play
+        icon, `title` "Run (Shift+Enter)") — then the editor, then the outputs inside the same block. Copy writes the editor's current text
         with `navigator.clipboard.writeText`; on success the button's text reads "Copied" for 2 s (structural) and a
         visually hidden `role="status"` says "Code copied"; on failure it says "Copy failed".
       - **Editor.** CodeMirror 6 (state, view, commands, language, lang-python, lezer highlight; REF-NOTEBOOK-6), loaded
@@ -260,8 +270,13 @@ requirements:
         numbers; no line wrapping (horizontal scroll inside the editor); the editor grows with its content (no row cap,
         the slice's 24-row text area scrolled inside itself); a 4-space indent unit; Tab and Shift+Tab indent and
         dedent (`indentWithTab`), Escape then Tab moves focus out of the editor (CodeMirror's rule, stated in a visually
-        hidden hint linked by `aria-describedby`); Shift+Enter and Mod+Enter run the lab with the editor's text; the
-        content element, and the fallback text area, have the accessible name "Lab <n> code". The edited text lives in memory for the open view as
+        hidden hint "Press Escape, then Tab, to leave the editor."); Shift+Enter and Mod+Enter run the lab with the
+        editor's text; the content element, and the fallback text area, have the accessible name "Lab <n> code".
+        **Accessibility inside the shadow root (review):** `aria-describedby` does not cross a shadow boundary, so the
+        hint element is rendered inside the same shadow root and the content element's `aria-describedby` names its id
+        there; the content element keeps CodeMirror's `role="textbox"` and `aria-multiline="true"`; the 2px
+        `--acme-focus` outline on the focused editor (WEB-UI FR-UI-10) is declared in the editor's `EditorView.theme`,
+        since app.css does not reach into the shadow root. The edited text lives in memory for the open view as
         before; Revert replaces the editor's text with the revision's source.
       The lesson view takes the chunk loader as an optional prop `loadEditor` (default: the lazy import of
       `web/src/notebook/editor.ts`), so tests and stories can hold it pending, fail it or hand in a stub editor; the
@@ -271,9 +286,12 @@ requirements:
       with a stub clipboard: written text, "Copied", the status texts, failure), the fallback text area before the chunk
       resolves and after it rejects, Shift+Enter and Mod+Enter calling `run` with the edited text through the editor
       component's key handler; [browser] under the production CSP, a lab renders the CodeMirror editor with no
-      `securitypolicyviolation`, `.cm-gutters` computed `display: flex`, typing then Shift+Enter sends the edited code
-      (stubbed relay), Escape then Tab moves focus to the next control; [story] a lab idle, running with Interrupt,
-      done with output, Dark.
+      `securitypolicyviolation`, `.cm-gutters` computed `display: flex`, `.cm-content` with `role="textbox"` and an
+      `aria-describedby` that resolves inside the shadow root to the hint, a focused editor with a 2px outline, an axe
+      run that includes the lab block with no serious or critical issue, typing a line holding `j k / ?` lands in the
+      editor (no lesson shortcut fires: focus stays in the editor, `#tutor` stays hidden, no dialog opens), then
+      Shift+Enter sends the edited code (stubbed relay), and Escape then Tab moves focus out of the editor; [story] a
+      lab idle, running with Interrupt, done with output, Dark.
   - id: FR-NOTEBOOK-10
     text: >-
       Kinds whose content lives in `metadata.reader` (ADR-0004), shown as plain text after the cell's source (the live
@@ -318,27 +336,41 @@ requirements:
       below 60rem the list is not displayed (`display: none`, so its links are neither in the tab order nor in the
       accessibility tree) until the "Contents" button (`aria-expanded`, `aria-controls`) opens it, and following an
       entry closes it.
-      **Design pass (2026-11-23):**
+      **Design pass (2026-11-23; every item below was approved by the owner with the audit's P1 and P2 list — the
+      current section, the cell toolbar and the recall deck (FR-NOTEBOOK-10) as part of the P2 navigation and
+      component items, the keyboard shortcuts as the cheap P3 the owner allowed):**
       - **Current section.** While the lesson scrolls, the contents entry of the last entry target whose top has passed
         30% of the viewport height (an `IntersectionObserver`; the first entry before any has) carries
         `aria-current="location"` and the `--acme-hover` fill with the text in `--acme-text`; exactly one entry is
         current at a time.
       - **Cell toolbar.** Every cell other than a lab (whose block header has its own actions) has a toolbar at its
-        inline end, revealed on hover and on `:focus-within` and always shown under `(hover: none)`: "Copy" (ghost
-        icon button, accessible name "Copy cell text"; writes the cell's markdown source with
-        `navigator.clipboard.writeText` and announces "Cell text copied" in a visually hidden `role="status"`) and "Ask"
-        (accessible name "Ask the tutor about this cell"; focuses the cell, so the tutor's "About:" names it, and opens
-        the tutor panel). Hidden toolbars are `opacity: 0` (still in the tab order, so `:focus-within` reveals them).
+        inline end, revealed on hover and on `:focus-within` and always shown under `(hover: none)`. A markdown cell's
+        toolbar has "Copy" (ghost icon button, accessible name "Copy cell text"; writes the cell's markdown source with
+        `navigator.clipboard.writeText` and announces "Cell text copied" in a visually hidden `role="status"`) and
+        "Ask"; a non-lab code cell's toolbar has only "Ask" (its code block header already has "Copy code",
+        WEB-RENDER FR-RENDER-4). "Ask" (accessible name "Ask the tutor about this cell") focuses the cell, so the
+        tutor's "About:" names it, and opens the tutor panel. **Tab order (review: 27 cells must not add 54 tab
+        stops):** the toolbar's buttons have `tabIndex={-1}` until focus is inside their cell (the cell itself focused
+        by `j`/`k` or a contents link, or one of its controls), then `0` (roving), so Tab from a focused cell reaches
+        its toolbar and the rest of the lesson's tab order is unchanged.
       - **Tutor panel state.** The lesson view owns the tutor panel's open state (SRV-TUTOR FR-TUTOR-11) and passes
         `{open, close}` as the third argument of the `aside` render prop, after the focused cell's id and label; the
         toolbar's "Ask the tutor" (ghost), the contents entry, a cell toolbar's "Ask" and `/` set it open.
-      - **Keyboard shortcuts.** On the lesson page, outside an editable field (a text area, an input, the editor) and
-        without Ctrl, Alt or Meta: `j` and `k` focus the next and previous cell (`tabIndex={-1}` targets, scrolled into
-        view); `/` opens the tutor panel and focuses its text area; `?` opens a dialog "Keyboard shortcuts" listing
-        these keys, Shift+Enter (run a lab), Ctrl+Enter or ⌘+Enter (ask the tutor) and Escape (close a panel or dialog).
+      - **Keyboard shortcuts.** One `keydown` listener on the document while the lesson page is shown. **Guard
+        (review B4):** no shortcut fires when the event's `defaultPrevented` is set, when Ctrl, Alt or Meta is held, or
+        when the event's composed path (`event.composedPath()`, which crosses the editor's shadow root) contains a
+        `textarea`, an `input`, a `select`, an element with `isContentEditable` (the editor's content), or an element
+        with `role="dialog"`, `role="menu"` or `role="alertdialog"`. Otherwise: `j` and `k` focus the next and previous
+        cell (`tabIndex={-1}` targets, scrolled into view), matched by `event.code` `KeyJ` and `KeyK` so they work on a
+        Russian layout (where those keys type "о" and "л"); `/` (`event.key` `/`) opens the tutor panel and focuses its
+        text area; `?` (`event.key` `?`) opens a dialog "Keyboard shortcuts" listing these keys, Shift+Enter (run a
+        lab), Ctrl+Enter or ⌘+Enter (ask the tutor) and Escape (close a panel or dialog); a handled key calls
+        `preventDefault`.
       [unit] [story] the current-section rule with a stub `IntersectionObserver` (one current entry, moves with the
-      reported targets), the toolbar's buttons and copy text, each shortcut, shortcuts ignored inside a text area and
-      with a modifier; [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and visible after
+      reported targets), the toolbar's buttons, copy text, code-cell toolbar without Copy, the roving tab index, each
+      shortcut, `j` matched by `code` with a Cyrillic `key`, shortcuts ignored inside a text area, a contenteditable,
+      with a modifier, with `defaultPrevented`, inside a `role="menu"` element and while the shortcuts dialog is open;
+      [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and visible after
       it; at every width following the last entry, whose target is not in the viewport before the click, scrolls to that
       target and focuses it; at 1280 and 1024 px the button is hidden and the nav is visible; after the scroll exactly
       one entry has `aria-current="location"`; the breadcrumb's current item reads L02's title.
@@ -385,8 +417,8 @@ nfr:
       output whose source map lists a `@codemirror/` or `@lezer/` module), production mode; none of those modules is in
       the initial chunk (WEB-UI NFR-UI-1 unchanged). Spike codemirror-bundle (REF-NOTEBOOK-7, esbuild, 2026-11-23):
       125,244 B; threshold = measured + 10 %. Green re-measures with Vite and records the number in the review. The
-      test builds the app with `build.sourcemap: true` into a temporary directory, finds the chunks through their
-      source maps, asserts at least one exists and none is referenced by `index.html`, and sums their gzip sizes.
+      test shares WEB-UI's build test production build (`build.sourcemap: 'hidden'`, review), finds the chunks through
+      their source maps, asserts at least one exists and none is referenced by `index.html`, and sums their gzip sizes.
     threshold: 137768
     verified_by: test
 

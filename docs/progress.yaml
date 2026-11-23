@@ -1021,7 +1021,38 @@ tasks:
         import/plan,ui}); browser specs e2e/web/{ui/theme,notebook/editor,render,tutor/ask,ui/csp}; the live `ui` step
         in e2e/web/live/owner.slice.ts asserts the new measured values. tsc reports only the highlight() signature
         change until Green.",
-      review: "Pending: one deep-reviewer round on the spec diff, one on the code (outside the complex areas)." }
+      review: "Spec: deep-reviewer (Fable) single round on 04e396b..d3c0a68, VERDICT changes; every finding applied
+        without a second round (coordinator, 2026-11-23). Findings and fixes —
+        B1 bundle (initial chunk 111,507 of 121,153 B; menu, drawer and icons about +18 KB): the user menu and the
+        drawer load lazily on first open from plain-button triggers, shell icons are app-owned SVGs (WEB-UI FR-UI-11,
+        FR-UI-17, NFR-UI-1 note); build.test asserts the initial chunks' source maps hold no @acme/ui menu, drawer or
+        icon entry and no CodeMirror module; the review note's 'collapsible' mention fixed.
+        B2 compile slot: `compileSlot(lesson) => {status, action} | null`, called for every list row (published too) and
+        the not-published page; status always visible, action revealed on hover/focus-within (FR-UI-6, FR-NOTEBOOK-1);
+        tests for every row, a null result and a null part (design.test.tsx in app/ and notebook/).
+        B3 NAV_ITEMS: optional `badge: () => ReactNode` rendered inside the link; the toEqual test plus a badge case.
+        B4 shortcut guard: no shortcut when defaultPrevented, a modifier, or the composed path holds a textarea, input,
+        select, contenteditable, role=dialog/menu/alertdialog (FR-NOTEBOOK-11); unit cases for each and for the open
+        shortcuts dialog; editor.spec types '# j k / ?' and asserts the text, focus in the editor, #tutor hidden, no
+        dialog.
+        B5 theme before first paint: classic external web/public/theme.js loaded in <head> before the module script,
+        no inline script, claimed in WEB-UI `paths` (FR-UI-16); unit: index.html order and theme.js in node:vm agreeing
+        with applyTheme; theme.spec records dataset.theme in the first requestAnimationFrame.
+        B6 tutor history injection: an expanded stored answer with a markdown link and image renders zero a, zero img
+        and makes no request beyond its own GET (FR-TUTOR-11, panel.design.test.tsx).
+        Non-blocking — editor accessibility: hint inside the shadow root, focus outline in EditorView.theme, role and
+        resolvable description and an axe run over the lab in editor.spec; spike probe.mjs committed, Chromium only,
+        Safari unmeasured (RESULT.md, REF-NOTEBOOK-7); tutor: Escape closes it from the page outside editable fields,
+        dialogs and menus, focus falls back to the toolbar's Ask the tutor (tests); live asserts: hooks named in
+        FR-UI-10, each asserted non-null first, the 56px header bound sourced (app.css min-height 3.5rem), dark claim
+        narrowed to 1280 px list and L02; 12-row rule tested at 12 and 13, all-published group without toggle, hash
+        scrollIntoView, drawer focus return and no duplicate ids; one disclosure control per list group (the button
+        under the list); lang from the Cyrillic rule only on div.lesson (metadata rule dropped) with a precise test;
+        play and more icons app-owned SVGs; cell toolbars roving (tabIndex -1 until focus is in the cell), no Copy on
+        code-cell toolbars; j/k by event.code (Russian layout case tested); no compile slot in the sidebar and distinct
+        sidebar-/drawer- id prefixes; scope: shortcuts, cell toolbar, recall deck and current section marked
+        owner-approved in FR-NOTEBOOK-11; NFR-UI-1 and NFR-NOTEBOOK-1 share one build (sourcemap hidden), bundle.test.ts
+        removed. Code: one deep-reviewer round to follow." }
   - { id: V.titles-data, stage: V, kind: fix, track: product, status: todo, needs: [V.design-pass],
       what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
         material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.

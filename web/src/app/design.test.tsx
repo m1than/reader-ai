@@ -18,7 +18,7 @@ interface ThemeModule {
   applyTheme: (choice: Theme, root: HTMLElement) => void;
 }
 interface NavModule {
-  NAV_ITEMS: { label: string; to: string; owner_only: boolean }[];
+  NAV_ITEMS: { label: string; to: string; owner_only: boolean; badge?: () => ReactNode }[];
 }
 interface NoticesModule {
   NOTICE_CATALOGUE: Record<string, string>;
@@ -53,7 +53,8 @@ const big = () => course('big', 'Big course', 30, [1, 17]);
 const small = () => course('small', 'Small course', 3, [2], 1);
 const lessons = () => [...big(), ...small()];
 
-const mount = async (path: string, opts: { me?: unknown; list?: L[]; compileAction?: (l: L) => ReactNode; lesson?: unknown } = {}) => {
+type Slot = (l: L) => { status: ReactNode | null; action: ReactNode | null } | null;
+const mount = async (path: string, opts: { me?: unknown; list?: L[]; compileSlot?: Slot; lesson?: unknown } = {}) => {
   const { AppRoot } = await load(() => import('./AppRoot'));
   expect(AppRoot).toBeTypeOf('function');
   const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
@@ -65,7 +66,7 @@ const mount = async (path: string, opts: { me?: unknown; list?: L[]; compileActi
     return json(404, { error: 'not_found' });
   });
   const navigateAway = vi.fn();
-  const props = { initialPath: path, fetch: fetchFn as unknown as typeof fetch, navigateAway, compileAction: opts.compileAction };
+  const props = { initialPath: path, fetch: fetchFn as unknown as typeof fetch, navigateAway, compileSlot: opts.compileSlot };
   await act(async () => {
     render(<AppRoot {...(props as Parameters<typeof AppRoot>[0])} />);
   });
@@ -122,54 +123,92 @@ describe('lesson list (FR-UI-6, design pass)', () => {
     expect(group('done').textContent).not.toContain('next:');
   });
 
+  // One disclosure control per group (review): the button under the list; the heading is plain text.
+  const toggleOf = (id: string) => within(group(id)).getByRole('button', { name: /^Show (all \d+ lessons|published only)$/ });
+
   it('collapses a group of more than 12 lessons to its published rows; 12 or fewer start expanded', async () => {
     await mount('/');
     await waitFor(() => expect(group('big')).toBeTruthy());
-    const bigToggle = within(group('big')).getByRole('button', { name: /Big course/ });
-    expect(bigToggle.getAttribute('aria-expanded')).toBe('false');
+    expect(within(group('big')).getByRole('heading', { level: 2 }).querySelector('button')).toBeNull();
+    expect(toggleOf('big').getAttribute('aria-expanded')).toBe('false');
+    expect(toggleOf('big').textContent).toBe('Show all 30 lessons');
     expect(within(group('big')).getAllByRole('listitem')).toHaveLength(2);
     for (const a of within(group('big')).getAllByRole('link')) expect(a.getAttribute('href')).toMatch(/^\/lessons\/big-(1|17)$/);
-    expect(within(group('small')).getByRole('button', { name: /Small course/ }).getAttribute('aria-expanded')).toBe('true');
+    expect(toggleOf('small').getAttribute('aria-expanded')).toBe('true');
     expect(within(group('small')).getAllByRole('listitem')).toHaveLength(3);
   });
 
-  it('expands with "Show all N lessons" and with the heading button, and collapses back', async () => {
-    await mount('/');
-    await waitFor(() => expect(group('big')).toBeTruthy());
-    fireEvent.click(within(group('big')).getByRole('button', { name: 'Show all 30 lessons' }));
-    expect(within(group('big')).getAllByRole('listitem')).toHaveLength(30);
-    expect(within(group('big')).getByRole('button', { name: /Big course/ }).getAttribute('aria-expanded')).toBe('true');
-    fireEvent.click(within(group('big')).getByRole('button', { name: 'Show published only' }));
-    expect(within(group('big')).getAllByRole('listitem')).toHaveLength(2);
-    fireEvent.click(within(group('big')).getByRole('button', { name: /Big course/ }));
-    expect(within(group('big')).getAllByRole('listitem')).toHaveLength(30);
+  it('draws the 12-row line exactly: 12 lessons start expanded, 13 collapsed', async () => {
+    await mount('/', { list: [...course('twelve', 'Twelve course', 12, [3]), ...course('thirteen', 'Thirteen course', 13, [3])] });
+    await waitFor(() => expect(group('twelve')).toBeTruthy());
+    expect(toggleOf('twelve').getAttribute('aria-expanded')).toBe('true');
+    expect(within(group('twelve')).getAllByRole('listitem')).toHaveLength(12);
+    expect(toggleOf('thirteen').getAttribute('aria-expanded')).toBe('false');
+    expect(within(group('thirteen')).getAllByRole('listitem')).toHaveLength(1);
   });
 
-  it('points the disclosure at its list', async () => {
+  it('has no toggle in a group whose lessons are all published', async () => {
+    await mount('/', { list: course('done', 'Done course', 14, Array.from({ length: 14 }, (_, i) => i + 1)) });
+    await waitFor(() => expect(group('done')).toBeTruthy());
+    expect(within(group('done')).queryByRole('button', { name: /^Show / })).toBeNull();
+    expect(within(group('done')).getAllByRole('listitem')).toHaveLength(14);
+  });
+
+  it('toggles with the one button under the list, which names the list it controls', async () => {
     await mount('/');
     await waitFor(() => expect(group('big')).toBeTruthy());
-    const toggle = within(group('big')).getByRole('button', { name: /Big course/ });
-    const list = document.getElementById(toggle.getAttribute('aria-controls') ?? '');
+    const list = document.getElementById(toggleOf('big').getAttribute('aria-controls') ?? '');
     expect(list && group('big').contains(list)).toBe(true);
-  });
-
-  it('expands the group named by /#course-<id>', async () => {
-    await mount('/#course-big');
-    await waitFor(() => expect(group('big')).toBeTruthy());
+    fireEvent.click(toggleOf('big'));
     expect(within(group('big')).getAllByRole('listitem')).toHaveLength(30);
+    expect(toggleOf('big').getAttribute('aria-expanded')).toBe('true');
+    expect(toggleOf('big').textContent).toBe('Show published only');
+    fireEvent.click(toggleOf('big'));
+    expect(within(group('big')).getAllByRole('listitem')).toHaveLength(2);
   });
 
-  it('renders the compile slot on every unpublished row, and nothing without it', async () => {
-    const slot = vi.fn((l: L) => <button type="button">{`Compile ${l.lesson_id}`}</button>);
-    await mount('/', { list: small(), compileAction: slot });
+  it('expands the group named by /#course-<id> and scrolls it into view', async () => {
+    const scroll = vi.fn();
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      await mount('/#course-big');
+      await waitFor(() => expect(group('big')).toBeTruthy());
+      expect(within(group('big')).getAllByRole('listitem')).toHaveLength(30);
+      await waitFor(() => expect(scroll.mock.contexts).toContain(group('big')));
+    } finally {
+      Element.prototype.scrollIntoView = original;
+    }
+  });
+
+  it('calls the compile slot for every row, published ones included, showing its status and action', async () => {
+    const slot = vi.fn<Slot>((l) =>
+      l.lesson_id === 'small-3'
+        ? null
+        : { status: <span>{`status ${l.lesson_id}`}</span>, action: l.latest_sha256 ? null : <button type="button">{`Compile ${l.lesson_id}`}</button> },
+    );
+    await mount('/', { list: small(), compileSlot: slot });
     await waitFor(() => expect(group('small')).toBeTruthy());
-    expect(within(group('small')).getByRole('button', { name: 'Compile small-1' })).toBeTruthy();
-    expect(within(group('small')).getByRole('button', { name: 'Compile small-3' })).toBeTruthy();
-    expect(within(group('small')).queryByRole('button', { name: 'Compile small-2' })).toBeNull();
-    cleanup();
+    const g = group('small');
+    expect(slot.mock.calls.map((c) => c[0].lesson_id)).toEqual(expect.arrayContaining(['small-1', 'small-2', 'small-3']));
+    // small-1: unpublished, slot status replaces the default chip, action shown.
+    expect(within(g).getByText('status small-1')).toBeTruthy();
+    expect(within(g).getByRole('button', { name: 'Compile small-1' })).toBeTruthy();
+    // small-2: published, status shown, null action renders nothing.
+    expect(within(g).getByText('status small-2')).toBeTruthy();
+    expect(within(g).queryByRole('button', { name: 'Compile small-2' })).toBeNull();
+    // small-3: a null result keeps the default chip.
+    const row3 = within(g).getByText('Small course lesson 3').closest('li') as HTMLElement;
+    expect(within(row3).getByText('not published yet')).toBeTruthy();
+    const row1 = within(g).getByText('Small course lesson 1').closest('li') as HTMLElement;
+    expect(within(row1).queryByText('not published yet')).toBeNull();
+  });
+
+  it('shows only the default status without a compile slot', async () => {
     await mount('/', { list: small() });
     await waitFor(() => expect(group('small')).toBeTruthy());
     expect(within(group('small')).queryByRole('button', { name: /^Compile/ })).toBeNull();
+    expect(within(group('small')).getAllByText('not published yet')).toHaveLength(2);
   });
 
   it('shows the status as a chip on unpublished rows', async () => {
@@ -220,11 +259,16 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       { label: 'Import', to: '/import', owner_only: true },
     ]);
     if (!mod.NAV_ITEMS) return;
-    mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false });
+    // An appended entry with a badge (V/signup's count) appears without changes to the header.
+    mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false, badge: () => <span className="nav-badge">7</span> });
     try {
       await mount('/');
       const nav = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
-      expect(within(nav).getAllByRole('link').map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Test entry']);
+      const links = within(nav).getAllByRole('link');
+      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Test entry7']);
+      expect(links[2]!.querySelector('.nav-badge')?.textContent).toBe('7');
+      mod.NAV_ITEMS.pop();
+      mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false });
       cleanup();
       await mount('/', { me: learner });
       const nav2 = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
@@ -333,13 +377,52 @@ describe('theme (FR-UI-16)', () => {
     localStorage.removeItem('reader-ai.theme');
   });
 
-  it('main.tsx applies the stored theme before rendering', async () => {
+  it('index.html loads /theme.js from <head> before the module script, with no inline script', async () => {
     const { readText } = await import('./testing/fixtures');
-    const src = readText('web/src/main.tsx');
-    const apply = src.search(/initTheme\(|applyTheme\(/);
-    const renderAt = src.search(/createRoot\(/);
-    expect(apply).toBeGreaterThan(-1);
-    expect(apply).toBeLessThan(renderAt);
+    const html = readText('web/index.html');
+    const head = html.slice(0, html.indexOf('</head>'));
+    expect(head).toMatch(/<script src="\/theme\.js"><\/script>/);
+    const themeAt = html.indexOf('src="/theme.js"');
+    const moduleAt = html.indexOf('type="module"');
+    expect(themeAt).toBeGreaterThan(-1);
+    expect(themeAt).toBeLessThan(moduleAt);
+    for (const m of html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)) {
+      expect(m[1], 'every script has a src').toMatch(/\bsrc=/);
+      expect(m[2]!.trim(), 'no inline script body').toBe('');
+    }
+  });
+
+  it('theme.js sets the same attribute as applyTheme for every stored value and a throwing storage', async () => {
+    const { readText } = await import('./testing/fixtures');
+    const { runInNewContext } = await import('node:vm');
+    const { applyTheme } = await dyn<ThemeModule>('../ui/theme');
+    expect(applyTheme).toBeTypeOf('function');
+    if (!applyTheme) return;
+    const src = readText('web/public/theme.js');
+    const run = (getItem: () => string | null) => {
+      const attrs = new Map<string, string>();
+      const documentElement = {
+        setAttribute: (k: string, v: string) => void attrs.set(k, v),
+        removeAttribute: (k: string) => void attrs.delete(k),
+        dataset: new Proxy({} as Record<string, string>, {
+          set: (_t, k, v) => (attrs.set(`data-${String(k)}`, String(v)), true),
+          deleteProperty: (_t, k) => (attrs.delete(`data-${String(k)}`), true),
+          get: (_t, k) => attrs.get(`data-${String(k)}`),
+        }),
+      };
+      runInNewContext(src, { document: { documentElement }, localStorage: { getItem } });
+      return attrs.get('data-theme') ?? null;
+    };
+    for (const v of ['system', 'light', 'dark', 'sepia', null]) {
+      const el = document.createElement('div');
+      applyTheme((v === 'light' || v === 'dark' ? v : 'system') as Theme, el);
+      expect(run(() => v), String(v)).toBe(el.getAttribute('data-theme'));
+    }
+    expect(
+      run(() => {
+        throw new Error('blocked');
+      }),
+    ).toBeNull();
   });
 });
 
@@ -372,15 +455,17 @@ describe('course sidebar (FR-UI-17)', () => {
     expect(within(bigList).getAllByRole('listitem')).toHaveLength(2);
   });
 
-  it('closed groups show no rows; opening one shows all of a small course with the compile slot', async () => {
-    await mount('/lessons/big-1', { compileAction: (l) => <button type="button">{`Compile ${l.lesson_id}`}</button> });
+  it('closed groups show no rows; opening one shows all of a small course, without the compile slot', async () => {
+    const slot = vi.fn<Slot>((l) => ({ status: <span>{`status ${l.lesson_id}`}</span>, action: <button type="button">{`Compile ${l.lesson_id}`}</button> }));
+    await mount('/lessons/big-1', { compileSlot: slot });
     const btn = await waitFor(() => within(sidebar()).getByRole('button', { name: /Small course/ }));
     const list = document.getElementById(btn.getAttribute('aria-controls') ?? '');
     expect(list === null || within(list).queryAllByRole('listitem').length === 0 || list.hidden).toBe(true);
     fireEvent.click(btn);
     const open = document.getElementById(btn.getAttribute('aria-controls') ?? '') as HTMLElement;
     expect(within(open).getAllByRole('listitem')).toHaveLength(3);
-    expect(within(open).getByRole('button', { name: 'Compile small-1' })).toBeTruthy();
+    expect(within(sidebar()).queryByRole('button', { name: /^Compile/ })).toBeNull();
+    expect(within(sidebar()).queryByText(/^status /)).toBeNull();
     expect(within(open).getByRole('link', { name: /Small course lesson 2/ }).getAttribute('href')).toBe('/lessons/small-2');
   });
 
@@ -394,12 +479,30 @@ describe('course sidebar (FR-UI-17)', () => {
     expect(open.getAttribute('aria-expanded')).toBe('true');
     const dialog = await screen.findByRole('dialog');
     const navInDrawer = within(dialog).getByRole('navigation', { name: 'Courses' });
+    // The static column and the drawer's copy share no id.
+    const ids = [...document.querySelectorAll('[id]')].map((e) => e.id);
+    expect(ids.filter((id, i) => ids.indexOf(id) !== i)).toEqual([]);
     const btn = within(navInDrawer).getByRole('button', { name: /Small course/ });
     fireEvent.click(btn);
     await act(async () => {
       fireEvent.click(within(navInDrawer).getByRole('link', { name: /Small course lesson 2/ }));
     });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Courses' })));
+  });
+
+  it('closes the drawer with Escape and returns focus to the Courses button', async () => {
+    await mount('/');
+    const open = await waitFor(() => screen.getByRole('button', { name: 'Courses' }));
+    await act(async () => {
+      fireEvent.click(open);
+    });
+    const dialog = await screen.findByRole('dialog');
+    await act(async () => {
+      fireEvent.keyDown(dialog, { key: 'Escape' });
+    });
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(open));
   });
 
   it('makes no request beyond the shared lessons query', async () => {

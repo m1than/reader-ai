@@ -116,6 +116,49 @@ describe('side panel (FR-TUTOR-11, design pass)', () => {
     expect((document.getElementById('tutor') as HTMLElement).hidden).toBe(true);
     expect(document.activeElement).toBe(opener);
   });
+
+  const lessonWithPanel = async () => {
+    const { LessonView } = await load(() => import('../notebook/LessonView'));
+    const nb = readJson<Record<string, unknown>>('spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb');
+    const state = { cells: {}, slot: null, session: null, connection: 'none', resetting: false, resetFailed: false };
+    const controller = { run: vi.fn(), runAll: vi.fn(), interrupt: vi.fn(), reset: vi.fn(), retry: vi.fn(), dispose: vi.fn(), getState: () => state, subscribe: () => () => undefined };
+    const api = fakeApi([]);
+    const aside = (cellId: string | null, label: string | null, p: { open: boolean; close: () => void }): ReactNode =>
+      panel({ lessonId: LESSON, revision: REV, cellId, cellLabel: label, api, open: p.open, onClose: p.close });
+    const props = { notebook: nb as never, controller: controller as never, aside, loadEditor: () => new Promise<never>(() => undefined) };
+    render(<LessonView {...(props as unknown as Parameters<typeof LessonView>[0])} />);
+    await flush();
+  };
+  const tutorHidden = () => (document.getElementById('tutor') as HTMLElement).hidden;
+
+  it('closes on Escape from the page outside an editable field, but not from inside a text area', async () => {
+    await lessonWithPanel();
+    fireEvent.click(within(document.querySelector('.lesson-toolbar') as HTMLElement).getByRole('button', { name: 'Ask the tutor' }));
+    await flush();
+    const area = within(document.querySelector('[data-cell-id="w01-lab"]') as HTMLElement).getByRole('textbox', { name: 'Lab 1 code' });
+    area.focus();
+    fireEvent.keyDown(area, { key: 'Escape' });
+    await flush();
+    expect(tutorHidden()).toBe(false);
+    const cell = document.querySelector('[data-cell-id="w01-route"]') as HTMLElement;
+    cell.focus();
+    fireEvent.keyDown(cell, { key: 'Escape' });
+    await flush();
+    expect(tutorHidden()).toBe(true);
+  });
+
+  it('returns focus to the toolbar\'s "Ask the tutor" when the opener is gone', async () => {
+    await lessonWithPanel();
+    const cell = document.querySelector('[data-cell-id="w01-explain"]') as HTMLElement;
+    const cellAsk = within(cell).getByRole('button', { name: 'Ask the tutor about this cell' });
+    cellAsk.focus();
+    fireEvent.click(cellAsk);
+    await flush();
+    cellAsk.remove();
+    fireEvent.click(screen.getByRole('button', { name: 'Close the tutor' }));
+    await flush();
+    expect(document.activeElement).toBe(within(document.querySelector('.lesson-toolbar') as HTMLElement).getByRole('button', { name: 'Ask the tutor' }));
+  });
 });
 
 describe('history (FR-TUTOR-11, design pass)', () => {
@@ -176,6 +219,27 @@ describe('history (FR-TUTOR-11, design pass)', () => {
     for (const Story of Object.values(composed)) {
       const { unmount } = render(<Story />);
       unmount();
+    }
+  });
+
+  it('renders an expanded stored answer without links or images and fetches nothing else', async () => {
+    const hostile = answer('See [x](https://example.test) and ![i](https://example.test/i.png) here.');
+    const api = fakeApi([item(1)], () => hostile);
+    const fetchSpy = vi.fn(async () => new Response(null, { status: 599 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    try {
+      render(panel({ lessonId: LESSON, revision: REV, cellId: null, api }));
+      await flush();
+      const entry = entries()[0]!;
+      fireEvent.click(within(entry).getByRole('button', { name: /Synthetic question 1\?/ }));
+      await flush();
+      expect(entry.textContent).toContain('https://example.test');
+      expect(entry.querySelectorAll('a')).toHaveLength(0);
+      expect(entry.querySelectorAll('img')).toHaveLength(0);
+      expect(api.getQuestion.mock.calls.map((c) => c[1])).toEqual([qid(1)]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
     }
   });
 

@@ -60,7 +60,8 @@ const row = (n: number, published: boolean): L => ({
   lesson_id: `p-${n}`, course_id: 'c1', course_title: 'Sample course', ordinal: n, title: `Sample lesson ${n}`,
   updated_at: '2026-11-20T09:00:00Z', latest_sha256: published ? 'a'.repeat(64) : null,
 });
-const mountPage = async (path: string, list: L[], route: (url: string) => Response | Promise<Response>, compileAction?: (l: L) => ReactNode) => {
+type Slot = (l: L) => { status: ReactNode | null; action: ReactNode | null } | null;
+const mountPage = async (path: string, list: L[], route: (url: string) => Response | Promise<Response>, compileSlot?: Slot) => {
   const { AppRoot } = await load(() => import('../app/AppRoot'));
   expect(AppRoot).toBeTypeOf('function');
   const fetchFn = vi.fn(async (input: RequestInfo | URL) => {
@@ -69,7 +70,7 @@ const mountPage = async (path: string, list: L[], route: (url: string) => Respon
     if (url === '/api/lessons') return json(200, { lessons: list });
     return route(url);
   });
-  const props = { initialPath: path, fetch: fetchFn as unknown as typeof fetch, navigateAway: vi.fn(), compileAction };
+  const props = { initialPath: path, fetch: fetchFn as unknown as typeof fetch, navigateAway: vi.fn(), compileSlot };
   await act(async () => {
     render(<AppRoot {...(props as Parameters<typeof AppRoot>[0])} />);
   });
@@ -105,13 +106,27 @@ describe('not-published page (FR-NOTEBOOK-1, design pass)', () => {
     expect(within(page()).queryByRole('link', { name: /^(Previous|Next):/ })).toBeNull();
   });
 
-  it('renders the compile slot when present and nothing otherwise', async () => {
-    await mountPage('/lessons/p-3', list, at(3), (l) => <button type="button">{`Compile ${l.lesson_id}`}</button>);
+  it("takes the compile slot's status in place of the chip and shows its action; null keeps the chip", async () => {
+    const slot = vi.fn<Slot>((l) => ({ status: <span>{`Compiling ${l.lesson_id}`}</span>, action: <button type="button">{`Compile ${l.lesson_id}`}</button> }));
+    await mountPage('/lessons/p-3', list, at(3), slot);
     await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
     expect(within(page()).getByRole('button', { name: 'Compile p-3' })).toBeTruthy();
+    expect(within(page()).getByText('Compiling p-3')).toBeTruthy();
+    expect(within(page()).queryByText('Not published yet')).toBeNull();
+    cleanup();
+    await mountPage('/lessons/p-3', list, at(3), () => null);
+    await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
+    expect(within(page()).getByText('Not published yet')).toBeTruthy();
+    expect(within(page()).queryByRole('button', { name: /^Compile/ })).toBeNull();
+    cleanup();
+    await mountPage('/lessons/p-3', list, at(3), () => ({ status: null, action: <button type="button">Compile now</button> }));
+    await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
+    expect(within(page()).getByText('Not published yet')).toBeTruthy();
+    expect(within(page()).getByRole('button', { name: 'Compile now' })).toBeTruthy();
     cleanup();
     await mountPage('/lessons/p-3', list, at(3));
     await within(page()).findByRole('heading', { level: 1, name: 'Sample lesson 3' });
+    expect(within(page()).getByText('Not published yet')).toBeTruthy();
     expect(within(page()).queryByRole('button', { name: /^Compile/ })).toBeNull();
   });
 });
@@ -318,6 +333,28 @@ describe('navigation (FR-NOTEBOOK-11, design pass)', () => {
     expect(last[2].open).toBe(true);
   });
 
+  it('gives a non-lab code cell only Ask (its code block has Copy code)', async () => {
+    const nb = notebook();
+    nb.cells = [{ cell_type: 'code', id: 'c1', source: 'x = 1', metadata: {}, outputs: [], execution_count: null }];
+    await view(nb, { aside: vi.fn<Aside>(() => null) });
+    expect(within(cellEl('c1')).queryByRole('button', { name: 'Copy cell text' })).toBeNull();
+    expect(within(cellEl('c1')).getByRole('button', { name: 'Ask the tutor about this cell' })).toBeTruthy();
+  });
+
+  it('keeps cell toolbars out of the tab order until focus is inside their cell (roving)', async () => {
+    await view(notebook(), { aside: vi.fn<Aside>(() => null) });
+    const tools = (id: string) => [...cellEl(id).querySelectorAll('.cell-toolbar button')] as HTMLButtonElement[];
+    expect(tools('w01-explain').length).toBe(2);
+    for (const b of tools('w01-explain')) expect(b.tabIndex).toBe(-1);
+    act(() => cellEl('w01-explain').focus());
+    fireEvent.focus(cellEl('w01-explain'));
+    for (const b of tools('w01-explain')) expect(b.tabIndex).toBe(0);
+    for (const b of tools('w01-route')) expect(b.tabIndex).toBe(-1);
+    act(() => cellEl('w01-route').focus());
+    fireEvent.focus(cellEl('w01-route'));
+    for (const b of tools('w01-explain')) expect(b.tabIndex).toBe(-1);
+  });
+
   it('opens the tutor from the toolbar and the contents entry; close closes it', async () => {
     const aside = vi.fn<Aside>(() => <p>panel</p>);
     await view(notebook(), { aside });
@@ -334,26 +371,66 @@ describe('navigation (FR-NOTEBOOK-11, design pass)', () => {
     const aside = vi.fn<Aside>(() => <p>panel</p>);
     await view(notebook(), { aside });
     cellEl('w01-route').focus();
-    fireEvent.keyDown(document.activeElement!, { key: 'j' });
+    fireEvent.keyDown(document.activeElement!, { key: 'j', code: 'KeyJ' });
     expect(document.activeElement).toBe(cellEl('w01-explain'));
-    fireEvent.keyDown(document.activeElement!, { key: 'k' });
+    fireEvent.keyDown(document.activeElement!, { key: 'k', code: 'KeyK' });
     expect(document.activeElement).toBe(cellEl('w01-route'));
-    fireEvent.keyDown(document.activeElement!, { key: '/' });
+    fireEvent.keyDown(document.activeElement!, { key: '/', code: 'Slash' });
     expect(aside.mock.calls.at(-1)![2].open).toBe(true);
-    fireEvent.keyDown(document.body, { key: '?' });
+    fireEvent.keyDown(document.body, { key: '?', code: 'Slash', shiftKey: true });
     const dialog = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
     for (const key of ['j', 'k', '/', '?', 'Shift+Enter', 'Escape']) expect(dialog.textContent).toContain(key);
   });
 
-  it('ignores shortcuts inside a text field and with a modifier', async () => {
+  it('matches j and k by their physical key on a Russian layout', async () => {
     await view();
     cellEl('w01-route').focus();
-    fireEvent.keyDown(document.activeElement!, { key: 'j', ctrlKey: true });
+    fireEvent.keyDown(document.activeElement!, { key: 'о', code: 'KeyJ' });
+    expect(document.activeElement).toBe(cellEl('w01-explain'));
+    fireEvent.keyDown(document.activeElement!, { key: 'л', code: 'KeyK' });
     expect(document.activeElement).toBe(cellEl('w01-route'));
+  });
+
+  it('ignores shortcuts with a modifier, when already handled, and inside text fields, editors, menus and dialogs', async () => {
+    const aside = vi.fn<Aside>(() => null);
+    await view(notebook(), { aside });
+    const route = cellEl('w01-route');
+    route.focus();
+    fireEvent.keyDown(route, { key: 'j', code: 'KeyJ', ctrlKey: true });
+    expect(document.activeElement).toBe(route);
+    const handled = new KeyboardEvent('keydown', { key: 'j', code: 'KeyJ', bubbles: true, cancelable: true });
+    handled.preventDefault();
+    route.dispatchEvent(handled);
+    expect(document.activeElement).toBe(route);
     const area = within(cellEl('w01-lab')).getByRole('textbox', { name: 'Lab 1 code' });
     area.focus();
-    fireEvent.keyDown(area, { key: 'j' });
+    fireEvent.keyDown(area, { key: 'j', code: 'KeyJ' });
     expect(document.activeElement).toBe(area);
+    // A contenteditable (the lab editor's content) and a role=menu element in the composed path.
+    for (const attrs of [{ contenteditable: 'true', tabindex: '-1' }, { role: 'menu', tabindex: '-1' }]) {
+      const el = document.createElement('div');
+      for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+      document.body.append(el);
+      el.focus();
+      fireEvent.keyDown(el, { key: 'j', code: 'KeyJ' });
+      fireEvent.keyDown(el, { key: '/', code: 'Slash' });
+      expect(document.activeElement).toBe(el);
+      el.remove();
+    }
+    expect(aside.mock.calls.every((c) => c[2].open === false)).toBe(true);
+  });
+
+  it('ignores shortcuts while the shortcuts dialog is open', async () => {
+    const aside = vi.fn<Aside>(() => null);
+    await view(notebook(), { aside });
+    fireEvent.keyDown(document.body, { key: '?', code: 'Slash', shiftKey: true });
+    const dialog = await screen.findByRole('dialog', { name: 'Keyboard shortcuts' });
+    const inside = (dialog.querySelector('button, [tabindex]') as HTMLElement | null) ?? dialog;
+    inside.focus();
+    fireEvent.keyDown(inside, { key: 'j', code: 'KeyJ' });
+    fireEvent.keyDown(inside, { key: '/', code: 'Slash' });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(aside.mock.calls.every((c) => c[2].open === false)).toBe(true);
   });
 
   it('shows breadcrumbs with the course and the lesson as the current page', async () => {
@@ -391,23 +468,25 @@ describe('lesson language (FR-UI-10, design pass)', () => {
   }
   const md = (source: string) => ({ cell_type: 'markdown', source });
 
-  it('takes a well-formed metadata language, else the Cyrillic majority, else en', async () => {
+  it('is ru when Cyrillic letters are the majority of the markdown, else en; code cells do not count', async () => {
     const { lessonLang } = await dyn<LangModule>('./lang');
     expect(lessonLang).toBeTypeOf('function');
     if (!lessonLang) return;
-    expect(lessonLang({ cells: [md('Plain English text.')], metadata: { reader: { language: 'de-AT' } } })).toBe('de-AT');
     expect(lessonLang({ cells: [md('Децентрализация — ключевая идея, а hash и API встречаются.')] })).toBe('ru');
     expect(lessonLang({ cells: [md('Mostly English with одно слово.')] })).toBe('en');
-    expect(lessonLang({ cells: [md('Текст по-русски.')], metadata: { reader: { language: 'Russian!' } } })).toBe('ru');
+    expect(lessonLang({ cells: [md('Plain English text.')], metadata: { reader: { language: 'ru' } } })).toBe('en');
     expect(lessonLang({ cells: [{ cell_type: 'code', source: 'печать = 1' }, md('English prose here.')] })).toBe('en');
+    expect(lessonLang({ cells: [] })).toBe('en');
   });
 
-  it('puts lang on the lesson article only', async () => {
+  it('puts lang on the lesson container div.lesson, around the cells', async () => {
     const nb = notebook();
     nb.cells = [{ cell_type: 'markdown', id: 'ru', source: 'Децентрализация распределяет управление между узлами.', metadata: { reader: { kind: 'explain' } } }];
     await view(nb);
-    const article = document.querySelector('article.lesson-article, .lesson[lang], [lang="ru"]') as HTMLElement;
-    expect(article?.getAttribute('lang')).toBe('ru');
-    expect(article.contains(cellEl('ru'))).toBe(true);
+    const container = document.querySelector('div.lesson') as HTMLElement;
+    expect(container).toBeTruthy();
+    expect(container.getAttribute('lang')).toBe('ru');
+    expect(container.contains(cellEl('ru'))).toBe(true);
+    expect(document.querySelectorAll('[lang]')).toHaveLength(1);
   });
 });

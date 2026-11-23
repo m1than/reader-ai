@@ -374,7 +374,7 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         h1_px: h1 ? getComputedStyle(h1).fontSize : '',
         h1_family: h1 ? getComputedStyle(h1).fontFamily : '',
         chars_per_line_median: perLine.length ? Math.round(perLine[Math.floor(perLine.length / 2)]!) : null,
-        article_lang: document.querySelector('#content [lang]')?.getAttribute('lang') ?? null,
+        article_lang: document.querySelector('#content div.lesson')?.getAttribute('lang') ?? null,
         td_hyphens: tdCs?.hyphens ?? null,
         td_overflow_wrap: tdCs?.overflowWrap ?? null,
         toolbar_button_radius: tbCs?.borderTopLeftRadius ?? null,
@@ -516,8 +516,9 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   for (const [name, l] of Object.entries(layout)) {
     expect.soft(l.overflow_px, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
     const w = Number(name.split('-')[0]);
-    // Design pass (FR-UI-11): the header is one row at every width.
-    expect.soft(l.header_px ?? 0, `header one row ${name}`).toBeLessThanOrEqual(56);
+    // Design pass (FR-UI-11): the header is present and one row (its declared 3.5rem min-height) at every width.
+    expect.soft(l.header_px, `header present ${name}`).not.toBeNull();
+    expect.soft(l.header_px ?? Infinity, `header one row ${name}`).toBeLessThanOrEqual(56);
     if (name.endsWith('-list')) {
       // FR-UI-10 (design pass): the app page title in the sans.
       expect.soft(l.h1_px, `page title size ${name}`).toBe(w === 390 ? '24px' : '28px');
@@ -529,7 +530,13 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     expect.soft(l.p_font_size, `prose size ${name}`).toBe('17px');
     expect.soft(Math.abs(parseFloat(l.p_line_height) - 28.05), `prose line height ${name}`).toBeLessThanOrEqual(0.1);
     expect.soft(l.p_font_family.startsWith('ui-serif'), `prose family ${name}`).toBe(true);
-    // Design pass (FR-UI-10): heading scale, language, table breaking, toolbar buttons, the wide lab block.
+    // Design pass (FR-UI-10): heading scale, language, table breaking, toolbar buttons, the wide lab block. Each hook
+    // must be present before its value is checked (review).
+    for (const [hook, value] of [
+      ['#content div.lesson[lang]', l.article_lang], ['[data-markdown] td', l.td_hyphens],
+      ['.lesson-toolbar .acme-button', l.toolbar_button_height], ['.cell[data-kind="lab"] .lab', l.lab_px],
+    ] as const)
+      expect.soft(value, `${hook} present ${name}`).not.toBeNull();
     expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '28px' : '32px');
     expect.soft(l.article_lang, `lesson lang ${name}`).toBe('ru');
     expect.soft(l.td_hyphens, `td hyphens ${name}`).toBe('auto');
