@@ -354,36 +354,45 @@ async def run_web(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: JobC
     await _report_stage(run, prep, report_prompt, bib, claims, views, entries, dropped, stored)
 
 
+def search_prompt_text(query: str) -> str:
+    """The search run's user prompt: the planned query on one line."""
+    return f"Query: {query}"
+
+
+def search_call(
+    stage_call: Callable[..., StageCall], attempt: int, prompt: prompts.Prompt, query: str, gate: Gate
+) -> StageCall:
+    """FR-FRESH-7's StageCall for one planned query under its gate (FR-FRESH-6). The INV-FRESH-1 [agent] test
+    builds its calls through this function too, so it runs the same options as the job."""
+    allowance = WebSearchAllowance(
+        searches_max=1, searches_per_request_max=1, requests_max=params.SEARCH_REQUESTS_MAX
+    )
+    return stage_call(
+        attempt=attempt, stage="search", task=params.TASK_WEB, system=prompt.text,
+        prompt=search_prompt_text(query), max_output_tokens=params.SEARCH_OUTPUT_TOKENS,
+        floor_usd=params.SEARCH_RESERVE_FLOOR_USD, abort_on_retry=True,
+        deadline_s=float(params.SEARCH_DEADLINE_S),
+        web_search=WebSearchCall(allowance=allowance, hook=gate, max_turns=params.SEARCH_MAX_TURNS),
+    )
+
+
 async def _search(
     run: _Run, prep: check.Prepared, prompt: prompts.Prompt, query: str, first_k: int
 ) -> SearchOutcome:
     """One search run under its gate; R entries only from the structured tool results."""
     if not run.time_left(params.SEARCH_CALL_BUDGET_S):
         return SearchOutcome("failed", code="deadline_exceeded")
-    user = f"Query: {query}"
     model = prep.models[params.TASK_WEB]
-    reserve = search_reserve(model, len(prompt.text) + len(user))
+    reserve = search_reserve(model, len(prompt.text) + len(search_prompt_text(query)))
     if await check.daily_refused(run.engine, run.owner_id, reserve):
         return SearchOutcome("refused", code="daily_budget_exhausted")
     gates: list[Gate] = []
-    allowance = WebSearchAllowance(
-        searches_max=1, searches_per_request_max=1, requests_max=params.SEARCH_REQUESTS_MAX
-    )
 
     async def call(attempt: int) -> Any:
         gate = Gate(query)  # a fresh gate per attempt: one allowed search per run
         gates.append(gate)
         async with run.deps.provider(run.engine) as provider:
-            return await provider.run(
-                run.stage_call(
-                    attempt, stage="search", task=params.TASK_WEB, system=prompt.text, prompt=user,
-                    max_output_tokens=params.SEARCH_OUTPUT_TOKENS, floor_usd=params.SEARCH_RESERVE_FLOOR_USD,
-                    abort_on_retry=True, deadline_s=float(params.SEARCH_DEADLINE_S),
-                    web_search=WebSearchCall(
-                        allowance=allowance, hook=gate, max_turns=params.SEARCH_MAX_TURNS
-                    ),
-                )
-            )
+            return await provider.run(search_call(run.stage_call, attempt, prompt, query, gate))
 
     budget = float(params.SEARCH_CALL_BUDGET_S)
     try:
@@ -487,4 +496,7 @@ def make_kinds(deps: Deps) -> tuple[JobKind, JobKind]:
 
 JOB_KINDS: Final = make_kinds(default_deps())
 
-__all__ = ["JOB_KINDS", "Deps", "ReportArgs", "SearchOutcome", "make_kinds", "run_scan", "run_web"]
+__all__ = [
+    "JOB_KINDS", "Deps", "ReportArgs", "SearchOutcome", "make_kinds", "run_scan", "run_web", "search_call",
+    "search_prompt_text",
+]

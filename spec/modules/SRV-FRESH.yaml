@@ -414,7 +414,11 @@ invariants:
       agent-proxy forwards to the stub during stage (b): no 6-word canary run appears and at most 5 canary words
       appear per query. The [agent] part runs the real adapter (`AgentProvider`, the bundled CLI in
       `reader-server:local`) through a real agent-proxy (`create_app`) to the stub's `websearch` scenario with the
-      ledger's reserve and settle replaced in memory (the image test has no database, `--network none`).
+      ledger's reserve and settle replaced in memory (the image test has no database, `--network none`). The stub
+      echoes the run's own `Query: <q>` line in its WebSearch tool_use (`STUB_QUERY_FROM_PROMPT=1`); each planned
+      query runs as `jobs.search_call` builds it for the job; the test also asserts that the `PreToolUse` matcher is
+      `WebSearch` and its one hook is the caller's `Gate`, that the gate allowed the planned query once, and that
+      each run's R comes from the stub's structured results.
   - id: INV-FRESH-2
     text: >-
       A stored report holds only FR-FRESH-8's and FR-FRESH-10's fields within their bounds, and no `cited_text`,
@@ -524,4 +528,11 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   its spec: SRV-EVENTS KIND_MODULES, SRV-AUTH ROUTERS, VERSION_LOCATIONS and `Route.method` PUT, OPS-DEPLOY's
   example tasks, OPS-DOD's material.freshness cells.
   Coordinator check (2026-11-23): `daily_budget_exhausted` is 429, aligned with SRV-TUTOR FR-TUTOR's daily cap
-  (WEB-FRESH VEC-FRESHUI-1 paired)."
+  (WEB-FRESH VEC-FRESHUI-1 paired).
+  Code review round 1 (2026-11-24), fixed without loosening any bound: subject words are \\w+ tokens in the scan and
+  again in the plan (FR-FRESH-3/-5); masking removes exempt words from both sides (FR-FRESH-5, INV-FRESH-1);
+  enum checks reject lists and objects (VEC-FRESH-1); R hosts need a 0–65535 port, a letter/digit charset and LDH
+  labels (FR-FRESH-7, INV-FRESH-3); the gate's exact match (FR-FRESH-6) and the lost-search case; the report route
+  is scoped to its material and the PUT passes the CSRF gate (FR-FRESH-11); the paid-scan-restart worst case
+  (FR-FRESH-12); FR-FRESH-14 in-process through the route handlers with `run_input_tokens`; INV-FRESH-1's [agent]
+  test through the real CLI and a real agent-proxy."

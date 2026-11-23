@@ -16,6 +16,8 @@ error result instead) and a short text; any other request gets the final text. F
 the request's `tools` in full (the CLI's own definitions, no secret), their canonical sha256s, the top-level keys,
 the system prompt's size only, and a skeleton of the messages (roles, block types, the first 200 characters of each
 text and tool_result). Everything is synthetic: no book text and no real token exist in the container.
+STUB_QUERY_FROM_PROMPT=1 (SRV-FRESH's INV-FRESH-1 [agent] test): the main loop's tool_use carries the query from the
+first user line `Query: <q>` (the search run's prompt), so the caller's gate sees its own planned query.
 """
 
 import hashlib
@@ -35,6 +37,24 @@ LOCK = threading.Lock()
 SCENARIO = os.environ.get("STUB_SCENARIO", "")
 WS_ERROR = os.environ.get("STUB_WS_ERROR", "")
 QUERY = "synthetic freshness query"
+QUERY_FROM_PROMPT = os.environ.get("STUB_QUERY_FROM_PROMPT", "") == "1"
+
+
+def prompt_query(payload: dict) -> str:
+    """The `Query: <q>` line of the request's user messages, or QUERY (STUB_QUERY_FROM_PROMPT=1 only)."""
+    if not QUERY_FROM_PROMPT:
+        return QUERY
+    for m in payload.get("messages") or []:
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        texts = [content] if isinstance(content, str) else [
+            b.get("text", "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text"]
+        for text in texts:
+            for line in text.splitlines():
+                if line.startswith("Query: "):
+                    return line[len("Query: "):]
+    return QUERY
 
 
 def canonical_sha256(obj: object) -> str:
@@ -141,7 +161,7 @@ def websearch_stream(payload: dict) -> bytes:
             sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {
                 "type": "tool_use", "id": "toolu_stub01", "name": "WebSearch", "input": {}}}),
             sse("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {
-                "type": "input_json_delta", "partial_json": json.dumps({"query": QUERY})}}),
+                "type": "input_json_delta", "partial_json": json.dumps({"query": prompt_query(payload)})}}),
             sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
         ]
         stop = "tool_use"
