@@ -70,10 +70,11 @@ async def _unless_stopped[T](work: Awaitable[T], stop: asyncio.Event) -> tuple[b
         await asyncio.wait({task, stopping}, return_when=asyncio.FIRST_COMPLETED)
     finally:
         stopping.cancel()
-    if not task.done():
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        if not task.done():  # stopped, or this coroutine itself was cancelled: the work never outlives it
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    if task.cancelled():
         return True, None
     return False, task.result()
 
@@ -102,7 +103,7 @@ async def run(
     hooks: Sequence[StartHook] | None = None,
 ) -> int:
     """Serve jobs until `stop` is set. Returns 0 after a stop, 1 when the database is unreachable at start or
-    the start sweep fails.
+    the start sweep fails (0 when `stop` is already set by then).
 
     `secret_values` are every resolved secret the calling process holds (FR-EVENTS-10); the database
     password is always among them. `hooks` are the start hooks (None: every declared module's
@@ -124,7 +125,7 @@ async def run(
             stopped, _ = await _unless_stopped(jobs.sweep(), stop)
         except Exception:  # driver detail is not logged (INV-EVENTS-5)
             log.warning("jobs: start sweep failed")
-            return 1
+            return 0 if stop.is_set() else 1
         if stopped:
             return 0
         _RUNNING[0] = jobs

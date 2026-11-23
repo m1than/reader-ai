@@ -874,6 +874,32 @@ async def test_hook_timeout_and_stop_during_a_hook(pg: Pg, monkeypatch: Any) -> 
             assert await task == 0  # stop is observed inside a hook
 
 
+async def test_run_without_hooks_awaits_the_declared_start_hooks(pg: Pg, monkeypatch: Any) -> None:
+    """FR-EVENTS-1: the production default `hooks=None` runs `start_hooks()`'s hooks, each once."""
+    from reader.jobs import worker
+
+    calls: list[Any] = []
+
+    async def recording(given: Any) -> None:
+        calls.append(given)
+
+    monkeypatch.setattr(worker, "start_hooks", lambda: [recording])
+    async with jobs_env(pg) as env:
+        await env.jobs.enqueue(KIND, {"name": "dflt"})
+        stop = asyncio.Event()
+        task = asyncio.create_task(worker.run(env.engine, target(pg), stop, env.jobs.catalog))
+
+        async def served() -> bool:
+            return (await env.key_row("dflt")).outcome == "succeeded"
+
+        await _until(served)
+        stop.set()
+        with anyio.fail_after(15):
+            assert await task == 0
+    assert len(calls) == 1
+    assert calls[0].catalog is not None  # the worker's Jobs
+
+
 async def test_a_failing_start_sweep_returns_1(pg: Pg, monkeypatch: Any) -> None:
     from reader.jobs.queue import Jobs
     from reader.jobs.worker import run

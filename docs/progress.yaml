@@ -425,7 +425,13 @@ tasks:
         inside the wrapper's try; the lost-run log names count or re-enqueue. Tests: server/tests/jobs 68 passed (41
         db + 27 unit), new: hooks (a)-(c), hook timeout and stop, failing start sweep, unknown-kind reconcile skip,
         failing sweep enqueue, FR-EVENTS-7 unknown kind with the lock free, wrapper_error, the worker's own re-enqueue
-        after a lost run, requeue_dead without outcome or job, stored sweep priority. Round 2 pending.",
+        after a lost run, requeue_dead without outcome or job, stored sweep priority. Round 2 (40900db): one test
+        short of approve, every round-1 item fixed and killed by mutants; the production default hooks=None was
+        untested (mutant `[] if hooks is None` survived). Added [unit] start_hooks() = search's and pipeline's
+        on_worker_start in KIND_MODULES order, empty for no modules, and [db] run without hooks awaits the declared
+        hooks once (kills that mutant, checked); HOOK_TIMEOUT_S 30 s in SRV-EVENTS bounds with its limit;
+        _unless_stopped cancels its task in the finally; a start sweep failing while stop is set returns 0. Final
+        verdict pending.",
       note: "green locally; code review next (complex area: full review). Spec SRV-EVENTS approved with Red (deep-reviewer
         rounds 1–3 changes, round 4 approve). 41 tests (21 unit incl. a Hypothesis state machine, 20 db on testcontainers
         Postgres with the OPS-DEPLOY digest); all 41 failed on their own assertion at Red; two mutations (exhaustion
