@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 from typing import Any, Final
 
 from asyncpg.exceptions import CannotConnectNowError, ConnectionDoesNotExistError
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 import reader.ingest as ingest
@@ -35,6 +37,31 @@ class ImportArgs(BaseModel):
     converter_version: str = Field(min_length=1, max_length=64)
     artifact_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     material_id: str = Field(min_length=1, max_length=200)
+
+
+async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha256: str) -> None:
+    """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): search.embed for the ingest this run wrote.
+
+    The ingest id is read in the run session (its rows are not committed yet); the enqueue commits on its
+    own connection and is idempotent by FR-SEARCH-5's key. Imported lazily: reader.search pulls httpx and
+    the config. A missing or broken reader.yaml (ConfigError) fails the attempt, as it fails the api.
+    """
+    from reader.jobs import running
+    from reader.search.jobs import KIND as EMBED_KIND
+    from reader.search.jobs import embed_args
+    from reader.search.store import fts_config_of
+
+    ingest_id = (
+        await conn.execute(
+            text(
+                "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id"
+                " WHERE m.owner_id = :o AND m.sha256 = :s"
+            ),
+            {"o": owner, "s": material_sha256},
+        )
+    ).scalar_one()
+    fts_config = await fts_config_of(conn, material_sha256, ingest_id)
+    await running().enqueue(EMBED_KIND, embed_args(material_sha256, ingest_id, fts_config))
 
 
 def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
@@ -61,6 +88,7 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
         await store.import_rows(
             conn, owner, args.material_id, args.artifact_id, manifest, members["spans.jsonl"], outline
         )
+        await _enqueue_embed(conn, owner, args.material_sha256)
 
     return (
         JobKind(

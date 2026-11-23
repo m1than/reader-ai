@@ -86,7 +86,7 @@ async def test_receive_then_import(pg: Pg, tmp_path: Path) -> None:
 
 
 async def test_import_enqueues_search_embed_for_its_ingest(pg: Pg, tmp_path: Path) -> None:
-    """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): the import enqueues search.embed for the new ingest."""
+    """FR-INGEST-13 (paired with SRV-SEARCH FR-SEARCH-5): the import enqueues search.embed for its ingest."""
     from sqlalchemy import text
 
     from reader.search.jobs import embed_args
@@ -102,11 +102,10 @@ async def test_import_enqueues_search_embed_for_its_ingest(pg: Pg, tmp_path: Pat
         async with w.engine.connect() as conn:
             fts = await fts_config_of(conn, MATERIAL_SHA, ingest_id)
             expected = embed_args(MATERIAL_SHA, ingest_id, fts).model_dump(mode="json")
-            queued = (
-                await conn.execute(
-                    text("SELECT count(*) FROM procrastinate_jobs WHERE task_name = 'search.embed' AND status = 'todo'")
-                )
-            ).scalar()
+            todo = (
+                "SELECT count(*) FROM procrastinate_jobs WHERE task_name = 'search.embed' AND status = 'todo'"
+            )
+            queued = (await conn.execute(text(todo))).scalar()
         assert args == expected
         assert outcome is None  # enqueued, not run: work() serves only the ingest queue here
         assert queued == 1
