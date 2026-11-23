@@ -445,7 +445,11 @@ tasks:
         0,2,...,6,...,2,0; 133 output 0,0,2,2,2,0). Full book under r2 (confined, CPU): 935 pages in 642.2 s; code
         boxes 360, indentation fallbacks 17 (kept the text layer), multi-box code items 0, so FR-INGEST-7's
         per-box known limit does not touch the pilot. Owner: `reader-ingest --setup` builds the r2 venv; the old
-        <data_dir>/ingest/venv-docling-2.151.1+r1 (several GB) can be deleted.",
+        <data_dir>/ingest/venv-docling-2.151.1+r1 (several GB) can be deleted.
+        Indentation review: round 1 changes (ad0da76), round 2 VERDICT approve (c6ae789), deep-reviewer (Fable).
+        Gate at c6ae789: LOCAL CI FAIL only in tests/sandbox (15 tests: test_session_sweep_spares_other_runs and 14
+        in test_supervisor.py), the identical set failing on clean origin/V/slice-integration 744997e; each passes
+        alone (order-dependent, not SRV-INGEST).",
       note: "spec revised after deep-reviewer round 1 (7 blockers; ADR-0027 none) and pinned to spikes/ingest-confine
         (converter.sb rules cited line by line; confined 15.69–15.85 pages/min vs 15.85–16.57 unconfined; separate
         non-editable converter venv). Owner accepted ADR-0027 and CLI-first ingestion in chat 2026-11-21 (status line
