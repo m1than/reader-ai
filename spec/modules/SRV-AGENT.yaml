@@ -74,6 +74,12 @@
 # Red tests (2026-11-23) after the three-part gate held: deep-reviewer rounds 1–2 changes, round 3 approve (with
 # SRV-FRESH); the shapes pinned by the stub run and confirmed by the owner's live call (spikes/web-search §§ 5a, 5b);
 # the owner's acceptance of ADR-0030.
+# Code review round 1 of V/freshness (2026-11-24; no requirement loosened): a WebSearchCall with no hook is
+# `tools_mismatch` before the reservation (FR-AGENT-14); FR-AGENT-16 states that an error result never settles at the
+# SDK cost, that a model_usage TTL breakdown that does not add up is `usage_unmapped`, and that the 100,000-token
+# tier boundary is inclusive. New oracles: placeholder pins and the nested tool's `name` (VEC-AGENT-3), an
+# error-result settlement (VEC-AGENT-4), the tier boundary, the lower tier for summed usage, and the search fee in
+# the reserve.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -316,7 +322,8 @@ requirements:
       The adapter (FR-AGENT-6) takes tool use only through one optional StageCall field, `web_search:
       WebSearchCall(allowance, hook, max_turns)`, so no StageCall field names a tool (SRV-TUTOR's no-tools test
       holds); the tools come from the code table `TOOL_STAGES = {("freshness_web", "search"): ("WebSearch",)}`, and a
-      call with `web_search` for any other (task, stage) raises `tools_mismatch` before the reservation. For such a
+      call with `web_search` for any other (task, stage), or with a `hook` of None (no tool runs ungated), raises
+      `tools_mismatch` before the reservation. For such a
       call it passes `tools=["WebSearch"]`, `allowed_tools=[]`, the caller's `PreToolUse` hook (the prompt is a
       string, so not `can_use_tool`), its `max_turns`, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`;
       the init check (FR-AGENT-7) then requires `tools == ["WebSearch"]` and empty `mcp_servers`. Pinned data (from the stub run and the owner's
@@ -356,8 +363,11 @@ requirements:
       with an `above_100k` tier exceed 100,000, the cross-check logs an INFO `tier_unknown` (model, summed prompt
       tokens) beside any `cost_crosscheck` warning, and the settle amount stays the SDK's (whether `total_cost_usd`
       knows the Haiku tiers stays open, H-WS-6). For a tool call several 2xx are expected: when the record shows no
-      refusal, nothing in flight or failed, at most `requests_max` requests, and the SDK reports a cost, the settle
-      amount is `total_cost_usd`; every other case keeps FR-AGENT-9's rule. The reserve for a tool call is max(the
+      refusal, nothing in flight or failed, at most `requests_max` requests, the result is not an error result, and
+      the SDK reports a cost, the settle amount is `total_cost_usd`; every other case keeps FR-AGENT-9's rule. A
+      `model_usage` entry whose `cacheCreationInputTokens` is not the sum of its 5-minute and 1-hour parts is
+      `usage_unmapped` (the TTL breakdown decides the rate). The tier boundary is inclusive: exactly 100,000 prompt
+      tokens is the lower tier, 100,001 the higher. The reserve for a tool call is max(the
       caller's floor, FR-AGENT-9's single-call estimate + `searches_max × web_search_usd`); the caller's floor must
       cover the call's worst case by formula (SRV-FRESH `search_reserve_floor_usd`), knowing that the tokens a search
       adds are not enforceable.
@@ -407,10 +417,10 @@ vectors:
     source: Pricing table (Anthropic API rates as cached 2026-11-03; cache multipliers from the prompt-caching economics; Haiku 5.5 tiers and the web search fee from the pricing page fetched 2026-11-23)
     file: spec/fixtures/SRV-AGENT/pricing.yaml
   - id: VEC-AGENT-3
-    source: The CLI's request shapes for WebSearch measured by the stub run (spikes/agent-proxy-handshake/results/20261123T2055*-websearch*) and confirmed by the owner's live call — main-loop tools with DeferredToolPlaceholder, the WebSearch definition with its input_schema digest, the nested tool — plus refused variants
+    source: The CLI's request shapes for WebSearch measured by the stub run (spikes/agent-proxy-handshake/results/20261123T2055*-websearch*) and confirmed by the owner's live call — main-loop tools with DeferredToolPlaceholder, the WebSearch definition with its input_schema digest, the nested tool — plus refused variants (including a changed placeholder input_schema, `defer_loading` false, a string or absent, an over-long placeholder description, and a nested tool with another or no `name`)
     file: spec/fixtures/SRV-AGENT/websearch-shapes.yaml
   - id: VEC-AGENT-4
-    source: Allowance and request-cap sequences (a retried nested request, 429 resends, requests_max reached, a tool-less freshness token), run-token issue cases, and tool-call settlements per FR-AGENT-9/-16
+    source: Allowance and request-cap sequences (a retried nested request, 429 resends, requests_max reached, a tool-less freshness token), run-token issue cases, and tool-call settlements per FR-AGENT-9/-16 (including an error result with a clean record)
     file: spec/fixtures/SRV-AGENT/websearch-sequences.yaml
 
 defers:

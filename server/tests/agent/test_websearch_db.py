@@ -65,12 +65,37 @@ async def test_tools_only_for_the_freshness_search_stage(pg: Pg, tmp_path: Path)
     errors = need("reader.agent.errors")
     w = await world(pg, tmp_path)
     p, cli, proxy = _provider(w, [Script()], tmp_path)
-    for bad in ({"task": "draft"}, {"stage": "report"}, {"task": "fact_check", "stage": "tutor"}):
+    provider = need("reader.agent.provider")
+    ungated = provider.WebSearchCall(
+        allowance=provider.WebSearchAllowance(searches_max=1, searches_per_request_max=1, requests_max=3),
+        hook=None,
+        max_turns=2,
+    )
+    bad_calls: list[dict[str, Any]] = [
+        {"task": "draft"}, {"stage": "report"}, {"task": "fact_check", "stage": "tutor"}, {"web_search": ungated},
+    ]
+    for bad in bad_calls:
         with pytest.raises(errors.AgentError) as refused:
             await p.run(_call(w, **bad))
         assert refused.value.code == "tools_mismatch"
     assert proxy.issued == [] and cli.requests == []
     assert await rows(w.engine, "SELECT id FROM agent_spend") == []  # refused before the reservation
+
+
+async def test_tool_call_reserve_adds_the_search_fee(pg: Pg, tmp_path: Path) -> None:
+    """FR-AGENT-16: reserve = max(floor, single-call estimate + searches_max x web_search_usd)."""
+    ledger = need("reader.agent.ledger")
+    w = await world(pg, tmp_path)
+    script = Script(
+        text="one line", cost=0.01258811, usage=MAIN_ONLY, init_tools=["WebSearch"], statuses=(200, 200, 200),
+        model_usage=HAIKU_USAGE, searches_forwarded=1, tool_use_results=[RESULT],
+    )
+    p, _, _ = _provider(w, [script], tmp_path)
+    await p.run(_call(w, floor_usd=D(0)))
+    [reserve] = await rows(w.engine, "SELECT usd FROM agent_spend WHERE kind = 'reserve'")
+    estimate = ledger.worst_case("claude-haiku-5-5", 2, 1000, custom_system=True)
+    assert reserve == (estimate + D("0.01"),)
+    assert reserve[0] == D("0.010700")  # (1,000 + 1) * 0.20 + 1,000 * 0.50 per 1e6, plus one $0.01 search
 
 
 async def test_tool_call_options_settlement_and_results(pg: Pg, tmp_path: Path) -> None:

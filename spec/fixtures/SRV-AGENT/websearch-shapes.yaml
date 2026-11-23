@@ -43,6 +43,11 @@ cases:
   - {id: main-schema-changed, tools: main_websearch_schema_extra_property, expect: tools_mismatch}
   - {id: main-second-client-tool, tools: main_plus_tool, tool: {name: Bash, description: x, input_schema: {type: object}}, expect: tools_mismatch}
   - {id: main-two-placeholders, tools: main_two_placeholders, expect: tools_mismatch}
+  - {id: main-placeholder-schema-changed, tools: main_placeholder_schema_extra_property, expect: tools_mismatch}
+  - {id: main-placeholder-defer-loading-false, tools: main_placeholder_key, key: defer_loading, value: false, expect: tools_mismatch}
+  - {id: main-placeholder-defer-loading-string, tools: main_placeholder_key, key: defer_loading, value: "true", expect: tools_mismatch}
+  - {id: main-placeholder-without-defer-loading, tools: main_placeholder_without, key: defer_loading, expect: tools_mismatch}
+  - {id: main-placeholder-description-too-long, tools: main_placeholder_key, key: description, value_repeat: 201, expect: tools_mismatch}
   - {id: main-tool-choice-any, tools: main, tool_choice: {type: any}, expect: tools_mismatch}
   - {id: nested-as-sent, tools: nested, tool_choice: {type: auto}, expect: nested, max_uses_forwarded: 1}
   - {id: nested-max-uses-absent, tools: nested_without_max_uses, expect: nested, max_uses_forwarded: 1}
@@ -51,6 +56,8 @@ cases:
   - {id: nested-max-uses-string, tools: nested_max_uses, value: "1", expect: tools_mismatch}
   - {id: nested-max-uses-bool, tools: nested_max_uses, value: true, expect: tools_mismatch}
   - {id: nested-other-version, tools: nested_type, value: web_search_20260209, expect: tools_mismatch}
+  - {id: nested-other-name, tools: nested_extra_key, key: name, value: WebSearch, expect: tools_mismatch}
+  - {id: nested-name-missing, tools: nested_without_key, key: name, expect: tools_mismatch}
   - {id: nested-allowed-domains, tools: nested_extra_key, key: allowed_domains, value: [example.com], expect: tools_mismatch}
   - {id: nested-blocked-domains, tools: nested_extra_key, key: blocked_domains, value: [example.com], expect: tools_mismatch}
   - {id: nested-user-location, tools: nested_extra_key, key: user_location, value: {type: approximate, country: US}, expect: tools_mismatch}

@@ -54,4 +54,7 @@ settlements:
   - {id: tool-call-no-sdk-cost, tool_call: true, record: {statuses: [200, 200, 200], refused: []}, sdk_usd: null, reserve: "0.020000", settled: "0.020000"}
   - {id: tool-call-unknown-record, tool_call: true, record: null, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
   - {id: tool-call-over-requests-max, tool_call: true, requests_max: 3, record: {statuses: [200, 200, 200, 200], refused: []}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
+  # An error result (e.g. max turns reached) never settles at the SDK cost, even with a clean record: FR-AGENT-9's rule
+  # (here several 2xx → the reserve).
+  - {id: tool-call-error-result, tool_call: true, error_result: true, record: {statuses: [200, 200, 200], refused: []}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}
   - {id: no-tool-call-multiple-2xx, tool_call: false, record: {statuses: [200, 200], refused: []}, sdk_usd: "0.012588", reserve: "0.020000", settled: "0.020000"}

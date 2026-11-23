@@ -53,6 +53,15 @@ def tools_for(case: dict[str, Any]) -> list[Any]:
         return [*main, _plain(case["tool"])]
     if name == "main_two_placeholders":
         return [main[0], copy.deepcopy(main[0]), main[1]]
+    if name == "main_placeholder_schema_extra_property":
+        main[0]["input_schema"]["properties"]["extra"] = {"type": "string"}
+        return main
+    if name == "main_placeholder_key":
+        main[0][case["key"]] = "x" * case["value_repeat"] if "value_repeat" in case else case["value"]
+        return main
+    if name == "main_placeholder_without":
+        main[0].pop(case["key"])
+        return main
     if name == "nested":
         return nested
     if name == "nested_without_max_uses":
@@ -66,6 +75,9 @@ def tools_for(case: dict[str, Any]) -> list[Any]:
         return nested
     if name == "nested_extra_key":
         nested[0][case["key"]] = _plain(case["value"])
+        return nested
+    if name == "nested_without_key":
+        nested[0].pop(case["key"])
         return nested
     if name == "nested_twice":
         return [nested[0], copy.deepcopy(nested[0])]
@@ -269,6 +281,7 @@ def test_tool_call_settlements(case: dict[str, Any]) -> None:
         D(case["reserve"]),
         record,
         sdk,
+        error_result=case.get("error_result", False),
         tool_call=case["tool_call"],
         requests_max=case.get("requests_max", 3),
     )
@@ -293,6 +306,13 @@ def test_haiku_tiers_and_the_search_fee() -> None:
     large = ledger.worst_case("claude-haiku-5-5", 220000, 1000, custom_system=True)
     assert small == D("0.000900")  # (1,000 + 1,000) * 0.20 + 1,000 * 0.50
     assert large == D("0.113500")  # (1,000 + 110,000) * 1.00 + 1,000 * 2.50: the higher tier
+    # The boundary is inclusive: exactly 100,000 prompt tokens is the lower tier, 100,001 the higher.
+    at = pricing.Usage(input=100000, output=0, cache_write_5m=0, cache_write_1h=0, cache_read=0)
+    over = pricing.Usage(input=100001, output=0, cache_write_5m=0, cache_write_1h=0, cache_read=0)
+    assert pricing.cost("claude-haiku-5-5", at) == D("0.010000")  # 100,000 * 0.10
+    assert pricing.cost("claude-haiku-5-5", over) == D("0.050001")  # 100,001 * 0.50, half up
+    # A tool call's summed model_usage is priced at the lower tier (it cannot say which request crossed).
+    assert pricing.cost("claude-haiku-5-5", big, summed=True) == D("0.020468")  # 200,500 * 0.10 + 835 * 0.50
 
 
 def test_model_usage_sum_and_tier_note(caplog: pytest.LogCaptureFixture) -> None:
@@ -316,3 +336,12 @@ def test_model_usage_sum_and_tier_note(caplog: pytest.LogCaptureFixture) -> None
     assert len(notes) == 1 and notes[0].levelno == logging.INFO
     with pytest.raises(need("reader.agent.errors").AgentError):
         pricing.map_model_usage({"claude-haiku-5-5": {**entry, "inputTokens": -1}})
+    # The TTL breakdown must add up to cacheCreationInputTokens: missing or inconsistent is usage_unmapped.
+    for broken in (
+        {**entry, "cacheCreationEphemeral1hInputTokens": 2780},
+        {k: v for k, v in entry.items() if k != "cacheCreationEphemeral1hInputTokens"},
+        {**entry, "cacheCreationEphemeral5mInputTokens": 1},
+    ):
+        with pytest.raises(need("reader.agent.errors").AgentError) as refused:
+            pricing.map_model_usage({"claude-haiku-5-5": broken})
+        assert refused.value.code == "usage_unmapped"

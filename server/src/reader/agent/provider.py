@@ -305,8 +305,10 @@ class AgentProvider:
 
     async def run(self, call: StageCall) -> StageResult:
         tool_call = call.web_search is not None
-        if tool_call and (call.task, call.stage) not in TOOL_STAGES:
-            raise agent_error("tools_mismatch")  # FR-AGENT-14: before any reservation
+        if call.web_search is not None and (
+            (call.task, call.stage) not in TOOL_STAGES or call.web_search.hook is None
+        ):
+            raise agent_error("tools_mismatch")  # FR-AGENT-14: before any reservation; no tool without a gate
         task = self.config.tasks.get(call.task)
         if task is None:
             raise agent_error("unknown_model")
