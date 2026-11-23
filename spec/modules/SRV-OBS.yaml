@@ -119,7 +119,7 @@ bounds:
   - { name: retention period, value: "once per day at 03:00 UTC, plus once per worker start", kind: "structural: deletion is idempotent; one REST call deleted 132–178 traces in ≤ 0.08 s (spikes/obs-stack)" }
   - { name: memory, value: "mlflow mem_limit 1g, rotel 256m", kind: "measured (docker stats incl. page cache): MLflow 581 MiB at its first idle start (spikes/trace-backend; × 1.25 = 726 ≤ 1,024) and 443 MiB peak under an 8-minute lesson replay plus a 10,080-span bulk (spikes/obs-stack); Rotel ≤ 41 MiB (spikes/trace-backend; × 1.25 = 51 ≤ 256). Revised from the stage-2 live check's cgroup memory.peak" }
   - { name: storage, value: "927 bytes per span (SQLite); a whole-book compile ≈ 10 MB", kind: "measured: spikes/obs-stack, 10,080 spans → +9,342,976 bytes" }
-  - { name: summary limits, value: "compile runs: the newest 50 in the window; ingest: the newest 50 imports; failures: up to 5 trace ids per group; tutor: the slowest 10", kind: "structural: one owner, one page; each view stays one indexed query" }
+  - { name: summary limits, value: "compile runs: the newest 50 in the window; ingest: the newest 50 imports; failures: up to 5 trace ids per group; tutor: the slowest 10; recent_keys_of: at most 500 key rows per call", kind: "structural: one owner, one page. The 500 bounds a published read that limits before owner scoping; when it is reached the view says so (`truncated`), it never silently undercounts" }
   - { name: attribute string length, value: "≤ 128 characters after the value rule", kind: "structural: every allowed string is an id, an enum or a route template (VEC-OBS-1); the longest is a route template" }
 
 requirements:
@@ -184,8 +184,10 @@ requirements:
       CONSUMER) in a new trace, with exactly one link to the parsed `trace` context when it parses and is valid, and
       none otherwise; parsing never raises. Its trace id is derived, not random: the first 16 bytes of the SHA-256
       of the bytes `reader.job`, NUL, the job id written as decimal ASCII digits (no sign, no leading zeros), NUL,
-      and the idempotency key encoded UTF-8; an all-zero result is replaced by bytes 16..31 (VEC-OBS-3's ids are
-      checked by `spec/fixtures/SRV-OBS/trace-ids.mjs`, never hand-written); installed through the `IdGenerator` FR-OBS-1 installs (a context variable set only around the root span's creation;
+      and the idempotency key encoded UTF-8; an all-zero result is replaced by bytes 16..31. VEC-OBS-3's keys and
+      ids are generated, never hand-written, by `spec/fixtures/SRV-OBS/trace-ids.mjs` (a fixture helper only); the
+      gate is the [unit] test that recomputes every key with `reader.jobs.model.idempotency_key` and every id with
+      this derivation in Python and fails CI on a difference. Installed through the `IdGenerator` FR-OBS-1 installs (a context variable set only around the root span's creation;
       every other span gets a random id). So the owner's views (FR-OBS-10) compute any job's trace id from a key row's
       `job_id` and `key` (read through SRV-EVENTS' published functions) without storing it. Attributes: `reader.job.kind`, `reader.job.id`,
       `reader.job.attempt` (the key's attempt count at claim), the per-kind argument attributes of VEC-OBS-1
@@ -300,7 +302,12 @@ requirements:
       fetch and a CORS fetch from that page arrived `same-site` with Dest `image`, `script`, `empty`, `empty` and were
       all refused. Caddy appends the original query string to the gate's URI (measured), so the gate ignores its own
       query. It never sets or refreshes a cookie, never extends a session, is GET only (forward_auth always sends GET),
-      and is neither traced nor logged per request (FR-OBS-3, -4). A 401 is returned to the browser
+      and is neither traced nor logged per request (FR-OBS-3, -4). Declared residual, not audited: the navigation
+      exception lets a same-site page open any MLflow UI route with a URL fragment it chose; if some MLflow UI route
+      performs a write on load from its fragment (rather than on a user action), such a page could trigger it with the
+      owner's session. The MLflow 3.18.0 UI routes were not audited for this; the writes it could reach are MLflow's
+      own (traces, assessments, tags, experiments), never reader-ai's, and the app's routes stay behind SRV-AUTH's
+      Origin check. A 401 is returned to the browser
       as is: the dashboard does not redirect to sign-in; the owner signs in at https://localhost and reloads (owner
       note). The same route is also reachable as https://localhost/api/obs/gate through the main site, where it tells
       a caller only whether its own session is the owner's, which `GET /api/me` already does. Defence in depth only,
@@ -315,12 +322,18 @@ requirements:
       another role) returns JSON computed from reader-ai's own tables, read-only, over the window. User-owned tables
       are read with `owner_id` = the caller's id. `job_keys` is never queried by SQL from this module (SRV-EVENTS
       FR-EVENTS-17: no module queries it directly): its rows come only through the read functions the paired
-      FR-EVENTS-18 publishes next to `job_status_of` and `dead_error_code_of`, `key_rows_of(conn, kind_name, keys)` and
-      `recent_keys_of(conn, kind_names, outcome, since, limit)`, each returning (kind, key, args, outcome, error_code,
-      job_id, attempts, created_at, finished_at); the keys this module asks for are computed with SRV-EVENTS'
-      `idempotency_key` (FR-EVENTS-2) from the owner's own rows. Each view is one query on the user-owned tables plus
-      at most one published read, served by an existing index or the one FR-EVENTS-18 adds on (kind, outcome,
-      finished_at):
+      FR-EVENTS-18 publishes next to `job_status_of` and `dead_error_code_of`: `key_rows_of(conn, keys)` (keys of any
+      kinds; the `<kind>:` prefix carries the kind; served by the primary key) and `recent_keys_of(conn, kind_names,
+      outcome, since, limit)` (served by the index FR-EVENTS-18 adds on (kind, outcome, finished_at)), each returning
+      rows of (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at), and `recent_keys_of`
+      also a `truncated` flag that is true when it returned `limit` rows. The keys this module asks for are computed
+      with SRV-EVENTS' `idempotency_key` (FR-EVENTS-2) from the owner's own rows. What each view runs: (a) one query
+      for the runs, one for their spend, one for their steps, then one `key_rows_of` for all steps' keys of both
+      pipeline kinds; (b) one query for the questions, one for the tutor settle rows, then one `key_rows_of` for the
+      slowest 10; (c) one `recent_keys_of` over every kind, one query for the owner's runs, questions and materials
+      used to scope it, and one for failed questions; (d) one `recent_keys_of` for `ingest.import` and one query for
+      the owner's materials. `recent_keys_of` limits before owner scoping, so a view built from it carries
+      `truncated` and the page shows "more rows exist than shown" when it is true:
       (a) `compile_runs`: the newest 50 runs started in the window, each with lesson id, started and finished times,
       `spent_usd` = SRV-AGENT's spent(run) (FR-AGENT-9: settled_usd of settle rows plus the usd of reserves with neither
       a settle nor a void, over `agent_spend` rows of the run_id), and its steps from `compile_steps` (stage, cost_usd,
@@ -334,14 +347,14 @@ requirements:
       (one per billed provider call, failed answers included; null when there are none), and the slowest 10 with their
       trace ids (the `tutor.answer` key of the question id);
       (c) `failures`: counts by (kind, error_code) of key rows with outcome `dead` finished in the window, from
-      `recent_keys_of(all kinds, dead, …)`. User kinds are scoped: `pipeline.*` rows count when their args run_id is one
+      `recent_keys_of(all kinds, dead, window, 500)`. User kinds are scoped: `pipeline.*` rows count when their args run_id is one
       of the owner's runs, `tutor.answer` rows when their question_id is one of the owner's questions, `ingest.import`
       rows when a materials row of the owner has their material_sha256. System rows are shown unscoped and marked
       `system: true` on this owner-only page (`ingest.import` with no materials row, `search.embed`, `obs.retention`,
       and any kind not listed here); key rows hold ids, codes and times, no text. Plus counts by error_code of the
       owner's failed `tutor_questions`. Each group carries up to 5 most recent trace ids;
       (d) `ingest`: the newest 50 `ingest.import` key rows that succeeded in the window and belong to the owner's
-      materials, each with the material's `page_count`, the import job's duration (`created_at` to `finished_at` of the
+      materials (from `recent_keys_of(["ingest.import"], succeeded, window, 500)`), each with the material's `page_count`, the import job's duration (`created_at` to `finished_at` of the
       key row, which includes queue wait) and `pages_per_min_import` = page_count over that duration in minutes (the
       in-stack import only; host-side conversion time is not included). No text column (questions, answers, reports, titles) is read. A web page `/observability`
       (paired WEB-UI change, owner only) renders the four views and links every trace id to
@@ -430,7 +443,9 @@ vectors:
 #            link parsing (FR-OBS-5, INV-OBS-4), the CLI environment builder and the uv.lock pin check against VEC-OBS-2
 #            (FR-OBS-6 a), the gate's decision table over (Origin, X-Forwarded-Method, Sec-Fetch-Site/-Mode/-Dest,
 #            session role) (FR-OBS-9, INV-OBS-5), the summary's percentile, scoping and join functions over rows
-#            (FR-OBS-10), VEC-OBS-3's trace ids recomputed from FR-OBS-5's derivation, the retention cutoff and the
+#            (FR-OBS-10), VEC-OBS-3's keys recomputed from its args with reader.jobs.model.idempotency_key and its
+#            trace ids from FR-OBS-5's derivation (the gate for the fixture; trace-ids.mjs only generates), the
+#            `truncated` flag shown when recent_keys_of hits its limit, the retention cutoff and the
 #            next-day-first order (FR-OBS-11), the canary for our process (INV-OBS-2 first half), failure isolation
 #            (INV-OBS-3).
 #   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
@@ -509,7 +524,7 @@ paired_changes:
       - "FR-EVENTS-3/-6/-4: `_defer` passes the `trace` kwarg of FR-OBS-5 (a); the registered task accepts `trace: str | None = None`; `_run` wraps `_attempt` and `_judge` in FR-OBS-5 (b)'s root span; the sweep's defers pass none (c)."
       - "FR-EVENTS-1: KIND_MODULES lists `reader.obs.jobs` (kind `obs.retention`, an `on_worker_start` hook)."
       - "FR-EVENTS-16: procrastinate log records gain no trace field; the scrubber already removes `task_kwargs` whole, so `trace` never reaches a log; unchanged behaviour."
-      - "New FR-EVENTS-18 (based on origin/V/slice-integration's SRV-EVENTS, which has FR-EVENTS-17 `dead_error_code_of` and the rule that no module queries `job_keys` directly): published reads next to `job_status_of` and `dead_error_code_of`, on an open connection without a procrastinate app, read-only: `key_rows_of(conn, kind_name, keys) -> list[KeyRow]` and `recent_keys_of(conn, kind_names, outcome, since, limit) -> list[KeyRow]` (newest `finished_at` first; `limit` ≤ 500), `KeyRow = (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at)`; a migration `jobs_0002` adds an index on job_keys (kind, outcome, finished_at). [db] tests: unknown keys omitted, outcome filter, window and limit, ordering, the index used (EXPLAIN shows an index scan on a seeded table)."
+      - "New FR-EVENTS-18 (based on origin/V/slice-integration's SRV-EVENTS, which has FR-EVENTS-17 `dead_error_code_of` and the rule that no module queries `job_keys` directly): published reads next to `job_status_of` and `dead_error_code_of`, on an open connection without a procrastinate app, read-only: `key_rows_of(conn, keys) -> list[KeyRow]` (keys of any kinds in one call: the kind is the key's `<kind>:` prefix, matched against the row's kind; primary-key lookup) and `recent_keys_of(conn, kind_names, outcome, since, limit) -> tuple[list[KeyRow], bool]` (newest `finished_at` first; 1 ≤ `limit` ≤ 500, structural; the bool is `truncated`, true when `limit` rows were returned), `KeyRow = (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at)`; a migration `jobs_0002` adds an index on job_keys (kind, outcome, finished_at). [db] tests: keys of two kinds in one call, unknown keys omitted, a key whose prefix differs from its row's kind omitted, outcome filter, window, limit and `truncated` at exactly `limit`, ordering, the index used (EXPLAIN shows an index scan on a seeded table)."
       - "Owner note: the stage-2 outbox must store the traceparent with the enqueue it defers (FR-OBS-5 d)."
   - spec: SRV-AGENT
     items:
