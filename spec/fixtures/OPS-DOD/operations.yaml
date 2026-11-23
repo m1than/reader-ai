@@ -195,7 +195,7 @@ operations:
       observability: { missing: "proposed SRV-INGEST FR-INGEST-24; no test yet" }
       recovery:
         items: [INV-IMPORT-2]
-        missing: "proposed SRV-INGEST FR-INGEST-19..21, FR-INGEST-23 (lease and heartbeat, stack-side expiry, import-key authority, receive order, delete on cancel, crash sweep, watch-mode stale cleanup); no test yet"
+        missing: "proposed SRV-INGEST FR-INGEST-19..21, FR-INGEST-23 (lease and heartbeat, stack-side expiry, import-key authority, receive order, delete on cancel under the upload lock, crash sweep, watch-mode stale cleanup, Retry requeueing a dead import or embed key); SRV-SEARCH FR-SEARCH-10 (language of uploads); no test yet"
 
   - id: course.plan
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
