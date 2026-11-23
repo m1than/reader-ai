@@ -152,11 +152,12 @@ def prepare_owner(project: str, reset: bool) -> bool:
         line("FAIL", "browser: owner passkeys counted")
         return False
     if count != "0" and not reset:
-        line("FAIL", f"browser: the owner has no passkey yet (found {count}; --reset-owner-passkeys deletes them all)")
+        line("FAIL", "browser: the owner has no passkey yet",
+             f"found {count}; --reset-owner-passkeys deletes them all")
         return False
     if count != "0":
         code, _ = psql(project, OWNER_RESET_SQL)
-        line("PASS" if code == 0 else "FAIL", f"browser: owner passkeys and sessions deleted ({count})")
+        line("PASS" if code == 0 else "FAIL", "browser: owner passkeys and sessions deleted", f"{count}")
         return code == 0
     line("PASS", "browser: the owner has no passkey yet")
     return True
@@ -287,9 +288,9 @@ def run_suite(args: argparse.Namespace, out: Path, suite: Path, spki: str, root_
     for status, title, seconds in walked:
         line(status, f"browser: {title}", f"({seconds:.1f}s)")
     if rc == -1:
-        line("FAIL", f"browser: suite exceeded {budget}s")
+        line("FAIL", "browser: suite exceeded its time budget", f"{budget}s")
     elif rc != 0 and not any(status == "FAIL" for status, _, _ in walked):
-        line("FAIL", f"browser: Playwright exited {rc} without a failing test (see playwright.log)")
+        line("FAIL", "browser: Playwright exited non-zero without a failing test", f"exit {rc}; see playwright.log")
     return failures
 
 
