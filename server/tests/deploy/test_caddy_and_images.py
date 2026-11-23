@@ -162,7 +162,11 @@ def test_caddy_adapt_in_pinned_image() -> None:
     upstreams = {u["dial"] for n in proxies for u in n.get("upstreams", [])}
     assert upstreams == {"10.230.1.10:8000", "mcp:8001"}
     proxied = {path: ups for path, ups in _path_upstreams(nodes).items() if ups}
-    assert proxied == {"/api/*": {"10.230.1.10:8000"}, "/mcp": {"mcp:8001"}}
+    assert proxied == {
+        "/api/materials/uploads": {"10.230.1.10:8000"},  # FR-DEPLOY-13: the upload's own body limit
+        "/api/*": {"10.230.1.10:8000"},
+        "/mcp": {"mcp:8001"},
+    }
     assert any(n.get("handler") == "file_server" for n in nodes)
     assert "/index.html" in json.dumps(config), "SPA fallback (try_files) missing"
     assert '"/assets/*"' in json.dumps(config), "assets route missing"
