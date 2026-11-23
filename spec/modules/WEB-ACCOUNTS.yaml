@@ -1,0 +1,119 @@
+# WEB-ACCOUNTS — the owner's "Sign-ups" screen: pending sign-up requests with Approve and Reject, approved sign-up
+# accounts with Disable, and the header link that shows how many requests wait (ADR-0031, proposed; owner request
+# 2026-11-23, task V.signup).
+#
+# Status: DRAFT. No code until the owner accepts ADR-0031 and the deep-reviewer approves this spec and SRV-AUTH's
+# FR-AUTH-23..32. The screen calls SRV-AUTH FR-AUTH-29's routes; an approval decides who can use the instance, so this
+# spec gets SRV-AUTH's full review rounds (auth is a complex area).
+#
+# The "Sign up" link on the sign-in page is not here: the sign-in, bootstrap and sign-up pages are SRV-AUTH's static
+# pages (FR-AUTH-14, FR-AUTH-31), outside the SPA, until WEB-UI replaces them in stage 4.
+#
+# Design: the same Calm system and polish rules as WEB-UI FR-UI-10/-11 — tokens only (INV-UI-1), the library's
+# spacing steps, the sans `--acme-font` for UI chrome, a 2px `--acme-focus` outline, one `main#content` from the shell
+# (this page renders a `section`), `role="status"` loading states with visually hidden text and the library's
+# `Skeleton`, lists without bullets carry `role="list"`, no HTML strings (INV-UI-2), axe with no serious or critical
+# issue at 1280, 1024 and 390 px, no horizontal overflow.
+#
+# Cross-spec items (paired changes, written with Green):
+#   - WEB-UI (reserved id FR-UI-14; FR-UI-12 is V/onboarding's, FR-UI-13 is V/plan's): the route table adds
+#     `/signups` (this page, a lazy chunk); for a user with role `owner` (from `/api/me`) the header shows a link
+#     "Sign-ups", with " (n)" when FR-ACCOUNTS-4's count is above 0; a non-owner sees no link, and `/signups` shows
+#     the not-found view to a non-owner without calling FR-AUTH-29's routes. `web/test-server/` stubs FR-AUTH-29's
+#     routes from VEC-ACCOUNTS-1. Held here, not as a `proposed_requirements` key in WEB-UI, because two other
+#     branches add that key to WEB-UI and a third copy would not merge.
+#   - SRV-AUTH FR-AUTH-29: the routes and bodies; `recent_session` on approve, reject and disable (401
+#     `reauth_required` for an older session).
+#
+# Test levels: [unit] Vitest in jsdom; [story] Storybook stories Light and Dark (FR-UI-8); [browser] Playwright
+# against the WEB-UI test server with stubbed routes; [live] SRV-AUTH FR-AUTH-32's `signup` step, which approves and
+# rejects through this screen.
+
+id: WEB-ACCOUNTS
+title: Owner's Sign-ups screen — pending requests with Approve and Reject, approved sign-up accounts with Disable
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: product
+adr: [ADR-0031, ADR-0013, ADR-0012]
+
+paths:
+  - web/src/accounts/**
+  - e2e/web/accounts/**
+  - spec/fixtures/WEB-ACCOUNTS/**
+
+normative:
+  - id: REF-ACCOUNTS-1
+    title: WCAG 2.2 — 2.4.3 Focus Order, 3.3.4 Error Prevention (Legal, Financial, Data), 4.1.3 Status Messages
+    url: https://www.w3.org/TR/WCAG22/
+  - id: REF-ACCOUNTS-2
+    title: SRV-AUTH FR-AUTH-29 — the owner's sign-up routes, bodies and codes this screen shows
+    url: spec/modules/SRV-AUTH.yaml
+
+requirements:
+  - id: FR-ACCOUNTS-1
+    text: >-
+      **Pending list.** `/signups` (owner only) shows a `section` with the `h1` "Sign-ups" and the lead "New accounts
+      wait here until you approve them. Approved accounts can sign in as learners." Under the heading "Waiting for
+      approval" a list (`role="list"`) of `GET /api/auth/signups`'s `pending`, oldest first; each row shows the handle
+      (prefixed "@", weight 600), the display name, the request time as relative text with the exact time in a
+      `<time datetime>` element, and two buttons, "Approve" (solid) and "Reject" (danger outline), whose accessible
+      names include the handle ("Approve @lc-1a2b"). Empty: "No sign-ups are waiting." Handles and display names are
+      rendered as text nodes only; a long display name wraps (no truncation, no hover-only text). Loading: FR-UI-11's pattern with
+      the hidden text "Loading sign-ups". A load error shows FR-UI-7's notice with a Retry button. [unit] the list
+      from VEC-ACCOUNTS-1 (order, text, accessible names), empty, loading, error; a display name holding `<b>` and
+      U+202E characters renders as text; [story] Light and Dark with 0, 1 and 20 pending.
+  - id: FR-ACCOUNTS-2
+    text: >-
+      **Approve and Reject.** Approve sends `POST /api/auth/signups/{id}/approve` with `{}` at once (it is undoable
+      through Disable). Reject asks first: an inline confirmation in the row ("Reject @<handle>? The request is
+      deleted and the handle becomes free." with "Reject" and "Cancel"; focus moves to "Cancel"), then sends `POST
+      /api/auth/signups/{id}/reject` with `{}`. While a request runs, that row's buttons are disabled and show the
+      library's busy state. On success the row leaves the list, the list is refetched, and a `role="status"` line
+      says "@<handle> approved." or "@<handle> rejected."; focus moves to the next row's first button, or to the
+      section heading when the list is empty. Responses: 401 `reauth_required` → the row shows "Sign in again to
+      approve or reject (required every 10 minutes for these actions)." with a link to `/api/auth/signin` and nothing
+      changes; 404 `not_found` → "This request is no longer waiting." and the list is refetched (another tab or the
+      7-day expiry removed it); 401 `unauthenticated` → the shell's sign-in redirect (FR-UI-5); network or 5xx →
+      "Could not reach reader-ai. Try again." with the buttons enabled. No server text is shown. [unit] each response
+      for both actions with the exact request (method, path, body); the confirmation and its focus; [browser] the
+      flow at three widths in both schemes with axe and the request oracle (every non-GET request equals the case's
+      list).
+  - id: FR-ACCOUNTS-3
+    text: >-
+      **Approved accounts.** Under the heading "Accounts" a list of `accounts` by handle: handle, display name,
+      "Approved <relative time>", and either a "Disable" button (danger outline, same inline confirmation pattern:
+      "Disable @<handle>? Their sessions end and they cannot sign in." ) or the text "Disabled". Disable sends `POST
+      /api/auth/signups/{id}/disable` with `{}` and handles responses as FR-ACCOUNTS-2. Empty: "No approved sign-up
+      accounts." Accounts from reader.yaml are not listed (they are managed there). [unit] list, disable flow,
+      disabled row; [story] Light and Dark.
+  - id: FR-ACCOUNTS-4
+    text: >-
+      **Header count.** For the owner, the shell asks `GET /api/auth/signups` once per page load and after each
+      approve, reject or disable, and shows the pending count in the "Sign-ups" header link (" (n)" with the
+      accessible name "Sign-ups, n waiting"); no polling (structural: a sign-up waits for days, not seconds; the
+      7-day expiry is the bound). A failure of that call shows the link without a count. A non-owner never calls it.
+      Notification beyond the app (Telegram) waits for SRV-NOTIFY (ADR-0031). [unit] owner with 0 and 3 pending,
+      the call failing, a learner (no call, no link).
+
+invariants:
+  - id: INV-ACCOUNTS-1
+    text: >-
+      The screen never sends a request that changes an account without a click on that account's own button (and, for
+      Reject and Disable, its confirmation): no request on load, on refetch or on focus changes state. [unit] the
+      request log over load, refetch, tab focus and keyboard navigation holds only GETs.
+  - id: INV-ACCOUNTS-2
+    text: >-
+      Handles and display names reach the DOM only as text (INV-UI-2); the build's source scan finds no
+      `dangerouslySetInnerHTML` or `innerHTML` in web/src/accounts.
+
+nfr: []
+
+vectors:
+  - id: VEC-ACCOUNTS-1
+    source: >-
+      Synthetic `GET /api/auth/signups` bodies written for this spec (no real person): 0, 1 and 20 pending rows,
+      Cyrillic and long display names, a display name with `<b>` and U+202E, approved and disabled accounts; and the
+      response bodies of each FR-AUTH-29 outcome.
+    file: spec/fixtures/WEB-ACCOUNTS/signups.json
