@@ -80,10 +80,14 @@ requirements:
     text: >-
       **Confirm.** "Create the course" with a checkbox "Start compiling lesson 1 now ($low–$high, stops at $8.00)",
       checked by default and showing the range from the current estimate (owner decision: confirm → the first lesson
-      compiling). The button is disabled while the plan does not fit or a request is in flight. It posts `POST
-      /api/plans/confirm` with the inputs, the shown `plan_sha256` and `compile_first`. 409 `plan_changed` replaces the
-      estimate with the returned plan and asks again ("The plan changed; check it and confirm again"); 422
-      `does_not_fit` shows its message. On success (also `replayed: true`) the page shows "Course created: N lessons"
+      compiling). The button is disabled, and Enter does nothing, unless the shown preview's inputs equal the current
+      valid fields with no preview pending (debounce or request) and no preview error, and the plan fits; it is also
+      disabled while a confirm is in flight. It posts `POST /api/plans/confirm` with the inputs the shown preview was
+      made from (never the live fields), its `plan_sha256` and `compile_first`. The checkbox is hidden and
+      `compile_first` false when the stored plan has a started lesson (the server would answer `already_started`).
+      409 `plan_changed` asks for a new preview (the 409 body carries no titles) and asks again ("The plan changed;
+      check it and confirm again"); 422 `does_not_fit` shows its message. On success (also `replayed: true`) the
+      page shows "Course created: N lessons" ("1 lesson" for one)
       with a link to the lesson list, and a compile result: "Lesson 1 is compiling" for `{run_id}`, or the code's
       message for `{error}` (`already_started`: "A lesson of this course is already compiled or compiling";
       `compile_running`; budget refusals), the course still created. [unit]
@@ -110,4 +114,4 @@ defers:
 owner_notes:
   - "1. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it as a range. The live check confirms with it unchecked, so it spends no credit."
 
-review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent. Tests (2026-11-23): [unit] web/src/import/plan/plan.test.tsx; [story] web/src/import/plan/ImportPage.stories.tsx."
+review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent. Tests (2026-11-23): [unit] web/src/import/plan/plan.test.tsx; [story] web/src/import/plan/ImportPage.stories.tsx. Code review of e244aa4 (changes): confirm could post the live fields with a stale plan_sha256 during the debounce or after a failed preview (a same-day re-plan would replay the old plan) — FR-IMPORT-6 now confirms only the shown preview's own inputs, with unit tests for Enter inside the debounce and after a failed preview; the 409 text matches the re-preview; compile-first hidden once a lesson started; '1 lesson'."

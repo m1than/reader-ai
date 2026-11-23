@@ -233,7 +233,8 @@ async def test_race_confirm_against_create_run(pg: Pg, tmp_path: Path) -> None:
         assert raised.value.code == "lesson_unknown"
         assert await env.scalar("SELECT count(*) FROM compile_runs WHERE lesson_id = :l", l=victim) == 0
         assert await env.scalar("SELECT count(*) FROM lessons WHERE id = :l", l=victim) == 0
-        # 2) the run comes first: the confirm of a plan that drops that lesson is refused
+        # 2) the run comes first (sequential, not concurrent: the run commits before the confirm starts): the
+        #    confirm of a plan that drops that lesson is refused
         async with client(env) as c:
             p2 = await _preview(c, weeks=3)
             target = uuid.UUID(

@@ -2,7 +2,7 @@
 import { Button } from '@acme/ui/button';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ApiError } from '../../app/api';
-import type { Confirmed, PlanApi, Preview, StoredPlan } from './api';
+import type { Confirmed, PlanApi, PlanBody, Preview, StoredPlan } from './api';
 import { message } from './messages';
 import { check, estimateLines, localDate, MINUTES, RATE, WEEKS, type Fields } from './model';
 
@@ -77,11 +77,15 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
     rate: stored ? stored.inputs.rate : RATE.default,
   });
   const [touched, setTouched] = useState<Partial<Record<Field, boolean>>>({});
-  const [preview, setPreview] = useState<Preview | null>(null);
+  // The shown preview together with the exact body that produced it: confirm posts that body, never the live fields.
+  const [shown, setShown] = useState<{ preview: Preview; body: PlanBody } | null>(null);
+  const preview = shown?.preview ?? null;
   const [loading, setLoading] = useState(false);
+  const [pending, setPending] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [refresh, setRefresh] = useState(0);
-  const [compileFirst, setCompileFirst] = useState(true);
+  // A course with a started lesson already has a run: compile-first would be refused (already_started).
+  const [compileFirst, setCompileFirst] = useState(!(stored && stored.started > 0));
   const [sending, setSending] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [done, setDone] = useState<Confirmed | null>(null);
@@ -91,13 +95,16 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
   useEffect(() => {
     if (!value) return undefined;
     const seq = ++latest.current;
+    setPending(true);
     const timer = window.setTimeout(() => {
+      setPending(false);
       setLoading(true);
+      const body: PlanBody = { material_id: materialId, ...value, today: today() };
       api
-        .preview({ material_id: materialId, ...value, today: today() })
+        .preview(body)
         .then((p) => {
           if (seq !== latest.current) return; // only the latest request's answer is shown
-          setPreview(p);
+          setShown({ preview: p, body });
           setPreviewError(null);
         })
         .catch((e: unknown) => {
@@ -120,22 +127,23 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
   const blur = (field: Field) => setTouched((t) => ({ ...t, [field]: true }));
 
   const lines = preview ? estimateLines(preview, locale) : null;
-  const fits = preview?.summary.fits === true && value !== null && !loading;
+  // Confirm only the plan on screen: its inputs equal the current valid fields, nothing is pending or failed.
+  const current =
+    shown !== null &&
+    value !== null &&
+    shown.body.total_weeks === value.total_weeks &&
+    shown.body.minutes_per_day === value.minutes_per_day &&
+    shown.body.rate === value.rate;
+  const confirmable = current && shown.preview.summary.fits && !pending && !loading && previewError === null;
 
   const confirm = async () => {
     setTouched({ weeks: true, minutes: true, rate: true });
-    if (!value || !preview) return;
+    if (!confirmable || !shown || sending) return;
     setSending(true);
     setConfirmError(null);
     try {
       setDone(
-        await api.confirm({
-          material_id: materialId,
-          ...value,
-          today: today(),
-          plan_sha256: preview.plan_sha256,
-          compile_first: compileFirst,
-        }),
+        await api.confirm({ ...shown.body, plan_sha256: shown.preview.plan_sha256, compile_first: compileFirst }),
       );
     } catch (e) {
       const code = codeOf(e);
@@ -268,19 +276,21 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
         </div>
 
         <div className="plan-confirm">
-          <label className="plan-check">
-            <input type="checkbox" checked={compileFirst} onChange={(e) => setCompileFirst(e.target.checked)} />
-            {preview?.estimate.first_lesson
-              ? `Start compiling lesson 1 now ($${preview.estimate.first_lesson.low_usd}–$${preview.estimate.first_lesson.high_usd}, stops at $${preview.estimate.run_cap_usd})`
-              : 'Start compiling lesson 1 now'}
-          </label>
-          <Button type="submit" disabled={!fits || sending}>
+          {stored && stored.started > 0 ? null : (
+            <label className="plan-check">
+              <input type="checkbox" checked={compileFirst} onChange={(e) => setCompileFirst(e.target.checked)} />
+              {preview?.estimate.first_lesson
+                ? `Start compiling lesson 1 now ($${preview.estimate.first_lesson.low_usd}–$${preview.estimate.first_lesson.high_usd}, stops at $${preview.estimate.run_cap_usd})`
+                : 'Start compiling lesson 1 now'}
+            </label>
+          )}
+          <Button type="submit" disabled={!confirmable || sending}>
             Create the course
           </Button>
           {confirmError ? <p className="plan-error">{message(confirmError)}</p> : null}
           {done ? (
             <div role="status" className="plan-done">
-              <p>{`Course created: ${done.lessons.length} lessons.`}</p>
+              <p>{`Course created: ${done.lessons.length} ${done.lessons.length === 1 ? 'lesson' : 'lessons'}.`}</p>
               {done.compile && 'run_id' in done.compile ? <p>Lesson 1 is compiling.</p> : null}
               {done.compile && 'error' in done.compile ? <p>{message(done.compile.error)}</p> : null}
               <p>

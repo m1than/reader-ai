@@ -55,7 +55,7 @@ for (const width of WIDTHS) {
     await expect(page.getByRole('button', { name: 'Create the course' })).toBeEnabled();
     await page.getByRole('checkbox').uncheck();
     await page.getByRole('button', { name: 'Create the course' }).click();
-    await expect(page.getByText('Course created: 1 lessons.')).toBeVisible();
+    await expect(page.getByText('Course created: 1 lesson.')).toBeVisible();
     expect(await serious(page)).toEqual([]);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/import-confirmed-${width}.png`, fullPage: true });
 

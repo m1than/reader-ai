@@ -270,7 +270,8 @@ requirements:
       - FR-PIPELINE-1's import becomes `import_course_plan(conn, owner_id, plan, *, origin: "manifest" |
         "study_plan") -> ImportResult`, called by the existing route (origin `manifest`, behaviour unchanged; the
         route now takes the course lock too) and by SRV-PLAN's confirm (origin `study_plan`, inside the caller's
-        transaction, which already holds the course lock).
+        transaction, which already holds the course lock). A [db] test per route holds `lock_course` on a second
+        connection and pins that the request waits (an ungranted advisory lock) until that commit.
       For origin `study_plan` only:
       - lessons of the course that are absent from the new plan are removed when they have **not started**,
         re-checked inside this transaction immediately before each removal: their `course_plans` row, then the
@@ -297,7 +298,7 @@ requirements:
       owner_id, lesson_id, cap_usd, *, require_course_unstarted=False) -> run_id` first takes the course lock of the
       lesson's `course_plans` row (FR-PIPELINE-14; none for a lesson without one), then the per-lesson lock as today,
       and re-reads the lesson after taking the locks, inside that transaction (a lesson removed by a concurrent re-plan
-      FR-PIPELINE-11's `lesson_unknown`, 404 at the route; a [db] test pins this re-read with a removal committed while `create_run` waits on the lock). With
+      raises FR-PIPELINE-11's `lesson_unknown`, 404 at the route; a [db] test pins this re-read with a removal committed while `create_run` waits on the lock). With
       `require_course_unstarted`, any compile run of any lesson of the same plan course raises `already_started`
       (SRV-PLAN's compile-first target). `compile_running` and SRV-AGENT's budget refusals are unchanged; the route
       passes the default and behaves as before. [db]

@@ -49,7 +49,8 @@
 # [live] e2e/live against `reader up` with the already-imported pilot, preview and confirm with `compile_first: false`
 # (no compile, no credit): `bash e2e/live/plan.sh`. Its owner session is one row it creates and deletes by id
 # (e2e/live/lib/plan_live.py; the owner's own passkeys and sessions are never touched), pinned against a fake owner
-# session in server/tests/plan/test_live_session_db.py.
+# session in server/tests/plan/test_live_session_db.py. When the owner already has a plan, the check reads it first
+# and restores its weeks, minutes and rate in a `finally` (server/tests/plan/test_live_restore.py, against a fake).
 
 id: SRV-PLAN
 title: Course planning — the study-time question, a deterministic planner that spreads the material over the study days within the daily minutes, the estimate and confirm
@@ -304,7 +305,8 @@ invariants:
       (c) race: a confirm that would remove an unstarted lesson and `create_run` on that lesson, run concurrently on
       two connections, end in one of two states only — the run exists and the lesson is kept (the confirm answers
       409 `plan_changed`, or the run was created after the confirm's commit on a lesson it kept), or the lesson is
-      removed and `create_run` answers `not_found`; never a run on a removed lesson, never a started lesson removed;
+      removed and `create_run` raises `lesson_unknown` (404 at the route); never a run on a removed lesson, never a
+      started lesson removed (the test's second half, run first and confirm second, is sequential, not concurrent);
       (d) a started lesson is never deleted, and after any re-plan the course's ordinals follow plan order. [db]
 
 nfr:
@@ -328,8 +330,11 @@ vectors:
       (days_left < 1: `does_not_fit`, reason `days`, a weeks suggestion only); round-3 cases: 104 weeks on a
       728-page source, first plan, lesson 1 then fixed (started by the compile), and a same-day re-plan (727 new
       lessons over 728 days left; fits, no error), and a re-plan with `today` one day before the stored
-      `start_date` (counted as `start_date`, days_left = D). Each case gives the expected lesson ranges, minutes,
-      summary and finish date.
+      `start_date` (counted as `start_date`, days_left = D); code-review cases: page characters (1, 1, 1), 1 week,
+      today = start + 5 (days_left 2, t1 = ceil(3/2) = 2 → [1-2], [3]; a floor would give [1], [2-3]), and five
+      pages of 10 with fixed p2-2 and p4-4, 1 week, today = start + 5 (three free intervals over 2 days left: does
+      not fit, reason `days`, suggest 2 weeks only). Each case gives the expected lesson ranges, minutes, summary
+      and finish date.
     file: spec/fixtures/SRV-PLAN/planner-cases.yaml
   - id: VEC-PLAN-2
     source: >-
@@ -355,4 +360,4 @@ owner_notes:
   - "4. A re-plan keeps your deadline: the start date of your first plan stays, started lessons stay as they are, and the rest of the source is spread over the days left until the deadline. Past the deadline the page suggests more weeks; changing the weeks moves the deadline from the original start. A lesson you start ahead of its calendar day takes no day, so compiling ahead leaves more days for the rest. This rule was decided by the coordinator for you (owner decision 4); you can overrule it, for example to restart the deadline from the re-plan day."
   - "5. Confirm with 'compile lesson 1' spends credit (about the first lesson's estimate) under your existing compile cap and monthly budget; the checkbox shows the amount."
 
-review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent. Green (2026-11-23): one Red oracle was a hand error and is corrected — the hash test's pages (1000, 2000, 3000) pack into [1-2], [3] (t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end, is dropped), not [1], [2], [3]; no requirement changed."
+review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent. Green (2026-11-23): one Red oracle was a hand error and is corrected — the hash test's pages (1000, 2000, 3000) pack into [1-2], [3] (t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end, is dropped), not [1], [2], [3]; no requirement changed. Code review of e244aa4 (changes): VEC-PLAN-1 adds the ceil-vs-floor and `days`-reason cases; [db] tests pin that confirm and the manifest route wait for the course lock, owner-only on confirm and GET with nothing written, and the store's owner filters; INV-PLAN-5(c) names `lesson_unknown` and marks the race test's second half sequential; the live check restores an existing owner plan; the confirm UI fix is WEB-PLAN's."

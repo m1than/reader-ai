@@ -185,6 +185,58 @@ describe('estimate preview (FR-IMPORT-5)', () => {
 });
 
 describe('confirm (FR-IMPORT-6)', () => {
+  it('Enter inside the debounce does not confirm the previous plan; the confirm posts the previewed inputs', async () => {
+    const api = fakeApi();
+    await section(api);
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.change(weeks(), { target: { value: '3' } }); // a new preview is pending
+    expect((screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => fireEvent.submit(weeks().closest('form') as HTMLFormElement));
+    expect(api.confirm).not.toHaveBeenCalled();
+    await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement).disabled).toBe(false));
+    await act(async () => fireEvent.submit(weeks().closest('form') as HTMLFormElement));
+    expect(api.confirm).toHaveBeenCalledWith(
+      expect.objectContaining({ total_weeks: 3, minutes_per_day: 60, rate: '2.64', today: '2026-01-01' }),
+    );
+  });
+
+  it('a failed preview blocks confirm, also by Enter', async () => {
+    const { ApiError } = await import('../../app/api');
+    let fail = false;
+    const api = fakeApi({
+      preview: vi.fn(async () => (fail ? Promise.reject(new ApiError(0, 'network')) : preview())),
+    });
+    await section(api);
+    fireEvent.change(weeks(), { target: { value: '2' } });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement).disabled).toBe(false));
+    fail = true;
+    fireEvent.change(weeks(), { target: { value: '4' } });
+    await waitFor(() => expect(screen.getByText(/could not be reached/)).toBeTruthy());
+    fireEvent.change(weeks(), { target: { value: '2' } }); // back to the shown inputs, but the new preview fails too
+    await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(screen.getByText(/could not be reached/)).toBeTruthy());
+    expect((screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => fireEvent.submit(weeks().closest('form') as HTMLFormElement));
+    expect(api.confirm).not.toHaveBeenCalled();
+  });
+
+  it('hides compile-first when the stored plan has a started lesson', async () => {
+    const api = fakeApi();
+    await section(api, {
+      course_id: 'c',
+      plan_course_id: 'plan-x',
+      inputs: { material_id: 'synthetic', total_weeks: 2, minutes_per_day: 60, rate: '2.64', start_date: '2026-01-01' },
+      plan_sha256: 'a'.repeat(64),
+      started: 1,
+    });
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Create the course' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole('checkbox')).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Create the course' })));
+    expect(api.confirm).toHaveBeenCalledWith(expect.objectContaining({ compile_first: false }));
+  });
+
   it('posts the shown sha with compile_first checked by default and reports the compile', async () => {
     const api = fakeApi({
       confirm: vi.fn(async () => ({
@@ -203,7 +255,7 @@ describe('confirm (FR-IMPORT-6)', () => {
     expect(box.checked).toBe(true);
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Create the course' })));
     expect(api.confirm).toHaveBeenCalledWith(expect.objectContaining({ plan_sha256: 'a'.repeat(64), compile_first: true, total_weeks: 2 }));
-    expect(screen.getByText('Course created: 1 lessons.')).toBeTruthy();
+    expect(screen.getByText('Course created: 1 lesson.')).toBeTruthy();
     expect(screen.getByText('Lesson 1 is compiling.')).toBeTruthy();
   });
 

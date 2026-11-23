@@ -69,6 +69,12 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
     assert pilot is not None
     mid = pilot["id"]
     results["material_id"] = mid
+    # Read the owner's own plan before anything changes: it is restored afterwards (code review fix 5).
+    stored = c.get("/api/plans", params={"material_id": mid})
+    results["stored_before"] = stored.status_code
+    owner_plan: dict[str, Any] | None = stored.json()["inputs"] if stored.status_code == 200 else None
+    if owner_plan is not None:
+        results["owner_plan"] = {k: owner_plan[k] for k in ("total_weeks", "minutes_per_day", "rate")}
     today = dt.date.today().isoformat()
     body = {"material_id": mid, "total_weeks": 12, "minutes_per_day": 60, "today": today}
     r = c.post("/api/plans/preview", json=body)
@@ -110,12 +116,35 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
         if not report(f"plan: the suggested {weeks} weeks fit", r.status_code == 200 and p["summary"]["fits"]):
             return results
     results["weeks"] = weeks
-    already = c.get("/api/plans", params={"material_id": mid})
-    results["stored_before"] = already.status_code
+    if owner_plan is None:
+        _mutate(c, mid, body, p, weeks, results)
+        return results
+    # The owner has a plan of their own: run the mutating steps, then restore its weeks, minutes and rate.
+    try:
+        _mutate(c, mid, body, p, weeks, results)
+    finally:
+        restore = {"material_id": mid, "total_weeks": owner_plan["total_weeks"],
+                   "minutes_per_day": owner_plan["minutes_per_day"], "rate": owner_plan["rate"], "today": today}
+        r = c.post("/api/plans/preview", json=restore)
+        ok = r.status_code == 200
+        if ok:
+            r = c.post("/api/plans/confirm", json=restore | {"plan_sha256": r.json()["plan_sha256"], "compile_first": False})
+            ok = r.status_code == 200
+        got = c.get("/api/plans", params={"material_id": mid}).json() if ok else {}
+        report("plan: the owner's own plan restored (weeks, minutes, rate)",
+               ok and all(got["inputs"][k] == owner_plan[k] for k in ("total_weeks", "minutes_per_day", "rate")),
+               f"{r.status_code} {r.text[:80]}")
+        results["owner_plan_restored"] = ok
+    return results
+
+
+def _mutate(c: httpx.Client, mid: str, body: dict[str, Any], p: dict[str, Any], weeks: int,
+            results: dict[str, Any]) -> None:
+    """Confirm without compile, replay, re-plan with 4 more weeks, back."""
     r = c.post("/api/plans/confirm", json=body | {"plan_sha256": p["plan_sha256"], "compile_first": False})
     ok = report("plan: confirm without compile answers 200", r.status_code == 200, f"{r.status_code} {r.text[:80]}")
     if not ok:
-        return results
+        return
     conf = r.json()
     results["confirm"] = {k: conf[k] for k in ("course_id", "plan_course_id", "created", "removed", "replayed")} | {
         "lessons": len(conf["lessons"]), "compile": conf["compile"]}
@@ -147,7 +176,6 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
     report(f"plan: back to {weeks} weeks", r.status_code == 200)
     if r.status_code == 200:
         results["final"] = {k: r.json()[k] for k in ("created", "removed")} | {"lessons": len(r.json()["lessons"])}
-    return results
 
 
 def shots(url: str, spki: str, root_pem: Path, token: str, out: Path, shots_dir: str, weeks: int) -> None:

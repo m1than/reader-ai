@@ -163,3 +163,24 @@ cases:
       summary: { days_left: 7, finish_by: "2026-01-12", end: "2026-01-16", fits: true }
       today_used: "2026-01-10"
       same_sha256_as_today: "2026-01-10"
+
+  - name: code review, ceil not floor
+    # 1 week from 2026-01-01, today 2026-01-06 → days_left 2; C 3, P 3, K 2; t1 = ceil(3/2) = 2 → after p2 (p3 has
+    # text after it). A floor (t1 = 1) would give [1], [2-3].
+    today: "2026-01-06"
+    page_chars: [1, 1, 1]
+    expect:
+      lessons: [[1, 2], [3, 3]]
+      summary: { days_left: 2, new_count: 2, fits: true }
+
+  - name: code review, the days reason
+    # Five pages of 10, fixed p2-2 and p4-4; free intervals [1], [3], [5] (G 3); today 2026-01-06 → days_left 2;
+    # K = max(1, min(2 − 2, 3)) = 1, so only the interval ends cut: three free lessons > 2 days left → `days`.
+    # More minutes never help; 2 weeks → days_left 9 ≥ 3.
+    today: "2026-01-06"
+    page_chars: [10, 10, 10, 10, 10]
+    fixed: [[2, 2, "p2-2"], [4, 4, "p4-4"]]
+    expect:
+      lessons: [[1, 1], [2, 2], [3, 3], [4, 4], [5, 5]]
+      summary: { days_left: 2, new_count: 3, fixed_count: 2, fits: false, reasons: [days] }
+      suggest: { minutes_per_day: null, total_weeks: 2 }
