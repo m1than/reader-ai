@@ -20,6 +20,7 @@ Inputs that do not exist yet (sandbox/Dockerfile, the image) make a test fail on
 body.
 """
 
+import ipaddress
 import json
 import os
 import re
@@ -70,18 +71,20 @@ def docker(*args: str, timeout: float = 300) -> subprocess.CompletedProcess[str]
     )
 
 
-TEST_SUBNETS = "10.231.0.0/16"  # explicit test subnets, outside Docker's default address pools
+TEST_SUBNETS = ipaddress.IPv4Network("10.231.0.0/16")  # explicit test subnets, outside Docker's default pools
 
 
 def create_network(name: str, label: str, attempts: int = 20) -> None:
-    """An `--internal` network on a random /28 of 10.231.0.0/16 (OPS-SANDBOX header, test networks).
+    """An `--internal` network on a random /28 of TEST_SUBNETS (OPS-SANDBOX header, test networks).
 
-    The live stack can use up Docker's default address pools, so test networks never draw from them. A random
-    /28 can collide with a concurrent session's; "Pool overlaps" is retried with another one."""
+    The live stack can use up Docker's default address pools, so test networks never draw from them. A /28
+    holds 13 containers besides the gateway, more than any test puts on one network. A random /28 can collide
+    with a concurrent session's; "Pool overlaps" is retried with another one."""
+    base, count = int(TEST_SUBNETS.network_address), TEST_SUBNETS.num_addresses // 16
     last = ""
     for _ in range(attempts):
-        subnet = f"10.231.{secrets.randbelow(256)}.{16 * secrets.randbelow(16)}/28"
-        proc = docker("network", "create", "--internal", "--subnet", subnet, "--label", label, name)
+        subnet = ipaddress.IPv4Network((base + 16 * secrets.randbelow(count), 28))
+        proc = docker("network", "create", "--internal", "--subnet", str(subnet), "--label", label, name)
         if proc.returncode == 0:
             return
         last = proc.stderr

@@ -207,53 +207,54 @@ def kernel() -> Iterator[tuple[int, int]]:
     from ruamel.yaml import YAML
 
     sandbox = REPO / "sandbox"
-    build = _docker(
-        "build",
-        "-q",
-        "--platform",
-        "linux/arm64",
-        "-t",
-        IMAGE,
-        "-f",
-        str(sandbox / "Dockerfile"),
-        str(sandbox),
-    )
-    assert build.returncode == 0, build.stderr
-    src = YAML(typ="safe").load((REPO / "deploy" / "compose.yaml").read_text())["x-kernel"]
-    flags = ["--user", str(src["user"]), "--read-only"]
-    for entry in src["tmpfs"]:
-        flags += ["--tmpfs", str(entry)]
-    flags += [
-        "--cap-drop",
-        "ALL",
-        "--security-opt",
-        "no-new-privileges:true",
-        "--memory",
-        str(src["mem_limit"]),
-        "--memory-swap",
-        str(src["memswap_limit"]),
-        "--pids-limit",
-        str(src["pids_limit"]),
-        "--restart",
-        "always",
-    ]
     name = f"rk-pipeline-{uuid.uuid4().hex[:8]}"
-    gw, ctl = _free_port(), _free_port()
-    run = _docker(
-        "run",
-        "-d",
-        "--name",
-        name,
-        "--label",
-        "org.reader-ai.test=srv-pipeline",
-        "-p",
-        f"127.0.0.1:{gw}:8888",
-        "-p",
-        f"127.0.0.1:{ctl}:8889",
-        *flags,
-        IMAGE,
-    )
+    # Build, run and wait inside the try, so the container and the per-run tag are removed on every path.
     try:
+        build = _docker(
+            "build",
+            "-q",
+            "--platform",
+            "linux/arm64",
+            "-t",
+            IMAGE,
+            "-f",
+            str(sandbox / "Dockerfile"),
+            str(sandbox),
+        )
+        assert build.returncode == 0, build.stderr
+        src = YAML(typ="safe").load((REPO / "deploy" / "compose.yaml").read_text())["x-kernel"]
+        flags = ["--user", str(src["user"]), "--read-only"]
+        for entry in src["tmpfs"]:
+            flags += ["--tmpfs", str(entry)]
+        flags += [
+            "--cap-drop",
+            "ALL",
+            "--security-opt",
+            "no-new-privileges:true",
+            "--memory",
+            str(src["mem_limit"]),
+            "--memory-swap",
+            str(src["memswap_limit"]),
+            "--pids-limit",
+            str(src["pids_limit"]),
+            "--restart",
+            "always",
+        ]
+        gw, ctl = _free_port(), _free_port()
+        run = _docker(
+            "run",
+            "-d",
+            "--name",
+            name,
+            "--label",
+            "org.reader-ai.test=srv-pipeline",
+            "-p",
+            f"127.0.0.1:{gw}:8888",
+            "-p",
+            f"127.0.0.1:{ctl}:8889",
+            *flags,
+            IMAGE,
+        )
         assert run.returncode == 0, run.stderr
         deadline = time.monotonic() + 60
         while time.monotonic() < deadline:

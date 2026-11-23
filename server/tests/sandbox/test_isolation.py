@@ -46,10 +46,13 @@ def _exists(name: str, net: str) -> tuple[bool, bool]:
 TEST_POOL = ipaddress.ip_network("10.231.0.0/16")
 
 
-def _subnets(net: str) -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
-    out = docker("network", "inspect", "--format", "{{range .IPAM.Config}}{{.Subnet}} {{end}}", net)
+def _subnets(net: str) -> tuple[bool, list[ipaddress.IPv4Network | ipaddress.IPv6Network]]:
+    """The network's `Internal` flag and its IPAM subnets."""
+    fmt = "{{.Internal}} {{range .IPAM.Config}}{{.Subnet}} {{end}}"
+    out = docker("network", "inspect", "--format", fmt, net)
     assert out.returncode == 0, out.stderr
-    return [ipaddress.ip_network(s) for s in out.stdout.split()]
+    internal, *subnets = out.stdout.split()
+    return internal == "true", [ipaddress.ip_network(s) for s in subnets]
 
 
 @requires_docker_daemon
@@ -57,12 +60,14 @@ def test_test_networks_use_explicit_subnets(image: Build) -> None:
     """Test networks take explicit subnets in 10.231.0.0/16, outside Docker's default address pools, which the
     live stack can exhaust (OPS-SANDBOX header, test networks)."""
     assert image.ok, image.log
+    assert conftest.TEST_SUBNETS == TEST_POOL
     box = conftest.Sandbox(image)
     made: list[tuple[str, str]] = []
     try:
         _pair(conftest.LABEL.split("=", 1)[1], made)
         for net in (box._net(), made[0][1]):
-            subnets = _subnets(net)
+            internal, subnets = _subnets(net)
+            assert internal, f"{net} is not --internal"
             assert subnets, net
             inside = [isinstance(s, ipaddress.IPv4Network) and s.subnet_of(TEST_POOL) for s in subnets]
             assert all(inside), (net, subnets)

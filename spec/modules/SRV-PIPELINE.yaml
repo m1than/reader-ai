@@ -293,7 +293,7 @@ vectors:
 # the kernel image built from sandbox/ under a per-run tag `reader-kernel:test-<pid>.<random>`, removed at the end of
 # the module (never `reader-kernel:local`, the live stack's tag; OPS-SANDBOX header, test image, 2026-11-23): two
 # runs, asserts pass, outputs identical; with a tampered assert (lab fails); and with a cell that sleeps past the
-# timeout (lab fails).
+# timeout (lab fails). The fixture builds, runs and removes the container and the tag inside one `try`/`finally`.
 
 defers:
   - "Publish (gate G2) as an owner action, with an immutable published revision and no override (ADR-0009 stage 7)."
