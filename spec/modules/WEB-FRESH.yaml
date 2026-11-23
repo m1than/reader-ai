@@ -1,8 +1,20 @@
 # WEB-FRESH — the "Source freshness" card for a material (owner request 2026-11-23; server side SRV-FRESH,
 # ADR-0030 proposed).
 #
-# Status: DRAFT, revision 2 (follows SRV-FRESH revision 2: bibliography confirmation by sha256, three stages).
-# Red gate: SRV-FRESH is approved, the deep-reviewer approves this spec, and the owner accepts ADR-0030.
+# Status: approved, revision 2 (follows SRV-FRESH revision 2: bibliography confirmation by sha256, three stages).
+# Red gate met: the deep-reviewer approved this spec (round 3) and the owner accepted ADR-0030 (2026-11-23).
+#
+# Response shapes SRV-FRESH FR-FRESH-11 leaves open, chosen minimal here and pinned by VEC-FRESHUI-1:
+# `GET …/freshness` → `{report|null, stale: bool, stale_reason: ttl|reingested|bibliography_changed|null,
+# bibliography: {…FR-FRESH-1 fields, source: owner|scan, sha256}|null, scan_bibliography: {…fields, sha256}|null,
+# estimate: {low_usd, high_usd, cap_usd}, daily_cap_usd}`. A report is `{id, status, created_at, finished_at|null,
+# error|null, progress: {stage: scan|search|report, done, total}|null, verdict|null, reasons|null, claims: [{id,
+# subject, kind, confidence, page, span, cell: {lesson_id, cell_id}|null}]|null, claim_status: [{id, status, note,
+# citations}]|null, recommendations|null, topics: [{id, title}]|null, dropped: {reason: count}|null}` with citations
+# `{url, host, title}`. Error bodies are `{error, …}`: `estimate` (409 estimate_changed), `daily_cap_usd` and
+# `spent_usd` (409 daily_budget_exhausted), `field` (400 bibliography_invalid). Page links (FR-FRESHUI-5) are app
+# links built by code from an integer page or a validated lesson and cell id, never from a report string;
+# INV-FRESHUI-1 governs the web links.
 #
 # The card (one component, `FreshnessCard`, given a material id) shows:
 #   1. the bibliography the check will search for, editable (FR-FRESHUI-2);
@@ -30,15 +42,17 @@
 
 id: WEB-FRESH
 title: Source freshness card — bibliography, run with cost estimate, verdict badge, flagged claims with page links, recommendations with safe links
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
+review: "deep-reviewer rounds 1–2 changes, round 3 approve (2026-11-23, with ADR-0030 and SRV-FRESH); owner accepted ADR-0030 2026-11-23. Test fixes during Green (no requirement changed): two TypeScript errors in the Red tests (a mock's argument tuple, a spread body's type), and INV-FRESHUI-2's test now asserts that some markup string is shown as text in each state, since the failed state shows no report string; the [browser] spec reads the fixture from web/ (Playwright loads it as CommonJS, without import.meta). Measured in Green: the lazy chunk is 6,000 B gzip (threshold 20,000); 19 [browser] tests pass against the test server"
 layer: web
 track: product
 adr: [ADR-0030, ADR-0013]
 
 paths:
   - web/src/fresh/**
+  - e2e/web/fresh/**
   - spec/fixtures/WEB-FRESH/**
 
 normative:
