@@ -1,9 +1,27 @@
 // App-wide services handed to routes and the lesson view.
-import { createContext, useContext } from 'react';
+import { createContext, useContext, type ComponentType } from 'react';
 import type { SignupsApi } from '../accounts/api';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
-import type { Api } from './api';
+import type { Api, LessonSummary } from './api';
+
+/** Where a slot component renders: a lesson row or the lesson page. */
+export type SlotPlace = 'list' | 'page';
+
+/** Props of the compile slot's components. */
+export interface SlotProps {
+  lesson: LessonSummary;
+  place: SlotPlace;
+}
+
+/** The compile slot (WEB-UI FR-UI-6, the shape FR-UI-15 fills): components, rendered for every lesson row and on the
+ * not-published page, so a stateful control fits. */
+export interface CompileSlot {
+  /** Replaces the default status while it renders something; always visible. */
+  Status?: ComponentType<SlotProps>;
+  /** At the row's end, revealed on hover and focus-within; interactive controls belong here. */
+  Action?: ComponentType<SlotProps>;
+}
 
 export interface Services {
   api: Api;
@@ -15,6 +33,9 @@ export interface Services {
   plan?: PlanApi;
   /** WEB-ACCOUNTS's client (FR-UI-14): the owner's Sign-ups screen and header count. */
   signups?: SignupsApi;
+  /** Rendered for every lesson row and on the lesson page (FR-UI-6); AppRoot's default renders FR-UI-15's
+   * CompileControl for the owner. */
+  compileSlot?: CompileSlot;
 }
 
 export const ServicesContext = createContext<Services | null>(null);

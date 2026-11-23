@@ -1,18 +1,20 @@
-// The app shell (WEB-UI FR-UI-3, FR-UI-5, FR-UI-7): checks the session with /api/me first, then routes; the header
-// shows the signed-in name and Sign out; notices are collected in one region.
-import { Button } from '@acme/ui/button';
+// The app shell (WEB-UI FR-UI-3, FR-UI-5, FR-UI-7, FR-UI-11): checks the session with /api/me first, then routes; the
+// root route renders the header (user menu with the theme choice and Sign out), the course sidebar and the single
+// `main`; notices are collected in one region.
 import { Skeleton } from '@acme/ui/skeleton';
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { createSignupsApi, SIGNUPS_KEY } from '../accounts/api';
+import { createSignupsApi } from '../accounts/api';
 import { createPlanApi } from '../import/plan/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
-import { ServicesContext, useServices, type Services } from './context';
+import { ownerCompileSlot } from './compile/slot';
+import { ServicesContext, useServices, type CompileSlot, type Services } from './context';
 import { NoticeRegion, type Notice } from './notices';
 import { queries } from './queries';
 import { createAppRouter, isBadLessonPath } from './routes';
+import { ShellContext, type ShellState } from './shell';
 
 export interface AppRootProps {
   /** Start at this path with an in-memory history (tests, stories); the browser history otherwise. */
@@ -20,93 +22,36 @@ export interface AppRootProps {
   fetch?: typeof fetch;
   /** Full-page navigation away from the SPA (the SRV-AUTH sign-in page). */
   navigateAway?: (url: string) => void;
+  /** The compile slot for lesson rows and the lesson page (FR-UI-6); without it, the app's own slot renders the
+   * owner's CompileControl (FR-UI-15). */
+  compileSlot?: CompileSlot;
 }
 
 const defaultNavigate = (url: string) => window.location.assign(url);
 
-/** FR-UI-14, WEB-ACCOUNTS FR-ACCOUNTS-4: the owner's Sign-ups link with the pending count, asked once per page
- * load (the screen shares the query) and after each action; no polling. A failure shows the link without a count. */
-function SignupsLink({ router }: { router: ReturnType<typeof createAppRouter> }) {
-  const { signups } = useServices();
-  const q = useQuery({
-    queryKey: SIGNUPS_KEY,
-    queryFn: () => (signups ? signups.list() : Promise.reject(new Error('no client'))),
-    staleTime: Infinity,
-    enabled: Boolean(signups),
-  });
-  const n = q.data?.pending.length ?? 0;
-  return (
-    <a
-      className="header-link"
-      href="/signups"
-      aria-label={n > 0 ? `Sign-ups, ${n} waiting` : undefined}
-      onClick={(e) => {
-        e.preventDefault();
-        void router.navigate({ to: '/signups' });
-      }}
-    >
-      {n > 0 ? `Sign-ups (${n})` : 'Sign-ups'}
-    </a>
-  );
-}
-
-function Header({
-  displayName,
-  queryClient,
-  owner,
-  router,
-}: {
-  displayName: string;
-  queryClient: QueryClient;
-  owner: boolean;
-  router: ReturnType<typeof createAppRouter>;
-}) {
-  const { api, notify, navigateAway } = useServices();
-  const signOut = async () => {
-    try {
-      await api.signOut();
-    } catch {
-      notify('sign_out_failed');
-      return;
-    }
-    queryClient.clear();
-    navigateAway(SIGN_IN_URL);
-  };
-  return (
-    <header className="app-header">
-      <a className="brand" href="/">
-        reader
-      </a>
-      {/* FR-UI-12: the Import link, for the owner only. */}
-      {owner ? <a href="/import">Import</a> : null}
-      {owner ? <SignupsLink router={router} /> : null}
-      <span className="who">{displayName}</span>
-      <Button variant="ghost" color="neutral" size="sm" onClick={() => void signOut()}>
-        Sign out
-      </Button>
-    </header>
-  );
-}
-
-/** FR-UI-11: the first Tab stop; following it focuses the shell's single `main`. */
-function SkipLink() {
-  return (
-    <a
-      className="skip-link"
-      href="#content"
-      onClick={() => {
-        const main = document.getElementById('content');
-        if (main) window.setTimeout(() => main.focus({ preventScroll: true }), 0);
-      }}
-    >
-      Skip to content
-    </a>
-  );
-}
-
 function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: string; router: ReturnType<typeof createAppRouter> }) {
-  const { api } = useServices();
+  const { api, notify, navigateAway } = useServices();
   const me = useQuery(queries(api).me());
+  const shell = useMemo<ShellState | null>(() => {
+    if (!me.data) return null;
+    return {
+      displayName: me.data.display_name,
+      owner: me.data.role === 'owner',
+      badFirstPath: isBadLessonPath(path),
+      onSignOut: () => {
+        void (async () => {
+          try {
+            await api.signOut();
+          } catch {
+            notify('sign_out_failed');
+            return;
+          }
+          queryClient.clear();
+          navigateAway(SIGN_IN_URL);
+        })();
+      },
+    };
+  }, [me.data, path, api, notify, navigateAway, queryClient]);
   if (me.isPending)
     return (
       <>
@@ -126,28 +71,15 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
         </div>
       </>
     );
-  if (me.isError) return <p className="page muted">Signing in…</p>;
+  if (me.isError || !shell) return <p className="page muted">Signing in…</p>;
   return (
-    <>
-      <SkipLink />
-      <Header displayName={me.data.display_name} queryClient={queryClient} owner={me.data.role === 'owner'} router={router} />
-      <main id="content" tabIndex={-1}>
-        {isBadLessonPath(path) ? (
-          <div className="page">
-            <h1>Not found</h1>
-            <p>
-              <a href="/">Back to lessons</a>
-            </p>
-          </div>
-        ) : (
-          <RouterProvider router={router} />
-        )}
-      </main>
-    </>
+    <ShellContext.Provider value={shell}>
+      <RouterProvider router={router} />
+    </ShellContext.Provider>
   );
 }
 
-export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNavigate }: AppRootProps) {
+export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNavigate, compileSlot }: AppRootProps) {
   const [notices, setNotices] = useState<Notice[]>([]);
   const seq = useRef(0);
   const notify = useCallback((code: string) => {
@@ -167,8 +99,10 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       signups: createSignupsApi(deps),
       notify,
       navigateAway,
+      // FR-UI-6, FR-UI-15: the owner's CompileControl renders through the slot unless a caller supplies its own.
+      compileSlot: compileSlot ?? ownerCompileSlot,
     };
-  }, [fetchFn, navigateAway, notify]);
+  }, [fetchFn, navigateAway, notify, compileSlot]);
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');
   const router = useMemo(

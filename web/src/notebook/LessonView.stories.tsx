@@ -17,6 +17,8 @@ export const WithAside: Story = {
   args: { aside: (id: string | null, label: string | null) => <section id="tutor">{`Focused: ${id ?? 'none'} ${label ?? ''}`}</section> },
   decorators: [themed('light')],
 };
+/** FR-NOTEBOOK-9: the lab's plain text area while the CodeMirror chunk loads (held pending here). */
+export const EditorLoading: Story = { args: { loadEditor: () => new Promise(() => undefined) }, decorators: [themed('light')] };
 export const Running: Story = {
   args: {
     controller: staticController({

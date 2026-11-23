@@ -61,7 +61,24 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   CompileControl and renders the lesson once a compile has written a revision; FR-NOTEBOOK-1's \"nothing else\" now
   points there. Learners see no change. Round 1 (cc817d0, changes): the owner's page reads the run state for any
   lesson and shows the control above a published draft while its run is open. Round 2 on 08534df: VERDICT approve
-  (deep-reviewer, run by the coordinator). Approved by agent"
+  (deep-reviewer, run by the coordinator). Approved by agent. Merge of V/design-pass into V/slice-integration
+  (2026-11-24): the owner's CompileControl renders through the design pass's compile slot (one control, not two) on
+  the not-published page and above a published draft. Amendment 2026-11-23
+  (V/design-pass, the owner's approval of the design audit's P1 and P2 items and of CodeMirror 6): FR-NOTEBOOK-1 kind
+  labels and the not-published page with the compile slot and neighbours; FR-NOTEBOOK-3 open-question callout and
+  sentence-case status; FR-NOTEBOOK-7 Reset kernel in a More menu; FR-NOTEBOOK-9 lab block header with Copy and the
+  CodeMirror 6 editor in a shadow root (spike codemirror-bundle: the app CSP blocks style-mod's style element in the
+  document), fallback text area; FR-NOTEBOOK-10 recall deck; FR-NOTEBOOK-11 breadcrumbs, current section, cell toolbar,
+  keyboard shortcuts (the deferred editor and cell navigation leave `defers`); FR-NOTEBOOK-12 state blocks; new
+  NFR-NOTEBOOK-1 editor chunk budget. deep-reviewer (Fable) single round on the spec diff (04e396b..d3c0a68, outside
+  the complex areas): changes; all findings applied without a second round (coordinator, 2026-11-23), each with its
+  fix in docs/progress.yaml V.design-pass `review`: B2 the not-published page takes the compile slot's status and
+  action; B4 the shortcut guard over the composed path (text fields, contenteditable, dialogs, menus,
+  defaultPrevented) with unit and browser cases; non-blocking: the editor's hint and focus outline inside its shadow
+  root with role and description checked in the browser and an axe run over the lab, the probe committed (Chromium
+  only), app-owned play and more icons, roving tab index and no Copy on code-cell toolbars, `j`/`k` by `event.code`,
+  every design-pass item marked as owner-approved, one shared build with WEB-UI's build test. Approved by agent
+  (coordinator, 2026-11-23)"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
@@ -77,9 +94,8 @@ defers:
   - "lab self-verification UI (expected hash, asserts shown as checks): stage 4b"
   - "diagnostic routing and recall card review flow: stages 4b and 6"
   - "older revisions and a revision picker: stage 4b"
-  - "a code editor with highlighting while typing (CodeMirror or similar): stage 4b"
-  - "keyboard navigation between cells beyond Tab order and Shift+Enter: stage 4b"
   - "rust and deno kernels: stage 4a/4b"
+  - "learner progress (which lessons a learner has read) for a 'next to study' that is not 'next unpublished': stage 6"
 
 normative:
   - id: REF-NOTEBOOK-1
@@ -97,19 +113,39 @@ normative:
   - id: REF-NOTEBOOK-5
     title: RFC 6455 — WebSocket close codes
     url: https://www.rfc-editor.org/rfc/rfc6455
+  - id: REF-NOTEBOOK-6
+    title: CodeMirror 6 reference manual (EditorView `root`, keymaps, `indentWithTab` and the Escape-then-Tab focus rule)
+    url: https://codemirror.net/docs/ref/
+  - id: REF-NOTEBOOK-7
+    title: spikes/codemirror-bundle/RESULT.md — editor chunk 125,244 B gzip; style-mod needs a shadow root under the app CSP (probe.mjs committed; Chromium only, Safari unmeasured)
+    url: spikes/codemirror-bundle/RESULT.md
+  - id: REF-NOTEBOOK-8
+    title: WAI-ARIA Authoring Practices — Disclosure Navigation Menu; Breadcrumb
+    url: https://www.w3.org/WAI/ARIA/apg/patterns/
 
 requirements:
   - id: FR-NOTEBOOK-1
     text: >-
-      The lesson view loads `GET /api/lessons/{lesson_id}`; when `latest_sha256` is null it shows "not published yet"
-      and nothing else (FR-NOTEBOOK-12 adds the back link and, for the owner, the compile control); otherwise it loads `GET /api/lessons/{lesson_id}/revisions/{latest_sha256}` (cached for the life
-      of the page under that sha256, since a revision is immutable) and renders the cells in order. Each cell shows
-      its kind as a quiet label (diagnostic, reading route, explanation, what changed, erratum, trade-off, lab, recall,
-      notes, open question) and its source: markdown cells through WEB-RENDER's markdown component, code cells as
-      highlighted code (WEB-RENDER). A cell without `metadata.reader.kind`, or with an unknown kind, renders as a plain
-      markdown or code cell without a label. Stored outputs of code cells render through WEB-RENDER. (A cell's heading
-      text also appears in the lesson contents, FR-NOTEBOOK-11, so tests find the cell's own heading by its element.)
-      [unit] [story]
+      The lesson view loads `GET /api/lessons/{lesson_id}`; when `latest_sha256` is null it shows the not-published
+      page below (for the owner, FR-NOTEBOOK-12's compile control renders there through the compile slot); otherwise it loads `GET /api/lessons/{lesson_id}/revisions/{latest_sha256}` (cached for the life
+      of the page under that sha256, since a revision is immutable) and renders the cells in order. A cell shows its kind
+      as a quiet label (diagnostic, reading route, what changed, erratum, trade-off, notes) except: explanation cells,
+      most of a lesson (10 of L02's 27), carry none (audit 2026-11-23: a label on every cell was noise); an open
+      question's callout title names it (FR-NOTEBOOK-3); a lab's block header names it (FR-NOTEBOOK-9); recall cards sit
+      under the deck's heading (FR-NOTEBOOK-10). Each cell shows its source: markdown cells through WEB-RENDER's
+      markdown component, code cells as highlighted code (WEB-RENDER). A cell without `metadata.reader.kind`, or with an
+      unknown kind, renders as a plain markdown or code cell without a label. Stored outputs of code cells render
+      through WEB-RENDER. (A cell's heading text also appears in the lesson contents, FR-NOTEBOOK-11, so tests find the
+      cell's own heading by its element.)
+      **Not-published page (design pass; the live page was a title and one sentence, a dead end):** the breadcrumbs of
+      FR-NOTEBOOK-11, then WEB-UI FR-UI-11's `StateBlock` with the lesson title as its `h1`, the line "Lesson <ordinal>
+      of <course title> is not published yet.", the status — the neutral chip "Not published yet", replaced by the
+      compile slot's `Status` component when that renders something (WEB-UI FR-UI-6's `compileSlot`, the shape
+      FR-UI-15 fills) — and the slot's `Action` component (always visible here), both inside a `div`, and links "Previous: <title>" and "Next: <title>" to the
+      nearest published lessons of the same course by ordinal (from the cached `GET /api/lessons`; each omitted when
+      there is none) and "All lessons of <course title>" to `/#course-<course_id>`. [unit] the label rule, the
+      not-published page (text, the default chip, a slot's `Status` replacing it and its `Action`, a `Status` rendering
+      `null`, no slot, the parts in a `div`, both neighbours, none, one side); [story]
   - id: FR-NOTEBOOK-2
     text: >-
       Citations as references: for `explain`, `changed` and `erratum` cells, every citation in `claims[].citations[]`
@@ -136,9 +172,14 @@ requirements:
   - id: FR-NOTEBOOK-3
     text: >-
       Open findings: an `open` cell whose `status` is not `answered` is shown with a visible marker that reads its
-      status once (the marker reads "open" for status `open`; the status is not repeated beside it), and, when
-      `finding.gate` is `G2`, the text "not yet confirmed" and the finding's reason as plain text. The lesson header
-      shows the count of such cells and links to the first one. [unit] [story]
+      status once (the marker reads "Open" for status `open`: the status in sentence case, its first letter
+      capitalised and `_` shown as a space; the status is not repeated beside it), and, when `finding.gate` is `G2`, the
+      text "Not yet confirmed by the source:" followed by the finding's reason as plain text, muted. The lesson header
+      shows the count of such cells and links to the first one.
+      Design pass: the cell is a callout block (class `callout`, `--acme-surface` background, `--radius-block`, a 3px `--acme-warning`
+      bar at the inline start inside the block, so the bar no longer runs across the cell separators): a title row with
+      the warning icon (`aria-hidden`), "Open question" and the status chip, then the G2 line, then the source. The header's count is a link styled as a warning chip ("4 open findings"). [unit] the chip
+      text, the G2 line, the reason as text; [story]
   - id: FR-NOTEBOOK-4
     text: >-
       Kernel session: opening a lesson does not start a kernel; the first Run creates the session
@@ -174,7 +215,12 @@ requirements:
       kernel asks for confirmation in a dialog that says it clears every open lesson's kernel state (SRV-KERNEL owner
       note), then calls `POST /api/kernel/reset` with no body. While a reset runs, Run (button and Shift+Enter) and
       Run all are disabled. A reset that fails (503 or any error other than 401) leaves a "Retry reset" control that
-      calls the reset again. [unit] [story]
+      calls the reset again. Design pass: "Run all" is a ghost button with the play icon (an app-owned inline SVG,
+      `aria-hidden`; the library has no play glyph) in the lesson toolbar; "Reset kernel…" is an item of the toolbar's
+      "More" menu (a ghost icon button with an app-owned "more" SVG and the accessible name "More lesson actions",
+      opening the library `Menu`, which ships in the lazy lesson-route chunk, not the initial one), shown in the danger
+      colour, still opening the same dialog; "Retry" and "Retry reset" stay visible toolbar buttons when they apply. [unit] the menu item opens the
+      dialog, no solid button in the toolbar; [story]
   - id: FR-NOTEBOOK-8
     text: >-
       Notices, closes and the single reconnect procedure (VEC-NOTEBOOK-2 has a case for each row).
@@ -206,11 +252,55 @@ requirements:
       "kernel unavailable" with Retry. Every notice text comes from WEB-UI's fixed catalogue. [unit]
   - id: FR-NOTEBOOK-9
     text: >-
-      Lab code is editable in a plain monospace text area (Tab inserts four spaces; the edited source lives in memory
-      for the open view and is what Run sends); a Revert control restores the revision's source. A cell shows its
+      Lab code is editable in the editor described below; until the editor has loaded, and if it cannot load, in a
+      plain monospace text area (Tab inserts four spaces; the edited source lives in memory for the open view and is
+      what Run sends); a Revert control restores the revision's source. A cell shows its
       execution count `[n]` after a reply. The text area does not wrap lines (`wrap="off"`, horizontal scroll), so
       Python indentation stays readable at 390 px; the run state label is in a `role="status"` element, so a screen
       reader hears "done", "error" and the other states of VEC-NOTEBOOK-2. [unit] [story]
+      **Design pass (owner decision 2026-11-23: CodeMirror 6, lazy):**
+      - **Block.** A lab is a wide block (WEB-UI FR-UI-10) with `--radius-block` and a `--acme-border` border: a header
+        row — "Python · Lab <n>" (n as in FR-NOTEBOOK-11), the execution count `[n]` and the run state (`role="status"`)
+        muted, then at the end "Copy" (ghost, `CopyIcon`), "Revert" (ghost, disabled while the code equals the
+        revision's source), "Interrupt" (outline, only while running) and "Run" (solid, the app-owned inline SVG play
+        icon, `title` "Run (Shift+Enter)") — then the editor, then the outputs inside the same block. Copy writes the editor's current text
+        with `navigator.clipboard.writeText`; on success the button's text reads "Copied" for 2 s (structural) and a
+        visually hidden `role="status"` says "Code copied"; on failure it says "Copy failed".
+      - **Editor.** CodeMirror 6 (state, view, commands, language, lang-python, lezer highlight; REF-NOTEBOOK-6), loaded
+        as a lazy chunk on the lesson route the first time a lab is rendered. Until it has loaded, and if it fails to
+        load, the plain text area above is shown with the same source and rules, so a lab can always be edited and run.
+        When the editor replaces the text area while it has focus (the user started typing before the chunk
+        arrived), the editor takes the text area's current text and receives focus (code review).
+        The editor is mounted in an open shadow root with `EditorView({root})` (REF-NOTEBOOK-7: in the document,
+        style-mod injects a `<style>` element that the app CSP blocks and the editor renders unstyled; in a shadow root
+        it uses an adopted stylesheet); its theme is `EditorView.theme` over `var(--acme-…)` and `var(--acme-font-mono)`
+        at 0.875rem with line height 1.55, and its highlight style maps lezer tags to the same Calm colour variables as
+        WEB-RENDER FR-RENDER-4's Shiki themes, so it follows the theme (WEB-UI FR-UI-16) without re-mounting. Line
+        numbers; no line wrapping (horizontal scroll inside the editor); the editor grows with its content (no row cap,
+        the slice's 24-row text area scrolled inside itself); a 4-space indent unit; Tab and Shift+Tab indent and
+        dedent (`indentWithTab`), Escape then Tab moves focus out of the editor (CodeMirror's rule, stated in a visually
+        hidden hint "Press Escape, then Tab, to leave the editor."); Shift+Enter and Mod+Enter run the lab with the
+        editor's text; the content element, and the fallback text area, have the accessible name "Lab <n> code".
+        **Accessibility inside the shadow root (review):** `aria-describedby` does not cross a shadow boundary, so the
+        hint element is rendered inside the same shadow root and the content element's `aria-describedby` names its id
+        there; the content element keeps CodeMirror's `role="textbox"` and `aria-multiline="true"`; the 2px
+        `--acme-focus` outline on the focused editor (WEB-UI FR-UI-10) is declared in the editor's `EditorView.theme`,
+        since app.css does not reach into the shadow root. The edited text lives in memory for the open view as
+        before; Revert replaces the editor's text with the revision's source.
+      The lesson view takes the chunk loader as an optional prop `loadEditor` (default: the lazy import of
+      `web/src/notebook/editor.ts`), so tests and stories can hold it pending, fail it or hand in a stub editor; the
+      chunk exports `mountEditor(host: HTMLElement, {doc, label, onChange(text), onRun(text)})` returning
+      `{setDoc(text), focus(), destroy()}`; it attaches the open shadow root to `host` and mounts the editor there.
+      [unit] the block header (texts, which buttons are visible in each run state, Revert disabled until an edit, Copy
+      with a stub clipboard: written text, "Copied", the status texts, failure), the fallback text area before the chunk
+      resolves and after it rejects, Shift+Enter and Mod+Enter calling `run` with the edited text through the editor
+      component's key handler; [browser] under the production CSP, a lab renders the CodeMirror editor with no
+      `securitypolicyviolation`, `.cm-gutters` computed `display: flex`, `.cm-content` with `role="textbox"` and an
+      `aria-describedby` that resolves inside the shadow root to the hint, a focused editor with a 2px outline, an axe
+      run that includes the lab block with no serious or critical issue, typing a line holding `j k / ?` lands in the
+      editor (no lesson shortcut fires: focus stays in the editor, `#tutor` stays hidden, no dialog opens), then
+      Shift+Enter sends the edited code (stubbed relay), and Escape then Tab moves focus out of the editor; [story] a
+      lab idle, running with Interrupt, done with output, Dark.
   - id: FR-NOTEBOOK-10
     text: >-
       Kinds whose content lives in `metadata.reader` (ADR-0004), shown as plain text after the cell's source (the live
@@ -221,14 +311,23 @@ requirements:
       inside a native disclosure (`details`/`summary` "Show answer"), closed by default, and no disclosure when `back`
       is not a non-empty string; `notes` with an empty source shows "Notes are not saved in this version." in the
       muted colour. Values of any other type are ignored. Declared deviation: the disclosure is the native element,
-      not the library's collapsible (the slice's FR-UI-1 entry list has none, and `details` is keyboard- and
-      screen-reader-operable without script). This is display only: diagnostic routing and recall review stay
-      deferred. [unit] [story]
+      not the library's collapsible (`details` is keyboard- and screen-reader-operable without script, and a card's
+      answer needs no animation). This is display only: diagnostic routing and recall review stay deferred.
+      **Recall deck (design pass; L02's 8 recall cells were 8 full-height cells in a row):** each run of adjacent recall
+      cells renders as one deck: a `section` (class `recall-deck`) with the heading (`h2`, sans) "Recall cards (<n>)" and a toggle button
+      "Show all answers" / "Hide all answers" (it opens or closes every card's disclosure in the deck; shown only when
+      at least one card has a `back`), then the cards in a grid (two columns at 40rem and wider, one below), each card
+      a block (`--radius-block`, `--acme-border`) holding the front and its "Show answer" disclosure. Each card keeps
+      its cell's `id="cell-<id>"`, `data-cell-id` and `tabIndex={-1}`, so the contents entry "Recall cards (<n>)" and the
+      tutor's focused cell work as before. [unit] adjacent runs become one deck, non-adjacent runs separate decks, the
+      count, the toggle both ways and its absence, card ids; [story]
   - id: FR-NOTEBOOK-11
     text: >-
       Lesson navigation for a long lesson (L02: 27 cells, about 17,000 px at 1280 px; live run 2026-11-23). The lesson
-      header holds a "Lessons" link back to `/`, the title (`h1`) on its own line, then one row with the open-findings
-      link and the kernel controls. A contents list (`nav` labelled "Lesson contents", inside the page's `main`, before
+      header holds the breadcrumbs (the library `Breadcrumbs`, a `nav` labelled "Breadcrumb": "Lessons" → `/`, the
+      course title → `/#course-<course_id>`, then the lesson title as the current page with `aria-current="page"`;
+      the course title comes from `GET /api/lessons/{lesson_id}`), the title (`h1`) on its own line, then one row
+      with the open-findings link, "Ask the tutor" (SRV-TUTOR FR-TUTOR-11) and the kernel controls (FR-NOTEBOOK-7). A contents list (`nav` labelled "Lesson contents", inside the page's `main`, before
       the cells) is built from the cells, in order: one entry per markdown cell, other than recall and open cells,
       whose source has a top-level heading (a direct child of the document root, so not inside a list or a block
       quote) of depth 1–3 in its markdown parse (remark with GFM and math, as WEB-RENDER FR-RENDER-2): the first such
@@ -236,17 +335,56 @@ requirements:
       gone, raw HTML contributes no text, and a `#` line inside a code fence or in a code cell is not a heading. Each
       lab cell is "Lab <n>", numbered from 1 in lesson order; one entry "Recall cards (<n>)" at the first recall cell,
       however many there are; one entry "Open questions (<n>)" at the first open cell whose status is not `answered`,
-      counting only those; and "Ask the tutor" when the panel is shown. With no entry at all, neither the list nor the
-      "Contents" button is rendered. Every entry is an in-page link to `#cell-<id>` (the panel: `#tutor`); the list is
+      counting only those; and "Ask the tutor" when the panel is available. With no entry at all, neither the list nor
+      the "Contents" button is rendered. Every entry is an in-page link to `#cell-<id>` (the panel: `#tutor`, whose
+      activation opens the tutor panel and focuses its text area, SRV-TUTOR FR-TUTOR-11); the list is
       an `ol` with `role="list"` (its list style is none, which drops the list role in WebKit);
       every cell container has `tabIndex={-1}`, so following an entry moves focus there. At a viewport of 60rem or
       wider the list is a sticky column beside the cells, at most the viewport height tall and scrolling inside itself
       (`max-height: calc(100vh - <top offset>)`, `overflow-y: auto`), and the "Contents" button is not displayed;
       below 60rem the list is not displayed (`display: none`, so its links are neither in the tab order nor in the
       accessibility tree) until the "Contents" button (`aria-expanded`, `aria-controls`) opens it, and following an
-      entry closes it. [unit] [story] [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and
-      visible after it; at every width following the last entry, whose target is not in the viewport before the click,
-      scrolls to that target and focuses it; at 1280 and 1024 px the button is hidden and the nav is visible.
+      entry closes it.
+      **Design pass (2026-11-23; every item below was approved by the owner with the audit's P1 and P2 list — the
+      current section, the cell toolbar and the recall deck (FR-NOTEBOOK-10) as part of the P2 navigation and
+      component items, the keyboard shortcuts as the cheap P3 the owner allowed):**
+      - **Current section.** While the lesson scrolls, the contents entry of the last entry target whose top has passed
+        30% of the viewport height (an `IntersectionObserver`; the first entry before any has) carries
+        `aria-current="location"` and the `--acme-hover` fill with the text in `--acme-text`; exactly one entry is
+        current at a time.
+      - **Cell toolbar.** Every cell other than a lab (whose block header has its own actions) has a toolbar at its
+        inline end, revealed on hover and on `:focus-within` and always shown under `(hover: none)`. A markdown cell's
+        toolbar has "Copy" (ghost icon button, accessible name "Copy cell text"; writes the cell's markdown source with
+        `navigator.clipboard.writeText` and announces "Cell text copied" in a visually hidden `role="status"`) and
+        "Ask"; a non-lab code cell's toolbar has only "Ask" (its code block header already has "Copy code",
+        WEB-RENDER FR-RENDER-4). "Ask" (accessible name "Ask the tutor about this cell") focuses the cell, so the
+        tutor's "About:" names it, and opens the tutor panel. **Tab order (review: 27 cells must not add 54 tab
+        stops):** the toolbar's buttons have `tabIndex={-1}` until focus is inside their cell (the cell itself focused
+        by `j`/`k` or a contents link, or one of its controls), then `0` (roving), so Tab from a focused cell reaches
+        its toolbar and the rest of the lesson's tab order is unchanged.
+      - **Tutor panel state.** The lesson view owns the tutor panel's open state (SRV-TUTOR FR-TUTOR-11) and passes
+        `{open, close}` as the third argument of the `aside` render prop, after the focused cell's id and label; the
+        toolbar's "Ask the tutor" (ghost), the contents entry, a cell toolbar's "Ask" and `/` set it open.
+      - **Keyboard shortcuts.** One `keydown` listener on the document while the lesson page is shown. **Guard
+        (review B4):** no shortcut fires when the event's `defaultPrevented` is set, when Ctrl, Alt or Meta is held, or
+        when the event's composed path (`event.composedPath()`, which crosses the editor's shadow root) contains a
+        `textarea`, an `input`, a `select`, an element with `isContentEditable` (the editor's content), or an element
+        with `role="dialog"`, `role="menu"` or `role="alertdialog"`. Otherwise: `j` and `k` focus the next and previous
+        cell (`tabIndex={-1}` targets, scrolled into view), matched by `event.code` `KeyJ` and `KeyK` so they work on a
+        Russian layout (where those keys type "о" and "л"); `/` (`event.key` `/`, or `event.code` `Slash` without Shift,
+        which types "." on a Russian layout) opens the tutor panel and focuses its text area; `?` (`event.key` `?`, or
+        `event.code` `Slash` with Shift, "," on a Russian layout) opens a dialog "Keyboard shortcuts" listing these keys, Shift+Enter (run a
+        lab), Ctrl+Enter or ⌘+Enter (ask the tutor) and Escape (close a panel or dialog); a handled key calls
+        `preventDefault`.
+      [unit] [story] the current-section rule with a stub `IntersectionObserver` (one current entry, moves with the
+      reported targets), the toolbar's buttons, copy text, code-cell toolbar without Copy, the roving tab index, each
+      shortcut, `j`, `/` and `?` matched by `code` with Russian-layout `key`s, `/` calling `preventDefault`, shortcuts
+      ignored inside a text area, an input, a select, a contenteditable, with Ctrl, Alt or Meta, with
+      `defaultPrevented`, inside a `role="menu"` or `role="alertdialog"` element and while the shortcuts dialog is open;
+      [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and visible after
+      it; at every width following the last entry, whose target is not in the viewport before the click, scrolls to that
+      target and focuses it; at 1280 and 1024 px the button is hidden and the nav is visible; after the scroll exactly
+      one entry has `aria-current="location"`; the breadcrumb's current item reads L02's title.
   - id: FR-NOTEBOOK-12
     text: >-
       Lesson page states, inside WEB-UI FR-UI-11's single `main`: while the lesson or its revision loads, a page
@@ -254,13 +392,17 @@ requirements:
       which would make screen readers skip the status) and the library's `Skeleton` (title and three text lines),
       hidden from assistive technology; a 404 for the lesson shows "Lesson not found" with only a "Back to
       lessons" link; any other error shows "The lesson could not be loaded." with a Retry button that refetches the
-      failed query and a "Back to lessons" link; a lesson not published yet keeps FR-NOTEBOOK-1's text and adds the
-      "Lessons" back link.
+      failed query and a "Back to lessons" link; a lesson not published yet shows FR-NOTEBOOK-1's not-published page
+      (its sentence and its default chip both say "not published yet"; the chip's text is exactly "Not published yet").
+      Design pass: the not-found and error states render through WEB-UI FR-UI-11's `StateBlock` (their texts above as
+      its `h1`, in the sans page-title style, with the explanation lines "The lesson may have been removed or the link
+      is wrong." and "Check the connection, then retry." respectively).
       **Owner's compile state (WEB-UI FR-UI-15).** For a user with role `owner` (from `/api/me`), the lesson page,
       published or not, reads `GET /api/lessons/{lesson_id}/compile` once (and polls it per FR-UI-15 while the run is
-      `running` or `stalled`), because a revision exists from the `draft` step on, long before the run ends:
-      - not published: FR-UI-15's `CompileControl` under the not-published text, always (status, "Compile" or
-        "Retry", the same confirm, error copy and polling);
+      `running` or `stalled`), because a revision exists from the `draft` step on, long before the run ends. The control
+      renders through WEB-UI FR-UI-6's compile slot (merge of V/design-pass, 2026-11-24: one control, not two):
+      - not published: FR-UI-15's `CompileControl` as the slot's `Status` in the not-published page's status `div`,
+        always (status, "Compile" or "Retry", the same confirm, error copy and polling);
       - published, while the run is `running`, `stalled`, `stage_failed` or `budget_exhausted`: the same control in a
         line above the lesson view, inside the page, led by the chip "draft, compile not finished"; for no run,
         `converged` or `open_findings`, or a failed read, nothing is added;
@@ -297,7 +439,17 @@ invariants:
       The client adds nothing of its own to the WebSocket handshake: no subprotocol, no query string; the browser
       sends the session cookie and Origin. [unit]
 
-nfr: []
+nfr:
+  - id: NFR-NOTEBOOK-1
+    metric: >-
+      gzip size in bytes (Node zlib, level 9) of the lazy chunks that hold CodeMirror (every chunk of the `vite build`
+      output whose source map lists a `@codemirror/` or `@lezer/` module), production mode; none of those modules is in
+      the initial chunk (WEB-UI NFR-UI-1 unchanged). Spike codemirror-bundle (REF-NOTEBOOK-7, esbuild, 2026-11-23):
+      125,244 B; threshold = measured + 10 %. Green re-measures with Vite and records the number in the review. The
+      test shares WEB-UI's build test production build (`build.sourcemap: 'hidden'`, review), finds the chunks through
+      their source maps, asserts at least one exists and none is referenced by `index.html`, and sums their gzip sizes.
+    threshold: 137768
+    verified_by: test
 
 vectors:
   - id: VEC-NOTEBOOK-1

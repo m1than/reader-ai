@@ -30,7 +30,8 @@ const violations = (root: HTMLElement): string[] => {
       if (attr.name === 'srcset') out.push('srcset');
       if (attr.name === 'href' && !SAFE_HREF.test(attr.value.trim())) out.push(`href ${attr.value}`);
     }
-    const trusted = el.closest('.katex, .shiki');
+    // KaTeX and Shiki output, and the module's own chrome (INV-RENDER-1, design pass: the element itself is marked).
+    const trusted = el.closest('.katex, .shiki') ?? (el.hasAttribute('data-render-chrome') ? el : null);
     if (!trusted && el.hasAttribute('style')) out.push(`style on ${tag}`);
     if (!trusted && el.getAttribute('class')) {
       const allowed = tag === 'code' && el.getAttribute('class')!.split(/\s+/).every((c) => /^(language-[\w-]+|math-inline|math-display)$/.test(c));
@@ -80,11 +81,19 @@ describe('markdown pipeline (FR-RENDER-2)', () => {
     const hostile = cases()
       .map((c) => c.output.data?.['text/markdown'])
       .filter((s): s is string => typeof s === 'string');
-    for (const source of [explainSource(), ...hostile]) {
+    // Design pass (INV-RENDER-1, code review): a 5-column table, whose wrapper is the module's trusted chrome, and a
+    // forged chrome mark in raw HTML, which stays text.
+    const table = '| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |';
+    const forgery = '<p data-render-chrome class="x">forged</p>';
+    for (const source of [explainSource(), ...hostile, table, forgery]) {
       const { container, unmount } = render(<Markdown source={source} />);
       expect(violations(container)).toEqual([]);
       unmount();
     }
+    const { container } = render(<Markdown source={`${table}\n\n${forgery}`} />);
+    expect(container.querySelector('.table-wide[data-render-chrome] > table')).toBeTruthy();
+    expect(container.querySelector('.x, p[data-render-chrome]')).toBeNull();
+    expect(container.textContent).toContain('<p data-render-chrome class="x">forged</p>');
   });
 });
 

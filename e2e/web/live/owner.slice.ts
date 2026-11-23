@@ -260,8 +260,8 @@ test('lesson: L02 renders, a lab cell runs, citations render', async () => {
   await lab().scrollIntoViewIfNeeded();
   const t = now();
   await lab().getByRole('button', { name: 'Run', exact: true }).click();
-  // Scoped to the controls: an output reading exactly "done" must not match the state label.
-  const label = lab().locator('.lab-controls').getByText(/^(done|error|timed out)$/);
+  // Scoped to the run-state status (WEB-NOTEBOOK FR-NOTEBOOK-9): an output reading exactly "done" must not match.
+  const label = lab().getByRole('status').filter({ hasText: /^(done|error|timed out)$/ });
   await expect(label).toBeVisible({ timeout: 120_000 });
   const state = (await label.first().textContent())?.trim();
   const outputs = await lab().locator('.outputs').innerText().catch(() => '');
@@ -277,6 +277,8 @@ test('tutor: three questions through the Ask panel', async () => {
   await ensureLesson();
   if (!page.url().includes(lessonId)) await page.goto(`/lessons/${lessonId}`);
   const panel = page.getByRole('region', { name: 'Tutor' });
+  // Design pass (SRV-TUTOR FR-TUTOR-11): the panel is closed by default; the lesson toolbar opens it.
+  if (!(await panel.isVisible())) await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click({ timeout: 30_000 });
   await expect(panel).toBeVisible({ timeout: 30_000 });
   // t01 replaces questions-v2 v03, whose premise the book does not support (SRV-TUTOR VEC-TUTOR-7, 2026-11-23)
   const t01 = fixedQuestions()[0]!;
@@ -326,13 +328,23 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   mkdirSync(resolve(dir, 'data'), { recursive: true });
   const meta = (await (await api.get(`/api/lessons/${lessonId}`)).json()) as { lesson: { latest_sha256: string | null } };
   const sha = meta.lesson.latest_sha256;
-  writeFileSync(resolve(dir, 'data', 'lessons.json'), await (await api.get('/api/lessons')).text());
+  const lessonsText = await (await api.get('/api/lessons')).text();
+  writeFileSync(resolve(dir, 'data', 'lessons.json'), lessonsText);
+  type Listed = { lesson_id: string; course_id: string; course_title: string; title: string; latest_sha256: string | null };
+  const listed = (JSON.parse(lessonsText) as { lessons: Listed[] }).lessons;
+  const unpublished = listed.find((x) => !x.latest_sha256);
+  const l02Title = listed.find((x) => x.lesson_id === lessonId)?.title ?? '';
   writeFileSync(resolve(dir, 'data', 'lesson.json'), JSON.stringify(meta));
   if (sha) writeFileSync(resolve(dir, 'data', 'revision.json'), await (await api.get(`/api/lessons/${lessonId}/revisions/${sha}`)).text());
   writeFileSync(resolve(dir, 'data', 'questions.json'), await (await api.get(`/api/lessons/${lessonId}/questions`)).text());
   const axe: Record<string, string[]> = {};
   const signinAxe: Record<string, string[]> = {}; // SRV-AUTH's own page: recorded only (follow-up amendment)
-  type Layout = { overflow_px: number; widest_p_px: number; p_font_size: string; p_line_height: string; p_font_family: string; h1_px: string; chars_per_line_median: number | null };
+  type Layout = {
+    overflow_px: number; widest_p_px: number; p_font_size: string; p_line_height: string; p_font_family: string; h1_px: string;
+    h1_family: string; chars_per_line_median: number | null; article_lang: string | null; td_hyphens: string | null;
+    td_overflow_wrap: string | null; toolbar_button_radius: string | null; toolbar_button_height: number | null;
+    lab_px: number | null; header_px: number | null;
+  };
   const layout: Record<string, Layout> = {};
   const serious = (r: { violations: { impact?: string | null; id: string; nodes: unknown[] }[] }) =>
     r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}:${v.nodes.length}`);
@@ -351,7 +363,15 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         })
         .filter((x): x is number => x !== null)
         .sort((a, b) => a - b);
-      const h1 = document.querySelector('h1');
+      const h1 = document.querySelector('#content h1');
+      // Design pass (FR-UI-10, 2026-11-23): page title family, lesson language, table breaking, toolbar buttons, the
+      // lab block's width against the reading column, the header's height.
+      const td = document.querySelector('[data-markdown] td');
+      const tdCs = td ? getComputedStyle(td) : null;
+      const tb = document.querySelector('.lesson-toolbar .acme-button');
+      const tbCs = tb ? getComputedStyle(tb) : null;
+      const labBlock = document.querySelector('.cell[data-kind="lab"] .lab') as HTMLElement | null;
+      const header = document.querySelector('header.app-header') as HTMLElement | null;
       return {
         // clientWidth excludes a vertical scrollbar, which innerWidth includes.
         overflow_px: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -360,7 +380,15 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         p_line_height: cs?.lineHeight ?? '',
         p_font_family: cs?.fontFamily ?? '',
         h1_px: h1 ? getComputedStyle(h1).fontSize : '',
+        h1_family: h1 ? getComputedStyle(h1).fontFamily : '',
         chars_per_line_median: perLine.length ? Math.round(perLine[Math.floor(perLine.length / 2)]!) : null,
+        article_lang: document.querySelector('#content div.lesson')?.getAttribute('lang') ?? null,
+        td_hyphens: tdCs?.hyphens ?? null,
+        td_overflow_wrap: tdCs?.overflowWrap ?? null,
+        toolbar_button_radius: tbCs?.borderTopLeftRadius ?? null,
+        toolbar_button_height: tb ? Math.round(tb.getBoundingClientRect().height) : null,
+        lab_px: labBlock ? Math.round(labBlock.getBoundingClientRect().width) : null,
+        header_px: header ? Math.round(header.getBoundingClientRect().height) : null,
       };
     });
   };
@@ -386,6 +414,41 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(dir, `${w}-list.png`), fullPage: true });
     await check(`${w}-list`);
+    if (w === WIDTHS[0]) {
+      // FR-UI-16 (code review B1): the production image serves /theme.js, and a stored Dark applies on reload.
+      const theme = await page.request.get('/theme.js');
+      expect.soft(theme.status(), 'GET /theme.js').toBe(200);
+      expect.soft(theme.headers()['content-type'] ?? '', '/theme.js content type').toMatch(/javascript/);
+      await page.evaluate(() => localStorage.setItem('reader-ai.theme', 'dark'));
+      await page.reload();
+      await expect.soft(page.locator('html'), 'stored dark applies on reload').toHaveAttribute('data-theme', 'dark');
+      await page.evaluate(() => localStorage.removeItem('reader-ai.theme'));
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
+    }
+    // Design pass, FR-UI-6: every published lesson is a visible link on `/` before any click; a group of more than 12
+    // lessons starts collapsed with exactly its published rows.
+    for (const l of listed.filter((x) => x.latest_sha256))
+      await expect.soft(page.locator(`#content a[href="/lessons/${l.lesson_id}"]`).first(), `published ${l.lesson_id} linked (${w})`).toBeVisible();
+    const byCourse = new Map<string, Listed[]>();
+    for (const x of listed) byCourse.set(x.course_id, [...(byCourse.get(x.course_id) ?? []), x]);
+    for (const [courseId, ls] of byCourse) {
+      if (ls.length <= 12) continue;
+      const group = page.locator(`#content #course-${courseId}`);
+      await expect.soft(group.getByRole('button', { expanded: false }).first(), `course ${courseId} collapsed (${w})`).toBeVisible();
+      await expect.soft(group.getByRole('listitem'), `course ${courseId} shows its published rows (${w})`).toHaveCount(ls.filter((x) => x.latest_sha256).length);
+    }
+    // FR-UI-17: the sidebar beside the page at 1280, behind the header's Courses button below 75rem.
+    const sidebar = page.getByRole('navigation', { name: 'Courses' });
+    if (w === 1280) {
+      await expect.soft(sidebar.first(), 'sidebar visible (1280)').toBeVisible();
+    } else {
+      await expect.soft(sidebar.first(), `sidebar hidden (${w})`).toBeHidden();
+      await page.getByRole('button', { name: 'Courses' }).click();
+      await expect.soft(page.getByRole('dialog').getByRole('navigation', { name: 'Courses' }), `drawer opens (${w})`).toBeVisible();
+      await page.screenshot({ path: resolve(dir, `${w}-list-sidebar-drawer.png`) });
+      await page.keyboard.press('Escape');
+    }
     // FR-UI-11: the skip link is the first Tab stop and moves focus to main#content.
     await page.locator('body').focus();
     await page.keyboard.press('Tab');
@@ -400,10 +463,18 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     if (w !== 390) await page.screenshot({ path: resolve(dir, `${w}-lesson-full.png`), fullPage: true });
     await el(`${w}-lesson-references`, '.cell:has(.references)');
     await el(`${w}-lesson-lab`, '.cell:has(.lab)');
-    await el(`${w}-lesson-tutor`, '.tutor');
-    await el(`${w}-lesson-open`, '.cell:has(.open-finding)');
-    await el(`${w}-lesson-recall`, '.cell[data-kind="recall"]');
+    await el(`${w}-lesson-open`, '.cell[data-kind="open"]');
+    await el(`${w}-lesson-recall`, '.recall-deck');
     await check(`${w}-lesson`);
+    // Design pass: breadcrumbs (FR-NOTEBOOK-11), the sidebar's current lesson at 1280 (FR-UI-17), the tutor panel
+    // opened from the toolbar (SRV-TUTOR FR-TUTOR-11).
+    await expect.soft(page.getByRole('navigation', { name: 'Breadcrumb' }).locator('[aria-current="page"]'), `breadcrumb current (${w})`).toHaveText(l02Title);
+    if (w === 1280)
+      await expect.soft(page.getByRole('navigation', { name: 'Courses' }).first().locator(`a[href="/lessons/${lessonId}"]`), 'sidebar marks L02').toHaveAttribute('aria-current', 'page');
+    await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click();
+    await el(`${w}-lesson-tutor`, '#tutor');
+    axe[`${w}-lesson-tutor-open`] = serious(await new AxeBuilder({ page }).include('#tutor').analyze());
+    await page.getByRole('button', { name: 'Close the tutor' }).click();
     // WEB-NOTEBOOK FR-NOTEBOOK-11: the contents column at 1280 and 1024, behind the toggle at 390.
     await page.evaluate(() => window.scrollTo(0, 0));
     const firstEntry = nav().getByRole('link').first();
@@ -424,6 +495,8 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await expect.soft(page.locator(href), `${href} focused (${w})`).toBeFocused();
     await expect.soft(page.locator(href), `${href} in view (${w})`).toBeInViewport();
     if (w === 390) await expect.soft(firstEntry, 'contents close after an entry (390)').toBeHidden();
+    // FR-NOTEBOOK-11 (design pass): after the scroll exactly one entry is the current section.
+    await expect.soft(nav().locator('a[aria-current="location"]'), `one current section (${w})`).toHaveCount(1);
     // Keyboard: the first Tab stops from the top of the lesson, screenshot of the focused control.
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('body').focus();
@@ -432,19 +505,69 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
 
     await page.goto('/no-such-page');
     await page.screenshot({ path: resolve(dir, `${w}-notfound.png`), fullPage: true });
+    await check(`${w}-notfound`);
+    // Design pass (FR-UI-10): no overflow on an unpublished lesson and on /import either (GETs only; no plan is
+    // previewed or confirmed here).
+    if (unpublished) {
+      await page.goto(`/lessons/${unpublished.lesson_id}`);
+      await expect(page.locator('#content h1')).toBeVisible({ timeout: 30_000 });
+      await page.screenshot({ path: resolve(dir, `${w}-unpublished.png`), fullPage: true });
+      await check(`${w}-unpublished`);
+    }
+    await page.goto('/import');
+    await expect(page.getByRole('heading', { name: 'Import a source' })).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: resolve(dir, `${w}-import.png`), fullPage: true });
+    await check(`${w}-import`);
   }
+  // Design pass (FR-UI-10, FR-UI-16): the list and L02 in the dark scheme at 1280 px, axe and overflow.
+  const dark = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 1280, height: 900 }, colorScheme: 'dark' });
+  const dp = await dark.newPage();
+  for (const [name, path] of [['dark-1280-list', '/'], ['dark-1280-lesson', `/lessons/${lessonId}`]] as const) {
+    await dp.goto(path);
+    await expect(dp.locator('#content h1').first()).toBeVisible({ timeout: 30_000 });
+    await dp.screenshot({ path: resolve(dir, `${name}.png`) });
+    axe[name] = serious(await new AxeBuilder({ page: dp }).analyze());
+    const overflow = await dp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect.soft(overflow, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
+  }
+  await dark.close();
   results.ui = { widths: [...WIDTHS], axe_serious_critical: axe, signin_axe_serious_critical_report_only: signinAxe, layout, revision: sha };
   for (const [name, issues] of Object.entries(axe)) expect.soft(issues, `axe ${name}`).toEqual([]);
   for (const [name, l] of Object.entries(layout)) {
     expect.soft(l.overflow_px, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
-    if (!name.endsWith('-lesson')) continue;
     const w = Number(name.split('-')[0]);
+    // Design pass (FR-UI-11): the header is present and one row (its declared 3.5rem min-height) at every width.
+    expect.soft(l.header_px, `header present ${name}`).not.toBeNull();
+    expect.soft(l.header_px ?? Infinity, `header one row ${name}`).toBeLessThanOrEqual(56);
+    if (name.endsWith('-list')) {
+      // FR-UI-10 (design pass): the app page title in the sans.
+      expect.soft(l.h1_px, `page title size ${name}`).toBe(w === 390 ? '24px' : '28px');
+      expect.soft(l.h1_family.startsWith('ui-serif'), `page title family ${name}`).toBe(false);
+    }
+    if (!name.endsWith('-lesson')) continue;
     expect.soft(l.widest_p_px, `reading column > 0 ${name}`).toBeGreaterThan(0);
     expect.soft(l.widest_p_px, `reading column ≤ 608 ${name}`).toBeLessThanOrEqual(608);
     expect.soft(l.p_font_size, `prose size ${name}`).toBe('17px');
     expect.soft(Math.abs(parseFloat(l.p_line_height) - 28.05), `prose line height ${name}`).toBeLessThanOrEqual(0.1);
     expect.soft(l.p_font_family.startsWith('ui-serif'), `prose family ${name}`).toBe(true);
-    expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '30px' : '36px');
+    // Design pass (FR-UI-10): heading scale, language, table breaking, toolbar buttons, the wide lab block. Each hook
+    // must be present before its value is checked (review).
+    for (const [hook, value] of [
+      ['#content div.lesson[lang]', l.article_lang], ['[data-markdown] td', l.td_hyphens],
+      ['.lesson-toolbar .acme-button', l.toolbar_button_height], ['.cell[data-kind="lab"] .lab', l.lab_px],
+    ] as const)
+      expect.soft(value, `${hook} present ${name}`).not.toBeNull();
+    expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '28px' : '32px');
+    expect.soft(l.article_lang, `lesson lang ${name}`).toBe('ru');
+    expect.soft(l.td_hyphens, `td hyphens ${name}`).toBe('auto');
+    expect.soft(l.td_overflow_wrap, `td overflow-wrap ${name}`).toBe('break-word');
+    expect.soft(l.toolbar_button_radius, `toolbar button radius ${name}`).toBe('6px');
+    expect.soft(l.toolbar_button_height, `toolbar button height ${name}`).toBe(28);
+    if (w === 390) expect.soft(l.lab_px ?? 0, `lab within the column ${name}`).toBeLessThanOrEqual(l.widest_p_px + 1);
+    else {
+      expect.soft(l.lab_px ?? 0, `lab wider than prose ${name}`).toBeGreaterThanOrEqual(l.widest_p_px + 64);
+      expect.soft(l.lab_px ?? 0, `lab at most 800 ${name}`).toBeLessThanOrEqual(800);
+    }
   }
 });
 
@@ -481,7 +604,9 @@ test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', 
   // slice.live.ts's sequence ("sign out, then sign in through the real page with the same passkey"), for the owner.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Design pass (WEB-UI FR-UI-5, FR-UI-11): Sign out is an item of the user menu.
+  await page.getByRole('button', { name: /^Account menu for / }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await page.waitForURL(/\/api\/auth\/signin$/);
   expect((await api.get('/api/me')).status(), 'signed out').toBe(401);
   await page.screenshot({ path: resolve(dir, 'signed-out.png') });

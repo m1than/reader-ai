@@ -35,7 +35,11 @@ test('the Ask panel asks, shows a checked answer and has no serious or critical 
   });
   await page.goto('/lessons/w01');
   const panel = page.getByRole('region', { name: 'Tutor' });
+  // Design pass: the panel is closed by default and opens from the lesson toolbar.
+  await expect(panel).toBeHidden();
+  await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click();
   await expect(panel).toBeVisible();
+  await expect(panel.getByLabel('Ask the tutor')).toBeFocused();
   await panel.getByLabel('Ask the tutor').fill('Why do miners vary the nonce?');
   await panel.getByRole('button', { name: 'Ask' }).click();
   await expect(panel.getByText('Mastering Blockchain, p. 61')).toBeVisible({ timeout: 10_000 });
@@ -44,4 +48,28 @@ test('the Ask panel asks, shows a checked answer and has no serious or critical 
   const results = await new AxeBuilder({ page }).include('[aria-label="Tutor"]').analyze();
   const bad = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
   expect(bad.map((v) => v.id)).toEqual([]);
+});
+
+// Design pass (2026-11-23): open at 1280 px the panel covers no paragraph of the lesson; axe is clean at 1280 and 390.
+test('the open panel covers no lesson text at 1280 px and has no serious axe issue at 1280 and 390 px', async ({ page }) => {
+  await page.route('**/api/lessons/*/questions', (route) => route.fulfill({ json: { questions: [] } }));
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/lessons/w01');
+    await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click();
+    const panel = page.getByRole('region', { name: 'Tutor' });
+    await expect(panel).toBeVisible();
+    if (width === 1280) {
+      const overlaps = await page.evaluate(() => {
+        const t = (document.getElementById('tutor') as HTMLElement).getBoundingClientRect();
+        return [...document.querySelectorAll('[data-markdown] p')]
+          .map((p) => p.getBoundingClientRect())
+          .filter((r) => r.width > 0 && r.right > t.left && r.left < t.right && r.bottom > t.top && r.top < t.bottom).length;
+      });
+      expect(overlaps).toBe(0);
+    }
+    const results = await new AxeBuilder({ page }).include('[aria-label="Tutor"]').analyze();
+    const bad = results.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
+    expect(bad.map((v) => v.id), `axe at ${width}`).toEqual([]);
+  }
 });

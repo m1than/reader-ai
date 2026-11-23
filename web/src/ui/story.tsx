@@ -3,6 +3,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/react-router';
 import type { Decorator } from '@storybook/react-vite';
+import { createSignupsApi } from '../accounts/api';
 import { createApi } from '../app/api';
 import { ServicesContext } from '../app/context';
 import type { KernelController, KernelState } from '../notebook/kernel';
@@ -45,10 +46,12 @@ export const failingFetch: typeof fetch = async () => json({ error: 'internal' }
 export const withServices =
   (routes: Record<string, unknown>, fetchFn: typeof fetch = stubFetch(routes)): Decorator =>
   (Story) => {
-    const api = createApi({ fetch: fetchFn, onUnauthorized: () => undefined });
+    const deps = { fetch: fetchFn, onUnauthorized: () => undefined };
+    const api = createApi(deps);
+    const signups = createSignupsApi(deps);
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     return (
-      <ServicesContext.Provider value={{ api, notify: () => undefined, navigateAway: () => undefined }}>
+      <ServicesContext.Provider value={{ api, signups, notify: () => undefined, navigateAway: () => undefined }}>
         <QueryClientProvider client={client}>
           <Story />
         </QueryClientProvider>

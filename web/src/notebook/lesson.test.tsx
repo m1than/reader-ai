@@ -31,7 +31,9 @@ const view = async (nb = notebook(), overrides: Record<string, unknown> = {}) =>
   const { LessonView } = await load(() => import('./LessonView'));
   expect(LessonView).toBeTypeOf('function');
   const controller = fakeController(overrides);
-  render(<LessonView notebook={nb as never} controller={controller as never} />);
+  // Design pass (FR-NOTEBOOK-9): the CodeMirror chunk is held pending, so these tests drive the fallback text area.
+  const props = { notebook: nb as never, controller: controller as never, loadEditor: () => new Promise<never>(() => undefined) };
+  render(<LessonView {...(props as Parameters<typeof LessonView>[0])} />);
   return controller;
 };
 
@@ -56,8 +58,14 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     // The heading also appears in the lesson contents (FR-NOTEBOOK-11); the cell renders it as an h2.
     await waitFor(() => expect(screen.getByText('Digests', { selector: 'h2' })).toBeTruthy());
     expect(urls).toEqual(expect.arrayContaining(['/api/lessons/w01', `/api/lessons/w01/revisions/${sha}`]));
-    for (const label of ['diagnostic', 'reading route', 'explanation', 'what changed', 'erratum', 'trade-off', 'lab', 'recall', 'notes', 'open question'])
-      expect(screen.getAllByText(label).length, label).toBeGreaterThan(0);
+    // Design pass: explanation cells carry no label; open, lab and recall cells are named by their callout, block
+    // header and deck heading.
+    const labels = [...document.querySelectorAll('.cell-kind')].map((e) => e.textContent);
+    for (const label of ['diagnostic', 'reading route', 'what changed', 'erratum', 'trade-off', 'notes']) expect(labels, label).toContain(label);
+    for (const label of ['explanation', 'lab', 'recall', 'open question']) expect(labels, label).not.toContain(label);
+    expect(screen.getByText('Open question')).toBeTruthy();
+    expect(screen.getByText(/^Python · Lab 1$/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /^Recall cards \(\d+\)$/ })).toBeTruthy();
   });
 
   it('shows "not published yet" when latest_sha256 is null and requests no revision', async () => {
@@ -74,7 +82,8 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     await act(async () => {
       render(<AppRoot initialPath="/lessons/w02" fetch={fetchFn as unknown as typeof fetch} navigateAway={vi.fn()} />);
     });
-    await waitFor(() => expect(screen.getByText(/not published yet/i)).toBeTruthy());
+    // Design pass: the sentence and the chip both say it; the chip's text is exact.
+    await waitFor(() => expect(screen.getByText('Not published yet')).toBeTruthy());
     expect(urls.filter((u) => u.includes('/revisions/'))).toEqual([]);
   });
 
@@ -103,7 +112,7 @@ describe('references and open findings (FR-NOTEBOOK-2, FR-NOTEBOOK-3)', () => {
   it('marks the G2 open cell and counts open findings in the header', async () => {
     await view();
     const open = document.querySelector('[data-cell-id="w01-open"]') as HTMLElement;
-    expect(within(open).getByText('not yet confirmed')).toBeTruthy();
+    expect(within(open).getByText('Not yet confirmed by the source:')).toBeTruthy();
     expect(within(open).getByText('claim not confirmed by fact-check')).toBeTruthy();
     const link = screen.getByRole('link', { name: /1 open finding/i });
     expect(link.getAttribute('href')).toBe('#cell-w01-open');
@@ -113,17 +122,17 @@ describe('references and open findings (FR-NOTEBOOK-2, FR-NOTEBOOK-3)', () => {
 describe('controls and editing (FR-NOTEBOOK-7, FR-NOTEBOOK-9)', () => {
   it('Run sends the edited code; Revert restores the revision source', async () => {
     const controller = await view();
-    const editor = screen.getByRole('textbox', { name: /lab code/i }) as HTMLTextAreaElement;
+    const editor = screen.getByRole('textbox', { name: 'Lab 1 code' }) as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: 'print(2)' } });
     fireEvent.click(screen.getByRole('button', { name: /^run$/i }));
     expect(controller.run).toHaveBeenCalledWith('w01-lab', 'print(2)');
     fireEvent.click(screen.getByRole('button', { name: /revert/i }));
-    expect((screen.getByRole('textbox', { name: /lab code/i }) as HTMLTextAreaElement).value).toContain('hashlib.sha256');
+    expect((screen.getByRole('textbox', { name: 'Lab 1 code' }) as HTMLTextAreaElement).value).toContain('hashlib.sha256');
   });
 
   it('Tab inserts four spaces and Shift+Enter runs', async () => {
     const controller = await view();
-    const editor = screen.getByRole('textbox', { name: /lab code/i }) as HTMLTextAreaElement;
+    const editor = screen.getByRole('textbox', { name: 'Lab 1 code' }) as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: 'x' } });
     editor.setSelectionRange(0, 0);
     fireEvent.keyDown(editor, { key: 'Tab' });
@@ -134,7 +143,13 @@ describe('controls and editing (FR-NOTEBOOK-7, FR-NOTEBOOK-9)', () => {
 
   it('Reset asks for confirmation that names every open lesson, then resets', async () => {
     const controller = await view();
-    fireEvent.click(screen.getByRole('button', { name: /reset kernel/i }));
+    // Design pass (FR-NOTEBOOK-7): Reset kernel is an item of the toolbar's More menu.
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'More lesson actions' }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('menuitem', { name: /reset kernel/i }));
+    });
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toMatch(/every open lesson/i);
     expect(controller.reset).not.toHaveBeenCalled();
@@ -146,7 +161,7 @@ describe('controls and editing (FR-NOTEBOOK-7, FR-NOTEBOOK-9)', () => {
     const controller = await view(notebook(), { resetting: true });
     expect((screen.getByRole('button', { name: /^run$/i }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole('button', { name: /run all/i }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.keyDown(screen.getByRole('textbox', { name: /lab code/i }), { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(screen.getByRole('textbox', { name: 'Lab 1 code' }), { key: 'Enter', shiftKey: true });
     expect(controller.run).not.toHaveBeenCalled();
   });
 

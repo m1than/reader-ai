@@ -43,7 +43,7 @@ title: Rendering — sanitised markdown, KaTeX, Shiki and the safe output types;
 status: approved
 approved_by: agent
 approved_at: 2026-11-22
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11, VEC-TUTOR-6; reviewed in SRV-TUTOR's code review): the markdown component takes an option `linksAsText` (default off, so every FR-RENDER-2 rendering is unchanged): before rehype, a link becomes its label followed by ` (url)` as plain text (the url alone when the label is the url), and an image becomes its alt text, so no `<a>` and no `<img>` is produced and nothing is fetched; the tutor's tests (web/src/tutor) cover the option against VEC-TUTOR-6"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11, VEC-TUTOR-6; reviewed in SRV-TUTOR's code review): the markdown component takes an option `linksAsText` (default off, so every FR-RENDER-2 rendering is unchanged): before rehype, a link becomes its label followed by ` (url)` as plain text (the url alone when the label is the url), and an image becomes its alt text, so no `<a>` and no `<img>` is produced and nothing is fetched; the tutor's tests (web/src/tutor) cover the option against VEC-TUTOR-6. Amendment 2026-11-23 (V/design-pass, the owner's approval of the design audit's P1 and P2 items): FR-RENDER-3 inline math padding inside its clip box and the 1.05em size; FR-RENDER-4 dual-theme Shiki through CSS custom properties and a code block header with the language and Copy. deep-reviewer (Fable) single round on the design-pass spec diff (04e396b..d3c0a68): changes, none blocking for this spec; applied without a second round (coordinator, 2026-11-23). Approved by agent (coordinator, 2026-11-23)"
 layer: web
 track: engineering
 adr: [ADR-0013, ADR-0024]
@@ -121,11 +121,40 @@ requirements:
       outer delimiter pair (`$$…$$`, `$…$`, `\[…\]`, `\(…\)`) is removed before rendering, and the output renders in
       display mode. `\href`, `\url` and `\includegraphics` render as text, never as links or attributes. [unit]
       [browser]
+      Design pass (audit 2026-11-23: the inline box clipped the top of superscripts, the 2 of 2^{n/2} lost its upper
+      third): the inline box keeps `max-height: 4em` on its content, `overflow: hidden` and `contain: paint`, and adds
+      `padding-block: 0.4em` with `margin-block: -0.4em` (the line box does not grow), so ordinary superscripts and
+      subscripts paint inside it; math is set at `font-size: 1.05em` (KaTeX's default 1.21em was a size step above the
+      17px serif). [browser] for `$2^{n/2}$`, `$x_{i,j}^{2}$` and `$\frac{a}{b}$` inline in a paragraph, every
+      descendant `span` of the `.katex-html` with a non-empty box lies within the `.katex` element's border box (±0.5px)
+      — measured before the change, 8.2px above it for `2^{n/2}`, and with 0.4em inside it (probe 2026-11-23); the
+      `.katex` font size is 1.05 × the paragraph's; the `\raisebox{-500em}` check above still holds.
   - id: FR-RENDER-4
     text: >-
       Code: Shiki with the JavaScript regex engine, the python grammar and one Calm theme per colour scheme, loaded as
       a lazy chunk; tokens become React elements. Until the chunk loads, and for any other language, code renders as
       plain monospace text. [unit]
+      Design pass (2026-11-23):
+      - **Both schemes at once.** Shiki renders with its two Calm themes (`themes: {light, dark}`, `defaultColor:
+        false`), so every token carries `--shiki-light` and `--shiki-dark` (and the `-bg` pair on the `pre`) as React
+        style custom properties; app CSS picks one with `[data-theme]` and `prefers-color-scheme` exactly as `calm.css`
+        does, so a theme change (WEB-UI FR-UI-16) or an OS switch recolours code without re-rendering. The scheme is no
+        longer read from `matchMedia` at render time (the audit's Storybook capture showed a light code block on the
+        dark canvas), and the highlighter takes no scheme: `highlight(code, language)`.
+      - **Block header.** Every code block (a fenced block in markdown, a code cell, and the plain fallback) is a wide
+        block (WEB-UI FR-UI-10) with `--radius-block`: a header row with the language in muted text (`python`, the
+        fence's language name when given, else `text`) and a "Copy" ghost button (`CopyIcon`, accessible name "Copy
+        code") that writes the code's text exactly (`navigator.clipboard.writeText`) and then reads "Copied" for 2 s
+        with a visually hidden `role="status"` "Code copied" ("Copy failed" on failure); the code below in
+        `--acme-font-mono` at 0.8125rem with line height 1.55, scrolling horizontally inside the block. The block is a
+        `role="group"` labelled "<language> code"; its scroll container takes `tabIndex={0}` only while its content is
+        wider than it (measured on mount and on resize), so a block that does not scroll adds no tab stop and a block
+        that does is a scroll region keyboard users can reach (axe `scrollable-region-focusable`; code review). Output
+        blocks (FR-RENDER-5) keep their plain look without a header.
+      [unit] both custom properties on tokens and the `pre`, no `matchMedia` call during render, the header's language
+      for python, a named fence and none, Copy's written text, the button's exact text "Copy" then "Copied", the status
+      texts and failure, with a stub clipboard, the group role and label, no tab stop without overflow and one with it; [browser] the computed colour of a python keyword differs between `data-theme="light"` and `"dark"`
+      on one rendered block without a re-render; [story] Light and Dark.
   - id: FR-RENDER-5
     text: >-
       Safe types: `text/plain`, stream and error text render as text nodes in a monospace block with ANSI escape
@@ -143,8 +172,12 @@ invariants:
       For any markdown or `text/markdown` input, the rendered React tree contains no `script`, `style`, `img`,
       `iframe`, `object`, `embed`, `form` or `base` element; no attribute starting with `on`; no `style` or `srcset`
       attribute taken from the input (style objects come only from KaTeX and Shiki output); no `class` outside
-      FR-RENDER-2's allowance except on elements KaTeX and Shiki create; and no `href` whose scheme is not http, https,
-      mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
+      FR-RENDER-2's allowance except on elements KaTeX and Shiki create and on this module's own chrome (design pass:
+      the code block's wrapper and header with its Copy button and status, FR-RENDER-4, and the wide-table wrapper,
+      WEB-UI FR-UI-10), built from no input, where every element that carries a class carries `data-render-chrome`
+      itself (the test trusts that element only, never its descendants; input cannot forge the mark: a raw
+      `<p data-render-chrome class="x">` in markdown stays text, and a test case says so, next to a 5-column table whose
+      wrapper is the trusted chrome); and no `href` whose scheme is not http, https, mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
       cases and VEC-NOTEBOOK-1's explain cell]
   - id: INV-RENDER-2
     text: >-

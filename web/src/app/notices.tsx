@@ -1,7 +1,9 @@
-// Notices (WEB-UI FR-UI-7): plain text from a fixed catalogue keyed by code; at most 3 visible.
+// Notices (WEB-UI FR-UI-7): plain text from a fixed catalogue keyed by code, each in sentence case ending with a
+// full stop; at most 3 visible, older ones counted as "+n more".
 import { Button } from '@acme/ui/button';
+import { CloseIcon, InfoIcon } from '../ui/icons';
 
-const CATALOGUE: Record<string, string> = {
+export const NOTICE_CATALOGUE: Readonly<Record<string, string>> = {
   rejected: 'The kernel refused that request.',
   busy: 'The kernel is busy; try again in a moment.',
   timeout: 'The cell ran longer than 60 seconds and was interrupted.',
@@ -11,7 +13,7 @@ const CATALOGUE: Record<string, string> = {
   kernel_reset: 'The kernel was reset; the next Run starts a fresh one.',
   kernel_unavailable: 'The kernel is unavailable right now.',
   kernel_upstream: 'The kernel did not answer; try Run again.',
-  too_many_kernels: 'too many open lessons; close one or reset',
+  too_many_kernels: 'Too many open lessons; close one or reset the kernel.',
   connect_failed: 'Could not connect to the kernel. The lesson may be open in other tabs.',
   sign_out_failed: 'Signing out failed; try again.',
   // WEB-UI FR-UI-15: a compile request the server answered with a run that already exists.
@@ -26,7 +28,8 @@ const CATALOGUE: Record<string, string> = {
 export const MAX_VISIBLE_NOTICES = 3;
 
 // Own properties only: a code such as `constructor` or `__proto__` must not reach Object.prototype.
-export const noticeText = (code: string): string => (Object.hasOwn(CATALOGUE, code) ? CATALOGUE[code]! : CATALOGUE.unknown!);
+export const noticeText = (code: string): string =>
+  Object.hasOwn(NOTICE_CATALOGUE, code) ? NOTICE_CATALOGUE[code]! : NOTICE_CATALOGUE.unknown!;
 
 export interface Notice {
   id: number;
@@ -38,12 +41,13 @@ export function NoticeRegion({ notices, onDismiss }: { notices: Notice[]; onDism
   const hidden = notices.length - visible.length;
   return (
     <aside className="notices" aria-label="Notices">
-      {hidden > 0 && <p className="notices-more">{hidden} more</p>}
+      {hidden > 0 && <p className="notices-more">{`+${hidden} more`}</p>}
       {visible.map((n) => (
         <div key={n.id} role="status" className="notice">
+          <InfoIcon className="notice-icon" />
           <span>{noticeText(n.code)}</span>
           <Button variant="ghost" color="neutral" size="sm" onClick={() => onDismiss(n.id)} aria-label="Dismiss">
-            ×
+            <CloseIcon />
           </Button>
         </div>
       ))}

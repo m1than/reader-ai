@@ -147,15 +147,38 @@ export const markdownToHast = (source: string, linksAsText = false): Root => {
 const textOf = (nodes: ElementContent[]): string =>
   nodes.map((n) => (n.type === 'text' ? n.value : n.type === 'element' ? textOf(n.children) : '')).join('');
 
-/** A `pre > code.language-python` block becomes the lazily highlighted Code component. */
+/** A fenced block (`pre > code`) becomes the Code component with its header: the fence's language, else `text`;
+ * python is highlighted lazily (FR-RENDER-4). */
 const Pre = (props: { node?: Element; children?: React.ReactNode }) => {
   const code = props.node?.children.find((c): c is Element => c.type === 'element' && c.tagName === 'code');
   const classes = (code?.properties.className as string[] | undefined) ?? [];
-  const language = classes.find((c) => c.startsWith('language-'))?.slice('language-'.length);
-  if (code && language) return <Code code={textOf(code.children).replace(/\n$/, '')} language={language} />;
+  const language = classes.find((c) => c.startsWith('language-'))?.slice('language-'.length) ?? 'text';
+  if (code) return <Code code={textOf(code.children).replace(/\n$/, '')} language={language} />;
   return <pre>{props.children}</pre>;
 };
 
+/** WEB-UI FR-UI-10: a table of 5 or more columns is a wide block. */
+export const WIDE_TABLE_COLUMNS = 5;
+const columnsOf = (table: Element | undefined): number => {
+  const rows: Element[] = [];
+  const walk = (n: Element) => {
+    for (const c of n.children) if (c.type === 'element') (c.tagName === 'tr' ? rows.push(c) : walk(c));
+  };
+  if (table) walk(table);
+  const first = rows[0];
+  return first ? first.children.filter((c) => c.type === 'element' && (c.tagName === 'td' || c.tagName === 'th')).length : 0;
+};
+const Table = (props: { node?: Element; children?: React.ReactNode }) => {
+  const table = <table>{props.children}</table>;
+  return columnsOf(props.node) >= WIDE_TABLE_COLUMNS ? (
+    <div className="wide table-wide" data-render-chrome="">
+      {table}
+    </div>
+  ) : (
+    table
+  );
+};
+
 export function Markdown({ source, linksAsText = false }: { source: string; linksAsText?: boolean }) {
-  return <div data-markdown="">{hastToReact(markdownToHast(source, linksAsText), { pre: Pre as never })}</div>;
+  return <div data-markdown="">{hastToReact(markdownToHast(source, linksAsText), { pre: Pre as never, table: Table as never })}</div>;
 }

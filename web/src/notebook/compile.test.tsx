@@ -21,6 +21,10 @@ const run = (state: string, extra: Record<string, unknown> = {}) => ({
   spent_usd: '0.00', task_budgets: {}, refusals: [], g2: null, latest_sha256: null, ...extra,
 });
 
+const main = () => document.getElementById('content') as HTMLElement;
+// FR-NOTEBOOK-1 (design pass): the not-published page's sentence.
+const NOT_PUBLISHED = /^Lesson 2 of .+ is not published yet\.$/;
+
 const mount = async (handler: (url: string, init?: RequestInit) => Response) => {
   const { AppRoot } = await load(() => import('../app/AppRoot'));
   expect(AppRoot).toBeTypeOf('function');
@@ -40,8 +44,8 @@ describe('not-published page (FR-NOTEBOOK-12, amended)', () => {
     const calls = await mount((url) =>
       url === '/api/me' ? json(200, learner) : url === '/api/lessons/w02' ? json(200, { lesson: { ...base(), latest_sha256: null }, revisions: [] }) : json(404, { error: 'not_found' }),
     );
-    await waitFor(() => expect(screen.getByText('This lesson is not published yet.')).toBeTruthy());
-    expect(screen.getByRole('link', { name: 'Lessons' })).toBeTruthy();
+    await waitFor(() => expect(screen.getByText(NOT_PUBLISHED)).toBeTruthy());
+    expect(within(main()).getByRole('link', { name: 'Lessons' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Compile' })).toBeNull();
     expect(calls.filter((c) => /\/compile$|\/estimate$|\/api\/compiles\//.test(c.url))).toEqual([]);
   });
@@ -61,7 +65,10 @@ describe('not-published page (FR-NOTEBOOK-12, amended)', () => {
       return json(404, { error: 'not_found' });
     });
     await waitFor(() => expect(screen.getByText('not compiled yet')).toBeTruthy());
-    expect(screen.getByText('This lesson is not published yet.')).toBeTruthy();
+    expect(screen.getByText(NOT_PUBLISHED)).toBeTruthy();
+    // One control, rendered through the compile slot in the page's status (merge with V/design-pass).
+    expect(main().querySelectorAll('.compile-control')).toHaveLength(1);
+    expect(main().querySelector('.state-status .slot-status .compile-control')).toBeTruthy();
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: 'Compile' }));
     });
@@ -91,7 +98,7 @@ describe('not-published page (FR-NOTEBOOK-12, amended)', () => {
       return json(404, { error: 'not_found' });
     });
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Digests' })).toBeTruthy());
-    expect(screen.queryByText('This lesson is not published yet.')).toBeNull();
+    expect(screen.queryByText(NOT_PUBLISHED)).toBeNull();
     expect(screen.queryByText('draft, compile not finished')).toBeNull(); // converged: nothing added
   });
 });
@@ -124,7 +131,8 @@ describe('published page with an unfinished compile (FR-NOTEBOOK-12, amended)', 
 
   it('a stopped compile: the chip, the reason and Retry above the lesson', async () => {
     await mount(published(() => json(200, run('stage_failed', { latest_sha256: SHA, steps: draftSteps('dead'), error: 'provider_missing' }))));
-    const retry = await screen.findByRole('button', { name: 'Retry' });
+    // Inside `main`: the course sidebar (design pass) has its own Retry when its list read fails, as it does here.
+    const retry = await waitFor(() => within(main()).getByRole('button', { name: 'Retry' }));
     expect(screen.getByText('draft, compile not finished')).toBeTruthy();
     expect(screen.getByText(/^Compile stopped at checking facts\. No AI provider is connected/)).toBeTruthy();
     expect(before(retry, screen.getByRole('heading', { name: 'Digests' }))).toBe(true);
@@ -135,7 +143,7 @@ describe('published page with an unfinished compile (FR-NOTEBOOK-12, amended)', 
       await mount(published(status));
       await waitFor(() => expect(screen.getByRole('heading', { name: 'Digests' })).toBeTruthy());
       expect(screen.queryByText('draft, compile not finished')).toBeNull();
-      expect(screen.queryByRole('button', { name: /^(Compile|Retry)$/ })).toBeNull();
+      expect(within(main()).queryByRole('button', { name: /^(Compile|Retry)$/ })).toBeNull();
       cleanup();
     }
   });

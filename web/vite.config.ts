@@ -23,6 +23,9 @@ export default defineConfig({
       },
     ],
   },
+  // WEB-UI FR-UI-16 (code review B1): files copied to the build's root (theme.js) live under src/public, because the
+  // production Caddy image copies src, not web/public.
+  publicDir: 'src/public',
   // WEB-UI FR-UI-9: fonts and images are files, never inlined as data: URLs (the app CSP allows none).
   build: { assetsInlineLimit: 0 },
   test: {

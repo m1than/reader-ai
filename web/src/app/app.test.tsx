@@ -1,5 +1,5 @@
 // @trace FR-UI-3 FR-UI-5 FR-UI-6 VEC-UI-2
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readJson } from './testing/fixtures';
 import { load } from './testing/load';
@@ -42,7 +42,8 @@ describe('routes (FR-UI-3)', () => {
   it('shows not-found for a bad id without requesting the lesson', async () => {
     const { urls } = await mount('/lessons/..', { '/api/me': () => json(200, me) });
     await waitFor(() => expect(screen.getByText(/not found/i)).toBeTruthy());
-    expect(urls.filter((u) => u.startsWith('/api/lessons'))).toEqual([]);
+    // Design pass: the sidebar's list query runs on every page; no request is made for the lesson itself.
+    expect(urls.filter((u) => u.startsWith('/api/lessons/'))).toEqual([]);
   });
 
   it('shows not-found for an unknown path', async () => {
@@ -64,9 +65,14 @@ describe('sign-in and header (FR-UI-5)', () => {
       '/api/lessons': () => json(200, fx().list),
       '/api/auth/signout': () => new Response(null, { status: 204 }),
     });
-    await waitFor(() => expect(screen.getByText('Ivan')).toBeTruthy());
+    // Design pass (FR-UI-5, FR-UI-11): the display name is the user menu's trigger; Sign out is a menu item.
+    const trigger = await waitFor(() => screen.getByRole('button', { name: /Ivan/ }));
     await act(async () => {
-      screen.getByRole('button', { name: /sign out/i }).click();
+      trigger.click();
+    });
+    const item = await screen.findByRole('menuitem', { name: /sign out/i });
+    await act(async () => {
+      item.click();
     });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/api/auth/signin'));
     expect(urls).toContain('/api/auth/signout');
@@ -77,15 +83,18 @@ describe('lesson list (FR-UI-6)', () => {
   it('groups by course, orders by ordinal, links published lessons only', async () => {
     // A learner: the owner's unpublished rows carry FR-UI-15's compile status instead of "not published yet".
     await mount('/', { '/api/me': () => json(200, { ...me, role: 'learner' }), '/api/lessons': () => json(200, fx().list) });
-    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
-    expect(screen.getByText('Another course')).toBeTruthy();
-    const w01 = screen.getByText('Fixture lesson W01: one cell of every kind').closest('a');
+    // Design pass: course titles also appear in the sidebar and the Continue block, so look inside each group.
+    const group = (id: string) => document.querySelector(`#content #course-${id}`) as HTMLElement;
+    await waitFor(() => expect(group('c-fixture')).toBeTruthy());
+    expect(group('c-other')).toBeTruthy();
+    const w01 = within(group('c-fixture')).getByText('Fixture lesson W01: one cell of every kind').closest('a');
     expect(w01?.getAttribute('href')).toBe('/lessons/w01');
-    const w02 = screen.getByText('Fixture lesson W02: not compiled yet');
+    const w02 = within(group('c-fixture')).getByText('Fixture lesson W02: not compiled yet');
     expect(w02.closest('a')).toBeNull();
-    expect(screen.getByText(/not published yet/i)).toBeTruthy();
-    const headings = screen.getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
-    expect(headings).toEqual(['Another course', 'Fixture course']);
+    expect(within(group('c-fixture')).getByText(/not published yet/i)).toBeTruthy();
+    const main = document.getElementById('content') as HTMLElement;
+    const headings = within(main).getAllByRole('heading', { level: 2 }).map((h) => h.textContent);
+    expect(headings).toEqual(['Continue', 'Another course', 'Fixture course']);
   });
 
   it('groupLessons sorts courses by title in the locale and lessons by ordinal', async () => {
@@ -104,6 +113,7 @@ describe('lesson list (FR-UI-6)', () => {
 
   it('shows the error state with Retry', async () => {
     await mount('/', { '/api/me': () => json(200, me), '/api/lessons': () => json(500, { error: 'x' }) });
-    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy());
+    // Design pass: the sidebar has its own Retry; the list's is inside main.
+    await waitFor(() => expect(within(document.getElementById('content') as HTMLElement).getByRole('button', { name: /retry/i })).toBeTruthy());
   });
 });

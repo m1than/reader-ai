@@ -13,6 +13,7 @@ export default defineConfig({
     'auth/**/*.spec.ts',
     'import/**/*.spec.ts',
     'accounts/**/*.spec.ts',
+    'notebook/**/*.spec.ts',
   ],
   fullyParallel: false,
   // WEB-UI FR-UI-15: the test server's compile stub keeps global state, so one worker.
@@ -22,7 +23,7 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'import/**/*.spec.ts'],
+      testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'import/**/*.spec.ts', 'notebook/**/*.spec.ts'],
       use: { ...devices['Desktop Chrome'] },
     },
     // SRV-AUTH FR-AUTH-21 and FR-AUTH-32, WEB-ACCOUNTS FR-ACCOUNTS-5: every state in dark and in light.

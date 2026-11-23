@@ -12,7 +12,13 @@ import { PlanSection } from './PlanSection';
 
 const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 
-function SourceRow({ api, material, onPlan }: { api: PlanApi; material: MaterialRow; onPlan: () => void }) {
+/** A status in sentence case, `_` as a space (FR-IMPORT-8, design pass). */
+const statusText = (s: string): string => {
+  const t = s.replaceAll('_', ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
+
+function SourceRow({ api, material, chosen, onPlan }: { api: PlanApi; material: MaterialRow; chosen: boolean; onPlan: () => void }) {
   const imported = material.status === 'imported';
   const stored = useQuery({
     queryKey: ['plan', 'stored', material.id],
@@ -20,13 +26,13 @@ function SourceRow({ api, material, onPlan }: { api: PlanApi; material: Material
     enabled: imported,
   });
   return (
-    <li className="source-row">
+    <li className="source-row" aria-current={chosen ? 'true' : undefined}>
       <span className="source-title">{material.id}</span>
       <span className="source-meta">
-        {imported ? `${material.page_count ?? '?'} pages` : material.status.replace('_', ' ')}
+        {imported ? `${material.page_count ?? '?'} pages` : <span className="chip">{statusText(material.status)}</span>}
       </span>
       {imported ? (
-        <Button variant="outline" color="neutral" size="sm" onClick={onPlan} disabled={stored.isPending}>
+        <Button variant="ghost" color="neutral" size="sm" onClick={onPlan} disabled={stored.isPending}>
           {stored.data ? 'Re-plan' : 'Plan study time'}
         </Button>
       ) : null}
@@ -83,7 +89,7 @@ export function ImportPage() {
         ) : (
           <ul className="source-list">
             {materials.data.materials.map((m) => (
-              <SourceRow key={m.id} api={plan} material={m} onPlan={() => setChosen(m.id)} />
+              <SourceRow key={m.id} api={plan} material={m} chosen={chosen === m.id} onPlan={() => setChosen(m.id)} />
             ))}
           </ul>
         )}

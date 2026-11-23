@@ -95,12 +95,22 @@ const w02List = (sha: string | null = null) => listOf([lesson('w01', 1, '1'.repe
 const ownerList = (list: unknown, open: unknown = runs()): Handler => (url) =>
   url === '/api/me' ? json(200, owner) : url === '/api/lessons' ? json(200, list) : url === '/api/compiles' ? json(200, open) : json(404, { error: 'not_found' });
 
-const rowOf = (title: string) => screen.getByText(title).closest('li') as HTMLElement;
+// Merge with V/design-pass: titles also appear in the course sidebar and the Continue block, so a row is the one inside
+// its course group in `main`.
+const rowOf = (title: string): HTMLElement => {
+  const main = document.getElementById('content') as HTMLElement;
+  const row = within(main)
+    .getAllByText(title)
+    .map((e) => e.closest('li'))
+    .find((li) => li?.closest('section[id^="course-"]'));
+  if (!row) throw new Error(`no row for ${title}`);
+  return row;
+};
 
 describe('who sees the Compile action, and where the run state comes from', () => {
   it('a learner sees FR-UI-6 unchanged and makes no compile or estimate request', async () => {
     const calls = await mount('/', (url) => (url === '/api/me' ? json(200, learner) : url === '/api/lessons' ? json(200, w02List()) : json(404, { error: 'not_found' })));
-    await waitFor(() => expect(screen.getByText('Lesson w02')).toBeTruthy());
+    await waitFor(() => expect(rowOf('Lesson w02')).toBeTruthy());
     expect(within(rowOf('Lesson w02')).getByText('not published yet')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Compile' })).toBeNull();
     expect(screen.queryByText(CHIP)).toBeNull();
@@ -110,6 +120,8 @@ describe('who sees the Compile action, and where the run state comes from', () =
   it('the owner list reads GET /api/compiles once and no per-lesson status', async () => {
     const many = listOf(Array.from({ length: 30 }, (_, i) => lesson(`u${String(i + 1).padStart(2, '0')}`, i + 1)));
     const calls = await mount('/', ownerList(many));
+    // FR-UI-6 (design pass): a group of more than 12 lessons starts collapsed to its published rows; show them all.
+    fireEvent.click(await screen.findByRole('button', { name: 'Show all 30 lessons' }));
     await waitFor(() => expect(screen.getAllByText('not compiled yet')).toHaveLength(30));
     expect(calls.filter((c) => c.url === '/api/compiles')).toHaveLength(1);
     expect(calls.filter((c) => /\/api\/lessons\/[^/]+\/compile$/.test(c.url))).toEqual([]);
@@ -120,6 +132,9 @@ describe('who sees the Compile action, and where the run state comes from', () =
     await mount('/', ownerList(w02List()));
     await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('not compiled yet')).toBeTruthy());
     expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Compile' })).toBeTruthy();
+    // One control per row, rendered through FR-UI-6's compile slot (merge with V/design-pass).
+    expect(rowOf('Lesson w02').querySelectorAll('.compile-control')).toHaveLength(1);
+    expect(rowOf('Lesson w02').querySelector('.slot-status .compile-control')).toBeTruthy();
     expect(within(rowOf('Lesson w01')).queryByRole('button')).toBeNull();
     expect(within(rowOf('Lesson w01')).queryByText(CHIP)).toBeNull();
   });
@@ -127,7 +142,8 @@ describe('who sees the Compile action, and where the run state comes from', () =
   it('a failed run-state read leaves "not published yet" and the Compile button', async () => {
     await mount('/', (url) => (url === '/api/me' ? json(200, owner) : url === '/api/lessons' ? json(200, w02List()) : json(500, { error: 'internal' })));
     await waitFor(() => expect(within(rowOf('Lesson w02')).getByRole('button', { name: 'Compile' })).toBeTruthy());
-    expect(within(rowOf('Lesson w02')).getByText('not published yet')).toBeTruthy();
+    // The control's own text, in the slot; the slot's default chip stays in the DOM, hidden by app.css (FR-UI-6).
+    expect(within(rowOf('Lesson w02').querySelector('.slot-status') as HTMLElement).getByText('not published yet')).toBeTruthy();
   });
 });
 
@@ -510,7 +526,7 @@ describe('retry and the link', () => {
       }
       return json(404, { error: 'not_found' });
     });
-    await waitFor(() => expect(screen.getByText('Lesson w02').closest('a')?.getAttribute('href')).toBe('/lessons/w02'));
+    await waitFor(() => expect(within(rowOf('Lesson w02')).getByText('Lesson w02').closest('a')?.getAttribute('href')).toBe('/lessons/w02'));
     expect(calls.filter((c) => c.url === '/api/lessons').length).toBeGreaterThanOrEqual(2);
     expect(within(rowOf('Lesson w02')).getByText(CHIP)).toBeTruthy();
     expect(within(rowOf('Lesson w02')).getByText('Compiling: checking facts')).toBeTruthy();

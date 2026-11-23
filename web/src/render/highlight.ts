@@ -31,8 +31,11 @@ const load = () =>
     engine: createJavaScriptRegexEngine(),
   }));
 
-export const highlight = async (code: string, language: string, scheme: 'light' | 'dark'): Promise<Root | null> => {
+// Design pass (FR-RENDER-4): both themes at once. With `defaultColor: false` every token carries `--shiki-light` and
+// `--shiki-dark` (the `pre` also the `-bg` pair) as custom properties; app.css picks one by scheme, so a theme change
+// recolours code without a re-render and nothing reads matchMedia here.
+export const highlight = async (code: string, language: string): Promise<Root | null> => {
   if (language !== 'python') return null;
   const h = await load();
-  return h.codeToHast(code, { lang: 'python', theme: scheme === 'dark' ? 'calm-dark' : 'calm-light' }) as Root;
+  return h.codeToHast(code, { lang: 'python', themes: { light: 'calm-light', dark: 'calm-dark' }, defaultColor: false }) as Root;
 };

@@ -24,7 +24,9 @@ const controller = (cells: Record<string, unknown> = {}) => {
 const view = async (nb: unknown = notebook(), opts: { cells?: Record<string, unknown>; aside?: unknown } = {}) => {
   const { LessonView } = await load(() => import('./LessonView'));
   expect(LessonView).toBeTypeOf('function');
-  render(<LessonView notebook={nb as never} controller={controller(opts.cells) as never} aside={opts.aside as never} />);
+  // Design pass (FR-NOTEBOOK-9): the CodeMirror chunk is held pending, so these tests see the fallback text area.
+  const props = { notebook: nb as never, controller: controller(opts.cells) as never, aside: opts.aside as never, loadEditor: () => new Promise<never>(() => undefined) };
+  render(<LessonView {...(props as Parameters<typeof LessonView>[0])} />);
 };
 
 const cellEl = (id: string) => document.querySelector(`[data-cell-id="${id}"]`) as HTMLElement;
@@ -45,7 +47,9 @@ describe('borrowed source titles (FR-NOTEBOOK-2, amended)', () => {
 describe('open marker (FR-NOTEBOOK-3, amended)', () => {
   it('reads the status once', async () => {
     await view();
-    expect(within(cellEl('w01-open')).getAllByText('open', { exact: true })).toHaveLength(1);
+    // Design pass: the status in sentence case.
+    expect(within(cellEl('w01-open')).getAllByText('Open', { exact: true })).toHaveLength(1);
+    expect(within(cellEl('w01-open')).queryAllByText('open', { exact: true })).toHaveLength(0);
   });
 });
 
@@ -53,8 +57,9 @@ describe('lab presentation (FR-NOTEBOOK-9, amended)', () => {
   it('does not wrap code and announces the run state', async () => {
     await view(notebook(), { cells: { 'w01-lab': { state: 'done', outputs: [], executionCount: 3, marker: null, notes: [] } } });
     const lab = cellEl('w01-lab');
-    expect(within(lab).getByRole('textbox', { name: /lab code/i }).getAttribute('wrap')).toBe('off');
-    expect(within(lab).getByRole('status').textContent).toContain('done');
+    expect(within(lab).getByRole('textbox', { name: 'Lab 1 code' }).getAttribute('wrap')).toBe('off');
+    // The block also has Copy's status line (design pass), so pick the run state's.
+    expect(within(lab).getAllByRole('status').some((s) => s.textContent?.includes('done'))).toBe(true);
     expect(within(lab).getByText('[3]')).toBeTruthy();
   });
 });
@@ -229,11 +234,16 @@ describe('lesson page header and states (FR-NOTEBOOK-11, FR-NOTEBOOK-12)', () =>
     return urls;
   };
 
-  it('puts a Lessons link and the title on their own line above the controls', async () => {
+  // Design pass: the header's main nav also has a "Lessons" link and the sidebar asks /api/lessons, so these checks
+  // look inside `main` and the breadcrumb (FR-NOTEBOOK-11), and the 'Retry' of the page state inside its state block.
+  const page = () => document.getElementById('content') as HTMLElement;
+  const crumbs = () => within(page()).getByRole('navigation', { name: 'Breadcrumb' });
+
+  it('puts the breadcrumbs and the title on their own line above the controls', async () => {
     const sha = String(lessons().lesson.lesson.latest_sha256);
     await mount((url) => (url === '/api/lessons/w01' ? json(200, lessons().lesson) : url.endsWith(sha) ? json(200, notebook()) : json(404, {})));
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1 })).toBeTruthy());
-    expect(screen.getByRole('link', { name: 'Lessons' }).getAttribute('href')).toBe('/');
+    await waitFor(() => expect(within(page()).getByRole('heading', { level: 1 })).toBeTruthy());
+    expect(within(crumbs()).getByRole('link', { name: 'Lessons' }).getAttribute('href')).toBe('/');
     expect(document.querySelectorAll('main')).toHaveLength(1);
   });
 
@@ -245,26 +255,26 @@ describe('lesson page header and states (FR-NOTEBOOK-11, FR-NOTEBOOK-12)', () =>
 
   it('shows "Lesson not found" with only a way back on a 404', async () => {
     await mount(() => json(404, { error: 'not_found' }));
-    await waitFor(() => expect(screen.getByText('Lesson not found')).toBeTruthy());
-    expect(screen.getByRole('link', { name: 'Back to lessons' }).getAttribute('href')).toBe('/');
-    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    await waitFor(() => expect(within(page()).getByText('Lesson not found')).toBeTruthy());
+    expect(within(page()).getByRole('link', { name: 'Back to lessons' }).getAttribute('href')).toBe('/');
+    expect(within(page()).queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('offers Retry and a way back when the lesson fails, and Retry refetches', async () => {
-    const urls = await mount(() => json(500, { error: 'internal' }));
-    await waitFor(() => expect(screen.getByText('The lesson could not be loaded.')).toBeTruthy());
-    expect(screen.getByRole('link', { name: 'Back to lessons' }).getAttribute('href')).toBe('/');
+    const urls = await mount((url) => (url === '/api/lessons' ? json(200, { lessons: [] }) : json(500, { error: 'internal' })));
+    await waitFor(() => expect(within(page()).getByText('The lesson could not be loaded.')).toBeTruthy());
+    expect(within(page()).getByRole('link', { name: 'Back to lessons' }).getAttribute('href')).toBe('/');
     expect(document.querySelectorAll('main')).toHaveLength(1);
     const before = urls.filter((u) => u === '/api/lessons/w01').length;
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      fireEvent.click(within(page()).getByRole('button', { name: 'Retry' }));
     });
     await waitFor(() => expect(urls.filter((u) => u === '/api/lessons/w01').length).toBe(before + 1));
   });
 
-  it('keeps the Lessons link on a lesson that is not published yet', async () => {
+  it('keeps the breadcrumbs on a lesson that is not published yet', async () => {
     await mount(() => json(200, { lesson: { ...lessons().lesson.lesson, latest_sha256: null }, revisions: [] }));
-    await waitFor(() => expect(screen.getByText(/not published yet/i)).toBeTruthy());
-    expect(screen.getByRole('link', { name: 'Lessons' }).getAttribute('href')).toBe('/');
+    await waitFor(() => expect(within(page()).getAllByText(/not published yet/i).length).toBeGreaterThan(0));
+    expect(within(crumbs()).getByRole('link', { name: 'Lessons' }).getAttribute('href')).toBe('/');
   });
 });

@@ -1,22 +1,29 @@
 /* reader-ai app styles under Calm (WEB-UI). Flat surfaces, no gradients, glass or glow (INV-UI-3).
-   FR-UI-10: spacing only in the library's --acme-space-1..7 steps, colours only Calm tokens, prose in the system serif
-   stack at 1.0625rem / 1.65 in a 38rem reading column, UI chrome in the library sans. No web font for text. */
+   FR-UI-10 (design pass 2026-11-23): spacing only in the library's --acme-space-1..7 steps, colours only Calm tokens,
+   three radii; reading content in the system serif at 1.0625rem / 1.65 in a 38rem column inside a 50rem container,
+   everything else in the library sans; ghost controls, one solid primary per view; motion at most 150 ms. */
 :root {
-  font-family: ui-serif, Georgia, 'Iowan Old Style', serif;
-  line-height: 1.65;
+  --radius-control: 6px;
+  --radius-block: 8px;
+  --radius-panel: 12px;
+  --serif: ui-serif, Georgia, 'Iowan Old Style', serif;
+  /* The library's mono stack led with fonts Chromium could not use for Cyrillic, so Russian comments and strings in
+     code fell back to a serif and broke the columns (after-screenshots 2026-11-24); the system monospace comes first. */
+  --acme-font-mono: ui-monospace, Menlo, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+  font-family: var(--acme-font);
+  line-height: 1.5;
 }
 
 body {
   margin: 0;
-  font-size: 1.0625rem;
+  font-size: 0.9375rem;
   color: var(--acme-text);
 }
 
 code,
 pre,
 textarea {
-  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
-  font-size: 0.875em;
+  font-family: var(--acme-font-mono);
 }
 
 a {
@@ -28,7 +35,10 @@ a {
 a:focus-visible,
 button:focus-visible,
 textarea:focus-visible,
+input:focus-visible,
 summary:focus-visible,
+[role='menuitem']:focus-visible,
+[role='menuitemradio']:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--acme-focus);
   outline-offset: 2px;
@@ -50,16 +60,61 @@ main:focus,
   white-space: nowrap;
 }
 
+.muted {
+  color: var(--acme-text-muted);
+}
+
+/* Library buttons (FR-UI-10): the control radius, 28px in toolbars (sm), 32px elsewhere. */
+.acme-button {
+  --acme-radius: var(--radius-control);
+  --height: 32px;
+  gap: var(--acme-space-1);
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease), color calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.acme-button[data-size='sm'] {
+  --height: 28px;
+}
+
+.acme-button svg {
+  flex: none;
+}
+
+/* Chips: status pills in the sans with tabular figures. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--acme-space-2);
+  border: 1px solid var(--acme-border);
+  border-radius: 999px;
+  background: var(--acme-surface);
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.chip[data-tone='warning'] {
+  border-color: var(--acme-warning);
+  color: var(--acme-warning);
+}
+
+a.chip {
+  text-decoration: none;
+}
+
 /* Skip link (FR-UI-11): off screen until focused. */
 .skip-link {
   position: absolute;
   top: var(--acme-space-2);
   left: var(--acme-space-2);
-  z-index: 10;
+  z-index: 30;
   padding: var(--acme-space-2) var(--acme-space-3);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--acme-surface-raised);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
   transform: translateY(-300%);
 }
@@ -68,63 +123,288 @@ main:focus,
   transform: none;
 }
 
-.muted {
-  color: var(--acme-text-muted);
-}
-
-/* Header */
+/* Header (FR-UI-11): Courses (below 75rem), brand, main nav, user menu; one row, min-height 3.5rem. */
 .app-header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
-  gap: var(--acme-space-4);
+  gap: var(--acme-space-2);
   min-height: 3.5rem;
-  padding: 0 var(--acme-space-5);
+  padding: 0 var(--acme-space-4);
   border-bottom: 1px solid var(--acme-border);
   background: var(--acme-surface);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
   box-sizing: border-box;
 }
 
 .app-header .brand {
-  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  margin: 0 var(--acme-space-3) 0 0;
+  padding: var(--acme-space-1) var(--acme-space-2);
+  border-radius: var(--radius-control);
   color: var(--acme-text);
-  font-size: 1rem;
+  font-size: 0.9375rem;
   font-weight: 700;
   letter-spacing: 0.01em;
   text-decoration: none;
 }
 
+.brand-mark {
+  color: var(--acme-accent);
+}
+
+.main-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--acme-space-1);
+  margin: 0 auto 0 0;
+}
+
+.nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  min-height: 28px;
+  padding: 0 var(--acme-space-3);
+  border-radius: var(--radius-control);
+  color: var(--acme-text-muted);
+  font-weight: 600;
+  text-decoration: none;
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease), color calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.nav-link:hover {
+  background: var(--acme-hover);
+  color: var(--acme-text);
+}
+
+.nav-link[aria-current='page'] {
+  background: var(--acme-hover);
+  color: var(--acme-text);
+}
+
+.header-end {
+  display: inline-flex;
+  align-items: center;
+}
+
+.user-trigger .who {
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The menus (user menu, More lesson actions). */
+.app-menu {
+  border-radius: var(--radius-panel);
+}
+
+.menu-check {
+  display: inline-block;
+  width: 1em;
+}
+
+[data-checked] > .menu-check::before,
+[aria-checked='true'] > .menu-check::before {
+  content: '✓';
+}
+
+.menu-danger {
+  color: var(--acme-danger);
+}
+
+/* Shell (FR-UI-17): the course sidebar beside the page at 75rem and wider. */
+.shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.shell-sidebar {
+  display: none;
+}
+
+.course-sidebar {
+  font-size: 0.875rem;
+}
+
+.sidebar-groups,
+.sidebar-group ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sidebar-course {
+  display: flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  width: 100%;
+  padding: var(--acme-space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--acme-text);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.sidebar-course:hover {
+  background: var(--acme-hover);
+}
+
+.sidebar-chevron {
+  flex: none;
+  color: var(--acme-text-muted);
+  transition: transform calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.sidebar-course[aria-expanded='true'] .sidebar-chevron {
+  transform: rotate(90deg);
+}
+
+.sidebar-course-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-count,
+.sidebar-ordinal {
+  color: var(--acme-text-muted);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.sidebar-row > a,
+.sidebar-row > span {
+  display: flex;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-1) var(--acme-space-2) var(--acme-space-1) var(--acme-space-6);
+  border-radius: var(--radius-control);
+  color: var(--acme-text);
+  text-decoration: none;
+  overflow-wrap: break-word;
+}
+
+.sidebar-row > a:hover,
+.sidebar-row > a[aria-current='page'] {
+  background: var(--acme-hover);
+}
+
+.sidebar-row > a[aria-current='page'] {
+  font-weight: 600;
+}
+
+.sidebar-row.unpublished > span {
+  color: var(--acme-text-muted);
+}
+
+.sidebar-more {
+  margin: 0 0 var(--acme-space-2) var(--acme-space-5);
+}
+
+.sidebar-error {
+  padding: var(--acme-space-2);
+  color: var(--acme-text-muted);
+}
+
+.course-drawer {
+  padding: var(--acme-space-4) var(--acme-space-3);
+  overflow-y: auto;
+}
+
+@media (min-width: 75rem) {
+  .shell {
+    grid-template-columns: 15rem minmax(0, 1fr);
+  }
+
+  .shell-sidebar {
+    display: block;
+    position: sticky;
+    top: var(--acme-space-7);
+    align-self: start;
+    max-height: calc(100vh - 3.5rem);
+    overflow-y: auto;
+    padding: var(--acme-space-4) var(--acme-space-2);
+    border-right: 1px solid var(--acme-border);
+    box-sizing: border-box;
+  }
+
+  .courses-button {
+    display: none;
+  }
+
+  /* The tutor panel open: a third column it covers, the contents column hidden (SRV-TUTOR FR-TUTOR-11). */
+  .shell:has(.lesson-aside[data-open='true']) {
+    grid-template-columns: 15rem minmax(0, 1fr) 24rem;
+  }
+}
+
 /* Pages */
 .page {
-  max-width: 44rem;
+  max-width: 50rem;
   margin: 0 auto;
   padding: var(--acme-space-6) var(--acme-space-5) var(--acme-space-7);
 }
 
+/* App page titles in the sans (FR-UI-10); lining figures on every heading. */
 h1 {
   margin: 0 0 var(--acme-space-4);
-  font-size: 2.25rem;
-  line-height: 1.2;
+  font-size: 1.75rem;
+  font-weight: 700;
+  line-height: 1.25;
   letter-spacing: -0.01em;
+  font-variant-numeric: lining-nums;
+}
+
+h2,
+h3,
+h4 {
+  font-variant-numeric: lining-nums;
+}
+
+/* State blocks (FR-UI-11). */
+.state-block {
+  display: grid;
+  justify-items: start;
+  gap: var(--acme-space-2);
+  max-width: 38rem;
+  padding: var(--acme-space-5) 0;
+}
+
+.state-block h1 {
+  margin: 0;
+}
+
+.state-block p {
+  margin: 0;
+}
+
+.state-icon {
+  display: inline-flex;
+  color: var(--acme-text-muted);
+}
+
+.state-block[data-tone='danger'] .state-icon {
+  color: var(--acme-danger);
 }
 
 .state-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--acme-space-4);
-}
-
-/* Header link to the owner's Sign-ups screen (WEB-UI FR-UI-14). */
-.app-header .header-link {
-  color: var(--acme-text);
-  font-weight: 600;
-  text-decoration: none;
-}
-
-.app-header .header-link:hover {
-  text-decoration: underline;
+  gap: var(--acme-space-3);
+  margin: var(--acme-space-2) 0 0;
 }
 
 /* Sign-ups screen (WEB-ACCOUNTS FR-ACCOUNTS-1..3). */
@@ -164,7 +444,7 @@ h1 {
   flex-direction: column;
   gap: var(--acme-space-1);
   min-width: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .signup-handle {
@@ -190,11 +470,29 @@ h1 {
   font-size: 0.875rem;
 }
 
-/* Lesson list (FR-UI-6) */
+.state-link {
+  font-weight: 600;
+}
+
+.state-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+}
+
+/* Lesson list (FR-UI-6): Continue, course groups, full-width rows. */
 .lesson-list h2 {
-  margin: var(--acme-space-6) 0 var(--acme-space-3);
-  font-size: 1.25rem;
-  line-height: 1.35;
+  margin: var(--acme-space-6) 0 var(--acme-space-1);
+  font-size: 1.125rem;
+  line-height: 1.3;
+}
+
+.course-summary {
+  margin: 0 0 var(--acme-space-2);
+  color: var(--acme-text-muted);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .lesson-list ul {
@@ -204,40 +502,41 @@ h1 {
 }
 
 .lesson-row {
+  position: relative;
   display: grid;
-  grid-template-columns: 2rem minmax(0, 1fr) auto;
+  grid-template-columns: 2rem minmax(0, 1fr) auto auto;
   column-gap: var(--acme-space-3);
   align-items: baseline;
-  padding: var(--acme-space-3) 0;
+  padding: var(--acme-space-2) var(--acme-space-2);
   border-bottom: 1px solid var(--acme-border);
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.lesson-row:hover {
+  background: var(--acme-hover);
+}
+
+.continue .lesson-row {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .lesson-ordinal,
 .lesson-meta {
   color: var(--acme-text-muted);
-  font-family: var(--acme-font);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
+}
+
+.lesson-title {
+  font-variant-numeric: lining-nums;
 }
 
 .lesson-row:not(.published) .lesson-title {
   color: var(--acme-text-muted);
 }
 
-.lesson-row.published .lesson-title a {
-  font-weight: 600;
-}
-
-.lesson-meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: baseline;
-  gap: var(--acme-space-3);
-  white-space: nowrap;
-}
-
-/* The owner's compile control (FR-UI-15): status, draft chip and actions wrap inside the row. */
+/* The owner's compile control (FR-UI-15), rendered through the compile slot's Status: status, draft chip and
+   actions wrap inside the row. */
 .compile-control {
   display: inline-flex;
   flex-wrap: wrap;
@@ -265,49 +564,148 @@ h1 {
   font-weight: 600;
 }
 
-/* Lesson page: one 38rem reading column; at 60rem and wider the contents sit beside it (FR-NOTEBOOK-11). */
-.page.lesson-page {
-  max-width: 38rem;
-}
-
-.lesson {
-  display: grid;
-  grid-template-columns: minmax(0, 38rem);
-}
-
-.lesson-header {
-  padding: 0 0 var(--acme-space-4);
-  border-bottom: 1px solid var(--acme-border);
-}
-
-.back-link {
+/* FR-UI-11: the nav badge (the Sign-ups count). */
+.nav-badge {
   display: inline-block;
-  margin: 0 0 var(--acme-space-3);
-  color: var(--acme-text-muted);
-  font-family: var(--acme-font);
-  font-size: 0.8125rem;
+  min-width: 1.25rem;
+  margin-left: var(--acme-space-1);
+  padding: 0 var(--acme-space-1);
+  border-radius: 999px;
+  background: var(--acme-hover);
+  color: var(--acme-text);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+.row-link {
+  color: var(--acme-text);
   font-weight: 600;
   text-decoration: none;
 }
 
-.back-link::before {
-  content: '← ';
+/* The published row's link covers the whole row. */
+.row-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+.row-link:hover {
+  color: var(--acme-accent);
+}
+
+.lesson-meta {
+  display: flex;
+  align-items: baseline;
+  gap: var(--acme-space-3);
+  white-space: nowrap;
+}
+
+/* A Continue row's course title may be long (a full bibliographic title): it wraps. */
+.continue .lesson-meta {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: break-word;
+}
+
+/* The compile slot (FR-UI-6): its Status above the row link, the default chip only while Status renders nothing. */
+.lesson-status {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+}
+
+.slot-status:empty {
+  display: none;
+}
+
+.slot-status:not(:empty) + .status-default {
+  display: none;
+}
+
+/* The compile slot's action: revealed on hover and focus-within, always on touch screens. */
+.row-action {
+  position: relative;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.lesson-row:hover .row-action,
+.lesson-row:focus-within .row-action {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .row-action {
+    opacity: 1;
+  }
+}
+
+.group-toggle {
+  margin: var(--acme-space-2) 0 0;
+}
+
+/* Lesson page: a 50rem cells container with the 38rem reading column; the contents column beside it at 60rem+. */
+.page.lesson-page {
+  max-width: 66rem;
+}
+
+.lesson {
+  display: grid;
+  grid-template-columns: minmax(0, 50rem);
+}
+
+.lesson-header {
+  max-width: 50rem;
+  padding: 0 0 var(--acme-space-4);
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.lesson-header h1 {
+  max-width: 38rem;
+  font-family: var(--serif);
+  font-size: 2rem;
+}
+
+.crumbs {
+  margin: 0 0 var(--acme-space-3);
+  color: var(--acme-text-muted);
+  font-size: 0.8125rem;
+}
+
+.crumbs a {
+  color: var(--acme-text-muted);
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  color: var(--acme-text);
+  text-decoration: underline;
 }
 
 .lesson-toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--acme-space-3);
-  font-family: var(--acme-font);
+  gap: var(--acme-space-2);
   font-size: 0.875rem;
 }
 
 .lesson-controls {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--acme-space-2);
+  align-items: center;
+  gap: var(--acme-space-1);
   margin-left: auto;
+}
+
+.icon-button {
+  padding: 0 var(--acme-space-2);
 }
 
 .lesson-contents {
@@ -315,9 +713,8 @@ h1 {
   margin: var(--acme-space-4) 0 0;
   padding: var(--acme-space-3) var(--acme-space-4);
   border: 1px solid var(--acme-border);
-  border-radius: 12px;
+  border-radius: var(--radius-panel);
   background: var(--acme-surface);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
   line-height: 1.45;
 }
@@ -343,24 +740,28 @@ h1 {
 
 .lesson-contents li a {
   display: block;
-  padding: var(--acme-space-1) 0;
-  color: var(--acme-text);
+  padding: var(--acme-space-1) var(--acme-space-2);
+  border-radius: var(--radius-control);
+  color: var(--acme-text-muted);
   text-decoration: none;
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease);
 }
 
 .lesson-contents li a:hover {
-  color: var(--acme-accent);
-  text-decoration: underline;
+  background: var(--acme-hover);
+  color: var(--acme-text);
+}
+
+.lesson-contents li a[aria-current='location'] {
+  background: var(--acme-hover);
+  color: var(--acme-text);
+  font-weight: 600;
 }
 
 @media (min-width: 60rem) {
-  .page.lesson-page {
-    max-width: 54rem;
-  }
-
   .lesson {
-    grid-template-columns: 13rem minmax(0, 38rem);
-    column-gap: var(--acme-space-7);
+    grid-template-columns: 13rem minmax(0, 50rem);
+    column-gap: var(--acme-space-6);
   }
 
   .lesson-header,
@@ -373,11 +774,11 @@ h1 {
   .lesson-contents[data-open='true'] {
     display: block;
     position: sticky;
-    top: var(--acme-space-5);
+    top: var(--acme-space-7);
     grid-column: 1;
     grid-row: 2 / span 2;
     align-self: start;
-    max-height: calc(100vh - 3rem);
+    max-height: calc(100vh - 5rem);
     overflow-y: auto;
     margin: var(--acme-space-6) 0 0;
     padding: 0;
@@ -390,30 +791,86 @@ h1 {
   }
 }
 
-/* Cells */
+@media (min-width: 75rem) {
+  .shell:has(.lesson-aside[data-open='true']) .lesson {
+    grid-template-columns: minmax(0, 50rem);
+  }
+
+  .shell:has(.lesson-aside[data-open='true']) .lesson-contents {
+    display: none;
+  }
+
+  .shell:has(.lesson-aside[data-open='true']) .lesson-header,
+  .shell:has(.lesson-aside[data-open='true']) .cells {
+    grid-column: 1;
+  }
+}
+
+/* Cells: the 38rem reading column inside the 50rem container; wide blocks take the container. */
+.cells {
+  max-width: 50rem;
+}
+
 .cell {
+  position: relative;
   padding: var(--acme-space-6) 0;
   border-top: 1px solid var(--acme-border);
-  scroll-margin-top: var(--acme-space-5);
+  scroll-margin-top: var(--acme-space-7);
 }
 
 .cells > .cell:first-child {
   border-top: 0;
 }
 
+.cell > :not(.wide):not([data-markdown]):not(.cell-toolbar),
+[data-markdown] > :not(.wide) {
+  max-width: 38rem;
+}
+
+.wide {
+  max-width: none;
+}
+
 .cell-kind {
   margin: 0 0 var(--acme-space-3);
   color: var(--acme-text-muted);
-  font-family: var(--acme-font);
   font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
-.cell[data-kind='lab'] .cell-kind,
-.cell[data-kind='recall'] .cell-kind {
-  color: var(--acme-accent);
+/* Cell toolbar (FR-NOTEBOOK-11): revealed on hover and focus-within, always on touch screens. */
+.cell-toolbar {
+  position: absolute;
+  top: var(--acme-space-4);
+  right: 0;
+  display: flex;
+  gap: var(--acme-space-1);
+  opacity: 0;
+  transition: opacity calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.cell:hover > .cell-toolbar,
+.cell:focus-within > .cell-toolbar,
+.cell:focus > .cell-toolbar {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .cell-toolbar {
+    opacity: 1;
+  }
+}
+
+/* Reading content in the serif (FR-UI-10). */
+[data-markdown],
+.recall-front,
+.tutor-answer,
+.tutor-question {
+  font-family: var(--serif);
+  font-size: 1.0625rem;
+  line-height: 1.65;
 }
 
 [data-markdown] > :first-child {
@@ -428,17 +885,24 @@ h1 {
   margin: 0 0 var(--acme-space-4);
 }
 
+[data-markdown] p,
+[data-markdown] li,
+[data-markdown] td,
+[data-markdown] th {
+  hyphens: auto;
+}
+
 [data-markdown] h1,
 [data-markdown] h2 {
   margin: var(--acme-space-6) 0 var(--acme-space-3);
-  font-size: 1.5rem;
-  line-height: 1.3;
+  font-size: 1.375rem;
+  line-height: 1.25;
 }
 
 [data-markdown] h3 {
   margin: var(--acme-space-5) 0 var(--acme-space-2);
-  font-size: 1.2rem;
-  line-height: 1.35;
+  font-size: 1.125rem;
+  line-height: 1.25;
 }
 
 [data-markdown] h4,
@@ -459,14 +923,18 @@ h1 {
   margin: var(--acme-space-1) 0 0;
 }
 
-/* Tables fit the column (cells wrap, long words break): a scrolling table would be a scroll region that keyboard
-   users cannot reach (axe scrollable-region-focusable; the sanitised markdown cannot carry a tabindex). */
+[data-markdown] code {
+  font-size: 0.875em;
+}
+
+/* Tables fit their width: cells wrap, words hyphenate and break only where no hyphenation point fits (FR-UI-10). */
 [data-markdown] table {
   width: 100%;
   border-collapse: collapse;
-  overflow-wrap: anywhere; /* L02 has a 6-column table 697px wide at break-word (measured 2026-11-23) */
+  overflow-wrap: break-word;
   font-size: 0.9375rem;
   line-height: 1.45;
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 [data-markdown] th,
@@ -475,6 +943,7 @@ h1 {
   border-bottom: 1px solid var(--acme-border);
   text-align: left;
   vertical-align: top;
+  overflow-wrap: break-word;
 }
 
 [data-markdown] th {
@@ -482,19 +951,30 @@ h1 {
   font-size: 0.8125rem;
 }
 
-.open-finding {
+/* Open question callout (FR-NOTEBOOK-3), and every warning callout. */
+.callout {
+  padding: var(--acme-space-4);
+  border-left: 3px solid var(--acme-warning);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface);
+}
+
+.callout-title {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--acme-space-2);
-  margin: 0 0 var(--acme-space-3);
-  font-family: var(--acme-font);
-  font-size: 0.875rem;
+  margin: 0 0 var(--acme-space-2);
+  font-weight: 600;
 }
 
-.cell[data-kind='open'] {
-  padding-left: var(--acme-space-4);
-  border-left: 3px solid var(--acme-warning);
+.callout-title svg {
+  color: var(--acme-warning);
+}
+
+.callout-note {
+  margin: 0 0 var(--acme-space-3);
+  font-size: 0.875rem;
 }
 
 .correction {
@@ -505,7 +985,6 @@ h1 {
 .sources {
   margin: var(--acme-space-4) 0 0;
   color: var(--acme-text-muted);
-  font-family: var(--acme-font);
   font-size: 0.8125rem;
   line-height: 1.5;
 }
@@ -522,10 +1001,47 @@ h1 {
   margin: 0;
   padding: 0;
   list-style: none;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
-/* Recall (FR-NOTEBOOK-10) */
+/* Recall deck (FR-NOTEBOOK-10) */
+.recall-deck {
+  padding: var(--acme-space-6) 0;
+  border-top: 1px solid var(--acme-border);
+}
+
+.recall-deck-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-3);
+  margin: 0 0 var(--acme-space-4);
+}
+
+.recall-deck h2 {
+  margin: 0 auto 0 0;
+  font-size: 1.125rem;
+}
+
+.recall-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--acme-space-3);
+}
+
+@media (min-width: 40rem) {
+  .recall-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.cell.recall-card {
+  padding: var(--acme-space-4);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface);
+}
+
 .recall-front {
   margin: 0 0 var(--acme-space-3);
   font-weight: 600;
@@ -534,7 +1050,6 @@ h1 {
 .recall-back summary {
   width: fit-content;
   color: var(--acme-accent);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
@@ -544,49 +1059,139 @@ h1 {
   margin: var(--acme-space-2) 0 0;
 }
 
-/* Lab (FR-NOTEBOOK-9) */
+/* Lab block (FR-NOTEBOOK-9) */
+.lab {
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface-raised);
+}
+
+.lab-header,
+.code-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  min-height: 2.25rem;
+  padding: 0 var(--acme-space-2) 0 var(--acme-space-3);
+  border-bottom: 1px solid var(--acme-border);
+  font-size: 0.8125rem;
+}
+
+.lab-title {
+  font-weight: 600;
+}
+
+.exec-count {
+  font-family: var(--acme-font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-1);
+  margin-left: auto;
+}
+
 .lab textarea {
   display: block;
   box-sizing: border-box;
   width: 100%;
   padding: var(--acme-space-3);
-  border: 1px solid var(--acme-control-border);
-  border-radius: 6px;
+  border: 0;
+  border-radius: 0 0 var(--radius-block) var(--radius-block);
   background: var(--acme-surface-raised);
   color: var(--acme-text);
-  line-height: 1.5;
+  font-size: 0.875rem;
+  line-height: 1.55;
   white-space: pre;
   overflow-x: auto;
   resize: vertical;
 }
 
-.lab-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--acme-space-2);
-  margin: var(--acme-space-3) 0 0;
-  font-family: var(--acme-font);
-  font-size: 0.8125rem;
+.lab-editor {
+  min-height: 3rem;
 }
 
 .outputs {
-  margin: var(--acme-space-3) 0 0;
-}
-
-.outputs pre,
-pre[data-code='plain'],
-pre.shiki {
-  margin: 0 0 var(--acme-space-2);
   padding: var(--acme-space-3);
-  overflow-x: auto;
-  border-radius: 6px;
-  background: var(--acme-surface);
-  font-size: 0.8125rem;
-  line-height: 1.5;
+  border-top: 1px solid var(--acme-border);
 }
 
-/* KaTeX: display math scrolls and clips inside its box; inline math is clipped to its line (FR-RENDER-3). */
+/* Code blocks (WEB-RENDER FR-RENDER-4): header with the language and Copy; both schemes via Shiki's properties. */
+.code-block {
+  margin: 0 0 var(--acme-space-4);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface);
+  font-family: var(--acme-font);
+}
+
+.code-lang {
+  margin-right: auto;
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font-mono);
+}
+
+.code-scroll {
+  overflow-x: auto;
+  border-radius: 0 0 var(--radius-block) var(--radius-block);
+}
+
+.code-block pre,
+.outputs pre,
+pre[data-code='plain'] {
+  margin: 0;
+  padding: var(--acme-space-3);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.code-block pre {
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+}
+
+.outputs pre {
+  overflow-x: auto;
+}
+
+.outputs pre {
+  border-radius: var(--radius-block);
+  background: var(--acme-surface);
+}
+
+.shiki,
+.shiki span {
+  color: var(--shiki-dark);
+  background-color: var(--shiki-dark-bg);
+}
+
+:root[data-theme='light'] .shiki,
+:root[data-theme='light'] .shiki span {
+  color: var(--shiki-light);
+  background-color: var(--shiki-light-bg);
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) .shiki,
+  :root:not([data-theme='dark']) .shiki span {
+    color: var(--shiki-light);
+    background-color: var(--shiki-light-bg);
+  }
+}
+
+.shiki span {
+  background-color: transparent;
+}
+
+.code-block .shiki {
+  border-radius: 0 0 var(--radius-block) var(--radius-block);
+}
+
+/* KaTeX: display math scrolls inside its box; inline math keeps its scripts inside its clip box (FR-RENDER-3). */
 .math-box,
 [data-markdown] .katex-display {
   overflow-x: auto;
@@ -594,56 +1199,75 @@ pre.shiki {
   max-width: 100%;
 }
 
-/* Inline math stays within a few lines of text: its box is capped and its painting clipped, so a \raisebox or
-   \rule cannot spill over the page (FR-RENDER-3). */
+/* Inline math stays within a few lines of text: capped and clipped, so a \raisebox or \rule cannot spill over the
+   page; 0.4em of block padding (and the same negative margin, so the line box does not grow) keeps ordinary
+   superscripts and subscripts inside the clip. The one declared exception to the spacing steps (FR-UI-10). */
 [data-markdown] .katex {
   display: inline-block;
   max-width: 100%;
   max-height: 4em;
+  padding-block: 0.4em;
+  margin-block: -0.4em;
   overflow: hidden;
   contain: paint;
   vertical-align: middle;
+  font-size: 1.05em;
 }
 
 [data-markdown] .katex-display > .katex {
   max-height: none;
+  padding-block: 0;
+  margin-block: 0;
 }
 
-/* Tutor panel (SRV-TUTOR FR-TUTOR-11) */
-.lesson-aside {
-  margin: var(--acme-space-6) 0 0;
-}
-
+/* Tutor panel (SRV-TUTOR FR-TUTOR-11): fixed at the inline end, non-modal. */
 .tutor {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  box-sizing: border-box;
+  width: 24rem;
+  max-width: 100vw;
+  overflow-y: auto;
   padding: var(--acme-space-5);
-  border: 1px solid var(--acme-border);
-  border-radius: 12px;
-  background: var(--acme-surface);
+  border-left: 1px solid var(--acme-border);
+  background: var(--acme-surface-raised);
+  box-shadow: var(--acme-shadow);
   scroll-margin-top: var(--acme-space-5);
 }
 
+.tutor[hidden] {
+  display: none;
+}
+
+.tutor-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--acme-space-2);
+}
+
 .tutor h2 {
-  margin: 0 0 var(--acme-space-1);
-  font-size: 1.25rem;
+  margin: 0;
+  font-size: 1.125rem;
 }
 
 .tutor h3 {
   margin: var(--acme-space-5) 0 var(--acme-space-2);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
 }
 
 .tutor label {
   display: block;
   margin: var(--acme-space-3) 0 var(--acme-space-2);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
   font-weight: 600;
 }
 
 .tutor-about {
-  margin: 0;
-  font-family: var(--acme-font);
+  margin: var(--acme-space-1) 0 0;
   font-size: 0.8125rem;
 }
 
@@ -653,11 +1277,11 @@ pre.shiki {
   width: 100%;
   padding: var(--acme-space-3);
   border: 1px solid var(--acme-control-border);
-  border-radius: 6px;
-  background: var(--acme-surface-raised);
+  border-radius: var(--radius-control);
+  background: var(--acme-surface);
   color: var(--acme-text);
-  font-family: inherit;
-  font-size: 1rem;
+  font-family: var(--acme-font);
+  font-size: 0.9375rem;
   line-height: 1.5;
   resize: vertical;
 }
@@ -668,8 +1292,11 @@ pre.shiki {
   align-items: center;
   gap: var(--acme-space-3);
   margin: var(--acme-space-2) 0 0;
-  font-family: var(--acme-font);
   font-size: 0.8125rem;
+}
+
+.tutor-count {
+  font-variant-numeric: tabular-nums;
 }
 
 .tutor-hint {
@@ -696,36 +1323,73 @@ pre.shiki {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
 }
 
 .tutor-history li {
-  padding: var(--acme-space-2) 0;
   border-top: 1px solid var(--acme-border);
 }
 
-/* Notices */
+.history-toggle {
+  display: block;
+  width: 100%;
+  padding: var(--acme-space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--acme-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.history-toggle:hover {
+  background: var(--acme-hover);
+}
+
+.history-answer {
+  padding: 0 var(--acme-space-2) var(--acme-space-3);
+}
+
+/* Notices (FR-UI-7) */
 .notices {
   position: fixed;
   right: var(--acme-space-4);
   bottom: var(--acme-space-4);
+  z-index: 25;
   display: flex;
   flex-direction: column;
+  align-items: flex-end;
   gap: var(--acme-space-2);
-  max-width: 22rem;
-  font-family: var(--acme-font);
+  max-width: 24rem;
   font-size: 0.875rem;
+}
+
+.notices-more {
+  margin: 0;
+  padding: 0 var(--acme-space-2);
+  border-radius: 999px;
+  background: var(--acme-surface-raised);
+  color: var(--acme-text-muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 .notice {
   display: flex;
   align-items: center;
   gap: var(--acme-space-2);
-  padding: var(--acme-space-2) var(--acme-space-3);
+  padding: var(--acme-space-2) var(--acme-space-2) var(--acme-space-2) var(--acme-space-3);
   border: 1px solid var(--acme-border);
-  border-radius: 6px;
+  border-radius: var(--radius-block);
   background: var(--acme-surface-raised);
   box-shadow: var(--acme-shadow);
+}
+
+.notice-icon {
+  flex: none;
+  color: var(--acme-info);
 }
 
 .dialog-actions {
@@ -735,10 +1399,43 @@ pre.shiki {
   margin: var(--acme-space-4) 0 0;
 }
 
-/* Narrow screens: one column, tighter page padding, list meta under the title. */
+.shortcuts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--acme-space-2) var(--acme-space-4);
+  margin: var(--acme-space-3) 0 0;
+}
+
+.shortcuts dd {
+  margin: 0;
+}
+
+kbd {
+  padding: 0 var(--acme-space-1);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-control);
+  font-family: var(--acme-font-mono);
+  font-size: 0.8125rem;
+}
+
+/* Narrow screens: tighter padding, smaller titles, list metadata under the title, brand and name as icons only. */
 @media (max-width: 40rem) {
   .app-header {
-    padding: 0 var(--acme-space-4);
+    padding: 0 var(--acme-space-2);
+  }
+
+  .brand-text,
+  .courses-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .user-trigger .who {
+    max-width: 6rem;
   }
 
   .page {
@@ -746,16 +1443,36 @@ pre.shiki {
   }
 
   h1 {
-    font-size: 1.875rem;
+    font-size: 1.5rem;
+  }
+
+  .lesson-header h1 {
+    font-size: 1.75rem;
   }
 
   .lesson-row {
     grid-template-columns: 2rem minmax(0, 1fr);
   }
 
-  .lesson-meta {
+  .lesson-meta,
+  .row-action {
     grid-column: 2;
   }
+
+  .continue .lesson-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .continue .lesson-meta {
+    grid-column: 1;
+  }
+
+  /* Below 40rem a table's columns share the width, so break-word applies inside cells (automatic layout sizes a
+     column to its longest word and a 7-column table overflowed 390 px; FR-UI-10). */
+  [data-markdown] table {
+    table-layout: fixed;
+  }
+
   .lesson-controls {
     margin-left: 0;
   }
@@ -767,5 +1484,11 @@ pre.shiki {
 
   .tutor {
     padding: var(--acme-space-4);
+  }
+}
+
+@media (max-width: 30rem) {
+  .tutor {
+    width: 100vw;
   }
 }
