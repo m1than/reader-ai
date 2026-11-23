@@ -999,6 +999,25 @@ tasks:
         (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
         timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
         latest live run (OPS-DOD owner note)." }
+  - { id: V.freshness, stage: V, kind: module, track: ai, status: in_progress, needs: [V.live],
+      branch: V/freshness,
+      what: "Owner 2026-11-23: 'validate how current the source is; if it's out of date, recommend another resource to
+        study from'. Owner decision 2026-11-23: Claude's server-side web search (egress stays api.anthropic.com).
+        Drafts: spikes/web-search/RESULT.md (sourced facts: web_search_20250305/20260209/20260318, max_uses per turn,
+        allowed/blocked domains, citations ≤ 150 chars, usage.server_tool_use.web_search_requests, $0.01 per search),
+        ADR-0030 (proposed), SRV-FRESH and WEB-FRESH (draft), SRV-AGENT proposed FR-AGENT-14..16 / INV-AGENT-6 /
+        VEC-AGENT-3, OPS-DOD operation material.freshness (8 missing).",
+      measured: "Nothing yet. Estimate (not measured): ≈ $0.27–0.40 per check, ≤ $0.85 worst planned; chosen caps
+        $1.00 per run and $2.00 per day.",
+      next: "1) deep-reviewer on ADR-0030 and the specs (coordinator runs it). 2) Zero-credit stub run
+        (spikes/web-search § 5a) to pin the CLI's WebSearch request shapes (H-WS-1, H-WS-2, H-WS-5). 3) The live
+        call (§ 5b, ≤ $0.10) after the owner approves it. Then Red.",
+      ask: "Owner: (1) Agent SDK WebSearch path (subscription only) vs an anthropic-api key for direct calls;
+        (2) approve one live call ≤ $0.10 from test_budget_usd; (3) caps $1.00/run, $2.00/day, 6 searches, TTL 90 days;
+        (4) queries with title/edition/topics going to Anthropic's search backend for personal-use materials.",
+      paired_later: "SRV-EVENTS KIND_MODULES (reader.freshness.jobs); SRV-AUTH ROUTERS and VERSION_LOCATIONS;
+        OPS-DEPLOY reader.example.yaml tasks freshness_scan / freshness_web; SRV-INGEST PDF Info dictionary (V/onboarding);
+        WEB-IMPORT and the course page mount the card (V/onboarding, V/plan)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
