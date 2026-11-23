@@ -126,22 +126,25 @@ operations:
       recovery: { items: [FR-AUTH-11] }
 
   # Added 2026-11-23 (V/signup) from the DRAFT items of ADR-0031 (proposed), SRV-AUTH FR-AUTH-23..32 and
-  # INV-AUTH-10..14 (held under `proposed_requirements`) and WEB-ACCOUNTS (draft). No route is named yet: routes enter
+  # INV-AUTH-10..15 (held under `proposed_requirements`) and WEB-ACCOUNTS (draft). No route is named yet: routes enter
   # the registry only when implemented and are added here in the same commit (GET /api/auth/signup, POST
   # /api/auth/signup/options, POST /api/auth/signup/verify; GET /api/auth/signups, POST
   # /api/auth/signups/{id}/approve, …/reject, …/disable). FR-AUTH-12 is mapped because its Origin and Content-Type
-  # gate runs for every non-GET /api/* route by construction; every other cell is `missing`.
+  # gate runs for every non-GET /api/* route by construction; every other cell is `missing`. Revision 1 (review round
+  # 1): live evidence for both operations comes only from a run with `sharing.signup: "open"`; the `signup` step's
+  # SKIP lines (sign-up off, cap or limit already used) are no evidence (FR-DOD-5), so the cells stay MISSING in such a
+  # run's report.
   - id: auth.signup
     title: Ask for an account on the sign-up page (handle, display name, passkey); wait for the owner's approval
     surface: [web]
     specs: [SRV-AUTH]
     gate: tracked
     criteria:
-      functional: { missing: "proposed, no test yet: SRV-AUTH FR-AUTH-23 (switch), FR-AUTH-25..27 (rules, options, verify), FR-AUTH-31 (page and states), FR-AUTH-32 (browser and live `signup` step)" }
+      functional: { missing: "proposed, no test yet: SRV-AUTH FR-AUTH-23 (switch, default open), FR-AUTH-24 (sync with reader.yaml), FR-AUTH-25..27 (rules, options, verify), FR-AUTH-31 (page and states), FR-AUTH-32 (browser and the live `signup` step in open mode)" }
       security:
         items: [FR-AUTH-12]
-        missing: "proposed, no test yet: INV-AUTH-10 (learner only, no session), INV-AUTH-12 (pending cap and limits under concurrency), INV-AUTH-13 (reader.yaml never adopts a sign-up account), INV-AUTH-14 (off writes nothing), FR-AUTH-26 (client and global limits), FR-AUTH-28 (pending cannot sign in)"
-      privacy: { missing: "proposed FR-AUTH-30 canary (no handle, display name or client address in logs or error bodies); no test yet" }
+        missing: "proposed, no test yet: INV-AUTH-10 (learner only, no session), INV-AUTH-12 (pending cap and the global limit under concurrency), INV-AUTH-13 (reader.yaml never adopts a sign-up account), INV-AUTH-14 (off writes nothing), INV-AUTH-15 (handles fit OPS-CLI's rule), FR-AUTH-26 (global limit, separate failure scope), FR-AUTH-28 (pending cannot sign in)"
+      privacy: { missing: "proposed FR-AUTH-30 canary (no handle or display name in logs or error bodies; no client address is read); no test yet" }
       a11y: { missing: "no axe run on /api/auth/signup yet (FR-AUTH-32 [browser]; pages evidence needs the live axe.json producer)" }
       latency: { missing: "no sourced budget for the sign-up ceremony" }
       cost: { na: no provider call }
@@ -154,12 +157,12 @@ operations:
     specs: [SRV-AUTH, WEB-ACCOUNTS]
     gate: tracked
     criteria:
-      functional: { missing: "proposed SRV-AUTH FR-AUTH-29 and WEB-ACCOUNTS FR-ACCOUNTS-1..4 (draft); FR-AUTH-32's live step approves and rejects through the screen; no test yet" }
+      functional: { missing: "proposed SRV-AUTH FR-AUTH-29 and WEB-ACCOUNTS FR-ACCOUNTS-1..5 (draft); FR-AUTH-32's live step approves and rejects through the screen in open mode; no test yet" }
       security:
         items: [FR-AUTH-12]
-        missing: "proposed, no test yet: FR-AUTH-29 (owner only, recent session, never a config user), INV-AUTH-11 (pending never authenticated), WEB-ACCOUNTS INV-ACCOUNTS-1 (no state change without a click)"
+        missing: "proposed, no test yet: FR-AUTH-29 (owner only, recent session, row lock and state re-check, never a config user), INV-AUTH-11 (pending never authenticated), WEB-ACCOUNTS INV-ACCOUNTS-1 (no state change without a click)"
       privacy: { missing: "proposed FR-AUTH-30 canary and WEB-ACCOUNTS INV-ACCOUNTS-2 (text only); no test yet" }
-      a11y: { missing: "no axe run on /signups yet (WEB-ACCOUNTS FR-ACCOUNTS-1..3 [browser])" }
+      a11y: { missing: "no axe run on /signups yet (WEB-ACCOUNTS FR-ACCOUNTS-5 [browser]; pages evidence needs the live axe.json producer)" }
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call }
       observability: { missing: "proposed FR-AUTH-29 log record per action (signup_approve, signup_reject, signup_disable); no test yet" }

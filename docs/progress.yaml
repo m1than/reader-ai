@@ -1032,16 +1032,33 @@ tasks:
       branch: V/signup,
       what: "Owner 2026-11-23: a 'Sign up' page from the sign-in screen; the owner chose open sign-up and accepted rate
         limiting and owner approval of new accounts. Drafts (stop for review): ADR-0031 (proposed), SRV-AUTH
-        FR-AUTH-23..32 and INV-AUTH-10..14 under `proposed_*` keys, WEB-ACCOUNTS (draft; WEB-UI FR-UI-14 reserved),
-        OPS-DOD operations auth.signup and auth.approve with every cell missing except FR-AUTH-12.",
-      notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Owner questions in ADR-0031: default
-        off or open (recommended off), approval required (recommended yes), handle rules, reachability beyond
-        localhost (RP ID change), what an approved learner may do before stage 8. Found while drafting: sync_users
+        FR-AUTH-23..32 and INV-AUTH-10..15 under `proposed_*` keys, WEB-ACCOUNTS (draft; WEB-UI FR-UI-14 reserved as
+        a pointer), OPS-DOD operations auth.signup and auth.approve with every cell missing except FR-AUTH-12.",
+      owner_answers: "2026-11-23: (1) default `open` (against the draft's recommendation of off); (2) approval required;
+        (3) lower-case Latin handles with the lookalike check and the reserved list; (4) this Mac only, for now; (5) an
+        empty lesson list for approved learners before stage 8 is acceptable. Recorded in ADR-0031 'Resolved
+        questions'.",
+      review: "ADR-0031 round 1 (deep-reviewer, coordinator): changes, no privilege-escalation path found. Blocking, all
+        fixed in revision 1: (1) per-client limit, XFF parsing, salt, client key and the signup-client-ip spike removed;
+        one global limit of 60 per hour; any local process can close sign-up for the hour (residual), per-client
+        limiting moves to the VPS ADR; enumeration and privacy claims corrected; (2) handle_skeleton with a partial
+        unique index on sign-up rows, written for config rows too, [db] case for two config handles sharing one;
+        (3) a pending sign-up row loses to a configured handle (deleted in the sync transaction); only an active or
+        disabled one stops the api with `handle_taken_by_signup <handle>` (FR-AUTH-2, owner note 5, exact-handle only);
+        (4) display names refuse Cc, Cf, Cs, Co, Cn, Zl, Zp, counted in code points after NFC, unit table and property
+        test; (5) the [live] step is a real oracle: evidence only in open mode, SKIP never fills a cell, off → 404 a
+        separate assertion. Non-blocking applied: auth_failures.scope; FOR UPDATE and state re-check in approve,
+        reject, disable and expiry; seam before the lock; quoted null/off; INV-AUTH-15 (handles fit OPS-CLI FR-CLI-4);
+        kernel-session case for a sign-up learner; SRV-MCP note; approved_at dropped (state kept), skeleton step order
+        defined; learner case with a recent session; WEB-ACCOUNTS: Disable stated permanent, no passkey recovery,
+        [browser] on FR-ACCOUNTS-1/-3, FR-ACCOUNTS-5 (route, link, axe, overflow), return to /signups after re-auth
+        through an allow-listed `next` on the sign-in page (FR-AUTH-31); disable is one transaction; a device passkey
+        can outlive a reject (owner note 7). Residuals stated: pending-cap DoS and the sign-up limit on localhost.
+        Awaits round 2.",
+      notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
         disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
-        need users.source and a startup refusal of a users[] handle equal to a sign-up handle (FR-AUTH-24). Spike
-        before approval: spikes/signup-client-ip (the address Caddy sees under Docker Desktop; hypothesis: one gateway
-        address, so the per-client limit equals a second global limit on the Mac). Merge note: V/onboarding also adds
-        a `proposed_requirements` key to SRV-AUTH (FR-AUTH-22); the two lists must become one key." }
+        need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding also adds a
+        `proposed_requirements` key to SRV-AUTH (FR-AUTH-22); the two lists must become one key." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
