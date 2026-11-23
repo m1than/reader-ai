@@ -1020,10 +1020,13 @@ tasks:
         the main loop only while total_cost_usd/model_usage include the nested request and the $0.01 fee; the main
         loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Estimate (not measured):
         ≈ $0.27 per check, worst ≈ $0.39 by formula.",
-      next: "1) deep-reviewer round 2 on ADR-0030 and the specs. 2) The owner runs `bash spikes/web-search/run-live.sh`
-        (≤ $0.10; H-WS-1..6, H-FRESH-2) and the result goes into RESULT.md § 5b and budget.ledger. 3) Red only after the
-        deep-reviewer approves AND the owner accepts ADR-0030 AND the live call has run.",
-      paired_later: "SRV-EVENTS KIND_MODULES (reader.freshness.jobs: freshness.scan, .search, .report); SRV-AUTH ROUTERS
+      next: "1) deep-reviewer round 3 on revision 3 (round 2: changes, 3 blocking, fixed). 2) The owner runs
+        `bash spikes/web-search/run-live.sh` at d9f96f0 (≤ $0.10, Haiku; H-WS-1..6, H-FRESH-2, observed once); the result
+        goes into RESULT.md § 5b and budget.ledger. 3) After that run, a separate commit hardens the script (round-2
+        list: no Sonnet option, non-SSE usage or worst case, a killed run counted, handle_error prints the exception
+        type only, abort unless init tools are [WebSearch], refuse any server tool but web_search_20250305). 4) Red only
+        after the deep-reviewer approves AND the owner accepts ADR-0030 AND the live call has run.",
+      paired_later: "SRV-EVENTS KIND_MODULES (reader.freshness.jobs: freshness.scan, freshness.web); SRV-AUTH ROUTERS
         and VERSION_LOCATIONS; OPS-DEPLOY reader.example.yaml tasks freshness_scan (sonnet), freshness_web (haiku),
         freshness_report (sonnet); SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount
         the card (V/onboarding, V/plan)." }

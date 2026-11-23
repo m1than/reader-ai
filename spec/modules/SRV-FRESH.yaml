@@ -4,9 +4,9 @@
 # $2.00 per day, 6 searches per check, 90-day TTL; queries may hold title, edition, authors and outline topics, never
 # book text (ADR-0030, proposed).
 #
-# Status: DRAFT, revision 2 (deep-reviewer round 1: changes, 12 blocking; all addressed, see `review`).
+# Status: DRAFT, revision 3 (deep-reviewer rounds 1 and 2: changes; all blocking items addressed, see `review`).
 # Red gate: the deep-reviewer approves, the owner accepts ADR-0030, and the live call of spikes/web-search § 5b has
-# confirmed H-WS-3/-6 and H-FRESH-2. Complex areas (AGENTS.md): tool authorization in agent-proxy, secrets, cost
+# been run (H-WS-3/-6 and H-FRESH-2 observed once). Complex areas (AGENTS.md): tool authorization in agent-proxy, secrets, cost
 # math, jobs.
 #
 # What it does, for one imported material, in three stages:
@@ -38,8 +38,8 @@
 # Cross-spec items (paired changes in their own specs; not edited here except SRV-AGENT's proposed amendment):
 #   - SRV-AGENT: proposed FR-AGENT-14..16, INV-AGENT-6, VEC-AGENT-3/-4 (task-scoped tool allowance with pinned
 #     shapes, `max_uses` rewrite and allowance, `requests_max`, search fee, settlement from the SDK cost).
-#   - SRV-EVENTS: KIND_MODULES adds `reader.freshness.jobs` (kinds `freshness.scan`, `freshness.search`,
-#     `freshness.report`).
+#   - SRV-EVENTS: KIND_MODULES adds `reader.freshness.jobs` (kinds `freshness.scan` and `freshness.web`; the web job
+#     runs the searches and the report, FR-FRESH-12).
 #   - SRV-AUTH: ROUTERS appends `reader.freshness.routes`; VERSION_LOCATIONS adds `reader/freshness/migrations`.
 #   - OPS-DEPLOY: `deploy/reader.example.yaml` gains `tasks.freshness_scan: { model: sonnet }`,
 #     `tasks.freshness_web: { model: haiku }` (alias `haiku` → `claude-haiku-5-5` in SRV-AGENT's alias data) and
@@ -112,7 +112,11 @@ bounds:
                                  # (abort_on_retry), so any extra request is refused (SRV-AGENT FR-AGENT-14)
   search_output_tokens: 1000     # CLAUDE_CODE_MAX_OUTPUT_TOKENS; caps the main and the nested request (§ 3a)
   t_max_tokens: 20000            # CHOSEN planning bound for tokens one search adds; NOT enforceable (H-WS-3)
-  summary_chars_max: 1500        # the nested model's summary kept for the report prompt only, never stored
+  summary_chars_max: 1500        # the nested model's summary kept in memory for the report prompt only, never stored
+  results_per_search_max: 10     # chosen: R entries kept per search, in result order; the rest dropped
+  result_host_chars_max: 100     # chosen: a longer host drops the entry before the prompt (`dropped.url_unsafe`)
+  result_title_chars_max: 120    # chosen: titles cut for the prompt; with the host ≤ 240 characters per entry, so
+                                 # the report prompt's links ≤ 2,400 characters per search (L ≤ 1,500 tokens enforced)
   # Report (stage c).
   report_output_tokens: 4000
   recommendations_min: 3         # owner request: 3–5 when the verdict is not `current`
@@ -122,15 +126,16 @@ bounds:
   title_chars_max: 200
   url_chars_max: 2048
   # Money (owner-approved 2026-11-23). Formulas in REF-FRESH-2 § 4.
-  run_cap_usd: 1.00              # ≥ worst case $0.39 per check; it also fits one paid retry, unused (FR-FRESH-12)
+  run_cap_usd: 1.00              # ≥ worst case $0.39 per check, $0.51 with the report's one paid retry (FR-FRESH-12)
   daily_cap_usd: 2.00            # per user, all three tasks, UTC day
   search_reserve_floor_usd: 0.02 # ≥ the per-run worst case $0.0171 on Haiku 5.5 at t_max (REF-FRESH-2 § 4)
   # Time.
   report_ttl_days: 90            # owner-approved: stale, never deleted
   scan_job_timeout_s: 1200       # SRV-PIPELINE's stage bound (one call)
-  search_job_timeout_s: 300      # chosen: one search run; abort_on_retry ends a retry wait at once
-  search_deadline_s: 240         # FR-AGENT-13 (e), inside the job timeout
-  report_job_timeout_s: 1200
+  search_call_budget_s: 300      # chosen: one search run; abort_on_retry ends a retry wait at once
+  search_deadline_s: 240         # FR-AGENT-13 (e) per search call, inside its 300 s budget
+  report_call_budget_s: 1200     # SRV-PIPELINE's stage bound (one call)
+  web_job_timeout_s: 3000        # searches_max × search_call_budget_s + report_call_budget_s = 6 × 300 + 1,200
 
 tables:
   material_bibliography: { owner_id: true, columns: "owner_id → users.id, material_id uuid → materials, title text, authors text[], edition text null, year int null, publisher text null, isbn text null, original_title text null, original_authors text[] null, original_edition text null, original_year int null, source text (owner|scan), sha256 text (canonical JSON of the fields), updated_at; pk (owner_id, material_id)" }
@@ -177,8 +182,9 @@ requirements:
       characters (counted in `dropped`). Invalid JSON or schema → `output_invalid` (transient).
       **Reuse:** `scan_inputs_sha256` = sha256 of the canonical JSON of (ingest id, sample span ids, the scan prompt's
       version and file sha256, resolved model id); it excludes the bibliography. A new check whose
-      `scan_inputs_sha256` equals that of an earlier `done` report of the same material copies that report's `claims`
-      and `scan_bibliography`, sets `scan_reused_from`, and records no scan cost (no provider call).
+      `scan_inputs_sha256` equals that of any earlier report of the same material with stored `claims` (whatever that
+      report's final status) copies its `claims` and `scan_bibliography`, sets `scan_reused_from`, and records no scan
+      cost (no provider call).
   - id: FR-FRESH-4
     text: >-
       Topics. The outline titles of level ≤ 2 in outline order, the first `topics_max`, each sanitised and cut to
@@ -201,8 +207,9 @@ requirements:
     text: >-
       Query gate. Each search run gets one planned query q and a `PreToolUse` hook (the adapter passes a string prompt,
       so a hook and not `can_use_tool`; spikes/web-search § 3a shows a hook deny stops the search before any nested
-      request). The hook allows a `WebSearch` call only when its `query`, trimmed, equals q exactly and it carries no
-      `allowed_domains` or `blocked_domains`; anything else is denied with a fixed reason (the query is not echoed)
+      request). The hook allows a `WebSearch` call only when its `query`, trimmed, equals q exactly, it carries no
+      `allowed_domains` or `blocked_domains`, and no `WebSearch` call was allowed earlier in this run (one per run);
+      anything else is denied with a fixed reason (the query is not echoed)
       and counted in `dropped.query_denied`; the run then ends at `search_max_turns` without a search. H-FRESH-2
       (how often the model passes q verbatim) is measured by the live call; if it is low, the search prompt changes,
       never the gate.
@@ -215,30 +222,36 @@ requirements:
       floor `search_reserve_floor_usd`, and the run_token allowance `{searches_max: 1, searches_per_request_max: 1,
       requests_max: search_requests_max}` (SRV-AGENT proposed FR-AGENT-14/15). The worker takes the run's result only
       from the structured `UserMessage.tool_use_result` (`{query, results: [{tool_use_id, content: [{title, url}]},
-      "<summary>"], searchCount}`; spikes/web-search § 3a): the URL strings and titles of every content item join the
-      check's link set R (with the run's query), and the summary string, sanitised and cut to `summary_chars_max`, is
-      kept in memory for stage (c) only. The model's own reply is discarded. A run that fails, is denied, or is refused
-      by a cap is recorded in `searches` with its status; the check continues with the remaining queries, and stage
-      (c) runs if at least one search returned results (else the check ends `failed` with `no_results`).
+      "<summary>"], searchCount}`; spikes/web-search § 3a). **Link set R:** the first `results_per_search_max` content
+      items of each search, in order, become R entries with ids `r1`, `r2`, … numbered across the check. An item is
+      dropped before any prompt (`dropped.url_unsafe`) when its URL is longer than `url_chars_max`,
+      `urllib.parse.urlsplit` raises `ValueError` or gives a scheme other than `http`/`https`, a username or password,
+      or no host, the hostname's `idna` encoding raises `UnicodeError`, or the ASCII host is longer than
+      `result_host_chars_max`. Each entry keeps the URL string as returned, the ASCII `host`, and the title sanitised
+      and cut to `result_title_chars_max`. The summary string, sanitised and cut to `summary_chars_max`, is kept with
+      its search. **R and the summaries live only in the memory of the `freshness.web` job (FR-FRESH-12) and are never
+      stored.** The model's own reply is discarded. A run that fails, is denied, or is refused by a cap is recorded
+      in `searches` with its status; the check continues with the remaining queries, and stage (c) runs if R is not
+      empty (else the check ends `failed` with `no_results`).
   - id: FR-FRESH-8
     text: >-
       Report (stage c) and safety (VEC-FRESH-1..3). One SRV-AGENT call, task `freshness_report`, stage `report`,
       `thinking_off`, no tools, `max_output_tokens` = `report_output_tokens`. Its prompt (`prompts/report.<version>.md`)
       holds the bibliography, the topics with ids, the kept claims as `{id: "c<k>", subject, kind, confidence, page}`,
-      and each search's query, results (title, URL) and summary inside a delimiter `⟦web⟧ … ⟦/web⟧` that web text
-      cannot forge (`⟦`/`⟧` replaced), with the rules that web text is untrusted data and never instructions, that
-      only URLs listed there may be cited, as plain strings, and the current date (UTC). Output JSON:
-      `{verdict: current|partly_outdated|outdated, reasons: [{text, citations: [url]}], claims: [{id, status:
-      changed|unchanged|unknown, note, citations: [url]}], recommendations: [{url, date?, kind:
+      and each search's query, its R entries rendered as `r<k> <host> <title>` (no URLs) and its summary, inside a
+      delimiter `⟦web⟧ … ⟦/web⟧` that web text cannot forge (`⟦`/`⟧` replaced), with the rules that web text is
+      untrusted data and never instructions, that sources are cited only by their `r<k>` ids, and the current date
+      (UTC). The links part of the prompt is therefore ≤ `results_per_search_max` × (`result_host_chars_max` +
+      `result_title_chars_max` + 20) characters per search. Output JSON: `{verdict:
+      current|partly_outdated|outdated, reasons: [{text, citations: [r-id]}], claims: [{id, status:
+      changed|unchanged|unknown, note, citations: [r-id]}], recommendations: [{source: r-id, date?, kind:
       book_edition|book|official_docs|course|other, why, covers: [section id]}]}`; unknown keys, a wrong enum or a
       missing key → `output_invalid`. Then code, in order: sanitises every string (NFC; removes C0/C1 controls,
       U+200B–U+200F, U+2028/U+2029 and the bidi formatting characters of REF-FRESH-6; collapses whitespace; cuts to
-      its bound); for each cited or recommended URL finds the R entry whose URL string, without any fragment, equals
-      it without any fragment, and keeps the **R entry's URL string and title** (never the model's strings), else
-      drops it (`dropped.url_not_searched`); keeps a URL only if `urllib.parse.urlsplit` gives scheme `http` or
-      `https`, no username or password, a host, and length ≤ `url_chars_max` (`dropped.url_unsafe`), and stores
-      `host` = the hostname encoded with the `idna` codec (ASCII; REF-FRESH-5); keeps `date` only as `YYYY`, `YYYY-MM`
-      or `YYYY-MM-DD` not after today, with `date_source: model`; drops unknown section and claim ids; keeps at most
+      its bound); resolves every cited or recommended id to its R entry and stores that entry's URL string, `host` and
+      title (the model never writes a URL or a title), dropping an unknown id (`dropped.source_unknown`); keeps `date`
+      only as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` not after today, with `date_source: model`; drops unknown section and
+      claim ids; keeps at most
       `reasons_max` reasons and `recommendations_max` recommendations. A non-`current` verdict with fewer than
       `recommendations_min` surviving recommendations is stored as is, `dropped` saying why (never padded).
   - id: FR-FRESH-9
@@ -261,9 +274,9 @@ requirements:
       topics, the planned queries, the search and report prompt versions with file hashes, resolved models). The latest
       `done` report is `stale` when older than `report_ttl_days`, when its ingest is not the material's current
       ingest, or when the bibliography's sha256 changed; a stale report is shown, labelled, and never deleted by the
-      TTL. Stored: the fields of FR-FRESH-8 and `searches` as `{query, template, status, result_count}`. Not stored:
-      result lists, titles or URLs that no citation or recommendation uses, summaries, page text, `cited_text`,
-      `encrypted_content`.
+      TTL. Stored: the fields of FR-FRESH-8 (with the R entries that a citation or recommendation uses) and `searches`
+      as `{query, template, status, result_count}`. Not stored: R itself, unused titles or URLs, summaries, page text,
+      `cited_text`, `encrypted_content`.
   - id: FR-FRESH-11
     text: >-
       Routes (session, owner role, the material's owner only; anyone else gets the 404 `not_found` of a material that
@@ -279,13 +292,23 @@ requirements:
       (SRV-AUTH FR-AUTH-12).
   - id: FR-FRESH-12
     text: >-
-      Jobs. Kinds `freshness.scan`, `freshness.search` and `freshness.report` (SRV-EVENTS), keyed by (report_id, stage,
-      index), timeouts from the bounds, `max_attempts` 2. A transient failure (SRV-AGENT FR-AGENT-10) is retried
-      **only when the failed attempt settled at $0** (no upstream 2xx); an attempt that spent is final, so a check
-      spends at most one paid attempt per call. The $1.00 cap would also fit one paid retry of every stage ($0.78),
-      but that room is not used. Each handler enqueues the next job inside itself (SRV-PIPELINE's pattern); search
-      jobs run in plan order. Status: `running` while a key is queued or running; `failed` with the error code when a
-      scan or report key is dead or no search returned results; `budget_refused`; `done`.
+      Jobs. Two kinds (SRV-EVENTS), keyed by (report_id, kind):
+      - `freshness.scan` (timeout `scan_job_timeout_s`) runs stage (a) and, if stage (b) may run (FR-FRESH-1), enqueues
+        `freshness.web` inside itself (SRV-PIPELINE's pattern);
+      - `freshness.web` (timeout `web_job_timeout_s` = 6 × 300 + 1,200 s) runs all planned search calls in plan order
+        and then the report call, in one job, because R and the summaries exist only in its memory (FR-FRESH-7).
+
+      **Retries inside a job:** a call that fails transiently (SRV-AGENT FR-AGENT-10) is retried once, and only when
+      the failed attempt settled at $0 (no upstream 2xx) and the job's remaining time covers the call's budget. A
+      reservation without a settle row counts as paid, so it is final. Exception: the report call may have **one paid
+      retry** (worst $0.39 + $0.116 = $0.51 ≤ the $1.00 cap).
+
+      **Job-level attempts:** `max_attempts` 2. A second attempt (after a timeout or a worker restart) **restarts the
+      check's stage (b) from its first search**, because R is gone. Its calls reserve and settle again; the cap
+      (≤ $0.39 + one more stage b+c of ≤ $0.22) still holds.
+
+      Status: `running` while a key is queued or running; `failed` with the error code when a key is dead or R is
+      empty; `budget_refused`; `done`.
   - id: FR-FRESH-13
     text: >-
       Logging. One line per stage end: report id prefix (8 hex), stage, index, status, error code, searches used,
@@ -296,8 +319,10 @@ requirements:
       Live: on the pilot with an owner-entered bibliography, one check through the routes completes `done` with a
       verdict, ≥ 1 search with results, every stored URL in that check's R, cost ≤ `run_cap_usd`, ledger rows carrying
       `web_search_requests`, and the settled amount within SRV-AGENT's cross-check tolerance of the proxy-recorded
-      usage (H-WS-6); the owner judges the flagged claims and recommendations (H-FRESH-1), recorded in
-      docs/progress.yaml. Expected ≈ $0.27 from `budget.test_budget_usd`. [live]
+      usage (H-WS-6); for every search the live result records the gate's decision (H-FRESH-2) and the nested
+      request's input tokens (t, H-WS-3). The owner judges the flagged claims and recommendations (H-FRESH-1). All of
+      this is recorded in docs/progress.yaml as observed in this one run. Expected ≈ $0.27 from
+      `budget.test_budget_usd`. [live]
 
 invariants:
   - id: INV-FRESH-1
@@ -319,9 +344,11 @@ invariants:
       (property test over generated outputs and streams).
   - id: INV-FRESH-3
     text: >-
-      Every stored URL is byte-equal to a URL string of its check's R, has scheme `http` or `https`, no userinfo, and
-      ≤ `url_chars_max` characters; its stored title is R's title for that URL (property test over generated model
-      outputs, including `javascript:`, `data:`, userinfo, IDN, fragment and look-alike cases).
+      Every stored URL, host and title is byte-equal to those of the R entry its `r<k>` id names; every R entry has
+      scheme `http` or `https`, no userinfo, a host whose ASCII form is ≤ `result_host_chars_max`, and a URL of ≤
+      `url_chars_max` characters; parser errors drop the entry and never escape (property test over generated search
+      results and model outputs, including `javascript:`, `data:`, userinfo, IDN, invalid IPv6 brackets, over-long
+      labels, fragments, look-alike hosts and model-written URLs).
   - id: INV-FRESH-4
     text: >-
       Reports, bibliographies and estimates are visible only to the material's owner; another user gets the same 404
@@ -342,7 +369,7 @@ vectors:
     source: Injection cases in search titles, summaries and model output (instructions, delimiter forgery, bidi overrides, zero-width characters, markup, a URL not searched, a model title differing from R's) with the sanitised stored result
     file: spec/fixtures/SRV-FRESH/injection.yaml
   - id: VEC-FRESH-3
-    source: URL cases (schemes, userinfo, IDN to ASCII, fragments, length, near-duplicates of R entries) against a link set
+    source: Search-result URL cases for R entry creation (schemes, userinfo, IDN to ASCII, urlsplit ValueError, idna UnicodeError, host and URL length, more than 10 results) and id resolution (unknown ids, a model-written URL instead of an id)
     file: spec/fixtures/SRV-FRESH/urls.yaml
   - id: VEC-FRESH-4
     source: Synthetic materials (spans, outlines, no book text) with their expected samples, including more sections than the budget holds and a material without an outline, plus topics and scan_inputs_sha256
@@ -383,4 +410,19 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   case; (10) retries only after a $0 settle; (11) scan_inputs_sha256 and scan reuse; (12) the Red gate includes the
   owner's acceptance of ADR-0030. Non-blocking items applied: R from tool_use_result, R's URL string and title stored,
   urllib.parse.urlsplit and idna named, queries stored without URLs or titles, quarantine INV-FRESH-5, the daily cap's
-  dependence on concurrency 1, the hook instead of can_use_tool, domain lists denied."
+  dependence on concurrency 1, the hook instead of can_use_tool, domain lists denied. Round 2 (2026-11-23): changes,
+  3 blocking, fixed in revision 3:
+  (1) R does not survive between jobs, so one `freshness.web` job (timeout 6 × 300 + 1,200 s) runs the searches and
+  the report, with R and the summaries in memory only; a restart restarts stage (b); FR-FRESH-7/-10/-12 and ADR-0030
+  updated;
+  (2) Haiku 5.5 is priced, with both tiers and the alias, in SRV-AGENT FR-AGENT-16 (VEC-AGENT-2);
+  (3) SRV-AGENT's header now states the three-part gate.
+  Non-blocking items applied:
+  - the live result is worded 'observed once', and FR-FRESH-14 records t and the gate decision per search;
+  - a scan is reused from any report with stored claims;
+  - the report call may have one paid retry;
+  - R entries have ids `r<k>`, the model cites ids, and the prompt shows only id, host and title, with at most 10
+    results per search and host and title bounds, so L is enforced;
+  - urlsplit `ValueError` and idna `UnicodeError` map to `dropped.url_unsafe`;
+  - the hook allows one WebSearch per run;
+  - a reservation without a settle row is final."

@@ -70,9 +70,11 @@
 # Proposed amendment (2026-11-23, V/freshness; ADR-0030 proposed; DRAFT): `proposed_requirements`,
 # `proposed_invariants` and `proposed_vectors` at the end of this file — one task-scoped tool allowance
 # (`freshness_web`: the CLI's WebSearch), the proxy-enforced search allowance with a `max_uses` rewrite, the per-search
-# fee in pricing and ledger, and settlement of multi-request runs. Everything already approved here is unchanged for
-# every other task. They join `requirements` with their Red tests after the deep-reviewer approves and the stub run
-# (spikes/web-search § 5a) has pinned the shapes. Status stays approved; the gate for the new items is that review.
+# fee and a Haiku 5.5 row in pricing, and settlement of multi-request runs. Everything already approved here is
+# unchanged for every other task. Status stays approved. The new items join `requirements` with their Red tests only
+# when all three hold: (1) the deep-reviewer returns approve; (2) the shapes are pinned by the stub run (done,
+# spikes/web-search § 5a) and confirmed against the real upstream by the owner's live call (§ 5b); (3) the owner
+# accepts ADR-0030.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -344,7 +346,7 @@ owner_notes:
 # (a `search_profile` field, the small-model flag `tengu_plum_vx3`, search-elsewhere, searchViaSearchService, a
 # ccr-proxy, an auxiliary request; deep-reviewer round 1) are outside the pin and fail closed. Any web search version
 # other than `web_search_20250305`, or a new CLI pin, needs a new deep-reviewer round.
-# Red gate: the deep-reviewer approves, the owner accepts ADR-0030, and the live call (spikes/web-search § 5b) has run.
+# Red gate: the three-part gate in the header (review approve; stub and live shapes; owner acceptance of ADR-0030).
 proposed_requirements:
   - id: FR-AGENT-14
     text: >-
@@ -387,8 +389,14 @@ proposed_requirements:
       line (FR-AGENT-5) adds the route kind (`main` | `search`) and nothing else (VEC-AGENT-4).
   - id: FR-AGENT-16
     text: >-
-      Search fee and settlement. `spec/fixtures/SRV-AGENT/pricing.yaml` gains `web_search_usd: 0.01` per search
-      (REF-AGENT-8, $10 per 1,000); `cost(model, usage)` adds `server_tool_use.web_search_requests × web_search_usd`
+      Search fee, Haiku 5.5 and settlement. `spec/fixtures/SRV-AGENT/pricing.yaml` (VEC-AGENT-2) gains
+      `web_search_usd: 0.01` per search (REF-AGENT-8, $10 per 1,000) and a row `claude-haiku-5-5` with two tiers by
+      prompt size (REF-AGENT-8's pricing source, platform pricing page fetched 2026-11-23): prompts ≤ 100,000 tokens
+      `{input: 0.10, output: 0.50, cache_write_5m: 0.125, cache_write_1h: 0.20, cache_read: 0.01}`, prompts > 100,000
+      tokens `{input: 0.50, output: 2.50, cache_write_5m: 0.625, cache_write_1h: 1.00, cache_read: 0.05}`; the tier is
+      chosen per request by its total prompt tokens (input + cache writes + cache reads), and the reserve uses the
+      higher tier when the estimated prompt exceeds 100,000 tokens. The alias data (FR-AGENT-6) adds `haiku` →
+      `claude-haiku-5-5`. `cost(model, usage)` adds `server_tool_use.web_search_requests × web_search_usd`
       (absent → 0). Settle rows store `web_search_requests` (additive migration `agent_0003`, a nullable int). The SDK's
       `ResultMessage.usage` covers the main loop only, while `total_cost_usd` and `model_usage` include the nested
       request and the fee (measured against the stub, spikes/web-search § 3a); so for a tool call the settle row's
@@ -421,7 +429,7 @@ proposed_vectors:
 
 proposed_normative:
   - id: REF-AGENT-8
-    title: Anthropic — Web search tool (max_uses counts failed searches; usage.server_tool_use.web_search_requests; $10 per 1,000 searches) and spikes/web-search/RESULT.md
+    title: Anthropic — Web search tool (max_uses counts failed searches; usage.server_tool_use.web_search_requests; $10 per 1,000 searches), the pricing page (Haiku 5.5 tiers; https://platform.claude.com/docs/en/about-claude/pricing) and spikes/web-search/RESULT.md §§ 2–4
     url: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
 
 proposed_errors: [tools_not_allowed, search_cap, request_cap]

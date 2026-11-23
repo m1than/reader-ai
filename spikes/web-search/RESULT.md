@@ -60,9 +60,11 @@ the proxy pin changes.
 | Claude Sonnet 5.5 | input $2, 5-min cache write $2.50, 1-h cache write $4, cache read $0.10, output $10 per MTok | S3 |
 | Claude Opus 5.5 | input $4, 5-min write $5, 1-h write $8, read $0.20, output $20 per MTok | S3 |
 | Claude Haiku 5.5 (≤ 100k-token prompts) | input $0.10, 5-min write $0.125, 1-h write $0.20, read $0.01, output $0.50 per MTok | S3 |
+| Claude Haiku 5.5 (> 100k-token prompts) | input $0.50, 5-min write $0.625, 1-h write $1.00, read $0.05, output $2.50 per MTok | S3 |
 
-These token rates equal SRV-AGENT's `spec/fixtures/SRV-AGENT/pricing.yaml` source (cached 2026-11-03) for the three
-models. SRV-AGENT's table has no per-search fee yet (proposed FR-AGENT-16). Whether the $0.01 fee draws from the
+These token rates equal SRV-AGENT's `spec/fixtures/SRV-AGENT/pricing.yaml` source (cached 2026-11-03) for Opus and
+Sonnet. That table has no Haiku 5.5 row and no per-search fee yet; proposed FR-AGENT-16 adds both. A search run's
+prompt stays far below 100k tokens (§ 4), so the lower Haiku tier applies. Whether the $0.01 fee draws from the
 subscription's Agent SDK credit is not documented. § 5b asks the owner to compare his credit before and after the
 live call.
 
@@ -144,7 +146,9 @@ nested search request, which is uncached (§ 3a) and is still priced at the 1-ho
 - expected: ≈ 25,200 × $4/M + 2,600 × $10/M ≈ $0.13.
 
 **Stage (b) one search run** (Haiku 5.5, `max_turns` 2, output cap O_s = 1,000 tokens per request, which applies to
-the nested request too, § 3a). Planned prompt P_s ≤ 2,000 tokens; links L ≤ 1,500 tokens.
+the nested request too, § 3a). Planned prompt P_s ≤ 2,000 tokens. Links L ≤ 1,500 tokens is a planning bound for the
+CLI's own tool-result text in this Haiku run. We do not format that text, so it is not enforced here: at 10× this
+bound the run would cost $0.003 more.
 
 | Part | Formula | Worst |
 | --- | --- | --- |
@@ -160,10 +164,17 @@ Six runs: ≤ $0.103.
 **Stage (c) report** (Sonnet 5.5, one call, no tools; output cap 4,000):
 - Prompt ≤ 1,500 instructions + 300 bibliography + 40 topics × 40 + 20 claims × 40 + 6 × (L 1,500 + summary 750 +
   query 60) + 1,000 CLI overhead ≈ 19,100 tokens.
+- Here L **is enforced by construction** (SRV-FRESH FR-FRESH-7): at most 10 results per search, each rendered as
+  `r<k> host title` with host ≤ 100 and title ≤ 120 characters (≤ 240 characters per result). That is ≤ 2,400
+  characters, so ≤ 1,200 tokens at 2.0 characters per token. The model cites `r<k>` ids, never URLs.
 - Worst: 19,100 × $4/M + 4,000 × $10/M = **$0.116**. FR-AGENT-9 computes its reserve from the actual prompt.
 
-**Per check, worst: $0.170 + $0.103 + $0.116 = $0.39** against the owner's run cap of $1.00. The cap therefore also
-covers a retry, but SRV-FRESH retries a paid stage only after a $0 settle (FR-FRESH-12).
+**Per check, worst: $0.170 + $0.103 + $0.116 = $0.39** against the owner's run cap of $1.00.
+- Retries: a call is retried only after a $0 settle, except the report call, which may have one paid retry.
+- With it: $0.39 + $0.116 = $0.51.
+- The cap would even fit one paid retry of every stage ($0.78).
+- A reservation without a settle row counts as paid, so it is never retried (FR-FRESH-12).
+- A worker restart restarts the web job: at most one more web stage, ≤ $0.22.
 
 **Expected ≈ $0.27:**
 - scan $0.13;
@@ -232,6 +243,9 @@ container, the pattern of `spikes/tutor-call/run.sh`). It runs `spikes/web-searc
 | SSE names | events and content-block key names |
 | US-only | the WebSearch description says "US-only": a `web_search_tool_result_error` or zero results would show it |
 | Fee and the subscription credit | a manual comparison by the owner, printed at the end of the run |
+
+One call gives one observation per hypothesis. Results are recorded as "observed once", not as established, and
+FR-FRESH-14's live check records t and denials again for every search.
 
 **Expected spend** ≈ $0.012: one search $0.01 plus about 10,000 Haiku tokens. The worst case is refused by the proxy
 above the cap. Record the spend in `budget.ledger` from `test_budget_usd`.

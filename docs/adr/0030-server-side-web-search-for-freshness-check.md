@@ -92,7 +92,10 @@ Facts (spikes/web-search/RESULT.md, sourced and measured 2026-11-23):
      - no 6-word run of a non-front span.
    - A canary test proves it.
 4. **The report is written by a tool-less call** (Sonnet 5.5) over the search results, delimited as untrusted data.
-   Only URL strings the searches returned are stored, with their returned titles (INV-FRESH-3).
+   - The model sees each result only as `r<k> host title` and cites ids.
+   - Code stores the URL string, host and title that the search returned for that id (INV-FRESH-3).
+   - The searches and the report run in **one job**. The link set and the summaries live only in that job's memory
+     and are never stored. A worker restart restarts the searches.
 5. **Egress unchanged.** The search runs at Anthropic. The worker and agent-proxy reach no new host.
 6. **Budget in the ledger.**
    - The fee is priced (`web_search_usd` = 0.01).
@@ -113,7 +116,7 @@ Facts (spikes/web-search/RESULT.md, sourced and measured 2026-11-23):
 | **Poisoned but genuine results** (residual) | A result that the search really returned can still be a bad or malicious page (SEO spam, a look-alike publisher). The link check cannot catch it. The card shows the host and "as reported"; the owner judges; per-domain allow lists are a defer | — (residual, stated) |
 | **Book text in search queries** | Decision 3: code-planned queries, verbatim gate, the bounded guarantee of INV-FRESH-1 | INV-FRESH-1 (canary) |
 | **Copyright of web content** | Stored: titles and URLs that are cited or recommended, dates as reported, the model's own reasons (≤ 300 characters), our outline section ids, the queries. Never stored: summaries, `cited_text`, `encrypted_content`, page text | INV-FRESH-2 |
-| **Cost** | Proxy-enforced search allowance, one search per request, `requests_max`, `abort_on_retry`; per-call reserves; run and daily caps; retries only after a $0 settle | SRV-AGENT INV-AGENT-6, VEC-AGENT-4; SRV-FRESH FR-FRESH-9/-12 |
+| **Cost** | Proxy-enforced search allowance, one search per request, `requests_max`, `abort_on_retry`; per-call reserves; run and daily caps; a call is retried only after a $0 settle, except one paid retry of the report call (worst $0.51 per check) | SRV-AGENT INV-AGENT-6, VEC-AGENT-4; SRV-FRESH FR-FRESH-9/-12 |
 | **Token or credential exposure** | ADR-0025 unchanged; the stub run under `--network none` saw no host but `ANTHROPIC_BASE_URL` | SRV-AGENT INV-AGENT-1/3 |
 
 ## Rejected options — why (numbers)
