@@ -12,13 +12,21 @@ fixed:
   - {source: spec/fixtures/SRV-TUTOR/bench-fixed.yaml, id: t01}
 gate_n: 40                        # exactly those 40: a 0.9 tutor passes the 0.8 bar 98.5 % of the time, a 0.7 tutor 11 %
 p95_rank: "ceil(0.95 × n) of the samples sorted ascending (nearest rank)"
-spend_bound_usd: "40 × question_cap_usd (≤ 12.00); expected ≈ 40 × 0.052 ≈ 2.1"
+spend_bound_usd: "40 × question_cap_usd (≤ 12.00); expected ≈ 40 × 0.046 ≈ 1.8 (asked without a cell, VEC-TUTOR-3)"
 daily_cap: >-
   the normal per-user daily cap (3.00): a run stops at the first 429 whose body code is daily_budget_exhausted; each
   run writes tutor-bench-<UTC time>.json (records) to READER_TUTOR_BENCH_DIR; the next UTC day asks only the
   questions not yet recorded there (READER_TUTOR_BENCH_FROM may skip further by index); the summary merges every run
   file by question id
+outcomes: >-
+  every asked question is recorded with its terminal state; a `failed`, `refused` or `expired` question, or one still
+  queued at the 630 s poll deadline (timed out), stays in the 40 as not grounded and is never re-asked: the gate
+  measures the tutor as a learner meets it, retries included. Only a run stopped by the daily cap leaves questions
+  unasked, and those are the ones the next day asks
 records: [id, chapter, wall_s, usd, output_tokens, thinking_tokens, state, grounded, insufficient, blocks,
-  blocks_with_verified_quote]
-summary: [n, p95_s, mean_usd (answered and expired only), grounded_share, insufficient_share, verified_block_share,
-  per_chapter, gate_n_met, pass]
+  blocks_with_verified_quote, gold_in_top8, gold_cited]
+# gold_in_top8: a gold page among the question's top 8 hits of POST /api/search (k 8, spends nothing), asked just
+#   before the question; gold_cited: a page cited by the answer is a gold page. Live search bench: 25 of the 39
+#   questions other than t01 had a gold page in the top 8 (64 %).
+summary: [n, p95_s, mean_usd (answered, and expired with usd > 0), grounded_share, insufficient_share,
+  verified_block_share, gold_cited_share, grounded_given_gold_in_top8, per_chapter, gate_n_met, pass]

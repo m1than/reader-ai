@@ -10,13 +10,13 @@
 //   compile  imports the course (G1), compiles L02 (POST /api/lessons/{id}/compile), polls GET /api/compiles/{run}.
 //   lesson   opens the compiled L02: screenshot, one lab cell run in the kernel, citations rendered.
 //   tutor    three questions through the Ask panel; latency and grounded per question.
-//   tutor-bench  SRV-TUTOR's bench (VEC-TUTOR-7): questions-v2 with v03 → t01 (40) over the HTTP API; ≈ $2.1.
+//   tutor-bench  SRV-TUTOR's bench (VEC-TUTOR-7): questions-v2 with v03 → t01 (40) over the HTTP API; ≈ $1.8.
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
 // snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots (outside the repository when slice.sh runs).
 import { expect, test, type APIRequestContext, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { benchSet, mergeRuns, summary, type BenchRecord } from '../../../web/src/tutor/bench.ts';
+import { benchSet, hitsGold, mergeRuns, summary, type BenchRecord } from '../../../web/src/tutor/bench.ts';
 
 const OUT = resolve(process.env.READER_LIVE_OUT ?? 'out');
 const SHOTS = resolve(OUT, 'screenshots');
@@ -328,6 +328,8 @@ test('tutor-bench: the 40 bench questions over the HTTP API', async () => {
     save();
   };
   for (const q of set.slice(from).filter((x) => !done.has(x.id))) {
+    // The retrieval predictor (NFR-TUTOR-3): is a gold page among the tutor's 8 hits? POST /api/search spends nothing.
+    const goldInTop8 = hitsGold((await search(q.question, 8)).results.map((h) => h.page), q.gold_pages);
     const body = { question: q.question };
     const t = now();
     let res = await post(`/api/lessons/${lessonId}/ask`, body);
@@ -343,7 +345,8 @@ test('tutor-bench: the 40 bench questions over the HTTP API', async () => {
     }
     expect(res.status(), `ask ${q.id}`).toBe(202);
     const qid = ((await res.json()) as { question_id: string }).question_id;
-    type Got = { state: string; grounded?: boolean; answer?: { insufficient: boolean; blocks: { supported: boolean }[] };
+    type Got = { state: string; grounded?: boolean;
+      answer?: { insufficient: boolean; blocks: { supported: boolean; citations: { page: number }[] }[] };
       usage?: { usd: number; output_tokens: number; thinking_tokens: number | null } };
     let got: Got = { state: 'queued' };
     while (got.state === 'queued' && now() - t < 630_000) {
@@ -356,6 +359,7 @@ test('tutor-bench: the 40 bench questions over the HTTP API', async () => {
       usd: got.usage?.usd ?? 0, output_tokens: got.usage?.output_tokens ?? 0, thinking_tokens: got.usage?.thinking_tokens ?? null,
       grounded: got.grounded === true, insufficient: got.answer?.insufficient === true, blocks: blocks.length,
       blocks_with_verified_quote: blocks.filter((b) => b.supported).length,
+      gold_in_top8: goldInTop8, gold_cited: hitsGold(blocks.flatMap((b) => b.citations.map((c) => c.page)), q.gold_pages),
     });
     report();
   }

@@ -17,9 +17,11 @@ inputs:
   max_output_tokens: 2000        # spikes/tutor-call: 92–310 measured
   attempts_max: 2
   daily_cap_usd: 3.00
-  typical:                       # one bench question, extrapolated from spikes/tutor-call's measured rates
-    prompt_tokens: 11000         # 8 whole chunks (mean 2,145 bytes, spikes/tutor-chunks) + question and cell ≈ 20,900
-                                 # bytes of Russian at 1.9 bytes/token (measured on q3)
+  typical:                       # one bench question, asked without a cell (VEC-TUTOR-7), extrapolated from
+                                 # spikes/tutor-call's measured rates
+    prompt_tokens: 9500          # 8 whole chunks (8 × mean 2,145 bytes, spikes/tutor-chunks) + the question and the
+                                 # JSON ≈ 17,800 bytes of Russian at 1.9 bytes/token (measured on q3); an Ask-panel
+                                 # question with a focused cell adds up to cell_bytes_max (about $0.052 then)
     fixed_tokens: 900            # answer-v1.md (1,440 bytes of English ≈ 360 tokens) + ≈ 410 overhead, rounded up
     output_tokens: 400           # measured 92–310 on short sources; rounded up for 8 whole chunks
                                  # every new question writes its whole prompt to the 1-hour cache (measured: the first
@@ -27,8 +29,8 @@ inputs:
 derived_by_test:                 # USD, for readers
   reserve_per_attempt: 0.148     # (1000 + 2000 + 29000) × 4.00e-6 + 2000 × 10.00e-6 = 0.128 + 0.020
   question_cap_min: 0.296        # 2 × reserve ≤ bounds.question_cap_usd 0.30 (kept)
-  typical: 0.0516                # (11000 + 900) × 4.00e-6 + 400 × 10.00e-6 — about $0.052
-  daily_cap_questions: {at_reserve: 20, typical: 58}   # floor(3.00 / value)
+  typical: 0.0456                # (9500 + 900) × 4.00e-6 + 400 × 10.00e-6 — about $0.046
+  daily_cap_questions: {at_reserve: 20, typical: 65}   # floor(3.00 / value)
 measured:                        # spikes/tutor-call, 2026-11-22, short synthetic sources (not L02-shaped)
   calls: 10
   usd_total: 0.038299

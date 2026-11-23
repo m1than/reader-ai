@@ -726,9 +726,13 @@ tasks:
         of every hit before any neighbour, sources_max 88 (bytes bind first); the bench set is questions-v2 with
         v03 → t01 (40 iid questions, per-chapter breakdown, gate on exactly those 40), asked from L02 without a cell;
         per-run record files merged before the summary; resume forwarded through slice.sh (--tutor-bench-dir,
-        --tutor-bench-from). The bench (≈ $2.1) runs after approval.",
+        --tutor-bench-from). Round 2 approve; its pre-bench items applied: gold_in_top8 and gold_cited per record,
+        grounded split by gold_in_top8 (retrieval predictor: 25 of 39 gold pages in the top 8), mean_usd over answered
+        and spent expired questions, slice.sh resolves and confines --tutor-bench-dir, bench.yaml keeps failed,
+        refused and timed-out questions in the 40 as not grounded; typical cost without a cell $0.046 (bench ≈ $1.8).
+        Next: the live agent merges V/SRV-TUTOR-chunks into V/live-slice and runs the bench.",
       review: "code review by deep-reviewer (Fable): round 1 (25a5920) changes, round 2 approve (2026-11-23);
-        chunks revision: round 1 changes (reserve math confirmed), round 2 next" }
+        chunks revision (V/SRV-TUTOR-chunks): round 1 changes (reserve math confirmed), round 2 approve (2026-11-23)" }
   - { id: S0.spike.tutor-chunks, stage: V, kind: spike, status: done, needs: [],
       result: "2026-11-23, read-only, no spend (the stack's own converter and chunker on the pilot; 665 s): 9,463 spans,
         2,247 chunks; bytes as sent: whole chunk mean 2,145 (p50 2,206, p90 3,119, p95 3,422, max 5,462), primary

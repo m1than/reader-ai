@@ -1,7 +1,7 @@
 // @trace VEC-TUTOR-7 NFR-TUTOR-1 NFR-TUTOR-2 NFR-TUTOR-3
 import { describe, expect, test } from 'vitest';
 import { readYaml } from '../app/testing/fixtures';
-import { BenchError, benchSet, GATE_N, mergeRuns, p95, summary, THRESHOLDS, type BenchQuestion, type BenchRecord } from './bench';
+import { BenchError, benchSet, GATE_N, hitsGold, mergeRuns, p95, summary, THRESHOLDS, type BenchQuestion, type BenchRecord } from './bench';
 
 type Bench = { set: { source: string; replace: Record<string, string> }; fixed: { source: string; id: string }[]; gate_n: number };
 type Spec = { nfr: { id: string; threshold: number }[] };
@@ -13,7 +13,8 @@ const ids = () => benchSet(v2(), fixed()).map((q) => q.id);
 
 const record = (over: Partial<BenchRecord> = {}): BenchRecord => ({
   id: 'v01', chapter: 1, question_id: null, state: 'answered', wall_s: 5, usd: 0.05, output_tokens: 300, thinking_tokens: 0,
-  grounded: true, insufficient: false, blocks: 2, blocks_with_verified_quote: 2, ...over,
+  grounded: true, insufficient: false, blocks: 2, blocks_with_verified_quote: 2, gold_in_top8: true, gold_cited: true,
+  ...over,
 });
 const forSet = (over: (i: number) => Partial<BenchRecord> = () => ({})) =>
   benchSet(v2(), fixed()).map((q, i) => record({ id: q.id, chapter: q.chapter, ...over(i) }));
@@ -78,11 +79,39 @@ describe('bench runs and summary (NFR-TUTOR-1..3)', () => {
     expect(summary([...all.slice(0, 39), record({ id: 'v99' })], ids()).gate_n_met).toBe(false);
   });
 
-  test('mean cost counts answered and expired questions only', () => {
+  test('mean cost counts answered questions and expired ones that spent something', () => {
     const all = forSet((i) => (i < 4 ? { state: i < 2 ? 'failed' : 'refused', usd: 0 } : { usd: 0.06 }));
     expect(summary(all, ids()).mean_usd).toBe(0.06);
+    const expired = forSet((i) =>
+      i === 0 ? { state: 'expired', usd: 0 } : i === 1 ? { state: 'expired', usd: 0.03 } : { usd: 0.06 },
+    );
+    // 38 answered at 0.06 and one expired at 0.03 count; the unspent expired one does not
+    expect(summary(expired, ids()).mean_usd).toBe(+((38 * 0.06 + 0.03) / 39).toFixed(6));
     const failing = summary(forSet((i) => ({ wall_s: i === 39 ? 99 : 40, usd: 0.07, grounded: i % 2 === 0 })), ids());
     expect(failing.pass).toEqual({ 'NFR-TUTOR-1': false, 'NFR-TUTOR-2': false, 'NFR-TUTOR-3': false });
     expect(summary([], ids()).n).toBe(0);
+  });
+
+  test('grounded is split by whether retrieval found a gold page (NFR-TUTOR-3)', () => {
+    // 25 questions with a gold page in the top 8 (23 grounded, 22 citing it); 15 without (3 grounded)
+    const all = forSet((i) =>
+      i < 25
+        ? { gold_in_top8: true, grounded: i < 23, gold_cited: i < 22 }
+        : { gold_in_top8: false, grounded: i < 28, gold_cited: false, insufficient: i >= 28 },
+    );
+    const s = summary(all, ids());
+    expect(s.grounded_given_gold_in_top8).toEqual({
+      in_top8: { n: 25, grounded: 23, share: 0.92 },
+      not_in_top8: { n: 15, grounded: 3, share: 0.2 },
+    });
+    expect(s.gold_cited_share).toBe(0.55);
+    expect(hitsGold([61, 72], [71, 72])).toBe(true);
+    expect(hitsGold([61, 70], [71, 72])).toBe(false);
+    expect(hitsGold([], [71])).toBe(false);
+    expect(s.grounded_share).toBe(0.65);
+    expect(summary([], ids()).grounded_given_gold_in_top8).toEqual({
+      in_top8: { n: 0, grounded: 0, share: null },
+      not_in_top8: { n: 0, grounded: 0, share: null },
+    });
   });
 });

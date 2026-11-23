@@ -53,7 +53,12 @@ export interface BenchRecord {
   insufficient: boolean;
   blocks: number;
   blocks_with_verified_quote: number;
+  gold_in_top8: boolean; // a gold page among the question's top 8 search hits (the retrieval predictor)
+  gold_cited: boolean; // a page the answer cites is a gold page
 }
+
+/** Whether any of `pages` is one of the question's gold pages. */
+export const hitsGold = (pages: number[], gold: number[]): boolean => pages.some((p) => gold.includes(p));
 
 /** The records of several runs (oldest first), one per question id: a later run's record replaces an earlier one. */
 export const mergeRuns = (runs: BenchRecord[][]): BenchRecord[] => {
@@ -68,7 +73,13 @@ export const mergeRuns = (runs: BenchRecord[][]): BenchRecord[] => {
 };
 
 const round = (x: number, digits: number) => +x.toFixed(digits);
-const COSTED = new Set(['answered', 'expired']); // failed and refused records do not describe a question's cost
+// A question's cost: answered ones, and expired ones that spent something; failed, refused and unspent expired
+// records do not describe it (NFR-TUTOR-2).
+const costed = (r: BenchRecord) => r.state === 'answered' || (r.state === 'expired' && r.usd > 0);
+const split = (rs: BenchRecord[]) => {
+  const grounded = rs.filter((r) => r.grounded).length;
+  return { n: rs.length, grounded, share: rs.length ? round(grounded / rs.length, 4) : null };
+};
 
 /** The numbers of the merged runs; NFRs are decided only when the records are exactly the bench set's ids. */
 export const summary = (records: BenchRecord[], setIds: string[]) => {
@@ -78,9 +89,9 @@ export const summary = (records: BenchRecord[], setIds: string[]) => {
     n === GATE_N && ids.size === GATE_N && setIds.length === GATE_N && setIds.every((id) => ids.has(id));
   const blocks = records.reduce((a, r) => a + r.blocks, 0);
   const verified = records.reduce((a, r) => a + r.blocks_with_verified_quote, 0);
-  const costed = records.filter((r) => COSTED.has(r.state ?? ''));
+  const spent = records.filter(costed);
   const p95_s = n ? p95(records.map((r) => r.wall_s)) : null;
-  const mean_usd = costed.length ? round(costed.reduce((a, r) => a + r.usd, 0) / costed.length, 6) : null;
+  const mean_usd = spent.length ? round(spent.reduce((a, r) => a + r.usd, 0) / spent.length, 6) : null;
   const grounded_share = n ? round(records.filter((r) => r.grounded).length / n, 4) : null;
   const per_chapter: Record<string, { n: number; grounded: number }> = {};
   for (const r of records) {
@@ -95,6 +106,12 @@ export const summary = (records: BenchRecord[], setIds: string[]) => {
     grounded_share,
     insufficient_share: n ? round(records.filter((r) => r.insufficient).length / n, 4) : null,
     verified_block_share: blocks ? round(verified / blocks, 4) : null,
+    gold_cited_share: n ? round(records.filter((r) => r.gold_cited).length / n, 4) : null,
+    // A miss with the gold page retrieved is the tutor's; without it, retrieval's (NFR-TUTOR-3).
+    grounded_given_gold_in_top8: {
+      in_top8: split(records.filter((r) => r.gold_in_top8)),
+      not_in_top8: split(records.filter((r) => !r.gold_in_top8)),
+    },
     per_chapter,
     gate_n_met,
     pass: {
