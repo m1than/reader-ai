@@ -335,67 +335,89 @@ owner_notes:
   - "ADR-0025 hypothesis 1 passed against a stub (spikes/agent-proxy-handshake, zero credit). FR-AGENT-11 checks the real upstream (≈ $0.03) under the owner's $30 test budget (budget.test_budget_usd, 2026-11-22), which covers live checks and live L02 compiles without further consent; every spend goes to the ledger and the per-run cap still applies."
   - "Spend is the Agent SDK credit of the subscription (ADR-0005). The ledger records it; docs/progress.yaml's budget ledger keeps the development spend."
 
-# ---- Proposed amendment (ADR-0030, SRV-FRESH; DRAFT, not yet requirements) ----
-# Pinned data these items read, produced by the zero-credit stub run (spikes/web-search § 5a) before Red:
-#   WEB_SEARCH_VERSION (expected `web_search_20250305`), the sha256 of the CLI's canonical WebSearch client-tool
-#   definition for claude-agent-sdk 0.2.187, the keys the CLI sends on the nested search tool, the nested request's
-#   model (H-WS-2) and its `max_tokens`. If the CLI changes any of them, the freshness check fails closed with
-#   `tools_mismatch` until the data is re-pinned.
+# ---- Proposed amendment (ADR-0030, SRV-FRESH; DRAFT revision 2, not yet requirements) ----
+# Pinned data (VEC-AGENT-3), measured by the zero-credit stub run (spikes/web-search § 3a, § 5a) for
+# claude-agent-sdk 0.2.187 (bundled CLI cc_version 2.1.330.355). WEB_SEARCH_VERSION = `web_search_20250305`; the CLI's
+# nested tool `{type, name: "web_search", max_uses: 8}`; WebSearch input_schema sha256
+# ce035ada7312377e4219f1f4d74d325e1db5b9e3b9c4bf9b8e46e7e119b7cbbb; DeferredToolPlaceholder input_schema sha256
+# efddc7bd8bbcef73a14eb1ace1ffdaec81e518ef1e13c1e9271d0b8acb694a49. Paths seen in the binary but not on the wire
+# (a `search_profile` field, the small-model flag `tengu_plum_vx3`, search-elsewhere, searchViaSearchService, a
+# ccr-proxy, an auxiliary request; deep-reviewer round 1) are outside the pin and fail closed. Any web search version
+# other than `web_search_20250305`, or a new CLI pin, needs a new deep-reviewer round.
+# Red gate: the deep-reviewer approves, the owner accepts ADR-0030, and the live call (spikes/web-search § 5b) has run.
 proposed_requirements:
   - id: FR-AGENT-14
     text: >-
-      Task-scoped tool allowance (ADR-0030 Decision 1). `POST /run-tokens` takes an optional `"task"` and, only with
-      `"task": "freshness_web"`, an optional `"web_search": {"searches_max": n, "searches_per_request_max": m,
-      "requests_max": r}` (positive integers; any other task with `web_search` → 400 `tools_not_allowed`). For a
-      token without that allowance FR-AGENT-4 is unchanged: a non-empty `tools` or `mcp_servers` → 403
-      `tools_mismatch`. For a `freshness_web` token a body is forwarded only when its `tools` is exactly (a) a
-      one-element list whose canonical JSON sha256 equals the pinned WebSearch client-tool digest (a main-loop
-      request), or (b) a one-element list holding an object with `type` = WEB_SEARCH_VERSION, `name` = `web_search`
-      and no keys beyond `type`, `name`, `max_uses`, one of `allowed_domains`/`blocked_domains` (each ≤ 20 ASCII
-      hostnames) and the pinned extra keys (a nested search request); else 403 `tools_mismatch`. `mcp_servers` stays
-      refused. A nested request's `model` must equal the token's model or the pinned nested model (data), else 403
-      `model_mismatch`. More than `requests_max` requests on one token → 403 `request_cap`. The adapter
-      (FR-AGENT-6) accepts tools only from the code table `TOOL_STAGES = {("freshness_web", "web"): ("WebSearch",)}`;
-      any other StageCall with tools raises `tools_mismatch` before the reservation. For such a call it passes
-      `tools=["WebSearch"]`, `allowed_tools=[]`, the caller's `can_use_tool` and `PreToolUse` hook, `max_turns` from
-      the call, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`; the init check (FR-AGENT-7) then
-      requires `tools == ["WebSearch"]` and empty `mcp_servers`.
+      Task-scoped tool allowance with pinned shapes (ADR-0030 Decision 1). `POST /run-tokens` takes an optional
+      `"task"` and, only with `"task": "freshness_web"`, an optional `"web_search": {"searches_max": n,
+      "searches_per_request_max": m, "requests_max": r}` (JSON integers ≥ 1, not booleans; any other task with
+      `web_search` → 400 `tools_not_allowed`). A token without that allowance, **including a `freshness_web` token
+      without it**, is tool-less: FR-AGENT-4 and FR-AGENT-7 ("tools must be empty") apply unchanged. With the
+      allowance, a body is forwarded only in one of two shapes, else 403 `tools_mismatch`:
+      (a) **main loop** — `tools` holds exactly one element named `WebSearch` with exactly the keys `name`,
+      `description`, `input_schema`, no `type`, a description of ≤ 1,000 characters (not pinned by bytes: the CLI may
+      put dated text in it) and an `input_schema` whose canonical sha256 equals the pinned digest, plus at most one
+      `DeferredToolPlaceholder` element (`defer_loading: true`, pinned input_schema digest, description ≤ 200
+      characters); no `tool_choice` other than absent or `{type: auto}`;
+      (b) **nested search** — `tools` is exactly one object with `type` = WEB_SEARCH_VERSION, `name` = `web_search` and
+      no keys beyond `type`, `name`, `max_uses`; `max_uses`, if present, a JSON integer ≥ 1 (absent is allowed; 0, a
+      negative, a float, a string or a boolean → 403 `tools_mismatch`); no `allowed_domains`, `blocked_domains`,
+      `user_location`, `allowed_callers` or `search_profile`; `tool_choice` absent or `{type: auto}`.
+      `mcp_servers` stays refused. Every request's `model` must equal the token's model, else 403 `model_mismatch`
+      (a nested request moved to another model by a CLI flag fails closed). More than `requests_max` requests on one
+      token → 403 `request_cap`. A refusal settles by FR-AGENT-9's record rule (no 2xx → $0; otherwise the reserve).
+      The adapter (FR-AGENT-6) accepts tools only from the code table
+      `TOOL_STAGES = {("freshness_web", "search"): ("WebSearch",)}`; any other StageCall with tools raises
+      `tools_mismatch` before the reservation. For such a call it passes `tools=["WebSearch"]`, `allowed_tools=[]`,
+      the caller's `PreToolUse` hook (the prompt is a string, so not `can_use_tool`), `max_turns` from the call,
+      `abort_on_retry`, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`; the init check (FR-AGENT-7)
+      then requires `tools == ["WebSearch"]` and empty `mcp_servers`.
   - id: FR-AGENT-15
     text: >-
-      Search allowance enforced by the proxy (ADR-0030 Decision 2). For each nested search request of a
-      `freshness_web` token, before forwarding, the proxy sets `max_uses` to min(the client's `max_uses` if present,
-      `searches_per_request_max`, remaining) — the only field the proxy rewrites, in the checked object it
-      re-serialises (FR-AGENT-4) — and subtracts that value from the token's remaining allowance; with 0 remaining it
-      refuses with 403 `search_cap` and forwards nothing. The upstream record (FR-AGENT-3) adds `searches_forwarded`
-      (the sum of forwarded `max_uses`) and `requests`. Failed searches still count against `max_uses` upstream
-      (REF-AGENT-8), so the allowance bounds billed searches from above. The proxy log line (FR-AGENT-5) adds the
-      route kind (`main` | `search`) and nothing else.
+      Search allowance and request cap enforced by the proxy (ADR-0030 Decision 2). For each nested search request,
+      before forwarding, the proxy sets `max_uses` to min(the client's value or `searches_per_request_max` when
+      absent, `searches_per_request_max`, remaining) — the **only field the proxy ever rewrites**, in the checked object
+      it re-serialises (FR-AGENT-4) — and subtracts it from the token's remaining allowance; with 0 remaining it
+      refuses with 403 `search_cap` and forwards nothing. Every forwarded request counts against `requests_max`,
+      including the CLI's own retries of a 429, 529 or 5xx (REF-AGENT-4: up to 10 resends): a retried nested request
+      finds the allowance used and is refused, so retries cannot buy more searches. SRV-FRESH sets `requests_max` = 3
+      (2 main-loop requests + 1 nested) and `abort_on_retry` (FR-AGENT-13 d), so a retry ends the call instead of
+      waiting. The upstream record (FR-AGENT-3) adds `searches_forwarded` and `requests`. Failed searches still count
+      against `max_uses` upstream (REF-AGENT-8), so the allowance bounds billed searches from above. The proxy log
+      line (FR-AGENT-5) adds the route kind (`main` | `search`) and nothing else (VEC-AGENT-4).
   - id: FR-AGENT-16
     text: >-
-      Search fee and multi-request settlement. `spec/fixtures/SRV-AGENT/pricing.yaml` gains `web_search_usd: 0.01` per
-      search (REF-AGENT-8, $10 per 1,000); `cost(model, usage)` adds `usage.server_tool_use.web_search_requests ×
-      web_search_usd` (absent → 0). Settle rows store `web_search_requests` (additive migration `agent_0003`, a
-      nullable int); VEC-AGENT-1 gains a web-search case and the cross-check (FR-AGENT-8) compares the totals with the
-      fee. For a `freshness_web` token, FR-AGENT-9's settlement changes in one place: several 2xx are expected, so
-      when the record shows no refusal, nothing in flight or failed, requests ≤ `requests_max` and the SDK reports a
-      cost, the settle amount is the SDK cost (H-WS-4: it includes the fee; if the live call shows it does not, the
-      adapter adds `searches_forwarded × web_search_usd` as an upper bound); every other case keeps FR-AGENT-9's rule.
-      The reserve for a tool call is max(the caller's floor, FR-AGENT-9's single-call estimate +
-      `searches_max × web_search_usd`); the caller's floor must cover the multi-turn worst case (SRV-FRESH
-      `web_reserve_floor_usd`).
+      Search fee and settlement. `spec/fixtures/SRV-AGENT/pricing.yaml` gains `web_search_usd: 0.01` per search
+      (REF-AGENT-8, $10 per 1,000); `cost(model, usage)` adds `server_tool_use.web_search_requests × web_search_usd`
+      (absent → 0). Settle rows store `web_search_requests` (additive migration `agent_0003`, a nullable int). The SDK's
+      `ResultMessage.usage` covers the main loop only, while `total_cost_usd` and `model_usage` include the nested
+      request and the fee (measured against the stub, spikes/web-search § 3a); so for a tool call the settle row's
+      usage fields and `web_search_requests` come from the sum over `model_usage` entries, and the cross-check
+      (FR-AGENT-8) recomputes from that sum. For a `freshness_web` token several 2xx are expected: when the record
+      shows no refusal, nothing in flight or failed, requests ≤ `requests_max`, and the SDK reports a cost, the settle
+      amount is `total_cost_usd`; every other case keeps FR-AGENT-9's rule (the reserve when the outcome is unknown).
+      **H-WS-6** (the live call): if `model_usage` does not match the proxy-observed requests per model within the
+      cross-check tolerance, tool calls settle at their reserve until the proxy records per-request usage itself (a
+      later amendment). The reserve for a tool call is max(the caller's floor, FR-AGENT-9's single-call estimate +
+      `searches_max × web_search_usd`); the caller's floor must cover the call's worst case by formula (SRV-FRESH
+      `search_reserve_floor_usd`, REF-AGENT-8 § 4), knowing that the tokens a search adds are not enforceable.
 
 proposed_invariants:
   - id: INV-AGENT-6
     text: >-
-      For any sequence of run_token requests and bodies: a body with non-empty `tools` is forwarded only on a
-      `freshness_web` token and only in one of FR-AGENT-14's two pinned shapes; on such a token every forwarded
-      `max_uses` ≤ `searches_per_request_max` and their sum ≤ `searches_max`; `mcp_servers` is never forwarded
-      non-empty (property test against a stub upstream).
+      For any sequence of run_token requests and bodies, including retries: a body with non-empty `tools` is
+      forwarded only on a token with a `web_search` allowance and only in one of FR-AGENT-14's two shapes; on such a
+      token every forwarded `max_uses` ≤ `searches_per_request_max`, their sum ≤ `searches_max`, and at most
+      `requests_max` requests are forwarded; `mcp_servers` is never forwarded non-empty (property test against a stub
+      upstream).
 
 proposed_vectors:
   - id: VEC-AGENT-3
-    source: The CLI's request shapes for WebSearch (main-loop client tool definition, nested search tool, models, max_tokens), pinned from the stub run of spikes/web-search § 5a
+    source: The CLI's request shapes for WebSearch measured by the stub run (spikes/agent-proxy-handshake/results/20261123T2055*-websearch*) — main-loop tools with DeferredToolPlaceholder, the WebSearch definition with its input_schema digest, the nested body (tool, tool_choice, no thinking, no cache_control, max_tokens from CLAUDE_CODE_MAX_OUTPUT_TOKENS, model equal to the main model) — plus refused variants (a `type` on WebSearch, a second client tool, `search_profile`, domain lists, another model, `max_uses` 0, 1.5, "1", true, absent)
     file: spec/fixtures/SRV-AGENT/websearch-shapes.yaml
+  - id: VEC-AGENT-4
+    source: Allowance and request-cap sequences (one search then a retried nested request, a 429 resend sequence, requests_max reached by main-loop turns, a refused request then a 2xx) with the forwarded max_uses, the refusals and the settlement per FR-AGENT-9/-16
+    file: spec/fixtures/SRV-AGENT/websearch-sequences.yaml
 
 proposed_normative:
   - id: REF-AGENT-8

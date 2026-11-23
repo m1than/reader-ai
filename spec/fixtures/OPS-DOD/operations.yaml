@@ -618,7 +618,7 @@ operations:
       security: { missing: "SRV-AGENT proposed FR-AGENT-14/15 and INV-AGENT-6 (tool allowance only for freshness_web), SRV-FRESH INV-FRESH-3/-4 and WEB-FRESH INV-FRESHUI-1/-2 (safe links, owner-only); no test yet" }
       privacy: { missing: "SRV-FRESH INV-FRESH-1 (no book text in search queries, canary) and INV-FRESH-2 (no web page text stored); no test yet" }
       a11y: { missing: "no axe run on the freshness card yet (WEB-FRESH FR-FRESHUI-7; at 1280, 1024 and 390 px once implemented)" }
-      latency: { missing: "no sourced budget; web_job_timeout_s 1800 is a timeout, not a latency target" }
-      cost: { missing: "estimate ≈ $0.27–0.40 per check (spikes/web-search § 4, not measured); run cap $1.00 and daily cap $2.00 are SRV-FRESH bounds without a test yet" }
+      latency: { missing: "no sourced budget; the job timeouts are timeouts, not latency targets" }
+      cost: { missing: "estimate ≈ $0.27 per check, worst ≈ $0.39 by formula (spikes/web-search § 4, not measured); run cap $1.00 and daily cap $2.00 are SRV-FRESH bounds without a test yet" }
       observability: { missing: "SRV-FRESH FR-FRESH-13 and SRV-AGENT proposed FR-AGENT-15's log field; no test yet" }
       recovery: { missing: "SRV-FRESH FR-FRESH-10/-12 (job retries, failed and budget_refused states, re-run, staleness); no test yet" }

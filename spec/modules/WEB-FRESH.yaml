@@ -1,7 +1,8 @@
 # WEB-FRESH — the "Source freshness" card for a material (owner request 2026-11-23; server side SRV-FRESH,
 # ADR-0030 proposed).
 #
-# Status: DRAFT. No code until SRV-FRESH is approved and the deep-reviewer approves this spec.
+# Status: DRAFT, revision 2 (follows SRV-FRESH revision 2: bibliography confirmation by sha256, three stages).
+# Red gate: SRV-FRESH is approved, the deep-reviewer approves this spec, and the owner accepts ADR-0030.
 #
 # The card (one component, `FreshnessCard`, given a material id) shows:
 #   1. the bibliography the check will search for, editable (FR-FRESHUI-2);
@@ -38,6 +39,7 @@ adr: [ADR-0030, ADR-0013]
 
 paths:
   - web/src/fresh/**
+  - spec/fixtures/WEB-FRESH/**
 
 normative:
   - id: REF-FRESHUI-1
@@ -64,19 +66,22 @@ requirements:
       Bibliography. Shows title, authors, edition, year, publisher, ISBN, and the original's title, edition and year,
       with its source ("from you" or "read from the book's first pages"). "Edit" opens a form with those fields and
       SRV-FRESH FR-FRESH-1's limits as client checks; Save sends `PUT …/bibliography`; a 400 shows the field's error.
-      A scan-read bibliography shows "Check these details before the web search" with a "Looks right" checkbox that
-      sets `confirm_bibliography`.
+      A scan-read bibliography (`scan_bibliography` present, no owner entry) shows "Check these details before the web
+      search" with a "These details are right" checkbox; checking it makes the run send `bibliography_sha256` = the
+      `sha256` the server returned with that scan bibliography (the card never computes it). Editing and saving
+      instead makes the bibliography the owner's.
   - id: FR-FRESHUI-3
     text: >-
       Run. "Run check" shows the estimate as "About $low–$high, at most $cap" from `estimate` and needs a second click
-      "Run for up to $high" to post `POST …/freshness {"high_usd", "confirm_bibliography"}`. A 409 `estimate_changed`
-      shows the new estimate and asks again; 409 `freshness_running` switches to progress; `daily_budget_exhausted`
-      says "Daily limit for freshness checks reached ($2.00); try again tomorrow" with the server's numbers. Money is
-      shown from the server's decimal strings, never recomputed in the browser.
+      "Run for up to $high" to post `POST …/freshness {"high_usd", "bibliography_sha256"?}`. A 409 `estimate_changed`
+      shows the new estimate and asks again; 409 `freshness_running` switches to progress; 409
+      `bibliography_unconfirmed` or `nothing_to_confirm` reloads the card and asks to check the details again;
+      `daily_budget_exhausted` says "Daily limit for freshness checks reached ($2.00); try again tomorrow" with the
+      server's numbers. Money is shown from the server's decimal strings, never recomputed in the browser.
   - id: FR-FRESHUI-4
     text: >-
-      Status and verdict. While running, a role=status line "Checking: reading the book" / "Searching the web" polls
-      every 3 s until a final status. A done report shows a badge with text and icon, never colour alone: `Current`,
+      Status and verdict. While running, a role=status line "Reading the book" / "Searching the web (k of n)" /
+      "Writing the report" polls every 3 s (chosen: a check takes minutes; not measured) until a final status. A done report shows a badge with text and icon, never colour alone: `Current`,
       `Partly outdated`, `Outdated` (REF-FRESHUI-4 1.4.1); "Checked <date>"; `Stale` with its reason (older than 90
       days, re-imported, details changed) and "Run again". `failed` and `budget_refused` show their code's message and
       "Run again". A scan-only report (`verdict` null) says the bibliography needs a check.
@@ -114,7 +119,8 @@ invariants:
       the anchors of INV-FRESHUI-1 (unit test with markup and script strings in every field).
 
 nfr:
-  # Chosen bound, not measured: one card of text, links and a form with no new dependency; the Red build measures it.
+  # CHOSEN bound (20,000 gzip bytes), not measured: one card of text, links and a form with no new dependency; the
+  # Red build measures it.
   - id: NFR-FRESHUI-1
     metric: gzip bytes of the lazy `/materials/{id}/freshness` chunk (it does not grow NFR-UI-1's initial chunk)
     threshold: 20000

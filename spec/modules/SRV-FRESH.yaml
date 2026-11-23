@@ -1,59 +1,59 @@
 # SRV-FRESH — the source freshness check (owner request 2026-11-23: "validate how current the source is; if it's
-# out of date, recommend another resource to study from"). Owner decision 2026-11-23: Claude's server-side web
-# search (ADR-0030, proposed).
+# out of date, recommend another resource to study from"). Owner decisions 2026-11-23: Claude's server-side web
+# search through the Agent SDK's WebSearch on the subscription; dates labelled "as reported"; caps $1.00 per run,
+# $2.00 per day, 6 searches per check, 90-day TTL; queries may hold title, edition, authors and outline topics, never
+# book text (ADR-0030, proposed).
 #
-# Status: DRAFT. No code until ADR-0030's hypotheses are checked (spikes/web-search § 5) and the deep-reviewer
-# approves. Complex areas (AGENTS.md): MCP-like tool authorization in agent-proxy, secrets, cost math, jobs.
+# Status: DRAFT, revision 2 (deep-reviewer round 1: changes, 12 blocking; all addressed, see `review`).
+# Red gate: the deep-reviewer approves, the owner accepts ADR-0030, and the live call of spikes/web-search § 5b has
+# confirmed H-WS-3/-6 and H-FRESH-2. Complex areas (AGENTS.md): tool authorization in agent-proxy, secrets, cost
+# math, jobs.
 #
-# What it does, for one imported material:
-#   (a) **dated-claims scan** — one model call, no tools, over a deterministic sample of the material's spans: extracts
-#       the bibliography from the front pages and flags statements likely superseded (versions, APIs, protocols,
-#       standards, tools, figures), each with its span, page, a short subject and a confidence;
-#   (b) **web check** — one Agent SDK run with the CLI's `WebSearch` tool (server-side search at Anthropic, through
-#       agent-proxy; ADR-0030), whose prompt holds only the bibliography, outline topics and the claim subjects:
-#       finds newer editions, newer authoritative books, official documentation or courses, and checks whether the
-#       flagged claims changed. Output: a verdict `current | partly_outdated | outdated`, reasons with citations
-#       (URL, title, date), and 3–5 recommendations (title, URL, date, why it is better, which sections it covers).
-# The report is stored per material and ingest, owner-only, re-runnable, and stale after a TTL.
+# What it does, for one imported material, in three stages:
+#   (a) **scan** — one model call, no tools, over a deterministic sample of the material's spans: extracts the
+#       bibliography from the front pages and flags statements likely superseded (versions, APIs, protocols,
+#       standards, tools, figures), each with its span, page, a ≤ 5-word subject and a confidence;
+#   (b) **searches** — a query plan built by code from templates over the bibliography, outline topics and claim
+#       subjects (FR-FRESH-5); each planned query runs as its own short Agent SDK run with the CLI's `WebSearch`
+#       (server-side search at Anthropic through agent-proxy, one search per run; ADR-0030); a `PreToolUse` gate allows
+#       only that query verbatim (FR-FRESH-6). The worker keeps each run's structured result (titles, URLs) and the
+#       nested model's short summary;
+#   (c) **report** — one tool-less call that reads the bibliography, topics, claim subjects and the search results
+#       (as untrusted data) and writes the verdict `current | partly_outdated | outdated`, reasons with citations,
+#       per-claim status and 3–5 recommendations. Every stored URL is a URL string the searches returned (FR-FRESH-8).
+# The report is stored per material and ingest, owner-only, re-runnable, and stale after the TTL.
 #
-# Design decisions (each open to the reviewer and the owner):
-#   - Book text never reaches a search query: the web stage's prompt is built from metadata, outline titles and
-#     ≤ 5-word claim subjects only (FR-FRESH-5), and the worker's `can_use_tool` gate refuses any query that carries a
-#     6-word run of a sampled span or a word outside that prompt's vocabulary (FR-FRESH-6). A canary test covers the
-#     prompt, the gate and every body forwarded through a stub upstream (INV-FRESH-1).
-#   - Links come only from this run's search results (FR-FRESH-8): the worker collects the URLs of every `WebSearch`
-#     tool result it sees in the SDK stream; a cited or recommended URL outside that set is dropped. Dates are what
-#     the model reports (`date_source: model`), because the SDK's WebSearch output carries titles and URLs only
-#     (spikes/web-search § 3a); the UI says so.
-#   - Stored: titles, URLs, dates, the model's own short reasons, outline section ids. Never stored: page text,
-#     `cited_text`, `encrypted_content`, snippets (INV-FRESH-2, ADR-0030 copyright stance).
-#   - The report feeds no prompt in this revision (defers).
+# Why per-query runs and a separate report call (round 1, blockers 3, 5, 8, 10): one multi-turn tool loop has a
+# worst case above the $1.00 cap (≈ $0.93 for the web loop on Sonnet, the reviewer's figure), because every turn
+# re-reads the growing context and the output cap applies to every request. Per-query runs have max_turns 2 and one
+# search each, and the report call has no tools. The worst case follows from the bounds by formula: ≈ $0.39 per check
+# (REF-FRESH-2 § 4). The model cannot steer queries, which also makes the query guarantee exact (INV-FRESH-1).
 #
-# Hypotheses that gate Red (spikes/web-search § 3a, § 5): H-WS-1 (the CLI's nested search request through
-# ANTHROPIC_BASE_URL and its shapes), H-WS-2 (the nested request's model), H-WS-3 (tokens per search,
-# planning range 3,000–20,000), H-WS-4 (`total_cost_usd` includes the $0.01 fee). H-FRESH-1: a 60,000-character
-# stratified sample flags the dated topics a reader would name; checked on the pilot by the [live] item
-# FR-FRESH-14 against the owner's judgement (no gold set exists yet).
+# Hypotheses (spikes/web-search § 3a; measured by § 5b, the owner's live call): H-WS-3 (t, tokens per search; chosen
+# planning bound 20,000, not enforceable), H-WS-6 (SDK `total_cost_usd`/`model_usage` equal the proxy-recorded
+# per-request usage), H-FRESH-2 (the search-run model passes the planned query verbatim; else the gate denies).
+# H-FRESH-1: a 60,000-character stratified sample flags the dated topics a reader would name; the owner judges it on
+# the pilot in FR-FRESH-14.
 #
 # Cross-spec items (paired changes in their own specs; not edited here except SRV-AGENT's proposed amendment):
-#   - SRV-AGENT: proposed FR-AGENT-14..16 and INV-AGENT-6 (task-scoped tool allowance, `max_uses` rewrite and search
-#     allowance, search fee in pricing and ledger, multi-request settlement), drafted in its `proposed_requirements`.
-#   - SRV-EVENTS: KIND_MODULES adds `reader.freshness.jobs` (kinds `freshness.scan`, `freshness.web`).
+#   - SRV-AGENT: proposed FR-AGENT-14..16, INV-AGENT-6, VEC-AGENT-3/-4 (task-scoped tool allowance with pinned
+#     shapes, `max_uses` rewrite and allowance, `requests_max`, search fee, settlement from the SDK cost).
+#   - SRV-EVENTS: KIND_MODULES adds `reader.freshness.jobs` (kinds `freshness.scan`, `freshness.search`,
+#     `freshness.report`).
 #   - SRV-AUTH: ROUTERS appends `reader.freshness.routes`; VERSION_LOCATIONS adds `reader/freshness/migrations`.
-#   - OPS-DEPLOY: `deploy/reader.example.yaml` gains `tasks.freshness_scan: { model: sonnet }` and
-#     `tasks.freshness_web: { model: sonnet }` (SRV-CONFIG task keys are open; no SRV-CONFIG change).
-#   - SRV-INGEST (V/onboarding owns it; for later): the PDF Info dictionary (Title, Author, CreationDate) in the
-#     manifest, as a third bibliography source after the owner's and the scan's.
-#   - WEB-UI / WEB-IMPORT (V/plan and V/onboarding own them; for later): where the WEB-FRESH card mounts (the
-#     material's row in "Your sources" and the course page).
-#   - OPS-DOD: operation `material.freshness` (added in this branch, every cell `missing`).
+#   - OPS-DEPLOY: `deploy/reader.example.yaml` gains `tasks.freshness_scan: { model: sonnet }`,
+#     `tasks.freshness_web: { model: haiku }` (alias `haiku` → `claude-haiku-5-5` in SRV-AGENT's alias data) and
+#     `tasks.freshness_report: { model: sonnet }` (SRV-CONFIG task keys are open).
+#   - SRV-INGEST (V/onboarding owns it; for later): the PDF Info dictionary as a third bibliography source.
+#   - WEB-UI / WEB-IMPORT (V/plan, V/onboarding; for later): where the WEB-FRESH card mounts.
+#   - OPS-DOD: operation `material.freshness` (every cell `missing`).
 #
-# Test levels: [unit] pure Python with fixtures; [db] testcontainers Postgres; [agent] the SDK adapter against a stub
-# upstream through a real agent-proxy (zero credit, as spikes/agent-proxy-handshake); [live] against `reader up`,
-# paid from `budget.test_budget_usd`.
+# Test levels: [unit] pure Python with fixtures; [db] testcontainers Postgres; [agent] the SDK adapter against the
+# spike stub (spikes/agent-proxy-handshake `websearch` mode) through a real agent-proxy, zero credit; [live] against
+# `reader up`, paid from `budget.test_budget_usd`.
 
 id: SRV-FRESH
-title: Source freshness check — dated-claims scan, server-side web search for newer sources, verdict and recommendations with safe links
+title: Source freshness check — dated-claims scan, code-planned server-side web searches, tool-less report with safe links
 status: draft
 approved_by: null
 approved_at: null
@@ -71,249 +71,316 @@ normative:
     title: ADR-0030 — server-side web search for the freshness check (proposed)
     url: docs/adr/0030-server-side-web-search-for-freshness-check.md
   - id: REF-FRESH-2
-    title: "spikes/web-search/RESULT.md — tool facts, SDK vs direct path, cost per check (sourced 2026-11-23)"
+    title: "spikes/web-search/RESULT.md — tool facts, the CLI's measured request shapes (stub run), cost formulas"
     url: spikes/web-search/RESULT.md
   - id: REF-FRESH-3
-    title: Anthropic — Web search tool (versions, max_uses, domains, citations, errors, $10 per 1,000 searches)
+    title: Anthropic — Web search tool (versions, max_uses, domains, errors, $10 per 1,000 searches)
     url: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
   - id: REF-FRESH-4
-    title: Claude Code — WebSearch tool behavior; Agent SDK for Python (WebSearch input/output, can_use_tool, hooks, ModelUsage)
+    title: Claude Code — WebSearch tool behavior; Agent SDK for Python (hooks, ModelUsage, tool_use_result)
     url: https://code.claude.com/docs/en/tools-reference
   - id: REF-FRESH-5
-    title: WHATWG URL Standard (parsing, scheme, host serialisation, IDNA to ASCII)
-    url: https://url.spec.whatwg.org/
+    title: "Python urllib.parse.urlsplit and the `idna` codec (IDNA 2003) — the URL parser and host-to-ASCII used here"
+    url: https://docs.python.org/3/library/urllib.parse.html#urllib.parse.urlsplit
   - id: REF-FRESH-6
     title: Unicode Standard Annex #9 — bidirectional formatting characters (U+202A–U+202E, U+2066–U+2069)
     url: https://www.unicode.org/reports/tr9/
 
 bounds:
-  # Sampling (stage a). All chosen; H-FRESH-1 is checked on the pilot (FR-FRESH-14).
-  sample_chars_max: 60000        # chosen: ≈ 24,000 tokens at the measured 2.5 chars/token (spikes/compile-cost);
-                                 # ≈ 4 % of the pilot's 1,841,091 planned characters (SRV-PLAN REF-PLAN-2)
-  front_pages: 6                 # chosen: title, imprint and copyright pages sit in the first pages of a book
+  # Sampling (stage a). Chosen; H-FRESH-1 is judged on the pilot (FR-FRESH-14).
+  sample_chars_max: 60000        # chosen: ≈ 24,000 tokens at the measured 2.5 chars/token (spikes/compile-cost)
+  front_pages: 6                 # chosen: title, imprint and copyright pages sit in the first pages
   front_chars_max: 8000          # chosen; counted inside sample_chars_max
-  spans_per_section_max: 3       # chosen: stratified over level-1 outline sections (the pilot has 27, SRV-INGEST)
-  span_chars_max: 1500           # chosen: a longer span is cut at a word boundary for the sample
-  claims_max: 20                 # chosen: the report stays reviewable on one screen
-  subject_words_max: 5           # chosen: a topic term, not a sentence (FR-FRESH-5)
+  span_chars_max: 1500           # chosen: a longer span is cut at a word boundary
+  claims_max: 20                 # chosen: reviewable on one screen
+  subject_words_max: 5           # chosen: a topic phrase, not a sentence (INV-FRESH-1)
   subject_chars_max: 60
-  # Web stage (b).
-  topics_max: 40                 # chosen: outline titles of level ≤ 2 in outline order, the first 40
+  # Bibliography (FR-FRESH-1). Chosen.
+  bib_title_chars_max: 200
+  bib_authors_max: 10
+  bib_author_chars_max: 100
+  bib_edition_chars_max: 40
+  bib_publisher_chars_max: 120
+  # Searches (stage b). Owner-approved: 6 searches per check.
+  searches_max: 6
+  topics_max: 40                 # chosen: outline titles of level ≤ 2, the first 40
   topic_chars_max: 80
-  searches_max: 6                # chosen: 1–2 for editions (translation and original), 1 for newer books, 3 for
-                                 # claims; S1 says single facts take 1–3 searches
-  searches_per_request_max: 1    # chosen: keeps input cost linear in searches (spikes/web-search § 4)
-  turns_max: 8                   # searches_max + 2 (the first turn and the final answer)
   query_chars_max: 120           # chosen, under the API's `query_too_long` (limit not published)
-  shingle_words: 6               # chosen: a 6-word run copied from a span is "span text" for the gate
+  shingle_words: 6               # chosen: a 6-word run copied from a non-front span is "book text" (INV-FRESH-1)
+  search_max_turns: 2            # the tool call and the reply (spikes/web-search § 3a)
+  search_requests_max: 3         # 2 main-loop requests + 1 nested search request; no retry is allowed for
+                                 # (abort_on_retry), so any extra request is refused (SRV-AGENT FR-AGENT-14)
+  search_output_tokens: 1000     # CLAUDE_CODE_MAX_OUTPUT_TOKENS; caps the main and the nested request (§ 3a)
+  t_max_tokens: 20000            # CHOSEN planning bound for tokens one search adds; NOT enforceable (H-WS-3)
+  summary_chars_max: 1500        # the nested model's summary kept for the report prompt only, never stored
+  # Report (stage c).
+  report_output_tokens: 4000
   recommendations_min: 3         # owner request: 3–5 when the verdict is not `current`
   recommendations_max: 5
   reasons_max: 8
   text_chars_max: 300            # reasons, why, notes
   title_chars_max: 200
   url_chars_max: 2048
-  # Money (ADR-0030 Decision 5). Chosen bounds over the estimate in REF-FRESH-2 § 4.
-  run_cap_usd: 1.00              # ≥ scan reserve 0.17 + web reserve floor 0.80
-  daily_cap_usd: 2.00            # per user, both tasks, UTC day: two checks a day
-  web_reserve_floor_usd: 0.80    # ≥ the worst planned web stage, $0.68 at t = 20,000 tokens per search
-  scan_max_output_tokens: 4000
-  web_max_output_tokens: 4000    # per request (the proxy's output cap; H-WS-1 shows the nested request's max_tokens)
+  # Money (owner-approved 2026-11-23). Formulas in REF-FRESH-2 § 4.
+  run_cap_usd: 1.00              # ≥ worst case $0.39 per check; it also fits one paid retry, unused (FR-FRESH-12)
+  daily_cap_usd: 2.00            # per user, all three tasks, UTC day
+  search_reserve_floor_usd: 0.02 # ≥ the per-run worst case $0.0171 on Haiku 5.5 at t_max (REF-FRESH-2 § 4)
   # Time.
-  report_ttl_days: 90            # chosen: editions change over years, documentation over months; stale, not deleted
+  report_ttl_days: 90            # owner-approved: stale, never deleted
   scan_job_timeout_s: 1200       # SRV-PIPELINE's stage bound (one call)
-  web_job_timeout_s: 1800        # structural: turns_max requests, each possibly in the CLI's ~3-minute retry
-  web_deadline_s: 1500           # FR-AGENT-13 (e), inside the job timeout
+  search_job_timeout_s: 300      # chosen: one search run; abort_on_retry ends a retry wait at once
+  search_deadline_s: 240         # FR-AGENT-13 (e), inside the job timeout
+  report_job_timeout_s: 1200
 
 tables:
-  material_bibliography: { owner_id: true, columns: "owner_id → users.id, material_id uuid → materials, title text, authors text[], edition text null, year int null, publisher text null, isbn text null, original_title text null, original_edition text null, original_year int null, source text (owner|scan), updated_at; pk (owner_id, material_id)" }
-  freshness_reports: { owner_id: true, columns: "id uuid pk, owner_id → users.id, material_id uuid, ingest_id uuid → ingests, status text (running|done|failed|budget_refused), inputs_sha256 text, bibliography jsonb, sample jsonb (span ids and pages only, no text), claims jsonb null, verdict text null, reasons jsonb null, recommendations jsonb null, searches jsonb null (query, result URLs and titles only), web_search_requests int null, dropped jsonb null (counts by reason), cost_usd numeric(12,6) null, models jsonb, prompt_versions jsonb, error text null, created_at, finished_at null; index (owner_id, material_id, created_at desc)" }
+  material_bibliography: { owner_id: true, columns: "owner_id → users.id, material_id uuid → materials, title text, authors text[], edition text null, year int null, publisher text null, isbn text null, original_title text null, original_authors text[] null, original_edition text null, original_year int null, source text (owner|scan), sha256 text (canonical JSON of the fields), updated_at; pk (owner_id, material_id)" }
+  freshness_reports: { owner_id: true, columns: "id uuid pk, owner_id → users.id, material_id uuid, ingest_id uuid → ingests, status text (running|done|failed|budget_refused), scan_inputs_sha256 text, inputs_sha256 text null, scan_reused_from uuid null → freshness_reports, bibliography jsonb, sample jsonb (span ids and pages only), claims jsonb null, scan_bibliography jsonb null (what the scan read; owner-visible for confirmation), searches jsonb null ([{query, template, status, result_count}]: no URLs, titles or summaries), verdict text null, reasons jsonb null, claim_status jsonb null, recommendations jsonb null, dropped jsonb null (counts by reason), web_search_requests int null, cost_usd numeric(12,6) null, models jsonb, prompt_versions jsonb, error text null, created_at, finished_at null; index (owner_id, material_id, created_at desc)" }
 
 errors: [no_material, not_imported, freshness_running, budget_exhausted, daily_budget_exhausted, output_invalid,
-  bibliography_invalid, estimate_changed, not_owner]
+  bibliography_invalid, bibliography_unconfirmed, nothing_to_confirm, estimate_changed, no_results, not_owner]
 
 requirements:
   - id: FR-FRESH-1
     text: >-
-      Bibliography. A material's bibliography is `{title, authors[], edition?, year?, publisher?, isbn?,
-      original_title?, original_edition?, original_year?}`. Sources in precedence order: the owner's entry
-      (`PUT /api/materials/{id}/bibliography`, stored with `source: owner`), else the scan's extraction (FR-FRESH-3,
-      `source: scan`, written only when no owner entry exists). Validation: strings NFC, sanitised (FR-FRESH-8), title
-      1–200 characters, ≤ 10 authors of ≤ 100 characters, years 1450–(current year + 1), ISBN-10/13 with a valid check
-      digit or null; else 400 `bibliography_invalid`. The web stage (FR-FRESH-5) runs only with a bibliography whose
-      title is set; the owner sees and may edit the scan's extraction before the web stage starts (FR-FRESH-11).
+      Bibliography. Fields `{title, authors[], edition?, year?, publisher?, isbn?, original_title?,
+      original_authors[]?, original_edition?, original_year?}`, every string NFC and sanitised (FR-FRESH-8), within
+      the `bib_*` bounds (titles ≤ `bib_title_chars_max`, ≤ `bib_authors_max` authors of ≤ `bib_author_chars_max`,
+      edition ≤ `bib_edition_chars_max`, publisher ≤ `bib_publisher_chars_max`), years 1450–(current year + 1), ISBN-10
+      or ISBN-13 with a valid check digit; anything else 400 `bibliography_invalid`. Its `sha256` is that of its
+      canonical JSON. Sources: the owner's entry (`PUT /api/materials/{id}/bibliography`, `source: owner`), else the
+      scan's extraction (FR-FRESH-3), stored as `scan_bibliography` on the report and copied to
+      `material_bibliography` with `source: scan` only when no owner entry exists; scan values outside the bounds are
+      dropped field by field. Stage (b) runs only when the bibliography's source is `owner`, or when the check's POST
+      carried `bibliography_sha256` equal to the sha256 of the scan bibliography it confirms (FR-FRESH-11).
   - id: FR-FRESH-2
     text: >-
-      Sample (deterministic). From the material's current ingest (SRV-INGEST `material_spans`, `material_outline`): (1)
-      every span of the first `front_pages` pages in `seq` order until `front_chars_max`; (2) for each level-1 outline
-      section in order (its pages from its entry to the next level-1 entry), up to `spans_per_section_max` spans of
-      kind paragraph, list item, table or code, ranked by a dated-claim score — the count of matches of the fixed
-      patterns in `reader.freshness.signals` (version numbers `\d+\.\d+`, four-digit years 1990–2099, and a fixed word
-      list per material language, e.g. `version`, `latest`, `currently`, `deprecated`, `версия`, `последн`, `устарел`)
-      — ties by `seq`; each span cut to `span_chars_max` at a word boundary; until `sample_chars_max`. With no outline,
-      sections are equal page ranges of ⌈page_count / 20⌉ pages. The sample stores span ids and pages only. Same
-      ingest and bounds → same sample, byte for byte (VEC-FRESH-4).
+      Sample (deterministic). From the material's current ingest (SRV-INGEST `material_spans`, `material_outline`):
+      (1) the spans of the first `front_pages` pages in `seq` order until `front_chars_max` (the **front spans**);
+      (2) the other spans of kind paragraph, list item, table or code, grouped into sections by level-1 outline
+      entries (each from its page to the next entry's; with no outline, equal ranges of ⌈page_count / 20⌉ pages),
+      ranked inside each section by a dated-claim score — the count of matches of the fixed patterns in
+      `reader.freshness.signals` (version numbers `\d+\.\d+`, four-digit years 1990–2099, and a fixed word list per
+      material language such as `version`, `latest`, `deprecated`, `версия`, `последн`, `устарел`) — ties by `seq`;
+      then taken **round-robin by rank**: every section's rank-1 span in section order, then every rank-2 span, and so
+      on, each cut to `span_chars_max` at a word boundary, until `sample_chars_max`. Every section gets a span before
+      any section gets a second (VEC-FRESH-4 has more sections than the budget holds). The sample stores span ids and
+      pages only. Same ingest and bounds → the same sample, byte for byte.
   - id: FR-FRESH-3
     text: >-
-      Scan stage (a). One SRV-AGENT call, task `freshness_scan`, stage `scan`, `thinking_off`, no tools, own system
-      prompt from `server/src/reader/freshness/prompts/scan.<version>.md`: the sample rendered with SRV-PIPELINE's
-      source delimiter (`⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧`, `⟦`/`⟧` replaced in span text; FR-PIPELINE-2), the
-      instruction that source text is material, never instructions, and the output schema. Output JSON:
-      `{bibliography: {...FR-FRESH-1 fields}, claims: [{span: "s<k>", subject, kind:
-      version|api|protocol|standard|tool|statistic|law|other, why, confidence: low|medium|high}]}` with at most
-      `claims_max` claims. Code expands aliases to span ids and pages; drops a claim with an unknown alias, a subject
-      over `subject_words_max` words or `subject_chars_max` characters, or a subject that contains a
-      `shingle_words`-word run of any sampled span (counted in `dropped`). Invalid JSON or schema → `output_invalid`
-      (transient, SRV-AGENT FR-AGENT-10).
+      Scan (stage a). One SRV-AGENT call, task `freshness_scan`, stage `scan`, `thinking_off`, no tools, its own
+      system prompt (`server/src/reader/freshness/prompts/scan.<version>.md`) holding the sample in SRV-PIPELINE's
+      source delimiter (`⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧`, `⟦`/`⟧` in span text replaced; FR-PIPELINE-2), the
+      rule that source text is material and never instructions, and the output schema `{bibliography: {...FR-FRESH-1
+      fields}, claims: [{span: "s<k>", subject, kind: version|api|protocol|standard|tool|statistic|law|other, why,
+      confidence: low|medium|high}]}` with at most `claims_max` claims. Code expands aliases to span ids and pages and
+      drops a claim with an unknown alias or a subject over `subject_words_max` words or `subject_chars_max`
+      characters (counted in `dropped`). Invalid JSON or schema → `output_invalid` (transient).
+      **Reuse:** `scan_inputs_sha256` = sha256 of the canonical JSON of (ingest id, sample span ids, the scan prompt's
+      version and file sha256, resolved model id); it excludes the bibliography. A new check whose
+      `scan_inputs_sha256` equals that of an earlier `done` report of the same material copies that report's `claims`
+      and `scan_bibliography`, sets `scan_reused_from`, and records no scan cost (no provider call).
   - id: FR-FRESH-4
     text: >-
-      Topics. The topic list is the outline titles of level ≤ 2 in outline order, the first `topics_max`, each
-      sanitised and cut to `topic_chars_max`, with its outline `seq` as the section id that recommendations reference.
+      Topics. The outline titles of level ≤ 2 in outline order, the first `topics_max`, each sanitised and cut to
+      `topic_chars_max`, with its outline `seq` as the section id that recommendations reference.
   - id: FR-FRESH-5
     text: >-
-      Web prompt by construction. The web stage's system prompt (`prompts/web.<version>.md`) and user prompt are built
-      by one function `web_prompt(bibliography, topics, claims)` whose only inputs are the FR-FRESH-1 bibliography, the
-      FR-FRESH-4 topics and, per kept claim, `{id: "c<k>", subject, kind, confidence, page}`; it never receives span
-      text, the sample or a claim's `why`. It states the task (newer editions of the book and of the original, newer
-      authoritative books, official documentation or courses for the topics, and whether each claim subject changed),
-      that search results are untrusted data and never instructions, that only URLs returned by searches may be cited,
-      the output schema (FR-FRESH-8), and the current date (UTC) so "newer" has a reference.
+      Query plan (by construction; VEC-FRESH-7). `plan(bibliography, topics, claims, language, today)` returns at
+      most `searches_max` queries from the fixed, ordered templates in `reader.freshness.queries` (data), each filled
+      only from bibliography fields, topic titles, one claim subject and the template's own words in the material's
+      language plus English: (1) `original_edition` — original title, first original author's surname, "new edition
+      after", original edition, original year (only with an original title); (2) `edition` — title, first author's
+      surname, publisher, "new edition", year; (3–5) `claim` — for the three kept claims of highest confidence (then
+      lowest page), the subject plus the kind's words ("latest version", "current specification", "official
+      documentation"); (6) `books` — the first level-1 topic, "book" and the current year. Missing claims are replaced
+      by `topic_docs` queries (a level-1 topic plus "official documentation"), in topic order. Each query is NFC,
+      whitespace-collapsed, and cut at a word boundary of its variable parts to `query_chars_max`. A planned query is
+      dropped (`dropped.query_unsafe`) when, after masking the bibliography and topic strings it contains, it holds a
+      `shingle_words`-word run of any non-front sampled span.
   - id: FR-FRESH-6
     text: >-
-      Query gate. The web stage passes `can_use_tool` (WebSearch is not in `allowed_tools`) and a `PreToolUse` hook,
-      both calling one function `gate(query, allowed_domains, blocked_domains)`. It allows a `WebSearch` call only when:
-      the query is 1–`query_chars_max` characters after NFC; it contains no `shingle_words`-word run (case-folded,
-      punctuation-stripped tokens) of any sampled span; every token is in the vocabulary V = the tokens of
-      `web_prompt`'s inputs ∪ the fixed query-word list in `reader.freshness.signals` (e.g. `edition`, `new`,
-      `latest`, `official`, `documentation`, `course`, `release`, `deprecated`, `vs`, `издание`, `новое`) ∪ integers
-      1900–2100; domain lists, if present, have ≤ 20 ASCII hostnames each; and the run has searches left
-      (`searches_max`). A denied call returns a deny with a fixed reason (no query echoed) and is counted in
-      `dropped.query_denied`. Allowed queries are stored in `searches` (VEC-FRESH-5).
+      Query gate. Each search run gets one planned query q and a `PreToolUse` hook (the adapter passes a string prompt,
+      so a hook and not `can_use_tool`; spikes/web-search § 3a shows a hook deny stops the search before any nested
+      request). The hook allows a `WebSearch` call only when its `query`, trimmed, equals q exactly and it carries no
+      `allowed_domains` or `blocked_domains`; anything else is denied with a fixed reason (the query is not echoed)
+      and counted in `dropped.query_denied`; the run then ends at `search_max_turns` without a search. H-FRESH-2
+      (how often the model passes q verbatim) is measured by the live call; if it is low, the search prompt changes,
+      never the gate.
   - id: FR-FRESH-7
     text: >-
-      Web stage call. One SRV-AGENT call, task `freshness_web`, stage `web`, `thinking_off`, `deadline_s` =
-      `web_deadline_s`, `max_turns` = `turns_max`, tools exactly `["WebSearch"]`, floor `web_reserve_floor_usd`, and
-      the search allowance `{searches_max, searches_per_request_max}` passed to the run_token (SRV-AGENT proposed
-      FR-AGENT-14/15). The init check requires the tool list `["WebSearch"]` exactly. The worker reads every
-      `WebSearch` tool result in the stream and records its `{query, results: [{url, title}]}` (titles sanitised and
-      cut; no other content kept); the union of result URLs is the run's link set R.
+      Search runs (stage b). For each planned query, one SRV-AGENT call: task `freshness_web`, stage `search`, own
+      system prompt (`prompts/search.<version>.md`: call WebSearch once with exactly the query and no other
+      parameters, then reply in one line), `thinking_off`, `abort_on_retry`, `deadline_s` = `search_deadline_s`,
+      `max_turns` = `search_max_turns`, tools exactly `["WebSearch"]`, `max_output_tokens` = `search_output_tokens`,
+      floor `search_reserve_floor_usd`, and the run_token allowance `{searches_max: 1, searches_per_request_max: 1,
+      requests_max: search_requests_max}` (SRV-AGENT proposed FR-AGENT-14/15). The worker takes the run's result only
+      from the structured `UserMessage.tool_use_result` (`{query, results: [{tool_use_id, content: [{title, url}]},
+      "<summary>"], searchCount}`; spikes/web-search § 3a): the URL strings and titles of every content item join the
+      check's link set R (with the run's query), and the summary string, sanitised and cut to `summary_chars_max`, is
+      kept in memory for stage (c) only. The model's own reply is discarded. A run that fails, is denied, or is refused
+      by a cap is recorded in `searches` with its status; the check continues with the remaining queries, and stage
+      (c) runs if at least one search returned results (else the check ends `failed` with `no_results`).
   - id: FR-FRESH-8
     text: >-
-      Report parsing and safety (VEC-FRESH-1..3). Web output JSON: `{verdict: current|partly_outdated|outdated,
-      reasons: [{text, citations: [{url, title, date?}]}], claims: [{id: "c<k>", status: changed|unchanged|unknown,
-      note, citations}], recommendations: [{title, url, date?, kind: book_edition|book|official_docs|course|other,
-      why, covers: [section id]}]}`; unknown keys, a wrong enum or a missing key → `output_invalid`. Then code, in
-      order: sanitises every string (NFC; removes C0/C1 controls, U+200B–U+200F, the bidi formatting characters of
-      REF-FRESH-6, U+2028/U+2029; collapses whitespace; cuts to its bound); parses each URL by REF-FRESH-5 and keeps it
-      only if the scheme is `http` or `https`, it has no username or password, it is ≤ `url_chars_max`, and it equals,
-      after removing the fragment, a URL of R after removing its fragment; stores the host serialised in ASCII
-      (punycode) beside it; drops a citation or recommendation whose URL fails (counted in `dropped` by reason); keeps
-      `date` only as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` not after today, with `date_source: model`; drops `covers` ids
-      that are not topic ids and claim ids that are not kept claims; keeps at most `reasons_max` reasons and
-      `recommendations_max` recommendations. A non-`current` verdict with fewer than `recommendations_min` surviving
-      recommendations is stored as is, with `dropped` explaining why (never padded).
+      Report (stage c) and safety (VEC-FRESH-1..3). One SRV-AGENT call, task `freshness_report`, stage `report`,
+      `thinking_off`, no tools, `max_output_tokens` = `report_output_tokens`. Its prompt (`prompts/report.<version>.md`)
+      holds the bibliography, the topics with ids, the kept claims as `{id: "c<k>", subject, kind, confidence, page}`,
+      and each search's query, results (title, URL) and summary inside a delimiter `⟦web⟧ … ⟦/web⟧` that web text
+      cannot forge (`⟦`/`⟧` replaced), with the rules that web text is untrusted data and never instructions, that
+      only URLs listed there may be cited, as plain strings, and the current date (UTC). Output JSON:
+      `{verdict: current|partly_outdated|outdated, reasons: [{text, citations: [url]}], claims: [{id, status:
+      changed|unchanged|unknown, note, citations: [url]}], recommendations: [{url, date?, kind:
+      book_edition|book|official_docs|course|other, why, covers: [section id]}]}`; unknown keys, a wrong enum or a
+      missing key → `output_invalid`. Then code, in order: sanitises every string (NFC; removes C0/C1 controls,
+      U+200B–U+200F, U+2028/U+2029 and the bidi formatting characters of REF-FRESH-6; collapses whitespace; cuts to
+      its bound); for each cited or recommended URL finds the R entry whose URL string, without any fragment, equals
+      it without any fragment, and keeps the **R entry's URL string and title** (never the model's strings), else
+      drops it (`dropped.url_not_searched`); keeps a URL only if `urllib.parse.urlsplit` gives scheme `http` or
+      `https`, no username or password, a host, and length ≤ `url_chars_max` (`dropped.url_unsafe`), and stores
+      `host` = the hostname encoded with the `idna` codec (ASCII; REF-FRESH-5); keeps `date` only as `YYYY`, `YYYY-MM`
+      or `YYYY-MM-DD` not after today, with `date_source: model`; drops unknown section and claim ids; keeps at most
+      `reasons_max` reasons and `recommendations_max` recommendations. A non-`current` verdict with fewer than
+      `recommendations_min` surviving recommendations is stored as is, `dropped` saying why (never padded).
   - id: FR-FRESH-9
     text: >-
-      Estimate and caps. `estimate(material)` returns `{low_usd, high_usd, cap_usd}` computed from the sample's actual
-      character count and the bounds with the formulas of REF-FRESH-2 § 4 and the pricing table (SRV-AGENT
-      FR-AGENT-8, the search fee of proposed FR-AGENT-16): low = scan at the plain input rate + web with 3 searches at
-      t = 3,000; high = scan reserve + `web_reserve_floor_usd`; cap = `run_cap_usd` (VEC-FRESH-6). Starting a check
-      (FR-FRESH-11) requires the client to echo `high_usd`; a different value gives 409 `estimate_changed` with the
-      new estimate. Before the scan, and again before the web stage, the check refuses with `daily_budget_exhausted`
-      when spent(user, {freshness_scan, freshness_web}, UTC day) (SRV-AGENT `ledger.spent(..., day=True)`) + the
-      remaining reserves > `daily_cap_usd`; each call also passes `run_cap_usd` as its run cap and `daily_cap_usd` as
-      `daily_budget_usd`. A refusal sets status `budget_refused` with the code. Overshoot of either cap is bounded by
-      one call's reserve (SRV-AGENT INV-AGENT-4).
+      Estimate and caps. `estimate(material)` returns `{low_usd, high_usd, cap_usd}` as decimal strings: high = scan
+      reserve (from the actual sample characters, SRV-AGENT FR-AGENT-9) + `searches_max` × `search_reserve_floor_usd`
+      + the report's worst case (REF-FRESH-2 § 4 formula over the bounds); low = the expected values of REF-FRESH-2
+      § 4; cap = `run_cap_usd` (VEC-FRESH-6). Starting a check requires the client to echo `high_usd`; a different
+      value gives 409 `estimate_changed` with the new estimate. Before each call the check refuses with
+      `daily_budget_exhausted` when spent(user, {freshness_scan, freshness_web, freshness_report}, UTC day) + that
+      call's reserve > `daily_cap_usd`, and each call passes `run_cap_usd` as its run cap (SRV-AGENT FR-AGENT-9) and
+      `daily_cap_usd` as `daily_budget_usd` (FR-AGENT-12). A refusal ends the check `budget_refused` with the code.
+      The daily sum is exact only because a user runs one check at a time (FR-FRESH-11) and the worker runs one job at
+      a time (SRV-EVENTS FR-EVENTS-9); overshoot of either cap is bounded by one call's reserve (INV-AGENT-4), plus
+      (t − `t_max_tokens`) × the input rate for a search whose results exceed the chosen bound (not enforceable).
   - id: FR-FRESH-10
     text: >-
-      Storage and staleness. One `freshness_reports` row per check; rows are never updated after `done`, `failed` or
-      `budget_refused`. `inputs_sha256` = sha256 of the canonical JSON of (ingest id, bibliography, sample span ids,
-      topics, prompt versions with their file hashes, resolved models). The latest `done` report of a material is
-      `stale` when older than `report_ttl_days`, when its ingest is not the material's current ingest, or when the
-      bibliography changed since (different `inputs_sha256` for the same sample); a stale report is shown, labelled,
-      and never deleted by the TTL. Re-running is always allowed (one running check per material).
+      Storage and staleness. One `freshness_reports` row per check, never updated after `done`, `failed` or
+      `budget_refused`. `inputs_sha256` = sha256 of the canonical JSON of (`scan_inputs_sha256`, bibliography sha256,
+      topics, the planned queries, the search and report prompt versions with file hashes, resolved models). The latest
+      `done` report is `stale` when older than `report_ttl_days`, when its ingest is not the material's current
+      ingest, or when the bibliography's sha256 changed; a stale report is shown, labelled, and never deleted by the
+      TTL. Stored: the fields of FR-FRESH-8 and `searches` as `{query, template, status, result_count}`. Not stored:
+      result lists, titles or URLs that no citation or recommendation uses, summaries, page text, `cited_text`,
+      `encrypted_content`.
   - id: FR-FRESH-11
     text: >-
-      Routes (session, owner role, the material's owner only; anyone else 404 `not_found`, SRV-AUTH):
-      `GET /api/materials/{id}/freshness` → `{report|null, stale, bibliography, estimate}`;
-      `PUT /api/materials/{id}/bibliography` → the stored bibliography (FR-FRESH-1);
-      `POST /api/materials/{id}/freshness {"high_usd": "<decimal>", "confirm_bibliography": bool}` → 202 `{report_id}`
-      and enqueues `freshness.scan`; 409 `freshness_running` while one runs; 404 `not_imported` without an ingest;
-      `GET /api/materials/{id}/freshness/{report_id}` → that report. When the bibliography came from the scan and the
-      owner did not confirm it, the run stops after the scan with status `done` and `verdict` null, so the owner can
-      correct it and run again (the scan is reused when `inputs_sha256` of the scan matches, at $0). Bodies ≤ 64 KiB
-      JSON (SRV-AUTH FR-AUTH-12).
+      Routes (session, owner role, the material's owner only; anyone else gets the 404 `not_found` of a material that
+      does not exist; SRV-AUTH). `GET /api/materials/{id}/freshness` → `{report|null, stale, bibliography,
+      scan_bibliography|null, estimate}`; `PUT /api/materials/{id}/bibliography` → the stored bibliography
+      (FR-FRESH-1); `POST /api/materials/{id}/freshness {"high_usd": "<decimal>", "bibliography_sha256"?: "<hex>"}`
+      → 202 `{report_id}` and enqueues `freshness.scan`; 409 `freshness_running` while one runs for this user; 404
+      `not_imported` without an ingest; `bibliography_sha256` when no scan bibliography exists → 409
+      `nothing_to_confirm`; a value that is not the latest scan bibliography's sha256 → 409
+      `bibliography_unconfirmed`. Without an owner bibliography and without a matching confirmation, the check stops
+      after stage (a) as `done` with `verdict` null, so the owner can confirm or correct it and run again (the scan is
+      reused, FR-FRESH-3). `GET /api/materials/{id}/freshness/{report_id}` → that report. JSON bodies ≤ 64 KiB
+      (SRV-AUTH FR-AUTH-12).
   - id: FR-FRESH-12
     text: >-
-      Jobs. Kinds `freshness.scan` and `freshness.web` (SRV-EVENTS), keyed by (report_id, stage), `max_attempts` 2,
-      timeouts `scan_job_timeout_s` and `web_job_timeout_s`; transient set per SRV-AGENT FR-AGENT-10. The scan handler
-      enqueues the web job inside itself (SRV-PIPELINE's pattern). Status: `running` while a key is queued or
-      running; `failed` (with the error code) when a key is dead; `budget_refused`; `done`.
+      Jobs. Kinds `freshness.scan`, `freshness.search` and `freshness.report` (SRV-EVENTS), keyed by (report_id, stage,
+      index), timeouts from the bounds, `max_attempts` 2. A transient failure (SRV-AGENT FR-AGENT-10) is retried
+      **only when the failed attempt settled at $0** (no upstream 2xx); an attempt that spent is final, so a check
+      spends at most one paid attempt per call. The $1.00 cap would also fit one paid retry of every stage ($0.78),
+      but that room is not used. Each handler enqueues the next job inside itself (SRV-PIPELINE's pattern); search
+      jobs run in plan order. Status: `running` while a key is queued or running; `failed` with the error code when a
+      scan or report key is dead or no search returned results; `budget_refused`; `done`.
   - id: FR-FRESH-13
     text: >-
-      Logging. One line per stage end: report id prefix (8 hex), stage, status, error code, searches used, queries
-      denied, links dropped, cost, duration. Never a query, URL, title, bibliography field, span text, prompt or model
-      output.
+      Logging. One line per stage end: report id prefix (8 hex), stage, index, status, error code, searches used,
+      denials, links dropped, cost, duration. Never a query, URL, title, bibliography field, span text, summary, prompt
+      or model output.
   - id: FR-FRESH-14
     text: >-
-      Live: on the pilot (owner-confirmed bibliography), one check through the routes completes with status `done`,
-      a verdict, ≥ 1 search, every stored URL in that run's link set, cost ≤ `run_cap_usd`, and the ledger rows carry
-      `web_search_requests`; the owner judges whether the flagged claims and recommendations make sense (H-FRESH-1),
-      recorded in docs/progress.yaml. Expected ≈ $0.27–0.40 from `budget.test_budget_usd`. [live]
+      Live: on the pilot with an owner-entered bibliography, one check through the routes completes `done` with a
+      verdict, ≥ 1 search with results, every stored URL in that check's R, cost ≤ `run_cap_usd`, ledger rows carrying
+      `web_search_requests`, and the settled amount within SRV-AGENT's cross-check tolerance of the proxy-recorded
+      usage (H-WS-6); the owner judges the flagged claims and recommendations (H-FRESH-1), recorded in
+      docs/progress.yaml. Expected ≈ $0.27 from `budget.test_budget_usd`. [live]
 
 invariants:
   - id: INV-FRESH-1
     text: >-
-      No book text leaves for search (canary): for any sample whose spans carry canary words absent from the
-      bibliography and the outline, and any scan output, no `shingle_words`-word run of a sampled span and no canary
-      word appears in `web_prompt`'s output, in a query `gate` allows, or in any request body agent-proxy forwards to
-      a stub upstream during the web stage (property test plus an [agent] test).
+      What can reach a search query from the book (property test plus an [agent] test). Every query sent is a planned
+      query (FR-FRESH-5/-6) and consists of template words, bibliography strings and topic titles (both exempt:
+      owner-visible metadata, which may also occur in spans) and at most one claim subject of ≤ `subject_words_max`
+      words. Hence: (a) at most `subject_words_max` words per query come from non-front spans other than through
+      exempt strings; (b) no query holds a `shingle_words`-word run of a non-front sampled span once its exempt
+      strings are masked; (c) no other text of the book can reach it. Test: canary sentences of ≥ 6 unique words are
+      planted in non-front spans and never in the outline or the bibliography; a fake scan may copy up to 5 canary
+      words into a subject; asserted for every query `plan` returns, every query the hook allows, and every body
+      agent-proxy forwards to the stub during stage (b): no 6-word canary run appears and at most 5 canary words
+      appear per query.
   - id: INV-FRESH-2
     text: >-
-      A stored report holds only the FR-FRESH-8 schema's fields within their bounds, and no `cited_text`,
-      `encrypted_content`, `encrypted_index` or page snippet, whatever the model or the stream returned (property
-      test over generated outputs and streams).
+      A stored report holds only FR-FRESH-8's and FR-FRESH-10's fields within their bounds, and no `cited_text`,
+      `encrypted_content`, `encrypted_index`, summary or page snippet, whatever the model or the stream returned
+      (property test over generated outputs and streams).
   - id: INV-FRESH-3
     text: >-
-      Every stored URL is `http` or `https`, has no userinfo, is ≤ `url_chars_max`, and is in its run's link set R
-      (property test over generated URLs, including `javascript:`, `data:`, userinfo, IDN and fragment cases).
+      Every stored URL is byte-equal to a URL string of its check's R, has scheme `http` or `https`, no userinfo, and
+      ≤ `url_chars_max` characters; its stored title is R's title for that URL (property test over generated model
+      outputs, including `javascript:`, `data:`, userinfo, IDN, fragment and look-alike cases).
   - id: INV-FRESH-4
     text: >-
       Reports, bibliographies and estimates are visible only to the material's owner; another user gets the same 404
       body as for a material that does not exist ([db]).
+  - id: INV-FRESH-5
+    text: >-
+      Quarantine: no module outside `reader.freshness` imports its internals or names the tables `freshness_reports`
+      or `material_bibliography` in SQL, so web-derived text reaches no other prompt (an import-graph and source-scan
+      [unit] test over server/src; the routes module is the only public surface).
 
 nfr: []
 
 vectors:
   - id: VEC-FRESH-1
-    source: Synthetic scan and web outputs (valid, missing keys, wrong enums, extra keys, over-long strings, unknown aliases and claim ids) with the parsed result or `output_invalid`
+    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, extra keys, over-long strings, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
     file: spec/fixtures/SRV-FRESH/outputs.yaml
   - id: VEC-FRESH-2
-    source: Injection cases in web results and model output (instructions in titles, bidi overrides, zero-width characters, markup, a recommendation of a URL not searched) with the sanitised stored result
+    source: Injection cases in search titles, summaries and model output (instructions, delimiter forgery, bidi overrides, zero-width characters, markup, a URL not searched, a model title differing from R's) with the sanitised stored result
     file: spec/fixtures/SRV-FRESH/injection.yaml
   - id: VEC-FRESH-3
-    source: URL cases per REF-FRESH-5 (schemes, userinfo, IDN to punycode, fragments, length) against a link set
+    source: URL cases (schemes, userinfo, IDN to ASCII, fragments, length, near-duplicates of R entries) against a link set
     file: spec/fixtures/SRV-FRESH/urls.yaml
   - id: VEC-FRESH-4
-    source: A synthetic material (spans, outline, no book text) with its expected sample, topics and inputs_sha256
+    source: Synthetic materials (spans, outlines, no book text) with their expected samples, including more sections than the budget holds and a material without an outline, plus topics and scan_inputs_sha256
     file: spec/fixtures/SRV-FRESH/sample.yaml
   - id: VEC-FRESH-5
-    source: Query-gate cases (allowed metadata and topic queries; denied shingles, canaries, out-of-vocabulary words, over-long queries, domain lists, an exhausted allowance)
+    source: Gate cases (the planned query verbatim, with surrounding spaces, altered by one word, with allowed_domains, with blocked_domains, empty)
     file: spec/fixtures/SRV-FRESH/gate.yaml
   - id: VEC-FRESH-6
     source: Estimate cases from sample sizes and the pricing table, recomputed by hand from REF-FRESH-2 § 4
     file: spec/fixtures/SRV-FRESH/estimate.yaml
+  - id: VEC-FRESH-7
+    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe)
+    file: spec/fixtures/SRV-FRESH/plans.yaml
 
 defers:
   - "Add as source: a recommendation becomes a second material of the course; waits for multi-source courses (not yet specified)."
-  - "Outdated marker on lesson cells: an `explain` cell whose cited span ids include a flagged claim's span (SRV-PIPELINE citations) shows a marker linking to the claim; a WEB-NOTEBOOK change once reports exist."
-  - "Feeding the report into compile or the tutor: only enum fields and our own outline titles, inside SRV-PIPELINE's source delimiter, never web text (ADR-0030 threats)."
-  - "Verified dates and citations: the direct Messages path (structured `page_age`, `cited_text`) once an `anthropic-api` provider exists, or a server-side `web_fetch` of the recommended pages (ADR-0030 revisit_when)."
+  - "Outdated marker on lesson cells: an `explain` cell whose cited span ids include a flagged claim's span shows a marker linking to the claim (WEB-NOTEBOOK)."
+  - "Feeding the report into compile or the tutor: only enum fields and our own outline titles, inside SRV-PIPELINE's source delimiter, never web text (ADR-0030 threats; INV-FRESH-5 keeps it impossible until then)."
+  - "Verified dates and citations: the direct Messages path once an `anthropic-api` provider exists, or a server-side `web_fetch` of the recommended pages."
+  - "Model-written follow-up queries (adaptive search): needs a multi-turn worst case that fits the cap."
   - "PDF Info dictionary as a bibliography source (SRV-INGEST paired change)."
   - "A scheduled re-check when a report goes stale; notifications (SRV-NOTIFY)."
-  - "A cheaper model per stage (stage a on Haiku 5.5 ≈ $0.006 instead of ≈ $0.13) once quality is compared (V.cost-optimize)."
   - "Per-domain allow lists (official documentation hosts) as an owner setting."
 
 owner_notes:
-  - "Each check costs about $0.27–0.40 (estimate; at most $1.00 by the run cap), shown before you start it; at most $2.00 a day."
-  - "Search queries carry the book's title, edition, authors and outline topics, never its text. They go to Anthropic's search backend as part of your Anthropic usage."
-  - "Recommendation dates are what the model reports from the search results' titles and text, not verified dates; the card says so."
+  - "Each check costs about $0.27 (estimate) and at most about $0.39 by the bounds, under your $1.00 run cap; it is shown before you start it; at most $2.00 a day."
+  - "Search queries are built by code from the title, edition, authors, outline topics and short topic phrases (at most 5 words each) that the scan picks out of the book. No sentence of the book's text goes into a query."
+  - "Recommendation dates are what the model reports from the search results, not verified dates; the card says 'as reported'."
+
+review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in revision 2: (1) structural tool pin
+  (SRV-AGENT FR-AGENT-14); (2) measured shapes and fail-closed paths (REF-FRESH-2 § 3a, FR-AGENT-14); (3) worst case by
+  formula: per-query search runs on Haiku plus a tool-less report, ≈ $0.39 ≤ $1.00, t stated as not enforceable;
+  (4) H-WS-6 and settlement (FR-AGENT-16); (5) requests_max derived (3 per search run) with abort_on_retry
+  (FR-FRESH-7, FR-AGENT-15, VEC-AGENT-4); (6) INV-FRESH-1 restated with exempt strings, the canary fixed, the dead
+  subject shingle check removed, the owner note reworded; (7) bibliography bounds, confirmation by sha256,
+  `nothing_to_confirm`; (8) the gate is an exact match on a code-planned query, so vocabulary rules, ordinals and
+  denial turns no longer apply, and H-FRESH-2 measures verbatim passing; (9) round-robin sampling with a VEC-FRESH-4
+  case; (10) retries only after a $0 settle; (11) scan_inputs_sha256 and scan reuse; (12) the Red gate includes the
+  owner's acceptance of ADR-0030. Non-blocking items applied: R from tool_use_result, R's URL string and title stored,
+  urllib.parse.urlsplit and idna named, queries stored without URLs or titles, quarantine INV-FRESH-5, the daily cap's
+  dependence on concurrency 1, the hook instead of can_use_tool, domain lists denied."
