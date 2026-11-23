@@ -310,3 +310,17 @@ vectors:
 # - An empty port (`https://x:`) is accepted as a URL without a port; this is harmless.
 # - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
 #   1+0j), matching the loader.
+
+# ---- Paired change (DRAFT, 2026-11-23, V/onboarding; drafted on V/plan and moved here by the coordinator). Held
+# under `proposed_requirements` (trace-check does not read it; this spec is approved). Promoted together with
+# SRV-SEARCH proposed FR-SEARCH-10, after the owner accepts ADR-0029, with its Red tests. ----
+proposed_requirements:
+  - id: FR-CONFIG-17
+    text: >-
+      **Reserved material ids.** A `materials[].id` that starts with `up-` is a validation problem with code
+      `reserved_id` and the message "material ids starting with up- are reserved for uploads" (SRV-INGEST proposed
+      FR-INGEST-23 names uploaded materials `up-<first 12 hex of sha256>`; SRV-SEARCH proposed FR-SEARCH-10 reads an
+      `up-` material's language from its upload, never from reader.yaml). The match is case-sensitive, on the id's
+      characters as written, with no normalisation. The problem is reported like every other FR-CONFIG-10 problem
+      (at the item's path and line, collected with the others). [unit] refused: `up-`, `up-abc`; accepted: `upx`,
+      `upload-notes`, `Up-x`.
