@@ -144,7 +144,8 @@ requirements:
       Routes (TanStack Router, declared as one route table): `/` the lesson list; `/lessons/$lessonId` the lesson view
       (WEB-NOTEBOOK); anything else a not-found view with a link to `/`. `$lessonId` must match
       `^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$` and must not be `.` or `..` (VEC-UI-2 `bad_ids`), otherwise the not-found
-      view renders and no request is made. [unit]
+      view renders and no request for that lesson is made (design pass: the shell's course sidebar, FR-UI-17, still
+      runs its `GET /api/lessons` list query on every page, so the oracle is "no `/api/lessons/<id>` request"). [unit]
   - id: FR-UI-4
     text: >-
       API client: one module with a typed function per route the slice calls (`me`, `signOut`, `listLessons`,
@@ -235,9 +236,13 @@ requirements:
       [unit] by inspecting the build output for `data:` URLs. The only `data:` URL allowed in the output is the one
       literal that the vendored library's own stylesheet carries at v0.1.0 (a `mask: url("data:image/svg+xml,…")` for
       the table sort indicator, a component the slice does not render; under the app CSP that mask would be blocked, so
-      it is an owner note for a library change, not an inlined asset). The test pins the number of distinct `data:`
-      URLs at exactly 1 (the minifier repeats it for `-webkit-mask`), so a new library literal fails the build check
-      until it is reviewed.
+      it is an owner note for a library change, not an inlined asset). Design pass (2026-11-23, reviewed here):
+      CodeMirror's `@codemirror/view` base theme carries one more literal, a `url('data:image/svg+xml,…')` background for
+      `.cm-highlightTab`, a class only the `highlightWhitespace()` extension sets, which the lab editor does not load
+      (WEB-NOTEBOOK FR-NOTEBOOK-9); it lives in the lazy editor chunk only, inside the editor's shadow root, and the
+      app CSP's `img-src 'self' blob:` would block it anyway. The test pins the distinct `data:` URLs at exactly these
+      2 — the library's (in the CSS) and CodeMirror's (in the chunk whose source map lists `@codemirror/view`, never
+      an initial chunk) — so any new literal fails the build check until it is reviewed.
   - id: FR-UI-10
     text: >-
       Layout and type (WEB polish, from the live screenshots of 2026-11-23; design pass, from the audit of the same

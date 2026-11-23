@@ -381,7 +381,8 @@ requirements:
       which would make screen readers skip the status) and the library's `Skeleton` (title and three text lines),
       hidden from assistive technology; a 404 for the lesson shows "Lesson not found" with only a "Back to
       lessons" link; any other error shows "The lesson could not be loaded." with a Retry button that refetches the
-      failed query and a "Back to lessons" link; a lesson not published yet shows FR-NOTEBOOK-1's not-published page.
+      failed query and a "Back to lessons" link; a lesson not published yet shows FR-NOTEBOOK-1's not-published page
+      (its sentence and its default chip both say "not published yet"; the chip's text is exactly "Not published yet").
       Design pass: the not-found and error states render through WEB-UI FR-UI-11's `StateBlock` (their texts above as
       its `h1`, in the sans page-title style, with the explanation lines "The lesson may have been removed or the link
       is wrong." and "Check the connection, then retry." respectively). [unit] [story]

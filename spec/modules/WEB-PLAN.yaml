@@ -130,7 +130,8 @@ requirements:
       Design pass (2026-11-23): each source is a full-width row (WEB-UI FR-UI-6's row style): the material id as its
       title (sans, semibold; a human title is server data, a follow-up), "<n> pages" muted with tabular figures, a
       neutral status chip for a material that is not imported (its status with `_` as a space, in sentence case), and
-      "Plan study time" / "Re-plan" as a ghost button; the row whose form is open has `aria-current="true"` and the
+      "Plan study time" / "Re-plan" as a ghost button (disabled until the stored-plan query has answered, so its
+      label is known); the row whose form is open has `aria-current="true"` and the
       `--acme-hover` fill. (The upload drop zone above it is WEB-IMPORT's, on another branch; this pass does not touch
       it.) [unit] the chip text, `aria-current` on the chosen row; [story]
 

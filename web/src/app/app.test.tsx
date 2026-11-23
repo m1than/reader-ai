@@ -42,7 +42,8 @@ describe('routes (FR-UI-3)', () => {
   it('shows not-found for a bad id without requesting the lesson', async () => {
     const { urls } = await mount('/lessons/..', { '/api/me': () => json(200, me) });
     await waitFor(() => expect(screen.getByText(/not found/i)).toBeTruthy());
-    expect(urls.filter((u) => u.startsWith('/api/lessons'))).toEqual([]);
+    // Design pass: the sidebar's list query runs on every page; no request is made for the lesson itself.
+    expect(urls.filter((u) => u.startsWith('/api/lessons/'))).toEqual([]);
   });
 
   it('shows not-found for an unknown path', async () => {
@@ -69,8 +70,9 @@ describe('sign-in and header (FR-UI-5)', () => {
     await act(async () => {
       trigger.click();
     });
+    const item = await screen.findByRole('menuitem', { name: /sign out/i });
     await act(async () => {
-      (await screen.findByRole('menuitem', { name: /sign out/i })).click();
+      item.click();
     });
     await waitFor(() => expect(navigate).toHaveBeenCalledWith('/api/auth/signin'));
     expect(urls).toContain('/api/auth/signout');
@@ -110,6 +112,7 @@ describe('lesson list (FR-UI-6)', () => {
 
   it('shows the error state with Retry', async () => {
     await mount('/', { '/api/me': () => json(200, me), '/api/lessons': () => json(500, { error: 'x' }) });
-    await waitFor(() => expect(screen.getByRole('button', { name: /retry/i })).toBeTruthy());
+    // Design pass: the sidebar has its own Retry; the list's is inside main.
+    await waitFor(() => expect(within(document.getElementById('content') as HTMLElement).getByRole('button', { name: /retry/i })).toBeTruthy());
   });
 });

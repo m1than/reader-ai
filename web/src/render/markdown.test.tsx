@@ -30,7 +30,8 @@ const violations = (root: HTMLElement): string[] => {
       if (attr.name === 'srcset') out.push('srcset');
       if (attr.name === 'href' && !SAFE_HREF.test(attr.value.trim())) out.push(`href ${attr.value}`);
     }
-    const trusted = el.closest('.katex, .shiki');
+    // KaTeX and Shiki output, and the module's own chrome (INV-RENDER-1, design pass: the element itself is marked).
+    const trusted = el.closest('.katex, .shiki') ?? (el.hasAttribute('data-render-chrome') ? el : null);
     if (!trusted && el.hasAttribute('style')) out.push(`style on ${tag}`);
     if (!trusted && el.getAttribute('class')) {
       const allowed = tag === 'code' && el.getAttribute('class')!.split(/\s+/).every((c) => /^(language-[\w-]+|math-inline|math-display)$/.test(c));

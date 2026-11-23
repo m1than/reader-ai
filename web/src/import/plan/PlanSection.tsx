@@ -2,9 +2,10 @@
 import { Button } from '@acme/ui/button';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ApiError } from '../../app/api';
+import { ChevronIcon, WarningIcon } from '../../ui/icons';
 import type { Confirmed, PlanApi, PlanBody, Preview, StoredPlan } from './api';
 import { message } from './messages';
-import { check, estimateLines, localDate, MINUTES, RATE, WEEKS, type Fields } from './model';
+import { check, estimateLines, estimateNotes, estimateRows, localDate, MINUTES, RATE, WEEKS, type Fields } from './model';
 
 export const PREVIEW_DEBOUNCE_MS = 300;
 
@@ -155,6 +156,20 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
   };
 
   const suggest = preview?.summary.suggest ?? null;
+  // FR-IMPORT-6 (design pass): why "Create the course" is disabled, the first reason that applies.
+  const blocked: string | null = sending
+    ? 'Creating the course…'
+    : confirmable
+      ? null
+      : fields.weeks.trim() === ''
+        ? 'Enter the total weeks first.'
+        : value === null
+          ? 'Fix the fields above first.'
+          : previewError !== null && !pending && !loading
+            ? 'The estimate failed; change a field to try again.'
+            : pending || loading || !current
+              ? 'Updating the estimate…'
+              : 'The plan does not fit; use a suggestion or change the fields.';
   return (
     <section className="plan" aria-labelledby={`${ids}-h`}>
       <h2 id={`${ids}-h`} tabIndex={-1}>
@@ -201,7 +216,10 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
           />
         </div>
         <details className="plan-pace">
-          <summary>Study pace</summary>
+          <summary>
+            <ChevronIcon className="disclosure-chevron" />
+            Study pace
+          </summary>
           <NumberField
             id={`${ids}-rate`}
             label="Minutes per 1,000 characters"
@@ -220,21 +238,15 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
 
         <div className={`plan-estimate${loading && preview ? ' is-updating' : ''}`}>
           <p role="status" className="visually-hidden">
-            {loading ? 'Updating the estimate' : preview ? 'Estimate updated' : ''}
+            {loading ? 'Updating the estimate' : lines ? `Estimate updated: ${lines.headline}` : ''}
           </p>
           {previewError ? (
             <p className="plan-error">{message(previewError)}</p>
-          ) : lines ? (
+          ) : lines && preview ? (
             <>
-              <p className="plan-headline">{lines.headline}</p>
-              {lines.deadline ? <p className="muted">{lines.deadline}</p> : null}
-              <p className="muted">{lines.reading}</p>
-              {lines.fills ? <p>{lines.fills}</p> : null}
-              <p>{lines.course}</p>
-              {lines.first ? <p>{lines.first}</p> : null}
-              {lines.extrapolation ? <p className="muted">{lines.extrapolation}</p> : null}
               {lines.notices.length > 0 ? (
-                <div className="plan-notice">
+                <div className="plan-notice callout" data-tone="warning">
+                  <WarningIcon className="callout-icon" />
                   {lines.notices.map((n) => (
                     <p key={n}>{n}</p>
                   ))}
@@ -255,8 +267,24 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
                   </div>
                 </div>
               ) : null}
+              <dl className={lines.notices.length > 0 ? 'plan-figures is-unfit' : 'plan-figures'}>
+                {estimateRows(preview, locale).map(([term, value]) => (
+                  <div key={term} className="plan-figure">
+                    <dt>{term}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="plan-notes">
+                {estimateNotes(lines).map((n) => (
+                  <p key={n}>{n}</p>
+                ))}
+              </div>
               <details className="plan-lessons">
-                <summary>Lessons</summary>
+                <summary>
+                  <ChevronIcon className="disclosure-chevron" />
+                  Lessons
+                </summary>
                 <ol>
                   {preview?.lessons.map((l) => (
                     <li key={l.id}>
@@ -284,9 +312,14 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
                 : 'Start compiling lesson 1 now'}
             </label>
           )}
-          <Button type="submit" disabled={!confirmable || sending}>
+          <Button type="submit" disabled={!confirmable || sending} aria-describedby={blocked ? `${ids}-why` : undefined}>
             Create the course
           </Button>
+          {blocked ? (
+            <p id={`${ids}-why`} className="plan-why">
+              {blocked}
+            </p>
+          ) : null}
           {confirmError ? <p className="plan-error">{message(confirmError)}</p> : null}
           {done ? (
             <div role="status" className="plan-done">

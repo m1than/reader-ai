@@ -1,8 +1,9 @@
 // The tutor's Ask panel (SRV-TUTOR FR-TUTOR-11): a question about the open lesson (and the focused cell), polled
 // until a terminal state; the answer is shown only after the server has checked it (no streaming).
 import { Button } from '@acme/ui/button';
-import { Fragment, useEffect, useId, useState, type KeyboardEvent } from 'react';
+import { Fragment, useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import { ApiError } from '../app/api';
+import { CloseIcon } from '../ui/icons';
 import { groupCitations } from '../notebook/citations';
 import type { AnswerBlock, AskBody, HistoryItem, QuestionState, TutorApi } from './api';
 import { messageFor } from './messages';
@@ -60,7 +61,16 @@ function Result({ shown }: { shown: Shown }) {
   return null;
 }
 
-function HistoryEntry({ item }: { item: HistoryItem }) {
+/** History shown before "Show n earlier questions" (FR-TUTOR-11, design pass): a structural bound. */
+export const HISTORY_SHOWN = 3;
+
+type Loaded = { kind: 'idle' } | { kind: 'loading' } | { kind: 'done'; shown: Shown } | { kind: 'failed' };
+
+/** One earlier question: a disclosure whose answer is fetched once, the first time it opens (FR-TUTOR-11). */
+function HistoryEntry({ item, lessonId, api }: { item: HistoryItem; lessonId: string; api: TutorApi }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<Loaded>({ kind: 'idle' });
+  const panelId = useId();
   const status =
     item.state === 'queued'
       ? 'waiting'
@@ -69,9 +79,43 @@ function HistoryEntry({ item }: { item: HistoryItem }) {
           ? 'answered, not fully grounded'
           : 'answered'
         : messageFor(item.error_code ?? (item.state === 'expired' ? 'expired' : 'tutor_failed'));
+  const fetchOnce = () => {
+    setLoaded({ kind: 'loading' });
+    api.getQuestion(lessonId, item.question_id).then(
+      (state) =>
+        setLoaded({
+          kind: 'done',
+          shown: state.state === 'answered' ? { kind: 'answer', state } : state.state === 'queued' ? { kind: 'waiting' } : { kind: 'message', code: terminalCode(state) },
+        }),
+      () => setLoaded({ kind: 'failed' }),
+    );
+  };
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && item.state !== 'queued' && loaded.kind === 'idle') fetchOnce();
+  };
   return (
     <li>
-      <span>{item.question}</span> <span className="muted">{status}</span>
+      <button type="button" className="history-toggle" aria-expanded={open} aria-controls={panelId} onClick={toggle}>
+        <span>{item.question}</span> <span className="muted">{status}</span>
+      </button>
+      <div id={panelId} className="history-answer" hidden={!open}>
+        {!open ? null : item.state === 'queued' ? (
+          <p className="muted">Waiting for the answer</p>
+        ) : loaded.kind === 'done' ? (
+          <Result shown={loaded.shown} />
+        ) : loaded.kind === 'failed' ? (
+          <p>
+            {messageFor('tutor_failed')}{' '}
+            <Button size="sm" variant="ghost" color="neutral" onClick={fetchOnce}>
+              Retry
+            </Button>
+          </p>
+        ) : (
+          <p className="muted">Loading the answer</p>
+        )}
+      </div>
     </li>
   );
 }
@@ -83,11 +127,23 @@ export interface AskPanelProps {
   /** The focused cell's lesson-contents label (WEB-NOTEBOOK FR-NOTEBOOK-11), shown as "About: …". */
   cellLabel?: string | null;
   api: TutorApi;
+  /** The lesson view's panel state (design pass); without it the panel renders open, as a standalone panel. */
+  open?: boolean;
+  onClose?: () => void;
 }
 
-export function AskPanel({ lessonId, revision, cellId, cellLabel = null, api }: AskPanelProps) {
+export function AskPanel({ lessonId, revision, cellId, cellLabel = null, api, open = true, onClose }: AskPanelProps) {
   const inputId = useId();
   const hintId = useId();
+  const historyId = useId();
+  const area = useRef<HTMLTextAreaElement>(null);
+  const [allHistory, setAllHistory] = useState(false);
+  // Opening focuses the text area (FR-TUTOR-11); the first render of an open standalone panel does not steal focus.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (open && !wasOpen.current) area.current?.focus();
+    wasOpen.current = open;
+  }, [open]);
   const [text, setText] = useState('');
   const [asking, setAsking] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
@@ -208,12 +264,32 @@ export function AskPanel({ lessonId, revision, cellId, cellLabel = null, api }: 
     }
   };
 
+  const shownHistory = allHistory ? history : history.slice(0, HISTORY_SHOWN);
   return (
-    <section className="tutor" id="tutor" aria-label="Tutor" tabIndex={-1}>
-      <h2>Tutor</h2>
+    <section
+      className="tutor"
+      id="tutor"
+      aria-label="Tutor"
+      tabIndex={-1}
+      hidden={!open}
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && onClose) {
+          e.stopPropagation();
+          onClose();
+        }
+      }}
+    >
+      <div className="tutor-head">
+        <h2>Tutor</h2>
+        {onClose ? (
+          <Button size="sm" variant="ghost" color="neutral" aria-label="Close the tutor" onClick={onClose}>
+            <CloseIcon />
+          </Button>
+        ) : null}
+      </div>
       {cellId !== null && <p className="muted tutor-about">{`About: ${cellLabel ?? 'the selected cell'}`}</p>}
       <label htmlFor={inputId}>Ask the tutor</label>
-      <textarea id={inputId} value={text} rows={3} aria-describedby={hintId} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
+      <textarea ref={area} id={inputId} value={text} rows={3} aria-describedby={hintId} onChange={(e) => setText(e.target.value)} onKeyDown={onKey} />
       <div className="tutor-controls">
         <span className="muted tutor-count" aria-live="off">{`${text.length} / ${QUESTION_CHARS_MAX}`}</span>
         <span className="muted tutor-hint" id={hintId}>
@@ -229,12 +305,17 @@ export function AskPanel({ lessonId, revision, cellId, cellLabel = null, api }: 
       </div>
       {history.length > 0 && (
         <>
-          <h3>Earlier questions</h3>
-          <ul className="tutor-history" role="list">
-            {history.map((item) => (
-              <HistoryEntry key={item.question_id} item={item} />
+          <h3 id={historyId}>Earlier questions</h3>
+          <ul className="tutor-history" role="list" aria-labelledby={historyId}>
+            {shownHistory.map((item) => (
+              <HistoryEntry key={item.question_id} item={item} lessonId={lessonId} api={api} />
             ))}
           </ul>
+          {history.length > HISTORY_SHOWN ? (
+            <Button size="sm" variant="ghost" color="neutral" onClick={() => setAllHistory((a) => !a)}>
+              {allHistory ? 'Show fewer' : `Show ${history.length - HISTORY_SHOWN} earlier questions`}
+            </Button>
+          ) : null}
         </>
       )}
     </section>

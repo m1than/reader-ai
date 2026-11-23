@@ -35,7 +35,7 @@ export const forbiddenUses = (): string[] =>
 /** FR-UI-1: the library entries the slice may import. */
 export const allowedEntries = [
   'button', 'toast', 'progress', 'skeleton', 'tooltip', 'dialog', 'chip', 'divider', 'link', 'typography', 'stack',
-  'container', 'app-bar', 'list-view', 'alert', 'styles.css',
+  'container', 'app-bar', 'list-view', 'alert', 'breadcrumbs', 'menu', 'drawer', 'icon', 'styles.css',
 ];
 
 export const libraryImports = (): string[] => {

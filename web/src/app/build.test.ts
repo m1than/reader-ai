@@ -45,11 +45,22 @@ describe('build (FR-UI-9)', () => {
     const library = new Set(dataUrls(readFileSync(`${webRoot}node_modules/@acme/ui/dist/styles.css`, 'utf8')));
     // Exactly one library literal (the table sort mask at v0.1.0): a new one fails here until it is reviewed.
     expect(library.size).toBe(1);
-    // Distinct URLs: the minifier may repeat the literal for a vendor-prefixed property (-webkit-mask).
-    expect(new Set(text.flatMap(dataUrls)).size).toBe(1);
-    expect(text.flatMap(dataUrls).filter((u) => !library.has(u))).toEqual([]);
-    const withoutLibrary = text.map((t) => [...library].reduce((s, u) => s.split(u).join(''), t.replace(/\s+/g, '')));
-    expect(withoutLibrary.flatMap((t) => t.match(/["'`]data:(image|font)\/[^"'`]{0,40}/g) ?? [])).toEqual([]);
+    // Design pass (FR-UI-9): CodeMirror's `.cm-highlightTab` literal, reviewed; only in the lazy editor chunk.
+    const codemirror = new Set(dataUrls(readFileSync(`${webRoot}node_modules/@codemirror/view/dist/index.js`, 'utf8')));
+    expect(codemirror.size).toBe(1);
+    const allowed = new Set([...library, ...codemirror]);
+    // Distinct URLs: the minifier may repeat the library literal for a vendor-prefixed property (-webkit-mask).
+    expect(new Set(text.flatMap(dataUrls)).size).toBe(2);
+    expect(text.flatMap(dataUrls).filter((u) => !allowed.has(u))).toEqual([]);
+    const initial = new Set(initialChunks());
+    for (const f of all.filter((x) => x.endsWith('.js'))) {
+      const asset = f.slice(outDir.length + 1);
+      if (!dataUrls(readFileSync(f, 'utf8')).some((u) => codemirror.has(u))) continue;
+      expect(initial.has(asset), asset).toBe(false);
+      expect(sourcesOf(asset).some((s) => /node_modules\/@codemirror\/view\//.test(s)), asset).toBe(true);
+    }
+    const withoutAllowed = text.map((t) => [...allowed].reduce((s, u) => s.split(u).join(''), t.replace(/\s+/g, '')));
+    expect(withoutAllowed.flatMap((t) => t.match(/["'`]data:(image|font)\/[^"'`]{0,40}/g) ?? [])).toEqual([]);
   });
 
   it('keeps markdown, math, highlighting and the lesson view out of the initial chunks', () => {

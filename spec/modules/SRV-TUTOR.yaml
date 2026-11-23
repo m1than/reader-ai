@@ -288,7 +288,8 @@ requirements:
         expanding a terminal entry fetches its state once with `GET /api/lessons/{lesson_id}/questions/{question_id}`
         and shows it with the same rendering as the current answer (blocks, citations, unsupported marks, the grounded
         notice, or its message); a failed fetch shows `tutor_failed`'s message and a Retry. A queued entry expands to
-        "Waiting for the answer". An expanded answer renders through the same pipeline as the current one, links as
+        "Waiting for the answer" (on load the first queued question resumes as the current one, as before, so a queued
+        entry in the history is a later one). An expanded answer renders through the same pipeline as the current one, links as
         plain text and no image (VEC-TUTOR-6), so a stored answer cannot inject a link or fetch a resource.
       [unit] closed by default, each opener, focus on open and on close (and the fallback to the toolbar's "Ask the
       tutor"), Escape inside the panel and from the page outside an editable field, not from inside a text area, the

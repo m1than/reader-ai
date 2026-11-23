@@ -244,8 +244,10 @@ describe('history (FR-TUTOR-11, design pass)', () => {
   });
 
   it('expands a queued entry to "Waiting for the answer"', async () => {
+    // The first queued question resumes as the current one; a later queued one stays in the history.
+    const resumed = { ...item(3, 'queued'), question_id: qid(3) };
     const queued = { ...item(1, 'queued'), question_id: qid(1) };
-    const api = fakeApi([item(2), queued]);
+    const api = fakeApi([item(2), resumed, queued], () => ({ state: 'queued' }) as QuestionState);
     render(panel({ lessonId: LESSON, revision: REV, cellId: null, api }));
     await flush();
     const entry = entries().find((e) => e.textContent?.includes('Synthetic question 1?'))!;

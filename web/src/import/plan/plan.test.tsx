@@ -180,9 +180,11 @@ describe('estimate preview (FR-IMPORT-5)', () => {
     fireEvent.change(weeks(), { target: { value: '2' } });
     await waitFor(() => expect(api.preview).toHaveBeenCalledTimes(1));
     fireEvent.change(weeks(), { target: { value: '3' } });
-    await waitFor(() => expect(screen.getByText(/^21 lessons/)).toBeTruthy());
+    // Design pass: the headline lives in the status line ("Estimate updated: …"); the count in the figures.
+    await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/^Estimate updated: 21 lessons/));
     await act(async () => release(preview()));
-    expect(screen.queryByText(/^14 lessons/)).toBeNull();
+    expect(screen.getByRole('status').textContent).not.toMatch(/14 lessons/);
+    expect(document.querySelector('.plan-figures dd')?.textContent).toBe('21');
   });
 
   it('shows no_text instead of the card', async () => {
@@ -365,6 +367,8 @@ describe('your sources (FR-IMPORT-8)', () => {
     expect(chip.closest('.acme-chip, [data-chip], .chip')).toBeTruthy();
     const rows = () => [...document.querySelectorAll('.source-row')] as HTMLElement[];
     expect(rows().map((r) => r.getAttribute('aria-current'))).toEqual([null, null]);
+    // The button is enabled once the stored-plan query has answered.
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Plan study time' }) as HTMLButtonElement).disabled).toBe(false));
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Plan study time' })));
     expect(rows().map((r) => r.getAttribute('aria-current'))).toEqual(['true', null]);
   });

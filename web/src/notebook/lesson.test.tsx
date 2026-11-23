@@ -82,7 +82,8 @@ describe('lesson view (FR-NOTEBOOK-1)', () => {
     await act(async () => {
       render(<AppRoot initialPath="/lessons/w02" fetch={fetchFn as unknown as typeof fetch} navigateAway={vi.fn()} />);
     });
-    await waitFor(() => expect(screen.getByText(/not published yet/i)).toBeTruthy());
+    // Design pass: the sentence and the chip both say it; the chip's text is exact.
+    await waitFor(() => expect(screen.getByText('Not published yet')).toBeTruthy());
     expect(urls.filter((u) => u.includes('/revisions/'))).toEqual([]);
   });
 

@@ -101,3 +101,24 @@ export const estimateLines = (p: Preview, locale: string): EstimateLines => {
     notices,
   };
 };
+
+/** FR-IMPORT-5 (design pass): the figures as definition-list rows, each only when its value exists. */
+export const estimateRows = (p: Preview, locale: string): Array<[string, string]> => {
+  const s = p.summary;
+  const e = p.estimate;
+  const num = new Intl.NumberFormat(locale);
+  const rows: Array<[string, string]> = [
+    ['Lessons', s.fixed_count > 0 ? `${num.format(s.fixed_count)} started + ${num.format(s.new_count)} new` : num.format(s.new_count)],
+  ];
+  if (s.minutes_mean !== null && s.minutes_max !== null)
+    rows.push(['Each lesson', `about ${num.format(s.minutes_mean)} min, at most ${num.format(s.minutes_max)}`]);
+  if (s.finish_by) rows.push(['Finish by', longDate(s.finish_by, locale)]);
+  if (s.fixed_count > 0) rows.push(['Deadline kept', longDate(s.end, locale)]);
+  rows.push(['Compile, whole course', `${usd(e.course_low_usd)}–${usd(e.course_high_usd)}`]);
+  if (e.first_lesson) rows.push(['Lesson 1', `${usd(e.first_lesson.low_usd)}–${usd(e.first_lesson.high_usd)}, stops at ${usd(e.run_cap_usd)}`]);
+  return rows;
+};
+
+/** FR-IMPORT-5 (design pass): the muted notes under the figures, in order. */
+export const estimateNotes = (lines: EstimateLines): string[] =>
+  [lines.reading, lines.fills, 'Costs are an estimate from one measured lesson.', lines.extrapolation].filter((n): n is string => n !== null);

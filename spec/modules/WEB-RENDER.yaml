@@ -169,8 +169,11 @@ invariants:
       For any markdown or `text/markdown` input, the rendered React tree contains no `script`, `style`, `img`,
       `iframe`, `object`, `embed`, `form` or `base` element; no attribute starting with `on`; no `style` or `srcset`
       attribute taken from the input (style objects come only from KaTeX and Shiki output); no `class` outside
-      FR-RENDER-2's allowance except on elements KaTeX and Shiki create; and no `href` whose scheme is not http, https,
-      mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
+      FR-RENDER-2's allowance except on elements KaTeX and Shiki create and on this module's own chrome (design pass:
+      the code block's wrapper and header with its Copy button and status, FR-RENDER-4, and the wide-table wrapper,
+      WEB-UI FR-UI-10), built from no input, where every element that carries a class carries `data-render-chrome`
+      itself (the test trusts that element only, never its descendants); and no `href` whose scheme is not http,
+      https, mailto or relative. [unit, property-based with fast-check over generated markup plus VEC-RENDER-1's hostile
       cases and VEC-NOTEBOOK-1's explain cell]
   - id: INV-RENDER-2
     text: >-
