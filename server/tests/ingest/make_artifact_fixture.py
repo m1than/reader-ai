@@ -16,7 +16,7 @@ from typing import Any, Final
 REPO: Final = Path(__file__).resolve().parents[3]
 OUT: Final = REPO / "spec" / "fixtures" / "SRV-INGEST" / "artifact-ok"
 MATERIAL_SHA256: Final = "a" * 64
-CONVERTER_VERSION: Final = "docling-2.151.1+r1"
+CONVERTER_VERSION: Final = "docling-2.151.1+r2"
 
 SPANS: Final[list[dict[str, Any]]] = [
     {"seq": 0, "page": 1, "kind": "heading", "level": 1, "decoded": None, "text": "Глава 1",

@@ -1,6 +1,6 @@
-"""Item mapping, reading order, outline, batches and progress lines, without Docling (SRV-INGEST).
+"""Item mapping, code indentation, reading order, outline, batches and progress, without Docling (SRV-INGEST).
 
-@trace FR-INGEST-5 FR-INGEST-6 FR-INGEST-8 FR-INGEST-9
+@trace FR-INGEST-5 FR-INGEST-6 FR-INGEST-7 FR-INGEST-8 FR-INGEST-9
 """
 
 from __future__ import annotations
@@ -140,6 +140,55 @@ def test_non_code_items_keep_docling_order_across_pages() -> None:
     ordered = [i.text for i in mapping.order(seq)]
     assert [t for t in ordered if t != "c1"] == ["a1", "b2", "a1-float", "b2-more"]
     assert ordered.index("c1") == ordered.index("a1") + 1  # after the last page-1 item above it
+
+
+# ---- FR-INGEST-7: indentation from glyph origins ----
+
+CELL = 4.05  # the pilot's monospace advance
+
+
+def glyph_rows(indents: list[int], widths: list[int], left: float = 96.38, top: float = 700.0) -> Any:
+    """Glyph origins (x, baseline y) for lines indented `indents` cells, `widths` glyphs each, 12 pt apart."""
+    return [
+        (left + (n + k) * CELL, top - row * 12.0 + (0.3 if k % 2 else 0.0))  # small baseline jitter
+        for row, (n, w) in enumerate(zip(indents, widths, strict=True))
+        for k in range(w)
+    ]
+
+
+def test_indentation_is_whole_cells_from_the_leftmost_line() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    lines = mapping.visual_lines(glyph_rows([0, 2, 4, 4, 2, 0], [8, 9, 12, 5, 1, 1]))
+    assert mapping.indentation(lines) == [0, 2, 4, 4, 2, 0]
+
+
+def test_reindent_replaces_leading_whitespace_and_never_writes_tabs() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    text = "a = 1\r\n b = 2\n\t\tc = 3\n\nd"
+    lines = mapping.visual_lines(glyph_rows([0, 4, 8, 0], [5, 5, 5, 1]))
+    assert mapping.reindent(text, lines) == "a = 1\n    b = 2\n        c = 3\n\nd"
+
+
+@pytest.mark.parametrize(
+    ("glyphs", "text"),
+    [
+        ([(10.0, 700.0), (10.0, 688.0)], "a\n b"),  # no advance: one glyph per line
+        ([(10.0, 700.0), (10.0 + CELL, 700.0), (10.0 + 1.5 * CELL, 688.0)], "ab\n c"),  # half a cell off
+        ([(10.0, 700.0), (10.0 + CELL, 700.0)], "ab\n c"),  # two text lines, one visual line
+    ],
+)
+def test_reindent_keeps_the_text_layer_when_the_rule_is_undefined(
+    glyphs: list[tuple[float, float]], text: str
+) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    assert mapping.reindent(text, mapping.visual_lines(glyphs)) == text
+
+
+def test_rounding_is_half_up_within_tolerance() -> None:
+    mapping = need("reader.ingest.host.mapping")
+    lines = [[0.0, CELL], [2.2 * CELL, 3.2 * CELL], [3.8 * CELL]]
+    assert mapping.indentation(lines) == [0, 2, 4]
+    assert mapping.indentation([[0.0, CELL], [2.3 * CELL]]) is None  # residual 0.3 > 0.25
 
 
 def test_out_of_range_bookmark_page_is_null() -> None:

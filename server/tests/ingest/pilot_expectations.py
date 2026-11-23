@@ -90,12 +90,57 @@ def candidates(pdf_path: str, scratch: str) -> None:
     print(json.dumps(report))
 
 
+def _indent(text_page: Any, height: float, box: list[float], text: str) -> str:
+    """FR-INGEST-7's indentation, written independently of reader.ingest.host: glyph origins inside the
+    top-left-origin `box`, lines by baseline (1 pt), the median origin step as the cell, round half up,
+    0.25-cell tolerance; the text is returned unchanged when the rule does not apply."""
+    import ctypes
+    import math
+    import statistics
+
+    import pypdfium2.raw as raw
+
+    x0, y0, x1, y1 = box
+    rows: list[list[float]] = []  # [baseline from the top, x, x, ...]
+    ox, oy = ctypes.c_double(), ctypes.c_double()
+    for index in range(text_page.count_chars()):
+        if chr(raw.FPDFText_GetUnicode(text_page, index)).isspace():
+            continue
+        left, bottom, right, top = text_page.get_charbox(index)
+        if not (x0 <= (left + right) / 2 <= x1 and y0 <= height - (bottom + top) / 2 <= y1):
+            continue
+        raw.FPDFText_GetCharOrigin(text_page, index, ox, oy)
+        baseline = height - oy.value
+        row = next((r for r in rows if abs(r[0] - baseline) <= 1.0), None)
+        if row is None:
+            rows.append([baseline, ox.value])
+        else:
+            row.append(ox.value)
+    rows.sort(key=lambda r: r[0])
+    xs_by_row = [sorted(r[1:]) for r in rows]
+    gaps = [xs[k + 1] - xs[k] for xs in xs_by_row for k in range(len(xs) - 1) if xs[k + 1] - xs[k] > 0.01]
+    lines = text.replace("\r\n", "\n").split("\n")
+    filled = [i for i, line in enumerate(lines) if line.strip()]
+    if not gaps or len(filled) != len(xs_by_row):
+        return text
+    cell = statistics.median(gaps)
+    origin = min(xs[0] for xs in xs_by_row)
+    for i, xs in zip(filled, xs_by_row, strict=True):
+        q = (xs[0] - origin) / cell
+        n = math.floor(q + 0.5)
+        if abs(q - n) > 0.25:
+            return text
+        lines[i] = " " * n + lines[i].lstrip()
+    return "\n".join(lines)
+
+
 def _code_entry(pdf: Any, number: int, box: list[float]) -> dict[str, Any]:
     page = pdf[number - 1]
     height = page.get_height()
     text_page = page.get_textpage()
     x0, y0, x1, y1 = box
     text = text_page.get_text_bounded(left=x0, bottom=height - y1, right=x1, top=height - y0)
+    text = _indent(text_page, height, box, text)
     text_page.close()
     page.close()
     normalised = normalise_code(text)
@@ -139,7 +184,7 @@ def build(pdf_path: str, boxes_path: str) -> None:
         entry: dict[str, Any] = {}
         if "code_boxes" in want:
             entry["code"] = [_code_entry(pdf, int(number), [float(v) for v in b]) for b in want["code_boxes"]]
-        for key in ("formulas_decoded", "tables", "steps", "order"):
+        for key in ("formulas_decoded", "tables", "steps", "order", "indents"):
             if key in want:
                 entry[key] = want[key]
         pages[str(number)] = entry

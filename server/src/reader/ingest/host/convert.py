@@ -17,7 +17,15 @@ from pathlib import Path
 from typing import Any, Final
 
 from reader.ingest.artifact import write_artifact
-from reader.ingest.host.mapping import BatchFailed, Item, outline, run_batches, spans
+from reader.ingest.host.mapping import (
+    BatchFailed,
+    Item,
+    outline,
+    reindent,
+    run_batches,
+    spans,
+    visual_lines,
+)
 
 TEXTLESS_BELOW: Final = 200  # characters in a page's text layer (the ingest-docling spike's threshold)
 # Points added around a code item's box before reading the text layer. Structural: Docling's boxes hug the
@@ -56,22 +64,41 @@ def read_outline(path: str | Path) -> list[dict[str, Any]]:
     return outline(marks, [], page_count)[0] if marks else []
 
 
+def _glyph_origins(text_page: Any, box: tuple[float, float, float, float]) -> list[tuple[float, float]]:
+    """FR-INGEST-7: the origins (pen x, baseline y) of the non-whitespace characters whose glyph-box centre
+    lies inside `box` (left, bottom, right, top; bottom-left origin)."""
+    import ctypes
+
+    import pypdfium2.raw as pdfium_c
+
+    left, bottom, right, top = box
+    origins: list[tuple[float, float]] = []
+    x, y = ctypes.c_double(), ctypes.c_double()
+    for index in range(text_page.count_chars()):
+        char = text_page.get_text_range(index, 1)
+        if not char or char.isspace():
+            continue
+        g_left, g_bottom, g_right, g_top = text_page.get_charbox(index)
+        if not (left <= (g_left + g_right) / 2 <= right and bottom <= (g_bottom + g_top) / 2 <= top):
+            continue
+        if pdfium_c.FPDFText_GetCharOrigin(text_page, index, x, y):
+            origins.append((float(x.value), float(y.value)))
+    return origins
+
+
 def _code_text(pdf: Any, prov: list[Any], heights: dict[int, float]) -> str:
-    """FR-INGEST-7: the text layer inside every provenance box, in order, joined with newlines."""
+    """FR-INGEST-7: the text layer inside every provenance box, reindented, in order, joined with newlines."""
     parts: list[str] = []
     for p in prov:
         box = p.bbox.to_bottom_left_origin(heights[p.page_no])
         page = pdf[p.page_no - 1]
         text_page = page.get_textpage()
+        left, right = box.l - CODE_MARGIN_PT, box.r + CODE_MARGIN_PT
+        bottom, top = min(box.b, box.t) - CODE_MARGIN_PT, max(box.b, box.t) + CODE_MARGIN_PT
         try:
-            parts.append(
-                text_page.get_text_bounded(
-                    left=box.l - CODE_MARGIN_PT,
-                    bottom=min(box.b, box.t) - CODE_MARGIN_PT,
-                    right=box.r + CODE_MARGIN_PT,
-                    top=max(box.b, box.t) + CODE_MARGIN_PT,
-                )
-            )
+            text = text_page.get_text_bounded(left=left, bottom=bottom, right=right, top=top)
+            glyphs = _glyph_origins(text_page, (left, bottom, right, top))
+            parts.append(reindent(text, visual_lines(glyphs)))
         finally:
             text_page.close()
             page.close()

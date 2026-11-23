@@ -1,11 +1,13 @@
-"""From converter items to spans and an outline, without Docling (SRV-INGEST FR-INGEST-5, -6, -8, -9).
+"""From converter items to spans and an outline, without Docling (SRV-INGEST FR-INGEST-5..9).
 
 Stdlib only, so the reading-order rule, the mapping and the batch loop are unit-tested with fake items.
 """
 
 from __future__ import annotations
 
+import itertools
 import json
+import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
@@ -49,6 +51,52 @@ class Item:
     @property
     def top(self) -> float:
         return self.boxes[0][1][1]
+
+
+BASELINE_PT: Final = 1.0  # FR-INGEST-7: glyphs within 1 pt of a line's first baseline share the line
+INDENT_TOLERANCE: Final = 0.25  # FR-INGEST-7: |q - n| allowed, in advances (the pilot's residual is 0.00)
+
+
+def visual_lines(glyphs: Sequence[tuple[float, float]]) -> list[list[float]]:
+    """FR-INGEST-7: glyph origins (x, baseline y, bottom-left origin) grouped into lines, top line first;
+    each line is its origins' x values, sorted."""
+    lines: list[tuple[float, list[float]]] = []
+    for x, y in sorted(glyphs, key=lambda g: -g[1]):
+        if lines and abs(lines[-1][0] - y) <= BASELINE_PT:
+            lines[-1][1].append(x)
+        else:
+            lines.append((y, [x]))
+    return [sorted(xs) for _, xs in lines]
+
+
+def indentation(lines: Sequence[Sequence[float]]) -> list[int] | None:
+    """FR-INGEST-7: leading spaces per visual line, or None when the rule is not well defined."""
+    steps = [b - a for xs in lines for a, b in itertools.pairwise(xs) if b - a > 0.01]
+    if not lines or not steps:
+        return None
+    advance = statistics.median(steps)
+    left = min(xs[0] for xs in lines)
+    counts = []
+    for xs in lines:
+        q = (xs[0] - left) / advance
+        n = int(q + 0.5)  # q >= 0: round half up
+        if abs(q - n) > INDENT_TOLERANCE:
+            return None
+        counts.append(n)
+    return counts
+
+
+def reindent(text: str, lines: Sequence[Sequence[float]]) -> str:
+    """FR-INGEST-7: replace each non-empty text line's leading whitespace by its measured indentation; the
+    text stays as the text layer gives it when the rule is not well defined or the line counts differ."""
+    rows = text.replace("\r\n", "\n").split("\n")
+    filled = [i for i, row in enumerate(rows) if row.strip()]
+    counts = indentation(lines)
+    if counts is None or len(counts) != len(filled):
+        return text
+    for i, n in zip(filled, counts, strict=True):
+        rows[i] = " " * n + rows[i].lstrip()
+    return "\n".join(rows)
 
 
 class BatchFailed(Exception):

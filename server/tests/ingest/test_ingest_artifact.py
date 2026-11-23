@@ -45,7 +45,7 @@ def test_fixture_artifact_is_valid_and_its_id_is_the_manifest_hash(tmp_path: Pat
 
 def test_converter_version_constant() -> None:
     ingest = need("reader.ingest")
-    assert ingest.CONVERTER_VERSION == "docling-2.151.1+r1"
+    assert ingest.CONVERTER_VERSION == "docling-2.151.1+r2"
     assert str(ingest.BLOBS_DIR) == "/var/lib/reader/blobs"
 
 

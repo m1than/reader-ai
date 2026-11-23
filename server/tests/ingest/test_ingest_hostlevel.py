@@ -210,9 +210,21 @@ def test_pilot_page_expectations(tmp_path: Path) -> None:
                 failures.append(f"page {page}: tables {shapes} != {want['tables']}")
         if "order" in want:
             failures.extend(order_failures(int(page), got, want))
+        for index, counts in want.get("indents", {}).items():  # FR-INGEST-7, counted by eye
+            box = want["code"][int(index)]["box"]
+            found = [s for s in code if _inside(s, box)]
+            measured = (
+                [len(line) - len(line.lstrip(" ")) for line in found[0]["text"].split("\n")]
+                if len(found) == 1
+                else None
+            )
+            if measured != counts:
+                failures.append(f"page {page}: block {index} indents {measured} != {counts}")
     known = set(expectations.get("known_misses", []))
     unexpected = [f for f in failures if int(f.split()[1].rstrip(":")) not in known]
     assert not unexpected, unexpected
+    # Page 468's Solidity block must keep more than one indentation level (owner, 2026-11-23).
+    assert len(set(expectations["pages"]["468"]["indents"]["3"])) > 1
 
 
 @pytest.mark.ingest_host
