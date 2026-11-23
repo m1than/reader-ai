@@ -999,6 +999,21 @@ tasks:
         (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
         timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
         latest live run (OPS-DOD owner note)." }
+  - { id: V.onboarding, stage: V, kind: module, track: product, status: in_progress, branch: V/onboarding,
+      needs: [V.live, V.WEB-polish],
+      what: "Owner 2026-11-23: a first step that imports a source in the browser and asks how long to study it.
+        Decision 1: total weeks and minutes per day (default 60, ADR-0010) give the plan; the UI shows ≈ N lessons,
+        ~M min each, finish by <date>, compile ≈ $X before confirming. Decision 2: browser upload, host-side confined
+        conversion picked up from a server queue; a new ADR (proposed) because it changes ADR-0027's flow.",
+      next: "Drafts on V/onboarding await the coordinator's deep-reviewer rounds: ADR-0029 (proposed), SRV-INGEST
+        revision 2 and the SRV-PIPELINE and WEB-UI amendments (held under proposed_* keys until approved), new specs
+        SRV-PLAN and WEB-IMPORT (draft), OPS-DOD material.upload and course.plan (tracked, missing where no evidence).
+        After approval: Red, Green, Storybook, live checks with a synthetic PDF and compile_first false (no credit).",
+      note: "spikes/study-rate step 1 (no spend): the owner's pilot plan budgets 81 theory hours for 890 PDF pages =
+        5.46 min/page = 2.58 min per 1,000 text-layer characters (per stage 1.40–5.18); step 1b counts the stack's
+        spans. Paired changes to schedule: SRV-AUTH (upload Content-Type), OPS-DEPLOY (Caddy request_body),
+        OPS-CLI (reader up starts reader-ingest --watch), SRV-SEARCH (fts_config of uploads), SRV-CONFIG
+        (planner.study_minutes_per_kchar), SRV-LESSON (delete_unstarted_lesson, reorder_lessons)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

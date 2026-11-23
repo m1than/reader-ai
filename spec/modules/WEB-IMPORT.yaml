@@ -1,0 +1,186 @@
+# WEB-IMPORT — the "Import source" page: drag-and-drop a PDF, follow its conversion and indexing, answer the
+# study-time question, preview the plan and its estimate, confirm (owner request 2026-11-23, task V.onboarding).
+#
+# Status: DRAFT. No code until the deep-reviewer approves.
+#
+# Flow (one page, `/import`, four sections that unlock in order):
+#   1. Source: a drop zone and a "Choose a PDF" button; client checks; language; upload with a progress bar.
+#   2. Processing: the upload's state from SRV-INGEST FR-INGEST-23 (polled), the converter's online state, Cancel,
+#      Retry and Discard.
+#   3. Study time: total weeks and minutes per day (default 60, ADR-0010), an optional study pace; validation; a live
+#      preview "≈ N lessons, ~M min each, finish by <date>, compile ≈ $X–Y" from SRV-PLAN's preview.
+#   4. Confirm: "Create the course" with "Start compiling lesson 1 now (≈ $x)"; then the lesson list, where the new
+#      course's first lesson shows "Compiling".
+# First run: an owner with no lessons and no materials lands on `/import` (WEB-UI paired change FR-UI-12).
+#
+# Design: the same Calm system and polish rules as WEB-UI FR-UI-10/-11 (tokens only, the library's spacing steps,
+# 2px focus outline, one `main#content`, role=status loading states, no HTML strings, axe with no serious or critical
+# issue at 1280, 1024 and 390 px). Components come from the vendored library entries WEB-UI FR-UI-1 lists, plus
+# `text-field`, `select` and `checkbox` if v0.1.0 exports them (checked in Red; otherwise native elements styled with
+# Calm tokens, declared then).
+#
+# Cross-spec items:
+#   - WEB-UI: FR-UI-12 (route `/import`, header link, first-run redirect, compile status in the lesson list);
+#     `web/test-server/` stubs this page's routes from VEC-IMPORT-1.
+#   - SRV-INGEST FR-INGEST-18/-23 and SRV-PLAN FR-PLAN-9: the routes and bodies this page calls.
+#   - OPS-DEPLOY: the app CSP needs no change (same-origin XHR and fetch only; no blob: or data: for the PDF).
+#
+# Test levels: [unit] Vitest in jsdom; [story] Storybook stories Light and Dark (FR-UI-8); [browser] Playwright
+# against the WEB-UI test server with stubbed routes; [live] the owner slice suite against `reader up`, uploading the
+# synthetic PDF of SRV-INGEST VEC-INGEST-2 with `compile_first: false` (no credit is spent by the live check).
+
+id: WEB-IMPORT
+title: Import source page — drag-and-drop upload, processing progress, the study-time form with its estimate, confirm
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: product
+adr: [ADR-0029, ADR-0010, ADR-0013]
+
+paths:
+  - web/src/import/**
+  - e2e/web/import/**
+  - spec/fixtures/WEB-IMPORT/**
+
+normative:
+  - id: REF-IMPORT-1
+    title: WHATWG HTML — drag and drop, the file input and `accept`
+    url: https://html.spec.whatwg.org/multipage/dnd.html
+  - id: REF-IMPORT-2
+    title: XMLHttpRequest Standard — upload progress events (fetch has no upload progress)
+    url: https://xhr.spec.whatwg.org/#the-upload-attribute
+  - id: REF-IMPORT-3
+    title: WCAG 2.2 — 3.3.1 Error Identification, 3.3.3 Error Suggestion, 4.1.3 Status Messages
+    url: https://www.w3.org/TR/WCAG22/
+  - id: REF-IMPORT-4
+    title: SRV-INGEST revision 2 and SRV-PLAN — the routes, states and codes this page shows
+    url: spec/modules/SRV-PLAN.yaml
+
+bounds:
+  upload_bytes_max: 209715200   # 200 MiB, SRV-INGEST FR-INGEST-18
+  poll_ms: 2000                 # upload view while not terminal (ADR-0029 Decision 4)
+  converter_poll_ms: 10000      # converter state while an upload waits
+  preview_debounce_ms: 300      # structural: one preview per pause in typing
+
+requirements:
+  - id: FR-IMPORT-1
+    text: >-
+      **Source.** A drop zone (a `section` with a heading, a visible "Choose a PDF" button that opens a hidden `<input
+      type="file" accept="application/pdf,.pdf">`, and the text "or drop it here") accepts one file by drop or by the
+      button; the whole zone is not a click target, so keyboard users reach the one button. Client checks, in order,
+      each with a plain-text message from the catalogue (FR-IMPORT-7): exactly one file (`one_file`); a name ending
+      `.pdf` or type `application/pdf` (`not_pdf`); 1..`upload_bytes_max` bytes (`empty`, `too_large`); the first 5
+      bytes equal `%PDF-`, read with `Blob.slice(0, 5).arrayBuffer()` (`not_pdf`). Nothing else of the file is read in
+      the browser: no preview, no object URL. A language select (Russian, English, Other) defaults from
+      `navigator.language` (`ru*` → Russian, `en*` → English, else Other). [unit] [story]
+  - id: FR-IMPORT-2
+    text: >-
+      **Upload.** "Upload" sends the file with XMLHttpRequest (`POST /api/materials/uploads?filename=…&language=…`,
+      the name and language through `URLSearchParams`, `Content-Type: application/pdf`, same origin, credentials
+      same-origin), showing a determinate progress bar from `upload.onprogress` with its percentage as text, and a
+      Cancel button that aborts the request. Responses: 201 or 200 (dedupe: "Already imported" with a link to its
+      state) move to Processing; 401 navigates to sign-in (WEB-UI FR-UI-5); 403, 409, 413, 415 and 400 show the
+      code's message; a network error shows `network` with Retry. The response body is validated (valibot) like
+      every WEB-UI client response (`bad_response`). [unit]
+  - id: FR-IMPORT-3
+    text: >-
+      **Processing.** The page polls `GET /api/materials/uploads/{id}` every `poll_ms` until `ready`, `failed` or
+      `cancelled`, and shows a step list (an ordered list with `role="list"`): Uploaded → Converting on your Mac →
+      Importing → Indexing for search → Ready. The current step has `aria-current="step"`; `converting` shows "Page n
+      of m" and a determinate progress bar when `pages_total` is known. One `role="status"` region announces step
+      changes only (not every page count). While `queued`, the page also polls `GET /api/materials/converter` every
+      `converter_poll_ms` and shows: online → "Waiting for the converter"; offline → "The converter on your Mac is not
+      running. Start it with `reader up`."; setup_missing → "The converter is not set up. Run `reader-ingest
+      --setup`." (commands in `<code>`, copyable as text). Cancel is shown in queued, claimed and converting (a
+      confirm dialog first); Retry and Discard on failed, with the code's message. Polling stops when the page is
+      hidden (`document.visibilityState`) and resumes when visible. [unit] [story: each state]
+  - id: FR-IMPORT-4
+    text: >-
+      **Study-time form**, shown when the upload is `ready` (or for a ready material chosen from the list,
+      FR-IMPORT-8): "How long do you want to study this?" with two required integer fields, total weeks (1–104) and
+      minutes per day (10–240, step 5, default 60), and a collapsed "Study pace" disclosure with minutes per 1,000
+      characters (0.10–20.00, two decimals; default the value the first preview returns). Native constraint
+      attributes plus the same checks in code; each invalid field gets `aria-invalid="true"` and a message linked by
+      `aria-describedby`, shown on blur and on submit, never while typing the first character. [unit] [story]
+  - id: FR-IMPORT-5
+    text: >-
+      **Estimate preview.** On valid input, after `preview_debounce_ms` without change, `POST /api/plans/preview` with
+      the material id, the fields and `start_date` = the browser's local date (YYYY-MM-DD). The estimate card shows
+      "≈ N lessons, ~M min each, finish by <date>" (the date in the user's locale, long form), "compile ≈ $low–$high
+      for the whole course" and "lesson 1 ≈ $x", plus the review days when the plan fits. When it does not fit, a
+      calm notice "At M min a day this needs N days, more than W weeks" with up to two buttons from `suggest` ("Use X
+      min a day", "Use Y weeks") that set the field and preview again. A collapsed "Lessons" disclosure lists each
+      lesson's title, pages and minutes. Out-of-order responses are dropped (only the latest request's answer is
+      shown); while a new one loads, the card keeps the previous estimate, dimmed, and its `role="status"` line reads
+      "Updating the estimate". [unit]
+      [story: fits, does not fit, loading, error]
+  - id: FR-IMPORT-6
+    text: >-
+      **Confirm.** "Create the course" with a checkbox "Start compiling lesson 1 now (≈ $x)", checked by default and
+      showing the amount from the current estimate (owner decision: confirm → the first lesson compiling). It posts
+      `POST /api/plans/confirm` with the inputs, the shown `plan_sha256` and `compile_first`. 409 `plan_changed`
+      replaces the estimate with the returned plan and asks again ("The plan changed; check it and confirm again");
+      the button is disabled while a request is in flight. On success the app navigates to `/` and the new course's
+      lessons appear in the list in plan order, the first one with "Compiling" (WEB-UI FR-UI-12); a compile error in
+      the response (budget, `compile_running`) is shown as a notice there, the course still created. [unit]
+  - id: FR-IMPORT-7
+    text: >-
+      **Messages.** Every message is plain text from one catalogue keyed by code (client checks, SRV-INGEST and
+      SRV-PLAN codes, `network`, `bad_response`, an `unknown` fallback); no server text is rendered; numbers and dates
+      are formatted with `Intl` in the user's locale; the filename is shown as text only. [unit]
+  - id: FR-IMPORT-8
+    text: >-
+      **Existing sources.** Below the drop zone, "Your sources" lists `GET /api/materials` with `source: "upload"`
+      (title, state, created date): a ready material without a study plan offers "Plan study time", one with a plan
+      offers "Re-plan" (the form pre-filled from `GET /api/plans/{course_id}`), and an unfinished upload links to its
+      processing view. Re-planning shows which lessons are already started and stay as they are ("3 started lessons
+      keep their pages"). [unit] [story]
+  - id: FR-IMPORT-9
+    text: >-
+      **Layout and accessibility** (WEB-UI FR-UI-10/-11 rules): sections inside the shell's `main#content` (no
+      second `main`); one `h1` "Import a source"; the drop zone's drag-over state uses a Calm token border and is
+      also announced ("Drop to upload"); every control is reachable and operable by keyboard in DOM order; focus
+      moves to the next section's heading when it unlocks; at 1280, 1024 and 390 px nothing scrolls horizontally;
+      axe reports no serious or critical issue in each state. [unit: the polish scan of WEB-UI applies to
+      `web/src/import/*.css`] [browser] [live]
+
+invariants:
+  - id: INV-IMPORT-1
+    text: >-
+      The page never reads the PDF beyond its first 5 bytes, never creates an object or data URL from it and never
+      inserts HTML (WEB-UI INV-UI-2's source scan covers `web/src/import/`). [unit]
+  - id: INV-IMPORT-2
+    text: >-
+      For every upload state, plan state and error code in VEC-IMPORT-1, the page shows exactly one message from the
+      catalogue and the controls that state allows (Cancel, Retry, Discard, the form, Confirm), and no other. [unit]
+  - id: INV-IMPORT-3
+    text: >-
+      Under the production CSP (WEB-UI INV-UI-4's test server), loading `/import` and walking every stubbed state
+      raises zero `securitypolicyviolation` events. [browser]
+
+nfr:
+  - id: NFR-IMPORT-1
+    metric: gzip bytes of the `/import` route's lazy chunk (the page is lazy and does not grow NFR-UI-1's initial chunk)
+    threshold: 30000
+    verified_by: test
+
+vectors:
+  - id: VEC-IMPORT-1
+    source: >-
+      Synthetic response bodies for every upload state (VEC-INGEST-6), the converter states, preview results (fits,
+      does not fit with both suggestions, a 1-lesson plan), a `plan_changed` conflict, a confirm with and without a
+      compile run and with a budget refusal, and each error code; no book text (titles are "Synthetic chapter N").
+    file: spec/fixtures/WEB-IMPORT/responses.json
+
+defers:
+  - "Choosing a page range or chapters in the form (SRV-PLAN accepts `pages`; the form leaves it at the whole material)."
+  - "Formats other than PDF, URLs and repositories (ADR-0008)."
+  - "Several uploads at once (SRV-INGEST allows one in flight)."
+  - "Server-sent events instead of polling."
+
+owner_notes:
+  - "1. The live check uploads a small synthetic PDF and confirms with 'Start compiling lesson 1' unchecked, so it spends no credit; the Bashir pilot stays as it is."
+  - "2. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it."
+
+review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer."

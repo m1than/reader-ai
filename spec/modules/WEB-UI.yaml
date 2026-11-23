@@ -225,6 +225,30 @@ requirements:
       it; [live] the `ui` step follows the skip link with the keyboard and finds focus on `main#content`; overflow is
       measured as `scrollWidth − clientWidth` of the document element. [story] the shell's loading state.
 
+
+# ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for WEB-IMPORT). Held under `proposed_requirements` (not read by
+# trace-check; this spec is approved) until reviewed; then it moves into `requirements` with its Red tests. ----
+proposed_requirements:
+  - id: FR-UI-12
+    text: >-
+      **Import entry points.**
+      - The route table adds `/import` (WEB-IMPORT's page, a lazy chunk) and the header an "Import" link for a user
+        with role `owner` (from `/api/me`).
+      - **First run:** on `/`, when `GET /api/lessons` returns no lessons and the user is the owner, the app asks
+        `GET /api/materials`; if it lists no material at all (neither declared nor uploaded), the app replaces the
+        location with `/import` (history `replace`, so Back does not loop). Any error of that call keeps the empty
+        lesson list. A non-owner never calls it.
+      - **Compile status in the list:** for each lesson with `latest_sha256: null`, at most 10 per render in list
+        order (structural: one plan confirm starts one compile), the list asks `GET /api/lessons/{lesson_id}/compile`
+        (SRV-PIPELINE FR-PIPELINE-11); 404 shows "not compiled yet", a `running` or `stalled` run "Compiling", a
+        `stage_failed` or `budget_exhausted` run "Compile stopped", replacing "not published yet" in FR-UI-6's status
+        slot. While any shown lesson is compiling, these queries refetch every 10 s.
+      - `web/test-server/` stubs WEB-IMPORT's routes from VEC-IMPORT-1 and `/api/materials` with an empty and a
+        non-empty list.
+      [unit] the redirect (owner with nothing, owner with a material, non-owner, an error), the status mapping; [live]
+      the owner slice suite sees the new course's first lesson as "Compiling" or later after a confirm with compile,
+      run only with the owner's consent to spend; without it, "not compiled yet".
+
 invariants:
   - id: INV-UI-1
     text: >-

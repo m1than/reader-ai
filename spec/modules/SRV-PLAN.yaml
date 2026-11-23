@@ -1,0 +1,264 @@
+# SRV-PLAN — the study-time question and the course plan derived from it (owner request 2026-11-23, task
+# V.onboarding). A deterministic planner turns an imported material's outline and per-page volume, the learner's total
+# weeks and minutes per day, and a study rate into lessons sized to the daily minutes; it shows an estimate before
+# confirming ("≈ N lessons, ~M min each, finish by <date>, compile ≈ $X"); confirm imports the plan through
+# SRV-PIPELINE's course import and, if asked, starts compiling the first lesson.
+#
+# Status: DRAFT. Nothing is implemented until the deep-reviewer approves (cost math is a complex area, AGENTS.md).
+#
+# Owner decisions (2026-11-23):
+#   1. The learner enters total weeks and minutes per day (default 60, ADR-0010 "Study budget: 60 minutes a day").
+#      The number and size of lessons follow from these and the material's volume.
+#   2. The study rate must not be invented: a sourced default the owner can adjust, plus a spike that measures it.
+#
+# Design decisions (each open to the reviewer and the owner):
+#   - One lesson = one study session of at most `minutes_per_day` (ADR-0010: the day's session is the unit; the home
+#     screen shows one next step). Lessons are cut at outline boundaries where possible, at chapter starts first,
+#     and by pages only inside a section longer than a session. So `minutes_per_day` sets the size of lessons, and
+#     the material's volume their number.
+#   - `total_weeks` sets the deadline: N lessons need N study days. If N ≤ 7 × weeks the plan fits, and the spare
+#     days are review days (FSRS recall and labs, ADR-0010 "Spacing"); otherwise the plan does not fit and the
+#     estimate says what would (the smallest minutes per day, or the weeks, at which it fits). Seven study days a
+#     week is an assumption the owner can revisit (owner note 2).
+#   - Alternative considered and not chosen (owner note 3): stretching lessons to fill all weeks (fewer, longer
+#     lessons when time is plentiful). It makes a lesson longer than a day's session, which ADR-0010's session shape
+#     does not have.
+#   - Volume is characters, not pages: page density in the pilot ranges from 1,299 (p10) to 2,765 (p90) characters
+#     (spikes/study-rate step 1), so pages would mis-size lessons by about 2×.
+#   - The planner is a pure function over integers (milli-minutes, characters), so the same inputs give the same plan
+#     byte for byte, on any machine (INV-PLAN-1).
+#
+# Cross-spec items (paired changes in their own specs, drafted with this one):
+#   - SRV-PIPELINE FR-PIPELINE-14: `import_course_plan(conn, owner_id, plan)` is FR-PIPELINE-1's import as a function;
+#     re-planning removes unstarted lessons and renumbers ordinals.
+#   - SRV-LESSON: `delete_unstarted_lesson` and `reorder_lessons` (owned there; listed in FR-PIPELINE-14).
+#   - SRV-CONFIG: optional `planner.study_minutes_per_kchar` (Decimal, 0.10 ≤ x ≤ 20.00, two decimals).
+#   - SRV-INGEST FR-INGEST-24: `page_chars(conn, material_sha256)` and the upload's `ready` state.
+#   - SRV-AUTH: ROUTERS adds `reader.plan.routes`; VERSION_LOCATIONS adds `reader/plan/migrations`.
+#   - WEB-IMPORT: the study-time form and the estimate preview use these routes.
+#
+# Test levels: [unit] pure Python, Hypothesis for the invariants; [db] testcontainers Postgres (as SRV-INGEST);
+# [live] e2e/live against `reader up` with a synthetic material (no compile, so no credit).
+
+id: SRV-PLAN
+title: Course planning — the study-time question, a deterministic planner that sizes lessons to the daily minutes, the estimate and confirm
+status: draft
+approved_by: null
+approved_at: null
+layer: server
+track: product
+adr: [ADR-0010, ADR-0009, ADR-0029, ADR-0005, ADR-0008]
+
+paths:
+  - server/src/reader/plan/**
+  - server/tests/plan/**
+  - spec/fixtures/SRV-PLAN/**
+
+normative:
+  - id: REF-PLAN-1
+    title: ADR-0010 — learning loop; study budget 60 minutes a day; sessions, spacing (FSRS)
+    url: docs/adr/0010-learning-loop.md
+  - id: REF-PLAN-2
+    title: "spikes/study-rate/RESULT.md — the default study rate from the owner's own pilot plan (81 theory hours over 890 PDF pages) and the pilot's characters per page"
+    url: spikes/study-rate/RESULT.md
+  - id: REF-PLAN-3
+    title: "Brysbaert M. (2019), How many words do we read per minute? A review and meta-analysis of reading rate. Journal of Memory and Language 109, 104047 — silent reading of English non-fiction 238 words per minute (a lower bound on time: reading, not study)"
+    url: https://doi.org/10.1016/j.jml.2019.104047
+  - id: REF-PLAN-4
+    title: "Compile cost basis: L02 converged in 210 s for $1.2587 on the product pipeline (docs/progress.yaml V.live, 2026-11-23); spike runs $2.4236 and $2.9714, one loop, not converged (spikes/compile-cost/RESULT.md)"
+    url: spikes/compile-cost/RESULT.md
+  - id: REF-PLAN-5
+    title: pilot/bashir/plan.yaml — the owner's hand-made study plan (theory and code hours per stage)
+    url: pilot/bashir/plan.yaml
+
+bounds:
+  minutes_per_day: { min: 10, max: 240, step: 5, default: 60 }   # default ADR-0010; 240 = four hours, structural
+  total_weeks: { min: 1, max: 104 }                             # two years, structural
+  study_minutes_per_kchar_default: "TBD by spikes/study-rate step 1b (spans basis); text-layer basis 2.58"
+  study_minutes_per_kchar: { min: "0.10", max: "20.00" }        # structural; the pilot's per-stage spread is 1.40–5.18
+  lesson_fill_max: 1.25        # a lesson may run to 1.25 × minutes_per_day before it is closed (chosen bound)
+  lesson_fill_min: 0.50        # a chapter start closes the open lesson only when it holds ≥ 0.5 × minutes_per_day (chosen bound)
+  outline_cut_level_max: 3     # sections are runs between outline entries of level ≤ 3 (the pilot has 3 levels)
+  lessons_max: 2000            # structural: 5,000 pages (SRV-INGEST cap) at 2.5 pages per lesson
+  week_days: 7                 # assumption, owner note 2
+  start_date_skew_days: 1      # the client's local date may differ from the server's UTC date by one day
+
+requirements:
+  - id: FR-PLAN-1
+    text: >-
+      **Planner input** (`reader.plan.planner.plan(PlanInput) -> Plan`, pure, no I/O):
+      `page_chars: tuple[int, ...]` (characters per PDF page, page 1 first), `outline: tuple[Entry(level, page | None),
+      ...]` in outline order, `first_page`, `last_page` (default 1 and the page count), `minutes_per_day`,
+      `total_weeks`, `rate_centi` (the study rate in hundredths of a minute per 1,000 characters, an integer),
+      `start_date`, and `fixed: tuple[(first, last), ...]` (page ranges of lessons that must stay as they are,
+      FR-PLAN-6). Inputs outside `bounds` raise `PlanInputError(code)` with `minutes_per_day`, `total_weeks`, `rate`,
+      `pages` or `fixed` (overlapping, out of range or unsorted). [unit]
+  - id: FR-PLAN-2
+    text: >-
+      **Minutes.** A page's cost in milli-minutes is `page_chars[p] × rate_centi × 10 // 1000` (integer arithmetic,
+      floor). A lesson's minutes are the sum over its pages, divided by 1,000 and rounded half up for display. The
+      target `T = minutes_per_day × 1000` milli-minutes. [unit]
+  - id: FR-PLAN-3
+    text: >-
+      **Sections.** Within the planned range, a page starts a section when an outline entry with level ≤
+      `outline_cut_level_max` and a non-null page lies on it; the first page of the range and of each free interval
+      (FR-PLAN-6) always starts one. A section runs to the page before the next start. A section that starts at a
+      level-1 entry is a chapter start. Entries are de-duplicated by page (the shallowest level wins). With no usable
+      outline, the whole interval is one section. [unit]
+  - id: FR-PLAN-4
+    text: >-
+      **Packing**, over the sections of each free interval in order, with an open lesson `L` (initially empty):
+      - a section of more than `lesson_fill_max × T` closes `L` if it is non-empty, then becomes `k = ceil(m / T)`
+        lessons: part j ends at the first page where the section's cumulative milli-minutes reach `j × m // k`
+        (j = 1..k−1), the last part ends at the section's end, and empty parts are dropped. A single page over the
+        bound is one lesson on its own;
+      - else, if the section is a chapter start and `L ≥ lesson_fill_min × T`, `L` is closed first;
+      - else, if `L + m ≤ lesson_fill_max × T`, the section joins `L`;
+      - otherwise `L` is closed (even when it is short: the bound on a lesson's length wins over the wish for
+        full lessons) and the section opens a new `L`.
+      At the end of an interval `L` is closed if non-empty. Every lesson is a contiguous page range. More than
+      `lessons_max` lessons raise `PlanInputError("too_many_lessons")`. [unit, VEC-PLAN-1]
+  - id: FR-PLAN-5
+    text: >-
+      **Lesson fields.** Each lesson has `id = "p<first>-<last>"` (decimal page numbers; a fixed lesson keeps its
+      existing plan lesson id), `pages.pdf = [first, last]`, `chapter` = the 1-based index of the last level-1 entry
+      at or before `first` (0 before the first one), `kchars` = its characters / 1000 (three decimals), `minutes`
+      (FR-PLAN-2), and `title`:
+      - the title of the shallowest outline entry starting inside the lesson (the first such entry on a tie);
+      - otherwise the title of the nearest entry before it, followed by ` (<j>/<k>)` when the lesson is part j of a
+        split section;
+      - otherwise `pp. <first>–<last>`;
+      cut to 200 characters (SRV-LESSON's title bound). Titles come from the outline rows in the database and never
+      enter a log (INV-PLAN-4). The planner works with entry indices; titles are attached by the caller. [unit]
+  - id: FR-PLAN-6
+    text: >-
+      **Re-planning.** A plan is recomputed from scratch for any change of inputs (weeks, minutes, rate, range, start
+      date, or a new ingest's outline). Lessons that have started (a lesson revision or a compile run exists, read by
+      FR-PLAN-9) are `fixed`: their page ranges are kept verbatim and the planner packs only the free intervals
+      between them, so a started lesson never changes its pages or its id, and its SRV-LESSON lesson is the same.
+      A fixed range that lies outside the new `[first_page, last_page]` widens the range to include it. [unit, db]
+  - id: FR-PLAN-7
+    text: >-
+      **Summary.** `lesson_count` N; `minutes_mean` and `minutes_max` over the lessons (rounded); `required_minutes`
+      (sum of lesson minutes); `study_days = 7 × total_weeks`; `fits = N ≤ study_days`; `review_days =
+      study_days − N` when it fits; `finish_by = start_date + (study_days if fits else N) − 1` days. When it does not
+      fit, `suggest` gives `minutes_per_day`: the smallest value on the 5-minute grid up to 240 whose plan fits with
+      the same weeks (computed by re-running the planner; null if none), and `total_weeks`: `ceil(N / 7)` at the
+      same minutes. [unit, VEC-PLAN-1]
+  - id: FR-PLAN-8
+    text: >-
+      **Compile estimate** (an estimate, labelled as such, never a budget). Per lesson: `low = kchars ×
+      L02_LOW_USD / L02_KCHARS` and `high = min(kchars × L02_HIGH_USD / L02_KCHARS, run_cap_usd)`, where
+      `L02_LOW_USD = 1.2587` (the converged product run, REF-PLAN-4), `L02_HIGH_USD = 2.9714` (the dearest spike run,
+      one loop, not converged), `L02_KCHARS` = L02's characters on the spans basis (spikes/study-rate step 1b), and
+      `run_cap_usd` = SRV-PIPELINE's `bounds.run_cap_usd` (8.00). The summary gives the sums for the whole course and
+      the values for the first unstarted lesson, rounded to cents (half up). The constants live in
+      `reader.plan.params` with their sources; VEC-PLAN-2 pins them. **Hypothesis:** compile cost scales with source
+      characters. Only L02 (54,742 text-layer characters) is measured; per-lesson fixed costs (prompts, the notebook
+      skeleton) make short lessons dearer per character than this line says. V.cost-optimize re-measures. [unit,
+      VEC-PLAN-2]
+  - id: FR-PLAN-9
+    text: >-
+      **Routes** (`reader.plan.routes.ROUTES`; each needs a session, and the handler checks role `owner`, else 403
+      `owner_only`, as SRV-INGEST FR-INGEST-15; bodies follow SRV-AUTH FR-AUTH-12):
+      - `POST /api/plans/preview` with `{material_id, total_weeks, minutes_per_day, start_date, rate?, pages?}`
+        (`rate` a decimal string with at most two decimals, default the config value; `pages` `[first, last]`)
+        returns `{plan_sha256, inputs, lessons, summary, estimate}` and writes nothing. The material must be
+        imported (404 `not_found` otherwise, 409 `not_ready` while its upload is not `ready`). `fixed` comes from the
+        material's existing plan course, if any. `start_date` outside the server's UTC date ± `start_date_skew_days`
+        is 400 `start_date`.
+      - `POST /api/plans/confirm` with the same fields plus `plan_sha256` and `compile_first: bool` recomputes the
+        plan; a different sha256 is 409 `plan_changed` with the new plan in the body (the learner confirms what they
+        saw, never a plan that moved underneath). Otherwise, in one transaction, it calls SRV-PIPELINE
+        `import_course_plan` (FR-PIPELINE-14) with course id `plan-<first 12 hex of the material sha256>` and the
+        material's display title as the course title, and upserts the `study_plans` row. After the commit, with
+        `compile_first`, it creates a compile run of the first unstarted lesson through SRV-PIPELINE's run creation
+        (FR-PIPELINE-11, default cap); a `compile_running` or budget refusal there is reported in the response, never
+        undoes the import. Returns `{course_id, lessons: [{plan_lesson_id, lesson_id, ordinal}], compile: {run_id} |
+        {error} | null}`.
+      - `GET /api/plans/{course_id}` returns the stored inputs and the current summary, for the re-plan form; 404
+        `not_found` for a course without a study plan.
+      Validation errors are 400 with the field's code (`total_weeks`, `minutes_per_day`, `rate`, `pages`,
+      `start_date`, `material_id`). [db]
+  - id: FR-PLAN-10
+    text: >-
+      **Plan hash.** `plan_sha256` is the sha256 of the canonical JSON (sorted keys, separators `,` `:`, UTF-8) of
+      `{inputs, lessons}` where `inputs` holds the material sha256, the ingest id, the resolved `rate_centi`, the
+      range, weeks, minutes, start date and the fixed ranges, and `lessons` holds every lesson's id, pages and
+      minutes (titles excluded, so the hash carries no book text). [unit]
+  - id: FR-PLAN-11
+    text: >-
+      **Table.** Migration `reader/plan/migrations/<rev>_plan.py`, branch label `plan`, `depends_on` the pipeline
+      branch: `study_plans(owner_id → users.id, course_id uuid → courses, material_sha256, ingest_id → ingests,
+      total_weeks int, minutes_per_day int, rate_centi int, first_page int, last_page int, start_date date,
+      plan_sha256 text, confirmed_at timestamptz)`, primary key (course_id), FK (course_id, owner_id) → courses
+      (id, owner_id). The downgrade drops this table only. [db]
+  - id: FR-PLAN-12
+    text: >-
+      **Logging.** Preview and confirm log one structured line each: event, material sha256 prefix (12 hex),
+      lesson_count, fits, plan_sha256 prefix, duration_ms, and for confirm the created and removed lesson counts and
+      whether a compile run was created. [unit]
+
+invariants:
+  - id: INV-PLAN-1
+    text: >-
+      Determinism: for any valid input (Hypothesis: page counts 1–5,000, characters 0–20,000 per page, outlines of
+      0–3 levels, any bounds-valid weeks, minutes and rate, 0–5 fixed ranges), `plan` returns equal results on equal
+      inputs and its canonical JSON is byte-identical across two runs and across a reversed construction order of
+      the outline tuple's equal-page entries. [unit]
+  - id: INV-PLAN-2
+    text: >-
+      Coverage: the lessons' page ranges are contiguous, non-overlapping, in order, and cover `[first_page,
+      last_page]` (widened by fixed ranges) exactly; every fixed range appears verbatim as one lesson with its id. [unit]
+  - id: INV-PLAN-3
+    text: >-
+      Size: every lesson that is not a single page has milli-minutes ≤ `lesson_fill_max × T`, except a part of a
+      split section whose page granularity forces more (a page that alone crosses a cut); a chapter start closes
+      the open lesson only when it holds at least `lesson_fill_min × T`. `suggest.minutes_per_day`, when not null, gives
+      a plan that fits (it is checked by re-running, not assumed monotonic). [unit]
+  - id: INV-PLAN-4
+    text: >-
+      No book text in logs, hashes or errors: with a canary word in every outline title, the canary appears in no log
+      record, no error body and not in `plan_sha256`'s pre-image. [unit, db]
+  - id: INV-PLAN-5
+    text: >-
+      Confirm is idempotent and safe to repeat: confirming the same inputs twice leaves one `study_plans` row, the same
+      course_plans rows and lesson ids, and (with `compile_first`) at most one running compile (the second is
+      `compile_running`). A started lesson is never deleted or renumbered out of plan order. [db]
+
+nfr:
+  - id: NFR-PLAN-1
+    metric: wall time of `POST /api/plans/preview` for the pilot (935 pages, 494 outline entries), including the suggestion search, ms, p95 over 20 calls
+    threshold: 500
+    verified_by: bench
+
+vectors:
+  - id: VEC-PLAN-1
+    source: >-
+      Hand-computed planner cases with synthetic page counts and outlines (no book text): an empty outline; a
+      chapter boundary that closes a half-full lesson; a section longer than 1.25 sessions split in three; a single
+      page over the bound; zero-character pages; a plan that fits with review days and one that does not, with its
+      suggestion; a re-plan with two fixed lessons and a changed minutes value. Each case gives the expected lesson
+      ranges, minutes, summary and finish date.
+    file: spec/fixtures/SRV-PLAN/planner-cases.yaml
+  - id: VEC-PLAN-2
+    source: >-
+      Cost constants and their sources (REF-PLAN-4, spikes/study-rate), plus three estimate cases: L02's own range
+      (expected low 1.26), a 1,000-kchar course, and a lesson whose high estimate is cut at the $8.00 run cap.
+    file: spec/fixtures/SRV-PLAN/cost-basis.yaml
+
+defers:
+  - "An agent-proposed plan (ADR-0009 stage 2: lesson objectives, labs, the order of chapters); the slice cuts by outline and volume only."
+  - "Study days per week other than 7, rest days and the implementation intention's time and place (ADR-0010 resolved question 1)."
+  - "Per-kind rates (code, formulas, tables) and a per-learner rate learnt from session timings (spike study-rate step 2 feeds the default first)."
+  - "A schedule of which lesson falls on which date and its notifications (ADR-0010 Notifier)."
+  - "Choosing chapters instead of a page range."
+
+owner_notes:
+  - "1. The default study rate comes from your own pilot plan: 81 theory hours for the 890 PDF pages of the 23 lessons, i.e. 5.46 min per page or 2.58 min per 1,000 characters of text layer (spikes/study-rate step 1; the spans-basis value replaces it before approval). Per stage it ranges from 1.40 to 5.18. For comparison, plain silent reading of English non-fiction is 238 words a minute (Brysbaert 2019), about 1.7 min for an average pilot page: your plan budgets about three times reading speed for study. You can change the default in reader.yaml (`planner.study_minutes_per_kchar`) and per plan in the form. Spike step 2 measures your real pace from timed L02 sessions."
+  - "2. Seven study days a week is assumed; spare days become review days. Say if you want fewer study days per week."
+  - "3. Lesson size follows minutes per day (one lesson per session). The alternative, fewer longer lessons when weeks are plentiful, was not chosen; say if you prefer it."
+  - "4. The compile estimate scales one measured lesson (L02: $1.26 converged, up to $2.97 in the spike) by characters. It is a range, not a promise; each compile still stops at your $8.00 cap."
+  - "5. Confirm with 'compile lesson 1' spends credit (≈ the first lesson's estimate) under your existing compile cap and monthly budget; the button shows the amount."
+
+review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer (cost math; numbers from spikes/study-rate)."
