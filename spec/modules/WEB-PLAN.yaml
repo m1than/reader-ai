@@ -49,6 +49,10 @@ requirements:
       `study_minutes_per_kchar_default`, with the hint "from your own pilot plan"). Native constraint
       attributes plus the same checks in code; each invalid field gets `aria-invalid="true"` and a message linked by
       `aria-describedby`, shown on blur and on submit, never while typing the first character. [unit] [story]
+      Design pass (2026-11-23): labels, hints and errors in the sans (WEB-UI FR-UI-10); inputs 32px tall, 8rem wide,
+      `--radius-control`, tabular figures; the "Study pace" summary shows the library `ChevronRightIcon` (`aria-hidden`),
+      rotated 90° while open, in place of the default marker (the audit found the browser's triangle beside the app's
+      own controls). [unit] the icon is present and hidden from assistive technology; [story]
   - id: FR-IMPORT-5
     text: >-
       **Estimate preview.** On valid input, after `preview_debounce_ms` without change, `POST /api/plans/preview` with
@@ -76,6 +80,21 @@ requirements:
       loads, the card keeps the previous estimate, dimmed, and its `role="status"` line reads "Updating the
       estimate". 404, 422 `no_text` ("This source has no text layer to plan from") show the code's message in place of the card. [unit]
       [story: fits, small source, does not fit, loading, error]
+      **Design pass (2026-11-23; the audit found every number set in serif prose, and in the does-not-fit state a bold
+      success-looking headline above the warning):** the card shows the figures as a definition list (`dl`, sans,
+      tabular figures, terms muted) in this order, each row only when its value exists: "Lessons" → "<count>"
+      (`<new_count>`, or "<F> started + <K> new"); "Each lesson" → "about <M> min, at most <X>"; "Finish by" → the long
+      date; "Deadline kept" → the long date (re-plan); "Compile, whole course" → "$<low>–$<high>"; "Lesson 1" →
+      "$<low>–$<high>, stops at $<cap>". Below it, in the muted small sans, the notes in this order: "Reading time
+      only; labs and review are not included.", the fills line, "Costs are an estimate from one measured lesson." and
+      the extrapolation line. The headline, "Deadline kept: …", "Compile: …" and "Lesson 1: …" sentences above are no
+      longer drawn as sentences (their values are the rows); the headline becomes the text of the card's
+      `role="status"` line once an answer is shown ("Estimate updated: <headline>"), so a screen reader hears the
+      summary. When the plan does not fit, the notices and their suggestion buttons come first in the card, as a
+      warning callout (`--radius-block`, a 3px `--acme-warning` inline-start bar, the `WarningIcon`), and the figures
+      under it are muted. [unit] the `dl` terms and values for a fresh plan, a re-plan, a plan without a first lesson;
+      the notes' order; the status text; in the does-not-fit case the callout precedes the `dl`; [story] the same five
+      states, Light and Dark.
   - id: FR-IMPORT-6
     text: >-
       **Confirm.** "Create the course" with a checkbox "Start compiling lesson 1 now ($low–$high, stops at $8.00)",
@@ -91,6 +110,13 @@ requirements:
       with a link to the lesson list, and a compile result: "Lesson 1 is compiling" for `{run_id}`, or the code's
       message for `{error}` (`already_started`: "A lesson of this course is already compiled or compiling";
       `compile_running`; budget refusals), the course still created. [unit]
+      Design pass (2026-11-23): "Create the course" is the page's one solid button (WEB-UI FR-UI-10). While it is
+      disabled, a muted line under it, linked by its `aria-describedby`, says why, the first that applies: "Creating the
+      course…" (a confirm in flight); "Enter the total weeks first." (weeks empty); "Fix the fields above first."
+      (another invalid field); "Updating the estimate…" (a preview pending or loading); "The estimate failed; change a
+      field to try again." (a preview error); "The plan does not fit; use a suggestion or change the fields." (does not
+      fit). The line is absent while the button is enabled. [unit] each reason, the `aria-describedby` link, absence
+      when enabled.
   - id: FR-IMPORT-8
     text: >-
       **Existing sources.** Below the drop zone, "Your sources" lists `GET /api/materials` (id, status, page count):
@@ -100,6 +126,12 @@ requirements:
       upload's processing link is the upload track's, FR-IMPORT-3).
       Re-planning shows which lessons are already started and stay as they are ("3 started lessons keep their
       pages"). [unit] [story]
+      Design pass (2026-11-23): each source is a full-width row (WEB-UI FR-UI-6's row style): the material id as its
+      title (sans, semibold; a human title is server data, a follow-up), "<n> pages" muted with tabular figures, a
+      neutral status chip for a material that is not imported (its status with `_` as a space, in sentence case), and
+      "Plan study time" / "Re-plan" as a ghost button; the row whose form is open has `aria-current="true"` and the
+      `--acme-hover` fill. (The upload drop zone above it is WEB-IMPORT's, on another branch; this pass does not touch
+      it.) [unit] the chip text, `aria-current` on the chosen row; [story]
 
 invariants: []
 
@@ -114,4 +146,4 @@ defers:
 owner_notes:
   - "1. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it as a range. The live check confirms with it unchecked, so it spends no credit."
 
-review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent. Tests (2026-11-23): [unit] web/src/import/plan/plan.test.tsx; [story] web/src/import/plan/ImportPage.stories.tsx. Code review of e244aa4 (changes): confirm could post the live fields with a stale plan_sha256 during the debounce or after a failed preview (a same-day re-plan would replay the old plan) — FR-IMPORT-6 now confirms only the shown preview's own inputs, with unit tests for Enter inside the debounce and after a failed preview; the 409 text matches the re-preview; compile-first hidden once a lesson started; '1 lesson'. Code review round 2 on a8a0408: VERDICT approve, every mutant killed."
+review: "Split out of WEB-IMPORT on 2026-11-23 (coordinator decision (B)): FR-IMPORT-4, -5, -6 and -8 moved verbatim. These items were reviewed in the plan track's deep-reviewer (Fable) rounds 1–4 together with SRV-PLAN (round 1 on 62a86b2, rounds 2 and 3 with changes, all applied), and round 4 on d9f655a returned VERDICT: approve. Approved by agent. Tests (2026-11-23): [unit] web/src/import/plan/plan.test.tsx; [story] web/src/import/plan/ImportPage.stories.tsx. Code review of e244aa4 (changes): confirm could post the live fields with a stale plan_sha256 during the debounce or after a failed preview (a same-day re-plan would replay the old plan) — FR-IMPORT-6 now confirms only the shown preview's own inputs, with unit tests for Enter inside the debounce and after a failed preview; the 409 text matches the re-preview; compile-first hidden once a lesson started; '1 lesson'. Code review round 2 on a8a0408: VERDICT approve, every mutant killed. Amendment 2026-11-23 (V/design-pass, the owner's approval of the design audit's P1 and P2 items): FR-IMPORT-4 form styling and the disclosure icon; FR-IMPORT-5 the estimate as a definition list with muted notes, the headline as the status text, the does-not-fit callout first; FR-IMPORT-6 the reason line under a disabled Create; FR-IMPORT-8 source rows. Pending: one deep-reviewer round on the spec diff (outside the complex areas)."
