@@ -20,10 +20,11 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 7.6546      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 8.7416      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
                          #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
-                         #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface shows agent_spend)
+                         #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
+                         #   + V.live tutor bench 1.0870 (40 questions, per-question usage from GET .../questions/{id})
   ledger:                # - { task: S0.spike.compile-cost, usd: 0.00, what: "" }
     - { task: S0.spike.agent-sdk-container, usd: 0.0568, date: 2026-11-20,
         what: "1 + 6 + 6 text probes, 1 sandboxed tools run, 3 verification runs on trixie; breakdown in spikes/agent-sdk-container/RESULT.md" }
@@ -42,6 +43,9 @@ budget:
     - { task: V.live, usd: 0.90, date: 2026-11-23, funding: test_budget_usd,
         what: "3 tutor questions through the Ask panel; UPPER BOUND (3 × the $0.30 question cap): the actual cost sits in
           agent_spend, which no allowed interface exposes (VEC-TUTOR-3 estimates ≈ $0.048 each)" }
+    - { task: V.live, usd: 1.0870, date: 2026-11-23, funding: test_budget_usd,
+        what: "SRV-TUTOR bench, 40 questions over the HTTP API (sum of the questions' usage.usd, 1.086955); mean $0.0267;
+          e2e/live/results/2026-11-23-tutor-bench.json" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -796,7 +800,16 @@ tasks:
         the spec. After reader up on 80c48f7: L02 recompile (run cf9b9f35) converged, $0 (draft, fact_check and
         review reused), steps 4.8 s (wall 15 s at the 15 s poll), G2 publishable true, failing [], final sha256
         542521481e88…a39db9 (same as run 2); browser recheck PASS (149 references, lab cell done in 3.0 s).
-        Tutor grounding: a second investigation is running; no tutor change until it reports." }
+        Tutor grounding: investigated; fix merged from origin/V/SRV-TUTOR-chunks 906b084 (whole chunks sent, bench over
+        HTTP). Merged origin/V/WEB-polish 0cbb571 and SRV-TUTOR-chunks (conflicts in SRV-TUTOR.yaml review line,
+        slice.sh and owner.slice.ts resolved keeping both sides: ui and tutor-bench steps); verify-all --slice now
+        accepts hyphenated step names (66fba58; 'tutor-bench' exited 2 before any request). Gate PASS. Tutor bench
+        2026-11-23 (40 questions, one run, no daily-cap stop): 39 answered, 1 failed (v18, error code not in the
+        bench record); grounded_share 0.625 (NFR-TUTOR-3 ≥ 0.8: FAIL), insufficient_share 0.275,
+        verified_block_share 0.870, gold_cited_share 0.575, grounded given gold in top 8: 21/26 = 0.808, not in top 8:
+        4/14 = 0.286 (retrieval bounds grounding); latency p50 5.65 s, p95 9.26 s (NFR-TUTOR-1 pass), mean_usd 0.0267
+        (NFR-TUTOR-2 pass), total $1.0870. Follow-up: 4 answers carried thinking tokens (88–533) with thinking off
+        (FR-AGENT-13). Results: e2e/live/results/2026-11-23-tutor-bench.json." }
   - { id: V.cost-optimize, stage: V, kind: module, track: ai, status: todo, needs: [V.live, V.DOD-index],
       what: "Owner 2026-11-22: optimise the cost of each operation after the slice works. First measure per operation
         (tokens, $, wall time, CPU, memory) into the DoD report's cost columns. Then apply measured levers, each with a
