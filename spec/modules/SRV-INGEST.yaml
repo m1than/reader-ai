@@ -327,6 +327,9 @@ requirements:
         is re-indented per box, so each part is dedented to its own leftmost line and a continuation that starts
         inside a nested scope loses that offset. The converter reports the number of such items
         (FR-INGEST-5's code line); the pilot's count is recorded in docs/progress.yaml before the first import.
+      - **Known limit:** a proportional box dominated by digits (tabular digits share one width) can pass the
+        80% rule, and its indentation is then expressed in digit widths. The pilot's seven majority-cell boxes
+        are all italic-comment or second-font cases (2026-11-23).
       VEC-INGEST-3's hashes are computed over exactly this normalised form, with the indentation rule implemented
       separately in the expectation generator. [host, VEC-INGEST-2; local, VEC-INGEST-3; unit]
   - id: FR-INGEST-8
@@ -693,6 +696,7 @@ vectors:
         an indented first line; that case is covered by [unit] tests. One block outside the sample, page 419's
         first (an italic comment line among upright code, recovered by FR-INGEST-7's majority cell), is
         recorded by box and counts only (0,4,4,4,4,4,8,8,12,12,8,4,0), adding no code-count or hash expectation;
+        page 419 is not part of the 20-page sample and never counts in NFR-INGEST-2's rule-B tally (owner note 6);
       - on pages 461 and 468, each block's index relative to its list steps (ADR-0021's wording, relational): the
         block comes after the step before it and before the next step, with the steps anchored by hand-recorded
         boxes. Other list items on the page (such as a filename label Docling labels as a list item) do not count.

@@ -277,6 +277,16 @@ def test_band_is_two_percent_of_the_modal_advance_smaller_on_a_tie(
     assert grid is not None and grid.mode == mode and grid.complete
 
 
+@pytest.mark.parametrize(
+    ("advances", "expected"),
+    [([CELL] * 9 + [4.14], "majority"), ([CELL] * 9 + [4.13], "complete"), ([0.0], None), ([], None)],
+)
+def test_band_edges_and_degenerate_advances(advances: list[float], expected: str | None) -> None:
+    mapping = need("reader.ingest.host.mapping")
+    grid = mapping.grid_of(advances)  # 4.14 is 2.2% above 4.05: out of band; 4.13 is 1.98%: in band
+    assert (None if grid is None else "complete" if grid.complete else "majority") == expected
+
+
 def test_proportional_prose_still_falls_back() -> None:
     mapping = need("reader.ingest.host.mapping")
     prose = "Field constants of the curve are listed in the table below"
@@ -315,11 +325,14 @@ def test_reindent_keeps_the_text_layer_when_the_rule_is_undefined(
     assert mapping.reindent(text, glyphs) == (text, "fallback")
 
 
-def test_an_out_of_band_line_still_needs_an_on_grid_offset() -> None:
+@pytest.mark.parametrize(("offset_cells", "how"), [(2.0, "majority"), (2.5, "fallback")])
+def test_an_out_of_band_line_still_needs_an_on_grid_offset(offset_cells: float, how: str) -> None:
     mapping = need("reader.ingest.host.mapping")
     glyphs = typeset("abcdefghij\nklmnopqrst\nuvwxyzabcd\nefghijklmn\nop")
-    glyphs += [(96.38 + 2.5 * CELL, 640.0, ITALIC)]  # an italic line starting half a cell off the grid
-    assert mapping.reindent("a\nb\nc\nd\ne\nf", glyphs)[1] == "fallback"
+    glyphs += [(96.38 + offset_cells * CELL, 640.0, 4.2)]  # one italic glyph, out of band, on its own line
+    grid = mapping.grid_of([g[2] for g in glyphs])
+    assert grid is not None and not grid.complete  # >= 80% in band: only the offset decides
+    assert mapping.reindent("a\nb\nc\nd\ne\nf", glyphs)[1] == how
 
 
 @pytest.mark.parametrize(("residual", "expected"), [(0.24, [0, 2]), (0.26, None)])
