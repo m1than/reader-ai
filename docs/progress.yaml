@@ -707,16 +707,25 @@ tasks:
       what: "Owner 2026-11-22: Definition-of-Done index of every user operation, verified automatically; feeds
         V.cost-optimize (spec OPS-DOD).",
       review: "deep-reviewer: one round (changes), all applied; coordinator checks the diff (no second review).
-        Recheck on V/slice-integration 744997e (2026-11-23) goes to a spec review before approval",
+        Recheck on V/slice-integration 744997e (2026-11-23): spec review round 1 of cd6be04 changes (8 blocking, all
+        applied, plus the non-blocking items); round 2 pending",
       note: "spec rechecked 2026-11-23 against the integrated code (every other spec approved). Index: 30 operations × 8
-        criteria = 240 cells, 44 na, 41 missing (closed: search.query × observability by FR-SEARCH-8,
-        lesson.compile_resume × cost by the run's stored cap, lesson.findings × recovery by FR-PIPELINE-6/11 and
-        FR-NOTEBOOK-1). Every mapped item is traced. Fixed drift: material and compile routes renamed, POST /api/search
-        and GET /api/lessons/{lesson_id}/questions mapped, GET /api/spend gone, tutor items renumbered (FR-TUTOR-11 Ask
-        panel with axe, FR-TUTOR-12 logging), tutor cap 0.30, ledger usd from settled_usd, reader-server not user-facing.
+        criteria = 240 cells, 44 na, 49 missing (declared gaps only). Closed: lesson.compile_resume × cost (the run's
+        stored cap). Opened by review round 1: search.query × observability (no test asserts FR-SEARCH-8's line),
+        cell.run/interrupt/reset/run_all × observability (INV-KERNEL-6 is privacy), auth.bootstrap and auth.signin ×
+        a11y (no axe run there), lesson.findings × recovery narrowed (absent G2 report untested). Every mapped item is
+        traced. axe.json, timings.jsonl and ledger.jsonl have no producer yet: Green adds axe.json (slice.live.ts);
+        timings and ledger are V.cost-optimize's first step. Fixed drift: material and compile routes renamed, POST
+        /api/search and GET /api/lessons/{lesson_id}/questions mapped, GET /api/spend gone, tutor items renumbered
+        (FR-TUTOR-11 Ask panel with axe, FR-TUTOR-12 logging), tutor cap 0.30, ledger usd from settled_usd (settle rows
+        only) plus thinking. FOR THE OWNER'S REVIEW-AFTER: not_user_facing gains `reader-server` (container entrypoint;
+        only the owner adds these entries); hand-rolled positional subcommands (outside argparse add_parser) escape T10's
+        CLI registry; ADR-0001 (proposed) content amended with T10, P8 (ratchet, trailer DoD-Owner-Change), H4 (waiver
+        hook) and tools/dod tests, status unchanged.
         Paired tools changes in Red/Green: repo.mjs TEST_PATTERNS ^tools/dod/.+\\.test\\.mjs$; check.mjs T10; guard-tests
-        ratchet; pre-write hook refuses agent `waived`; ci runs node --test \"tools/dod/*.test.mjs\"; verify-all.sh
-        inputs and report. Cross-spec: SRV-TUTOR FR-TUTOR-13 (dod.yaml) becomes a pointer to this index at its next
+        ratchet; pre-write hook refuses new or changed waived cells; ci runs node --test \"tools/dod/*.test.mjs\";
+        verify-all.sh inputs and report; web_live.py and passkey_check.py details after a TAB; slice.live.ts writes
+        axe.json. Cross-spec: SRV-TUTOR FR-TUTOR-13 (dod.yaml) becomes a pointer to this index at its next
         revision. This entry duplicates the one on V/owner-housekeeping; keep this one when merging." }
 
   # Stage 2 — event backbone and notifications

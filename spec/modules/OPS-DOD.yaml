@@ -14,32 +14,44 @@
 #
 # Initial index (2026-11-22, after merging V/slice-integration, V/live-e2e, V/V.TUTOR-min and V/V.COMPILE-min;
 # rechecked 2026-11-23 on V/slice-integration 744997e, where every other spec is approved and implemented in code):
-# 30 operations × 8 criteria = 240 cells; 44 `na`, 41 `missing`. Missing per operation:
-#   ingest.setup 3, material.browse 3, lesson.list 3, lesson.open 3, course.import 3, stack.backup 3,
-#   stack.restore 3; auth.signout 2, auth.add_passkey 2, lesson.findings 2, stack.trust 2;
-#   auth.bootstrap 1, auth.signin 1, ingest.requeue 1, cell.interrupt 1, cell.run_all 1, lesson.compile_status 1,
-#   lesson.compile_resume 1, tutor.history 1, stack.down 1, stack.status 1, stack.doctor 1, secrets.set 1;
-#   material.ingest 0, search.query 0, cell.run 0, cell.reset 0, lesson.compile 0, tutor.ask 0, stack.up 0.
-# Closed by the recheck: search.query × observability (FR-SEARCH-8 logs lengths and the result count, never `q`),
-# lesson.compile_resume × cost (the resumed step runs under the run's stored cap, FR-PIPELINE-11 and FR-AGENT-9),
-# lesson.findings × recovery (FR-PIPELINE-6's derived state and FR-PIPELINE-11's status routes return the G2 report
-# only after lab verification; FR-NOTEBOOK-1 shows "not published yet"). The remaining gaps are mostly latency (no
-# sourced budget), observability (no required log line), privacy canaries for lesson, material and course text, and
-# the backup-restore drill (disabled until S1.OPS-CLI-restore-seed). Every mapped item is traced by at least one test
-# file. Bench-only items (NFR-*) are never mapped; their numbers are budget sources instead.
+# 30 operations × 8 criteria = 240 cells; 44 `na`, 49 `missing`. Missing per operation:
+#   ingest.setup, material.browse, lesson.list, lesson.open, course.import, lesson.findings, stack.backup and
+#   stack.restore 3 each; auth.bootstrap, auth.signin, auth.signout, auth.add_passkey, cell.interrupt, cell.run_all
+#   and stack.trust 2 each; ingest.requeue, search.query, cell.run, cell.reset, lesson.compile_status,
+#   lesson.compile_resume, tutor.history, stack.down, stack.status, stack.doctor and secrets.set 1 each;
+#   material.ingest, lesson.compile, tutor.ask and stack.up 0.
+# The count covers declared gaps only, the cells whose index entry says `missing`. A cell with items, labels, budgets
+# or pages can still be MISSING in a report when its evidence is absent from that run (FR-DOD-5). Today three inputs
+# have no producer at all: `axe.json`, `timings.jsonl` and `ledger.jsonl` (FR-DOD-10). Until they exist, every budget
+# cell and every a11y page reports no evidence in a live run. This module's Green adds the `axe.json` producer; the
+# timings and ledger producers are V.cost-optimize's first step.
+# Recheck 2026-11-23: lesson.compile_resume × cost is closed, because the resumed step runs under the run's stored
+# cap (FR-PIPELINE-11, FR-AGENT-9). lesson.findings × recovery maps the tested part, FR-PIPELINE-6's derived state
+# and FR-NOTEBOOK-1's "not published yet", and keeps a `missing` for the status routes' absent report. Opened by
+# review round 1: search.query, cell.run, cell.interrupt, cell.reset and cell.run_all × observability (FR-SEARCH-8
+# requires a log line that no test asserts; INV-KERNEL-6 is a privacy item), and auth.bootstrap and auth.signin ×
+# a11y (no axe run on those pages). The remaining gaps are mostly latency (no sourced budget), observability (no
+# required or asserted log line), privacy canaries for lesson, material and course text, and the backup-restore drill
+# (disabled until S1.OPS-CLI-restore-seed). Every mapped item is traced by at least one test file. Bench-only items
+# (NFR-*) are never mapped; their numbers are budget sources instead.
 #
 # Gate placement: everything here is tooling outside the spec gate (tools/** and docs/** are neither implementation
 # nor tests to tools/lib/repo.mjs); this spec still owns it through `paths`. Paired tools changes, all in this module's
 # Red/Green:
 # - tools/lib/repo.mjs TEST_PATTERNS gains `^tools/dod/.+\.test\.mjs$` (node:test), limited to tools/dod/ so the
-#   untraced tools/hooks test is not swept into T3;
+#   untraced tools/hooks test is not swept into T3. The tests of FR-DOD-3, -10, -12 and -13 (T10, the report, the
+#   waiver rule as a pure function the hook calls, the ratchet) live in tools/dod/*.test.mjs and are traced;
 # - tools/trace/check.mjs gains T10 (FR-DOD-3), using tools/dod/index.mjs; the "T1–T9" wording in tools/ci-local.sh,
 #   .github/workflows/ci.yml and AGENTS.md becomes "T0–T10";
 # - tools/trace/guard-tests.mjs gains the ratchet (FR-DOD-13);
 # - tools/hooks/pre-write.mjs refuses agent writes that add `waived` (FR-DOD-12), with a case in
 #   tools/hooks/pre-write.test.mjs;
 # - tools/ci-local.sh and ci.yml run `node --test "tools/dod/*.test.mjs"`;
-# - e2e/live/verify-all.sh writes the FR-DOD-4 inputs (pytest with `-o junit_family=xunit1`) and runs report.mjs last.
+# - e2e/live/verify-all.sh writes the FR-DOD-4 inputs (pytest with `-o junit_family=xunit1`) and runs report.mjs last;
+# - e2e/live/lib/web_live.py `line` and e2e/live/lib/passkey_check.py `report` put any detail after a TAB (FR-DOD-4);
+#   e2e/web/live/slice.live.ts writes `axe.json` (FR-DOD-10) beside its a11y.txt;
+# - docs/adr/0001-process-and-enforcement.md (proposed) lists T10, the ratchet, the waiver hook rule and the
+#   tools/dod tests (content only, its status unchanged).
 #
 # Cross-spec: the approved SRV-TUTOR keeps its own DoD hook, FR-TUTOR-13 (server/src/reader/tutor/dod.yaml, operation
 # `ask_tutor`, criteria with test function names, checked by a SRV-TUTOR unit test). There is one index: `tutor.ask`
@@ -109,33 +121,53 @@ requirements:
       e2e/web/live/slice.live.ts); a route in the registry (each `Route(METHOD, path, …)` and `WsRoute(path, …)` of
       the modules in reader.api.app.ROUTERS, read from their source files) or a command in the CLI registry is in no
       operation and not in `not_user_facing`; a route or command the index names is not in its registry (stale);
-      an approved spec is named by no operation and not in `not_user_facing`. The CLI registry is: `reader` followed
-      by every subcommand path of the `add_parser` tree in server/src/reader/cli/app.py (`reader watcher status`);
-      every other `[project.scripts]` name of server/pyproject.toml; and `<name> <flag>` for every `store_true` flag
-      of that script's parser module. Options of `reader` subcommands (`--config`, `--json`, `--handle`) and value
-      options of other scripts are not registry entries. An index
-      command is a registry entry or a registry entry followed by ` --<flag>` (`reader down --untrust`); a
-      `not_user_facing` command covers every registry entry it is a prefix of, up to a space. For an `enforced` operation also: a `missing` cell; an `items` id of a draft spec; an
-      `items` id that no test file traces; a live label under a disabled section. For tracked operations T10
-      prints, as information, the missing count and the untraced items per operation.
+      an approved spec is named by no operation and not in `not_user_facing`.
+      **CLI registry.** (a) `reader` followed by the path of every **leaf** subcommand of the `add_parser` tree in
+      server/src/reader/cli/app.py, a leaf being a parser that adds no subparsers (`reader watcher status`; `reader
+      watcher` is not an entry); (b) every other `[project.scripts]` name of server/pyproject.toml; (c) `<name>
+      <flag>` for every `store_true` flag that (b)'s script declares on its top-level parser in its entry point's
+      module. Options of `reader` subcommands (`--config`, `--json`, `--handle`) and value options are not entries.
+      An index command is a registry entry, or an (a) entry followed by ` <flag>` where `<flag>` is an option that
+      entry's own subparser declares with `add_argument` (`reader down --untrust`: `--untrust` is an argument of
+      `down`). A `not_user_facing` command covers every registry entry it equals or is a prefix of up to a space.
+      Subcommands a script parses by hand (positional words outside `add_parser`) are not seen by T10; reviews
+      catch them.
+      **Disabled labels.** index.mjs declares, as data, the live labels whose section does not run, each with its
+      reason: today the stage-1 drill labels under `if ((DRILL))` (`reader backup`, `backup files are 0600`, `fresh
+      stack (volumes recreated)`, `reader restore onto the fresh stack`, `stack healthy after restore`, `restored
+      database holds this run's live-check passkey`; reason S1.OPS-CLI-restore-seed). A declared disabled label that
+      its key's scripts do not emit is an error (stale).
+      For an `enforced` operation also: a `missing` cell; an `items` id of a draft spec; an `items` id that no test
+      file traces; a `live` label in the disabled list. For tracked operations T10 prints, as information, the
+      missing count and the untraced items per operation.
   - id: FR-DOD-4
     text: >-
       Inputs, all under one directory (default e2e/live/out/results/): `pytest.xml` (pytest --junitxml with `-o
       junit_family=xunit1`, REF-DOD-1), `vitest.json` (REF-DOD-2), `playwright.json` (REF-DOD-3; the Playwright
-      [browser] tests of e2e/**/*.spec.ts), `live.log` (lines `PASS|FAIL|SKIP <key>: <label>`), `axe.json` (per
-      page: {page, violations: {minor, moderate, serious, critical}} counts), `timings.jsonl` ({operation, ms, run,
-      per?}), `ledger.jsonl` (one row per SRV-AGENT `agent_spend` settle row: {operation, run_id, stage, attempt,
-      model, input, output, cache_write_5m, cache_write_1h, cache_read, usd}, usd a decimal string copied from
-      `settled_usd`, the amount SRV-AGENT counts as spent, FR-AGENT-9) and the `--commit <sha>` argument. Test file paths are normalised to repo-relative POSIX paths; an absolute path outside the
-      repository stops the report with exit 2. A missing input file means its evidence is absent, not failed.
+      [browser] tests of e2e/**/*.spec.ts), `live.log`, `axe.json` (per page: {page, violations: {minor, moderate,
+      serious, critical}} counts; `page` is the index's page template, FR-DOD-10), `timings.jsonl` ({operation, ms,
+      run, per?}), `ledger.jsonl` and the `--commit <sha>` argument.
+      **live.log grammar.** After ANSI escapes are stripped, a line is evidence only when it matches
+      `^(PASS|FAIL|SKIP) (stage-1|browser): ([^\t]+)(\t.*)?$`: the label is group 3 exactly, and a detail (a duration
+      such as `(3.4s)`, a failure note) follows one TAB and is ignored. Labels never contain a TAB, and a label's own
+      trailing parenthetical (`(not printed)`, `(KaTeX, Shiki)`) is part of it. Every other line (indented command
+      output, summaries, blank lines) is ignored. verify-all.sh writes `live.log` from the stage-1 log (prefixing
+      `stage-1: ` as it does today) and from web_live.py's output, and both emitters put details after a TAB.
+      **ledger.jsonl** holds one row per SRV-AGENT `agent_spend` settle row: {operation, run_id, stage, attempt,
+      model, input, output, thinking, cache_write_5m, cache_write_1h, cache_read, usd}, usd a decimal string copied
+      from `settled_usd`, thinking the row's thinking tokens or null. Settle rows only: an open reserve is not a
+      cost here, unlike FR-AGENT-9's `spent`, which also counts unsettled reserves; the report measures what runs
+      cost, not what the budget guard held back.
+      Test file paths are normalised to repo-relative POSIX paths; an absolute path outside the repository stops
+      the report with exit 2. A missing input file means its evidence is absent, not failed.
   - id: FR-DOD-5
     text: >-
       `node tools/dod/report.mjs --index <yaml> --results <dir> --commit <sha> --out <dir>` writes INDEX.md and
       report.json. Item status: PASS only if every test file tracing it has at least one passed case and no failed,
       errored or skipped case; a Playwright `flaky` case counts as failed (no assertion retries); a Vitest `todo`
       case counts as skipped; otherwise FAIL if any case failed or errored, else no evidence. Live status: a label
-      with any FAIL line is FAIL, with only PASS lines PASS, with SKIP only or absent no evidence (`live.log` lines
-      are split on the first `: ` after the status, ANSI escapes stripped). Budget status: fewer than `n_min`
+      with any FAIL line is FAIL, with only PASS lines PASS, with SKIP only or absent no evidence (lines per
+      FR-DOD-4's grammar). Budget status: fewer than `n_min`
       measurements → no evidence; a measured p50/p95 or per-run cost above the budget → FAIL; else PASS; a budget
       with enough measurements is evidence on its own. a11y: every listed page needs an `axe.json` entry; any serious
       or critical violation → FAIL. A `cost: na` operation with `ledger.jsonl` rows → FAIL. Cell status: na → NA;
@@ -167,9 +199,32 @@ requirements:
   - id: FR-DOD-10
     text: >-
       `e2e/live/verify-all.sh` writes the FR-DOD-4 inputs, runs report.mjs last into docs/dod/, prints one line per
-      operation `<status> <id> (<missing> missing, <fail> failed)`, and exits non-zero when any cell is FAIL or any
-      enforced operation is MISSING. report.mjs exits 0 (no FAIL, no enforced MISSING), 1 (a FAIL), 2 (invalid
-      input), 3 (an enforced operation MISSING). docs/dod/INDEX.md and report.json are committed with the final PR.
+      operation `<status> <id> (<missing> missing, <fail> failed)`, and exits non-zero when any `live.log` line is
+      FAIL (mapped to an operation or not), any cell is FAIL, or any enforced operation is MISSING. report.mjs exits
+      0 (no FAIL, no enforced MISSING), 1 (a FAIL), 2 (invalid input), 3 (an enforced operation MISSING).
+      docs/dod/INDEX.md and report.json are committed with the final PR.
+      **Producers.** `live.log`: stage-1.sh and web_live.py (exist). `pytest.xml`, `vitest.json`, `playwright.json`:
+      verify-all.sh runs the server, web and e2e [browser] suites with those reporters. `axe.json`: none today;
+      this module's Green makes e2e/web/live/slice.live.ts write one entry per page it already scans with axe:
+      `/` (lesson list; covers lesson.list and auth.signout) and `/lessons/{lesson_id}` (the fixture lesson; covers
+      lesson.open, cell.*, lesson.findings, tutor.*), n = 1 each per run. The `page` key is the index's template:
+      the producer maps the URL it visited (`/lessons/<uuid>`) to its template and never writes a concrete id. No
+      axe run covers `/api/auth/bootstrap` or `/api/auth/signin`, so those a11y cells are `missing`.
+      `timings.jsonl` and `ledger.jsonl`: no producer yet; each budget's future producer and n:
+      material.ingest latency (reader-ingest on the pilot, n ≥ 20 pages), search.query latency (the [local]
+      NFR-SEARCH-1 bench, 40 queries), cell.run latency (30 `print(1)` runs in the browser suite), cell.reset
+      latency (3 resets in the browser suite), stack.up latency (one timed `reader up`, outside verify-all.sh, which
+      starts nothing), lesson.compile latency and cost (one L02 compile, n = 1), lesson.compile_resume cost (a
+      resumed run, n = 1; none occurs in a planned run), tutor.ask latency and cost (the NFR-TUTOR-1 bench, n =
+      min(20, explain cells) + 1).
+      **Cost of a run.** verify-all.sh as it stands calls no model: $0. The paid producers are opt-in and funded by
+      `budget.test_budget_usd` (docs/progress.yaml, $30): one L02 compile ≈ $2.42–2.97 (cap $8.00) and one tutor
+      bench ≈ $1 (cap n × $0.30 ≤ $6.30), so a full measured run is ≈ $4, at most $14.30.
+      **Attribution.** The ledger producer sets `operation` from the settle row: task `tutor` → tutor.ask (run_id =
+      question_id, FR-TUTOR-7); every compile task → lesson.compile, except that all rows of a run any of whose job
+      keys was requeued by a resume (FR-PIPELINE-11, FR-EVENTS-8) → lesson.compile_resume. A run therefore counts
+      in exactly one operation, and a resumed run is measured whole against the run cap. Timings use the same
+      operation ids.
   - id: FR-DOD-11
     text: >-
       INDEX.md lists, after the matrix and the cost and latency table, every MISSING cell as `operation × criterion —
@@ -177,17 +232,22 @@ requirements:
       grouped by operation, so the gap list is the work list.
   - id: FR-DOD-12
     text: >-
-      Waivers are the owner's: tools/hooks/pre-write.mjs refuses an agent Write or Edit of
-      spec/fixtures/OPS-DOD/operations.yaml whose result has more `waived` entries than the current file, with a
-      fixed reason; a case in tools/hooks/pre-write.test.mjs proves it. T10 accepts `waived` only with `by: owner`
+      Waivers are the owner's (hook rule H4 in ADR-0001): tools/hooks/pre-write.mjs refuses an agent Write or Edit of
+      spec/fixtures/OPS-DOD/operations.yaml when the result holds a `waived` (operation, criterion) cell that the
+      current file does not hold, or holds with a different `waived` value, with a fixed reason. It compares the
+      sets of waived cells, never counts, so moving a waiver to another cell is refused; removing a waiver is
+      allowed. The comparison is a pure function in tools/dod/index.mjs, tested in tools/dod/*.test.mjs, and a
+      case in tools/hooks/pre-write.test.mjs proves the hook calls it. T10 accepts `waived` only with `by: owner`
       and a date.
   - id: FR-DOD-13
     text: >-
       Ratchet in tools/trace/guard-tests.mjs, comparing the index at `--base` with HEAD: an error for an operation
       that goes from enforced to tracked, a removed operation, a removed item or live label on an enforced
       operation, a loosened budget (a larger max or a smaller n_min, or kind target → baseline), a new
-      `not_user_facing` entry, and a cell of an enforced operation that becomes `na`. When `--base` has no index (the
-      change that introduces it), the ratchet has nothing to compare and passes.
+      `not_user_facing` entry, a new or changed `waived` cell, and a cell of an enforced operation that becomes `na`.
+      When `--base` has no index (the change that introduces it), the ratchet has nothing to compare and passes. The
+      owner's path: a commit in `--base..HEAD` with the trailer `DoD-Owner-Change: <reason>` turns the ratchet's
+      errors into an information line, as `Spec-Neutral` does for P7; the agent never writes that trailer.
 
 invariants:
   - id: INV-DOD-1
@@ -228,16 +288,24 @@ vectors:
   - id: VEC-DOD-2
     source: >-
       Synthetic results for a three-operation index (pytest xunit1 XML, Vitest and Playwright JSON incl. flaky and
-      todo, live.log with ANSI and duplicate labels, axe.json, timings and ledger) with the expected INDEX.md and
+      todo, live.log with ANSI, duplicate labels, TAB details, labels ending in their own parenthetical, indented
+      output and summary lines, an unmapped FAIL line, axe.json, timings and ledger) with the expected INDEX.md and
       report.json, written in Red
     file: spec/fixtures/OPS-DOD/results/
   - id: VEC-DOD-3
-    source: Hand-written invalid indexes and index changes with the expected T10 and ratchet errors (written in Red)
+    source: >-
+      Hand-written invalid indexes and index changes with the expected T10, ratchet and waiver-rule errors (written
+      in Red). Among them: an `na` reason with an unquoted comma inside a flow mapping (`{ na: a, b }` parses as a
+      second key, an unknown-key error under FR-DOD-1); an enforced operation mapping a disabled label; a declared
+      disabled label no script emits; a non-leaf command (`reader watcher`); a flag its subparser does not declare;
+      a stale route and a stale command; a waiver moved to another cell; a changed waiver; a new waiver with and
+      without the `DoD-Owner-Change` trailer.
     file: spec/fixtures/OPS-DOD/t10-cases.yaml
 
 defers:
-  - The checks that close the 41 missing cells live in their own modules (latency budgets and timings, log lines,
-    text canaries, the drill, an add-passkey page); this spec indexes and verifies them.
+  - The checks that close the 49 missing cells live in their own modules (latency budgets and timings, log lines
+    and tests that assert them, text canaries, the drill, an add-passkey page, axe runs on the auth pages); this spec
+    indexes and verifies them. The timings and ledger producers (FR-DOD-10) are V.cost-optimize's.
   - V.cost-optimize consumes report.json's cost and latency columns; optimisation itself is not here.
   - Per-test-case traceability would need @trace on test functions; v1 is per file, so it errs toward FAIL.
 
