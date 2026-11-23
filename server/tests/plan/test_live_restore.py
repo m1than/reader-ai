@@ -38,8 +38,8 @@ def preview(body: dict[str, Any]) -> dict[str, Any]:
         "inputs": {**body, "start_date": "2026-01-01"},
         "lessons": [{"id": "p1-2", "pages": [1, 2], "minutes": 5, "fixed": False, "title": "t"}],
         "summary": {"lesson_count": 1, "fixed_count": 0, "new_count": 1, "study_days": w * 7, "days_left": w * 7,
-                    "minutes_mean": 5, "minutes_max": 5, "required_minutes": 5, "fits": True, "reasons": [],
-                    "suggest": None},
+                    "minutes_mean": 5, "minutes_max": 5, "required_minutes": 5, "fits": w != 1,
+                    "reasons": [] if w != 1 else ["days"], "suggest": None},
         "estimate": {"course_low_usd": "0.10", "course_high_usd": "0.20", "mean_lesson_kchars": "1.000",
                      "extrapolated": True, "first_lesson": None},
     }
@@ -91,6 +91,14 @@ def test_restores_even_when_a_step_fails(live: ModuleType, tmp_path: Any) -> Non
     with pytest.raises(RuntimeError):
         live.check_api(c, tmp_path)
     assert (c.confirms[-1]["total_weeks"], c.confirms[-1]["minutes_per_day"]) == (20, 45)
+
+
+def test_skips_the_mutating_steps_when_the_owners_plan_would_not_fit(live: ModuleType, tmp_path: Any) -> None:
+    owner = {"total_weeks": 1, "minutes_per_day": 45, "rate": "3.10", "start_date": "2026-01-01"}
+    c = FakeClient(dict(owner))
+    results = live.check_api(c, tmp_path)
+    assert c.confirms == []
+    assert results["mutating_steps"].startswith("skipped")
 
 
 def test_without_a_stored_plan_it_leaves_its_own(live: ModuleType, tmp_path: Any) -> None:

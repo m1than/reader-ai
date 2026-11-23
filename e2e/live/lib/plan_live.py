@@ -119,12 +119,19 @@ def check_api(c: httpx.Client, out: Path) -> dict[str, Any]:
     if owner_plan is None:
         _mutate(c, mid, body, p, weeks, results)
         return results
-    # The owner has a plan of their own: run the mutating steps, then restore its weeks, minutes and rate.
+    # The owner has a plan of their own: run the mutating steps, then restore its weeks, minutes and rate. First check
+    # that the owner's inputs still give a plan that fits today; otherwise the restore could fail halfway, so the
+    # mutating steps are skipped and the run says so.
+    restore = {"material_id": mid, "total_weeks": owner_plan["total_weeks"],
+               "minutes_per_day": owner_plan["minutes_per_day"], "rate": owner_plan["rate"], "today": today}
+    r = c.post("/api/plans/preview", json=restore)
+    if r.status_code != 200 or not r.json()["summary"]["fits"]:
+        results["mutating_steps"] = "skipped: the owner's stored plan does not fit today, so it could not be restored"
+        report("plan: mutating steps skipped (the owner's own plan would not be restorable today)", True)
+        return results
     try:
         _mutate(c, mid, body, p, weeks, results)
     finally:
-        restore = {"material_id": mid, "total_weeks": owner_plan["total_weeks"],
-                   "minutes_per_day": owner_plan["minutes_per_day"], "rate": owner_plan["rate"], "today": today}
         r = c.post("/api/plans/preview", json=restore)
         ok = r.status_code == 200
         if ok:

@@ -1057,7 +1057,9 @@ tasks:
         24 kchars, 0.4× L02); preview p95 18–28 ms over 20 calls; confirm without compile, replay, re-plan and back
         all PASS; axe 0 serious at 1280/1024/390; the owner's passkey and session counts unchanged. The stack keeps a
         15-week plan course for bashir-2025 (105 unpublished lessons, no compile run).",
-      note: "Specs: SRV-PLAN and WEB-PLAN approved by agent after deep-reviewer (Fable) rounds 1–4, VERDICT approve on
+      note: "Code review: round 1 on e244aa4 changes (stale plan_sha256 on confirm, route-lock and owner-only tests,
+        two vectors, live restore), all fixed; round 2 on a8a0408 VERDICT approve, every mutant killed.
+        Specs: SRV-PLAN and WEB-PLAN approved by agent after deep-reviewer (Fable) rounds 1–4, VERDICT approve on
         d9f655a. Owner decisions recorded in SRV-PLAN: even spread over total_weeks × 7 days (3), re-plan keeps the
         deadline (4, decided by the coordinator for the owner; overrulable). Tests: server 46 plan tests (planner
         vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
