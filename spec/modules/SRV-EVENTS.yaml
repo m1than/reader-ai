@@ -55,7 +55,7 @@ layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); FR-EVENTS-12's status read is also exposed as `reader.jobs.queue.job_status_of(conn, kind, key)` for callers without a procrastinate app (SRV-INGEST's routes), and `Jobs.job_status` uses it; no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review. Integration (V/slice-integration, 2026-11-23): KIND_MODULES ingest, search, pipeline, tutor (SRV-TUTOR's order)"
+review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); FR-EVENTS-12's status read is also exposed as `reader.jobs.queue.job_status_of(conn, kind, key)` for callers without a procrastinate app (SRV-INGEST's routes), and `Jobs.job_status` uses it; no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review. Integration (V/slice-integration, 2026-11-23): KIND_MODULES ingest, search, pipeline, tutor (SRV-TUTOR's order). Final code review on 2924dcf (2026-11-23, deep-reviewer): changes, no live correctness bug, untested or unspecified behaviour. Applied on V/SRV-EVENTS-final, spec then tests then code: FR-EVENTS-1 injectable start hooks (`hooks=`), awaited once after the start sweep with `running()` set, failure and a 30 s timeout isolated, idempotent and enqueue-only, `running()` cleared in the finally; FR-EVENTS-15 skips unknown-kind keys (the reconcile's `dead`/`unknown_kind` write removed) and a failing enqueue no longer ends a sweep round; FR-EVENTS-9 a failing start sweep returns 1 and `stop` is observed during the start sweep and hooks; tests for FR-EVENTS-7's unknown-kind `dead` with the lock free, `wrapper_error`, the worker's own re-enqueue after a lost run, `requeue_dead` on a key with no outcome and no job, the stored sweep priority. Green: worker.run(hooks=), HOOK_TIMEOUT_S 30 s, `stop` raced against the start sweep and each hook, `_RUNNING` cleared in the finally; queue: the idempotency key computed inside the wrapper's try, the lost-run log names the failed step (count or re-enqueue), sweep enqueues guarded (`_sweep_defer`), the reconcile's unknown-kind `dead` removed. Round 2 (40900db): one test short of approve — the production default `hooks=None` had no test; added [unit] `start_hooks()` equals search's and pipeline's `on_worker_start` in KIND_MODULES order (empty for no modules) and [db] `run` without `hooks` awaits the declared hooks once; HOOK_TIMEOUT_S in `bounds` with its limit; `_unless_stopped` also cancels its task in the finally; a start sweep that fails while `stop` is set returns 0. Round 3 (6eeb576): VERDICT approve. Its items applied: a test where the start sweep sets `stop` and then raises (`run` returns 0; kills M36); a hook that cancels itself counts as a stop only when `stop` is set, so the worker still serves (FR-EVENTS-1 failure isolation), with a test"
 
 paths:
   - server/src/reader/jobs/**
@@ -100,6 +100,7 @@ bounds:
   - { name: retry delays, value: "5 s after the 1st counted failure, 25 s after the 2nd", kind: "structural: two retries span about 30 s; SRV-AGENT replaces them with the provider's Retry-After" }
   - { name: worker concurrency, value: 1, kind: "structural: ADR-0006 load profile < 1 job/s; one compile stage at a time keeps spend serial against budget.live_runs_usd" }
   - { name: shutdown_graceful_timeout, value: "8 s", kind: "structural: below Compose's 10 s stop timeout (REF-EVENTS-7), so procrastinate aborts the job and records it before SIGKILL" }
+  - { name: start hook timeout (HOOK_TIMEOUT_S), value: "30 s per hook", kind: "structural: a start hook only enqueues (FR-EVENTS-1), milliseconds per key. Limit: a hook that needs more than 30 s is cancelled on every start, so it never completes; such work belongs in a job, not a hook" }
 
 requirements:
   - id: FR-EVENTS-1
@@ -119,7 +120,15 @@ requirements:
       (a) append spend rows through SRV-AGENT's ledger, which opens its own connection and commits at once (append-only,
       never an outcome effect, so a rolled-back run still records its spend), and (b) enqueue through
       `reader.jobs.running()`, the worker's `Jobs` (FR-EVENTS-3 commits independently of the run's transaction); a kind
-      module may export `on_worker_start(jobs)`, which `worker.run` awaits once after the start sweep; building
+      module may export `on_worker_start(jobs)`. `worker.run`'s `hooks` argument is the list of start hooks (None
+      means every declared module's `on_worker_start`, `reader.jobs.catalog.start_hooks()`; tests pass their own),
+      independent of `catalog`. Each hook is awaited exactly once, in order, after the start sweep and with
+      `running()` already returning the worker's `Jobs`. A hook must be idempotent and may only enqueue (through
+      the `Jobs` it gets); it holds no lock and writes no key state. Hook failure is isolated: a hook that raises or
+      overruns `HOOK_TIMEOUT_S` (30 s, a chosen bound: a hook only enqueues, which takes milliseconds per key) is
+      logged with its module name only, and the next hook and the worker still run. Outside a running `worker.run`
+      (before it, after it returns, in the api) `running()` raises `JobError("no_worker")`; `run` clears it in its
+      `finally`. Building
       a `Catalog` rejects a duplicate name (`kind_name_duplicate`), the reserved name `jobs.sweep`, an `args` model
       whose `model_config` does not set `extra="forbid"` (`kind_args_not_forbid`), a `key` field missing from
       `args`, a `priority` outside 0 ≤ priority < the sweep's 1,000,000 (`kind_bounds_invalid`), and an `args` model
@@ -220,7 +229,7 @@ requirements:
       for `succeeded` and `unknown_key` when no row exists. It is the only way out of `dead`.
   - id: FR-EVENTS-9
     text: >-
-      `reader.jobs.worker.run(engine, target, stop, catalog=None, secret_values=())` installs the log scrubber
+      `reader.jobs.worker.run(engine, target, stop, catalog=None, secret_values=(), hooks=None)` installs the log scrubber
       (FR-EVENTS-16) first, checks the database through `engine`, opens the procrastinate app on `reader.db`'s
       `DbTarget` (the password as a psycopg connect argument, never in a conninfo string), builds the runtime with
       every resolved secret the calling process holds (`secret_values` plus the database password; FR-EVENTS-10;
@@ -229,7 +238,10 @@ requirements:
       queues of every kind in the catalog plus `jobs.sweep`, with `concurrency=1`,
       LISTEN/NOTIFY on and `shutdown_graceful_timeout=8`. On SIGTERM it stops fetching, waits up to 8 s, then
       procrastinate aborts the running job (status `aborted`; the job's transaction rolls back). It returns 0 after
-      a stop and 1 when the database is unreachable at start.
+      a stop and 1 when the database is unreachable at start or the start sweep fails (logged without detail;
+      0 when `stop` is already set by then).
+      `stop` is observed during the start sweep and the start hooks too: a stop there cancels the sweep or hook
+      (any gap a cancelled sweep leaves is FR-EVENTS-15's, as after a crash) and `run` returns 0 without serving.
   - id: FR-EVENTS-10
     text: >-
       No job payload carries a secret. An `args` model must not contain a field of type `reader.config.Secret`, at any
@@ -284,8 +296,13 @@ requirements:
       FR-EVENTS-14, write `dead` with `error_code` `orphaned` in the same transaction; commit; then, when not
       exhausted, enqueue through FR-EVENTS-3;
       `cancelled`: no action (an operator cancel).
+      A key whose kind is not in the catalog (a worker of another version, a rollback) is skipped each round: no
+      outcome is written for it here (only FR-EVENTS-7 writes `unknown_kind`, for a stalled job of such a kind), so
+      a later worker that knows the kind still runs it.
       Each key-row write commits before any enqueue call. Because a re-deferred key has a `todo` job, a key is
-      re-deferred at most once per abort or lost run. Separately, each sweep
+      re-deferred at most once per abort or lost run. An enqueue that fails inside a sweep (FR-EVENTS-7 or this
+      rule) is logged with the kind only and does not end the round; the key is left with no `todo` job, so
+      reconciliation takes it once its row is 60 s old, like FR-EVENTS-6's lost re-enqueue. Separately, each sweep
       cancels every `todo` job whose `task_name` is neither in `KINDS` nor `jobs.sweep`.
   - id: FR-EVENTS-16
     text: >-

@@ -1,4 +1,5 @@
-"""The worker loop: the start sweep, then procrastinate serving every declared kind (SRV-EVENTS FR-EVENTS-9).
+"""The worker loop: the start sweep, the start hooks, then procrastinate serving every declared kind
+(SRV-EVENTS FR-EVENTS-1, FR-EVENTS-9).
 
 `reader-server --role worker` calls `run` once the schema is at all heads.
 """
@@ -8,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Iterable
+from collections.abc import Awaitable, Iterable, Sequence
 from typing import Final
 
 import procrastinate
@@ -16,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from reader.db import DbTarget
-from reader.jobs.catalog import Catalog, load_kinds, start_hooks
+from reader.jobs.catalog import Catalog, StartHook, load_kinds, start_hooks
 from reader.jobs.logfilter import install_log_filter
 from reader.jobs.model import JobError
 from reader.jobs.queue import Jobs
@@ -24,11 +25,15 @@ from reader.jobs.queue import Jobs
 log = logging.getLogger("reader.jobs")
 
 CONCURRENCY: Final = 1
+# A chosen bound (FR-EVENTS-1): a start hook only enqueues, which takes milliseconds per key.
+HOOK_TIMEOUT_S: float = 30.0
 _RUNNING: list[Jobs | None] = [None]
 
 
 def running() -> Jobs:
-    """The worker's `Jobs`, for a handler that enqueues a follow-up job (paired SRV-PIPELINE amendment)."""
+    """The worker's `Jobs`, for a handler that enqueues a follow-up job (paired SRV-PIPELINE amendment).
+
+    Set only while `run` serves (from the start hooks on); outside it, `JobError("no_worker")`."""
     jobs = _RUNNING[0]
     if jobs is None:
         raise JobError("no_worker")
@@ -56,17 +61,53 @@ def make_app(target: DbTarget) -> procrastinate.App:
     return procrastinate.App(connector=connector)
 
 
+async def _unless_stopped[T](work: Awaitable[T], stop: asyncio.Event) -> tuple[bool, T | None]:
+    """Await `work` unless `stop` is set first, then cancel it. Returns (stopped, result); raises its
+    error."""
+    task = asyncio.ensure_future(work)
+    stopping = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({task, stopping}, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        stopping.cancel()
+        if not task.done():  # stopped, or this coroutine itself was cancelled: the work never outlives it
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+    if task.cancelled():  # by the stop above, or the work cancelled itself: only a set `stop` is a stop
+        return stop.is_set(), None
+    return False, task.result()
+
+
+async def _start_hooks(jobs: Jobs, hooks: Sequence[StartHook], stop: asyncio.Event) -> bool:
+    """Each hook once, in order, isolated and bounded (FR-EVENTS-1). False when `stop` was set meanwhile."""
+    for hook in hooks:
+        if stop.is_set():
+            return False
+        try:
+            stopped, _ = await _unless_stopped(asyncio.wait_for(hook(jobs), HOOK_TIMEOUT_S), stop)
+        except Exception:  # an error or the timeout: logged by module only; the next hook still runs
+            log.warning("jobs: start hook failed: %s", getattr(hook, "__module__", "?"))
+            continue
+        if stopped:
+            return False
+    return not stop.is_set()
+
+
 async def run(
     engine: AsyncEngine,
     target: DbTarget,
     stop: asyncio.Event,
     catalog: Catalog | None = None,
     secret_values: Iterable[str] = (),
+    hooks: Sequence[StartHook] | None = None,
 ) -> int:
-    """Serve jobs until `stop` is set. Returns 0 after a stop, 1 when the database is unreachable at start.
+    """Serve jobs until `stop` is set. Returns 0 after a stop, 1 when the database is unreachable at start or
+    the start sweep fails (0 when `stop` is already set by then).
 
     `secret_values` are every resolved secret the calling process holds (FR-EVENTS-10); the database
-    password is always among them.
+    password is always among them. `hooks` are the start hooks (None: every declared module's
+    `on_worker_start`, FR-EVENTS-1).
     """
     install_log_filter()  # before procrastinate logs anything
     try:
@@ -80,16 +121,17 @@ async def run(
     try:
         kinds = catalog if catalog is not None else load_kinds()
         jobs = Jobs(engine, app, kinds, [target.password.reveal(), *secret_values])
-        await jobs.sweep()
+        try:
+            stopped, _ = await _unless_stopped(jobs.sweep(), stop)
+        except Exception:  # driver detail is not logged (INV-EVENTS-5)
+            log.warning("jobs: start sweep failed")
+            return 0 if stop.is_set() else 1
+        if stopped:
+            return 0
         _RUNNING[0] = jobs
-        if (
-            catalog is None
-        ):  # the declared kinds: their start hooks (e.g. SRV-PIPELINE's ensure of unfinished runs)
-            for hook in start_hooks():
-                try:
-                    await hook(jobs)
-                except Exception:  # a hook's failure is logged by code only; the worker still serves
-                    log.warning("jobs: start hook failed: %s", getattr(hook, "__module__", "?"))
+        # The start hooks (e.g. SRV-PIPELINE's ensure of unfinished runs): after the sweep, running() set.
+        if not await _start_hooks(jobs, start_hooks() if hooks is None else hooks, stop):
+            return 0
         worker = asyncio.create_task(
             app.run_worker_async(
                 queues=jobs.queues,
@@ -108,4 +150,5 @@ async def run(
             await worker
         return 0
     finally:
+        _RUNNING[0] = None
         await app.close_async()
