@@ -457,7 +457,9 @@ proposed_requirements:
       `reader status` (and `--json` as `"ingest_watcher": "running" | "stale" | "stopped"`) probes the lock as FR-CLI-7 probes
       the secret watcher's, and reports `"converter": "running" | "idle"` by probing `<data_dir>/ingest/locks/
       convert.lock` the same way (SRV-INGEST FR-INGEST-22: one converter run on the host at a time; a CLI
-      `reader-ingest` exits 3 `busy` while it is held, proposed FR-INGEST-1 amendment). `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
+      `reader-ingest` exits 3 `busy` while it is held, proposed FR-INGEST-1 amendment). An idle watcher waits without
+      the lock (`next --peek`), so it reads `idle`; `running` means a conversion is under way. [unit] an idle
+      watcher's lock state reads `idle`; a held lock reads `running`. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
       lock file, only while the lock is held, then up to 15 s for the lock to be released, then SIGKILL (the
       watcher's own handler kills its converter child first, FR-INGEST-21). A failed spawn is reported and does not
       fail `up`: the stack runs and uploads wait as `queued` (ADR-0029 Decision 6).

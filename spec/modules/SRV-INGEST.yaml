@@ -702,13 +702,14 @@ proposed_requirements:
       **Deadlines** (in the container, each through `asyncio.timeout` and a SIGALRM for blocking I/O): `next`
       `--wait` + 10 s, `fetch` 300 s, the others 15 s.
       **Commands:**
-      - `next --wait S --host-state ready|setup_missing --strays N --converter-version V --watcher-sha H --busy B`
-        (S in 1..25, N in 0..10,000, H 64 lowercase hex, B 0 or 1): upserts `ingest_hosts.seen_at`, state, strays,
-        versions and busy; applies lease expiry; with `ready` and `--busy 0`, claims the
-        oldest `queued` upload `FOR
-        UPDATE SKIP LOCKED` (claim = 32 random hex, `lease_until = now() + 120 s`) and prints `{"upload": {"id",
-        "sha256", "size", "claim"}}`; if none, it `LISTEN`s on `reader_inbox` for up to S seconds, tries once more,
-        then prints `{"upload": null}`. Any other host state claims nothing.
+      - `next (--peek | --claim) --wait S --host-state ready|setup_missing --strays N --converter-version V
+        --watcher-sha H --busy none|claim|cli_running` (S in 1..25, N in 0..10,000, H 64 lowercase hex): upserts
+        `ingest_hosts.seen_at`, state, strays, versions and busy; applies lease expiry. **`--peek`** claims nothing:
+        it reports whether a `queued` upload exists, `{"queued": n}`, waiting on `LISTEN reader_inbox` for up to S
+        seconds while none does. **`--claim`**, only with `ready` and `--busy none`, claims the oldest `queued`
+        upload `FOR UPDATE SKIP LOCKED` (claim = 32 random hex, `lease_until = now() + 120 s`) and prints
+        `{"upload": {"id", "sha256", "size", "claim"}}`, or `{"upload": null}` when none is left (no wait beyond S,
+        which the watcher sets to 1). Any other combination claims nothing.
       - `fetch --upload-id U --claim C`: for an upload in `claimed` or `converting` under C, copies
         `<BLOBS_DIR>/inbox/<sha256>.pdf` (opened `O_RDONLY|O_NOFOLLOW`, `fstat` a regular file whose size equals the
         row's, else the error `missing`, which the host reports with `fail --code inbox_missing`) to stdout in 1 MiB
@@ -728,12 +729,8 @@ proposed_requirements:
       non-blocking `flock` on `<data_dir>/ingest/locks/watch.lock` and writes its pid into it (held: exit 3 `busy`),
       holds no secret and reads no Keychain item. It is started by `reader up` (OPS-CLI proposed FR-CLI-22) or by
       hand.
-      **Stale cleanup at start**, under `watch.lock`: every run record carrying an `upload_id` is stale (a free
-      `watch.lock` proves no live watcher owns it). Each one is handled exactly as FR-INGEST-16's stale records are:
-      its session is killed only after the pid, start-time and cwd checks, then its work directory and record are
-      removed. Records without `upload_id` (CLI runs, under their material locks) are never touched. [unit] cases: a
-      stale upload record with a live verified child is killed and removed; one whose pid now belongs to another
-      process is not signalled and is removed; a CLI record is left alone.
+      **Stale cleanup** happens when `convert.lock` is taken (FR-INGEST-22), for CLI and watch runs alike, so a run
+      left by a crashed watcher or a crashed CLI is cleaned by whichever converter run comes next.
       **Reading every exec** (the `docker exec -i` client is a subprocess with stdin, stdout and stderr pipes):
       - stdout through a bounded reader: at most 4,097 bytes for a reply, `size` + 1 for `fetch`. Reaching the bound
         kills the exec client (SIGKILL) and is `bad_reply` (reply) or `fetch_mismatch` (fetch); the in-container
@@ -749,11 +746,14 @@ proposed_requirements:
         the current stray count (FR-INGEST-22), which is a warning only and never stops claims;
       - checks the stack (FR-INGEST-2's `reader status --json` and worker resolution); unhealthy: waits 10 s and
         retries, never exits for it;
-      - takes `convert.lock` (FR-INGEST-22: one converter run on the host at a time) without blocking; while another
-        run holds it, sends a heartbeat-only `next --wait 1 --host-state <state> --busy 1` that claims nothing (so the
-        converter stays `online`), waits 10 s and tries again. Holding it, runs `next --wait 25`, releasing the lock
-        again when no upload was claimed; the claim schema is exact (a UUID, 64 lowercase hex, an integer
-        1..`upload_bytes_max`, 32 lowercase hex, no other key); `bad_reply` waits 10 s;
+      - **waits without the lock:** runs `next --peek --wait 25 --busy none` (claims nothing, holds no lock), so an
+        idle watcher never holds `convert.lock` and never starves a CLI run;
+      - when `queued` > 0, tries `convert.lock` without blocking (FR-INGEST-22). Held by a CLI run: sends `next
+        --peek --wait 1 --busy cli_running` (claims nothing; the Import page then says "a command-line conversion is
+        running"), waits 10 s and tries again. Taken: runs the lock's stale cleanup (FR-INGEST-22), then `next
+        --claim --wait 1 --busy none`; with no upload left it releases the lock. The claim schema is exact (a UUID,
+        64 lowercase hex, an integer 1..`upload_bytes_max`, 32 lowercase hex, no other key); `bad_reply` releases
+        the lock and waits 10 s. From the claim on, the lock is held until the run's cleanup has ended;
       - **for a claim:** starts the **heartbeat**, a timer that runs `progress --phase <current phase>` every 30 s
         from the claim until receive's reply (through fetch, model load, conversion, sending and receive), so the
         120 s lease never depends on the converter's output; a cancel reply to any call kills the run's processes
@@ -766,7 +766,8 @@ proposed_requirements:
         `close_fds` and stdin, stdout and stderr on `/dev/null`; it is started once per claim and killed (and
         reaped) when the claim ends by success, by `fail`, by a cancel reply, and by SIGTERM to the watcher;
       - **reports its version:** every `next` sends `--converter-version` (CONVERTER_VERSION) and `--watcher-sha`
-        (FR-INGEST-3's `converter_source_sha256` of the code it runs) and whether it holds a claim (`--busy 0|1`);
+        (FR-INGEST-3's `converter_source_sha256` of the code it runs) and `--busy` (`claim` while it holds a claim,
+        `cli_running` while a CLI run holds `convert.lock`, else `none`);
         `ingest_hosts` stores them, and the watcher keeps `watch.lock`'s content as one JSON line `{pid, sha, busy}`,
         rewritten in place at every claim and release (OPS-CLI proposed FR-CLI-22 restarts an idle watcher whose sha
         differs from the checkout's);
@@ -820,11 +821,23 @@ proposed_requirements:
       excludes) started after the child with its cwd inside WORK would be counted and killed.
       **One converter run on the host at a time** (coordinator decision (A), 2026-11-23, after the round-4 inode
       finding). Every converter run, CLI (`reader-ingest <material>`, proposed FR-INGEST-1 amendment) and watch mode
-      alike, holds an exclusive non-blocking `flock` on `<data_dir>/ingest/locks/convert.lock` from before the child
-      starts until its run processes are killed and its work directory is removed. The CLI exits 3 `busy` when the
-      lock is held; the watcher does not run `next` (claims nothing) while it is held and tries again after 10 s. So
-      no two converter children ever coexist, and no live run exists for another run's child to join. Cost: none in
-      practice, since the owner converts one book at a time and each run peaks at about 4 GiB (NFR-INGEST-1).
+      alike, holds an exclusive non-blocking `flock` on `<data_dir>/ingest/locks/convert.lock` from just before its
+      run (the CLI: before its run record; the watcher: before its claim) until its run processes are killed and its
+      work directory is removed. An idle watcher never holds it (it waits with `next --peek`, FR-INGEST-21). The CLI
+      exits 3 `busy` when the lock is held; the watcher claims nothing while it is held and tries again after 10 s.
+      So no two converter children ever coexist, and no live run exists for another run's child to join.
+      **The lock fd** is opened with `O_CLOEXEC` (and never passed in `pass_fds`), so no child holds it: a child
+      that outlives its parent cannot keep the lock, and a crashed holder releases it with its own exit.
+      **Taking the lock includes the stale cleanup.** A free `convert.lock` proves that no live run owns any run
+      record (CLI or watch), so the new holder, before starting anything, handles every record under
+      `<data_dir>/ingest/run/` exactly as FR-INGEST-16's stale records are (kill only after the pid, start-time and
+      cwd checks; then remove its work directory, if under `<data_dir>/ingest/work/`, and the record). This replaces
+      FR-INGEST-16's per-material scope for stale cleanup and the watch-only cleanup at watcher start: whichever run
+      comes next cleans what a crashed watcher or a crashed CLI left.
+      **Cost:** none in practice, since the owner converts one book at a time and each run peaks at about 4 GiB
+      (NFR-INGEST-1). An upload queued while a CLI run converts waits up to that run's 4 h wall clock, shown as
+      `queued` with "a command-line conversion is running" (the watcher's `--busy cli_running`); a CLI run started
+      during an upload's conversion exits 3 `busy` at once.
       **What this guarantees, honestly.** For non-malicious runs nothing is counted or killed across runs, because
       there is only one run. Against an exploited child:
       - **learning another process's arguments, environment or cwd** is closed by the profile (proposed FR-INGEST-4
@@ -832,10 +845,15 @@ proposed_requirements:
         an inode returns its path under every profile tried, and `chdir` into a known directory is allowed
         (measured, round 4). With one run at a time this gives an attacker no concurrent run to join;
       - **residual across runs:** a child that escaped an earlier run (it called `setsid()`, left WORK and rewrote its
-        args, so it was neither counted nor killed) survives, still confined, and can find a later run's WORK through
-        `fsgetpath`, `chdir` into it or name it in its args, become a member of that run, and push it over
-        `memory_limit`: a denial of service of one later conversion, retried by the owner. The stray warning
-        (below) is the only signal; restarting the Mac session clears such a process;
+        args, so it was neither counted nor killed) survives, still confined, and can find each later run's WORK
+        through `fsgetpath`, `chdir` into it or name it in its args, become a member of that run, and push it over
+        `memory_limit`. So one escaped process can fail **every** later conversion until the Mac session restarts.
+        There is **no reliable signal**: the same args rewrite that hides it from accounting hides it from the stray
+        count. The symptom is the signal: repeated `memory_limit` failures on files that converted before. The
+        Import page names it next to `memory_limit` (WEB-IMPORT FR-IMPORT-3): "If files that used to convert now
+        fail with this, restart your Mac session". A later spike (`sandbox_check(pid)` from the watcher, to find
+        processes still under the converter's sandbox whatever their args) may replace the `comm` rule; it does not
+        block this revision;
       - such an escaped child stays under the profile, which a process cannot leave: no network, no sockets, no
         information about other processes, writes only into a WORK that is deleted. It can hold memory and CPU until
         it is killed.
@@ -864,17 +882,25 @@ proposed_requirements:
         is one, and claims continue;
       - [host] a converter stand-in that forks a child which calls `setpgid`, and another that calls `setsid()`, both
         allocating memory past a test limit: all are found through `getsid` or the arms, killed, and the run fails
-        `memory_limit`; **two concurrent runs** in different WORKs: when the first run ends and kills its set, the
-        second converter survives and finishes;
+        `memory_limit`; [unit, stand-ins] the watchdog function given two runs' stand-in process sets (as the
+        one-run lock makes two real runs impossible) kills only its own run's set at that run's end;
       - [host] **the round-3 attack, replayed:** spikes/ingest-sysctl's probe (copied to
         `server/tests/ingest/cross_process_probe.py`), run under the product profile next to a second confined process
         B, finds every process channel refused (`kern.procargs2`, `kern.procargs`, `kern.proc.pid`, `kern.proc.all`,
         `proc_pidinfo` cwd, `proc_pidpath`, `proc_listallpids`, listing WORK's parent) and records `fsgetpath` as
         allowed by design;
       - [unit, fake lock] **one run at a time:** with `convert.lock` held by a watcher run, the CLI exits 3 `busy`
-        before creating a run record or work directory; with it held by a CLI run, the watcher's loop runs no `next`
-        and claims nothing; the lock is released only after the run's processes are killed and WORK is removed;
-        [host] a second real converter run started while one holds the lock never starts its child;
+        before creating a run record or work directory; with it held by a CLI run, the watcher claims nothing (it
+        sends `--busy cli_running`); **watcher idle, CLI runs:** an idle watcher in `next --peek` holds no lock and the
+        CLI takes it at once; the lock is released only after the run's processes are killed and WORK is removed;
+      - [unit, fake runner] **stale cleanup on taking the lock:** a CLI run after a crashed watcher (a watch record
+        with a live verified child) kills that child and removes its WORK and record before its own run; a watcher
+        claim after a crashed CLI does the same for the CLI record; a record whose pid now belongs to another process
+        is not signalled and is removed;
+      - [host] **the lock fd is not inherited:** the converter child's open descriptors (listed from inside the
+        child through `/dev/fd`) do not include the lock's; after the parent is SIGKILLed, the lock is free while the
+        orphaned child still runs, and the next run's stale cleanup kills that child; a second real converter run
+        started while one holds the lock never starts its child;
       - [local] the 9 GiB case above.
   - id: FR-INGEST-23
     text: >-
@@ -906,7 +932,8 @@ proposed_requirements:
         `POST /api/materials/uploads/{id}/retry`, owner only, either returns a `failed` row to `queued`
         (`reconvert`) or, for a view `failed` by a dead `ingest.import` or `search.embed` key, calls `requeue_dead`
         for that key (`requeue`, no reconversion; FR-INGEST-19), else 409 `state`; `GET /api/materials/converter`
-        returns `{state: online | offline | setup_missing, seen_at, converter_version, strays}` (`offline` when
+        returns `{state: online | offline | setup_missing, seen_at, converter_version, strays, busy: none | claim |
+        cli_running}` (`offline` when
         `seen_at` is 60 s old or more, else the host's reported state). Both reads apply lease expiry first
         (FR-INGEST-19).
       - **Search** (SRV-SEARCH proposed FR-SEARCH-10): an uploaded material's `fts_config` is `russian`, `english`
@@ -1039,8 +1066,10 @@ proposed_amendments:
       **One converter at a time.** After its material lock and before it writes the run record, `reader-ingest`
       (CLI) takes an exclusive non-blocking `flock` on `<data_dir>/ingest/locks/convert.lock` (FR-INGEST-22, decision
       (A)); held (by the watcher's run or another CLI run) it exits 3 `busy` and prints "another conversion is
-      running; try again when it ends". `--requeue` and `--setup` do not take it (they start no converter). The lock
-      is released after FR-INGEST-16's cleanup of the run.
+      running; try again when it ends". Taken, it first runs the lock's stale cleanup over every run record
+      (FR-INGEST-22), which replaces FR-INGEST-16's per-material stale cleanup. The lock fd is `O_CLOEXEC` and never
+      reaches the child. `--requeue` and `--setup` do not take it (they start no converter). The lock is released
+      after FR-INGEST-16's cleanup of the run.
   - id: FR-INGEST-4
     change: >-
       **Profile.** `converter.sb` is the spike profile minus SCRIPTS (unchanged) with two edits, each cited to
