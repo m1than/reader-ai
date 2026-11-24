@@ -1517,12 +1517,21 @@ tasks:
         methods note, create_course, an owner position lock, Undo to the old position, NFR-MANAGE-1 as a delta
         hypothesis, the interface language moved to WEB-UI FR-UI-30 with paired notes per area, the material_imported
         query, GET /api/compiles/{run_id} among the tombstone reads), all applied in revision 2.",
-      next: "deep-reviewer round 3 (auth, jobs and secrets items are complex areas: full rounds); then promote with
-        Red. P1: FR-MANAGE-1..8 and -10 — course rename/describe/dates/archive/delete+restore, lesson
-        rename/skip/delete/done/revert/download, compile cancel and history, material rename/delete+cascade, tutor
-        history clear, /settings (appearance with language, instance view, own passkeys and sessions, people, Data
-        with Recently deleted and Activity), audit rows, Russian and English interface; FR-MANAGE-11 / FR-CONFIG-26
-        once the owner accepts ADR-0036; Enable once ADR-0037 is accepted. P2: reorder, notes, bookmarks.",
+      impl: "2026-11-24, branch V/manage-impl (from V/manage 4997ec5 + e3e7fe1). Round 3 on 2a7d86f: VERDICT approve;
+        ADR-0036 and ADR-0037 accepted by the owner (fd9377a). Promoted with Red, then Green, in five slices merged
+        into V/manage-impl: audit (SRV-EVENTS FR-EVENTS-30..31, jobs_0003); lessons/plan/pipeline (FR-LESSON-20..31,
+        INV-LESSON-20..23, FR-PLAN-20..21, FR-PIPELINE-20..22; lessons_0002, pipeline_0004); auth/config/tutor
+        (FR-AUTH-40..48, INV-AUTH-20..21, FR-CONFIG-25..26 with the settings overlay, FR-TUTOR-20..21; config_0001,
+        0003_manage, tutor_0002); ingest/search/fresh (FR-INGEST-30..32, FR-SEARCH-20, FR-FRESH-20; ingest_0003);
+        web (WEB-UI FR-UI-30..32 interface language in 11 areas, WEB-MANAGE approved by agent with Red and built).
+        Merge points applied by the coordinator: materials.deleted_at in material_is_live, material_imported and
+        plan page_chars; SRV-OBS's error-code enum takes the new pipeline codes. Measured: initial chunks 120,254 B
+        gzip (+2,425 B over 117,829 B; NFR-UI-1 cap 121,153 B). Declared deviations (in the specs' review strings):
+        the notes panel sits after the cells behind a toolbar toggle (FR-MANAGE-9), 'Add a passkey' is a hint, not
+        an in-page ceremony (FR-MANAGE-7), /import's manage section is headed 'Manage your sources', WEB-PLAN's own
+        page shows course_deleted without a Restore button. Not done: the `manage` live step in e2e/live/slice.sh.",
+      next: "code review (deep-reviewer, full rounds: auth and sessions, jobs and idempotency, secrets) of
+        V/manage-impl; then the `manage` live step; owner decides on the declared deviations.",
       owner_decisions: "Owner 2026-11-24 (via the coordinator): D1 soft delete only with restore, no purge ADR; D2
         ADR-0036 yes (option B), the owner flips its status after review, the agent does not; D5 manual lesson order
         kept across re-plan (re-plan changes weeks and dates only; SRV-PLAN FR-PLAN-21, courses.order_source); D7
