@@ -90,6 +90,35 @@ async def test_success_reserves_runs_and_settles(pg: Pg, tmp_path: Path) -> None
     assert model == [("claude-sonnet-5-5",)]
 
 
+async def test_budget_overrides_are_enforced_live_per_call(pg: Pg, tmp_path: Path) -> None:
+    """SRV-CONFIG FR-CONFIG-26 (paired): the reserve reads the owner's overrides at each call; the file's values
+    (monthly 200, fact_check 2.0) allow this call, as its last run shows."""
+    from sqlalchemy import text
+
+    errors = need("reader.agent.errors")
+    w = await world(pg, tmp_path)
+    p, _, proxy = _provider(w, [Script(text="answer", cost=0.05)], tmp_path)
+    run = uuid.uuid4()
+    insert = text(
+        "INSERT INTO settings_overrides (key, value, updated_by, version) VALUES (:k, CAST(:v AS jsonb), :u, 1)"
+    )
+    for key, code in [
+        ("budgets.monthly_usd", "monthly_budget_exhausted"),
+        ("tasks.fact_check.budget_usd_per_lesson", "task_budget_exhausted"),
+    ]:
+        async with w.engine.begin() as conn:
+            await conn.execute(insert, {"k": key, "v": "0.1", "u": w.users["ivan"]})
+        with pytest.raises(errors.BudgetRefused) as refused:
+            await p.run(_call(w, run))
+        assert refused.value.code == code, key
+        assert await _ledger(w) == [] and proxy.issued == []
+        async with w.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM settings_overrides"))
+    result = await p.run(_call(w, run))
+    assert result.text == "answer"
+    assert [kind for kind, _, _ in await _ledger(w)] == ["reserve", "settle"]
+
+
 def test_sdk_options_have_no_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     provider = need("reader.agent.provider")
     monkeypatch.setenv("READER_DB_HOST", "postgres")  # a worker variable the CLI must not see

@@ -62,6 +62,7 @@ _DELETE_ACCOUNT: Final = tuple(
         "DELETE FROM bootstrap_tokens WHERE user_id = :u",
         "DELETE FROM sessions WHERE owner_id = :u",
         "DELETE FROM webauthn_credentials WHERE owner_id = :u",
+        "DELETE FROM invitations WHERE owner_id = :u",  # the invitations it issued: account rows (OWN_TABLES)
         "DELETE FROM users WHERE id = :u",
     )
 )

@@ -298,6 +298,24 @@ async def test_delete_cancels_open_signup_ceremonies_for_the_handle(pg: Pg, tmp_
     await engine.dispose()
 
 
+async def test_delete_takes_the_invitations_the_learner_issued(pg: Pg, tmp_path: Path) -> None:
+    """`invitations.owner_id` is the issuing account: an account row (not in owns_data), deleted with it."""
+    s, engine = await setup(pg, tmp_path)
+    me, session, _ = await owner(engine)
+    anna, _, _ = await learner(engine, "lc-anna")
+    await execute(engine, "INSERT INTO invitations (owner_id) VALUES (:u)", u=anna)
+    await execute(engine, "INSERT INTO invitations (owner_id) VALUES (:u)", u=me)
+    async with as_user(s, engine, session) as c:
+        people = (await c.get("/api/auth/users")).json()["users"]
+        assert next(p for p in people if p["id"] == str(anna))["owns_data"] is False
+        r = await c.request("DELETE", f"/api/auth/users/{anna}", json={"confirm": "lc-anna"})
+        assert r.status_code == 204, r.text
+    assert await scalar(engine, "SELECT count(*) FROM users WHERE id = :u", u=anna) == 0
+    assert await scalar(engine, "SELECT count(*) FROM invitations WHERE owner_id = :u", u=anna) == 0
+    assert await scalar(engine, "SELECT count(*) FROM invitations WHERE owner_id = :u", u=me) == 1
+    await engine.dispose()
+
+
 async def test_late_foreign_key_violation_answers_user_has_data(
     pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -568,6 +586,49 @@ async def test_learner_and_second_user_matrix(pg: Pg, tmp_path: Path) -> None:
                 assert (r.status_code, r.json()) == (403, {"error": "origin"}), (method, path)
     assert await snapshot(engine) == before
     del me, anna, anna_pid
+    await engine.dispose()
+
+
+RECENT_OWNER = [
+    ("POST", "/api/auth/users/{uid}/sessions/revoke"),
+    ("DELETE", "/api/auth/users/{uid}/credentials/{pid}"),
+    ("DELETE", "/api/auth/users/{uid}"),
+    ("POST", "/api/auth/signups/{uid}/enable"),
+]
+
+
+async def test_no_session_and_a_stale_session_get_the_exact_401_and_change_nothing(
+    pg: Pg, tmp_path: Path
+) -> None:
+    """Each target is one the request would change (a disabled, deletable learner with a live session and two
+    passkeys; the caller's own second passkey), so a relaxed gate shows up in the row snapshot."""
+    s, engine = await setup(pg, tmp_path)
+    me, _, _ = await owner(engine)
+    anna, _, anna_pid = await learner(engine, "lc-anna")
+    await add_credential(engine, anna)
+    victim, victim_session, victim_pid = await learner(engine, "lc-vic")
+    await add_credential(engine, victim)
+    await execute(engine, "UPDATE users SET disabled_at = now() WHERE id = :u", u=victim)
+    stale_owner = await new_session(engine, me, age_s=900)
+    stale_anna = await new_session(engine, anna, age_s=900)
+    values = {"uid": str(victim), "pid": victim_pid, "sid": sid_of(victim_session)}
+    body = {"confirm": "lc-vic", "label": "x"}
+    before = await snapshot(engine)
+    async with as_user(s, engine, None) as c:
+        for method, path in OWNER_ONLY + OWN_OBJECT + SELF:
+            r = await c.request(method, path.format(**values), json=None if method == "GET" else body)
+            assert (r.status_code, r.json()) == (401, {"error": "unauthenticated"}), (method, path)
+    assert await snapshot(engine) == before
+    async with as_user(s, engine, stale_owner) as c:
+        for method, path in RECENT_OWNER:
+            r = await c.request(method, path.format(**values), json=body)
+            assert (r.status_code, r.json()) == (401, {"error": "reauth_required"}), (method, path)
+    async with as_user(s, engine, stale_anna) as c:
+        r = await c.request("DELETE", f"/api/auth/credentials/{anna_pid}", json={})
+        assert (r.status_code, r.json()) == (401, {"error": "reauth_required"})
+    assert await snapshot(engine) == before
+    assert await credentials(engine, anna) == 2 and await credentials(engine, victim) == 2
+    assert await live_sessions(engine, victim) == 1
     await engine.dispose()
 
 

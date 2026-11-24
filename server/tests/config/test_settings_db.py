@@ -264,6 +264,65 @@ async def test_signup_turned_off_by_an_override_answers_404_without_a_restart(pg
     await w.engine.dispose()
 
 
+async def test_a_stored_open_override_never_opens_a_file_off_switch(pg: Pg, tmp_path: Path) -> None:
+    """Narrowing on the resolved file value, through SRV-AUTH's sign-up routes (the reader)."""
+    w = await world(pg, tmp_path, sharing='{ signup: "off" }')
+    owner = w.users["ivan"]
+    # Stored earlier (the file changed since): the route refuses to write it, so it is inserted directly.
+    await execute(
+        w.engine,
+        "INSERT INTO settings_overrides (key, value, updated_by, version)"
+        " VALUES ('sharing.signup', '\"open\"'::jsonb, :u, 1)",
+        u=owner,
+    )
+    async with client(w, None) as visitor:
+        page = await visitor.get("/api/auth/signup")
+        assert page.status_code == 404
+        opts = await visitor.post("/api/auth/signup/options", json={"handle": "lc-x", "display_name": "X"})
+        assert (opts.status_code, opts.json()) == (404, {"error": "not_found"})
+        verify = await visitor.post("/api/auth/signup/verify", json={})
+        assert (verify.status_code, verify.json()) == (404, {"error": "not_found"})
+        assert 'href="/api/auth/signup"' not in (await visitor.get("/api/auth/signin")).text
+    assert await scalar(w.engine, "SELECT count(*) FROM auth_challenges") == 0
+    assert await scalar(w.engine, "SELECT count(*) FROM users WHERE source = 'signup'") == 0
+    await w.engine.dispose()
+
+
+async def test_numbers_at_the_overlay_bound_are_value_invalid(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    async with client(w, await session_for(w, "ivan")) as c:
+        for key in ("budgets.monthly_usd", "tasks.draft.budget_usd_per_lesson"):
+            for value in (1e15, 1e308, 10**15, 10**400):
+                r = await c.post(f"/api/settings/{key}", json={"value": value, "version": 0})
+                refused = (400, {"error": "value_invalid", "field": key})
+                assert (r.status_code, r.json()) == refused, (key, value)
+            r = await c.post(f"/api/settings/{key}", json={"value": 999999999999999, "version": 0})
+            assert r.status_code == 200, (key, r.text)  # just below the bound
+    assert await overrides(w.engine) == [
+        ("budgets.monthly_usd", 999999999999999, 1),
+        ("tasks.draft.budget_usd_per_lesson", 999999999999999, 1),
+    ]
+    await w.engine.dispose()
+
+
+async def test_a_stale_session_neither_sets_nor_resets(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    async with client(w, await session_for(w, "ivan")) as c:
+        r = await c.post("/api/settings/budgets.monthly_usd", json={"value": 300, "version": 0})
+        assert r.status_code == 200
+    before = (await overrides(w.engine), await audit(w.engine))
+    async with client(w, await session_for(w, "ivan", age_s=900)) as c:
+        r = await c.post("/api/settings/budgets.monthly_usd", json={"value": 100, "version": 1})
+        assert (r.status_code, r.json()) == (401, {"error": "reauth_required"})
+        r = await c.post("/api/settings/budgets.warn_at", json={"value": 0.5, "version": 0})
+        assert (r.status_code, r.json()) == (401, {"error": "reauth_required"})
+        r = await c.request("DELETE", "/api/settings/budgets.monthly_usd", json={})
+        assert (r.status_code, r.json()) == (401, {"error": "reauth_required"})
+    assert (await overrides(w.engine), await audit(w.engine)) == before
+    assert before[0] == [("budgets.monthly_usd", 300, 1)]
+    await w.engine.dispose()
+
+
 async def test_settings_overrides_is_a_system_table(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     columns = await scalar(
