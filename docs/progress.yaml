@@ -1594,8 +1594,13 @@ tasks:
         restore 0..5), the fresh-volume hypothesis with a fallback, tutor_summary moved to SRV-TUTOR. Design review
         round 5 (46e9017): every crash point for an existing store and restore passes; G1 (an interrupted fresh
         first start stuck) fixed in revision 6 with a backup/fresh marker that step 0 wipes and restarts from;
-        normal starts skip the backup; restore needs in-progress or --force. Next: owner decision on ADR-0038
-        and approval of the phase 2 requirements." }
+        normal starts skip the backup; restore needs in-progress or --force. Design review round 6 (4b81738): H1
+        (the fallback could wipe a served store) and H2 (a restored older store skipped its migration) fixed in
+        revision 7: the fallback initialises the store inside mlflow-migrate (one SqlAlchemyStore call), step 0
+        tries db upgrade before any wipe, reader backup/restore carry store.version. Round 13
+        (results/20261124T164527-round13-init): db upgrade on a missing file and the SqlAlchemyStore call both
+        build 71 tables at head f4a9b2c7d1e6 and serve /health 200. Next: owner decision on ADR-0038 and approval
+        of the phase 2 requirements." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

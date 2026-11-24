@@ -576,6 +576,19 @@ body.
   - a lookup of example.com fails (`gaierror`);
   - `http://mlflow:5000/health` answers 200, so the probe is on the right networks.
 
+## Round 13 (initialising an empty store, design review round 6, H1), 2026-11-24
+
+`run-round13.sh` runs the pinned image with no network, each case on its own fresh volume. Results are in
+`results/20261124T164527-round13-init`.
+
+| Case | How the empty store is made | Exit | Tables | Alembic head | Second `db upgrade` | Server `/health` |
+|---|---|---|---|---|---|---|
+| A | `mlflow db upgrade` on a missing file | 0 | 71 | f4a9b2c7d1e6 | exit 0, no change | 200 |
+| B | `SqlAlchemyStore('sqlite:///…', '/v/art')`, one Python call | 0 | 71 | f4a9b2c7d1e6 | exit 0, no change | 200 |
+
+So for MLflow 3.18.0, FR-OBS-29's fresh-volume hypothesis holds: case A, `db upgrade` on a missing file, builds the
+full schema. Case B is the fallback, and it gives the identical store.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.
