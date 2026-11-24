@@ -1,11 +1,11 @@
-// @trace FR-MANAGE-6 FR-MANAGE-7 FR-MANAGE-8 FR-MANAGE-10 FR-MANAGE-11 INV-MANAGE-1 INV-MANAGE-2 INV-MANAGE-4 VEC-MANAGE-1
+// @trace FR-MANAGE-6 FR-MANAGE-7 FR-MANAGE-8 FR-MANAGE-10 FR-MANAGE-11 INV-MANAGE-1 INV-MANAGE-2 INV-MANAGE-4 VEC-MANAGE-1 VEC-MANAGE-2
 // WEB-MANAGE /settings: tabs per role, Appearance (theme, text size, reading width, language), Account (passkeys and
 // sessions), People, Instance (read and edit), Data (recently deleted and activity), with the request oracle.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { webRoot } from '../app/testing/fixtures';
+import { readJson, webRoot } from '../app/testing/fixtures';
 import { load } from '../app/testing/load';
 import { fakeServer, fixture, refusal, type FakeServer } from './testkit';
 
@@ -357,16 +357,40 @@ describe('Instance (FR-MANAGE-6, FR-MANAGE-11)', () => {
     const model = await row('tasks.draft.model');
     expect(within(model).getByText('Change this in reader.yaml, then run `reader up`.')).toBeTruthy();
     expect(within(model).queryByRole('button', { name: /Edit/ })).toBeNull();
-    expect(within(await row('run_cap_usd')).getByText('fixed in reader-ai')).toBeTruthy();
+    expect(within(await row('pipeline.run_cap_usd')).getByText('fixed in reader-ai')).toBeTruthy();
     const retention = await row('observability.retention_days');
     expect(within(retention).getByText('Set here (reader.yaml says 30)')).toBeTruthy();
     expect(within(retention).getByText(/at the next run/)).toBeTruthy();
   });
 
+  it('renders the route’s real body (VEC-MANAGE-2): keyed rows editable, model rows read-only, an ignored override with Reset', async () => {
+    const body = readJson<{ body: unknown }>('spec/fixtures/WEB-MANAGE/settings-view.json').body;
+    const server = fakeServer({ overrides: { 'GET /api/settings': { status: 200, body } } });
+    await mount(server);
+    const panel = await tab('Instance');
+    const row = (name: string) =>
+      waitFor(() => {
+        const r = within(panel).getAllByRole('row').find((x) => x.querySelector('th')?.textContent === name);
+        if (!r) throw new Error(`no ${name}`);
+        return r;
+      });
+    const monthly = await row('budgets.monthly_usd');
+    expect(within(monthly).getByText('Set here (reader.yaml says 200)')).toBeTruthy();
+    expect(within(monthly).getByRole('button', { name: 'Edit budgets.monthly_usd' })).toBeTruthy();
+    expect(within(await row('tasks.draft.model')).queryByRole('button', { name: /Edit/ })).toBeNull();
+    expect(within(await row('observability.enabled')).queryByRole('button', { name: /Edit/ })).toBeNull();
+    const gone = await row('tasks.gone.budget_usd_per_lesson');
+    expect(within(gone).getByText('Ignored: the task is no longer in reader.yaml')).toBeTruthy();
+    fireEvent.click(within(gone).getByRole('button', { name: 'Reset to reader.yaml' }));
+    const dialog = await screen.findByRole('dialog');
+    await act(async () => fireEvent.click(within(dialog).getByRole('button', { name: 'Reset' })));
+    await waitFor(() => expect(server.writes()).toEqual([{ method: 'DELETE', path: '/api/settings/tasks.gone.budget_usd_per_lesson', body: {} }]));
+  });
+
   it('edits a number within the schema bounds, resets to reader.yaml after a confirm, and disables Open when the file says off', async () => {
     const fx = fixture();
-    const rows = (fx.settings as { settings: Array<Record<string, unknown>> }).settings.map((r) => (r.name === 'signup' ? fx.settings_signup_file_off : r));
-    const server = fakeServer({ fx, overrides: { 'GET /api/settings': { status: 200, body: { settings: rows } } } });
+    const rows = (fx.settings as { rows: Array<Record<string, unknown>> }).rows.map((r) => (r.name === 'signup' ? fx.settings_signup_file_off : r));
+    const server = fakeServer({ fx, overrides: { 'GET /api/settings': { status: 200, body: { rows, ignored: [] } } } });
     await mount(server);
     const panel = await tab('Instance');
     const retention = await waitFor(() => within(panel).getAllByRole('row').find((x) => x.querySelector('th')?.textContent === 'observability.retention_days')!);

@@ -79,8 +79,11 @@ const CreationOptions = v.looseObject({
 });
 const Sessions = v.object({ sessions: v.array(v.looseObject({ sid: str, created_at: str, expires_at: str, current: v.boolean() })) });
 const Scalar = v.union([str, num, v.boolean(), v.null()]);
+// SRV-CONFIG FR-CONFIG-25's body `{rows, ignored}`; spec/fixtures/WEB-MANAGE/settings-view.json is the route's real
+// answer, parsed by this schema in contract.test.ts. A row is editable exactly when it carries a key (FR-CONFIG-26's
+// allow-list); `ignored` lists stored overrides with no row of their own, so the owner can reset them.
 const Settings = v.object({
-  settings: v.array(
+  rows: v.array(
     v.looseObject({
       name: str,
       value: Scalar,
@@ -88,11 +91,11 @@ const Settings = v.object({
       source: str,
       key: nstr,
       read_when: str,
-      overridable: v.optional(v.boolean(), false),
       version: v.optional(num, 0),
       ignored: v.optional(nstr, null),
     }),
   ),
+  ignored: v.optional(v.array(v.looseObject({ key: str, value: v.optional(Any), reason: str, version: num })), []),
 });
 const Audit = v.object({
   rows: v.array(v.looseObject({ id: num, at: str, actor_id: nstr, action: str, object_kind: str, object_id: str, detail: v.optional(Any) })),
@@ -114,7 +117,8 @@ export type MaterialImpact = v.InferOutput<typeof MaterialImpact>;
 export type Person = v.InferOutput<typeof Users>['users'][number];
 export type Credential = v.InferOutput<typeof Credentials>['credentials'][number];
 export type Session = v.InferOutput<typeof Sessions>['sessions'][number];
-export type Setting = v.InferOutput<typeof Settings>['settings'][number];
+export type Setting = v.InferOutput<typeof Settings>['rows'][number];
+export type IgnoredOverride = v.InferOutput<typeof Settings>['ignored'][number];
 export type AuditPage = v.InferOutput<typeof Audit>;
 export type Note = v.InferOutput<typeof Note>;
 export type Bookmark = v.InferOutput<typeof Bookmarks>['bookmarks'][number];

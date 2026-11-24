@@ -242,6 +242,7 @@ const ru: Translation<typeof en> = {
   'instance.reset': 'Вернуть значение из reader.yaml',
   'instance.reset_title': 'Вернуть {name} к значению из reader.yaml?',
   'instance.reset_body': 'Значение {value} сменится на {file}.',
+  'instance.reset_ignored': 'Сохранённое значение {value} будет удалено; сейчас reader-ai его не использует.',
   'instance.reset_confirm': 'Вернуть',
   'instance.range': 'От {min} до {max}.',
   'instance.signup_off': 'В reader.yaml регистрация выключена; открыть её можно только в файле.',

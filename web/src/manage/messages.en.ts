@@ -235,6 +235,7 @@ const en = {
   'instance.reset': 'Reset to reader.yaml',
   'instance.reset_title': 'Reset {name} to reader.yaml?',
   'instance.reset_body': 'The value goes from {value} back to {file}.',
+  'instance.reset_ignored': 'The stored value {value} is removed; reader-ai does not use it now.',
   'instance.reset_confirm': 'Reset',
   'instance.range': 'From {min} to {max}.',
   'instance.signup_off': 'reader.yaml turns sign-up off; only the file can open it.',

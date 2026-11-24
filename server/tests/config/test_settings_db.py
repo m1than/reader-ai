@@ -138,6 +138,30 @@ async def test_view_is_owner_only_and_needs_the_file(pg: Pg, tmp_path: Path) -> 
     await w.engine.dispose()
 
 
+CONTRACT = Path(__file__).resolve().parents[3] / "spec" / "fixtures" / "WEB-MANAGE" / "settings-view.json"
+
+
+async def test_view_body_equals_the_committed_contract_fixture(pg: Pg, tmp_path: Path) -> None:
+    # The web client's validator parses the same file (web/src/manage/contract.test.ts), so the two sides
+    # cannot drift: one applied override, one stored override whose task is not in reader.yaml (`ignored`).
+    import json
+
+    w = await world(pg, tmp_path)
+    async with client(w, await session_for(w, "ivan")) as c:
+        r = await c.post("/api/settings/budgets.monthly_usd", json={"value": 150, "version": 0})
+        assert r.status_code == 200
+        await execute(
+            w.engine,
+            "INSERT INTO settings_overrides (key, value, updated_by, version)"
+            " VALUES ('tasks.gone.budget_usd_per_lesson', '3', :u, 1)",
+            u=w.users["ivan"],
+        )
+        r = await c.get("/api/settings")
+    assert r.status_code == 200
+    assert r.json() == json.loads(CONTRACT.read_text(encoding="utf-8"))["body"]
+    await w.engine.dispose()
+
+
 # FR-CONFIG-26 ----------------------------------------------------------------------------------------------
 
 

@@ -115,21 +115,24 @@
     ]
   },
   "settings": {
-    "settings": [
-      { "name": "signup", "value": "open", "file_value": "open", "source": "reader.yaml", "key": "sharing.signup", "read_when": "start", "overridable": true, "version": 0, "ignored": null },
-      { "name": "observability.enabled", "value": true, "file_value": true, "source": "default", "key": "observability.enabled", "read_when": "worker start and the daily job", "overridable": false, "version": 0, "ignored": null },
-      { "name": "observability.retention_days", "value": 14, "file_value": 30, "source": "override", "key": "observability.retention_days", "read_when": "worker start and the daily job", "overridable": true, "version": 2, "ignored": null },
-      { "name": "budgets.monthly_usd", "value": "50.00", "file_value": "50.00", "source": "reader.yaml", "key": "budgets.monthly_usd", "read_when": "each job", "overridable": true, "version": 0, "ignored": null },
-      { "name": "budgets.warn_at", "value": "0.8", "file_value": "0.8", "source": "reader.yaml", "key": "budgets.warn_at", "read_when": "each job", "overridable": true, "version": 0, "ignored": null },
-      { "name": "tasks.draft.model", "value": "claude-opus-5-5", "file_value": "claude-opus-5-5", "source": "reader.yaml", "key": "tasks.draft.model", "read_when": "each job", "overridable": false, "version": 0, "ignored": null },
-      { "name": "tasks.draft.budget_usd_per_lesson", "value": "3.00", "file_value": "3.00", "source": "reader.yaml", "key": "tasks.draft.budget_usd_per_lesson", "read_when": "each job", "overridable": true, "version": 0, "ignored": null },
-      { "name": "tasks.(hidden).model", "value": "(hidden)", "file_value": "(hidden)", "source": "reader.yaml", "key": null, "read_when": "each job", "overridable": false, "version": 0, "ignored": null },
-      { "name": "run_cap_usd", "value": "8.00", "file_value": null, "source": "fixed", "key": null, "read_when": "fixed", "overridable": false, "version": 0, "ignored": null },
-      { "name": "question_cap_usd", "value": "0.25", "file_value": null, "source": "fixed", "key": null, "read_when": "fixed", "overridable": false, "version": 0, "ignored": null },
-      { "name": "daily_cap_usd", "value": "2.00", "file_value": null, "source": "fixed", "key": null, "read_when": "fixed", "overridable": false, "version": 0, "ignored": null }
+    "rows": [
+      { "name": "signup", "value": "open", "file_value": "open", "source": "reader.yaml", "key": "sharing.signup", "read_when": "start", "version": 0, "ignored": null },
+      { "name": "observability.enabled", "value": true, "file_value": true, "source": "default", "key": null, "read_when": "worker start and the daily job", "version": 0, "ignored": null },
+      { "name": "observability.retention_days", "value": 14, "file_value": 30, "source": "override", "key": "observability.retention_days", "read_when": "worker start and the daily job", "version": 2, "ignored": null },
+      { "name": "budgets.monthly_usd", "value": 50, "file_value": 50, "source": "reader.yaml", "key": "budgets.monthly_usd", "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "budgets.warn_at", "value": 0.8, "file_value": 0.8, "source": "reader.yaml", "key": "budgets.warn_at", "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "tasks.draft.model", "value": "claude-opus-5-5", "file_value": "claude-opus-5-5", "source": "reader.yaml", "key": null, "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "tasks.draft.budget_usd_per_lesson", "value": 3, "file_value": 3, "source": "reader.yaml", "key": "tasks.draft.budget_usd_per_lesson", "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "tasks.(hidden).model", "value": "(hidden)", "file_value": "(hidden)", "source": "reader.yaml", "key": null, "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "pipeline.run_cap_usd", "value": 8, "file_value": 8, "source": "fixed", "key": null, "read_when": "fixed", "version": 0, "ignored": null },
+      { "name": "tutor.question_cap_usd", "value": 0.3, "file_value": 0.3, "source": "fixed", "key": null, "read_when": "fixed", "version": 0, "ignored": null },
+      { "name": "tutor.daily_cap_usd", "value": 3, "file_value": 3, "source": "fixed", "key": null, "read_when": "fixed", "version": 0, "ignored": null }
+    ],
+    "ignored": [
+      { "key": "tasks.gone.budget_usd_per_lesson", "value": 3, "reason": "not_in_file", "version": 1 }
     ]
   },
-  "settings_signup_file_off": { "name": "signup", "value": "off", "file_value": "off", "source": "reader.yaml", "key": "sharing.signup", "read_when": "start", "overridable": true, "version": 0, "ignored": null },
+  "settings_signup_file_off": { "name": "signup", "value": "off", "file_value": "off", "source": "reader.yaml", "key": "sharing.signup", "read_when": "start", "version": 0, "ignored": null },
   "audit_page1": {
     "rows": [
       { "id": 402, "at": "2026-11-24T11:00:00Z", "actor_id": "0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10", "action": "course.rename", "object_kind": "course", "object_id": "c-fixture", "detail": { "version": 3 } },

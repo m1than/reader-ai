@@ -5,7 +5,7 @@
 import { Button } from '@acme/ui/button';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import type { Setting } from './api';
+import type { IgnoredOverride, Setting } from './api';
 import { KEYS, useManageApi, useRefresh } from './hooks';
 import { boundOf, problem, validNumber, type Problem } from './model';
 import { codeOf, ConfirmDialog, ProblemLine, useManageT } from './primitives';
@@ -35,8 +35,11 @@ export function InstanceTab() {
               </tr>
             </thead>
             <tbody>
-              {q.data.settings.map((s, i) => (
+              {q.data.rows.map((s, i) => (
                 <Row key={`${s.name}-${i}`} s={s} />
+              ))}
+              {q.data.ignored.map((o) => (
+                <IgnoredRow key={o.key} o={o} />
               ))}
             </tbody>
           </table>
@@ -55,7 +58,8 @@ function Row({ s }: { s: Setting }) {
   const [issue, setIssue] = useState<Problem | null>(null);
   const [resetting, setResetting] = useState(false);
   const [saved, setSaved] = useState(false);
-  const editable = s.overridable === true && s.key !== null;
+  // FR-CONFIG-25: a row carries a key exactly when FR-CONFIG-26's allow-list lets the overlay set it.
+  const editable = s.key !== null;
   const isSignup = s.key === 'sharing.signup';
   const bound = s.key ? boundOf(s.key) : null;
   const fileOff = isSignup && s.file_value === 'off';
@@ -171,6 +175,56 @@ function Row({ s }: { s: Setting }) {
             }}
           >
             <p>{t('instance.reset_body', { value: show(s.value), file: show(s.file_value ?? null) })}</p>
+          </ConfirmDialog>
+        ) : null}
+      </td>
+    </tr>
+  );
+}
+
+// FR-CONFIG-26's stale override with no row of its own (its task left reader.yaml): shown so the owner can reset it.
+function IgnoredRow({ o }: { o: IgnoredOverride }) {
+  const t = useManageT();
+  const api = useManageApi();
+  const refresh = useRefresh();
+  const [resetting, setResetting] = useState(false);
+  const [issue, setIssue] = useState<Problem | null>(null);
+  const value = typeof o.value === 'object' && o.value !== null ? JSON.stringify(o.value) : show((o.value ?? null) as Setting['value']);
+  return (
+    <tr>
+      <th scope="row">{o.key}</th>
+      <td>
+        <span>{value}</span>
+        <span className="muted">{t('instance.ignored', { reason: t.enum('ignored', o.reason) })}</span>
+        <ProblemLine problem={issue} />
+      </td>
+      <td>
+        <code>{o.key}</code>
+      </td>
+      <td>{t.enum('setting_source', 'override')}</td>
+      <td>
+        <Button variant="ghost" color="neutral" size="sm" onClick={() => setResetting(true)}>
+          {t('instance.reset')}
+        </Button>
+        {resetting ? (
+          <ConfirmDialog
+            open
+            title={t('instance.reset_title', { name: o.key })}
+            confirmLabel={t('instance.reset_confirm')}
+            danger={false}
+            onClose={() => setResetting(false)}
+            onConfirm={async () => {
+              setResetting(false);
+              setIssue(null);
+              try {
+                await api.resetSetting(o.key);
+                await refresh();
+              } catch (e) {
+                setIssue(problem(codeOf(e), 'setting', t));
+              }
+            }}
+          >
+            <p>{t('instance.reset_ignored', { value })}</p>
           </ConfirmDialog>
         ) : null}
       </td>
