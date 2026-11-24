@@ -223,6 +223,25 @@ class World:
         )
 
 
+COURSE_COLUMNS = (
+    "ALTER TABLE courses ADD COLUMN IF NOT EXISTS deleted_at timestamptz NULL",
+    "ALTER TABLE courses ADD COLUMN IF NOT EXISTS deleted_by_material text NULL",
+    "ALTER TABLE courses ADD COLUMN IF NOT EXISTS archived_at timestamptz NULL",
+    "ALTER TABLE courses ADD COLUMN IF NOT EXISTS position integer NULL",
+    "ALTER TABLE lessons ADD COLUMN IF NOT EXISTS deleted_at timestamptz NULL",
+)
+
+
+async def course_columns(engine: Any) -> None:
+    """Pre-merge shim (FR-INGEST-31): SRV-LESSON's manage columns that the material routes read, until the
+    lessons manage migration (V/manage-impl-lesson) is in the heads; IF NOT EXISTS makes it a no-op after."""
+    from sqlalchemy import text
+
+    async with engine.begin() as conn:
+        for sql in COURSE_COLUMNS:
+            await conn.execute(text(sql))
+
+
 @asynccontextmanager
 async def world(pg: Pg, tmp: Path) -> AsyncIterator[World]:
     """A migrated database (ingest tables included), users ivan (owner) and anna (learner), a blob root, the
@@ -248,6 +267,7 @@ async def world(pg: Pg, tmp: Path) -> AsyncIterator[World]:
     await prepare(engine, settings)
     async with engine.connect() as conn:
         users = {r[0]: r[1] for r in await conn.execute(text("SELECT handle, id FROM users"))}
+    await course_columns(engine)
     blobs = tmp / "blobs"
     blobs.mkdir()
     app = make_app(target)
