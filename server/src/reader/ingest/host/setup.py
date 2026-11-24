@@ -71,8 +71,28 @@ def _models_problem(models: Path) -> str | None:
     return None
 
 
+def models_fingerprint(data_dir: Path) -> tuple[tuple[str, int, int], ...]:
+    """Size and mtime of every locked model file (absent: -1, -1); the watcher hashes again on a change."""
+    models = models_dir(data_dir)
+    lock = json.loads(MODELS_LOCK.read_text(encoding="utf-8"))
+    found: list[tuple[str, int, int]] = []
+    for repo in lock["repos"]:
+        for rel in sorted(repo["files"]):
+            try:
+                info = (models / repo["folder"] / rel).stat()
+                found.append((f"{repo['folder']}/{rel}", info.st_size, info.st_mtime_ns))
+            except OSError:
+                found.append((f"{repo['folder']}/{rel}", -1, -1))
+    return tuple(found)
+
+
 def check_setup(data_dir: Path) -> str | None:
     """None when the converter venv and models match the checkout, else `setup_missing` or `setup_stale`."""
+    return check_record(data_dir) or _models_problem(models_dir(data_dir))
+
+
+def check_record(data_dir: Path) -> str | None:
+    """The cheap part of check_setup: the venv and setup.json against the checkout, no model hashing."""
     venv = venv_dir(data_dir)
     record_path = venv / SETUP_RECORD
     if not (venv / "bin" / "python").exists() or not record_path.is_file():
@@ -83,7 +103,7 @@ def check_setup(data_dir: Path) -> str | None:
         return "setup_stale"
     if record != expected_record():
         return "setup_stale"
-    return _models_problem(models_dir(data_dir))
+    return None
 
 
 Run = Callable[[list[str], Mapping[str, str]], int]

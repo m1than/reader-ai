@@ -1,6 +1,7 @@
 // App-wide services handed to routes and the lesson view.
 import { createContext, useContext, type ComponentType } from 'react';
 import type { SignupsApi } from '../accounts/api';
+import type { UploadApi } from '../import/api';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
 import type { Api, ApiDeps, LessonSummary } from './api';
@@ -41,6 +42,8 @@ export interface Services {
   compileSlot?: CompileSlot;
   /** The shell's fetch and 401 hook, for clients built inside lazy chunks (WEB-FRESH's card). */
   http?: ApiDeps;
+  /** SRV-INGEST's upload client for the /import page's upload sections (FR-UI-13, WEB-IMPORT). */
+  upload?: UploadApi;
 }
 
 export const ServicesContext = createContext<Services | null>(null);

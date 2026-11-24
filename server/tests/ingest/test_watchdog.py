@@ -1,0 +1,651 @@
+"""Host watchdogs over a converter run's processes (SRV-INGEST FR-INGEST-22 [unit, fake ps] and [host]).
+
+@trace FR-INGEST-22 FR-INGEST-1
+"""
+
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import signal
+import subprocess
+import sys
+import textwrap
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+
+from .conftest import need
+
+PY = "/uv/python/cpython-3.14/bin/python3.14"  # the kernel executable path every converter process reports
+VENV_PY = "/data/ingest/venv-x/bin/python"  # what `ps -o comm=` shows for the converter (unresolved)
+WORK = "/data/ingest/work/0123456789abcdef"
+T0 = "Mon Nov 23 10:00:00 2026"
+T1 = "Mon Nov 23 10:00:05 2026"
+EARLY = "Mon Nov 23 09:00:00 2026"
+GiB = 1 << 30
+
+
+@dataclass
+class P:
+    pid: int
+    ppid: int = 1
+    start: str = T1
+    rss_kb: int = 1024
+    comm: str = VENV_PY
+    sid: int = 0
+    exe: str = PY
+    cwd: str = "/"
+    args: str = ""
+
+
+@dataclass
+class FakeInspect:
+    procs: dict[int, P]
+    killed: list[int] = field(default_factory=list)
+    changed: dict[int, P] = field(default_factory=dict)  # what a pid looks like at kill time
+
+    def snapshot(self) -> list[Any]:
+        wd = need("reader.ingest.host.watchdog")
+        return [wd.Proc(p.pid, p.ppid, p.start, p.rss_kb, p.comm) for p in self.procs.values()]
+
+    def _now(self, pid: int) -> P | None:
+        return self.changed.get(pid, self.procs.get(pid))
+
+    def sid(self, pid: int) -> int | None:
+        p = self._now(pid)
+        return p.sid if p else None
+
+    def exe(self, pid: int) -> str | None:
+        p = self._now(pid)
+        return p.exe if p else None
+
+    def cwd(self, pid: int) -> str | None:
+        p = self._now(pid)
+        return p.cwd if p else None
+
+    def args(self, pid: int) -> str | None:
+        p = self._now(pid)
+        return p.args if p else None
+
+    def start(self, pid: int) -> str | None:
+        p = self._now(pid)
+        return p.start if p else None
+
+    def kill(self, pid: int) -> None:
+        self.killed.append(pid)
+
+
+def run(sid: int = 100, work: str = WORK, exclude: tuple[int, ...] = (1, 50)) -> Any:
+    wd = need("reader.ingest.host.watchdog")
+    return wd.Run(child_sid=sid, child_start=T0, work=work, exclude=frozenset(exclude))
+
+
+def members(procs: list[P], r: Any = None) -> set[int]:
+    wd = need("reader.ingest.host.watchdog")
+    inspect = FakeInspect({p.pid: p for p in procs})
+    return set(wd.members(r or run(), inspect.snapshot(), inspect, PY))
+
+
+def test_membership_arms() -> None:
+    procs = [
+        P(100, ppid=50, sid=100, cwd=WORK, start=T0),  # the child
+        P(101, ppid=100, sid=100, cwd=WORK),  # setpgid only: same session
+        P(102, sid=102, cwd=WORK + "/tmp"),  # setsid, cwd under WORK
+        P(103, sid=103, cwd="/", args=f"x --input {WORK}/in/material.pdf"),  # setsid, WORK in args
+        P(104, sid=104, cwd="/", args="x --input /elsewhere/in/material.pdf"),  # not bound to this WORK
+        P(105, sid=105, cwd=WORK, start=EARLY),  # started before the child
+        P(106, sid=106, cwd=WORK, exe="/bin/zsh", comm="-zsh"),  # a shell in WORK: not the converter's Python
+        P(50, ppid=1, sid=50, cwd=WORK),  # the watcher (excluded) even with its cwd in WORK
+        P(107, sid=107, cwd=WORK + "x/tmp"),  # a sibling path that only shares the prefix
+    ]
+    assert members(procs) == {100, 101, 102, 103}
+
+
+def test_two_live_runs_each_count_only_their_own() -> None:
+    other = "/data/ingest/work/fedcba9876543210"
+    procs = [
+        P(100, sid=100, cwd=WORK, start=T0),
+        P(102, sid=102, cwd=WORK),
+        P(200, sid=200, cwd=other, start=T0),
+        P(202, sid=202, cwd="/", args=f"--out {other}/out"),
+    ]
+    assert members(procs, run(100, WORK)) == {100, 102}
+    assert members(procs, run(200, other)) == {200, 202}
+
+
+def test_a_work_path_with_a_space_matches_by_substring() -> None:
+    spaced = "/Users/x/Application Support/reader/ingest/work/0123456789abcdef"
+    procs = [
+        P(100, sid=100, cwd=spaced, start=T0),
+        P(103, sid=103, args=f"py -m c --input {spaced}/in/material.pdf"),
+    ]
+    assert members(procs, run(100, spaced)) == {100, 103}
+
+
+def test_limits_kill_every_member_with_their_code(tmp_path: Path) -> None:
+    wd = need("reader.ingest.host.watchdog")
+    procs = {
+        100: P(100, sid=100, cwd=WORK, start=T0, rss_kb=5 * GiB // 1024),
+        102: P(102, sid=102, cwd=WORK, rss_kb=4 * GiB // 1024),
+        300: P(300, sid=300, cwd="/", rss_kb=20 * GiB // 1024),  # not a member: never counted
+    }
+    inspect = FakeInspect(procs)
+    dog = wd.Watchdog(run(), inspect, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path)
+    assert dog.check() == "memory_limit"
+    assert sorted(inspect.killed) == [100, 102]
+    procs[102].rss_kb = 1024
+    inspect.killed.clear()
+    assert dog.check() is None and inspect.killed == []
+
+
+def test_work_directory_limit(tmp_path: Path) -> None:
+    wd = need("reader.ingest.host.watchdog")
+    (tmp_path / "big").write_bytes(b"x" * 3000)
+    (tmp_path / "link").symlink_to("/etc/passwd")  # not followed, not counted
+    assert wd.work_bytes(tmp_path) == 3000
+    inspect = FakeInspect({100: P(100, sid=100, cwd=WORK, start=T0)})
+    dog = wd.Watchdog(run(), inspect, PY, rss_max=8 * GiB, work_max=2000, work=tmp_path)
+    assert dog.check() == "work_limit" and inspect.killed == [100]
+    many = tmp_path / "many"
+    many.mkdir()
+    for i in range(30):
+        (many / str(i)).touch()
+    assert wd.work_bytes(tmp_path, max_entries=20) > 10**15  # past the entry bound counts as over
+
+
+def test_kills_are_reverified(tmp_path: Path) -> None:
+    wd = need("reader.ingest.host.watchdog")
+    procs = {
+        100: P(100, sid=100, cwd=WORK, start=T0),
+        102: P(102, sid=102, cwd=WORK),
+        103: P(103, sid=103, cwd=WORK),
+    }
+    inspect = FakeInspect(procs)
+    inspect.changed[102] = P(102, sid=102, cwd=WORK, start="Mon Nov 23 11:00:00 2026")  # pid reused
+    inspect.changed[103] = P(103, sid=103, cwd=WORK, exe="/bin/zsh")  # exec'd something else
+    dog = wd.Watchdog(run(), inspect, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path)
+    dog.kill_all()
+    assert inspect.killed == [100]
+
+
+def test_stand_in_sets_of_two_runs_end_separately(tmp_path: Path) -> None:
+    """[unit, stand-ins] the one-run lock makes two real runs impossible; the function keeps them apart."""
+    wd = need("reader.ingest.host.watchdog")
+    other = "/data/ingest/work/fedcba9876543210"
+    procs = {
+        100: P(100, sid=100, cwd=WORK, start=T0),
+        102: P(102, sid=102, cwd=WORK),
+        200: P(200, sid=200, cwd=other, start=T0),
+        202: P(202, sid=202, cwd=other),
+    }
+    inspect = FakeInspect(procs)
+    wd.Watchdog(run(100, WORK), inspect, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path).kill_all()
+    assert sorted(inspect.killed) == [100, 102]
+
+
+def test_strays_are_counted_never_killed() -> None:
+    wd = need("reader.ingest.host.watchdog")
+    procs = [
+        P(400, comm="/Users/x/.local/share/uv/python/cpython-3.14/bin/python3.14"),  # another tool's python
+        P(401, comm="/Users/x/reader-ai/server/.venv/bin/python3"),  # the secret watcher
+        P(402, comm=VENV_PY),  # a detached converter python outside any live run
+        P(403, comm=VENV_PY, ppid=77),  # not detached
+        P(100, comm=VENV_PY, sid=100),  # a member of a live run
+    ]
+    inspect = FakeInspect({p.pid: p for p in procs})
+    assert wd.strays(inspect.snapshot(), VENV_PY, live={100}) == 1
+    assert inspect.killed == []
+
+
+def test_ps_snapshot_parsing() -> None:
+    wd = need("reader.ingest.host.watchdog")
+    out = (
+        "  100     1 Mon Nov 23 10:00:00 2026  2048 /data/ingest/venv-x/bin/python\n"
+        "  101   100 Mon Nov 23 10:00:05 2026     0 /path with space/bin/python3.14\n"
+    )
+    got = wd.parse_ps(out)
+    assert got == [
+        wd.Proc(100, 1, "Mon Nov 23 10:00:00 2026", 2048, "/data/ingest/venv-x/bin/python"),
+        wd.Proc(101, 100, "Mon Nov 23 10:00:05 2026", 0, "/path with space/bin/python3.14"),
+    ]
+
+
+def test_tick_timing_is_logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    wd = need("reader.ingest.host.watchdog")
+    caplog.set_level(logging.INFO)
+    inspect = FakeInspect({100: P(100, sid=100, cwd=WORK, start=T0)})
+    wd.Watchdog(run(), inspect, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path).check()
+    assert "watchdog_tick" in caplog.text and "ms" in caplog.text
+
+
+# ---- the CLI's converter run uses the watchdog too ----
+
+
+def test_cli_converter_run_stops_at_a_watchdog_limit(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    killed: list[str] = []
+
+    class Child:
+        pid = 4321
+
+        def stdout_lines(self) -> Any:
+            yield b'{"pages_done": 1, "pages_total": 2}\n'
+            time.sleep(0.05)
+            yield b'{"pages_done": 2, "pages_total": 2}\n'
+
+        def wait(self, timeout: float | None = None) -> int:
+            return -9
+
+        def terminate(self) -> None:
+            killed.append("term")
+
+        def kill(self) -> None:
+            killed.append("kill")
+
+    class Dog:
+        def check(self) -> str | None:
+            return "memory_limit"
+
+        def kill_all(self) -> None:
+            killed.append("kill_all")
+
+    deps = cli.Deps(
+        runner=None, spawn=lambda *a: Child(), probe=None, venv=tmp_path, pyroot=tmp_path, models=tmp_path
+    )
+    deps.watchdog = lambda child, work: Dog()
+    deps.tick_s = 0.01
+    work = tmp_path / "w"
+    (work / "in").mkdir(parents=True)
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(work, deps, lambda _: None)
+    assert (stop.value.code, stop.value.exit_code) == ("memory_limit", 5)
+    assert "kill_all" in killed
+
+
+# ---- fail closed (code review round 1) ----
+
+
+class SlowChild:
+    """A child that prints until it is killed (bounded at 10 s, so a regression fails instead of hanging)."""
+
+    pid = 4321
+
+    def __init__(self) -> None:
+        import threading
+
+        self.dead = threading.Event()
+        self.events: list[str] = []
+
+    def stdout_lines(self) -> Any:
+        for _ in range(1000):
+            if self.dead.wait(0.01):
+                return
+            yield b'{"pages_done": 1, "pages_total": 2}\n'
+
+    def wait(self, timeout: float | None = None) -> int:
+        return -9
+
+    def terminate(self) -> None:
+        self.events.append("term")
+        self.dead.set()
+
+    def kill(self) -> None:
+        self.events.append("kill")
+        self.dead.set()
+
+
+def _deps(tmp_path: Path, child: SlowChild) -> Any:
+    cli = need("reader.ingest.host.cli")
+    deps = cli.Deps(
+        runner=None, spawn=lambda *a: child, probe=None, venv=tmp_path, pyroot=tmp_path, models=tmp_path
+    )
+    deps.tick_s = 0.01
+    (tmp_path / "w" / "in").mkdir(parents=True)
+    return deps
+
+
+def test_a_tick_that_raises_fails_the_run_after_three(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    child, calls = SlowChild(), {"check": 0, "kill_all": 0}
+
+    class Broken:
+        def check(self) -> str | None:
+            calls["check"] += 1
+            raise OSError("ps failed")
+
+        def kill_all(self) -> None:
+            calls["kill_all"] += 1
+
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: Broken()
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert calls["check"] == cli.WATCHDOG_FAILED_TICKS
+    assert calls["kill_all"] >= 1
+    assert "kill" in child.events
+
+
+def test_a_failed_kill_all_still_kills_the_group_and_logs_it(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    cli = need("reader.ingest.host.cli")
+    child = SlowChild()
+
+    class Blind:
+        def check(self) -> str | None:
+            raise OSError("ps failed")
+
+        def kill_all(self) -> None:
+            raise OSError("ps failed")
+
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: Blind()
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert "kill" in child.events
+    assert "watchdog_failed kill=group_only" in caplog.text
+
+
+class ExitedChild(SlowChild):
+    """A child that prints nothing and exits 0 at once."""
+
+    def stdout_lines(self) -> Any:
+        return iter(())
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+class EndDog:
+    """Ticks that pass (or raise); `kill_all` raises on the calls listed in `raising` (1-based), or always."""
+
+    def __init__(self, raising: set[int] | None = None, check_raises: bool = False) -> None:
+        self.raising, self.check_raises, self.kills = raising, check_raises, 0
+
+    def check(self) -> str | None:
+        if self.check_raises:
+            raise OSError("ps failed")
+        return None
+
+    def kill_all(self) -> None:
+        self.kills += 1
+        if self.raising is None or self.kills in self.raising:
+            raise OSError("ps failed")
+
+
+def test_an_unverified_end_of_run_fails_a_child_that_exited_0(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Round 3: ticks pass, the end-of-run kill always raises: never a success."""
+    cli = need("reader.ingest.host.cli")
+    child, dog = ExitedChild(), EndDog()
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: dog
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert dog.kills == cli.WATCHDOG_FAILED_TICKS
+    assert caplog.text.count("watchdog_failed kill=group_only") == 1
+
+
+def test_the_end_of_run_kill_is_retried(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    cli = need("reader.ingest.host.cli")
+    child, dog = ExitedChild(), EndDog(raising={1, 2})
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: dog
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "convert_failed"  # a verified end: the (empty) output decides, not the watchdog
+    assert dog.kills == 3
+    assert "kill=group_only" not in caplog.text
+
+
+def test_a_mid_run_kill_failure_is_logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Round 3: kill_all raises only on its first call (mid-run, after 3 failed ticks); the end kill works."""
+    cli = need("reader.ingest.host.cli")
+    child, dog = SlowChild(), EndDog(raising={1}, check_raises=True)
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: dog
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert dog.kills == 2  # the mid-run kill that raised, then one end-of-run kill that worked
+    assert caplog.text.count("watchdog_failed kill=group_only") == 1
+    assert "kill" in child.events
+
+
+def test_a_failing_ps_at_build_time_refuses_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cli = need("reader.ingest.host.cli")
+    wd = need("reader.ingest.host.watchdog")
+    child = SlowChild()
+    deps = _deps(tmp_path, child)
+    deps.start_time = lambda pid: T0
+
+    def no_ps(self: Any) -> list[Any]:
+        raise OSError("ps exited 1 with 0 processes")
+
+    monkeypatch.setattr(wd.SystemInspect, "snapshot", no_ps)
+    deps.watchdog = lambda c, work: cli.system_watchdog(deps, c, work)
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert "kill" in child.events
+
+
+def test_an_empty_ps_while_the_child_lives_is_a_failed_tick(tmp_path: Path) -> None:
+    wd = need("reader.ingest.host.watchdog")
+
+    class EmptyPs(FakeInspect):
+        def snapshot(self) -> list[Any]:
+            return []
+
+    live = EmptyPs({100: P(100, sid=100, cwd=WORK, start=T0)})
+    dog = wd.Watchdog(run(), live, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path)
+    with pytest.raises(wd.WatchdogBlind):
+        dog.check()
+    gone = EmptyPs({})  # the child has exited: an empty set is the end of the run, not a blind tick
+    assert wd.Watchdog(run(), gone, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path).check() is None
+
+
+def test_an_empty_snapshot_without_a_start_time_while_the_child_object_lives_is_a_failed_tick(
+    tmp_path: Path,
+) -> None:
+    """Round 2: liveness comes from the child process itself, never from `ps` (which here knows nothing)."""
+    wd = need("reader.ingest.host.watchdog")
+
+    class EmptyPs(FakeInspect):
+        def snapshot(self) -> list[Any]:
+            return []
+
+    blind = EmptyPs({})  # no start time either: `ps` cannot tell whether the child lives
+    dog = wd.Watchdog(run(), blind, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path, alive=lambda: True)
+    with pytest.raises(wd.WatchdogBlind):
+        dog.check()
+    ended = wd.Watchdog(
+        run(), blind, PY, rss_max=8 * GiB, work_max=2 * GiB, work=tmp_path, alive=lambda: False
+    )
+    assert ended.check() is None
+
+
+def test_ps_that_fails_or_prints_nothing_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    wd = need("reader.ingest.host.watchdog")
+    line = "  1     0 Mon Nov 24 10:00:00 2026   100 /sbin/launchd\n"
+    for code, out in ((0, ""), (1, line), (0, "garbage\n")):
+        done = subprocess.CompletedProcess(args=[], returncode=code, stdout=out, stderr="")
+        monkeypatch.setattr(wd.subprocess, "run", lambda *a, _d=done, **k: _d)
+        with pytest.raises(OSError, match="ps exited"):
+            wd.SystemInspect().snapshot()
+    ok = subprocess.CompletedProcess(args=[], returncode=0, stdout=line, stderr="")
+    monkeypatch.setattr(wd.subprocess, "run", lambda *a, **k: ok)
+    assert [p.pid for p in wd.SystemInspect().snapshot()] == [1]
+
+
+def test_child_alive_reads_the_child_process() -> None:
+    cli = need("reader.ingest.host.cli")
+    proc = subprocess.Popen(["/bin/sleep", "30"])
+    child = SimpleNamespace(pid=proc.pid, process=proc)
+    try:
+        assert cli.child_alive(child) is True
+    finally:
+        proc.kill()
+        proc.wait(timeout=10)
+    assert cli.child_alive(child) is False
+    assert cli.child_alive(SimpleNamespace(pid=proc.pid)) is False  # reaped: kill(pid, 0) finds nothing
+
+
+def test_a_missing_start_time_refuses_the_run(tmp_path: Path) -> None:
+    cli = need("reader.ingest.host.cli")
+    child = SlowChild()
+    deps = _deps(tmp_path, child)
+    deps.start_time = lambda pid: None
+    deps.watchdog = lambda c, work: cli.system_watchdog(deps, c, work)
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert "kill" in child.events
+
+
+# ---- [host] real processes ----
+
+STAND_IN = textwrap.dedent(
+    """
+    import os, sys, time
+    mode = sys.argv[1]
+    pid = os.fork()
+    if pid == 0:
+        if mode == "setsid":
+            os.setsid()
+        else:
+            os.setpgid(0, 0)
+        hold = bytearray(64 << 20)
+        for i in range(0, len(hold), 4096):
+            hold[i] = 1
+        time.sleep(60)
+        os._exit(0)
+    hold = bytearray(16 << 20)
+    for i in range(0, len(hold), 4096):
+        hold[i] = 1
+    time.sleep(60)
+    """
+)
+
+
+@pytest.mark.ingest_host
+@pytest.mark.parametrize("mode", ["setsid", "setpgid"])
+def test_escaping_children_are_found_and_killed(tmp_path: Path, mode: str) -> None:
+    if os.environ.get("READER_TEST_INGEST_HOST") != "1":
+        pytest.skip("[host]: set READER_TEST_INGEST_HOST=1")
+    wd = need("reader.ingest.host.watchdog")
+    records = need("reader.ingest.host.records")
+    work = Path(os.path.realpath(tmp_path)) / "work"
+    work.mkdir()
+    script = work / "stand_in.py"
+    script.write_text(STAND_IN)
+    child = subprocess.Popen([sys.executable, "-I", str(script), mode], cwd=work, start_new_session=True)
+    try:
+        time.sleep(1.5)
+        start = records.SystemProbe().start_time(child.pid)
+        me = frozenset({os.getpid(), os.getppid()})
+        r = wd.Run(child_sid=child.pid, child_start=start, work=str(work), exclude=me)
+        inspect = wd.SystemInspect()
+        found = wd.members(r, inspect.snapshot(), inspect, os.path.realpath(sys.executable))
+        assert child.pid in found and len(found) == 2, found
+        python = os.path.realpath(sys.executable)
+        dog = wd.Watchdog(r, inspect, python, rss_max=40 << 20, work_max=2 * GiB, work=work)
+        assert dog.check() == "memory_limit"
+        time.sleep(0.3)
+        assert all(not _alive(pid) for pid in found)
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):  # macOS: EPERM for a gone group
+            os.killpg(child.pid, signal.SIGKILL)
+        child.wait(5)
+
+
+def _alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    argv = ["/bin/ps", "-o", "stat=", "-p", str(pid)]
+    out = subprocess.run(argv, capture_output=True, text=True, check=False)
+    return bool(out.stdout.strip()) and not out.stdout.strip().startswith("Z")
+
+
+PARENT = textwrap.dedent(
+    """
+    import json, sys, time
+    from pathlib import Path
+    from reader.ingest.host import cli, records
+    data = Path(sys.argv[1])
+    run_dir, work_root = data / "ingest" / "run", data / "ingest" / "work"
+    with cli.convert_lock(data):
+        name = records.new_run(run_dir, work_root, "a" * 64)
+        work = work_root / name
+        check = (
+            "import os, sys, time; lock = os.stat(sys.argv[1]); held = []\\n"
+            "for fd in range(256):\\n"
+            "    try:\\n"
+            "        s = os.fstat(fd)\\n"
+            "    except OSError:\\n"
+            "        continue\\n"
+            "    held.append((s.st_dev, s.st_ino) == (lock.st_dev, lock.st_ino))\\n"
+            "open('fds.txt', 'w').write(str(any(held)))\\n"
+            "time.sleep(60)\\n"
+        )
+        lock_file = str(data / "ingest" / "locks" / "convert.lock")
+        argv = [sys.executable, "-I", "-c", check, lock_file]
+        child = cli.system_spawn(argv, {"PATH": "/usr/bin:/bin"}, work)
+        records.set_child(run_dir, name, child.pid, records.SystemProbe().start_time(child.pid) or "")
+        print(json.dumps({"pid": child.pid, "work": str(work)}), flush=True)
+        time.sleep(60)
+    """
+)
+
+
+@pytest.mark.ingest_host
+def test_lock_is_not_inherited_and_an_orphan_is_cleaned(tmp_path: Path) -> None:
+    if os.environ.get("READER_TEST_INGEST_HOST") != "1":
+        pytest.skip("[host]: set READER_TEST_INGEST_HOST=1")
+    watch = need("reader.ingest.host.watch")
+    data = Path(os.path.realpath(tmp_path))
+    parent = subprocess.Popen([sys.executable, "-c", PARENT, str(data)], stdout=subprocess.PIPE)
+    assert parent.stdout is not None
+    import select
+
+    ready, _, _ = select.select([parent.stdout], [], [], 30)  # bounded: a parent that never starts fails here
+    if not ready:
+        parent.kill()
+        pytest.fail("the stand-in parent did not report its child within 30 s")
+    started = json.loads(parent.stdout.readline())
+    time.sleep(0.5)
+    assert watch.try_convert_lock(data) is None  # held by the parent
+    report = Path(started["work"]) / "fds.txt"
+    for _ in range(50):
+        if report.exists() and report.read_text():
+            break
+        time.sleep(0.1)
+    child_holds_lock = report.read_text()
+    parent.send_signal(signal.SIGKILL)
+    parent.wait(5)
+    try:
+        assert _alive(started["pid"])  # the orphaned child still runs
+        held = watch.try_convert_lock(data)
+        assert held is not None  # ... but does not hold the lock
+        assert child_holds_lock == "False"  # no descriptor of the child is the lock file
+        assert watch.clean_all(data, need("reader.ingest.host.records").SystemProbe()) == 1
+        time.sleep(0.3)
+        assert not _alive(started["pid"])
+        held.release()
+    finally:
+        with contextlib.suppress(ProcessLookupError, PermissionError):
+            os.killpg(started["pid"], signal.SIGKILL)

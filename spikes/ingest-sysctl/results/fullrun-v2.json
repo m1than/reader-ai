@@ -1,0 +1,11 @@
+{
+ "profile": "converter-v2.sb",
+ "page_count": 935,
+ "pages_converted": 935,
+ "span_count": 9463,
+ "wall_seconds": 961.6,
+ "pages_per_minute": 58.3,
+ "converter_peak_rss_mib": 3590.8,
+ "denied_sysctl_names": [],
+ "log_lines_scanned": 2
+}

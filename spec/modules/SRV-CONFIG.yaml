@@ -17,7 +17,7 @@ title: reader.yaml settings, JSON Schema export, secret references and the conta
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CONFIG-17, the `observability` section, reviewed in SRV-OBS's code review"
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CONFIG-17, the `observability` section, reviewed in SRV-OBS's code review; paired change FR-CONFIG-18 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner; drafted and promoted as FR-CONFIG-17, renumbered at the merge into V/slice-integration, 2026-11-24, because SRV-OBS's item took that id first): drafted on V/plan, reviewed in the onboarding deep-reviewer rounds 3–7, promoted with SRV-SEARCH FR-SEARCH-10 on V/upload-impl with its Red test; Green: the Red test's expected key path corrected to the loader's notation `materials.1.id` (FR-CONFIG-10's path form), no requirement changed; the test reformatted for ruff (line length), no oracle change"
 layer: server
 track: engineering
 adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026]
@@ -242,6 +242,15 @@ requirements:
       is regenerated (FR-CONFIG-4). Codes: a non-boolean `enabled` or a non-int `retention_days` (a float, a string, a
       boolean) is `wrong_type`; an int outside 1..365 is `out_of_range`; any other key is `unknown_key`. [unit]
       server/tests/config/test_observability.py.
+  - id: FR-CONFIG-18   # paired change for SRV-INGEST revision 2 (ADR-0029); was FR-CONFIG-17 until the merge
+    text: >-
+      **Reserved material ids.** A `materials[].id` that starts with `up-` is a validation problem with code
+      `reserved_id` and the message "material ids starting with up- are reserved for uploads" (SRV-INGEST
+      FR-INGEST-23 names uploaded materials `up-<first 12 hex of sha256>`; SRV-SEARCH FR-SEARCH-10 reads an
+      `up-` material's language from its upload, never from reader.yaml). The match is case-sensitive, on the id's
+      characters as written, with no normalisation. The problem is reported like every other FR-CONFIG-10 problem
+      (at the item's path and line, collected with the others). [unit] refused: `up-`, `up-abc`; accepted: `upx`,
+      `upload-notes`, `Up-x`.
 
 invariants:
   - id: INV-CONFIG-1

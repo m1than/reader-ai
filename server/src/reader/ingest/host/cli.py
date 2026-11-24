@@ -17,6 +17,7 @@ import fcntl
 import hashlib
 import io
 import json
+import logging
 import os
 import signal
 import subprocess
@@ -28,13 +29,16 @@ from pathlib import Path
 from typing import Any, Final, Protocol, TextIO
 
 from reader.config import ConfigError, load_config
-from reader.ingest import artifact, tarstream
+from reader.ingest import artifact, params, tarstream
 from reader.ingest.artifact import ArtifactError
-from reader.ingest.host import records, sandbox, setup
+from reader.ingest.host import records, sandbox, setup, watchdog
 from reader.ingest.host.mapping import parse_progress, render_code_line
+
+log = logging.getLogger("reader.ingest.host")
 
 CHILD_TIMEOUT_S: Final = 4 * 3600.0  # ADR-0021's 10 pages/min gives 94 min for the pilot (spec header)
 CHILD_GRACE_S: Final = 10.0
+WATCHDOG_FAILED_TICKS: Final = 3  # consecutive failed ticks before the run is killed (FR-INGEST-22, chosen)
 STATUS_TIMEOUT_S: Final = 60.0
 RECEIVE_TIMEOUT_S: Final = 330.0  # receive ends itself at 300 s
 DOCKER_TIMEOUT_S: Final = 30.0
@@ -142,13 +146,57 @@ class Deps:
     models: Path | None = None
     cpus: int = field(default_factory=lambda: os.cpu_count() or 1)
     start_time: Callable[[int], str | None] = field(default_factory=lambda: records.SystemProbe().start_time)
+    # FR-INGEST-22: a watchdog over the run's processes, built once the child has started (None: no watchdog)
+    watchdog: Callable[[Child, Path], Any] | None = None
+    tick_s: float = params.TICK_S
 
 
 def real_deps(data_dir: Path | None = None) -> Deps:
     deps = Deps(runner=SystemRunner(), spawn=system_spawn, probe=records.SystemProbe())
+    deps.watchdog = lambda child, work: system_watchdog(deps, child, work)
     if data_dir is not None:
         resolve_paths(deps, data_dir)
     return deps
+
+
+def system_watchdog(deps: Deps, child: Child, work: Path) -> watchdog.Watchdog:
+    """FR-INGEST-22 for the real child: its session, its start, this run's realpath'd WORK, the converter's
+    Python as the kernel reports it, and the parent with its ancestors excluded."""
+    inspect = watchdog.SystemInspect()
+    assert deps.pyroot is not None  # noqa: S101 (resolved before the child starts)
+    start = deps.start_time(child.pid)
+    if not start:  # fail closed: no accounting without the child's start time (FR-INGEST-22)
+        raise Stop("watchdog_failed", 5)
+    try:
+        exclude = watchdog.ancestors(os.getpid(), inspect.snapshot())
+    except OSError:  # an empty or failed `ps` at the start: fail closed too
+        raise Stop("watchdog_failed", 5) from None
+    run = watchdog.Run(child_sid=child.pid, child_start=start, work=os.path.realpath(work), exclude=exclude)
+    converter = os.path.realpath(deps.pyroot / "bin" / "python3.14")
+    return watchdog.Watchdog(
+        run,
+        inspect,
+        converter,
+        rss_max=params.RSS_MAX,
+        work_max=params.WORK_BYTES_MAX,
+        work=Path(work),
+        alive=lambda: child_alive(child),
+    )
+
+
+def child_alive(child: Child) -> bool:
+    """Whether the child lives, from the child process itself (code review round 2): `poll()` when it is our
+    Popen, else `kill(pid, 0)`."""
+    process = getattr(child, "process", None)
+    if isinstance(process, subprocess.Popen):
+        return process.poll() is None
+    try:
+        os.kill(child.pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
 
 
 def resolve_paths(deps: Deps, data_dir: Path) -> None:
@@ -185,6 +233,7 @@ def convert_members(
     deps: Deps,
     report: Callable[[str], None],
     on_start: Callable[[Child], None] | None = None,
+    on_pages: Callable[[int, int], None] | None = None,
 ) -> tuple[dict[str, bytes], dict[str, Any]]:
     """Run the confined child on `<work>/in/material.pdf`; returns the members, read once and validated, and
     the manifest the validator returned. These bytes, never WORK again, are what is sent (FR-INGEST-10)."""
@@ -195,15 +244,50 @@ def convert_members(
     argv = sandbox.child_argv(deps.venv, deps.pyroot, deps.models, work)
     child: Child | None = None
     timer: threading.Timer | None = None
+    dog: Any = None
+    tripped: list[str] = []
+    stop = threading.Event()
+
+    def kill_on_timeout() -> None:
+        if child is not None:
+            child.kill()
+
+    def watch() -> None:  # FR-INGEST-22: one snapshot per tick; a limit kills every member of the run
+        failed = 0
+        while not stop.wait(deps.tick_s):
+            try:
+                code = dog.check()
+                failed = 0
+            except Exception:  # fail closed: a tick that raises or cannot see the live child counts
+                failed += 1
+                code = "watchdog_failed" if failed >= WATCHDOG_FAILED_TICKS else None
+                if code is not None:
+                    try:
+                        dog.kill_all()
+                    except Exception:  # the child's session still dies below (killpg)
+                        log.warning("watchdog_failed kill=group_only")
+            if code is not None:
+                tripped.append(code)
+                if child is not None:
+                    child.kill()
+                return
+
     try:
         child = deps.spawn(argv, sandbox.child_env(work, deps.cpus), Path(os.path.realpath(work)))
         if on_start is not None:
             on_start(child)
-        timer = threading.Timer(CHILD_TIMEOUT_S, child.kill)
+        timer = threading.Timer(CHILD_TIMEOUT_S, kill_on_timeout)
         timer.daemon = True
         timer.start()
+        if deps.watchdog is not None:
+            dog = deps.watchdog(child, work)
+            threading.Thread(target=watch, daemon=True).start()
         for line in child.stdout_lines():
+            if tripped:
+                break
             parsed = parse_progress(line.strip())
+            if parsed and on_pages is not None:
+                on_pages(*parsed)
             rendered = f"page {parsed[0]}/{parsed[1]}" if parsed else render_code_line(line.strip())
             if rendered is not None:
                 report(rendered)
@@ -215,11 +299,23 @@ def convert_members(
                 child.wait(CHILD_GRACE_S)
         raise
     finally:
+        stop.set()
         if timer is not None:
             timer.cancel()
         if child is not None:
             child.kill()  # the whole session, so nothing the child started still writes into WORK
-    if code != 0:
+        if dog is not None:  # every member, re-verified, at the end of every run (setsid'd ones too)
+            for attempt in range(1, WATCHDOG_FAILED_TICKS + 1):
+                try:
+                    dog.kill_all()
+                    break
+                except Exception:  # fail closed: an unverified end of run is not a success (rounds 2-3)
+                    if attempt == WATCHDOG_FAILED_TICKS:
+                        log.warning("watchdog_failed kill=group_only")
+                        tripped.append("watchdog_failed")
+    if tripped:
+        raise Stop(tripped[0], 5)
+    if code != 0:  # the 4 h wall clock included (FR-INGEST-10: a timeout is convert_failed)
         raise Stop("convert_failed", 5)
     try:
         members = artifact.read_members(work / "out")
@@ -360,10 +456,8 @@ def convert_lock(data_dir: Path) -> Iterator[int]:
     locks.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(locks / CONVERT_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
-        try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise Stop("busy", 3, "another conversion is running; try again when it ends") from None
+        if not records.try_flock(fd):  # one retry: `reader status` probes the lock with a short shared lock
+            raise Stop("busy", 3, "another conversion is running; try again when it ends")
         yield fd
     finally:
         os.close(fd)
@@ -408,8 +502,7 @@ def _ingest(material: Material, deps: Deps, requeue: bool, out: TextIO) -> int:
     ingest_root = material.data_dir / "ingest"
     run_dir, work_root = ingest_root / "run", ingest_root / "work"
     with _material_lock(material.data_dir, material.sha256):
-        if requeue:  # starts no converter: no convert.lock, and only this material's records are cleaned
-            records.cleanup_stale(run_dir, work_root, material.sha256, deps.probe)
+        if requeue:  # starts no converter: no convert.lock, and it cleans no record (FR-INGEST-16, round 1)
             container = worker_container(deps)
             args = ["--material-sha256", material.sha256]
             code, reply = _exec(deps, container, "reader.ingest.requeue", args, STATUS_TIMEOUT_S)
@@ -453,7 +546,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", default="reader.yaml", type=Path)
     parser.add_argument("--requeue", action="store_true")
     parser.add_argument("--setup", action="store_true")
+    parser.add_argument("--watch", action="store_true")
     return parser
+
+
+def data_dir_of(config_path: Path) -> Path:
+    config = load_config(config_path)
+    data_dir = Path(config.instance.data_dir)
+    return data_dir if data_dir.is_absolute() else config_path.resolve().parent / data_dir
 
 
 def _terminate(signum: int, _: Any) -> None:
@@ -463,14 +563,23 @@ def _terminate(signum: int, _: Any) -> None:
 def ingest(argv: list[str], deps: Deps, out: TextIO, err: TextIO) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.watch:
+            from reader.ingest.host import watch
+
+            return watch.run_watch(data_dir_of(args.config), deps)
         if args.setup:
-            material_cfg = load_config(args.config)
-            base = args.config.resolve().parent
-            data_dir = Path(material_cfg.instance.data_dir)
-            data_dir = data_dir if data_dir.is_absolute() else base / data_dir
+            data_dir = data_dir_of(args.config)
             problem = setup.run_setup(data_dir, _env(), _printer(out))
             if problem is not None:
                 raise Stop(problem, 2)
+            from reader.ingest.host import crossprobe  # INV-INGEST-4 at run time
+
+            resolve_paths(deps, data_dir)
+            venv, pyroot, models = deps.venv, deps.pyroot, deps.models
+            if venv is None or pyroot is None or models is None:
+                raise Stop("setup_missing", 2)
+            if crossprobe.run(venv, pyroot, models, data_dir) != "ready":
+                raise Stop("setup_probe_failed", 2, "a cross-process probe was not refused; see the log")
             return 0
         if not args.material:
             raise Stop("material_missing", 2)

@@ -1,0 +1,46 @@
+(version 1)
+; Spike ingest-sysctl, variant v3: v2's sysctl allow-list, without v2's process-info rules (process-info stays
+; under the profile's deny default). Isolates which of the two rules breaks getcwd.
+(deny default)
+
+(allow file-read* file-map-executable
+  (subpath (param "PYROOT"))
+  (subpath (param "VENV"))
+  (subpath "/usr/lib")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld"))
+(allow file-read* (subpath (param "MODELS")))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/null"))
+(allow file-read* (literal "/"))
+(allow file-read* (literal "/private/etc/apache2/mime.types"))
+(allow file-read-metadata)
+
+(allow file-read* file-write* (subpath (param "WORK")))
+(allow file-write-data (literal "/dev/null"))
+
+(allow process-exec
+  (literal (string-append (param "VENV") "/bin/python"))
+  (literal (string-append (param "PYROOT") "/bin/python3.14")))
+(allow process-fork)
+
+(allow sysctl-read
+  (sysctl-name-prefix "hw.")
+  (sysctl-name-prefix "machdep.")
+  (sysctl-name-prefix "vm.")
+  (sysctl-name-prefix "sysctl.")
+  (sysctl-name-prefix "security.mac.")
+  (sysctl-name-prefix "kern.os")
+  (sysctl-name "kern.version")
+  (sysctl-name "kern.hostname")
+  (sysctl-name "kern.boottime")
+  (sysctl-name "kern.argmax")
+  (sysctl-name "kern.maxfiles")
+  (sysctl-name "kern.maxfilesperproc")
+  (sysctl-name "kern.ngroups")
+  (sysctl-name "kern.secure_kernel")
+  (sysctl-name "kern.usrstack64")
+  (sysctl-name "kern.clockrate")
+  (sysctl-name "kern.hv_vmm_present")
+  (sysctl-name "kern.willshutdown")
+  (sysctl-name "kern.memorystatus_level"))

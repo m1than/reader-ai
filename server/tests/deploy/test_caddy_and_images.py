@@ -1,4 +1,4 @@
-# @trace FR-DEPLOY-2, FR-DEPLOY-7, FR-DEPLOY-9, FR-DEPLOY-13
+# @trace FR-DEPLOY-2, FR-DEPLOY-7, FR-DEPLOY-9, FR-DEPLOY-13, FR-DEPLOY-14
 """OPS-DEPLOY [config] Caddyfile text and the derived caddy image, [image] checks (`caddy adapt`, postgres
 uid), the [image: registry] check (arm64 manifests; only with READER_TEST_REGISTRY=1) and the [image: build]
 check of reader-caddy:local (only with READER_TEST_IMAGE_BUILD=1)."""
@@ -219,7 +219,11 @@ def test_caddy_adapt_in_pinned_image() -> None:
     # FR-DEPLOY-13 (paired SRV-OBS change): the 8443 site adds forward_auth to the api and the MLflow proxy.
     assert upstreams == {"10.230.1.10:8000", "mcp:8001", "mlflow:5000"}
     proxied = {path: ups for path, ups in _path_upstreams(nodes).items() if ups}
-    assert proxied == {"/api/*": {"10.230.1.10:8000"}, "/mcp": {"mcp:8001"}}
+    assert proxied == {
+        "/api/materials/uploads": {"10.230.1.10:8000"},  # FR-DEPLOY-14: the upload's own body limit
+        "/api/*": {"10.230.1.10:8000"},
+        "/mcp": {"mcp:8001"},
+    }
     _check_dashboard_site(config)
     assert any(n.get("handler") == "file_server" for n in nodes)
     assert "/index.html" in json.dumps(config), "SPA fallback (try_files) missing"

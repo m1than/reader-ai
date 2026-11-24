@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from reader.cli import ingest_watch
 from reader.cli.commands import (
     Ctx,
     cmd_bootstrap,
@@ -78,6 +79,7 @@ def default_ctx() -> Ctx:
         sleep=time.sleep,
         monotonic=time.monotonic,
         kill=os.kill,
+        ingest_spawn=ingest_watch.spawn,  # FR-CLI-23
     )
 
 

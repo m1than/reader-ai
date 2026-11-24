@@ -1,0 +1,40 @@
+{
+  "_comment": "VEC-IMPORT-1 (upload part): synthetic bodies of SRV-INGEST FR-INGEST-18/-19/-23 for the Import page's upload sections. No book text. The plan responses are WEB-PLAN's fixtures (decision (B), 2026-11-23).",
+  "views": {
+    "queued": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "queued", "code": null, "pages_done": null, "pages_total": null, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "claimed": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "claimed", "code": null, "pages_done": null, "pages_total": null, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "converting": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "converting", "code": null, "pages_done": 50, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "sending": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "sending", "code": null, "pages_done": 120, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "importing": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "importing", "code": null, "pages_done": 120, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "indexing": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "indexing", "code": null, "pages_done": 120, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "ready": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "ready", "code": null, "pages_done": 120, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null },
+    "failed_reconvert": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "failed", "code": "convert_failed", "pages_done": null, "pages_total": null, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": "reconvert" },
+    "failed_memory": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "failed", "code": "memory_limit", "pages_done": 10, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": "reconvert" },
+    "failed_host_lost": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "failed", "code": "host_lost", "pages_done": null, "pages_total": null, "attempts": 3, "created_at": "2026-11-23T10:00:00Z", "retry": "reconvert" },
+    "failed_import_dead": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "failed", "code": "artifact_invalid", "pages_done": 120, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": "requeue" },
+    "failed_embed_dead": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "failed", "code": "EmbedUnavailable", "pages_done": 120, "pages_total": 120, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": "requeue" },
+    "failed_no_retry": { "id": "11111111-1111-4111-8111-111111111111", "material_id": "up-0123456789ab", "filename": "Synthetic chapter 1.pdf", "size": 2048, "language": "en", "state": "failed", "code": "unknown_code", "pages_done": null, "pages_total": null, "attempts": 0, "created_at": "2026-11-23T10:00:00Z", "retry": null }
+  },
+  "declared": { "material_id": "synthetic-declared", "upload": null },
+  "converter": {
+    "online": { "state": "online", "seen_at": "2026-11-23T10:00:00Z", "converter_version": "docling-2.151.1+r2", "strays": 0, "busy": "none", "stale": false },
+    "cli_running": { "state": "online", "seen_at": "2026-11-23T10:00:00Z", "converter_version": "docling-2.151.1+r2", "strays": 0, "busy": "cli_running", "stale": false },
+    "offline": { "state": "offline", "seen_at": null, "converter_version": null, "strays": 0, "busy": "none", "stale": false },
+    "setup_missing": { "state": "setup_missing", "seen_at": "2026-11-23T10:00:00Z", "converter_version": "docling-2.151.1+r2", "strays": 0, "busy": "none", "stale": false },
+    "strays": { "state": "online", "seen_at": "2026-11-23T10:00:00Z", "converter_version": "docling-2.151.1+r2", "strays": 2, "busy": "none", "stale": false },
+    "stale": { "state": "online", "seen_at": "2026-11-23T10:00:00Z", "converter_version": "docling-2.151.1+r2", "strays": 0, "busy": "none", "stale": true }
+  },
+  "retry": {
+    "requeued": [202, { "retry": "requeued" }],
+    "already_queued": [202, { "retry": "already_queued" }],
+    "view": [200, "views.importing"],
+    "busy": [409, { "error": "busy" }],
+    "state": [409, { "error": "state" }],
+    "upload_busy": [409, { "error": "upload_busy" }]
+  },
+  "upload_errors": [
+    [400, "language"], [400, "filename"], [400, "empty"], [403, "owner_only"], [408, "body_timeout"],
+    [409, "upload_busy"], [409, "inbox_full"], [409, "id_collision"], [413, "too_large"], [415, "not_pdf"],
+    [415, "content_type"], [500, "inbox_invalid"], [503, "config_unavailable"]
+  ]
+}
