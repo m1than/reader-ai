@@ -17,7 +17,7 @@ title: reader.yaml settings, JSON Schema export, secret references and the conta
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CONFIG-17, the `observability` section, reviewed in SRV-OBS's code review; paired change FR-CONFIG-18 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner; drafted and promoted as FR-CONFIG-17, renumbered at the merge into V/slice-integration, 2026-11-24, because SRV-OBS's item took that id first): drafted on V/plan, reviewed in the onboarding deep-reviewer rounds 3–7, promoted with SRV-SEARCH FR-SEARCH-10 on V/upload-impl with its Red test; Green: the Red test's expected key path corrected to the loader's notation `materials.1.id` (FR-CONFIG-10's path form), no requirement changed; the test reformatted for ruff (line length), no oracle change. Amendment 2026-11-24 (V/manage, WEB-MANAGE FR-MANAGE-6): FR-CONFIG-25..26 and the system table `settings_overrides` promoted from `proposed_manage` with the Red tests (tests/config/test_settings_*.py, tests/cli/test_overrides.py) after deep-reviewer rounds 1–3 (round 3 approve on 2a7d86f); ADR-0036 accepted by the owner, so the overlay is built; paired notes in SRV-AUTH (FR-AUTH-1, -10, -23), SRV-OBS, SRV-PIPELINE, SRV-AGENT and OPS-CLI review strings. Approved by agent with Red (2026-11-24)"
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CONFIG-17, the `observability` section, reviewed in SRV-OBS's code review; paired change FR-CONFIG-18 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner; drafted and promoted as FR-CONFIG-17, renumbered at the merge into V/slice-integration, 2026-11-24, because SRV-OBS's item took that id first): drafted on V/plan, reviewed in the onboarding deep-reviewer rounds 3–7, promoted with SRV-SEARCH FR-SEARCH-10 on V/upload-impl with its Red test; Green: the Red test's expected key path corrected to the loader's notation `materials.1.id` (FR-CONFIG-10's path form), no requirement changed; the test reformatted for ruff (line length), no oracle change. Amendment 2026-11-24 (V/manage, WEB-MANAGE FR-MANAGE-6): FR-CONFIG-25..26 and the system table `settings_overrides` promoted from `proposed_manage` with the Red tests (tests/config/test_settings_*.py, tests/cli/test_overrides.py) after deep-reviewer rounds 1–3 (round 3 approve on 2a7d86f); ADR-0036 accepted by the owner, so the overlay is built; paired notes in SRV-AUTH (FR-AUTH-1, -10, -23), SRV-OBS, SRV-PIPELINE, SRV-AGENT and OPS-CLI review strings. Approved by agent with Red (2026-11-24). Code review of the management layer (2026-11-24, V/manage-fix-auth): FR-CONFIG-26 states the overlay's number bound `OVERRIDE_MAX` (below 1e15; 1e15 and 1e308 → 400 `value_invalid`) and that budget enforcement is live per call while `compile_runs.task_budgets` is a display snapshot (the code already enforced live); oracles added through the real readers (B5): the sign-up routes with a file `off` and a stored `open` override (tests/config/test_settings_db.py), SRV-AGENT's reserve with lowered monthly and task budget overrides (tests/agent/test_provider_db.py), `create_run`'s snapshot and live enforcement during a run (tests/pipeline/test_overrides_db.py), the retention job's cutoff and the summary's trace cutoff (tests/obs/test_overrides_db.py), and POST and DELETE with a stale session"
 layer: server
 track: engineering
 adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026, ADR-0036]
@@ -290,7 +290,10 @@ requirements:
       `budgets.warn_at`, `tasks.<name>.budget_usd_per_lesson` for a task present in reader.yaml (any other key →
       400 `not_overridable`). One function `effective_settings(conn, config) -> Settings` resolves each key as
       override ?? file ?? default and validates the result with the same Pydantic models as the file (a value the
-      file's schema refuses → 400 `value_invalid` with the field name, never stored).
+      file's schema refuses → 400 `value_invalid` with the field name, never stored). The overlay adds one bound
+      the file does not have: a number for `budgets.monthly_usd` or a task budget must be below 1e15
+      (`OVERRIDE_MAX`, below 2^53, so the settings page's JavaScript reads it exactly); a larger one (1e15, 1e308)
+      → 400 `value_invalid`, never 500, and a stored one is ignored as `invalid`.
       - **Narrowing on the resolved sign-up value.** The file's sign-up value is first resolved by FR-AUTH-23's rule,
         defaults included (absent on a `localhost` RP ID → open; absent on any other host → off; `false` or `"off"`
         → off). When that resolved file value is off, the effective switch is off whatever the override says;
@@ -312,6 +315,11 @@ requirements:
         snapshots `tasks.<name>.budget_usd_per_lesson` into `compile_runs.task_budgets`, reads the effective
         value at run creation (a running run keeps its snapshot); SRV-AGENT's monthly budget check per call in the
         worker.
+      - **Enforcement is live.** Every budget check reads the effective value at the moment of the check: SRV-AGENT's
+        reserve reads `tasks.<name>.budget_usd_per_lesson`, `budgets.monthly_usd` and `budgets.warn_at` through
+        `effective_settings` per call, so an override changed during a run applies to that run's next call.
+        `compile_runs.task_budgets` is a display snapshot only (the run status's `task_budgets`, the values in
+        effect when the run was created); no check reads it.
       Routes (owner only, else 403 `owner_only`; `recent_session`): `POST /api/settings/{key}` with `{value,
       version}` (409 `stale` on a version mismatch; 0 for a new key) sets the override; `DELETE
       /api/settings/{key}` with `{}` removes it (idempotent). Each applied change writes the audit actions
@@ -332,7 +340,16 @@ requirements:
       loaded config (attribute or key access outside that module fails the test); [db] set, stale, reset,
       not_overridable, value_invalid, file_narrower; an override for a task then removed from reader.yaml is
       ignored, logged once and listed as ignored; sign-up turned off by an override answers 404 on the sign-up
-      routes on the next request without a restart; a learner gets 403 with nothing written.
+      routes on the next request without a restart; a learner gets 403 with nothing written; `budgets.monthly_usd`
+      and a task budget at 1e15 and 1e308 → 400 `value_invalid`; POST and DELETE with a session older than
+      `recent_session` → 401 `reauth_required` with nothing written or removed. [db] through each real reader, not
+      `effective_settings` alone: reader.yaml `sharing.signup: off` plus a stored `open` override → the three
+      sign-up routes answer 404 (SRV-AUTH FR-AUTH-23); a lowered `budgets.monthly_usd` override makes SRV-AGENT's
+      reserve refuse `monthly_budget_exhausted` where the file's value allows the call, and a lowered task budget
+      override set after the run's creation makes it refuse `task_budget_exhausted` (enforcement is live);
+      a task budget override appears in a new run's `compile_runs.task_budgets` (SRV-PIPELINE `create_run`); an
+      `observability.retention_days` override reaches the retention job's cutoff and the obs summary's trace
+      cutoff (SRV-OBS FR-OBS-11, FR-OBS-1).
 
 invariants:
   - id: INV-CONFIG-1

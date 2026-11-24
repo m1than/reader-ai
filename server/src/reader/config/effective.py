@@ -35,6 +35,8 @@ WARN: Final = "budgets.warn_at"
 FIXED_KEYS: Final = (SIGNUP, RETENTION, MONTHLY, WARN)
 # `tasks.<name>.budget_usd_per_lesson`; the name follows SRV-EVENTS's audit pattern for a setting key.
 TASK_KEY: Final = re.compile(r"tasks\.([a-z0-9][a-z0-9_-]{0,63})\.budget_usd_per_lesson")
+# The overlay's own bound on a number (FR-CONFIG-26): below 2^53, so the settings page reads it exactly.
+OVERRIDE_MAX: Final = Decimal(10) ** 15
 _ABSENT: Final = object()
 
 
@@ -142,7 +144,7 @@ def _valid(file: Settings, key: str, value: Any) -> bool:
         if key == RETENTION:
             return _valid_retention(value)
         number = _decimal(value)
-        if number is None:
+        if number is None or not number.is_finite() or number >= OVERRIDE_MAX:
             return False
         if key == MONTHLY:
             Budgets.model_validate({"monthly_usd": number, "warn_at": file.warn_at})
