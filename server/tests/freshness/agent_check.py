@@ -1,18 +1,23 @@
-"""Run inside reader-server:local by test_agent_image.py (not collected: no `test_` prefix).
+"""Run inside an image built from deploy/images/server.Dockerfile by test_agent_image.py (not collected: no
+`test_` prefix). Argument: `allow` (default) or `deny`.
 
 INV-FRESH-1 [agent]. In one process, with `--network none`, no token and no credit:
-  - the handshake spike's stub on 127.0.0.1:8080 in its `websearch` scenario; with STUB_QUERY_FROM_PROMPT=1
-    the main loop's tool_use carries the run's own `Query: <q>` line, so the gate sees the planned query;
+  - the handshake spike's stub on 127.0.0.1:8080 in its `websearch` scenario. `allow`:
+    STUB_QUERY_FROM_PROMPT=1, so the main loop's tool_use carries the run's own `Query: <q>` line and the gate
+    sees the planned query.
+    `deny`: the stub asks for its own fixed query, which the gate denies;
   - a real agent-proxy (`reader.agent.proxy.create_app`) on 127.0.0.1:8090 with the stub as its upstream,
     through a transport that records every body the proxy forwards;
   - the real adapter (`reader.agent.provider.AgentProvider`) with the real bundled CLI (`sdk_cli`), wrapped
     only to record the SDK options it builds; the ledger's reserve and settle are replaced in memory (no
     database).
 A synthetic material holds canary sentences in non-front spans; a fake scan output copies canary words into
-subjects (5 words; 6 joined by punctuation; a 7-word copy with a topic word inside). The real `scan.parse` and
-`queries.plan` run on it, and each planned query runs as `jobs.search_call` builds it, under a fresh `Gate`.
+subjects (5 words; 6 joined by punctuation, by `_`, by U+200B and by nothing; a 7-word copy with a topic word
+inside). The real `scan.parse` and `queries.plan` run on it, and each planned query runs as `jobs.search_call`
+builds it, under a fresh `Gate`.
 Prints one JSON line: the planned queries (synthetic), each run's hook matcher and identity, gate counts,
-outcome and R size, and per forwarded body its kind, canary words and whether a 6-word canary run appears.
+outcome and R size, and per forwarded body its kind, the canary words found in it and whether a 6-word canary
+run appears. The canary oracle is a regex over the raw body text, independent of the product's tokenizer.
 """
 
 from __future__ import annotations
@@ -21,6 +26,7 @@ import asyncio
 import functools
 import json
 import os
+import re
 import subprocess
 import sys
 import uuid
@@ -39,7 +45,6 @@ from reader.agent.proxy import ProxySettings, create_app
 from reader.config import load_config, secret_file_name
 from reader.freshness import jobs, links, prompts, queries, sample, scan
 from reader.freshness.gate import Gate
-from reader.freshness.text import words
 
 PROXY = "http://127.0.0.1:8090"
 TOKEN_REF = "secret://keychain/reader-ai/claude-oauth-token"  # noqa: S105 (a reference; the value is synthetic)
@@ -63,7 +68,9 @@ S1 = "canaryaa canaryab canaryac canaryad canaryae canaryaf canaryag"
 S2 = "canaryba canarybb canarybc canarybd canarybe canarybf"
 S3 = "canaryca canarycb canarycc Ledgers canarycd latest version"  # a topic word and the template's words
 S4 = "canaryda canarydb canarydc canarydd canaryde canarydf"
-SENTENCES = (S1, S2, S3, S4)
+S5 = "canaryea canaryeb canaryec canaryed canaryee canaryef"
+SENTENCES = (S1, S2, S3, S4, S5)
+EXEMPT = ("ledgers",)  # the topic word inside S3: masked, as INV-FRESH-1 (b) masks it
 SPANS = (
     sample.SpanRow(0, 1, "heading", "Practical Ledgers"),
     sample.SpanRow(1, 2, "text", "Example Press, 2019."),
@@ -71,9 +78,11 @@ SPANS = (
     sample.SpanRow(3, 11, "text", f"Intro. {S2}. Outro."),
     sample.SpanRow(4, 12, "text", f"Intro. {S3}. Outro."),
     sample.SpanRow(5, 13, "text", f"Intro. {S4}. Outro."),
+    sample.SpanRow(6, 14, "text", f"Intro. {S5}. Outro."),
 )
 OUTLINE = (sample.OutlineRow(0, 1, "Ledgers", 7), sample.OutlineRow(1, 1, "Blocks", 9))
 BIB = {"title": "Practical Ledgers", "authors": ["Ada Example"], "year": 2019}
+CANARY = re.compile(r"canary[a-f]{2}")
 
 
 def scan_output(aliases: dict[str, Any]) -> str:
@@ -82,13 +91,35 @@ def scan_output(aliases: dict[str, Any]) -> str:
     def claim(seq: int, subject: str, kind: str, confidence: str) -> dict[str, str]:
         return {"span": alias[seq], "subject": subject, "kind": kind, "why": "w", "confidence": confidence}
 
+    e = S5.split()
     claims = [
         claim(2, "canaryaa canaryab canaryac canaryad canaryae", "version", "high"),  # 5 words: kept
         claim(3, "canaryba-canarybb-canarybc-canarybd-canarybe-canarybf", "tool", "high"),  # 6: dropped
         claim(4, "canaryca canarycb canarycc Ledgers canarycd", "version", "high"),  # a 7-word copy
         claim(5, "canaryda/canarydb", "api", "medium"),  # 2 words: kept
+        claim(6, "_".join(e), "tool", "high"),  # 6 words joined by `_`: dropped
+        claim(6, chr(0x200B).join(e[:2]) + " " + " ".join(e[2:]), "tool", "high"),  # U+200B removed: dropped
+        claim(6, "".join(e[:3]) + " " + " ".join(e[3:]), "tool", "high"),  # no joiner: 6 words, dropped
     ]
     return json.dumps({"bibliography": {"title": BIB["title"]}, "claims": claims})
+
+
+def canary_words(text: str) -> list[str]:
+    """The canary words in the raw, case-folded text (a regex; not the product tokenizer)."""
+    return CANARY.findall(text.casefold())
+
+
+def canary_6run(text: str) -> bool:
+    """True when 6 consecutive words of a canary sentence (exempt words removed) occur in the raw text in
+    order, with only non-letters or exempt words between them."""
+    gap = "(?:[\\W\\d_]|" + "|".join(EXEMPT) + ")*"
+    folded = text.casefold()
+    for sentence in SENTENCES:
+        kept = [w.casefold() for w in sentence.split() if w.casefold() not in EXEMPT]
+        for i in range(len(kept) - 5):
+            if re.search(gap.join(re.escape(w) for w in kept[i : i + 6]), folded):
+                return True
+    return False
 
 
 class Recording(httpx.AsyncBaseTransport):
@@ -115,16 +146,13 @@ def prepare() -> Path:
     return config
 
 
-def body_view(body: bytes, runs: set[tuple[str, ...]], canary: set[str]) -> dict[str, Any]:
+def body_view(body: bytes) -> dict[str, Any]:
     payload = json.loads(body)
     tools = payload.get("tools") or []
     kind = "search" if any("type" in t for t in tools) else "main" if tools else "other"
-    tokens = words(json.dumps(payload, ensure_ascii=False))
-    return {
-        "kind": kind,
-        "canary_words": sorted({t for t in tokens if t in canary}),
-        "canary_6run": any(tuple(tokens[i : i + 6]) in runs for i in range(len(tokens) - 5)),
-    }
+    # the raw body, and its JSON escapes decoded too
+    raw = body.decode("utf-8", "replace") + "\n" + json.dumps(payload, ensure_ascii=False)
+    return {"kind": kind, "canary_words": sorted(set(canary_words(raw))), "canary_6run": canary_6run(raw)}
 
 
 async def main(config_path: Path) -> dict[str, Any]:
@@ -174,8 +202,6 @@ async def main(config_path: Path) -> dict[str, Any]:
         run_cap_usd=Decimal("1.00"), daily_budget_usd=Decimal("2.00"), thinking_off=True,
     )
     prompt = prompts.load("search")
-    canary = {w for s in SENTENCES for w in words(s) if w.startswith("canary")}
-    shingles = queries.shingles(list(SENTENCES))
     out_runs: list[dict[str, Any]] = []
     for index, query in enumerate(plan.queries):
         gate = Gate(query.text)
@@ -193,7 +219,7 @@ async def main(config_path: Path) -> dict[str, Any]:
         one = len(matchers) == 1 and len(matchers[0].hooks) == 1
         run["hook_is_the_gate"] = one and matchers[0].hooks[0] is gate
         run["allowed"], run["denied"] = gate.allowed, gate.denied
-        run["bodies"] = [body_view(b, shingles, canary) for b in recording.bodies[first:]]
+        run["bodies"] = [body_view(b) for b in recording.bodies[first:]]
         out_runs.append(run)
 
     await proxy.aclose()
@@ -203,15 +229,17 @@ async def main(config_path: Path) -> dict[str, Any]:
         "scan_dropped": dict(scanned.dropped),
         "plan_dropped": dict(plan.dropped),
         "queries": [[q.template, q.text] for q in plan.queries],
-        "canary_words": sorted(canary),
-        "sentence_6runs": [list(r) for r in sorted(shingles)],
+        "sentences": [s.split() for s in SENTENCES],
         "runs": out_runs,
         "reserves": [str(r) for r in reserves],
     }
 
 
 if __name__ == "__main__":
-    env = {**os.environ, "STUB_SCENARIO": "websearch", "STUB_QUERY_FROM_PROMPT": "1"}
+    mode = sys.argv[1] if len(sys.argv) > 1 else "allow"
+    env = {**os.environ, "STUB_SCENARIO": "websearch"}
+    if mode == "allow":
+        env["STUB_QUERY_FROM_PROMPT"] = "1"  # deny: the stub asks for its own fixed query
     pipe = subprocess.PIPE
     stub = subprocess.Popen([sys.executable, "/stub/stub.py"], stdin=pipe, stdout=pipe, env=env)
     assert stub.stdout is not None

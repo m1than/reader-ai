@@ -291,7 +291,9 @@ requirements:
       closed and the call raises `upstream_retry` (transient) instead of waiting out the CLI's own ~3-minute backoff.
       (e) With `deadline_s`, a call still running after that many seconds is closed and raises `deadline_exceeded`
       (transient). In (d) and (e) the run_token is still revoked and the reservation settled per FR-AGENT-9 from the
-      upstream record (no 2xx → $0; a 2xx without an SDK cost → the reserve).
+      upstream record (no 2xx → $0; a 2xx without an SDK cost → the reserve). Its [image] test builds the server image
+      from `deploy/images/server.Dockerfile` and runs it by the id `docker build -q` prints, never by a tag, so the
+      shared `reader-server:local` of other checkouts and the running stack is never rewritten.
   - id: FR-AGENT-11
     text: >-
       Live: one `claude-sonnet-5-5` call with `max_turns=1` and a one-word answer through agent-proxy with a run_token
