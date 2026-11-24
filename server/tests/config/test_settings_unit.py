@@ -175,6 +175,12 @@ VALUE_TABLE: list[tuple[str, Any, str | None]] = [
     ("tasks.draft.budget_usd_per_lesson", 3, None),
     ("tasks.tutor.budget_usd_per_lesson", 0.25, None),  # a task without a file budget may take one
     ("tasks.draft.budget_usd_per_lesson", -2, "invalid"),
+    # OVERRIDE_MAX: a stored number at 1e15 or above is ignored (FR-CONFIG-26's overlay bound).
+    ("budgets.monthly_usd", 999999999999999, None),
+    ("budgets.monthly_usd", 10**15, "invalid"),
+    ("budgets.monthly_usd", 1e308, "invalid"),
+    ("tasks.draft.budget_usd_per_lesson", 1e15, "invalid"),
+    ("tasks.draft.budget_usd_per_lesson", float("nan"), "invalid"),
     ("tasks.gone.budget_usd_per_lesson", 3, "not_in_file"),
     ("tasks.draft.model", "opus", "invalid"),
     ("kernels", ["python3"], "invalid"),
