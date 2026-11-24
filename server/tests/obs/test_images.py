@@ -31,7 +31,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 CANARY_DIR = Path(__file__).resolve().parent / "cli_canary"
-CANARY_IMAGE = "reader-test-cli-canary:local"
 MLFLOW_IMAGE = "reader-mlflow:local"
 ROTEL = "streamfold/rotel:v0.2.7@sha256:7a12878dae3dc494c27def53ebcccbdc18e13389ececf33abf116af3a07c3427"
 CADDY = "caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0"
@@ -84,17 +83,15 @@ def _sdk_pin() -> str:
 
 @pytest.fixture(scope="module")
 def canary_image() -> str:
-    sh(
+    """Run by the id `docker build -q` prints, never by a shared tag."""
+    return sh(
         "docker",
         "build",
         "-q",
         "--build-arg",
         f"CLAUDE_AGENT_SDK={_sdk_pin()}",
-        "-t",
-        CANARY_IMAGE,
         str(CANARY_DIR),
-    )
-    return CANARY_IMAGE
+    ).strip()
 
 
 @pytest.fixture(scope="module")
@@ -132,9 +129,9 @@ def test_cli_canary(canary_image: str, tmp_path: Path) -> None:
     out = tmp_path / "out"
     out.mkdir()
     out.chmod(0o777)
-    canaries = {
-        k: f"{k.lower()}{secrets.token_hex(8)}" for k in ("CANARY_PROMPT", "CANARY_SYSTEM", "CANARY_RESPONSE")
-    }
+    names = ("CANARY_PROMPT", "CANARY_SYSTEM", "CANARY_RESPONSE")
+    search_names = ("CANARY_QUERY", "CANARY_TITLE", "CANARY_URL", "CANARY_SUMMARY")  # SRV-FRESH's WebSearch run
+    canaries = {k: f"{k.lower()}{secrets.token_hex(8)}" for k in (*names, *search_names)}
     handle = secrets.token_urlsafe(32)
     env = [
         arg
@@ -158,22 +155,36 @@ def test_cli_canary(canary_image: str, tmp_path: Path) -> None:
         "-v",
         f"{out}:/out",
         canary_image,
-        timeout=300,
+        timeout=600,
     )
     report = json.loads((out / "report.json").read_text())["modes"]
     vec = load_yaml(FIXTURES / "cli-span-keys.yaml")
-    plain = report["agent-env"]
-    assert plain["error"] is None
-    assert plain["hits"] == {"CANARY_PROMPT": 0, "CANARY_SYSTEM": 0, "CANARY_RESPONSE": 0, "HANDLE": 0}
-    assert plain["authorization_present"] is False
-    assert plain["other_hosts"] == []
-    assert plain["cli_spans"], "the CLI exported no span"
-    assert plain["under_agent_call"] == ["claude_code.interaction"]
-    for span in plain["cli_spans"]:
-        assert span["name"] in vec["spans"], span["name"]
-        assert set(span["keys"]) <= set(vec["spans"][span["name"]]["keys"]), span["name"]
-        assert set(span["resource_keys"]) <= set(vec["resource_keys"])
+    for mode in ("agent-env", "websearch-allow", "websearch-deny"):
+        plain = report[mode]
+        assert plain["error"] is None, mode
+        assert set(plain["hits"].values()) == {0}, (mode, plain["hits"])
+        assert plain["authorization_present"] is False
+        assert plain["other_hosts"] == []
+        assert plain["cli_spans"], "the CLI exported no span"
+        assert plain["under_agent_call"] == ["claude_code.interaction"]
+        for span in plain["cli_spans"]:
+            assert span["name"] in vec["spans"], span["name"]
+            assert set(span["keys"]) <= set(vec["spans"][span["name"]]["keys"]), span["name"]
+            assert set(span["resource_keys"]) <= set(vec["resource_keys"])
     assert report["positive-control"]["hits"]["CANARY_PROMPT"] >= 1  # the scan works
+    # FR-OBS-6: SRV-FRESH's WebSearch run, allowed by its gate: the search ran and its tool spans were exported.
+    allow = report["websearch-allow"]
+    assert allow["gate"] == {"allowed": 1, "denied": 0}
+    assert allow["upstream_kinds"] == ["main", "search", "final"]
+    assert allow["tool_results"] == 1
+    assert "claude_code.tool" in {s["name"] for s in allow["cli_spans"]}
+    # Denied: no nested search request, so no result exists to leak.
+    deny = report["websearch-deny"]
+    assert deny["gate"] == {"allowed": 0, "denied": 1}
+    assert deny["upstream_kinds"] == ["main", "final"]
+    control = report["websearch-tool-content"]  # positive control: the scan finds the search content
+    assert control["gate"] == {"allowed": 1, "denied": 0}
+    assert all(control["hits"][k] >= 1 for k in search_names), control["hits"]
 
 
 def _run(
