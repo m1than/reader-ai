@@ -811,10 +811,22 @@ requirements:
           paired VEC-OBS-4 edit in `phase2_in_place_edits`) = the value, `max_results` 500 with `page_token`
           paging until no token remains, then `link-to-run` in batches of at most 100 ids (round 8: 120 in one call
           is 400; 100 + 20 linked all 120). Re-linking a linked trace is accepted (measured).
-      (e) Ends the Run: `runs/update` status FINISHED or FAILED and end time, then, LAST, `set-tag`
-          `reader.complete` = `true`. A Run whose `reader.complete` is missing (a job that died between (b) and
+          An import has one end per job that writes its traces: end 1 when `ingest.import` succeeds, and end
+          1 + n when its n-th `search.embed` succeeds (n = the ingest's `search_embeds` rows; paired FR-INGEST-26),
+          so the embed's traces, which start after the import's end, are linked late, and that step's metrics
+          carry `chunks` (code review of 8466329).
+      (e) Ends the Run: `runs/update` with status and end time, then, LAST, `set-tag`
+          `reader.complete` = `true`. Status: FINISHED for a finished run and an import; FAILED for a failed or
+          dead run, whose end time is the newest `finished_at` of its step keys (a failed run has no
+          `finished_at`); KILLED with `reader.outcome` = `cancelled` for a cancelled run (FR-PIPELINE-20; its end
+          is counted by the cancel, paired FR-PIPELINE-18). A Run whose `reader.complete` is missing (a job that
+          died between (b) and
           (e)) is incomplete: the next attempt or end finds it in (a) and redoes (c)-(e), so an incomplete Run is
           completed, never duplicated.
+      (f) Metrics, from the snapshot: compile as VEC-OBS-5 `runs.compile.metrics` (the ledger's keys); import
+          `pages` (the material's page count), `spans`, `chunks` (the ingest's `search_chunks` rows),
+          `import_s` (the `ingest.import` key's `finished_at` − `created_at`) and `pages_per_min_import`
+          (pages ÷ import_s × 60; left out when import_s is 0). Each lookup is scoped to the ingest's owner.
       Every value is an id, an enum, a model id from pricing.yaml, a sha256 or a number. A failure is logged by
       code and never changes the run's outcome. With tracing off the job ends without a request. An MLflow that is
       down for longer than the job's 3 attempts (SRV-EVENTS' 5 s and 25 s delays, about 90 s with the timeouts)
@@ -825,6 +837,12 @@ requirements:
       list of locations"). In experiment 0, the Run's Traces tab lists its traces with their assessments (round 6).
       Bench runs go to their own experiment (FR-OBS-23), so experiment 0's Evaluation runs tab lists only compile
       and import Runs, which can be filtered by `tags.reader.kind`.
+      Known limit (declared, code review of 8466329): VEC-OBS-5's patterns for the code-sourced params
+      `reader_version` (`^[0-9A-Za-z.+-]{1,64}$`) and the bench's `hf_model` model names are shapes, not
+      allow-lists (a pricing.yaml `model` is an enum), so a bare canary of that shape (letters, digits, dashes)
+      passes them; INV-OBS-2's phase 2 clause holds because these values come from the package version and the
+      owner's own bench result file, never from material, questions or answers, not because the pattern would
+      refuse a canary.
   - id: FR-OBS-21
     text: >-
       Agent versions. A version key is the sha256 of the canonical JSON of {prompt_set_sha256, stage_models,
@@ -870,8 +888,11 @@ requirements:
       checks), JSON at most 256 KiB, {set: <set file text>, result: <bench result object>}. Errors (body `{"error":
       code}`): 401/403 as FR-OBS-10; 413 `too_large`; 400 `set_not_pinned` (the set's sha256 is not in VEC-OBS-5),
       400 `bench_invalid` (the result's required `kind` (search | tutor) differs from the pinned set's kind, or the
-      result fails VEC-OBS-5 `bench_results` for that kind: unknown key, pattern, enum or range, or an id not in
-      the set); 409 `already_recorded` (the same upload digest exists); 202 {upload_id}
+      result fails VEC-OBS-5 `bench_results` for that kind: unknown key, pattern, enum or range, an id not in
+      the set's registered records, an id twice, or no rows); 409 `already_recorded` (the same upload digest
+      exists; known limit, declared in the code review of 8466329: the digest is UNIQUE across all users, not per
+      owner, so a second owner uploading a byte-identical result gets 409 too; v1 has one owner, ADR-0012); 202
+      {upload_id}
       otherwise. The route is used from /observability only (paired WEB-UI FR-UI-33: a file picker for the two
       files); there is no CLI command (review round 1, B10).
       The api stores the upload in Postgres table `obs_bench_results` (paired migration `obs_0002`: id uuid pk,
@@ -888,7 +909,9 @@ requirements:
           pinned records (`datasets/{id}/records`);
       (c) finds a Run tagged `reader.bench_upload` = upload id (`runs/search`): found and tagged `reader.complete`
           → ends `succeeded` without a request; otherwise creates it (tags `reader.bench` = kind, `reader.bench_upload`)
-          or reuses the incomplete one, logs params (model, chunk_chars, overlap, set_sha256, commit) and the
+          or reuses the incomplete one, logs the params that apply to the kind (search: model, chunk_chars,
+          overlap; tutor: lesson_id, date, since a tutor bench has no model or chunking; both: set_sha256, and
+          commit when the result has one; code review round 1 of phase 2) and the
           stored row's scores as metrics: search, from `per_question` over registered ids: hit@1, hit@3, hit@10,
           reciprocal rank (mean; an absent rank counts 0), and the per-question rank as a metric `rank` at step =
           the record's index; tutor, from the records file's per-question rows over registered ids (VEC-TUTOR-7's
@@ -921,8 +944,10 @@ requirements:
       neither is used (review round 1, B8; the round 6 queue was dropped).
       (a) The record: table `owner_labels` (paired migration `obs_0002`: id uuid pk, owner_id, target lesson |
           answer, target_id uuid (lesson id or question id), lesson_revision_sha256 char(64) (the lesson revision
-          the owner saw: the lesson's current revision for a lesson label, the question's `revision_sha256` for an
-          answer label), ok bool, reason text null CHECK in VEC-OBS-5 `labels.reasons`, revision int ≥ 1 (the
+          the owner saw: the lesson's current revision for a lesson label (`reader.lessons.store.current_sha256`,
+          FR-LESSON-4, not `published_sha256`; '' when the lesson has no revision yet), the question's
+          `revision_sha256` for an answer label), ok bool, reason text null CHECK in VEC-OBS-5
+          `labels.reasons`, revision int ≥ 1 (the
           label's own revision), assessment_id text null (the mirror's), created_at, updated_at; UNIQUE (owner_id,
           target, target_id, lesson_revision_sha256)). A relabel of the same lesson revision updates the row and
           increments `revision`; a label on a newer lesson revision is a new row.
@@ -936,9 +961,16 @@ requirements:
           `no_trace` path is dropped); a trace that is missing anyway (tracing turned on later, or rotated out by
           retention) is FR-OBS-14's transient-then-no-trace rule, and the record stays.
       (c) The mirror: `obs.label` first reads the row: a job whose revision is below the row's current revision
-          ends without a request (a newer relabel's job will post). It resolves the target's trace (lesson: the
-          newest compile run's revise-stage job for that lesson revision; answer: the question's `tutor.answer`
-          job; FR-OBS-5's derivation), GETs the trace and looks for an assessment whose `assessment_name` is the
+          ends without a request (a newer relabel's job will post). It resolves the target's trace, exactly one row
+          per label (code review round 1 of phase 2, B5): lesson: the compile run of the lesson (same owner) whose
+          `final_sha256` equals the row's `lesson_revision_sha256` (the lesson's current revision when labelled,
+          `reader.lessons.store.current_sha256`), the newest such run by (created_at, id); in it the `revise`
+          stage's job, or the `draft` stage's when the run has no `revise` (a first pass that converged), the
+          newest key by (created_at, job_id); a revision no compile run produced (edited by hand) has no trace, so
+          the job ends without a request (logged `obs label no_trace`); answer: the question's `tutor.answer` job
+          (newest by (created_at, job_id)); FR-OBS-5's derivation. A 404 from the GET or the POST follows FR-OBS-14's
+          rule: transient while attempts remain, on the last attempt the job ends without a request (logged), never
+          dead. It GETs the trace and looks for an assessment whose `assessment_name` is the
           label's and whose `metadata.revision` equals the job's revision: found → stores its id and ends (a retry
           or a lost response never posts twice). Otherwise it POSTs a HUMAN assessment (`owner.lesson_ok` |
           `owner.answer_ok`, source {HUMAN, owner}, value ok, metadata {lesson_id | question_id, reason, revision});
@@ -955,26 +987,38 @@ requirements:
       alert surface: the summary gains `alerts`, a list of {code, subject, value, limit} (VEC-OBS-5 `alerts`)
       computed on each request from Postgres only (the api never reads MLflow):
       - `daily_spend_high`: per task (FR-AGENT-12's caps are per task), today's (UTC) spend of that task ≥ 80 % of
-        its daily cap; subject = the task;
+        its daily cap; subject = the task (`tutor`: SRV-TUTOR's daily cap), or `freshness` for the three
+        freshness tasks summed against FR-FRESH-9's one daily cap (code review round 1 of phase 2);
       - `run_over_cap`: an open run's spend ≥ 80 % of its run cap; subject = the run id;
       - `dead_jobs`: dead jobs in the window > 0; subject = the kind;
       - `bench_regressed`: from `obs_bench_results` only, the newest upload's hit@10 (search) or grounded_share
         (tutor) is below the previous upload of the SAME (kind, set_name, model) by more than 0.05; subject =
         kind/set/model; no previous upload → no alert;
-      - `obs_unhealthy`: FR-OBS-32 (from `obs_stack_status`). The store size alert is `reader doctor`/`status`
+      - `obs_unhealthy`: FR-OBS-32 (from `obs_stack_status`), only while tracing is on: with tracing off
+        nothing probes, so the rows are stale by design and raise no alert. A member alerts when its last probe
+        failed or when `reader.obs.health.stale(checked_at, now, tracing_on)` (FR-OBS-32's one staleness
+        rule) is true, with `tracing_on` from the api's `phase2.tracing_on()` (code review of 8466329;
+        [unit] tracing off with an old row: none; tracing on with a row older than 75 minutes: one; a fresh
+        row: none). The rows are read in a savepoint;
+        a missing table reads as no rows, any other database error fails the request (it never reads as "no
+        alert"). The store size alert is `reader doctor`/`status`
         output, not an api alert (FR-OBS-31; review round 2, N8).
       The page shows a banner per alert (paired WEB-UI FR-UI-33). A push notification waits for SRV-NOTIFY.
   # --- MLflow operations (owner, 2026-11-24: "production-ready"; rounds 9 and 10) ---
   - id: FR-OBS-26
     text: >-
       Declarative bootstrap (ADR-0038 Decision 5). `deploy/otel/mlflow-setup.yaml` (VEC-OBS-6, committed; proposed
-      content in spec/fixtures/SRV-OBS/mlflow-setup.yaml) is the only source of MLflow's experiments (experiment 0
+      content in spec/fixtures/SRV-OBS/mlflow-setup.yaml; the worker reads it at the code constant
+      `/etc/reader/mlflow-setup.yaml`, compose's read-only bind, when that file exists, else the package's copy,
+      which a [unit] test keeps equal to the fixture) is the only source of MLflow's experiments (experiment 0
       renamed `reader`, and `bench`), their descriptions (`mlflow.note.content`) and tags, the dataset names, the
       LoggedModel naming and the Run tag keys (the trace tag keys stay VEC-OBS-4's only; the file does not restate
       them, review round 2, N5). Nothing is created by hand. Setup is ONE idempotent function, `ensure_setup()`:
       it reads MLflow's state (`experiments/get`, `get-by-name`, `logged-models/search`), compares it with the
-      file and writes only the difference (`experiments/update` for a name, `set-experiment-tag` per differing
-      tag, `experiments/create` with tags, FR-OBS-21 b's LoggedModel); a tag or experiment in MLflow that the file
+      file and writes only the difference (`experiments/update` for a name, `set-experiment-tag` per missing or
+      differing tag of every experiment the file names, an existing `bench` included, `experiments/create` with
+      tags, FR-OBS-21 b's LoggedModel, and `PATCH logged-models/{id}` status LOGGED_MODEL_READY whenever the
+      version's LoggedModel is not READY, a new one or one left PENDING by a setup that died after its create); a tag or experiment in MLflow that the file
       does not name is left alone and listed in the log line by key only. A repeat on the same UTC day makes 0
       writes (round 10: the state dump before and after a re-run is equal, `drift` false); the first run of a new
       day makes exactly one, FR-OBS-31's `reader.last_started` tag (round 12: `PATCH logged-models/{id}/tags`
@@ -1027,7 +1071,7 @@ requirements:
       concurrent `reader up` runs cannot migrate twice). Files, all in the volume: `store.version` (the MLflow
       version that last migrated the store), `backup/pre-migrate.db` and `backup/pre-migrate.version`,
       `backup/in-progress`, `backup/restored-for`, `backup/fresh`. Exit codes are mlflow-migrate's own (10..13,
-      distinct from the restore command's 0..6):
+      distinct from the restore command's 0..7):
       (0) if `backup/fresh` exists (an earlier first start of an empty volume was interrupted inside this script;
           design review rounds 5 and 6, G1 and H1), first run `mlflow db upgrade` on the file and, if it exits 0,
           go on to (4); only if it fails, remove `mlflow.db`, `mlflow.db-wal`, `mlflow.db-shm` and
@@ -1068,8 +1112,10 @@ requirements:
       Manual restore after a failed migration, with the stack down: `reader restore-obs-premigrate` (paired OPS-CLI
       FR-CLI-24, its exit codes there) refuses unless `backup/in-progress` exists (a store that migrated fine is
       never rolled back by accident) or `--force` is given (a `--force` restore prints the version it rolls back to,
-      from `pre-migrate.version`, before it copies anything); it then removes any stale `mlflow.db-wal` and `mlflow.db-shm`, copies
-      `backup/pre-migrate.db` over `mlflow.db` through the backup API, sets `store.version` from
+      from `pre-migrate.version`, before it copies anything; a missing or empty `pre-migrate.version` refuses with
+      exit 7 before any copy, never restoring for an "unknown" version); it then copies `backup/pre-migrate.db`
+      through the backup API into a temporary file in the volume, and only then removes any stale `mlflow.db-wal`
+      and `mlflow.db-shm` and moves the copy over `mlflow.db` (a failed copy leaves the store whole), sets `store.version` from
       `pre-migrate.version`, prints that version, writes `backup/restored-for` holding it, and removes
       `backup/in-progress`. Then `mlflow-migrate` of any other version exits 11 at (0) until the image matches,
       so a newer image never re-migrates the restored file by accident. Going back to the old pin (reverting the
@@ -1093,6 +1139,10 @@ requirements:
       backup taken under N and restored by `reader restore` under N+1 goes through steps (2)-(3) (its restored
       `store.version` is N) and serves its data (H2); a start whose `store.version` equals the image's makes no
       backup and writes no marker; the restore command without `in-progress` and without `--force` refuses.
+      Each case asserts which path ran (the `db upgrade` or the fallback's line in the log); a failing step (4)
+      exits 13; the restore command exits 2 while a container holds the volume, 4 when the copy fails (and
+      `mlflow.db` is byte-identical), 5 when the marker cannot be written, 7 without `pre-migrate.version` (code
+      review round 1 of phase 2).
   - id: FR-OBS-30
     text: >-
       Backup and restore (paired OPS-CLI FR-CLI-24, OPS-DEPLOY FR-DEPLOY-15). `obs_mlflow` joins `reader backup`
@@ -1104,17 +1154,22 @@ requirements:
       diagnostic (retention trims them). `reader restore`, with the stack down, in this order: removes the
       volume's `store.version` (so a crash part-way never leaves a newer version beside an older file), removes
       `backup/in-progress`, `backup/fresh` and `backup/restored-for` (markers of the replaced store, which would
-      otherwise stop or wipe the restored one), puts the file back through the backup API, and then writes
+      otherwise stop or wipe the restored one), puts the file back through the backup API (copy into a temporary
+      file in the volume first, then remove the old `-wal`/`-shm`, then move into place), and then writes
       `store.version` from `<DIR>/obs_mlflow.store.version`, or leaves it absent when the backup has none (design
       review rounds 6 and 7, H2: otherwise a restored older store would carry the newer version and skip its
-      migration); then `mlflow-migrate` runs as at any start (round 9: a second MLflow served the backup's 98 traces and its Runs).
+      migration); then `reader restore` runs `mlflow-migrate` itself and starts mlflow only when it exited 0
+      (OPS-CLI FR-CLI-24 (b); round 9: a second MLflow served the backup's 98 traces and its Runs).
       Labels and bench results have Postgres as the record (FR-OBS-23, -24) and come back with the Postgres
       restore; a mirror missing after a restore stays missing until that label or upload is posted again (there is
       no repair command; review round 2, N2).
   - id: FR-OBS-31
     text: >-
       Retention and size. `obs.retention` (FR-OBS-11) also deletes compile and import Runs in experiment 0 whose
-      `end_time` (the Run's last end; MLflow's own column) is older than `retention_days` (`runs/delete`: MLflow's
+      `end_time` (the Run's last end; MLflow's own column) is older than `retention_days`, found by one
+      `runs/search` per kind (filter ``tags.`reader.kind` = 'compile'``, then `'ingest'`, each with
+      ``attributes.end_time < <cutoff ms>``, `max_results` 1000 and `page_token` paging until no token remains;
+      code review of 8466329: MLflow 3.18 refuses `IN` on a tag, so one search per kind) (`runs/delete`: MLflow's
       soft delete, the Run's lifecycle stage becomes `deleted`; round 10: it leaves `runs/search` at once; its rows
       stay until `mlflow gc` removes them, which reader does not run, so soft-deleted rows are part of the store's
       size, declared) and LoggedModels whose version key is not "used": a key is used while a worker started
@@ -1145,7 +1200,10 @@ requirements:
       `obs.health` (every 30 minutes, queue obs; excluded from tracing, so it adds no trace: its kind is not
       traced, FR-OBS-5's root is skipped for it) records in Postgres table `obs_stack_status` (paired migration
       `obs_0002`): mlflow's /health and rotel's probe (a POST of `{}` to its OTLP receiver: 400 means listening,
-      round 9; Rotel 0.2.7 has no health endpoint). The api's summary gains `stack` from that table only and
+      round 9; Rotel 0.2.7 has no health endpoint; any other answer is `unhealthy`, no answer `unreachable`). With
+      tracing off the job ends without a probe, so the rows go stale by design: `reader.obs.health.stale(checked_at,
+      now, tracing_on)` is the one staleness rule (older than 75 minutes, and never while tracing is off), which
+      the alerts use. The api's summary gains `stack` from that table only and
       `obs_unhealthy` when a member failed its last probe or the row is older than 75 minutes (two missed runs plus
       margin). Jaeger is shown by `reader doctor`/`status` only; /observability shows "see reader doctor" for it.
   - id: FR-OBS-33
@@ -1183,7 +1241,10 @@ requirements:
       CPU, Rotel 32 MiB, Jaeger 50 MiB, the database +51.6 MB. Limits: mlflow 1g (stays; 45 % headroom at the
       burst), rotel 256m and jaeger 256m (unchanged), `store_bytes_max` 4 GiB (structural, FR-OBS-31). Growth:
       1.45 KB a stored span (51.6 MB / 35,560). An opt-in [image] burst test replays the same load and fails on a
-      dropped span, p95 above 30 s, or a peak above 80 % of a limit.
+      dropped span, p95 above 30 s, or a peak above 80 % of a limit. Not verified until implemented (code review
+      of 8466329): the replay is not built yet, so the limits above rest on round 9's spike only; the burst test
+      lives in the test suite (its replay is the test's own code, never shipped) and skips with that reason; the
+      shipped `reader.obs.burst` holds only the limits.
 
 invariants:
   - id: INV-OBS-1
@@ -1611,7 +1672,7 @@ phase2_paired_changes:
   - { spec: SRV-INGEST, id: FR-INGEST-26, change: "the same for an import's end (obs.runs {ingest, ingest_id, 1}); id above V/manage's FR-INGEST-25 (review round 2, N10)" }
   - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench's records file (tutor-bench-<UTC time>.json) gains a header (kind tutor, date, branch, commit sha, lesson_id, set tutor-bench-v2) and is VEC-OBS-5 bench_results.tutor exactly (the upload); the summary file is spec/fixtures/SRV-TUTOR/bench-summary.yaml's tutor_summary (no prose keys, commit sha only; moved to SRV-TUTOR in review round 4) and the committed 2026-11-23 summary is migrated to it (a report, not an upload)" }
   - { spec: WEB-UI, id: FR-UI-33, change: "/observability: the bench upload (two file pickers, the route's errors shown by code), label buttons on lesson and answer rows (good/bad and the reason enum), one banner per alert, and a stack row (mlflow, rotel from obs_stack_status; jaeger: see reader doctor)" }
-  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader backup` also writes `obs_mlflow.store.version` (the volume's store.version, when present) beside `obs_mlflow.db`, and `reader restore` (stack down) first removes the volume's store.version and the markers backup/in-progress, backup/fresh and backup/restored-for, then replaces mlflow.db through the backup API, then writes store.version back from the backup (absent when the backup has none) (FR-OBS-30, H2, review round 7); `reader restore-obs-premigrate` (FR-OBS-29; with --force it prints the version it rolls back to before copying); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written, 6 no `backup/in-progress` (nothing failed; rerun with `--force` to restore anyway); `reader up` reports mlflow-migrate's own codes (FR-OBS-29: 10 obs_migration_incomplete → run restore-obs-premigrate; 11 obs_restored_for_other_version → the marker's version and the hint that the owner reverts the pin in git; 12 obs_migration_failed and 13 obs_migration_finish_failed → restore-obs-premigrate), which never overlap the restore command's 0..6" }
+  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader backup` also writes `obs_mlflow.store.version` (the volume's store.version, when present) beside `obs_mlflow.db`, and `reader restore` (stack down) first removes the volume's store.version and the markers backup/in-progress, backup/fresh and backup/restored-for, then replaces mlflow.db through the backup API, then writes store.version back from the backup (absent when the backup has none) (FR-OBS-30, H2, review round 7); `reader restore-obs-premigrate` (FR-OBS-29; with --force it prints the version it rolls back to before copying); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written, 6 no `backup/in-progress` (nothing failed; rerun with `--force` to restore anyway), 7 no `pre-migrate.version` (code review round 1 of phase 2); `reader up` reports mlflow-migrate's own codes (FR-OBS-29: 10 obs_migration_incomplete → run restore-obs-premigrate; 11 obs_restored_for_other_version → the marker's version and the hint that the owner reverts the pin in git; 12 obs_migration_failed and 13 obs_migration_finish_failed → restore-obs-premigrate), which never overlap the restore command's 0..7; `reader restore` runs mlflow-migrate itself and starts mlflow only after it exited 0; `reader status` and `doctor --json` carry the obs lines" }
   - { spec: OPS-DEPLOY, id: FR-DEPLOY-15, change: "FR-OBS-27's pinned flags and environment with comments and sources; the mlflow-migrate one-shot (flock, pre-migration backup, db upgrade, WAL); no new healthchecks (rotel and jaeger have no shell; obs.health and reader doctor cover them); deploy/otel/mlflow-setup.yaml mounted read-only into the worker; the 8443 request body limit (10 MiB, structural); the obs_mlflow volume's backup label changes from excluded to included (ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion), VEC-DEPLOY-3's backup list updated" }
   - { spec: spikes, id: "spikes/embeddings-local (no spec; spike files)", change: "bench.py writes `kind: search`, and the committed results under results/20261120T195713-draft-questions/ (the run over questions.yaml, i.e. search-bench-v1's set) gain it, so they conform to VEC-OBS-5; the edit is noted in spikes/embeddings-local/RESULT.md (review rounds 2 and 3, N3 and R4)" }
   - { spec: OPS-DOD, id: "tools/ci-local.sh (paired, tooling)", change: "ci-local.sh and ci.yml run `node spec/fixtures/SRV-OBS/compose-bench.mjs --check` beside trace-check" }

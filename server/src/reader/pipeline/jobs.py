@@ -35,11 +35,16 @@ class StageArgs(BaseModel):
 
 KEY: Final = ("run_id", "step", "stage", "input_sha256")
 
-# FR-PIPELINE-18: a run's end is recorded by the step that finished it (lab verification, or a budget refusal
-# with no notebook) or by a step key going dead (the run stops failed). Counted once per committed end.
+# FR-PIPELINE-18: a run's end is counted only by the step that ended it: a succeeded step of a finished, not
+# cancelled run whose step is at least every recorded step (the final step, whatever its stage: lab
+# verification or a budget refusal), or a dead step of a run that is not finished (it stops failed). A cancel
+# counts its own end (runs.cancel). Counted once per committed end.
 _ENDED_SQL: Final = (
-    "UPDATE compile_runs SET ends = ends + 1 WHERE id = CAST(:r AS uuid) AND ends < 100"
-    " AND (:dead OR (finished_at IS NOT NULL AND (:last OR budget_refused IS NOT NULL))) RETURNING ends"
+    "UPDATE compile_runs r SET ends = ends + 1 WHERE r.id = CAST(:r AS uuid) AND r.ends < 100"
+    " AND r.cancelled_at IS NULL"
+    " AND CASE WHEN :dead THEN r.finished_at IS NULL ELSE r.finished_at IS NOT NULL"
+    " AND :step >= coalesce((SELECT max(s.step) FROM compile_steps s WHERE s.run_id = r.id), 0) END"
+    " RETURNING r.ends"
 )
 
 
@@ -50,8 +55,7 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
 
     async with engine.begin() as conn:  # the end is counted with tracing off too; only the enqueue is skipped
         ends = (await conn.execute(text(_ENDED_SQL), {
-            "r": str(payload["run_id"]), "dead": outcome == "dead",
-            "last": payload.get("stage") == "lab_verification"})).scalar()
+            "r": str(payload["run_id"]), "dead": outcome == "dead", "step": int(payload["step"])})).scalar()
     if ends is not None:
         await obs_runs.enqueue_end("compile", str(payload["run_id"]), int(ends))
 

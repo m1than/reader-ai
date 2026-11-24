@@ -8,7 +8,7 @@
 #
 # Files in the volume: store.version (the MLflow version that last migrated the store), backup/pre-migrate.db and
 # backup/pre-migrate.version (the one pre-migration backup), backup/in-progress, backup/restored-for, backup/fresh.
-# Exit codes (mlflow-migrate's own; `reader restore-obs-premigrate` uses 0..6):
+# Exit codes (mlflow-migrate's own; `reader restore-obs-premigrate` uses 0..7):
 #   10 obs_migration_incomplete       a previous migration of a store with data did not finish: restore first
 #   11 obs_restored_for_other_version the store was restored for another MLflow version: revert the pin
 #   12 obs_migration_failed           `mlflow db upgrade` (or the fresh store's initialisation) failed
@@ -40,12 +40,18 @@ initialise() {
   # A missing (or wiped) store: the schema from empty, in this script, never in the server (H1). `db upgrade`
   # first; a pin whose `db upgrade` cannot build an empty file (3.10.0: "no such table: metrics", measured by
   # test_images_migrate) gets the fallback on a clean file. READER_MLFLOW_MIGRATE_FALLBACK=1 skips `db upgrade`.
+  # Each path logs one line naming itself, so a test can assert which one ran.
   if [ "${READER_MLFLOW_MIGRATE_FALLBACK:-}" = 1 ]; then
+    log "path: fallback (forced)"
     sqlalchemy_store
     return
   fi
-  mlflow db upgrade "$URI" && return 0
+  if mlflow db upgrade "$URI"; then
+    log "path: db upgrade"
+    return 0
+  fi
   log "mlflow db upgrade could not build the store from empty: the SqlAlchemyStore fallback"
+  log "path: fallback"
   rm -f "$DB" "$DB-wal" "$DB-shm" && sqlalchemy_store
 }
 
@@ -110,5 +116,6 @@ printf '%s\n' "$from_version" > "$B/pre-migrate.version" || exit 12
 # (3) The migration, marked in progress until (4) finishes.
 : > "$B/in-progress" || exit 12
 mlflow db upgrade "$URI" || { log "obs_migration_failed: mlflow db upgrade failed; run \`reader restore-obs-premigrate\`"; exit 12; }
+log "path: db upgrade (from $from_version)"
 
 finish

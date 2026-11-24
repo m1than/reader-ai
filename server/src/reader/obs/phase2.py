@@ -1,13 +1,12 @@
 """SRV-OBS phase 2 (ADR-0038): the shared catalogues and the one MLflow client every phase 2 job uses.
 
 `VEC` is VEC-OBS-5 (phase2.yaml beside this module), `SETUP` is VEC-OBS-6 (mlflow_setup.yaml; the
-deployed copy at READER_MLFLOW_SETUP overrides it at runtime, FR-OBS-26). `WRITE_PATHS` is every (method,
+deployed copy at SETUP_PATH overrides it at runtime, FR-OBS-26). `WRITE_PATHS` is every (method,
 path template) a phase 2 job may send; `request` refuses any other, so no job can reach an undeclared MLflow
 route (INV-OBS-2's phase 2 clause covers the bodies)."""
 
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -35,11 +34,13 @@ _TEMPLATES: Final = tuple(
 )
 
 
-def setup_config() -> dict[str, Any]:
-    """VEC-OBS-6: the deployed file (READER_MLFLOW_SETUP, mounted read-only) or the shipped default."""
-    deployed = os.environ.get("READER_MLFLOW_SETUP")
-    if deployed and Path(deployed).is_file():
-        loaded: dict[str, Any] = _load(Path(deployed))
+SETUP_PATH: Final = Path("/etc/reader/mlflow-setup.yaml")  # compose's read-only bind (FR-OBS-26)
+
+
+def setup_config(path: Path = SETUP_PATH) -> dict[str, Any]:
+    """VEC-OBS-6: the deployed file at SETUP_PATH when it exists, else the package's copy."""
+    if path.is_file():
+        loaded: dict[str, Any] = _load(path)
         return loaded
     return SETUP
 

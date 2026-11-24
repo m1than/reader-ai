@@ -200,7 +200,8 @@ def validate(set_text: str, result: Any) -> Upload:
         raise BenchError("bench_invalid")
     registered = {str(q["id"]) for q in _registered(set_text)}
     rows = result["per_question"] if kind == "search" else result["records"]
-    if not rows or any(r["id"] not in registered for r in rows):
+    ids = [r["id"] for r in rows]
+    if not rows or len(set(ids)) != len(ids) or any(i not in registered for i in ids):
         raise BenchError("bench_invalid")
     scores = _scores_search(rows) if kind == "search" else _scores_tutor(rows)
     params = (

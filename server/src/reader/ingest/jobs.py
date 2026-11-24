@@ -148,10 +148,13 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
     from reader.obs import runs as obs_runs
 
     async with engine.connect() as conn:
+        owner = await store.owner_id(conn)
+        if owner is None:
+            return
         ingest_id = (await conn.execute(text(
-            "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id WHERE m.sha256 = :s"
-            " AND m.config_id = :c AND i.converter_version = :v"),
-            {"s": str(payload["material_sha256"]), "c": str(payload["material_id"]),
+            "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id AND m.owner_id = i.owner_id"
+            " WHERE m.owner_id = :o AND m.sha256 = :s AND m.config_id = :c AND i.converter_version = :v"),
+            {"o": owner, "s": str(payload["material_sha256"]), "c": str(payload["material_id"]),
              "v": str(payload["converter_version"])})).scalar()
     if ingest_id is not None:
         await obs_runs.enqueue_end("ingest", str(ingest_id), 1)

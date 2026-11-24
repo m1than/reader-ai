@@ -19,7 +19,7 @@ runs:
   compile:
     name: "compile {run_id[:8]}"
     tags: { reader.kind: { enum: [compile] }, reader.run_id: uuid, reader.lesson.id: uuid, reader.course.id: uuid,
-            reader.outcome: { enum: [finished, failed, dead] }, reader.ends: { int: [1, 100] },
+            reader.outcome: { enum: [finished, failed, dead, cancelled] }, reader.ends: { int: [1, 100] },
             reader.complete: { enum: ["true"] }, reader.snapshot_at: datetime }
     params: { version_key: version_key, reader_version: "^[0-9A-Za-z.+-]{1,64}$", "model.<stage>": model }
     metrics:
@@ -38,8 +38,8 @@ runs:
   ingest:
     name: "import {material_sha256[:8]}"
     tags: { reader.kind: { enum: [ingest] }, reader.ingest_id: uuid, reader.material_sha256: sha256,
-            reader.outcome: { enum: [succeeded, dead] }, reader.complete: { enum: ["true"] },
-            reader.snapshot_at: datetime }
+            reader.outcome: { enum: [succeeded, dead] }, reader.ends: { int: [1, 100] },
+            reader.complete: { enum: ["true"] }, reader.snapshot_at: datetime }
     params: { converter_version: "^[0-9A-Za-z.+-]{1,32}$", material_sha256: sha256 }
     metrics: { pages: { int: [0, 100000] }, spans: { int: [0, 10000000] }, chunks: { int: [0, 10000000] },
                pages_per_min_import: { float: [0, 100000] }, import_s: { float: [0, 1000000] } }

@@ -27,6 +27,7 @@ from reader.obs.phase2 import request
 log = logging.getLogger("reader.obs")
 KIND: Final = "obs.setup"
 SHORT: Final = 12
+READY: Final = "LOGGED_MODEL_READY"
 
 
 class ObsSetupRefused(Exception):
@@ -97,6 +98,7 @@ async def ensure_setup(
 ) -> list[str]:
     """Write only the difference between MLflow and `setup`; returns the writes made (for the log line)."""
     made: list[str] = []
+    unnamed: list[str] = []
     for exp in setup["experiments"]:
         want_tags: Mapping[str, str] = exp.get("tags") or {}
         if "id" in exp:
@@ -112,32 +114,36 @@ async def ensure_setup(
                     {"experiment_id": str(exp["id"]), "new_name": exp["name"]},
                 )
                 made.append(f"rename {exp['id']}")
-            have = _tags(current.get("tags"))
-            for k, v in want_tags.items():
-                if have.get(k) != v:
-                    await request(
-                        client,
-                        "POST",
-                        "/api/2.0/mlflow/experiments/set-experiment-tag",
-                        {"experiment_id": str(exp["id"]), "key": k, "value": v},
-                    )
-                    made.append(f"tag {exp['id']}")
-            continue
-        status, _ = await request(
-            client,
-            "GET",
-            "/api/2.0/mlflow/experiments/get-by-name",
-            params={"experiment_name": exp["name"]},
-            ok404=True,
-        )
-        if status == 404:
-            await request(
+        else:
+            status, got = await request(
                 client,
-                "POST",
-                "/api/2.0/mlflow/experiments/create",
-                {"name": exp["name"], "tags": [{"key": k, "value": v} for k, v in want_tags.items()]},
+                "GET",
+                "/api/2.0/mlflow/experiments/get-by-name",
+                params={"experiment_name": exp["name"]},
+                ok404=True,
             )
-            made.append(f"create {exp['name']}")
+            if status == 404:
+                await request(
+                    client,
+                    "POST",
+                    "/api/2.0/mlflow/experiments/create",
+                    {"name": exp["name"], "tags": [{"key": k, "value": v} for k, v in want_tags.items()]},
+                )
+                made.append(f"create {exp['name']}")
+                continue
+            current = got.get("experiment") or {}
+        exp_id = str(current.get("experiment_id", exp.get("id", "")))
+        have = _tags(current.get("tags"))
+        for k, v in want_tags.items():  # every experiment the file names, an existing `bench` included
+            if have.get(k) != v:
+                await request(
+                    client,
+                    "POST",
+                    "/api/2.0/mlflow/experiments/set-experiment-tag",
+                    {"experiment_id": exp_id, "key": k, "value": v},
+                )
+                made.append(f"tag {exp['name']}")
+        unnamed += sorted(k for k in have if k not in want_tags and not k.startswith("mlflow."))
     models = setup["logged_models"]
     short = short_key(version_key)
     _, found = await request(
@@ -151,6 +157,14 @@ async def ensure_setup(
         info = listed[0].get("info") or {}
         model_id = str(info["model_id"])
         last = _tags(info.get("tags")).get(models["last_started_tag"])
+        if info.get("status") != READY:  # left PENDING by a setup that died after its create (FR-OBS-26)
+            await request(
+                client,
+                "PATCH",
+                f"/api/2.0/mlflow/logged-models/{model_id}",
+                {"model_id": model_id, "status": READY},
+            )
+            made.append("model ready")
     else:
         _, created = await request(
             client,
@@ -170,7 +184,7 @@ async def ensure_setup(
             client,
             "PATCH",
             f"/api/2.0/mlflow/logged-models/{model_id}",
-            {"model_id": model_id, "status": "LOGGED_MODEL_READY"},
+            {"model_id": model_id, "status": READY},
         )
         made.append("create model")
         last = None
@@ -182,6 +196,8 @@ async def ensure_setup(
             {"tags": [{"key": models["last_started_tag"], "value": day}]},
         )
         made.append("last_started")
+    if unnamed:  # left alone; logged by key only (FR-OBS-26)
+        log.info("obs setup unnamed_tags=%s", ",".join(unnamed))
     return made
 
 

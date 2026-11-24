@@ -1086,9 +1086,13 @@ requirements:
       (`ingest.import` succeeded) has committed, the import handler enqueues `obs.runs` {kind: ingest, id: the
       ingest id, end: 1} with `schedule_in` 60 s, inside its own try/except: an enqueue failure is logged as
       `obs runs_enqueue_failed kind=ingest` and never changes the import's outcome (SRV-OBS INV-OBS-3). With tracing
-      off nothing is enqueued. The id is above V/manage's FR-INGEST-25 (design review round 2, N10). Tests: [db] a
-      succeeded import enqueues exactly one `obs.runs` {ingest, ingest_id, 1}; a failing enqueue leaves the import
-      succeeded and logs the line.
+      off nothing is enqueued. The id is above V/manage's FR-INGEST-25 (design review round 2, N10). The ingest is
+      looked up by the instance owner's material (`owner_id`, sha256, config id) and converter version. Late end
+      (SRV-OBS FR-OBS-20 d; code review of 8466329): a succeeded `search.embed` of the ingest enqueues `obs.runs`
+      {ingest, ingest_id, 1 + the ingest's `search_embeds` rows} the same way (SRV-SEARCH's kind declares the
+      `after_end` hook). Tests: [db] a
+      succeeded import enqueues exactly one `obs.runs` {ingest, ingest_id, 1}, and its embed one with end 2; a
+      failing enqueue leaves the import succeeded and logs the line.
   - id: FR-INGEST-30
     text: >-
       **Rename.** `POST /api/materials/{material_id}` with `{version, title}` on an imported material (no row or a

@@ -70,6 +70,38 @@ async def test_an_untraced_kind_opens_no_root_span(pg: Pg) -> None:
 
 
 @pytest.mark.anyio
+async def test_after_end_runs_after_commit_and_never_changes_the_outcome(pg: Pg, caplog: Any) -> None:
+    """FR-EVENTS-32 (code review of 8466329): `after_end` sees the committed outcome (succeeded and dead), and
+    a raising hook is logged by class name and leaves the outcome recorded."""
+    import logging
+
+    from sqlalchemy import text
+
+    seen: list[tuple[str, str, Any]] = []
+
+    async def hook(engine: Any, payload: Any, outcome: str) -> None:
+        async with engine.connect() as conn:  # a fresh connection: the outcome is already committed
+            row = (await conn.execute(text("SELECT outcome FROM job_keys WHERE args->>'name' = :n"),
+                                      {"n": payload["name"]})).scalar()
+        seen.append((payload["name"], outcome, row))
+        raise RuntimeError("hook-secret-message")
+
+    kind = dataclasses.replace(effect_kind(max_attempts=1), after_end=hook)
+    with caplog.at_level(logging.WARNING):
+        async with jobs_env(pg, kinds=[kind]) as env:
+            await env.jobs.enqueue(KIND, {"name": "ok"})
+            await env.jobs.enqueue(KIND, {"name": "bad", "mode": "permanent"})
+            await env.work()
+            outcomes = dict(await env.rows("SELECT args->>'name', outcome FROM job_keys"))
+    assert outcomes == {"ok": "succeeded", "bad": "dead"}
+    assert sorted(seen) == [("bad", "dead", "dead"), ("ok", "succeeded", "succeeded")]
+    lines = [r.getMessage() for r in caplog.records if r.getMessage().startswith("after_end failed")]
+    assert sorted(lines) == [f"after_end failed: kind={KIND} outcome={o} error=RuntimeError"
+                             for o in ("dead", "succeeded")]
+    assert not any("hook-secret-message" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.anyio
 async def test_the_periodic_entry_enqueues_one_health_job_per_slot(pg: Pg) -> None:
     health = require("reader.obs.health")
     obs_jobs = require("reader.obs.jobs")

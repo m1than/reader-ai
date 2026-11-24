@@ -373,7 +373,9 @@ requirements:
       `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, `MLFLOW_DISABLE_TELEMETRY=true`, `DO_NOT_TRACK=true`,
       `MLFLOW_ENABLE_AI_GATEWAY=false`, `MLFLOW_ENABLE_REMOTE_ASSISTANT=false`, `MLFLOW_MODEL_CATALOG_URI=`.
       (b) A one-shot service `mlflow-migrate` (the reader-mlflow image, the `obs_mlflow` volume, uid 10004,
-      read_only, tmpfs /tmp, cap_drop ALL, no-new-privileges, no network, `restart: "no"`) runs
+      read_only, tmpfs /tmp, cap_drop ALL, no-new-privileges, no network, `restart: "no"`, `mem_limit: 512m`
+      equal to its `memswap_limit` (no swap; a structural cap on one `db upgrade` of a SQLite file, code review
+      round 1 of phase 2)) runs
       `deploy/otel/mlflow-migrate.sh` (FR-OBS-29: flock, the markers, the one pre-migration backup, `mlflow db
       upgrade`, WAL, `store.version`); `mlflow` depends on it with `condition: service_completed_successfully`.
       (c) No new healthchecks (rotel and jaeger have no shell; `obs.health` and `reader doctor` cover them).
@@ -387,8 +389,8 @@ requirements:
       read-only `./otel/mlflow-setup.yaml:/etc/reader/mlflow-setup.yaml`, and with the override that bind plus
       the config bind; mlflow's environment is (a)'s six entries; the Caddyfile has exactly two `request_body`
       blocks, the upload path's 200 MiB and the 8443 site's 10 MiB. Tests: [config] the rendered model's
-      mlflow command and environment equal (a) exactly; mlflow-migrate's hardening, network-less placement and the
-      dependency; the worker's read-only mount; the 8443 body limit in the Caddyfile; the volume's backup label.
+      mlflow command and environment equal (a) exactly; mlflow-migrate's hardening, memory limit, network-less
+      placement and the dependency; the worker's read-only mount; the 8443 body limit in the Caddyfile; the volume's backup label.
 
 invariants:
   - id: INV-DEPLOY-1

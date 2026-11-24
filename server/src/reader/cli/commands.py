@@ -311,6 +311,7 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "unknown"
     converting = ingest_watch.converter(data_dir) if data_dir else "unknown"
     overrides = _status_overrides(ctx, project, config_path)
+    obs = _status_obs(ctx, config_path)
     if as_json:
         body: dict[str, Any] = {
             "project": project,
@@ -320,6 +321,8 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
             "services": rows,
             "overrides": overrides,
         }
+        if obs:
+            body["obs"] = obs
         if problem:
             body["ingest_config"] = {"problem": problem, "path": str(config_path)}
         print(json.dumps(body), file=ctx.out)
@@ -337,7 +340,7 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
             )
         for row in rows:
             print(f"  {row['name']}: {row['state']} {row['health'] or ''}".rstrip(), file=ctx.out)
-        for line in overrides:
+        for line in (*overrides, *obs):
             print(f"  {line}", file=ctx.out)
     return code
 
@@ -378,6 +381,19 @@ def _status_overrides(ctx: Ctx, project: str, config_path: Path) -> list[str]:
     except ConfigError, OSError:
         return []  # without the reader.yaml of `reader up` the overrides cannot be evaluated
     return override_lines(ctx, project, config)
+
+
+def _status_obs(ctx: Ctx, config_path: Path) -> list[str]:
+    """FR-CLI-24 (e): the doctor's obs lines, when `reader up` recorded the observability profile."""
+    if "observability" not in recorded_profiles(ctx):
+        return []
+    try:
+        project = load(ctx, config_path)
+    except ConfigError, CliError, OSError:
+        return []  # without the reader.yaml of `reader up` the stack's names cannot be rendered
+    from reader.cli.maintenance import obs_doctor_lines  # maintenance imports this module
+
+    return obs_doctor_lines(ctx, project.model)
 
 
 # The DB password (FR-CLI-14) ------------------------------------------------------------------------------

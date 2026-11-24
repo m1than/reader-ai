@@ -16,6 +16,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from ruamel.yaml import YAML
 
 from jobs.conftest import pg, pg_container  # noqa: F401 (the [db] fixtures: one Postgres per session, a db per test)
@@ -78,17 +79,38 @@ def catalogs(**overrides: Any) -> Any:
 
 
 @contextmanager
+def kept_state() -> Iterator[None]:
+    """`reader.obs._STATE` (the provider, the version key) as it was before, whatever the body set (code review of
+    8466329: no test leaks a version key or a provider into the next)."""
+    import reader.obs
+
+    before = dict(reader.obs._STATE)
+    try:
+        yield
+    finally:
+        reader.obs._STATE.clear()
+        reader.obs._STATE.update(before)
+
+
+@pytest.fixture(autouse=True)
+def _reset_obs_state() -> Iterator[None]:
+    with kept_state():
+        yield
+
+
+@contextmanager
 def obs_setup(role: str = "api", enabled: bool = True, **cat: Any) -> Iterator[Any]:
     """Tracing installed with an InMemorySpanExporter behind the AllowListExporter; yields (handle, exported)."""
     from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
     setup = require("reader.obs.setup")
     memory = InMemorySpanExporter()
-    handle = setup.setup(role, config(enabled), exporter=memory, catalogs=catalogs(**cat))
-    try:
-        yield handle, memory
-    finally:
-        handle.shutdown()
+    with kept_state():
+        handle = setup.setup(role, config(enabled), exporter=memory, catalogs=catalogs(**cat))
+        try:
+            yield handle, memory
+        finally:
+            handle.shutdown()
 
 
 def finished(handle: Any, memory: Any) -> list[Any]:

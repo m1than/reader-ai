@@ -30,7 +30,7 @@ TRACKED_JOBS: Final = ("obs.retention", "obs.setup")
 # FR-CLI-24: restore-obs-premigrate's exit codes; mlflow-migrate's own are 10..13 (FR-OBS-29).
 PREMIGRATE_CODES: Final = {
     "restored": 0, "stack_up": 2, "no_backup": 3, "copy_failed": 4, "marker_failed": 5,
-    "not_in_progress": 6,
+    "not_in_progress": 6, "no_version": 7,
 }
 MIGRATE_CODES: Final = {
     10: "obs_migration_incomplete",
@@ -185,7 +185,9 @@ def restore_steps(*, directory: Path, volume: str, image: str) -> list[list[str]
     """Stack down. Order (FR-OBS-30): store.version goes first, then the replaced store's markers, then
     the file through the backup API, then store.version from the backup (absent when it has none)."""
     src = f"{Path(directory).resolve()}:/in:ro"
-    swap = (f'rm -f {DATA}/mlflow.db-wal {DATA}/mlflow.db-shm && python -c "{_RESTORE_PY}" && '
+    # Copy first (into a temp file in the volume), then drop the old WAL files, then move into place: a
+    # failed copy leaves the old store and its WAL untouched (code review round 1, B3).
+    swap = (f'python -c "{_RESTORE_PY}" && rm -f {DATA}/mlflow.db-wal {DATA}/mlflow.db-shm && '
             f"mv {DATA}/mlflow.db.restore {DATA}/mlflow.db")
     return [
         one_off(image, volume, f"rm -f {DATA}/store.version", src),
@@ -221,12 +223,13 @@ set -u
 D={data}; B=$D/backup
 if [ ! -f $B/in-progress ] && [ "{force}" != 1 ]; then echo "no migration in progress" >&2; exit 6; fi
 if [ ! -f $B/pre-migrate.db ]; then echo "no pre-migrate.db" >&2; exit 3; fi
-V=$(cat $B/pre-migrate.version 2>/dev/null || echo unknown)
+V=$(cat $B/pre-migrate.version 2>/dev/null)
+if [ -z "$V" ]; then echo "no pre-migrate.version: the backup's MLflow version is unknown" >&2; exit 7; fi
 echo "restoring the MLflow store migrated from MLflow $V"
-rm -f $D/mlflow.db-wal $D/mlflow.db-shm || exit 4
 python -c "import sqlite3; s = sqlite3.connect('file:$B/pre-migrate.db?mode=ro', uri=True); \
 d = sqlite3.connect('$D/mlflow.db.restore'); s.backup(d); d.close(); s.close()" \
   || {{ rm -f $D/mlflow.db.restore; exit 4; }}
+rm -f $D/mlflow.db-wal $D/mlflow.db-shm || exit 4
 mv $D/mlflow.db.restore $D/mlflow.db || exit 4
 printf '%s\\n' "$V" > $D/store.version || exit 5
 printf '%s\\n' "$V" > $B/restored-for || exit 5

@@ -396,6 +396,8 @@ class Jobs:
                 log.warning("lost run not counted: kind=%s job_id=%s", kind.name, job_id)
             else:
                 log.warning("lost run counted, re-enqueue failed: kind=%s job_id=%s", kind.name, job_id)
+        if dead:
+            await _after_end(self.engine, kind, payload, "dead")
         return dead
 
     async def _attempt(
@@ -585,6 +587,8 @@ class Jobs:
                         report.dead.append(key)
                     else:
                         enqueue = True
+            if key in report.dead and row is not None:
+                await _after_end(self.engine, kind, row["args"], "dead")
             if enqueue and row is not None and await self._sweep_defer(kind, key, row["args"]):
                 report.reenqueued.append(key)
             if await self._finish(job, finish_status):
@@ -626,6 +630,8 @@ class Jobs:
                         action = "-"
                     else:
                         action = RECONCILE_ENQUEUE
+            if key in report.dead and kind is not None and row is not None:
+                await _after_end(self.engine, kind, row["args"], "dead")
             if (
                 action == RECONCILE_ENQUEUE
                 and kind is not None

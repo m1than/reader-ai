@@ -383,9 +383,17 @@ requirements:
       `JobKind` gains the optional field `traced: bool = True`; with `traced: false` the job wrapper opens no root
       span and passes no trace context (SRV-OBS FR-OBS-5 f). Declared: `obs.runs` holds a second advisory lock,
       `lock_id("obs.runs:<kind>:<id>")`, on its job's connection for the whole run beside the key lock, so it holds
-      one pooled connection for up to its 60 s timeout like every running job. Tests: [unit] the catalogue lists the
+      one pooled connection for up to its 60 s timeout like every running job. A `JobKind` also gains the
+      optional hook `after_end(engine, payload, outcome)` (code review of 8466329): the wrapper calls it after
+      the transaction that records the key's `succeeded` or `dead` outcome has committed, on every path that
+      records one (the run's own, the judge's, a lost run's count, and the sweep's stalled and orphaned counts),
+      never inside that transaction; an exception from it is logged as `after_end failed: kind=<kind>
+      outcome=<outcome> error=<class>` and never changes the recorded outcome. The pipeline and import kinds use it
+      to count a run's end and enqueue `obs.runs` (SRV-PIPELINE FR-PIPELINE-18, SRV-INGEST FR-INGEST-26), and
+      `search.embed` for its late end (SRV-OBS FR-OBS-20 d). Tests: [unit] the catalogue lists the
       kinds in KIND_MODULES order with exactly these declarations; a `traced: false` kind opens no root span; [db]
-      the periodic entry enqueues one `obs.health` per slot.
+      the periodic entry enqueues one `obs.health` per slot; `after_end` runs after the succeeded and the dead
+      outcome have committed, and a raising `after_end` leaves the outcome recorded and logs the line.
   # Amendment (2026-11-24, V/manage, WEB-MANAGE; header note above `audit_actions`).
   - id: FR-EVENTS-30
     text: >-
