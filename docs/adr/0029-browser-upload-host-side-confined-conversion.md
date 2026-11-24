@@ -8,6 +8,8 @@ revisit_when: "Ingestion moves into Docker (ADR-0021's 51 s per formula bound is
 supersedes: []
 ---
 
+> Amendment (owner, 2026-11-24), id renumbering at the upload merge: SRV-OBS took the ids first, so the upload's proposed items cited below as OPS-DEPLOY FR-DEPLOY-13, OPS-CLI FR-CLI-22 and SRV-CONFIG FR-CONFIG-17 are FR-DEPLOY-14, FR-CLI-23 and FR-CONFIG-18 in the specs. The decision is unchanged.
+
 > Amendment (owner, 2026-11-24), from the upload code review: the inbox quota is checked after the body is received and after the duplicate check (a re-upload of an open file is answered with its view even when the quota is full), not before the body with Content-Length. The cap of 200 MiB is still enforced before and while streaming, and only one body streams at a time under the upload lock, so the transient overshoot is at most one 200 MiB temporary file above the 1 GiB of stored open uploads.
 
 > Amendment (owner, 2026-11-23), from SRV-INGEST revision 2 review rounds 4–6 and spikes/ingest-sysctl:
