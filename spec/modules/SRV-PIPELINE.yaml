@@ -79,6 +79,11 @@
 # Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): `create_run` snapshots
 # `compile_runs.task_budgets` from `reader.config.effective` (reader.yaml plus the owner's overrides at run creation;
 # a running run keeps its snapshot); `runs.task_budgets(conn, rt)` is async; no oracle changed.
+# Code review of the management layer (2026-11-24, V/manage-fix-auth; SRV-CONFIG FR-CONFIG-26 "Enforcement is
+# live"): `compile_runs.task_budgets` is a display snapshot (the run status's `task_budgets`); no step reads it, and
+# SRV-AGENT's reserve enforces the effective budget per call. tests/pipeline/test_overrides_db.py adds the [db]
+# oracle: a task budget override appears in a new run's snapshot, and an override lowered after the run's creation
+# refuses the run's draft (`task_budget_exhausted`) while the status still shows the creation-time snapshot.
 
 id: SRV-PIPELINE
 title: Compile pipeline — stages as data, one revise loop, budgeted agent stages, findings as open cells, lab verification, G2 report (slice)
