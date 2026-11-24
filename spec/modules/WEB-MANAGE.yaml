@@ -114,6 +114,7 @@ title: Management layer — edit, reorder, archive, delete and restore courses, 
 status: draft
 approved_by: null
 approved_at: null
+review: "deep-reviewer (Fable) round 1 on 840af4b: changes (16 blocking, applied in 3112546); round 2 on 3112546: changes (5 small blocking, applied in 2a7d86f); round 3 on 2a7d86f: VERDICT approve, its non-blocking items applied in 4997ec5. ADR-0036 and ADR-0037 accepted by the owner (fd9377a, 2026-11-25). Approved by agent with the Red tests on V/manage-impl. FR-MANAGE-10's runtime is WEB-UI FR-UI-30, promoted only after its own deep-reviewer round."
 layer: web
 track: product
 adr: [ADR-0013, ADR-0031, ADR-0017, ADR-0036, ADR-0037, ADR-0011, ADR-0016]
