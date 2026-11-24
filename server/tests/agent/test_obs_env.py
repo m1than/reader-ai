@@ -142,6 +142,24 @@ async def test_failed_but_billed_call_records_the_settled_amount(pg: Pg, tmp_pat
     assert call.status.status_code.name == "ERROR"
 
 
+async def test_the_settled_amount_is_quantized_once_for_ledger_and_span(pg: Pg, tmp_path: Path) -> None:
+    """Code review round 1: an SDK cost below a micro-dollar's half (2.5e-6) is rounded once, half up, to the
+    ledger's 0.000003, and the span records that same value; the input part derives from it."""
+    w = await _enabled_world(pg, tmp_path, True)
+    cli = SpanCli([Script(text="answer", cost=0.0000025)])
+    cli.parents = []
+    with obs_setup("worker") as (handle, memory):
+        await _provider(w, cli, tmp_path).run(_call(w))
+        (call,) = [s for s in finished(handle, memory) if s.name == "agent.call"]
+    settled = await _settled_usd(w)
+    assert settled == Decimal("0.000003")
+    attrs = dict(call.attributes)
+    assert attrs["reader.cost_usd"] == 0.000003
+    assert 0 <= attrs["reader.cost_input_usd"] <= 0.000003
+    assert Decimal(str(attrs["reader.cost_input_usd"])) == Decimal(str(attrs["reader.cost_input_usd"])).quantize(
+        Decimal("0.000001"))
+
+
 async def test_a_non_pipeline_stage_is_not_recorded(pg: Pg, tmp_path: Path, caplog: Any) -> None:
     import logging
 

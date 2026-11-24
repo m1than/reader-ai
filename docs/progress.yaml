@@ -1639,7 +1639,19 @@ tasks:
         trace-check, guard-tests, web typecheck, vitest and the storybook build passed. Obs [image] tests by image
         id: 9 passed (Jaeger fill 32,400 full-key spans, 143 MiB of 256, last trace 0.3 s after the flush; marker
         session, ledger cost, 0-cost CLI spans, span metric = ledger). Stubbed browser suite: 446 passed. Merged
-        V/slice-integration 199d2f1. No reader up, no live step, no credit. Next: code review, full rounds." }
+        V/slice-integration 199d2f1. No reader up, no live step, no credit. Code review round 1 (3198cb2): changes;
+        fixed on top of the V/slice-integration 9bb014a merge (freshness): obs.prompts keyed by template digest +
+        start day; settled amount quantized once (pricing.micro) for ledger and span, cost_input at cost()'s tier
+        with the search fee on the output side, HALF_UP everywhere; per-handler [db] call-site tests (tutor,
+        pipeline, verify, search, ingest, queue marker) with canaries; an [image] test of feedback.post,
+        prompts.register and child spans against real MLflow, which found a real defect: MLflow 3.18 hides prompt
+        versions from model-version search unless the filter names the prompt tag (fixed); live obs.sh gains the
+        session, lessons, 8444 gate/edge, Jaeger lookup and catalog cost oracle checks; surviving mutants killed;
+        non-blocking: deleted-lesson rows, Jaeger link label, X-Reader-Site stripped site-wide, 8444 read-only
+        (POST /api/archive and /api/transform measured on the pinned image), feedback WARNING, record early return,
+        miss cache, FLUSH_MS note. Gate: pytest 1 failed + 103 errors, all Postgres-connect timeouts under load (and
+        Docker Desktop's disk full); `pytest --lf` alone 104 passed: load flakes. Obs [image] tests 10 of 10 (9 in
+        the parallel run, then the edge test, updated for the read-only 8444, passed alone). Next: code review round 2." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

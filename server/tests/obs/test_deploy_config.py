@@ -11,6 +11,8 @@ import re
 import subprocess
 import sys
 
+import pytest
+
 from deploy.conftest import CADDYFILE, DEPLOY, networks_of, render, requires_docker_cli
 
 ROTEL_IMAGE = (
@@ -219,6 +221,19 @@ def test_caddyfile_8444_site_text() -> None:  # FR-OBS-19
                  "header_down -Access-Control-*"):
         assert line in proxy, line
     assert f'Content-Security-Policy "{CSP_JAEGER}"' in site
+    # Read-only (code review round 1, measured against the pinned image): archive and transform refused for every
+    # method, any other non-GET/HEAD method 405, both before the proxy.
+    assert "@jaeger_blocked path_regexp (?i)^/+api/+(?:archive|transform)(?:/|$)\n" in site
+    assert "handle @jaeger_blocked {\n\t\trespond 404\n\t}" in site
+    assert "@jaeger_write not method GET HEAD\n\thandle @jaeger_write {\n\t\trespond 405\n\t}" in site
+    assert site.index("handle @jaeger_blocked") < site.index("handle @jaeger_write") < site.index(
+        "reverse_proxy jaeger:16686")
+
+
+@pytest.mark.parametrize("host", ["localhost", "localhost:8443", "localhost:8444"])
+def test_every_site_strips_a_client_site_header(host: str) -> None:  # FR-OBS-9 (code review round 1)
+    site = _site(host)
+    assert "\trequest_header -X-Reader-Site\n" in site
 
 
 def test_main_site_names_itself_to_the_gate() -> None:  # FR-OBS-9: https://localhost/api/obs/gate

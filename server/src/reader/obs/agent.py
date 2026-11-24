@@ -10,7 +10,7 @@ import logging
 import uuid
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 
 from opentelemetry import context as otel_context
@@ -23,27 +23,41 @@ log = logging.getLogger("reader.obs")
 _MICRO: Final = Decimal("0.000001")
 
 
-def input_part(settled: Decimal, usage: Any, rates: Mapping[str, Decimal]) -> Decimal:
-    """FR-OBS-12 (c): the input share of the settled amount, by pricing.yaml's rates for the call's tokens
-    (each cache write at its own TTL's rate); 0 when the call priced nothing (the whole amount is output)."""
+def input_part(
+    settled: Decimal, usage: Any, rates: Mapping[str, Decimal], fee_usd: Decimal = Decimal(0)
+) -> Decimal:
+    """FR-OBS-12 (c): the input share of the settled amount, by pricing.yaml's rates (per million tokens)
+    for the call's tokens, each cache write at its own TTL's rate; the search fee counts on the output side;
+    0 when the call priced nothing (the whole amount is output). Rounded like the ledger (half up)."""
     priced_in = (
         Decimal(int(usage.input)) * rates["input"]
         + Decimal(int(usage.cache_read)) * rates["cache_read"]
         + Decimal(int(usage.cache_write_5m)) * rates["cache_write_5m"]
         + Decimal(int(usage.cache_write_1h)) * rates["cache_write_1h"]
     )
-    priced_out = Decimal(int(usage.output)) * rates["output"]
+    priced_out = Decimal(int(usage.output)) * rates["output"] + fee_usd * Decimal(10**6)
     whole = priced_in + priced_out
     if whole == 0:
         return Decimal(0).quantize(_MICRO)
-    return min((settled * priced_in / whole).quantize(_MICRO, ROUND_HALF_EVEN), settled)
+    return min((settled * priced_in / whole).quantize(_MICRO, ROUND_HALF_UP), settled)
+
+
+def priced_input_part(model: str, settled: Decimal, usage: Any, *, summed: bool = False) -> Decimal:
+    """`input_part` at the tier SRV-AGENT's `cost()` uses (FR-AGENT-17) and with the call's search fee."""
+    from reader.agent.pricing import load_pricing, rates
+
+    table = rates(model, 0 if summed else int(usage.prompt_tokens))
+    fee = Decimal(int(getattr(usage, "web_search_requests", None) or 0)) * load_pricing().web_search_usd
+    return input_part(settled, usage, table, fee)
 
 
 class AgentSpan:
     def __init__(self, span: Span | None, model: str) -> None:
         self._span, self._model = span, model
 
-    def settled(self, usage: Any, settled_usd: Decimal | None, stop_reason: str | None) -> None:
+    def settled(
+        self, usage: Any, settled_usd: Decimal | None, stop_reason: str | None, *, summed: bool = False
+    ) -> None:
         try:
             if self._span is None:
                 return
@@ -56,11 +70,9 @@ class AgentSpan:
                 self._span.set_attribute("gen_ai.usage.cache_write.input_tokens", written)
             if settled_usd is not None:
                 self._span.set_attribute("reader.cost_usd", float(settled_usd))
-                part = Decimal(0)
+                part = Decimal(0)  # a settle with no usage: the whole amount counts as output
                 if usage is not None:
-                    from reader.agent.pricing import rates
-
-                    part = input_part(Decimal(settled_usd), usage, rates(self._model))
+                    part = priced_input_part(self._model, Decimal(settled_usd), usage, summed=summed)
                 self._span.set_attribute("reader.cost_input_usd", float(part))
             if stop_reason is not None:
                 self._span.set_attribute("reader.stop_reason", stop_reason)

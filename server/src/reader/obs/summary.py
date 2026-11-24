@@ -355,13 +355,14 @@ async def _lessons(conn: AsyncConnection, owner: uuid.UUID, since: datetime) -> 
         found = await _rows(conn, LESSON_CHARS_SQL, o=owner, ids=list(titles))
         chars = {r.lesson_id: int(r.chars) for r in found}
     rows: list[dict[str, Any]] = []
-    for lesson_id, t in titles.items():
-        p = per[lesson_id]
+    for lesson_id, p in per.items():
+        t = titles.get(lesson_id)  # None: the lesson was deleted; its spend stays (totals equal the ledger)
         total = p["compile"] + p["tutor"]
         newest = max(p["runs"].values(), key=lambda v: v[0], default=None)
         rows.append({
-            "lesson_id": str(lesson_id), "title": t.title, "course_id": str(t.course_id),
-            "course_title": t.course_title, "compile_usd": _usd(p["compile"]), "runs": len(p["runs"]),
+            "lesson_id": str(lesson_id), "title": t.title if t else None,
+            "course_id": str(t.course_id) if t else None, "course_title": t.course_title if t else None,
+            "deleted": t is None, "compile_usd": _usd(p["compile"]), "runs": len(p["runs"]),
             "last_compile_usd": _usd(newest[1]) if newest else None, "tutor_usd": _usd(p["tutor"]),
             "total_usd": _usd(total), "open_reserves": p["open"], "chars": chars.get(lesson_id),
             "usd_per_1k_chars": _per_1k(total, chars.get(lesson_id)),
@@ -371,6 +372,8 @@ async def _lessons(conn: AsyncConnection, owner: uuid.UUID, since: datetime) -> 
     kept = rows[:LESSONS_LIMIT]
     courses: dict[str, dict[str, Any]] = {}
     for r in kept:
+        if r["course_id"] is None:  # a deleted lesson joins no course total
+            continue
         c = courses.setdefault(r["course_id"], {"title": r["course_title"], "compile": Decimal(0),
                                                 "tutor": Decimal(0), "chars": 0})
         c["compile"] += Decimal(str(r["compile_usd"]))

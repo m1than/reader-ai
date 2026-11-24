@@ -249,6 +249,121 @@ def credit_checks(c: httpx.Client, owner: str) -> None:
     # MLflow keeps resource attributes as trace tags; the CLI's and FR-OBS-1's resource keys are the only ones allowed.
     rep(not unknown, "credit: the trace's resource keys are VEC-OBS-2's or FR-OBS-1's", ",".join(sorted(unknown)))
     rep(canary not in json.dumps(trace), "credit: the canary is absent from the trace JSON")
+    # FR-OBS-12 (e): the job.session marker made the lesson the trace's session, not the CLI's own session id.
+    meta = (trace["trace"].get("trace_info") or {}).get("trace_metadata") or {}
+    rep(meta.get("mlflow.trace.session") == lesson["id"], "credit: the trace's session is the lesson id",
+        str(meta.get("mlflow.trace.session")))
+    cost_oracle(trace, "credit: ")
+
+
+def _attr(span: dict[str, Any], key: str) -> Any:
+    raw = span.get("attributes") or {}
+    if isinstance(raw, list):
+        raw = {a.get("key"): next(iter((a.get("value") or {}).values()), None) for a in raw if isinstance(a, dict)}
+    value = raw.get(key)
+    if isinstance(value, dict) and isinstance(value.get("values"), list):  # MLflow 3.18's kvlist
+        return {i["key"]: next(iter(i["value"].values())) for i in value["values"]}
+    if isinstance(value, str) and value[:1] == "{":
+        return json.loads(value)
+    return value
+
+
+def cost_oracle(trace: dict[str, Any], prefix: str = "") -> bool:
+    """FR-OBS-12 (c), the catalog oracle: reader-mlflow's zero catalog prices every CLI `llm_request` at 0, so the
+    trace's cost is the ledger's `agent.call` amounts only. False when the trace has no CLI span."""
+    spans = trace["trace"]["spans"]
+    llm = [s for s in spans if s.get("name") == "claude_code.llm_request"]
+    if not llm:
+        return False
+    priced = [(_attr(s, "mlflow.llm.cost") or {}).get("total_cost", 0) for s in llm]
+    rep(all(p == 0 for p in priced), f"{prefix}every claude_code.llm_request costs 0 (the replaced catalog)",
+        str(priced[:5]))
+    ours = sum((_attr(s, "mlflow.llm.cost") or {}).get("total_cost", 0) for s in spans if s.get("name") == "agent.call")
+    total = json.loads(((trace["trace"].get("trace_info") or {}).get("trace_metadata") or {}).get(
+        "mlflow.trace.cost", "{}") or "{}").get("total_cost", 0)
+    rep(abs(total - ours) < 1e-9, f"{prefix}the trace cost equals the agent.call (ledger) amounts", f"{total} != {ours}")
+    return True
+
+
+def catalog_checks(c: httpx.Client, owner: str) -> None:
+    """Zero credit: the cost oracle on the newest traces that hold CLI spans (from earlier paid runs)."""
+    for t in search_traces(c, owner, 50):
+        got = get_trace(c, owner, t["trace_id"])
+        if got is not None and cost_oracle(got):
+            return
+    skip("every claude_code.llm_request costs 0 (the replaced catalog)", "no trace with CLI spans in the newest 50")
+
+
+LESSONS_SPENT_SQL = (
+    "SELECT coalesce(sum(CASE WHEN s.kind = 'settle' THEN s.settled_usd WHEN s.kind = 'reserve' AND NOT EXISTS "
+    "(SELECT 1 FROM agent_spend x WHERE x.reservation_id = s.id) THEN s.usd ELSE 0 END), 0) FROM agent_spend s "
+    "WHERE s.owner_id = (SELECT id FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1) "
+    "AND s.lesson_id IS NOT NULL AND s.created_at >= now() - interval '7 days';"
+)
+
+
+def lessons_checks(c: httpx.Client, owner: str, project: str) -> None:
+    """FR-OBS-17 on the live stack: each row links to MLflow on 8443, and the rows' totals equal the ledger's spend
+    on lessons in the window (deleted lessons included) when nothing was truncated."""
+    r = c.get(f"{APP}/api/obs/summary", headers={"Cookie": f"{COOKIE}={owner}"})
+    lessons = (r.json() if r.status_code == 200 else {}).get("lessons") or {}
+    rows = lessons.get("rows") or []
+    if not rows:
+        skip("cost per lesson matches the ledger (FR-OBS-17)", "no lesson spend in the window")
+        return
+    rep(all(row["mlflow_url"].startswith(DASH + "/") for row in rows), "lessons: every row links to MLflow on 8443")
+    rep(all(isinstance(row.get("deleted"), bool) for row in rows), "lessons: every row says whether it is deleted")
+    if lessons.get("truncated"):
+        skip("cost per lesson matches the ledger (FR-OBS-17)", "the view is truncated")
+        return
+    code, out = psql(project, LESSONS_SPENT_SQL)
+    lines = [x.strip() for x in out.splitlines() if x.strip() and x.strip()[0].isdigit()]
+    if code != 0 or not lines:
+        skip("cost per lesson matches the ledger (FR-OBS-17)", "the ledger sum could not be read")
+        return
+    ledger = float(lines[0])
+    rows_total = round(sum(row["total_usd"] for row in rows), 6)
+    rep(abs(rows_total - ledger) < 1e-6, "lessons: the rows' totals equal the ledger's spend on lessons",
+        f"{rows_total} != {ledger}")
+
+
+JAEGER = "https://localhost:8444"
+
+
+def jaeger_checks(c: httpx.Client, owner: str, learner: str, target: str | None) -> None:
+    """FR-OBS-19 and FR-OBS-9's per-site gate on 8444: the gate, the read-only edge, the strip of a client's
+    X-Reader-Site, and the dashboard's newest trace looked up in Jaeger."""
+    def st(path: str, cookie: str | None = None, method: str = "GET", **headers: str) -> int:
+        h = dict(headers)
+        if cookie:
+            h["Cookie"] = f"{COOKIE}={cookie}"
+        return c.request(method, JAEGER + path, headers=h).status_code
+
+    rep(st("/") == 401, "8444 / without a cookie is 401", str(st("/")))
+    rep(st("/", learner) == 403, "8444 / with a learner session is 403", str(st("/", learner)))
+    s = st("/search", owner)
+    rep(200 <= s < 300, "8444 /search with the owner session is 2xx", str(s))
+    s = st("/", owner, "GET", Origin=DASH)
+    rep(s == 403, "8444 with the MLflow site's Origin is 403 (per-site gate)", str(s))
+    s = st("/", owner, "GET", Origin=DASH, **{"X-Reader-Site": "mlflow"})
+    rep(s == 403, "8444 ignores a client-sent X-Reader-Site", str(s))
+    for method, path, want in (("POST", "/api/transform", 404), ("POST", "/api/archive/" + "0" * 32, 404),
+                               ("PUT", "/", 405), ("DELETE", "/api/traces", 405)):
+        s = st(path, owner, method, Origin=JAEGER)
+        rep(s == want, f"8444 {method} {path} is {want} (read-only edge)", str(s))
+    r = c.get(JAEGER + "/", headers={"Cookie": f"{COOKIE}={owner}"})
+    leaked = [h for h in r.headers if h.lower() == "set-cookie" or h.lower().startswith("access-control-")]
+    rep(not leaked, "8444 carries no Set-Cookie or Access-Control-*", ",".join(leaked))
+    if target is None:
+        skip("the newest MLflow trace opens in Jaeger", "no trace in MLflow")
+        return
+    tid = target.removeprefix("tr-")
+    r = c.get(f"{JAEGER}/api/traces/{tid}", headers={"Cookie": f"{COOKIE}={owner}"})
+    data = (r.json().get("data") or []) if r.status_code == 200 else []
+    if r.status_code == 404 or not data:
+        skip("the newest MLflow trace opens in Jaeger", f"not in Jaeger's window ({r.status_code}); it restarts empty")
+        return
+    rep(bool(data[0].get("spans")), "the newest MLflow trace opens in Jaeger with its spans")
 
 
 def main() -> int:
@@ -275,6 +390,9 @@ def main() -> int:
                 gate_checks(c, owner, learner)
                 ids = summary_checks(c, owner, learner)
                 target = dashboard_target(c, owner)
+                lessons_checks(c, owner, a.project)
+                catalog_checks(c, owner)
+                jaeger_checks(c, owner, learner, target)
                 (out / "summary-trace-ids.json").write_text(json.dumps(ids))
                 (out / "dashboard-trace.json").write_text(json.dumps(target))
                 if a.with_credit:

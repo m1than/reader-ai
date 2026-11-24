@@ -155,7 +155,7 @@ async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
     try:
         await jobs.enqueue(KIND, {"day": today})
     finally:
-        await prompts.on_worker_start(jobs)  # FR-OBS-15: enqueue-only, never raises
+        await prompts.on_worker_start(jobs, now)  # FR-OBS-15: enqueue-only, never raises
 
 
 JOB_KINDS: Final = (

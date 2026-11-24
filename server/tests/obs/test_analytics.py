@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,7 +31,7 @@ _MICRO = Decimal("0.000001")
 
 
 def _money(value: float) -> Decimal:
-    return Decimal(str(value)).quantize(_MICRO, ROUND_HALF_EVEN)
+    return Decimal(str(value)).quantize(_MICRO, ROUND_HALF_UP)
 
 
 def oracle_derive(klass: str | None, name: str, attrs: dict[str, Any], root: bool) -> dict[str, Any]:
@@ -180,7 +180,9 @@ def test_child_span_counts_pass_their_rules() -> None:
     (0.1, None, {"input_cost": 0.0, "output_cost": 0.1, "total_cost": 0.1}),  # a settle with no usage
     (0.0, 0.0, {"input_cost": 0.0, "output_cost": 0.0, "total_cost": 0.0}),
     (0.3, 0.5, {"input_cost": 0.3, "output_cost": 0.0, "total_cost": 0.3}),  # an input part above the total: capped
-    (0.000001, 0.0000005, {"input_cost": 0.0, "output_cost": 0.000001, "total_cost": 0.000001}),
+    # a 7th-place tie rounds half up, like the ledger (code review round 1): the whole micro-dollar is input
+    (0.000001, 0.0000005, {"input_cost": 0.000001, "output_cost": 0.0, "total_cost": 0.000001}),
+    (0.000003, 0.0000015, {"input_cost": 0.000002, "output_cost": 0.000001, "total_cost": 0.000003}),
 ])
 def test_llm_cost_parts_sum_to_the_total(total: float, given_in: float | None, expected: dict[str, float]) -> None:
     attrs: dict[str, Any] = {"reader.cost_usd": total}
@@ -311,6 +313,42 @@ def test_session_marker_failure_is_logged_once(monkeypatch: pytest.MonkeyPatch, 
     assert [r.getMessage() for r in caplog.records].count("obs session_marker_failed") == 1
 
 
+def test_a_failing_flush_thread_is_logged_once(monkeypatch: pytest.MonkeyPatch, caplog: Any) -> None:
+    """FR-OBS-12 (e): an error inside the daemon flush thread is caught there and logged once; the job's own
+    task never sees it (INV-OBS-3)."""
+    spans = require("reader.obs.spans")
+
+    class Broken:
+        def force_flush(self, timeout_millis: int) -> bool:
+            raise RuntimeError(CANARY)
+
+    monkeypatch.setattr(spans, "_LOGGED", set())
+    with caplog.at_level(logging.WARNING, logger="reader.obs"):
+        spans._flush(Broken())
+        spans._flush(Broken())
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines.count("obs session_marker_failed") == 1
+    assert not any(CANARY in line for line in lines)
+
+
+def test_annotate_job_never_raises(monkeypatch: pytest.MonkeyPatch, caplog: Any) -> None:
+    """INV-OBS-3: a failure while setting root keys is logged once and never reaches the job."""
+    spans = require("reader.obs.spans")
+
+    def boom(span: Any, attributes: Any) -> None:
+        raise RuntimeError(CANARY)
+
+    monkeypatch.setattr(spans, "_LOGGED", set())
+    monkeypatch.setattr(spans, "_set", boom)
+    with obs_setup(role="worker"), caplog.at_level(logging.WARNING, logger="reader.obs"):
+        tracer = require("reader.obs").tracer()
+        with tracer.start_as_current_span("job tutor.answer"):
+            spans.annotate_job({"reader.lesson.id": UUID_B})
+            spans.annotate_job({"reader.lesson.id": UUID_B})
+    lines = [r.getMessage() for r in caplog.records]
+    assert lines.count("obs annotate_job_failed") == 1
+
+
 def test_child_span_status_and_annotate(monkeypatch: pytest.MonkeyPatch) -> None:
     spans = require("reader.obs.spans")
     from opentelemetry.trace import StatusCode
@@ -336,8 +374,9 @@ def test_child_span_status_and_annotate(monkeypatch: pytest.MonkeyPatch) -> None
 # --- the agent span (FR-OBS-12 b, c) ---
 
 
-def _usage(i: int, o: int, w5: int, w1: int, r: int) -> Any:
-    return SimpleNamespace(input=i, output=o, cache_write_5m=w5, cache_write_1h=w1, cache_read=r)
+def _usage(i: int, o: int, w5: int, w1: int, r: int, searches: int | None = None) -> Any:
+    return SimpleNamespace(input=i, output=o, cache_write_5m=w5, cache_write_1h=w1, cache_read=r,
+                           prompt_tokens=i + w5 + w1 + r, web_search_requests=searches)
 
 
 def test_input_part_uses_each_cache_rate() -> None:
@@ -347,10 +386,42 @@ def test_input_part_uses_each_cache_rate() -> None:
     usage = _usage(50, 4000, 6000, 2000, 30000)
     priced_in = Decimal(50 * 2) + Decimal(30000) * Decimal("0.1") + Decimal(6000) * Decimal("2.5") + Decimal(2000 * 4)
     priced_out = Decimal(4000 * 10)
-    want = (Decimal("0.21") * priced_in / (priced_in + priced_out)).quantize(_MICRO, ROUND_HALF_EVEN)
+    want = (Decimal("0.21") * priced_in / (priced_in + priced_out)).quantize(_MICRO, ROUND_HALF_UP)
     assert agent.input_part(Decimal("0.21"), usage, rates) == want
     assert agent.input_part(Decimal("0.1"), _usage(0, 0, 0, 0, 0), rates) == Decimal("0.000000")
     assert agent.input_part(Decimal("0"), usage, rates) == Decimal("0")
+    # The search fee counts on the output side (rates are per million tokens, the fee in USD).
+    fee = Decimal("0.02")
+    with_fee = (Decimal("0.21") * priced_in / (priced_in + priced_out + fee * 10**6)).quantize(_MICRO, ROUND_HALF_UP)
+    assert agent.input_part(Decimal("0.21"), usage, rates, fee) == with_fee < want
+
+
+def test_input_part_rounds_half_up_like_the_ledger() -> None:
+    """A tie at the 7th place: half up gives the larger micro-dollar, half even would keep the even one."""
+    agent = require("reader.obs.agent")
+    rates = {"input": Decimal(1), "output": Decimal(1), "cache_write_5m": Decimal(1),
+             "cache_write_1h": Decimal(1), "cache_read": Decimal(1)}
+    # settled 0.000005, half input: 0.0000025 exactly
+    assert agent.input_part(Decimal("0.000005"), _usage(1, 1, 0, 0, 0), rates) == Decimal("0.000003")
+
+
+def test_priced_input_part_uses_the_tier_and_the_fee() -> None:
+    """FR-AGENT-17's tier (haiku above 100k prompt tokens) and the call's search fee (pricing.yaml)."""
+    agent = require("reader.obs.agent")
+    from reader.agent.pricing import load_pricing, rates
+
+    big = _usage(150_000, 2000, 0, 0, 0)
+    high, low = rates("claude-haiku-5-5", 150_000), rates("claude-haiku-5-5", 0)
+    settled = Decimal("0.08")
+    assert agent.priced_input_part("claude-haiku-5-5", settled, big) == agent.input_part(settled, big, high)
+    assert agent.priced_input_part("claude-haiku-5-5", settled, big, summed=True) == agent.input_part(
+        settled, big, low)
+    searched = _usage(5000, 800, 0, 0, 20000, searches=2)
+    fee = 2 * load_pricing().web_search_usd
+    son = rates("claude-sonnet-5-5")
+    assert agent.priced_input_part("claude-sonnet-5-5", settled, searched) == agent.input_part(
+        settled, searched, son, fee)
+    assert fee > 0
 
 
 def test_agent_span_semconv_keys_and_cost() -> None:
@@ -371,4 +442,27 @@ def test_agent_span_semconv_keys_and_cost() -> None:
     cost = json.loads(a["mlflow.llm.cost"])
     assert cost["total_cost"] == 0.21
     assert 0 < cost["input_cost"] < 0.21
+    assert _money(cost["input_cost"]) + _money(cost["output_cost"]) == _money(cost["total_cost"])
     assert "gen_ai.usage.cache_read_input_tokens" not in a
+
+
+@pytest.mark.parametrize(("usage", "settled", "parts"), [
+    # A tie (code review round 1): one 5m cache-write token on sonnet is 2.5e-6 USD; the ledger's micro() rounds
+    # it half up to 0.000003, which is all input: the parts are exact at 6 places.
+    (_usage(0, 0, 1, 0, 0), Decimal("0.000003"), (0.000003, 0.0, 0.000003)),
+    # A settle with no usage (a failed call billed at its reserve): the whole amount counts as output.
+    (None, Decimal("0.25"), (0.0, 0.25, 0.25)),
+])
+def test_agent_span_cost_edges(usage: Any, settled: Decimal, parts: tuple[float, float, float]) -> None:
+    agent = require("reader.obs.agent")
+    with obs_setup(role="worker") as (handle, exported):
+        with agent.agent_call("fact_check", "fact_check", "claude-sonnet-5-5") as span:
+            span.settled(usage, settled, None)
+        handle.force_flush()
+        (out,) = exported.get_finished_spans()
+    a = dict(out.attributes)
+    assert a["reader.cost_usd"] == float(settled)
+    assert a["reader.cost_input_usd"] == parts[0]
+    assert json.loads(a["mlflow.llm.cost"]) == dict(zip(("input_cost", "output_cost", "total_cost"), parts, strict=True))
+    if usage is None:
+        assert "gen_ai.usage.input_tokens" not in a

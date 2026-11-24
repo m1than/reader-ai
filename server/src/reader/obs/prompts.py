@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -22,12 +24,14 @@ KIND: Final = "obs.prompts"
 MLFLOW: Final = "http://mlflow:5000"
 HTTP_TIMEOUT_S: Final = 10.0
 LOOKUP_TIMEOUT_S: Final = 2.0
+MISS_TTL_S: Final = 600.0  # a miss or a failed lookup is retried at most once per name per 10 minutes
 SHA_TAG: Final = "reader.prompt_sha256"
 VERSION_TAG: Final = "reader.version"
 SOURCE: Final = "dummy-source"  # MLflow 3.18.0 accepts only its own placeholder as a prompt version's source
 _PACKAGE: Final = Path(__file__).resolve().parents[1]  # the installed `reader` package
 _PREFIX: Final = "server/src/reader/"
 _CACHE: dict[str, int] = {}
+_MISSES: dict[str, float] = {}  # name -> monotonic time after which a lookup may run again
 
 
 class PromptsRefused(Exception):
@@ -37,6 +41,13 @@ class PromptsRefused(Exception):
 class PromptsArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
     version: str = Field(pattern=r"^[0-9A-Za-z.+-]{1,64}$")
+    digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def digest(day: str) -> str:
+    """FR-OBS-15: the key, sha256 of the templates' sha256s in VEC-OBS-4 order and the start day (UTC)."""
+    parts = [template(name)[1] for name in PROMPTS] + [day]
+    return hashlib.sha256("\n".join(parts).encode()).hexdigest()
 
 
 def template_path(name: str) -> Path:
@@ -62,9 +73,15 @@ def _tag(version: dict[str, Any], key: str) -> str | None:
     return None
 
 
+def search_filter(name: str) -> str:
+    """MLflow 3.18 leaves prompt versions out of a model-version search unless the filter asks for prompts
+    (its store anti-joins every `mlflow.prompt.is_prompt` row otherwise; found by the [image] test)."""
+    return f"name='{name}' AND tags.`mlflow.prompt.is_prompt` = 'true'"
+
+
 async def _search(client: httpx.AsyncClient, name: str, limit_s: float) -> list[dict[str, Any]]:
     got = await client.get(f"{MLFLOW}/api/2.0/mlflow/model-versions/search",
-                           params={"filter": f"name='{name}'", "max_results": 1000}, timeout=limit_s)
+                           params={"filter": search_filter(name), "max_results": 1000}, timeout=limit_s)
     _raise_for(got)
     return _versions(got.json())
 
@@ -128,6 +145,7 @@ async def handle(args: PromptsArgs, conn: Any, ctx: Any) -> None:
             number = await register(client, name, args.version)
             if number is not None:
                 _CACHE[name] = number
+                _MISSES.pop(name, None)
 
 
 async def version_of(name: str) -> int | None:
@@ -139,23 +157,29 @@ async def version_of(name: str) -> int | None:
         return None
     if name in _CACHE:
         return _CACHE[name]
+    if _MISSES.get(name, 0.0) > time.monotonic():
+        return None
+    found: int | None = None
     try:
         _, sha = template(name)
         async with httpx.AsyncClient(trust_env=False) as client:
             found = _matching(await _search(client, name, LOOKUP_TIMEOUT_S), sha)
     except Exception:
+        found = None
+    if found is None:
+        _MISSES[name] = time.monotonic() + MISS_TTL_S
         return None
-    if found is not None:
-        _CACHE[name] = found
+    _CACHE[name] = found
     return found
 
 
-async def on_worker_start(jobs: Any) -> None:
+async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
     """Enqueue-only (FR-EVENTS-1 hooks): a failure is logged and the next start retries."""
     from reader.obs.export import reader_version
 
     try:
-        await jobs.enqueue(KIND, {"version": reader_version()})
+        day = (now or datetime.now(UTC)).date().isoformat()
+        await jobs.enqueue(KIND, {"version": reader_version(), "digest": digest(day)})
     except Exception:
         log.warning("obs prompts not enqueued")
 
@@ -164,7 +188,7 @@ KIND_DECL: Final = JobKind(
     name=KIND,
     queue="obs",
     args=PromptsArgs,
-    key=("version",),
+    key=("digest",),
     handler=handle,
     max_attempts=3,
     transient=(httpx.TransportError, httpx.HTTPStatusError),

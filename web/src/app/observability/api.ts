@@ -50,9 +50,11 @@ const Ingest = v.object({
 // SRV-OBS FR-OBS-17: cost per lesson from the ledger (titles shown here only; MLflow never gets them).
 const LessonRow = v.object({
   lesson_id: v.string(),
-  title: v.string(),
-  course_id: v.string(),
-  course_title: v.string(),
+  // null with `deleted` true: spend on a lesson that no longer exists (it stays, so totals equal the ledger)
+  title: v.nullable(v.string()),
+  course_id: v.nullable(v.string()),
+  course_title: v.nullable(v.string()),
+  deleted: v.boolean(),
   compile_usd: v.number(),
   runs: v.number(),
   last_compile_usd: v.nullable(v.number()),

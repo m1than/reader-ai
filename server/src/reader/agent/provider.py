@@ -36,6 +36,7 @@ from reader.agent.pricing import (
     log_crosscheck,
     map_model_usage,
     map_usage,
+    micro,
     resolve_model,
 )
 from reader.config import ReaderConfig
@@ -388,9 +389,11 @@ class AgentProvider:
             usd = cost(model, usage, summed=tool_call) if usage is not None else None
             if usd is not None and sdk_usd is not None:
                 log_crosscheck(model, sdk_usd, usd, usage if tool_call else None)
+            # FR-AGENT-14: quantized once with the ledger's rounding; the ledger and the span get one value.
+            settled = micro(settled)
             await ledger.settle(self.engine, reservation, settled, sdk_usd, usd, usage, record)
-            stop_reason = getattr(seen.result, "stop_reason", None)
-            span.settled(usage, settled, stop_reason if isinstance(stop_reason, str) else None)
+            stop = getattr(seen.result, "stop_reason", None)
+            span.settled(usage, settled, stop if isinstance(stop, str) else None, summed=tool_call)
         log.info(
             "agent_call stage=%s run=%s model=%s settled=%s seconds=%.1f",
             call.stage,

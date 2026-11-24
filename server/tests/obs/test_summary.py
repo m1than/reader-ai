@@ -285,10 +285,36 @@ async def test_summary_on_vec_obs_3(pg: Any) -> None:
         ("search.embed", "exhausted", True),
     }
     assert [(t["error_code"], t["count"]) for t in other["failures"]["tutor"]] == [("tutor_failed", 1)]
-    assert other["ingest"]["rows"] == []
-    # FR-OBS-17: the other owner sees only its own lesson; the owner's lessons never appear there.
-    assert [r["lesson_id"] for r in other["lessons"]["rows"]] == ["20000000-0000-4000-8000-000000000009"]
+    # The other owner has the same book (code review round 1): the import of that sha256 is its material's too.
+    assert [r["material_sha256"] for r in other["ingest"]["rows"]] == ["aa11" * 16]
+    # FR-OBS-17: the other owner sees only its own lesson; the owner's lessons never appear there, and each
+    # owner's chars count only its own spans of the shared book (owner: 2000 above; other: 5000 + 7000).
+    assert [(r["lesson_id"], r["chars"]) for r in other["lessons"]["rows"]] == [
+        ("20000000-0000-4000-8000-000000000009", 12000)
+    ]
     assert '"question"' not in json.dumps(got)  # no text column is read (`question_id` is an id)
+
+
+@pytest.mark.anyio
+async def test_lessons_truncated_at_the_row_limit(pg: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-OBS-17: with the limit at 1 only the largest total is kept and `truncated` is true."""
+    from jobs.conftest import target
+    from reader.db import make_engine, migrate
+
+    summary = require("reader.obs.summary")
+    monkeypatch.setattr(summary, "LESSONS_LIMIT", 1)
+    engine = make_engine(target(pg))
+    try:
+        await migrate(engine)
+        await _seed(engine)
+        async with engine.connect() as conn:
+            got = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW, tracing=TRACING)
+    finally:
+        await engine.dispose()
+    lessons = got["lessons"]
+    assert lessons["truncated"] is True
+    assert [r["lesson_id"] for r in lessons["rows"]] == ["20000000-0000-4000-8000-000000000001"]
+    assert lessons["courses"][0]["total_usd"] == 1.86  # course totals over the returned rows only
 
 
 @pytest.mark.anyio

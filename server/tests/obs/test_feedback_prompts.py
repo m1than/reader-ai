@@ -64,7 +64,8 @@ def test_kind_declarations() -> None:
     assert feedback.TraceMissing in k.transient and httpx.TransportError in k.transient
     assert feedback.SCHEDULE_IN_S == 60 and feedback.HTTP_TIMEOUT_S == 10.0
     p = prompts.KIND_DECL
-    assert (p.name, p.queue, p.key, p.max_attempts) == ("obs.prompts", "obs", ("version",), 3)
+    assert (p.name, p.queue, p.key, p.max_attempts) == ("obs.prompts", "obs", ("digest",), 3)
+    assert prompts.LOOKUP_TIMEOUT_S == 2.0 and prompts.MISS_TTL_S == 600.0
     assert sorted(VEC4["job_kinds"]) == ["obs.feedback", "obs.prompts"]
 
 
@@ -131,6 +132,21 @@ async def test_post_creates_once_and_skips_an_existing_one() -> None:
     assert [r.method for r in existing.requests] == ["GET"]  # idempotent: no second assessment
 
 
+@pytest.mark.parametrize("there", [
+    # verify.passed and verify.lab_passed share the source_id reader.pipeline.verify: the name decides
+    {"assessment_name": "verify.passed", "source": {"source_id": "reader.pipeline.verify"}},
+    # the same name from another source is not ours
+    {"assessment_name": "verify.lab_passed", "source": {"source_id": "reader.other"}},
+])
+async def test_idempotency_needs_the_same_name_and_source(there: dict[str, Any]) -> None:
+    feedback = require("reader.obs.feedback")
+    args = _args(name="verify.lab_passed", value=True, metadata={"cells": 12, "cells_ok": 12})
+    mlflow = Mlflow({("GET", "/ajax-api/3.0/mlflow/traces/get"): {"trace": {"trace_info": {"assessments": [there]}}}})
+    async with mlflow.client() as c:
+        assert await feedback.post(args, c, last=False) is True
+    assert [r.method for r in mlflow.requests] == ["GET", "POST"]
+
+
 async def test_404_is_transient_until_the_last_attempt(caplog: Any) -> None:
     feedback = require("reader.obs.feedback")
     missing = Mlflow({("GET", "/ajax-api/3.0/mlflow/traces/get"): (404, {})})
@@ -139,7 +155,49 @@ async def test_404_is_transient_until_the_last_attempt(caplog: Any) -> None:
             await feedback.post(_args(), c, last=False)
         with caplog.at_level(logging.INFO, logger="reader.obs"):
             assert await feedback.post(_args(), c, last=True) is False
-    assert "obs feedback_no_trace name=fact_check.passed" in [r.getMessage() for r in caplog.records]
+    got = [(r.levelno, r.getMessage()) for r in caplog.records]
+    assert (logging.INFO, "obs feedback_no_trace name=fact_check.passed") in got
+    assert [r.method for r in missing.requests] == ["GET", "GET"]  # no POST after a 404 GET
+
+
+async def test_post_404_is_transient_then_a_warning(caplog: Any) -> None:
+    feedback = require("reader.obs.feedback")
+    trace = feedback.trace_ref(104, "pipeline.stage:" + "a" * 64)
+    gone = Mlflow({
+        ("GET", "/ajax-api/3.0/mlflow/traces/get"): {"trace": {"trace_info": {"assessments": []}}},
+        ("POST", f"/ajax-api/3.0/mlflow/traces/{trace}/assessments"): (404, {}),
+    })
+    async with gone.client() as c:
+        with pytest.raises(feedback.TraceMissing):
+            await feedback.post(_args(), c, last=False)
+        with caplog.at_level(logging.INFO, logger="reader.obs"):
+            assert await feedback.post(_args(), c, last=True) is False
+    assert (logging.WARNING, "obs feedback_no_trace name=fact_check.passed") in [
+        (r.levelno, r.getMessage()) for r in caplog.records
+    ]
+
+
+def _patch_client(monkeypatch: pytest.MonkeyPatch, mlflow: Mlflow) -> None:
+    """Every httpx.AsyncClient the code under test opens talks to `mlflow`."""
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient",
+                        lambda **kw: original(transport=httpx.MockTransport(mlflow.handler)))
+
+
+@pytest.mark.parametrize(("attempts", "raises"), [(0, True), (1, True), (2, False)])
+async def test_handler_last_attempt_is_the_third(monkeypatch: pytest.MonkeyPatch, attempts: int, raises: bool) -> None:
+    feedback = require("reader.obs.feedback")
+    from reader.obs import setup
+
+    monkeypatch.setattr(setup, "current_settings", lambda: setup.Settings(True, 30))
+    missing = Mlflow({("GET", "/ajax-api/3.0/mlflow/traces/get"): (404, {})})
+    _patch_client(monkeypatch, missing)
+    if raises:
+        with pytest.raises(feedback.TraceMissing):
+            await feedback.handle(_args(), None, SimpleNamespace(attempts=attempts))
+    else:
+        await feedback.handle(_args(), None, SimpleNamespace(attempts=attempts))  # ends without a request
+    assert len(missing.requests) == 1
 
 
 async def test_other_answers() -> None:
@@ -172,12 +230,22 @@ async def test_record_enqueues_and_never_raises(monkeypatch: pytest.MonkeyPatch,
         async def enqueue(self, kind: str, args: Any, schedule_in: int = 0) -> None:
             calls.append((kind, args, schedule_in))
 
+    import reader.obs
+
     monkeypatch.setattr(reader.jobs, "running", lambda: Jobs())
     ctx = SimpleNamespace(job_id=7, key="tutor.answer:" + "d" * 64, attempts=0)
+    monkeypatch.setitem(reader.obs._STATE, "provider", None)
+    await feedback.record(ctx, "tutor.citations_valid", True, {"total": 3, "valid": 3})
+    assert calls == []  # tracing off: nothing to assess, nothing enqueued
+    monkeypatch.setitem(reader.obs._STATE, "provider", object())
     await feedback.record(ctx, "tutor.citations_valid", True, {"total": 3, "valid": 3})
     assert calls == [("obs.feedback", {"job_id": 7, "key": ctx.key, "name": "tutor.citations_valid", "value": True,
                                        "metadata": {"total": 3, "valid": 3}}, 60)]
     assert not any(c in json.dumps(calls) for c in CANARIES)  # INV-OBS-2: the args hold ids and numbers only
+    calls.clear()
+    await feedback.record(ctx, CANARIES[0], True)  # the catalogue check comes first, even with a working queue
+    await feedback.record(ctx, "tutor.citations_valid", True, {"note": 1})
+    assert calls == []
 
     def down() -> Any:
         raise RuntimeError("no worker")
@@ -217,7 +285,7 @@ async def test_register_creates_a_version_only_for_a_new_sha() -> None:
     async with fresh.client() as c:
         assert await prompts.register(c, "reader.tutor", "0.1.0") == 1
     search, model, version = fresh.requests
-    assert search.url.params["filter"] == "name='reader.tutor'"
+    assert search.url.params["filter"] == "name='reader.tutor' AND tags.`mlflow.prompt.is_prompt` = 'true'"
     assert json.loads(model.content) == {"name": "reader.tutor",
                                          "tags": [{"key": "mlflow.prompt.is_prompt", "value": "true"}]}
     body = json.loads(version.content)
@@ -234,16 +302,123 @@ async def test_register_creates_a_version_only_for_a_new_sha() -> None:
     assert [r.method for r in known.requests] == ["GET"]
 
 
-async def test_version_of_is_none_with_tracing_off_and_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def _found(sha: str, number: str = "3") -> dict[str, Any]:
+    return {"model_versions": [{"version": number, "tags": [{"key": "reader.prompt_sha256", "value": sha}]}]}
+
+
+async def test_version_of_lookups(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-OBS-18: tracing off or an unknown name returns None before any request (MLflow reachable here); a
+    lookup uses LOOKUP_TIMEOUT_S; a found version is cached; a miss is cached for MISS_TTL_S."""
     prompts = require("reader.obs.prompts")
     import reader.obs
 
+    _, sha = prompts.template("reader.tutor")
     monkeypatch.setattr(prompts, "_CACHE", {})
+    monkeypatch.setattr(prompts, "_MISSES", {})
+    mlflow = Mlflow({("GET", "/api/2.0/mlflow/model-versions/search"): _found(sha)})
+    _patch_client(monkeypatch, mlflow)
     monkeypatch.setitem(reader.obs._STATE, "provider", None)
     assert await prompts.version_of("reader.tutor") is None
     monkeypatch.setitem(reader.obs._STATE, "provider", object())
     assert await prompts.version_of("reader.verify") is None  # no such template
-    assert await prompts.version_of("reader.tutor") is None  # MLflow unreachable from the test: None, no raise
+    assert mlflow.requests == []
+    assert await prompts.version_of("reader.tutor") == 3
+    assert await prompts.version_of("reader.tutor") == 3  # cached: one request
+    (lookup,) = mlflow.requests
+    assert lookup.extensions["timeout"]["read"] == prompts.LOOKUP_TIMEOUT_S
+    # A miss: one request, then none until the TTL passes.
+    monkeypatch.setattr(prompts, "_CACHE", {})
+    clock = [1000.0]
+    monkeypatch.setattr(prompts.time, "monotonic", lambda: clock[0])
+    mlflow.replies[("GET", "/api/2.0/mlflow/model-versions/search")] = {"model_versions": []}
+    assert await prompts.version_of("reader.tutor") is None
+    assert await prompts.version_of("reader.tutor") is None
+    assert len(mlflow.requests) == 2
+    clock[0] += prompts.MISS_TTL_S + 1
+    assert await prompts.version_of("reader.tutor") is None
+    assert len(mlflow.requests) == 3
+
+
+async def test_version_of_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts = require("reader.obs.prompts")
+    import reader.obs
+
+    monkeypatch.setattr(prompts, "_CACHE", {})
+    monkeypatch.setattr(prompts, "_MISSES", {})
+    monkeypatch.setitem(reader.obs._STATE, "provider", object())
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(refuse)))
+    assert await prompts.version_of("reader.tutor") is None
+
+
+async def test_digest_keys_on_templates_and_day(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-OBS-15: a key that ended dead (MLflow down at start) is retried by the next day's start; changed
+    templates get a new key at once; registration itself is idempotent by sha."""
+    prompts = require("reader.obs.prompts")
+    from datetime import UTC, datetime
+
+    calls: list[Any] = []
+
+    class Jobs:
+        async def enqueue(self, kind: str, args: Any, schedule_in: int = 0) -> None:
+            calls.append((kind, args))
+
+    day1, day2 = datetime(2026, 11, 24, 9, tzinfo=UTC), datetime(2026, 11, 25, 9, tzinfo=UTC)
+    await prompts.on_worker_start(Jobs(), day1)
+    await prompts.on_worker_start(Jobs(), day1)
+    await prompts.on_worker_start(Jobs(), day2)
+    (k1, a1), (_, a2), (_, a3) = calls
+    assert k1 == "obs.prompts" and set(a1) == {"version", "digest"}
+    assert a1 == a2 and a1["digest"] != a3["digest"]
+    assert a1["digest"] == prompts.digest("2026-11-24")
+    real = prompts.template
+    monkeypatch.setattr(prompts, "template", lambda n: (real(n)[0], "0" * 64) if n == "reader.tutor" else real(n))
+    assert prompts.digest("2026-11-24") != a1["digest"]  # a changed template: a new key the same day
+
+
+async def test_mlflow_down_at_start_up_later(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts = require("reader.obs.prompts")
+    from reader.obs import setup
+
+    monkeypatch.setattr(setup, "current_settings", lambda: setup.Settings(True, 30))
+    monkeypatch.setattr(prompts, "_CACHE", {})
+    args = prompts.PromptsArgs(version="0.1.0", digest=prompts.digest("2026-11-24"))
+
+    up = Mlflow({})
+    up.replies[("GET", "/api/2.0/mlflow/model-versions/search")] = {"model_versions": []}
+    up.replies[("POST", "/api/2.0/mlflow/model-versions/create")] = {"model_version": {"version": "1"}}
+    state = {"down": True}
+
+    def answer(request: httpx.Request) -> httpx.Response:
+        if state["down"]:
+            raise httpx.ConnectError("down", request=request)
+        return up.handler(request)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(answer)))
+    with pytest.raises(httpx.TransportError):  # transient: the key is retried, then dead after 3 attempts
+        await prompts.handle(args, None, None)
+    assert prompts._CACHE == {}
+    shas = {name: prompts.template(name)[1] for name in prompts.PROMPTS}
+    state["down"] = False
+    later = prompts.PromptsArgs(version="0.1.0", digest=prompts.digest("2026-11-25"))  # the next day's key
+    await prompts.handle(later, None, None)
+    assert dict.fromkeys(shas, 1) == prompts._CACHE
+
+
+async def test_prompts_handler_does_nothing_with_tracing_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    prompts = require("reader.obs.prompts")
+    from reader.obs import setup
+
+    monkeypatch.setattr(setup, "current_settings", lambda: setup.Settings(False, 30))
+    mlflow = Mlflow({})
+    _patch_client(monkeypatch, mlflow)
+    await prompts.handle(prompts.PromptsArgs(version="0.1.0", digest="a" * 64), None, None)
+    assert mlflow.requests == []
 
 
 async def test_start_hook_never_raises(caplog: Any) -> None:

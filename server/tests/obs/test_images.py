@@ -534,7 +534,9 @@ print(json.dumps(out))
         assert out[case]["status"] == 403, case
     assert out["post_dash"]["status"] == 200
     assert out["j_none"]["status"] == 401
-    assert out["j_owner"]["status"] == 200 and out["j_post_own"]["status"] == 200
+    assert out["j_owner"]["status"] == 200
+    # The gate passes its own origin; the read-only 8444 edge then refuses the POST (code review round 1).
+    assert out["j_post_own"]["status"] == 405
     for case in ("j_post_dash", "post_jaeger_origin", "j_spoof", "spoof"):
         assert out[case]["status"] == 403, case
     assert "cookie" not in json.loads(out["j_owner"]["body"])

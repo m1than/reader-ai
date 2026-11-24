@@ -339,7 +339,9 @@ requirements:
       caddy–jaeger and the `never` pairs jaeger–{api, worker, mlflow, postgres, embed, agent-proxy, mcp, every
       kernel}. The Caddyfile gains the site `localhost:8444` of FR-OBS-19, `header_up X-Reader-Site mlflow|jaeger` in
       both forward_auth blocks, and the main site's `handle /api/obs/gate` (before `/api/*`) with `header_up
-      X-Reader-Site app`; `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001, mlflow:5000, jaeger:16686};
+      X-Reader-Site app`; every site strips a client's `X-Reader-Site` (`request_header -X-Reader-Site`), and the
+      8444 site answers 404 for `/api/archive*` and `/api/transform*` and 405 for any method but GET and HEAD
+      (SRV-OBS code review round 1); `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001, mlflow:5000, jaeger:16686};
       INV-DEPLOY-2 (1)'s environment entries add rotel's five, mlflow's third and jaeger's one.
   - id: FR-DEPLOY-14   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23); was FR-DEPLOY-13 until the merge
     text: >-

@@ -360,7 +360,9 @@ requirements:
       (experiments search, delete-traces); other endpoints were not measured, and the gate's Origin rules are what
       refuse a cross-origin POST. Per-site origins (ADR-0033, accepted 2026-11-24): every forward_auth block sets
       `header_up X-Reader-Site <site>` (`mlflow` on 8443, `jaeger` on 8444, FR-OBS-19), overriding any value the
-      client sent, and the main site's handler for `/api/obs/gate` sets `X-Reader-Site: app` the same way. The gate
+      client sent, and the main site's handler for `/api/obs/gate` sets `X-Reader-Site: app` the same way; every
+      site also strips a client-sent `X-Reader-Site` first (`request_header -X-Reader-Site`, site-wide; code review
+      round 1), so no upstream ever sees a client's value. The gate
       reads the site first: an absent or unknown value is 403; the expected Origin above is then the site's own
       (`https://localhost:8443` for `mlflow`, `https://localhost:8444` for `jaeger`, `https://localhost` for `app`),
       and every other rule is unchanged. Measured (spikes/obs-stack round 5, 18 cases): each site passed only with its
@@ -482,16 +484,21 @@ requirements:
       call's (MLflow's tree aggregation lets `agent.call` hide the CLI's own counts; measured equal). (c) Cost, with
       the ledger as MLflow's source (owner, 2026-11-24: "our pricing.yaml is the source of truth"). SRV-AGENT sets on
       `agent.call`, after the settle, `reader.cost_usd` = the settle row's `settled_usd` (numeric(12,6), exact) and
-      `reader.cost_input_usd` = the input part (B7): with P = pricing.yaml's rates for the call's model and the settle
-      row's token columns, `priced_in` = input × P.input + cache_read × P.cache_read + cache_write_5m ×
-      P.cache_write_5m + cache_write_1h × P.cache_write_1h (each cache write at its own TTL's rate, the columns
-      SRV-AGENT's `map_usage` fills), `priced_out` = output × P.output; `reader.cost_input_usd` = round_half_even(
-      settled × priced_in / (priced_in + priced_out), 6), or 0 when priced_in + priced_out = 0 (a settle with no
-      usage: the whole amount counts as output; with settled 0 both are 0). The exporter derives `mlflow.llm.cost` =
-      {input_cost: reader.cost_input_usd, output_cost: reader.cost_usd − input_cost, total_cost: reader.cost_usd},
-      computed with `Decimal(str(value)).quantize(Decimal("0.000001"), ROUND_HALF_EVEN)` for both inputs and the
-      subtraction done in Decimal (never in float), then serialized as numbers, so the parts sum to the total exactly
-      at 6 places; no `reader.cost_usd`, no `mlflow.llm.cost` (a
+      `reader.cost_input_usd` = the input part (B7). SRV-AGENT quantizes the settled amount once with the ledger's
+      rounding (`pricing.micro`, 6 places, ROUND_HALF_UP; code review round 1) and passes that same value to both
+      `ledger.settle` and the span. With P = pricing.yaml's rates for the call's model at the tier SRV-AGENT's
+      `cost()` uses (FR-AGENT-17: the `above_100k` tier when the usage's prompt tokens exceed 100,000 and the model
+      has one; a tool call's summed usage at the lower tier) and the settle row's token columns, `priced_in` = input
+      × P.input + cache_read × P.cache_read + cache_write_5m × P.cache_write_5m + cache_write_1h × P.cache_write_1h
+      (each cache write at its own TTL's rate, the columns SRV-AGENT's `map_usage` fills), `priced_out` = output ×
+      P.output + web_search_requests × web_search_usd × 10^6 (the search fee counts on the output side; rates are
+      per million tokens); `reader.cost_input_usd` = min(settled, round_half_up(settled × priced_in / (priced_in +
+      priced_out), 6)), or 0 when priced_in + priced_out = 0 (a settle with no usage: the whole amount counts as
+      output; with settled 0 both are 0). The exporter derives `mlflow.llm.cost` = {input_cost:
+      reader.cost_input_usd, output_cost: reader.cost_usd − input_cost, total_cost: reader.cost_usd}, computed with
+      `Decimal(str(value)).quantize(Decimal("0.000001"), ROUND_HALF_UP)` for both inputs and the subtraction done
+      in Decimal (never in float; the output part is serialized from its Decimal), so the parts sum to the total
+      exactly at 6 places; no `reader.cost_usd`, no `mlflow.llm.cost` (a
       reserve never settled, e.g. a killed call; /observability's spent(run) still counts it). An explicit cost on an
       AGENT span is kept by MLflow 3.18.0 (it auto-prices only non-AGENT spans; measured). MLflow would otherwise
       also price the CLI's `llm_request` spans and its span cost metrics sum every priced span with no dedup
@@ -528,7 +535,11 @@ requirements:
       pipeline kinds: the job wrapper calls it right after opening the root, with `reader.run_id` from the job's
       validated args (VEC-OBS-1 `job_args`); `tutor.answer`: the tutor handler calls it with `reader.lesson.id` after
       it reads the question row and before `Provider.run` (the lesson id is not in the args). The helper then starts
-      a daemon thread that calls `TracerProvider.force_flush(2000)`, so the job's own task never waits (INV-OBS-3);
+      a daemon thread that calls `TracerProvider.force_flush(2000)`, so the job's own task never waits (INV-OBS-3).
+      The 2000 ms is a request only: SDK 1.45.2's BatchSpanProcessor ignores the timeout and exports everything
+      queued, each export bounded by the exporter's 10 s timeout (code review round 1, read from the SDK); the job
+      never joins the thread, so only the thread's lifetime grows, and a failed flush is logged once as `obs
+      session_marker_failed` (an [unit] test raises inside it);
       with tracing disabled it does nothing (no span, no thread); any exception from opening the span or starting
       the thread is caught and logged once per process as `obs session_marker_failed` (no value), and the job goes
       on. The CLI's first export comes at its exit or its batch interval, after process start-up, so the marker
@@ -620,13 +631,19 @@ requirements:
       division by zero). `mlflow_url` = `https://localhost:8443/#/experiments/0/traces?q=<lesson id>`. Rows: at most
       200 lessons, those with the largest `total_usd` (ties by lesson id), with `truncated` true when more exist; a
       course total row per course over the returned rows (`usd_per_1k_chars` over their summed non-null lengths).
-      No text column but the two titles is returned. The page sorts the rows by any column (client-side; default
-      total_usd descending). VEC-OBS-3 gains a lesson whose run has a failed paid attempt (a settle row on an
+      No text column but the two titles is returned. Spend on a lesson id with no `lessons` row of the caller (the
+      lesson was deleted) is kept as a row with `title`, `course_id` and `course_title` null and `deleted` true
+      (every other row has `deleted` false), so the rows' totals equal the ledger's; the page shows it as "deleted
+      lesson", and it joins no course total (code review round 1). The page sorts the rows by any column
+      (client-side; default total_usd descending). VEC-OBS-3 gains a lesson whose run has a failed paid attempt (a settle row on an
       attempt whose job ended failed) and an open reserve, so `compile_usd` counts both, a voided reserve (counts 0),
       an open reserve and a settle row created before the window (both excluded: the query filters on
       `agent_spend.created_at`, so a reserve opened before the window counts nowhere in it),
       a second lesson with tutor spend only and no source (null per 1k chars), a lesson with 0 source characters
-      (null), another owner's lesson (absent), and the expected `lessons` JSON. [unit, db, live]
+      (null), another owner's lesson (absent), a second owner who imported the same book (same material sha256)
+      with their own spans, which must not change the first owner's chars, a lesson with two compile runs
+      (`last_compile_usd` = the newer run's), a deleted lesson's spend, and the expected `lessons` JSON; a [db] test
+      also sets the row limit to 1 and expects `truncated` true. [unit, db, live]
   - id: FR-OBS-14
     text: >-
       Under ADR-0035 (accepted 2026-11-24: the worker's assessment and prompt writes to MLflow). Code-sourced
@@ -637,8 +654,10 @@ requirements:
       not in this revision (review, non-blocking): its assessment is proposed with the freshness spec. The POST body
       is built only by `reader.obs.feedback.body(name, value, metadata)` from that catalogue: `assessment_name` =
       name, `feedback.value` = the value after its rule, `source` = {`source_type`: CODE, `source_id`: the entry's},
-      `metadata` = the entry's keys only, each a decimal string within its range, no `rationale`, no other field; a
-      name, value or metadata key outside the catalogue raises before any request. Job kind `obs.feedback` (declared
+      `metadata` = the entry's keys only, each a decimal string within its range, `trace_id` = `tr-<FR-OBS-5 trace
+      id>` (MLflow requires it in the body), no `rationale`, no other field; a name, value or metadata key outside
+      the catalogue raises before any request. `record` checks the catalogue before it enqueues and, with tracing
+      off, returns without enqueueing (code review round 1). Job kind `obs.feedback` (declared
       in `reader.obs.jobs` with SRV-EVENTS' `JobKind`): args {job_id, key, name, value, metadata} (the metadata
       travels in the args, so a retry posts the same body); idempotency key [job_id, name]; `max_attempts` 3 with
       SRV-EVENTS' delays (5 s, 25 s); `timeout_s` 30; the HTTP client timeout 10 s. The code that computes the
@@ -648,7 +667,8 @@ requirements:
       (`…/mlflow/traces/tr-<FR-OBS-5 trace id>`) and ends without a request when an assessment with the same name and
       `source_id` exists (idempotent across retries and a lost response); then it POSTs `…/assessments`. A 404 from
       either call is transient (raised as a `transient` type) while attempts remain; on the last attempt a 404 ends
-      without a request with the log line `obs feedback_no_trace name=<name>`, not `dead` (a trace that never
+      without a request with the log line `obs feedback_no_trace name=<name>` (INFO after the GET, WARNING when the
+      POST answered 404: the trace existed and then went away), not `dead` (a trace that never
       arrived, e.g. tracing turned off in between, is not a failure of the job); other HTTP errors and timeouts are
       transient; a 4xx other than 404 raises `FeedbackRefused` (the key ends `dead` with that class name). "Ends
       without a request" means the handler returns, so the key ends `succeeded`: SRV-EVENTS gives a handler no
@@ -660,16 +680,25 @@ requirements:
       Under ADR-0035 (as FR-OBS-14). Prompts tab: our own static prompt templates, never book text, listed as data in
       VEC-OBS-4 `prompts` (name → file: the four stage instruction files under `server/src/reader/pipeline/prompts/`
       and the tutor's `server/src/reader/tutor/prompts/answer-v1.md`; FR-PIPELINE-3's runtime system prompt is the
-      rendered book source plus these, and only the static file is registered). A job kind `obs.prompts` (key: the
-      package version; `max_attempts` 3, SRV-EVENTS' delays) is enqueued by the worker's start hook (SRV-EVENTS
+      rendered book source plus these, and only the static file is registered). A job kind `obs.prompts` (args
+      {version: the package version, digest}; key [digest], where digest = sha256 of the templates' sha256s in
+      VEC-OBS-4 order joined with the worker's start day (UTC, YYYY-MM-DD), so changed templates register at the
+      next start and a key that ended dead, e.g. MLflow down at start, is retried by the first start of the next
+      day; registration is idempotent by sha, so a repeat is harmless (code review round 1); `max_attempts` 3,
+      SRV-EVENTS' delays) is enqueued by the worker's start hook (SRV-EVENTS
       FR-EVENTS-1 hooks: enqueue-only, so registration never blocks the worker's start; a failed enqueue is logged
-      and the next start retries). Per file: the version is looked up by sha (`search` of the prompt's versions for
-      tag `reader.prompt_sha256` = the file's sha256); only when none matches is a version created, with tags
+      and the next start retries). Per file: the version is looked up by sha (`search` of the prompt's versions,
+      filtered by the name AND the version tag mlflow.prompt.is_prompt = 'true', for tag `reader.prompt_sha256` = the
+      file's sha256; without the prompt tag in the filter MLflow 3.18 returns no prompt version, so every start
+      would create a new one: found by the [image] test, code review round 1); only when none matches is a version created, with tags
       `reader.prompt_sha256` and `reader.version` (the package version; the image has no git sha). The body is the
       file's bytes; INV-OBS-2's canary covers it (no book text, secret or run token can be in a static file; a unit
       test also runs the secret scanner over each file and refuses a `{{…}}` placeholder that a renderer would fill).
       With tracing off the run ends without a request. The worker reads the stage → version map from MLflow on demand for
-      FR-OBS-18 (linked prompts), cached per process; an unknown version links nothing. Measured: 3 prompts
+      FR-OBS-18 (linked prompts), cached per process: the handler fills the cache with every version it registers or
+      finds; a lookup (timeout `LOOKUP_TIMEOUT_S` = 2 s) caches a found version for the process and a miss or a
+      failure for `MISS_TTL_S` = 600 s, so a job never waits on MLflow more than once per name per 10 minutes; an
+      unknown version links nothing. Measured: 3 prompts
       registered, listed with their tags, and "1 linked prompt" on a trace. [unit, image]
   - id: FR-OBS-18
     text: >-
@@ -694,10 +723,16 @@ requirements:
       jaeger, `jaeger-ui` 10.230.6.0/24 with exactly caddy and jaeger (both internal; checked unused like FR-OBS-8's
       subnets); jaeger is on no other network. Caddy serves `localhost:8444` (`tls internal`; published as
       `127.0.0.1:8444:8444` by `reader up`'s override only while the profile is active) with the same forward_auth
-      (`header_up X-Reader-Site jaeger`), `reverse_proxy jaeger:16686` with FR-OBS-9's header removals, and the CSP of
+      (`header_up X-Reader-Site jaeger`), only GET and HEAD (any other method answers 405 at the edge: measured
+      against the pinned image with no network, Jaeger 2.23.0 answers POST `/api/archive/<id>` (500, no archive
+      storage) and POST `/api/transform` (200), every other non-GET route 404/405 or the SPA's 200; code review
+      round 1), `/api/archive*` and `/api/transform*` answering 404 for every method, `reverse_proxy jaeger:16686`
+      with FR-OBS-9's header removals, and the CSP of
       FR-OBS-9 except `script-src 'self' 'sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU='
       'sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ='` and `base-uri 'self'`. `/observability` links each
-      trace to `https://localhost:8444/trace/<trace id>` beside the MLflow link. Tests: [config] networks, VEC-DEPLOY-2
+      trace to `https://localhost:8444/trace/<trace id>` beside the MLflow link, labelled "Jaeger (recent traces
+      only)" with the title "Jaeger keeps the newest 450 traces and starts empty after a restart; an older trace may
+      have rotated out" (code review round 1). Tests: [config] networks, VEC-DEPLOY-2
       pairs (rotel–jaeger, caddy–jaeger, and jaeger never with api, worker, mlflow, postgres, embed, agent-proxy, mcp
       or a kernel), the 8444 site, its CSP and the X-Reader-Site headers; [image] jaeger starts under the hardening and
       receives a span through rotel; the inline-script hashes recomputed from the served index equal the configured

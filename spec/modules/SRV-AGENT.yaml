@@ -324,9 +324,11 @@ requirements:
       `reader.step`; `StageCall` gains only `course_id: UUID | None = None` and `step: int | None = None` (no separate
       context object). The tokens use the GenAI semconv keys: `gen_ai.usage.input_tokens` = input + cache read +
       cache write (5m + 1h), `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`,
-      `gen_ai.usage.cache_write.input_tokens`. With the settled amount the span also sets `reader.cost_input_usd`: the
-      input share by pricing.yaml's rates for the settle row's token columns, each cache write at its own TTL's rate,
-      rounded half-even to 6 places; 0 when no usage was mapped.
+      `gen_ai.usage.cache_write.input_tokens`. The settled amount is quantized once with `pricing.micro` (6 places,
+      ROUND_HALF_UP) and that value goes to both `ledger.settle` and the span (code review round 1). With it the span
+      also sets `reader.cost_input_usd`: the input share by pricing.yaml's rates at `cost()`'s tier (FR-AGENT-17) for
+      the settle row's token columns, each cache write at its own TTL's rate, the search fee on the output side,
+      rounded half-up to 6 places (SRV-OBS FR-OBS-12 c); 0 when no usage was mapped.
   - id: FR-AGENT-15
     text: >-
       Task-scoped tool allowance with pinned shapes (ADR-0030 Decision 1; VEC-AGENT-3). `POST /run-tokens` takes an

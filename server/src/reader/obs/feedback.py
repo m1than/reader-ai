@@ -92,8 +92,11 @@ async def record(ctx: Any, name: str, value: bool | float, metadata: Mapping[str
     """Enqueue `obs.feedback` for the running job's trace; a failure is logged and changes nothing."""
     try:
         from reader.jobs import running
+        from reader.obs import _STATE
 
         checked(name, value, metadata or {})
+        if _STATE["provider"] is None:  # tracing off: no trace to assess
+            return
         args = {"job_id": int(ctx.job_id), "key": str(ctx.key), "name": name, "value": value,
                 "metadata": dict(metadata or {})}
         await running().enqueue(KIND, args, schedule_in=SCHEDULE_IN_S)
@@ -109,7 +112,7 @@ async def post(args: FeedbackArgs, client: httpx.AsyncClient, last: bool) -> boo
     got = await client.get(f"{MLFLOW}/ajax-api/3.0/mlflow/traces/get", params={"trace_id": trace_id},
                            timeout=HTTP_TIMEOUT_S)
     if got.status_code == 404:
-        return _missing(args.name, last)
+        return _missing(args.name, last, after_post=False)
     _raise_for(got)
     info = ((got.json() or {}).get("trace") or {}).get("trace_info") or {}
     for existing in info.get("assessments") or []:
@@ -119,15 +122,16 @@ async def post(args: FeedbackArgs, client: httpx.AsyncClient, last: bool) -> boo
     sent = await client.post(f"{MLFLOW}/ajax-api/3.0/mlflow/traces/{trace_id}/assessments", json=payload,
                              timeout=HTTP_TIMEOUT_S)
     if sent.status_code == 404:
-        return _missing(args.name, last)
+        return _missing(args.name, last, after_post=True)
     _raise_for(sent)
     return True
 
 
-def _missing(name: str, last: bool) -> bool:
+def _missing(name: str, last: bool, *, after_post: bool) -> bool:
     if not last:
         raise TraceMissing(name)
-    log.info("obs feedback_no_trace name=%s", name)
+    # After the POST the trace existed a moment ago and went away: worth a WARNING (code review round 1).
+    log.log(logging.WARNING if after_post else logging.INFO, "obs feedback_no_trace name=%s", name)
     return False
 
 

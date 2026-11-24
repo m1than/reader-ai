@@ -212,12 +212,13 @@ async def test_on_worker_start_enqueues_today() -> None:
     log: list[str] = []
     fake = FakeJobs(log)
     await jobs.on_worker_start(fake, now=NOW)
-    # FR-OBS-15: the start hook also enqueues the prompt registration for this package version.
+    # FR-OBS-15: the start hook also enqueues the prompt registration, keyed by the templates and the start day.
+    from reader.obs import prompts
     from reader.obs.export import reader_version
 
     assert fake.calls == [
         ("obs.retention", {"day": "2026-11-24"}, 0),
-        ("obs.prompts", {"version": reader_version()}, 0),
+        ("obs.prompts", {"version": reader_version(), "digest": prompts.digest("2026-11-24")}, 0),
     ]
 
 

@@ -299,3 +299,106 @@ def test_mlflow_delivery_with_jaeger_stopped(prefix: str, canary_image: str, mlf
     sent = _send(prefix, canary_image)
     got = _get(prefix, canary_image, sent["trace"])
     assert got["found"] is not None and got["found"] - sent["ended"] <= 30  # NFR-OBS-1 holds without Jaeger
+
+
+# --- FR-OBS-13, -14, -15 against real MLflow (code review round 1): the shipped code, from the server image ---
+
+
+@pytest.fixture(scope="module")
+def server_image() -> str:
+    return ti.build_id("-f", str(REPO / "deploy/images/server.Dockerfile"), str(REPO))
+
+
+def _server_client(prefix: str, image: str, net: str, script: str, timeout: float = 300) -> str:
+    return sh("docker", "run", "--rm", "--network", f"{prefix}-{net}", "--entrypoint", "python", image, "-c", script,
+              timeout=timeout)
+
+
+JOB_ID, JOB_KEY = 4711, "tutor.answer:" + "e" * 64
+
+CHILDREN = """
+import json
+from opentelemetry import context as ctx, trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+import reader.obs as obs
+from reader.obs import spans
+from reader.obs.attributes import AllowList, Catalogs
+from reader.obs.export import AllowListExporter, resource
+from reader.obs.ids import JobIdGenerator, derive_trace_id, next_trace_id
+cat = Catalogs(frozenset(), frozenset({"tutor.answer"}), frozenset(), frozenset({"tutor"}), frozenset())
+ours = TracerProvider(resource=resource("worker"), id_generator=JobIdGenerator())
+ours.add_span_processor(SimpleSpanProcessor(AllowListExporter(
+    OTLPSpanExporter(endpoint="http://rotel:4318/v1/traces"), AllowList(cat), resource("worker"))))
+obs.install(ours)
+with next_trace_id(derive_trace_id(%(job)d, %(key)r)):
+    root = ours.get_tracer("reader").start_span("job tutor.answer", context=ctx.Context(),
+        kind=trace.SpanKind.CONSUMER, attributes={"reader.job.kind": "tutor.answer", "reader.job.id": %(job)d})
+with trace.use_span(root):
+    with spans.child_span("tutor.retrieve") as r:
+        r.set({"reader.retrieval.hits": 8, "reader.retrieval.candidates": 40})
+    with spans.child_span("tutor.citations") as c:
+        c.set({"reader.citations.total": 4, "reader.citations.valid": 3})
+root.end()
+ours.shutdown()
+print(json.dumps({"trace": format(root.get_span_context().trace_id, "032x")}))
+"""
+
+WRITES = """
+import asyncio, json, time, urllib.request
+import httpx
+from reader.obs import feedback, prompts
+TRACE = %(trace)r
+def get():
+    with urllib.request.urlopen("http://mlflow:5000/ajax-api/3.0/mlflow/traces/get?trace_id=tr-" + TRACE,
+                                timeout=5) as r:
+        return json.load(r)["trace"]
+deadline, trace = time.time() + 30, None
+while time.time() < deadline:
+    try:
+        trace = get()
+        if len(trace.get("spans", [])) >= 3:
+            break
+    except Exception:
+        pass
+    time.sleep(1)
+async def main():
+    args = feedback.FeedbackArgs(job_id=%(job)d, key=%(key)r, name="tutor.citations_valid", value=False,
+                                 metadata={"total": 4, "valid": 3})
+    async with httpx.AsyncClient(trust_env=False) as client:
+        first = await feedback.post(args, client, last=True)
+        again = await feedback.post(args, client, last=True)
+        v1 = await prompts.register(client, "reader.tutor", "0.1.0")
+        v2 = await prompts.register(client, "reader.tutor", "0.1.1")
+    return first, again, v1, v2
+first, again, v1, v2 = asyncio.run(main())
+after = get()
+print(json.dumps({"spans": trace["spans"] if trace else [], "first": first, "again": again, "v1": v1, "v2": v2,
+                  "assessments": after["trace_info"].get("assessments", [])}))
+"""
+
+
+def test_feedback_prompts_and_child_spans_against_real_mlflow(
+    prefix: str, server_image: str, mlflow_image: str
+) -> None:
+    _backend(prefix, mlflow_image)
+    sent = json.loads(_server_client(prefix, server_image, "otel", CHILDREN % {"job": JOB_ID, "key": JOB_KEY}))
+    got = json.loads(_server_client(prefix, server_image, "obs",
+                                    WRITES % {"trace": sent["trace"], "job": JOB_ID, "key": JOB_KEY}))
+    by_name = {s["name"]: _attrs(s) for s in got["spans"]}
+    # FR-OBS-13: the child spans reach MLflow with their counts and their derived span type.
+    assert by_name["tutor.retrieve"]["reader.retrieval.hits"] == 8
+    assert by_name["tutor.retrieve"]["reader.retrieval.candidates"] == 40
+    assert by_name["tutor.citations"]["reader.citations.valid"] == 3
+    assert by_name["tutor.retrieve"]["mlflow.spanType"] == "RETRIEVER"
+    # FR-OBS-14: one assessment from the catalogue, idempotent on a second post.
+    assert (got["first"], got["again"]) == (True, False)
+    (assessment,) = [a for a in got["assessments"] if a.get("assessment_name") == "tutor.citations_valid"]
+    assert assessment["source"]["source_type"] == "CODE"
+    assert assessment["source"]["source_id"] == "reader.tutor.citations"
+    assert assessment["feedback"]["value"] is False
+    assert assessment.get("metadata") == {"total": "4", "valid": "3"}
+    assert "rationale" not in assessment
+    # FR-OBS-15: registration creates one version and finds it again by sha (another package version, same file).
+    assert got["v1"] == got["v2"] == 1

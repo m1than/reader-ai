@@ -13,6 +13,9 @@ import { DASHBOARDS, jaegerUrl, OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, ty
 const MORE = 'More rows may exist.';
 // FR-UI-18: the server gives no trace id when no trace can exist (before tracing, tracing off, past retention).
 const NO_TRACE = 'no trace';
+// SRV-OBS FR-OBS-19: Jaeger keeps only the newest traces in memory, so its link may lead nowhere.
+const JAEGER_TITLE =
+  'Jaeger keeps the newest 450 traces and starts empty after a restart; an older trace may have rotated out';
 
 function TraceLink({ id }: { id: string | null }) {
   if (!id) return <span className="muted">{NO_TRACE}</span>;
@@ -21,8 +24,8 @@ function TraceLink({ id }: { id: string | null }) {
       <a href={traceUrl(id)} target="_blank" rel="noopener noreferrer">
         Trace
       </a>{' '}
-      <a href={jaegerUrl(id)} target="_blank" rel="noopener noreferrer">
-        Jaeger
+      <a href={jaegerUrl(id)} target="_blank" rel="noopener noreferrer" title={JAEGER_TITLE}>
+        Jaeger (recent traces only)
       </a>
     </span>
   );
@@ -261,7 +264,7 @@ function LessonsView({ lessons }: { lessons: ObsSummary['lessons'] }) {
           <tbody>
             {rows.map((r) => (
               <tr key={r.lesson_id}>
-                <td>{r.title}</td>
+                <td>{r.deleted ? <span className="muted">deleted lesson</span> : r.title}</td>
                 <td>{r.course_title}</td>
                 <td>{num(r.compile_usd)}</td>
                 <td>{r.runs}</td>

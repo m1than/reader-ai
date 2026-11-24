@@ -107,9 +107,12 @@ describe('observability page (FR-UI-18)', () => {
   it('links every trace to Jaeger too and lists the saved views (FR-OBS-16, -19)', async () => {
     await mountPage(() => json(200, summary()));
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Dashboards' })).toBeTruthy());
-    const jaeger = screen.getAllByRole('link', { name: 'Jaeger' }).map((a) => a.getAttribute('href'));
+    const links = screen.getAllByRole('link', { name: 'Jaeger (recent traces only)' });
+    const jaeger = links.map((a) => a.getAttribute('href'));
     expect(jaeger).toContain('https://localhost:8444/trace/cf8a1cbe5cc23a546382dc30e5e2b16a');
     expect(jaeger).toHaveLength(screen.getAllByRole('link', { name: 'Trace' }).length);
+    // Jaeger keeps the newest 450 traces and starts empty after a restart (code review round 1).
+    for (const a of links) expect(a.getAttribute('title')).toMatch(/newest 450 traces.*may have rotated out/);
     const views = within(screen.getByRole('region', { name: 'Dashboards' })).getAllByRole('link');
     expect(views.map((a) => a.getAttribute('href'))).toContain('https://localhost:8443/#/experiments/0/traces?q=dead');
     for (const a of views) expect(a.getAttribute('rel')).toBe('noopener noreferrer');
@@ -120,25 +123,28 @@ describe('observability page (FR-UI-18)', () => {
     const region = await waitFor(() => screen.getByRole('region', { name: 'Cost per lesson' }));
     const table = within(region).getByRole('table', { name: 'Cost per lesson' });
     const titles = () => within(table).getAllByRole('row').slice(1).map((r) => r.querySelector('td')?.textContent);
-    expect(titles()).toEqual(['Lesson one', 'Lesson two', 'Lesson three']); // total USD, largest first
+    // total USD, largest first; spend on a deleted lesson stays as a row (code review round 1)
+    expect(titles()).toEqual(['Lesson one', 'Lesson three', 'Lesson two', 'deleted lesson']);
     const total = within(table).getByRole('columnheader', { name: 'Total USD' });
     expect(total.getAttribute('aria-sort')).toBe('descending');
     expect(within(region).getByText(/includes 1 open reserves/)).toBeTruthy();
     const traces = within(table).getAllByRole('link', { name: 'Traces' });
     expect(traces[0]!.getAttribute('href')).toBe('https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000001');
-    // Per 1k characters: lesson one 0.93; lessons two and three have none, so they stay last in both directions.
+    // Per 1k characters: lesson one 0.93; the others have none, so they stay last in both directions.
     const per = () => within(table).getByRole('button', { name: 'USD per 1k characters' });
     await act(async () => per().click());
     expect(titles()[0]).toBe('Lesson one');
     await act(async () => per().click());
-    expect(titles()).toEqual(['Lesson one', 'Lesson two', 'Lesson three']); // missing values tie by lesson id
+    // missing values tie by lesson id
+    expect(titles()).toEqual(['Lesson one', 'Lesson two', 'Lesson three', 'deleted lesson']);
     expect(within(table).getByRole('columnheader', { name: 'USD per 1k characters' }).getAttribute('aria-sort')).toBe('ascending');
     expect(total.getAttribute('aria-sort')).toBeNull();
     await act(async () => within(table).getByRole('button', { name: 'Lesson' }).click());
-    expect(titles()).toEqual(['Lesson two', 'Lesson three', 'Lesson one']); // descending by title
+    // descending by title; the deleted lesson has none and sorts last
+    expect(titles()).toEqual(['Lesson two', 'Lesson three', 'Lesson one', 'deleted lesson']);
     const courses = within(region).getByRole('table', { name: 'Cost per course' });
-    expect(within(courses).getByText('2.09')).toBeTruthy();
-    expect(within(courses).getByText('1.045')).toBeTruthy();
+    expect(within(courses).getByText('2.14')).toBeTruthy();
+    expect(within(courses).getByText('1.07')).toBeTruthy();
   });
 
   it('refuses an invalid body and offers a retry', async () => {

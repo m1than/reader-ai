@@ -50,6 +50,12 @@ seed:
     - { id: 22, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000007, task: draft, attempt: 1, kind: reserve, usd: 2.00, lesson_id: 20000000-0000-4000-8000-000000000001, created_at: "2026-11-10T11:00:00Z" }   # old, open
     - { id: 23, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000003, task: draft, attempt: 1, kind: reserve, usd: 0.50, lesson_id: 20000000-0000-4000-8000-000000000003 }
     - { id: 24, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000003, task: draft, attempt: 1, kind: settle, reservation_id: 23, settled_usd: 0.10, lesson_id: 20000000-0000-4000-8000-000000000003 }
+    # Code review round 1: lesson 3's second, newer compile run (last_compile_usd = its 0.05), and spend on a
+    # deleted lesson (no lessons row: kept as a "deleted lesson" row, so the rows' totals equal the ledger).
+    - { id: 25, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000005, task: draft, attempt: 1, kind: reserve, usd: 0.50, lesson_id: 20000000-0000-4000-8000-000000000003, created_at: "2026-11-24T11:30:00Z" }
+    - { id: 26, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000005, task: draft, attempt: 1, kind: settle, reservation_id: 25, settled_usd: 0.05, lesson_id: 20000000-0000-4000-8000-000000000003, created_at: "2026-11-24T11:30:00Z" }
+    - { id: 27, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000006, task: draft, attempt: 1, kind: reserve, usd: 0.50, lesson_id: 20000000-0000-4000-8000-000000000007 }
+    - { id: 28, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000006, task: draft, attempt: 1, kind: settle, reservation_id: 27, settled_usd: 0.07, lesson_id: 20000000-0000-4000-8000-000000000007 }
   # FR-OBS-17: SRV-AGENT writes agent_spend.lesson_id on every row of a call with a lesson; the rows above without
   # their own `lesson_id` get it from their run here (tutor calls: the question's lesson).
   agent_spend_lessons:
@@ -72,13 +78,19 @@ seed:
   course_plans:
     - { lesson_id: 20000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", pdf_first: 1, pdf_last: 2 }
     - { lesson_id: 20000000-0000-4000-8000-000000000003, owner_id: 00000000-0000-4000-8000-000000000001, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", pdf_first: 4, pdf_last: 4 }
+    # Code review round 1: the other owner imported the same book (same sha256) and planned its lesson on pages
+    # 1..2; its own spans there must not change the owner's chars (and the owner's must not reach its row).
+    - { lesson_id: 20000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", pdf_first: 1, pdf_last: 2 }
   ingests:
     - { id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11" }
+    - { id: 40000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11" }   # other
   material_spans:   # `chars`: the text is that many "x" characters (no text in the fixture)
     - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 0, page: 1, chars: 1200 }
     - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 1, page: 2, chars: 800 }
     - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 2, page: 3, chars: 500 }   # outside every plan
     - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 3, page: 4, chars: 0 }
+    - { ingest_id: 40000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, seq: 0, page: 1, chars: 5000 }   # other
+    - { ingest_id: 40000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, seq: 1, page: 2, chars: 7000 }   # other
   tutor_questions:   # latency = finished_at − created_at
     - { id: 30000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:00:00.000Z", finished_at: "2026-11-24T11:00:02.000Z" }
     - { id: 30000000-0000-4000-8000-000000000002, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:01:00.000Z", finished_at: "2026-11-24T11:01:04.000Z" }
@@ -89,6 +101,7 @@ seed:
   materials:
     - { sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", owner_id: 00000000-0000-4000-8000-000000000001, page_count: 594 }
     - { sha256: "77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee", owner_id: 00000000-0000-4000-8000-000000000002, page_count: 10 }   # other
+    - { sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", owner_id: 00000000-0000-4000-8000-000000000002, page_count: 594 }   # other: the same book
   # Read through SRV-EVENTS' published functions (FR-OBS-10, paired FR-EVENTS-18), never by SQL from SRV-OBS.
   # args are the validated payloads (model_dump(mode="json")); `key` is FR-EVENTS-2's key of args.
   job_keys:
@@ -151,23 +164,29 @@ expected:
           pages_per_min_import: 297.0, job: 301, trace_id: c7c885850da1d6bbde90e0f9302cbf7f }
   # FR-OBS-17: largest total first. Lesson 1: 0.62 + 0.23 (the failed paid attempt) + 0.21 settled + 0.80 open
   # reserve; the voided reserve and the old open reserve count 0. Lesson 2: tutor settles only, no source. Lesson 3:
-  # 0 source characters, so no per-1k figure. The other owner's lesson is absent.
+  # 0 source characters, so no per-1k figure; its two runs: 0.10 then the newer 0.05 (last_compile_usd 0.05). The
+  # deleted lesson's 0.07 stays as a row with no title or course and joins no course total. The other owner's
+  # lesson is absent, and its spans of the same book do not change lesson 1's 2000 characters.
   lessons:
     truncated: false
     open_reserves: 1
     rows:
       - { lesson_id: 20000000-0000-4000-8000-000000000001, title: Lesson one, course_id: 50000000-0000-4000-8000-000000000001,
-          course_title: Course one, compile_usd: 1.86, runs: 1, last_compile_usd: 1.86, tutor_usd: 0.0, total_usd: 1.86,
-          open_reserves: 1, chars: 2000, usd_per_1k_chars: 0.93,
+          course_title: Course one, deleted: false, compile_usd: 1.86, runs: 1, last_compile_usd: 1.86, tutor_usd: 0.0,
+          total_usd: 1.86, open_reserves: 1, chars: 2000, usd_per_1k_chars: 0.93,
           mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000001" }
-      - { lesson_id: 20000000-0000-4000-8000-000000000002, title: Lesson two, course_id: 50000000-0000-4000-8000-000000000001,
-          course_title: Course one, compile_usd: 0.0, runs: 0, last_compile_usd: null, tutor_usd: 0.13, total_usd: 0.13,
-          open_reserves: 0, chars: null, usd_per_1k_chars: null,
-          mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000002" }
       - { lesson_id: 20000000-0000-4000-8000-000000000003, title: Lesson three, course_id: 50000000-0000-4000-8000-000000000001,
-          course_title: Course one, compile_usd: 0.1, runs: 1, last_compile_usd: 0.1, tutor_usd: 0.0, total_usd: 0.1,
-          open_reserves: 0, chars: 0, usd_per_1k_chars: null,
+          course_title: Course one, deleted: false, compile_usd: 0.15, runs: 2, last_compile_usd: 0.05, tutor_usd: 0.0,
+          total_usd: 0.15, open_reserves: 0, chars: 0, usd_per_1k_chars: null,
           mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000003" }
+      - { lesson_id: 20000000-0000-4000-8000-000000000002, title: Lesson two, course_id: 50000000-0000-4000-8000-000000000001,
+          course_title: Course one, deleted: false, compile_usd: 0.0, runs: 0, last_compile_usd: null, tutor_usd: 0.13,
+          total_usd: 0.13, open_reserves: 0, chars: null, usd_per_1k_chars: null,
+          mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000002" }
+      - { lesson_id: 20000000-0000-4000-8000-000000000007, title: null, course_id: null, course_title: null,
+          deleted: true, compile_usd: 0.07, runs: 1, last_compile_usd: 0.07, tutor_usd: 0.0, total_usd: 0.07,
+          open_reserves: 0, chars: null, usd_per_1k_chars: null,
+          mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000007" }
     courses:
-      - { course_id: 50000000-0000-4000-8000-000000000001, title: Course one, compile_usd: 1.96, tutor_usd: 0.13,
-          total_usd: 2.09, chars: 2000, usd_per_1k_chars: 1.045 }
+      - { course_id: 50000000-0000-4000-8000-000000000001, title: Course one, compile_usd: 2.01, tutor_usd: 0.13,
+          total_usd: 2.14, chars: 2000, usd_per_1k_chars: 1.07 }

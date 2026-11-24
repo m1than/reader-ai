@@ -605,7 +605,10 @@ requirements:
       the note that failed attempts and open reserves count ("includes N open reserves" when N > 0) while MLflow's
       Cost column shows each call's settled amount, and "More rows may exist." when truncated. A sixth section
       "Dashboards" lists FR-OBS-16's saved views and Jaeger's search as links (`rel="noopener noreferrer"`). Every
-      trace link gains a "Jaeger" twin to `https://localhost:8444/trace/<id>`. No header, nav or app.css change.
+      trace link gains a "Jaeger (recent traces only)" twin to `https://localhost:8444/trace/<id>`, whose title says
+      that Jaeger keeps the newest 450 traces and starts empty after a restart. A row with `deleted` true (spend on a
+      deleted lesson) shows "deleted lesson" in the Lesson column and no course (SRV-OBS code review round 1). No
+      header, nav or app.css change.
   # FR-UI-13: amendment for WEB-IMPORT (V/onboarding), promoted on V/upload-impl with its Red tests.
   - id: FR-UI-13
     text: >-

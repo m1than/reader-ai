@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from decimal import ROUND_HALF_EVEN, Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 
 SPAN_TYPES: Final[Mapping[str, str]] = {
@@ -94,8 +94,8 @@ def _dump(value: object) -> str:
 
 
 def money(value: float) -> Decimal:
-    """A validated float as the ledger's 6-place Decimal."""
-    return Decimal(str(value)).quantize(_MICRO, ROUND_HALF_EVEN)
+    """A validated float as the ledger's 6-place Decimal (the ledger's rounding, half up)."""
+    return Decimal(str(value)).quantize(_MICRO, ROUND_HALF_UP)
 
 
 def llm_cost(attributes: Mapping[str, object]) -> str | None:
@@ -106,7 +106,9 @@ def llm_cost(attributes: Mapping[str, object]) -> str | None:
     whole = money(total)
     given = attributes.get(LLM_COST["input"])
     part = min(money(given), whole) if isinstance(given, float) else Decimal(0).quantize(_MICRO)
-    return _dump({"input_cost": float(part), "output_cost": float(whole - part), "total_cost": float(whole)})
+    rest = whole - part  # Decimal - Decimal: exact at 6 places, serialized from the Decimal itself
+    return _dump({"input_cost": float(str(part)), "output_cost": float(str(rest)),
+                  "total_cost": float(str(whole))})
 
 
 def preview(kind: object, side: str, attributes: Mapping[str, object]) -> str | None:
