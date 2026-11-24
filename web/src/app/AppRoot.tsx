@@ -9,7 +9,8 @@ import { createSignupsApi } from '../accounts/api';
 import { createPlanApi } from '../import/plan/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ownerCompileSlot } from './compile/slot';
-import { ServicesContext, useServices, type CompileSlot, type Services } from './context';
+import { manageSlot } from '../manage/slot';
+import { ServicesContext, useServices, type CompileSlot, type ManageSlot, type Services } from './context';
 import { NoticeRegion, type Notice } from './notices';
 import { queries } from './queries';
 import { createAppRouter, isBadLessonPath } from './routes';
@@ -26,6 +27,8 @@ export interface AppRootProps {
   /** The compile slot for lesson rows and the lesson page (FR-UI-6); without it, the app's own slot renders the
    * owner's CompileControl (FR-UI-15). */
   compileSlot?: CompileSlot;
+  /** WEB-MANAGE's slot (FR-UI-6 paired change); `null` renders no management control. */
+  manageSlot?: ManageSlot | null;
 }
 
 const defaultNavigate = (url: string) => window.location.assign(url);
@@ -81,7 +84,7 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
   );
 }
 
-export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNavigate, compileSlot }: AppRootProps) {
+export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNavigate, compileSlot, manageSlot: manage }: AppRootProps) {
   const [notices, setNotices] = useState<Notice[]>([]);
   const seq = useRef(0);
   const notify = useCallback((code: string) => {
@@ -105,8 +108,10 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       navigateAway,
       // FR-UI-6, FR-UI-15: the owner's CompileControl renders through the slot unless a caller supplies its own.
       compileSlot: compileSlot ?? ownerCompileSlot,
+      ...(manage === null ? {} : { manageSlot: manage ?? manageSlot }),
     };
-  }, [fetchFn, navigateAway, notify, compileSlot]);
+  }, [fetchFn, navigateAway, notify, compileSlot, manage]);
+  const Host = services.manageSlot?.Host;
   const queryClient = useMemo(() => new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } }), []);
   const path = initialPath ?? (typeof window !== 'undefined' ? window.location.pathname : '/');
   const router = useMemo(
@@ -119,6 +124,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
         <QueryClientProvider client={queryClient}>
           <Gate queryClient={queryClient} path={path} router={router} />
           <NoticeRegion notices={notices} onDismiss={(id) => setNotices((ns) => ns.filter((n) => n.id !== id))} />
+          {Host ? <Host /> : null}
         </QueryClientProvider>
       </ServicesContext.Provider>
     </I18nProvider>

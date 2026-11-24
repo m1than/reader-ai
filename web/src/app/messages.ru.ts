@@ -35,6 +35,8 @@ const ru: Translation<typeof en> = {
   'list.not_published': 'ещё не опубликован',
   'list.summary': 'Опубликовано {done} из {total}',
   'list.summary_next': 'Опубликовано {done} из {total} · далее: {title}',
+  'list.done': 'пройден',
+  'list.skipped': 'Пропущен',
   'list.show_published': 'Показать только опубликованные',
   'list.show_all': {
     one: 'Показать все {count} урок',
@@ -98,6 +100,7 @@ const ru: Translation<typeof en> = {
   'compile.shorter': 'Этот урок в {ratio} раза короче измеренного; реальная стоимость, скорее всего, выше этого диапазона.',
   'compile.longer': 'Этот урок в {ratio} раза длиннее измеренного; реальная стоимость может выйти за этот диапазон.',
   'compile.draft_chip': 'черновик, сборка не завершена',
+  'compile.reverted': 'Возвращена прежняя версия',
   'compile.stops_at': 'Остановится на ${cap}.',
   'compile.estimating': 'Оцениваем…',
   'compile.no_estimate': 'Для этого урока нет оценки.',

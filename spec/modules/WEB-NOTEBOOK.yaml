@@ -85,7 +85,13 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   Paired with WEB-UI FR-UI-32 (2026-11-24, V/manage-impl-web): web/src/notebook/design.test.tsx's 'puts lang on the
   lesson container' test now asserts FR-UI-32's placement — `div.lesson` carries no lang, the title h1 and every
   [data-markdown] block carry the Cyrillic rule's `ru`, and the cell stays inside the container; the Cyrillic rule's
-  own oracle is unchanged"
+  own oracle is unchanged. Paired with WEB-MANAGE (Green, 2026-11-24): LessonView takes an optional `extras` prop
+  (WEB-MANAGE's lesson items appended to \"More lesson actions\" after Reset kernel… and Keyboard shortcuts, a bookmark
+  toggle in each non-lab cell's toolbar, the lesson's bookmarks in the contents, a Notes toggle in the toolbar and the
+  notes panel after the cells); LessonPage renders them when the shell supplies the manage slot, and builds the tutor
+  client from `Services.http` when none is given (NFR-UI-1). The notes panel sits after the cells rather than as a
+  second tab of the tutor panel (declared deviation from FR-MANAGE-9's wording; same content and controls). No test
+  of this spec changed"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]

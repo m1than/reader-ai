@@ -35,6 +35,8 @@ const en = {
   'list.not_published': 'not published yet',
   'list.summary': '{done} of {total} published',
   'list.summary_next': '{done} of {total} published · next: {title}',
+  'list.done': 'done',
+  'list.skipped': 'Skipped',
   'list.show_published': 'Show published only',
   'list.show_all': { one: 'Show all {count} lesson', other: 'Show all {count} lessons' },
   // course sidebar (FR-UI-17)
@@ -96,6 +98,7 @@ const en = {
   'compile.shorter': 'This lesson is {ratio}× shorter than the measured one; the real cost is likely higher than this range.',
   'compile.longer': 'This lesson is {ratio}× longer than the measured one; the real cost may differ from this range.',
   'compile.draft_chip': 'draft, compile not finished',
+  'compile.reverted': 'Reverted to an earlier revision',
   'compile.stops_at': 'Stops at ${cap}.',
   'compile.estimating': 'Estimating…',
   'compile.no_estimate': 'No estimate for this lesson.',

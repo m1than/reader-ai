@@ -83,7 +83,8 @@ const mount = async (path: string, handler: Handler) => {
     return handler(url, init);
   });
   await act(async () => {
-    render(<AppRoot initialPath={path} fetch={fetchFn as unknown as typeof fetch} navigateAway={vi.fn()} />);
+    // WEB-MANAGE's controls stay out: these oracles test the compile control alone.
+    render(<AppRoot initialPath={path} fetch={fetchFn as unknown as typeof fetch} navigateAway={vi.fn()} manageSlot={null} />);
   });
   return calls;
 };

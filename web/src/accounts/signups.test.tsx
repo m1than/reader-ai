@@ -218,19 +218,28 @@ describe('approved accounts (FR-ACCOUNTS-3)', () => {
     ).toBeTruthy();
   });
 
-  it('disables after a confirmation that says it cannot be undone', async () => {
+  it('disables after a confirmation that says Enable undoes it (ADR-0037)', async () => {
     const maria = fx().one.accounts[0]!;
     const { calls } = await mount(() => json(200, fx().one), {
       [`POST /api/auth/signups/${maria.id}/disable`]: () => json(204, null),
     });
     await waitFor(() => screen.getByRole('button', { name: 'Disable @maria' }));
     fireEvent.click(screen.getByRole('button', { name: 'Disable @maria' }));
-    expect(
-      screen.getByText('Disable @maria? Their sessions end and they can no longer sign in. This cannot be undone here.'),
-    ).toBeTruthy();
+    expect(screen.getByText('Disable @maria? Their sessions end and they can no longer sign in. Enable undoes it.')).toBeTruthy();
+    expect(screen.queryByText(/This cannot be undone here\./)).toBeNull();
     expect(document.activeElement?.textContent).toBe('Cancel');
     fireEvent.click(screen.getByRole('button', { name: 'Disable' }));
     await waitFor(() => expect(calls.filter((c) => c.method !== 'GET')).toEqual([{ method: 'POST', url: `/api/auth/signups/${maria.id}/disable`, body: {} }]));
+  });
+
+  it('enables a disabled account with one click (WEB-MANAGE paired change, SRV-AUTH FR-AUTH-48)', async () => {
+    const disabled = fx().one.accounts.find((a: Row) => a.disabled)!;
+    const { calls } = await mount(() => json(200, fx().one), {
+      [`POST /api/auth/signups/${disabled.id}/enable`]: () => json(200, { status: 'active' }),
+    });
+    const enable = await waitFor(() => screen.getByRole('button', { name: `Enable @${disabled.handle}` }));
+    fireEvent.click(enable);
+    await waitFor(() => expect(calls.filter((c) => c.method !== 'GET')).toEqual([{ method: 'POST', url: `/api/auth/signups/${disabled.id}/enable`, body: {} }]));
   });
 });
 

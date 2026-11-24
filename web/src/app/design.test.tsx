@@ -82,7 +82,9 @@ describe('library entries (FR-UI-1, design pass)', () => {
     const { allowedEntries } = await load(() => import('./sourceScan'));
     expect(allowedEntries).toEqual([
       'button', 'toast', 'progress', 'skeleton', 'tooltip', 'dialog', 'chip', 'divider', 'link', 'typography', 'stack',
-      'container', 'app-bar', 'list-view', 'alert', 'breadcrumbs', 'menu', 'drawer', 'icon', 'styles.css',
+      'container', 'app-bar', 'list-view', 'alert', 'breadcrumbs', 'menu', 'drawer', 'icon',
+      // WEB-MANAGE paired change (2026-11-24).
+      'text-field', 'select', 'switch', 'tabs', 'radio-group', 'styles.css',
     ]);
   });
 });

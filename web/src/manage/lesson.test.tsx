@@ -33,7 +33,7 @@ const rowOf = async (title: string) =>
   });
 const openRowMenu = async (title: string) => {
   const row = await rowOf(title);
-  fireEvent.click(within(row).getByRole('button', { name: `Actions for ${title}` }));
+  fireEvent.click(await within(row).findByRole('button', { name: `Actions for ${title}` }));
   return screen.findByRole('menu');
 };
 const labels = (menu: HTMLElement) => within(menu).getAllByRole('menuitem').map((i) => i.textContent);

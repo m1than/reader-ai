@@ -9,6 +9,8 @@ const en = {
   'code.compile_running': 'A compile of this lesson is already running.',
   'code.budget_exhausted': 'The monthly budget is used up; the course is created, compile it later.',
   'code.owner_only': 'Only the owner can plan a course.',
+  // WEB-MANAGE paired change (SRV-PLAN FR-PLAN-20): the plan's course is deleted; restore it from Settings → Data.
+  'code.course_deleted': "This book's course was deleted. Restore it from Settings → Data.",
   'code.network': 'The server could not be reached. Check the connection and try again.',
   'code.bad_response': 'The server sent an answer this page does not understand.',
   'code.unknown': 'Something went wrong. Try again.',

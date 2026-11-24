@@ -28,4 +28,20 @@
     if (String(first).split('-')[0].toLowerCase() === 'ru') lang = 'ru';
   }
   root.setAttribute('lang', lang);
+  // WEB-MANAGE FR-MANAGE-6: text size and reading width (web/src/manage/appearance.ts's rule): a known non-default
+  // value sets its attribute; the default or an unknown value leaves the stylesheet's own values.
+  var prefs = [
+    ['reader-ai.text-size', 'data-text-size', ['small', 'large']],
+    ['reader-ai.width', 'data-width', ['narrow', 'wide']],
+  ];
+  for (var i = 0; i < prefs.length; i += 1) {
+    var stored = null;
+    try {
+      stored = localStorage.getItem(prefs[i][0]);
+    } catch (e) {
+      stored = null;
+    }
+    if (prefs[i][2].indexOf(stored) >= 0) root.setAttribute(prefs[i][1], stored);
+    else root.removeAttribute(prefs[i][1]);
+  }
 })();

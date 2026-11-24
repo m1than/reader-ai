@@ -119,7 +119,13 @@ function Row({ row, kind, signups, onDone, t, locale }: RowProps) {
           </Button>
         </div>
       ) : disabled ? (
-        <span className="signup-disabled muted">{t('disabled')}</span>
+        <div className="signup-actions state-actions">
+          <span className="signup-disabled muted">{t('disabled')}</span>
+          {/* WEB-MANAGE paired change (ADR-0037): Enable restores access; Disable undoes it. */}
+          <Button variant="outline" color="neutral" size="sm" aria-label={t('enable.label', { handle })} disabled={busy} onClick={() => void run('enable')}>
+            {t('enable')}
+          </Button>
+        </div>
       ) : (
         <div className="signup-actions state-actions">
           <Button

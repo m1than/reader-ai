@@ -40,6 +40,8 @@ const ObservabilityPage = lazy(
 // WEB-FRESH (paired change): the freshness card's own lazy route until it mounts in the sources list.
 const MATERIAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const FreshnessPage = lazy(withAreas(() => import('../fresh/FreshnessPage').then((m) => ({ default: m.FreshnessPage })), ['fresh']));
+// WEB-MANAGE FR-MANAGE-6: /settings, a lazy chunk with its own catalogues.
+const SettingsPage = lazy(withAreas(() => import('../manage/SettingsPage').then((m) => ({ default: m.SettingsPage })), ['manage', 'accounts']));
 
 /** FR-UI-13 first run: an owner with no lessons and no material at all lands on /import (history replace). */
 function useFirstRun(lessons: LessonSummary[] | undefined) {
@@ -296,6 +298,25 @@ const observabilityRoute = createRoute({
   },
 });
 
+// WEB-MANAGE FR-MANAGE-6 (paired FR-UI-3 change): the settings page, for every signed-in user, a lazy chunk.
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/settings',
+  component: function SettingsRoute() {
+    return (
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading label="loading.settings" />
+          </div>
+        }
+      >
+        <SettingsPage />
+      </Suspense>
+    );
+  },
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   lessonRoute,
@@ -303,6 +324,7 @@ const routeTree = rootRoute.addChildren([
   signupsRoute,
   observabilityRoute,
   freshnessRoute,
+  settingsRoute,
 ]);
 
 export const createAppRouter = (history: RouterHistory) =>

@@ -218,6 +218,16 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
     }
   }, [focusStatus, open, text]);
 
+  // WEB-MANAGE FR-MANAGE-4 (SRV-LESSON FR-LESSON-30): a finished run's status belongs to its final revision; after a
+  // revert to another one, the page says so until a run reports on the current revision.
+  const runSha = run ? ((run as { final_sha256?: string | null }).final_sha256 ?? run.latest_sha256) : null;
+  if (source === 'page' && run && !isOpen(run.state) && !polls(run.state) && published && runSha !== null && runSha !== lesson.latest_sha256)
+    return (
+      <span className="compile-control">
+        <span className="compile-status">{t('compile.reverted')}</span>
+      </span>
+    );
+
   // Published and no open run: nothing beyond FR-UI-6 (the list) or the lesson itself (the page).
   if (published && !openRun) return null;
 

@@ -18,6 +18,8 @@ const en = {
   'code.config_unavailable': 'The server cannot read its configuration; check reader.yaml',
   'code.inbox_invalid': "The server's upload folder is not usable; see the server log",
   'code.disconnected': 'The upload was interrupted. Try again.',
+  // WEB-MANAGE FR-MANAGE-5 (SRV-INGEST): the uploaded bytes are a source the owner deleted.
+  'code.material_deleted': 'You deleted this book. Restore it from Settings → Data.',
   // conversion and import failures (SRV-INGEST FR-INGEST-19, -20)
   'code.host_lost': 'The converter on your Mac stopped answering three times.',
   'code.convert_failed': 'The converter could not convert this file.',

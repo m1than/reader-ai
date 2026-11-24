@@ -7,7 +7,11 @@ import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useOwner } from '../manage/hooks';
+import { useLessonManage } from '../manage/LessonActions';
+import { BookmarkToggle, BookmarksList, NotesPanel, NotesToggle } from '../manage/Notes';
+import { MenuItems, shownItems } from '../manage/primitives';
 import { ApiError, SIGN_IN_URL, type LessonSummary } from '../app/api';
 import { useServices } from '../app/context';
 import { queries } from '../app/queries';
@@ -146,7 +150,7 @@ function NotPublished({ lesson }: { lesson: LessonSummary }) {
 }
 
 function Lesson({ lessonId, lesson, notebook, revision }: { lessonId: string; lesson: LessonSummary; notebook: Notebook; revision: string }) {
-  const { api, notify, navigateAway, tutor: givenTutor, http, compileSlot } = useServices();
+  const { api, notify, navigateAway, tutor: givenTutor, http, compileSlot, manageSlot } = useServices();
   // NFR-UI-1: the tutor client is built in this lazy chunk from the shell's fetch and 401 hook.
   const tutor = useMemo(() => givenTutor ?? (http ? createTutorApi(http) : undefined), [givenTutor, http]);
   const Status = compileSlot?.Status;
@@ -182,8 +186,39 @@ function Lesson({ lessonId, lesson, notebook, revision }: { lessonId: string; le
           <Status lesson={lesson} place="page" />
         </div>
       ) : null}
-      <LessonView notebook={notebook} controller={controller} aside={aside} crumbs={<Crumbs lesson={lesson} />} />
+      {manageSlot ? (
+        <ManagedLessonView lessonId={lessonId} lesson={lesson} notebook={notebook} controller={controller} aside={aside} crumbs={<Crumbs lesson={lesson} />} />
+      ) : (
+        <LessonView notebook={notebook} controller={controller} aside={aside} crumbs={<Crumbs lesson={lesson} />} />
+      )}
     </div>
+  );
+}
+
+/** WEB-MANAGE FR-MANAGE-4 and -9 (paired change): the lesson items in "More lesson actions", the bookmark toggles,
+ * the contents' bookmarks and the notes panel. */
+function ManagedLessonView({
+  lessonId,
+  lesson,
+  ...view
+}: { lessonId: string; lesson: LessonSummary } & Pick<Parameters<typeof LessonView>[0], 'notebook' | 'controller' | 'aside' | 'crumbs'>) {
+  const manage = useLessonManage(lesson);
+  const owner = useOwner();
+  const [notes, setNotes] = useState(false);
+  return (
+    <>
+      <LessonView
+        {...view}
+        extras={{
+          menu: <MenuItems items={shownItems(manage.items, owner)} separatorFirst />,
+          cell: (cellId) => <BookmarkToggle lessonId={lessonId} cellId={cellId} />,
+          contents: (labels) => <BookmarksList lessonId={lessonId} labels={labels} />,
+          toolbar: <NotesToggle open={notes} onToggle={() => setNotes((o) => !o)} />,
+          after: (labels) => (notes ? <NotesPanel lessonId={lessonId} labels={labels} onClose={() => setNotes(false)} /> : null),
+        }}
+      />
+      {manage.node}
+    </>
   );
 }
 

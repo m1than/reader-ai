@@ -15,6 +15,7 @@ export default defineConfig({
     'accounts/**/*.spec.ts',
     'notebook/**/*.spec.ts',
     'fresh/**/*.spec.ts',
+    'manage/**/*.spec.ts',
   ],
   fullyParallel: false,
   // WEB-UI FR-UI-15: the test server's compile stub keeps global state, so one worker.
@@ -32,6 +33,8 @@ export default defineConfig({
         'import/**/*.spec.ts',
         'notebook/**/*.spec.ts',
         'fresh/**/*.spec.ts',
+        // WEB-MANAGE (paired change).
+        'manage/**/*.spec.ts',
       ],
       use: { ...devices['Desktop Chrome'] },
     },

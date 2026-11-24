@@ -49,6 +49,20 @@ export interface EditorModule {
 export type EditorLoader = () => Promise<EditorModule>;
 const defaultLoadEditor: EditorLoader = () => import('./editor');
 
+/** WEB-MANAGE's parts of the lesson view (paired change, FR-MANAGE-4 and -9). */
+export interface LessonExtras {
+  /** Library Menu items appended to "More lesson actions", after Reset kernel… and Keyboard shortcuts. */
+  menu?: ReactNode;
+  /** A control in a cell's toolbar. */
+  cell?: (cellId: string) => ReactNode;
+  /** More of the contents column, given the cells' contents labels. */
+  contents?: (labels: ReadonlyMap<string, string>) => ReactNode;
+  /** A control in the lesson toolbar. */
+  toolbar?: ReactNode;
+  /** A panel after the cells, given the cells' contents labels. */
+  after?: (labels: ReadonlyMap<string, string>) => ReactNode;
+}
+
 /** The tutor panel's state as the lesson view hands it to the `aside` (FR-NOTEBOOK-11, SRV-TUTOR FR-TUTOR-11). */
 export interface PanelState {
   open: boolean;
@@ -310,10 +324,22 @@ function Questions({ r, source, lang }: { r: Record<string, unknown>; source: st
 }
 
 /** FR-NOTEBOOK-11: Copy (markdown cells) and Ask, in the tab order only while focus is inside the cell. */
-function CellToolbar({ source, markdown, active, onAsk }: { source: string; markdown: boolean; active: boolean; onAsk?: (e: MouseEvent<HTMLButtonElement>) => void }) {
+function CellToolbar({
+  source,
+  markdown,
+  active,
+  onAsk,
+  extra,
+}: {
+  source: string;
+  markdown: boolean;
+  active: boolean;
+  onAsk?: (e: MouseEvent<HTMLButtonElement>) => void;
+  extra?: ReactNode;
+}) {
   const t = useT('notebook', en);
   const { state, copy } = useCopy();
-  if (!markdown && !onAsk) return null;
+  if (!markdown && !onAsk && !extra) return null;
   const tab = active ? 0 : -1;
   return (
     <div className="cell-toolbar">
@@ -327,6 +353,7 @@ function CellToolbar({ source, markdown, active, onAsk }: { source: string; mark
           <AskIcon />
         </Button>
       ) : null}
+      {extra}
       <span role="status" className="visually-hidden">
         {state === 'copied' ? t('cell.copied') : state === 'failed' ? t('copy.failed') : ''}
       </span>
@@ -349,9 +376,11 @@ interface CellProps {
   children?: ReactNode;
   /** The lesson's language for the cell's content nodes (WEB-UI FR-UI-32). */
   contentLang: string;
+  /** WEB-MANAGE FR-MANAGE-9: the bookmark toggle in the cell's toolbar. */
+  toolbarExtra?: ReactNode;
 }
 
-function CellView({ cell, id, label, titles, run, controller, resetting, loadEditor, active, onAsk, className, children, contentLang }: CellProps) {
+function CellView({ cell, id, label, titles, run, controller, resetting, loadEditor, active, onAsk, className, children, contentLang, toolbarExtra }: CellProps) {
   const t = useT('notebook', en);
   const r = reader(cell);
   const kind = kindOf(cell);
@@ -412,7 +441,9 @@ function CellView({ cell, id, label, titles, run, controller, resetting, loadEdi
   }
   return (
     <article className={className ?? 'cell'} data-cell-id={id} data-kind={kind} id={`cell-${id}`} tabIndex={-1}>
-      {kind !== 'lab' ? <CellToolbar source={source} markdown={cell.cell_type === 'markdown'} active={active} {...(ask ? { onAsk: ask } : {})} /> : null}
+      {kind !== 'lab' ? (
+        <CellToolbar source={source} markdown={cell.cell_type === 'markdown'} active={active} extra={toolbarExtra} {...(ask ? { onAsk: ask } : {})} />
+      ) : null}
       {kindLabel && <p className="cell-kind">{kindLabel}</p>}
       {body}
       {kind === 'erratum' && typeof r.correction === 'string' && (
@@ -537,9 +568,13 @@ export function LessonView({
   aside,
   crumbs,
   loadEditor = defaultLoadEditor,
+  extras,
 }: {
   notebook: Notebook;
   controller: KernelController;
+  /** WEB-MANAGE's additions (FR-MANAGE-4, -9; paired change): the lesson items of the "More lesson actions" menu, a
+   * cell's bookmark toggle, the contents' bookmarks, a toolbar control and a panel after the cells. */
+  extras?: LessonExtras | undefined;
   /** The tutor panel, shown with the focused cell's id and contents label and the panel's state (FR-TUTOR-11). */
   aside?: ((focusedCellId: string | null, focusedLabel: string | null, panel: PanelState) => ReactNode) | undefined;
   /** The breadcrumbs above the title (FR-NOTEBOOK-11); the route passes the library Breadcrumbs. */
@@ -653,6 +688,7 @@ export function LessonView({
       active={focused === id}
       onAsk={aside ? askAbout : undefined}
       contentLang={lang}
+      toolbarExtra={extras?.cell?.(id)}
       {...extra}
     />
   );
@@ -676,6 +712,7 @@ export function LessonView({
               {t('toolbar.ask')}
             </Button>
           )}
+          {extras?.toolbar}
           {entries.length > 0 && (
             <span className="contents-toggle">
               <Button
@@ -730,6 +767,7 @@ export function LessonView({
                       {t('menu.reset')}
                     </Menu.Item>
                     <Menu.Item onClick={() => setShortcuts(true)}>{t('menu.shortcuts')}</Menu.Item>
+                    {extras?.menu}
                   </Menu.Popup>
                 </Menu.Positioner>
               </Menu.Portal>
@@ -761,6 +799,7 @@ export function LessonView({
               </li>
             ))}
           </ol>
+          {extras?.contents?.(labels)}
         </nav>
       )}
       <div className="cells" onFocusCapture={(e) => focusFrom(e.target)} onClickCapture={(e) => focusFrom(e.target)}>
@@ -777,6 +816,7 @@ export function LessonView({
           ),
         )}
       </div>
+      {extras?.after?.(labels)}
       {aside && (
         <div className="lesson-aside" data-open={tutorOpen}>
           {aside(focused, focused ? (labels.get(focused) ?? null) : null, { open: tutorOpen, close: closeTutor })}

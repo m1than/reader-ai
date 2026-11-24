@@ -11,7 +11,8 @@ const Signups = v.object({ pending: v.array(Pending), accounts: v.array(Account)
 export type PendingSignup = v.InferOutput<typeof Pending>;
 export type SignupAccount = v.InferOutput<typeof Account>;
 export type Signups = v.InferOutput<typeof Signups>;
-export type SignupAction = 'approve' | 'reject' | 'disable';
+// `enable`: SRV-AUTH FR-AUTH-48 (ADR-0037 accepted; WEB-MANAGE paired change).
+export type SignupAction = 'approve' | 'reject' | 'disable' | 'enable';
 
 export const SIGNUPS_PATH = '/api/auth/signups';
 

@@ -103,7 +103,8 @@ for (const width of WIDTHS)
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/import');
     const section = page.getByRole('region', { name: 'Manage your sources' });
-    await expect(section.getByText('Distributed systems notes')).toBeVisible();
+    // The test server's /api/materials is WEB-PLAN's synthetic list (shared with the plan specs).
+    await expect(section.getByText('synthetic-plan')).toBeVisible();
     await noOverflow(page, `/import ${width}`);
   });
 

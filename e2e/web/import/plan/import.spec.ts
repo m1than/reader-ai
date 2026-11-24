@@ -34,7 +34,8 @@ for (const width of WIDTHS) {
     if (width < 1200) await page.getByRole('button', { name: 'Courses' }).click();
     await page.getByRole('link', { name: 'Import', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Import a source', level: 1 })).toBeVisible();
-    await expect(page.getByText('synthetic-plan')).toBeVisible();
+    // WEB-MANAGE's "Manage your sources" lists the same source further down the page.
+    await expect(page.getByRole('region', { name: 'Your sources', exact: true }).getByText('synthetic-plan')).toBeVisible();
     expect(await serious(page)).toEqual([]);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/import-sources-${width}.png`, fullPage: true });
 

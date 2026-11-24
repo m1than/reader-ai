@@ -155,7 +155,8 @@ for (const width of WIDTHS) {
       const maria = FX.one.accounts[0]!;
       const { posts } = await open(page, FX.one, { [`/api/auth/signups/${maria.id}/disable`]: fulfill(FX.outcomes.disable!) });
       await page.getByRole('button', { name: 'Disable @maria' }).click();
-      await expect(page.getByText('Disable @maria? Their sessions end and they can no longer sign in. This cannot be undone here.')).toBeVisible();
+      // ADR-0037 (WEB-MANAGE paired change): Enable undoes a disable.
+      await expect(page.getByText('Disable @maria? Their sessions end and they can no longer sign in. Enable undoes it.')).toBeVisible();
       await checks(page);
       await page.getByRole('button', { name: 'Disable', exact: true }).click();
       await expect.poll(() => posts).toEqual([{ path: `/api/auth/signups/${maria.id}/disable`, body: {} }]);
