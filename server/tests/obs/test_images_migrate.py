@@ -252,7 +252,7 @@ def test_a_killed_first_fresh_migrate_recovers(volume: str, next_image: str, fal
 def test_a_served_fallback_store_keeps_its_trace(volume: str, next_image: str) -> None:
     assert migrate(next_image, volume, "READER_MLFLOW_MIGRATE_FALLBACK=1") == 0
     in_volume(next_image, volume, f"python -c \"import mlflow; mlflow.set_tracking_uri('{STORE}'); "
-              "s = mlflow.start_span('kept'); s.end()\"")
+              "s = mlflow.start_span_no_context('kept'); s.end()\"")  # 3.18: start_span is a context manager
     assert serve(next_image, volume)["traces"] == 1
     assert migrate(next_image, volume) == 0  # H1: a served store is never wiped
     assert serve(next_image, volume)["traces"] == 1

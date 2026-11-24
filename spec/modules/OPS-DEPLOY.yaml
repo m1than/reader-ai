@@ -380,7 +380,13 @@ requirements:
       (d) `deploy/otel/mlflow-setup.yaml` (VEC-OBS-6) is mounted read-only into the worker.
       (e) The 8443 site caps request bodies at 10 MiB (`request_body max_size 10MiB`, structural).
       (f) The `obs_mlflow` volume's backup label changes from `exclude` to `include` (ADR-0038 Decision 6 replaces
-      ADR-0032 Decision 1's exclusion); VEC-DEPLOY-3's backup list is updated. Tests: [config] the rendered model's
+      ADR-0032 Decision 1's exclusion); VEC-DEPLOY-3's backup list is updated. (g) Exceptions to earlier
+      [config] rules, exactly these and nothing else: `mlflow-migrate` is the one service with `network_mode:
+      none` (FR-DEPLOY-9's no-`network_mode` rule keeps every other service) and the one service without a
+      healthcheck besides jaeger (a one-shot that exits); the worker has exactly one bind in the base model, the
+      read-only `./otel/mlflow-setup.yaml:/etc/reader/mlflow-setup.yaml`, and with the override that bind plus
+      the config bind; mlflow's environment is (a)'s six entries; the Caddyfile has exactly two `request_body`
+      blocks, the upload path's 200 MiB and the 8443 site's 10 MiB. Tests: [config] the rendered model's
       mlflow command and environment equal (a) exactly; mlflow-migrate's hardening, network-less placement and the
       dependency; the worker's read-only mount; the 8443 body limit in the Caddyfile; the volume's backup label.
 

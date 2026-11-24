@@ -134,7 +134,7 @@ async def label(ctx: Ctx) -> Response:
     revision, label_id = got
     if mirror_on:
         await _enqueue_after(ctx, labels.KIND, {"label_id": label_id, "revision": revision})
-    return JSONResponse({"revision": revision, "mirror": "pending" if mirror_on else "off"})
+    return JSONResponse({"revision": revision, "mirror": "queued" if mirror_on else "off"})  # FR-OBS-24 (b)
 
 
 ROUTES: Final[tuple[Route, ...]] = (

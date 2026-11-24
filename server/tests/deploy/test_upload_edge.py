@@ -18,7 +18,9 @@ def _block(text: str, opener: str) -> str:
 
 def test_one_request_body_limit_on_exactly_the_upload_path() -> None:
     text = CADDYFILE.read_text()
-    assert text.count("request_body") == 1
+    # OPS-DEPLOY FR-DEPLOY-15 (g): exactly two body limits, the upload path's and the 8443 site's 10 MiB
+    assert text.count("request_body") == 2
+    assert re.search(r"localhost:8443 \{[\s\S]*?request_body\s*\{\s*max_size\s+10MiB\s*\}", text)
     assert "read_body" not in text  # no server-wide body timeout: it would bound the WebSocket relays too
     handles = re.findall(r"^\s*handle\s+(\S+)\s*\{", text, flags=re.MULTILINE)
     assert "/api/materials/uploads" in handles

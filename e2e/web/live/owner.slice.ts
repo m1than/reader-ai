@@ -34,9 +34,12 @@
 // committed.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { benchSet, hitsGold, mergeRuns, summary, type BenchRecord } from '../../../web/src/tutor/bench.ts';
+import {
+  benchSet, hitsGold, mergeRuns, recordsFile, summary, summaryFile, type BenchHeader, type BenchRecord,
+} from '../../../web/src/tutor/bench.ts';
 
 const OUT = resolve(process.env.READER_LIVE_OUT ?? 'out');
 const SHOTS = resolve(OUT, 'screenshots');
@@ -814,11 +817,22 @@ test('tutor-bench: the 40 bench questions over the HTTP API', async () => {
   const runFile = resolve(dir, `tutor-bench-${new Date().toISOString().replace(/[:.]/g, '')}.json`);
   const records: BenchRecord[] = [];
   let stoppedAt: string | null = null;
+  // SRV-TUTOR FR-TUTOR-15: the records file is VEC-OBS-5 bench_results.tutor (the MLflow upload) and the summary
+  // VEC-TUTOR-8 (a report): a header of ids and a bare commit sha, then numbers, states and flags only.
+  const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf-8' }).trim();
+  const header: BenchHeader = {
+    date: new Date().toISOString().slice(0, 10), branch: git('rev-parse', '--abbrev-ref', 'HEAD'),
+    commit: git('rev-parse', '--short=12', 'HEAD'), lesson_id: lessonId,
+  };
   const report = () => {
-    writeFileSync(runFile, `${JSON.stringify({ lesson_id: lessonId, records }, null, 2)}\n`);
+    writeFileSync(runFile, `${JSON.stringify(recordsFile(header, records), null, 2)}\n`);
+    const merged = mergeRuns([...prior, records]);
+    // not `tutor-bench-*.json`: that pattern is the run files merged above
+    writeFileSync(resolve(dir, `summary-tutor-bench-${header.date}.json`),
+      `${JSON.stringify(summaryFile(header, merged, setIds, prior.length + 1), null, 2)}\n`);
     results.tutor_bench = {
       lesson_id: lessonId, dir_runs: prior.length + 1, from, stopped_at: stoppedAt, asked_this_run: records.length,
-      summary: summary(mergeRuns([...prior, records]), setIds),
+      summary: summary(merged, setIds),
     };
     save();
   };

@@ -1737,7 +1737,18 @@ tasks:
         observability-phase2.test.tsx and bench-upload.test.ts. Existing assertions updated with the spec: the
         obs kinds list (test_retention, test_jobs_unit), mlflow command/env and the obs_mlflow backup label
         (test_deploy_config). Green must also update test_images._backend to compose's FR-OBS-27 command and
-        write deploy/otel/UPGRADE.md (FR-OBS-34's checklist source, a path the Red test chose)." }
+        write deploy/otel/UPGRADE.md (FR-OBS-34's checklist source, a path the Red test chose). GREEN (owner:
+        build everything, fast checks only, review later): ops 3afcfb9 (mlflow-migrate.sh with flock, markers,
+        store.version, exit codes 10..13 and an automatic SqlAlchemyStore fallback, because MLflow 3.10.0's db
+        upgrade fails on a missing file; compose per FR-OBS-27/FR-DEPLOY-15; reader doctor, backup and restore,
+        restore-obs-premigrate 0..6), server f245ff7..47584a2 (runs, bootstrap, bench, labels, alerts, health;
+        obs_0002 and pipeline_0004 `compile_runs.ends`; JobKind traced/periodic/after_end; routes; version key),
+        web and tutor bench f245ff7 (FR-UI-31; records and summary files; the committed 2026-11-23 summary
+        migrated, its three prose notes, latency polling 0.5 s, thinking tokens follow-up and the v18 failure,
+        recorded here only); integration: FR-DEPLOY-15 (g) exceptions and the six deploy tests, the owner slice
+        writes the records and summary files, mirror `queued`. Fast checks: ruff, mypy strict, trace-check 0
+        errors, vitest 537 passed, targeted pytest green; image migrate test 13/14 before the test fix. Not run:
+        the full gate, test_images_phase2, the burst test (burst.run not implemented yet), the browser suite." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

@@ -1041,7 +1041,11 @@ requirements:
       server: on a missing file write `backup/fresh` and initialise the store with one Python call that
       constructs MLflow's own SQLAlchemy store, `python -c "from mlflow.store.tracking.sqlalchemy_store import
       SqlAlchemyStore as S; S('sqlite:////var/lib/mlflow/mlflow.db', '/var/lib/mlflow/artifacts')"` (round 13:
-      the same 71 tables and head, then a no-op upgrade and health 200), then go to (4). So `backup/fresh` is
+      the same 71 tables and head, then a no-op upgrade and health 200), then go to (4). The fallback is automatic:
+      on a fresh volume the script tries `db upgrade` first and, if it fails, removes the half-made file and runs
+      the Python call (Green: MLflow 3.10.0, the [image] test's N pin, fails `db upgrade` on a missing file with
+      "no such table: metrics"); `READER_MLFLOW_MIGRATE_FALLBACK=1` skips the `db upgrade` try, for the test's
+      forced-fallback case only. So `backup/fresh` is
       always cleared before the server's first start (design review round 6, H1). That first start is a
       migration too, and `reader doctor` prints `obs mlflow: fresh store, schema <revision>` after it.
       Manual restore after a failed migration, with the stack down: `reader restore-obs-premigrate` (paired OPS-CLI
