@@ -268,8 +268,11 @@ requirements:
       (`server/tests/obs/cli_canary/`, moved from spikes/cli-otel-content in Red: Dockerfile, stub upstream, capturing
       OTLP receiver, probe) asserts INV-OBS-2's CLI half and that every exported CLI span name, attribute key and
       resource key is in VEC-OBS-2; (c) [live] the same subset check on the CLI spans of the live tutor trace, under
-      the owner's real account. The canary also reruns if any call ever declares tools (FR-AGENT-7 forbids it today;
-      tool spans and tool content were not measured).
+      the owner's real account. The one call that declares tools, SRV-FRESH's WebSearch run (SRV-AGENT FR-AGENT-15),
+      is in the harness too (the stub flow of spikes/web-search-otel), in an allow and a deny variant of its
+      PreToolUse gate: no query, result title, URL or summary canary is exported, its `claude_code.tool*` span names
+      and keys are in VEC-OBS-2, and with `OTEL_LOG_TOOL_CONTENT=1` the scan finds them (positive control). Any
+      other tool, or a change of that call's flow, reruns the canary first.
   - id: FR-OBS-7
     text: >-
       Coverage of the owner's flows, by construction from FR-OBS-3, -5 and -6 (no module-specific span beyond
@@ -813,7 +816,7 @@ vectors:
     source: "Hand-derived from FR-OBS-3, -5, -6 and the route, kind and error catalogs: span name patterns, attribute keys with types, value rules and span kinds, and job_args per kind"
     file: spec/fixtures/SRV-OBS/attributes.yaml
   - id: VEC-OBS-2
-    source: "spikes/cli-otel-content/results/20261124T002020/report.json, mode agent-env: the bundled CLI 2.1.330's span names, attribute keys and resource keys under FR-OBS-6's environment (stub upstream, fake credential)"
+    source: "spikes/cli-otel-content/results/20261124T002020/report.json, mode agent-env: the bundled CLI 2.1.330's span names, attribute keys and resource keys under FR-OBS-6's environment (stub upstream, fake credential); the WebSearch run's tool spans from spikes/web-search-otel/results/20261124T122933/report.json, mode content-off"
     file: spec/fixtures/SRV-OBS/cli-span-keys.yaml
   - id: VEC-OBS-3
     source: "Hand-derived from FR-OBS-10 and SRV-AGENT FR-AGENT-9: seeded agent_spend, compile_runs/compile_steps, tutor_questions and job_keys rows, including a failed step attempt that billed money (a settle row with settled_usd > 0 on an attempt whose job ended failed) and an unsettled reserve, with the expected summary JSON"

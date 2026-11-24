@@ -773,3 +773,24 @@ async def test_the_live_check_calls_the_routes_in_process(pg: Pg, tmp_path: Path
     async with client(w) as c:
         assert (await c.get(path(w) + f"/freshness/{report_id}")).json() == report
     assert [r["url"] for r in report["recommendations"]]  # stored URLs to compare with R in the live run
+
+
+async def test_the_live_check_runs_only_as_an_active_enabled_owner(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-14: the live module's owner lookup applies SRV-AUTH's session rule: a disabled or a
+    not-yet-active owner is not found."""
+    from sqlalchemy.exc import NoResultFound
+
+    live = need("reader.freshness.live")
+    w = await world(pg, tmp_path)
+    async with client(w) as c:
+        await c.put(path(w) + "/bibliography", json=BIB)
+    owner = w.users["ivan"]
+    await execute(w.engine, "UPDATE users SET disabled_at = now() WHERE id = :u", u=owner)
+    with pytest.raises(NoResultFound):
+        await live._owner(w.engine, "ivan")
+    await execute(w.engine, "UPDATE users SET disabled_at = NULL, state = 'pending' WHERE id = :u", u=owner)
+    with pytest.raises(NoResultFound):
+        await live._owner(w.engine, "ivan")
+    await execute(w.engine, "UPDATE users SET state = 'active' WHERE id = :u", u=owner)
+    user, _ = await live._owner(w.engine, "ivan")
+    assert user.id == owner

@@ -27,7 +27,7 @@ import json
 import os
 import sys
 import uuid
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -200,7 +200,7 @@ async def _run() -> dict[str, Any]:
         stored += [c["url"] for s in report["claim_status"] or [] for c in s["citations"]]
         stored += [r["url"] for r in report["recommendations"] or []]
         settles = await _settles(engine, report_id)
-        compared = [(Decimal(s[0]), Decimal(s[1])) for s in settles if s[0] is not None and s[1] is not None]
+        rows, ok = crosscheck(settles)
         return {
             "report": report_id.hex[:8],
             "estimate_high_usd": high_usd,
@@ -212,14 +212,21 @@ async def _run() -> dict[str, Any]:
             "stored_urls_in_r": all(u in recorder.urls for u in stored),
             "usd": float(await ledger.spent(engine, run_id=report_id)),
             "ledger_rows_with_web_search_requests": sum(1 for s in settles if s[2]),
-            "crosscheck_rows": len(compared),
-            "crosscheck_ok": bool(compared) and all(crosscheck_ok(sdk, usd) for sdk, usd in compared),
+            "crosscheck_rows": rows,
+            "crosscheck_ok": ok,
             "searches": recorder.searches,
         }
     finally:
         with contextlib.suppress(Exception):
             await proxy.aclose()
         await engine.dispose()
+
+
+def crosscheck(settles: Sequence[Sequence[Any]]) -> tuple[int, bool]:
+    """FR-FRESH-14's cross-check over settle rows `(sdk_usd, usd, …)`: the rows that have both amounts, and
+    whether there is at least one and each is within SRV-AGENT's tolerance (no compared row is not a pass)."""
+    compared = [(Decimal(s[0]), Decimal(s[1])) for s in settles if s[0] is not None and s[1] is not None]
+    return len(compared), bool(compared) and all(crosscheck_ok(sdk, usd) for sdk, usd in compared)
 
 
 async def _settles(engine: AsyncEngine, report_id: Any) -> list[Any]:

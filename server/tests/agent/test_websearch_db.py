@@ -61,11 +61,20 @@ def _provider(w: Any, scripts: list[Script], tmp: Path) -> tuple[Any, FakeCli, F
     return provider.AgentProvider(w.engine, w.config, proxy, cli=cli, home_root=tmp), cli, proxy
 
 
-async def test_tools_only_for_the_freshness_search_stage(pg: Pg, tmp_path: Path) -> None:
+async def test_tools_only_for_the_freshness_search_stage(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     errors = need("reader.agent.errors")
     w = await world(pg, tmp_path)
     p, cli, proxy = _provider(w, [Script()], tmp_path)
     provider = need("reader.agent.provider")
+    spans: list[tuple[Any, ...]] = []
+
+    def no_span(*args: Any) -> Any:
+        spans.append(args)
+        raise AssertionError("agent.call opened for a refused tool call")
+
+    monkeypatch.setattr(provider, "agent_call", no_span)  # FR-AGENT-15: refused before the span opens
     ungated = provider.WebSearchCall(
         allowance=provider.WebSearchAllowance(searches_max=1, searches_per_request_max=1, requests_max=3),
         hook=None,
@@ -78,7 +87,7 @@ async def test_tools_only_for_the_freshness_search_stage(pg: Pg, tmp_path: Path)
         with pytest.raises(errors.AgentError) as refused:
             await p.run(_call(w, **bad))
         assert refused.value.code == "tools_mismatch"
-    assert proxy.issued == [] and cli.requests == []
+    assert proxy.issued == [] and cli.requests == [] and spans == []
     assert await rows(w.engine, "SELECT id FROM agent_spend") == []  # refused before the reservation
 
 

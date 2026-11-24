@@ -22,6 +22,26 @@ spans:
       gen_ai.response.finish_reasons, gen_ai.system, input_tokens, llm_request.context, model, output_tokens,
       query_source_safe, session.id, span.type, speed, stop_reason, success, terminal.type, ttft_ms, user.id]
     events: [{ name: gen_ai.request.attempt, keys: [attempt] }]
+  # --- WebSearch run (SRV-FRESH's search call, SRV-AGENT FR-AGENT-15). Source:
+  # spikes/web-search-otel/results/20261124T122933/report.json, mode content-off (the four content flags 0); the
+  # canary harness's websearch-allow and websearch-deny modes check the same subset.
+  claude_code.tool:
+    parent: claude_code.interaction
+    keys: [anthropic.custom_base_url, anthropic.provider, duration_ms, gen_ai.conversation.id,
+      gen_ai.operation.name, gen_ai.provider.name, gen_ai.tool.call.id, gen_ai.tool.name, session.id, span.type,
+      terminal.type, tool_name, tool_name_safe, tool_use_id, user.id]
+    events: []
+  claude_code.tool.blocked_on_user:
+    parent: claude_code.tool
+    keys: [anthropic.custom_base_url, anthropic.provider, decision, duration_ms, gen_ai.conversation.id,
+      gen_ai.provider.name, session.id, source, span.type, terminal.type, user.id]
+    events: []
+  claude_code.tool.execution:
+    parent: claude_code.tool
+    keys: [anthropic.custom_base_url, anthropic.provider, duration_ms, gen_ai.conversation.id, gen_ai.provider.name,
+      gen_ai.tool.call.id, session.id, span.type, success, terminal.type, tool_use_id, user.id]
+    events: []
+  # --- end WebSearch run
 # Not present in any mode: a cost attribute. Present only with OTEL_LOG_USER_PROMPTS=1 (positive control):
 # user_prompt holding the prompt text.
 otlp_request_headers: [accept, accept-encoding, connection, content-length, content-type, host, user-agent]

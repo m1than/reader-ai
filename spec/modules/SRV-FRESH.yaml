@@ -111,7 +111,7 @@ bounds:
   shingle_words: 6               # chosen: a 6-word run copied from a non-front span is "book text" (INV-FRESH-1)
   search_max_turns: 2            # the tool call and the reply (spikes/web-search § 3a)
   search_requests_max: 3         # 2 main-loop requests + 1 nested search request; no retry is allowed for
-                                 # (abort_on_retry), so any extra request is refused (SRV-AGENT FR-AGENT-15)
+                                 # (abort_on_retry), so any extra request is refused (SRV-AGENT FR-AGENT-16)
   search_output_tokens: 1000     # CLAUDE_CODE_MAX_OUTPUT_TOKENS; caps the main and the nested request (§ 3a)
   t_max_tokens: 20000            # CHOSEN planning bound for tokens one search adds; NOT enforceable (H-WS-3)
   summary_chars_max: 1500        # the nested model's summary kept in memory for the report prompt only, never stored
@@ -194,11 +194,13 @@ requirements:
       confidence: low|medium|high}]}` with at most `claims_max` claims. Code expands aliases to span ids and pages and
       drops a claim with an unknown alias or a subject over `subject_words_max` words, with a token over
       `subject_token_chars_max` characters, over `subject_chars_max` characters, or with no word (counted in
-      `dropped`). Words are counted as INV-FRESH-1 counts them (`reader.freshness.text.words`): runs of `[^\W_]+`
+      `dropped`). Words are counted as INV-FRESH-1 counts them (`reader.freshness.text.words`): over the NFKC form
+      (so fullwidth and mathematical letters count as their plain letters), runs of `[^\W_]+`
       (so `_` separates, like `-`, `.`, `/`), split again where the script changes (the first word of the
       character's Unicode name, so U+02BC between Latin letters separates) and between letters and digits; a
       character of a script written without spaces (CJK ideographs, kana, Thai, Lao, Myanmar, Khmer) is a word of
-      its own; a dotted number such as `3.11` is one word; then a token that is not itself a word of the non-front
+      its own, so a CJK subject holds at most `subject_words_max` (5) characters; a dotted number such as `3.11`
+      is one word; then a token that is not itself a word of the non-front
       sampled spans but concatenates their words (an empty joiner, a zero-width character `clean` removed,
       camelCase) counts as the fewest such words (`text.split`). So `one-two.three/four`, `one_two_three_four`,
       `OneTwoThreeFour` and `onetwothreefour` (also the four words joined by U+200B) are four words each when the
@@ -226,9 +228,13 @@ requirements:
       by `topic_docs` queries (a level-1 topic plus "official documentation"), in topic order. `plan` applies
       FR-FRESH-3's subject rule again, so a stored or reused claim meets it too: a claim whose subject fails it is
       skipped before the ranking (`dropped.subject_too_long`). Claims are then taken in rank order, skipping one
-      whose subject, before or after the subject of a claim already taken, forms a `shingle_words`-word run of a
+      whose subject, joined with the subjects of the claims already taken in any order of them all (at most 3!
+      orderings), forms a `shingle_words`-word run of a
       non-front sampled span with its exempt strings masked (`dropped.subject_split`), so a span's run cannot be
-      split across the queries of one check (the owner note holds per check). Each query is NFC,
+      split across the queries of one check (the owner note holds per check). Every run comparison of this
+      requirement is made on the words as written and again with the number tokens (`1`, `3.11`) and the
+      modifier-letter tokens (U+02BC) removed from both sides, so such a joiner, a word of its own, cannot break a
+      copied run. Each query is NFC,
       whitespace-collapsed, and cut at a word boundary of its variable parts to `query_chars_max`. A planned query is
       dropped (`dropped.query_unsafe`) when, after masking the bibliography and topic strings it contains, it holds a
       `shingle_words`-word run of any non-front sampled span. Masking removes the exempt word sequences from both
@@ -411,7 +417,9 @@ requirements:
       Live: on the pilot with an owner-entered bibliography, one check completes `done` with a verdict, ≥ 1 search
       with results, ≥ 1 stored URL and every stored URL in that check's R, cost ≤ `run_cap_usd`, ledger rows carrying
       `web_search_requests`, and, over at least one settle row that has both, the settled amount (priced from the
-      SDK's `model_usage`) within SRV-AGENT's cross-check tolerance of the SDK's `total_cost_usd` (`sdk_usd`).
+      SDK's `model_usage`) within SRV-AGENT's cross-check tolerance of the SDK's `total_cost_usd` (`sdk_usd`);
+      with no such row the cross-check fails (`crosscheck_ok` false; [unit] test), and the owner it runs as is the
+      configured owner only while active and not disabled, as SRV-AUTH's session lookup requires ([db] test).
       agent-proxy records no usage of its own, so H-WS-6's proxy-side comparison is not made by this check. For
       every search the live result records the gate's decision (`allowed` or `denied`; a search with results was
       `allowed`; H-FRESH-2) and `run_input_tokens`, the search run's summed uncached `input` tokens from
@@ -434,7 +442,11 @@ invariants:
       words. Hence: (a) at most `subject_words_max` words per query come from non-front spans other than through
       exempt strings; (b) no query holds a `shingle_words`-word run of a non-front sampled span once its exempt
       strings are masked (FR-FRESH-5: removed from both word sequences); (c) no other text of the book can reach it.
-      Words are FR-FRESH-3's everywhere (a concatenation of span words counts as those words). Test: canary
+      Words are FR-FRESH-3's everywhere (a concatenation of span words counts as those words). Hard bound, whatever
+      the tokenizer: a query carries at most `subject_chars_max` (60) characters of one subject, and a check plans
+      at most 3 claim queries. Residual: a subject that joins span words with a stray letter (`alphaxbravo`, or
+      `é`, `ß` between them) counts as one token, not as the words it joins; `subject_token_chars_max` (24) bounds
+      such a token, and the 60-character bound the subject. Test: canary
       sentences of ≥ 6 unique words are planted in non-front spans and never in the outline or the bibliography; a
       fake scan may copy up to 5 canary words into a subject; the generator also joins subject words with
       punctuation (`-`, `.`, `/`, `,`), `_`, the empty joiner, U+200B, U+200D, U+02BC and a digit, optionally in
@@ -480,7 +492,7 @@ nfr: []
 
 vectors:
   - id: VEC-FRESH-1
-    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, a list or an object where an enum string belongs, extra keys, over-long strings, punctuation-joined subjects, subjects joined by `_`, U+200B, U+200D, U+02BC, digits, camelCase or nothing, a CJK subject, a dotted version, lone surrogates raw and escaped, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
+    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, a list or an object where an enum string belongs, extra keys, over-long strings, punctuation-joined subjects, subjects joined by `_`, U+200B, U+200D, U+02BC, digits, camelCase or nothing, a CJK subject, a dotted version, each token cap alone (a 25- and a 24-character token, 6 and 5 CJK characters, a 7-word subject of short tokens), fullwidth and mathematical bold letters, lone surrogates raw and escaped, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
     file: spec/fixtures/SRV-FRESH/outputs.yaml
   - id: VEC-FRESH-2
     source: Injection cases in search titles, summaries and model output (instructions, delimiter forgery, bidi overrides, zero-width characters, lone surrogates in a title and a URL, markup, a URL not searched, a model title differing from R's) with the sanitised stored result
@@ -498,7 +510,7 @@ vectors:
     source: Estimate cases from sample sizes and the pricing table, recomputed by hand from REF-FRESH-2 § 4
     file: spec/fixtures/SRV-FRESH/estimate.yaml
   - id: VEC-FRESH-7
-    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims)
+    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims in either order and across three, U+02BC, digit and `_` joiners in one query and U+02BC across two, fullwidth and mathematical bold letters)
     file: spec/fixtures/SRV-FRESH/plans.yaml
 
 defers:
@@ -513,7 +525,7 @@ defers:
 
 owner_notes:
   - "Each check costs about $0.27 (estimate) and at most about $0.39 by the bounds, under your $1.00 run cap; it is shown before you start it; at most $2.00 a day."
-  - "Search queries are built by code from the title, edition, authors, outline topics and short topic phrases (at most 5 words each) that the scan picks out of the book. No sentence of the book's text goes into a query."
+  - "Search queries are built by code from the title, edition, authors, outline topics and short topic phrases (at most 5 words each) that the scan picks out of the book. No sentence of the book's text goes into a query. Hard limit: at most 60 characters of a phrase per query and 3 phrase queries per check. One gap remains: words glued with a stray letter (like `alphaxbravo`) count as one word, at most 24 characters long."
   - "Recommendation dates are what the model reports from the search results, not verified dates; the card says 'as reported'."
 
 review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in revision 2: (1) structural tool pin
@@ -578,4 +590,10 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   (`subject_split`, FR-FRESH-5); lone surrogates are removed by sanitising, `output_invalid` in model output,
   `url_unsafe` in URLs and `bibliography_invalid` in the owner's entry (FR-FRESH-1/-7/-8); the web job writes
   `dropped` only with its final status (FR-FRESH-12); FR-FRESH-14's cross-check needs a compared row and names
-  what it compares; the [agent] test adds the deny scenario and runs its image by id."
+  what it compares; the [agent] test adds the deny scenario and runs its image by id.
+  Code review round 3 (2026-11-24), fixed without loosening any bound: runs are also compared with number and
+  modifier-letter tokens removed on both sides, so a U+02BC or digit joiner cannot break a run (FR-FRESH-5); a
+  run split across claims is checked over every order of the chosen subjects plus the candidate (FR-FRESH-5);
+  words are taken over NFKC (FR-FRESH-3); VEC-FRESH-1 tests each token cap alone; INV-FRESH-1 and the owner
+  note state the hard bound (60 subject characters per query, 3 claim queries per check) and the stray-letter
+  residual; FR-FRESH-14's owner lookup and its zero-row cross-check are tested; bound comment FR-AGENT-16."

@@ -1361,8 +1361,16 @@ tasks:
         carry no query, title, URL or summary (only OTEL_LOG_TOOL_CONTENT=1 does), so the search run keeps the trace
         export; test_obs_env pins its environment (additions + CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION). SRV-OBS
         allow-lists: freshness.scan/web job_args {}, error codes tools_not_allowed, search_cap, request_cap.
-        live._owner selects an active, enabled user.",
-      next: "1) Code review round 3 on the round-2 fixes and the merge (coordinator). 2) Before any live check
+        live._owner selects an active, enabled user.
+        Code review round 3 fixes (2026-11-24, V/fresh-r3 into V/slice-integration): runs are also compared with
+        number and modifier-letter tokens removed on both sides (a U+02BC or digit joiner no longer breaks a run, in
+        one query or across two); subject_split checks every order of the chosen subjects plus the candidate (a run
+        split across three claims); words over NFKC (fullwidth, mathematical bold); VEC-FRESH-1 tests each token cap
+        alone; INV-FRESH-1 and the owner note state the hard bound (60 subject characters per query, 3 claim queries
+        per check) and the stray-letter residual; tools_mismatch before the agent.call span (test); live._owner's
+        filter ([db]) and crosscheck with zero rows ([unit]) tested; SRV-OBS's CLI canary runs the WebSearch call in
+        allow, deny and tool-content modes, and VEC-OBS-2 lists the claude_code.tool* spans.",
+      next: "1) Code review of the round-3 fixes (coordinator). 2) Before any live check
         or `reader up`: the coordinator's approval (a real check ≈ $0.27). 3) WEB-IMPORT and the course page mount the
         card; SRV-INGEST PDF Info dictionary (later, paired).",
       paired_later: "SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount the card

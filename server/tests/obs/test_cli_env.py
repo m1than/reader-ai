@@ -46,7 +46,16 @@ def test_locked_sdk_equals_the_measured_canary_version() -> None:
 
 
 def test_vec_obs_2_shape() -> None:
-    assert set(VEC["spans"]) == {"claude_code.interaction", "claude_code.llm_request"}
+    assert set(VEC["spans"]) == {
+        "claude_code.interaction",
+        "claude_code.llm_request",
+        # the WebSearch run's tool spans (SRV-FRESH's search call): keys only, no input or output key
+        "claude_code.tool",
+        "claude_code.tool.blocked_on_user",
+        "claude_code.tool.execution",
+    }
+    for name in ("claude_code.tool", "claude_code.tool.blocked_on_user", "claude_code.tool.execution"):
+        assert not {"input", "output", "tool_input", "tool.output"} & set(VEC["spans"][name]["keys"]), name
     assert VEC["spans"]["claude_code.interaction"]["redacted"] == {"user_prompt": "<REDACTED>"}
     assert "authorization" not in VEC["otlp_request_headers"]
     for span in VEC["spans"].values():
