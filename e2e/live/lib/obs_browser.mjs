@@ -43,7 +43,7 @@ try {
   await page.getByRole('heading', { level: 1, name: 'Observability' }).waitFor({ timeout: 30_000 });
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${dir}/observability.png`, fullPage: true });
-  const links = page.getByRole('link', { name: 'Trace' });
+  const links = page.getByRole('link', { name: 'Trace', exact: true }); // not the "traces dashboard" link
   const n = await links.count();
   const summaryIds = JSON.parse(readFileSync(`${dir}/summary-trace-ids.json`, 'utf-8'));
   info({ observability_trace_links: n, summary_trace_ids: summaryIds.length });

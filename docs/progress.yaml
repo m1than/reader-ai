@@ -1099,6 +1099,15 @@ tasks:
         fetched with the panel's backoff until terminal.
         Checks: 335 Vitest tests, 212 Playwright tests (chromium, auth-dark, auth-light; run on port 4174 because another
         worktree's test server held 4173), LOCAL CI below." }
+  - { id: V.live-harness-fixes, stage: V, kind: fix, track: engineering, status: done, needs: [V.live-ui-fixes],
+      branch: V/live-harness-fixes,
+      notes: "After the owner's live upload check (2026-11-24, 9140885): upload.sh passes --config to `reader status`
+        (the one false FAIL); `reader status` without a loadable reader.yaml reports `unknown` with the config problem
+        (OPS-CLI FR-CLI-23, unit test); obs_browser.mjs matches the summary's `Trace` links exactly; web_live.py
+        --owner never deletes owner credentials: with a passkey it signs in with one id-only session row deleted by
+        id (owner.slice.ts READER_SESSION mode), without one it removes only rows created since the run started;
+        --reset-owner-passkeys is refused. Gate: all steps PASS except pytest's 95 tutor [db] TimeoutErrors under
+        parallel load; tests/tutor rerun alone: 128 passed (load flake, owner 2026-11-25: run tracks in parallel)." }
   - { id: V.live-ui-fixes, stage: V, kind: fix, track: product, status: in_progress, needs: [V.design-pass],
       branch: V/live-ui-fixes,
       what: "Product and test bugs found by the live check at 647cfeb (V/slice-integration with SRV-OBS on the design
