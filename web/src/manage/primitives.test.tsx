@@ -56,6 +56,16 @@ describe('titles and typed confirmation (FR-MANAGE-1, FR-MANAGE-2)', () => {
     expect(matchesConfirm?.('fixture course', 'Fixture course')).toBe(false);
     expect(matchesConfirm?.('Краткий курс'.normalize('NFD'), 'Краткий курс')).toBe(true);
   });
+
+  it('cuts the NFC title to 40 code points before trimming (the server rule, FR-MANAGE-2 vector)', async () => {
+    const { confirmTarget, matchesConfirm } = await model();
+    const title = 'a'.repeat(39) + ' ' + 'tail words';
+    expect(confirmTarget?.(title)).toBe('a'.repeat(39));
+    expect(matchesConfirm?.('a'.repeat(39), title)).toBe(true);
+    expect(matchesConfirm?.('a'.repeat(39) + ' t', title)).toBe(false);
+    // Leading white space in a stored title counts towards the 40 code points, then goes.
+    expect(confirmTarget?.('  ' + 'b'.repeat(50))).toBe('b'.repeat(38));
+  });
 });
 
 describe('response mapping (FR-MANAGE-1)', () => {
@@ -183,6 +193,23 @@ describe('ConfirmDialog (FR-MANAGE-2)', () => {
     expect(onConfirm).not.toHaveBeenCalled();
     await act(async () => fireEvent.click(del));
     expect(onConfirm).toHaveBeenCalledWith('Fixture course');
+  });
+
+  it('enables on the vector title’s 39-letter target and sends the normalised input', async () => {
+    const { ConfirmDialog } = await prim();
+    if (!ConfirmDialog) return expect(ConfirmDialog).toBeTypeOf('function');
+    const onConfirm = vi.fn(async () => undefined);
+    const title = 'a'.repeat(39) + ' ' + 'tail words';
+    render(<ConfirmDialog open title="Delete the course?" confirmLabel="Delete" typed={title} onConfirm={onConfirm} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole('dialog');
+    const input = within(dialog).getByRole('textbox', { name: `Type ${'a'.repeat(39)} to confirm` });
+    const del = within(dialog).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+    fireEvent.change(input, { target: { value: 'a'.repeat(39) + ' t' } });
+    expect(del.disabled).toBe(true);
+    fireEvent.change(input, { target: { value: '  ' + 'a'.repeat(39) + '  ' } });
+    expect(del.disabled).toBe(false);
+    await act(async () => fireEvent.click(del));
+    expect(onConfirm).toHaveBeenCalledWith('a'.repeat(39));
   });
 
   it('closes on Escape and on Cancel with no request', async () => {

@@ -12,7 +12,7 @@ import { textLang, useT } from '../ui/i18n';
 import { MoreIcon } from '../ui/icons';
 import './manage.css';
 import en from './messages.en';
-import { cleanTitle, confirmTarget, matchesConfirm, problem, type ObjectKind, type Problem } from './model';
+import { cleanTitle, confirmTarget, matchesConfirm, normaliseConfirm, problem, type ObjectKind, type Problem } from './model';
 
 export const useManageT = () => useT('manage', en);
 
@@ -271,7 +271,8 @@ export function ConfirmDialog({
     if (!ok || busy) return;
     setBusy(true);
     try {
-      await onConfirm(target);
+      // FR-MANAGE-2: the request's `confirm` is the typed text, NFC-normalised and trimmed (equal to the target here).
+      await onConfirm(typed === undefined ? undefined : normaliseConfirm(value));
     } finally {
       setBusy(false);
     }
