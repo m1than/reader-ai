@@ -995,7 +995,11 @@ requirements:
         (tutor) is below the previous upload of the SAME (kind, set_name, model) by more than 0.05; subject =
         kind/set/model; no previous upload → no alert;
       - `obs_unhealthy`: FR-OBS-32 (from `obs_stack_status`), only while tracing is on: with tracing off
-        nothing probes, so the rows are stale by design and raise no alert. The rows are read in a savepoint;
+        nothing probes, so the rows are stale by design and raise no alert. A member alerts when its last probe
+        failed or when `reader.obs.health.stale(checked_at, now, tracing_on)` (FR-OBS-32's one staleness
+        rule) is true, with `tracing_on` from the api's `phase2.tracing_on()` (code review of 8466329;
+        [unit] tracing off with an old row: none; tracing on with a row older than 75 minutes: one; a fresh
+        row: none). The rows are read in a savepoint;
         a missing table reads as no rows, any other database error fails the request (it never reads as "no
         alert"). The store size alert is `reader doctor`/`status`
         output, not an api alert (FR-OBS-31; review round 2, N8).

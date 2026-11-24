@@ -11,9 +11,11 @@ from typing import Any, Final
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
+from reader.obs import health
+
 SHARE: Final = 0.8  # of a cap
 REGRESSION: Final = 0.05
-STALE: Final = timedelta(minutes=75)  # FR-OBS-32: health.STALE_AFTER_S
+STALE: Final = timedelta(seconds=health.STALE_AFTER_S)  # FR-OBS-32
 BENCH_METRIC: Final = {"search": "hit_at_10", "tutor": "grounded_share"}
 
 
@@ -62,7 +64,7 @@ def compute(
             )
     for member, (ok, checked_at) in sorted(stack.items() if tracing else ()):
         age = now - checked_at
-        if not ok or age > STALE:
+        if not ok or health.stale(checked_at, now, tracing):  # FR-OBS-32's one staleness rule
             out.append(
                 {
                     "code": "obs_unhealthy",

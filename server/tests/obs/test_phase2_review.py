@@ -195,6 +195,33 @@ def test_the_freshness_tasks_count_against_one_daily_cap() -> None:
     assert alerts.subject("tutor") == "tutor"
 
 
+@pytest.mark.parametrize(("tracing", "age_min", "alerts_n"), [
+    (False, 300, 0),  # tracing off, an old row: stale by design, no alert
+    (True, 76, 1),    # tracing on, older than 75 minutes: obs_unhealthy
+    (True, 75, 0),    # the boundary is not stale
+    (True, 5, 0),     # a fresh row: no alert
+])
+def test_obs_unhealthy_uses_healths_one_staleness_rule(tracing: bool, age_min: int, alerts_n: int,
+                                                        monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-OBS-25 with FR-OBS-32: the alert asks `health.stale(checked_at, now, tracing_on)`."""
+    alerts = require("reader.obs.alerts")
+    health = require("reader.obs.health")
+    now = datetime(2026, 11, 25, 12, 0, tzinfo=UTC)
+    asked: list[tuple[datetime, datetime, bool]] = []
+    real = health.stale
+
+    def spy(checked_at: datetime, at: datetime, tracing_on: bool) -> bool:
+        asked.append((checked_at, at, tracing_on))
+        return bool(real(checked_at, at, tracing_on))
+
+    monkeypatch.setattr(health, "stale", spy)
+    checked = now - timedelta(minutes=age_min)
+    got = alerts.compute(task_spend_today={}, task_daily_caps={}, open_runs=[], dead_jobs={}, bench=[],
+                         stack={"mlflow": (True, checked)}, now=now, tracing=tracing)
+    assert [(a["code"], a["subject"]) for a in got] == [("obs_unhealthy", "mlflow")] * alerts_n
+    assert asked == ([(checked, now, True)] if tracing else [])
+
+
 @pytest.mark.anyio
 async def test_load_sums_the_freshness_tasks_and_skips_stale_health_while_tracing_is_off() -> None:
     alerts = require("reader.obs.alerts")
