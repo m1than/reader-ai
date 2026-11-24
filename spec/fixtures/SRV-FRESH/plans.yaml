@@ -177,6 +177,22 @@ cases:
         - [books, "Ledgers book 2026"]
       dropped: { query_unsafe: 3 }
 
+  - name: an_underscore_joiner_does_not_break_a_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # `_` separates words like a space, so "echo foxtrot golf_hotel latest version" is a 6-word run of the span.
+    claims:
+      - { id: c1, subject: "echo foxtrot golf_hotel", kind: version, confidence: high, page: 1 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 1 }
+
   - name: a_modifier_joiner_does_not_break_a_run_across_claims
     language: en
     today: "2026-11-23"

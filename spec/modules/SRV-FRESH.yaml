@@ -510,7 +510,7 @@ vectors:
     source: Estimate cases from sample sizes and the pricing table, recomputed by hand from REF-FRESH-2 § 4
     file: spec/fixtures/SRV-FRESH/estimate.yaml
   - id: VEC-FRESH-7
-    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims in either order and across three, U+02BC and digit joiners in one query and across two, fullwidth and mathematical bold letters)
+    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims in either order and across three, U+02BC, digit and `_` joiners in one query and U+02BC across two, fullwidth and mathematical bold letters)
     file: spec/fixtures/SRV-FRESH/plans.yaml
 
 defers:
