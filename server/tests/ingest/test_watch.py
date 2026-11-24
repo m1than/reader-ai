@@ -796,6 +796,105 @@ def test_a_setup_failure_releases_what_exists_and_fails_once(
     assert h.stack.failed() == ["convert_failed"]
 
 
+# ---- code review round 3 ----
+
+
+def test_a_heartbeat_thread_that_cannot_start_fails_once_and_the_watcher_runs_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    watch = need("reader.ingest.host.watch")
+    h = Harness(tmp_path)
+    deps = h.deps()
+    deps.timer = watch.RepeatTimer  # the real heartbeat
+
+    def no_thread(self: threading.Thread) -> None:
+        raise RuntimeError("can't start new thread")
+
+    monkeypatch.setattr(threading.Thread, "start", no_thread)
+    w = watch.Watcher(deps)
+    w.step()
+    assert h.stack.failed() == ["convert_failed"]
+    assert w.busy == "none" and "awake-stop" in h.events and "convert" not in h.events
+    w.step()  # the watcher keeps running: the next claim gets the same treatment, nothing escapes
+    assert h.stack.failed() == ["convert_failed", "convert_failed"]
+
+
+def test_releases_are_independent_when_the_record_removal_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = need("reader.ingest.host.records")
+    h = Harness(tmp_path)
+
+    def no_removal(*_: Any) -> None:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(records, "end_run", no_removal)
+    w = h.watcher()
+    at = h.clock.now
+    w.step()  # the cleanup's OSError reaches the step: logged, 10 s, never raised
+    assert w.busy == "none"
+    assert h.timers[0].cancelled and "awake-stop" in h.events
+    assert h.events[-1] == "unlock"
+    assert h.clock.now - at >= 10
+    assert h.stack.failed() == []  # the run itself succeeded
+
+
+def test_a_failed_run_record_leaves_nothing_half_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    records = need("reader.ingest.host.records")
+    run_dir, work_root = tmp_path / "run", tmp_path / "work"
+
+    def full(*_: Any, **__: Any) -> None:
+        raise OSError(28, "No space left on device")
+
+    with monkeypatch.context() as m:
+        m.setattr(records.json, "dump", full)  # fails inside the temporary file
+        with pytest.raises(OSError, match="No space"):
+            records.new_run(run_dir, work_root, "a" * 64, upload_id=UPLOAD)
+    assert list(run_dir.iterdir()) == [] and list(work_root.iterdir()) == []
+    taken = work_root / ("ab" * 8)
+    taken.mkdir()
+    (taken / "keep").write_bytes(b"x")
+    monkeypatch.setattr(records.secrets, "token_hex", lambda n: "ab" * 8)
+    with pytest.raises(FileExistsError):
+        records.new_run(run_dir, work_root, "a" * 64, upload_id=UPLOAD)
+    assert list(run_dir.iterdir()) == []  # the record it wrote is gone
+    assert (taken / "keep").exists()  # a directory it did not create is never removed
+
+
+def test_a_failing_stray_count_sends_nothing_and_waits(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    deps = h.deps()
+
+    def no_ps() -> int:
+        raise OSError("ps exited 1 with 0 processes")
+
+    deps.strays = no_ps
+    w = need("reader.ingest.host.watch").Watcher(deps)
+    w.step()
+    assert h.stack.calls == []  # no `next`: seen_at ages and the stack shows the converter offline after 60 s
+    assert h.clock.now >= 10
+
+
+def test_a_late_heartbeat_never_aborts_the_next_run(tmp_path: Path) -> None:
+    h = Harness(tmp_path)
+    w = h.watcher()
+    w.step()  # run A converts and ends
+    late = h.timers[0].fn
+    h.stack.progress_reply = (3, CANCEL)
+
+    def during_b(_: Path) -> None:
+        late()  # A's slow progress returns cancel while run B converts
+
+    h.convert_hook = during_b
+    w.step()
+    assert "abort" not in h.events
+    assert h.stack.failed() == []
+
+
 def test_a_code_outside_fail_s_list_is_reported_as_convert_failed(tmp_path: Path) -> None:
     cli = need("reader.ingest.host.cli")
     h = Harness(tmp_path)

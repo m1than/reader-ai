@@ -234,9 +234,7 @@ class Watcher:
         started = self.d.clock()
         phase = ["fetch"]
         cancelled = threading.Event()
-        awake: Awake | None = None
-        heart: TimerHandle | None = None
-        name: str | None = None
+        ended = threading.Event()  # set at cleanup: a late heartbeat of this run never aborts the next one
         run_dir, work_root = self.d.data_dir / "ingest" / "run", self.d.data_dir / "ingest" / "work"
 
         def call(args: list[str], timeout: float, shape: Callable[[Any], bool]) -> tuple[str, Any]:
@@ -246,23 +244,32 @@ class Watcher:
             return kind, obj
 
         def beat() -> None:
+            if ended.is_set():
+                return
             args = [*self._claim_args("progress", c), "--phase", phase[0]]
             kind, _ = call(args, EXEC_TIMEOUT["progress"], _ok_shape)
-            if kind == "cancel":
+            if kind == "cancel" and not ended.is_set():
                 log.info("upload_cancelled id=%s phase=%s", c.id, phase[0])
                 self.d.abort()
 
-        # The try begins before the first resource, so a setup failure (busy, caffeinate, the heartbeat, the
-        # run record) still releases what exists and fails the claim (code review round 2).
-        try:
+        # Each resource registers its release as it is created; the stack runs every release even when one
+        # raises (code review rounds 2-3), in reverse: run record, ended, heartbeat, caffeinate, busy.
+        with contextlib.ExitStack() as cleanup:
             try:
+                cleanup.callback(self._set_busy, "none")
                 self._set_busy("claim")
                 awake = self.d.caffeinate()
+                cleanup.callback(awake.stop)
                 heart = self.d.timer(params.HEARTBEAT_S, beat)
+                cleanup.callback(heart.cancel)
+                cleanup.callback(ended.set)
                 name = records.new_run(run_dir, work_root, c.sha256, upload_id=c.id)
+                cleanup.callback(records.end_run, run_dir, work_root, name)
                 code = self._convert_and_send(container, c, work_root / name, phase, call, cancelled)
-            except OSError as error:  # with the claim held: fail it, never leave it to the lease
-                log.warning("run_error id=%s errno=%s", c.id, error.errno)
+            except (OSError, RuntimeError) as error:  # the claim is held: fail it, never leave it to a lease
+                # RuntimeError: Thread.start() of the heartbeat ("can't start new thread")
+                log.warning("run_error id=%s error=%s errno=%s", c.id, type(error).__name__,
+                            getattr(error, "errno", None))
                 code = "convert_failed"
             if code is not None and code not in params.FAIL_CODES:
                 log.info("run_code id=%s code=%s reported=convert_failed", c.id, code)
@@ -270,14 +277,6 @@ class Watcher:
             if code is not None and not cancelled.is_set():
                 call([*self._claim_args("fail", c), "--code", code], EXEC_TIMEOUT["fail"], _ok_shape)
                 log.info("upload_failed id=%s code=%s s=%.1f", c.id, code, self.d.clock() - started)
-        finally:
-            if heart is not None:
-                heart.cancel()
-            if awake is not None:
-                awake.stop()
-            if name is not None:
-                records.end_run(run_dir, work_root, name)
-            self._set_busy("none")
 
     @staticmethod
     def _claim_args(command: str, c: Claim) -> list[str]:

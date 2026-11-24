@@ -61,9 +61,19 @@ def new_run(run_dir: Path, work_root: Path, material_sha256: str, upload_id: str
     record: dict[str, Any] = {"material_sha256": material_sha256, "work": str(work)}
     if upload_id is not None:
         record["upload_id"] = upload_id
-    _write(run_dir / f"{name}.json", record)
-    work.mkdir(mode=0o700)
-    os.chmod(work, 0o700)
+    path, made = run_dir / f"{name}.json", False
+    try:
+        _write(path, record)
+        work.mkdir(mode=0o700)
+        made = True
+        os.chmod(work, 0o700)
+    except BaseException:  # leave nothing half-made: the record, its temporary file, a directory we created
+        for leftover in (path, path.with_name(f".{path.name}.tmp")):
+            with contextlib.suppress(OSError):
+                leftover.unlink()
+        if made:
+            shutil.rmtree(work, ignore_errors=True)
+        raise
     return name
 
 

@@ -356,6 +356,92 @@ def test_a_failed_kill_all_still_kills_the_group_and_logs_it(
     assert "watchdog_failed kill=group_only" in caplog.text
 
 
+class ExitedChild(SlowChild):
+    """A child that prints nothing and exits 0 at once."""
+
+    def stdout_lines(self) -> Any:
+        return iter(())
+
+    def wait(self, timeout: float | None = None) -> int:
+        return 0
+
+
+class EndDog:
+    """Ticks that pass (or raise); `kill_all` raises on the calls listed in `raising` (1-based), or always."""
+
+    def __init__(self, raising: set[int] | None = None, check_raises: bool = False) -> None:
+        self.raising, self.check_raises, self.kills = raising, check_raises, 0
+
+    def check(self) -> str | None:
+        if self.check_raises:
+            raise OSError("ps failed")
+        return None
+
+    def kill_all(self) -> None:
+        self.kills += 1
+        if self.raising is None or self.kills in self.raising:
+            raise OSError("ps failed")
+
+
+def test_an_unverified_end_of_run_fails_a_child_that_exited_0(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Round 3: ticks pass, the end-of-run kill always raises: never a success."""
+    cli = need("reader.ingest.host.cli")
+    child, dog = ExitedChild(), EndDog()
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: dog
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert dog.kills == cli.WATCHDOG_FAILED_TICKS
+    assert caplog.text.count("watchdog_failed kill=group_only") == 1
+
+
+def test_the_end_of_run_kill_is_retried(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    cli = need("reader.ingest.host.cli")
+    child, dog = ExitedChild(), EndDog(raising={1, 2})
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: dog
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "convert_failed"  # a verified end: the (empty) output decides, not the watchdog
+    assert dog.kills == 3
+    assert "kill=group_only" not in caplog.text
+
+
+def test_a_mid_run_kill_failure_is_logged(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Round 3: kill_all raises only on its first call (mid-run, after 3 failed ticks); the end kill works."""
+    cli = need("reader.ingest.host.cli")
+    child, dog = SlowChild(), EndDog(raising={1}, check_raises=True)
+    deps = _deps(tmp_path, child)
+    deps.watchdog = lambda c, work: dog
+    with caplog.at_level("WARNING"), pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert dog.kills == 2  # the mid-run kill that raised, then one end-of-run kill that worked
+    assert caplog.text.count("watchdog_failed kill=group_only") == 1
+    assert "kill" in child.events
+
+
+def test_a_failing_ps_at_build_time_refuses_the_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cli = need("reader.ingest.host.cli")
+    wd = need("reader.ingest.host.watchdog")
+    child = SlowChild()
+    deps = _deps(tmp_path, child)
+    deps.start_time = lambda pid: T0
+
+    def no_ps(self: Any) -> list[Any]:
+        raise OSError("ps exited 1 with 0 processes")
+
+    monkeypatch.setattr(wd.SystemInspect, "snapshot", no_ps)
+    deps.watchdog = lambda c, work: cli.system_watchdog(deps, c, work)
+    with pytest.raises(cli.Stop) as stop:
+        cli.convert_members(tmp_path / "w", deps, lambda _: None)
+    assert stop.value.code == "watchdog_failed"
+    assert "kill" in child.events
+
+
 def test_an_empty_ps_while_the_child_lives_is_a_failed_tick(tmp_path: Path) -> None:
     wd = need("reader.ingest.host.watchdog")
 

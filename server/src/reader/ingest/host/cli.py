@@ -304,12 +304,15 @@ def convert_members(
             timer.cancel()
         if child is not None:
             child.kill()  # the whole session, so nothing the child started still writes into WORK
-        if dog is not None:
-            try:
-                dog.kill_all()  # every member, re-verified, at the end of every run (setsid'd ones too)
-            except Exception:  # fail closed: an unverified end of run is not a success (round 2)
-                log.warning("watchdog_failed kill=group_only")
-                tripped.append("watchdog_failed")
+        if dog is not None:  # every member, re-verified, at the end of every run (setsid'd ones too)
+            for attempt in range(1, WATCHDOG_FAILED_TICKS + 1):
+                try:
+                    dog.kill_all()
+                    break
+                except Exception:  # fail closed: an unverified end of run is not a success (rounds 2-3)
+                    if attempt == WATCHDOG_FAILED_TICKS:
+                        log.warning("watchdog_failed kill=group_only")
+                        tripped.append("watchdog_failed")
     if tripped:
         raise Stop(tripped[0], 5)
     if code != 0:  # the 4 h wall clock included (FR-INGEST-10: a timeout is convert_failed)
