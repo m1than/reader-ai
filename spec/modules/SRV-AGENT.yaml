@@ -87,6 +87,11 @@
 # Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): the provider's caps (task budget,
 # monthly budget, warn level) are read per call through `reader.config.effective` (reader.yaml plus the owner's
 # overrides), so a budget override applies to the next call without a worker restart; no oracle changed.
+# Code review of the management layer (2026-11-24, V/manage-fix-auth; SRV-CONFIG FR-CONFIG-26 "Enforcement is
+# live"): the reserve enforces the effective budgets per call, never `compile_runs.task_budgets` (a display snapshot).
+# tests/agent/test_provider_db.py adds the [db] oracle: a lowered `budgets.monthly_usd` override refuses
+# `monthly_budget_exhausted` and a lowered task budget override refuses `task_budget_exhausted` on calls the file's
+# values allow, with nothing reserved; after the overrides are removed the same call succeeds.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
