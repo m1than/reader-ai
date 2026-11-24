@@ -8,6 +8,8 @@ revisit_when: "The owner adds an `anthropic-api` provider (the direct Messages p
 supersedes: []
 ---
 
+> Amendment (owner, 2026-11-25), id renumbering at the freshness merge: SRV-OBS took FR-AGENT-14 first, so the SRV-AGENT items cited below as FR-AGENT-14, FR-AGENT-15 and FR-AGENT-16 are FR-AGENT-15, FR-AGENT-16 and FR-AGENT-17 in the specs. The decision is unchanged.
+
 > Amends SRV-AGENT's "tools must be empty" (FR-AGENT-4, FR-AGENT-7) for one task, and ADR-0025 as notes for the
 > owner to add on acceptance:
 > - rule 2 (tools by allow-list) already permits a declared tool;
