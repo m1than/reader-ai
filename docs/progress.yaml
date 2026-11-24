@@ -1588,7 +1588,11 @@ tasks:
         (phase2_review_round3): only lacking params logged; scores recomputed from registered per-question records
         (the tutor upload is the records file); restore marker and mlflow-migrate exit 3; FR-OBS-29's image test
         first Red. Round 12 (results/20261124T155700-round12-rest): same-value param re-log 200, changed 400;
-        LoggedModel tag PATCH and read-back; egress probe reaches MLflow /health 200. Next: design review round 4." }
+        LoggedModel tag PATCH and read-back; egress probe reaches MLflow /health 200. Design review round 4
+        (03124aa): changes, F1 (the restore logic); revision 5: store.version, an in-progress marker that stops a
+        second run before the backup, named versions in the image test, distinct exit codes (migrate 10..13,
+        restore 0..5), the fresh-volume hypothesis with a fallback, tutor_summary moved to SRV-TUTOR. Next: design
+        review round 5." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

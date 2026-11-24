@@ -123,36 +123,8 @@ bench_results:
       gold_in_top8: bool
       gold_cited: bool
     rule: "every record id is a record id of the uploaded set; scores are recomputed from the records (R4)"
-  tutor_summary:   # e2e/live/results/<date>-tutor-bench.json, a report after FR-TUTOR-15's migration; NOT an upload
-    required:
-      kind: { enum: [tutor] }
-      date: date
-      branch: branch
-      commit: commit
-      lesson_id: uuid
-      set: { enum: [tutor-bench-v2] }
-      n: { int: [1, 1000] }
-      states: { keys: { enum: [answered, failed, insufficient, expired] }, values: { int: [0, 1000] } }
-      grounded_share: { float: [0, 1] }
-      gold_cited_share: { float: [0, 1] }
-      latency_s: { p50: { float: [0, 3600] }, p95: { float: [0, 3600] }, max: { float: [0, 3600] } }
-      mean_usd: { float: [0, 100] }
-      total_usd: { float: [0, 1000] }
-    optional:
-      runs: { int: [1, 100] }
-      stopped_by_daily_cap: bool
-      failed: { list: { id: question_id, chapter: { int: [1, 23] }, wall_s: { float: [0, 3600] },
-                        usd: { float: [0, 100] }, output_tokens: { int: [0, 1000000] },
-                        error_code: { enum_or_null: SRV-TUTOR error codes } }, max: 1000 }
-      insufficient_share: { float: [0, 1] }
-      verified_block_share: { float: [0, 1] }
-      grounded_given_gold_in_top8: { in_top8: top8_cell, not_in_top8: top8_cell }
-      per_chapter: { keys: "^([1-9]|1[0-9]|2[0-3])$", values: { pair: { int: [0, 1000] } } }
-      output_tokens_mean: { float: [0, 1000000] }
-      thinking_tokens_nonzero: { count: { int: [0, 1000] }, values: { list: { int: [0, 1000000] }, max: 1000 } }
-      nfr: { keys: "^(gate_n_met|NFR-TUTOR-[0-9]+_[A-Za-z0-9_.]+)$", values: bool }
-    top8_cell: { n: { int: [0, 1000] }, grounded: { int: [0, 1000] }, share: { float: [0, 1] } }
-    rule: "every failed id is a record id of the uploaded set"
+# The tutor SUMMARY's numbers-only shape (a report, not an upload) lives with its owner:
+# spec/fixtures/SRV-TUTOR/bench-summary.yaml (design review round 4).
 upload: { max_bytes: 262144, content_type: application/json }
 
 # FR-OBS-24: owner labels (Postgres `owner_labels` is the record; MLflow gets a HUMAN assessment mirror; the mirror is

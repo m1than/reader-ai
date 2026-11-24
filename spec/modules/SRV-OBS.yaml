@@ -1133,8 +1133,12 @@ proposed_requirements:
       the tutor upload is the bench's records file (VEC-TUTOR-7's `tutor-bench-<UTC time>.json`), not the
       summary: paired SRV-TUTOR FR-TUTOR-15 gives that file a header (kind `tutor`, date, branch, commit sha,
       lesson_id, set `tutor-bench-v2`) above its records, numbers, ids, states and flags only; the committed
-      summary (e2e/live/results/2026-11-23-tutor-bench.json) is migrated to VEC-OBS-5's numbers-only shape (commit
-      `66fba58`, prose keys dropped) and stays a report, not an upload (review rounds 1 and 3, B4 and R4).
+      summary (e2e/live/results/2026-11-23-tutor-bench.json) is migrated to the numbers-only shape of
+      spec/fixtures/SRV-TUTOR/bench-summary.yaml (commit `66fba58`, prose keys dropped) and stays a report, not an
+      upload (review rounds 1, 3 and 4). The 2026-11-23 run's records file was not committed, so the first tutor
+      upload needs a new bench run (VEC-TUTOR-7: about 40 × $0.027 ≈ $1.10 at the measured mean), which spends
+      Agent SDK credit from `budget.live_runs_usd` and waits for the owner's go-ahead like every live run
+      (declared; phase 2 itself spends nothing).
   - id: FR-OBS-24
     text: >-
       Owner labels (ADR-0038 Decisions 2 and 3). Postgres is the record; MLflow gets a mirror. MLflow's labeling
@@ -1244,35 +1248,52 @@ proposed_requirements:
       Schema migrations on upgrade. A one-shot service `mlflow-migrate` (same image, same volume and hardening,
       `restart: "no"`); `mlflow` depends on it with `condition: service_completed_successfully`. Its command is a
       shell script of exactly these steps, all under an exclusive `flock /var/lib/mlflow/.migrate.lock` (so two
-      concurrent `reader up` runs cannot migrate twice):
-      (1) if `/var/lib/mlflow/mlflow.db` does not exist, skip to (3) (no backup of an empty store);
-      (2) take the one pre-migration backup through SQLite's backup API to
-          `/var/lib/mlflow/backup/pre-migrate.db`, replacing the previous one (exactly one is kept), and record the
-          image version in `/var/lib/mlflow/backup/pre-migrate.version`;
-      (3) `mlflow db upgrade sqlite:////var/lib/mlflow/mlflow.db`; a non-zero exit stops here, so `mlflow` does not
-          start, and the error names the manual restore below;
-      (4) `PRAGMA journal_mode=WAL` (persistent; FR-OBS-28), then exit 0.
+      concurrent `reader up` runs cannot migrate twice). Files, all in the volume: `store.version` (the MLflow
+      version that last migrated the store), `backup/pre-migrate.db` and `backup/pre-migrate.version`,
+      `backup/in-progress`, `backup/restored-for`. Exit codes are mlflow-migrate's own (10..13, distinct from the
+      restore command's 0..5):
+      (0) if `backup/in-progress` exists (a previous run died or failed in step 3), exit 10
+          `obs_migration_incomplete` before anything else, naming `reader restore-obs-premigrate`: the backup is
+          never overwritten while a migration is unfinished. If `backup/restored-for` exists and differs from this
+          image's MLflow version, exit 11 `obs_restored_for_other_version`; if it matches, remove it and go on;
+      (1) if `mlflow.db` does not exist, skip to (3);
+      (2) take the one pre-migration backup through SQLite's backup API to `backup/pre-migrate.db` (replacing the
+          previous one: exactly one is kept), and copy `store.version` into `backup/pre-migrate.version` (a store
+          without `store.version` was made before this change by MLflow 3.18.0's own start, the only version reader
+          shipped before it, so `3.18.0` is written; declared);
+      (3) write `backup/in-progress`, then `mlflow db upgrade sqlite:////var/lib/mlflow/mlflow.db`; a non-zero exit
+          stops here with exit 12 `obs_migration_failed`, leaving `in-progress` in place, so `mlflow` does not start
+          and every later run stops at (0);
+      (4) `PRAGMA journal_mode=WAL` (persistent; FR-OBS-28), write `store.version` = this image's MLflow version,
+          remove `backup/in-progress`, exit 0. A failure here exits 13 `obs_migration_finish_failed`, with
+          `in-progress` still in place.
+      Fresh volume: step (3) on a missing file is expected to build the schema from empty (HYPOTHESIS, measured by
+      the [image] test before Green). If it does not, the fallback is: on a missing file skip (2) and (3), let the
+      server create and initialise the store at its first start, and run (4)'s WAL and `store.version` at the next
+      `mlflow-migrate` (the server's own first-start migration of an empty store is then the one declared window,
+      with no data to lose). Either way that first start is a migration too, and `reader doctor` prints
+      `obs mlflow: fresh store, schema <revision>` after it.
       Manual restore after a failed migration, with the stack down: `reader restore-obs-premigrate` (paired OPS-CLI
-      FR-CLI-24, exit codes there) copies `backup/pre-migrate.db` over `mlflow.db` through the backup API,
-      removes any stale `mlflow.db-wal` and `mlflow.db-shm` first, prints the version in `pre-migrate.version`,
-      and writes the marker `/var/lib/mlflow/backup/restored-for` holding that version. While the marker exists,
-      `mlflow-migrate` compares it with its own image version and, when they differ, exits with code 3
-      (`obs_restored_for_other_version`) before step (1), so a newer image never migrates the restored file;
-      when they match it removes the marker and goes on. Going back to the old pin (reverting the image bump in
-      deploy/compose.yaml) is the owner's own git action; reader does not change the pin. A fresh volume (no
-      `mlflow.db`) is created by step (3)'s `mlflow db upgrade`, which builds the schema from empty: that first
-      start is a migration too (declared), and `reader doctor` prints `obs mlflow: fresh store, schema <revision>`
-      after it. Why: a server stopped during its own first-start migration left the file
+      FR-CLI-24, its exit codes there) removes any stale `mlflow.db-wal` and `mlflow.db-shm`, copies
+      `backup/pre-migrate.db` over `mlflow.db` through the backup API, sets `store.version` from
+      `pre-migrate.version`, prints that version, writes `backup/restored-for` holding it, and removes
+      `backup/in-progress`. Then `mlflow-migrate` of any other version exits 11 at (0) until the image matches,
+      so a newer image never re-migrates the restored file by accident. Going back to the old pin (reverting the
+      image bump in deploy/compose.yaml) is the owner's own git action; reader does not change the pin. Why: a server stopped during its own first-start migration left the file
       half-migrated ("table _alembic_tmp_experiments already exists") and never started again (round 9); and
       3.18.0's server runs pending migrations itself at start (round 9: on a volume written by 3.10.0 it ran without
       an error until the test's 60 s limit, so it does not refuse an old schema), so without the one-shot every
       first start after a bump is that window. Test [image], the FIRST Red test of phase 2 (it pins the riskiest
       behaviour before any code): under the service's own hardening (non-root uid, read-only root filesystem, only
       the volume writable), a volume written by the previous pin is started by the new pin through
-      `mlflow-migrate`; it serves its data, `pre-migrate.db` exists and opens; two `mlflow-migrate` started at once
-      serialise on the `flock` (the second waits, then finds nothing to upgrade); a second run is a no-op
-      upgrade; after `reader restore-obs-premigrate`, `mlflow-migrate` of a different version exits 3 and of the
-      marker's version starts; a fresh volume reaches a served, empty store.
+      `mlflow-migrate`; it serves its data, `pre-migrate.db` exists and opens, `store.version` names the new
+      pin; two `mlflow-migrate` started at once serialise on the `flock` (the second waits, then finds nothing to
+      upgrade); a second run is a no-op upgrade. With named versions N (the previous pin) and N+1 (the new one): a
+      volume written by N whose step (3) under N+1 fails (forced by a read-only file or an injected failing
+      upgrade) exits 12; a second N+1 `mlflow-migrate` exits 10 and leaves `pre-migrate.db` byte-identical
+      (sha256 before and after); `reader restore-obs-premigrate` exits 0 and prints N; then N+1 exits 11 and N
+      starts and serves the data. A fresh volume reaches a served, empty store (this run decides the fresh-volume
+      hypothesis above).
   - id: FR-OBS-30
     text: >-
       Backup and restore (paired OPS-CLI FR-CLI-24, OPS-DEPLOY FR-DEPLOY-15). `obs_mlflow` joins `reader backup`
@@ -1456,9 +1477,9 @@ phase2_paired_changes:
   - { spec: SRV-EVENTS, id: FR-EVENTS-32, change: "the catalogue gains obs.setup, obs.runs, obs.bench, obs.label and obs.health (phase2_job_kinds); a periodic scheduler entry for obs.health; `traced: false` for obs.health; declared: obs.runs holds a second advisory lock (lock_id(obs.runs:<kind>:<id>)) on its job's connection for the whole run, beside the key lock, so it holds one pooled connection for up to its 60 s timeout, like every running job" }
   - { spec: SRV-PIPELINE, id: FR-PIPELINE-18, change: "after the transaction that records a run's end commits, enqueue obs.runs {compile, run_id, end} inside its own try/except" }
   - { spec: SRV-INGEST, id: FR-INGEST-26, change: "the same for an import's end (obs.runs {ingest, ingest_id, 1}); id above V/manage's FR-INGEST-25 (review round 2, N10)" }
-  - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench's records file (tutor-bench-<UTC time>.json) gains a header (kind tutor, date, branch, commit sha, lesson_id, set tutor-bench-v2) and is VEC-OBS-5 bench_results.tutor exactly (the upload); the summary file is VEC-OBS-5 tutor_summary (no prose keys, commit sha only) and the committed 2026-11-23 summary is migrated to it (a report, not an upload)" }
+  - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench's records file (tutor-bench-<UTC time>.json) gains a header (kind tutor, date, branch, commit sha, lesson_id, set tutor-bench-v2) and is VEC-OBS-5 bench_results.tutor exactly (the upload); the summary file is spec/fixtures/SRV-TUTOR/bench-summary.yaml's tutor_summary (no prose keys, commit sha only; moved to SRV-TUTOR in review round 4) and the committed 2026-11-23 summary is migrated to it (a report, not an upload)" }
   - { spec: WEB-UI, id: FR-UI-31, change: "/observability: the bench upload (two file pickers, the route's errors shown by code), label buttons on lesson and answer rows (good/bad and the reason enum), one banner per alert, and a stack row (mlflow, rotel from obs_stack_status; jaeger: see reader doctor)" }
-  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader restore-obs-premigrate` (FR-OBS-29); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written; mlflow-migrate's own exit 3 (obs_restored_for_other_version) is reported by `reader up` with the marker's version and the hint that the owner reverts the pin in git" }
+  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader restore-obs-premigrate` (FR-OBS-29); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written; `reader up` reports mlflow-migrate's own codes (FR-OBS-29: 10 obs_migration_incomplete → run restore-obs-premigrate; 11 obs_restored_for_other_version → the marker's version and the hint that the owner reverts the pin in git; 12 obs_migration_failed and 13 obs_migration_finish_failed → restore-obs-premigrate), which never overlap the restore command's 0..5" }
   - { spec: OPS-DEPLOY, id: FR-DEPLOY-15, change: "FR-OBS-27's pinned flags and environment with comments and sources; the mlflow-migrate one-shot (flock, pre-migration backup, db upgrade, WAL); no new healthchecks (rotel and jaeger have no shell; obs.health and reader doctor cover them); deploy/otel/mlflow-setup.yaml mounted read-only into the worker; the 8443 request body limit (10 MiB, structural); the obs_mlflow volume's backup label changes from excluded to included (ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion), VEC-DEPLOY-3's backup list updated" }
   - { spec: spikes, id: "spikes/embeddings-local (no spec; spike files)", change: "bench.py writes `kind: search`, and the committed results under results/20261120T195713-draft-questions/ (the run over questions.yaml, i.e. search-bench-v1's set) gain it, so they conform to VEC-OBS-5; the edit is noted in spikes/embeddings-local/RESULT.md (review rounds 2 and 3, N3 and R4)" }
   - { spec: OPS-DOD, id: "tools/ci-local.sh (paired, tooling)", change: "ci-local.sh and ci.yml run `node spec/fixtures/SRV-OBS/compose-bench.mjs --check` beside trace-check" }
@@ -1499,6 +1520,10 @@ phase2_review_round3:
   - { id: R3, answer: "restore-obs-premigrate removes stale -wal/-shm, prints pre-migrate.version, writes backup/restored-for; mlflow-migrate exits 3 obs_restored_for_other_version until the image matches; reverting the pin is the owner's git action; FR-CLI-24 has the exit-code table (FR-OBS-29)" }
   - { id: R4, answer: "scores recomputed by code over registered records only, file aggregates validated but never stored; the tutor upload is the per-question records file with FR-TUTOR-15's header; kind: search points at results/20261120T195713-draft-questions, noted in spikes/embeddings-local/RESULT.md (FR-OBS-23, VEC-OBS-5)" }
   - { id: non-blocking, answer: "fresh-volume first start declared as a migration with a doctor line; pre-migrate.db counted in the store size; FR-OBS-29's [image] test (flock, non-root, read-only) is the first Red test; the egress test shows the probe reaching MLflow (round 12: /health 200); 0 writes on the same day; the advisory-lock connection hold declared in FR-EVENTS-32" }
+# Design review round 4 (03124aa, changes): F1 and the non-blocking items, answered in revision 5.
+phase2_review_round4:
+  - { id: F1, answer: "FR-OBS-29: step 4 writes store.version; step 2 copies store.version into pre-migrate.version (3.18.0 for a store made before this change); an in-progress marker is written before step 3 and removed after step 4; at start an existing marker exits 10 obs_migration_incomplete before step 2, so the backup is never overwritten; the [image] test names N and N+1: a failed N→N+1 exits 12, a second run exits 10 with pre-migrate.db byte-identical, the restore prints N, then N+1 exits 11 and N starts" }
+  - { id: non-blocking, answer: "`db upgrade` from empty marked a hypothesis with its fallback (skip to the server's own initialisation, WAL and store.version at the next run); the first tutor records upload needs a new bench run that spends live-budget credit (declared); tutor_summary moved to spec/fixtures/SRV-TUTOR/bench-summary.yaml; mlflow-migrate exits 10..13, the restore command 0..5" }
 
 owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."
