@@ -1492,26 +1492,37 @@ tasks:
         is a data file (cross_process_probe.txt); FR-UI-12's chunk sentence points to FR-UI-13's mount." }
   - { id: V.manage, stage: V, kind: module, track: product, status: in_progress, branch: V/manage,
       needs: [V.design-pass, V.onboarding-upload, V.compile-ui],
-      what: "Owner 2026-11-25 (Russian): no edit buttons, no customization, no deletion. The management layer: every
+      what: "Owner 2026-11-24 (Russian): no edit buttons, no customization, no deletion. The management layer: every
         create, edit, delete and customize action for courses, lessons, revisions, compile runs, materials, tutor
         history, people, passkeys, sessions and personal settings. Audit of 9140885 on the stubbed test server (owner
         and learner) is in WEB-MANAGE's header. Drafted (status draft, nothing approved): WEB-MANAGE (new) and
-        `proposed_manage` blocks in SRV-LESSON FR-LESSON-20..31 / INV-LESSON-20..22, SRV-PIPELINE FR-PIPELINE-20..22,
-        SRV-PLAN FR-PLAN-20..21, SRV-TUTOR FR-TUTOR-20..21, SRV-INGEST FR-INGEST-30..32, SRV-AUTH FR-AUTH-40..47 /
-        INV-AUTH-20..21, SRV-CONFIG FR-CONFIG-25, SRV-EVENTS FR-EVENTS-30; ADR-0036 (proposed) for settings edited in
-        the UI.",
-      next: "deep-reviewer round on the spec drafts (auth, jobs and secrets items are complex areas: full rounds);
-        then promote with Red. P1 first: course rename/describe/archive/delete+restore, lesson
-        rename/skip/delete/done/revert/download, compile cancel and history, material rename/delete, tutor history
-        clear, /settings (appearance, instance view, own passkeys and sessions, people with Enable), audit rows,
-        Russian and English interface (FR-MANAGE-10), editable settings (FR-MANAGE-11, FR-CONFIG-26) once the owner
-        accepts ADR-0036. P2: reorder, dates and pace from a course, notes, bookmarks, Recently deleted.",
-      owner_decisions: "Owner 2026-11-25 (via the coordinator): D1 soft delete only with restore, no purge ADR; D2
+        `proposed_manage` blocks in SRV-LESSON FR-LESSON-20..31 / INV-LESSON-20..23, SRV-PIPELINE FR-PIPELINE-20..22,
+        SRV-PLAN FR-PLAN-20..21, SRV-TUTOR FR-TUTOR-20..21, SRV-INGEST FR-INGEST-30..32, SRV-SEARCH FR-SEARCH-20,
+        SRV-AUTH FR-AUTH-40..48 / INV-AUTH-20..21, SRV-CONFIG FR-CONFIG-25..26, SRV-EVENTS FR-EVENTS-30..31; ADR-0036
+        (settings overlay) and ADR-0037 (re-enable a disabled sign-up account), both proposed. Merged
+        V/slice-integration 9bb014a (freshness) into V/manage; ids re-checked against SRV-FRESH, WEB-FRESH and
+        FR-AGENT-15..17: no collision.",
+      review: "deep-reviewer round 1 on 840af4b: changes — 16 blocking (auth: learner delete with challenges and a
+        catalog-wide owns_data, passkey lists, last sign-in from last_used_at, own passkey removal revokes other
+        sessions; soft delete: partial position index, Recently deleted in P1 with lessons, material cascade and both
+        restore orders, plans onto a deleted course, imported materials only, FR-SEARCH-20; compile: cancel's
+        re-reads and guarded UPDATEs, open-run definition and lock order with create_run, rename refusal and the
+        full-cost recompile stated; no-op before version; ADR-0036 amends ADR-0031 §1 and ADR-0032 §6, file `off`
+        wins, restore and processes, values not hashes; Enable gated on new ADR-0037) and the non-blocking items, all
+        applied in revision 1 (2026-11-24). Round 2 next.",
+      next: "deep-reviewer round 2 (auth, jobs and secrets items are complex areas: full rounds); then promote with
+        Red. P1: FR-MANAGE-1..8 and -10 — course rename/describe/dates/archive/delete+restore, lesson
+        rename/skip/delete/done/revert/download, compile cancel and history, material rename/delete+cascade, tutor
+        history clear, /settings (appearance with language, instance view, own passkeys and sessions, people, Data
+        with Recently deleted and Activity), audit rows, Russian and English interface; FR-MANAGE-11 / FR-CONFIG-26
+        once the owner accepts ADR-0036; Enable once ADR-0037 is accepted. P2: reorder, notes, bookmarks.",
+      owner_decisions: "Owner 2026-11-24 (via the coordinator): D1 soft delete only with restore, no purge ADR; D2
         ADR-0036 yes (option B), the owner flips its status after review, the agent does not; D5 manual lesson order
         kept across re-plan (re-plan changes weeks and dates only; SRV-PLAN FR-PLAN-21, courses.order_source); D7
         Russian and English UI, browser language by default, switcher in Settings, P1. Coordinator defaults: D3 P1
-        export is the per-lesson .ipynb download; D4 Enable for a disabled sign-up account (SRV-AUTH FR-AUTH-48); D6
-        re-import unscheduled.",
+        export is the per-lesson .ipynb download; D4 Enable for a disabled sign-up account, drafted as ADR-0037
+        (proposed) because it reverses accepted ADR-0031 decision 4, FR-AUTH-48 gated on it; D6 re-import
+        unscheduled. Owner asks: accept or reject ADR-0036 and ADR-0037.",
       note: "Paired changes in files of active tracks are listed in WEB-MANAGE's header and are written with Green
         only: WEB-UI (routes, manage slot, UserMenu Settings item, theme.js, test server, Playwright config),
         WEB-NOTEBOOK (lesson menu, bookmark toggle, notes tab), WEB-IMPORT (Your sources), OPS-DOD operations. No
