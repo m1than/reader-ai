@@ -1,4 +1,7 @@
-"""Who may open a lesson (SRV-LESSON FR-LESSON-11, FR-LESSON-12). Stage 1: the course owner only."""
+"""Who may open a lesson (SRV-LESSON FR-LESSON-11, FR-LESSON-12). Stage 1: the course owner only.
+
+A deleted lesson, or a lesson of a deleted course, cannot be opened (INV-LESSON-22); an archived one can.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +28,7 @@ async def can_open(conn: AsyncConnection, user_id: uuid.UUID, lesson_id: str) ->
         text(
             "SELECT 1 FROM lessons l JOIN courses c ON c.id = l.course_id"
             " WHERE l.id = :l AND c.owner_id = :u"
+            " AND l.deleted_at IS NULL AND c.deleted_at IS NULL"  # INV-LESSON-22: tombstones are not found
         ),
         {"l": lesson, "u": user_id},
     )

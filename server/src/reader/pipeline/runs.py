@@ -2,8 +2,8 @@
 
 A run's state is never stored. It is derived from its steps and the job status of its next step's key:
 `running` (queued or running), `stage_failed` (dead), `stalled` (no live job, a lost enqueue); a finished
-run is `budget_exhausted`, `converged` or `open_findings`. `ensure` re-enqueues the next step of a stalled
-run; the key makes it idempotent.
+run is `budget_exhausted`, `converged` or `open_findings`; a cancelled one is `cancelled` (FR-PIPELINE-20,
+checked first). `ensure` re-enqueues the next step of a stalled run; the key makes it idempotent.
 """
 
 from __future__ import annotations
@@ -21,7 +21,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from reader.agent import ledger
 from reader.agent.errors import AgentError
 from reader.agent.pricing import resolve_model
-from reader.jobs import idempotency_key
+from reader.config.effective import effective_settings
+from reader.jobs import audit, idempotency_key
 from reader.jobs.queue import dead_error_code_of
 from reader.lessons.store import current_sha256
 from reader.pipeline import runtime as runtime_mod
@@ -83,6 +84,7 @@ class RunRow:
     g2: Mapping[str, Any] | None
     final_sha256: str | None
     stage_error: Mapping[str, Any] | None = None  # FR-PIPELINE-16: {step, input_sha256, code}
+    cancelled_at: Any = None  # FR-PIPELINE-20
 
 
 @dataclass(frozen=True)
@@ -100,7 +102,7 @@ async def load_run(
         await conn.execute(
             text(
                 "SELECT id, owner_id, lesson_id, cap_usd, task_budgets, budget_refused, finished_at, g2,"
-                " final_sha256, stage_error FROM compile_runs WHERE id = :r"
+                " final_sha256, stage_error, cancelled_at FROM compile_runs WHERE id = :r"
             ),
             {"r": run_id},
         )
@@ -108,8 +110,30 @@ async def load_run(
     if row is None or (owner_id is not None and row[1] != owner_id):
         return None
     return RunRow(
-        row[0], row[1], row[2], Decimal(row[3]), row[4] or {}, row[5], row[6], row[7], row[8], row[9]
+        row[0], row[1], row[2], Decimal(row[3]), row[4] or {}, row[5], row[6], row[7], row[8], row[9], row[10]
     )
+
+
+async def lesson_gate(
+    conn: AsyncConnection, owner_id: uuid.UUID, lesson_id: uuid.UUID, *, active: bool
+) -> None:
+    """FR-PIPELINE-22 / SRV-LESSON INV-LESSON-22: a deleted lesson, or a lesson of a deleted course, is
+    `not_found`; with `active`, a skipped lesson or one of an archived course is `lesson_inactive`. A missing
+    lesson passes (the callers' own reads refuse it)."""
+    row = (
+        await conn.execute(
+            text(
+                "SELECT l.deleted_at IS NOT NULL OR c.deleted_at IS NOT NULL,"
+                " l.skipped_at IS NOT NULL OR c.archived_at IS NOT NULL"
+                " FROM lessons l JOIN courses c ON c.id = l.course_id WHERE l.id = :l AND l.owner_id = :o"
+            ),
+            {"l": lesson_id, "o": owner_id},
+        )
+    ).first()
+    if row is not None and row[0]:
+        raise PipelineError("not_found")
+    if row is not None and active and row[1]:
+        raise PipelineError("lesson_inactive")
 
 
 async def load_steps(conn: AsyncConnection, run_id: uuid.UUID) -> list[StepRow]:
@@ -142,6 +166,7 @@ async def load_lesson(
     ).first()
     if plan is None:
         raise PipelineError("lesson_unknown")
+    await lesson_gate(conn, owner_id, lesson_id, active=True)  # FR-PIPELINE-22, read after create_run's locks
     spans, _ = await rt.spans.load(conn, owner_id, plan[0], plan[1], plan[2])
     # citations name the course title (as SRV-TUTOR); the course id is for the trace only
     course_id = plan[5] if len(plan) > 5 and isinstance(plan[5], uuid.UUID) else None
@@ -225,11 +250,14 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
         run = await load_run(conn, run_id, owner_id)
         if run is None:
             raise PipelineError("not_found")
+        await lesson_gate(conn, owner_id, run.lesson_id, active=False)  # a deleted lesson's runs: not found
         steps = await load_steps(conn, run_id)
         latest = await current_sha256(conn, run.lesson_id)
         pending: dict[str, Any] | None = None
         error: str | None = None
-        if run.finished_at is not None:
+        if run.cancelled_at is not None:  # FR-PIPELINE-20: checked first; no ensure, no requeue
+            state = "cancelled"
+        elif run.finished_at is not None:
             g2 = run.g2 or {}
             if run.budget_refused:
                 state = "budget_exhausted"
@@ -324,9 +352,10 @@ async def open_runs(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID) -> list
             await conn.execute(
                 text(
                     "SELECT id FROM (SELECT DISTINCT ON (lesson_id) id, created_at, finished_at,"
-                    " budget_refused FROM compile_runs WHERE owner_id = :o"
+                    " budget_refused, cancelled_at FROM compile_runs WHERE owner_id = :o"
                     " ORDER BY lesson_id, created_at DESC, id) latest"  # ties: id ascending, as latest_run
-                    " WHERE finished_at IS NULL OR budget_refused IS NOT NULL"
+                    " WHERE (finished_at IS NULL OR budget_refused IS NOT NULL)"
+                    " AND cancelled_at IS NULL"  # FR-PIPELINE-20: a cancelled run is not open
                     " ORDER BY created_at DESC, id LIMIT :n"
                 ),
                 {"o": owner_id, "n": OPEN_RUNS_MAX},
@@ -359,6 +388,77 @@ async def status(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
     return result
 
 
+async def cancel(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uuid.UUID) -> dict[str, Any]:
+    """FR-PIPELINE-20: one UPDATE on its own connection; it waits only on the run row's lock, which a step
+    holds from its second cancel read to its commit. Idempotent: a cancelled run answers its body again."""
+    async with engine.begin() as conn:
+        lesson = (
+            await conn.execute(
+                text(
+                    "UPDATE compile_runs SET cancelled_at = now(), finished_at = now() WHERE id = :r"
+                    " AND owner_id = :o AND finished_at IS NULL AND cancelled_at IS NULL RETURNING lesson_id"
+                ),
+                {"r": run_id, "o": owner_id},
+            )
+        ).scalar()
+        if lesson is not None:
+            await audit.record(conn, owner_id, "compile.cancel", str(run_id), {"lesson_id": str(lesson)})
+    if lesson is None:
+        async with engine.connect() as conn:
+            run = await load_run(conn, run_id, owner_id)
+        if run is None:
+            raise PipelineError("not_found")
+        if run.cancelled_at is None:
+            raise PipelineError("not_running")
+    result = await derive(engine, jobs, owner_id, run_id)
+    result.pop("_pending", None)
+    return result
+
+
+HISTORY_MAX: Final = 20  # FR-PIPELINE-21
+
+
+async def history(
+    engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, lesson_id: uuid.UUID
+) -> list[dict[str, Any]]:
+    """FR-PIPELINE-21: the lesson's newest runs, read-only (derive, never ensure)."""
+    async with engine.connect() as conn:
+        known = (
+            await conn.execute(
+                text("SELECT 1 FROM lessons WHERE id = :l AND owner_id = :o"), {"l": lesson_id, "o": owner_id}
+            )
+        ).first()
+        if known is None:
+            raise PipelineError("not_found")
+        await lesson_gate(conn, owner_id, lesson_id, active=False)
+        rows = (
+            await conn.execute(
+                text(
+                    "SELECT r.id, r.created_at, r.finished_at,"
+                    " (SELECT count(*) FROM compile_steps s WHERE s.run_id = r.id) FROM compile_runs r"
+                    " WHERE r.lesson_id = :l AND r.owner_id = :o ORDER BY r.created_at DESC, r.id LIMIT :n"
+                ),
+                {"l": lesson_id, "o": owner_id, "n": HISTORY_MAX},
+            )
+        ).all()
+    out = []
+    for run_id, created_at, finished_at, steps in rows:
+        derived = await derive(engine, jobs, owner_id, run_id)
+        out.append(
+            {
+                "run_id": str(run_id),
+                "state": derived["state"],
+                "created_at": created_at.isoformat(),
+                "finished_at": None if finished_at is None else finished_at.isoformat(),
+                "spent_usd": derived["spent_usd"],
+                "cap_usd": derived["cap_usd"],
+                "steps": int(steps),
+                "error": derived["error"],
+            }
+        )
+    return out
+
+
 async def ensure_all(engine: AsyncEngine, jobs: Any) -> None:
     """At worker start: every unfinished run (FR-PIPELINE-6)."""
     async with engine.connect() as conn:
@@ -372,12 +472,13 @@ async def ensure_all(engine: AsyncEngine, jobs: Any) -> None:
             continue
 
 
-def task_budgets(rt: Runtime) -> dict[str, str]:
-    return {
-        name: str(task.budget_usd_per_lesson)
-        for name, task in rt.config.tasks.items()
-        if task.budget_usd_per_lesson is not None and name in {s.task for s in rt.pipeline.stages.values()}
-    }
+async def task_budgets(conn: AsyncConnection, rt: Runtime) -> dict[str, str]:
+    """The run's snapshot of the per-lesson task budgets: reader.yaml plus the owner's overrides at run
+    creation (SRV-CONFIG FR-CONFIG-26, paired); a running run keeps it."""
+    settings = await effective_settings(conn, rt.config)
+    stages = {s.task for s in rt.pipeline.stages.values()}
+    budgets = settings.task_budgets.items()
+    return {name: str(budget) for name, budget in budgets if budget is not None and name in stages}
 
 
 async def create_run(
@@ -431,6 +532,7 @@ async def create_run(
         for (other,) in unfinished:
             if (await derive(engine, jobs, owner_id, other))["state"] in ("running", "stalled"):
                 raise PipelineError("compile_running")
+        budgets = await task_budgets(conn, rt)
         run_id: uuid.UUID = (
             await conn.execute(
                 text(
@@ -441,11 +543,11 @@ async def create_run(
                     "o": owner_id,
                     "l": lesson_id,
                     "c": cap_usd,
-                    "t": json.dumps(task_budgets(rt)),
+                    "t": json.dumps(budgets),
                     "b": await current_sha256(conn, lesson_id),
                 },
             )
         ).scalar_one()
-    run = RunRow(run_id, owner_id, lesson_id, cap_usd, task_budgets(rt), None, None, None, None)
+    run = RunRow(run_id, owner_id, lesson_id, cap_usd, budgets, None, None, None, None)
     await enqueue_next(jobs, rt, run, lesson, [])
     return run_id

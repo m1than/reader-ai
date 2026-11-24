@@ -139,7 +139,7 @@ const vec: ObsSummary = {
       },
     ],
   },
-  // WEB-UI FR-UI-31 (SRV-OBS FR-OBS-25, -32): one banner per alert and the stack row.
+  // WEB-UI FR-UI-33 (SRV-OBS FR-OBS-25, -32): one banner per alert and the stack row.
   alerts: [
     { code: 'daily_spend_high', subject: 'tutor', value: 2.5, limit: 2.4 },
     { code: 'dead_jobs', subject: 'pipeline.stage', value: 1, limit: 0 },

@@ -26,8 +26,8 @@
 #     `reauth_required` for an older session). FR-AUTH-31: the sign-in page's `next=/signups` return.
 #
 # Owner notes:
-#   1. Disable is permanent in the product: there is no enable route (SRV-AUTH FR-AUTH-29); only the owner's database
-#      can undo it.
+#   1. Disable is undone by Enable (ADR-0037, accepted 2026-11-25; SRV-AUTH FR-AUTH-48): the account keeps its
+#      passkeys through the disable and signs in again after Enable; sessions ended by the disable stay ended.
 #   2. A sign-up user who loses every passkey has no recovery (bootstrap links refuse sign-up users, SRV-AUTH owner
 #      note 6). The owner disables the account; the person signs up again under another handle.
 #
@@ -40,7 +40,7 @@ title: Owner's Sign-ups screen — pending requests with Approve and Reject, app
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "Reviewed with ADR-0031 and SRV-AUTH FR-AUTH-23..32 (auth, complex area; deep-reviewer, Fable): round 1 changes (Disable permanent in the copy, no passkey recovery stated, [browser] on FR-ACCOUNTS-1/-3, FR-ACCOUNTS-5 for route, link, axe and overflow, return to /signups after re-auth), round 2 changes (none for this spec beyond FR-UI-14 as a proposed WEB-UI item), round 3 VERDICT approve. ADR-0031 accepted by the owner 2026-11-23. Approved by agent with the Red tests; code review rounds follow Green."
+review: "Reviewed with ADR-0031 and SRV-AUTH FR-AUTH-23..32 (auth, complex area; deep-reviewer, Fable): round 1 changes (Disable permanent in the copy, no passkey recovery stated, [browser] on FR-ACCOUNTS-1/-3, FR-ACCOUNTS-5 for route, link, axe and overflow, return to /signups after re-auth), round 2 changes (none for this spec beyond FR-UI-14 as a proposed WEB-UI item), round 3 VERDICT approve. ADR-0031 accepted by the owner 2026-11-23. Approved by agent with the Red tests; code review rounds follow Green. Paired with WEB-MANAGE (Green, 2026-11-24, ADR-0037 accepted): a disabled row keeps its \"Disabled\" text and gains an Enable button (`POST /api/auth/signups/{id}/enable`, SRV-AUTH FR-AUTH-48); the Disable confirmation drops \"This cannot be undone here.\" and says \"Enable undoes it.\"; owner note 1 replaced; web/src/accounts/signups.test.tsx's Disable copy and a new Enable case follow."
 layer: web
 track: product
 adr: [ADR-0031, ADR-0013, ADR-0012]
@@ -144,3 +144,9 @@ vectors:
       Cyrillic and 64-code-point display names, a display name with `<b>` and U+202E, active and disabled accounts;
       and the response bodies of each FR-AUTH-29 outcome. Written with Red.
     file: spec/fixtures/WEB-ACCOUNTS/signups.json
+
+# ---- Paired note (2026-11-24, V/manage; reviewed with WEB-UI FR-UI-30..32): this spec's interface copy moves into
+# `web/src/accounts/messages.en.ts` (static; the current English) and `messages.ru.ts` (behind `import()`); handles
+# stay untranslated, display names get `lang` from the Cyrillic rule (FR-UI-32). ADR-0037 is accepted (2026-11-25):
+# FR-ACCOUNTS-3 gains Enable on a disabled row (SRV-AUTH FR-AUTH-48), its Disable copy drops "This cannot be undone
+# here." and owner note 1 is replaced, written with WEB-MANAGE's Green.

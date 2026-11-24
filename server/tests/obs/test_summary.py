@@ -193,10 +193,11 @@ async def _seed(engine: Any) -> None:
                 {"o": m["owner_id"], "s": m["sha256"], "p": m["page_count"]},
             )
         # FR-OBS-17: the lessons, courses and source spans the cost-per-lesson view reads.
-        for c in seed["courses"]:
+        # SRV-LESSON FR-LESSON-20 (V/manage): an active course has a position, unique per owner.
+        for position, c in enumerate(seed["courses"], start=1):
             await run(
-                text("INSERT INTO courses (id, owner_id, title) VALUES (:id, :o, :t)"),
-                {"id": c["id"], "o": c["owner_id"], "t": c["title"]},
+                text("INSERT INTO courses (id, owner_id, title, position) VALUES (:id, :o, :t, :p)"),
+                {"id": c["id"], "o": c["owner_id"], "t": c["title"], "p": position},
             )
         for lesson in seed["lessons"]:
             await run(

@@ -1,5 +1,9 @@
 // Citations as references (WEB-NOTEBOOK FR-NOTEBOOK-2). Span form `{span, page?, material_title?}` (SRV-LESSON) or
 // `{url, retrieved}`. Span citations are grouped per material with page ranges; only http and https URLs become links.
+import { englishT, type T } from '../ui/i18n';
+import en from './messages.en';
+
+const english = englishT(en);
 
 export type Citation = { span?: unknown; page?: unknown; material_title?: unknown; url?: unknown; retrieved?: unknown };
 export type Reference =
@@ -77,7 +81,7 @@ export const lessonTitles = (cells: Array<{ metadata?: Record<string, unknown> }
 type Entry = { kind: 'material'; id: string; title?: string; pages: number[] } | { kind: 'url'; citation: Citation };
 
 /** One reference per material (pages as ranges) and per distinct URL, in order of first use. */
-export const groupCitations = (citations: Citation[], titles: Titles = new Map()): Reference[] => {
+export const groupCitations = (citations: Citation[], titles: Titles = new Map(), t: T<typeof en> = english): Reference[] => {
   const entries: Entry[] = [];
   const byKey = new Map<string, Entry>();
   for (const c of citations) {
@@ -110,13 +114,13 @@ export const groupCitations = (citations: Citation[], titles: Titles = new Map()
   }
   return entries.map((e): Reference => {
     if (e.kind === 'url') return formatCitation(e.citation);
-    const title = e.title ?? titles.get(e.id) ?? `source ${e.id.slice(0, 8)}`;
+    const title = e.title ?? titles.get(e.id) ?? t('citation.source', { id: e.id.slice(0, 8) });
     const distinct = new Set(e.pages).size;
     if (distinct === 0) return { kind: 'text', text: title };
-    return { kind: 'text', text: `${title}, ${distinct === 1 ? 'p.' : 'pp.'} ${pageRanges(e.pages)}` };
+    return { kind: 'text', text: t(distinct === 1 ? 'citation.page' : 'citation.pages', { title, pages: pageRanges(e.pages) }) };
   });
 };
 
 /** Every citation of a cell's `metadata.reader`, grouped (FR-NOTEBOOK-2). */
-export const collectCitations = (reader: Record<string, unknown>, titles: Titles = new Map()): Reference[] =>
-  groupCitations(cellCitations(reader), titles);
+export const collectCitations = (reader: Record<string, unknown>, titles: Titles = new Map(), t: T<typeof en> = english): Reference[] =>
+  groupCitations(cellCitations(reader), titles, t);

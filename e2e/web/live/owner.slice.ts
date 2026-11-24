@@ -94,7 +94,9 @@ const ensureLesson = async () => {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  context = await browser.newContext({ ignoreHTTPSErrors: false });
+  // WEB-UI FR-UI-30: the live checks read the English interface whatever the host's language (the contexts made
+  // later in this file pass the same locale).
+  context = await browser.newContext({ ignoreHTTPSErrors: false, locale: 'en-US' });
   page = await context.newPage();
   api = page.request;
   cdp = await context.newCDPSession(page);
@@ -418,7 +420,7 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   const toggle = () => page.getByRole('button', { name: 'Contents' });
   for (const w of WIDTHS) {
     // Sign-in page in a fresh context (no session).
-    const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
+    const anon = await browser.newContext({ viewport: { width: w, height: 900 }, locale: 'en-US' });
     const p = await anon.newPage();
     await p.goto('/api/auth/signin');
     await p.screenshot({ path: resolve(dir, `${w}-signin.png`), fullPage: true });
@@ -549,7 +551,7 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await check(`${w}-import`);
   }
   // Design pass (FR-UI-10, FR-UI-16): the list and L02 in the dark scheme at 1280 px, axe and overflow.
-  const dark = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 1280, height: 900 }, colorScheme: 'dark' });
+  const dark = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 1280, height: 900 }, colorScheme: 'dark', locale: 'en-US' });
   const dp = await dark.newPage();
   for (const [name, path] of [['dark-1280-list', '/'], ['dark-1280-lesson', `/lessons/${lessonId}`]] as const) {
     await dp.goto(path);
@@ -612,7 +614,7 @@ test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', 
     // A fresh context per page: no session, so the pages render as a visitor sees them. The bootstrap page is
     // opened without a token (the no-token state), so no bootstrap request is made.
     for (const name of ['signin', 'bootstrap'] as const) {
-      const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
+      const anon = await browser.newContext({ viewport: { width: w, height: 900 }, locale: 'en-US' });
       const p = await anon.newPage();
       await p.goto(`/api/auth/${name}`);
       await expect(p.locator('main.auth')).toHaveAttribute('data-state', name === 'signin' ? 'ready' : 'no_token');
@@ -722,7 +724,7 @@ test('signup: a visitor signs up through the page and waits for approval', async
     signupState.skip = 'pending cap full';
     test.skip(true, signupState.skip);
   }
-  signupState.visitor = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  signupState.visitor = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
   signupState.vpage = await signupState.visitor.newPage();
   await withPasskey(signupState.visitor, signupState.vpage);
   const handle = runHandle();
@@ -772,7 +774,7 @@ test('signup: the approved account signs in as a learner', async () => {
 test('signup: a second request is rejected on the screen and is gone', async ({ browser }) => {
   onlyOpen();
   test.setTimeout(3 * 60_000);
-  const other = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+  const other = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
   try {
     const op = await other.newPage();
     await withPasskey(other, op);

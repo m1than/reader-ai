@@ -10,6 +10,10 @@ The handlers write every final status themselves and never raise for a call's ou
 through their own short transactions, so the routes see progress at once. Each stage end logs one line
 (FR-FRESH-13): report id prefix, stage, index, status, code, searches, denials, links dropped, cost and
 duration; never a query, URL, title, bibliography field, span text, summary, prompt or model output.
+
+FR-FRESH-20: the material is re-read at the job's start, immediately before every model call and after a call
+returns; a deleted material ends the job `failed` with `material_deleted`, writing no findings and enqueuing
+nothing. A call already in flight finishes and settles in the ledger as usual.
 """
 
 from __future__ import annotations
@@ -45,6 +49,7 @@ from reader.jobs.model import JobContext, JobKind
 log = logging.getLogger("reader.freshness")
 DEFAULT_CONFIG: Final = "/etc/reader/reader.yaml"
 ATTEMPT_STRIDE: Final = 100  # attempt number = job attempt * 100 + call index: unique per (run, stage)
+MATERIAL_DELETED: Final = "material_deleted"  # FR-FRESH-20
 
 
 class ReportArgs(BaseModel):
@@ -198,6 +203,8 @@ async def _prepared(run: _Run, stage: str) -> check.Prepared | None:
         config = run.deps.config()
         async with run.engine.connect() as c:
             material = await store.material(c, run.owner_id, run.report["material_id"])
+            if material is not None and material.deleted:
+                raise FreshError(MATERIAL_DELETED)
             if material is None or material.ingest_id != run.report["ingest_id"]:
                 raise FreshError("not_imported")
             return await check.prepare(c, config, run.owner_id, material)
@@ -206,6 +213,23 @@ async def _prepared(run: _Run, stage: str) -> check.Prepared | None:
     except Exception:  # an unreadable reader.yaml
         await _final(run, stage, "failed", "config_unavailable", {})
     return None
+
+
+class MaterialDeleted(Exception):
+    """FR-FRESH-20: the report's material was deleted while its job ran."""
+
+
+async def _live(run: _Run) -> None:
+    """Re-read the material; raise MaterialDeleted for a tombstone (before a model call, or after one)."""
+    async with run.engine.connect() as c:
+        material = await store.material(c, run.owner_id, run.report["material_id"])
+    if material is not None and material.deleted:
+        raise MaterialDeleted
+
+
+async def _end_deleted(run: _Run, stage: str) -> None:
+    log.info("freshness_material_deleted report=%s stage=%s", run.id.hex[:8], stage)
+    await _final(run, stage, "failed", MATERIAL_DELETED, {})
 
 
 # ---- freshness.scan --------------------------------------------------------------------------------------
@@ -218,6 +242,13 @@ async def run_scan(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: Job
     prep = await _prepared(run, "scan")
     if prep is None:
         return
+    try:
+        await _scan_stage(deps, run, prep)
+    except MaterialDeleted:
+        await _end_deleted(run, "scan")
+
+
+async def _scan_stage(deps: Deps, run: _Run, prep: check.Prepared) -> None:
     prompt = prompts.load("scan")
     records: dict[str, Any] = {"models": dict(prep.models), "prompt_versions": {"scan": prompt.record()}}
     if run.report["claims"] is None:
@@ -235,6 +266,7 @@ async def run_scan(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: Job
             outcome = await _scan_call(run, prep, prompt)
             if outcome is None:
                 return
+            await _live(run)  # a delete during the call: its findings are not written
             scanned_bib = outcome.bibliography
             await store.update(
                 run.engine, run.id, claims=outcome.claims, scan_bibliography=scanned_bib,
@@ -246,6 +278,7 @@ async def run_scan(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: Job
     if run.report["bibliography"] is None:  # FR-FRESH-11: no owner entry and no confirmation: scan only
         await _final(run, "scan", "done", None, records)
         return
+    await _live(run)  # no next job for a deleted material
     try:
         await deps.jobs().enqueue(params.KIND_WEB, {"report_id": str(run.id)})
     except Exception as failure:
@@ -265,6 +298,7 @@ async def _scan_call(run: _Run, prep: check.Prepared, prompt: prompts.Prompt) ->
     today = run.deps.today()
 
     async def call(attempt: int) -> scan.ScanResult:
+        await _live(run)  # immediately before the model call (FR-FRESH-20)
         async with run.deps.provider(run.engine) as provider:
             result = await provider.run(
                 run.stage_call(
@@ -307,6 +341,14 @@ async def run_web(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: JobC
     prep = await _prepared(run, "search")
     if prep is None:
         return
+    try:
+        await _web_stage(deps, run, prep)
+    except MaterialDeleted:
+        await _end_deleted(run, "search")
+
+
+async def _web_stage(deps: Deps, run: _Run, prep: check.Prepared) -> None:
+    report = run.report
     bib = check.fields_of(report["bibliography"])
     claims: list[dict[str, Any]] = list(report["claims"])
     texts = prep.sample.non_front_texts
@@ -391,6 +433,7 @@ async def _search(
     gates: list[Gate] = []
 
     async def call(attempt: int) -> Any:
+        await _live(run)  # immediately before the model call (FR-FRESH-20)
         gate = Gate(query)  # a fresh gate per attempt: one allowed search per run
         gates.append(gate)
         async with run.deps.provider(run.engine) as provider:
@@ -434,6 +477,7 @@ async def _report_stage(
         return
 
     async def call(attempt: int) -> dict[str, Any]:
+        await _live(run)  # immediately before the model call (FR-FRESH-20)
         async with run.deps.provider(run.engine) as provider:
             result = await provider.run(
                 run.stage_call(
@@ -452,6 +496,7 @@ async def _report_stage(
     except AgentError as error:
         await _final(run, "report", "failed", error.code, {**stored, "dropped": dropped or None})
         return
+    await _live(run)  # a delete during the report call: no findings are written
     resolved = verdict.resolve(parsed, entries, {c["id"] for c in claims}, {t.id for t in topics}, today)
     _merge(dropped, resolved.dropped)
     versions = stored["prompt_versions"]

@@ -30,6 +30,7 @@ from reader.agent.pricing import resolve_model
 from reader.agent.provider import Provider, StageCall
 from reader.config import ReaderConfig, load_config
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.lessons.access import can_open
 from reader.obs import feedback, prompts
 from reader.obs.spans import annotate_job, child_span, session_marker
 from reader.tutor import params, store
@@ -213,7 +214,9 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
                   "reader.course.id": str(q.course_id) if q.course_id else None,
                   "reader.prompt.version": await prompts.version_of("reader.tutor")})
     session_marker("reader.lesson.id", str(q.lesson_id))
-    if q.age_s > params.QUESTION_TTL_S:  # FR-TUTOR-4: before any reservation
+    # FR-TUTOR-4: before any reservation. FR-TUTOR-21: a lesson deleted meanwhile (SRV-LESSON's `can_open`
+    # hides tombstones) ends the question `expired` without a model call.
+    if q.age_s > params.QUESTION_TTL_S or not await can_open(conn, q.owner_id, str(q.lesson_id)):
         written = await store.finish(conn, q.id, "expired", error_code="expired")
         annotate_job({"reader.tutor.state": "expired"})
         log.info("tutor_answer question=%s state=expired written=%s", q.id, written)

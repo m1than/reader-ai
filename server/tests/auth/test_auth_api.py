@@ -652,6 +652,8 @@ def test_routers_are_a_declared_list() -> None:
         "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
         "reader.obs.routes",  # SRV-OBS paired change (FR-AUTH-33)
         "reader.freshness.routes",
+        "reader.jobs.audit_routes",  # SRV-EVENTS FR-EVENTS-31 (V/manage)
+        "reader.config.routes",  # SRV-CONFIG FR-CONFIG-25/-26 (FR-AUTH-10 note, V/manage)
     ]
 
 
@@ -691,8 +693,25 @@ def test_route_table_is_declared_as_data() -> None:
     assert by_path[("POST", "/api/auth/register/verify")] == "recent_session"
     # FR-AUTH-29: the owner's sign-up routes.
     assert by_path[("GET", "/api/auth/signups")] == "session"
-    for action in ["approve", "reject", "disable"]:
+    for action in ["approve", "reject", "disable", "enable"]:  # enable: FR-AUTH-48
         assert by_path[("POST", f"/api/auth/signups/{{user_id}}/{action}")] == "recent_session"
+    # FR-AUTH-40..46 (manage amendment): the `auth` kind each route names.
+    assert {k: v for k, v in by_path.items() if k[1].startswith(MANAGE_PREFIXES)} == MANAGE_ROUTES
+
+
+MANAGE_PREFIXES = ("/api/auth/users", "/api/auth/sessions", "/api/auth/credentials")
+MANAGE_ROUTES = {
+    ("GET", "/api/auth/users"): "session",
+    ("POST", "/api/auth/users/{user_id}/sessions/revoke"): "recent_session",
+    ("DELETE", "/api/auth/users/{user_id}/credentials/{pid}"): "recent_session",
+    ("DELETE", "/api/auth/users/{user_id}"): "recent_session",
+    ("GET", "/api/auth/sessions"): "session",
+    ("DELETE", "/api/auth/sessions/{sid}"): "session",
+    ("POST", "/api/auth/sessions/revoke-others"): "session",
+    ("GET", "/api/auth/credentials"): "session",
+    ("POST", "/api/auth/credentials/{pid}"): "session",
+    ("DELETE", "/api/auth/credentials/{pid}"): "recent_session",
+}
 
 
 async def test_get_routes_write_nothing(pg: Pg, tmp_path: Path) -> None:

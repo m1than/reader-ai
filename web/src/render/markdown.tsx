@@ -179,6 +179,7 @@ const Table = (props: { node?: Element; children?: React.ReactNode }) => {
   );
 };
 
-export function Markdown({ source, linksAsText = false }: { source: string; linksAsText?: boolean }) {
-  return <div data-markdown="">{hastToReact(markdownToHast(source, linksAsText), { pre: Pre as never, table: Table as never })}</div>;
+/** `lang` (WEB-UI FR-UI-32): the content's own language, set on this content node; omitted, it inherits. */
+export function Markdown({ source, linksAsText = false, lang }: { source: string; linksAsText?: boolean; lang?: string | undefined }) {
+  return <div data-markdown="" lang={lang}>{hastToReact(markdownToHast(source, linksAsText), { pre: Pre as never, table: Table as never })}</div>;
 }

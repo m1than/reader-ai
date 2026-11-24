@@ -80,7 +80,7 @@ const Lessons = v.object({
   rows: v.array(LessonRow),
   courses: v.array(CourseTotal),
 });
-// SRV-OBS FR-OBS-25 / FR-OBS-32 (WEB-UI FR-UI-31): alerts from Postgres and the stack's last probes.
+// SRV-OBS FR-OBS-25 / FR-OBS-32 (WEB-UI FR-UI-33): alerts from Postgres and the stack's last probes.
 const Alert = v.object({
   code: v.string(),
   subject: v.nullable(v.string()),

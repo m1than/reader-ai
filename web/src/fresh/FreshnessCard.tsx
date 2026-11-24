@@ -2,59 +2,57 @@
 // scan-read one), Run with the server's estimate and cap, progress while a check runs, the verdict badge, reasons,
 // flagged claims with page links and recommendations with safe links. Report strings are text nodes only
 // (INV-FRESHUI-2); web links follow the link rule of links.ts (INV-FRESHUI-1). Money is shown as the server wrote it.
+// Interface copy and the server's enums come from this area's catalogue (WEB-UI FR-UI-30); an unknown enum value is
+// shown as received.
 import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { textLang, useT } from '../ui/i18n';
 import { estimateOf, type Estimate, type FreshApi, type Freshness, type LinkRef, type Report } from './api';
-import { FIELDS, formField, fromForm, MESSAGES, toForm, type Field, type FormValues } from './bibliography';
+import { FIELDS, fieldLabel, fieldMessage, formField, fromForm, toForm, type Field, type FormValues, type FreshT } from './bibliography';
 import { EXTERNAL, pageHref, safeHref } from './links';
+import en from './messages.en';
 import './fresh.css';
 
 /** Poll interval while a check runs (chosen: a check takes minutes; not measured). */
 export const POLL_MS = 3000;
 
 const VERDICTS = {
-  current: { label: 'Current', className: 'fresh-badge fresh-badge-current', icon: 'M3 8.5l3 3 7-7' },
-  partly_outdated: { label: 'Partly outdated', className: 'fresh-badge fresh-badge-partly', icon: 'M8 3v6M8 12v1' },
-  outdated: { label: 'Outdated', className: 'fresh-badge fresh-badge-outdated', icon: 'M4 4l8 8M12 4l-8 8' },
+  current: { className: 'fresh-badge fresh-badge-current', icon: 'M3 8.5l3 3 7-7' },
+  partly_outdated: { className: 'fresh-badge fresh-badge-partly', icon: 'M8 3v6M8 12v1' },
+  outdated: { className: 'fresh-badge fresh-badge-outdated', icon: 'M4 4l8 8M12 4l-8 8' },
 } as const;
 
-const STALE = { ttl: 'older than 90 days', reingested: 'the material was re-imported', bibliography_changed: 'the details changed' } as const;
+const DROPPED = ['source_unknown', 'url_unsafe'] as const;
+type Dropped = (typeof DROPPED)[number];
 
-const REC_KINDS = { book_edition: 'New edition', book: 'Book', official_docs: 'Official documentation', course: 'Course', other: 'Other' } as const;
+const dailyMessage = (t: FreshT, cap: string, spent?: unknown) =>
+  typeof spent === 'string' && /^\d+(\.\d+)?$/.test(spent) ? t('daily.limit_spent', { cap, spent }) : t('daily.limit', { cap });
 
-const DROPPED: Readonly<Record<string, string>> = {
-  source_unknown: "not found in this check's search results",
-  url_unsafe: 'not a web link',
-};
-
-const dailyMessage = (cap: string, spent?: unknown) =>
-  `Daily limit for freshness checks reached ($${cap}); try again tomorrow.${typeof spent === 'string' && /^\d+(\.\d+)?$/.test(spent) ? ` Spent today: $${spent}.` : ''}`;
-
-const reportMessage = (code: string | null, data: Freshness): string => {
+const reportMessage = (t: FreshT, code: string | null, data: Freshness): string => {
   switch (code) {
     case 'no_results':
-      return 'The web searches returned no results.';
+      return t('report.no_results');
     case 'daily_budget_exhausted':
-      return dailyMessage(data.daily_cap_usd);
+      return dailyMessage(t, data.daily_cap_usd);
     case 'budget_exhausted':
-      return `This check reached its $${data.estimate.cap_usd} cap and stopped.`;
+      return t('report.budget_exhausted', { cap: data.estimate.cap_usd });
     case 'output_invalid':
-      return "The model's answer could not be read.";
+      return t('report.output_invalid');
     default:
-      return 'The check failed.';
+      return t('report.failed');
   }
 };
 
-const progressText = (report: Report): string => {
+const progressText = (t: FreshT, report: Report): string => {
   const p = report.progress;
-  if (p?.stage === 'search') return `Searching the web (${p.done} of ${p.total})`;
-  if (p?.stage === 'report') return 'Writing the report';
-  return 'Reading the book';
+  if (p?.stage === 'search') return t('progress.search', { done: p.done, total: p.total });
+  if (p?.stage === 'report') return t('progress.report');
+  return t('progress.scan');
 };
 
 /** A web link by the link rule, else its title and URL as text. */
-function WebLink({ link }: { link: LinkRef }) {
+function WebLink({ link, t }: { link: LinkRef; t: FreshT }) {
   const href = safeHref(link.url, link.host);
   if (href === null)
     return (
@@ -66,36 +64,36 @@ function WebLink({ link }: { link: LinkRef }) {
     <span>
       <a href={href} rel={EXTERNAL.rel} target={EXTERNAL.target}>
         {link.title}
-        <span className="visually-hidden"> (opens in a new tab)</span>
+        <span className="visually-hidden">{t('link.new_tab')}</span>
       </a>{' '}
       <code className="fresh-host">{link.host}</code>
     </span>
   );
 }
 
-function Citations({ links }: { links: LinkRef[] }) {
+function Citations({ links, t }: { links: LinkRef[]; t: FreshT }) {
   if (links.length === 0) return null;
   return (
     <span className="fresh-cites">
-      {' Sources: '}
+      {t('cites.label')}
       {links.map((l, i) => (
         <Fragment key={i}>
           {i > 0 ? '; ' : ''}
-          <WebLink link={l} />
+          <WebLink link={l} t={t} />
         </Fragment>
       ))}
     </span>
   );
 }
 
-function Badge({ verdict }: { verdict: keyof typeof VERDICTS }) {
+function Badge({ verdict, t }: { verdict: keyof typeof VERDICTS; t: FreshT }) {
   const v = VERDICTS[verdict];
   return (
     <p className={v.className}>
       <svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="16" height="16">
         <path d={v.icon} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
-      <span>{v.label}</span>
+      <span>{t.enum('verdict', verdict)}</span>
     </p>
   );
 }
@@ -117,9 +115,10 @@ interface BibliographyProps {
   confirmed: boolean;
   onConfirm: (v: boolean) => void;
   onSaved: () => void;
+  t: FreshT;
 }
 
-function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSaved }: BibliographyProps) {
+function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSaved, t }: BibliographyProps) {
   const base = useId();
   const [editing, setEditing] = useState(false);
   const [values, setValues] = useState<FormValues>(() => toForm(null));
@@ -138,7 +137,7 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
   };
 
   const save = async () => {
-    const { body, errors: found } = fromForm(values, { original_authors: shown?.original_authors ?? null }, new Date().getUTCFullYear());
+    const { body, errors: found } = fromForm(values, { original_authors: shown?.original_authors ?? null }, new Date().getUTCFullYear(), t);
     setErrors(found);
     setFormError(null);
     if (Object.keys(found).length > 0) return;
@@ -150,29 +149,30 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
     } catch (e) {
       const err = e as { code?: unknown; body?: { field?: unknown } };
       const field = err.code === 'bibliography_invalid' ? formField(err.body?.field) : null;
-      if (field) setErrors({ [field]: MESSAGES[field] });
-      else setFormError('These details could not be saved. Check them and try again.');
+      if (field) setErrors({ [field]: fieldMessage(field, t) });
+      else setFormError(t('bib.save_failed'));
     } finally {
       setSaving(false);
     }
   };
 
-  const rows: Array<[string, string | number | null | undefined]> = shown
+  // The book's own details are content: their language is the Cyrillic rule's (WEB-UI FR-UI-32).
+  const rows: Array<[string, string | number | null | undefined, boolean]> = shown
     ? [
-        ['Title', shown.title],
-        ['Authors', shown.authors.join(', ')],
-        ['Edition', shown.edition],
-        ['Year', shown.year],
-        ['Publisher', shown.publisher],
-        ['ISBN', shown.isbn],
-        ['Original title', shown.original_title],
-        ['Original edition', shown.original_edition],
-        ['Original year', shown.original_year],
+        [t('field.title'), shown.title, true],
+        [t('row.authors'), shown.authors.join(', '), true],
+        [t('field.edition'), shown.edition, true],
+        [t('field.year'), shown.year, false],
+        [t('field.publisher'), shown.publisher, true],
+        [t('field.isbn'), shown.isbn, false],
+        [t('field.original_title'), shown.original_title, true],
+        [t('field.original_edition'), shown.original_edition, true],
+        [t('field.original_year'), shown.original_year, false],
       ]
     : [];
 
   return (
-    <Section title="Bibliography">
+    <Section title={t('bib.heading')}>
       {editing ? (
         <form
           className="fresh-form"
@@ -182,7 +182,7 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
             void save();
           }}
         >
-          {FIELDS.map(({ field, label, multiline }) => {
+          {FIELDS.map(({ field, multiline }) => {
             const id = `${base}-${field}`;
             const errorId = `${id}-error`;
             const invalid = errors[field] !== undefined;
@@ -195,7 +195,7 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
             };
             return (
               <div className="fresh-field" key={field}>
-                <label htmlFor={id}>{label}</label>
+                <label htmlFor={id}>{fieldLabel(field, t)}</label>
                 {multiline ? <textarea rows={3} {...common} /> : <input type="text" {...common} />}
                 {invalid && (
                   <p id={errorId} className="fresh-field-error">
@@ -208,10 +208,10 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
           {formError && <p role="alert">{formError}</p>}
           <div className="state-actions">
             <Button type="submit" disabled={saving}>
-              Save
+              {t('save')}
             </Button>
             <Button type="button" variant="ghost" color="neutral" onClick={() => setEditing(false)}>
-              Cancel
+              {t('cancel')}
             </Button>
           </div>
         </form>
@@ -221,28 +221,28 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
             <dl className="fresh-bib">
               {rows
                 .filter(([, v]) => v !== null && v !== undefined && v !== '')
-                .map(([k, v]) => (
+                .map(([k, v, text]) => (
                   <div key={k}>
                     <dt>{k}</dt>
-                    <dd>{v}</dd>
+                    <dd lang={text ? textLang(String(v)) : undefined}>{v}</dd>
                   </div>
                 ))}
             </dl>
           ) : (
-            <p className="muted">No details yet: enter them, or run a check to read them from the book's first pages.</p>
+            <p className="muted">{t('bib.none')}</p>
           )}
-          {shown && <p className="muted">Source: {fromOwner ? 'from you' : "read from the book's first pages"}</p>}
+          {shown && <p className="muted">{fromOwner ? t('bib.from_owner') : t('bib.from_scan')}</p>}
           {needsConfirm && (
             <div className="fresh-confirm">
-              <p>Check these details before the web search: the check searches the web only for details you confirm or enter.</p>
+              <p>{t('bib.confirm_hint')}</p>
               <label>
-                <input type="checkbox" checked={confirmed} onChange={(e) => onConfirm(e.target.checked)} /> These details are right
+                <input type="checkbox" checked={confirmed} onChange={(e) => onConfirm(e.target.checked)} /> {t('bib.confirm')}
               </label>
             </div>
           )}
           <div className="state-actions">
             <Button variant="outline" color="neutral" onClick={edit}>
-              Edit
+              {t('edit')}
             </Button>
           </div>
         </>
@@ -251,41 +251,43 @@ function BibliographySection({ data, materialId, api, confirmed, onConfirm, onSa
   );
 }
 
-function ReportSections({ report, materialId }: { report: Report; materialId: string }) {
+function ReportSections({ report, materialId, t }: { report: Report; materialId: string; t: FreshT }) {
   const status = new Map((report.claim_status ?? []).map((s) => [s.id, s]));
-  const topics = new Map((report.topics ?? []).map((t) => [t.id, t.title]));
-  const dropped = Object.entries(report.dropped ?? {}).filter(([k, n]) => k in DROPPED && n > 0);
+  const topics = new Map((report.topics ?? []).map((tp) => [tp.id, tp.title]));
+  const dropped = Object.entries(report.dropped ?? {}).filter((e): e is [Dropped, number] => (DROPPED as readonly string[]).includes(e[0]) && e[1] > 0);
   return (
     <>
       {report.reasons && report.reasons.length > 0 && (
-        <Section title="Reasons">
+        <Section title={t('report.reasons')}>
           <ul className="fresh-list">
             {report.reasons.map((r, i) => (
               <li key={i}>
-                {r.text}
-                <Citations links={r.citations} />
+                <span lang={textLang(r.text)}>{r.text}</span>
+                <Citations links={r.citations} t={t} />
               </li>
             ))}
           </ul>
         </Section>
       )}
       {report.claims && report.claims.length > 0 && (
-        <Section title="Flagged claims">
+        <Section title={t('report.claims')}>
           <ul className="fresh-list">
             {report.claims.map((c) => {
               const s = status.get(c.id);
               return (
                 <li key={c.id}>
                   <p>
-                    <span className="fresh-subject">{c.subject}</span>
-                    {` (${c.kind}, ${c.confidence} confidence), `}
-                    <a href={pageHref(materialId, c.page, c.cell)}>p. {c.page}</a>
+                    <span className="fresh-subject" lang={textLang(c.subject)}>
+                      {c.subject}
+                    </span>
+                    {t('claim.meta', { kind: t.enum('kind', c.kind), confidence: t.enum('confidence', c.confidence) })}
+                    <a href={pageHref(materialId, c.page, c.cell)}>{t('claim.page', { page: String(c.page) })}</a>
                   </p>
                   {s && (
                     <p className="muted">
-                      {`On the web: ${s.status}`}
+                      {t('claim.web', { status: t.enum('status', s.status) })}
                       {s.note !== '' && ` — ${s.note}`}
-                      <Citations links={s.citations} />
+                      <Citations links={s.citations} t={t} />
                     </p>
                   )}
                 </li>
@@ -295,20 +297,20 @@ function ReportSections({ report, materialId }: { report: Report; materialId: st
         </Section>
       )}
       {report.recommendations && report.recommendations.length > 0 && (
-        <Section title="Recommendations">
+        <Section title={t('report.recommendations')}>
           <ul className="fresh-recs">
             {report.recommendations.map((r, i) => {
               const href = safeHref(r.url, r.host);
-              const covers = r.covers.map((id) => topics.get(id)).filter((t): t is string => t !== undefined);
+              const covers = r.covers.map((id) => topics.get(id)).filter((tp): tp is string => tp !== undefined);
               return (
                 <li key={i} className="fresh-rec">
-                  <h3>
+                  <h3 lang={textLang(r.title)}>
                     {href === null ? (
                       r.title
                     ) : (
                       <a href={href} rel={EXTERNAL.rel} target={EXTERNAL.target}>
                         {r.title}
-                        <span className="visually-hidden"> (opens in a new tab)</span>
+                        <span className="visually-hidden">{t('link.new_tab')}</span>
                       </a>
                     )}
                   </h3>
@@ -317,11 +319,11 @@ function ReportSections({ report, materialId }: { report: Report; materialId: st
                   </p>
                   {href === null && <p className="fresh-url">{r.url}</p>}
                   <p className="muted">
-                    {REC_KINDS[r.kind]}
-                    {r.date !== null && ` · ${r.date} (as reported)`}
+                    {t.enum('rec_kind', r.kind)}
+                    {r.date !== null && t('rec.date', { date: r.date })}
                   </p>
-                  <p>{r.why}</p>
-                  {covers.length > 0 && <p className="muted">Covers: {covers.join(', ')}</p>}
+                  <p lang={textLang(r.why)}>{r.why}</p>
+                  {covers.length > 0 && <p className="muted">{t('rec.covers', { topics: covers.join(', ') })}</p>}
                 </li>
               );
             })}
@@ -329,7 +331,7 @@ function ReportSections({ report, materialId }: { report: Report; materialId: st
         </Section>
       )}
       {dropped.length > 0 && (
-        <p className="muted">Removed from this report: {dropped.map(([k, n]) => `${n} ${DROPPED[k]}`).join('; ')}.</p>
+        <p className="muted">{t('dropped.line', { list: dropped.map(([k, n]) => t(`dropped.${k}`, { count: n })).join('; ') })}</p>
       )}
     </>
   );
@@ -343,6 +345,7 @@ export interface FreshnessCardProps {
 }
 
 export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCardProps) {
+  const t = useT('fresh', en);
   const [data, setData] = useState<Freshness | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -374,8 +377,8 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
   const running = data?.report?.status === 'running';
   useEffect(() => {
     if (!running) return;
-    const t = window.setTimeout(() => void reload(), pollMs);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => void reload(), pollMs);
+    return () => window.clearTimeout(timer);
   }, [running, data, pollMs, reload]);
 
   if (data === null) {
@@ -383,7 +386,7 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
       return (
         <div className="fresh">
           <div className="error state-actions">
-            <p>The freshness check could not be loaded.</p>
+            <p>{t('card.load_failed')}</p>
             <Button
               variant="outline"
               color="neutral"
@@ -392,7 +395,7 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
                 void reload();
               }}
             >
-              Retry
+              {t('retry')}
             </Button>
           </div>
         </div>
@@ -400,7 +403,7 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
     return (
       <div className="fresh">
         <p role="status" className="visually-hidden">
-          Loading the freshness check
+          {t('card.loading')}
         </p>
         <div aria-hidden="true">
           <Skeleton.Root>
@@ -435,7 +438,7 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
       if (code === 'estimate_changed') {
         const next = estimateOf(err.body?.estimate);
         if (next) setEstimate(next);
-        setNotice('The estimate changed. Check it and run again.');
+        setNotice(t('run.estimate_changed'));
       } else if (code === 'freshness_running') {
         setConfirming(false);
         await reload();
@@ -443,14 +446,14 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
         setConfirming(false);
         setConfirmed(false);
         await reload();
-        setNotice('The details changed: check the details again before the web search.');
+        setNotice(t('run.details_changed'));
       } else if (code === 'daily_budget_exhausted') {
         setConfirming(false);
         const cap = typeof err.body?.daily_cap_usd === 'string' ? err.body.daily_cap_usd : data.daily_cap_usd;
-        setNotice(dailyMessage(cap, err.body?.spent_usd));
+        setNotice(dailyMessage(t, cap, err.body?.spent_usd));
       } else {
         setConfirming(false);
-        setNotice('The check could not be started. Try again.');
+        setNotice(t('run.failed'));
       }
     } finally {
       setPosting(false);
@@ -471,39 +474,36 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
           setConfirmed(false);
           void reload();
         }}
+        t={t}
       />
-      <Section title="Freshness check">
-        {report === null && <p className="muted">No check yet.</p>}
+      <Section title={t('card.heading')}>
+        {report === null && <p className="muted">{t('card.none')}</p>}
         {running && report && (
           <p role="status" className="fresh-progress">
-            {progressText(report)}
+            {progressText(t, report)}
           </p>
         )}
-        {verdict && <Badge verdict={verdict} />}
-        {report?.status === 'done' && (
-          <p className="muted">Checked {(report.finished_at ?? report.created_at).slice(0, 10)}</p>
-        )}
-        {report?.status === 'done' && verdict === null && (
-          <p>The bibliography needs a check before the web search: confirm or correct the details above and run again.</p>
-        )}
+        {verdict && <Badge verdict={verdict} t={t} />}
+        {report?.status === 'done' && <p className="muted">{t('card.checked', { date: (report.finished_at ?? report.created_at).slice(0, 10) })}</p>}
+        {report?.status === 'done' && verdict === null && <p>{t('card.needs_bib')}</p>}
         {report?.status === 'done' && data.stale && (
           <p className="fresh-stale-line">
-            <span className="fresh-stale">Stale</span>
-            {data.stale_reason && <span>{` — ${STALE[data.stale_reason]}`}</span>}
+            <span className="fresh-stale">{t('card.stale')}</span>
+            {data.stale_reason && <span>{` — ${t.enum('stale_reason', data.stale_reason)}`}</span>}
           </p>
         )}
-        {(report?.status === 'failed' || report?.status === 'budget_refused') && <p>{reportMessage(report.error, data)}</p>}
+        {(report?.status === 'failed' || report?.status === 'budget_refused') && <p>{reportMessage(t, report.error, data)}</p>}
         {notice && <p role="alert">{notice}</p>}
         {!running &&
           (confirming ? (
             <div className="fresh-estimate">
-              <p>{`About $${shownEstimate.low_usd}–$${shownEstimate.high_usd}, at most $${shownEstimate.cap_usd}`}</p>
+              <p>{t('card.estimate', { low: shownEstimate.low_usd, high: shownEstimate.high_usd, cap: shownEstimate.cap_usd })}</p>
               <div className="state-actions">
                 <Button disabled={posting} onClick={() => void run()}>
-                  {`Run for up to $${shownEstimate.high_usd}`}
+                  {t('card.run_up_to', { high: shownEstimate.high_usd })}
                 </Button>
                 <Button variant="ghost" color="neutral" onClick={() => setConfirming(false)}>
-                  Cancel
+                  {t('cancel')}
                 </Button>
               </div>
             </div>
@@ -515,12 +515,12 @@ export function FreshnessCard({ materialId, api, pollMs = POLL_MS }: FreshnessCa
                   setConfirming(true);
                 }}
               >
-                {report === null ? 'Run check' : 'Run again'}
+                {report === null ? t('card.run') : t('card.run_again')}
               </Button>
             </div>
           ))}
       </Section>
-      {report?.status === 'done' && <ReportSections report={report} materialId={materialId} />}
+      {report?.status === 'done' && <ReportSections report={report} materialId={materialId} t={t} />}
     </div>
   );
 }

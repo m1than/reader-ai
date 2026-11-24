@@ -65,6 +65,17 @@ def current_settings() -> Settings:
     return _CURRENT[0]
 
 
+async def effective_settings(conn: Any) -> Settings:
+    """`current_settings()` with the owner's retention override, read per run and per request (SRV-CONFIG
+    FR-CONFIG-26, paired); without a connection the file's value stands."""
+    current = current_settings()
+    if conn is None:
+        return current
+    from reader.config.effective import retention_days
+
+    return Settings(current.enabled, await retention_days(conn, current.retention_days))
+
+
 @dataclass
 class Handle:
     enabled: bool
@@ -124,7 +135,9 @@ def setup(
     """Install tracing for `role` (api or worker) from `config.observability`; returns the handle that shuts
     it down."""
     set_global_textmap(TraceContextTextMapPropagator())
-    _CURRENT[0] = Settings(bool(config.observability.enabled), int(config.observability.retention_days))
+    from reader.config.effective import file_retention_days  # the overlay's reader (FR-CONFIG-26)
+
+    _CURRENT[0] = Settings(bool(config.observability.enabled), file_retention_days(config))
     if not config.observability.enabled:
         install(None)
         return Handle(enabled=False)

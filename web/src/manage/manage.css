@@ -1,0 +1,313 @@
+/* WEB-MANAGE (INV-MANAGE-3; WEB-UI FR-UI-10 holds): tokens only, the library's spacing steps, the three radii, a 2px
+   focus outline. Loaded with the management chunks only. */
+
+.course-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+}
+
+.course-head h2 {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+.course-actions,
+.lesson-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  min-width: 0;
+}
+
+.rename-field {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  max-width: 100%;
+}
+
+/* WEB-UI INV-UI-3: the library's outlined label paints a gradient behind itself to cut the border; this label is
+   visually hidden, so it needs no background. */
+.rename-field .acme-text-field-root > .acme-text-field-label {
+  background-image: none;
+}
+
+.rename-hint {
+  font-size: 0.875rem;
+}
+
+.manage-problem {
+  margin: var(--acme-space-1) 0;
+  color: var(--acme-danger);
+  font-size: 0.875rem;
+}
+
+.manage-dialog {
+  max-width: min(36rem, 100%);
+  overflow-wrap: break-word;
+}
+
+.manage-dialog-body p,
+.manage-confirm p {
+  margin: var(--acme-space-2) 0;
+}
+
+.manage-field,
+.confirm-type {
+  display: grid;
+  gap: var(--acme-space-1);
+  margin: var(--acme-space-3) 0 0;
+}
+
+.manage-fields {
+  display: grid;
+  gap: var(--acme-space-2);
+}
+
+.manage-input {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: var(--acme-space-1) var(--acme-space-2);
+  border: 1px solid var(--acme-control-border);
+  border-radius: var(--radius-control);
+  background: var(--acme-surface);
+  color: var(--acme-text);
+  font: inherit;
+}
+
+.manage-input:focus-visible,
+.radio-option:focus-visible,
+.settings-tab:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+.manage-list {
+  display: grid;
+  gap: 0;
+  margin: var(--acme-space-2) 0;
+  padding: 0;
+  list-style: none;
+}
+
+.manage-row,
+.archived-row,
+.note-row,
+.activity-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-2) 0;
+  border-bottom: 1px solid var(--acme-border);
+  overflow-wrap: anywhere;
+}
+
+.activity-row {
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.row-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--acme-space-1) var(--acme-space-2);
+  min-width: 0;
+}
+
+.row-title {
+  font-weight: 600;
+}
+
+.row-buttons {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-1);
+}
+
+.person-handle {
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font-mono);
+  font-size: 0.875rem;
+}
+
+.lesson-done {
+  display: inline-flex;
+  color: var(--acme-success);
+}
+
+.lesson-row.skipped .lesson-title {
+  color: var(--acme-text-muted);
+}
+
+.archived-courses {
+  margin: var(--acme-space-5) 0 0;
+}
+
+.undo-region {
+  position: fixed;
+  left: var(--acme-space-4);
+  bottom: var(--acme-space-4);
+  z-index: 26;
+  max-width: calc(100% - 2rem);
+}
+
+.undo-toast {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-2) var(--acme-space-2) var(--acme-space-2) var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface-raised);
+  color: var(--acme-text);
+  box-shadow: var(--acme-shadow);
+  font-size: 0.875rem;
+}
+
+.settings-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-1);
+  margin: var(--acme-space-3) 0;
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.settings-tab {
+  padding: var(--acme-space-2) var(--acme-space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--acme-text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color calc(var(--acme-duration) * 0.75);
+}
+
+.settings-tab:hover {
+  background: var(--acme-hover);
+}
+
+.settings-tab[aria-selected='true'] {
+  color: var(--acme-text);
+  font-weight: 600;
+}
+
+.settings-section,
+.settings-block {
+  display: grid;
+  gap: var(--acme-space-2);
+  max-width: 50rem;
+  margin: 0 0 var(--acme-space-5);
+}
+
+.settings-choice h2 {
+  font-size: 1rem;
+}
+
+.radio-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-2);
+}
+
+.radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-1) var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--acme-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.radio-option[aria-checked='true'] {
+  border-color: var(--acme-accent);
+  background: var(--acme-hover);
+}
+
+.radio-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--acme-accent);
+}
+
+.manage-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.manage-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.manage-table th,
+.manage-table td {
+  padding: var(--acme-space-2);
+  border-bottom: 1px solid var(--acme-border);
+  text-align: start;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.manage-table td > span {
+  display: block;
+}
+
+.notes-panel {
+  display: grid;
+  gap: var(--acme-space-2);
+  max-width: 38rem;
+  margin: var(--acme-space-5) 0 0;
+  padding: var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-panel);
+}
+
+.notes-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--acme-space-2);
+}
+
+.note-body {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.contents-bookmarks ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.manage-sources {
+  margin: var(--acme-space-5) 0 0;
+}
+
+@media (max-width: 39.98rem) {
+  .manage-table thead {
+    display: none;
+  }
+
+  .manage-table tr,
+  .manage-table th,
+  .manage-table td {
+    display: block;
+  }
+}

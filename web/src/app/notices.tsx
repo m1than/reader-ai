@@ -1,29 +1,18 @@
 // Notices (WEB-UI FR-UI-7): plain text from a fixed catalogue keyed by code, each in sentence case ending with a
-// full stop; at most 3 visible, older ones counted as "+n more".
+// full stop; at most 3 visible, older ones counted as "+n more". The catalogue is the app area's `notice.*` messages
+// (FR-UI-30); NOTICE_CATALOGUE is its English view.
 import { Button } from '@acme/ui/button';
+import { useT } from '../ui/i18n';
 import { CloseIcon, InfoIcon } from '../ui/icons';
+import en from './messages.en';
 
-export const NOTICE_CATALOGUE: Readonly<Record<string, string>> = {
-  rejected: 'The kernel refused that request.',
-  busy: 'The kernel is busy; try again in a moment.',
-  timeout: 'The cell ran longer than 60 seconds and was interrupted.',
-  output_truncated: 'The output was too large and was cut.',
-  kernel_restarted: 'The kernel restarted; variables from earlier cells are gone.',
-  kernel_dead: 'The kernel stopped; the next Run starts a new one.',
-  kernel_reset: 'The kernel was reset; the next Run starts a fresh one.',
-  kernel_unavailable: 'The kernel is unavailable right now.',
-  kernel_upstream: 'The kernel did not answer; try Run again.',
-  too_many_kernels: 'Too many open lessons; close one or reset the kernel.',
-  connect_failed: 'Could not connect to the kernel. The lesson may be open in other tabs.',
-  sign_out_failed: 'Signing out failed; try again.',
-  // WEB-UI FR-UI-15: a compile request the server answered with a run that already exists.
-  compile_running: 'A compile of this lesson is already running.',
-  already_started: 'A lesson of this course is already compiled or compiling.',
-  not_failed: 'This compile is no longer stopped.',
-  network: 'The network connection was lost.',
-  bad_response: 'The server sent something unexpected.',
-  unknown: 'Something went wrong.',
-};
+const PREFIX = 'notice.';
+
+export const NOTICE_CATALOGUE: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(en)
+    .filter(([k]) => k.startsWith(PREFIX))
+    .map(([k, v]) => [k.slice(PREFIX.length), v as string]),
+);
 
 export const MAX_VISIBLE_NOTICES = 3;
 
@@ -37,16 +26,18 @@ export interface Notice {
 }
 
 export function NoticeRegion({ notices, onDismiss }: { notices: Notice[]; onDismiss: (id: number) => void }) {
+  const t = useT('app', en);
   const visible = notices.slice(-MAX_VISIBLE_NOTICES);
   const hidden = notices.length - visible.length;
+  const text = (code: string) => (Object.hasOwn(NOTICE_CATALOGUE, code) ? t.maybe(`${PREFIX}${code}`) : t('notice.unknown'));
   return (
-    <aside className="notices" aria-label="Notices">
-      {hidden > 0 && <p className="notices-more">{`+${hidden} more`}</p>}
+    <aside className="notices" aria-label={t('notices.label')}>
+      {hidden > 0 && <p className="notices-more">{t('notices.more', { count: hidden })}</p>}
       {visible.map((n) => (
         <div key={n.id} role="status" className="notice">
           <InfoIcon className="notice-icon" />
-          <span>{noticeText(n.code)}</span>
-          <Button variant="ghost" color="neutral" size="sm" onClick={() => onDismiss(n.id)} aria-label="Dismiss">
+          <span>{text(n.code)}</span>
+          <Button variant="ghost" color="neutral" size="sm" onClick={() => onDismiss(n.id)} aria-label={t('notices.dismiss')}>
             <CloseIcon />
           </Button>
         </div>

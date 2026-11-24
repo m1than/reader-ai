@@ -1,5 +1,5 @@
-// @trace FR-UI-31 FR-OBS-23 FR-OBS-24 FR-OBS-25 FR-OBS-32
-// WEB-UI FR-UI-31 (paired SRV-OBS phase 2): on /observability, the bench upload (two files, every error code shown),
+// @trace FR-UI-33 FR-OBS-23 FR-OBS-24 FR-OBS-25 FR-OBS-32
+// WEB-UI FR-UI-33 (paired SRV-OBS phase 2): on /observability, the bench upload (two files, every error code shown),
 // a label control on lesson and answer rows (the exact body; revision and mirror shown), one text-only banner per
 // alert, and the stack row.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -71,7 +71,7 @@ const upload = async (setText: string, resultText: string) => {
   return region;
 };
 
-describe('bench upload (FR-UI-31 a, FR-OBS-23)', () => {
+describe('bench upload (FR-UI-33 a, FR-OBS-23)', () => {
   const SET = readText('spikes/embeddings-local/questions.yaml');
   const RESULT = JSON.stringify({ kind: 'search', model: 'BAAI/bge-m3', chunk_chars: 1200, overlap: 200, questions: 1, per_question: [] });
 
@@ -93,7 +93,7 @@ describe('bench upload (FR-UI-31 a, FR-OBS-23)', () => {
   }
 });
 
-describe('labels (FR-UI-31 b, FR-OBS-24)', () => {
+describe('labels (FR-UI-33 b, FR-OBS-24)', () => {
   it('a lesson label posts the exact body and shows revision and mirror', async () => {
     const calls = await mount(() => json(200, { revision: 2, mirror: 'queued' }));
     const region = await waitFor(() => screen.getByRole('region', { name: 'Cost per lesson' }));
@@ -128,7 +128,7 @@ describe('labels (FR-UI-31 b, FR-OBS-24)', () => {
   });
 });
 
-describe('alerts and stack (FR-UI-31 c, d; FR-OBS-25, -32)', () => {
+describe('alerts and stack (FR-UI-33 c, d; FR-OBS-25, -32)', () => {
   it('one banner per alert, as text', async () => {
     await mount(() => json(200, {}));
     const banners = await waitFor(() => screen.getAllByRole('alert'));

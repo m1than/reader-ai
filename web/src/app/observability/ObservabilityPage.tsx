@@ -4,11 +4,12 @@
 // https://localhost:8444 (owner only, behind the gate); the saved dashboard views are listed. Values render as text.
 import { Button } from '@acme/ui/button';
 import { useQuery } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { WarningIcon } from '../../ui/icons';
 import { StateBlock } from '../../ui/StateBlock';
 import { useServices } from '../context';
 import {
+  createObsApi,
   DASHBOARDS,
   jaegerUrl,
   LABEL_REASONS,
@@ -22,7 +23,7 @@ import {
   type PostResult,
 } from './api';
 
-// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-24): the owner's good/bad label on a lesson or an answer; the reply's revision
+// WEB-UI FR-UI-33 (SRV-OBS FR-OBS-24): the owner's good/bad label on a lesson or an answer; the reply's revision
 // and mirror (or its error code) are shown as text. Postgres is the record; MLflow gets a mirror.
 function LabelControl({ target, id }: { target: LabelBody['target']; id: string }) {
   const { obs } = useServices();
@@ -65,7 +66,7 @@ function LabelControl({ target, id }: { target: LabelBody['target']; id: string 
   );
 }
 
-// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-23): record a bench result with its pinned set file; it never starts a bench.
+// WEB-UI FR-UI-33 (SRV-OBS FR-OBS-23): record a bench result with its pinned set file; it never starts a bench.
 function BenchUpload() {
   const { obs } = useServices();
   const [setFile, setSetFile] = useState<File | null>(null);
@@ -108,7 +109,7 @@ function BenchUpload() {
   );
 }
 
-// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-25): one banner per alert; every value renders as text.
+// WEB-UI FR-UI-33 (SRV-OBS FR-OBS-25): one banner per alert; every value renders as text.
 function Alerts({ alerts }: { alerts: ObsSummary['alerts'] }) {
   if (alerts.length === 0) return null;
   return (
@@ -123,7 +124,7 @@ function Alerts({ alerts }: { alerts: ObsSummary['alerts'] }) {
   );
 }
 
-// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-32): the stack's own health from its last probes; Jaeger is reader doctor's.
+// WEB-UI FR-UI-33 (SRV-OBS FR-OBS-32): the stack's own health from its last probes; Jaeger is reader doctor's.
 function StackView({ stack }: { stack: ObsSummary['stack'] }) {
   return (
     <ul className="obs-stack">
@@ -450,7 +451,9 @@ function Dashboards() {
 }
 
 export function ObservabilityPage() {
-  const { obs } = useServices();
+  // WEB-UI FR-UI-30 merge: AppRoot no longer builds this client; the lazy chunk builds it from `Services.http`.
+  const { obs: given, http } = useServices();
+  const obs = useMemo(() => given ?? (http ? createObsApi(http) : undefined), [given, http]);
   const q = useQuery({
     queryKey: OBS_KEY,
     queryFn: () => (obs as ObsApi).summary(),

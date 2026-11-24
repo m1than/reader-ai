@@ -64,6 +64,7 @@ class MaterialRow:
     config_id: str
     page_count: int
     ingest_id: uuid.UUID | None
+    deleted: bool = False  # SRV-INGEST FR-INGEST-31's tombstone (FR-FRESH-20)
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ def _uuid(value: str) -> uuid.UUID | None:
 
 
 _MATERIAL: Final = (
-    "SELECT m.id, m.sha256, m.config_id, m.page_count, i.id FROM materials m"
+    "SELECT m.id, m.sha256, m.config_id, m.page_count, i.id, m.deleted_at IS NOT NULL FROM materials m"
     " LEFT JOIN ingests i ON i.material_id = m.id AND i.owner_id = m.owner_id WHERE m.owner_id = :o AND "
 )
 
@@ -103,7 +104,13 @@ _MATERIAL: Final = (
 def _material(row: Any) -> MaterialRow | None:
     if row is None:
         return None
-    return MaterialRow(row[0], str(row[1]), str(row[2]), int(row[3]), row[4])
+    return MaterialRow(row[0], str(row[1]), str(row[2]), int(row[3]), row[4], bool(row[5]))
+
+
+async def live_material(conn: AsyncConnection, owner_id: uuid.UUID, ident: str) -> MaterialRow | None:
+    """FR-FRESH-20: `find_material`, but nothing for a deleted material (the routes answer 404)."""
+    found = await find_material(conn, owner_id, ident)
+    return None if found is None or found.deleted else found
 
 
 async def find_material(conn: AsyncConnection, owner_id: uuid.UUID, ident: str) -> MaterialRow | None:
@@ -233,6 +240,12 @@ async def latest_scan_bibliography(
     )
     fields = _json((await conn.execute(text(sql), {"o": owner_id, "m": material_id})).scalar())
     return with_meta(fields, None) if isinstance(fields, dict) else None
+
+
+async def running_for(conn: AsyncConnection, owner_id: uuid.UUID, material_id: uuid.UUID) -> bool:
+    """FR-FRESH-20: a `running` report of this material (SRV-INGEST FR-INGEST-31 refuses its delete)."""
+    sql = "SELECT 1 FROM freshness_reports WHERE owner_id = :o AND material_id = :m AND status = 'running'"
+    return (await conn.execute(text(sql), {"o": owner_id, "m": material_id})).first() is not None
 
 
 async def running_of(conn: AsyncConnection, owner_id: uuid.UUID) -> list[Report]:

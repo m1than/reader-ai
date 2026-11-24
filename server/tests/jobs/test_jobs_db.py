@@ -81,7 +81,7 @@ async def test_migration_heads(pg: Pg) -> None:
         async with engine.connect() as conn:
             versions = set((await conn.execute(text("SELECT version_num FROM alembic_version"))).scalars())
             tables = set((await conn.execute(text(_TABLES))).scalars())
-        assert "jobs_0002" in versions  # the branch head since FR-EVENTS-18
+        assert "jobs_0003" in versions  # the branch head since FR-EVENTS-30 (V/manage)
         assert "job_keys" in tables
         assert "procrastinate_jobs" in tables
 

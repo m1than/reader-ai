@@ -554,14 +554,18 @@ describe('lesson language (FR-UI-10, design pass)', () => {
     expect(lessonLang({ cells: [] })).toBe('en');
   });
 
-  it('puts lang on the lesson container div.lesson, around the cells', async () => {
+  it('puts the lesson language on its content nodes, not on the container div.lesson (WEB-UI FR-UI-32)', async () => {
     const nb = notebook();
     nb.cells = [{ cell_type: 'markdown', id: 'ru', source: 'Децентрализация распределяет управление между узлами.', metadata: { reader: { kind: 'explain' } } }];
+    nb.metadata = { ...nb.metadata, reader: { ...((nb.metadata.reader ?? {}) as Record<string, unknown>), title: 'Децентрализация' } };
     await view(nb);
     const container = document.querySelector('div.lesson') as HTMLElement;
     expect(container).toBeTruthy();
-    expect(container.getAttribute('lang')).toBe('ru');
+    expect(container.hasAttribute('lang')).toBe(false);
     expect(container.contains(cellEl('ru'))).toBe(true);
-    expect(document.querySelectorAll('[lang]')).toHaveLength(1);
+    expect(container.querySelector('h1')?.getAttribute('lang')).toBe('ru');
+    const blocks = cellEl('ru').querySelectorAll('[data-markdown]');
+    expect(blocks.length).toBeGreaterThan(0);
+    for (const b of blocks) expect(b.getAttribute('lang')).toBe('ru');
   });
 });
