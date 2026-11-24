@@ -11,25 +11,31 @@ import { useEffect, useMemo } from 'react';
 import { ApiError, SIGN_IN_URL, type LessonSummary } from '../app/api';
 import { useServices } from '../app/context';
 import { queries } from '../app/queries';
+import { createTutorApi } from '../tutor/api';
 import { AskPanel } from '../tutor/AskPanel';
+import { textLang, useT } from '../ui/i18n';
 import { SearchOffIcon, WarningIcon } from '../ui/icons';
 import { StateBlock } from '../ui/StateBlock';
 import { browserSocketFactory, createKernelController } from './kernel';
 import { LessonView, type Notebook, type PanelState } from './LessonView';
+import en from './messages.en';
 
-/** FR-NOTEBOOK-11: Lessons › course › lesson (current page). */
+/** FR-NOTEBOOK-11: Lessons › course › lesson (current page). Titles get lang from their own text (WEB-UI FR-UI-32). */
 function Crumbs({ lesson }: { lesson: LessonSummary }) {
+  const t = useT('notebook', en);
   return (
-    <Breadcrumbs.Root aria-label="Breadcrumb" className="crumbs">
+    <Breadcrumbs.Root aria-label={t('crumbs.label')} className="crumbs">
       <Breadcrumbs.List>
         <Breadcrumbs.Item>
-          <Breadcrumbs.Link render={<Link to="/" />}>Lessons</Breadcrumbs.Link>
+          <Breadcrumbs.Link render={<Link to="/" />}>{t('crumbs.lessons')}</Breadcrumbs.Link>
         </Breadcrumbs.Item>
         <Breadcrumbs.Item>
-          <Breadcrumbs.Link render={<Link to="/" hash={`course-${lesson.course_id}`} />}>{lesson.course_title}</Breadcrumbs.Link>
+          <Breadcrumbs.Link render={<Link to="/" hash={`course-${lesson.course_id}`} lang={textLang(lesson.course_title)} />}>
+            {lesson.course_title}
+          </Breadcrumbs.Link>
         </Breadcrumbs.Item>
         <Breadcrumbs.Item>
-          <Breadcrumbs.Page>{lesson.title}</Breadcrumbs.Page>
+          <Breadcrumbs.Page lang={textLang(lesson.title)}>{lesson.title}</Breadcrumbs.Page>
         </Breadcrumbs.Item>
       </Breadcrumbs.List>
     </Breadcrumbs.Root>
@@ -37,44 +43,48 @@ function Crumbs({ lesson }: { lesson: LessonSummary }) {
 }
 
 /** FR-NOTEBOOK-12: a status with hidden text (no aria-busy: it would silence the status) and the library skeleton. */
-const LessonSkeleton = () => (
-  <div className="page">
-    <p role="status" className="visually-hidden">
-      Loading the lesson
-    </p>
-    <div aria-hidden="true">
-      <Skeleton.Root>
-        <Skeleton.Item variant="text" width="50%" height="2.25rem" />
-        <Skeleton.Item variant="text" width="100%" />
-        <Skeleton.Item variant="text" width="95%" />
-        <Skeleton.Item variant="text" width="70%" />
-      </Skeleton.Root>
+function LessonSkeleton() {
+  const t = useT('notebook', en);
+  return (
+    <div className="page">
+      <p role="status" className="visually-hidden">
+        {t('page.loading')}
+      </p>
+      <div aria-hidden="true">
+        <Skeleton.Root>
+          <Skeleton.Item variant="text" width="50%" height="2.25rem" />
+          <Skeleton.Item variant="text" width="100%" />
+          <Skeleton.Item variant="text" width="95%" />
+          <Skeleton.Item variant="text" width="70%" />
+        </Skeleton.Root>
+      </div>
     </div>
-  </div>
-);
+  );
+}
 
 const Failed = ({ error, retry }: { error: unknown; retry: () => void }) => {
+  const t = useT('notebook', en);
   const missing = error instanceof ApiError && error.status === 404;
   return (
     <div className="page state">
       <StateBlock
         tone={missing ? 'neutral' : 'danger'}
         icon={missing ? <SearchOffIcon size={20} /> : <WarningIcon size={20} />}
-        title={missing ? 'Lesson not found' : 'The lesson could not be loaded.'}
+        title={missing ? t('page.not_found') : t('page.failed')}
         actions={
           <>
             {!missing && (
               <Button variant="outline" color="neutral" onClick={retry}>
-                Retry
+                {t('page.retry')}
               </Button>
             )}
             <Link to="/" className="state-link">
-              Back to lessons
+              {t('page.back')}
             </Link>
           </>
         }
       >
-        <p className="muted">{missing ? 'The lesson may have been removed or the link is wrong.' : 'Check the connection, then retry.'}</p>
+        <p className="muted">{missing ? t('page.not_found_hint') : t('page.failed_hint')}</p>
       </StateBlock>
     </div>
   );
@@ -82,11 +92,12 @@ const Failed = ({ error, retry }: { error: unknown; retry: () => void }) => {
 
 /** FR-NOTEBOOK-1 (design pass): the not-published page, with the compile slot and the nearest published lessons. */
 function NotPublished({ lesson }: { lesson: LessonSummary }) {
+  const t = useT('notebook', en);
   const { api, compileSlot } = useServices();
   const list = useQuery(queries(api).lessons());
   const Status = compileSlot?.Status;
   const Action = compileSlot?.Action;
-  const chip = <span className="chip">Not published yet</span>;
+  const chip = <span className="chip">{t('unpublished.chip')}</span>;
   const siblings = (list.data?.lessons ?? []).filter((l) => l.course_id === lesson.course_id && l.latest_sha256 !== null);
   const previous = siblings.filter((l) => l.ordinal < lesson.ordinal).sort((a, b) => b.ordinal - a.ordinal)[0];
   const next = siblings.filter((l) => l.ordinal > lesson.ordinal).sort((a, b) => a.ordinal - b.ordinal)[0];
@@ -99,21 +110,21 @@ function NotPublished({ lesson }: { lesson: LessonSummary }) {
           <>
             {previous ? (
               <Link to="/lessons/$lessonId" params={{ lessonId: previous.lesson_id }} className="state-link">
-                {`Previous: ${previous.title}`}
+                {t('unpublished.previous', { title: previous.title })}
               </Link>
             ) : null}
             {next ? (
               <Link to="/lessons/$lessonId" params={{ lessonId: next.lesson_id }} className="state-link">
-                {`Next: ${next.title}`}
+                {t('unpublished.next', { title: next.title })}
               </Link>
             ) : null}
             <Link to="/" hash={`course-${lesson.course_id}`} className="state-link">
-              {`All lessons of ${lesson.course_title}`}
+              {t('unpublished.all', { course: lesson.course_title })}
             </Link>
           </>
         }
       >
-        <p className="muted">{`Lesson ${lesson.ordinal} of ${lesson.course_title} is not published yet.`}</p>
+        <p className="muted">{t('unpublished.text', { n: String(lesson.ordinal), course: lesson.course_title })}</p>
         {/* WEB-UI FR-UI-6: a div (the slot's parts may be block or interactive); the default chip shows while the
             slot's Status renders nothing. */}
         <div className="state-status">
@@ -135,7 +146,9 @@ function NotPublished({ lesson }: { lesson: LessonSummary }) {
 }
 
 function Lesson({ lessonId, lesson, notebook, revision }: { lessonId: string; lesson: LessonSummary; notebook: Notebook; revision: string }) {
-  const { api, notify, navigateAway, tutor, compileSlot } = useServices();
+  const { api, notify, navigateAway, tutor: givenTutor, http, compileSlot } = useServices();
+  // NFR-UI-1: the tutor client is built in this lazy chunk from the shell's fetch and 401 hook.
+  const tutor = useMemo(() => givenTutor ?? (http ? createTutorApi(http) : undefined), [givenTutor, http]);
   const Status = compileSlot?.Status;
   const controller = useMemo(
     () =>

@@ -5,7 +5,9 @@
 // activation (review B1); until then the triggers are plain buttons styled like the library's ghost buttons.
 import { Link } from '@tanstack/react-router';
 import { Component, lazy, Suspense, useRef, useState, type ReactNode } from 'react';
+import { textLang, useT } from '../ui/i18n';
 import { MarkIcon, MenuIcon } from '../ui/icons';
+import en from './messages.en';
 import { isCurrent, NAV_ITEMS, type NavBadge, type NavItem } from './nav';
 
 const UserMenu = lazy(() => import('./UserMenu'));
@@ -16,6 +18,7 @@ const noBadge = (): NavBadge | null => null;
 function NavEntry({ item, current, onNavigate }: { item: NavItem; current: boolean; onNavigate?: (() => void) | undefined }) {
   // The badge hook is fixed per item (the entry's key), so the hook order of this component never changes.
   const badge = (item.useBadge ?? noBadge)();
+  const t = useT('app', en);
   return (
     <Link
       to={item.to}
@@ -25,7 +28,8 @@ function NavEntry({ item, current, onNavigate }: { item: NavItem; current: boole
     >
       {/* FR-UI-11: "<label> <shown> <after>", e.g. "Sign-ups 1 waiting", with `after` visually hidden; no punctuation
           in hidden text, so no browser's spacing can misplace it (code review 2026-11-24). */}
-      {item.label}
+      {/* FR-UI-30: a declared label is translated; an entry the catalogue does not know shows its label as given. */}
+      {t.maybe(`nav.${item.label}`, undefined, item.label)}
       {badge ? (
         <>
           {' '}
@@ -40,8 +44,9 @@ function NavEntry({ item, current, onNavigate }: { item: NavItem; current: boole
 /** The main nav from NAV_ITEMS (FR-UI-11): `main-nav` in the header (hidden below 75rem), `drawer-nav` in the Courses
  * drawer (shown only below 75rem), so exactly one "Main" navigation is rendered visibly at any width. */
 export function MainNav({ owner, path, className, onNavigate }: { owner: boolean; path: string; className: string; onNavigate?: () => void }) {
+  const t = useT('app', en);
   return (
-    <nav className={className} aria-label="Main">
+    <nav className={className} aria-label={t('header.main_nav')}>
       {NAV_ITEMS.filter((item) => owner || !item.owner_only).map((item) => (
         <NavEntry key={item.to} item={item} current={isCurrent(item, path)} onNavigate={onNavigate} />
       ))}
@@ -64,6 +69,7 @@ class LazyBoundary extends Component<{ fallback: ReactNode; children: ReactNode 
 const ghost = { className: 'acme-button', 'data-variant': 'ghost', 'data-color': 'neutral', 'data-size': 'sm' } as const;
 
 function PlainUserTrigger({ displayName, onClick }: { displayName: string; onClick?: () => void }) {
+  const t = useT('app', en);
   return (
     <button
       type="button"
@@ -71,10 +77,12 @@ function PlainUserTrigger({ displayName, onClick }: { displayName: string; onCli
       className="acme-button user-trigger"
       aria-haspopup="menu"
       aria-expanded={false}
-      aria-label={`Account menu for ${displayName}`}
+      aria-label={t('header.account_menu', { name: displayName })}
       onClick={onClick}
     >
-      <span className="who">{displayName}</span>
+      <span className="who" lang={textLang(displayName)}>
+        {displayName}
+      </span>
     </button>
   );
 }
@@ -96,6 +104,7 @@ export function Header({
   const [drawerLoaded, setDrawerLoaded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const coursesButton = useRef<HTMLButtonElement>(null);
+  const t = useT('app', en);
   const closeDrawer = () => {
     setDrawerOpen(false);
     window.setTimeout(() => coursesButton.current?.focus(), 0);
@@ -115,7 +124,7 @@ export function Header({
         }}
       >
         <MenuIcon />
-        <span className="courses-label">Courses</span>
+        <span className="courses-label">{t('header.courses')}</span>
       </button>
       <Link className="brand" to="/">
         <MarkIcon className="brand-mark" />

@@ -8,7 +8,9 @@ import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate, useRouterState, type RouterHistory } from '@tanstack/react-router';
 import { lazy, Suspense, useContext, useEffect, useState } from 'react';
+import { useLocale, useT, withAreas } from '../ui/i18n';
 import { SearchOffIcon, WarningIcon } from '../ui/icons';
+import en from './messages.en';
 import { StateBlock } from '../ui/StateBlock';
 import type { LessonSummary } from './api';
 import { useServices } from './context';
@@ -22,17 +24,22 @@ const LESSON_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 
 export const isLessonId = (id: string): boolean => LESSON_ID.test(id) && id !== '.' && id !== '..';
 
-const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ default: m.LessonPage })));
+// FR-UI-31: each lazy route loads its areas' Russian catalogues together with its chunk (withAreas).
+const LessonPage = lazy(
+  withAreas(() => import('../notebook/LessonPage').then((m) => ({ default: m.LessonPage })), ['notebook', 'render', 'tutor', 'manage']),
+);
 // FR-UI-13 mount note: WEB-IMPORT's page composes WEB-PLAN's page with the upload sections.
-const ImportPage = lazy(() => import('../import/ImportPage').then((m) => ({ default: m.ImportPage })));
+const ImportPage = lazy(withAreas(() => import('../import/ImportPage').then((m) => ({ default: m.ImportPage })), ['import', 'import/plan', 'manage']));
 // FR-UI-14: WEB-ACCOUNTS's Sign-ups screen, a lazy chunk, for the owner only.
-const SignupsPage = lazy(() => import('../accounts/SignupsPage').then((m) => ({ default: m.SignupsPage })));
+const SignupsPage = lazy(withAreas(() => import('../accounts/SignupsPage').then((m) => ({ default: m.SignupsPage })), ['accounts']));
 // FR-UI-18: the observability page, a lazy chunk, for the owner only.
-const ObservabilityPage = lazy(() => import('./observability/ObservabilityPage').then((m) => ({ default: m.ObservabilityPage })));
+const ObservabilityPage = lazy(
+  withAreas(() => import('./observability/ObservabilityPage').then((m) => ({ default: m.ObservabilityPage })), ['app/observability']),
+);
 
 // WEB-FRESH (paired change): the freshness card's own lazy route until it mounts in the sources list.
 const MATERIAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
-const FreshnessPage = lazy(() => import('../fresh/FreshnessPage').then((m) => ({ default: m.FreshnessPage })));
+const FreshnessPage = lazy(withAreas(() => import('../fresh/FreshnessPage').then((m) => ({ default: m.FreshnessPage })), ['fresh']));
 
 /** FR-UI-13 first run: an owner with no lessons and no material at all lands on /import (history replace). */
 function useFirstRun(lessons: LessonSummary[] | undefined) {
@@ -51,33 +58,37 @@ function useFirstRun(lessons: LessonSummary[] | undefined) {
   }, [empty, navigate]);
 }
 
-const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
+const useAppT = () => useT('app', en);
 
 // Pages render inside the shell's single `main#content` (FR-UI-11).
 function NotFound() {
+  const t = useAppT();
   return (
     <div className="page">
       <StateBlock
         icon={<SearchOffIcon size={20} />}
-        title="Not found"
+        title={t('shell.not_found.title')}
         actions={
           <Link to="/" className="state-link">
-            Back to lessons
+            {t('shell.not_found.back')}
           </Link>
         }
       >
-        <p className="muted">Nothing lives at this address.</p>
+        <p className="muted">{t('shell.not_found.body')}</p>
       </StateBlock>
     </div>
   );
 }
 
-function Loading({ label }: { label: string }) {
+type LoadingKey = 'loading.lessons' | 'loading.lesson' | 'loading.import' | 'loading.signups' | 'loading.freshness' | 'loading.observability' | 'loading.settings';
+
+function Loading({ label }: { label: LoadingKey }) {
+  const t = useAppT();
   return (
     <div>
       {/* FR-UI-11: no aria-busy, which would silence the status. */}
       <p role="status" className="visually-hidden">
-        {label}
+        {t(label)}
       </p>
       <div aria-hidden="true">
         <Skeleton.Root>
@@ -92,6 +103,7 @@ function Loading({ label }: { label: string }) {
 
 /** FR-UI-11: the first Tab stop; following it focuses the shell's single `main`. */
 function SkipLink() {
+  const t = useAppT();
   return (
     <a
       className="skip-link"
@@ -101,7 +113,7 @@ function SkipLink() {
         if (main) window.setTimeout(() => main.focus({ preventScroll: true }), 0);
       }}
     >
-      Skip to content
+      {t('shell.skip')}
     </a>
   );
 }
@@ -146,26 +158,28 @@ function ListPage() {
   const hash = useRouterState({ select: (s) => s.location.hash });
   const focusCourse = hash.startsWith('course-') ? hash.slice('course-'.length) : null;
   useFirstRun(q.data?.lessons);
+  const t = useAppT();
+  const { formatLocale } = useLocale();
   return (
     <div className="page">
-      <h1>Lessons</h1>
+      <h1>{t('list.title')}</h1>
       {q.isPending ? (
-        <Loading label="Loading the lessons" />
+        <Loading label="loading.lessons" />
       ) : q.isError ? (
         <StateBlock
           tone="danger"
           icon={<WarningIcon size={20} />}
-          title="The lessons could not be loaded."
+          title={t('list.error.title')}
           actions={
             <Button variant="outline" color="neutral" onClick={() => void q.refetch()}>
-              Retry
+              {t('list.retry')}
             </Button>
           }
         >
-          <p className="muted">Check the connection, then retry.</p>
+          <p className="muted">{t('list.error.body')}</p>
         </StateBlock>
       ) : (
-        <LessonList lessons={q.data.lessons} locale={locale()} focusCourse={focusCourse} />
+        <LessonList lessons={q.data.lessons} locale={formatLocale} focusCourse={focusCourse} />
       )}
     </div>
   );
@@ -185,7 +199,7 @@ const lessonRoute = createRoute({
       <Suspense
         fallback={
           <div className="page">
-            <Loading label="Loading the lesson" />
+            <Loading label="loading.lesson" />
           </div>
         }
       >
@@ -208,7 +222,7 @@ const importRoute = createRoute({
       <Suspense
         fallback={
           <div className="page">
-            <Loading label="Loading the import page" />
+            <Loading label="loading.import" />
           </div>
         }
       >
@@ -230,7 +244,7 @@ const signupsRoute = createRoute({
       <Suspense
         fallback={
           <div className="page">
-            <Loading label="Loading sign-ups" />
+            <Loading label="loading.signups" />
           </div>
         }
       >
@@ -250,7 +264,7 @@ const freshnessRoute = createRoute({
       <Suspense
         fallback={
           <div className="page">
-            <Loading label="Loading the freshness check" />
+            <Loading label="loading.freshness" />
           </div>
         }
       >
@@ -272,7 +286,7 @@ const observabilityRoute = createRoute({
       <Suspense
         fallback={
           <div className="page">
-            <Loading label="Loading observability" />
+            <Loading label="loading.observability" />
           </div>
         }
       >

@@ -8,6 +8,8 @@ import { type QueryClient, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, type CompileStatus, type LessonSummary } from '../api';
 import { useServices } from '../context';
+import en from '../messages.en';
+import { textLang, useT } from '../../ui/i18n';
 import { queries } from '../queries';
 import {
   COMPILE_POLL_MAX_MS,
@@ -22,7 +24,7 @@ import {
   submitAction,
 } from './model';
 
-export const DRAFT_CHIP = 'draft, compile not finished';
+export const DRAFT_CHIP = en['compile.draft_chip'];
 
 // The start of each query's polling window, per query client (FR-UI-15's 30-minute stop).
 const windows = new WeakMap<QueryClient, Map<string, number>>();
@@ -126,20 +128,21 @@ function useRunState(lesson: LessonSummary, source: Source): RunState {
 function EstimateText({ lessonId, onEmpty }: { lessonId: string; onEmpty: (empty: boolean) => void }) {
   const { api } = useServices();
   const q = useQuery(queries(api).estimate(lessonId));
-  const shown = q.data ? estimateLines(q.data) : null;
+  const t = useT('app', en);
+  const shown = q.data ? estimateLines(q.data, t) : null;
   const empty = shown?.empty ?? false;
   useEffect(() => onEmpty(empty), [empty, onEmpty]);
-  const stops = <p>Stops at ${q.data?.run_cap_usd ?? RUN_CAP_USD}.</p>;
+  const stops = <p>{t('compile.stops_at', { cap: q.data?.run_cap_usd ?? RUN_CAP_USD })}</p>;
   if (q.isPending)
     return (
       <>
-        <p className="muted">Estimating…</p>
+        <p className="muted">{t('compile.estimating')}</p>
         {stops}
       </>
     );
   return (
     <>
-      {shown ? shown.lines.map((line) => <p key={line}>{line}</p>) : <p>No estimate for this lesson.</p>}
+      {shown ? shown.lines.map((line) => <p key={line}>{line}</p>) : <p>{t('compile.no_estimate')}</p>}
       {stops}
     </>
   );
@@ -157,6 +160,7 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
   const { api, notify } = useServices();
   const client = useQueryClient();
   const state = useRunState(lesson, source);
+  const t = useT('app', en);
   const { run } = state;
   const [open, setOpen] = useState(defaultOpen);
   const [mode, setMode] = useState<'compile' | 'resume'>('compile');
@@ -172,7 +176,7 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
 
   const published = lesson.latest_sha256 !== null;
   const known = run !== undefined;
-  const described = known ? describeRun(run) : null;
+  const described = known ? describeRun(run, t) : null;
   const openRun = run ? isOpen(run.state) : false;
   const expired =
     state.active &&
@@ -218,7 +222,7 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
   if (published && !openRun) return null;
 
   const action = described ? described.action : state.failed && !published ? 'compile' : null;
-  const fallback = source === 'list' && !published && (!known || state.failed) ? 'not published yet' : null;
+  const fallback = source === 'list' && !published && (!known || state.failed) ? t('list.not_published') : null;
   const shownText = text ?? fallback;
 
   const start = (next: 'compile' | 'resume') => {
@@ -244,7 +248,7 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
       setFocusStatus(true);
       await refetchRun();
     } catch (e) {
-      const outcome = postOutcome(e instanceof ApiError ? e.code : 'unknown');
+      const outcome = postOutcome(e instanceof ApiError ? e.code : 'unknown', t);
       if (outcome.kind === 'notice') {
         setOpen(false);
         notify(outcome.code);
@@ -264,7 +268,7 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
     <span className="compile-control">
       {published && openRun && (
         <Chip.Root size="sm" variant="outline" color="neutral">
-          <Chip.Label>{DRAFT_CHIP}</Chip.Label>
+          <Chip.Label>{t('compile.draft_chip')}</Chip.Label>
         </Chip.Root>
       )}
       {shownText && (
@@ -283,12 +287,12 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
             void client.refetchQueries({ queryKey: source === 'list' ? ['compiles'] : ['compile', lesson.lesson_id] });
           }}
         >
-          Refresh
+          {t('compile.refresh')}
         </Button>
       )}
       {action && (
         <Button variant="outline" color="neutral" size="sm" onClick={() => start(action === 'retry' ? 'resume' : 'compile')}>
-          {action === 'retry' ? 'Retry' : 'Compile'}
+          {action === 'retry' ? t('compile.retry') : t('compile.compile')}
         </Button>
       )}
       <Dialog.Root
@@ -301,14 +305,12 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
         <Dialog.Portal>
           <Dialog.Backdrop />
           <Dialog.Popup>
-            <Dialog.Title>{mode === 'resume' ? `Resume the compile of lesson ${lesson.ordinal}?` : `Compile lesson ${lesson.ordinal}?`}</Dialog.Title>
-            <Dialog.Description>{lesson.title}</Dialog.Description>
+            <Dialog.Title>{t(mode === 'resume' ? 'compile.title_resume' : 'compile.title', { n: lesson.ordinal })}</Dialog.Title>
+            <Dialog.Description lang={textLang(lesson.title)}>{lesson.title}</Dialog.Description>
             {mode === 'resume' && run ? (
               <>
-                <p>
-                  Spent so far: ${money(run.spent_usd)} of ${cap}.
-                </p>
-                <p>Stops at ${cap}.</p>
+                <p>{t('compile.spent_so_far', { spent: money(run.spent_usd), cap })}</p>
+                <p>{t('compile.stops_at', { cap })}</p>
               </>
             ) : (
               <EstimateText lessonId={lesson.lesson_id} onEmpty={setEmpty} />
@@ -319,9 +321,9 @@ export function CompileControl({ lesson, source, defaultOpen = false }: CompileC
               </p>
             )}
             <div className="dialog-actions">
-              <Dialog.Close>Cancel</Dialog.Close>
+              <Dialog.Close>{t('compile.cancel')}</Dialog.Close>
               <Button disabled={busy || (mode === 'compile' && empty)} onClick={() => void submit()}>
-                {mode === 'resume' ? 'Resume' : 'Compile'}
+                {mode === 'resume' ? t('compile.resume') : t('compile.compile')}
               </Button>
             </div>
           </Dialog.Popup>

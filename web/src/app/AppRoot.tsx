@@ -6,17 +6,16 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { createSignupsApi } from '../accounts/api';
-import { createUploadApi } from '../import/api';
 import { createPlanApi } from '../import/plan/api';
-import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
 import { ownerCompileSlot } from './compile/slot';
-import { createObsApi } from './observability/api';
 import { ServicesContext, useServices, type CompileSlot, type Services } from './context';
 import { NoticeRegion, type Notice } from './notices';
 import { queries } from './queries';
 import { createAppRouter, isBadLessonPath } from './routes';
 import { ShellContext, type ShellState } from './shell';
+import { I18nProvider, useT } from '../ui/i18n';
+import en from './messages.en';
 
 export interface AppRootProps {
   /** Start at this path with an in-memory history (tests, stories); the browser history otherwise. */
@@ -34,6 +33,7 @@ const defaultNavigate = (url: string) => window.location.assign(url);
 function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: string; router: ReturnType<typeof createAppRouter> }) {
   const { api, notify, navigateAway } = useServices();
   const me = useQuery(queries(api).me());
+  const t = useT('app', en);
   const shell = useMemo<ShellState | null>(() => {
     if (!me.data) return null;
     return {
@@ -61,7 +61,7 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
         {/* FR-UI-11: a status with hidden text (no aria-busy: it would silence the status) and the library skeleton. */}
         <div className="page">
           <p role="status" className="visually-hidden">
-            Loading
+            {t('shell.loading')}
           </p>
           <div aria-hidden="true">
             <Skeleton.Root>
@@ -73,7 +73,7 @@ function Gate({ queryClient, path, router }: { queryClient: QueryClient; path: s
         </div>
       </>
     );
-  if (me.isError || !shell) return <p className="page muted">Signing in…</p>;
+  if (me.isError || !shell) return <p className="page muted">{t('shell.signing_in')}</p>;
   return (
     <ShellContext.Provider value={shell}>
       <RouterProvider router={router} />
@@ -96,12 +96,11 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
     };
     return {
       api: createApi(deps),
-      tutor: createTutorApi(deps),
       plan: createPlanApi(deps),
       signups: createSignupsApi(deps),
-      obs: createObsApi(deps), // FR-UI-18
+      // The tutor (FR-TUTOR-11), observability (FR-UI-18) and upload (FR-UI-13) clients are built by their lazy chunks
+      // from `http`, so their schemas stay out of the initial chunk (NFR-UI-1, V/manage).
       http: deps,
-      upload: createUploadApi(deps), // FR-UI-13
       notify,
       navigateAway,
       // FR-UI-6, FR-UI-15: the owner's CompileControl renders through the slot unless a caller supplies its own.
@@ -115,11 +114,13 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
     [initialPath],
   );
   return (
-    <ServicesContext.Provider value={services}>
-      <QueryClientProvider client={queryClient}>
-        <Gate queryClient={queryClient} path={path} router={router} />
-        <NoticeRegion notices={notices} onDismiss={(id) => setNotices((ns) => ns.filter((n) => n.id !== id))} />
-      </QueryClientProvider>
-    </ServicesContext.Provider>
+    <I18nProvider>
+      <ServicesContext.Provider value={services}>
+        <QueryClientProvider client={queryClient}>
+          <Gate queryClient={queryClient} path={path} router={router} />
+          <NoticeRegion notices={notices} onDismiss={(id) => setNotices((ns) => ns.filter((n) => n.id !== id))} />
+        </QueryClientProvider>
+      </ServicesContext.Provider>
+    </I18nProvider>
   );
 }

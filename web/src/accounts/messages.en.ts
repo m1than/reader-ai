@@ -1,0 +1,35 @@
+// WEB-ACCOUNTS interface copy (WEB-UI FR-UI-30): English, imported statically by this area's code. Handles and
+// display names are shown as received; no server text is shown.
+const en = {
+  'problem.reauth_required': 'Sign in again to approve or reject (required every 10 minutes for these actions).',
+  'problem.not_found': 'This request is no longer waiting.',
+  'problem.unreachable': 'Could not reach reader-ai. Try again.',
+  'problem.failed': 'Something went wrong. Try again.',
+  'done.approve': '{handle} approved.',
+  'done.reject': '{handle} rejected.',
+  'done.disable': '{handle} disabled.',
+  'confirm.reject': 'Reject {handle}? The request is deleted and the handle becomes free.',
+  'confirm.disable': 'Disable {handle}? Their sessions end and they can no longer sign in. This cannot be undone here.',
+  requested: 'Requested {when}',
+  reject: 'Reject',
+  disable: 'Disable',
+  cancel: 'Cancel',
+  approve: 'Approve',
+  'approve.label': 'Approve {handle}',
+  'reject.label': 'Reject {handle}',
+  'disable.label': 'Disable {handle}',
+  disabled: 'Disabled',
+  'sign_in_again': 'Sign in again',
+  loading: 'Loading sign-ups',
+  title: 'Sign-ups',
+  lead: 'New accounts wait here until you approve them. Approved accounts can sign in as learners.',
+  'load_failed': 'The sign-ups could not be loaded.',
+  retry: 'Retry',
+  waiting: 'Waiting for approval',
+  'waiting.none': 'No sign-ups are waiting.',
+  accounts: 'Accounts',
+  'accounts.none': 'No approved sign-up accounts.',
+  help: 'A sign-up account that loses its passkey cannot recover it. Disable it; the person can sign up again with another handle.',
+} as const;
+
+export default en;

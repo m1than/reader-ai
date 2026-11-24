@@ -2,9 +2,10 @@
 // trigger's first activation (review B1); from then on this component renders the trigger itself.
 import { Menu } from '@acme/ui/menu';
 import { useState } from 'react';
+import { textLang, useT } from '../ui/i18n';
+import uiEn from '../ui/messages.en';
 import { THEMES, setTheme, storedTheme, type Theme } from '../ui/theme';
-
-const LABEL: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+import en from './messages.en';
 
 export function UserMenu({
   displayName,
@@ -16,6 +17,8 @@ export function UserMenu({
   onSignOut: () => void;
 }) {
   const [theme, setChoice] = useState<Theme>(() => storedTheme());
+  const t = useT('app', en);
+  const tu = useT('ui', uiEn);
   return (
     <Menu.Root defaultOpen={defaultOpen}>
       <Menu.Trigger
@@ -23,9 +26,11 @@ export function UserMenu({
         data-variant="ghost"
         data-color="neutral"
         data-size="sm"
-        aria-label={`Account menu for ${displayName}`}
+        aria-label={t('header.account_menu', { name: displayName })}
       >
-        <span className="who">{displayName}</span>
+        <span className="who" lang={textLang(displayName)}>
+          {displayName}
+        </span>
       </Menu.Trigger>
       <Menu.Portal>
         <Menu.Positioner align="end">
@@ -38,16 +43,16 @@ export function UserMenu({
                 setTheme(next);
               }}
             >
-              <Menu.GroupLabel>Theme</Menu.GroupLabel>
-              {THEMES.map((t) => (
-                <Menu.RadioItem key={t} value={t}>
+              <Menu.GroupLabel>{tu('theme.label')}</Menu.GroupLabel>
+              {THEMES.map((th) => (
+                <Menu.RadioItem key={th} value={th}>
                   <Menu.RadioItemIndicator className="menu-check" aria-hidden="true" />
-                  {LABEL[t]}
+                  {tu(`theme.${th}`)}
                 </Menu.RadioItem>
               ))}
             </Menu.RadioGroup>
             <Menu.Separator />
-            <Menu.Item onClick={onSignOut}>Sign out</Menu.Item>
+            <Menu.Item onClick={onSignOut}>{t('menu.sign_out')}</Menu.Item>
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

@@ -3,15 +3,18 @@
 // (FR-UI-11), which the header then hides.
 import { Drawer } from '@acme/ui/drawer';
 import type { ReactNode } from 'react';
+import { useT } from '../ui/i18n';
 import { CourseSidebar } from './CourseSidebar';
+import en from './messages.en';
 
 export function CourseDrawer({ open, onClose, current, nav }: { open: boolean; onClose: () => void; current: string | null; nav?: ReactNode }) {
+  const t = useT('app', en);
   return (
     <Drawer.Root open={open} onOpenChange={(o) => (o ? undefined : onClose())} side="inline-start" variant="temporary">
       <Drawer.Portal>
         <Drawer.Backdrop />
         <Drawer.Popup className="course-drawer" id="course-drawer">
-          <Drawer.Title className="visually-hidden">Courses</Drawer.Title>
+          <Drawer.Title className="visually-hidden">{t('header.courses')}</Drawer.Title>
           {nav}
           <CourseSidebar current={current} prefix="drawer" onNavigate={onClose} />
         </Drawer.Popup>

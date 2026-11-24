@@ -20,7 +20,8 @@ export default defineConfig({
   // WEB-UI FR-UI-15: the test server's compile stub keeps global state, so one worker.
   workers: 1,
   reporter: 'list',
-  use: { baseURL: 'http://127.0.0.1:4173' },
+  // WEB-UI FR-UI-30: tests pin English (a browser language of ru would otherwise pick the Russian interface).
+  use: { baseURL: 'http://127.0.0.1:4173', locale: 'en-US' },
   projects: [
     {
       name: 'chromium',

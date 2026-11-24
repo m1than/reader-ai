@@ -31,6 +31,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.{ts,tsx}'],
+    // WEB-UI FR-UI-30: tests pin English (the setup clears the stored interface language).
+    setupFiles: ['src/ui/test-setup.ts'],
     testTimeout: 20_000,
   },
 });

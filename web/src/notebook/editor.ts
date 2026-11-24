@@ -13,6 +13,8 @@ export interface EditorOptions {
   doc: string;
   /** The content element's accessible name ("Lab <n> code"). */
   label: string;
+  /** The hidden hint on leaving the editor, in the interface language (WEB-UI FR-UI-30); ESCAPE_HINT by default. */
+  hint?: string;
   onChange: (text: string) => void;
   onRun: (text: string) => void;
 }
@@ -91,7 +93,7 @@ const insertThroughState = EditorView.domEventHandlers({
 
 let seq = 0;
 
-export const mountEditor = (host: HTMLElement, { doc, label, onChange, onRun }: EditorOptions): EditorHandle => {
+export const mountEditor = (host: HTMLElement, { doc, label, hint: hintText = ESCAPE_HINT, onChange, onRun }: EditorOptions): EditorHandle => {
   const root = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   seq += 1;
   const hintId = `cm-hint-${seq}`;
@@ -99,7 +101,7 @@ export const mountEditor = (host: HTMLElement, { doc, label, onChange, onRun }: 
   const hint = document.createElement('span');
   hint.id = hintId;
   hint.className = 'cm-hint';
-  hint.textContent = ESCAPE_HINT;
+  hint.textContent = hintText;
   Object.assign(hint.style, { position: 'absolute', width: '1px', height: '1px', overflow: 'hidden', clipPath: 'inset(50%)', whiteSpace: 'nowrap' });
   root.append(hint);
   const parent = document.createElement('div');

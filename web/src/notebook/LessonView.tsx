@@ -20,7 +20,9 @@ import {
 import { Code } from '../render/code';
 import { Markdown } from '../render/markdown';
 import { Output, type NbOutput } from '../render/outputs';
+import { textLang, useT } from '../ui/i18n';
 import { AskIcon, CopyIcon, MoreIcon, PlayIcon, WarningIcon } from '../ui/icons';
+import en from './messages.en';
 import { collectCitations, lessonTitles, type Reference, type Titles } from './citations';
 import { cellLabels, contentsEntries, isUnansweredOpen, type ContentsCell } from './contents';
 import type { EditorHandle, EditorOptions } from './editor';
@@ -53,26 +55,9 @@ export interface PanelState {
   close: () => void;
 }
 
-/** Quiet labels (FR-NOTEBOOK-1): explanations, open questions, labs and recall cards are named otherwise. */
-export const KIND_LABEL: Record<string, string> = {
-  diagnostic: 'diagnostic',
-  route: 'reading route',
-  changed: 'what changed',
-  erratum: 'erratum',
-  tradeoff: 'trade-off',
-  notes: 'notes',
-};
-
-const STATE_LABEL: Record<string, string> = {
-  queued: 'queued',
-  running: 'running',
-  done: 'done',
-  error: 'error',
-  interrupted: 'interrupted',
-  timed_out: 'timed out',
-  not_run: 'not run',
-  lost: 'lost (kernel restarted)',
-};
+/** Quiet labels (FR-NOTEBOOK-1): explanations, open questions, labs and recall cards are named otherwise; the
+ * labels and the run states are `enum.kind.*` and `enum.state.*` in this area's catalogues (WEB-UI FR-UI-30). */
+const QUIET_KINDS = new Set(['diagnostic', 'route', 'changed', 'erratum', 'tradeoff', 'notes']);
 
 const COPIED_MS = 2000; // structural: long enough to read "Copied"
 
@@ -131,14 +116,15 @@ const useCopy = () => {
 };
 
 function Sources({ refs }: { refs: Reference[] }) {
+  const t = useT('notebook', en);
   if (refs.length === 0) return null;
   return (
     <div className="sources">
       <p className="sources-label" aria-hidden="true">
-        Sources
+        {t('sources.label')}
       </p>
       {/* list-style none drops the list role in WebKit; role="list" restores it (FR-NOTEBOOK-2). */}
-      <ol className="references" aria-label="Sources" role="list">
+      <ol className="references" aria-label={t('sources.label')} role="list">
         {refs.map((r, i) => (
           <li key={i}>
             {r.kind === 'link' ? (
@@ -148,7 +134,7 @@ function Sources({ refs }: { refs: Reference[] }) {
             ) : (
               <span>{r.text}</span>
             )}
-            {r.retrieved ? <span className="muted"> (retrieved {r.retrieved})</span> : null}
+            {r.retrieved ? <span className="muted">{t('sources.retrieved', { date: r.retrieved })}</span> : null}
           </li>
         ))}
       </ol>
@@ -164,10 +150,13 @@ interface LabProps {
   controller: KernelController;
   resetting: boolean;
   loadEditor: EditorLoader;
+  /** The lesson's language, set on the output area (WEB-UI FR-UI-32). */
+  contentLang: string;
 }
 
 /** FR-NOTEBOOK-9: the lab block — header with the actions, the editor (or its fallback text area), the outputs. */
-function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: LabProps) {
+function LabBlock({ cell, id, label, run, controller, resetting, loadEditor, contentLang }: LabProps) {
+  const t = useT('notebook', en);
   const original = text(cell.source);
   const [code, setCode] = useState(original);
   const [editorModule, setEditorModule] = useState<EditorModule | null>(null);
@@ -178,7 +167,8 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
   const latest = useRef({ resetting, run: (src: string) => controller.run(id, src) });
   latest.current = { resetting, run: (src: string) => controller.run(id, src) };
   const { state: copyState, copy } = useCopy();
-  const codeLabel = `${label} code`;
+  const codeLabel = t('lab.code', { label });
+  const hint = t('editor.hint');
 
   useEffect(() => {
     let live = true;
@@ -201,9 +191,10 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
     const h = editorModule.mountEditor(host.current, {
       doc: code,
       label: codeLabel,
-      onChange: (t) => setCode(t),
-      onRun: (t) => {
-        if (!latest.current.resetting) latest.current.run(t);
+      hint,
+      onChange: (s) => setCode(s),
+      onRun: (s) => {
+        if (!latest.current.resetting) latest.current.run(s);
       },
     });
     handle.current = h;
@@ -219,8 +210,8 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
     if (e.key === 'Tab') {
       e.preventDefault();
       const el = e.currentTarget;
-      const { selectionStart: s, selectionEnd: t } = el;
-      const next = `${code.slice(0, s)}    ${code.slice(t)}`;
+      const { selectionStart: s, selectionEnd: end } = el;
+      const next = `${code.slice(0, s)}    ${code.slice(end)}`;
       setCode(next);
       el.value = next;
       el.setSelectionRange(s + 4, s + 4);
@@ -243,25 +234,25 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
         <span className="lab-title">{`Python · ${label}`}</span>
         <span className="muted exec-count">{count !== null ? `[${count}]` : ''}</span>
         <span role="status" className="muted run-state">
-          {run && run.state !== 'idle' ? STATE_LABEL[run.state] : ''}
+          {run && run.state !== 'idle' ? t.enum('state', run.state) : ''}
         </span>
-        {run?.marker === 'timed_out' && run.state === 'running' && <span className="muted">timed out, interrupting…</span>}
+        {run?.marker === 'timed_out' && run.state === 'running' && <span className="muted">{t('lab.timed_out')}</span>}
         <span className="lab-actions">
           <Button size="sm" variant="ghost" color="neutral" onClick={() => void copy(code)}>
             <CopyIcon />
-            {copyState === 'copied' ? 'Copied' : 'Copy'}
+            {copyState === 'copied' ? t('lab.copied') : t('lab.copy')}
           </Button>
           <Button size="sm" variant="ghost" color="neutral" disabled={code === original} onClick={revert}>
-            Revert
+            {t('lab.revert')}
           </Button>
           {running && (
             <Button size="sm" variant="outline" color="neutral" onClick={() => controller.interrupt()}>
-              Interrupt
+              {t('lab.interrupt')}
             </Button>
           )}
-          <Button size="sm" disabled={resetting} title="Run (Shift+Enter)" onClick={() => controller.run(id, code)}>
+          <Button size="sm" disabled={resetting} title={t('lab.run_title')} onClick={() => controller.run(id, code)}>
             <PlayIcon />
-            Run
+            {t('lab.run')}
           </Button>
         </span>
       </div>
@@ -280,15 +271,20 @@ function LabBlock({ cell, id, label, run, controller, resetting, loadEditor }: L
         />
       )}
       {(outputs.length > 0 || truncated) && (
-        <div className="outputs">
+        // WEB-UI FR-UI-32: the output area carries the lesson's language; its cut note is chrome.
+        <div className="outputs" lang={contentLang}>
           {outputs.map((o, i) => (
             <Output key={i} output={o} />
           ))}
-          {truncated && <p className="muted">Output was cut at the size limit.</p>}
+          {truncated && (
+            <p className="muted" lang={t.lang}>
+              {t('lab.cut')}
+            </p>
+          )}
         </div>
       )}
       <span role="status" className="visually-hidden">
-        {copyState === 'copied' ? 'Code copied' : copyState === 'failed' ? 'Copy failed' : ''}
+        {copyState === 'copied' ? t('lab.code_copied') : copyState === 'failed' ? t('copy.failed') : ''}
       </span>
     </div>
   );
@@ -301,11 +297,11 @@ const questionText = (q: unknown): string | null => {
 };
 
 /** FR-NOTEBOOK-10: diagnostic questions as a list, unless the source already holds every one. */
-function Questions({ r, source }: { r: Record<string, unknown>; source: string }) {
+function Questions({ r, source, lang }: { r: Record<string, unknown>; source: string; lang: string }) {
   const qs = (Array.isArray(r.questions) ? r.questions : []).map(questionText).filter((q): q is string => !!q);
   if (qs.length === 0 || qs.every((q) => source.includes(q))) return null;
   return (
-    <ol className="questions">
+    <ol className="questions" lang={lang}>
       {qs.map((q, i) => (
         <li key={i}>{q}</li>
       ))}
@@ -315,23 +311,24 @@ function Questions({ r, source }: { r: Record<string, unknown>; source: string }
 
 /** FR-NOTEBOOK-11: Copy (markdown cells) and Ask, in the tab order only while focus is inside the cell. */
 function CellToolbar({ source, markdown, active, onAsk }: { source: string; markdown: boolean; active: boolean; onAsk?: (e: MouseEvent<HTMLButtonElement>) => void }) {
+  const t = useT('notebook', en);
   const { state, copy } = useCopy();
   if (!markdown && !onAsk) return null;
   const tab = active ? 0 : -1;
   return (
     <div className="cell-toolbar">
       {markdown ? (
-        <Button size="sm" variant="ghost" color="neutral" tabIndex={tab} aria-label="Copy cell text" onClick={() => void copy(source)}>
+        <Button size="sm" variant="ghost" color="neutral" tabIndex={tab} aria-label={t('cell.copy')} onClick={() => void copy(source)}>
           <CopyIcon />
         </Button>
       ) : null}
       {onAsk ? (
-        <Button size="sm" variant="ghost" color="neutral" tabIndex={tab} aria-label="Ask the tutor about this cell" onClick={onAsk}>
+        <Button size="sm" variant="ghost" color="neutral" tabIndex={tab} aria-label={t('cell.ask')} onClick={onAsk}>
           <AskIcon />
         </Button>
       ) : null}
       <span role="status" className="visually-hidden">
-        {state === 'copied' ? 'Cell text copied' : state === 'failed' ? 'Copy failed' : ''}
+        {state === 'copied' ? t('cell.copied') : state === 'failed' ? t('copy.failed') : ''}
       </span>
     </div>
   );
@@ -350,21 +347,35 @@ interface CellProps {
   onAsk?: ((id: string, e: MouseEvent<HTMLButtonElement>) => void) | undefined;
   className?: string;
   children?: ReactNode;
+  /** The lesson's language for the cell's content nodes (WEB-UI FR-UI-32). */
+  contentLang: string;
 }
 
-function CellView({ cell, id, label, titles, run, controller, resetting, loadEditor, active, onAsk, className, children }: CellProps) {
+function CellView({ cell, id, label, titles, run, controller, resetting, loadEditor, active, onAsk, className, children, contentLang }: CellProps) {
+  const t = useT('notebook', en);
   const r = reader(cell);
   const kind = kindOf(cell);
   const source = text(cell.source);
-  const kindLabel = kind ? KIND_LABEL[kind] : undefined;
-  const refs = kind && ['explain', 'changed', 'erratum', 'route'].includes(kind) ? collectCitations(r, titles) : [];
+  const kindLabel = kind && QUIET_KINDS.has(kind) ? t.enum('kind', kind) : undefined;
+  const refs = kind && ['explain', 'changed', 'erratum', 'route'].includes(kind) ? collectCitations(r, titles, t) : [];
   const finding = r.finding && typeof r.finding === 'object' ? (r.finding as Record<string, unknown>) : {};
   const status = typeof r.status === 'string' ? r.status : 'open';
   const unanswered = kind === 'open' && r.status !== 'answered';
   const ask = onAsk ? (e: MouseEvent<HTMLButtonElement>) => onAsk(id, e) : undefined;
   let body: ReactNode;
   if (kind === 'lab') {
-    body = <LabBlock cell={cell} id={id} label={label ?? 'Lab'} run={run} controller={controller} resetting={resetting} loadEditor={loadEditor} />;
+    body = (
+      <LabBlock
+        cell={cell}
+        id={id}
+        label={label ?? t('lab.default')}
+        run={run}
+        controller={controller}
+        resetting={resetting}
+        loadEditor={loadEditor}
+        contentLang={contentLang}
+      />
+    );
   } else if (cell.cell_type === 'code') {
     body = <Code code={source} language="python" />;
   } else if (kind === 'open') {
@@ -372,26 +383,30 @@ function CellView({ cell, id, label, titles, run, controller, resetting, loadEdi
       <div className="callout" data-tone="warning">
         <p className="callout-title">
           <WarningIcon />
-          <span>Open question</span>
-          {unanswered ? <span className="chip" data-tone="warning">{sentenceCase(status)}</span> : null}
+          <span>{t('open.title')}</span>
+          {unanswered ? (
+            <span className="chip" data-tone="warning">
+              {t.maybe(`enum.status.${status}`, undefined, sentenceCase(status))}
+            </span>
+          ) : null}
         </p>
         {unanswered && finding.gate === 'G2' ? (
           <p className="muted callout-note">
-            <span>Not yet confirmed by the source:</span> <span>{String(finding.reason ?? '')}</span>
+            <span>{t('open.unconfirmed')}</span> <span lang={contentLang}>{String(finding.reason ?? '')}</span>
           </p>
         ) : null}
-        <Markdown source={source} />
+        <Markdown source={source} lang={contentLang} />
       </div>
     );
   } else if (kind === 'recall') {
     body = children;
   } else if (kind === 'notes' && !nonEmpty(source)) {
-    body = <p className="muted">Notes are not saved in this version.</p>;
+    body = <p className="muted">{t('notes.unsaved')}</p>;
   } else {
     body = (
       <>
-        <Markdown source={source} />
-        {kind === 'diagnostic' && <Questions r={r} source={source} />}
+        <Markdown source={source} lang={contentLang} />
+        {kind === 'diagnostic' && <Questions r={r} source={source} lang={contentLang} />}
       </>
     );
   }
@@ -402,7 +417,7 @@ function CellView({ cell, id, label, titles, run, controller, resetting, loadEdi
       {body}
       {kind === 'erratum' && typeof r.correction === 'string' && (
         <p className="correction">
-          Correction: <span>{r.correction}</span>
+          {t('erratum.correction')} <span lang={contentLang}>{r.correction}</span>
         </p>
       )}
       <Sources refs={refs} />
@@ -411,7 +426,16 @@ function CellView({ cell, id, label, titles, run, controller, resetting, loadEdi
 }
 
 /** FR-NOTEBOOK-10: a run of adjacent recall cells as one deck with a show/hide-all toggle. */
-function RecallDeck({ cells, render }: { cells: Array<{ cell: NbCell; id: string }>; render: (c: { cell: NbCell; id: string }, card: ReactNode) => ReactNode }) {
+function RecallDeck({
+  cells,
+  render,
+  contentLang,
+}: {
+  cells: Array<{ cell: NbCell; id: string }>;
+  render: (c: { cell: NbCell; id: string }, card: ReactNode) => ReactNode;
+  contentLang: string;
+}) {
+  const t = useT('notebook', en);
   const withBack = cells.filter(({ cell }) => nonEmpty(reader(cell).back)).map(({ id }) => id);
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const allOpen = withBack.length > 0 && withBack.every((id) => open.has(id));
@@ -419,10 +443,10 @@ function RecallDeck({ cells, render }: { cells: Array<{ cell: NbCell; id: string
   return (
     <section className="recall-deck" aria-labelledby={headingId}>
       <div className="recall-deck-header">
-        <h2 id={headingId}>{`Recall cards (${cells.length})`}</h2>
+        <h2 id={headingId}>{t('recall.heading', { count: cells.length })}</h2>
         {withBack.length > 0 ? (
           <Button size="sm" variant="ghost" color="neutral" onClick={() => setOpen(allOpen ? new Set() : new Set(withBack))}>
-            {allOpen ? 'Hide all answers' : 'Show all answers'}
+            {allOpen ? t('recall.hide_all') : t('recall.show_all')}
           </Button>
         ) : null}
       </div>
@@ -432,7 +456,13 @@ function RecallDeck({ cells, render }: { cells: Array<{ cell: NbCell; id: string
           const source = text(c.cell.source);
           const card = (
             <>
-              {nonEmpty(source) ? <Markdown source={source} /> : nonEmpty(r.front) ? <p className="recall-front">{r.front}</p> : null}
+              {nonEmpty(source) ? (
+                <Markdown source={source} lang={contentLang} />
+              ) : nonEmpty(r.front) ? (
+                <p className="recall-front" lang={contentLang}>
+                  {r.front}
+                </p>
+              ) : null}
               {nonEmpty(r.back) && (
                 <details
                   className="recall-back"
@@ -448,8 +478,8 @@ function RecallDeck({ cells, render }: { cells: Array<{ cell: NbCell; id: string
                     });
                   }}
                 >
-                  <summary>Show answer</summary>
-                  <p>{r.back}</p>
+                  <summary>{t('recall.show')}</summary>
+                  <p lang={contentLang}>{r.back}</p>
                 </details>
               )}
             </>
@@ -517,6 +547,7 @@ export function LessonView({
   /** The CodeMirror chunk loader (FR-NOTEBOOK-9); tests and stories hold, fail or stub it. */
   loadEditor?: EditorLoader;
 }) {
+  const t = useT('notebook', en);
   const state = useSyncExternalStore(controller.subscribe, controller.getState, controller.getState);
   const [confirm, setConfirm] = useState(false);
   const [shortcuts, setShortcuts] = useState(false);
@@ -539,11 +570,16 @@ export function LessonView({
       }),
     [notebook],
   );
-  const labels = useMemo(() => cellLabels(contentsCells), [contentsCells]);
+  const labels = useMemo(() => cellLabels(contentsCells, t), [contentsCells, t]);
   const titles = useMemo(() => lessonTitles(notebook.cells), [notebook]);
   const lang = useMemo(() => lessonLang(notebook), [notebook]);
   const blocks = useMemo(() => blocksOf(notebook.cells), [notebook]);
-  const entries = contentsEntries(contentsCells, labels, aside !== undefined);
+  const entries = contentsEntries(contentsCells, labels, aside !== undefined, t);
+  // WEB-UI FR-UI-32: an entry named by a cell's heading is lesson text; the others (labs, decks, tutor) are chrome.
+  const headingEntry = (href: string, label: string): boolean => {
+    const c = contentsCells.find((x) => `#cell-${x.id}` === href);
+    return c !== undefined && c.kind !== 'lab' && labels.get(c.id) === label;
+  };
   const current = useCurrentSection(entries.filter((e) => e.href !== '#tutor').map((e) => e.href));
   const currentIndex = entries.findIndex((e) => e.href === current);
   const labs = notebook.cells.map((c, i) => ({ c, id: cellId(c, i) })).filter(({ c }) => kindOf(c) === 'lab');
@@ -616,25 +652,28 @@ export function LessonView({
       loadEditor={loadEditor}
       active={focused === id}
       onAsk={aside ? askAbout : undefined}
+      contentLang={lang}
       {...extra}
     />
   );
 
+  // WEB-UI FR-UI-32: the container holds chrome too, so it carries no lang; the lesson's language sits on the title,
+  // the markdown blocks and the output areas, and the toolbar, menus and labels inherit the interface language.
   return (
-    <div className="lesson" lang={lang} ref={root}>
+    <div className="lesson" ref={root}>
       <header className="lesson-header">
         {crumbs}
-        {typeof title === 'string' && <h1>{title}</h1>}
+        {typeof title === 'string' && <h1 lang={lang}>{title}</h1>}
         <div className="lesson-toolbar">
           {open.length > 0 && (
             <a className="chip findings-link" data-tone="warning" href={`#cell-${open[0]!.id}`} onClick={focusHashTarget}>
-              {open.length} open finding{open.length === 1 ? '' : 's'}
+              {t('toolbar.findings', { count: open.length })}
             </a>
           )}
           {aside && (
             <Button ref={askButton} size="sm" variant="ghost" color="neutral" onClick={(e) => openTutor(e.currentTarget)}>
               <AskIcon />
-              Ask the tutor
+              {t('toolbar.ask')}
             </Button>
           )}
           {entries.length > 0 && (
@@ -647,7 +686,7 @@ export function LessonView({
                 aria-controls={navId}
                 onClick={() => setContentsOpen((o) => !o)}
               >
-                Contents
+                {t('contents.toggle')}
               </Button>
             </span>
           )}
@@ -661,30 +700,36 @@ export function LessonView({
                 onClick={() => controller.runAll(labs.map(({ c, id }) => ({ id, code: text(c.source) })))}
               >
                 <PlayIcon />
-                Run all
+                {t('toolbar.run_all')}
               </Button>
             )}
             {(state.connection === 'disconnected' || state.connection === 'unavailable') && (
               <Button size="sm" variant="outline" color="neutral" onClick={() => controller.retry()}>
-                Retry
+                {t('toolbar.retry')}
               </Button>
             )}
             {state.resetFailed && !state.resetting && (
               <Button size="sm" variant="outline" color="danger" onClick={() => controller.reset()}>
-                Retry reset
+                {t('toolbar.retry_reset')}
               </Button>
             )}
             <Menu.Root>
-              <Menu.Trigger className="acme-button icon-button" data-variant="ghost" data-color="neutral" data-size="sm" aria-label="More lesson actions">
+              <Menu.Trigger
+                className="acme-button icon-button"
+                data-variant="ghost"
+                data-color="neutral"
+                data-size="sm"
+                aria-label={t('toolbar.more')}
+              >
                 <MoreIcon />
               </Menu.Trigger>
               <Menu.Portal>
                 <Menu.Positioner align="end">
                   <Menu.Popup className="app-menu">
                     <Menu.Item className="menu-danger" disabled={state.resetting} onClick={() => setConfirm(true)}>
-                      Reset kernel…
+                      {t('menu.reset')}
                     </Menu.Item>
-                    <Menu.Item onClick={() => setShortcuts(true)}>Keyboard shortcuts</Menu.Item>
+                    <Menu.Item onClick={() => setShortcuts(true)}>{t('menu.shortcuts')}</Menu.Item>
                   </Menu.Popup>
                 </Menu.Positioner>
               </Menu.Portal>
@@ -693,9 +738,9 @@ export function LessonView({
         </div>
       </header>
       {entries.length > 0 && (
-        <nav id={navId} className="lesson-contents" aria-label="Lesson contents" data-open={contentsOpen}>
+        <nav id={navId} className="lesson-contents" aria-label={t('contents.label')} data-open={contentsOpen}>
           <p className="contents-label" aria-hidden="true">
-            Contents
+            {t('contents.toggle')}
           </p>
           <ol role="list">
             {entries.map((e, i) => (
@@ -711,7 +756,7 @@ export function LessonView({
                     } else focusHashTarget(ev);
                   }}
                 >
-                  {e.label}
+                  {headingEntry(e.href, e.label) ? <span lang={textLang(e.label)}>{e.label}</span> : e.label}
                 </a>
               </li>
             ))}
@@ -724,6 +769,7 @@ export function LessonView({
             <RecallDeck
               key={`deck-${b.cells[0]!.id}`}
               cells={b.cells}
+              contentLang={lang}
               render={({ cell, id }, card) => renderCell(cell, id, { className: 'cell recall-card', children: card })}
             />
           ) : (
@@ -740,10 +786,10 @@ export function LessonView({
         <Dialog.Portal>
           <Dialog.Backdrop />
           <Dialog.Popup>
-            <Dialog.Title>Reset the kernel?</Dialog.Title>
-            <Dialog.Description>This clears the Python state of every open lesson, not only this one.</Dialog.Description>
+            <Dialog.Title>{t('reset.title')}</Dialog.Title>
+            <Dialog.Description>{t('reset.body')}</Dialog.Description>
             <div className="dialog-actions">
-              <Dialog.Close>Cancel</Dialog.Close>
+              <Dialog.Close>{t('reset.cancel')}</Dialog.Close>
               <Button
                 color="danger"
                 onClick={() => {
@@ -751,7 +797,7 @@ export function LessonView({
                   controller.reset();
                 }}
               >
-                Reset
+                {t('reset.confirm')}
               </Button>
             </div>
           </Dialog.Popup>
@@ -761,35 +807,35 @@ export function LessonView({
         <Dialog.Portal>
           <Dialog.Backdrop />
           <Dialog.Popup>
-            <Dialog.Title>Keyboard shortcuts</Dialog.Title>
+            <Dialog.Title>{t('shortcuts.title')}</Dialog.Title>
             <dl className="shortcuts">
               <dt>
                 <kbd>j</kbd> / <kbd>k</kbd>
               </dt>
-              <dd>Next or previous cell</dd>
+              <dd>{t('shortcuts.move')}</dd>
               <dt>
                 <kbd>/</kbd>
               </dt>
-              <dd>Ask the tutor</dd>
+              <dd>{t('shortcuts.ask')}</dd>
               <dt>
                 <kbd>?</kbd>
               </dt>
-              <dd>This list</dd>
+              <dd>{t('shortcuts.list')}</dd>
               <dt>
                 <kbd>Shift+Enter</kbd>
               </dt>
-              <dd>Run a lab</dd>
+              <dd>{t('shortcuts.run')}</dd>
               <dt>
-                <kbd>Ctrl+Enter</kbd> or <kbd>⌘+Enter</kbd>
+                <kbd>Ctrl+Enter</kbd> {t('shortcuts.or')} <kbd>⌘+Enter</kbd>
               </dt>
-              <dd>Ask the tutor your question</dd>
+              <dd>{t('shortcuts.send')}</dd>
               <dt>
                 <kbd>Escape</kbd>
               </dt>
-              <dd>Close a panel or dialog</dd>
+              <dd>{t('shortcuts.close_panel')}</dd>
             </dl>
             <div className="dialog-actions">
-              <Dialog.Close>Close</Dialog.Close>
+              <Dialog.Close>{t('shortcuts.close')}</Dialog.Close>
             </div>
           </Dialog.Popup>
         </Dialog.Portal>

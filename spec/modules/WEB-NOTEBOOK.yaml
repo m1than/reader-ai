@@ -81,7 +81,11 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   (coordinator, 2026-11-23). Live fixes (2026-11-24, V/live-ui-fixes, from the live check at 647cfeb): FR-NOTEBOOK-9
   plain text insertions go through a CodeMirror transaction (Chromium wrote a style attribute when replacing a
   selection, 7 style-src-attr reports per learner session); FR-NOTEBOOK-11's [live] current-section count is read
-  with the contents reopened at 390 px (the marker was set; a hidden nav has no role) and skips the #tutor entry"
+  with the contents reopened at 390 px (the marker was set; a hidden nav has no role) and skips the #tutor entry.
+  Paired with WEB-UI FR-UI-32 (2026-11-24, V/manage-impl-web): web/src/notebook/design.test.tsx's 'puts lang on the
+  lesson container' test now asserts FR-UI-32's placement — `div.lesson` carries no lang, the title h1 and every
+  [data-markdown] block carry the Cyrillic rule's `ru`, and the cell stays inside the container; the Cyrillic rule's
+  own oracle is unchanged"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]

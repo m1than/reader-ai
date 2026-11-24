@@ -85,7 +85,9 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   items, applied in 5677fb3. Round 4 (5677fb3): VERDICT approve; its three nits applied at approval (view (c)'s
   key_rows_of for failed questions, one kind per stage in view (a), 'more rows may exist'). The owner accepted ADR-0018 and
   ADR-0032 on 2026-11-24 (973cd62). Approved by agent with Red on V/obs-impl (2026-11-24); the paired items live in
-  their own specs."
+  their own specs. Paired with WEB-UI FR-UI-30 (2026-11-24, V/manage-impl-web): e2e/live/lib/obs_browser.mjs's
+  browser context passes `locale: 'en-US'`, so the live check reads the English interface whatever the host's
+  language; no requirement changed."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
