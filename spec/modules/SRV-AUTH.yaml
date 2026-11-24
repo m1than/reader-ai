@@ -864,7 +864,9 @@ requirements:
       [unit, db] server/tests/auth/test_obs_wiring.py (the serving_logs test restores the process's logging state).
       The pinned lists follow: FR-AUTH-10's ROUTERS test gains `reader.obs.routes`, the public-route set gains
       `GET /api/obs/gate`, FR-AUTH-2's readiness test removes the jobs branch's head (`jobs_0002`), and the edge CSP test
-      pins the app site's CSP plus the dashboard site's (SRV-OBS FR-OBS-9).
+      pins the app site's CSP plus the dashboard site's (SRV-OBS FR-OBS-9). VERSION_LOCATIONS gains
+      `obs/migrations` (SRV-OBS's `obs` branch, table `obs_tracing`, FR-OBS-10), after `plan/migrations` and before
+      procrastinate's; FR-AUTH-1's declared-list test follows.
 
 invariants:
   - id: INV-AUTH-1

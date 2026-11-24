@@ -86,18 +86,43 @@ def test_doctor_gate_check(
     from reader.cli import maintenance
 
     calls: list[str] = []
+    seen_roots: list[bytes] = []
 
     def fake(url: str, roots: Any) -> int | None:
         calls.append(url)
-        assert list(roots) == []  # no `reader trust` record in this world
+        seen_roots.extend(Path(r).read_bytes() for r in roots)
         return status
 
     monkeypatch.setattr(maintenance, "gate_status", fake)
     world = _world(tmp_path, monkeypatch, agents_in_model=False)
+    world.runner.on("exec", "-T", "caddy", "cat", result=ROOT_PEM)  # no `reader trust` record in this world
     maintenance.cmd_doctor(world.ctx, _cfg(tmp_path, True), True)
     checks = {c["name"]: c for c in json.loads(world.out.strip().splitlines()[-1])}
     assert calls == ["https://localhost:8443/"]
+    assert seen_roots == [ROOT_PEM]  # Caddy's current public root, read the way `reader trust` reads it
     assert (checks["observability"]["ok"], checks["observability"]["detail"]) == (ok, detail)
+    saved = world.ctx.run_dir / "doctor-root.pem"
+    assert saved.stat().st_mode & 0o777 == 0o600
+    assert not world.runner.argvs("security", "add-trusted-cert")  # the doctor never adds trust
+
+
+def test_doctor_without_any_caddy_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import json
+
+    from reader.cli import maintenance
+
+    monkeypatch.setattr(maintenance, "gate_status", lambda url, roots: pytest.fail("no request: no root"))
+    world = _world(tmp_path, monkeypatch, agents_in_model=False)
+    world.runner.on("exec", "-T", "caddy", "cat", result=(1, b"", b"no such service"))
+    maintenance.cmd_doctor(world.ctx, _cfg(tmp_path, True), True)
+    checks = {c["name"]: c for c in json.loads(world.out.strip().splitlines()[-1])}
+    assert (checks["observability"]["ok"], checks["observability"]["detail"]) == (
+        False,
+        "unreachable: no Caddy root (stack down?)",
+    )
+
+
+ROOT_PEM = b"-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----\n"
 
 
 def test_doctor_gate_check_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

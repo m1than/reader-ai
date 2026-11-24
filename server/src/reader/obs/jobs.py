@@ -105,7 +105,26 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
         )
 
 
+RECORD_START_SQL: Final = "INSERT INTO obs_tracing (started_at, enabled) VALUES (clock_timestamp(), :enabled)"
+
+
+async def record_start(engine: Any, enabled: bool) -> None:
+    """FR-OBS-10: one `obs_tracing` row per worker start. A failure only hides links (never a false one)."""
+    from sqlalchemy import text
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(text(RECORD_START_SQL), {"enabled": enabled})
+    except Exception:
+        logging.getLogger("reader.obs").warning("obs tracing start not recorded")
+
+
 async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
+    from reader.obs import setup as obs_setup
+
+    engine = getattr(jobs, "engine", None)
+    if engine is not None:
+        await record_start(engine, obs_setup.current_settings().enabled)
     today = (now or datetime.now(UTC)).date().isoformat()
     await jobs.enqueue(KIND, {"day": today})
 

@@ -571,7 +571,8 @@ requirements:
       seconds, model); tutor count, p50 and p95 in ms, cost sum and mean per settled call, the slowest answers;
       failures by kind and code (a `system` row marked "system"); imports with pages and pages per minute. Every
       trace id renders as a link to `https://localhost:8443/#/experiments/0/traces?selectedEvaluationId=tr-<id>`
-      (text "Trace", `rel="noopener noreferrer"`); a section whose data carries `truncated: true` shows "More rows
+      (text "Trace", `rel="noopener noreferrer"`); a null trace id (no trace can exist: SRV-OBS FR-OBS-10) shows
+      the text "no trace" and no link; a section whose data carries `truncated: true` shows "More rows
       may exist." Values render as text only. A load failure shows a retry block; a 401 goes to the shell's sign-in
       redirect (FR-UI-5). The header shows an "Observability" link for the owner. [unit]
       web/src/app/observability/observability.test.tsx (VEC-OBS-3's expected JSON without its seeded-row references

@@ -10,6 +10,8 @@ from __future__ import annotations
 import math
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
+from contextvars import ContextVar
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any, Final
@@ -44,8 +46,38 @@ def _iso(value: datetime | None) -> str | None:
     return None if value is None else value.isoformat()
 
 
+@dataclass(frozen=True)
+class TraceGate:
+    """FR-OBS-10: whether a key row's trace can exist. `periods` are (started_at, enabled) worker starts,
+    oldest first; a row's moment (finished_at, else created_at) is traced when tracing is on in the api now,
+    the latest start at or before it was enabled, and it is not older than `oldest` (retention deletes)."""
+
+    enabled: bool
+    periods: tuple[tuple[datetime, bool], ...]
+    oldest: datetime
+
+    def traced(self, row: Any) -> bool:
+        moment = row.finished_at or row.created_at
+        if not self.enabled or moment is None or moment < self.oldest:
+            return False
+        before = [on for started, on in self.periods if started <= moment]
+        return bool(before) and before[-1]
+
+
+_GATE: ContextVar[TraceGate | None] = ContextVar("reader_obs_trace_gate", default=None)
+
+PERIODS_SQL: Final = (
+    "SELECT started_at, enabled FROM obs_tracing WHERE started_at >= :s"
+    " UNION ALL (SELECT started_at, enabled FROM obs_tracing WHERE started_at < :s"
+    " ORDER BY started_at DESC LIMIT 1) ORDER BY started_at"
+)
+
+
 def _trace(row: Any) -> str | None:
-    return None if row is None or row.job_id is None else format(derive_trace_id(row.job_id, row.key), "032x")
+    gate = _GATE.get()
+    if row is None or row.job_id is None or gate is None or not gate.traced(row):
+        return None
+    return format(derive_trace_id(row.job_id, row.key), "032x")
 
 
 def _uuids(values: Iterable[object]) -> list[uuid.UUID]:
@@ -256,14 +288,33 @@ async def _ingest(conn: AsyncConnection, owner: uuid.UUID, since: datetime, limi
     return {"truncated": truncated, "rows": rows[:INGEST_LIMIT]}
 
 
+async def trace_gate(conn: AsyncConnection, since: datetime, now: datetime, tracing: Any) -> TraceGate:
+    """`tracing`: the api's settings (`enabled`, `retention_days`), FR-OBS-1."""
+    periods = tuple((r.started_at, bool(r.enabled)) for r in await _rows(conn, PERIODS_SQL, s=since))
+    oldest = now - timedelta(days=int(tracing.retention_days))
+    return TraceGate(bool(tracing.enabled), periods, oldest)
+
+
 async def summary(
-    conn: AsyncConnection, owner: uuid.UUID, days: int, now: datetime, read_limit: int = READ_LIMIT
+    conn: AsyncConnection,
+    owner: uuid.UUID,
+    days: int,
+    now: datetime,
+    read_limit: int = READ_LIMIT,
+    tracing: Any = None,
 ) -> dict[str, Any]:
+    from reader.obs.setup import current_settings
+
     since = now - timedelta(days=days)
     catalog = _kinds()
-    return {
-        "compile_runs": await _compile_runs(conn, owner, since, catalog),
-        "tutor": await _tutor(conn, owner, since, catalog),
-        "failures": await _failures(conn, owner, since, catalog, read_limit),
-        "ingest": await _ingest(conn, owner, since, read_limit),
-    }
+    gate = await trace_gate(conn, since, now, tracing if tracing is not None else current_settings())
+    token = _GATE.set(gate)
+    try:
+        return {
+            "compile_runs": await _compile_runs(conn, owner, since, catalog),
+            "tutor": await _tutor(conn, owner, since, catalog),
+            "failures": await _failures(conn, owner, since, catalog, read_limit),
+            "ingest": await _ingest(conn, owner, since, read_limit),
+        }
+    finally:
+        _GATE.reset(token)

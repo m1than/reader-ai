@@ -10,9 +10,11 @@ import { useServices } from '../context';
 import { OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, type ObsSummary } from './api';
 
 const MORE = 'More rows may exist.';
+// FR-UI-18: the server gives no trace id when no trace can exist (before tracing, tracing off, past retention).
+const NO_TRACE = 'no trace';
 
 function TraceLink({ id }: { id: string | null }) {
-  if (!id) return <span className="muted">-</span>;
+  if (!id) return <span className="muted">{NO_TRACE}</span>;
   return (
     <a href={traceUrl(id)} target="_blank" rel="noopener noreferrer">
       Trace
@@ -21,7 +23,7 @@ function TraceLink({ id }: { id: string | null }) {
 }
 
 function Traces({ ids }: { ids: string[] }) {
-  if (ids.length === 0) return <span className="muted">-</span>;
+  if (ids.length === 0) return <span className="muted">{NO_TRACE}</span>;
   return (
     <span className="obs-traces">
       {ids.map((id) => (

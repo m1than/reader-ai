@@ -73,6 +73,21 @@ describe('observability page (FR-UI-18)', () => {
     expect(screen.queryByText('More rows may exist.')).toBeNull();
   });
 
+  it('shows "no trace" and no link where no trace can exist', async () => {
+    const body = summary() as {
+      ingest: { rows: Array<{ trace_id: string | null }> };
+      failures: { jobs: Array<{ trace_ids: string[] }> };
+    };
+    body.ingest.rows[0]!.trace_id = null;
+    for (const g of body.failures.jobs) g.trace_ids = [];
+    await mountPage(() => json(200, body));
+    const ingest = await waitFor(() => screen.getByRole('region', { name: 'Ingest' }));
+    expect(within(ingest).getByText('no trace')).toBeTruthy();
+    expect(within(ingest).queryByRole('link', { name: 'Trace' })).toBeNull();
+    const failures = screen.getByRole('region', { name: 'Failures' });
+    expect(within(failures).getAllByText('no trace')).toHaveLength(3);
+  });
+
   it('says more rows may exist when a view is truncated', async () => {
     const body = summary() as { failures: { truncated: boolean } };
     body.failures.truncated = true;

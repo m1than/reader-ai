@@ -86,11 +86,37 @@ def _login_keychain(ctx: Ctx) -> str:
     return str(Path(home) / "Library" / "Keychains" / "login.keychain-db")
 
 
-def trust_root(ctx: Ctx, project: str) -> int:
+def caddy_root_pem(ctx: Ctx, project: str) -> bytes | None:
+    """Caddy's public root certificate from the running stack, or None (stack down, not PEM)."""
     exported = docker(ctx, "docker", "compose", "-p", project, "exec", "-T", "caddy", "cat", ROOT_CRT)
-    if exported is None or exported.code != 0:
+    if exported is None or exported.code != 0 or not exported.out.strip():
+        return None
+    return exported.out
+
+
+DOCTOR_ROOT: Final = "doctor-root.pem"
+
+
+def doctor_roots(ctx: Ctx, project: str | None, recorded: Sequence[Path]) -> list[Path]:
+    """FR-CLI-22: the roots `reader trust` recorded plus Caddy's current public root, saved under run/ for
+    this check only (never added to a keychain)."""
+    roots = list(recorded)
+    pem = caddy_root_pem(ctx, project) if project else None
+    if pem is not None and pem.lstrip().startswith(b"-----BEGIN CERTIFICATE-----"):
+        ensure_run_dir(ctx)
+        path = ctx.run_dir / DOCTOR_ROOT
+        path.unlink(missing_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as out:
+            out.write(pem)
+        roots.append(path)
+    return roots
+
+
+def trust_root(ctx: Ctx, project: str) -> int:
+    pem = caddy_root_pem(ctx, project)
+    if pem is None:
         raise CliError("trust_failed", "cannot read Caddy's root certificate (is the stack up?)")
-    pem = exported.out
     der: bytes | None
     try:
         der = ssl.PEM_cert_to_DER_cert(pem.decode("ascii"))
@@ -213,8 +239,11 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         check("trust", trusted == {p.stem for p in roots}, f"{len(roots)} recorded root(s)")
     # FR-CLI-22: with the profile chosen, the dashboard answers 401 without a cookie (the gate is in front).
     if config.observability.enabled:
-        status = gate_status(TRACES_URL, roots)
-        if status == 401:
+        gate_roots = doctor_roots(ctx, project.model.name if project is not None else None, roots)
+        status = gate_status(TRACES_URL, gate_roots) if gate_roots else None
+        if not gate_roots:
+            check("observability", False, "unreachable: no Caddy root (stack down?)")
+        elif status == 401:
             check("observability", True, "gate ok")
         elif status is None:
             check("observability", False, "unreachable")

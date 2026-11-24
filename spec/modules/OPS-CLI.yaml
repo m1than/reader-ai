@@ -346,11 +346,16 @@ requirements:
       nothing else for it (the base compose.yaml publishes only 443, OPS-DEPLOY FR-DEPLOY-13). (c) After every service
       is healthy, `reader up` prints `traces: https://localhost:8443/` when the profile is active. (d) `reader doctor`
       adds the check `observability`: skipped (ok, detail `off`) when the profile is not chosen; otherwise an HTTPS GET
-      of `https://localhost:8443/` with no cookie (Caddy's internal CA from FR-CLI-16's trust, 5 s timeout) must answer
-      401: detail `gate ok` (ok), `gate open` (any 2xx or 3xx: fails), `status <n>` (any other answer: fails) or
-      `unreachable` (no answer, or the certificate does not verify: fails). `gate_status(url, roots)` takes the
-      recorded roots as an argument, verifies the certificate and the host name, and never follows a redirect; a
-      unit test runs it against a local HTTPS server with a test CA (code review round 1). [unit]
+      of `https://localhost:8443/` with no cookie (5 s timeout) must answer 401: detail `gate ok` (ok), `gate open`
+      (any 2xx or 3xx: fails), `status <n>` (any other answer: fails) or `unreachable` (no answer, or the certificate
+      does not verify: fails). The roots it verifies against are the ones recorded by FR-CLI-16's `reader trust` plus
+      Caddy's public root read from the running stack exactly as `reader trust` reads it (`docker compose exec -T
+      caddy cat` of the root certificate), kept in `run/doctor-root.pem` (mode 0600) and passed to the check only:
+      the doctor never adds trust to a keychain (`reader trust` changes the login keychain's trust settings, an owner
+      action), so it works without `reader trust` (live check 2026-11-24 reported `unreachable` with no recorded
+      root). When neither is available the detail is `unreachable: no Caddy root (stack down?)`. `gate_status(url,
+      roots)` takes the roots as an argument, verifies the certificate and the host name, and never follows a
+      redirect; a unit test runs it against a local HTTPS server with a test CA (code review round 1). [unit]
       server/tests/cli/test_observability.py.
 
 invariants:

@@ -1375,7 +1375,18 @@ tasks:
         Python's strict X.509 verification (the doctor risk is closed), 170 of 188 mutants killed, the rest
         equivalent or small gaps; the cheap gaps were then closed with tests only (upper-case traceparent, aborted
         and session_lost root marks, the retention handler reading current_settings). Live steps still not run
-        (owner's rule for this task); the stage-2 live check covers them.",
+        (owner's rule for this task); the stage-2 live check covers them. Live check on the owner's stack at 647cfeb
+        (2026-11-24, ad-hoc probes, zero credit): 20 of 20 passed (gate 401/403/204 and every refused Origin,
+        method and Sec-Fetch case; the blocked paths 404; no Set-Cookie or ACAO; zero CSP violations; the span
+        tree renders; an assessment note saved and cleared; mlflow 620 MiB of 1 GiB, rotel 46 MiB). Fixed on
+        V/obs-live-fixes: e2e/live/obs.sh did not exist (now committed with obs_live.py and obs_browser.mjs; id-only
+        sessions, no OWNER_RESET_SQL, credit parts behind --with-credit); `reader doctor` said `unreachable`
+        without `reader trust` (it now also reads Caddy's public root the way `reader trust` does, for the check
+        only; `reader trust` changes the login keychain, an owner action); links of jobs that ran before tracing
+        existed left MLflow on its loading skeleton (table obs_tracing records each worker start, and a trace id
+        is given only when a trace can exist; the page shows `no trace`). Declared: the live stack has no stub
+        provider, so the trace nesting check (job → agent.call → CLI spans) needs real credit (obs.sh
+        --with-credit); without credit it is covered by the [image] CLI canary and the [db] propagation tests.",
       review: "deep-reviewer (Fable): design rounds 1–3 changes (7, 3 and 1 blockers, all applied), round 4 approve
         (5677fb3); details in the spec's review field. Code review (Fable): round 1 on 08700c5 changes (3 blockers:
         deep blocked paths, days=² 500, surviving mutants in complex areas; plus non-blocking items, all applied in
