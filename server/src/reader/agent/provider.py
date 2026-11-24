@@ -466,7 +466,7 @@ class AgentProvider:
         config: ReaderConfig | None = self.config  # None only in that check
         if config is not None and config.observability.enabled:
             env.update(cli_env_additions())
-        if call.web_search is not None:  # FR-AGENT-16: the CLI's own per-turn search cap
+        if call.web_search is not None:  # FR-AGENT-15: the CLI's own per-turn search cap
             env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] = str(call.web_search.allowance.searches_max)
         system_file: Path | None = None
         if call.system is not None:

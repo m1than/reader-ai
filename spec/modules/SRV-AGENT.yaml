@@ -82,6 +82,8 @@
 # tier boundary is inclusive. New oracles: placeholder pins and the nested tool's `name` (VEC-AGENT-3), an
 # error-result settlement (VEC-AGENT-4), the tier boundary, the lower tier for summed usage, and the search fee in
 # the reserve.
+# Code review round 3 of the freshness merge (2026-11-24; no requirement loosened): FR-AGENT-15 states that the
+# `tools_mismatch` refusal also comes before the `agent.call` span opens, pinned by the [db] refusal test.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -345,7 +347,8 @@ requirements:
       WebSearchCall(allowance, hook, max_turns)`, so no StageCall field names a tool (SRV-TUTOR's no-tools test
       holds); the tools come from the code table `TOOL_STAGES = {("freshness_web", "search"): ("WebSearch",)}`, and a
       call with `web_search` for any other (task, stage), or with a `hook` of None (no tool runs ungated), raises
-      `tools_mismatch` before the reservation. For such a
+      `tools_mismatch` before the reservation and before FR-AGENT-14's `agent.call` span opens (a refused call
+      leaves no span). For such a
       call it passes `tools=["WebSearch"]`, `allowed_tools=[]`, the caller's `PreToolUse` hook (the prompt is a
       string, so not `can_use_tool`), its `max_turns`, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`;
       the init check (FR-AGENT-7) then requires `tools == ["WebSearch"]` and empty `mcp_servers`. Pinned data (from the stub run and the owner's
