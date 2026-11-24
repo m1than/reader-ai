@@ -542,7 +542,17 @@ owner_notes:
 # `AND deleted_at IS NULL` (FR-PIPELINE-22's second guard), with a [db] test. V/manage-fix (2026-11-24): the
 # SRV-OBS phase-2 revision for FR-PIPELINE-18's `compile_runs.ends` also claimed id `pipeline_0004`, so the branch
 # had two revisions with one id and `cancelled_at` could be missing after a migrate; that revision is renumbered
-# `pipeline_0005` (down_revision `pipeline_0004`), so the order is cancel, then ends.
+# `pipeline_0005` (down_revision `pipeline_0004`), so the order is cancel, then ends. V/manage-fix2 (2026-11-24,
+# review round 2 B7): a database migrated before the renumbering is stamped `pipeline_0004` with either column
+# alone (the old `ends` revision, or V/manage's `cancelled_at`), and an upgrade runs only pipeline_0005 on it; so
+# pipeline_0005 converges from both: `ADD COLUMN IF NOT EXISTS` for `cancelled_at` and for `ends` (same
+# definition), and the CHECK `compile_runs_ends_check` (the name Postgres gave the old inline CHECK) added only when
+# missing; pipeline_0004 adds `cancelled_at` with IF NOT EXISTS too and touches nothing else. [db]
+# tests/pipeline/test_migration_converge_db.py rewinds a migrated database to each pre-state (version
+# `pipeline_0004` with only `ends`; with only `cancelled_at`), upgrades to heads and asserts both columns, the CHECK
+# and `at_heads`. K10: FR-PIPELINE-17's open runs (and SRV-LESSON's open-run checks) filter `cancelled_at IS
+# NULL` on their own, not only through `finished_at`: test_open_runs_db.py lists no lesson whose latest run is
+# cancelled, even a row with `finished_at` still null.
 # What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
 # 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
 # renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose

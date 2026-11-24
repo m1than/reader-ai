@@ -13,7 +13,9 @@ down_revision = "pipeline_0003"
 branch_labels = None
 depends_on = None
 
-UPGRADE = ("ALTER TABLE compile_runs ADD COLUMN cancelled_at timestamptz NULL",)
+# IF NOT EXISTS: idempotent like pipeline_0005, which also adds the column for a database that applied the old
+# `pipeline_0004` (the `ends` revision under this id); this revision touches only `cancelled_at`.
+UPGRADE = ("ALTER TABLE compile_runs ADD COLUMN IF NOT EXISTS cancelled_at timestamptz NULL",)
 DOWNGRADE = ("ALTER TABLE compile_runs DROP COLUMN cancelled_at",)
 
 
