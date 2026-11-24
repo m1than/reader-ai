@@ -1599,8 +1599,14 @@ tasks:
         revision 7: the fallback initialises the store inside mlflow-migrate (one SqlAlchemyStore call), step 0
         tries db upgrade before any wipe, reader backup/restore carry store.version. Round 13
         (results/20261124T164527-round13-init): db upgrade on a missing file and the SqlAlchemyStore call both
-        build 71 tables at head f4a9b2c7d1e6 and serve /health 200. Next: owner decision on ADR-0038 and approval
-        of the phase 2 requirements." }
+        build 71 tables at head f4a9b2c7d1e6 and serve /health 200. Design review verdicts (deep-reviewer):
+        round 1 b1a84d5 changes (B1-B11); round 2 ac3a79d changes (N1-N10); round 3 d03645c changes (R1-R4);
+        round 4 03124aa changes (F1); round 5 46e9017 changes (G1); round 6 4b81738 changes (H1, H2); round 7
+        aedd89a VERDICT approve, with three non-blocking items applied after it (reader restore clears the
+        in-progress, fresh and restored-for markers; store.version removed before the file is replaced and
+        written back after; the hardened FR-OBS-29 [image] test stays the first Red test). Next: the owner's
+        decision on ADR-0038 (his script sets its status on this branch); then the phase 2 requirements move
+        into SRV-OBS with their Red tests." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
