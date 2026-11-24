@@ -532,7 +532,8 @@ async def delete_course(
 
 async def material_is_live(conn: AsyncConnection, owner_id: uuid.UUID, sha256: str | None) -> bool:
     """FR-LESSON-25's `material_deleted` check: the course's material row, read FOR SHARE so a concurrent
-    material delete cannot interleave (no write skew); a deleted material (SRV-INGEST FR-INGEST-31) is not live."""
+    material delete cannot interleave (no write skew); a deleted material (SRV-INGEST FR-INGEST-31) is not
+    live."""
     if sha256 is None:
         return True
     found = await conn.execute(

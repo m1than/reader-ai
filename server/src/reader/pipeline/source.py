@@ -91,7 +91,7 @@ async def material_imported(conn: AsyncConnection, owner_id: uuid.UUID, material
     if (await conn.execute(text("SELECT to_regclass('materials')"))).scalar() is None:
         return False
     found = await conn.execute(
-        # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) is not imported for a new run or import.
+        # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported.
         text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :m AND deleted_at IS NULL"),
         {"o": owner_id, "m": material_sha256},
     )

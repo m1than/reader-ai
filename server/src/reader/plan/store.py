@@ -25,7 +25,8 @@ async def page_chars(
         await conn.execute(
             text(
                 "SELECT i.id, m.page_count FROM materials m JOIN ingests i ON i.material_id = m.id"
-                " WHERE m.owner_id = :o AND m.sha256 = :s AND m.deleted_at IS NULL"  # FR-PLAN-20: 404 when deleted
+                # FR-PLAN-20: a deleted material is not planned (404).
+                " WHERE m.owner_id = :o AND m.sha256 = :s AND m.deleted_at IS NULL"
             ),
             {"o": owner_id, "s": material_sha256},
         )
