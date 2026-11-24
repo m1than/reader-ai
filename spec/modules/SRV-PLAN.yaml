@@ -417,5 +417,16 @@ proposed_manage:
         **Re-plan and tombstones.** In FR-PIPELINE-14's import, a soft-deleted lesson (SRV-LESSON FR-LESSON-28) is
         treated like any lesson of the plan: if it is started it is fixed and stays deleted; if it is unstarted and
         the new plan drops or moves it, it is removed by `delete_unstarted_lesson` (its tombstone goes with it);
-        if the new plan keeps it unchanged it stays deleted. A skipped lesson keeps `skipped_at`. A re-plan resets
-        manual lesson order to plan order (`reorder_lessons`; WEB-MANAGE owner decision D5). [db] each case.
+        if the new plan keeps it unchanged it stays deleted. A skipped lesson keeps `skipped_at`.
+        **Manual order is kept** (owner, 2026-11-25, WEB-MANAGE D5: a re-plan changes weeks and dates only). A course
+        whose lessons were reordered by SRV-LESSON FR-LESSON-27 has `courses.order_source = 'manual'` (new column,
+        `'plan'` by default; FR-LESSON-27 sets it, nothing resets it). For such a course FR-PIPELINE-14's final
+        `reorder_lessons` call gets this order instead of plan order: the kept lessons (same lesson id before and
+        after) in their current relative order; each new lesson placed directly after the lesson that precedes it in
+        the new plan's order (kept or new; the first position when none precedes it); removed lessons gone. Titles
+        are never rewritten (already so). For `'plan'` courses nothing changes. Any per-lesson day the schedule
+        assigns follows the ordinal, not the page order. Paired SRV-PIPELINE change: FR-PIPELINE-14's renumbering
+        sentence names this rule. [db] a manual course re-planned with 0, 1 and 3 new lessons, one in front; a
+        removed lesson between two kept ones; a `'plan'` course unchanged; [unit] the placement function as a pure
+        function of (current order, new plan order, kept set), with a fast-check property that kept lessons keep
+        their relative order and every new lesson follows its plan predecessor.

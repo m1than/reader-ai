@@ -1405,12 +1405,15 @@ tasks:
       next: "deep-reviewer round on the spec drafts (auth, jobs and secrets items are complex areas: full rounds);
         then promote with Red. P1 first: course rename/describe/archive/delete+restore, lesson
         rename/skip/delete/done/revert/download, compile cancel and history, material rename/delete, tutor history
-        clear, /settings (appearance, read-only instance view, own passkeys and sessions, people), audit rows. P2:
-        reorder, dates and pace from a course, notes, bookmarks, Recently deleted, Russian chrome.",
-      owner_decisions: "D1 soft delete only (purge needs an ADR against INV-LESSON-6 and INV-INGEST-3); D2 ADR-0036
-        settings overlay; D3 export = ADR-0017 / SRV-EXPORT, P1 ships per-lesson .ipynb download; D4 Enable for a
-        disabled sign-up account; D5 manual lesson order reset on re-plan; D6 re-import (span-id mapping); D7 Russian
-        UI chrome.",
+        clear, /settings (appearance, instance view, own passkeys and sessions, people with Enable), audit rows,
+        Russian and English interface (FR-MANAGE-10), editable settings (FR-MANAGE-11, FR-CONFIG-26) once the owner
+        accepts ADR-0036. P2: reorder, dates and pace from a course, notes, bookmarks, Recently deleted.",
+      owner_decisions: "Owner 2026-11-25 (via the coordinator): D1 soft delete only with restore, no purge ADR; D2
+        ADR-0036 yes (option B), the owner flips its status after review, the agent does not; D5 manual lesson order
+        kept across re-plan (re-plan changes weeks and dates only; SRV-PLAN FR-PLAN-21, courses.order_source); D7
+        Russian and English UI, browser language by default, switcher in Settings, P1. Coordinator defaults: D3 P1
+        export is the per-lesson .ipynb download; D4 Enable for a disabled sign-up account (SRV-AUTH FR-AUTH-48); D6
+        re-import unscheduled.",
       note: "Paired changes in files of active tracks are listed in WEB-MANAGE's header and are written with Green
         only: WEB-UI (routes, manage slot, UserMenu Settings item, theme.js, test server, Playwright config),
         WEB-NOTEBOOK (lesson menu, bookmark toggle, notes tab), WEB-IMPORT (Your sources), OPS-DOD operations. No

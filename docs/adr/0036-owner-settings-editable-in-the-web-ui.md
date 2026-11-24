@@ -3,13 +3,16 @@ id: ADR-0036
 title: Owner settings editable in the web UI as a database overlay over reader.yaml
 status: proposed
 date: 2026-11-25
-verified_by: ""
-revisit_when: ""
+verified_by: "SRV-CONFIG FR-CONFIG-26 [unit] merge and validation table and [db] set, stale, reset and refusal cases; the sign-up switch turned off by an override answers 404 without a restart; WEB-MANAGE FR-MANAGE-11 [browser]; `reader status` prints every override"
+revisit_when: "An override is ever found disagreeing with reader.yaml without the `reader status` line (one occurrence); the allow-list is asked to grow beyond 5 key families; the stack listens on anything other than 127.0.0.1"
 supersedes: []
 ---
 
-> Drafted with WEB-MANAGE (V/manage, 2026-11-25). Nothing in this ADR is built while it is `proposed`: WEB-MANAGE
-> FR-MANAGE-6 shows these settings read-only, with the reader.yaml key and the command that applies a change.
+> Owner decision, 2026-11-25 (relayed by the coordinator): option B, settings editable from the UI. The owner sets
+> this ADR's status himself after the review; this file's status is not changed by the agent. Until it reads
+> `accepted`, WEB-MANAGE FR-MANAGE-6 shows these settings read-only and FR-MANAGE-11 / SRV-CONFIG FR-CONFIG-26 wait.
+>
+> Drafted with WEB-MANAGE (V/manage, 2026-11-25).
 > Amends, if accepted: ADR-0011 (`proposed`, "one file declares instance settings … budgets … sharing defaults") and
 > SRV-AUTH FR-AUTH-23 ("the switch is read at startup only; changing it needs an api restart, as every reader.yaml
 > value does"). No accepted ADR is contradicted.

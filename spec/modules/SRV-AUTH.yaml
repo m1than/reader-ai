@@ -995,13 +995,16 @@ vectors:
     file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json
 
 # ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE FR-MANAGE-7; status: draft, not reviewed). Auth is a
-# complex area: deep-reviewer rounds until approve. Held under `proposed_manage` until then; ids FR-AUTH-40..47 and
+# complex area: deep-reviewer rounds until approve. Held under `proposed_manage` until then; ids FR-AUTH-40..48 and
 # INV-AUTH-20..21 (34..39 and 16..19 left free for parallel branches).
 # Scope: the owner manages people (list, sign out everywhere, remove a passkey, delete a sign-up learner with no
 # data); every user manages their own passkeys and sessions. Configured users stay managed by reader.yaml (FR-AUTH-1
 # would undo a UI disable at the next start; INV-AUTH-13), so no route here disables, enables or deletes a
-# `source = 'config'` user. Disable stays permanent (WEB-ACCOUNTS owner note 1; WEB-MANAGE owner decision D4).
+# `source = 'config'` user. Disable is no longer permanent: FR-AUTH-48 adds Enable for sign-up accounts (WEB-MANAGE
+# owner decision D4, coordinator default 2026-11-25).
 # What changes in approved text when this moves in:
+#   - FR-AUTH-29: "cannot be undone in the product (no enable route…)" is replaced by a pointer to FR-AUTH-48;
+#     WEB-ACCOUNTS owner note 1 and FR-ACCOUNTS-3's copy change with it (paired).
 #   - `tables`: `webauthn_credentials` adds `label text null CHECK (1..64 chars)`.
 #   - FR-AUTH-10: the session routes add this amendment's routes with the `auth` kinds named below.
 #   - FR-AUTH-14 (sign-in `next`): the allow-list of constants adds "/settings" beside "/signups"; still compared
@@ -1066,6 +1069,17 @@ proposed_manage:
       text: >-
         **Return after re-auth.** FR-AUTH-14's sign-in `next` allow-list adds the constant "/settings": with
         `location.search === "?next=/settings"` exactly, a successful sign-in navigates to "/settings". [browser]
+    - id: FR-AUTH-48
+      text: >-
+        **Enable a sign-up account.** `POST /api/auth/signups/{id}/enable` (`recent_session`, body `{}`; owner only,
+        else 403 `owner_only`) under FR-AUTH-29's row lock (`source = 'signup'` only, so a configured user is 404 as
+        in FR-AUTH-29): on an active sign-up user with `disabled_at` set, clears `disabled_at`; 200
+        `{"status":"active"}`; repeating it on an enabled account returns the same body (idempotent); a pending user →
+        409 `pending` (approve instead). Sessions revoked by the disable stay revoked; the person signs in again with
+        a passkey kept through the disable. If the owner removed every passkey meanwhile (FR-AUTH-42), the account is
+        enabled but cannot sign in, and WEB-MANAGE says so. INV-AUTH-13 holds: reader.yaml never changes a sign-up
+        account. Audit action `user.enable` (SRV-EVENTS FR-EVENTS-30). [db] disable → enable → sign in with the same
+        passkey; enable twice; pending and configured refusals; a learner gets 403 with nothing changed.
   invariants:
     - id: INV-AUTH-20
       text: >-

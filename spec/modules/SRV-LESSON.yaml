@@ -370,7 +370,7 @@ owner_notes:
 #     compile_running, revision_current, note_invalid, cell_unknown.
 proposed_manage:
   tables:
-    courses_add: "description text null CHECK (≤ 2000 chars), position int null CHECK (>= 1), archived_at timestamptz null, deleted_at timestamptz null, version int NOT NULL DEFAULT 1; UNIQUE (owner_id, position) DEFERRABLE INITIALLY DEFERRED; the partial unique title index adds AND deleted_at IS NULL"
+    courses_add: "description text null CHECK (≤ 2000 chars), position int null CHECK (>= 1), archived_at timestamptz null, deleted_at timestamptz null, version int NOT NULL DEFAULT 1, order_source text NOT NULL DEFAULT 'plan' CHECK (IN ('plan', 'manual')); UNIQUE (owner_id, position) DEFERRABLE INITIALLY DEFERRED; the partial unique title index adds AND deleted_at IS NULL"
     lessons_add: "skipped_at timestamptz null, deleted_at timestamptz null, version int NOT NULL DEFAULT 1"
     lesson_progress: "{ owner_id: true } user_id uuid → users, lesson_id uuid, done_at timestamptz; PRIMARY KEY (user_id, lesson_id); FK (lesson_id, owner_id) → lessons (id, owner_id)"
     lesson_notes: "{ owner_id: true } id uuid pk, user_id uuid → users, lesson_id uuid, cell_id text null, body text CHECK (1..10000 chars), created_at, updated_at, deleted_at timestamptz null; FK (lesson_id, owner_id) → lessons (id, owner_id)"
@@ -434,8 +434,9 @@ proposed_manage:
       text: >-
         **Order lessons.** `POST /api/courses/{id}/lessons/order` with `{lesson_ids}` — exactly the course's lessons
         that are not deleted, else 409 `order_mismatch` — calls `reorder_lessons` (FR-LESSON-15) with the deleted
-        lessons appended after them in their current order. A later re-plan renumbers in plan order (FR-PIPELINE-14;
-        WEB-MANAGE owner decision D5). [db]
+        lessons appended after them in their current order, and sets `courses.order_source = 'manual'` (a no-op order
+        leaves it as it is). A later re-plan keeps this order and places new lessons by SRV-PLAN FR-PLAN-21's rule
+        (WEB-MANAGE owner decision D5: a re-plan changes weeks and dates only). [db]
     - id: FR-LESSON-28
       text: >-
         **Skip and delete a lesson.** `POST /api/lessons/{id}/skip` and `/unskip` set or clear `skipped_at`; `DELETE

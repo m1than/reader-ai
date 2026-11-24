@@ -62,27 +62,31 @@
 #     cell's toolbar gains the bookmark toggle (FR-MANAGE-9) and the notes panel mounts beside the tutor (FR-MANAGE-9).
 #   - WEB-IMPORT: the /import page gains the "Your sources" section of FR-MANAGE-5 (a component from web/src/manage).
 #   - WEB-PLAN: its preview and confirm form is reused, pre-filled, by FR-MANAGE-3's "Change dates and pace" dialog.
-#   - WEB-ACCOUNTS: none; /signups stays as it is; people management lives on /settings (FR-MANAGE-7).
+#   - WEB-ACCOUNTS: FR-ACCOUNTS-3's "Disabled" text becomes "Disabled" plus an Enable button (SRV-AUTH FR-AUTH-48),
+#     and its Disable copy drops "This cannot be undone here."; owner note 1 is replaced by D4. Other people
+#     management lives on /settings (FR-MANAGE-7).
+#   - Interface language (FR-MANAGE-10): the English strings of WEB-UI, WEB-NOTEBOOK, WEB-IMPORT, WEB-PLAN,
+#     WEB-ACCOUNTS, SRV-TUTOR's panel (FR-TUTOR-11) and the observability page (WEB-UI FR-UI-18) move into the
+#     catalogue, keyed, with Russian beside them. The observability page is edited by V/obs-analytics-impl now, so
+#     its strings move after that track merges. jsdom's `navigator.language` is `en-US`, so existing tests that
+#     match English text stay valid; each spec's text keeps its English copy as the `en` value.
 #   - SRV-AUTH FR-AUTH-31: the `next` allow-list gains the constant "/settings" (FR-AUTH-47).
 #   - OPS-DOD: one operation per new route group (manage.course, manage.lesson, manage.material, manage.people,
 #     manage.self, manage.settings) with every cell `missing`, routes added with Green (T10).
 #   - V/freshness (not merged): a "Dismiss" and "Check again" action for freshness reports belongs to WEB-FRESH; this
 #     spec only reserves the lesson menu slot for it.
 #
-# ---- Owner decisions this spec needs (also in docs/progress.yaml V.manage `owner_decisions`)
-#   D1. Deletion is soft (a tombstone; restorable; spend rows and immutable revisions untouched). Physical purge of
-#       revisions, blobs and retained PDFs is not built: it breaks SRV-LESSON INV-LESSON-6 and SRV-INGEST INV-INGEST-3
-#       and needs its own ADR. Accept soft delete for v1?
-#   D2. ADR-0036 (proposed): instance settings editable in the UI as a database overlay. Until accepted, FR-MANAGE-6
-#       shows them read-only.
-#   D3. "Export my data" is SRV-EXPORT under ADR-0017 (proposed, stage 7). This spec ships only "Download .ipynb"
-#       per lesson (FR-MANAGE-4). Accept ADR-0017 to schedule the full archive?
-#   D4. A disabled sign-up account is permanent today (WEB-ACCOUNTS owner note 1). Add an Enable action?
-#   D5. Manual lesson order versus re-plan: a re-plan renumbers lessons in plan order (SRV-PIPELINE FR-PIPELINE-14).
-#       This draft resets manual order on re-plan and says so in the dialog. Keep the manual order instead?
-#   D6. Re-running an import is deferred by SRV-INGEST (every old span id must map to the same text, or citations
-#       change). Schedule that revision of SRV-INGEST?
-#   D7. UI chrome in Russian (FR-MANAGE-10, P2): wanted, and which strings first?
+# ---- Owner decisions (owner 2026-11-25, relayed by the coordinator; D3, D4, D6 are the coordinator's defaults)
+#   D1. Soft delete only, with restore. No purge, and no purge ADR (INV-LESSON-6 and INV-INGEST-3 stand).
+#   D2. Settings editable from the UI: ADR-0036's option B. The owner sets the ADR's status himself after review;
+#       FR-MANAGE-11 and SRV-CONFIG FR-CONFIG-26 are built only once it reads `accepted`.
+#   D3. Export in P1 is the per-lesson "Download .ipynb" (FR-MANAGE-4); the full archive stays SRV-EXPORT
+#       (ADR-0017, stage 7).
+#   D4. An Enable action for a disabled sign-up account (SRV-AUTH FR-AUTH-48; WEB-ACCOUNTS owner note 1 changes).
+#   D5. Manual lesson order is kept across a re-plan: a re-plan changes weeks and dates only (SRV-PLAN FR-PLAN-21).
+#   D6. Re-running an import stays unscheduled (SRV-INGEST defers it: old span ids must map to the same text).
+#   D7. Interface in Russian and English, P1: the browser's language by default, a switcher in Settings
+#       (FR-MANAGE-10).
 #
 # Test levels: [unit] Vitest in jsdom; [story] Storybook Light and Dark (FR-UI-8); [browser] Playwright against the
 # WEB-UI test server with stubbed routes at 1280, 1024 and 390 px in both schemes; [live] a `manage` step in
@@ -103,8 +107,7 @@ paths:
   - spec/fixtures/WEB-MANAGE/**
 
 defers:
-  - "Physical purge of deleted courses, lessons, revisions, blobs and retained PDFs (owner decision D1; needs an ADR that amends INV-LESSON-6 and INV-INGEST-3)."
-  - "Editing instance settings from the UI (ADR-0036, proposed; owner decision D2)."
+  - "Building FR-MANAGE-11 (instance settings edited in the UI) until ADR-0036 reads `accepted` (owner decision D2)."
   - "The full data export (SRV-EXPORT, ADR-0017, stage 7; owner decision D3)."
   - "Re-running an import under a new converter (SRV-INGEST defers; owner decision D6)."
   - "Moving a lesson to another week: weeks are derived from the schedule (study_plans), not stored; the schedule view belongs to WEB-SESSION (stage 6)."
@@ -163,9 +166,8 @@ requirements:
       on the group heading; SRV-LESSON FR-LESSON-22), Edit description (a dialog with a 2,000-character text area;
       FR-LESSON-22), Change dates and pace (a dialog with WEB-PLAN's form pre-filled from the course's study plan and
       its preview summary; a target date is converted to whole weeks from the plan's start date; confirm calls
-      SRV-PLAN FR-PLAN-20; the dialog states "Lessons you have not started may be renumbered or replaced; started
-      lessons keep their pages." and, when manual order exists, "Your manual lesson order is reset." — owner decision
-      D5), Move up / Move down (FR-LESSON-23; no drag and drop, so the keyboard and screen readers get the same
+      SRV-PLAN FR-PLAN-20; the dialog states "This changes weeks and dates. Your lesson order and titles stay;
+      lessons you have not started may get new page ranges." — owner decision D5, SRV-PLAN FR-PLAN-21), Move up / Move down (FR-LESSON-23; no drag and drop, so the keyboard and screen readers get the same
       action), Archive (FR-LESSON-24; Undo toast) and Delete… (FR-MANAGE-2 with typed confirmation; FR-LESSON-25;
       Undo toast). An archived course leaves the main list and the sidebar and appears under a closed "Archived (n)"
       disclosure at the end of `/` with Unarchive and Delete…; a deleted course appears only in Settings → Data
@@ -211,8 +213,9 @@ requirements:
       that select token values; an unknown stored value falls back to the default. Instance (owner): a read-only
       table from SRV-CONFIG FR-CONFIG-25 — sign-up mode, trace retention days, the monthly budget and its warning
       level, the model and per-lesson budget of each stage, the compile run cap and the tutor caps — each row with its
-      value, its reader.yaml key or "fixed in reader-ai", and one line under the table: "Change these in reader.yaml,
-      then run `reader up`." (ADR-0036, proposed, would make some editable; owner decision D2). [unit] each choice
+      value, its reader.yaml key or "fixed in reader-ai", and its source; rows outside ADR-0036's allow-list carry the
+      line "Change this in reader.yaml, then run `reader up`."; allow-listed rows are edited as FR-MANAGE-11 states
+      (read-only until ADR-0036 is accepted). [unit] each choice
       written and applied, the fallback, the instance table from VEC-MANAGE-1, no secret-looking value rendered;
       [browser] the page at the three widths in both schemes; text size and width survive a reload with no flash
       (the first paint's computed font size equals the stored choice).
@@ -225,7 +228,8 @@ requirements:
       browser marked "This session", Sign out on each other row, and "Sign out everywhere else". People (owner): the
       list of FR-AUTH-40 — handle, display name, role, source ("reader.yaml" or "Sign-up"), state (active, pending,
       disabled), last sign-in, passkeys and sessions — with per-person actions: Sign out everywhere (FR-AUTH-41),
-      Remove a passkey… (FR-AUTH-42), Disable… for sign-up accounts (the existing FR-AUTH-29 route), Delete… for a
+      Remove a passkey… (FR-AUTH-42), Disable… for sign-up accounts (the existing FR-AUTH-29 route), Enable for a
+      disabled sign-up account (FR-AUTH-48; no dialog: it restores access and is undone by Disable), Delete… for a
       sign-up learner with no data (FR-AUTH-43; a person with data shows "Disable instead: this account owns
       courses or materials."). A reader.yaml person has no Disable or Delete and the hint "Managed in reader.yaml.".
       The owner's own row has no actions (Account covers it). Every action here needs a recent sign-in (FR-MANAGE-1's
@@ -237,8 +241,8 @@ requirements:
       FR-LESSON-21 `state=deleted`, SRV-INGEST `GET /api/materials?state=deleted`; restore through FR-LESSON-25 and
       FR-INGEST-31) with the deletion time and Restore; a restored course
       returns to the list at its old position, with its lessons in their old state. "Export": "Download each lesson
-      as .ipynb from its menu. A full export of your data is planned (ADR-0017)." No purge control (owner decision
-      D1). [unit] list and restore requests; [browser] delete → restore round trip.
+      as .ipynb from its menu. A full export of your data is planned (ADR-0017)." No purge control: deletion is
+      soft only (owner decision D1). [unit] list and restore requests; [browser] delete → restore round trip.
   - id: FR-MANAGE-9
     text: >-
       **Notes and bookmarks** (every reader; P2). A bookmark toggle in each cell's toolbar ("Bookmark this cell" /
@@ -249,11 +253,31 @@ requirements:
       [unit] toggle, add, edit, delete and undo requests; [browser] the panel at the three widths.
   - id: FR-MANAGE-10
     text: >-
-      **Interface language** (P2; owner decision D7). The chrome strings of the shell, this layer and the pages it
-      touches move into a message catalogue declared as data (`web/src/manage/messages/<locale>.ts`, English and
-      Russian, the same keys checked by a unit test); Settings → Appearance gains "Language: Follow the browser,
-      English, Русский" in localStorage `reader-ai.locale`. Lesson content keeps the language of the material
-      (FR-UI-10's lang rule). [unit] key parity, the fallback to English for a missing key.
+      **Interface language** (P1; owner decision D7). Every interface string of the SPA — the shell, header, nav,
+      menus, the lesson list and page chrome, the tutor panel's chrome, /import, /signups, /observability and this
+      layer — comes from one message catalogue declared as data, `web/src/manage/messages/{en,ru}.ts`, with the same
+      keys in both (unit test) and Russian plurals (one / few / many / other) through `Intl.PluralRules`. Settings →
+      Appearance has "Language" with "Follow the browser" (default), "English" and "Русский", stored in
+      localStorage `reader-ai.locale` and applied before first paint by theme.js as `lang` on `html`; "Follow the
+      browser" picks `ru` when the first entry of `navigator.languages` has the primary subtag `ru`, else `en`.
+      Switching re-renders without a reload and moves no focus. Dates and numbers use `Intl` with the chosen
+      locale. Lesson content keeps the language of the material (FR-UI-10's lang rule on the lesson container).
+      Server error codes are never shown, so no server text needs translating; SRV-AUTH's static sign-in,
+      bootstrap and sign-up pages stay English for now (outside the SPA until stage 4; a follow-up). [unit] key
+      parity; the browser rule for `ru-RU`, `ru`, `en-US`, `uk` and an empty list; a missing key falls back to
+      English and fails the parity test; Russian plurals for 1, 2, 5, 11, 21; [browser] the switch on /, a lesson
+      and /settings in both languages at 390 px with no overflow (Russian strings are longer), and the first paint
+      already in the stored language.
+  - id: FR-MANAGE-11
+    text: >-
+      **Edit instance settings** (owner; built once ADR-0036 is accepted, owner decision D2). In Settings → Instance
+      each allow-listed row of SRV-CONFIG FR-CONFIG-26 has Edit: sign-up mode as a library select (Open / Off),
+      retention days, the monthly budget, its warning level and each stage's per-lesson budget as library number
+      fields with the schema's bounds; Save sends FR-CONFIG-26's set request, "Reset to reader.yaml" its reset
+      request (an FR-MANAGE-2 confirm naming both values). While an override exists the row shows "Set here
+      (reader.yaml says <value>)". Saving needs a recent sign-in (FR-MANAGE-1's `reauth_required` path). Model rows
+      stay read-only. [unit] each editor's bounds, the set and reset requests, the override line; [browser] edit
+      and reset at the three widths.
 
 invariants:
   - id: INV-MANAGE-1

@@ -450,7 +450,9 @@ owner_notes:
 # the items move into `requirements` with their Red tests. Ids FR-PIPELINE-20..22 (18..19 left free for parallel
 # branches). Owner-only like FR-PIPELINE-11: anyone else gets 404.
 # What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
-# 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it.
+# 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
+# renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose
+# `order_source` is `manual` (owner, 2026-11-25: manual lesson order survives a re-plan), plan order otherwise.
 proposed_manage:
   requirements:
     - id: FR-PIPELINE-20
