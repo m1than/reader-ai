@@ -366,7 +366,9 @@ requirements:
       accepted 2026-11-24): for `pipeline.*` kinds the wrapper calls `reader.obs.spans.session_marker("reader.run_id",
       <payload run_id>)` right after opening the root (only when the payload's `run_id` is a string; the helper never
       raises and does nothing with tracing off); `reader.obs.jobs` also declares `obs.feedback` and `obs.prompts`,
-      and its `on_worker_start` also enqueues `obs.prompts` (enqueue-only, a failure logged).
+      and its `on_worker_start` also enqueues `obs.prompts` (enqueue-only, a failure logged); the integrated
+      catalog is ingest.import, search.embed, pipeline.stage, pipeline.verify, tutor.answer, obs.feedback,
+      obs.prompts, obs.retention (FR-EVENTS-1's unit test updated).
 
 invariants:
   - id: INV-EVENTS-1

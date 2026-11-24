@@ -81,8 +81,9 @@ def test_stylesheet_imports_nothing() -> None:
 def test_edge_csp_is_unchanged() -> None:
     caddyfile = (REPO / "deploy" / "Caddyfile").read_text("utf-8")
     found = re.findall(r'Content-Security-Policy\s+"([^"]+)"', caddyfile)
-    # The app's site first, then the 8443 dashboard site's measured CSP (FR-AUTH-33, SRV-OBS FR-OBS-9).
-    assert found == [PINNED_CSP, DASHBOARD_CSP]
+    # The app's site first, then the 8443 dashboard site's measured CSP (FR-AUTH-33, SRV-OBS FR-OBS-9), then
+    # the 8444 Jaeger site's (SRV-OBS FR-OBS-19: its two inline-script hashes and base-uri 'self').
+    assert found == [PINNED_CSP, DASHBOARD_CSP, JAEGER_CSP]
 
 
 DASHBOARD_CSP = (
@@ -90,6 +91,11 @@ DASHBOARD_CSP = (
     "font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; "
     "object-src 'none'; base-uri 'none'; form-action 'self'"
 )
+JAEGER_CSP = DASHBOARD_CSP.replace(
+    "script-src 'self';",
+    "script-src 'self' 'sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU='"
+    " 'sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ=';",
+).replace("base-uri 'none'", "base-uri 'self'")
 
 
 # FR-AUTH-19 ---------------------------------------------------------------------------------------------
