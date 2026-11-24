@@ -59,7 +59,9 @@ async def _run(w: Any, qid: uuid.UUID, provider: Any, monkeypatch: pytest.Monkey
         return PROMPT_VERSION if name == "reader.tutor" else None
 
     monkeypatch.setattr(prompts, "version_of", version_of)
-    kind = need("reader.tutor.jobs").make_kind(deps(w, provider, FakeSearch()))
+    # Two hits, the first with a neighbour span: 2 candidates (search results), 3 spans sent (code review round 2:
+    # distinct counts, so swapping the two attributes fails).
+    kind = need("reader.tutor.jobs").make_kind(deps(w, provider, FakeSearch(chunks=[(0, [0, 1]), (2, [2])])))
     args = kind.args.model_validate({"question_id": str(qid)})
     with obs_setup("worker") as (handle, memory):
         tracer = require("reader.obs").tracer()
@@ -106,9 +108,9 @@ async def test_answer_spans_root_keys_and_assessments(
     marker = got["job.session"]
     assert marker.attributes["session.id"] == str(lesson)
     assert marker.parent.span_id == root.context.span_id
-    # FR-OBS-13: retrieval counts (FakeSearch: 3 one-span hits) and citation counts (2 blocks, 1 supported).
+    # FR-OBS-13: retrieval counts (2 search results, 3 spans kept) and citation counts (2 blocks, 1 supported).
     retrieve, cited = got["tutor.retrieve"], got["tutor.citations"]
-    assert (retrieve.attributes["reader.retrieval.hits"], retrieve.attributes["reader.retrieval.candidates"]) == (3, 3)
+    assert (retrieve.attributes["reader.retrieval.hits"], retrieve.attributes["reader.retrieval.candidates"]) == (3, 2)
     assert (cited.attributes["reader.citations.total"], cited.attributes["reader.citations.valid"]) == (2, 1)
     for child in (retrieve, cited):
         assert child.parent.span_id == root.context.span_id

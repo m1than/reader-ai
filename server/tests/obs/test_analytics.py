@@ -422,6 +422,11 @@ def test_priced_input_part_uses_the_tier_and_the_fee() -> None:
     assert agent.priced_input_part("claude-sonnet-5-5", settled, searched) == agent.input_part(
         settled, searched, son, fee)
     assert fee > 0
+    # Code review round 2: both at once, the fee and a prompt above 100k on a tiered model (not summed).
+    both = _usage(150_000, 2000, 0, 0, 0, searches=3)
+    fee3 = 3 * load_pricing().web_search_usd
+    assert agent.priced_input_part("claude-haiku-5-5", settled, both) == agent.input_part(settled, both, high, fee3)
+    assert agent.input_part(settled, both, high, fee3) < agent.input_part(settled, both, high)
 
 
 def test_agent_span_semconv_keys_and_cost() -> None:

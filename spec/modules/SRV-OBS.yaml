@@ -687,7 +687,9 @@ requirements:
       day; registration is idempotent by sha, so a repeat is harmless (code review round 1); `max_attempts` 3,
       SRV-EVENTS' delays) is enqueued by the worker's start hook (SRV-EVENTS
       FR-EVENTS-1 hooks: enqueue-only, so registration never blocks the worker's start; a failed enqueue is logged
-      and the next start retries). Per file: the version is looked up by sha (`search` of the prompt's versions,
+      and the next start retries) and by every daily `obs.retention` run with that day's digest (code review round
+      2: a worker that runs for days without a restart still retries a dead key and registers changed templates;
+      the same day's key is a no-op, and a failure to enqueue never changes retention's outcome). Per file: the version is looked up by sha (`search` of the prompt's versions,
       filtered by the name AND the version tag mlflow.prompt.is_prompt = 'true', for tag `reader.prompt_sha256` = the
       file's sha256; without the prompt tag in the filter MLflow 3.18 returns no prompt version, so every start
       would create a new one: found by the [image] test, code review round 1); only when none matches is a version created, with tags

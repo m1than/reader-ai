@@ -347,12 +347,41 @@ async def test_version_of_never_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(prompts, "_MISSES", {})
     monkeypatch.setitem(reader.obs._STATE, "provider", object())
 
+    tries: list[str] = []
+
     def refuse(request: httpx.Request) -> httpx.Response:
+        tries.append(request.url.path)
         raise httpx.ConnectError("down", request=request)
 
     original = httpx.AsyncClient
     monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(refuse)))
     assert await prompts.version_of("reader.tutor") is None
+    # A failed lookup is a cached miss too (code review round 2): no second try within MISS_TTL_S.
+    assert await prompts.version_of("reader.tutor") is None
+    assert len(tries) == 1 and "reader.tutor" in prompts._MISSES
+
+
+async def test_registration_clears_a_cached_miss(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Code review round 2: after obs.prompts registers a template, version_of answers from the cache at once,
+    even within a miss's TTL."""
+    prompts = require("reader.obs.prompts")
+    import time
+
+    import reader.obs
+    from reader.obs import setup
+
+    monkeypatch.setattr(setup, "current_settings", lambda: setup.Settings(True, 30))
+    monkeypatch.setattr(prompts, "_CACHE", {})
+    monkeypatch.setattr(prompts, "_MISSES", dict.fromkeys(prompts.PROMPTS, time.monotonic() + 600))
+    monkeypatch.setitem(reader.obs._STATE, "provider", object())
+    up = Mlflow({("GET", "/api/2.0/mlflow/model-versions/search"): {"model_versions": []},
+                 ("POST", "/api/2.0/mlflow/model-versions/create"): {"model_version": {"version": "2"}}})
+    _patch_client(monkeypatch, up)
+    await prompts.handle(prompts.PromptsArgs(version="0.1.0", digest=prompts.digest("2026-11-24")), None, None)
+    assert prompts._MISSES == {}
+    before = len(up.requests)
+    assert await prompts.version_of("reader.tutor") == 2
+    assert len(up.requests) == before  # answered from the cache, no lookup
 
 
 async def test_digest_keys_on_templates_and_day(monkeypatch: pytest.MonkeyPatch) -> None:

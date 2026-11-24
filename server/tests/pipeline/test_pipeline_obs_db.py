@@ -91,6 +91,15 @@ async def test_loop_spans_root_keys_and_assessments(pg: Pg, tmp_path: Path, monk
         assert root.attributes["reader.lesson.id"] == str(lesson)
         assert root.attributes["reader.course.id"] == str(course)
         assert root.attributes["reader.prompt.version"] == PROMPT_VERSION
+    # FR-OBS-12 (d), SRV-AGENT FR-AGENT-14 (code review round 2): every step's `agent.call`, from the provider,
+    # carries the lesson, the course and the step its root stage job ran.
+    agent_calls = _children(spans, "agent.call")
+    assert agent_calls, "no agent.call span"
+    for call, parent in agent_calls:
+        assert call.attributes["reader.lesson.id"] == str(lesson)
+        assert call.attributes["reader.course.id"] == str(course)
+        assert call.attributes["reader.step"] == parent.attributes["reader.step"]
+    assert len({c.attributes["reader.step"] for c, _ in agent_calls}) > 1  # the steps differ, not one constant
     # FR-OBS-13: the two fact checks' claim counts (6 claims; 5 then 6 supported), OK status, under their roots.
     claims = _children(spans, "verify.claims")
     assert sorted((c.attributes["reader.claims.total"], c.attributes["reader.claims.supported"]) for c, _ in claims) \

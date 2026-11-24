@@ -249,3 +249,9 @@ async def test_handle_takes_the_current_settings(
         days,
         queue,
     )
+    # FR-OBS-15 (code review round 2): the daily run also enqueues the prompt registration with today's digest.
+    from reader.obs import prompts
+
+    (enqueued,) = [c for c in queue.calls if c[0] == "obs.prompts"]
+    today = datetime.now(UTC).date().isoformat()
+    assert enqueued[1]["digest"] == prompts.digest(today)

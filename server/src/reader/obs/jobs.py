@@ -107,6 +107,14 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
         )
     if conn is not None:
         await prune_starts(conn, now - timedelta(days=settings.retention_days))
+    # FR-OBS-15: the daily run also enqueues the prompt registration (enqueue-only, never raises), so a worker
+    # that runs for days retries a dead key and registers changed templates.
+    try:
+        jobs = running()
+    except Exception:
+        logging.getLogger("reader.obs").warning("obs prompts not enqueued")
+        return
+    await prompts.on_worker_start(jobs, now)
 
 
 # FR-OBS-10: worker starts older than retention decide nothing any more, except the latest of them, which
