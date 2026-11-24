@@ -88,7 +88,9 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   their own specs. Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): `setup` takes the
   file's retention through `reader.config.effective`, and the retention job (FR-OBS-11) and the summary (FR-OBS-1)
   read the owner's retention override per run and per request (`setup.effective_settings(conn)`); no oracle
-  changed."
+  changed. Paired SRV-PIPELINE change (V/manage, 2026-11-24): SRV-PIPELINE's `errors` gained `course_deleted`,
+  `lesson_inactive` and `not_running`, so `attributes.SPEC_CODES` (the `reader.error_code` enum, VEC-OBS-1) takes
+  them; the catalogue test reads the specs and is unchanged."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
