@@ -1417,7 +1417,11 @@ proposed_manage:
         `material_busy`; when courses that are not deleted use it and
         `cascade` is not `true` → 409 `{"error": "material_in_use", "courses": [...]}`; with `cascade: true` each such
         course is soft-deleted through SRV-LESSON FR-LESSON-25's function with `deleted_by_material` = this material
-        (its locks and its `compile_running` refusal apply, and any refusal aborts the whole request), in the same
+        (its `compile_running` refusal applies, and any refusal aborts the whole request). Locks: before any check or
+        write, the request takes every affected course's `lock_course` in ascending `plan_course_id` order, then
+        every affected lesson's run lock in ascending lesson id order, then the owner's position lock "RCPO" once
+        (SRV-LESSON INV-LESSON-23's order, applied to the whole set, so a cascade never holds a later lock while
+        waiting for an earlier one); all of this in the same
         transaction. Then `deleted_at` = now. A second DELETE returns 200 with the same body. `POST
         /api/materials/{material_id}/restore` clears `deleted_at` and, in the same transaction, restores every course
         whose `deleted_by_material` is this material (clearing that field; these courses have a material, so the

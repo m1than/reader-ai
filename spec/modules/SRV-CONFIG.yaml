@@ -400,7 +400,13 @@ proposed_manage:
         /api/settings/{key}` with `{}` removes it (idempotent). Each applied change writes the audit actions
         `settings.set` or `settings.reset` (SRV-EVENTS FR-EVENTS-30) with the key and the old and new values (small
         numbers and enums, not secrets). `reader up` and `reader status` print `override <key>: <value>
-        (reader.yaml: <value>)` for each applied override, and the ignored lines above; a `reader restore` brings
+        (reader.yaml: <value>)` for each applied override, and the ignored lines above. The CLI reads the table the
+        way its other status reads do (paired OPS-CLI change to FR-CLI's status section): one `docker compose exec -T
+        postgres psql -U postgres -d <db> -At` query `SELECT key, value FROM settings_overrides ORDER BY key`, bounded
+        by the status command's timeout, then evaluates each row against the loaded reader.yaml with the same
+        resolution and validation rules as `effective_settings` (shared pure functions in `reader.config`, no
+        database driver in the CLI); a failed query prints `overrides: unavailable` and does not fail status. A
+        `reader restore` brings
         overrides back with the database. Models, users, providers, secrets, materials and kernels are never
         overridable. [unit] the merge, narrowing and validation table, with the rows: signup key absent on a
         non-localhost host plus an `open` override → off (ignored, `narrowed`); absent on localhost plus an `off`

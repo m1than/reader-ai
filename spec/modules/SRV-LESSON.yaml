@@ -454,7 +454,8 @@ proposed_manage:
         **Archive.** `POST /api/courses/{id}/archive` with `{}` takes the header's locks, refuses with 409
         `compile_running` while any of its lessons has an open run, then sets `archived_at`, copies `position` into
         `last_position` and clears `position`; `/unarchive` with `{at?: "previous" | "first"}` (default `"first"`)
-        clears `archived_at` and, unless the course is also deleted, places it with `place_at` at `last_position`
+        on a deleted course answers 404 `not_found` (restore it first; nothing written); otherwise it clears
+        `archived_at` and places it with `place_at` at `last_position`
         for `"previous"` (WEB-MANAGE's Undo toast sends it, so Undo puts the course back where it was) or at 1 for
         `"first"`. Repeating either returns 200 with the same body (idempotent). An archived course's lessons still
         open by link (FR-LESSON-8/-9) and its tutor works; SRV-PIPELINE refuses to compile them (FR-PIPELINE-22). [db]
@@ -580,5 +581,11 @@ proposed_manage:
         then the affected lessons' run locks in ascending lesson id order, then reads run state and tombstones; and
         `create_run` reads the tombstones and archive state after the same two locks. So no compile run starts on a
         deleted, skipped or archived lesson, and no lesson is deleted, skipped, archived or reverted under an open
-        run. [db] the race: a delete and a compile of one lesson started together, 50 times; every outcome is
-        either (compile 202, delete 409 `compile_running`) or (delete 200, compile 404), never both applied.
+        run. Multi-object writes (a course delete or archive over its lessons, SRV-INGEST FR-INGEST-31's cascade over
+        several courses) take all their course locks in ascending `plan_course_id` order, then all lesson locks in
+        ascending lesson id order, then the owner's position lock "RCPO", before any check. [db] the race: a delete and
+        a compile of one lesson started together, 50 times; every outcome is either (compile 202, delete 409
+        `compile_running`) or (delete 200, compile 404), never both applied; a material cascade over two courses and a
+        compile of a lesson in the second course started together, 50 times: either the cascade is refused with 409
+        `compile_running` and nothing is deleted, or the compile gets 404, with no deadlock (each request finishes
+        within 10 s); a cascade and a course order route of the same owner together, 50 times: positions stay 1..n.

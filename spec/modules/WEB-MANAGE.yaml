@@ -366,11 +366,14 @@ nfr:
   - id: NFR-MANAGE-1
     metric: >-
       bytes (gzip, level 9) that this layer and WEB-UI FR-UI-30's runtime add to the initial JavaScript chunks of
-      WEB-UI NFR-UI-1's build, measured as a delta against the same build without them (web/src/app/build.test.ts
-      reports both); the slot stubs, the i18n runtime and the English catalogue of the initial routes count, the lazy
-      chunks and the Russian catalogues do not. The 1,024 B bound is a hypothesis, re-measured at Green and recorded
-      with the measured value. For scale: the initial chunks measured 117,829 B on 2026-11-24 after merging 9bb014a,
-      against NFR-UI-1's cap of 121,153 B, which still applies
+      WEB-UI NFR-UI-1's build, measured as a delta. The "without" side is a recorded baseline, not a second build:
+      the constant `INITIAL_BASELINE_B` in web/src/manage/budget.ts holds the initial chunks' gzip size measured on the
+      merge base just before this layer lands (117,829 B on 2026-11-24 after merging 9bb014a; re-measured and
+      updated on purpose at Green if the base moved, the update named in the commit and in this spec's review note);
+      build.test.ts measures the current initial chunks and asserts current − baseline ≤ 1,024. The slot stubs, the
+      i18n runtime and the English catalogue of the initial routes count, the lazy chunks and the Russian
+      catalogues do not. The 1,024 B bound is a hypothesis, re-measured at Green and recorded with the measured
+      value. NFR-UI-1's cap of 121,153 B still applies
     threshold: 1024
     verified_by: test
 
