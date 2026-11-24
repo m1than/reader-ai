@@ -1,0 +1,83 @@
+{
+ "variant": "before",
+ "tabs": {
+  "overview": {
+   "url": "/#/experiments/0/overview",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Overview Let's improve your agent with MLflow Help me create an evaluation Build a continuous quality loop in 4 steps Trace, analyze, evaluate, and monitor your agent as it evolves. Learn how it works ↗ TRACE 5 traces View traces ANALYZE Recommended Review real traces to surface failure modes and quality issues worth fixing. Detect issues EVAL/TEST Turn "
+  },
+  "traces": {
+   "url": "/#/experiments/0/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display now Detect Issues Time Input Output Duration State Tokens Tags 1 minute ago - - 30ms OK - service.version: 0.1.0 +1 3 minutes ago - - 1.0min Error 6050 service.version: 2.1.330 +4 5 minutes ago - - 40.0s OK 4050 service.version: 2.1.330 +4 7 minutes ago - - 9.0s OK 930 service.version: 2.1.330 +4 8 minutes ago - - "
+  },
+  "trace-detail": {
+   "url": "/#/experiments/0/traces?selectedEvaluationId=tr-2ee7830c3d1b7acd623a0df3e83b2b38",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 9 seconds ago Detect Issues Time Input Output Duration State Tokens Tags 1 minute ago - - 30ms OK - service.version: 0.1.0 +1 3 minutes ago - - 1.0min Error 6050 service.version: 2.1.330 +4 5 minutes ago - - 40.0s OK 4050 service.version: 2.1.330 +4 7 minutes ago - - 9.0s OK 930 service.version: 2.1.330 +4 8 minute"
+  },
+  "trace-detail-compile": {
+   "url": "/#/experiments/0/traces?selectedEvaluationId=tr-be38e45ad8997255dafac81e2281bc81",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 18 seconds ago Detect Issues Time Input Output Duration State Tokens Tags 1 minute ago - - 30ms OK - service.version: 0.1.0 +1 3 minutes ago - - 1.0min Error 6050 service.version: 2.1.330 +4 5 minutes ago - - 40.0s OK 4050 service.version: 2.1.330 +4 7 minutes ago - - 9.0s OK 930 service.version: 2.1.330 +4 8 minut"
+  },
+  "sessions": {
+   "url": "/#/experiments/0/traces?groupBy=session",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 27 seconds ago Detect Issues Session Input Output Time Duration State Tokens Tags - - - 1 minute ago 30ms OK - service.version: 0.1.0 +1 - - - 4 minutes ago 1.0min Error 6050 service.version: 2.1.330 +4 - - - 5 minutes ago 40.0s OK 4050 service.version: 2.1.330 +4 - - - 7 minutes ago 9.0s OK 930 service.version: 2."
+  },
+  "traces-lesson": {
+   "url": "/#/experiments/0/traces?q=20000000-0000-4000-8000-0000000000bb",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 36 seconds ago Detect Issues No traces match your filters Clear filters MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "issues": {
+   "url": "/#/experiments/0/issues",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Issues Cost increased 3× last week Agent response violated policy Tool error: invalid argument Discover issues automatically Scan your traces to surface failure modes, quality regressions, and cost anomalies, then triage and fix them in one place. Run issue detection Learn how it works MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask"
+  },
+  "dashboard-usage": {
+   "url": "/#/experiments/0/dashboard/usage",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Filters Time Unit: Day Last 7 days Detect Issues Traces 5 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 2 4 6 8 AVG (1) Latency 22.21s p50p90p99 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 15000 30000 45000 60000 AVG (22.21s) Errors 1 (Overall error rate: 20.0%) Error CountError Rate 11/17 11/18 11/19 11/20 11"
+  },
+  "dashboard-quality": {
+   "url": "/#/experiments/0/dashboard/quality",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Time Unit: Day Last 7 days Detect Issues No assessments available Monitor quality metrics from scorers MLflow allows you to evaluate your GenAI applications using scorers. Scorers compute quality metrics like relevance, correctness, and custom assessments. Copy the code snippet below to run an evaluation, or visit the d"
+  },
+  "dashboard-tool-calls": {
+   "url": "/#/experiments/0/dashboard/tool-calls",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Time Unit: Day Last 7 days Detect Issues 0 Total Tool Calls 0.00ms Avg Latency 0.00% Success Rate 0 Failed Calls Tool Performance Summary No data available for the selected time range Tool Usage Over Time No data available for the selected time range Latency Comparison No data available for the selected time range MLflo"
+  },
+  "judges": {
+   "url": "/#/experiments/0/judges",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Judges Add a judge to your experiment to measure your GenAI app quality Choose from a selection of built-in LLM judges or create your own custom code based judge. Learn more New LLM judge New custom code judge MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for f"
+  },
+  "review": {
+   "url": "/#/experiments/0/review-queue?selectedQueueId=rq-1503ef7b559e4a888ee8140b77b5aa01",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Review Default Manage questions New queue Queue To do Default Default 1 question No traces in this queue yet Add traces from the Traces tab to start reviewing them with your team. Add traces MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0.07"
+  },
+  "datasets": {
+   "url": "/#/experiments/0/datasets",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Datasets Create an evaluation dataset Create evaluation datasets in order to iteratively evaluate and improve your app. For example, build a dataset from production traces with negative feedback. Learn more Create dataset MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable"
+  },
+  "evaluation-runs": {
+   "url": "/#/experiments/0/evaluation-runs",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Evaluation runs Run evaluation All time Display now Evaluate and improve the quality, cost, latency of your GenAI app Create evaluation datasets in order to iteratively evaluate and improve your app. Run evaluations to check that your fixes are working, and compare quality between app / prompt versions. Learn more Or use coding agents/code snippets Copy "
+  },
+  "prompts": {
+   "url": "/#/experiments/0/prompts",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Prompts Name Latest version Last modified Tags Create your first prompt Manage and version prompts using MLflow's Prompt Registry. Learn more Get help registering a prompt Copy for coding agent MLflow assistant Copy this prompt and paste into Claude Code, Codex, Cursor, or any coding agent already running in your project. Help me create and test my first"
+  },
+  "agent-versions": {
+   "url": "/#/experiments/0/models",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Agent versions Table view Chart view Sort: Created Columns Group by Model attributes Model name Status Created Model attributes Logged from Source run Registered models Dataset Track and compare versions of your GenAI app Track every version of your app's code and prompts to understand how quality changes over time. Learn more Create version MLflow Assis"
+  }
+ },
+ "headers": [
+  "",
+  "Time",
+  "Input",
+  "Output",
+  "Duration",
+  "State",
+  "Tokens",
+  "Tags"
+ ],
+ "chooser_found": 1,
+ "chooser_menu": "Columns Sort Time Row height Compact",
+ "cost_option": 0,
+ "csp": []
+}

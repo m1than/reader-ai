@@ -620,6 +620,197 @@ paired_changes:
       - "Existing observability cells gain FR-OBS-5 (job trace and its log lines) where the operation runs a job: material.ingest, ingest.requeue, lesson.compile, lesson.compile_status, lesson.compile_resume, tutor.ask; and FR-OBS-6 for lesson.compile and tutor.ask."
       - "not_user_facing: none added."
 
+# V.obs-analytics (draft, 2026-11-24): the owner asked for "more detailed info in mlflow dashboards … all tabs for
+# tracing, all with best practices" and "a Jaeger-like view of spans". Measured in spikes/obs-stack round 4 (zero
+# credit; RESULT.md "Round 4"). Not approved: OTel and privacy are complex areas, so full deep-reviewer rounds
+# precede Green. Options that need the owner (a Jaeger view, an opt-in content mode) are in ADR-0033 (proposed).
+proposed_requirements:
+  - id: FR-OBS-12
+    text: >-
+      MLflow conventions on our spans (zero credit; values ids, enums and numbers only). (a) Span types: every span we
+      own carries `mlflow.spanType` explicitly (the stored type column, used by span search and per-type metrics,
+      takes only an explicit value; translated types are not stored, measured): job roots CHAIN; `agent.call` AGENT
+      (plus `gen_ai.operation.name: invoke_agent`, the GenAI semconv name, so MLflow never types it LLM and never prices
+      it); FR-OBS-13's children RETRIEVER, TOOL, PARSER or EMBEDDING as listed there; HTTP and WS spans unchanged
+      (no type). The CLI's spans are typed by MLflow's Claude Code translator (interaction AGENT, llm_request LLM,
+      tool TOOL; measured) and are not changed. (b) Tokens: `agent.call` uses the current GenAI semconv keys:
+      `gen_ai.usage.input_tokens` = input + cache read + cache write (semconv counts cached input in the input, as
+      MLflow's Claude Code translator does), `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`,
+      `gen_ai.usage.cache_write.input_tokens`; the old `gen_ai.usage.cache_read_input_tokens` and
+      `cache_creation_input_tokens` keys (not read by MLflow 3.18.0) leave VEC-OBS-1. Trace token usage then equals the
+      call's (MLflow's tree aggregation lets `agent.call` hide the CLI's own counts; measured equal). (c) Cost, with
+      the ledger as MLflow's source (owner, 2026-11-24: "our pricing.yaml is the source of truth"): `agent.call` sets
+      `mlflow.llm.cost` = `{input_cost, output_cost, total_cost}` (USD numbers) where `total_cost` is the ledger's
+      settled amount for the call (SRV-AGENT's settle row, the same number as `reader.cost_usd`) and the input/output
+      split is pricing.yaml's prices for the call's tokens scaled to that total (the ledger records the total only).
+      An explicit cost on an AGENT span is kept by MLflow 3.18.0 (it auto-prices only non-AGENT spans; measured).
+      MLflow would otherwise price the CLI's `llm_request` spans from its bundled catalog as well, and its span-level
+      cost metrics sum every priced span with no dedup (measured before: 0.0401 on `agent.call` plus 0.0631 on the
+      CLI span for one call). So the mlflow service gets `MLFLOW_MODEL_CATALOG_URI=file:///catalog` with a read-only
+      mount of `deploy/mlflow-catalog/anthropic.json`, generated from pricing.yaml's model ids with every price 0
+      (a committed generator; no network, no list prices): the CLI spans are then priced 0 and our call is the one
+      priced span. Measured (round 4, `compose.catalog.yaml`): each trace's cost = its call's ledger amount (0.21,
+      0.23, 0.03; trace header and the traces table's Cost column), the span cost metric summed 1.55 = the sum of the
+      seven ledger amounts, and the CLI span's cost was 0.0. A call that billed nothing (a reserve voided) sets
+      total 0; a reserve never settled (a killed call) sets no cost, and /observability's spent(run) still counts it.
+      (d) Trace name and tags: each root span sets `mlflow.traceTag.mlflow.traceName` to its span name and
+      `mlflow.traceTag.<key>` for these keys when known, each value already valid under its VEC-OBS-1 rule:
+      `reader.job.kind`, `reader.job.outcome`, `reader.job.attempt`, `reader.error_code`, `reader.error_class`,
+      `reader.stage`, `reader.step`, `reader.task`, `reader.run_id`, `reader.lesson.id` and `reader.course.id` (new
+      keys, UUIDs; ids only, never titles), `reader.question_id`, `gen_ai.request.model` as `reader.model`,
+      `reader.cost_usd` (the job's settled amount: the sum over its calls, a decimal string with 4 places),
+      `reader.run.spent_usd` (pipeline roots: SRV-AGENT's spent(run) when the step's job ends, failed attempts and
+      open reserves included; a new key, a decimal string with 4 places), and `reader.cache_read_share` (new key, a
+      float 0..1 rendered with two decimals: cache read over input tokens). `agent.call` also carries
+      `reader.lesson.id`, `reader.course.id`, `reader.stage` and `reader.step` as attributes. Tag values are strings
+      (MLflow stores tags as strings), so the `mlflow.traceTag.` form of a numeric key gets an existing-type `pattern`
+      rule (`^[0-9]{1,6}(\.[0-9]{1,4})?$`). `mlflow.llm.cost` is a JSON object of three numbers: the `json_object` rule
+      type of (f). (e) Session: the root's `session.id` is the compile run id for
+      `pipeline.*` jobs and the lesson id for `tutor.answer`; other roots carry none. (f) Previews: the root's
+      `mlflow.spanInputs` and `mlflow.spanOutputs` are JSON objects (sent as JSON strings; MLflow unwraps them,
+      measured) whose keys come from a per-kind list and whose values pass existing rules: inputs
+      `{question_id, lesson_id}` (tutor), `{run_id, lesson_id, stage, step}` (pipeline), `{material_sha256}`
+      (ingest); outputs `{outcome, error_code?, citations?}`, `{outcome, error_code?}`, `{outcome, pages?, chunks?}`.
+      This needs a new VEC-OBS-1 rule type, `json_object` (listed keys, each with its own existing rule; nothing else;
+      at most 512 bytes), the one value shape outside today's rules: flagged for the owner and the reviewer before it
+      is approved. (g) Linked prompts: the root's `mlflow.traceTag.mlflow.linkedPrompts` = `[{"name", "version"}]` of
+      the FR-OBS-15 templates the job used (a `json_array` of such objects, the same new rule family). (h) Tool
+      spans set status OK on success (MLflow's tool-call success rate counts only OK; measured 0.00% with UNSET).
+      [unit, image]
+  - id: FR-OBS-13
+    text: >-
+      Child spans where a stage has measurable parts (counts, sizes and durations as numbers; names fixed): tutor
+      `tutor.retrieve` RETRIEVER {reader.retrieval.hits, reader.retrieval.candidates, reader.retrieval.top_score
+      0..1} and `tutor.citations` PARSER {reader.citations.total, reader.citations.valid}; pipeline `verify.claims`
+      PARSER {reader.claims.total, reader.claims.supported} and `verify.lab` TOOL {reader.kernel.cells,
+      reader.kernel.cells_ok, reader.kernel.ms}; kernel runs inside lab verification `kernel.run` TOOL
+      {reader.kernel.cells, reader.kernel.exit} (the kernel's code and output never); ingest `ingest.parse` PARSER
+      {reader.pages, reader.bytes} and `ingest.chunk` PARSER {reader.chunks}; `search.embed` batches `embed.batch`
+      EMBEDDING {reader.embed.vectors, reader.embed.batch}. Every key gets a VEC-OBS-1 rule (ints with ranges, floats
+      0..1); each span name joins the allow-list's names. Measured rendering: the trace detail shows each with its
+      type icon and duration; the tool-calls dashboard lists `verify.lab`. [unit, image]
+  - id: FR-OBS-14
+    text: >-
+      Code-sourced assessments (MLflow "Quality" dashboard; deterministic outcomes we already compute, never an LLM
+      judge, zero credit). Names and values: `fact_check.passed` bool with metadata {claims, supported};
+      `verify.passed` bool (the verifier's verdict); `verify.lab_passed` bool with {cells, cells_ok};
+      `freshness.verdict` enum {current, stale, unknown} (the freshness check of V/freshness, still in review; its
+      enum is aligned when that branch merges); `tutor.citations_valid` bool with
+      {total, valid} and `tutor.citation_share` float 0..1. Source `CODE`, `source_id` the module
+      (`reader.pipeline.fact_check`, `reader.pipeline.verify`, `reader.freshness`, `reader.tutor.citations`); no
+      rationale; metadata values are decimal strings. They are logged by a new job kind `obs.feedback` (args: job
+      id, key, name, value; key `[job_id, name]`), enqueued by the code that computes the outcome with `schedule_in`
+      60 s (after the trace's export), which POSTs `…/mlflow/traces/tr-<FR-OBS-5 trace id>/assessments` on `obs`
+      (the worker reaches MLflow already, FR-OBS-11); a 404 (trace not yet ingested) is transient, other failures
+      end the key dead; with tracing off the kind does nothing. Measured: 8 of 8 created; the Quality dashboard
+      showed a summary row, counts and averages per name, and per-value bars. [unit, db, image]
+  - id: FR-OBS-15
+    text: >-
+      Prompts tab: the worker registers our own static prompt templates at start, never book text: the four stage
+      instruction files `server/src/reader/pipeline/prompts/<stage>.<version>.md` and the tutor's
+      `server/src/reader/tutor/prompts/answer-v1.md` (FR-PIPELINE-3's runtime system prompt is the rendered book source
+      plus these; only the static file is registered). Name `reader.<stage>` / `reader.tutor`; a version is created
+      only when no version has tag `reader.prompt_sha256` equal to the file's sha256; tags `reader.prompt_sha256` and
+      `reader.version` (the package version; the image has no git sha). A unit test checks each file against the
+      secret scanner and that it contains no `{{…}}` placeholder that would be filled with book text when rendered by
+      MLflow's playground (they are plain instructions). The worker keeps the stage → version map for FR-OBS-12 (g).
+      Measured: 3 prompts registered, listed with their tags, and "1 linked prompt" on a trace. [unit, image]
+  - id: FR-OBS-16
+    text: >-
+      Every tab of MLflow 3.18.0's GenAI experiment UI, and what reader-ai puts there (measured before and after in
+      spikes/obs-stack round 4, results/20261124T105821-round4-tabs/tabs/): Traces — FR-OBS-12's types, tokens,
+      previews, tags, names; the execution timeline ("Show execution timeline", narrow; ADR-0033 option A offers
+      Jaeger). Sessions (Traces/Sessions switch) — FR-OBS-12 (e). Dashboard › Usage — counts, latency p50/p90/p99,
+      errors, tokens with the cache split, MLflow's cost estimate. Dashboard › Quality — FR-OBS-14. Dashboard › Tool
+      calls — FR-OBS-13's TOOL spans. Prompts — FR-OBS-15. Overview — MLflow's onboarding guide; stays as is.
+      Empty, with reasons: Issues (LLM-based issue detection: credit and a provider key in MLflow); Judges and
+      Evaluation runs (LLM judges spend credit; code scorers run server-side only with MLflow's job execution and its
+      docker executor backend, i.e. the Docker socket, which ADR-0025 and ADR-0032 keep away from every container;
+      the owner may run code scorers locally with `mlflow.genai.evaluate` over exported traces, not built);
+      Review (labeling queues need text to label; ADR-0033 option B); Datasets (evaluation records need inputs and
+      expectations as text; an ids-only dataset has no use in the UI); Agent versions (needs logged models and
+      `mlflow.modelId` trace metadata, which an OTLP client cannot set; not measured further); Playground and AI
+      Gateway (provider keys and egress; their routes are blocked at the edge, FR-OBS-9). Saved views:
+      /observability links ready-made dashboard views; measured that the traces tab's URL carries only `q` (full text
+      over span content), `groupBy`, `startTimeLabel`/`startTime`/`endTime` (its filters live in local view state; a
+      `filter=` URL showed all rows): dead jobs `?q=dead`, a stage `?q=<stage>`, an error code `?q=<code>`, tutor
+      answers `?q=job%20tutor.answer`, sessions `?groupBy=session`, and the Usage, Quality and Tool calls dashboards
+      (`#/experiments/0/dashboard/usage|quality|tool-calls`). "Slowest first" has no working URL in 3.18.0
+      (`sort`/`dir` did not reorder); the Usage dashboard's latency percentiles stand in. [image, live]
+  - id: FR-OBS-17
+    text: >-
+      Cost per lesson (owner, 2026-11-24: "pricing of each lesson in traces and other data"). In MLflow (measured,
+      round 4): the traces table has a Cost column (Display › Columns › Cost; shows each trace's ledger cost after
+      FR-OBS-12 c) and tag columns such as `reader.lesson.id` and `reader.cost_usd`, but it cannot sort by cost (Sort
+      offers only Time, Duration and State; the column's menu offers only "Hide column"); the trace metrics API
+      groups span cost only by `span_model_name` or `span_model_provider` (a tag dimension is refused with 400) and
+      has no trace-level cost metric; a `trace.tag.\`reader.lesson.id\` = '<id>'` filter works on span cost (0.88 and
+      0.67 for the two seeded lessons, equal to their ledger sums). So MLflow shows a lesson's traces and their costs
+      (saved view `?q=<lesson id>`: 5 of 10 traces, exactly that lesson's; FR-OBS-16), and the ranking lives in
+      reader-ai. FR-OBS-10 gains a fifth view, (e) `lessons`, from the ledger, owner-scoped, over the window: one row
+      per lesson of the owner with a compile run started or a tutor settle row in the window: lesson id, title (the
+      `lessons.title` column; this page may show titles, MLflow never gets them), course id and title, `compile_usd`
+      = the sum of spent(run) over the lesson's runs started in the window (failed and abandoned runs included:
+      settle rows of failed attempts and open reserves count, FR-AGENT-9), `runs` = their count, `last_compile_usd`
+      = spent(run) of the newest of them, `tutor_usd` = the sum of `settled_usd` of the owner's tutor settle rows
+      whose question's lesson is this lesson, `total_usd` = compile_usd + tutor_usd, `usd_per_1k_chars` = total_usd
+      over the lesson's source length in characters ÷ 1000 (`sum(char_length(text))` of the `material_spans` rows
+      SRV-PIPELINE's `DbSpanReader` loads for the lesson: its `course_plans` row's material and pages pdf_first..
+      pdf_last; the database returns the number only, no text leaves it; null when the lesson has no plan row or no
+      spans), and `mlflow_url` =
+      `https://localhost:8443/#/experiments/0/traces?q=<lesson id>`. Plus a course total row per course (sums of the
+      lesson rows; `usd_per_1k_chars` over the summed lengths). Queries: one over the owner's runs in the window,
+      one over their `agent_spend` rows, one over the owner's tutor settle rows joined to `tutor_questions`, one over
+      the lessons and courses named, one for the source lengths; no text column but the two titles is returned. The page sorts the rows by any
+      column (client-side; default total_usd descending). VEC-OBS-3 gains a lesson whose run has a failed paid attempt
+      (a settle row on an attempt whose job ended failed) and an unsettled reserve, so `compile_usd` counts both, a
+      second lesson with tutor spend only, and the expected `lessons` JSON. [unit, db, live]
+
+proposed_paired_changes:
+  - spec: SRV-AGENT
+    items:
+      - "FR-AGENT-14: `agent.call` gains `mlflow.spanType: AGENT`, `gen_ai.operation.name: invoke_agent`,
+        `gen_ai.provider.name: anthropic`, and FR-OBS-12 (b)'s token keys (input including the cache)."
+      - "FR-AGENT-14: after the settle, `agent.call` sets `mlflow.llm.cost` from the settle row and pricing.yaml
+        (FR-OBS-12 c), and `reader.lesson.id`, `reader.course.id`, `reader.stage`, `reader.step` from the caller's
+        context (a new optional `CallContext` argument; ids only)."
+  - spec: OPS-DEPLOY
+    items:
+      - "mlflow service: `MLFLOW_MODEL_CATALOG_URI=file:///catalog` and a read-only mount of
+        `deploy/mlflow-catalog/`, whose `anthropic.json` (MLflow catalog schema 1.0, every price 0, the model ids of
+        pricing.yaml) comes from a committed generator checked by trace-check against pricing.yaml (FR-OBS-12 c)."
+  - spec: SRV-PIPELINE
+    items:
+      - "Root tags and session (FR-OBS-12 d, e) from the step's args, with `reader.lesson.id`, `reader.course.id`,
+        `reader.step`, `reader.cost_usd` and `reader.run.spent_usd` (spent(run) read when the step's job ends);
+        `verify.claims`, `verify.lab`, `kernel.run`
+        spans (FR-OBS-13); `obs.feedback` enqueues for fact_check.passed, verify.passed, verify.lab_passed
+        (FR-OBS-14); linked prompt versions (FR-OBS-12 g)."
+  - spec: SRV-TUTOR
+    items:
+      - "`tutor.retrieve` and `tutor.citations` spans (FR-OBS-13); `obs.feedback` for tutor.citations_valid and
+        tutor.citation_share (FR-OBS-14); `reader.lesson.id` and `reader.course.id` on the root and `agent.call`
+        (from the question row and its lesson), `reader.cost_usd` on the root (FR-OBS-12 d)."
+  - spec: SRV-INGEST
+    items:
+      - "`ingest.parse`, `ingest.chunk` spans (FR-OBS-13); `search.embed` `embed.batch` spans."
+  - spec: "the freshness spec of V/freshness (in review; not on this base)"
+    items:
+      - "`obs.feedback` for freshness.verdict (FR-OBS-14) where the verdict is computed, once that branch merges."
+  - spec: SRV-EVENTS
+    items:
+      - "KIND_MODULES unchanged (`reader.obs.jobs` gains the kind `obs.feedback`)."
+  - spec: WEB-UI
+    items:
+      - "/observability: a `Dashboards` list of FR-OBS-16's saved views (links to https://localhost:8443, `rel=noopener
+        noreferrer`), and the note that MLflow's cost column and dashboard show the ledger's per-call amounts while
+        this page's run and lesson totals also count open reserves. No header, nav or app.css change
+        (V/live-ui-fixes owns those while it is open)."
+      - "/observability: a fifth view, `Cost per lesson` (FR-OBS-17): a table of the `lessons` rows (title, course,
+        compile total, runs, last compile, tutor, total, per 1k characters, a `Traces` link to `mlflow_url`), a
+        course total row per course, sortable by every column (`aria-sort` on the active header; default total
+        descending); a Storybook story with VEC-OBS-3's lessons."
+
 owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."
   - "If 8443 shows 401, you are not signed in: open https://localhost, sign in with your passkey, and reload the dashboard. It does not redirect to the sign-in page itself."

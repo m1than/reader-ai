@@ -1,0 +1,9 @@
+# Spike only (never shipped), round 4: the ledger as MLflow's cost source. A local model catalog (file://, no
+# network) prices our models at 0, so MLflow never prices the CLI's LLM spans itself; `agent.call` carries the
+# ledger's settled amount as `mlflow.llm.cost`, the one priced span per call.
+services:
+  mlflow-sqlite:
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+      MLFLOW_MODEL_CATALOG_URI: file:///catalog
+    volumes: ["./catalog:/catalog:ro"]

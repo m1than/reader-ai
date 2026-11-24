@@ -1415,6 +1415,27 @@ tasks:
         (5677fb3); details in the spec's review field. Code review (Fable): round 1 on 08700c5 changes (3 blockers:
         deep blocked paths, days=² 500, surviving mutants in complex areas; plus non-blocking items, all applied in
         8a0e679); round 2 on 8a0e679 VERDICT approve." }
+  - { id: V.obs-analytics, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [S2.SRV-OBS], branch: V/obs-analytics,
+      what: "Owner 2026-11-24: customize the MLflow dashboard for better analytics with best practices; use every tab;
+        is there a Jaeger-like view of spans.",
+      note: "Research and spec draft, zero credit. spikes/obs-stack round 4 (RESULT.md): MLflow 3.18.0 read in the
+        pinned image's source, then measured. Findings: today agent.call is typed LLM and priced from cache-less input
+        tokens, so trace tokens are wrong and the dashboard cost double-counts; with mlflow.spanType on our spans,
+        gen_ai.operation.name invoke_agent and semconv token keys including the cache, MLflow counts tokens right.
+        Cost (owner: the ledger is the source of truth): agent.call carries the ledger amount as mlflow.llm.cost and
+        a file:// zero-price model catalog stops MLflow pricing the CLI spans; measured trace cost = ledger, span cost
+        sum 1.55 = the seven ledger amounts, no double count. Per lesson: the traces table has a Cost column (not
+        sortable), cost groups only by model, a lesson tag filter works (0.88/0.67), ?q=<lesson id> lists a lesson's
+        traces; the ranking goes to /observability (FR-OBS-17). Root-span mlflow.traceTag.* gives trace tags,
+        the trace name and linked prompts; session.id gives sessions; JSON-string mlflow.spanInputs/Outputs give
+        ids-only previews; code-sourced assessments fill the Quality dashboard; our static prompt files fill Prompts.
+        Before/after screenshots of every tab: results/20261124T105821-round4-tabs/tabs/. Saved views: only q, groupBy
+        and the time range survive in the traces URL. Timeline: MLflow's \"Show execution timeline\" is real but
+        narrow; Jaeger 2.23.0 as Rotel's second exporter gives a full waterfall at 12–35 MiB (ADR-0033 option A).
+        Spec: SRV-OBS proposed FR-OBS-12..17 and proposed paired changes (incl. OPS-DEPLOY's catalog mount); ADR-0033 proposed (Jaeger, opt-in content
+        mode). Flagged: FR-OBS-12 (f, g) need a new allow-list rule type (json_object/json_array of listed keys).
+        Next: deep-reviewer rounds (OTel and privacy are complex areas), then the owner's decision on ADR-0033." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

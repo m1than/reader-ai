@@ -54,6 +54,21 @@
 	import gated
 }
 
+# Round 4 (the owner's Jaeger question): Jaeger's UI behind the same gate and the candidate CSP, on its own port.
+:8448 {
+	# Jaeger UI 2.23.0 runs two inline scripts (measured, round 4): their hashes, never 'unsafe-inline'.
+	header Content-Security-Policy "{$CSP_JAEGER}"
+	forward_auth gate:9000 {
+		uri /api/auth/owner-gate
+	}
+	reverse_proxy jaeger:16686 {
+		header_up -Cookie
+		header_up -Authorization
+		header_down -Set-Cookie
+		header_down -Access-Control-*
+	}
+}
+
 # Round 3 (review N1): a stand-in for the app's /observability page on another port of the same site. It is not
 # gated; its link opens the dashboard's deep link given in its own fragment, and the browser script adds
 # subresource and fetch requests to :8443 from it.
