@@ -347,7 +347,9 @@ requirements:
       the stored title NFC-normalised, cut to its first 40 code points, then trimmed of leading and trailing white
       space; the request's `confirm` is NFC-normalised and trimmed; they must be equal (else 400
       `confirm_mismatch`; WEB-MANAGE FR-MANAGE-2 asks for exactly that text; SRV-INGEST FR-INGEST-31 uses the same
-      rule);
+      rule); an empty target (a title whose first 40 code points are all white space) matches nothing: the delete
+      answers 400 `confirm_mismatch` for every `confirm`, the empty one included, and the web confirm button stays
+      disabled;
       under the header's locks, a course with an open run → 409 `compile_running` (cancel it first,
       FR-PIPELINE-20); otherwise `deleted_at` = now, `last_position` = `position` (when it had one) and `position` =
       null in one transaction, and the response is the impact body plus `deleted_at`. A second DELETE of a deleted
@@ -618,3 +620,9 @@ owner_notes:
 #     turns on).
 #   - Existing tests: the declared-route set, the migration test (two downgrades) and FR-LESSON-7's key set gain
 #     the amendment's items; SRV-PIPELINE's open-runs test inserts its foreign course with `position` 1 (the CHECK).
+#
+# Code review round 2 (V/manage-fix2, 2026-11-24): K10, the open-run checks (`_refuse_open_runs` and the impact's
+# `open_runs`) filter `cancelled_at IS NULL` on their own, not only through `finished_at`: [db]
+# test_manage_lessons_db.py renames a lesson and reads a course's impact while its only run is cancelled with
+# `finished_at` still null. FR-LESSON-25 gains the empty-target sentence (same wording as SRV-INGEST FR-INGEST-31
+# and WEB-MANAGE FR-MANAGE-2); [unit] tests/lessons/test_manage_confirm_unit.py.

@@ -22,8 +22,12 @@ export const confirmTarget = (title: string): string => [...title.normalize('NFC
 /** The request's `confirm`: the typed text NFC-normalised and trimmed. */
 export const normaliseConfirm = (typed: string): string => typed.normalize('NFC').trim();
 
-/** The typed text, normalised, equals the target (the server compares the same way). */
-export const matchesConfirm = (typed: string, title: string): boolean => normaliseConfirm(typed) === confirmTarget(title);
+/** The typed text, normalised, equals the target (the server compares the same way). An empty target matches
+ * nothing, the empty input included (FR-MANAGE-2). */
+export const matchesConfirm = (typed: string, title: string): boolean => {
+  const target = confirmTarget(title);
+  return target !== '' && normaliseConfirm(typed) === target;
+};
 
 export type ObjectKind = 'course' | 'lesson' | 'source' | 'note' | 'passkey' | 'session' | 'person' | 'setting' | 'compile';
 

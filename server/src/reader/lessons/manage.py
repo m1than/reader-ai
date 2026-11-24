@@ -449,11 +449,12 @@ async def course_impact(conn: AsyncConnection, owner_id: uuid.UUID, course_id: u
 
 def confirms(confirm: Any, title: str) -> bool:
     """FR-LESSON-25: the target is the title NFC-normalised, cut to 40 code points, then trimmed; `confirm` is
-    NFC-normalised and trimmed (SRV-INGEST FR-INGEST-31 and WEB-MANAGE FR-MANAGE-2 use the same rule)."""
+    NFC-normalised and trimmed (SRV-INGEST FR-INGEST-31 and WEB-MANAGE FR-MANAGE-2 use the same rule). An empty
+    target matches nothing, the empty `confirm` included."""
     if not isinstance(confirm, str):
         return False
     expected = unicodedata.normalize("NFC", title)[:CONFIRM_CHARS].strip()
-    return unicodedata.normalize("NFC", confirm).strip() == expected
+    return expected != "" and unicodedata.normalize("NFC", confirm).strip() == expected
 
 
 async def delete_courses(

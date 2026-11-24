@@ -75,9 +75,10 @@ def clean_title(value: Any) -> str | None:
 
 def confirm_matches(confirm: Any, display: str) -> bool:
     """FR-INGEST-31: the target is the display title NFC-normalised, cut to 40 code points, then trimmed;
-    `confirm` is NFC-normalised and trimmed (SRV-LESSON FR-LESSON-25's rule, character for character)."""
+    `confirm` is NFC-normalised and trimmed (SRV-LESSON FR-LESSON-25's rule, character for character). An empty
+    target matches nothing, the empty `confirm` included."""
     target = unicodedata.normalize("NFC", display)[:CONFIRM_CHARS].strip()
-    return isinstance(confirm, str) and _nfc(confirm) == target
+    return target != "" and isinstance(confirm, str) and _nfc(confirm) == target
 
 
 def default_title(material_id: str, filename: str | None) -> str:
@@ -237,9 +238,11 @@ async def _take(conn: AsyncConnection, owner: uuid.UUID, kind: str, key: str) ->
 
 async def lock_affected(conn: AsyncConnection, owner: uuid.UUID, sha: str, material_id: str) -> None:
     """FR-INGEST-31: course locks, lesson locks, then the position lock, over every course this request may
-    write. After each round the affected set is read again; when it changed, the whole new set is walked again
-    in the same global order (a held lock is granted again at once; nothing is released), so the acquisition
-    sequence never inverts. A set that still changes after `_LOCK_ROUNDS` walks refuses `material_busy`."""
+    write. After each walk the affected set is read again. What is guaranteed: a set that stays stable between
+    two reads has been walked whole in the global order; a set that changed is walked whole again in that order
+    (a lock already held is granted again at once; nothing is released, so a lock taken in an earlier walk may
+    precede one that sorts before it); a set that still changes after `_LOCK_ROUNDS` walks refuses
+    `material_busy`."""
     held: Affected | None = None
     for _ in range(_LOCK_ROUNDS):
         found = await affected(conn, owner, sha, material_id)

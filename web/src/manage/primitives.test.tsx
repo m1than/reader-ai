@@ -66,6 +66,14 @@ describe('titles and typed confirmation (FR-MANAGE-1, FR-MANAGE-2)', () => {
     // Leading white space in a stored title counts towards the 40 code points, then goes.
     expect(confirmTarget?.('  ' + 'b'.repeat(50))).toBe('b'.repeat(38));
   });
+
+  it('matches nothing when the target is empty, the empty input included (FR-MANAGE-2)', async () => {
+    const { confirmTarget, matchesConfirm } = await model();
+    for (const title of ['', '   ', ' '.repeat(40) + 'after forty']) {
+      expect(confirmTarget?.(title)).toBe('');
+      for (const typed of ['', '  ', 'after forty']) expect(matchesConfirm?.(typed, title)).toBe(false);
+    }
+  });
 });
 
 describe('response mapping (FR-MANAGE-1)', () => {
@@ -210,6 +218,20 @@ describe('ConfirmDialog (FR-MANAGE-2)', () => {
     expect(del.disabled).toBe(false);
     await act(async () => fireEvent.click(del));
     expect(onConfirm).toHaveBeenCalledWith('a'.repeat(39));
+  });
+
+  it('keeps the button disabled for an empty target, whatever is typed', async () => {
+    const { ConfirmDialog } = await prim();
+    if (!ConfirmDialog) return expect(ConfirmDialog).toBeTypeOf('function');
+    const onConfirm = vi.fn(async () => undefined);
+    render(<ConfirmDialog open title="Delete the course?" confirmLabel="Delete" typed={'   '} onConfirm={onConfirm} onClose={vi.fn()} />);
+    const dialog = await screen.findByRole('dialog');
+    const del = within(dialog).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+    expect(del.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByRole('textbox'), { target: { value: ' ' } });
+    expect(del.disabled).toBe(true);
+    await act(async () => fireEvent.click(del));
+    expect(onConfirm).not.toHaveBeenCalled();
   });
 
   it('closes on Escape and on Cancel with no request', async () => {

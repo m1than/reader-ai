@@ -1104,6 +1104,9 @@ requirements:
       imported material: the target is the display title NFC-normalised, cut to its first 40 code points, then
       trimmed of leading and trailing white space; the request's `confirm` is NFC-normalised and trimmed; they must
       be equal (the same rule as SRV-LESSON FR-LESSON-25 and WEB-MANAGE FR-MANAGE-2), else 400 `confirm_mismatch`;
+      an empty target (a title whose first 40 code points are all white space) matches nothing: the delete
+      answers 400 `confirm_mismatch` for every `confirm`, the empty one included, and the web confirm button stays
+      disabled;
       an open upload or a
       running import or embed key for it, or a `running` freshness report of it (SRV-FRESH FR-FRESH-20) → 409
       `material_busy`; when courses that are not deleted use it and
@@ -1489,3 +1492,7 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 # upload of bytes whose material row is deleted → 409 `material_deleted` before any write (restore it instead;
 # `UNIQUE (owner_id, sha256)` holds); the `ingest.import` job for a reader.yaml material whose row is deleted
 # does nothing and logs `ingest material_deleted <id>`; an import never clears `deleted_at`.
+# Code review round 2 (V/manage-fix2, 2026-11-24): FR-INGEST-31 gains the empty-target sentence (same wording as
+# SRV-LESSON FR-LESSON-25 and WEB-MANAGE FR-MANAGE-2), [unit] tests/ingest/test_manage_confirm_unit.py; the lock
+# walk's docstring states what is guaranteed (a set that stays stable was walked whole in global order; a changed
+# set is walked whole again; after 3 walks a still-changing set refuses `material_busy`), no behaviour change.

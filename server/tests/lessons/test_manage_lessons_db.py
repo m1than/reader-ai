@@ -41,6 +41,21 @@ async def test_rename_lesson(pg: Pg, tmp_path: Path) -> None:
     await w.engine.dispose()
 
 
+async def test_a_cancelled_run_never_blocks(pg: Pg, tmp_path: Path) -> None:
+    """K10: the open-run checks filter `cancelled_at IS NULL` themselves: a cancelled run whose `finished_at` is
+    still null neither refuses a change nor counts in the impact's `open_runs`."""
+    w = await manage_world(pg, tmp_path)
+    course, (lesson,) = await make_course(w, "ivan", "Course", lessons=1)
+    run = await open_run(w, "ivan", lesson)
+    await execute(w, "UPDATE compile_runs SET cancelled_at = now() WHERE id = :r", r=run)
+    async with client(w) as c:
+        impact = await c.get(f"/api/courses/{course}/impact")
+        assert (impact.status_code, impact.json()["open_runs"], impact.json()["compile_runs"]) == (200, 0, 1)
+        r = await c.post(f"/api/lessons/{lesson}", json={"version": 1, "title": "Renamed"})
+        assert r.status_code == 200, r.text
+    await w.engine.dispose()
+
+
 async def test_order_lessons_keeps_deleted_after_visible(pg: Pg, tmp_path: Path) -> None:
     w = await manage_world(pg, tmp_path)
     course, (a, b, cc, d) = await make_course(w, "ivan", "Course", lessons=4)

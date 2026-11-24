@@ -240,6 +240,19 @@ describe('Add a passkey (FR-MANAGE-7, SRV-AUTH FR-AUTH-6)', () => {
     expect((within(region).getByRole('button', { name: 'Add a passkey' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
+  it('says a prompt that resolves without a credential calmly and sends no verify', async () => {
+    const webauthn = stub(async () => null);
+    const server = fakeServer();
+    const region = await passkeys(server);
+    await add(region);
+    const line = await within(region).findByText('The passkey request was cancelled or timed out. Nothing was added.');
+    expect(line.getAttribute('role')).toBe('status');
+    expect(within(region).queryByRole('alert')).toBeNull();
+    expect(webauthn.create).toHaveBeenCalledTimes(1);
+    expect(server.writes()).toEqual([{ method: 'POST', path: '/api/auth/register/options', body: {} }]);
+    expect((within(region).getByRole('button', { name: 'Add a passkey' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('takes the recent-sign-in path on reauth_required and never prompts', async () => {
     const webauthn = stub(async () => ({ toJSON: () => CREDENTIAL_JSON }));
     const navigateAway = vi.fn();
