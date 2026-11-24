@@ -430,19 +430,31 @@ requirements:
       `<DIR>/obs_mlflow.db` plus the artifacts directory, and writes `<DIR>/obs_mlflow.store.version` (the volume's
       `store.version`, when present). `reader restore DIR` (stack down), in this order: removes the volume's
       `store.version` and the markers `backup/in-progress`, `backup/fresh` and `backup/restored-for`, replaces
-      `mlflow.db` through the backup API, then writes `store.version` from the backup (absent when the backup has
-      none); `mlflow-migrate` runs at the next start. The `obs_mlflow` volume's backup label changes from excluded to
-      included (ADR-0038 Decision 6; OPS-DEPLOY FR-DEPLOY-15).
+      `mlflow.db` (copy first, through the backup API, into a temporary file in the volume; only then removes the
+      old `mlflow.db-wal` and `mlflow.db-shm` and moves the copy into place, so a failed copy leaves the old store
+      whole), then writes `store.version` from the backup (absent when the backup has none). It then runs
+      `mlflow-migrate` itself as a fresh one-shot (`docker compose run --rm --no-deps mlflow-migrate`, with the
+      `observability` profile) and starts mlflow again only when that run exited 0; any other exit leaves mlflow
+      stopped, prints that code's message as (d) and exits with `restore_failed` (code review round 1 of phase 2,
+      B3). The `obs_mlflow` volume's backup label changes from excluded to included (ADR-0038 Decision 6; OPS-DEPLOY
+      FR-DEPLOY-15).
       (c) `reader restore-obs-premigrate [--force]` (stack down) restores `backup/pre-migrate.db` as SRV-OBS FR-OBS-29
-      describes; with `--force` it prints the version it rolls back to before copying. Exit codes: 0 restored
+      describes; with `--force` it prints the version it rolls back to before copying. Exit codes (0..7): 0 restored
       (prints the version), 2 the stack is up (stop it first), 3 no `pre-migrate.db`, 4 the backup API copy failed
-      (`mlflow.db` untouched), 5 the marker could not be written, 6 no `backup/in-progress` (rerun with `--force`).
+      (`mlflow.db` untouched), 5 the marker could not be written, 6 no `backup/in-progress` (rerun with `--force`),
+      7 no (or an empty) `backup/pre-migrate.version`: the version to restore for is unknown, so nothing is copied
+      (code review round 1 of phase 2: never restore for "unknown").
       (d) `reader up` reports `mlflow-migrate`'s own exit codes (10 `obs_migration_incomplete` → run
       restore-obs-premigrate; 11 `obs_restored_for_other_version` → the marker's version and the hint that the owner
       reverts the pin in git; 12 `obs_migration_failed` and 13 `obs_migration_finish_failed` → restore-obs-premigrate),
-      which never overlap the restore command's 0..6. Tests: [unit] the doctor and status lines from canned
+      which never overlap the restore command's 0..7. (e) `reader status` prints (a)'s obs lines when the
+      `observability` profile is recorded (`reader status --json`: the list `obs`), and `reader doctor --json` carries
+      each as an informational check `{name: obs, ok: true, detail: <line>}`, so the array's shape stays. Tests: [unit] the doctor and status lines from canned
       `docker inspect` / `docker system df -v` output, the 80 % warning; the backup and restore command sequences
-      (argv) in order; restore-obs-premigrate's exit codes; `reader up`'s message per migrate code.
+      (argv) in order; restore-obs-premigrate's exit codes; `reader up`'s message per migrate code; [unit,
+      command level] `cmd_restore` with the obs volume runs `mlflow-migrate` after the store copy and before mlflow
+      starts, and leaves mlflow stopped when it exits non-zero; `cmd_backup` writes the three obs files; `cmd_up`
+      prints the migrate message when `up` fails with the profile.
 
 invariants:
   - id: INV-CLI-1

@@ -247,6 +247,10 @@ services:
     security_opt: ["no-new-privileges:true"]
     restart: "no"
     network_mode: none
+    # Structural (OPS-DEPLOY FR-DEPLOY-15 (b)): one `db upgrade` of a SQLite file, half of mlflow's 1g; equal to
+    # memswap_limit, so no swap.
+    mem_limit: 512m
+    memswap_limit: 512m
     volumes:
       - obs_mlflow:/var/lib/mlflow
       - ./otel/mlflow-migrate.sh:/opt/reader/mlflow-migrate.sh:ro

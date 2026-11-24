@@ -32,6 +32,8 @@ def test_mlflow_migrate_service() -> None:
     assert svc["cap_drop"] == ["ALL"] and "no-new-privileges:true" in svc["security_opt"]
     assert any(str(t).startswith("/tmp") for t in svc["tmpfs"])
     assert svc["restart"] == "no"
+    # FR-DEPLOY-15 (b): 512 MiB, no swap (code review round 1 of phase 2)
+    assert int(svc["mem_limit"]) == int(svc["memswap_limit"]) == 512 * 1024 * 1024
     assert svc.get("network_mode") == "none" and not svc.get("networks")
     assert [v["source"] for v in svc["volumes"] if v["type"] == "volume"] == ["obs_mlflow"]
     assert "mlflow-migrate.sh" in " ".join(svc.get("entrypoint") or []) + " ".join(svc.get("command") or [])
@@ -74,8 +76,7 @@ def test_obs_services_hardened_and_only_on_internal_networks() -> None:
         svc = model["services"][name]
         assert svc["read_only"] is True and svc["cap_drop"] == ["ALL"], name
         assert "no-new-privileges:true" in svc["security_opt"], name
-        if name != "mlflow-migrate":
-            assert int(svc["mem_limit"]) == int(svc["memswap_limit"]), name
+        assert int(svc["mem_limit"]) == int(svc["memswap_limit"]), name
         for net in networks_of(svc):
             assert model["networks"][net].get("internal") is True, (name, net)
 

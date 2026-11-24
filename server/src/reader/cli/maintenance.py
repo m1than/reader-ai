@@ -21,6 +21,7 @@ from reader.cli.commands import (
     Project,
     _obs_run,
     choose_profiles,
+    compose_argv,
     docker,
     ensure_run_dir,
     guarded,
@@ -278,8 +279,9 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     obs_on = project is not None and config.observability.enabled
     obs_lines = obs_doctor_lines(ctx, project.model) if project is not None and obs_on else []
     ok = all(c["ok"] for c in checks)
-    if as_json:
-        print(json.dumps(checks), file=ctx.out)
+    if as_json:  # FR-CLI-24 (e): the obs lines as informational checks; the array's shape stays
+        obs = [{"name": "obs", "ok": True, "detail": line} for line in obs_lines]
+        print(json.dumps([*checks, *obs]), file=ctx.out)
     else:
         for c in checks:
             print(f"{'ok  ' if c['ok'] else 'FAIL'} {c['name']}: {c['detail']}".rstrip(": "), file=ctx.out)
@@ -336,7 +338,7 @@ def obs_doctor_lines(ctx: Ctx, model: Rendered) -> list[str]:
 @guarded
 def cmd_restore_obs_premigrate(ctx: Ctx, config_path: Path, force: bool) -> int:
     """FR-CLI-24 / SRV-OBS FR-OBS-29: put the pre-migration backup back after a failed migration (stack down).
-    Exit codes 0..6 (obs_store.PREMIGRATE_CODES)."""
+    Exit codes 0..7 (obs_store.PREMIGRATE_CODES)."""
     project = load(ctx, config_path)
     model = project.model
     volume = _obs_volume(ctx, model)
@@ -432,16 +434,15 @@ def _obs_backup(ctx: Ctx, model: Rendered) -> dict[str, bytes]:
         return {n: (Path(tmp) / n).read_bytes() for n in OBS_FILES if (Path(tmp) / n).is_file()}
 
 
-def _migrate_once(ctx: Ctx, model: Rendered) -> None:
-    """After a restore, mlflow-migrate runs before mlflow starts again (FR-OBS-29, -30)."""
-    container = f"{model.name}-mlflow-migrate-1"
-    started = docker(ctx, "docker", "start", container)
-    if started is None or started.code != 0:
-        return  # never created (the profile has not run since): the next `reader up` runs it
-    waited = docker(ctx, "docker", "wait", container, timeout=ONE_OFF_TIMEOUT * 5)
-    code = waited.out.decode().strip() if waited is not None and waited.code == 0 else ""
-    if code != "0":
-        exit_code = int(code) if code.isdigit() else -1
+def _migrate_once(ctx: Ctx, project: Project) -> None:
+    """After a restore, mlflow-migrate runs (a fresh one-shot through `docker compose run --rm`, so a
+    never-created container cannot skip it) and must exit 0 before mlflow starts again (FR-OBS-29, -30;
+    OPS-CLI FR-CLI-24). Any other exit raises with the code's message; the caller leaves mlflow stopped."""
+    extra = tuple(sorted({*project.profiles, "observability"}))
+    argv = compose_argv(ctx, "run", "--rm", "--no-deps", "mlflow-migrate", extra=extra)
+    ran = docker(ctx, *argv, stdin=project.override, timeout=ONE_OFF_TIMEOUT * 5)
+    exit_code = ran.code if ran is not None else -1
+    if exit_code != 0:
         raise CliError("restore_failed", obs_store.migrate_message(exit_code))
 
 
@@ -635,6 +636,7 @@ def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
             raise CliError("blobs_not_empty", "the blobs volume is not empty")
     obs = "obs_mlflow.db" in files and _obs_volume(ctx, model) is not None
     stopped = [s for s in (*WRITERS, "caddy", *(("mlflow",) if obs else ())) if s in model.services]
+    migrated = not obs  # FR-CLI-24: mlflow starts again only after mlflow-migrate exited 0
     try:
         _services(ctx, model.name, "stop", stopped)
         _capture(
@@ -658,8 +660,9 @@ def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
             )
         if obs:
             _obs_restore(ctx, model, files)
-            _migrate_once(ctx, model)
+            _migrate_once(ctx, project)
+            migrated = True
     finally:
-        _services(ctx, model.name, "start", stopped)
+        _services(ctx, model.name, "start", [s for s in stopped if s != "mlflow" or migrated])
     print(f"restored from {source}", file=ctx.out)
     return 0

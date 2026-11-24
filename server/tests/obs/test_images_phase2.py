@@ -146,8 +146,14 @@ def health():
         return None
 print(json.dumps({"connect": connect(), "resolve": resolve(), "health": health()}))
 """
-    inside = _worker(prefix, server_image, probe)
-    assert inside == {"connect": False, "resolve": False, "health": 200}
+    # Both of mlflow's compose networks, obs and obs-ui (code review round 1 of phase 2): each internal.
+    ti.internal_network(f"{prefix}-obs-ui")
+    sh("docker", "network", "connect", "--alias", "mlflow", f"{prefix}-obs-ui", f"{prefix}-mlflow")
+    for net in ("obs", "obs-ui"):
+        out = sh("docker", "run", "--rm", "--network", f"{prefix}-{net}", "--entrypoint", "python", server_image,
+                 "-c", probe, timeout=120)
+        inside = json.loads(out.strip().splitlines()[-1])
+        assert inside == {"connect": False, "resolve": False, "health": 200}, net
     outside = json.loads(sh("docker", "run", "--rm", "--entrypoint", "python", server_image, "-c", probe).strip())
     assert outside["connect"] is True and outside["resolve"] is True
 

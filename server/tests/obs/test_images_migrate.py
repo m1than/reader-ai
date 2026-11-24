@@ -35,7 +35,7 @@ HARDEN = ["--user", "10004:10004", "--read-only", "--tmpfs", "/tmp:uid=10004", "
           "--security-opt", "no-new-privileges", "--network", "none", "-e", "HOME=/tmp"]
 # mlflow-migrate's own exit codes (FR-OBS-29) and restore-obs-premigrate's (FR-CLI-24).
 INCOMPLETE, RESTORED_OTHER, FAILED, FINISH_FAILED = 10, 11, 12, 13
-RESTORED, STACK_UP, NO_BACKUP, COPY_FAILED, MARKER_FAILED, NOT_IN_PROGRESS = 0, 2, 3, 4, 5, 6
+RESTORED, STACK_UP, NO_BACKUP, COPY_FAILED, MARKER_FAILED, NOT_IN_PROGRESS, NO_VERSION = 0, 2, 3, 4, 5, 6, 7
 
 
 @pytest.fixture(scope="module")
@@ -61,14 +61,23 @@ def _script() -> Path:
 
 def migrate(image: str, vol: str, *env: str, detach: bool = False) -> int | str:
     """One hardened `mlflow-migrate` run; its exit code (or the container id when detached)."""
-    script = _script()
-    cmd = ["docker", "run", *(["-d"] if detach else ["--rm"]), *HARDEN, *[a for e in env for a in ("-e", e)],
-           "-v", f"{vol}:{DATA}", "-v", f"{script}:/opt/reader/mlflow-migrate.sh:ro", "--entrypoint", "sh", image,
-           "/opt/reader/mlflow-migrate.sh"]
     if detach:
-        return sh(*cmd).strip()
-    proc = ti.subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=600)
-    return proc.returncode
+        return sh(*_migrate_cmd(image, vol, env, detach=True)).strip()
+    return migrate_logged(image, vol, *env)[0]
+
+
+def migrate_logged(image: str, vol: str, *env: str) -> tuple[int, str]:
+    """One run's exit code and its `mlflow-migrate:` lines (which name the path that ran)."""
+    proc = ti.subprocess.run(_migrate_cmd(image, vol, env), capture_output=True, text=True, check=False, timeout=600)
+    lines = [x for x in (proc.stdout + proc.stderr).splitlines() if x.startswith("mlflow-migrate:")]
+    return proc.returncode, "\n".join(lines)
+
+
+def _migrate_cmd(image: str, vol: str, env: tuple[str, ...], *, detach: bool = False) -> list[str]:
+    script = _script()
+    return ["docker", "run", *(["-d"] if detach else ["--rm"]), *HARDEN, *[a for e in env for a in ("-e", e)],
+            "-v", f"{vol}:{DATA}", "-v", f"{script}:/opt/reader/mlflow-migrate.sh:ro", "--entrypoint", "sh",
+            image, "/opt/reader/mlflow-migrate.sh"]
 
 
 def in_volume(image: str, vol: str, script: str, *, root: bool = False, timeout: float = 300) -> str:
@@ -126,8 +135,10 @@ def serve(image: str, vol: str) -> dict[str, object]:
 
 
 def n_store_with_data(vol: str) -> None:
-    """A store as the previous pin leaves it: migrated by N's mlflow-migrate (store.version = N), holding `old`."""
-    assert migrate(N_IMAGE, vol) == 0
+    """A store as the previous pin leaves it: migrated by N's mlflow-migrate (store.version = N), holding `old`.
+    N's `db upgrade` cannot build an empty store, so the automatic fallback runs (asserted by its path line)."""
+    code, log = migrate_logged(N_IMAGE, vol)
+    assert code == 0 and "path: fallback" in log and "(forced)" not in log, log
     assert read(N_IMAGE, vol, "store.version") == N_VERSION
     in_volume(N_IMAGE, vol, f'python -c "{WRITE_OLD}"')
 
@@ -137,7 +148,8 @@ def n_store_with_data(vol: str) -> None:
 
 def test_n_to_next_upgrades_with_one_backup(volume: str, next_image: str) -> None:
     n_store_with_data(volume)
-    assert migrate(next_image, volume) == 0
+    code, log = migrate_logged(next_image, volume)
+    assert code == 0 and f"path: db upgrade (from {N_VERSION})" in log, log
     assert read(next_image, volume, "store.version") == NEXT_VERSION
     assert read(next_image, volume, "backup/pre-migrate.version") == N_VERSION
     count = "select count(*) from experiments"  # a constant: no value is interpolated
@@ -216,11 +228,69 @@ def test_restore_codes_for_a_missing_backup(volume: str, next_image: str) -> Non
     assert code == NO_BACKUP
 
 
+def test_restore_refuses_while_a_container_holds_the_volume(volume: str, next_image: str) -> None:
+    n_store_with_data(volume)
+    assert migrate(next_image, volume) == 0
+    holder = sh("docker", "run", "-d", *HARDEN, "-v", f"{volume}:{DATA}", "--entrypoint", "sleep", next_image,
+                "120").strip()
+    try:
+        store = require("reader.cli.obs_store")
+        code, _ = store.restore_premigrate(volume=volume, image=next_image, force=True)
+        assert code == STACK_UP
+    finally:
+        sh("docker", "rm", "-f", holder, check=False)
+    assert read(next_image, volume, "store.version") == NEXT_VERSION  # nothing was restored
+
+
+def test_a_failed_copy_leaves_the_store_and_its_wal_whole(volume: str, next_image: str) -> None:
+    """Exit 4: the copy goes first (B3), so a backup that cannot be read changes neither mlflow.db nor its -wal."""
+    n_store_with_data(volume)
+    assert migrate(next_image, volume) == 0
+    in_volume(next_image, volume, f"printf 'not a database' > {DATA}/backup/pre-migrate.db && "
+              f"printf 'wal' > {DATA}/mlflow.db-wal")
+    db, wal = sha(next_image, volume, "mlflow.db"), sha(next_image, volume, "mlflow.db-wal")
+    store = require("reader.cli.obs_store")
+    code, _ = store.restore_premigrate(volume=volume, image=next_image, force=True)
+    assert code == COPY_FAILED
+    assert sha(next_image, volume, "mlflow.db") == db and sha(next_image, volume, "mlflow.db-wal") == wal
+    assert read(next_image, volume, "mlflow.db.restore") is None
+    assert read(next_image, volume, "store.version") == NEXT_VERSION
+
+
+def test_a_marker_that_cannot_be_written_exits_5(volume: str, next_image: str) -> None:
+    n_store_with_data(volume)
+    assert migrate(next_image, volume) == 0
+    in_volume(next_image, volume, f"mkdir {DATA}/backup/restored-for")  # a directory: the marker write fails
+    store = require("reader.cli.obs_store")
+    code, _ = store.restore_premigrate(volume=volume, image=next_image, force=True)
+    assert code == MARKER_FAILED
+
+
+def test_a_missing_pre_migrate_version_refuses_before_copying(volume: str, next_image: str) -> None:
+    """Exit 7 (code review round 1 of phase 2): never a restore for an "unknown" version."""
+    n_store_with_data(volume)
+    assert migrate(next_image, volume) == 0
+    in_volume(next_image, volume, f"rm {DATA}/backup/pre-migrate.version")
+    db = sha(next_image, volume, "mlflow.db")
+    store = require("reader.cli.obs_store")
+    code, out = store.restore_premigrate(volume=volume, image=next_image, force=True)
+    assert code == NO_VERSION and "pre-migrate.version" in out, out
+    assert sha(next_image, volume, "mlflow.db") == db
+    assert read(next_image, volume, "store.version") == NEXT_VERSION
+
+
+def test_a_failing_finish_exits_13(volume: str, next_image: str) -> None:
+    in_volume(next_image, volume, f"mkdir {DATA}/store.version.tmp")  # step (4) cannot write store.version
+    code, log = migrate_logged(next_image, volume)
+    assert code == FINISH_FAILED and "obs_migration_finish_failed" in log, log
+
+
 # --- fresh volumes ---
 
 
 def test_fresh_volume_via_db_upgrade(volume: str, next_image: str) -> None:
-    assert migrate(next_image, volume) == 0
+    code, log = migrate_logged(next_image, volume)
+    assert code == 0 and "path: db upgrade" in log and "path: fallback" not in log, log
     assert read(next_image, volume, "store.version") == NEXT_VERSION
     assert read(next_image, volume, "backup/fresh") is None
     assert read(next_image, volume, "backup/pre-migrate.db") is None  # nothing to back up
@@ -229,7 +299,8 @@ def test_fresh_volume_via_db_upgrade(volume: str, next_image: str) -> None:
 
 
 def test_fresh_volume_via_the_fallback(volume: str, next_image: str) -> None:
-    assert migrate(next_image, volume, "READER_MLFLOW_MIGRATE_FALLBACK=1") == 0  # db upgrade forced off
+    code, log = migrate_logged(next_image, volume, "READER_MLFLOW_MIGRATE_FALLBACK=1")  # db upgrade forced off
+    assert code == 0 and "path: fallback (forced)" in log and "path: db upgrade" not in log, log
     assert read(next_image, volume, "store.version") == NEXT_VERSION
     assert read(next_image, volume, "backup/fresh") is None  # cleared before the server's first start (H1)
     assert serve(next_image, volume)["health"] is True
