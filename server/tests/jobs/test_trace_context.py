@@ -28,6 +28,41 @@ def _roots(spans: list[Any]) -> list[Any]:
     return sorted((s for s in spans if s.name == f"job {KIND}"), key=lambda s: s.attributes["reader.job.id"])
 
 
+@pytest.mark.parametrize(
+    ("ending", "outcome", "code"),
+    [
+        ("cancelled", "aborted", None),
+        ("lost", "failed", "session_lost"),
+        ("lost_dead", "dead", "session_lost"),
+    ],
+)
+async def test_root_outcome_of_a_cancelled_or_lost_run(ending: str, outcome: str, code: str | None) -> None:
+    """Round 2: the wrapper's `aborted` and `session_lost` marks, without a database (steps faked)."""
+    import asyncio
+
+    from reader.jobs import queue
+    from reader.jobs.model import JobFailed
+
+    prop = require("reader.obs.propagation")
+
+    class Fake:
+        async def _attempt(self, *_a: Any) -> Any:
+            if ending == "cancelled":
+                raise asyncio.CancelledError
+            return (RuntimeError("x"), False, True)  # (error, timed out, session lost)
+
+        async def _count_lost_run(self, *_a: Any) -> bool:
+            return ending == "lost_dead"
+
+    with obs_setup("worker") as (handle, memory):
+        with prop.job_span(KIND, 7, "k", {}), pytest.raises((asyncio.CancelledError, JobFailed)):
+            await queue.Jobs._run_in_span(Fake(), effect_kind(), 7, {"name": "x"})  # type: ignore[arg-type]
+        (root,) = _roots(finished(handle, memory))
+    attrs = dict(root.attributes)
+    assert attrs["reader.job.outcome"] == outcome
+    assert attrs.get("reader.error_code") == code
+
+
 def test_kind_modules_list_obs_jobs() -> None:
     from reader.jobs.catalog import KIND_MODULES, load_kinds
 

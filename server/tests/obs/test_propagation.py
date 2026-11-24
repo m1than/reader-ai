@@ -46,6 +46,9 @@ def test_derive_trace_id_known_value() -> None:
         "00-" + "1" * 31 + "-" + "1" * 16 + "-01",
         "00-" + "g" * 32 + "-" + "1" * 16 + "-01",
         "00-" + "1" * 32 + "-" + "1" * 16 + "-00",
+        "00-" + "AB" * 16 + "-" + "cd" * 8 + "-01",  # W3C: lower-case hex only (round 2)
+        "00-" + "ab" * 16 + "-" + "CD" * 8 + "-01",
+        "00-" + "ab" * 16 + "-" + "cd" * 8 + "-0B",
     ],
 )
 def test_parse_traceparent_refuses(value: str | None) -> None:

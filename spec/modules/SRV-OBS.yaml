@@ -481,7 +481,9 @@ vectors:
 #            (INV-OBS-3: a failing exporter, and a tracer whose start, attribute or end call raises inside the
 #            middleware). Code review round 1 added: an oracle of VEC-OBS-1 read from the YAML independently of
 #            reader.obs.attributes (used by the INV-OBS-1 property test) with example rows at every bound; the gate's
-#            remaining Sec-Fetch, OPTIONS and inexact-Origin rows; the regexp of FR-OBS-9 on its own.
+#            remaining Sec-Fetch, OPTIONS and inexact-Origin rows; the regexp of FR-OBS-9 on its own. Round 2 added:
+#            an upper-case traceparent is refused (W3C: lower-case hex only), and the retention handler takes
+#            `enabled` and `retention_days` from `current_settings()`.
 #   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
 #            capturing exporter (INV-OBS-4 end to end), the summary queries on VEC-OBS-3 (FR-OBS-10; the fixture's ISO
 #            times are seeded as timezone-aware datetimes), the gate route on real sessions (FR-OBS-9).

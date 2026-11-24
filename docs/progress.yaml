@@ -1370,9 +1370,16 @@ tasks:
         tutor calls, gate_status(url, roots) with a real-TLS test and `status <n>`, guarded middleware, `**BATCH`
         and env headers cleared while the exporter is built, retention enqueue retries and bad-200 handling,
         failures view bounded by the dead rows' ids, lost runs marked dead, start_obs inside the try, FR-OBS-1's
-        dependency wording. Live steps still not run (owner's rule for this task).",
+        dependency wording (8a0e679). Code review round 2 (on 8a0e679): VERDICT approve; the blocked regexp held
+        against every bypass tried (no passing variant is a real MLflow route), Caddy's internal root passes
+        Python's strict X.509 verification (the doctor risk is closed), 170 of 188 mutants killed, the rest
+        equivalent or small gaps; the cheap gaps were then closed with tests only (upper-case traceparent, aborted
+        and session_lost root marks, the retention handler reading current_settings). Live steps still not run
+        (owner's rule for this task); the stage-2 live check covers them.",
       review: "deep-reviewer (Fable): design rounds 1–3 changes (7, 3 and 1 blockers, all applied), round 4 approve
-        (5677fb3); details in the spec's review field." }
+        (5677fb3); details in the spec's review field. Code review (Fable): round 1 on 08700c5 changes (3 blockers:
+        deep blocked paths, days=² 500, surviving mutants in complex areas; plus non-blocking items, all applied in
+        8a0e679); round 2 on 8a0e679 VERDICT approve." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

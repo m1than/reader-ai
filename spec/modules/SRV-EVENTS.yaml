@@ -360,7 +360,8 @@ requirements:
       obs's `on_worker_start` in that order (FR-EVENTS-1's unit test updated). The root span's outcome is the key's:
       `dead` with `reader.error_class` for a permanent failure, `dead` with `exhausted` for a run that finds the key
       at max_attempts, `skipped` for a run that finds the key decided, and `dead` (not `failed`) for `session_lost` and
-      `wrapper_error` when that count ended the key dead (code review round 1). [unit, db]
+      `wrapper_error` when that count ended the key dead (code review round 1), `failed` with `session_lost` when it
+      did not, and `aborted` for a cancelled run (round 2). [unit, db]
       server/tests/jobs/test_trace_context.py.
 
 invariants:

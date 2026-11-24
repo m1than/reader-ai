@@ -212,3 +212,32 @@ async def test_on_worker_start_enqueues_today() -> None:
     fake = FakeJobs(log)
     await jobs.on_worker_start(fake, now=NOW)
     assert fake.calls == [("obs.retention", {"day": "2026-11-24"}, 0)]
+
+
+@pytest.mark.parametrize(("enabled", "days"), [(True, 7), (False, 365)])
+async def test_handle_takes_the_current_settings(
+    enabled: bool, days: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Round 2: the job reads `enabled` and `retention_days` from setup's current settings."""
+    import reader.jobs
+    from reader.obs import setup
+
+    jobs = require("reader.obs.jobs")
+    seen: list[dict[str, Any]] = []
+    queue = FakeJobs([])
+
+    async def recording(day: str, **kwargs: Any) -> int:
+        seen.append({"day": day, **kwargs})
+        return 0
+
+    monkeypatch.setattr(setup, "current_settings", lambda: setup.Settings(enabled, days))
+    monkeypatch.setattr(reader.jobs, "running", lambda: queue)
+    monkeypatch.setattr(jobs, "retain", recording)
+    await jobs.handle(jobs.RetentionArgs(day="2026-11-24"), None, None)
+    ((call),) = seen
+    assert (call["day"], call["enabled"], call["retention_days"], call["jobs"]) == (
+        "2026-11-24",
+        enabled,
+        days,
+        queue,
+    )
