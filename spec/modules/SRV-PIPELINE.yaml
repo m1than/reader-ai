@@ -409,6 +409,8 @@ requirements:
       one `obs.runs` with end 1 after commit; a resumed run's second end enqueues end 2; a failing enqueue leaves
       the run's end recorded and logs the line.
   # Amendment (2026-11-24, V/manage, WEB-MANAGE): FR-PIPELINE-20..22; see the note at the end.
+  # Code-review fixes (V/manage-fix-srv, 2026-11-24): FR-PIPELINE-20's tests gain the paused real step (B4), the
+  # budget-refusal and budget-stopped cancel cases and owner scope on cancel and history (surviving mutants).
   - id: FR-PIPELINE-20
     text: >-
       **Cancel a run.** `POST /api/compiles/{run_id}/cancel` with `{}` (owner) on an open run (`finished_at IS NULL
@@ -434,9 +436,15 @@ requirements:
       [db] cancel between steps (no further reservation row); cancel during a stubbed model call (that call
       settles, no revision, no compile_steps row, nothing enqueued); cancel during a stubbed lab run (no stamped
       revision, no `_finish`); cancel, then SRV-LESSON revert, then the late step returns: the reverted revision
-      stays current; a cancel sent while a step holds the row lock from (2) waits, then commits, and the next step
-      does nothing; cancel twice; cancel a finished run; resume a cancelled run; the per-key idempotency of
-      SRV-EVENTS FR-EVENTS-5 unchanged.
+      stays current; a cancel sent while the real step handler is paused right after its read (2) (a test hook
+      around that read, no sleep) waits — `pg_stat_activity` shows its backend waiting on a lock with its UPDATE —
+      until the step commits its revision, its compile_steps row and its enqueue, then commits; the next step
+      returns at (1) with no reservation and nothing written; a cancel committed while the model call is refused
+      for budget leaves `budget_refused`, `g2` and the cancel's `finished_at` as they were (`_refused` writes
+      nothing); cancel of a budget-stopped run that is still open (`budget_refused` set, `finished_at` null) → 200
+      `cancelled`, of a finished budget-stopped run → 409 `not_running`; another owner's run id on cancel, and
+      another owner's lesson on FR-PIPELINE-21's history → 404 with nothing written; cancel twice; cancel a
+      finished run; resume a cancelled run; the per-key idempotency of SRV-EVENTS FR-EVENTS-5 unchanged.
   - id: FR-PIPELINE-21
     text: >-
       **Run history.** `GET /api/lessons/{lesson_id}/compiles` → the lesson's newest 20 runs `{runs: [{run_id,

@@ -139,23 +139,143 @@ async def test_cancel_during_a_lab_run(pg: Pg, tmp_path: Path, monkeypatch: Any)
         ) == 0
 
 
-async def test_cancel_waits_for_a_step_holding_the_run_row(pg: Pg, tmp_path: Path) -> None:
-    from sqlalchemy import text
+async def _cancel_waiting_on_a_lock(env: Any) -> int:
+    """The backend of the cancel's UPDATE once it waits on a lock (the run row), polled until it does."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 10
+    while loop.time() < deadline:
+        pid = await env.scalar(
+            "SELECT pid FROM pg_stat_activity WHERE wait_event_type = 'Lock'"
+            " AND query LIKE 'UPDATE compile_runs SET cancelled_at = now()%'"
+        )
+        if pid is not None:
+            return int(pid)
+        await asyncio.sleep(0.02)
+    raise AssertionError("the cancel never waited on the run row")
 
+
+async def test_cancel_waits_while_the_real_step_holds_the_run_row_then_nothing_after_runs(
+    pg: Pg, tmp_path: Path, monkeypatch: Any
+) -> None:
+    steps = need("reader.pipeline.steps")
     async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
         lesson = await env.import_plan()
         env.cli.scripts[:] = scripts_for(CLEAN, "pass")
+        real_cancelled, real_load = steps._cancelled, steps.load_run
+        paused, release, cancelled = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        loads = [0]
+
+        async def pause_after_the_second_read(conn: Any, run_id: Any) -> bool:
+            seen: bool = await real_cancelled(conn, run_id)  # FOR UPDATE: the step's transaction holds the row
+            if not paused.is_set():
+                paused.set()
+                await release.wait()
+            return seen
+
+        async def next_step_after_the_cancel(conn: Any, run_id: Any, *args: Any) -> Any:
+            loads[0] += 1
+            if loads[0] > 1:  # the next step's read (1) comes after the cancel committed
+                await cancelled.wait()
+            return await real_load(conn, run_id, *args)
+
+        monkeypatch.setattr(steps, "_cancelled", pause_after_the_second_read)
+        monkeypatch.setattr(steps, "load_run", next_step_after_the_cancel)
         async with client(env) as c:
             run = (await c.post(f"/api/lessons/{lesson}/compile", json={})).json()["run_id"]
-            async with env.engine.connect() as step:
-                await step.execute(text("SELECT cancelled_at FROM compile_runs WHERE id = :r FOR UPDATE"), {"r": run})
-                cancel = asyncio.create_task(c.post(f"/api/compiles/{run}/cancel", json={}))
-                await asyncio.sleep(0.5)
-                assert not cancel.done()  # waits on the row lock
-                await step.commit()
-            assert (await asyncio.wait_for(cancel, 10)).status_code == 200
+            revisions = await env.scalar("SELECT count(*) FROM lesson_revisions WHERE lesson_id = :l", l=lesson)
+            work = asyncio.create_task(env.work())
+            await asyncio.wait_for(paused.wait(), 30)
+            cancel = asyncio.create_task(c.post(f"/api/compiles/{run}/cancel", json={}))
+            await _cancel_waiting_on_a_lock(env)
+            assert not cancel.done()
+            assert await env.scalar("SELECT cancelled_at FROM compile_runs WHERE id = :r", r=run) is None
+            release.set()
+            response = await asyncio.wait_for(cancel, 30)
+            cancelled.set()
+            await asyncio.wait_for(work, 60)
+        assert (response.status_code, response.json()["state"]) == (200, "cancelled")
+        # the paused draft step committed everything before the cancel; the next step returned at (1)
+        assert [r[0] for r in await env.rows("SELECT stage FROM compile_steps WHERE run_id = :r", r=run)] == ["draft"]
+        assert await env.scalar("SELECT count(*) FROM lesson_revisions WHERE lesson_id = :l", l=lesson) == revisions + 1
+        assert await env.scalar("SELECT count(*) FROM agent_spend WHERE kind = 'reserve'") == 1  # the draft's only
+        assert loads[0] == 2
+
+
+async def test_a_cancel_during_a_budget_refusal_is_not_overwritten(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    steps = need("reader.pipeline.steps")
+    errors = need("reader.agent.errors")
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        lesson = await env.import_plan()
+        holder: dict[str, Any] = {}
+
+        async def cancel_then_refuse(*args: Any, **kwargs: Any) -> Any:
+            async with client(env) as c:
+                assert (await c.post(f"/api/compiles/{holder['run']}/cancel", json={})).status_code == 200
+            holder["finished_at"] = await env.scalar("SELECT finished_at FROM compile_runs WHERE id = :r", r=holder["run"])
+            raise errors.BudgetRefused("task_budget_exhausted")
+
+        monkeypatch.setattr(steps, "_model_step", cancel_then_refuse)
+        async with client(env) as c:
+            holder["run"] = run = (await c.post(f"/api/lessons/{lesson}/compile", json={})).json()["run_id"]
+            keys = await _keys(env, run)
             await env.work()
-            assert await env.scalar("SELECT count(*) FROM compile_steps") == 0
+            assert (await c.get(f"/api/compiles/{run}")).json()["state"] == "cancelled"
+        row = (await env.rows("SELECT budget_refused, g2, finished_at FROM compile_runs WHERE id = :r", r=run))[0]
+        assert (row[0], row[1], row[2]) == (None, None, holder["finished_at"])
+        assert await _keys(env, run) == keys  # nothing enqueued after the refusal
+
+
+async def test_cancel_of_a_budget_stopped_run_open_or_finished(pg: Pg, tmp_path: Path) -> None:
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        lesson = await env.import_plan()
+        ivan = env.users["ivan"]
+        insert = (
+            "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets, budget_refused, finished_at)"
+            " VALUES (:o, :l, 8.00, '{}'::jsonb, 'task_budget_exhausted', FINISHED) RETURNING id"
+        )
+        async with env.engine.begin() as conn:
+            from sqlalchemy import text
+
+            stopped_open, stopped_done = [
+                (await conn.execute(text(insert.replace("FINISHED", end)), {"o": ivan, "l": lesson})).scalar_one()
+                for end in ("NULL", "now()")
+            ]
+        async with client(env) as c:
+            r = await c.post(f"/api/compiles/{stopped_open}/cancel", json={})
+            assert (r.status_code, r.json()["state"]) == (200, "cancelled")
+            done = await c.post(f"/api/compiles/{stopped_done}/cancel", json={})
+            assert (done.status_code, done.json()["error"]) == (409, "not_running")
+        assert await env.scalar("SELECT cancelled_at FROM compile_runs WHERE id = :r", r=stopped_done) is None
+        assert await env.scalar("SELECT count(*) FROM audit_log WHERE action = 'compile.cancel'") == 1
+
+
+async def test_another_owners_run_and_lesson_are_not_found_on_cancel_and_history(pg: Pg, tmp_path: Path) -> None:
+    store = need("reader.lessons.store")
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        await env.import_plan()
+        anna = env.users["anna"]  # owns a course of her own (ownership is per row)
+        async with env.engine.begin() as conn:
+            from sqlalchemy import text
+
+            course = await store.create_course(conn, anna, "Anna's course", None)
+            theirs = await store.ensure_lesson(conn, anna, course, 1, "Hers")
+            run = (
+                await conn.execute(
+                    text(
+                        "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets)"
+                        " VALUES (:o, :l, 8.00, '{}'::jsonb) RETURNING id"
+                    ),
+                    {"o": anna, "l": theirs},
+                )
+            ).scalar_one()
+        before = await env.rows("SELECT * FROM compile_runs ORDER BY id")
+        async with client(env) as c:
+            cancel = await c.post(f"/api/compiles/{run}/cancel", json={})
+            history = await c.get(f"/api/lessons/{theirs}/compiles")
+        assert (cancel.status_code, cancel.json()["error"]) == (404, "not_found")
+        assert history.status_code == 404
+        assert await env.rows("SELECT * FROM compile_runs ORDER BY id") == before
+        assert await env.scalar("SELECT count(*) FROM audit_log") == 0
 
 
 async def test_run_history(pg: Pg, tmp_path: Path) -> None:
