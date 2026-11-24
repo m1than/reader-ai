@@ -626,6 +626,22 @@ requirements:
         non-empty list.
       [unit] the redirect (owner with nothing, owner with a material, non-owner, an error); [browser] the first-run
       redirect under the production CSP.
+  - id: FR-UI-31
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-23, -24, -25, -32; ADR-0038). /observability gains, owner only:
+      (a) a "Bench upload" form with two file pickers (the set file and the result file), posting
+      `POST /api/obs/bench` {set: <text>, result: <parsed JSON>}; each error code of FR-OBS-23 (`too_large`,
+      `set_not_pinned`, `bench_invalid`, `already_recorded`) is shown by its code as text, 202 shows "recorded";
+      (b) on each Cost-per-lesson row and each Tutor answer row a "Label" control (good / bad and an optional reason
+      from VEC-OBS-5 `labels.reasons`) posting `POST /api/obs/labels` {target: lesson | answer, id, ok, reason?};
+      the response's `revision`
+      and `mirror` (`queued` | `off`) are shown; a 404 shows "not found";
+      (c) one banner per item of the summary's `alerts` (code, subject, value, limit), text only;
+      (d) a "Stack" row from the summary's `stack` (mlflow and rotel: healthy or not and when checked; jaeger: "see
+      reader doctor").
+      No header, nav or app.css change. Tests: [unit] Vitest: the upload posts both files and renders every error
+      code; a label posts the exact body and shows revision and mirror; banners render the fixture's alerts as text
+      (an `<img>` in a subject stays text); the stack row; [story] the page with alerts and stack fixtures.
 
 invariants:
   - id: INV-UI-1

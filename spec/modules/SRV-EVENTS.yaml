@@ -370,6 +370,21 @@ requirements:
       and its `on_worker_start` also enqueues `obs.prompts` (enqueue-only, a failure logged); the integrated
       catalog is ingest.import, search.embed, pipeline.stage, pipeline.verify, tutor.answer, obs.feedback,
       obs.prompts, obs.retention (FR-EVENTS-1's unit test updated).
+  - id: FR-EVENTS-32
+    text: >-
+      Paired SRV-OBS phase 2 change (ADR-0038 accepted 2026-11-25; SRV-OBS `phase2_job_kinds`). `reader.obs.jobs`
+      declares five more kinds with SRV-EVENTS' `JobKind`, queue `obs`, delays 5 s and 25 s: `obs.setup` {digest}
+      key [digest], 3 attempts, 60 s, enqueued by the worker's start hook (enqueue-only); `obs.runs` {kind
+      compile|ingest, id, end 1..100} key [kind, id, end], 3 attempts, 60 s, `schedule_in` 60 s; `obs.bench`
+      {upload_id} key [upload_id], 3 attempts, 60 s; `obs.label` {label_id, revision} key [label_id, revision], 3
+      attempts, 30 s; `obs.health` {slot: the time truncated to 30 minutes} key [slot], 1 attempt, 20 s,
+      `traced: false`. A periodic entry of the worker's scheduler enqueues `obs.health` every 30 minutes. A
+      `JobKind` gains the optional field `traced: bool = True`; with `traced: false` the job wrapper opens no root
+      span and passes no trace context (SRV-OBS FR-OBS-5 f). Declared: `obs.runs` holds a second advisory lock,
+      `lock_id("obs.runs:<kind>:<id>")`, on its job's connection for the whole run beside the key lock, so it holds
+      one pooled connection for up to its 60 s timeout like every running job. Tests: [unit] the catalogue lists the
+      kinds in KIND_MODULES order with exactly these declarations; a `traced: false` kind opens no root span; [db]
+      the periodic entry enqueues one `obs.health` per slot.
 
 invariants:
   - id: INV-EVENTS-1

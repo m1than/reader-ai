@@ -1065,6 +1065,15 @@ requirements:
       state, code, attempts, page counts, byte counts (stderr included) and durations. The filename is never logged:
       it is the owner's text and may name the book. [unit, db] a canary filename appears in no log record of the api,
       the worker or the watcher, and in no request URL the client builds.
+  - id: FR-INGEST-26
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-20, ADR-0038). After the transaction that records an import's end
+      (`ingest.import` succeeded) has committed, the import handler enqueues `obs.runs` {kind: ingest, id: the
+      ingest id, end: 1} with `schedule_in` 60 s, inside its own try/except: an enqueue failure is logged as
+      `obs runs_enqueue_failed kind=ingest` and never changes the import's outcome (SRV-OBS INV-OBS-3). With tracing
+      off nothing is enqueued. The id is above V/manage's FR-INGEST-25 (design review round 2, N10). Tests: [db] a
+      succeeded import enqueues exactly one `obs.runs` {ingest, ingest_id, 1}; a failing enqueue leaves the import
+      succeeded and logs the line.
 
 invariants:
   - id: INV-INGEST-1

@@ -31,7 +31,8 @@ span_types:
 # Root spans only: `mlflow.traceTag.mlflow.traceName` = the span name, and `mlflow.traceTag.<key>` = str(value) for
 # each of these keys the root carries (already validated; ints in decimal). No cost or cache tag.
 trace_tags: [reader.job.kind, reader.job.outcome, reader.job.attempt, reader.error_code, reader.error_class,
-  reader.stage, reader.step, reader.run_id, reader.lesson.id, reader.course.id, reader.question_id]
+  reader.stage, reader.step, reader.run_id, reader.lesson.id, reader.course.id, reader.question_id,
+  reader.material_sha256, reader.version_key]   # phase 2: FR-OBS-20 (d) finds import traces by the material tag; FR-OBS-21 (a)
 
 # Previews: `mlflow.spanInputs` / `mlflow.spanOutputs` = a JSON object of {preview key: validated value} for the keys
 # the root carries, in this order; nothing else (no key: no preview). A preview key is never one of the forbidden.

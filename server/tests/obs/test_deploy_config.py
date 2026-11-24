@@ -77,16 +77,19 @@ def test_mlflow_service() -> None:
     assert mlflow["image"] == "reader-mlflow:local"
     assert mlflow["build"]["dockerfile"].endswith("deploy/otel/mlflow.Dockerfile")
     assert mlflow["user"] == "10004:10004"
-    assert mlflow["environment"] == {
+    assert mlflow["environment"] == {  # phase 2: FR-OBS-27 exactly
         "MLFLOW_SERVER_ENABLE_JOB_EXECUTION": "false",
         "MLFLOW_DISABLE_TELEMETRY": "true",
+        "DO_NOT_TRACK": "true",
+        "MLFLOW_ENABLE_AI_GATEWAY": "false",
+        "MLFLOW_ENABLE_REMOTE_ASSISTANT": "false",
         "MLFLOW_MODEL_CATALOG_URI": "",  # FR-OBS-12 (c): no remote price fetch
     }
-    assert mlflow["command"] == [
+    assert mlflow["command"] == [  # phase 2: FR-OBS-27 exactly
         "mlflow", "server", "--host", "0.0.0.0", "--port", "5000", "--workers", "1",
         "--backend-store-uri", "sqlite:////var/lib/mlflow/mlflow.db",
         "--artifacts-destination", "/var/lib/mlflow/artifacts", "--default-artifact-root", "mlflow-artifacts:/",
-        "--allowed-hosts", "localhost:8443,mlflow:5000,mlflow",
+        "--serve-artifacts", "--allowed-hosts", "localhost:8443,mlflow:5000,mlflow", "--x-frame-options", "DENY",
     ]
     assert [v["target"] for v in mlflow["volumes"]] == ["/var/lib/mlflow"]
     assert mlflow["volumes"][0]["source"] == "obs_mlflow"
@@ -152,9 +155,9 @@ def test_networks_and_the_volume() -> None:
     assert networks_of(model["services"]["mlflow"]) == {"obs", "obs-ui"}
     assert networks_of(model["services"]["jaeger"]) == {"jaeger-in", "jaeger-ui"}
     volume = model["volumes"]["obs_mlflow"]
-    assert volume["labels"] == {"org.reader-ai.backup": "exclude"}
-    users = [n for n, s in model["services"].items() for v in s.get("volumes") or [] if v.get("source") == "obs_mlflow"]
-    assert users == ["mlflow"]
+    assert volume["labels"] == {"org.reader-ai.backup": "include"}  # phase 2: ADR-0038 Decision 6, FR-OBS-30
+    users = {n for n, s in model["services"].items() for v in s.get("volumes") or [] if v.get("source") == "obs_mlflow"}
+    assert users == {"mlflow", "mlflow-migrate"}  # phase 2: FR-OBS-29
     # The base publishes 443 only; 8443 and 8444 come from `reader up`'s override (OPS-CLI FR-CLI-22).
     assert [p["published"] for p in model["services"]["caddy"]["ports"]] == ["443"]
 

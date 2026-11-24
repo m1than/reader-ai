@@ -42,6 +42,7 @@ attributes:
   reader.question_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
   reader.ingest_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
   reader.material_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.version_key: { type: string, pattern: "^[0-9a-f]{12}$" }   # phase 2, FR-OBS-21 (a)
   reader.task: { type: string, enum_from: tasks }
   gen_ai.request.model: { type: string, enum_from: models }
   gen_ai.usage.input_tokens: { type: int, range: [0, 1000000000] }
@@ -86,7 +87,7 @@ keys_by_span:
   job: [reader.job.kind, reader.job.id, reader.job.attempt, reader.job.outcome, reader.error_code, reader.error_class,
     reader.run_id,
     reader.step, reader.stage, reader.question_id, reader.ingest_id, reader.material_sha256,
-    reader.lesson.id, reader.course.id, reader.tutor.state, reader.prompt.version]
+    reader.lesson.id, reader.course.id, reader.tutor.state, reader.prompt.version, reader.version_key]
   agent.call: [reader.task, reader.stage, gen_ai.request.model, gen_ai.usage.input_tokens, gen_ai.usage.output_tokens,
     gen_ai.usage.cache_read.input_tokens, gen_ai.usage.cache_write.input_tokens, reader.cost_usd,
     reader.stop_reason, reader.error_code, gen_ai.operation.name, gen_ai.provider.name, reader.cost_input_usd,

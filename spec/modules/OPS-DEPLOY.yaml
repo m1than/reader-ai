@@ -363,6 +363,26 @@ requirements:
       209,715,200 bytes pass the edge and the api, and 209,715,201 bytes are 413 (SRV-INGEST FR-INGEST-18's live
       case). The live check does not assert which of Caddy or the api answered the 413: both enforce the same cap,
       and the config check above pins Caddy's.
+  - id: FR-DEPLOY-15
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-26..33, ADR-0038). (a) The mlflow service's command and environment are
+      exactly SRV-OBS FR-OBS-27's, each flag and variable with a comment and its source: `mlflow server --host
+      0.0.0.0 --port 5000 --workers 1 --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db --artifacts-destination
+      /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/ --serve-artifacts --allowed-hosts
+      localhost:8443,mlflow:5000,mlflow --x-frame-options DENY`; environment exactly
+      `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, `MLFLOW_DISABLE_TELEMETRY=true`, `DO_NOT_TRACK=true`,
+      `MLFLOW_ENABLE_AI_GATEWAY=false`, `MLFLOW_ENABLE_REMOTE_ASSISTANT=false`, `MLFLOW_MODEL_CATALOG_URI=`.
+      (b) A one-shot service `mlflow-migrate` (the reader-mlflow image, the `obs_mlflow` volume, uid 10004,
+      read_only, tmpfs /tmp, cap_drop ALL, no-new-privileges, no network, `restart: "no"`) runs
+      `deploy/otel/mlflow-migrate.sh` (FR-OBS-29: flock, the markers, the one pre-migration backup, `mlflow db
+      upgrade`, WAL, `store.version`); `mlflow` depends on it with `condition: service_completed_successfully`.
+      (c) No new healthchecks (rotel and jaeger have no shell; `obs.health` and `reader doctor` cover them).
+      (d) `deploy/otel/mlflow-setup.yaml` (VEC-OBS-6) is mounted read-only into the worker.
+      (e) The 8443 site caps request bodies at 10 MiB (`request_body max_size 10MiB`, structural).
+      (f) The `obs_mlflow` volume's backup label changes from `exclude` to `include` (ADR-0038 Decision 6 replaces
+      ADR-0032 Decision 1's exclusion); VEC-DEPLOY-3's backup list is updated. Tests: [config] the rendered model's
+      mlflow command and environment equal (a) exactly; mlflow-migrate's hardening, network-less placement and the
+      dependency; the worker's read-only mount; the 8443 body limit in the Caddyfile; the volume's backup label.
 
 invariants:
   - id: INV-DEPLOY-1

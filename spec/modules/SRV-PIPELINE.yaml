@@ -390,6 +390,16 @@ requirements:
       a budget-refused run each give exactly 100 entries, the oldest cut; two runs with the same `created_at` list in
       `id` order, the same one `GET /api/lessons/{lesson_id}/compile` returns; a stage whose `step_input` raises
       `AgentError` leaves the read 200 with that run `stalled`.
+  - id: FR-PIPELINE-18
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-20, ADR-0038). After the transaction that records a compile run's end
+      (finished, failed or dead) has committed, the code that recorded it enqueues `obs.runs` {kind: compile, id:
+      the run id, end: the run's count of recorded ends, 1 for the first} with `schedule_in` 60 s, inside its own
+      try/except: an enqueue failure is logged as `obs runs_enqueue_failed kind=compile` and never changes the run's
+      outcome, its status or the read routes (SRV-OBS INV-OBS-3). A resumed run that ends again enqueues with the
+      next `end`. With tracing off nothing is enqueued. Tests: [db] a finished and a failed run each enqueue exactly
+      one `obs.runs` with end 1 after commit; a resumed run's second end enqueues end 2; a failing enqueue leaves
+      the run's end recorded and logs the line.
 
 invariants:
   - id: INV-PIPELINE-1

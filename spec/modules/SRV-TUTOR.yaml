@@ -330,6 +330,19 @@ requirements:
       whose quote is verified, and its ledger cost is ≤ `question_cap_usd`. Spends from `budget.test_budget_usd`. The
       live check and the bench never write answer, quote or question text (it holds book quotes) to committed files:
       committed outputs carry ids, counts, flags, timings and costs only. [live]
+  - id: FR-TUTOR-15
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-23, ADR-0038). The bench's records file (`tutor-bench-<UTC time>.json`
+      in READER_TUTOR_BENCH_DIR, VEC-TUTOR-7) gains a header, so it is exactly SRV-OBS VEC-OBS-5
+      `bench_results.tutor`: `kind: tutor`, `date` (UTC day), `branch`, `commit` (the sha only, pattern
+      `^[0-9a-f]{7,40}$`), `lesson_id`, `set: tutor-bench-v2`, and `records` (the BenchRecord rows, exactly the keys
+      of VEC-OBS-5 `tutor_record`). That file is what the owner uploads to MLflow from /observability. The bench's
+      summary is exactly VEC-TUTOR-8 (`tutor_summary`: no prose keys, commit sha only), a report, not an upload;
+      the committed e2e/live/results/2026-11-23-tutor-bench.json is migrated to it (commit `66fba58`, prose keys
+      dropped, numbers unchanged). Declared: the 2026-11-23 run's records file was not committed, so the first
+      upload needs a new bench run, which spends live-budget credit and waits for the owner. Tests: [unit]
+      web/src/tutor/bench.ts builds the header and records with exactly VEC-OBS-5's keys and the summary with
+      exactly VEC-TUTOR-8's; the committed summary validates against VEC-TUTOR-8.
 
 invariants:
   - id: INV-TUTOR-1
@@ -424,6 +437,9 @@ vectors:
   - id: VEC-TUTOR-6
     source: answer block text with markdown links, raw HTML and images; expected rendering (links and images as text)
     file: spec/fixtures/SRV-TUTOR/render.yaml
+  - id: VEC-TUTOR-8
+    source: "SRV-OBS phase 2 (design review round 4): the numbers-only shape of the tutor bench summary (FR-TUTOR-15), moved from SRV-OBS VEC-OBS-5"
+    file: spec/fixtures/SRV-TUTOR/bench-summary.yaml
   - id: VEC-TUTOR-7
     source: >-
       bench questions: the curated questions-v2 set (spikes/embeddings-local/questions-v2.yaml: 40 independent,

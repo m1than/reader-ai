@@ -413,6 +413,31 @@ requirements:
       signals only a pid whose lock is held; `reader up` with the lock held by a watcher of the same sha starts
       nothing; with a different sha and an idle watcher it stops and restarts it; with a busy one it leaves it and
       reports `stale`.
+  - id: FR-CLI-24
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-29, -30, -31, -32; ADR-0038). (a) `reader doctor` and `reader status`
+      print one line each for mlflow, rotel and jaeger from `docker inspect` (image, running, restart count, the
+      Docker health where there is one); for mlflow also the store size from `docker system df -v` for the
+      `obs_mlflow` volume (including `backup/pre-migrate.db`) with the warning `obs_store_large` at 80 % of 4 GiB,
+      the journal mode (read through the existing one-off helper, read-only), the last `obs.retention` and
+      `obs.setup` from the jobs table, and `obs mlflow: fresh store, schema <revision>` after a first start.
+      (b) `reader backup DIR` includes `obs_mlflow`, always through SQLite's backup API (stack up or down), to
+      `<DIR>/obs_mlflow.db` plus the artifacts directory, and writes `<DIR>/obs_mlflow.store.version` (the volume's
+      `store.version`, when present). `reader restore DIR` (stack down), in this order: removes the volume's
+      `store.version` and the markers `backup/in-progress`, `backup/fresh` and `backup/restored-for`, replaces
+      `mlflow.db` through the backup API, then writes `store.version` from the backup (absent when the backup has
+      none); `mlflow-migrate` runs at the next start. The `obs_mlflow` volume's backup label changes from excluded to
+      included (ADR-0038 Decision 6; OPS-DEPLOY FR-DEPLOY-15).
+      (c) `reader restore-obs-premigrate [--force]` (stack down) restores `backup/pre-migrate.db` as SRV-OBS FR-OBS-29
+      describes; with `--force` it prints the version it rolls back to before copying. Exit codes: 0 restored
+      (prints the version), 2 the stack is up (stop it first), 3 no `pre-migrate.db`, 4 the backup API copy failed
+      (`mlflow.db` untouched), 5 the marker could not be written, 6 no `backup/in-progress` (rerun with `--force`).
+      (d) `reader up` reports `mlflow-migrate`'s own exit codes (10 `obs_migration_incomplete` → run
+      restore-obs-premigrate; 11 `obs_restored_for_other_version` → the marker's version and the hint that the owner
+      reverts the pin in git; 12 `obs_migration_failed` and 13 `obs_migration_finish_failed` → restore-obs-premigrate),
+      which never overlap the restore command's 0..6. Tests: [unit] the doctor and status lines from canned
+      `docker inspect` / `docker system df -v` output, the 80 % warning; the backup and restore command sequences
+      (argv) in order; restore-obs-premigrate's exit codes; `reader up`'s message per migrate code.
 
 invariants:
   - id: INV-CLI-1

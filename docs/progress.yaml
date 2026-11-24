@@ -1727,7 +1727,17 @@ tasks:
         FR-PIPELINE-18, FR-INGEST-26, FR-TUTOR-15, FR-UI-31, FR-CLI-24 and FR-DEPLOY-15. Ops first; the
         hardened FR-OBS-29 [image] test is the first Red test.",
       note: "Cut from V/slice-integration 87840d1 with origin/V/obs-mlflow-phase2 b34b712 merged. Zero credit;
-        the first tutor-records upload needs a paid bench run and waits for the owner." }
+        the first tutor-records upload needs a paid bench run and waits for the owner. RED done (2026-11-25):
+        FR-OBS-20..35 moved into SRV-OBS requirements, every phase2_in_place_edit applied, VEC-OBS-5/6 and the
+        paired FR-EVENTS-32, FR-PIPELINE-18, FR-INGEST-26, FR-TUTOR-15 (+ VEC-TUTOR-8), FR-UI-31, FR-CLI-24 and
+        FR-DEPLOY-15 written; trace-check 0 errors. Red tests: test_images_migrate.py first (N = mlflow v3.10.0
+        @sha256:f1e71127..., N+1 = reader-mlflow by id; fails on the missing deploy/otel/mlflow-migrate.sh),
+        test_phase2_unit/_config/_images_phase2 (obs), test_obs_phase2_kinds (jobs), the pipeline and ingest
+        enqueue [db] tests, test_obs_phase2_routes (auth), cli test_obs_phase2, and the vitests
+        observability-phase2.test.tsx and bench-upload.test.ts. Existing assertions updated with the spec: the
+        obs kinds list (test_retention, test_jobs_unit), mlflow command/env and the obs_mlflow backup label
+        (test_deploy_config). Green must also update test_images._backend to compose's FR-OBS-27 command and
+        write deploy/otel/UPGRADE.md (FR-OBS-34's checklist source, a path the Red test chose)." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

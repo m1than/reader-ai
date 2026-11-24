@@ -127,6 +127,7 @@ def test_kind_modules_are_a_declared_list() -> None:
     assert list(jobs.load_kinds()) == [
         "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer",
         "obs.feedback", "obs.prompts", "obs.retention",  # SRV-OBS FR-OBS-14, -15 (V.obs-analytics)
+        "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health",  # SRV-OBS phase 2 (FR-EVENTS-32)
         "freshness.scan", "freshness.web",
     ]
 

@@ -25,8 +25,9 @@ def anyio_backend() -> str:
 
 def test_kind_declaration() -> None:
     jobs = require("reader.obs.jobs")
-    assert [k.name for k in jobs.JOB_KINDS] == ["obs.feedback", "obs.prompts", "obs.retention"]  # FR-OBS-14, -15
-    kind = jobs.JOB_KINDS[-1]
+    assert [k.name for k in jobs.JOB_KINDS] == [  # FR-OBS-14, -15; phase 2: SRV-EVENTS FR-EVENTS-32
+        "obs.feedback", "obs.prompts", "obs.retention", "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health"]
+    kind = jobs.JOB_KINDS[2]
     assert kind.name == "obs.retention"
     assert kind.key == ("day",)
     assert kind.max_attempts == 3
