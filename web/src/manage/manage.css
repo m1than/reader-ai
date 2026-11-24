@@ -81,7 +81,6 @@
 }
 
 .manage-input:focus-visible,
-.radio-option:focus-visible,
 .settings-tab:focus-visible {
   outline: 2px solid var(--acme-focus);
   outline-offset: 2px;
@@ -213,35 +212,16 @@
   font-size: 1rem;
 }
 
-.radio-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--acme-space-2);
-}
-
+/* One choice: the library's 18 px radio (its own box, colours and focus ring) with its label beside it on one line
+   (FR-MANAGE-6). The group is the library's horizontal radio group, which wraps whole choices. */
 .radio-option {
   display: inline-flex;
   align-items: center;
-  gap: var(--acme-space-2);
-  padding: var(--acme-space-1) var(--acme-space-3);
-  border: 1px solid var(--acme-border);
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--acme-text);
-  font: inherit;
-  cursor: pointer;
+  gap: var(--acme-space-1);
 }
 
-.radio-option[aria-checked='true'] {
-  border-color: var(--acme-accent);
-  background: var(--acme-hover);
-}
-
-.radio-dot {
-  width: 0.5rem;
-  height: 0.5rem;
-  border-radius: 50%;
-  background: var(--acme-accent);
+.radio-label {
+  white-space: nowrap;
 }
 
 .manage-scroll {

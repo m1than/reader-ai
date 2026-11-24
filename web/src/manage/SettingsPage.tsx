@@ -3,7 +3,7 @@
 // read runs for anyone else).
 import { RadioGroup } from '@acme/ui/radio-group';
 import { Tabs } from '@acme/ui/tabs';
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { useLocale, useT, type Choice } from '../ui/i18n';
 import uiEn from '../ui/messages.en';
 import { setTheme, storedTheme, THEMES, type Theme } from '../ui/theme';
@@ -61,17 +61,27 @@ function Choices<V extends string>({
   options: ReadonlyArray<{ value: V; text: string; lang?: string }>;
   onChange: (v: V) => void;
 }) {
-  const id = `choice-${label.replace(/\W+/g, '-')}`;
+  // useId, not the label: a Russian label has no ASCII word characters, so every group got the same id.
+  const id = useId();
   return (
     <div className="settings-choice">
       <h2 id={id}>{label}</h2>
-      <RadioGroup.Root aria-labelledby={id} value={value} onValueChange={(v) => onChange(v as V)} className="radio-row">
-        {options.map((o) => (
-          <RadioGroup.Item key={o.value} value={o.value} className="radio-option" lang={o.lang}>
-            <RadioGroup.Indicator className="radio-dot" />
-            {o.text}
-          </RadioGroup.Item>
-        ))}
+      {/* The library's parts as designed: an 18 px Item (the control) and its Label beside it, never text inside the
+          Item, whose box is fixed at 18 px (the live check's labels overlaid the controls). */}
+      <RadioGroup.Root aria-labelledby={id} value={value} onValueChange={(v) => onChange(v as V)} orientation="horizontal">
+        {options.map((o) => {
+          const item = `${id}-${o.value}`;
+          return (
+            <span key={o.value} className="radio-option" lang={o.lang}>
+              <RadioGroup.Item id={item} value={o.value}>
+                <RadioGroup.Indicator />
+              </RadioGroup.Item>
+              <RadioGroup.Label htmlFor={item} className="radio-label">
+                {o.text}
+              </RadioGroup.Label>
+            </span>
+          );
+        })}
       </RadioGroup.Root>
     </div>
   );

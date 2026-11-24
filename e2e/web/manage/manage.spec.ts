@@ -123,6 +123,49 @@ for (const scheme of ['light', 'dark'] as const)
       }
     });
 
+// FR-MANAGE-6 (owner live check): in the production build each radio's text was drawn inside the library's 18 px
+// Item, so labels overlaid tiny controls. Every choice of the four groups: a control at least 16 × 16 px, its label
+// beside it on one line, the two boxes disjoint.
+for (const locale of ['en', 'ru'] as const)
+  for (const width of [1280, 390])
+    test(`appearance radios: control and label side by side at ${width} px (${locale})`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto('/settings');
+      if (locale === 'ru') await page.getByRole('radio', { name: 'Русский' }).click();
+      await expect(page.getByRole('heading', { level: 1 })).toHaveText(locale === 'ru' ? 'Настройки' : 'Settings');
+      const groups = page.getByRole('tabpanel').getByRole('radiogroup');
+      await expect(groups).toHaveCount(4);
+      const layout = await groups.evaluateAll((els) =>
+        els.flatMap((g) =>
+          [...g.querySelectorAll<HTMLElement>('[role="radio"]')].map((radio) => {
+            // The label is the radio's `label[for]`; without one, the text drawn inside the radio stands for it.
+            const label = document.querySelector<HTMLElement>(`label[for="${CSS.escape(radio.id)}"]`);
+            const range = document.createRange();
+            range.selectNodeContents(label ?? radio);
+            const c = radio.getBoundingClientRect();
+            const l = label ? label.getBoundingClientRect() : range.getBoundingClientRect();
+            const style = getComputedStyle(label ?? radio);
+            const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.3;
+            const name = (label ?? radio).textContent ?? '';
+            return { name, c: [c.left, c.top, c.width, c.height], l: name ? [l.left, l.top, l.width, l.height] : null, line };
+          }),
+        ),
+      );
+      expect(layout.length).toBe(12);
+      for (const { name, c, l, line } of layout) {
+        const [cx, cy, cw, ch] = c as [number, number, number, number];
+        expect(l, `${name}: a label for the radio`).not.toBeNull();
+        const [lx, ly, lw, lh] = l as [number, number, number, number];
+        expect(cw, `${name}: control width`).toBeGreaterThanOrEqual(16);
+        expect(ch, `${name}: control height`).toBeGreaterThanOrEqual(16);
+        const overlap = cx < lx + lw && lx < cx + cw && cy < ly + lh && ly < cy + ch;
+        expect(overlap, `${name}: control ${c} and label ${l} overlap`).toBe(false);
+        expect(lx, `${name}: label right of the control`).toBeGreaterThanOrEqual(cx + cw);
+        expect(lh, `${name}: label on one line`).toBeLessThan(line * 1.5);
+        expect(Math.abs(ly + lh / 2 - (cy + ch / 2)), `${name}: label beside the control`).toBeLessThan(ch / 2);
+      }
+    });
+
 test('text size and reading width survive a reload with no flash', async ({ page }) => {
   await page.goto('/settings');
   await page.getByRole('radio', { name: 'Large' }).click();
