@@ -107,7 +107,8 @@ async def _one(conn: AsyncConnection, sql: str, params: dict[str, Any], what: st
 
 def guarded(handler: Handler, *, owner: bool = False) -> Handler:
     """The handler as a route's: an owner-only route answers 403 `owner_only` to anyone else first; an early
-    `_Answer` becomes the response."""
+    `_Answer` becomes the response; a refused audit row (a programming error, SRV-EVENTS FR-EVENTS-30) answers
+    500 `audit_refused` after its transaction rolled back."""
 
     async def run(ctx: Ctx) -> Response:
         if owner and ctx.signed_in.role != "owner":
@@ -116,6 +117,9 @@ def guarded(handler: Handler, *, owner: bool = False) -> Handler:
             return await handler(ctx)
         except _Answer as answer:
             return answer.response
+        except audit.AuditRefused as refusal:
+            audit.report_refused(refusal)
+            return error(500, "audit_refused")
 
     return run
 

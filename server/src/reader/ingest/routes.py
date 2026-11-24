@@ -390,6 +390,9 @@ def _managed_route(handler: Handler) -> Handler:
             return JSONResponse(refusal.body, status_code=refusal.status)
         except _NoConfig, ConfigError:
             return error(503, "config_unavailable")
+        except audit.AuditRefused as refusal:  # a programming error (SRV-EVENTS FR-EVENTS-30); rolled back
+            audit.report_refused(refusal)
+            return error(500, "audit_refused")
 
     return guarded
 

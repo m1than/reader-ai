@@ -140,6 +140,27 @@ def test_accepted_rows() -> None:
     audit.check("material.rename", "bashir", {"version": 2})
 
 
+@pytest.mark.parametrize(
+    "material_id",
+    ["bashir", "Bashir", "bashir_4th", "Башир-2025", "a" * 64, "a" * 65, "two words", "a/b", "rtl‏mark",
+     "up-abc", "up-0123456789ab", "up-0123456789AB", ""],
+)
+def test_material_id_rule_is_the_config_rule(material_id: str) -> None:
+    from reader.config.checks import material_id_problem
+
+    audit = _audit()
+    upload = audit._UPLOAD_ID.fullmatch(material_id) is not None
+    expected = upload or (material_id != "" and material_id_problem(material_id) is None)
+    accepted = {"bashir", "Bashir", "bashir_4th", "Башир-2025", "a" * 64, "up-0123456789ab"}
+    assert expected == (material_id in accepted)
+    if expected:
+        audit.check("material.rename", material_id, {"version": 2})
+    else:
+        with pytest.raises(audit.AuditRefused) as caught:
+            audit.check("material.rename", material_id, {"version": 2})
+        assert caught.value.reason == "object_id"
+
+
 # --- [db] the trigger, one row per applied action, rollback, and the read route ---
 
 

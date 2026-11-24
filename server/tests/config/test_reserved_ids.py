@@ -39,6 +39,32 @@ def test_other_ids_are_accepted(tmp_path: Path, material_id: str) -> None:
     assert [m.id for m in config.materials] == [material_id]
 
 
+@pytest.mark.parametrize("material_id", ["a" * 65, "two words", "a/b", "rtl‏mark", "tab\tid"])
+def test_ill_formed_ids_are_refused_by_the_loader_and_the_model(tmp_path: Path, material_id: str) -> None:
+    import pydantic
+
+    from reader.config import ConfigError, ReaderConfig, load_config
+
+    path = write_config(tmp_path, HEAD + _material("fine") + _material(material_id, "b" * 64))
+    with pytest.raises(ConfigError) as caught:
+        load_config(path)
+    got = [(p.line, p.path, p.code) for p in caught.value.problems]
+    assert got == [(5, "materials.1.id", "bad_material_id")]
+    valid = load_config(write_config(tmp_path, HEAD + _material("fine"))).model_dump()
+    ReaderConfig.model_validate(valid)  # the dump itself validates: the id alone makes the model refuse
+    valid["materials"][0]["id"] = material_id
+    with pytest.raises(pydantic.ValidationError):
+        ReaderConfig.model_validate(valid)
+
+
+@pytest.mark.parametrize("material_id", ["Bashir", "bashir_4th", "Башир-2025", "b" * 64])
+def test_well_formed_ids_are_accepted(tmp_path: Path, material_id: str) -> None:
+    from reader.config import load_config
+
+    config = load_config(write_config(tmp_path, HEAD + _material(material_id)))
+    assert [m.id for m in config.materials] == [material_id]
+
+
 def test_reserved_id_is_collected_with_other_problems(tmp_path: Path) -> None:
     from reader.config import ConfigError, load_config
 

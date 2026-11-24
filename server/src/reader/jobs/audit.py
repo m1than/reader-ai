@@ -8,6 +8,7 @@ inserts the row on the caller's connection, so it commits or rolls back with the
 from __future__ import annotations
 
 import json
+import logging
 import re
 import uuid
 from collections.abc import Callable, Mapping
@@ -17,11 +18,15 @@ from typing import Any, Final
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from reader.config.checks import material_id_problem
+
+log = logging.getLogger(__name__)
+
 DETAIL_MAX_BYTES: Final = 2048
 _UUID: Final = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _HEX16: Final = re.compile(r"[0-9a-f]{16}")
 _SHA: Final = re.compile(r"[0-9a-f]{64}")
-_MATERIAL: Final = re.compile(r"up-[0-9a-f]{12}|[a-z0-9][a-z0-9-]{0,62}")
+_UPLOAD_ID: Final = re.compile(r"up-[0-9a-f]{12}")
 # SRV-CONFIG FR-CONFIG-26's OVERRIDABLE families; a task name follows reader.yaml's task keys.
 _SETTING: Final = re.compile(
     r"sharing\.signup|observability\.retention_days|budgets\.monthly_usd|budgets\.warn_at"
@@ -35,6 +40,12 @@ class AuditRefused(ValueError):
     def __init__(self, reason: str, action: str) -> None:
         super().__init__(f"audit refused: {reason} ({action})")
         self.reason = reason
+
+
+def report_refused(refusal: AuditRefused) -> None:
+    """FR-EVENTS-30: a refused row is a programming error; the route answers 500 `audit_refused` and logs the
+    rule's name only (never the object id or the detail)."""
+    log.error("audit_refused reason=%s", refusal.reason)
 
 
 def _count(value: Any) -> bool:
@@ -60,6 +71,11 @@ def _fullmatch(pattern: re.Pattern[str]) -> Callable[[Any], bool]:
     return lambda value: isinstance(value, str) and pattern.fullmatch(value) is not None
 
 
+def _material_id(value: str) -> bool:
+    """`up-<12 hex>` (SRV-INGEST FR-INGEST-23) or a reader.yaml id by SRV-CONFIG FR-CONFIG-18's own rule."""
+    return _UPLOAD_ID.fullmatch(value) is not None or (value != "" and material_id_problem(value) is None)
+
+
 _VALUE_RULES: Final[dict[str, Callable[[Any], bool]]] = {
     "version": _count,
     "count": _count,
@@ -81,7 +97,11 @@ _VALUE_RULES: Final[dict[str, Callable[[Any], bool]]] = {
     "file": _setting_value,
 }
 
-_ID_RULES: Final[dict[str, re.Pattern[str]]] = {"uuid": _UUID, "material": _MATERIAL, "setting": _SETTING}
+_ID_RULES: Final[dict[str, Callable[[Any], bool]]] = {
+    "uuid": _fullmatch(_UUID),
+    "material": lambda value: isinstance(value, str) and _material_id(value),
+    "setting": _fullmatch(_SETTING),
+}
 
 
 @dataclass(frozen=True)
@@ -135,7 +155,7 @@ def check(action: str, object_id: str, detail: Mapping[str, Any]) -> str:
     declared = AUDIT_ACTIONS.get(action)
     if declared is None:
         raise AuditRefused("unknown_action", action)
-    if not isinstance(object_id, str) or _ID_RULES[declared.id].fullmatch(object_id) is None:
+    if not _ID_RULES[declared.id](object_id):
         raise AuditRefused("object_id", action)
     for key, value in detail.items():
         if key not in declared.detail:

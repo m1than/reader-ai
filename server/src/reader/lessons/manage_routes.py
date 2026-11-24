@@ -18,6 +18,7 @@ from starlette.responses import JSONResponse, Response
 
 from reader import blobs
 from reader.api.http import Ctx, error
+from reader.jobs import audit
 from reader.lessons import manage
 from reader.lessons.access import lesson_uuid
 
@@ -35,6 +36,9 @@ async def _run(action: Action, ctx: Ctx, status: int = 200) -> Response:
             result = await action(conn)
     except manage.ManageError as e:
         return JSONResponse({"error": e.code, **e.extra}, status_code=e.status)
+    except audit.AuditRefused as refusal:  # a programming error (SRV-EVENTS FR-EVENTS-30); rolled back
+        audit.report_refused(refusal)
+        return error(500, "audit_refused")
     return JSONResponse(result, status_code=status)
 
 

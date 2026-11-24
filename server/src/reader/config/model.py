@@ -39,8 +39,8 @@ def _url(value: str) -> str:
 
 
 def _material_id(value: str) -> str:
-    if material_id_problem(value):
-        raise ValueError("reserved_id")
+    if problem := material_id_problem(value):
+        raise ValueError(problem)
     return value
 
 
