@@ -155,7 +155,10 @@ defers:
   - "An `Outdated` marker on lesson cells whose cited pages are flagged (WEB-NOTEBOOK change, SRV-FRESH defers)."
   - "Mounting in WEB-IMPORT's source list and the course page (paired changes for V/onboarding and V/plan)."
 
-# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
-# interface copy into `web/src/fresh/messages.ts` ({en, ru}; the current English is the `en` value) when it is built;
-# a deleted material's card is not shown (SRV-FRESH FR-FRESH-20 answers 404). Nothing here changes until those are
-# promoted.
+# ---- Paired note (2026-11-24, V/manage; reviewed with WEB-UI FR-UI-30..32): this spec's interface copy moves into
+# `web/src/fresh/messages.en.ts` (static; the current English) and `messages.ru.ts` (behind `import()`).
+# `FreshnessCard`'s server enums are mapped through this catalogue, an unknown value shown as received (FR-UI-30's
+# enum rule): a claim's `kind` (version, api, protocol, standard, tool, statistic, law, other), its `confidence`, the
+# web `status` (changed, unchanged, unknown), the report status (running, done, failed, budget_refused) and the
+# verdict badges; hosts, URLs and titles from the report stay as received. A deleted material's card is not shown
+# (SRV-FRESH FR-FRESH-20 answers 404).

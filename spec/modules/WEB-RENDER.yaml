@@ -195,6 +195,6 @@ vectors:
       SVG probes), written for this spec
     file: spec/fixtures/WEB-RENDER/outputs.yaml
 
-# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
-# interface copy (labels such as "Copy code"; never rendered content) into `web/src/render/messages.ts` ({en, ru};
-# the current English is the `en` value) when it is built. Nothing here changes until it is promoted.
+# ---- Paired note (2026-11-24, V/manage; reviewed with WEB-UI FR-UI-30..32): this spec's interface copy (labels such as
+# "Copy code"; never rendered content) moves into `web/src/render/messages.en.ts` (static; the current English) and
+# `messages.ru.ts` (behind `import()`). Rendered markdown and outputs carry the lesson's `lang` (WEB-UI FR-UI-32).

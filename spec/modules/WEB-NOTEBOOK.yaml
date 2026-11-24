@@ -488,7 +488,9 @@ vectors:
 # - In the slice, edits to lab code and notes are lost when the page reloads; persistence arrives with stage 4b.
 # - Reset kernel clears every open lesson's Python state at once (the slice's reset is per user, SRV-KERNEL).
 
-# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
-# interface copy into `web/src/notebook/messages.ts` ({en, ru}; the current English is the `en` value) when it is
-# built; WEB-MANAGE FR-MANAGE-4 and -9 add lesson menu items, the bookmark toggle and the notes tab. Nothing here
-# changes until those are promoted.
+# ---- Paired note (2026-11-24, V/manage; reviewed with WEB-UI FR-UI-30..32): this spec's interface copy moves into
+# `web/src/notebook/messages.en.ts` (static; the current English) and `messages.ru.ts` (behind `import()`). WEB-UI
+# FR-UI-32 moves the lesson's `lang` from `div.lesson` onto the content nodes: the title `h1`, every
+# `[data-markdown]` block and every output area; the lesson toolbar, menus and labels inside `div.lesson` carry the
+# interface language. Cell kinds and states shown to the user are mapped through this area's catalogue (FR-UI-30's
+# enum rule). WEB-MANAGE FR-MANAGE-4 and -9 add lesson menu items, the bookmark toggle and the notes tab.

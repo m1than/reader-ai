@@ -145,8 +145,8 @@ vectors:
       and the response bodies of each FR-AUTH-29 outcome. Written with Red.
     file: spec/fixtures/WEB-ACCOUNTS/signups.json
 
-# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
-# interface copy into `web/src/accounts/messages.ts` ({en, ru}; the current English is the `en` value) when it is
-# built. Once ADR-0037 is accepted, FR-ACCOUNTS-3 gains Enable on a disabled row (SRV-AUTH FR-AUTH-48), its Disable
-# copy drops "This cannot be undone here." and owner note 1 is replaced. Nothing here changes until those are
-# promoted.
+# ---- Paired note (2026-11-24, V/manage; reviewed with WEB-UI FR-UI-30..32): this spec's interface copy moves into
+# `web/src/accounts/messages.en.ts` (static; the current English) and `messages.ru.ts` (behind `import()`); handles
+# stay untranslated, display names get `lang` from the Cyrillic rule (FR-UI-32). ADR-0037 is accepted (2026-11-25):
+# FR-ACCOUNTS-3 gains Enable on a disabled row (SRV-AUTH FR-AUTH-48), its Disable copy drops "This cannot be undone
+# here." and owner note 1 is replaced, written with WEB-MANAGE's Green.

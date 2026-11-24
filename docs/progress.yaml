@@ -1533,7 +1533,27 @@ tasks:
       note: "Paired changes in files of active tracks are listed in WEB-MANAGE's header and are written with Green
         only: WEB-UI (routes, manage slot, UserMenu Settings item, theme.js, test server, Playwright config),
         WEB-NOTEBOOK (lesson menu, bookmark toggle, notes tab), WEB-IMPORT (Your sources), OPS-DOD operations. No
-        NAV_ITEMS change, so V/obs-analytics-impl's nav is untouched." }
+        NAV_ITEMS change, so V/obs-analytics-impl's nav is untouched.",
+      ui30_review: "deep-reviewer (Fable) single round on 4997ec5 for WEB-UI FR-UI-30 and the area notes (outside the
+        complex areas): changes, all applied without a second round (2026-11-24), then promoted as FR-UI-30..32 with
+        Red. Blocking: (1) lazy Russian needs two modules → `messages.en.ts` (static) and `messages.ru.ts` (behind
+        `import()`) per area in all nine places, one parity test, a [build] oracle that no initial chunk's source map
+        lists a `messages.ru` module; (2) first paint and failure → FR-UI-31: the first commit waits for the active
+        locale's catalogues, lazy routes load their `ru` catalogue with their chunk, a failed load renders English
+        with `html lang=en` and retries next load, oracles (first rAF lang, a MutationObserver never sees the English
+        h1, an aborted `ru` chunk); (3) chrome versus content `lang` → FR-UI-32 on content nodes (title h1,
+        `[data-markdown]`, outputs), FR-UI-10's 'chrome stays lang=en' amended, the WEB-NOTEBOOK note, a 4-combination
+        unit oracle; (4) server enums mapped through the owning catalogue, unknown shown as received, one test per
+        enum, FreshnessCard's kind/confidence/status named, declared exceptions listed; (5) bundle gate → the
+        recorded-baseline delta test (NFR-MANAGE-1) dropped, NFR-UI-1 stays the durable gate, a structural build check,
+        the delta recorded once at Green. Non-blocking: theme.js resolver with a node:vm parity oracle, primary-subtag
+        case-insensitive, static `<html lang=en>` kept; tests pin English (Playwright `use.locale`, three live
+        `newContext()` calls, Vitest setup clears the key, no-provider runtime is English); plurals 0/12/22/111/1.5,
+        exact categories per locale, equal placeholder sets, whole sentences; the formatting locale rule (full tag on
+        a primary-subtag match), also for Intl.Collator; the Language options carry their own lang, html[lang] updates
+        on switch, `auto` ignores languagechange; tutor answers, notes and titles in chrome get lang from the Cyrillic
+        rule; areas enumerated as data (`I18N_AREAS`, incl. app and app/observability) with one glob parity test; the
+        owner note on English sign-in pages; e3e7fe1 merged before promotion (done in ec38b96)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

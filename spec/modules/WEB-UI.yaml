@@ -278,7 +278,9 @@ requirements:
         prices and other metadata use `tabular-nums`.
       - **Language.** The lesson container (`div.lesson`, WEB-NOTEBOOK's lesson view root) carries `lang`: `ru` when
         Cyrillic letters are more than half of the letters in the lesson's markdown sources, else `en` (review: no
-        metadata field exists for it today; a server field is a follow-up); the chrome stays `lang="en"`. Prose paragraphs, list items and table cells
+        metadata field exists for it today; a server field is a follow-up). Amended by FR-UI-32 (V/manage,
+        2026-11-24): that language is set on the lesson's content nodes, and the chrome carries the interface
+        language. Prose paragraphs, list items and table cells
         set `hyphens: auto`. (The live L02 is Russian under `lang="en"`: no hyphenation, and the table rule below broke
         "Отказоустойчивость" mid-letter; audit 2026-11-23.)
       - **Widths.** Lesson cells sit in a container at most 50rem wide whose prose children keep the 38rem reading
@@ -615,6 +617,65 @@ requirements:
         non-empty list.
       [unit] the redirect (owner with nothing, owner with a material, non-owner, an error); [browser] the first-run
       redirect under the production CSP.
+  # Interface language (V/manage, 2026-11-24; amendment note at the end of this file).
+  - id: FR-UI-30
+    text: >-
+      **Catalogues and runtime.** Every interface string of the SPA comes from message catalogues declared as data.
+      The areas are one list, `I18N_AREAS` in `web/src/ui/i18n.ts`: `app`, `app/observability`, `ui`, `notebook`,
+      `render`, `tutor`, `import`, `import/plan`, `accounts`, `fresh`, `manage`; each owns two modules beside its
+      code, `web/src/<area>/messages.en.ts` (imported statically) and `web/src/<area>/messages.ru.ts` (reached only
+      through `import()`), so each spec still owns its own copy and a copy change pairs with that spec and its tests
+      (H2). Messages are whole sentences (no concatenated fragments); placeholders are `{name}`. A plural message is
+      an object whose keys are exactly the locale's `Intl.PluralRules` categories (en: one, other; ru: one, few, many,
+      other). The runtime `t(key, values)` formats with `Intl.PluralRules`, `Intl.NumberFormat` and
+      `Intl.DateTimeFormat`; `Intl.Collator` (FR-UI-6's sorting) uses the same locale. **Formatting locale:** the
+      browser's full tag (`navigator.languages[0]`) when its primary subtag equals the chosen language, otherwise the
+      bare tag (`ru` or `en`). **Locale choice:** localStorage `reader-ai.locale` holds `auto`, `en` or `ru`
+      (WEB-MANAGE FR-MANAGE-10's control); `auto`, the default also for a missing or unknown value, picks `ru` when the
+      primary subtag of `navigator.languages[0]`, compared case-insensitively, is `ru`, else `en`; `auto` is resolved
+      once per page load and ignores later `languagechange` events (declared). With no provider mounted (tests,
+      stories) the runtime is English. **Server values:** a server enum value shown to the user (a state, kind, status
+      or reason code) is mapped through the owning area's catalogue; an unknown value is shown as received. Declared
+      exceptions, shown untranslated: identifiers (lesson, course, run and question ids, sha256 prefixes, model ids),
+      handles, URLs, file names, reader.yaml keys, and the observability page's span and kind names. [unit] one
+      parity test over `import.meta.glob('/src/**/messages.{en,ru}.ts')`: the glob's areas equal `I18N_AREAS`, the key
+      sets are equal, each plural message carries exactly its locale's categories, placeholder sets are equal across
+      locales; plural forms for 0, 1, 2, 5, 11, 12, 21, 22, 111 and 1.5 in Russian and English; the formatting-locale
+      rule for `ru-RU`, `RU`, `ru`, `en-GB`, `uk` and an empty list; one test per mapped enum (a known value
+      translated, an unknown one shown as received); `Intl.Collator` sorts with the chosen locale. [build]
+      web/src/app/build.test.ts (paired line in NFR-UI-1's test): no initial chunk's source map lists a
+      `messages.ru` module, and none lists a `web/src/manage/` module other than the slot stubs; NFR-UI-1's 121,153 B
+      stays the durable size gate. **Tests pin English:** web/playwright.config.ts sets `use.locale: 'en-US'`; the
+      Vitest setup clears `reader-ai.locale` before each test; the three live `newContext()` calls pass `locale:
+      'en-US'` (amendment note).
+  - id: FR-UI-31
+    text: >-
+      **First paint, lazy routes and failure.** theme.js (FR-UI-16) resolves the locale before first paint with the
+      same rule as the runtime (primary subtag, case-insensitive) and sets `lang` on `html`; `index.html` keeps a
+      static `<html lang="en">` as the fallback. The first React commit waits until the active locale's catalogues of
+      the initial route have loaded (English is static, so an English page never waits). Each lazy route loads its
+      `ru` catalogue together with its own chunk (one `Promise.all`) and renders once both are there. If a `ru`
+      catalogue fails to load, the app renders English, sets `html lang="en"`, keeps the stored choice, and tries
+      again on the next page load. The Settings control (WEB-MANAGE FR-MANAGE-10) switches without a reload, moves no
+      focus, and updates `html[lang]`. [unit] theme.js's resolver run in `node:vm` with the same table as the runtime
+      (stored `auto`, `en`, `ru`, `RU`, junk, missing × `navigator.languages` `ru-RU`, `en-US`, `uk`, empty) gives the
+      runtime's answer in every case; `html[lang]` updates on a switch; [browser] with `reader-ai.locale = ru`:
+      `html.lang` is `ru` in the first `requestAnimationFrame`, and a MutationObserver installed with `addInitScript`
+      never sees the English "Lessons" `h1`; with the `ru` chunk request aborted the page renders English with `html
+      lang="en"`, the stored value stays `ru`, and the next load (not aborted) is Russian; /, a lesson and /settings in
+      both languages at 390 px with no overflow (Russian strings are longer).
+  - id: FR-UI-32
+    text: >-
+      **Language of chrome and content.** `html[lang]` is the interface language. Content carries its own language,
+      set on the content nodes, never on a container that also holds chrome: in the lesson view (WEB-NOTEBOOK) the
+      title `h1`, every `[data-markdown]` block and every output area get `lang` from FR-UI-10's Cyrillic rule over
+      the lesson's markdown sources, while the lesson's toolbar, menus, labels and buttons inside `div.lesson` inherit
+      the interface language. Text that the user or a model wrote and that appears in chrome — course and lesson
+      titles in lists and the sidebar, tutor answers, notes, display names — gets `lang` from the same Cyrillic rule
+      over that text. This replaces FR-UI-10's sentence "the chrome stays `lang="en"`". [unit] the four combinations
+      of interface language × lesson language (en/en, en/ru, ru/en, ru/ru): the toolbar's computed language is the
+      interface's, the title, a markdown block and an output carry the lesson's; a Russian course title in an English
+      list carries `lang="ru"`.
 
 invariants:
   - id: INV-UI-1
@@ -688,32 +749,12 @@ vectors:
 # - The library tarball in web/vendor/ (about 354 KB) is built from the owner's tag v0.1.0 locally; nothing is pushed to
 #   the library.
 
-# ---- Proposed amendment (2026-11-24, V/manage, paired with WEB-MANAGE; status: draft). Held under `proposed_manage`
-# until a deep-reviewer round approves it; id FR-UI-30 (19..29 left free). Moved here from WEB-MANAGE's FR-MANAGE-10
-# at review round 2: the interface language is the shell's concern; WEB-MANAGE keeps only the Language control in
-# Settings → Appearance. Owner, 2026-11-24: Russian and English, the browser's language by default, a switcher in
-# Settings, P1. Each area spec gets a paired note (WEB-NOTEBOOK, WEB-RENDER, WEB-IMPORT, WEB-PLAN, WEB-ACCOUNTS,
-# WEB-FRESH, SRV-TUTOR's panel, WEB-MANAGE); the observability page (FR-UI-18) follows after V/obs-analytics-impl
-# merges. WEB-MANAGE's other paired WEB-UI changes (routes, the manage slot, the Settings menu item, theme.js
-# attributes, FR-UI-1 entries) are listed in WEB-MANAGE's header and are written with its Green.
-proposed_manage:
-  requirements:
-    - id: FR-UI-30
-      text: >-
-        **Interface language.** Every interface string of the SPA comes from message catalogues declared as data:
-        each area owns a file beside its code, `web/src/<area>/messages.ts`, exporting `{en, ru}` with the same keys
-        (a unit test per area checks key parity), so each spec still owns its own copy and a copy change pairs with
-        that spec and its tests (H2). The runtime is this spec's `web/src/ui/i18n.ts`: `t(key, values)` with Russian
-        plurals (one / few / many / other) through `Intl.PluralRules`, and `Intl` date and number formats in the
-        chosen locale. The locale is localStorage `reader-ai.locale` (`auto`, `en` or `ru`; WEB-MANAGE FR-MANAGE-10's
-        control), applied before first paint by theme.js (FR-UI-16) as `lang` on `html`; `auto` (the default, also
-        for a missing or unknown value) picks `ru` when the first entry of `navigator.languages` has the primary
-        subtag `ru`, else `en`. Switching re-renders without a reload and moves no focus. Lesson content keeps the
-        language of the material (FR-UI-10's lang rule on the lesson container). Server error codes are never shown,
-        so no server text needs translating; SRV-AUTH's static pages stay English until stage 4. The Russian
-        catalogues load lazily with their locale, so the initial chunk carries only the runtime and English (WEB-MANAGE
-        NFR-MANAGE-1). Tests keep matching English: jsdom reports `en-US`, and each spec's existing copy is its `en`
-        value. [unit] key parity per area; the browser rule for `ru-RU`, `ru`, `en-US`, `uk` and an empty list; a
-        missing Russian key falls back to English at run time and fails the parity test; Russian plurals for 1, 2, 5,
-        11, 21; [browser] /, a lesson and /settings in both languages at 390 px with no overflow (Russian strings are
-        longer), and the first paint already in the stored language.
+# Amendment (2026-11-24, V/manage, paired with WEB-MANAGE): FR-UI-30..32, the interface language (owner,
+# 2026-11-24: Russian and English, the browser's language by default, a switcher in Settings, P1). Moved here from
+# WEB-MANAGE's FR-MANAGE-10 at that spec's review round 2; WEB-MANAGE keeps only the Language control. deep-reviewer
+# (Fable) single round on 4997ec5 (outside the complex areas): changes, all applied without a second round (findings
+# and fixes in docs/progress.yaml V.manage `ui30_review`), then promoted with the Red tests. FR-UI-10's language
+# sentence is amended in the same change (FR-UI-32). Paired notes: WEB-NOTEBOOK, WEB-RENDER, WEB-IMPORT, WEB-PLAN,
+# WEB-ACCOUNTS, WEB-FRESH, SRV-TUTOR's panel, WEB-MANAGE; the observability page (`app/observability`) is an area of
+# this spec. Paired test-locale pins: e2e/web/live/slice.live.ts (SRV-AUTH), e2e/web/live/owner.slice.ts (WEB-UI)
+# and e2e/live/lib/obs_browser.mjs (SRV-OBS) pass `locale: 'en-US'` to `newContext()`.

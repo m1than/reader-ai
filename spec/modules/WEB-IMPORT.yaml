@@ -175,7 +175,8 @@ owner_notes:
 
 review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer. 2026-11-23 (V/plan, coordinator decision (B)): FR-IMPORT-4, -5, -6, -8 and `preview_debounce_ms` moved verbatim to WEB-PLAN (approved after the plan track's rounds 1–4); `paths` narrowed to files directly in `web/src/import/` and `e2e/web/import/`, so the `plan/` subtree is WEB-PLAN's. Reviewed with SRV-INGEST revision 2 in the onboarding deep-reviewer rounds 1–7 (round 2: Retry by the view's `retry`; round 4: Retry replies, `stale`, 503/415/500 codes; rounds 5–6: `busy: cli_running` and the 'restart your Mac' remedy); the owner accepted ADR-0029 with its amendment note. Approved by agent 2026-11-23 on V/upload-impl with the Red tests. VEC-IMPORT-1's fixture holds the upload part; the plan responses it once named are WEB-PLAN's own fixtures since decision (B). Mount: `web/src/import/ImportPage.tsx` renders WEB-PLAN's page, then this spec's sections (WEB-UI FR-UI-13 mount note)."
 
-# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
-# interface copy into `web/src/import/messages.ts` ({en, ru}; the current English is the `en` value) when it is built;
-# WEB-MANAGE FR-MANAGE-5 mounts "Your sources" after this spec's sections. Nothing here changes until those are
-# promoted.
+# ---- Paired note (2026-11-24, V/manage; reviewed with WEB-UI FR-UI-30..32): this spec's interface copy moves into
+# `web/src/import/messages.en.ts` (static; the current English) and `messages.ru.ts` (behind `import()`); the upload
+# states and failure codes shown to the user (queued, converting, importing, indexing, ready, failed and their codes)
+# are mapped through this catalogue, an unknown one shown as received (FR-UI-30's enum rule). WEB-MANAGE FR-MANAGE-5
+# mounts "Your sources" after this spec's sections.

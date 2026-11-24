@@ -55,7 +55,7 @@
 #     delete needs the start of its title typed (FR-MANAGE-2). Deletes offer Undo in a toast (FR-MANAGE-1).
 #   - Lesson numbers on screen are the position among the visible lessons (1..n), never the stored ordinal, which
 #     keeps gaps after a delete (SRV-LESSON FR-LESSON-28).
-#   - All code under web/src/manage is lazy, so the initial chunk grows only by the slot stubs (NFR-MANAGE-1).
+#   - All code under web/src/manage is lazy, so the initial chunk grows only by the slot stubs (WEB-UI FR-UI-30 [build]).
 #
 # ---- Paired changes (written with Green; files owned by other specs)
 #   - WEB-UI: FR-UI-1 allowed list (+ text-field, select, switch, tabs); FR-UI-3 routes `/settings` (any signed-in
@@ -322,9 +322,13 @@ requirements:
       runtime, the browser default and first-paint application — is WEB-UI FR-UI-30 (moved there at review round 2).
       This spec owns the control: Settings → Appearance → "Language", a library radio group with "Follow the
       browser" (default), "English" and "Русский", writing localStorage `reader-ai.locale` as `auto`, `en` or `ru` and
-      switching through FR-UI-30's runtime without a reload; focus stays on the chosen option. This layer's own
-      strings live in `web/src/manage/messages.ts` (`{en, ru}`, FR-UI-30's rule). [unit] the control writes each value
-      and the page re-renders in that language; the key parity of web/src/manage/messages.ts; [browser] the switch on
+      switching through FR-UI-30's runtime without a reload (WEB-UI FR-UI-31 updates `html[lang]`); focus stays on
+      the chosen option. The options "English" and "Русский" carry their own `lang` (`en`, `ru`) whatever the
+      interface language. This layer's own strings live in `web/src/manage/messages.en.ts` and `messages.ru.ts`
+      (FR-UI-30's rule); course, lesson and material titles and notes shown here get `lang` from WEB-UI FR-UI-32.
+      Owner note: a user with a Russian interface who signs out lands on SRV-AUTH's sign-in page, which is English
+      until stage 4. [unit] the control writes each value and the page re-renders in that language; each option's
+      `lang`; [browser] the switch on
       /settings in both languages at 390 px with no overflow.
   - id: FR-MANAGE-11
     text: >-
@@ -363,20 +367,11 @@ invariants:
       history and passkeys are not restorable and their dialogs say so ("This cannot be undone."). No control in this
       layer deletes a spend record, a revision or a blob. [unit] each delete's restore path or its dialog line.
 
-nfr:
-  - id: NFR-MANAGE-1
-    metric: >-
-      bytes (gzip, level 9) that this layer and WEB-UI FR-UI-30's runtime add to the initial JavaScript chunks of
-      WEB-UI NFR-UI-1's build, measured as a delta. The "without" side is a recorded baseline, not a second build:
-      the constant `INITIAL_BASELINE_B` in web/src/manage/budget.ts holds the initial chunks' gzip size measured on the
-      merge base just before this layer lands (117,829 B on 2026-11-24 after merging 9bb014a; re-measured and
-      updated on purpose at Green if the base moved, the update named in the commit and in this spec's review note);
-      build.test.ts measures the current initial chunks and asserts current − baseline ≤ 1,024. The slot stubs, the
-      i18n runtime and the English catalogue of the initial routes count, the lazy chunks and the Russian
-      catalogues do not. The 1,024 B bound is a hypothesis, re-measured at Green and recorded with the measured
-      value. NFR-UI-1's cap of 121,153 B still applies
-    threshold: 1024
-    verified_by: test
+# Bundle size (WEB-UI FR-UI-30 review, 2026-11-24): the recorded-baseline delta test is dropped. The durable gate is
+# WEB-UI NFR-UI-1 (121,153 B); the lasting check is structural (WEB-UI FR-UI-30 [build]: no `web/src/manage/` module
+# beyond the slot stubs and no `messages.ru` module in the initial chunks). The measured delta against 117,829 B (the
+# initial chunks after merging 9bb014a) is recorded once at Green in this spec's review note.
+nfr: []
 
 vectors:
   - id: VEC-MANAGE-1
