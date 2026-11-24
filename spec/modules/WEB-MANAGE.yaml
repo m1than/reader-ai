@@ -419,3 +419,6 @@ vectors:
       file, copied from the route's answer (owner live check, 2026-11-24). The server's [db] test asserts the route
       answers exactly `body`; the web contract test parses it with the client's validator.
     file: spec/fixtures/WEB-MANAGE/settings-view.json
+
+owner_notes:
+  - "Marking a lesson done or not done is your own progress, not a management action, so it does not appear in Settings → Data → Activity (SRV-EVENTS FR-EVENTS-30: progress is not audited)."
