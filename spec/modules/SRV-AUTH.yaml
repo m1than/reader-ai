@@ -309,6 +309,8 @@ requirements:
       change (2026-11-23): ROUTERS appends `reader.freshness.routes` after `reader.obs.routes`, and
       `reader/freshness/migrations` follows `reader/obs/migrations`; a route's `method` may also be `PUT` (its
       `PUT /api/materials/{material_id}/bibliography`; non-GET, so under the same CSRF gate and JSON body rule).
+      Paired SRV-EVENTS change (2026-11-24, V/manage, FR-EVENTS-31): ROUTERS appends `reader.jobs.audit_routes`
+      after `reader.freshness.routes`, and the declared-list test takes it.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row

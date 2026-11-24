@@ -652,6 +652,7 @@ def test_routers_are_a_declared_list() -> None:
         "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
         "reader.obs.routes",  # SRV-OBS paired change (FR-AUTH-33)
         "reader.freshness.routes",
+        "reader.jobs.audit_routes",  # SRV-EVENTS FR-EVENTS-31 (V/manage)
     ]
 
 

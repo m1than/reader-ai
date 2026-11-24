@@ -746,3 +746,21 @@ operations:
         missing: "no measured cost per check yet (FR-FRESH-14 not run); estimate ≈ $0.27, run cap $1.00, daily cap $2.00"
       observability: { items: [FR-FRESH-13, FR-AGENT-16] }
       recovery: { items: [FR-FRESH-3, FR-FRESH-10, FR-FRESH-12] }
+
+  - id: manage.audit
+    title: Read the activity log of management actions (owner, Settings → Data → Activity)
+    surface: [web, api]
+    specs: [SRV-EVENTS, WEB-MANAGE]
+    routes: ["GET /api/audit"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-EVENTS-30, FR-EVENTS-31]
+        missing: "no live run yet: the `manage` live step reads the audit after its course actions"
+      security: { items: [FR-EVENTS-31] }
+      privacy: { items: [FR-EVENTS-30] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-EVENTS-31] }

@@ -156,10 +156,13 @@ async def test_record_commits_and_rolls_back_with_the_change(pg: Pg, tmp_path: P
     actor = w.users["ivan"]
     async with w.engine.begin() as conn:
         await audit.record(conn, actor, "course.archive", COURSE_ID, {})
-    with pytest.raises(RuntimeError):
+    async def failing_change() -> None:
         async with w.engine.begin() as conn:
             await audit.record(conn, actor, "course.unarchive", COURSE_ID, {})
             raise RuntimeError("the change fails")
+
+    with pytest.raises(RuntimeError):
+        await failing_change()
     rows = await _rows(w.engine)
     assert [(r[0], r[1]) for r in rows] == [("course.archive", COURSE_ID)]
     with pytest.raises(audit.AuditRefused):
@@ -194,7 +197,10 @@ async def test_audit_log_has_no_foreign_key_to_users(pg: Pg, tmp_path: Path) -> 
     async with w.engine.begin() as conn:
         await audit.record(conn, uuid.uuid4(), "course.archive", COURSE_ID, {})
         fks = await conn.execute(
-            text("SELECT count(*) FROM pg_constraint WHERE conrelid = 'audit_log'::regclass AND contype = 'f'")
+            text(
+                "SELECT count(*) FROM pg_constraint"
+                " WHERE conrelid = 'audit_log'::regclass AND contype = 'f'"
+            )
         )
         assert fks.scalar() == 0
     await w.engine.dispose()
@@ -213,7 +219,8 @@ async def test_read_route_pages_and_refuses_a_learner(pg: Pg, tmp_path: Path) ->
         assert len(body["rows"]) == 200
         ids = [r["id"] for r in body["rows"]]
         assert ids == sorted(ids, reverse=True)
-        assert set(body["rows"][0]) == {"id", "at", "actor_id", "action", "object_kind", "object_id", "detail"}
+        keys = {"id", "at", "actor_id", "action", "object_kind", "object_id", "detail"}
+        assert set(body["rows"][0]) == keys
         assert body["rows"][0]["object_kind"] == "course"
         second = (await c.get("/api/audit", params={"before": body["next_before"]})).json()
         assert len(second["rows"]) == 5
