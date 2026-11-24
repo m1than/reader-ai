@@ -359,7 +359,8 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   const signinAxe: Record<string, string[]> = {}; // SRV-AUTH's own page: recorded only (follow-up amendment)
   type Layout = {
     overflow_px: number; widest_p_px: number; p_font_size: string; p_line_height: string; p_font_family: string; h1_px: string;
-    h1_family: string; chars_per_line_median: number | null; article_lang: string | null; td_hyphens: string | null;
+    h1_family: string; chars_per_line_median: number | null; title_lang: string | null; markdown_lang: string | null;
+    output_lang: string | null; output_present: boolean; td_hyphens: string | null;
     td_overflow_wrap: string | null; toolbar_button_radius: string | null; toolbar_button_height: number | null;
     lab_px: number | null; header_px: number | null;
   };
@@ -400,7 +401,12 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         h1_px: h1 ? getComputedStyle(h1).fontSize : '',
         h1_family: h1 ? getComputedStyle(h1).fontFamily : '',
         chars_per_line_median: perLine.length ? Math.round(perLine[Math.floor(perLine.length / 2)]!) : null,
-        article_lang: document.querySelector('#content div.lesson')?.getAttribute('lang') ?? null,
+        // WEB-UI FR-UI-32: the lesson's language sits on its content nodes (the title, the markdown blocks, the
+        // output areas), never on div.lesson, which also holds chrome.
+        title_lang: document.querySelector('#content div.lesson h1')?.getAttribute('lang') ?? null,
+        markdown_lang: document.querySelector('#content [data-markdown]')?.getAttribute('lang') ?? null,
+        output_lang: document.querySelector('#content .outputs')?.getAttribute('lang') ?? null,
+        output_present: document.querySelector('#content .outputs') !== null,
         td_hyphens: tdCs?.hyphens ?? null,
         td_overflow_wrap: tdCs?.overflowWrap ?? null,
         toolbar_button_radius: tbCs?.borderTopLeftRadius ?? null,
@@ -584,12 +590,16 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     // Design pass (FR-UI-10): heading scale, language, table breaking, toolbar buttons, the wide lab block. Each hook
     // must be present before its value is checked (review).
     for (const [hook, value] of [
-      ['#content div.lesson[lang]', l.article_lang], ['[data-markdown] td', l.td_hyphens],
+      ['#content div.lesson h1[lang]', l.title_lang], ['#content [data-markdown][lang]', l.markdown_lang],
+      ['[data-markdown] td', l.td_hyphens],
       ['.lesson-toolbar .acme-button', l.toolbar_button_height], ['.cell[data-kind="lab"] .lab', l.lab_px],
     ] as const)
       expect.soft(value, `${hook} present ${name}`).not.toBeNull();
     expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '28px' : '32px');
-    expect.soft(l.article_lang, `lesson lang ${name}`).toBe('ru');
+    // WEB-UI FR-UI-32: the content nodes carry the lesson's language (L02 is Russian).
+    expect.soft(l.title_lang, `lesson title lang ${name}`).toBe('ru');
+    expect.soft(l.markdown_lang, `lesson markdown lang ${name}`).toBe('ru');
+    if (l.output_present) expect.soft(l.output_lang, `lesson output lang ${name}`).toBe('ru');
     expect.soft(l.td_hyphens, `td hyphens ${name}`).toBe('auto');
     expect.soft(l.td_overflow_wrap, `td overflow-wrap ${name}`).toBe('break-word');
     expect.soft(l.toolbar_button_radius, `toolbar button radius ${name}`).toBe('6px');
