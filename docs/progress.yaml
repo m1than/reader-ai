@@ -1591,8 +1591,11 @@ tasks:
         LoggedModel tag PATCH and read-back; egress probe reaches MLflow /health 200. Design review round 4
         (03124aa): changes, F1 (the restore logic); revision 5: store.version, an in-progress marker that stops a
         second run before the backup, named versions in the image test, distinct exit codes (migrate 10..13,
-        restore 0..5), the fresh-volume hypothesis with a fallback, tutor_summary moved to SRV-TUTOR. Next: design
-        review round 5." }
+        restore 0..5), the fresh-volume hypothesis with a fallback, tutor_summary moved to SRV-TUTOR. Design review
+        round 5 (46e9017): every crash point for an existing store and restore passes; G1 (an interrupted fresh
+        first start stuck) fixed in revision 6 with a backup/fresh marker that step 0 wipes and restarts from;
+        normal starts skip the backup; restore needs in-progress or --force. Next: owner decision on ADR-0038
+        and approval of the phase 2 requirements." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
