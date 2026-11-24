@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-quer
 import { createBrowserHistory, createMemoryHistory, RouterProvider } from '@tanstack/react-router';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { createSignupsApi } from '../accounts/api';
+import { createUploadApi } from '../import/api';
 import { createPlanApi } from '../import/plan/api';
 import { createTutorApi } from '../tutor/api';
 import { createApi, SIGN_IN_URL } from './api';
@@ -99,6 +100,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       plan: createPlanApi(deps),
       signups: createSignupsApi(deps),
       obs: createObsApi(deps), // FR-UI-18
+      upload: createUploadApi(deps), // FR-UI-13
       notify,
       navigateAway,
       // FR-UI-6, FR-UI-15: the owner's CompileControl renders through the slot unless a caller supplies its own.

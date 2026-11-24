@@ -1367,6 +1367,31 @@ tasks:
       note: "Coordination (coordinator, 2026-11-23): this item is FR-UI-15. FR-UI-13 stays the upload track's id
         (V/onboarding, left untouched here): it keeps its first-run bullet and drops its compile-status bullet at merge,
         which FR-UI-15 supersedes. FR-UI-14 is V/signup's; FR-UI-16 and above are the design pass's." }
+  - { id: V.onboarding-upload, stage: V, kind: module, track: product, status: in_progress, branch: V/upload-impl,
+      needs: [V.live, V.WEB-polish],
+      what: "The upload track of V.onboarding (ADR-0029, accepted by the owner with its amendment note): SRV-INGEST
+        revision 2 (FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7, INV-INGEST-4's run-time probe), SRV-AUTH
+        FR-AUTH-22, OPS-DEPLOY FR-DEPLOY-14, OPS-CLI FR-CLI-23, SRV-SEARCH FR-SEARCH-10, SRV-CONFIG FR-CONFIG-18,
+        WEB-IMPORT (approved), WEB-UI FR-UI-13, OPS-DOD material.upload. Branch from V/onboarding with
+        V/slice-integration, V/plan and V/ingest-profile-v2 merged in. Ids renumbered at the merge into
+        V/slice-integration (2026-11-24), because SRV-OBS took them first: FR-DEPLOY-13 → 14, FR-CLI-22 → 23,
+        FR-CONFIG-17 → 18 (ADR-0029's text keeps the old numbers; it is the owner's file).",
+      next: "Code review (deep-reviewer, coordinator; sandbox, egress and jobs: full rounds): round 1 (8270d1b) and
+        round 2 (dc5fce4) changes, fixed in dc5fce4 and 67a2615; round 3 on 67a2615 VERDICT approve, its non-blocking
+        items applied in 7e5fd0e. Merged into V/slice-integration (two-parent merge, 2026-11-24). Live check
+        (e2e/live/upload.sh) waits for the coordinator's go with the owner's OK on the restart: it needs `reader up`
+        from the merged line (the uploads migration, the new routes and the watcher).",
+      note: "Specs promoted with Red, then Green: server (upload route, uploads state machine, inbox commands, receive
+        under a claim, routes), host (watch mode, convert.lock shared with the CLI, watchdogs by getsid plus
+        proc_pidpath plus cwd/args, bounded execs, caffeinate, run-time cross-process probe), CLI (reader up/status/
+        down), web (drop zone, progress, processing, converter state, Cancel/Retry/Discard; first-run redirect). The
+        compile status in the lesson list moved to V/compile-ui as FR-UI-15 (coordinator 2026-11-23). Tests 2026-11-23: server ingest 389 passed (10 skipped [host]/[local] by default), cli 243,
+        config 255, search/auth/deploy upload cases; [host] on this Mac: watchdog stand-ins (setsid, setpgid) killed at
+        the limit, lock not inherited and the orphan cleaned, the converter-level host tests 6 passed under the v2
+        profile, the run-time probe returns ready; web 306 unit, 212 browser, Storybook build. Bundles: /import lazy
+        7,910 B gzip (NFR-IMPORT-1 30,000), initial 113,752 B (NFR-UI-1 121,153). Spec corrections in Green:
+        FR-INGEST-19's busy column is the three-valued text FR-INGEST-20/-23 use; the run-time probe's package copy
+        is a data file (cross_process_probe.txt); FR-UI-12's chunk sentence points to FR-UI-13's mount." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

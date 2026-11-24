@@ -5,10 +5,11 @@
 import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
-import { createRootRoute, createRoute, createRouter, Link, Outlet, useRouterState, type RouterHistory } from '@tanstack/react-router';
-import { lazy, Suspense, useContext, useState } from 'react';
+import { createRootRoute, createRoute, createRouter, Link, Outlet, useNavigate, useRouterState, type RouterHistory } from '@tanstack/react-router';
+import { lazy, Suspense, useContext, useEffect, useState } from 'react';
 import { SearchOffIcon, WarningIcon } from '../ui/icons';
 import { StateBlock } from '../ui/StateBlock';
+import type { LessonSummary } from './api';
 import { useServices } from './context';
 import { CourseSidebar } from './CourseSidebar';
 import { Header } from './Header';
@@ -21,11 +22,29 @@ const LESSON_ID = /^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$/;
 export const isLessonId = (id: string): boolean => LESSON_ID.test(id) && id !== '.' && id !== '..';
 
 const LessonPage = lazy(() => import('../notebook/LessonPage').then((m) => ({ default: m.LessonPage })));
-const ImportPage = lazy(() => import('../import/plan/ImportPage').then((m) => ({ default: m.ImportPage })));
+// FR-UI-13 mount note: WEB-IMPORT's page composes WEB-PLAN's page with the upload sections.
+const ImportPage = lazy(() => import('../import/ImportPage').then((m) => ({ default: m.ImportPage })));
 // FR-UI-14: WEB-ACCOUNTS's Sign-ups screen, a lazy chunk, for the owner only.
 const SignupsPage = lazy(() => import('../accounts/SignupsPage').then((m) => ({ default: m.SignupsPage })));
 // FR-UI-18: the observability page, a lazy chunk, for the owner only.
 const ObservabilityPage = lazy(() => import('./observability/ObservabilityPage').then((m) => ({ default: m.ObservabilityPage })));
+
+/** FR-UI-13 first run: an owner with no lessons and no material at all lands on /import (history replace). */
+function useFirstRun(lessons: LessonSummary[] | undefined) {
+  const { api, plan } = useServices();
+  const me = useQuery(queries(api).me());
+  const navigate = useNavigate();
+  const owner = me.data?.role === 'owner';
+  const materials = useQuery({
+    queryKey: ['plan', 'materials'],
+    queryFn: () => plan!.materials(),
+    enabled: owner && plan !== undefined && lessons !== undefined && lessons.length === 0,
+  });
+  const empty = materials.isSuccess && materials.data.materials.length === 0;
+  useEffect(() => {
+    if (empty) void navigate({ to: '/import', replace: true });
+  }, [empty, navigate]);
+}
 
 const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 
@@ -121,6 +140,7 @@ function ListPage() {
   const q = useQuery(queries(api).lessons());
   const hash = useRouterState({ select: (s) => s.location.hash });
   const focusCourse = hash.startsWith('course-') ? hash.slice('course-'.length) : null;
+  useFirstRun(q.data?.lessons);
   return (
     <div className="page">
       <h1>Lessons</h1>

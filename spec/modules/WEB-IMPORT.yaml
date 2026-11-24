@@ -1,7 +1,8 @@
 # WEB-IMPORT — the "Import source" page: drag-and-drop a PDF, follow its conversion and indexing, answer the
 # study-time question, preview the plan and its estimate, confirm (owner request 2026-11-23, task V.onboarding).
 #
-# Status: DRAFT. No code until the deep-reviewer approves.
+# Status: approved by agent (2026-11-23) after the onboarding deep-reviewer rounds 1–7 and the owner's acceptance of
+# ADR-0029; promoted on V/upload-impl with its Red tests. This spec now holds the upload sections (1 and 2) only.
 #
 # Flow (one page, `/import`, four sections that unlock in order):
 #   1. Source: a drop zone and a "Choose a PDF" button; client checks; language; upload with a progress bar.
@@ -34,9 +35,9 @@
 
 id: WEB-IMPORT
 title: Import source page — drag-and-drop upload, processing progress, the study-time form with its estimate, confirm
-status: draft
-approved_by: null
-approved_at: null
+status: approved
+approved_by: agent
+approved_at: 2026-11-23
 layer: web
 track: product
 adr: [ADR-0029, ADR-0010, ADR-0013]
@@ -78,24 +79,41 @@ requirements:
       `navigator.language` (`ru*` → Russian, `en*` → English, else Other). [unit] [story]
   - id: FR-IMPORT-2
     text: >-
-      **Upload.** "Upload" sends the file with XMLHttpRequest (`POST /api/materials/uploads?filename=…&language=…`,
-      the name and language through `URLSearchParams`, `Content-Type: application/pdf`, same origin, credentials
-      same-origin), showing a determinate progress bar from `upload.onprogress` with its percentage as text, and a
-      Cancel button that aborts the request. Responses: 201 or 200 (dedupe: "Already imported" with a link to its
-      state) move to Processing; 401 navigates to sign-in (WEB-UI FR-UI-5); 403, 409, 413, 415 and 400 show the
-      code's message; a network error shows `network` with Retry. The response body is validated (valibot) like
-      every WEB-UI client response (`bad_response`). [unit]
+      **Upload.** "Upload" sends the file with XMLHttpRequest (`POST /api/materials/uploads?language=…` with the
+      language through `URLSearchParams`; the file name in the header `X-Reader-Filename`, percent-encoded with
+      `encodeURIComponent`, never in the URL (SRV-INGEST FR-INGEST-18); `Content-Type: application/pdf`;
+      same origin, credentials same-origin), showing a determinate progress bar from `upload.onprogress` with its
+      percentage as text, and a Cancel button that aborts the request. Responses: 201 or 200 (dedupe: "Already
+      imported" with a link to its state) move to Processing; 401 navigates to sign-in (WEB-UI FR-UI-5); 403, 408,
+      409 (`upload_busy`; `inbox_full` with its remedy "Discard failed uploads, cancel queued ones, or wait";
+      `id_collision`), 413, 415 (`not_pdf`, `content_type`), 400, 503 `config_unavailable` ("The server cannot read
+      its configuration; check reader.yaml") and 500 `inbox_invalid` ("The server's upload folder is not usable; see
+      the server log") show the code's message; a network error shows `network` with Retry. The
+      response body is validated (valibot) like every WEB-UI client response (`bad_response`). [unit]
   - id: FR-IMPORT-3
     text: >-
-      **Processing.** The page polls `GET /api/materials/uploads/{id}` every `poll_ms` until `ready`, `failed` or
-      `cancelled`, and shows a step list (an ordered list with `role="list"`): Uploaded → Converting on your Mac →
+      **Processing.** The page polls `GET /api/materials/uploads/{id}` every `poll_ms` until `ready` or `failed` (a
+      404 after the owner's own cancel or Discard ends polling with "Cancelled" or "Discarded"; any other 404 shows
+      "This upload no longer exists"), and shows a step list (an ordered list with `role="list"`): Uploaded → Converting on your Mac →
       Importing → Indexing for search → Ready. The current step has `aria-current="step"`; `converting` shows "Page n
       of m" and a determinate progress bar when `pages_total` is known. One `role="status"` region announces step
       changes only (not every page count). While `queued`, the page also polls `GET /api/materials/converter` every
-      `converter_poll_ms` and shows: online → "Waiting for the converter"; offline → "The converter on your Mac is not
+      `converter_poll_ms` and shows: online → "Waiting for the converter", or, with `busy: cli_running`, "Waiting: a
+      command-line conversion is running on your Mac; this upload starts when it ends"; offline → "The converter on your Mac is not
       running. Start it with `reader up`."; setup_missing → "The converter is not set up. Run `reader-ingest
-      --setup`." (commands in `<code>`, copyable as text). Cancel is shown in queued, claimed and converting (a
-      confirm dialog first); Retry and Discard on failed, with the code's message. Polling stops when the page is
+      --setup`." (commands in `<code>`, copyable as text); and, whatever the state, when `strays` > 0 a non-blocking
+      warning "Earlier conversions left processes running on your Mac; restarting your Mac clears them", and
+      when `stale` is true the warning "The converter on your Mac runs older code; `reader up` restarts it when it is
+      idle".
+      Cancel is shown in queued, claimed and converting (a confirm dialog first; cancel deletes the upload, so the
+      same file can be uploaded again). A failure with code `memory_limit` adds the remedy "If files that used to
+      convert now fail with this, restart your Mac" (SRV-INGEST FR-INGEST-22's cross-run residual: an escaped
+      process from an earlier conversion can fail later ones, with no other signal). On failed, the view's `retry`
+      decides the controls: `reconvert` shows Retry
+      and Discard; `requeue` (the import or indexing job died after the file was converted) shows Retry only, which
+      restarts that job without converting again; null shows neither. Retry's replies (SRV-INGEST FR-INGEST-19):
+      202 `requeued` or `already_queued` → "Restarted" and polling resumes; 200 → the returned view; 409 `busy` →
+      "Already restarting; try again in a moment"; 409 `state` or `upload_busy` → the view is refreshed. Polling stops when the page is
       hidden (`document.visibilityState`) and resumes when visible. [unit] [story: each state]
   # FR-IMPORT-4, -5, -6 and -8 (study-time form, estimate, confirm, "Your sources") moved verbatim to WEB-PLAN
   # (2026-11-23, coordinator decision (B)).
@@ -121,7 +139,9 @@ invariants:
   - id: INV-IMPORT-2
     text: >-
       For every upload state, plan state and error code in VEC-IMPORT-1, the page shows exactly one message from the
-      catalogue and the controls that state allows (Cancel, Retry, Discard, the form, Confirm), and no other. [unit]
+      catalogue and the controls that state allows (Cancel, Retry, Discard, the form, Confirm), and no other. Upload
+      cases include a `failed` view with `retry: requeue` from a dead import and from a dead embed (Retry only, no
+      Discard) and with `retry: reconvert` (Retry and Discard). [unit]
   - id: INV-IMPORT-3
     text: >-
       Under the production CSP (WEB-UI INV-UI-4's test server), loading `/import` and walking every stubbed state
@@ -138,7 +158,10 @@ vectors:
     source: >-
       Synthetic response bodies for every upload state (VEC-INGEST-6), the converter states, preview results (fits,
       does not fit with both suggestions, a 1-lesson plan), a `plan_changed` conflict, a confirm with and without a
-      compile run and with a budget refusal, and each error code; no book text (titles are "Synthetic chapter N").
+      compile run and with a budget refusal, and each error code; for the upload part also the converter view with
+      `strays` > 0 and with `stale: true`, each Retry reply (202 `requeued`, 202 `already_queued`, 200, 409 `busy`,
+      409 `state`), and the upload codes 503 `config_unavailable`, 415 `content_type` and 500 `inbox_invalid`; no
+      book text (titles are "Synthetic chapter N").
     file: spec/fixtures/WEB-IMPORT/responses.json
 
 defers:
@@ -150,4 +173,4 @@ owner_notes:
   - "1. The live check uploads a small synthetic PDF and confirms with 'Start compiling lesson 1' unchecked, so it spends no credit; the Bashir pilot stays as it is."
   - "2. 'Start compiling lesson 1 now' is checked by default as you asked; the amount is shown next to it."
 
-review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer. 2026-11-23 (V/plan, coordinator decision (B)): FR-IMPORT-4, -5, -6, -8 and `preview_debounce_ms` moved verbatim to WEB-PLAN (approved after the plan track's rounds 1–4); `paths` narrowed to files directly in `web/src/import/` and `e2e/web/import/`, so the `plan/` subtree is WEB-PLAN's."
+review: "draft 2026-11-23 (V/onboarding). Awaits deep-reviewer. 2026-11-23 (V/plan, coordinator decision (B)): FR-IMPORT-4, -5, -6, -8 and `preview_debounce_ms` moved verbatim to WEB-PLAN (approved after the plan track's rounds 1–4); `paths` narrowed to files directly in `web/src/import/` and `e2e/web/import/`, so the `plan/` subtree is WEB-PLAN's. Reviewed with SRV-INGEST revision 2 in the onboarding deep-reviewer rounds 1–7 (round 2: Retry by the view's `retry`; round 4: Retry replies, `stale`, 503/415/500 codes; rounds 5–6: `busy: cli_running` and the 'restart your Mac' remedy); the owner accepted ADR-0029 with its amendment note. Approved by agent 2026-11-23 on V/upload-impl with the Red tests. VEC-IMPORT-1's fixture holds the upload part; the plan responses it once named are WEB-PLAN's own fixtures since decision (B). Mount: `web/src/import/ImportPage.tsx` renders WEB-PLAN's page, then this spec's sections (WEB-UI FR-UI-13 mount note)."

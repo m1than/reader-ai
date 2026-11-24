@@ -1,6 +1,7 @@
 // App-wide services handed to routes and the lesson view.
 import { createContext, useContext, type ComponentType } from 'react';
 import type { SignupsApi } from '../accounts/api';
+import type { UploadApi } from '../import/api';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
 import type { Api, LessonSummary } from './api';
@@ -39,6 +40,8 @@ export interface Services {
   /** Rendered for every lesson row and on the lesson page (FR-UI-6); AppRoot's default renders FR-UI-15's
    * CompileControl for the owner. */
   compileSlot?: CompileSlot;
+  /** SRV-INGEST's upload client for the /import page's upload sections (FR-UI-13, WEB-IMPORT). */
+  upload?: UploadApi;
 }
 
 export const ServicesContext = createContext<Services | null>(null);

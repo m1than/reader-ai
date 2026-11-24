@@ -19,6 +19,15 @@ def forbidden(c: str) -> bool:
     return c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F
 
 
+UPLOAD_ID_PREFIX: Final = "up-"
+
+
+def material_id_problem(value: str) -> str | None:
+    """`reserved_id` for an id starting with `up-` (case-sensitive, as written): SRV-INGEST names uploaded
+    materials `up-<12 hex>` (FR-CONFIG-18)."""
+    return "reserved_id" if value.startswith(UPLOAD_ID_PREFIX) else None
+
+
 def url_problem(value: str) -> str | None:
     """`bad_url` unless an absolute https URL with a host and a valid port, free of whitespace and `\\`.
 

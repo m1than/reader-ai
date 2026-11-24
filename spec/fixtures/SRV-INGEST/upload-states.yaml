@@ -1,0 +1,36 @@
+# VEC-INGEST-6: the upload view's state, code and `retry` (SRV-INGEST FR-INGEST-19, FR-INGEST-23).
+# Inputs: the row's state, its attempts and whether its lease has expired (claimed, converting, sending only); the
+# SRV-EVENTS status and error code of the `ingest.import` key; whether the material has an `ingests` row; the status
+# and code of the `search.embed` key of that frozen ingest under the current params (`none` when there is no such
+# key: a dead key of an ingest that never existed, or of older params, is never passed here).
+# Statuses: none | queued | running | succeeded | dead. An existing import key wins over the row (FR-INGEST-19).
+# A deleted row has no view (404 `not_found`), so it has no case here.
+cases:
+  # no import key: the row decides
+  - { row: queued, attempts: 0, expired: false, import: none, ingest: false, embed: none, want: { state: queued, code: null, retry: null } }
+  - { row: claimed, attempts: 0, expired: false, import: none, ingest: false, embed: none, want: { state: claimed, code: null, retry: null } }
+  - { row: converting, attempts: 1, expired: false, import: none, ingest: false, embed: none, want: { state: converting, code: null, retry: null } }
+  - { row: sending, attempts: 0, expired: false, import: none, ingest: false, embed: none, want: { state: sending, code: null, retry: null } }
+  # lease expiry: back to queued with attempts + 1, or failed host_lost when that makes 3
+  - { row: claimed, attempts: 0, expired: true, import: none, ingest: false, embed: none, want: { state: queued, code: null, retry: null } }
+  - { row: converting, attempts: 1, expired: true, import: none, ingest: false, embed: none, want: { state: queued, code: null, retry: null } }
+  - { row: sending, attempts: 2, expired: true, import: none, ingest: false, embed: none, want: { state: failed, code: host_lost, retry: reconvert } }
+  - { row: failed, attempts: 0, expired: false, import: none, ingest: false, embed: none, code: convert_failed, want: { state: failed, code: convert_failed, retry: reconvert } }
+  - { row: failed, attempts: 3, expired: false, import: none, ingest: false, embed: none, code: host_lost, want: { state: failed, code: host_lost, retry: reconvert } }
+  # the import key exists: it wins over the row's state (receive enqueued, then crashed before marking)
+  - { row: sending, attempts: 0, expired: false, import: queued, ingest: false, embed: none, want: { state: importing, code: null, retry: null } }
+  - { row: sending, attempts: 0, expired: true, import: queued, ingest: false, embed: none, want: { state: importing, code: null, retry: null } }
+  - { row: failed, attempts: 0, expired: false, import: queued, ingest: false, embed: none, code: receive_failed, want: { state: importing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: queued, ingest: false, embed: none, want: { state: importing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: running, ingest: false, embed: none, want: { state: importing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: dead, import_code: artifact_invalid, ingest: false, embed: none, want: { state: failed, code: artifact_invalid, retry: requeue } }
+  - { row: received, attempts: 0, expired: false, import: succeeded, ingest: true, embed: queued, want: { state: indexing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: succeeded, ingest: true, embed: running, want: { state: indexing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: succeeded, ingest: true, embed: none, want: { state: indexing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: succeeded, ingest: true, embed: succeeded, want: { state: ready, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: succeeded, ingest: true, embed: dead, embed_code: EmbedUnavailable, want: { state: failed, code: EmbedUnavailable, retry: requeue } }
+  # received, the import key removed by an operator
+  - { row: received, attempts: 0, expired: false, import: none, ingest: false, embed: none, want: { state: failed, code: import_missing, retry: reconvert } }
+  - { row: received, attempts: 0, expired: false, import: none, ingest: true, embed: succeeded, want: { state: ready, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: none, ingest: true, embed: queued, want: { state: indexing, code: null, retry: null } }
+  - { row: received, attempts: 0, expired: false, import: none, ingest: true, embed: dead, embed_code: EmbedUnavailable, want: { state: failed, code: EmbedUnavailable, retry: requeue } }

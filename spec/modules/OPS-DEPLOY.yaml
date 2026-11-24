@@ -40,7 +40,15 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted by the owner; SRV-OBS design review rounds 1–4, approve):
   FR-DEPLOY-13 adds profile `observability` (rotel, mlflow), networks otel/obs/obs-ui, volume obs_mlflow, the 8443
   Caddy site, mlflow's environment allow-list; FR-DEPLOY-12's example gains `observability`; VEC-DEPLOY-2 extended.
-  Reviewed in SRV-OBS's code review."
+  Reviewed in SRV-OBS's code review.
+  Paired change 2026-11-23 (for SRV-INGEST revision 2, ADR-0029 accepted by the owner): FR-DEPLOY-14 (drafted and
+  promoted as FR-DEPLOY-13; renumbered at the merge into V/slice-integration, 2026-11-24, because SRV-OBS's item
+  took that id first; ADR-0029's text still says FR-DEPLOY-13), drafted on V/onboarding and reviewed in its
+  deep-reviewer rounds 1–7, promoted on V/upload-impl with its Red tests; it also states the converter-source-hash
+  line of server.Dockerfile that SRV-INGEST FR-INGEST-23 names (round 4). Its test reformatted for ruff (line
+  length, split assertions), no oracle change. The [image] `caddy adapt` test's set of proxied paths gains
+  `/api/materials/uploads` (same api upstream), as FR-DEPLOY-14 requires; at the merge it sits beside SRV-OBS's
+  8443 site and its upstreams."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -314,6 +322,26 @@ requirements:
       `mlflow.Dockerfile` joins INV-DEPLOY-7's allow-list with no COPY source, FR-DEPLOY-7's "no `data:`, no
       `unsafe-inline`" applies to the app's site only, and FR-DEPLOY-5's override test compares renders with the same
       profiles. [config; image: `caddy adapt`]
+  - id: FR-DEPLOY-14   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23); was FR-DEPLOY-13 until the merge
+    text: >-
+      **Upload body limit.** The Caddyfile's site block gains, before `handle /api/*`, a `handle
+      /api/materials/uploads` with `request_body { max_size 200MiB }` and the same `reverse_proxy` as `/api/*`, so a
+      body over 209,715,200 bytes is refused with 413 at the edge (owner 2026-11-23: 200 MiB). The path matcher is
+      exact, so `/api/materials/uploads/{id}` routes keep the `/api/*` handler.
+      **Read timeout: in the api, numerically 300 s for the whole body** (SRV-INGEST FR-INGEST-18, 408
+      `body_timeout`). It is not set in Caddy: Caddy's `servers { timeouts { read_body … } }` is server-wide, so it
+      would also bound every other request, including the WebSocket kernel relays (SRV-KERNEL), and whether it is
+      cleared after the upgrade is not verified. 300 s is structural: v1 serves only `localhost` (ADR-0012), where a
+      200 MiB body takes seconds, and the bound limits how long a stalled client holds the single upload lock.
+      **Converter source hash** (the paired line SRV-INGEST FR-INGEST-23 names): `server.Dockerfile` runs SRV-INGEST
+      FR-INGEST-3's closure function (`reader.ingest.host.closure.source_sha256`) over the copied `/opt/reader/src`
+      at build and writes the hex digest to `/usr/local/share/reader/converter_source_sha256` (0444), so the api
+      compares the watcher's sha with it without importing `reader.ingest.host` at run time.
+      [unit] the config check parses the Caddyfile: exactly one `request_body` block, on exactly that path, with
+      `max_size 200MiB`, and no server-wide `read_body`; the Dockerfile writes that file from that function; [live]
+      209,715,200 bytes pass the edge and the api, and 209,715,201 bytes are 413 (SRV-INGEST FR-INGEST-18's live
+      case). The live check does not assert which of Caddy or the api answered the 413: both enforce the same cap,
+      and the config check above pins Caddy's.
 
 invariants:
   - id: INV-DEPLOY-1

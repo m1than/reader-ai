@@ -19,7 +19,14 @@ from pydantic import (
     model_validator,
 )
 
-from reader.config.checks import FrozenDict, decimal_in_context, freeze_opaque, unique, url_problem
+from reader.config.checks import (
+    FrozenDict,
+    decimal_in_context,
+    freeze_opaque,
+    material_id_problem,
+    unique,
+    url_problem,
+)
 from reader.config.refs import SecretRef
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -28,6 +35,12 @@ _FROZEN = ConfigDict(frozen=True, extra="forbid", strict=True)
 def _url(value: str) -> str:
     if url_problem(value):
         raise ValueError("bad_url")
+    return value
+
+
+def _material_id(value: str) -> str:
+    if material_id_problem(value):
+        raise ValueError("reserved_id")
     return value
 
 
@@ -95,7 +108,7 @@ class Budgets(BaseModel):
 
 class Material(BaseModel):
     model_config = _FROZEN
-    id: Text
+    id: Annotated[Text, AfterValidator(_material_id)]
     file: Text
     sha256: Sha256
     license: Text

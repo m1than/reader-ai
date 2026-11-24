@@ -24,6 +24,7 @@ from starlette.websockets import WebSocket
 
 from reader.api.http import Ctx, Route, WsRoute, error
 from reader.auth import store
+from reader.auth.csrf import raw_body_type
 from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
 ROUTERS: Final = (
@@ -73,10 +74,12 @@ class CsrfGate:
             return
         length = headers.get("content-length", "0").strip()
         has_body = not length.isdigit() or int(length) > 0 or "transfer-encoding" in headers
+        raw_path = scope.get("raw_path") or scope["path"].encode("utf-8")
+        allowed = raw_body_type(method, raw_path.split(b"?", 1)[0]) or "application/json"  # FR-AUTH-22
         if (
             method not in _SAFE_METHODS
             and has_body
-            and _media_type(headers.get("content-type", "")) != ("application/json")
+            and _media_type(headers.get("content-type", "")) != allowed
         ):
             await self._refuse(scope, receive, send, error(415, "content_type"))
             return

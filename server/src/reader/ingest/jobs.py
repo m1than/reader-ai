@@ -30,6 +30,7 @@ ArtifactMissing = import_error("artifact_missing")
 ArtifactInvalid = import_error("artifact_invalid")
 NoOwner = import_error("no_owner")
 ArtifactMismatch = import_error("artifact_mismatch")
+UploadMissing = import_error("upload_missing")
 
 
 class ImportArgs(BaseModel):
@@ -68,6 +69,12 @@ async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha25
 def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
     async def handle(args: ImportArgs, conn: AsyncConnection, ctx: JobContext) -> None:
         del ctx
+        if args.material_id.startswith("up-"):  # FR-INGEST-23: language and title come from the upload's row
+            found = await conn.execute(
+                text("SELECT 1 FROM uploads WHERE sha256 = :s"), {"s": args.material_sha256}
+            )
+            if found.first() is None:
+                raise UploadMissing()
         root = blobs_root / "ingest" / args.artifact_id
         try:
             manifest, members = await asyncio.to_thread(store.read_artifact, root)
