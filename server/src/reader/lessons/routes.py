@@ -1,4 +1,5 @@
-"""Lesson read routes (SRV-LESSON FR-LESSON-7..9, FR-LESSON-12), declared as data for SRV-AUTH's ROUTERS."""
+"""Lesson read routes (SRV-LESSON FR-LESSON-7..9, FR-LESSON-12), declared as data for SRV-AUTH's ROUTERS,
+plus the management routes of `reader.lessons.manage_routes` (FR-LESSON-21..31)."""
 
 from __future__ import annotations
 
@@ -14,17 +15,17 @@ from starlette.responses import JSONResponse, Response
 
 from reader import blobs
 from reader.api.http import Ctx, Route, error
+from reader.lessons import manage
+from reader.lessons import manage_routes as m
 from reader.lessons.access import lesson_uuid
 
 REVISIONS_LISTED: Final = 100
 log = logging.getLogger("reader.lessons")
 
-# latest_sha256 is the current revision: the sha256 of the most recent stage record (FR-LESSON-7).
-_LESSON_COLUMNS: Final = (
-    "SELECT l.id, l.course_id, c.title, l.ordinal, l.title, l.updated_at,"
-    " (SELECT s.sha256 FROM lesson_revision_stages s WHERE s.lesson_id = l.id ORDER BY s.id DESC LIMIT 1)"
-    " FROM lessons l JOIN courses c ON c.id = l.course_id WHERE c.owner_id = :u"
-)
+# latest_sha256 is the current revision: the sha256 of the most recent stage record (FR-LESSON-7). Deleted
+# lessons and lessons of deleted courses are not found (INV-LESSON-22); rows carry the amendment's fields.
+_LESSON_COLUMNS: Final = manage.LESSON_ROW
+_lesson = manage.lesson_json
 
 
 def _not_found() -> JSONResponse:
@@ -35,22 +36,13 @@ def _iso(value: datetime) -> str:
     return value.isoformat()
 
 
-def _lesson(row: Any) -> dict[str, Any]:
-    return {
-        "lesson_id": str(row[0]),
-        "course_id": str(row[1]),
-        "course_title": row[2],
-        "ordinal": row[3],
-        "title": row[4],
-        "updated_at": _iso(row[5]),
-        "latest_sha256": row[6],
-    }
-
-
 async def list_lessons(ctx: Ctx) -> Response:
+    """FR-LESSON-7; archived courses' lessons only with `?archived=1` (FR-LESSON-24)."""
+    archived = "" if ctx.request.query_params.get("archived") == "1" else " AND c.archived_at IS NULL"
     async with ctx.engine.connect() as conn:
         rows = await conn.execute(
-            text(_LESSON_COLUMNS + " ORDER BY c.created_at DESC, c.id, l.ordinal"), {"u": ctx.signed_in.id}
+            text(_LESSON_COLUMNS + archived + " ORDER BY c.created_at DESC, c.id, l.ordinal"),
+            {"u": ctx.signed_in.id},
         )
         return JSONResponse({"lessons": [_lesson(row) for row in rows]})
 
@@ -142,4 +134,29 @@ ROUTES: tuple[Route, ...] = (
     Route("GET", "/api/lessons", "session", list_lessons),
     Route("GET", "/api/lessons/{lesson_id}", "session", get_lesson),
     Route("GET", "/api/lessons/{lesson_id}/revisions/{sha256}", "session", get_revision),
+    # FR-LESSON-21..31 (amendment V/manage); `/api/courses/order` matches before `/api/courses/{course_id}`.
+    Route("GET", "/api/courses", "session", m.list_courses),
+    Route("POST", "/api/courses/order", "session", m.order_courses),
+    Route("POST", "/api/courses/{course_id}", "session", m.edit_course),
+    Route("POST", "/api/courses/{course_id}/archive", "session", m.archive_course),
+    Route("POST", "/api/courses/{course_id}/unarchive", "session", m.unarchive_course),
+    Route("GET", "/api/courses/{course_id}/impact", "session", m.course_impact),
+    Route("DELETE", "/api/courses/{course_id}", "session", m.delete_course),
+    Route("POST", "/api/courses/{course_id}/restore", "session", m.restore_course),
+    Route("GET", "/api/courses/{course_id}/lessons", "session", m.course_lessons),
+    Route("POST", "/api/courses/{course_id}/lessons/order", "session", m.order_lessons),
+    Route("POST", "/api/lessons/{lesson_id}", "session", m.rename_lesson),
+    Route("POST", "/api/lessons/{lesson_id}/skip", "session", m.skip_lesson),
+    Route("POST", "/api/lessons/{lesson_id}/unskip", "session", m.unskip_lesson),
+    Route("DELETE", "/api/lessons/{lesson_id}", "session", m.delete_lesson),
+    Route("POST", "/api/lessons/{lesson_id}/restore", "session", m.restore_lesson),
+    Route("POST", "/api/lessons/{lesson_id}/progress", "session", m.set_progress),
+    Route("POST", "/api/lessons/{lesson_id}/revert", "session", m.revert_lesson),
+    Route("GET", "/api/lessons/{lesson_id}/notes", "session", m.list_notes),
+    Route("POST", "/api/lessons/{lesson_id}/notes", "session", m.add_note),
+    Route("POST", "/api/lessons/{lesson_id}/notes/{note_id}", "session", m.edit_note),
+    Route("DELETE", "/api/lessons/{lesson_id}/notes/{note_id}", "session", m.delete_note),
+    Route("POST", "/api/lessons/{lesson_id}/bookmarks/{cell_id}", "session", m.add_bookmark),
+    Route("DELETE", "/api/lessons/{lesson_id}/bookmarks/{cell_id}", "session", m.remove_bookmark),
+    Route("GET", "/api/bookmarks", "session", m.list_bookmarks),
 )

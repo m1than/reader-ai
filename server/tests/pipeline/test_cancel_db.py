@@ -203,15 +203,15 @@ async def test_inactive_lessons_and_tombstoned_reads(pg: Pg, tmp_path: Path) -> 
             assert (await c.get(f"/api/compiles/{run}")).json()["state"] == "stage_failed"
             for column, table, key in (("skipped_at", "lessons", lesson), ("archived_at", "courses", course)):
                 extra = ", position = NULL" if table == "courses" else ""
-                await _sql(env, f"UPDATE {table} SET {column} = now(){extra} WHERE id = :k", k=key)
+                await _sql(env, f"UPDATE {table} SET {column} = now(){extra} WHERE id = :k", k=key)  # noqa: S608
                 for method, path in (("POST", f"/api/lessons/{lesson}/compile"), ("POST", f"/api/compiles/{run}/resume")):
                     r = await c.request(method, path, json={})
                     assert (r.status_code, r.json()) == (409, {"error": "lesson_inactive"}), (column, path)
                 restore = ", position = 1" if table == "courses" else ""
-                await _sql(env, f"UPDATE {table} SET {column} = NULL{restore} WHERE id = :k", k=key)
+                await _sql(env, f"UPDATE {table} SET {column} = NULL{restore} WHERE id = :k", k=key)  # noqa: S608
             for column, table, key in (("deleted_at", "lessons", lesson), ("deleted_at", "courses", course)):
                 extra = ", position = NULL" if table == "courses" else ""
-                await _sql(env, f"UPDATE {table} SET {column} = now(){extra} WHERE id = :k", k=key)
+                await _sql(env, f"UPDATE {table} SET {column} = now(){extra} WHERE id = :k", k=key)  # noqa: S608
                 for method, path in (
                     ("POST", f"/api/lessons/{lesson}/compile"),
                     ("POST", f"/api/compiles/{run}/resume"),
@@ -224,7 +224,7 @@ async def test_inactive_lessons_and_tombstoned_reads(pg: Pg, tmp_path: Path) -> 
                     assert r.status_code == 404, (table, path, r.text)
                 assert run not in {x["run_id"] for x in (await c.get("/api/compiles")).json()["runs"]}
                 restore = ", position = 1" if table == "courses" else ""
-                await _sql(env, f"UPDATE {table} SET {column} = NULL{restore} WHERE id = :k", k=key)
+                await _sql(env, f"UPDATE {table} SET {column} = NULL{restore} WHERE id = :k", k=key)  # noqa: S608
             assert (await c.get(f"/api/compiles/{run}")).status_code == 200
             # the manifest import onto a deleted course: 409 with its id, nothing written
             await _sql(env, "UPDATE courses SET deleted_at = now(), position = NULL WHERE id = :k", k=course)

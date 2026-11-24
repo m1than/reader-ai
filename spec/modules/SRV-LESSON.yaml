@@ -55,7 +55,7 @@ layer: server
 track: product
 adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
 slice: V.SRV-LESSON-min
-review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed. Amendment V/manage (2026-11-24): FR-LESSON-20..31 and INV-LESSON-20..23, deep-reviewer rounds 1–3 (round 3 VERDICT approve on 2a7d86f), promoted with Red; two existing tests change with it — the lesson routes' declared set gains the amendment's routes, and the migration test downgrades `lessons@-1` twice (the new head first), each oracle extended, none weakened."
+review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed. Amendment V/manage (2026-11-24): FR-LESSON-20..31 and INV-LESSON-20..23, deep-reviewer rounds 1–3 (round 3 VERDICT approve on 2a7d86f), promoted with Red; two existing tests change with it — the lesson routes' declared set gains the amendment's routes, and the migration test downgrades `lessons@-1` twice (the new head first), each oracle extended, none weakened. Green (V/manage): see the amendment note's Green paragraph."
 
 paths:
   - server/src/reader/lessons/**
@@ -587,3 +587,24 @@ owner_notes:
 #   - Paired, other tracks: SRV-OBS FR-OBS-17 (V/obs-analytics) labels the cost row of a deleted lesson "(deleted
 #     lesson)" with its id and still counts it (spend stays); SRV-FRESH (V/freshness) skips deleted lessons and
 #     courses in its scans and hides their reports; SRV-SEARCH FR-SEARCH-20 (deleted materials).
+#
+# Green (V/manage, 2026-11-24). Code: reader/lessons/manage.py (functions), manage_routes.py (handlers; the routes
+# are declared in routes.py, the module SRV-AUTH's ROUTERS names), migration lessons_0002, store.py (position lock,
+# place_at, shift_positions; create_course goes first). Interpretations, no requirement changed:
+#   - `route_errors` gains `invalid_body` (400) for a body of the wrong shape: not a JSON object, a missing or
+#     non-integer `version`, an edit with neither field, `at` outside previous|first, `done` not a boolean, ids not
+#     a list of uuids, `state` outside the listed values.
+#   - Response bodies the text leaves open: course mutations answer FR-LESSON-21's course row; the order routes
+#     `{course_ids}` / `{lesson_ids}` (409 adds the current list under the same key); skip/unskip/delete/restore of
+#     a lesson `{lesson_id, skipped_at, deleted_at}`; a lesson's `stale` adds `lesson` (its row); revert's no-op
+#     also carries `latest_sha256`; a bookmark `{lesson_id, cell_id, created_at}`; `GET /api/bookmarks` rows add
+#     `course_id` and `lesson_title`; FR-LESSON-7's row also carries `version` (rename needs it).
+#   - A note DELETE answers 200 `{note_id, deleted: true}` whether or not a row of the caller matched, so a repeat
+#     is the same response (INV-LESSON-21) and nothing is learnt about other notes; a note edit with another
+#     user's (or an unknown) note id is 404.
+#   - INV-LESSON-20's "second owner" is a second user who owns courses (SRV-AUTH allows one `owner` role).
+#   - The `material_deleted` check reads the material row FOR SHARE in `manage.material_is_live`; until SRV-INGEST's
+#     `materials.deleted_at` is merged it does not see deleted materials (its test is a strict xfail that the merge
+#     turns on).
+#   - Existing tests: the declared-route set, the migration test (two downgrades) and FR-LESSON-7's key set gain
+#     the amendment's items; SRV-PIPELINE's open-runs test inserts its foreign course with `position` 1 (the CHECK).

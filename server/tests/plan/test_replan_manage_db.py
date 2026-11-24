@@ -143,12 +143,11 @@ async def test_replan_from_a_course_and_refusals(pg: Pg, tmp_path: Path) -> None
 
 
 async def test_compile_first_skips_inactive_lessons(pg: Pg, tmp_path: Path) -> None:
-    async with plan_env(pg, tmp_path) as env:
-        async with client(env) as c:
-            confirmed = await _confirmed(c)
-            lessons = sorted(confirmed["lessons"], key=lambda x: x["ordinal"])
-            assert (await c.post(f"/api/lessons/{lessons[0]['lesson_id']}/skip", json={})).status_code == 200
-            again = await _confirmed(c, compile_first=True)
-            assert "run_id" in again["compile"], again
-            started = await env.scalar("SELECT lesson_id FROM compile_runs")
-            assert str(started) == lessons[1]["lesson_id"]
+    async with plan_env(pg, tmp_path) as env, client(env) as c:
+        confirmed = await _confirmed(c)
+        lessons = sorted(confirmed["lessons"], key=lambda x: x["ordinal"])
+        assert (await c.post(f"/api/lessons/{lessons[0]['lesson_id']}/skip", json={})).status_code == 200
+        again = await _confirmed(c, compile_first=True)
+        assert "run_id" in again["compile"], again
+        started = await env.scalar("SELECT lesson_id FROM compile_runs")
+        assert str(started) == lessons[1]["lesson_id"]

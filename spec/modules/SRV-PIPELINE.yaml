@@ -500,6 +500,10 @@ owner_notes:
 # `lesson_inactive` and `course_deleted`; `compile_runs` gains `cancelled_at`. Sequencing: FR-PIPELINE-22's
 # `material_imported` condition needs SRV-INGEST's `materials.deleted_at` (FR-INGEST-31, a parallel slice); the query
 # stays unchanged in this slice and gains `AND deleted_at IS NULL` when that column is merged.
+# Green (V/manage): `runs.lesson_gate` holds FR-PIPELINE-22's check (called by `load_lesson`, by `derive` for the
+# tombstone only, and first by resume, so a skipped lesson's stopped run answers `lesson_inactive`, not
+# `not_failed`); `runs.cancel` and `runs.history`; the cancel and history tests are test_cancel_db.py. No oracle
+# of an existing test changed.
 # What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
 # 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
 # renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose

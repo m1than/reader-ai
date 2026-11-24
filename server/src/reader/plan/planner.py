@@ -90,6 +90,12 @@ class Plan:
         return tuple(x for x in self.lessons if not x.fixed)
 
 
+def weeks_until(start_date: dt.date, target: dt.date) -> int:
+    """FR-PLAN-20: the `total_weeks` a client sends for a target date, ceil((d - start + 1) / 7) in 1..104."""
+    days = (target - start_date).days + 1
+    return min(max(-(-days // 7), WEEKS_MIN), WEEKS_MAX)
+
+
 def _half_up(milli: int) -> int:
     return (milli + 500) // 1000
 

@@ -95,6 +95,10 @@ async def test_list_shows_only_own_lessons_in_order(pg: Pg, tmp_path: Path) -> N
         "title",
         "updated_at",
         "latest_sha256",
+        "skipped",  # amendment V/manage (FR-LESSON-7's additive fields)
+        "done",
+        "course_position",
+        "version",
     }
     assert (first["course_id"], first["course_title"], first["ordinal"], first["latest_sha256"]) == (
         str(newer),

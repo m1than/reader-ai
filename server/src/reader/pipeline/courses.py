@@ -7,7 +7,9 @@ upserted by (owner, course id, lesson id); the lesson uuid never changes on a la
 owner's G1 approval.
 
 FR-PIPELINE-14: every import runs under a per-course advisory lock; SRV-PLAN's study-plan import (origin
-`study_plan`) also removes unstarted lessons absent from the plan and renumbers the course in plan order.
+`study_plan`) also removes unstarted lessons absent from the plan and renumbers the course in plan order, or,
+for a course whose lessons the owner reordered (`order_source = 'manual'`), by SRV-PLAN FR-PLAN-21's rule.
+FR-PIPELINE-22: an import onto a deleted course is refused before any write.
 """
 
 from __future__ import annotations
@@ -22,8 +24,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader.lessons import store
 from reader.lessons.schema import LessonWriteError
-from reader.pipeline.errors import PipelineError
+from reader.pipeline.errors import CourseDeleted, PipelineError
 from reader.pipeline.source import material_imported
+from reader.plan import order
 
 SHA256: Final = re.compile(r"[0-9a-f]{64}")
 TITLE_MAX: Final = 200
@@ -136,6 +139,29 @@ async def _remove_unstarted(
     return removed
 
 
+async def _final_order(
+    conn: AsyncConnection,
+    course_id: uuid.UUID,
+    ids: list[tuple[str, uuid.UUID]],
+    known: dict[str, tuple[uuid.UUID, int, int]],
+) -> list[uuid.UUID]:
+    """FR-PIPELINE-14's renumbering: plan order, or SRV-PLAN FR-PLAN-21's placement for a manual order."""
+    plan_order = [lesson_id for _, lesson_id in ids]
+    source = (
+        await conn.execute(text("SELECT order_source FROM courses WHERE id = :c"), {"c": course_id})
+    ).scalar_one()
+    if source != "manual":
+        return plan_order
+    rows = (
+        await conn.execute(
+            text("SELECT id, deleted_at IS NOT NULL FROM lessons WHERE course_id = :c ORDER BY ordinal"),
+            {"c": course_id},
+        )
+    ).all()
+    kept = {lesson_id for lesson_id, _, _ in known.values()}
+    return order.placement([r[0] for r in rows], plan_order, kept, {r[0] for r in rows if r[1]})
+
+
 async def import_course_plan(
     conn: AsyncConnection, owner_id: uuid.UUID, plan: Plan, *, origin: str
 ) -> ImportResult:
@@ -159,6 +185,11 @@ async def import_course_plan(
         course_id: uuid.UUID = (
             await conn.execute(text("SELECT course_id FROM lessons WHERE id = :l"), {"l": first_lesson})
         ).scalar_one()
+        deleted = await conn.execute(
+            text("SELECT 1 FROM courses WHERE id = :c AND deleted_at IS NOT NULL"), {"c": course_id}
+        )
+        if deleted.first() is not None:  # FR-PIPELINE-22: restore the course first; nothing is written
+            raise CourseDeleted(course_id)
     else:
         course_id = await store.create_course(conn, owner_id, plan.title, plan.material_sha256)
     removed = 0
@@ -209,7 +240,8 @@ async def import_course_plan(
             )
         ids.append((lesson.id, lesson_id))
     if origin == "study_plan":
-        await store.reorder_lessons(conn, owner_id, course_id, [lesson_id for _, lesson_id in ids])
+        final = await _final_order(conn, course_id, ids, known)
+        await store.reorder_lessons(conn, owner_id, course_id, final)
     ordinals = {
         r[0]: int(r[1])
         for r in await conn.execute(

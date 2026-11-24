@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from .conftest import ORIGIN, Pg, client, need, write
+from .conftest import Pg, client, need, write
 from .manage_support import MANAGE_ROUTES, audit_rows, make_course, manage_world, snapshot
 
 pytestmark = pytest.mark.anyio
@@ -54,7 +54,7 @@ async def _send(c: httpx.AsyncClient, method: str, path: str, body: Any, **kw: A
 def test_routes_are_declared_with_session_auth() -> None:
     routes = need("reader.lessons.routes")
     declared = {(r.method, r.path): r.auth for r in routes.ROUTES}
-    assert MANAGE_ROUTES <= set(declared)
+    assert set(declared) >= MANAGE_ROUTES
     assert {declared[k] for k in MANAGE_ROUTES} == {"session"}
     # the order route is matched before the course id route
     paths = [(r.method, r.path) for r in routes.ROUTES]
@@ -88,7 +88,6 @@ async def test_strangers_get_404_and_change_nothing(pg: Pg, tmp_path: Path) -> N
             r = await _send(c, method, path, body, headers={"Origin": "https://evil.example"})
             assert (r.status_code, r.json()) == (403, {"error": "origin"}), (method, path)
     assert await snapshot(w.engine) == before
-    assert ORIGIN == "https://localhost"
     await w.engine.dispose()
 
 

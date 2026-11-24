@@ -108,7 +108,8 @@ async def execute(w: World, sql: str, **params: Any) -> Any:
     from sqlalchemy import text
 
     async with w.engine.begin() as conn:
-        return (await conn.execute(text(sql), params)).all() if "RETURNING" in sql else None
+        result = await conn.execute(text(sql), params)
+        return result.all() if "RETURNING" in sql else None
 
 
 async def open_run(w: World, handle: str, lesson: uuid.UUID) -> uuid.UUID:

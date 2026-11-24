@@ -99,6 +99,10 @@ known-first-party = ["reader"]
 "tests/obs/**" = ["S101", "PT018", "S603", "S607", "S104", "S108", "RUF012", "PT011", "E501"]
 "tests/jobs/test_key_reads_db.py" = ["S101", "PT018", "E501"]
 "tests/pipeline/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+# SRV-LESSON management tests (V/manage): PT018 compound status-and-body expectations on one response; E501 the
+# long URL, SQL and @trace lines stay whole; S608 the row digest names tables read from pg_tables.
+"tests/lessons/test_manage_*.py" = ["S101", "PT018", "E501"]
+"tests/lessons/manage_support.py" = ["S101", "E501", "S608"]
 # SRV-INGEST: PT018 compound expectations on one result; S603 the [host] tests run the converter and probes as
 # subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
 # Russian text on purpose (Cyrillic letters that look Latin).
