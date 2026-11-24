@@ -499,26 +499,65 @@ owner_notes:
   - "A running job holds one database transaction for its whole run (minutes for compile stages); worker sessions disable `idle_in_transaction_session_timeout`. At concurrency 1 this is one long transaction at a time."
   - "Never run two worker versions side by side: a worker's sweep cancels `todo` jobs of kinds its own catalog lacks (FR-EVENTS-15) and writes `dead`/`unknown_kind` for their stalled jobs (FR-EVENTS-7). Stop the old worker before starting the new one."
 
-# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE; status: draft, not reviewed). Held under
-# `proposed_manage` until a deep-reviewer round approves it; id FR-EVENTS-30 (20..29 left free). The transactional
-# outbox and its audit consumer stay deferred to stage 2; this is the smallest audit trail the management layer
-# needs now, written in the same transaction as each change.
+# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE; status: draft; round 1 changes applied). Held under
+# `proposed_manage` until a deep-reviewer round approves it; ids FR-EVENTS-30..31 (20..29 left free). The
+# transactional outbox and its audit consumer stay deferred to stage 2; this is the smallest audit trail the
+# management layer needs now, written in the same transaction as each change. The code lives in this spec's paths:
+# `server/src/reader/jobs/audit.py` (record), `server/src/reader/jobs/audit_routes.py` (the read route) and a
+# migration on the `jobs` branch; tests in server/tests/jobs/.
 proposed_manage:
+  # One row per action: object_kind, the pattern its object_id must match, and the only keys `detail` may hold.
+  # uuid = canonical lowercase UUID; sid/pid = 16 lowercase hex; sha = 64 lowercase hex.
+  audit_actions:
+    course.rename: { kind: course, id: uuid, detail: [version] }
+    course.describe: { kind: course, id: uuid, detail: [version] }
+    course.order: { kind: owner, id: uuid, detail: [count] }
+    course.archive: { kind: course, id: uuid, detail: [] }
+    course.unarchive: { kind: course, id: uuid, detail: [] }
+    course.delete: { kind: course, id: uuid, detail: [lessons, revisions, tutor_questions, compile_runs, spend_rows, by_material] }
+    course.restore: { kind: course, id: uuid, detail: [by_material] }
+    lesson.rename: { kind: lesson, id: uuid, detail: [version] }
+    lesson.order: { kind: course, id: uuid, detail: [count] }
+    lesson.skip: { kind: lesson, id: uuid, detail: [] }
+    lesson.unskip: { kind: lesson, id: uuid, detail: [] }
+    lesson.delete: { kind: lesson, id: uuid, detail: [] }
+    lesson.restore: { kind: lesson, id: uuid, detail: [] }
+    lesson.revert: { kind: lesson, id: uuid, detail: [from_sha256, to_sha256] }
+    material.rename: { kind: material, id: "a material id as GET /api/materials returns it (`up-<12 hex>` or a reader.yaml id)", detail: [version] }
+    material.delete: { kind: material, id: "a material id", detail: [courses] }
+    material.restore: { kind: material, id: "a material id", detail: [courses] }
+    compile.cancel: { kind: run, id: uuid, detail: [lesson_id] }
+    tutor.clear: { kind: lesson, id: uuid, detail: [count] }
+    user.sessions_revoke: { kind: user, id: uuid, detail: [count] }
+    user.credential_remove: { kind: user, id: uuid, detail: [pid] }
+    user.delete: { kind: user, id: uuid, detail: [] }
+    user.enable: { kind: user, id: uuid, detail: [] }
+    self.session_revoke: { kind: user, id: uuid, detail: [sid, count] }
+    self.credential_label: { kind: user, id: uuid, detail: [pid] }
+    self.credential_remove: { kind: user, id: uuid, detail: [pid, revoked_sessions] }
+    settings.set: { kind: setting, id: "an OVERRIDABLE key", detail: [old, new] }
+    settings.reset: { kind: setting, id: "an OVERRIDABLE key", detail: [old, file] }
   requirements:
     - id: FR-EVENTS-30
       text: >-
-        **Audit rows.** A system table `audit_log(id bigint identity pk, at timestamptz, actor_id uuid (no foreign
-        key, so a deleted learner's rows stay and never block SRV-AUTH FR-AUTH-43), action text, object_kind text, object_id text, detail jsonb)` with a trigger that refuses UPDATE,
-        DELETE and TRUNCATE (as agent_spend's). `reader.events.audit.record(conn, actor_id, action, kind, id,
-        detail)` inserts one row on the caller's connection, so the row commits or rolls back with the change.
-        Actions are declared as data (`AUDIT_ACTIONS`: course.rename, course.describe, course.order, course.archive,
-        course.unarchive, course.delete, course.restore, lesson.rename, lesson.order, lesson.skip, lesson.unskip,
-        lesson.delete, lesson.restore, lesson.revert, material.rename, material.delete, material.restore,
-        compile.cancel, tutor.clear, user.sessions_revoke, user.credential_remove, user.delete, user.enable,
-        self.session_revoke, self.credential_label, self.credential_remove, settings.set, settings.reset); an unknown
-        action raises. `detail` holds ids, counts and
-        hashes only — never a title, description, note, question or handle (titles are user content; INV-AUTH log
-        rules) — and is ≤ 2 KiB compact JSON. Progress, notes and bookmarks are not audited (the reader's own
-        data). A no-op request writes no row (SRV-LESSON INV-LESSON-21). [db] the trigger; one row per applied
-        action; rollback of the change removes its row; a `detail` holding a string field other than an id or hash
-        is refused by a schema check.
+        **Audit rows.** A system table `audit_log(id bigint identity pk, at timestamptz, actor_id uuid, action text,
+        object_kind text, object_id text, detail jsonb)`; `actor_id` has no foreign key, so a deleted learner's rows
+        stay and never block SRV-AUTH FR-AUTH-43. A trigger refuses UPDATE, DELETE and TRUNCATE (as agent_spend's).
+        `reader.jobs.audit.record(conn, actor_id, action, object_id, detail)` checks the row against
+        `proposed_manage.audit_actions` (declared as data in `AUDIT_ACTIONS`; the code's table equals this spec's,
+        unit test): an unknown action, an `object_id` that does not match its pattern, or a `detail` key outside its
+        list raises before any insert. `detail` values are integers, booleans, ids or hashes of the listed shapes,
+        except `settings.*`, whose `old`, `new` and `file` are the setting's value (a number, an enum or null; never
+        free text); never a title, description, note, question or handle. ≤ 2 KiB compact JSON. The row is inserted
+        on the caller's connection, so it commits or rolls back with the change. Progress, notes and bookmarks are
+        not audited (the reader's own data). A no-op request writes no row (SRV-LESSON INV-LESSON-21). [unit] the
+        table equality and each refusal; [db] the trigger; one row per applied action; rollback of the change removes
+        its row.
+    - id: FR-EVENTS-31
+      text: >-
+        **Reading the audit.** `GET /api/audit?before=<id>` (`session`; owner only, else 403 `owner_only`;
+        read-only) → the newest 200 rows with an id below `before` (all rows when absent), `{rows: [{id, at, actor_id,
+        action, object_kind, object_id, detail}], next_before | null}`. WEB-MANAGE's Data tab lists them as
+        "Activity" with the actor's handle and the object's current title looked up by the client from the lists it
+        already has (a deleted object shows its kind and the id's first 8 characters). The route is in
+        `reader.jobs.audit_routes` (SRV-AUTH ROUTERS, paired). [db] paging; a learner gets 403.

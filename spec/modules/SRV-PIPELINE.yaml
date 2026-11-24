@@ -445,28 +445,40 @@ owner_notes:
   - "With one loop the measured outcome is open findings: the lesson is studyable as a draft, with unresolved points as open cells. More loops or a revised review bar is still your call (compile-cost ask a)."
   - "L01 vs L02 (compile-cost ask b): the slice compiles L02 as the roadmap says; L01 (larger) is measured when the full pipeline lands."
 
-# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE; status: draft, not reviewed). Held under
+# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE; status: draft; deep-review round 1 changes applied). Held under
 # `proposed_manage` until a deep-reviewer round approves it (jobs and idempotency: complex area, full rounds); then
 # the items move into `requirements` with their Red tests. Ids FR-PIPELINE-20..22 (18..19 left free for parallel
 # branches). Owner-only like FR-PIPELINE-11: anyone else gets 404.
 # What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
 # 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
 # renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose
-# `order_source` is `manual` (owner, 2026-11-25: manual lesson order survives a re-plan), plan order otherwise.
+# `order_source` is `manual` (owner, 2026-11-24: manual lesson order survives a re-plan), plan order otherwise.
+# `ensure_course` places a new course first (SRV-LESSON FR-LESSON-20 `place_first`).
 proposed_manage:
   requirements:
     - id: FR-PIPELINE-20
       text: >-
-        **Cancel a run.** `POST /api/compiles/{run_id}/cancel` with `{}` on a `running`, `stalled` or `stage_failed`
-        run sets `compile_runs.cancelled_at` (new nullable column; migration `pipeline_0004`) and `finished_at` in one
-        transaction under the run's lock, and the run's state becomes `cancelled`. Every step handler checks
-        `cancelled_at` before it reserves budget or calls a model and returns without effect when it is set, so at
-        most the step already inside a model call finishes; that call settles in the ledger as usual (SRV-AGENT
-        FR-AGENT-9), its revision is written, and no next step is enqueued. A dead key of a `stage_failed` run is left
-        dead (never requeued). Repeating cancel on a `cancelled` run returns 200 with the same body; cancel on a
-        `converged`, `open_findings` or `budget_exhausted` run → 409 `not_running`. 200 the run body of
-        FR-PIPELINE-11. [db] cancel between steps (no further reservation row), cancel during a stubbed model call
-        (that call settles, nothing after it), cancel twice, cancel a finished run; the per-key idempotency of
+        **Cancel a run.** `POST /api/compiles/{run_id}/cancel` with `{}` (owner) on an open run (`finished_at IS NULL
+        AND cancelled_at IS NULL`: derived `running`, `stalled` or `stage_failed`) is one statement on its own
+        connection, `UPDATE compile_runs SET cancelled_at = now(), finished_at = now() WHERE id = :run AND owner_id
+        = :o AND finished_at IS NULL AND cancelled_at IS NULL RETURNING id` (new nullable column `cancelled_at`;
+        migration `pipeline_0004`). It takes no advisory lock: the step handler holds its job transaction for minutes
+        (SRV-EVENTS owner note), and the run row is written by a step only in `_finish`, `_refused` and the
+        stage-error record, all at the step's end; so cancel waits at most for a step that is already committing.
+        No row returned → the run is re-read: already `cancelled` → 200 with the same body (idempotent); finished →
+        409 `not_running`. **The step handler** (`pipeline.stage` and `pipeline.verify`, steps.py) re-reads
+        `SELECT cancelled_at FROM compile_runs WHERE id = :run` (READ COMMITTED, so a committed cancel is seen):
+        (1) before it reserves budget, calls a model or runs the lab kernel — set → return without effect; (2) after
+        the model call or the lab run returns — set → skip `write_revision`, the `compile_steps` row and the enqueue
+        of the next step, and return; the model call has already settled or voided its reservation in the ledger
+        (SRV-AGENT FR-AGENT-9 runs on its own committed connection), so the spend stays recorded. `_finish` and
+        `_refused` add `AND cancelled_at IS NULL` to their UPDATE and do nothing when it matches no row. `derive`
+        checks `cancelled_at` first: set → state `cancelled`, no `ensure`, no requeue. A dead key of a cancelled
+        `stage_failed` run is never requeued (resume → 409 `not_failed`). 200 the run body of FR-PIPELINE-11.
+        [db] cancel between steps (no further reservation row); cancel during a stubbed model call (that call
+        settles, no revision, no compile_steps row, nothing enqueued); cancel during a stubbed lab run (no stamped
+        revision, no `_finish`); cancel, then SRV-LESSON revert, then the late step returns: the reverted revision
+        stays current; cancel twice; cancel a finished run; resume a cancelled run; the per-key idempotency of
         SRV-EVENTS FR-EVENTS-5 unchanged.
     - id: FR-PIPELINE-21
       text: >-
@@ -477,4 +489,13 @@ proposed_manage:
       text: >-
         **Inactive lessons.** `POST /api/lessons/{lesson_id}/compile` and `/api/compiles/{run_id}/resume` answer 409
         `lesson_inactive` for a skipped lesson or a lesson of an archived course, and 404 for a deleted lesson or a
-        lesson of a deleted course (SRV-LESSON FR-LESSON-24/-25/-28); FR-PIPELINE-15's compile-first skips them. [db]
+        lesson of a deleted course (SRV-LESSON FR-LESSON-24/-25/-28); the check sits in runs.py `load_lesson`, read
+        after `create_run`'s two locks (SRV-LESSON INV-LESSON-23), so it also covers `derive`'s `ensure` and the step
+        handler (a step of a lesson deleted meanwhile cannot exist: delete refuses an open run). FR-PIPELINE-15's
+        compile-first skips them. The manifest import (`POST /api/pipeline/courses`, FR-PIPELINE-1) whose plan
+        course maps to a deleted course answers 409 `{"error": "course_deleted", "course_id": <id>}` and writes
+        nothing (restore the course first; SRV-PLAN FR-PLAN-20 does the same for a study plan). A run of a lesson whose
+        material is deleted cannot start either: no course that is not deleted refers to a deleted material
+        (SRV-INGEST FR-INGEST-32), and as a second guard source.py's `material_imported` is false for a deleted
+        material, so an import refuses it with the existing `no_material` (courses.py). [db] each refusal; the manifest import onto a deleted
+        course.

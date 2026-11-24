@@ -332,11 +332,11 @@ vectors:
 # - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
 #   1+0j), matching the loader.
 
-# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE FR-MANAGE-6; status: draft, not reviewed). Held under
-# `proposed_manage` until a deep-reviewer round approves it (secrets-adjacent: the view must never carry a secret
-# reference); ids FR-CONFIG-25..26 (19..24 left free). FR-CONFIG-25 is read-only; FR-CONFIG-26 is the editable
-# overlay of ADR-0036, which the owner chose on 2026-11-25 and accepts by flipping its status after review: it is
-# built only once ADR-0036 reads `accepted`.
+# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-6; status: draft; round 1 changes applied).
+# Held under `proposed_manage` until a deep-reviewer round approves it (secrets-adjacent: the view must never carry a
+# secret reference); ids FR-CONFIG-25..26 (19..24 left free). FR-CONFIG-25 is read-only; FR-CONFIG-26 is the
+# editable overlay of ADR-0036, which the owner chose (2026-11-24) and accepts by flipping its status after review:
+# it is built only once ADR-0036 reads `accepted`.
 proposed_manage:
   requirements:
     - id: FR-CONFIG-25
@@ -348,31 +348,44 @@ proposed_manage:
         `budgets.monthly_usd` and `budgets.warn_at` (`each job`), each `tasks.<name>.model` and
         `tasks.<name>.budget_usd_per_lesson` (`each job`), and the constants SRV-PIPELINE `bounds.run_cap_usd` and
         SRV-TUTOR `question_cap_usd` and `daily_cap_usd` (`fixed`). Each row: `{name, value, source: "reader.yaml" |
-        "default" | "fixed", key | null, read_when}`. `start` values are the values the running api read at start
-        (so the page never shows a file value that is not in effect), `each job` values the file's current values.
-        No other key appears: users, providers, secret references, materials, kernels and instance URLs are never in
-        the body. An unreadable file → 503 `config_unavailable` (FR-INGEST-15's code). [unit] the projection of
-        VEC-CONFIG fixtures, a config holding `secret://` references in every field yields a body with no `secret://`
-        substring; [db] the owner-only refusal. With FR-CONFIG-26 the row's `source` adds `"override"` and the body
+        "default" | "fixed", key | null, read_when}`. Where `start` values come from: `signup` is read by the api, so
+        its value is the api process's own startup snapshot (the process serving this route; so the page never shows
+        a file value that is not in effect); `observability.*` is read by the worker at its start and by the daily
+        job, which the api cannot see, so its row shows the file's current value with `read_when` "worker start and
+        the daily job" and the page says "applies at the next run". `each job` values are the file's current values.
+        **Redaction.** Free-text names from the file are shown only when they match `^[a-z0-9][a-z0-9._-]{0,63}$`
+        (task names and model ids as reader.yaml writes them) and, for a model id, also appear in the pricing table
+        (SRV-AGENT); any other task name or model id, and any value that starts with `secret:` or `sk-` or contains
+        `://`, is replaced by the fixed string "(hidden)" and its row keeps its
+        index, so nothing typed into the file by mistake (a token pasted into `model`) reaches the browser. No other
+        key appears: users, providers, secret references, materials, kernels and instance URLs are never in the body.
+        An unreadable file → 503 `config_unavailable` (FR-INGEST-15's code). The route lives in
+        `reader.config.routes` (SRV-AUTH ROUTERS, paired). [unit] the projection of VEC-CONFIG fixtures; a config
+        holding `secret://` references in every field and a model id `sk-ant-…`-shaped yields a body with no
+        `secret://`, no `sk-` and the "(hidden)" rows; [db] the owner-only refusal. With FR-CONFIG-26 the row's `source` adds `"override"` and the body
         carries `file_value` beside `value`.
     - id: FR-CONFIG-26
       text: >-
-        **Settings overlay** (ADR-0036 option B, owner decision 2026-11-25; built only once ADR-0036 reads
+        **Settings overlay** (ADR-0036 option B, owner decision 2026-11-24; built only once ADR-0036 reads
         `accepted`). A system table `settings_overrides(key text pk, value jsonb, updated_by uuid, updated_at,
         version int)`; `key` is one of the declared allow-list `OVERRIDABLE` = `sharing.signup`,
         `observability.retention_days`, `budgets.monthly_usd`, `budgets.warn_at`, `tasks.<name>.budget_usd_per_lesson`
         for a task present in reader.yaml (any other key → 400 `not_overridable`). One function
         `effective_settings(conn, config) -> Settings` merges override ?? file ?? default and validates the merged
         result with the same Pydantic models as the file (a value the file's schema refuses → 400 `value_invalid`
-        with the field name, never stored). Every reader of an allow-listed key goes through it: SRV-AUTH reads the
-        sign-up switch per request instead of at start (paired FR-AUTH-23 change), SRV-OBS's retention job and
-        worker start read it per run (paired FR-OBS-11 change), SRV-AGENT's budget checks per call (paired). Routes
+        with the field name, never stored), with one narrowing rule: when the file's `sharing.signup` is `off` (or
+        `false`), the effective switch is `off` whatever the override says, and setting the override to `open` then
+        answers 409 `file_narrower` (ADR-0036). Every reader of an allow-listed key goes through it, and only
+        processes with a database connection read these keys (api and worker; ADR-0036): SRV-AUTH reads the sign-up
+        switch per request instead of at start (paired FR-AUTH-23 change), SRV-OBS's retention job and worker start
+        read it per run (paired FR-OBS-11 change), SRV-AGENT's budget checks per call in the worker (paired). Routes
         (owner only, else 403 `owner_only`; `recent_session`): `POST /api/settings/{key}` with `{value, version}`
         (409 `stale` on a version mismatch; 0 for a new key) sets the override; `DELETE /api/settings/{key}` with
         `{}` removes it (idempotent). Each applied change writes the audit actions `settings.set` or `settings.reset`
-        (SRV-EVENTS FR-EVENTS-30) with the key and both values' sha256, not the values. `reader up` and `reader
-        status` print `override <key>: <value> (reader.yaml: <value>)` for each override (paired OPS-CLI change),
-        so the file never silently disagrees with the running instance. Models, users, providers, secrets,
-        materials and kernels are never overridable. [unit] the merge and validation table; [db] set, stale, reset,
-        not_overridable, value_invalid; sign-up turned off by an override answers 404 on the sign-up routes on the
-        next request without a restart; a learner gets 403 with nothing written.
+        (SRV-EVENTS FR-EVENTS-30) with the key and the old and new values (small numbers and enums, not secrets).
+        `reader up` and `reader status` print `override <key>: <value> (reader.yaml: <value>)` for each override, and
+        `override <key>: ignored (not in reader.yaml)` for an override whose task is gone (paired OPS-CLI change); a
+        `reader restore` brings overrides back with the database. Models, users, providers, secrets, materials and
+        kernels are never overridable. [unit] the merge, narrowing and validation table; [db] set, stale, reset,
+        not_overridable, value_invalid, file_narrower; sign-up turned off by an override answers 404 on the sign-up
+        routes on the next request without a restart; a learner gets 403 with nothing written.

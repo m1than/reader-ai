@@ -2,24 +2,32 @@
 id: ADR-0036
 title: Owner settings editable in the web UI as a database overlay over reader.yaml
 status: proposed
-date: 2026-11-25
-verified_by: "SRV-CONFIG FR-CONFIG-26 [unit] merge and validation table and [db] set, stale, reset and refusal cases; the sign-up switch turned off by an override answers 404 without a restart; WEB-MANAGE FR-MANAGE-11 [browser]; `reader status` prints every override"
+date: 2026-11-24
+verified_by: "SRV-CONFIG FR-CONFIG-26 [unit] merge, narrowing and validation table and [db] set, stale, reset and refusal cases; the sign-up switch turned off by an override answers 404 without a restart, and an override cannot open sign-up that the file turns off; WEB-MANAGE FR-MANAGE-11 [browser]; `reader status` prints every override"
 revisit_when: "An override is ever found disagreeing with reader.yaml without the `reader status` line (one occurrence); the allow-list is asked to grow beyond 5 key families; the stack listens on anything other than 127.0.0.1"
 supersedes: []
 ---
 
-> Owner decision, 2026-11-25 (relayed by the coordinator): option B, settings editable from the UI. The owner sets
-> this ADR's status himself after the review; this file's status is not changed by the agent. Until it reads
-> `accepted`, WEB-MANAGE FR-MANAGE-6 shows these settings read-only and FR-MANAGE-11 / SRV-CONFIG FR-CONFIG-26 wait.
+> Owner decision (relayed by the coordinator, 2026-11-24): option B, settings editable from the UI. The owner sets
+> this ADR's status himself after the review; the agent does not change it. Until it reads `accepted`, WEB-MANAGE
+> FR-MANAGE-6 shows these settings read-only and FR-MANAGE-11 / SRV-CONFIG FR-CONFIG-26 are not built.
 >
-> Drafted with WEB-MANAGE (V/manage, 2026-11-25).
-> Amends, if accepted: ADR-0011 (`proposed`, "one file declares instance settings … budgets … sharing defaults") and
-> SRV-AUTH FR-AUTH-23 ("the switch is read at startup only; changing it needs an api restart, as every reader.yaml
-> value does"). No accepted ADR is contradicted.
+> Drafted with WEB-MANAGE (V/manage, 2026-11-24). Revision 1 after deep-review round 1 (840af4b): the amended
+> decisions listed in full; the file's `signup: off` always wins; backup and restore; which processes read the
+> overlay; audit rows hold the values.
+>
+> Amends, if accepted:
+> - ADR-0031 (accepted) §1 "Switch": `sharing.signup` is read from reader.yaml at start; with this ADR it is also
+>   narrowed by an override, read per request.
+> - ADR-0032 (accepted) §6 "Retention": "configurable from 1 to 365" in reader.yaml; with this ADR also by an
+>   override, read at each run of the retention job.
+> - ADR-0011 (`proposed`): "one file declares instance settings … budgets … sharing defaults".
+> - SRV-AUTH FR-AUTH-23: "the switch is read at startup only; changing it needs an api restart, as every reader.yaml
+>   value does".
 
 ## Context
 
-Owner, 2026-11-25 (in Russian, paraphrased): the tool has no edit buttons, no customization and no deletion. The
+Owner, 2026-11-24 (in Russian, paraphrased): the tool has no edit buttons, no customization and no deletion. The
 management layer (WEB-MANAGE) adds them for courses, lessons, materials, users and personal settings. Some of the
 settings the owner expects on a settings page live in reader.yaml today:
 
@@ -46,8 +54,8 @@ Facts that constrain the choice:
 
 | Option | Gives | Costs |
 | --- | --- | --- |
-| A. Read-only page (WEB-MANAGE FR-MANAGE-6 as drafted) | The owner sees every effective value, its key and the command that applies a change; one source of truth | Each change is a file edit plus `reader up` (about 1 min of restart for start-only keys, hypothesis) |
-| B. Database overlay for an allow-list of keys | Edit from the page; effective value = overlay ?? reader.yaml ?? default; the page shows which source wins | Two sources of truth; a new `settings_overrides` table, an audit row per change, a reload path for start-only keys (sign-up switch, retention), tests for precedence |
+| A. Read-only page (WEB-MANAGE FR-MANAGE-6) | The owner sees every effective value, its key and the command that applies a change; one source of truth | Each change is a file edit plus `reader up` (about 1 min of restart for start-only keys, hypothesis) |
+| B. Database overlay for an allow-list of keys | Edit from the page; the page shows which source wins | Two sources of truth; a new `settings_overrides` table, an audit row per change, per-request or per-run reads for start-only keys, tests for precedence |
 | C. The api writes reader.yaml | One source of truth, edited from the page | The file becomes writable from a network-facing process; comments and formatting lost on rewrite; contradicts the read-only mount |
 
 ## Decision (proposed)
@@ -55,12 +63,29 @@ Facts that constrain the choice:
 Option B for this allow-list only: `sharing.signup`, `observability.retention_days`, `budgets.monthly_usd`,
 `budgets.warn_at`, `tasks.<stage>.budget_usd_per_lesson`. Model choice per stage stays file-only (a model id names a
 provider contract and pricing row; a typo there costs credit). Users, providers, secrets, materials and kernels stay
-file-only. An overlay value is validated by the same Pydantic model as the file; the page always shows both the file
-value and the override, and "Reset to reader.yaml" deletes the override. Every change requires a recent sign-in
-(SRV-AUTH `recent_session`) and writes one audit row. `reader up` prints a line for each key whose override differs
-from the file, so the file never silently disagrees with the running instance.
+file-only.
 
-Until the owner accepts this ADR, Option A ships.
+- **Precedence.** effective = override ?? file ?? default, validated by the same Pydantic model as the file.
+- **Narrowing only for the sign-up switch.** When the file says `signup: off` (or `false`), sign-up is off whatever
+  the override says; an override can turn sign-up off when the file leaves it open, never open it when the file
+  closes it. The file is the owner's hard boundary for who can create an account. The other keys take the override
+  in either direction.
+- **Changes.** Every change requires a recent sign-in (SRV-AUTH `recent_session`) and writes one audit row with the
+  key, the old and the new value (the values are small numbers or enums, not secrets; a hash of them would be
+  trivially reversible and only hide them from the owner). "Reset to reader.yaml" deletes the override.
+- **Visibility.** The page shows the file value beside every override. `reader up` and `reader status` print one
+  line per override, so the file never silently disagrees with the running instance.
+- **Who reads the overlay.** Only the api and the worker, which hold a database connection: the api reads the
+  sign-up switch per request and serves the settings routes; the worker reads retention at each run of the retention
+  job and the budgets at each agent call's budget check. A process without a database connection (the agent proxy
+  of ADR-0025, the host CLI `reader-ingest`) never reads an allow-listed key; if one ever needs such a key, that key
+  leaves the allow-list first.
+- **Backup and restore.** Overrides live in Postgres, so `reader backup` keeps them and `reader restore` brings them
+  back with the rest of the database (OPS-CLI FR-CLI-17/-18). After a restore, `reader status` lists them; a restored
+  override whose key the current reader.yaml no longer has (a task removed from `tasks`) is ignored and listed as
+  `override <key>: ignored (not in reader.yaml)`.
+
+Until the owner accepts this ADR, option A ships.
 
 ## Rejected options — why
 
@@ -70,13 +95,11 @@ Until the owner accepts this ADR, Option A ships.
 ## Consequences
 
 - Easier: the owner turns sign-up off, lowers the monthly budget or shortens trace retention from the page.
-- Harder: two sources of truth; every reader of an allow-listed key goes through one `effective_settings()` function,
-  and the start-only readers need a reload hook (SRV-AUTH re-reads the sign-up switch per request instead of at
-  start; SRV-OBS reads retention per job run).
-- Forbidden: an override for any key outside the allow-list; an override that the file's schema would refuse.
+- Harder: two sources of truth; every reader of an allow-listed key goes through one `effective_settings()` function.
+- Forbidden: an override for any key outside the allow-list; an override that the file's schema would refuse; an
+  override that opens sign-up the file closes.
 
 ## Open questions
 
-1. Accept B, or keep A (file plus `reader up`) for v1?
-2. Should model choice per stage join the allow-list, limited to the model ids in the pricing table?
-3. Should the compile run cap and the tutor caps become reader.yaml keys first (they are spec constants today)?
+1. Should model choice per stage join the allow-list, limited to the model ids in the pricing table?
+2. Should the compile run cap and the tutor caps become reader.yaml keys first (they are spec constants today)?
