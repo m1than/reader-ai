@@ -36,7 +36,9 @@ review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: name
   deep-reviewer rounds 1–7 (secrets area: full rounds), promoted on V/upload-impl with its Red tests. Green: the
   spawn is a `Ctx` field (`ingest_spawn`, set by `default_ctx`; the fake world of the existing tests has none, so
   they start no watcher), and the Red test injects its recorder there instead of patching the module; no oracle
-  changed. The test reformatted for ruff (line length), no oracle change."
+  changed. The test reformatted for ruff (line length), no oracle change. Live-harness fix 2026-11-24
+  (V/live-harness-fixes, after the owner's live upload check): FR-CLI-23's status reads `unknown` with the config
+  problem, not `stopped`, when reader.yaml cannot be loaded; paired unit test."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -395,7 +397,13 @@ requirements:
       convert.lock` the same way (SRV-INGEST FR-INGEST-22: one converter run on the host at a time; a CLI
       `reader-ingest` exits 3 `busy` while it is held, SRV-INGEST FR-INGEST-1). An idle watcher waits without
       the lock (`next --peek`), so it reads `idle`; `running` means a conversion is under way. [unit] an idle
-      watcher's lock state reads `idle`; a held lock reads `running`. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
+      watcher's lock state reads `idle`; a held lock reads `running`. **Without a loadable reader.yaml** (the
+      `--config` path is not a file, or it does not load) the lock cannot be found, so `reader status` reports
+      `"ingest_watcher": "unknown"` and `"converter": "unknown"`, never `stopped`, plus `"ingest_config":
+      {"problem": "config_missing" | "config_invalid", "path": <the path>}` in `--json` and one text line naming
+      the problem and `--config` (live check 2026-11-24: status without `--config` read `stopped` while the watcher
+      ran); the exit code is unchanged. [unit] a missing and an invalid config each read `unknown` with their
+      problem. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
       lock file, only while the lock is held, then up to 15 s for the lock to be released, then SIGKILL (the
       watcher's own handler kills its converter child first, FR-INGEST-21). A failed spawn is reported and does not
       fail `up`: the stack runs and uploads wait as `queued` (ADR-0029 Decision 6).

@@ -817,7 +817,8 @@ vectors:
 #            FR-OBS-12 image test decodes. The V.obs-analytics image tests (test_images_analytics.py) use images by id
 #            and allow MLflow 180 s to turn healthy (over 60 s was measured on a loaded Mac).
 #   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (e2e/live/lib/obs_live.py, run
-#            as `python -I`, and obs_browser.mjs). It is run by hand until the stage-2 live check script
+#            as `python -I`, and obs_browser.mjs, which finds the summary's trace links by the exact name `Trace`:
+#            the page's "traces dashboard" link also contains it, live check 2026-11-24). It is run by hand until the stage-2 live check script
 #            (`e2e/live/stage-2.sh`, docs/roadmap.md) exists; that script will call it. DIR is resolved and checked to
 #            lie outside the repository before anything is created. Sessions: one owner and one live-check learner
 #            row, each created and deleted by its id hash only (each statement must report exactly one row), through
