@@ -9,9 +9,10 @@ propagator is W3C tracecontext only. `shutdown()` is bounded by 2 s whatever the
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, TypedDict
 
 from opentelemetry.propagate import set_global_textmap
 from opentelemetry.sdk.trace import TracerProvider
@@ -28,15 +29,23 @@ log = logging.getLogger("reader.obs")
 
 OTLP_ENDPOINT: Final = "http://rotel:4318/v1/traces"
 EXPORTER_KWARGS: Final[dict[str, Any]] = {"endpoint": OTLP_ENDPOINT, "timeout": 10, "headers": {}}
-SCHEDULE_DELAY_MS: Final = 5000
-MAX_QUEUE: Final = 2048
-MAX_BATCH: Final = 512
-EXPORT_TIMEOUT_MS: Final = 10000
-BATCH: Final[dict[str, int]] = {
-    "schedule_delay_millis": SCHEDULE_DELAY_MS,
-    "max_queue_size": MAX_QUEUE,
-    "max_export_batch_size": MAX_BATCH,
-    "export_timeout_millis": EXPORT_TIMEOUT_MS,
+# The exporter merges these environment headers into its own whatever `headers` says, so they are absent while
+# it is built (code review round 1): only EXPORTER_KWARGS decide what goes to Rotel.
+HEADER_ENV: Final = ("OTEL_EXPORTER_OTLP_HEADERS", "OTEL_EXPORTER_OTLP_TRACES_HEADERS")
+
+
+class Batch(TypedDict):
+    schedule_delay_millis: int
+    max_queue_size: int
+    max_export_batch_size: int
+    export_timeout_millis: int
+
+
+BATCH: Final[Batch] = {
+    "schedule_delay_millis": 5000,
+    "max_queue_size": 2048,
+    "max_export_batch_size": 512,
+    "export_timeout_millis": 10000,
 }
 SHUTDOWN_FLUSH_MS: Final = 2000
 
@@ -84,9 +93,13 @@ class Handle:
 
 
 def default_exporter() -> SpanExporter:
-    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.exporter.otlp.proto.http import trace_exporter
 
-    return OTLPSpanExporter(**EXPORTER_KWARGS)
+    saved = {name: os.environ.pop(name) for name in HEADER_ENV if name in os.environ}
+    try:
+        return trace_exporter.OTLPSpanExporter(**EXPORTER_KWARGS)
+    finally:
+        os.environ.update(saved)
 
 
 def default_catalogs(config: Any) -> Catalogs:
@@ -123,13 +136,6 @@ def setup(
         shutdown_on_exit=False,
     )
     inner = exporter if exporter is not None else default_exporter()
-    processor = BatchSpanProcessor(
-        AllowListExporter(inner, allow, resource(role)),
-        max_queue_size=MAX_QUEUE,
-        schedule_delay_millis=SCHEDULE_DELAY_MS,
-        max_export_batch_size=MAX_BATCH,
-        export_timeout_millis=EXPORT_TIMEOUT_MS,
-    )
-    provider.add_span_processor(processor)
+    provider.add_span_processor(BatchSpanProcessor(AllowListExporter(inner, allow, resource(role)), **BATCH))
     install(provider)
     return Handle(enabled=True, provider=provider)

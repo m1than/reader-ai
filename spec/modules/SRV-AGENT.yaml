@@ -288,7 +288,12 @@ requirements:
       amount, the stop reason and the error code. When `config.observability.enabled`, FR-AGENT-6's environment gains
       exactly SRV-OBS's `cli_env_additions()` (telemetry on, traces only, OTLP to http://rotel:4318, four content flags
       `0`); `OTEL_LOG_RAW_API_BODIES`, `ENABLE_BETA_TRACING_DETAILED` and `BETA_TRACING_ENDPOINT` stay blank like every
-      other variable. When disabled, the environment is exactly FR-AGENT-6's. [unit] server/tests/agent/test_obs_env.py.
+      other variable. When disabled, the environment is exactly FR-AGENT-6's. `reader.stage` is set only when the
+      call's stage is a declared pipeline stage (the tutor's calls carry none). The tokens are the mapped usage's
+      input, output, cache read and cache write (5m + 1h); `reader.cost_usd` is the ledger's settled amount, also on a
+      failed call, and differs from the SDK's figure whenever settlement does (e.g. two 2xx answers). A provider
+      constructed without a configuration adds nothing to the environment. [unit, db]
+      server/tests/agent/test_obs_env.py.
 
 invariants:
   - id: INV-AGENT-1

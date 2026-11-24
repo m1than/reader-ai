@@ -52,14 +52,15 @@ def test_schedule_and_cutoff() -> None:
 
 
 class FakeJobs:
-    def __init__(self, log: list[str], fail: bool = False) -> None:
+    def __init__(self, log: list[str], fail: bool | int = False) -> None:
+        """`fail`: True fails every enqueue; an int n fails the first n."""
         self.log, self.fail = log, fail
         self.calls: list[tuple[str, dict[str, Any], int]] = []
 
     async def enqueue(self, kind: str, args: dict[str, Any], schedule_in: int = 0) -> Any:
         self.log.append("enqueue")
         self.calls.append((kind, dict(args), schedule_in))
-        if self.fail:
+        if self.fail is True or (type(self.fail) is int and len(self.calls) <= self.fail):
             raise RuntimeError("queue down")
 
 
@@ -68,6 +69,7 @@ def _client(
     status: int = 200,
     bodies: list[dict[str, Any]] | None = None,
     exc: Exception | None = None,
+    content: bytes | None = None,
 ) -> httpx.AsyncClient:
     def handler(request: httpx.Request) -> httpx.Response:
         log.append("delete")
@@ -81,6 +83,8 @@ def _client(
                     "ctype": request.headers.get("content-type"),
                 }
             )
+        if content is not None:
+            return httpx.Response(status, content=content)
         return httpx.Response(status, json={"traces_deleted": 3})
 
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
@@ -117,9 +121,20 @@ async def test_disabled_enqueues_the_next_day_and_deletes_nothing() -> None:
     assert log == ["enqueue"]
 
 
-async def test_a_failed_next_day_enqueue_still_deletes() -> None:
+@pytest.fixture(autouse=True)
+def _no_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(require("reader.obs.jobs"), "ENQUEUE_PAUSE_S", 0.0)
+
+
+async def test_a_failed_next_day_enqueue_is_retried_then_still_deletes() -> None:
     jobs = require("reader.obs.jobs")
+    assert jobs.ENQUEUE_TRIES == 3
     log: list[str] = []
+    fake = FakeJobs(log, fail=1)
+    async with _client(log) as client:
+        await jobs.retain("2026-11-24", jobs=fake, enabled=True, retention_days=30, client=client, now=NOW)
+    assert log == ["enqueue", "enqueue", "delete"]
+    log.clear()
     async with _client(log) as client:
         await jobs.retain(
             "2026-11-24",
@@ -129,7 +144,48 @@ async def test_a_failed_next_day_enqueue_still_deletes() -> None:
             client=client,
             now=NOW,
         )
-    assert log == ["enqueue", "delete"]
+    assert log == ["enqueue", "enqueue", "enqueue", "delete"]  # three tries, then today's delete anyway
+
+
+async def test_a_late_run_enqueues_the_argument_day_plus_one_at_once() -> None:
+    """Day 2026-11-20 run on 2026-11-24 (round 1 survivor): the next key is 2026-11-21, due now."""
+    jobs = require("reader.obs.jobs")
+    log: list[str] = []
+    fake = FakeJobs(log)
+    async with _client(log) as client:
+        await jobs.retain("2026-11-20", jobs=fake, enabled=True, retention_days=30, client=client, now=NOW)
+    assert fake.calls == [("obs.retention", {"day": "2026-11-21"}, 0)]
+
+
+@pytest.mark.parametrize(
+    ("status", "content"),
+    [
+        (400, b'{"error_code": "INVALID_PARAMETER_VALUE"}'),
+        (404, b""),
+        (200, b"<html>not json</html>"),
+        (200, b"[]"),
+        (200, b'{"traces_deleted": "3"}'),
+        (200, b'{"traces_deleted": true}'),
+    ],
+)
+async def test_a_4xx_or_a_bad_200_is_retention_failed(status: int, content: bytes) -> None:
+    jobs = require("reader.obs.jobs")
+    log: list[str] = []
+    async with _client(log, status=status, content=content) as client:
+        with pytest.raises(jobs.RetentionFailed):
+            await jobs.retain(
+                "2026-11-24", jobs=FakeJobs(log), enabled=True, retention_days=30, client=client, now=NOW
+            )
+
+
+async def test_an_empty_200_object_means_zero_deleted() -> None:
+    jobs = require("reader.obs.jobs")
+    log: list[str] = []
+    async with _client(log, content=b"{}") as client:
+        count = await jobs.retain(
+            "2026-11-24", jobs=FakeJobs(log), enabled=True, retention_days=30, client=client, now=NOW
+        )
+    assert count == 0
 
 
 async def test_unreachable_is_transient_and_other_failures_are_coded() -> None:

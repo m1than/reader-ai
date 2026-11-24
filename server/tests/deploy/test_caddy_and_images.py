@@ -147,10 +147,37 @@ def _path_upstreams(nodes: list[dict[str, Any]]) -> dict[str, set[str]]:
     return mapping
 
 
-BLOCKED = [
-    "/v1/*", "/gateway/*", "/ajax-api/*/mlflow/assistant/*", "/ajax-api/*/mlflow/gateway-proxy*", "/mcp*",
-    "/api/*/mlflow/gateway/*",
+BLOCKED_RE = (  # SRV-OBS FR-OBS-9, exactly
+    "(?i)^/+(?:(?:v1|gateway)(?:/|$)|mcp|(?:ajax-api|api)/+[^/]+/+mlflow/+"
+    "(?:assistant|gateway|gateway-proxy)(?:/|$))"
+)
+# Code review round 1: deep paths, case and repeated slashes (Go's RE2 and Python agree on this regexp).
+BLOCKED_PATHS = [
+    "/v1/traces", "/v1", "/gateway/x", "/mcp", "/mcp/x",
+    "/api/3.0/mlflow/gateway/secrets/create", "/api/3.0/mlflow/gateway/endpoints/create",
+    "/ajax-api/3.0/mlflow/gateway/endpoints/create",
+    "/ajax-api/3.0/mlflow/assistant/sessions/abc/stream",
+    "/ajax-api/3.0/mlflow/assistant/providers/claude_code/health",
+    "/ajax-api/2.0/mlflow/gateway-proxy/v1/chat", "/ajax-api/2.0/mlflow/gateway-proxy",
+    "//api/3.0/mlflow/gateway/secrets/create", "/api//3.0//mlflow//gateway/x",
+    "/AJAX-API/3.0/MLFLOW/Assistant/x", "/API/3.0/mlflow/GATEWAY/secrets/create", "/V1/traces",
 ]
+OPEN_PATHS = [
+    "/", "/api/2.0/mlflow/experiments/search", "/ajax-api/3.0/mlflow/traces/get", "/static-files/x.js",
+    "/api/3.0/mlflow/gateways", "/v10/x",
+]
+
+
+@requires_docker_cli
+def test_blocked_regexp_decides_the_paths() -> None:
+    """FR-OBS-9's regexp on its own; the [image] edge test sends the same paths through the pinned Caddy."""
+    import re
+
+    text = CADDYFILE.read_text(encoding="utf-8")
+    assert f"\t@blocked path_regexp {BLOCKED_RE}\n" in text
+    blocked = re.compile(BLOCKED_RE)
+    assert [p for p in BLOCKED_PATHS if not blocked.search(p)] == []
+    assert [p for p in OPEN_PATHS if blocked.search(p)] == []
 
 
 def _check_dashboard_site(config: dict[str, Any]) -> None:
@@ -162,9 +189,9 @@ def _check_dashboard_site(config: dict[str, Any]) -> None:
     assert '"uri": "/api/obs/gate' in text.replace("?", "")  # forward_auth's rewrite to the gate
     order = [text.index(marker) for marker in ('"10.230.1.10:8000"', '"static_response"', '"mlflow:5000"')]
     assert order == sorted(order), "gate, then the blocked 404, then the MLflow proxy"
-    for path in BLOCKED:
-        assert json.dumps(path) in text, path
     nodes = _walk(site)
+    patterns = [m["path_regexp"]["pattern"] for n in nodes for m in n.get("match", []) if "path_regexp" in m]
+    assert patterns == [BLOCKED_RE]
     (blocked,) = [n for n in nodes if n.get("handler") == "static_response"]
     assert blocked.get("status_code") in (404, "404")
     (mlflow,) = [n for n in nodes if n.get("handler") == "reverse_proxy"

@@ -54,7 +54,8 @@ localhost:8443 {
 		uri /api/obs/gate
 	}
 
-	@blocked path /v1/* /gateway/* /ajax-api/*/mlflow/assistant/* /ajax-api/*/mlflow/gateway-proxy* /mcp* /api/*/mlflow/gateway/*
+	# Any depth, any case, repeated slashes: a middle `*` of a `path` pattern matches one segment only.
+	@blocked path_regexp (?i)^/+(?:(?:v1|gateway)(?:/|$)|mcp|(?:ajax-api|api)/+[^/]+/+mlflow/+(?:assistant|gateway|gateway-proxy)(?:/|$))
 	handle @blocked {
 		respond 404
 	}

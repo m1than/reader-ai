@@ -157,7 +157,7 @@ async def _seed(engine: Any) -> None:
                     "res": a.get("reservation_id"),
                     "usd": Decimal(str(a.get("usd", 0))),
                     "settled": Decimal(str(a["settled_usd"])) if "settled_usd" in a else None,
-                    "at": "2026-11-24T11:00:00Z",
+                    "at": a.get("created_at", "2026-11-24T11:00:00Z"),  # "old" rows carry their own
                 },
             )
         for q in seed["tutor_questions"]:
@@ -229,11 +229,14 @@ async def test_summary_on_vec_obs_3(pg: Any) -> None:
     # The other owner sees its own run and no row of the owner's; system rows are shown to any owner caller.
     assert [r["run_id"] for r in other["compile_runs"]] == ["10000000-0000-4000-8000-000000000009"]
     assert other["tutor"]["count"] == 0
-    assert {(j["kind"], j["error_code"]) for j in other["failures"]["jobs"]} == {
-        ("pipeline.stage", "timeout"),
-        ("ingest.import", "ValueError"),
-        ("search.embed", "exhausted"),
+    assert {(j["kind"], j["error_code"], j["system"]) for j in other["failures"]["jobs"]} == {
+        ("pipeline.stage", "timeout", False),
+        ("tutor.answer", "exhausted", False),  # its own dead answer job (round 1 seed)
+        ("ingest.import", "ValueError", False),  # its own material's import
+        ("ingest.import", "ValueError", True),  # the system import (no materials row)
+        ("search.embed", "exhausted", True),
     }
+    assert [(t["error_code"], t["count"]) for t in other["failures"]["tutor"]] == [("tutor_failed", 1)]
     assert other["ingest"]["rows"] == []
     assert '"question"' not in json.dumps(got)  # no text column is read (`question_id` is an id)
 
@@ -250,6 +253,51 @@ async def test_truncated_when_the_published_read_hits_its_limit(pg: Any) -> None
         await _seed(engine)
         async with engine.connect() as conn:
             got = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW, read_limit=2)
+            one = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW, read_limit=1)
     finally:
         await engine.dispose()
     assert got["failures"]["truncated"] is True
+    assert got["ingest"]["truncated"] is False  # one succeeded import: under a limit of 2
+    assert one["ingest"]["truncated"] is True  # exactly the limit (round 1 survivor)
+
+
+def test_limits_are_the_spec_numbers() -> None:
+    """FR-OBS-10: newest 50 runs, slowest 10, up to 5 trace ids per group, newest 50 imports, reads of 500."""
+    summary = require("reader.obs.summary")
+    assert (summary.RUNS_LIMIT, summary.SLOWEST, summary.TRACE_IDS, summary.INGEST_LIMIT, summary.READ_LIMIT) == (
+        50,
+        10,
+        5,
+        50,
+        500,
+    )
+
+
+@pytest.mark.anyio
+async def test_the_limits_are_applied(pg: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from jobs.conftest import target
+    from reader.db import make_engine, migrate
+
+    summary = require("reader.obs.summary")
+    monkeypatch.setattr(summary, "SLOWEST", 2)
+    monkeypatch.setattr(summary, "RUNS_LIMIT", 0)
+    monkeypatch.setattr(summary, "INGEST_LIMIT", 0)
+    engine = make_engine(target(pg))
+    try:
+        await migrate(engine)
+        await _seed(engine)
+        async with engine.connect() as conn:
+            got = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW)
+    finally:
+        await engine.dispose()
+    assert [s["ms"] for s in got["tutor"]["slowest"]] == [9000, 4000]
+    assert got["compile_runs"] == [] and got["ingest"]["rows"] == []
+
+
+@pytest.mark.parametrize(
+    ("values", "p50", "p95"),
+    [([1000] * 19 + [5000], 1000, 1000), ([1000] * 18 + [5000, 6000], 1000, 5000), (list(range(1, 101)), 50, 95)],
+)
+def test_p95_is_nearest_rank(values: list[int], p50: int, p95: int) -> None:
+    summary = require("reader.obs.summary")
+    assert (summary.nearest_rank(values, 50), summary.nearest_rank(values, 95)) == (p50, p95)

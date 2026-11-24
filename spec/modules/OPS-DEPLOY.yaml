@@ -306,8 +306,8 @@ requirements:
       {caddy, mlflow}. VEC-DEPLOY-2 gains exactly api–rotel, worker–rotel, rotel–mlflow, worker–mlflow and caddy–mlflow,
       and the `never` pairs of SRV-OBS's paired change. The base compose.yaml publishes only 443; caddy's
       `127.0.0.1:8443:8443` comes from OPS-CLI's override (FR-CLI-22). The Caddyfile gains the site `localhost:8443` of
-      SRV-OBS FR-OBS-9 (forward_auth to `10.230.1.10:8000` uri `/api/obs/gate`, the blocked patterns in a `handle`
-      block, the MLflow reverse proxy with `header_up -Cookie`, `header_up -Authorization`, `header_down -Set-Cookie`,
+      SRV-OBS FR-OBS-9 (forward_auth to `10.230.1.10:8000` uri `/api/obs/gate`, the blocked paths as FR-OBS-9's one
+      `path_regexp` in a `handle` block, the MLflow reverse proxy with `header_up -Cookie`, `header_up -Authorization`, `header_down -Set-Cookie`,
       `header_down -Access-Control-*`, and its CSP); `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001,
       mlflow:5000}. INV-DEPLOY-2 (1)'s only environment entries become READER_CONFIG on the server roles plus mlflow's
       two. Existing checks follow: `reader-mlflow:local` joins the locally built images (INV-DEPLOY-6),

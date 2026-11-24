@@ -42,6 +42,21 @@ CASES = [
     # The checks come before the session: a refused request never reveals whether the cookie is valid.
     ("https://localhost:3000", "GET", None, None, None, None, 403),
     (None, "GET", "cross-site", "navigate", "document", None, 403),
+    # Code review round 1 survivors: the navigation exception needs mode `navigate`, dest `document` and GET;
+    # OPTIONS is no safe method; the dashboard origin is compared exactly (no case folding, no trailing slash).
+    (None, "GET", "same-site", "cors", "document", "owner", 403),
+    (None, "GET", "same-site", "navigate", "empty", "owner", 403),
+    (None, "POST", "same-site", "navigate", "document", "owner", 403),
+    (None, "OPTIONS", None, None, None, "owner", 403),
+    (None, "options", "same-origin", "cors", "empty", "owner", 403),
+    (None, "get", None, None, None, "owner", 204),
+    ("HTTPS://LOCALHOST:8443", "POST", None, None, None, "owner", 403),
+    ("https://localhost:8443/", "POST", None, None, None, "owner", 403),
+    ("HTTPS://LOCALHOST:8443", "GET", None, None, None, "owner", 403),
+    (DASH, "GET", "same-site", "no-cors", "image", "owner", 403),
+    (DASH, "GET", "cross-site", "cors", "empty", "owner", 403),
+    (DASH, "POST", None, None, None, None, 401),
+    (DASH, "POST", None, None, None, "learner", 403),
 ]
 
 

@@ -165,6 +165,48 @@ async def test_inv_obs_3_failing_exporter_changes_no_response() -> None:
         handle.shutdown()
 
 
+@pytest.mark.parametrize("broken", ["start_span", "set_attribute", "end"])
+async def test_inv_obs_3_a_raising_tracer_changes_no_response(
+    broken: str, monkeypatch: pytest.MonkeyPatch, caplog: Any
+) -> None:
+    """Round 1: every OTel call of the middleware is guarded; the request and its log line go on."""
+    import reader.obs.asgi as asgi
+
+    def boom(*_a: Any, **_k: Any) -> Any:
+        raise RuntimeError("otel broke")
+
+    class Span:
+        def set_attribute(self, *_a: Any) -> None:
+            if broken == "set_attribute":
+                boom()
+
+        def set_status(self, *_a: Any) -> None: ...
+
+        def end(self) -> None:
+            if broken == "end":
+                boom()
+
+        def is_recording(self) -> bool:
+            return True
+
+        def get_span_context(self) -> Any:
+            from opentelemetry.trace import INVALID_SPAN_CONTEXT
+
+            return INVALID_SPAN_CONTEXT
+
+    class Tracer:
+        def start_span(self, *_a: Any, **_k: Any) -> Any:
+            if broken == "start_span":
+                boom()
+            return Span()
+
+    monkeypatch.setattr(asgi, "tracer", lambda: Tracer())
+    with caplog.at_level(logging.INFO, logger="reader.obs.http"):
+        r = await _get(_app(), "/api/lessons/x")
+    assert (r.status_code, r.json()) == (200, {"ok": True})
+    assert any(m.getMessage().startswith("request method=GET") for m in caplog.records)
+
+
 def test_trace_filter_appends_once_inside_a_span() -> None:
     logs = require("reader.obs.logs")
     filt = logs.TraceFilter()

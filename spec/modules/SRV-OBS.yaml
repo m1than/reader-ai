@@ -143,13 +143,17 @@ requirements:
       global tracer provider stays OTel's no-op provider, no exporter, thread or socket exists, and every FR-OBS-3..6
       call path still runs. When enabled, it installs one `TracerProvider` with the resource exactly
       `{service.name: "reader-<role>", service.version: <reader package version>}`, the parent-based always-on sampler,
-      the `IdGenerator` of FR-OBS-5, one BatchSpanProcessor with the `bounds` values feeding the AllowListExporter
-      (FR-OBS-2), which wraps an OTLP/HTTP protobuf exporter built with exactly the endpoint
-      `http://rotel:4318/v1/traces`, a 10 s timeout and no headers (`EXPORTER_KWARGS`, checked by a unit test). Every
-      tracer is obtained under the one instrumentation scope `reader` (a constant, no version). The global propagator
-      is W3C tracecontext only (no baggage). `opentelemetry-sdk` and `opentelemetry-exporter-otlp-proto-http` are
-      pinned at 1.45.2 (the spike versions; `opentelemetry-api` 1.45.2 is already in uv.lock). No other OpenTelemetry
-      package or instrumentation library is installed. The `mcp` role is not traced in this revision (declared gap).
+      the `IdGenerator` of FR-OBS-5, one BatchSpanProcessor built with exactly `BATCH` (the `bounds` values) feeding the
+      AllowListExporter (FR-OBS-2), which wraps an OTLP/HTTP protobuf exporter built with exactly the endpoint
+      `http://rotel:4318/v1/traces`, a 10 s timeout and no headers (`EXPORTER_KWARGS`, checked by a unit test); the
+      exporter merges `OTEL_EXPORTER_OTLP_HEADERS` and `OTEL_EXPORTER_OTLP_TRACES_HEADERS` from the environment
+      whatever its `headers` argument says, so both are absent from the environment while it is built (code review
+      round 1). Every tracer is obtained under the one instrumentation scope `reader` (a constant, no version). The
+      global propagator is W3C tracecontext only (no baggage). The direct dependencies `opentelemetry-sdk` and
+      `opentelemetry-exporter-otlp-proto-http` are pinned at 1.45.2 (the spike versions; `opentelemetry-api` 1.45.2 is
+      already in uv.lock); uv.lock adds only what those two require (opentelemetry-proto, -semantic-conventions,
+      -exporter-otlp-proto-common, -exporter-otlp-common and -exporter-http-transport). No instrumentation library and
+      no other OpenTelemetry package is added. The `mcp` role is not traced in this revision (declared gap).
   - id: FR-OBS-2
     text: >-
       Allow-list. VEC-OBS-1 (spec/fixtures/SRV-OBS/attributes.yaml) declares, as data, every span name pattern and
@@ -287,9 +291,13 @@ requirements:
       is active (the base compose.yaml publishes 443 only). Every request is first sent by `forward_auth
       10.230.1.10:8000 { uri /api/obs/gate }`. Then, in this order, as mutually exclusive `handle` blocks (a `respond`
       next to a catch-all `handle` never runs, because Caddy orders `handle` first: measured, spikes/obs-stack round
-      2, where /v1/traces reached MLflow): `handle @blocked { respond 404 }` for the paths `/v1/*`, `/gateway/*`,
-      `/mcp*`, `/ajax-api/*/mlflow/assistant/*`, `/ajax-api/*/mlflow/gateway-proxy*` and `/api/*/mlflow/gateway/*`
-      (exactly these patterns in the Caddyfile; the adapt test checks each in this form); and `handle { reverse_proxy mlflow:5000
+      2, where /v1/traces reached MLflow): `handle @blocked { respond 404 }` with `@blocked path_regexp
+      (?i)^/+(?:(?:v1|gateway)(?:/|$)|mcp|(?:ajax-api|api)/+[^/]+/+mlflow/+(?:assistant|gateway|gateway-proxy)(?:/|$))`
+      (exactly this regexp in the Caddyfile; the adapt test checks it): the OTLP receiver, the AI gateway, MLflow's
+      MCP server, and the assistant, gateway and gateway-proxy routes at any depth under both `/api/<v>/mlflow/` and
+      `/ajax-api/<v>/mlflow/`, case-insensitive and with repeated slashes (code review round 1 measured on the pinned
+      caddy that a middle `*` of a `path` pattern matches one segment only, so deep gateway, assistant and
+      gateway-proxy paths reached MLflow); and `handle { reverse_proxy mlflow:5000
       { header_up -Cookie; header_up -Authorization; header_down -Set-Cookie; header_down -Access-Control-* } }` with
       the Host header unchanged (MLflow's `--allowed-hosts` accepts only `localhost:8443` from the edge). The site's
       response headers are the main site's except the Content-Security-Policy, which is exactly `default-src 'self';
@@ -332,7 +340,8 @@ requirements:
       The owner's views. MLflow 3.18.0's trace metrics group span cost only by model name or provider and trace counts
       only by trace name or status (REF-OBS-5), so cost per stage per lesson and failures by error code cannot be
       expressed there. `GET /api/obs/summary?days=<1..90, default 7>` (owner only: 401 without a session, 403 for
-      another role) returns JSON computed from reader-ai's own tables, read-only, over the window. User-owned tables
+      another role; `days` must fully match `^[0-9]{1,2}$`, ASCII digits only, and lie in 1..90, else 400 `days`:
+      code review round 1 found `days=²` passing `str.isdigit` and failing `int` with a 500) returns JSON computed from reader-ai's own tables, read-only, over the window. User-owned tables
       are read with `owner_id` = the caller's id. `job_keys` is never queried by SQL from this module (SRV-EVENTS
       FR-EVENTS-17: no module queries it directly): its rows come only through the read functions the paired
       FR-EVENTS-18 publishes next to `job_status_of` and `dead_error_code_of`: `key_rows_of(conn, keys)` (keys of any
@@ -344,8 +353,9 @@ requirements:
       for the runs, one for their spend, one for their steps, then one `key_rows_of` for all steps' keys, one key per
       step under the one kind SRV-PIPELINE enqueues for that stage (`pipeline.verify` for lab verification,
       `pipeline.stage` for every other stage); (b) one query for the questions, one for the tutor settle rows, then one
-      `key_rows_of` for the slowest 10; (c) one `recent_keys_of` over every kind, one query for the owner's runs,
-      questions and materials used to scope it, one for failed questions, and one `key_rows_of` for those failed
+      `key_rows_of` for the slowest 10; (c) one `recent_keys_of` over every kind, then ownership queries bounded by
+      the ids the dead rows name (the owner's runs among their run_ids, the owner's questions among their
+      question_ids, the materials rows of their material_sha256 values; code review round 1), one for failed questions, and one `key_rows_of` for those failed
       questions' `tutor.answer` keys (their trace ids); (d) one `recent_keys_of` for `ingest.import` and one query for
       the owner's materials. `recent_keys_of` limits before owner scoping, so a view built from it carries
       `truncated` and the page shows "more rows may exist" when it is true:
@@ -381,12 +391,16 @@ requirements:
       YYYY-MM-DD}`, key `[day]`, max_attempts 3, transient connection errors, timeout 60 s). Its handler first enqueues
       the next day's key, whose day is the argument day + 1 (a calendar day in UTC, never "today + 1", so a late or
       retried run cannot skip or repeat a day), with `schedule_in` the seconds from now to 03:00 UTC of that day (0
-      when already past), so a day that ends dead never stops the chain (the enqueue is idempotent per key); then it calls MLflow's REST `POST http://mlflow:5000/api/2.0/mlflow/traces/delete-traces`
+      when already past), so a day that ends dead never stops the chain (the enqueue is idempotent per key; a failed
+      enqueue is tried 3 times in the run, 1 s apart, then logged and today's delete still runs); then it calls
+      MLflow's REST `POST http://mlflow:5000/api/2.0/mlflow/traces/delete-traces`
       once with `{"experiment_id": "0", "max_timestamp_millis": now − retention_days × 86,400,000}` (no `max_traces`:
       MLflow 3.18.0 sets no server cap and one call deleted 178 traces in 0.05 s, measured). `on_worker_start`
       enqueues today's key. With tracing disabled the kind is still declared and its handler returns at once after
       enqueuing the next day (so a disabled profile never leaves dead keys). MLflow unreachable is transient; any other
-      HTTP failure raises `RetentionFailed`, so the day's key ends `dead` with `error_code` `RetentionFailed` (FR-EVENTS-6
+      HTTP failure (any non-200, and a 200 whose body is not a JSON object or carries a non-integer `traces_deleted`;
+      an absent `traces_deleted` is 0, as protobuf JSON omits zero values) raises
+      `RetentionFailed`, so the day's key ends `dead` with `error_code` `RetentionFailed` (FR-EVENTS-6
       records a permanent failure by its class name; amended at Red, 2026-11-24, from `obs_retention_failed`, which no
       job wrapper can write). SQLite does not shrink on delete (measured);
       freed pages are reused, so the store's size stays bounded by the retained traces.
@@ -464,7 +478,10 @@ vectors:
 #            trace ids from FR-OBS-5's derivation (the gate for the fixture; trace-ids.mjs only generates), the
 #            `truncated` flag shown when recent_keys_of hits its limit, the retention cutoff and the
 #            next-day-first order (FR-OBS-11), the canary for our process (INV-OBS-2 first half), failure isolation
-#            (INV-OBS-3).
+#            (INV-OBS-3: a failing exporter, and a tracer whose start, attribute or end call raises inside the
+#            middleware). Code review round 1 added: an oracle of VEC-OBS-1 read from the YAML independently of
+#            reader.obs.attributes (used by the INV-OBS-1 property test) with example rows at every bound; the gate's
+#            remaining Sec-Fetch, OPTIONS and inexact-Origin rows; the regexp of FR-OBS-9 on its own.
 #   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
 #            capturing exporter (INV-OBS-4 end to end), the summary queries on VEC-OBS-3 (FR-OBS-10; the fixture's ISO
 #            times are seeded as timezone-aware datetimes), the gate route on real sessions (FR-OBS-9).
@@ -475,7 +492,9 @@ vectors:
 #            hardening; a span sent to rotel is returned by MLflow (FR-OBS-8); retention against real MLflow: a trace
 #            ingested with a 40-day-old timestamp is deleted by the handler and a fresh one stays (FR-OBS-11, measured
 #            in spikes/obs-stack round 2); the Caddy + gate + echo upstream case of INV-OBS-5 (no Cookie or
-#            Authorization upstream, no Set-Cookie or Access-Control-* down); the CLI canary of INV-OBS-2 and
+#            Authorization upstream, no Set-Cookie or Access-Control-* down; every blocked path of FR-OBS-9, deep,
+#            upper-case, with repeated slashes and with an encoded slash, answers Caddy's empty 404); the CLI canary of
+#            INV-OBS-2 and
 #            FR-OBS-6 (b) in server/tests/obs/cli_canary/ (no network, stub upstream, zero credit). The backend
 #            tests' internal networks take explicit subnets 10.233.<n>.0/24 (random n per network, a new n on an
 #            overlap), because Docker Desktop's predefined pools run out (measured 2026-11-24); nothing else in the

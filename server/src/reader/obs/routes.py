@@ -3,6 +3,7 @@ dashboard, and the owner's summary. Registered through SRV-AUTH's ROUTERS (FR-AU
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from typing import Final
 
@@ -16,6 +17,7 @@ from reader.obs.gate_rules import DASHBOARD_ORIGIN, decide, precheck
 __all__ = ["DASHBOARD_ORIGIN", "ROUTES", "decide"]
 
 DAYS: Final = (1, 90)
+DAYS_TEXT: Final = re.compile(r"[0-9]{1,2}")
 
 
 async def gate(ctx: Ctx) -> Response:
@@ -38,7 +40,8 @@ async def summary(ctx: Ctx) -> Response:
     if user.role != "owner":
         return error(403, "forbidden")
     raw = ctx.request.query_params.get("days", "7")
-    if not raw.isdigit() or not DAYS[0] <= int(raw) <= DAYS[1]:
+    # ASCII digits only: str.isdigit accepts "²", which int() refuses (code review round 1).
+    if not DAYS_TEXT.fullmatch(raw) or not DAYS[0] <= int(raw) <= DAYS[1]:
         return error(400, "days")
     days = int(raw)
     async with ctx.engine.connect() as conn:

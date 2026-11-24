@@ -49,6 +49,34 @@ async def test_key_rows_of(pg: Pg) -> None:
     assert isinstance(ok.job_id, int) and ok.created_at is not None and ok.finished_at is not None
 
 
+async def test_key_rows_of_skips_a_stored_row_whose_kind_is_not_its_prefix(pg: Pg) -> None:
+    """Round 1 survivor: a real row (kind other.kind, key test.effect:…) is never returned for that key."""
+    from sqlalchemy import text
+
+    from reader.jobs import queue
+
+    async with jobs_env(pg) as env:
+        await _seed(env)
+        key = env.key("ok")
+        async with env.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO job_keys (kind, key, args, attempts, outcome, created_at, updated_at)"
+                    " VALUES ('other.kind', :k, '{}', 1, 'dead', now(), now())"
+                ),
+                {"k": key},
+            )
+        async with env.engine.connect() as conn:
+            rows = await queue.key_rows_of(conn, [key])
+            await conn.execute(text("SET enable_seqscan = off"))
+            plan = "\n".join(
+                str(r[0])
+                for r in (await conn.execute(text("EXPLAIN " + queue.KEY_ROWS_SQL), {"keys": [key]})).all()
+            )
+    assert [(r.kind, r.key) for r in rows] == [(KIND, key)]
+    assert "job_keys_pkey" in plan, plan
+
+
 async def test_recent_keys_of(pg: Pg) -> None:
     from reader.jobs import queue
     from reader.jobs.model import JobError

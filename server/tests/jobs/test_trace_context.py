@@ -62,6 +62,56 @@ async def test_no_span_no_trace_kwarg(pg: Pg) -> None:
     assert "trace" not in job
 
 
+async def test_root_outcomes_permanent_exhausted_skipped(pg: Pg) -> None:
+    """Round 1 survivors: the root span carries the key's outcome for each way a run can end."""
+    with obs_setup("worker") as (handle, memory):
+        async with jobs_env(pg) as env:
+            await env.jobs.enqueue(KIND, {"name": "perm", "mode": "permanent"})
+            await env.jobs.enqueue(KIND, {"name": "full"})
+            await env.execute("UPDATE job_keys SET attempts = 3 WHERE key = :k", k=env.key("full"))
+            await env.jobs.enqueue(KIND, {"name": "done"})
+            await env.execute(
+                "UPDATE job_keys SET outcome = 'succeeded', finished_at = now() WHERE key = :k",
+                k=env.key("done"),
+            )
+            await env.work()
+            ids = {name: (await _job_rows(env, name))[0]["id"] for name in ("perm", "full", "done")}
+            roots = {s.attributes["reader.job.id"]: s for s in _roots(finished(handle, memory))}
+    perm, full, done = (dict(roots[ids[n]].attributes) for n in ("perm", "full", "done"))
+    assert (perm["reader.job.outcome"], perm["reader.error_class"]) == ("dead", "RuntimeError")
+    assert "reader.error_code" not in perm
+    assert roots[ids["perm"]].status.status_code.name == "ERROR"
+    assert (full["reader.job.outcome"], full["reader.error_code"], full["reader.job.attempt"]) == (
+        "dead",
+        "exhausted",
+        3,
+    )
+    assert done["reader.job.outcome"] == "skipped"
+    assert "reader.job.attempt" not in done
+    assert roots[ids["done"]].status.status_code.name == "UNSET"
+
+
+async def test_a_wrapper_error_that_ends_the_key_dead_is_marked_dead(
+    pg: Pg, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reader.jobs import queue
+
+    async def broken(self: Any, *_args: Any, **_kw: Any) -> Any:
+        raise RuntimeError("wrapper broke")
+
+    monkeypatch.setattr(queue.Jobs, "_attempt", broken)
+    with obs_setup("worker") as (handle, memory):
+        async with jobs_env(pg) as env:
+            await env.jobs.enqueue(KIND, {"name": "w"})
+            await env.execute("UPDATE job_keys SET attempts = 2 WHERE key = :k", k=env.key("w"))
+            await env.work()
+            (root,) = _roots(finished(handle, memory))
+            row = await env.key_row("w")
+    assert row[1] == "dead"
+    attrs = root.attributes
+    assert (attrs["reader.job.outcome"], attrs["reader.error_code"]) == ("dead", "wrapper_error")
+
+
 async def test_retry_links_to_the_failed_run(pg: Pg) -> None:
     with obs_setup("worker") as (handle, memory):
         async with jobs_env(pg) as env:

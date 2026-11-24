@@ -6,6 +6,7 @@ import os
 import plistlib
 import re
 import ssl
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
@@ -52,19 +53,19 @@ def _roots_dir(ctx: Ctx) -> Path:
     return ctx.run_dir / "trusted-roots"
 
 
-GATE_ROOTS: list[str] = []  # the recorded Caddy roots (`reader trust`), set by `reader doctor`
 GATE_TIMEOUT_S: Final = 5.0
 
 
-def gate_status(url: str) -> int | None:
-    """FR-CLI-22: the HTTP status of a cookie-less GET of the dashboard, verified against Caddy's recorded
-    roots; None when it cannot be reached. Redirects are not followed (a 3xx counts as an open gate)."""
+def gate_status(url: str, roots: Sequence[str | Path]) -> int | None:
+    """FR-CLI-22: the HTTP status of a cookie-less GET of the dashboard, the certificate and host name
+    verified against `roots` (Caddy's roots recorded by `reader trust`); None when there is no answer or the
+    certificate does not verify. Redirects are not followed (a 3xx counts as an open gate)."""
     import urllib.error
     import urllib.request
 
-    context = ssl.create_default_context()
-    for root in GATE_ROOTS:
-        context.load_verify_locations(cafile=root)
+    context = ssl.create_default_context()  # CERT_REQUIRED and check_hostname
+    for root in roots:
+        context.load_verify_locations(cafile=str(root))
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args: Any, **kwargs: Any) -> None:
@@ -212,14 +213,15 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         check("trust", trusted == {p.stem for p in roots}, f"{len(roots)} recorded root(s)")
     # FR-CLI-22: with the profile chosen, the dashboard answers 401 without a cookie (the gate is in front).
     if config.observability.enabled:
-        GATE_ROOTS[:] = [str(p) for p in roots]
-        status = gate_status(TRACES_URL)
+        status = gate_status(TRACES_URL, roots)
         if status == 401:
             check("observability", True, "gate ok")
         elif status is None:
             check("observability", False, "unreachable")
-        else:
+        elif 200 <= status < 400:
             check("observability", False, "gate open")
+        else:
+            check("observability", False, f"status {status}")
     else:
         check("observability", True, "off")
     ok = all(c["ok"] for c in checks)

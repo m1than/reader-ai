@@ -30,23 +30,133 @@ def test_module_data_equals_vec_obs_1() -> None:
     assert attrs.SCOPE == VEC["instrumentation_scope"]["name"] == "reader"
 
 
-def test_error_codes_are_the_declared_catalogues() -> None:
-    attrs = require("reader.obs.attributes")
+JOB_CODES = {
+    "exhausted",
+    "stalled",
+    "orphaned",
+    "timeout",
+    "session_lost",
+    "wrapper_error",
+    "unknown_kind",
+    "no_key_row",
+}
+
+
+def _declared_error_codes() -> frozenset[str]:
     specs = FIXTURES.parent.parent / "modules"
     declared: set[str] = set()
     for name in ("SRV-AGENT", "SRV-TUTOR", "SRV-PIPELINE"):
         declared |= set(load_yaml(specs / f"{name}.yaml")["errors"])
-    jobs = {
-        "exhausted",
-        "stalled",
-        "orphaned",
-        "timeout",
-        "session_lost",
-        "wrapper_error",
-        "unknown_kind",
-        "no_key_row",
+    return frozenset(declared | JOB_CODES)
+
+
+def test_error_codes_are_the_declared_catalogues() -> None:
+    assert _declared_error_codes() == require("reader.obs.attributes").ERROR_CODES
+
+
+def _oracle_enums() -> dict[str, frozenset[str]]:
+    """The `enum_from` sets as VEC-OBS-1 defines them, from the test catalogs and the specs, not the module."""
+    cat = catalogs()
+    return {
+        "route_templates": frozenset(cat.route_templates) | {"other"},
+        "job_kinds": frozenset(cat.job_kinds),
+        "pipeline_stages": frozenset(cat.pipeline_stages),
+        "tasks": frozenset(cat.tasks),
+        "models": frozenset(cat.models),
+        "error_codes": _declared_error_codes(),
     }
-    assert frozenset(declared | jobs) == attrs.ERROR_CODES
+
+
+def oracle_valid(key: str, value: object, enums: dict[str, frozenset[str]]) -> bool:
+    """VEC-OBS-1's value rule for `key`, read from the YAML (independent of reader.obs.attributes)."""
+    rule = VEC["attributes"].get(key)
+    if rule is None:
+        return False
+    if rule["type"] == "string":
+        if type(value) is not str or len(value) > 128:
+            return False
+        if "enum" in rule:
+            return value in rule["enum"]
+        if "enum_from" in rule:
+            return value in enums[rule["enum_from"]]
+        return re.fullmatch(rule["pattern"], value) is not None
+    wanted = {"int": int, "float": float}[rule["type"]]
+    if type(value) is not wanted:  # a bool is neither an int nor a float here
+        return False
+    low, high = rule["range"]
+    return bool(low <= value <= high)  # type: ignore[operator]
+
+
+def oracle_clean(span_class: str | None, attrs: dict[str, Any]) -> dict[str, Any]:
+    enums = _oracle_enums()
+    allowed = VEC["keys_by_span"].get(span_class or "", [])
+    return {k: v for k, v in attrs.items() if k in allowed and oracle_valid(k, v, enums)}
+
+
+UUID = "3f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f"
+SHA = "ab" * 32
+ROWS = [
+    # key, value, valid (code review round 1 survivors first)
+    ("reader.run_id", f"{UUID} text", False),
+    ("reader.run_id", f"{UUID}\n", False),
+    ("reader.run_id", UUID.upper(), False),
+    ("reader.run_id", UUID, True),
+    ("reader.material_sha256", SHA + "0" * 100, False),
+    ("reader.material_sha256", SHA, True),
+    ("reader.material_sha256", SHA[:-1], False),
+    ("http.response.status_code", 99999, False),
+    ("http.response.status_code", 99, False),
+    ("http.response.status_code", 100, True),
+    ("http.response.status_code", 599, True),
+    ("http.response.status_code", 600, False),
+    ("reader.step", -1, False),
+    ("reader.step", 0, True),
+    ("reader.step", 999, True),
+    ("reader.step", 1000, False),
+    ("reader.job.id", True, False),
+    ("reader.job.id", 0, False),
+    ("reader.job.id", 1, True),
+    ("reader.job.id", 9223372036854775807, True),
+    ("reader.job.id", 9223372036854775808, False),
+    ("reader.job.attempt", 1.0, False),
+    ("reader.ws.close_code", 999, False),
+    ("reader.ws.close_code", 4999, True),
+    ("reader.cost_usd", 1, False),
+    ("reader.cost_usd", -0.01, False),
+    ("reader.cost_usd", 1000.0, True),
+    ("reader.cost_usd", 1000.5, False),
+    ("gen_ai.usage.input_tokens", 1_000_000_001, False),
+    ("gen_ai.usage.input_tokens", False, False),
+    ("reader.error_class", "A", False),
+    ("reader.error_class", "A" + "b" * 63, True),
+    ("reader.error_class", "A" + "b" * 64, False),
+    ("reader.error_class", "valueError", False),
+    ("reader.error_code", "Transient", False),
+    ("reader.error_code", "provider_unavailable", True),
+    ("reader.job.outcome", "dead", True),
+    ("reader.job.outcome", "Dead", False),
+    ("http.request.method", "get", False),
+    ("http.route", "other", True),
+    ("reader.stop_reason", "end_turn ", False),
+]
+
+
+def test_oracle_rows() -> None:
+    allow = require("reader.obs.attributes").AllowList(catalogs())
+    enums = _oracle_enums()
+    for key, value, valid in ROWS:
+        assert oracle_valid(key, value, enums) is valid, (key, value)
+        assert allow.valid(key, value) is valid, (key, value)
+
+
+def test_module_agrees_with_the_oracle_on_every_key() -> None:
+    allow = require("reader.obs.attributes").AllowList(catalogs())
+    enums = _oracle_enums()
+    samples: list[object] = [None, True, 0, 1, -1, 1.5, "", "x" * 129, UUID, SHA, "GET", "other", "dead"]
+    samples += sorted({v for values in enums.values() for v in values})
+    for key in VEC["attributes"]:
+        for value in samples:
+            assert allow.valid(key, value) is oracle_valid(key, value, enums), (key, value)
 
 
 def test_span_names_by_class() -> None:
@@ -171,11 +281,13 @@ def _exporter(capture: Capture) -> Any:
     return export.AllowListExporter(capture, attrs.AllowList(catalogs()), export.resource("api"))
 
 
-def _check_clean(out: Any, allowed: Any) -> None:
+def _check_clean(out: Any, allowed: Any, given: dict[str, Any] | None = None) -> None:
     name_ok = out.name == "reader.unlisted" or allowed.span_class(out.name) is not None
     assert name_ok, out.name
     klass = allowed.span_class(out.name)
-    assert dict(out.attributes) == (allowed.clean(klass, dict(out.attributes)) if klass else {})
+    source = dict(out.attributes) if given is None else given
+    # The oracle (VEC-OBS-1 read independently), applied to what went in: exactly the valid listed keys survive.
+    assert dict(out.attributes) == (oracle_clean(klass, source) if klass else {})
     assert list(out.events) == []
     assert out.status.description is None
     assert all(dict(link.attributes or {}) == {} for link in out.links)
@@ -286,4 +398,4 @@ def test_inv_obs_1_property(
     )
     (out,) = capture.spans
     allowed = require("reader.obs.attributes").AllowList(catalogs())
-    _check_clean(out, allowed)
+    _check_clean(out, allowed, attrs)

@@ -347,7 +347,10 @@ requirements:
       is healthy, `reader up` prints `traces: https://localhost:8443/` when the profile is active. (d) `reader doctor`
       adds the check `observability`: skipped (ok, detail `off`) when the profile is not chosen; otherwise an HTTPS GET
       of `https://localhost:8443/` with no cookie (Caddy's internal CA from FR-CLI-16's trust, 5 s timeout) must answer
-      401: detail `gate ok` (ok), `gate open` (any 2xx or 3xx: fails) or `unreachable` (fails). [unit]
+      401: detail `gate ok` (ok), `gate open` (any 2xx or 3xx: fails), `status <n>` (any other answer: fails) or
+      `unreachable` (no answer, or the certificate does not verify: fails). `gate_status(url, roots)` takes the
+      recorded roots as an argument, verifies the certificate and the host name, and never follows a redirect; a
+      unit test runs it against a local HTTPS server with a test CA (code review round 1). [unit]
       server/tests/cli/test_observability.py.
 
 invariants:

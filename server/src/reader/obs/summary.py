@@ -48,6 +48,17 @@ def _trace(row: Any) -> str | None:
     return None if row is None or row.job_id is None else format(derive_trace_id(row.job_id, row.key), "032x")
 
 
+def _uuids(values: Iterable[object]) -> list[uuid.UUID]:
+    """The distinct valid UUIDs among `values` (args are validated; an invalid one is skipped, not raised)."""
+    found: set[uuid.UUID] = set()
+    for value in values:
+        try:
+            found.add(uuid.UUID(str(value)))
+        except ValueError:
+            continue
+    return sorted(found)
+
+
 async def _rows(conn: AsyncConnection, sql: str, **params: Any) -> list[Any]:
     return list((await conn.execute(text(sql), params)).all())
 
@@ -151,9 +162,24 @@ async def _failures(
     from reader.jobs.queue import recent_keys_of
 
     dead, truncated = await recent_keys_of(conn, sorted(catalog), "dead", since, limit)
-    runs = {str(r.id) for r in await _rows(conn, "SELECT id FROM compile_runs WHERE owner_id = :o", o=owner)}
-    asked = await _rows(conn, "SELECT id FROM tutor_questions WHERE owner_id = :o", o=owner)
-    questions = {str(r.id) for r in asked}
+    # Ownership of just the ids the dead rows name (at most `limit` each), never every row the owner has.
+    run_ids = _uuids(r.args.get("run_id") for r in dead if r.kind.startswith("pipeline."))
+    question_ids = _uuids(r.args.get("question_id") for r in dead if r.kind == "tutor.answer")
+    runs = {
+        str(r.id)
+        for r in await _rows(
+            conn, "SELECT id FROM compile_runs WHERE owner_id = :o AND id = ANY(:ids)", o=owner, ids=run_ids
+        )
+    } if run_ids else set()
+    questions = {
+        str(r.id)
+        for r in await _rows(
+            conn,
+            "SELECT id FROM tutor_questions WHERE owner_id = :o AND id = ANY(:ids)",
+            o=owner,
+            ids=question_ids,
+        )
+    } if question_ids else set()
     shas = sorted({str(r.args.get("material_sha256")) for r in dead if r.kind == "ingest.import"})
     owners: dict[str, set[str]] = {}
     for sha, who in await _rows(

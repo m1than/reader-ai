@@ -77,13 +77,15 @@ async def _sessions(pg: Pg, tmp: Path) -> tuple[Any, Any, dict[str, str]]:
     return settings, engine, cookies
 
 
-async def _gate(settings: Any, engine: Any, cookie: str | None, **headers: str) -> httpx.Response:
+async def _gate(
+    settings: Any, engine: Any, cookie: str | None, query: str = "max_results=1", **headers: str
+) -> httpx.Response:
     from reader.api.app import create_app
 
     app = create_app(settings, engine, run_cleanup_task=False)
     jar = {"__Host-reader_session": cookie} if cookie else {}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN, cookies=jar) as c:
-        return await c.get("/api/obs/gate?max_results=1", headers=headers)
+        return await c.get(f"/api/obs/gate?{query}", headers=headers)
 
 
 async def test_gate_on_real_sessions(pg: Pg, tmp_path: Path) -> None:
@@ -105,6 +107,14 @@ async def test_gate_on_real_sessions(pg: Pg, tmp_path: Path) -> None:
         assert (await _gate(settings, engine, owner, **nav)).status_code == 204
         img = {"Sec-Fetch-Site": "same-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "image"}
         assert (await _gate(settings, engine, owner, **img)).status_code == 403
+        # The gate reads headers only: Caddy appends the original query, which never stands in for them.
+        spoof = "origin=https://localhost:8443&method=GET&x-forwarded-method=GET"
+        post = {"X-Forwarded-Method": "POST"}
+        assert (await _gate(settings, engine, owner, spoof, **post)).status_code == 403
+        assert (await _gate(settings, engine, owner, spoof)).status_code == 204
+        for origin in ("HTTPS://LOCALHOST:8443", "https://localhost:8443/"):
+            refused = await _gate(settings, engine, owner, Origin=origin, **post)
+            assert refused.status_code == 403, origin
     finally:
         await engine.dispose()
 
@@ -160,7 +170,7 @@ async def test_summary_route_is_owner_only(pg: Pg, tmp_path: Path) -> None:
         ) as c:
             body = (await c.get("/api/obs/summary?days=7")).json()
             assert set(body) == {"days", "compile_runs", "tutor", "failures", "ingest"}
-            for bad in ("0", "91", "x"):
+            for bad in ("0", "91", "x", "²", "٣", "007", "-1", "+5", " 7", "7 ", ""):  # "²": round 1, a 500
                 assert (await c.get(f"/api/obs/summary?days={bad}")).status_code == 400
     finally:
         await engine.dispose()

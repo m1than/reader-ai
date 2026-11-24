@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 
@@ -127,3 +128,38 @@ def test_default_exporter_points_at_rotel_without_headers() -> None:
     exporter = setup.default_exporter()
     assert isinstance(exporter, OTLPSpanExporter)
     assert exporter._endpoint == "http://rotel:4318/v1/traces"
+
+
+def test_environment_headers_never_reach_the_exporter(monkeypatch: Any) -> None:
+    """Round 1: the exporter merges the env headers whatever `headers` says, so they are absent while it is built
+    and restored afterwards."""
+    from opentelemetry.exporter.otlp.proto.http import trace_exporter
+
+    setup = require("reader.obs.setup")
+    seen: list[dict[str, Any]] = []
+
+    class Recorder:
+        def __init__(self, **kwargs: Any) -> None:
+            seen.append({"kwargs": kwargs, "env": {n: os.environ.get(n) for n in setup.HEADER_ENV}})
+
+    for name in setup.HEADER_ENV:
+        monkeypatch.setenv(name, "x-leak=1")
+    monkeypatch.setattr(trace_exporter, "OTLPSpanExporter", Recorder)
+    setup.default_exporter()
+    assert seen == [{"kwargs": setup.EXPORTER_KWARGS, "env": dict.fromkeys(setup.HEADER_ENV)}]
+    assert all(os.environ[n] == "x-leak=1" for n in setup.HEADER_ENV)
+
+
+def test_the_processor_is_built_with_batch(monkeypatch: Any) -> None:
+    setup = require("reader.obs.setup")
+    built: list[dict[str, Any]] = []
+    real = setup.BatchSpanProcessor
+
+    def recording(exporter: Any, **kwargs: Any) -> Any:
+        built.append(kwargs)
+        return real(exporter, **kwargs)
+
+    monkeypatch.setattr(setup, "BatchSpanProcessor", recording)
+    with obs_setup("api"):
+        pass
+    assert built == [dict(setup.BATCH)]

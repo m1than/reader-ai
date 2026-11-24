@@ -188,8 +188,9 @@ def _serve_api(bind: str, env: Env) -> None:
             # routes that enqueue (SRV-PIPELINE, the tutor's ask).
             queue = make_app(target)
             await queue.open_async()
-            obs = start_obs("api", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1)
+            obs: Any = None
             try:
+                obs = start_obs("api", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1); a failure still closes the queue
                 jobs = Jobs(engine, queue, load_kinds(), (target.password.reveal(),))
                 app = create_app(settings, engine, jobs=jobs)
                 # log_config=None: uvicorn's records go through serving_logs' root handler (no tracebacks).
@@ -198,7 +199,8 @@ def _serve_api(bind: str, env: Env) -> None:
                 )
                 await server.serve()
             finally:
-                obs.shutdown()
+                if obs is not None:
+                    obs.shutdown()
                 await queue.close_async()
         finally:
             await engine.dispose()
@@ -230,11 +232,13 @@ def _run_worker(env: Env) -> None:
 
                 # Every resolved secret this process holds: the worker role holds only the database password.
                 held = (target.password.reveal(),)
-                obs = start_obs("worker", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1)
+                obs: Any = None
                 try:
+                    obs = start_obs("worker", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1), inside the try
                     code = await run_jobs(engine, target, stop, secret_values=held)
                 finally:
-                    obs.shutdown()
+                    if obs is not None:
+                        obs.shutdown()
                 if code != 0:
                     raise Failure("database_unreachable")
         finally:

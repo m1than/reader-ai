@@ -70,7 +70,11 @@ def test_up_without_the_profile_prints_no_traces_line(
     [
         (401, True, "gate ok"),
         (200, False, "gate open"),
+        (204, False, "gate open"),
         (302, False, "gate open"),
+        (399, False, "gate open"),
+        (403, False, "status 403"),
+        (502, False, "status 502"),
         (None, False, "unreachable"),
     ],
 )
@@ -83,8 +87,9 @@ def test_doctor_gate_check(
 
     calls: list[str] = []
 
-    def fake(url: str) -> int | None:
+    def fake(url: str, roots: Any) -> int | None:
         calls.append(url)
+        assert list(roots) == []  # no `reader trust` record in this world
         return status
 
     monkeypatch.setattr(maintenance, "gate_status", fake)
@@ -100,8 +105,97 @@ def test_doctor_gate_check_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
     from reader.cli import maintenance
 
-    monkeypatch.setattr(maintenance, "gate_status", lambda url: pytest.fail("no request when off"))
+    monkeypatch.setattr(maintenance, "gate_status", lambda url, roots: pytest.fail("no request when off"))
     world = _world(tmp_path, monkeypatch, agents_in_model=False)
     maintenance.cmd_doctor(world.ctx, _cfg(tmp_path, False), True)
     checks = {c["name"]: c for c in json.loads(world.out.strip().splitlines()[-1])}
     assert (checks["observability"]["ok"], checks["observability"]["detail"]) == (True, "off")
+
+
+def _test_ca(tmp: Path) -> tuple[Path, Path, Path]:
+    """A throwaway CA and a `localhost` leaf it signed: (ca.pem, leaf.pem, leaf.key)."""
+    from datetime import UTC, datetime, timedelta
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    now = datetime.now(UTC)
+
+    def cert(subject: str, key: Any, issuer: str, signer: Any, ca: bool) -> Any:
+        builder = (
+            x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, subject)]))
+            .issuer_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, issuer)]))
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5))
+            .not_valid_after(now + timedelta(hours=1))
+            .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True)
+            .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+            # Python 3.13+ verifies strictly (VERIFY_X509_STRICT): key identifiers and key usage are required.
+            .add_extension(
+                x509.AuthorityKeyIdentifier.from_issuer_public_key(signer.public_key()), critical=False
+            )
+        )
+        if ca:
+            usage = x509.KeyUsage(False, False, False, False, False, True, True, False, False)
+        else:
+            usage = x509.KeyUsage(True, False, False, False, False, False, False, False, False)
+            builder = builder.add_extension(x509.SubjectAlternativeName([x509.DNSName("localhost")]), False)
+            server_auth = x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.SERVER_AUTH])
+            builder = builder.add_extension(server_auth, False)
+        return builder.add_extension(usage, critical=True).sign(signer, hashes.SHA256())
+
+    ca_key, leaf_key = ec.generate_private_key(ec.SECP256R1()), ec.generate_private_key(ec.SECP256R1())
+    ca = cert("reader test CA", ca_key, "reader test CA", ca_key, True)
+    leaf = cert("localhost", leaf_key, "reader test CA", ca_key, False)
+    paths = (tmp / "ca.pem", tmp / "leaf.pem", tmp / "leaf.key")
+    paths[0].write_bytes(ca.public_bytes(serialization.Encoding.PEM))
+    paths[1].write_bytes(leaf.public_bytes(serialization.Encoding.PEM))
+    paths[2].write_bytes(
+        leaf_key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()
+        )
+    )
+    return paths
+
+
+def test_gate_status_verifies_and_never_follows_a_redirect(tmp_path: Path) -> None:
+    """The real function against a local HTTPS server on 127.0.0.1 (no Docker, no published port)."""
+    import http.server
+    import ssl
+    import threading
+
+    from reader.cli.maintenance import gate_status
+
+    ca, leaf, key = _test_ca(tmp_path)
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/")
+            else:
+                self.send_response(200 if self.headers.get("Cookie") else 401)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+
+        def log_message(self, *args: Any) -> None: ...
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(leaf, key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    port = server.server_address[1]
+    try:
+        assert gate_status(f"https://localhost:{port}/", [ca]) == 401
+        assert gate_status(f"https://localhost:{port}/redirect", [ca]) == 302  # not followed to the 401
+        assert gate_status(f"https://localhost:{port}/", []) is None  # untrusted root: no answer counts
+        assert gate_status(f"https://127.0.0.1:{port}/", [ca]) is None  # the host name is checked
+        assert gate_status("https://localhost:1/", [ca]) is None  # nothing listens
+    finally:
+        server.shutdown()
+        server.server_close()

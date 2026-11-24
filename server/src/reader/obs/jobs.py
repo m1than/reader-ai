@@ -5,6 +5,7 @@ RetentionFailed."""
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any, Final
@@ -19,6 +20,8 @@ MLFLOW: Final = "http://mlflow:5000"
 DELETE_PATH: Final = "/api/2.0/mlflow/traces/delete-traces"
 RUN_AT: Final = time(3, 0, tzinfo=UTC)
 DAY_MS: Final = 86_400_000
+ENQUEUE_TRIES: Final = 3
+ENQUEUE_PAUSE_S: Final = 1.0
 
 
 class RetentionFailed(Exception):
@@ -63,19 +66,31 @@ async def retain(
     """Enqueue the next day first (a failure there never stops today's delete), then delete; returns the
     count."""
     following = next_day(day)
-    try:
-        await jobs.enqueue(KIND, {"day": following}, schedule_in=seconds_until(following, now))
-    except Exception:
-        logging.getLogger("reader.obs").warning("obs retention: next day not enqueued")
+    for attempt in range(1, ENQUEUE_TRIES + 1):
+        try:
+            await jobs.enqueue(KIND, {"day": following}, schedule_in=seconds_until(following, now))
+            break
+        except Exception:
+            if attempt == ENQUEUE_TRIES:
+                logging.getLogger("reader.obs").warning("obs retention: next day not enqueued")
+            else:
+                await asyncio.sleep(ENQUEUE_PAUSE_S)
     if not enabled:
         return 0
     url, body = delete_request(now.timestamp(), retention_days)
     response = await client.post(url, json=body, timeout=30)
     if response.status_code != 200:
         raise RetentionFailed(f"status {response.status_code}")
-    data = response.json()
-    count = data.get("traces_deleted", 0) if isinstance(data, dict) else 0
-    return int(count) if isinstance(count, int) and not isinstance(count, bool) else 0
+    try:
+        data = response.json()
+    except ValueError:
+        raise RetentionFailed("body") from None
+    if not isinstance(data, dict):
+        raise RetentionFailed("body")
+    count = data.get("traces_deleted", 0)  # protobuf JSON omits a zero count
+    if not isinstance(count, int) or isinstance(count, bool):
+        raise RetentionFailed("body")
+    return count
 
 
 async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:

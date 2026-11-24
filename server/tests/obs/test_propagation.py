@@ -52,6 +52,24 @@ def test_parse_traceparent_refuses(value: str | None) -> None:
     assert require("reader.obs.propagation").parse_traceparent(value) is None
 
 
+def test_job_span_inside_an_active_span_starts_a_new_trace() -> None:
+    """Round 1 survivor: opened under a current span (and no `trace` kwarg), the root has no parent, the derived
+    trace id, and no link: a job never joins the trace that happens to be current in the worker."""
+    prop = require("reader.obs.propagation")
+    ids = require("reader.obs.ids")
+    key = "tutor.answer:" + "a" * 64
+    tracer = require("reader.obs").tracer
+    with obs_setup("worker") as (handle, memory):
+        with tracer().start_as_current_span("POST /api/lessons/{lesson_id}"), prop.job_span("tutor.answer", 42, key, {}) as job:
+            job.outcome("succeeded")
+        spans = finished(handle, memory)
+    (root,) = [s for s in spans if s.name == "job tutor.answer"]
+    assert root.parent is None
+    assert root.context.trace_id == ids.derive_trace_id(42, key)
+    assert list(root.links) == []
+    assert format(root.context.trace_flags, "02x") == "01"
+
+
 def test_parse_traceparent_accepts() -> None:
     ctx = require("reader.obs.propagation").parse_traceparent("00-" + "ab" * 16 + "-" + "cd" * 8 + "-01")
     assert ctx is not None

@@ -380,8 +380,8 @@ class AgentProvider:
             env["MAX_THINKING_TOKENS"] = "0"
         # FR-AGENT-14 (SRV-OBS FR-OBS-6): traces only, content off. A provider built without a configuration
         # (the [image] CLI check drives `drive_bounded` directly) adds nothing.
-        observability = getattr(self.config, "observability", None)
-        if observability is not None and observability.enabled:
+        config: ReaderConfig | None = self.config  # None only in that check
+        if config is not None and config.observability.enabled:
             env.update(cli_env_additions())
         system_file: Path | None = None
         if call.system is not None:

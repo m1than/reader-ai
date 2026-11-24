@@ -496,11 +496,11 @@ out = {
   "post_dash": req("/x", "owner", "https://localhost:8443", "POST"),
   "img_same_site": req("/x", "owner", site="same-site"),
 }
-for p in ["/v1/traces", "/gateway/x", "/ajax-api/3.0/mlflow/assistant/x", "/ajax-api/2.0/mlflow/gateway-proxy",
-          "/mcp", "/api/2.0/mlflow/gateway/x"]:
+for p in BLOCKED_PATHS + OPEN_PATHS:
     out[p] = req(p, "owner")
 print(json.dumps(out))
 """
+    probe = f"BLOCKED_PATHS = {EDGE_BLOCKED!r}\nOPEN_PATHS = {EDGE_OPEN!r}\n" + probe
     out = json.loads(_client(prefix, canary_image, "edge", probe))
     assert out["none"]["status"] == 401
     owner = out["owner"]
@@ -513,13 +513,31 @@ print(json.dumps(out))
     for case in ("post_foreign", "post_app", "post_none", "img_same_site"):
         assert out[case]["status"] == 403, case
     assert out["post_dash"]["status"] == 200
-    for path in [
-        "/v1/traces",
-        "/gateway/x",
-        "/ajax-api/3.0/mlflow/assistant/x",
-        "/ajax-api/2.0/mlflow/gateway-proxy",
-        "/mcp",
-        "/api/2.0/mlflow/gateway/x",
-    ]:
+    for path in EDGE_BLOCKED:
         assert out[path]["status"] == 404, path
         assert out[path]["body"] == "", path  # Caddy's own empty 404, never the upstream's
+    for path in EDGE_OPEN:
+        assert out[path]["status"] == 200, path  # reached the echo upstream
+
+
+# FR-OBS-9 through the pinned Caddy (code review round 1): deep paths, case, repeated slashes, an encoded slash.
+EDGE_BLOCKED = [
+    "/v1/traces",
+    "/gateway/x",
+    "/mcp",
+    "/api/2.0/mlflow/gateway/x",
+    "/api/3.0/mlflow/gateway/secrets/create",
+    "/api/3.0/mlflow/gateway/endpoints/create",
+    "/ajax-api/3.0/mlflow/gateway/endpoints/create",
+    "/ajax-api/3.0/mlflow/assistant/x",
+    "/ajax-api/3.0/mlflow/assistant/sessions/abc/stream",
+    "/ajax-api/3.0/mlflow/assistant/providers/claude_code/health",
+    "/ajax-api/2.0/mlflow/gateway-proxy",
+    "/ajax-api/2.0/mlflow/gateway-proxy/v1/chat",
+    "//api/3.0/mlflow/gateway/secrets/create",
+    "/api//3.0//mlflow//gateway/secrets/create",
+    "/AJAX-API/3.0/MLFLOW/Assistant/sessions/abc/stream",
+    "/API/3.0/mlflow/GATEWAY/secrets/create",
+    "/api/3.0/mlflow%2Fgateway/secrets/create",
+]
+EDGE_OPEN = ["/", "/api/2.0/mlflow/experiments/search", "/ajax-api/3.0/mlflow/traces/get"]

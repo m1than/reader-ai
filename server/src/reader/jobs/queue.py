@@ -307,8 +307,8 @@ class Jobs:
                 # the cause is the run itself. Taking the key lock again in _judge serializes with the sweep.
                 if lost and not timed_out:
                     log.warning("job session lost: kind=%s job_id=%s", kind.name, job_id)
-                    await self._count_lost_run(kind, key, payload, job_id, "session_lost")
-                    _mark("failed", "session_lost")
+                    dead = await self._count_lost_run(kind, key, payload, job_id, "session_lost")
+                    _mark("dead" if dead else "failed", "session_lost")
                     raise JobFailed("session_lost")
                 await self._judge(kind, key, payload, job_id, error, timed_out)
         except JobFailed:
@@ -318,15 +318,17 @@ class Jobs:
             raise  # cancellation is a shutdown abort (procrastinate: aborted)
         except Exception:  # a database or wrapper failure: never let its message or args out
             log.warning("job wrapper failed: kind=%s job_id=%s", kind.name, job_id)
+            dead = False
             if key is not None:  # without a key (payload not keyable) there is no key row to count against
-                await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
-            _mark("failed", "wrapper_error")
+                dead = await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
+            _mark("dead" if dead else "failed", "wrapper_error")
             raise JobFailed("wrapper_error") from None
 
     async def _count_lost_run(
         self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int, code: str
-    ) -> None:
-        """Count a run that ended without a judged outcome, unless the sweep already counted it.
+    ) -> bool:
+        """Count a run that ended without a judged outcome, unless the sweep already counted it. True when
+        this count ended the key dead (the job span then says `dead`, FR-EVENTS-19).
 
         On a fresh connection, under the key lock: while this job is still `doing` and the key has no outcome,
         no one else has counted the run (the sweep finishes the jobs it counts), so it is counted here like a
@@ -334,6 +336,7 @@ class Jobs:
         counted here; the job ends `failed` and FR-EVENTS-15 counts it after 60 s.
         """
         step = "count"
+        dead = False
         try:
             enqueue = False
             async with self.engine.begin() as conn:
@@ -345,8 +348,9 @@ class Jobs:
                 ).scalar()
                 row = await _row(conn, kind.name, key)
                 if status != "doing" or row is None or row["outcome"] is not None:
-                    return
+                    return False
                 counted = await _count(conn, kind, key, code, job_id)
+                dead = counted is not None and counted[1]
                 enqueue = counted is not None and not counted[1]
             if enqueue:
                 step = "re-enqueue"
@@ -356,6 +360,7 @@ class Jobs:
                 log.warning("lost run not counted: kind=%s job_id=%s", kind.name, job_id)
             else:
                 log.warning("lost run counted, re-enqueue failed: kind=%s job_id=%s", kind.name, job_id)
+        return dead
 
     async def _attempt(
         self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int
@@ -671,14 +676,16 @@ async def key_rows_of(conn: AsyncConnection, keys: Iterable[str]) -> list[KeyRow
     wanted = list(keys)
     if not wanted:
         return []
-    rows = await conn.execute(
-        text(
-            f"SELECT {_KEY_ROW_COLUMNS} FROM job_keys"  # noqa: S608 (fixed columns)
-            " WHERE (kind, key) IN (SELECT split_part(k, ':', 1), k FROM unnest(CAST(:keys AS text[])) AS k)"
-        ),  # the primary key (kind, key) serves it
-        {"keys": wanted},
-    )
-    return [_key_row(r) for r in rows if str(r.key).split(":", 1)[0] == r.kind]
+    rows = await conn.execute(text(KEY_ROWS_SQL), {"keys": wanted})
+    return [_key_row(r) for r in rows]
+
+
+# The kind is the key's `<kind>:` prefix, so a row whose kind differs from its key's prefix never matches, and
+# the primary key (kind, key) serves the lookup (the db test checks both, with EXPLAIN).
+KEY_ROWS_SQL: Final = (
+    f"SELECT {_KEY_ROW_COLUMNS} FROM job_keys"  # noqa: S608 (fixed columns)
+    " WHERE (kind, key) IN (SELECT split_part(k, ':', 1), k FROM unnest(CAST(:keys AS text[])) AS k)"
+)
 
 
 async def recent_keys_of(

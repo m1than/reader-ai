@@ -4,6 +4,7 @@ CLI's spans carry none), the stop reason and the error code. A failure of a help
 
 from __future__ import annotations
 
+import functools
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -49,13 +50,21 @@ class AgentSpan:
             log.warning("obs agent span: error not recorded")
 
 
+@functools.cache
+def pipeline_stages() -> frozenset[str]:
+    """SRV-PIPELINE's declared stage names (the allow-list's `pipeline_stages`)."""
+    from reader.pipeline.stages import load
+
+    return frozenset(load().stages)
+
+
 @contextmanager
 def agent_call(task: str, stage: str | None, model: str) -> Iterator[AgentSpan]:
     span: Span | None = None
     token: object = None
     try:
         attributes: dict[str, Any] = {"reader.task": task, "gen_ai.request.model": model}
-        if stage:
+        if stage and stage in pipeline_stages():  # the tutor's calls carry no stage (round 1)
             attributes["reader.stage"] = stage
         span = tracer().start_span(
             "agent.call", kind=SpanKind.CLIENT, attributes=attributes, record_exception=False,

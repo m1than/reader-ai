@@ -16,7 +16,7 @@ from typing import Any, Final
 
 from opentelemetry import context as otel_context
 from opentelemetry import trace
-from opentelemetry.trace import SpanKind, Status, StatusCode
+from opentelemetry.trace import Span, SpanKind, Status, StatusCode
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from reader.obs import tracer
@@ -29,6 +29,28 @@ METHODS: Final = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OP
 def _pattern(template: str) -> re.Pattern[str]:
     parts = re.split(r"(\{[^}/]+\})", template)
     return re.compile("".join("[^/]+" if p.startswith("{") else re.escape(p) for p in parts if p))
+
+
+def _finish(span: Span | None, token: object, websocket: bool, state: dict[str, Any]) -> str:
+    """Detach, record the status, end the span; the log line's ` trace=` suffix. Never raises (INV-OBS-3)."""
+    try:
+        if token is not None:
+            otel_context.detach(token)  # type: ignore[arg-type]
+        if span is None:
+            return ""
+        if websocket:
+            if state["close"] is not None:
+                span.set_attribute("reader.ws.close_code", state["close"])
+        elif state["status"] is not None:
+            span.set_attribute("http.response.status_code", state["status"])
+        if state.get("error") or (not websocket and (state["status"] or 0) >= 500):
+            span.set_status(Status(StatusCode.ERROR))
+        span.end()
+        ctx = span.get_span_context()
+        return f" trace={ctx.trace_id:032x}" if ctx.is_valid else ""  # invalid: tracing is off
+    except Exception:
+        log.warning("obs request span not ended")
+        return ""
 
 
 class TraceMiddleware:
@@ -56,15 +78,21 @@ class TraceMiddleware:
         name = f"WS {route}" if websocket else f"{method} {route}"
         state: dict[str, Any] = {"status": None, "close": None}
         started = time.monotonic()
-        span = tracer().start_span(
-            name,
-            context=otel_context.Context(),  # never the client's traceparent
-            kind=SpanKind.SERVER,
-            attributes={"http.request.method": method, "http.route": route},
-            record_exception=False,
-            set_status_on_exception=False,
-        )
-        token = otel_context.attach(trace.set_span_in_context(span))
+        # INV-OBS-3: an OTel failure never reaches the request; the request then runs without a span.
+        span: Span | None = None
+        token: object = None
+        try:
+            span = tracer().start_span(
+                name,
+                context=otel_context.Context(),  # never the client's traceparent
+                kind=SpanKind.SERVER,
+                attributes={"http.request.method": method, "http.route": route},
+                record_exception=False,
+                set_status_on_exception=False,
+            )
+            token = otel_context.attach(trace.set_span_in_context(span))
+        except Exception:
+            log.warning("obs request span not started")
 
         async def sending(message: Message) -> None:
             if message["type"] == "http.response.start":
@@ -82,23 +110,13 @@ class TraceMiddleware:
         try:
             await self.app(scope, receiving, sending)
         except Exception:
-            span.set_status(Status(StatusCode.ERROR))
+            state["error"] = True
             if state["status"] is None:
                 state["status"] = 500
             raise
         finally:
-            otel_context.detach(token)
-            if websocket:
-                if state["close"] is not None:
-                    span.set_attribute("reader.ws.close_code", state["close"])
-            elif state["status"] is not None:
-                span.set_attribute("http.response.status_code", state["status"])
-                if state["status"] >= 500:
-                    span.set_status(Status(StatusCode.ERROR))
-            span.end()
+            suffix = _finish(span, token, websocket, state)
             ms = int((time.monotonic() - started) * 1000)
-            ctx = span.get_span_context()
-            suffix = f" trace={ctx.trace_id:032x}" if ctx.is_valid else ""  # invalid: tracing is off
             if websocket:
                 log.info("ws route=%s close=%s ms=%d%s", route, state["close"], ms, suffix)
             else:

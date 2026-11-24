@@ -22,13 +22,9 @@ CSP = (
     "font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; "
     "object-src 'none'; base-uri 'none'; form-action 'self'"
 )
-BLOCKED = (
-    "/v1/*",
-    "/gateway/*",
-    "/ajax-api/*/mlflow/assistant/*",
-    "/ajax-api/*/mlflow/gateway-proxy*",
-    "/mcp*",
-    "/api/*/mlflow/gateway/*",
+BLOCKED_RE = (  # FR-OBS-9 (code review round 1: any depth, case, repeated slashes)
+    "(?i)^/+(?:(?:v1|gateway)(?:/|$)|mcp|(?:ajax-api|api)/+[^/]+/+mlflow/+"
+    "(?:assistant|gateway|gateway-proxy)(?:/|$))"
 )
 
 
@@ -154,7 +150,7 @@ def test_caddyfile_8443_site_text() -> None:
     site = m.group(1)
     assert "tls internal" in site
     assert "forward_auth 10.230.1.10:8000 {\n\t\turi /api/obs/gate\n\t}" in site
-    assert "@blocked path " + " ".join(BLOCKED) in site
+    assert "\t@blocked path_regexp " + BLOCKED_RE + "\n" in site
     assert "handle @blocked {\n\t\trespond 404\n\t}" in site
     proxy = site[site.index("reverse_proxy mlflow:5000") :]
     for line in (

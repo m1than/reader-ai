@@ -341,7 +341,9 @@ requirements:
       and `truncated` = (exactly `limit` rows were returned). `KeyRow = (kind, key, args, outcome, error_code, job_id,
       attempts, created_at, finished_at)`. Revision `jobs_0002` (branch `jobs`, down_revision `jobs_0001`) adds the
       index `job_keys_kind_outcome_finished` on (kind, outcome, finished_at); its downgrade drops it. The jobs
-      branch's head becomes `jobs_0002` (the migration-heads test checks it). [db]
+      branch's head becomes `jobs_0002` (the migration-heads test checks it). `key_rows_of` matches (kind, key) with
+      the kind taken from the key's prefix in SQL, so a stored row whose kind differs from its key's prefix is never
+      returned, and its plan uses `job_keys_pkey` (EXPLAIN in the db test; code review round 1). [db]
       server/tests/jobs/test_key_reads_db.py.
   - id: FR-EVENTS-19
     text: >-
@@ -355,7 +357,10 @@ requirements:
       outcome (`succeeded`, `skipped`, `failed`, `dead`, `aborted`) and the `JobFailed` code; a failure inside the span
       helpers never changes the job's outcome. KIND_MODULES lists `reader.obs.jobs` (kind `obs.retention`) last, so
       the integrated order is ingest, search, pipeline, tutor, obs, and `start_hooks()` is search's, pipeline's and
-      obs's `on_worker_start` in that order (FR-EVENTS-1's unit test updated). [unit, db]
+      obs's `on_worker_start` in that order (FR-EVENTS-1's unit test updated). The root span's outcome is the key's:
+      `dead` with `reader.error_class` for a permanent failure, `dead` with `exhausted` for a run that finds the key
+      at max_attempts, `skipped` for a run that finds the key decided, and `dead` (not `failed`) for `session_lost` and
+      `wrapper_error` when that count ended the key dead (code review round 1). [unit, db]
       server/tests/jobs/test_trace_context.py.
 
 invariants:

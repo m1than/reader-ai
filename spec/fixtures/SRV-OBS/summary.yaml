@@ -4,7 +4,9 @@
 # row's args, and every trace id is FR-OBS-5's derivation from (job id, key); both are generated and checked by
 # `node spec/fixtures/SRV-OBS/trace-ids.mjs`. The gate is SRV-OBS's [unit] test, which recomputes them in Python with
 # reader.jobs.model.idempotency_key.
-# Clock: now = 2026-11-24T12:00:00Z; every row is inside the 7-day window. All ids are fixed values.
+# Clock: now = 2026-11-24T12:00:00Z; every row is inside the 7-day window except the ones marked "old" (created
+# 2026-11-10, outside it; code review round 1). All ids are fixed values. Rows marked "other" belong to other_owner
+# and must change nothing in the owner's result.
 owner: 00000000-0000-4000-8000-000000000001
 other_owner: 00000000-0000-4000-8000-000000000002   # its user-owned rows must not appear anywhere in the result
 
@@ -12,6 +14,7 @@ seed:
   compile_runs:
     - { id: 10000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, lesson_id: 20000000-0000-4000-8000-000000000001, created_at: "2026-11-24T10:00:00Z", finished_at: null }
     - { id: 10000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, lesson_id: 20000000-0000-4000-8000-000000000009, created_at: "2026-11-24T10:00:00Z", finished_at: null }
+    - { id: 10000000-0000-4000-8000-000000000008, owner_id: 00000000-0000-4000-8000-000000000001, lesson_id: 20000000-0000-4000-8000-000000000008, created_at: "2026-11-10T10:00:00Z", finished_at: "2026-11-10T11:00:00Z" }   # old
   compile_steps:
     - { run_id: 10000000-0000-4000-8000-000000000001, step: 1, stage: draft, input_sha256: "1111111111111111111111111111111111111111111111111111111111111111", cost_usd: 0.62, duration_s: 95, model: claude-sonnet-5-5 }
     - { run_id: 10000000-0000-4000-8000-000000000001, step: 2, stage: fact_check, input_sha256: "2222222222222222222222222222222222222222222222222222222222222222", cost_usd: 0.21, duration_s: 40, model: claude-sonnet-5-5 }
@@ -34,13 +37,18 @@ seed:
     - { id: 10, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000003, task: tutor, kind: settle, reservation_id: 15, settled_usd: 0.04 }
     - { id: 11, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000004, task: tutor, kind: settle, reservation_id: 16, settled_usd: 0.01 }   # failed answer, billed
     - { id: 12, owner_id: 00000000-0000-4000-8000-000000000002, run_id: 30000000-0000-4000-8000-000000000009, task: tutor, kind: settle, reservation_id: 17, settled_usd: 9.99 }
+    - { id: 18, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000008, task: tutor, kind: reserve, usd: 0.30, created_at: "2026-11-10T11:00:00Z" }   # old
+    - { id: 19, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000008, task: tutor, kind: settle, reservation_id: 18, settled_usd: 5.00, created_at: "2026-11-10T11:00:00Z" }   # old
   tutor_questions:   # latency = finished_at − created_at
     - { id: 30000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:00:00.000Z", finished_at: "2026-11-24T11:00:02.000Z" }
     - { id: 30000000-0000-4000-8000-000000000002, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:01:00.000Z", finished_at: "2026-11-24T11:01:04.000Z" }
     - { id: 30000000-0000-4000-8000-000000000003, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:02:00.000Z", finished_at: "2026-11-24T11:02:09.000Z" }
     - { id: 30000000-0000-4000-8000-000000000004, owner_id: 00000000-0000-4000-8000-000000000001, state: failed, error_code: provider_unavailable, created_at: "2026-11-24T11:03:00.000Z", finished_at: "2026-11-24T11:03:01.000Z" }
+    - { id: 30000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, state: failed, error_code: tutor_failed, created_at: "2026-11-24T11:04:00.000Z", finished_at: "2026-11-24T11:04:01.000Z" }   # other
+    - { id: 30000000-0000-4000-8000-000000000008, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-10T11:00:00.000Z", finished_at: "2026-11-10T11:01:00.000Z" }   # old: 60 s would move p95
   materials:
     - { sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", owner_id: 00000000-0000-4000-8000-000000000001, page_count: 594 }
+    - { sha256: "77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee", owner_id: 00000000-0000-4000-8000-000000000002, page_count: 10 }   # other
   # Read through SRV-EVENTS' published functions (FR-OBS-10, paired FR-EVENTS-18), never by SQL from SRV-OBS.
   # args are the validated payloads (model_dump(mode="json")); `key` is FR-EVENTS-2's key of args.
   job_keys:
@@ -60,6 +68,9 @@ seed:
         args: { material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", converter_version: r2, artifact_id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", material_id: pilot-1 } }
     - { kind: ingest.import, job_id: 302, outcome: dead, error_code: ValueError, finished_at: "2026-11-24T10:05:00Z", key: "ingest.import:b57f1828fa0d82a6879750a7236d77dfa90cc32364b4ae88898ef8312db52ec0",   # no materials row: a system job, shown
         args: { material_sha256: "99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff99ff", converter_version: r2, artifact_id: "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", material_id: upload-9 } }
+    - { kind: tutor.answer, job_id: 209, outcome: dead, error_code: exhausted, finished_at: "2026-11-24T11:31:00Z", key: "tutor.answer:302a0a351b8124981abd88c696916181b8d21fc040d6c57e812c77723e76a58e", args: { question_id: 30000000-0000-4000-8000-000000000009 } }   # other owner's question: not shown
+    - { kind: ingest.import, job_id: 309, outcome: dead, error_code: ValueError, finished_at: "2026-11-24T10:06:00Z", key: "ingest.import:2d2b5303f176518d1a8da4d9c1c664c88d68bacf410c257a60cc062f52bbf7f2",   # other owner's material: not shown
+        args: { material_sha256: "77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee", converter_version: r2, artifact_id: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", material_id: upload-8 } }
     - { kind: search.embed, job_id: 401, outcome: dead, error_code: exhausted, finished_at: "2026-11-24T10:10:00Z", key: "search.embed:7e140447d6d3b066f243d7418ed73c27b82000d26e33798e89eb32c53fe58239",   # system job, shown
         args: { material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", ingest_id: 40000000-0000-4000-8000-000000000001, model: BAAI/bge-m3, params_sha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" } }
 

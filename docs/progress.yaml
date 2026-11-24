@@ -1359,9 +1359,18 @@ tasks:
         compose.yaml, deploy/otel/mlflow.Dockerfile, the 8443 Caddy site, the /observability page. Learned at Green:
         OTel SDK 1.45 sets W3C's random-trace-id flag (traceparent ...-03) unless the id generator says its ids are not
         random, so JobIdGenerator returns False (flags stay 01, derived ids are not random); OTLPSpanExporter exposes
-        no timeout attribute, so the spec pins EXPORTER_KWARGS. Not run here: the [image] obs tests
-        (READER_TEST_IMAGE_BUILD=1) and every live step (owner's rule for this task). Waiting for code review (OTel
-        propagation, auth, secrets are complex areas).",
+        no timeout attribute, so the spec pins EXPORTER_KWARGS. [image] obs tests (87771f4): 4/4 after explicit
+        10.233.<n>.0/24 test subnets (Docker Desktop's pools were exhausted) and MLflow 3.18's `trace.spans` response
+        shape. Code review round 1 (on 08700c5): changes, 3 blockers fixed: (1) the Caddy `@blocked` path pattern's
+        middle `*` matched one segment, so deep gateway, assistant and gateway-proxy paths reached MLflow; now one
+        case-insensitive path_regexp (deep, `//` and `%2F` variants 404 through the pinned Caddy); (2) `days=²`
+        gave a 500; now `^[0-9]{1,2}$`; (3) surviving mutants killed (gate rows, an independent VEC-OBS-1 oracle,
+        exact agent.call tokens and settled cost on a failed billed call, late-run retention, other-owner and old
+        VEC-OBS-3 seeds, root-span outcomes, job_span under an active span). Non-blocking items applied: no stage on
+        tutor calls, gate_status(url, roots) with a real-TLS test and `status <n>`, guarded middleware, `**BATCH`
+        and env headers cleared while the exporter is built, retention enqueue retries and bad-200 handling,
+        failures view bounded by the dead rows' ids, lost runs marked dead, start_obs inside the try, FR-OBS-1's
+        dependency wording. Live steps still not run (owner's rule for this task).",
       review: "deep-reviewer (Fable): design rounds 1–3 changes (7, 3 and 1 blockers, all applied), round 4 approve
         (5677fb3); details in the spec's review field." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
