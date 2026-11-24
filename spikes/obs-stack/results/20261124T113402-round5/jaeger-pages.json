@@ -1,0 +1,150 @@
+{
+ "pages": {
+  "/search": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Search Upload Service (2) - Span Name (0) All Span Names Attributes Lookback Last 1 hour Min Duration Max"
+  },
+  "/trace/430146e3bdfc156aab44a476e180177f": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger reader-worker: job pipeline.stage 430146e GenAI View Trace StartNovember 24 2026, 07:31:45.332Duration1.2"
+  },
+  "/trace/430146e3bdfc156aab44a476e180177f?uiEmbed=v0": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "reader-worker: job pipeline.stage 430146e Trace StartNovember 24 2026, 07:31:45.332Duration1.2mServices2Depth5Total Spans45 GenAI calls: 16 0μs 18.0s 36.0s 54.0"
+  },
+  "/trace/430146e3bdfc156aab44a476e180177f/430146e3bdfc156aab44a476e180177f": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Error Page not found Back home"
+  },
+  "/dependencies": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Layout Hierarchical Layout Focal Service Select A Service Depth Reset Search"
+  },
+  "/deep-dependencies": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Service: Select a service… Layout Enter query above"
+  },
+  "/monitor": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Get started with Service Performance Monitoring A high-level monitoring dashboard that helps you cut down"
+  },
+  "/quality-metrics": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Service: Select a service… Lookback: (in hours)"
+  },
+  "/compare": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Error Page not found Back home"
+  },
+  "/search?service=reader-worker": {
+   "status": 200,
+   "csp": [
+    {
+     "directive": "script-src",
+     "blocked": "eval",
+     "source": "http://localhost:8448/static/schemas-hm98w7NF.js",
+     "line": 2,
+     "column": 6182,
+     "sample": ""
+    }
+   ],
+   "title": "Jaeger Search Compare System Architecture About Jaeger Search Upload Service (2) reader-worker Span Name (10) All Span Names Attributes Lookback Last 1 hour Min"
+  }
+ },
+ "foreign": [],
+ "inline_script_hashes": [
+  "sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU=",
+  "sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ="
+ ],
+ "csp_header": "default-src 'self'; script-src 'self' 'sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU=' 'sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+}

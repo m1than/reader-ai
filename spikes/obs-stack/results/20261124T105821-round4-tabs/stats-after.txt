@@ -1,0 +1,4 @@
+reader-spike-obs-caddy-1 18.5MiB / 11.62GiB
+reader-spike-obs-gate-1 14.56MiB / 11.62GiB
+reader-spike-obs-mlflow-sqlite-1 399.3MiB / 1GiB
+reader-spike-obs-rotel-1 9.215MiB / 256MiB

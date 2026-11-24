@@ -1,0 +1,569 @@
+{
+ "variant": "before",
+ "traces": {
+  "tutor_fast": "431a709a9bc2c88d5c42fe1476e4c24e",
+  "tutor_slow": "2ee7830c3d1b7acd623a0df3e83b2b38",
+  "stage_fact_check": "be38e45ad8997255dafac81e2281bc81",
+  "stage_review_dead": "7650c83e5468845d43e57054af888635"
+ },
+ "assessments": [],
+ "prompts": [],
+ "views": {
+  "tutor_fast": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.cost": "{\"input_cost\": 3.9999999999999996e-05, \"output_cost\": 0.002, \"total_cost\": 0.00204}",
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 20, \"output_tokens\": 200, \"total_tokens\": 220}"
+   },
+   "tags": {
+    "service.version": "2.1.330",
+    "os.type": "linux",
+    "host.arch": "arm64",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-431a709a9bc2c88d5c42fe1476e4c24e/artifacts",
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "os.version": "6"
+   },
+   "state": "OK",
+   "execution_duration": "2s",
+   "spans": [
+    {
+     "name": "job tutor.answer"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 20
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 200
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 220
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 3.9999999999999996e-05
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.002
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.00204
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 9020
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 200
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 9220
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 0
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0009400000000000001
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.002
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.00294
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "tutor_slow": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.cost": "{\"input_cost\": 5.9999999999999995e-05, \"output_cost\": 0.009000000000000001, \"total_cost\": 0.00906}",
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 30, \"output_tokens\": 900, \"total_tokens\": 930}"
+   },
+   "tags": {
+    "service.version": "2.1.330",
+    "os.type": "linux",
+    "host.arch": "arm64",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-2ee7830c3d1b7acd623a0df3e83b2b38/artifacts",
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "os.version": "6"
+   },
+   "state": "OK",
+   "execution_duration": "9s",
+   "spans": [
+    {
+     "name": "job tutor.answer"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 30
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 900
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 930
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 5.9999999999999995e-05
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.009000000000000001
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.00906
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 11030
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 900
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 11930
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 2000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.00596
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.009000000000000001
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.014960000000000001
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "stage_fact_check": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.cost": "{\"input_cost\": 9.999999999999999e-05, \"output_cost\": 0.04, \"total_cost\": 0.040100000000000004}",
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 50, \"output_tokens\": 4000, \"total_tokens\": 4050}"
+   },
+   "tags": {
+    "service.version": "2.1.330",
+    "os.type": "linux",
+    "host.arch": "arm64",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-be38e45ad8997255dafac81e2281bc81/artifacts",
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "os.version": "6"
+   },
+   "state": "OK",
+   "execution_duration": "40s",
+   "spans": [
+    {
+     "name": "job pipeline.stage"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 4000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 4050
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 9.999999999999999e-05
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.04
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.040100000000000004
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 38050
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 4000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 42050
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 30000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 8000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0231
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.04
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.0631
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "stage_review_dead": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.cost": "{\"input_cost\": 9.999999999999999e-05, \"output_cost\": 0.060000000000000005, \"total_cost\": 0.06010000000000001}",
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 50, \"output_tokens\": 6000, \"total_tokens\": 6050}"
+   },
+   "tags": {
+    "service.version": "2.1.330",
+    "os.type": "linux",
+    "host.arch": "arm64",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-7650c83e5468845d43e57054af888635/artifacts",
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "os.version": "6"
+   },
+   "state": "ERROR",
+   "execution_duration": "60s",
+   "spans": [
+    {
+     "name": "job pipeline.stage"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 6000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 6050
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 9.999999999999999e-05
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.060000000000000005
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.06010000000000001
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 38050
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 6000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 44050
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 30000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 8000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0231
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.060000000000000005
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.08310000000000001
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  }
+ }
+}

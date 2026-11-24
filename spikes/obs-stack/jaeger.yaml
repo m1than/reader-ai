@@ -1,0 +1,43 @@
+# Spike only (never shipped): Jaeger v2 all-in-one for the owner's "Jaeger-like view" question (round 4). OTLP/HTTP
+# in from Rotel's second exporter, in-memory storage with a trace cap, the query UI on :16686, no telemetry export.
+service:
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    metrics:
+      level: none
+    logs:
+      level: warn
+
+extensions:
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: 0.0.0.0:13133
+  jaeger_query:
+    storage:
+      traces: mem
+    http:
+      endpoint: 0.0.0.0:16686
+  jaeger_storage:
+    backends:
+      mem:
+        memory:
+          max_traces: ${env:JAEGER_MAX_TRACES}
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: mem
