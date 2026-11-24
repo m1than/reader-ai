@@ -331,3 +331,24 @@ vectors:
 # - An empty port (`https://x:`) is accepted as a URL without a port; this is harmless.
 # - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
 #   1+0j), matching the loader.
+
+# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE FR-MANAGE-6; status: draft, not reviewed). Held under
+# `proposed_manage` until a deep-reviewer round approves it (secrets-adjacent: the view must never carry a secret
+# reference); id FR-CONFIG-25 (19..24 left free). Read-only: editing is ADR-0036 (proposed), not built.
+proposed_manage:
+  requirements:
+    - id: FR-CONFIG-25
+      text: >-
+        **Effective settings view.** `GET /api/settings` (`session`; non-owner → 403 `owner_only`; read-only) loads
+        reader.yaml through `load_config` and returns an allow-listed projection, declared as one data table
+        `SETTINGS_VIEW` of `(name, path or constant, read_when)` rows: `signup` (`sharing.signup` with FR-AUTH-23's
+        default rule, `start`), `observability.enabled` and `observability.retention_days` (`start`),
+        `budgets.monthly_usd` and `budgets.warn_at` (`each job`), each `tasks.<name>.model` and
+        `tasks.<name>.budget_usd_per_lesson` (`each job`), and the constants SRV-PIPELINE `bounds.run_cap_usd` and
+        SRV-TUTOR `question_cap_usd` and `daily_cap_usd` (`fixed`). Each row: `{name, value, source: "reader.yaml" |
+        "default" | "fixed", key | null, read_when}`. `start` values are the values the running api read at start
+        (so the page never shows a file value that is not in effect), `each job` values the file's current values.
+        No other key appears: users, providers, secret references, materials, kernels and instance URLs are never in
+        the body. An unreadable file → 503 `config_unavailable` (FR-INGEST-15's code). [unit] the projection of
+        VEC-CONFIG fixtures, a config holding `secret://` references in every field yields a body with no `secret://`
+        substring; [db] the owner-only refusal.

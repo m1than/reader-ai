@@ -993,3 +993,88 @@ vectors:
       authentication vector of tests/test_verify_authentication_response.py passes; its EC2 and OKP authentication
       vectors fail with `user_verified_missing` (recorded without UV; this module requires UV).
     file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json
+
+# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE FR-MANAGE-7; status: draft, not reviewed). Auth is a
+# complex area: deep-reviewer rounds until approve. Held under `proposed_manage` until then; ids FR-AUTH-40..47 and
+# INV-AUTH-20..21 (34..39 and 16..19 left free for parallel branches).
+# Scope: the owner manages people (list, sign out everywhere, remove a passkey, delete a sign-up learner with no
+# data); every user manages their own passkeys and sessions. Configured users stay managed by reader.yaml (FR-AUTH-1
+# would undo a UI disable at the next start; INV-AUTH-13), so no route here disables, enables or deletes a
+# `source = 'config'` user. Disable stays permanent (WEB-ACCOUNTS owner note 1; WEB-MANAGE owner decision D4).
+# What changes in approved text when this moves in:
+#   - `tables`: `webauthn_credentials` adds `label text null CHECK (1..64 chars)`.
+#   - FR-AUTH-10: the session routes add this amendment's routes with the `auth` kinds named below.
+#   - FR-AUTH-14 (sign-in `next`): the allow-list of constants adds "/settings" beside "/signups"; still compared
+#     raw, never echoed.
+#   - FR-AUTH-17: no change (revoked sessions are already cleaned up by expiry).
+# Opaque ids: a session is named by `sid` = the first 16 hex of its `id_sha256`, a passkey by `pid` = the first 16
+# hex of sha256(credential_id); neither lets anyone authenticate (the cookie value and the private key never leave
+# the browser and the authenticator). A 16-hex prefix collision within one user's rows answers 409 `ambiguous` and is
+# logged (2^-64 per pair; hypothesis, not measured).
+proposed_manage:
+  requirements:
+    - id: FR-AUTH-40
+      text: >-
+        **People.** `GET /api/auth/users` (`session`; non-owner → 403 `owner_only`) → `{users: [{id, handle,
+        display_name, role, source, state, disabled_at, created_at, last_signin_at, passkeys, sessions_active,
+        owns_data}]}` by handle; `last_signin_at` is the newest `sessions.created_at`; `sessions_active` counts
+        sessions neither revoked nor expired; `owns_data` is true when any table with an `owner_id` foreign key to
+        users (read from the catalog, as SRV-LESSON's `started_lessons` does) other than SRV-AUTH's own tables holds a
+        row for the user (SRV-EVENTS `audit_log.actor_id` has no foreign key, so audit rows never count). Read-only. [db]
+    - id: FR-AUTH-41
+      text: >-
+        **Sign a person out everywhere.** `POST /api/auth/users/{id}/sessions/revoke` (`recent_session`; owner only,
+        else 403 `owner_only`; the owner's own id → 409 `use_own_sessions`) sets `revoked_at` on every unrevoked
+        session of that user, for any source; 200 `{revoked: n}`; repeating it returns `{revoked: 0}`. [db]
+    - id: FR-AUTH-42
+      text: >-
+        **Remove a person's passkey.** `DELETE /api/auth/users/{id}/credentials/{pid}` (`recent_session`; owner only;
+        the owner's own id → 409 `use_own_passkeys`) deletes that credential and revokes all of that user's
+        sessions in one transaction (a lost device's sessions end with it). Removing the last passkey of a sign-up
+        user is allowed with this consequence stated in WEB-MANAGE's dialog: that account can no longer sign in
+        (owner note 6). For a configured user it is allowed too; `reader bootstrap` gives them a new one. 204;
+        repeating it → 404. [db]
+    - id: FR-AUTH-43
+      text: >-
+        **Delete a sign-up learner.** `DELETE /api/auth/users/{id}` with `{confirm}` (`recent_session`; owner only):
+        only a `source = 'signup'`, role `learner` user (else 409 `configured_user` or 409 `not_learner`); `confirm`
+        equals the handle (else 400 `confirm_mismatch`); `owns_data` true → 409 `user_has_data` (disable instead);
+        otherwise, under FR-AUTH-29's row lock, deletes its sessions, credentials and user row (as FR-AUTH-29's
+        reject does for a pending user) and writes the `auth user_deleted <id>` record. 204; repeating it → 404.
+        [db] each refusal; a user with one tutor question cannot be deleted.
+    - id: FR-AUTH-44
+      text: >-
+        **Own sessions.** `GET /api/auth/sessions` (`session`) → the caller's unrevoked, unexpired sessions `{sessions:
+        [{sid, created_at, expires_at, current}]}`, newest first. `DELETE /api/auth/sessions/{sid}` (`session`)
+        revokes one (the current one too, which is sign-out); `POST /api/auth/sessions/revoke-others` (`session`)
+        revokes all but the current. Another user's sid → 404. No user agent or address is stored, so none is shown
+        (no new personal data). [db]
+    - id: FR-AUTH-45
+      text: >-
+        **Own passkeys.** `GET /api/auth/credentials` (`session`) → `{credentials: [{pid, label, created_at,
+        last_used_at, backed_up, transports}]}`; `POST /api/auth/credentials/{pid}` with `{label}` (`session`;
+        trimmed 1..64 characters, no Cc, or `null` to clear; else 400 `label_invalid`). Adding a passkey is FR-AUTH-6,
+        unchanged. [db]
+    - id: FR-AUTH-46
+      text: >-
+        **Remove an own passkey.** `DELETE /api/auth/credentials/{pid}` (`recent_session`) in one transaction that
+        first locks all of the caller's credential rows (`SELECT … FOR UPDATE`), then refuses with 409
+        `last_passkey` when it is the only one, else deletes it. Sessions stay (the caller is signed in with a
+        session, not a credential). 204; another user's pid → 404. [db] two concurrent deletes of the last two
+        passkeys: one 204, one 409, one passkey left.
+    - id: FR-AUTH-47
+      text: >-
+        **Return after re-auth.** FR-AUTH-14's sign-in `next` allow-list adds the constant "/settings": with
+        `location.search === "?next=/settings"` exactly, a successful sign-in navigates to "/settings". [browser]
+  invariants:
+    - id: INV-AUTH-20
+      text: >-
+        **Access.** Every route of this amendment runs FR-AUTH-12 before its handler; owner-only routes answer 403
+        `owner_only` to a learner with zero rows changed; own-object routes answer 404 for another user's sid or pid;
+        no route here changes a `source = 'config'` user's row, `disabled_at` or `state`. [db] the learner and
+        second-user matrix over every route, with row snapshots of users, sessions and webauthn_credentials.
+    - id: INV-AUTH-21
+      text: >-
+        **At least one way in.** After any request of this amendment the owner has at least one passkey, and no
+        request of this amendment revokes the caller's current session except `DELETE /api/auth/sessions/{own
+        current sid}`. [db]

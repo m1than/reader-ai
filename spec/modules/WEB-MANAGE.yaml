@@ -1,0 +1,293 @@
+# WEB-MANAGE — the management layer: every create, edit, delete and customize action that the owner and learners
+# need on courses, lessons, revisions, compile runs, materials, tutor history, people, passkeys, sessions and personal
+# settings (owner, 2026-11-25, in Russian: "no edit buttons, no customization, no deletion"; task V.manage).
+#
+# Status: draft (2026-11-25, V/manage from V/slice-integration 9140885). Not approved: a deep-reviewer round comes
+# next. Auth items (people, passkeys, sessions) are a complex area (AGENTS.md): full rounds until approve. The server
+# routes live in their owning specs under a `proposed_manage` key (trace-check reads only `requirements`,
+# `invariants` and `vectors`; those specs stay approved): SRV-LESSON FR-LESSON-20..31 and INV-LESSON-20..22,
+# SRV-PIPELINE FR-PIPELINE-20..22, SRV-PLAN FR-PLAN-20..21, SRV-TUTOR FR-TUTOR-20..21, SRV-INGEST FR-INGEST-30..32,
+# SRV-AUTH FR-AUTH-40..47 and INV-AUTH-20..21, SRV-CONFIG FR-CONFIG-25, SRV-EVENTS FR-EVENTS-30. Ids start above
+# every id used on the parallel branches (V/freshness, V/obs-analytics, V/obs-analytics-impl; checked 2026-11-25).
+#
+# ---- Audit (2026-11-25, Playwright against web/test-server at 9140885, owner and learner; screenshots in the
+# session scratchpad `manage/`). What a user can do with each object today, from the UI and from the server routes:
+#
+#   object                | today                                                   | missing
+#   materials / books     | upload a PDF, list on /import (owner)                   | rename, delete, restore, re-import
+#   uploads               | Cancel (queued..converting), Retry, Discard (failed)    | — (complete)
+#   courses               | created by Plan → Create the course; listed as groups   | rename, description, date/pace from
+#                         | on / and in the sidebar; collapse a group               | the course, archive, delete, reorder
+#   lessons               | open, Compile / Resume (owner), Previous / Next          | rename, delete, skip, done/undone,
+#                         |                                                          | reorder, revisions, revert, download
+#   course plan           | preview and confirm on /import (owner)                  | re-plan from the course itself
+#   lesson cells          | Run, Run all, Copy, edit lab code, Revert (cell edit)   | bookmarks; edits are not kept
+#   notes                 | none (notes cells are part of the compiled lesson)     | personal notes per lesson / cell
+#   tutor history         | ask, list the newest 50 per lesson                       | clear per lesson, delete one
+#   compile runs          | start, resume a stopped run, status in the list/page    | cancel, history per lesson
+#   sign-ups / users      | Approve, Reject, Disable (sign-up accounts only)        | all users, revoke sessions, remove
+#                         |                                                          | passkeys, delete a learner
+#   sessions / passkeys   | Sign out (this session); add a passkey: route only      | list, revoke others, list / rename
+#                         | (FR-AUTH-6, no UI)                                       | / delete own passkeys, add from UI
+#   settings              | theme (System / Light / Dark) in the account menu       | font size, reading width, UI
+#                         | everything else is reader.yaml or a spec constant       | language; an instance settings view
+#   freshness reports     | not on this branch (V/freshness, not merged)            | paired item, after that merge
+#   observability         | owner page (summary, link to the trace dashboard)       | retention shown nowhere in the UI
+#
+#   Learner walk: the header shows only "Lessons"; the account menu has the theme and Sign out; /import, /signups,
+#   /observability are not-found. On the real server a learner owns no course (SRV-LESSON scopes every read to the
+#   course owner; SRV-SHARE is stage 8), so a learner's list is empty: learner-side items below serve the owner as a
+#   reader today and every learner once SRV-SHARE lands.
+#   Pages that do not exist: /settings, /courses, /materials, /account (not-found for both roles).
+#
+# ---- Design rules for every item
+#   - Components: the design pass's library entries (WEB-UI FR-UI-1: menu, dialog, toast, button, chip) plus four
+#     new entries this spec adds to FR-UI-1's allowed list (paired change): text-field, select, switch and tabs.
+#     The "⋯" trigger is the existing `MoreIcon` icon button with the accessible name "Actions for <object>".
+#     Buttons are FR-UI-10's sizes and variants (Notion-style ghost and outline; danger only for the confirming
+#     button of a destructive dialog).
+#   - Owner-only controls are not rendered for a non-owner; the server refuses them anyway (INV-MANAGE-2).
+#   - Every destructive action opens a dialog naming the object and what goes (FR-MANAGE-2); a course or a material
+#     delete needs the object's title typed (FR-MANAGE-2). Soft deletes offer Undo in a toast (FR-MANAGE-3).
+#   - All code under web/src/manage is lazy: the initial chunk does not grow (NFR-MANAGE-1).
+#
+# ---- Paired changes (written with Green; files owned by other specs)
+#   - WEB-UI: FR-UI-1 allowed list (+ text-field, select, switch, tabs); FR-UI-3 routes `/settings` (any signed-in
+#     user, lazy, this spec's page); FR-UI-6 a `manage` slot beside the compile slot on course group headers and
+#     lesson rows (`{CourseActions, LessonActions}` components, null for a non-owner except Mark as done); FR-UI-11
+#     the account menu gains "Settings" above "Sign out" (UserMenu.tsx; no NAV_ITEMS change, so the nav that
+#     V/obs-analytics-impl edits is untouched); FR-UI-16 theme.js also applies font size and reading width before
+#     first paint; the test server gains the stubs of VEC-MANAGE-1; the Playwright config matches e2e/web/manage/**.
+#   - WEB-NOTEBOOK: the lesson header's "More lesson actions" menu gains this spec's lesson items (FR-MANAGE-4), each
+#     cell's toolbar gains the bookmark toggle (FR-MANAGE-9) and the notes panel mounts beside the tutor (FR-MANAGE-9).
+#   - WEB-IMPORT: the /import page gains the "Your sources" section of FR-MANAGE-5 (a component from web/src/manage).
+#   - WEB-PLAN: its preview and confirm form is reused, pre-filled, by FR-MANAGE-3's "Change dates and pace" dialog.
+#   - WEB-ACCOUNTS: none; /signups stays as it is; people management lives on /settings (FR-MANAGE-7).
+#   - SRV-AUTH FR-AUTH-31: the `next` allow-list gains the constant "/settings" (FR-AUTH-47).
+#   - OPS-DOD: one operation per new route group (manage.course, manage.lesson, manage.material, manage.people,
+#     manage.self, manage.settings) with every cell `missing`, routes added with Green (T10).
+#   - V/freshness (not merged): a "Dismiss" and "Check again" action for freshness reports belongs to WEB-FRESH; this
+#     spec only reserves the lesson menu slot for it.
+#
+# ---- Owner decisions this spec needs (also in docs/progress.yaml V.manage `owner_decisions`)
+#   D1. Deletion is soft (a tombstone; restorable; spend rows and immutable revisions untouched). Physical purge of
+#       revisions, blobs and retained PDFs is not built: it breaks SRV-LESSON INV-LESSON-6 and SRV-INGEST INV-INGEST-3
+#       and needs its own ADR. Accept soft delete for v1?
+#   D2. ADR-0036 (proposed): instance settings editable in the UI as a database overlay. Until accepted, FR-MANAGE-6
+#       shows them read-only.
+#   D3. "Export my data" is SRV-EXPORT under ADR-0017 (proposed, stage 7). This spec ships only "Download .ipynb"
+#       per lesson (FR-MANAGE-4). Accept ADR-0017 to schedule the full archive?
+#   D4. A disabled sign-up account is permanent today (WEB-ACCOUNTS owner note 1). Add an Enable action?
+#   D5. Manual lesson order versus re-plan: a re-plan renumbers lessons in plan order (SRV-PIPELINE FR-PIPELINE-14).
+#       This draft resets manual order on re-plan and says so in the dialog. Keep the manual order instead?
+#   D6. Re-running an import is deferred by SRV-INGEST (every old span id must map to the same text, or citations
+#       change). Schedule that revision of SRV-INGEST?
+#   D7. UI chrome in Russian (FR-MANAGE-10, P2): wanted, and which strings first?
+#
+# Test levels: [unit] Vitest in jsdom; [story] Storybook Light and Dark (FR-UI-8); [browser] Playwright against the
+# WEB-UI test server with stubbed routes at 1280, 1024 and 390 px in both schemes; [live] a `manage` step in
+# e2e/live/slice.sh that renames, archives, deletes and restores a scratch course and checks the learner's 404s.
+
+id: WEB-MANAGE
+title: Management layer — edit, reorder, archive, delete and restore courses, lessons and materials; revisions and compile runs; people, passkeys and sessions; personal settings
+status: draft
+approved_by: null
+approved_at: null
+layer: web
+track: product
+adr: [ADR-0013, ADR-0031, ADR-0017, ADR-0036, ADR-0011, ADR-0016]
+
+paths:
+  - web/src/manage/**
+  - e2e/web/manage/**
+  - spec/fixtures/WEB-MANAGE/**
+
+defers:
+  - "Physical purge of deleted courses, lessons, revisions, blobs and retained PDFs (owner decision D1; needs an ADR that amends INV-LESSON-6 and INV-INGEST-3)."
+  - "Editing instance settings from the UI (ADR-0036, proposed; owner decision D2)."
+  - "The full data export (SRV-EXPORT, ADR-0017, stage 7; owner decision D3)."
+  - "Re-running an import under a new converter (SRV-INGEST defers; owner decision D6)."
+  - "Moving a lesson to another week: weeks are derived from the schedule (study_plans), not stored; the schedule view belongs to WEB-SESSION (stage 6)."
+  - "Sharing courses with learners and roles per course (SRV-SHARE, ADR-0016, stage 8)."
+
+normative:
+  - id: REF-MANAGE-1
+    title: WCAG 2.2 — 2.4.3 Focus Order, 3.3.4 Error Prevention (Legal, Financial, Data), 4.1.3 Status Messages
+    url: https://www.w3.org/TR/WCAG22/
+  - id: REF-MANAGE-2
+    title: WAI-ARIA Authoring Practices 1.2 — Menu Button, Dialog (Modal), Alert and Message Dialogs
+    url: https://www.w3.org/WAI/ARIA/apg/patterns/
+  - id: REF-MANAGE-3
+    title: RFC 9110 HTTP Semantics — 9.2.2 Idempotent Methods, 15.5.10 409 Conflict
+    url: https://www.rfc-editor.org/rfc/rfc9110
+  - id: REF-MANAGE-4
+    title: SRV-LESSON, SRV-PIPELINE, SRV-PLAN, SRV-TUTOR, SRV-INGEST, SRV-AUTH, SRV-CONFIG, SRV-EVENTS `proposed_manage` — the routes and bodies this layer calls
+    url: spec/modules/SRV-LESSON.yaml
+
+requirements:
+  - id: FR-MANAGE-1
+    text: >-
+      **Primitives.** web/src/manage exports four components used by every item below. (a) `ActionsMenu`: the
+      library Menu behind an icon button named "Actions for <object title>"; items are declared as data
+      `{label, onSelect, danger?, ownerOnly?, hidden?}` and rendered in order, a danger item last after a separator.
+      (b) `RenameField`: an inline library text-field replacing the title in place; Enter or blur saves, Escape
+      cancels and restores focus to the menu trigger; the value is trimmed; 1..200 characters, no control characters
+      (else the field shows "Use 1 to 200 characters." and sends nothing); while saving the field is read-only; on
+      409 `stale` it shows "Changed elsewhere. Reload to see the new title." with a Reload button. (c) `ConfirmDialog`
+      (FR-MANAGE-2). (d) `UndoToast`: the library toast with the text "<Object> deleted." or "<Object> archived." and
+      an Undo button, shown for 10 s (paused while hovered or focused; WCAG 2.2.1); Undo calls the restore route and
+      announces "<Object> restored." in a `role="status"` region. Every mutation goes through the app's api client
+      (same origin, JSON body, FR-UI-4), invalidates the queries it changes, and maps responses the same way: 401
+      `unauthenticated` → the shell's sign-in redirect; 401 `reauth_required` → "Sign in again to do this (required
+      every 10 minutes for account actions)." with a link to `/api/auth/signin?next=/settings`; 404 → "This <object>
+      no longer exists." and a refetch; network or 5xx → "Could not reach reader-ai. Try again."; no server text is
+      shown. [unit] each component's states and keyboard paths; the response table for one route of each kind;
+      [story] Light and Dark.
+  - id: FR-MANAGE-2
+    text: >-
+      **Confirm dialogs.** A destructive action (delete a course, lesson, material, note, tutor history, passkey or
+      person; revoke sessions; cancel a compile) opens a modal library Dialog before any request. Its title names the
+      action and the object ("Delete the course “<title>”?"). Its body lists what goes and what stays, from the
+      object's impact route where one exists (SRV-LESSON FR-LESSON-25, SRV-INGEST FR-INGEST-31): for a course
+      "n lessons, n compiled revisions, n tutor questions and n compile runs are hidden. Spend records stay in the
+      ledger. You can restore the course from Settings → Data." Initial focus is on Cancel. Deleting a course or a
+      material also needs its title typed into a library text-field labelled "Type <title> to confirm"; the danger
+      button stays disabled until the trimmed input equals the title exactly, and the same string is sent as
+      `confirm` (the server checks it again). The dialog closes on Escape and on Cancel with no request. [unit] each
+      dialog's copy from VEC-MANAGE-1's impact bodies, the disabled button until an exact match (a trailing space
+      matches, a different case does not), no request before the confirming click; [browser] axe on every dialog in
+      both schemes.
+  - id: FR-MANAGE-3
+    text: >-
+      **Course actions** (owner; the `manage` slot on each course group header on `/`, FR-UI-6): Rename (RenameField
+      on the group heading; SRV-LESSON FR-LESSON-22), Edit description (a dialog with a 2,000-character text area;
+      FR-LESSON-22), Change dates and pace (a dialog with WEB-PLAN's form pre-filled from the course's study plan and
+      its preview summary; a target date is converted to whole weeks from the plan's start date; confirm calls
+      SRV-PLAN FR-PLAN-20; the dialog states "Lessons you have not started may be renumbered or replaced; started
+      lessons keep their pages." and, when manual order exists, "Your manual lesson order is reset." — owner decision
+      D5), Move up / Move down (FR-LESSON-23; no drag and drop, so the keyboard and screen readers get the same
+      action), Archive (FR-LESSON-24; Undo toast) and Delete… (FR-MANAGE-2 with typed confirmation; FR-LESSON-25;
+      Undo toast). An archived course leaves the main list and the sidebar and appears under a closed "Archived (n)"
+      disclosure at the end of `/` with Unarchive and Delete…; a deleted course appears only in Settings → Data
+      (FR-MANAGE-8). A course without a study plan (manifest import) has no "Change dates and pace" item. [unit] the
+      menu per course state, each request's method, path and body, the reorder of the first and last course (Move up
+      hidden on the first, Move down on the last); [browser] rename, archive with Undo, delete with typed
+      confirmation and Undo, at the three widths.
+  - id: FR-MANAGE-4
+    text: >-
+      **Lesson actions** (the `manage` slot on each lesson row and the lesson page's "More lesson actions" menu).
+      For every reader: Mark as done / Mark as not done (SRV-LESSON FR-LESSON-29; the row shows a check icon with the
+      hidden text "done"), Download .ipynb (a link to the current revision's existing GET route with the `download`
+      attribute and the file name `<ordinal>-<title slug>.ipynb`; no new server route), Clear tutor history…
+      (FR-MANAGE-2; SRV-TUTOR FR-TUTOR-20). For the owner also: Rename (FR-LESSON-26), Move up / Move down within the
+      course (FR-LESSON-27), Skip / Unskip (FR-LESSON-28; a skipped row is muted with the chip "Skipped" and is never
+      the Continue block's target), Revisions… (a dialog listing the newest 100 revisions from FR-LESSON-8 with time,
+      stages and cell count; the current one marked "Current"; each other row has Revert, which confirms "Make this
+      revision current? The newer revisions stay and you can switch back." and calls FR-LESSON-30), Compile history…
+      (FR-PIPELINE-21; state, spend, duration and finish time per run), Cancel compile… while a run is open
+      (FR-MANAGE-2; FR-PIPELINE-20) and Delete… (FR-MANAGE-2 without typed confirmation; FR-LESSON-28; Undo toast).
+      The existing Reset kernel… and Keyboard shortcuts items stay first. [unit] the menu for owner and learner in
+      each lesson state (published, never compiled, compiling, skipped, done), each request; the download link's href
+      and file name; [browser] the menu on the page and on a row; revert with the request oracle.
+  - id: FR-MANAGE-5
+    text: >-
+      **Your sources** (owner; a section on `/import` below the upload sections, WEB-IMPORT paired change). A list of
+      `GET /api/materials` (not deleted) with the display title, pages, the source ("Uploaded" or "reader.yaml") and
+      the courses that use it (links to `/#course-<id>`). Actions: Rename (RenameField; SRV-INGEST FR-INGEST-30;
+      for a reader.yaml source the hint "This name is shown in reader-ai only; reader.yaml keeps the id."), Delete…
+      (FR-INGEST-31): when no course uses it, FR-MANAGE-2 with typed confirmation; when courses use it, the dialog
+      lists them and offers two choices — "Cancel" and "Delete the source and its n courses" (the typed confirmation
+      then applies to the source title, and the request sends `cascade: true`). Re-run import is not offered (owner
+      decision D6); a failed upload keeps WEB-IMPORT's Retry and Discard. [unit] the list, the in-use dialog, both
+      requests; [browser] the section at the three widths.
+  - id: FR-MANAGE-6
+    text: >-
+      **Settings page** `/settings` (any signed-in user; lazy). An `h1` "Settings" and library tabs: "Appearance",
+      "Account", and for the owner "People", "Instance" and "Data". Appearance: Theme (the existing System / Light /
+      Dark, now also here), Text size (Small 0.9375rem, Medium 1.0625rem — today's reading size — and Large
+      1.1875rem), Reading width (Narrow 34rem, Normal — FR-UI-10's column — and Wide 48rem), and later Language
+      (FR-MANAGE-10). These are per-browser choices in localStorage (`reader-ai.text-size`, `reader-ai.width`) next to
+      `reader-ai.theme`, applied before first paint by theme.js (FR-UI-16 paired change) as data attributes on `html`
+      that select token values; an unknown stored value falls back to the default. Instance (owner): a read-only
+      table from SRV-CONFIG FR-CONFIG-25 — sign-up mode, trace retention days, the monthly budget and its warning
+      level, the model and per-lesson budget of each stage, the compile run cap and the tutor caps — each row with its
+      value, its reader.yaml key or "fixed in reader-ai", and one line under the table: "Change these in reader.yaml,
+      then run `reader up`." (ADR-0036, proposed, would make some editable; owner decision D2). [unit] each choice
+      written and applied, the fallback, the instance table from VEC-MANAGE-1, no secret-looking value rendered;
+      [browser] the page at the three widths in both schemes; text size and width survive a reload with no flash
+      (the first paint's computed font size equals the stored choice).
+  - id: FR-MANAGE-7
+    text: >-
+      **Account and People.** Account (every user): "Passkeys" — the list of SRV-AUTH FR-AUTH-45 (label, created,
+      last used, "synced" when backed up), Rename (RenameField; 1..64 characters), Remove… (FR-MANAGE-2; FR-AUTH-46; refused for
+      the last passkey with "Add another passkey before removing this one."), and "Add a passkey" (the existing
+      register ceremony, FR-AUTH-6, run by the shared passkey script); "Sessions" — the list of FR-AUTH-44 with this
+      browser marked "This session", Sign out on each other row, and "Sign out everywhere else". People (owner): the
+      list of FR-AUTH-40 — handle, display name, role, source ("reader.yaml" or "Sign-up"), state (active, pending,
+      disabled), last sign-in, passkeys and sessions — with per-person actions: Sign out everywhere (FR-AUTH-41),
+      Remove a passkey… (FR-AUTH-42), Disable… for sign-up accounts (the existing FR-AUTH-29 route), Delete… for a
+      sign-up learner with no data (FR-AUTH-43; a person with data shows "Disable instead: this account owns
+      courses or materials."). A reader.yaml person has no Disable or Delete and the hint "Managed in reader.yaml.".
+      The owner's own row has no actions (Account covers it). Every action here needs a recent sign-in (FR-MANAGE-1's
+      `reauth_required` path). [unit] each list, each action's request and its refusals (last passkey, configured
+      user, user with data); [browser] the tabs at the three widths in both schemes with the request oracle.
+  - id: FR-MANAGE-8
+    text: >-
+      **Data** (owner tab on /settings). "Recently deleted": the deleted courses and materials (SRV-LESSON
+      FR-LESSON-21 `state=deleted`, SRV-INGEST `GET /api/materials?state=deleted`; restore through FR-LESSON-25 and
+      FR-INGEST-31) with the deletion time and Restore; a restored course
+      returns to the list at its old position, with its lessons in their old state. "Export": "Download each lesson
+      as .ipynb from its menu. A full export of your data is planned (ADR-0017)." No purge control (owner decision
+      D1). [unit] list and restore requests; [browser] delete → restore round trip.
+  - id: FR-MANAGE-9
+    text: >-
+      **Notes and bookmarks** (every reader; P2). A bookmark toggle in each cell's toolbar ("Bookmark this cell" /
+      "Remove bookmark", `aria-pressed`; SRV-LESSON FR-LESSON-31); a "Bookmarks" entry in the lesson contents lists
+      that lesson's bookmarks; a "Notes" panel beside the tutor (the same side panel, a second tab) with the user's
+      notes for the lesson, newest first, each optionally attached to a cell ("On: <cell label>"); add, edit in place
+      (10,000 characters), delete (Undo toast). Notes are plain text rendered as text nodes (INV-UI-2), never Markdown.
+      [unit] toggle, add, edit, delete and undo requests; [browser] the panel at the three widths.
+  - id: FR-MANAGE-10
+    text: >-
+      **Interface language** (P2; owner decision D7). The chrome strings of the shell, this layer and the pages it
+      touches move into a message catalogue declared as data (`web/src/manage/messages/<locale>.ts`, English and
+      Russian, the same keys checked by a unit test); Settings → Appearance gains "Language: Follow the browser,
+      English, Русский" in localStorage `reader-ai.locale`. Lesson content keeps the language of the material
+      (FR-UI-10's lang rule). [unit] key parity, the fallback to English for a missing key.
+
+invariants:
+  - id: INV-MANAGE-1
+    text: >-
+      No request that changes state is sent without a click on the object's own control and, for every action in
+      FR-MANAGE-2's list, its confirming button: loading, refetching, focus changes and keyboard navigation send
+      GETs only. [unit] the request log over each page's load, refetch and keyboard walk.
+  - id: INV-MANAGE-2
+    text: >-
+      For a non-owner, no owner-only control of FR-MANAGE-3..8 is rendered and no owner-only route is called; the
+      server refuses them independently (SRV-LESSON INV-LESSON-20, SRV-AUTH INV-AUTH-20: a learner's request is 404
+      for another owner's object and 403 `owner_only` for an owner-only collection). [unit] the learner's menus and
+      request log; [browser] the learner walk of every page; [live] the `manage` step's learner requests.
+  - id: INV-MANAGE-3
+    text: >-
+      Titles, descriptions, notes, handles and labels reach the DOM only as text (INV-UI-2), and the source scan
+      finds no `dangerouslySetInnerHTML` or `innerHTML` under web/src/manage; colours and sizes come from tokens
+      only (INV-UI-1).
+  - id: INV-MANAGE-4
+    text: >-
+      Every soft delete offered here has a restore path in the UI (Undo toast for 10 s, then Settings → Data), and no
+      control in this layer deletes a spend record, a revision or a blob. [unit] each delete's restore path.
+
+nfr:
+  - id: NFR-MANAGE-1
+    metric: growth of the initial JavaScript chunk caused by this layer, bytes (gzip), in WEB-UI NFR-UI-1's build
+    threshold: 1024
+    verified_by: test
+
+vectors:
+  - id: VEC-MANAGE-1
+    source: >-
+      Synthetic bodies written for this spec (no real person, no book text): courses in each state (active, archived,
+      deleted, with and without a study plan), impact bodies, lessons in each state, a revisions list, a compile
+      history, materials in use and unused, people of every source and state, own passkeys (one and three) and
+      sessions, the instance settings view, and every refusal body of the proposed routes. Written with Red.
+    file: spec/fixtures/WEB-MANAGE/responses.json

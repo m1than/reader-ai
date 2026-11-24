@@ -1392,6 +1392,29 @@ tasks:
         7,910 B gzip (NFR-IMPORT-1 30,000), initial 113,752 B (NFR-UI-1 121,153). Spec corrections in Green:
         FR-INGEST-19's busy column is the three-valued text FR-INGEST-20/-23 use; the run-time probe's package copy
         is a data file (cross_process_probe.txt); FR-UI-12's chunk sentence points to FR-UI-13's mount." }
+  - { id: V.manage, stage: V, kind: module, track: product, status: in_progress, branch: V/manage,
+      needs: [V.design-pass, V.onboarding-upload, V.compile-ui],
+      what: "Owner 2026-11-25 (Russian): no edit buttons, no customization, no deletion. The management layer: every
+        create, edit, delete and customize action for courses, lessons, revisions, compile runs, materials, tutor
+        history, people, passkeys, sessions and personal settings. Audit of 9140885 on the stubbed test server (owner
+        and learner) is in WEB-MANAGE's header. Drafted (status draft, nothing approved): WEB-MANAGE (new) and
+        `proposed_manage` blocks in SRV-LESSON FR-LESSON-20..31 / INV-LESSON-20..22, SRV-PIPELINE FR-PIPELINE-20..22,
+        SRV-PLAN FR-PLAN-20..21, SRV-TUTOR FR-TUTOR-20..21, SRV-INGEST FR-INGEST-30..32, SRV-AUTH FR-AUTH-40..47 /
+        INV-AUTH-20..21, SRV-CONFIG FR-CONFIG-25, SRV-EVENTS FR-EVENTS-30; ADR-0036 (proposed) for settings edited in
+        the UI.",
+      next: "deep-reviewer round on the spec drafts (auth, jobs and secrets items are complex areas: full rounds);
+        then promote with Red. P1 first: course rename/describe/archive/delete+restore, lesson
+        rename/skip/delete/done/revert/download, compile cancel and history, material rename/delete, tutor history
+        clear, /settings (appearance, read-only instance view, own passkeys and sessions, people), audit rows. P2:
+        reorder, dates and pace from a course, notes, bookmarks, Recently deleted, Russian chrome.",
+      owner_decisions: "D1 soft delete only (purge needs an ADR against INV-LESSON-6 and INV-INGEST-3); D2 ADR-0036
+        settings overlay; D3 export = ADR-0017 / SRV-EXPORT, P1 ships per-lesson .ipynb download; D4 Enable for a
+        disabled sign-up account; D5 manual lesson order reset on re-plan; D6 re-import (span-id mapping); D7 Russian
+        UI chrome.",
+      note: "Paired changes in files of active tracks are listed in WEB-MANAGE's header and are written with Green
+        only: WEB-UI (routes, manage slot, UserMenu Settings item, theme.js, test server, Playwright config),
+        WEB-NOTEBOOK (lesson menu, bookmark toggle, notes tab), WEB-IMPORT (Your sources), OPS-DOD operations. No
+        NAV_ITEMS change, so V/obs-analytics-impl's nav is untouched." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }

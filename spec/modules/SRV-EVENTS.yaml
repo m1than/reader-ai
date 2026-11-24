@@ -498,3 +498,26 @@ owner_notes:
   - "Migrations: each module keeps its Alembic revisions in its own `reader/<module>/migrations/` with a branch label; SRV-AUTH's environment computes `version_locations` and upgrades to all heads."
   - "A running job holds one database transaction for its whole run (minutes for compile stages); worker sessions disable `idle_in_transaction_session_timeout`. At concurrency 1 this is one long transaction at a time."
   - "Never run two worker versions side by side: a worker's sweep cancels `todo` jobs of kinds its own catalog lacks (FR-EVENTS-15) and writes `dead`/`unknown_kind` for their stalled jobs (FR-EVENTS-7). Stop the old worker before starting the new one."
+
+# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE; status: draft, not reviewed). Held under
+# `proposed_manage` until a deep-reviewer round approves it; id FR-EVENTS-30 (20..29 left free). The transactional
+# outbox and its audit consumer stay deferred to stage 2; this is the smallest audit trail the management layer
+# needs now, written in the same transaction as each change.
+proposed_manage:
+  requirements:
+    - id: FR-EVENTS-30
+      text: >-
+        **Audit rows.** A system table `audit_log(id bigint identity pk, at timestamptz, actor_id uuid (no foreign
+        key, so a deleted learner's rows stay and never block SRV-AUTH FR-AUTH-43), action text, object_kind text, object_id text, detail jsonb)` with a trigger that refuses UPDATE,
+        DELETE and TRUNCATE (as agent_spend's). `reader.events.audit.record(conn, actor_id, action, kind, id,
+        detail)` inserts one row on the caller's connection, so the row commits or rolls back with the change.
+        Actions are declared as data (`AUDIT_ACTIONS`: course.rename, course.describe, course.order, course.archive,
+        course.unarchive, course.delete, course.restore, lesson.rename, lesson.order, lesson.skip, lesson.unskip,
+        lesson.delete, lesson.restore, lesson.revert, material.rename, material.delete, material.restore,
+        compile.cancel, tutor.clear, user.sessions_revoke, user.credential_remove, user.delete, self.session_revoke,
+        self.credential_label, self.credential_remove); an unknown action raises. `detail` holds ids, counts and
+        hashes only — never a title, description, note, question or handle (titles are user content; INV-AUTH log
+        rules) — and is ≤ 2 KiB compact JSON. Progress, notes and bookmarks are not audited (the reader's own
+        data). A no-op request writes no row (SRV-LESSON INV-LESSON-21). [db] the trigger; one row per applied
+        action; rollback of the change removes its row; a `detail` holding a string field other than an id or hash
+        is refused by a schema check.

@@ -444,3 +444,35 @@ owner_notes:
   - "A compile is capped at your $8.00 compile_cap_usd and runs under your $30 test budget (budget.test_budget_usd, approved 2026-11-22), which covers live L02 compiles without further consent; every spend goes to the ledger. The spike measured $2.4–3.0 for one loop on L02 without span ids; a recompile reuses unchanged steps and spends only where inputs changed."
   - "With one loop the measured outcome is open findings: the lesson is studyable as a draft, with unresolved points as open cells. More loops or a revised review bar is still your call (compile-cost ask a)."
   - "L01 vs L02 (compile-cost ask b): the slice compiles L02 as the roadmap says; L01 (larger) is measured when the full pipeline lands."
+
+# ---- Proposed amendment (2026-11-25, V/manage, WEB-MANAGE; status: draft, not reviewed). Held under
+# `proposed_manage` until a deep-reviewer round approves it (jobs and idempotency: complex area, full rounds); then
+# the items move into `requirements` with their Red tests. Ids FR-PIPELINE-20..22 (18..19 left free for parallel
+# branches). Owner-only like FR-PIPELINE-11: anyone else gets 404.
+# What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
+# 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it.
+proposed_manage:
+  requirements:
+    - id: FR-PIPELINE-20
+      text: >-
+        **Cancel a run.** `POST /api/compiles/{run_id}/cancel` with `{}` on a `running`, `stalled` or `stage_failed`
+        run sets `compile_runs.cancelled_at` (new nullable column; migration `pipeline_0004`) and `finished_at` in one
+        transaction under the run's lock, and the run's state becomes `cancelled`. Every step handler checks
+        `cancelled_at` before it reserves budget or calls a model and returns without effect when it is set, so at
+        most the step already inside a model call finishes; that call settles in the ledger as usual (SRV-AGENT
+        FR-AGENT-9), its revision is written, and no next step is enqueued. A dead key of a `stage_failed` run is left
+        dead (never requeued). Repeating cancel on a `cancelled` run returns 200 with the same body; cancel on a
+        `converged`, `open_findings` or `budget_exhausted` run → 409 `not_running`. 200 the run body of
+        FR-PIPELINE-11. [db] cancel between steps (no further reservation row), cancel during a stubbed model call
+        (that call settles, nothing after it), cancel twice, cancel a finished run; the per-key idempotency of
+        SRV-EVENTS FR-EVENTS-5 unchanged.
+    - id: FR-PIPELINE-21
+      text: >-
+        **Run history.** `GET /api/lessons/{lesson_id}/compiles` → the lesson's newest 20 runs `{runs: [{run_id,
+        state, created_at, finished_at, spent_usd, cap_usd, steps: n, error}]}`, newest first; read-only, no
+        `ensure`. [db]
+    - id: FR-PIPELINE-22
+      text: >-
+        **Inactive lessons.** `POST /api/lessons/{lesson_id}/compile` and `/api/compiles/{run_id}/resume` answer 409
+        `lesson_inactive` for a skipped lesson or a lesson of an archived course, and 404 for a deleted lesson or a
+        lesson of a deleted course (SRV-LESSON FR-LESSON-24/-25/-28); FR-PIPELINE-15's compile-first skips them. [db]
