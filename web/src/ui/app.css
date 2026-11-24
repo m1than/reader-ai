@@ -1579,3 +1579,31 @@ kbd {
     width: 100vw;
   }
 }
+
+/* WEB-MANAGE FR-MANAGE-6 (paired FR-UI-16 change): text size and reading width, chosen in Settings and set on html by
+   theme.js before first paint. Medium (1.0625rem) and Normal (FR-UI-10's 38rem column) are the defaults above. */
+html[data-text-size='small'] [data-markdown],
+html[data-text-size='small'] .recall-front,
+html[data-text-size='small'] .tutor-answer,
+html[data-text-size='small'] .tutor-question {
+  font-size: 0.9375rem;
+}
+
+html[data-text-size='large'] [data-markdown],
+html[data-text-size='large'] .recall-front,
+html[data-text-size='large'] .tutor-answer,
+html[data-text-size='large'] .tutor-question {
+  font-size: 1.1875rem;
+}
+
+html[data-width='narrow'] .cell > :not(.wide):not([data-markdown]):not(.cell-toolbar),
+html[data-width='narrow'] [data-markdown] > :not(.wide),
+html[data-width='narrow'] .lesson-header h1 {
+  max-width: 34rem;
+}
+
+html[data-width='wide'] .cell > :not(.wide):not([data-markdown]):not(.cell-toolbar),
+html[data-width='wide'] [data-markdown] > :not(.wide),
+html[data-width='wide'] .lesson-header h1 {
+  max-width: 48rem;
+}

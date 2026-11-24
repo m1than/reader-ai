@@ -111,10 +111,10 @@
 
 id: WEB-MANAGE
 title: Management layer — edit, reorder, archive, delete and restore courses, lessons and materials; revisions and compile runs; people, passkeys and sessions; personal settings and interface language
-status: draft
-approved_by: null
-approved_at: null
-review: "deep-reviewer (Fable) round 1 on 840af4b: changes (16 blocking, applied in 3112546); round 2 on 3112546: changes (5 small blocking, applied in 2a7d86f); round 3 on 2a7d86f: VERDICT approve, its non-blocking items applied in 4997ec5. ADR-0036 and ADR-0037 accepted by the owner (fd9377a, 2026-11-25). Approved by agent with the Red tests on V/manage-impl. FR-MANAGE-10's runtime is WEB-UI FR-UI-30, promoted only after its own deep-reviewer round."
+status: approved
+approved_by: agent
+approved_at: 2026-11-24
+review: "deep-reviewer (Fable) round 1 on 840af4b: changes (16 blocking, applied in 3112546); round 2 on 3112546: changes (5 small blocking, applied in 2a7d86f); round 3 on 2a7d86f: VERDICT approve, its non-blocking items applied in 4997ec5. ADR-0036 and ADR-0037 accepted by the owner (fd9377a, 2026-11-25). Approved by agent with the Red tests on V/manage-impl. FR-MANAGE-10's runtime is WEB-UI FR-UI-30, promoted only after its own deep-reviewer round. Red (2026-11-24, V/manage-impl-web): VEC-MANAGE-1 written (spec/fixtures/WEB-MANAGE/responses.json, ids matching VEC-UI-2 so the WEB-UI test server serves both); unit tests web/src/manage/{primitives,course,lesson,sources,settings,notes}.test.tsx over a fake API (web/src/manage/testkit.ts) and e2e/web/manage/manage.spec.ts. Green (2026-11-24): web/src/manage/lesson.test.tsx waits for a row's lazy menu trigger (findByRole) instead of reading it at once (the first test raced the lazy chunk); no oracle changed. e2e/web/manage/manage.spec.ts reads WEB-PLAN's synthetic source on /import (the test server's /api/materials is shared with the plan specs). Initial chunks after Green (Vite 8 production build, zlib level 9): 120,254 B, +2,425 B against the recorded 117,829 B, within NFR-UI-1's 121,153 B. Declared deviations: the sources section is headed \"Manage your sources\" (WEB-PLAN's list on the same page is \"Your sources\"); the notes panel sits after the cells with a Notes toggle in the lesson toolbar, not as a second tab of the tutor panel; the Undo toast is an app-owned region (one host for the shell) like FR-UI-7's notices, not the library toast manager; \"Add a passkey\" is a hint (sign in on the new device with an existing passkey) until the shared ceremony script can run inside the SPA's CSP; select and switch joined FR-UI-1's list, the forms use native select and number inputs styled with tokens."
 layer: web
 track: product
 adr: [ADR-0013, ADR-0031, ADR-0017, ADR-0036, ADR-0037, ADR-0011, ADR-0016]

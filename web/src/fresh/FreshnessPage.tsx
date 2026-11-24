@@ -4,16 +4,19 @@ import { useMemo } from 'react';
 import { useServices } from '../app/context';
 import { createFreshApi } from './api';
 import { FreshnessCard } from './FreshnessCard';
+import { useT } from '../ui/i18n';
+import en from './messages.en';
 
 export function FreshnessPage({ materialId }: { materialId: string }) {
   const { http } = useServices();
+  const t = useT('fresh', en);
   const api = useMemo(
     () => createFreshApi(http ?? { fetch: (...a: Parameters<typeof fetch>) => globalThis.fetch(...a), onUnauthorized: () => undefined }),
     [http],
   );
   return (
     <div className="page">
-      <h1>Source freshness</h1>
+      <h1>{t('page.title')}</h1>
       <FreshnessCard materialId={materialId} api={api} />
     </div>
   );

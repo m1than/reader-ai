@@ -36,6 +36,8 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   context = await browser.newContext({
+    // WEB-UI FR-UI-30: the live checks read the English interface whatever the host's language.
+    locale: 'en-US',
     recordVideo: { dir: resolve(OUT, 'video') },
     ignoreHTTPSErrors: false,
   });

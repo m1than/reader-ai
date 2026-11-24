@@ -1,8 +1,10 @@
 // Notebook outputs (WEB-RENDER FR-RENDER-1, FR-RENDER-5, INV-RENDER-2). text/html and image/svg+xml are never parsed
 // or loaded: they render their text/plain alternative or their source as text. Raster images use short-lived blob: URLs.
 import { useEffect, useRef, useState } from 'react';
+import { useT } from '../ui/i18n';
 import { Latex } from './latex';
 import { Markdown } from './markdown';
+import en from './messages.en';
 
 export type MimeBundle = Record<string, unknown>;
 export type NbOutput =
@@ -28,11 +30,12 @@ const ANSI = /\u001b\[[0-?]*[ -/]*[@-~]|\u001b\][^\u0007\u001b]*(?:\u0007|\u001b
 export const stripAnsi = (s: string): string => s.replace(ANSI, '');
 
 function Text({ text, kind = 'text' }: { text: string; kind?: string }) {
+  const t = useT('render', en);
   const cut = text.length > TEXT_LIMIT;
   return (
     <div data-output={kind}>
       <pre>{cut ? text.slice(0, TEXT_LIMIT) : text}</pre>
-      {cut && <p className="output-note">Output truncated at 1 MiB.</p>}
+      {cut && <p className="output-note">{t('output.truncated')}</p>}
     </div>
   );
 }
@@ -69,7 +72,12 @@ function BlobImage({ mime, payload, alt }: { mime: string; payload: string; alt:
   return <div data-output="image">{src && <img src={src} alt={alt ?? ''} onLoad={revoke} onError={revoke} />}</div>;
 }
 
-const isBundle = (v: unknown): v is MimeBundle => !!v && typeof v === 'object' && !Array.isArray(v);
+function Unsupported({ types }: { types: string }) {
+  const t = useT('render', en);
+  return <p>{t('output.unsupported', { types })}</p>;
+}
+
+const isBundle =(v: unknown): v is MimeBundle => !!v && typeof v === 'object' && !Array.isArray(v);
 
 export function Output({ output }: { output: NbOutput }) {
   if (output.output_type === 'stream') return <Text text={stripAnsi(joined(output.text ?? ''))} />;
@@ -109,7 +117,7 @@ export function Output({ output }: { output: NbOutput }) {
     default:
       return (
         <div data-output="dropped">
-          <p>unsupported output type: {Object.keys(data).join(', ')}</p>
+          <Unsupported types={Object.keys(data).join(', ')} />
         </div>
       );
   }

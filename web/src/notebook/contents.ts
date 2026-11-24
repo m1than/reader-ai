@@ -5,6 +5,10 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import remarkParse from 'remark-parse';
 import { unified } from 'unified';
+import { englishT, type T } from '../ui/i18n';
+import en from './messages.en';
+
+const english = englishT(en);
 
 export interface ContentsCell {
   cell_type: string;
@@ -41,13 +45,13 @@ export const firstHeading = (markdown: string): string | null => {
 export const isUnansweredOpen = (c: Pick<ContentsCell, 'kind' | 'status'>) => c.kind === 'open' && c.status !== 'answered';
 
 /** The label of every cell that has an entry of its own (headed markdown cells and labs), by cell id. */
-export const cellLabels = (cells: ContentsCell[]): Map<string, string> => {
+export const cellLabels = (cells: ContentsCell[], t: T<typeof en> = english): Map<string, string> => {
   const labels = new Map<string, string>();
   let lab = 0;
   for (const c of cells) {
     if (c.kind === 'lab') {
       lab += 1;
-      labels.set(c.id, `Lab ${lab}`);
+      labels.set(c.id, t('contents.lab', { n: String(lab) }));
     } else if (c.cell_type === 'markdown' && c.kind !== 'recall' && c.kind !== 'open') {
       const h = firstHeading(c.source);
       if (h) labels.set(c.id, h);
@@ -56,16 +60,16 @@ export const cellLabels = (cells: ContentsCell[]): Map<string, string> => {
   return labels;
 };
 
-export const contentsEntries = (cells: ContentsCell[], labels: Map<string, string>, tutor: boolean): ContentsEntry[] => {
+export const contentsEntries = (cells: ContentsCell[], labels: Map<string, string>, tutor: boolean, t: T<typeof en> = english): ContentsEntry[] => {
   const entries: ContentsEntry[] = [];
   const recall = cells.filter((c) => c.kind === 'recall');
   const open = cells.filter(isUnansweredOpen);
   for (const c of cells) {
     const label = labels.get(c.id);
     if (label) entries.push({ href: `#cell-${c.id}`, label });
-    if (c === recall[0]) entries.push({ href: `#cell-${c.id}`, label: `Recall cards (${recall.length})` });
-    if (c === open[0]) entries.push({ href: `#cell-${c.id}`, label: `Open questions (${open.length})` });
+    if (c === recall[0]) entries.push({ href: `#cell-${c.id}`, label: t('contents.recall', { count: recall.length }) });
+    if (c === open[0]) entries.push({ href: `#cell-${c.id}`, label: t('contents.open', { count: open.length }) });
   }
-  if (tutor) entries.push({ href: '#tutor', label: 'Ask the tutor' });
+  if (tutor) entries.push({ href: '#tutor', label: t('contents.tutor') });
   return entries;
 };

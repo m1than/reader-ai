@@ -5,12 +5,15 @@
 import { Button } from '@acme/ui/button';
 import type { Root } from 'hast';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useT } from '../ui/i18n';
 import { CopyIcon } from '../ui/icons';
 import { hastToReact } from './hast';
+import en from './messages.en';
 
 const COPIED_MS = 2000; // structural: long enough to read "Copied"
 
 function CopyCode({ code }: { code: string }) {
+  const t = useT('render', en);
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const timer = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(timer.current), []);
@@ -26,12 +29,12 @@ function CopyCode({ code }: { code: string }) {
   };
   return (
     <>
-      <Button size="sm" variant="ghost" color="neutral" aria-label="Copy code" data-render-chrome="" onClick={() => void copy()}>
+      <Button size="sm" variant="ghost" color="neutral" aria-label={t('code.copyLabel')} data-render-chrome="" onClick={() => void copy()}>
         <CopyIcon />
-        <span aria-hidden="true">{state === 'copied' ? 'Copied' : 'Copy'}</span>
+        <span aria-hidden="true">{state === 'copied' ? t('code.copied') : t('code.copy')}</span>
       </Button>
       <span role="status" className="visually-hidden" data-render-chrome="">
-        {state === 'copied' ? 'Code copied' : state === 'failed' ? 'Copy failed' : ''}
+        {state === 'copied' ? t('code.copiedStatus') : state === 'failed' ? t('code.copyFailed') : ''}
       </span>
     </>
   );
@@ -55,6 +58,7 @@ const useOverflow = (content: unknown) => {
 };
 
 export function Code({ code, language }: { code: string; language: string }) {
+  const t = useT('render', en);
   const [tree, setTree] = useState<Root | null>(null);
   const [scroller, overflows] = useOverflow(tree ?? code);
   useEffect(() => {
@@ -75,8 +79,9 @@ export function Code({ code, language }: { code: string; language: string }) {
   const name = language || 'text';
   return (
     // The chrome is built from no input; INV-RENDER-1 trusts each element marked `data-render-chrome`.
-    <div className="code-block wide" data-render-chrome="" role="group" aria-label={`${name} code`}>
-      <div className="code-header" data-render-chrome="">
+    <div className="code-block wide" data-render-chrome="" role="group" aria-label={t('code.group', { name })}>
+      {/* WEB-UI FR-UI-32: the header is chrome in the interface language, also inside a lesson's content node. */}
+      <div className="code-header" data-render-chrome="" lang={t.lang}>
         <span className="code-lang" data-render-chrome="">
           {name}
         </span>

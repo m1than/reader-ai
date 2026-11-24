@@ -24,7 +24,8 @@ const skip = (name, why) => console.log(`SKIP ${name}\t${why}`);
 const browser = await chromium.launch({ args: [`--ignore-certificate-errors-spki-list=${process.env.READER_CA_SPKI}`] });
 const csp = [];
 try {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  // WEB-UI FR-UI-30: the live check reads the English interface whatever the host's language.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US' });
   await context.addCookies([
     { name: '__Host-reader_session', value: process.env.READER_SESSION, url, secure: true, httpOnly: true, sameSite: 'Lax' },
   ]);

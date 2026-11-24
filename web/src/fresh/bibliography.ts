@@ -1,6 +1,12 @@
 // Client checks for the bibliography form (WEB-FRESH FR-FRESHUI-2) with SRV-FRESH FR-FRESH-1's bounds. The server
 // checks again and answers 400 `bibliography_invalid` with the field.
+// The copy is this area's catalogue (WEB-UI FR-UI-30): English by default, or the translator the card passes.
+import { englishT, type T } from '../ui/i18n';
 import type { Bibliography, BibliographyInput } from './api';
+import en from './messages.en';
+
+export type FreshT = T<typeof en>;
+const english: FreshT = englishT(en);
 
 export const BOUNDS = { title: 200, authors: 10, author: 100, edition: 40, publisher: 120, yearMin: 1450 } as const;
 
@@ -9,29 +15,45 @@ export type Field = 'title' | 'authors' | 'edition' | 'year' | 'publisher' | 'is
 /** The form's text values, one per field; authors one per line. */
 export type FormValues = Record<Field, string>;
 
-export const FIELDS: ReadonlyArray<{ field: Field; label: string; multiline?: boolean }> = [
-  { field: 'title', label: 'Title' },
-  { field: 'authors', label: 'Authors (one per line)', multiline: true },
-  { field: 'edition', label: 'Edition' },
-  { field: 'year', label: 'Year' },
-  { field: 'publisher', label: 'Publisher' },
-  { field: 'isbn', label: 'ISBN' },
-  { field: 'original_title', label: 'Original title' },
-  { field: 'original_edition', label: 'Original edition' },
-  { field: 'original_year', label: 'Original year' },
+export const FIELDS: ReadonlyArray<{ field: Field; multiline?: boolean }> = [
+  { field: 'title' },
+  { field: 'authors', multiline: true },
+  { field: 'edition' },
+  { field: 'year' },
+  { field: 'publisher' },
+  { field: 'isbn' },
+  { field: 'original_title' },
+  { field: 'original_edition' },
+  { field: 'original_year' },
 ];
 
-export const MESSAGES: Record<Field, string> = {
-  title: `Enter a title of up to ${BOUNDS.title} characters.`,
-  authors: `Enter up to ${BOUNDS.authors} authors, one per line, each up to ${BOUNDS.author} characters.`,
-  edition: `Up to ${BOUNDS.edition} characters.`,
-  year: 'A year from 1450 to next year.',
-  publisher: `Up to ${BOUNDS.publisher} characters.`,
-  isbn: 'A valid ISBN-10 or ISBN-13.',
-  original_title: `Up to ${BOUNDS.title} characters.`,
-  original_edition: `Up to ${BOUNDS.edition} characters.`,
-  original_year: 'A year from 1450 to next year.',
+/** A field's label. */
+export const fieldLabel = (field: Field, t: FreshT = english): string => t(`field.${field}`);
+
+/** A field's check message. */
+export const fieldMessage = (field: Field, t: FreshT = english): string => {
+  switch (field) {
+    case 'title':
+      return t('error.title', { max: BOUNDS.title });
+    case 'authors':
+      return t('error.authors', { max: BOUNDS.authors, each: BOUNDS.author });
+    case 'edition':
+    case 'original_edition':
+      return t('error.short', { max: BOUNDS.edition });
+    case 'publisher':
+      return t('error.short', { max: BOUNDS.publisher });
+    case 'original_title':
+      return t('error.short', { max: BOUNDS.title });
+    case 'year':
+    case 'original_year':
+      return t('error.year');
+    case 'isbn':
+      return t('error.isbn');
+  }
 };
+
+/** The English messages per field. */
+export const MESSAGES: Record<Field, string> = Object.fromEntries(FIELDS.map(({ field }) => [field, fieldMessage(field)])) as Record<Field, string>;
 
 const text = (s: string | null | undefined) => s ?? '';
 
@@ -67,26 +89,28 @@ export const fromForm = (
   f: FormValues,
   keep: { original_authors: string[] | null },
   thisYear: number,
+  t: FreshT = english,
 ): { body: BibliographyInput; errors: Partial<Record<Field, string>> } => {
   const errors: Partial<Record<Field, string>> = {};
+  const msg = (field: Field) => fieldMessage(field, t);
   const title = f.title.trim();
-  if (title === '' || title.length > BOUNDS.title) errors.title = MESSAGES.title;
+  if (title === '' || title.length > BOUNDS.title) errors.title = msg('title');
   const authors = f.authors.split('\n').map((a) => a.trim()).filter((a) => a !== '');
-  if (authors.length > BOUNDS.authors || authors.some((a) => a.length > BOUNDS.author)) errors.authors = MESSAGES.authors;
+  if (authors.length > BOUNDS.authors || authors.some((a) => a.length > BOUNDS.author)) errors.authors = msg('authors');
   const short = (field: Field, max: number) => {
     const v = optional(f[field]);
-    if (v !== null && v.length > max) errors[field] = MESSAGES[field];
+    if (v !== null && v.length > max) errors[field] = msg(field);
     return v;
   };
   const year = (field: Field) => {
     const v = optional(f[field]);
     if (v === null) return null;
     const n = /^\d{4}$/.test(v) ? Number(v) : NaN;
-    if (!(n >= BOUNDS.yearMin && n <= thisYear + 1)) errors[field] = MESSAGES[field];
+    if (!(n >= BOUNDS.yearMin && n <= thisYear + 1)) errors[field] = msg(field);
     return n;
   };
   const isbnRaw = optional(f.isbn);
-  if (isbnRaw !== null && !isbnValid(isbnRaw)) errors.isbn = MESSAGES.isbn;
+  if (isbnRaw !== null && !isbnValid(isbnRaw)) errors.isbn = msg('isbn');
   const body: BibliographyInput = {
     title,
     authors,

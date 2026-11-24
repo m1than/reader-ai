@@ -90,7 +90,9 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   read the owner's retention override per run and per request (`setup.effective_settings(conn)`); no oracle
   changed. Paired SRV-PIPELINE change (V/manage, 2026-11-24): SRV-PIPELINE's `errors` gained `course_deleted`,
   `lesson_inactive` and `not_running`, so `attributes.SPEC_CODES` (the `reader.error_code` enum, VEC-OBS-1) takes
-  them; the catalogue test reads the specs and is unchanged."
+  them; the catalogue test reads the specs and is unchanged. Paired with WEB-UI FR-UI-30 (2026-11-24,
+  V/manage-impl-web): e2e/live/lib/obs_browser.mjs's browser context passes `locale: 'en-US'`, so the live check
+  reads the English interface whatever the host's language; no requirement changed."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]

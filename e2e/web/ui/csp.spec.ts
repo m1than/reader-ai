@@ -58,7 +58,7 @@ for (const width of [1280, 390])
 
     // The owner's Compile dialog on W02's row (FR-UI-15), cancelled: nothing is posted.
     const row = page.locator('#course-c-fixture li', { hasText: 'Fixture lesson W02' });
-    await row.getByRole('button', { name: 'Compile' }).click();
+    await row.getByRole('button', { name: 'Compile', exact: true }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('dialog')).toBeHidden();
