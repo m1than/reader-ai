@@ -315,8 +315,10 @@ async def run_web(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: JobC
         {"query": q.text, "template": q.template, "status": "pending", "result_count": 0}
         for q in plan.queries
     ]
+    # report["dropped"] is still the scan's: this job writes `dropped` only with its final status, so a second
+    # attempt (FR-FRESH-12) counts nothing twice.
     dropped = _merge(_merge({}, report["dropped"]), plan.dropped)
-    await store.update(run.engine, run.id, searches=searches, dropped=dropped or None)
+    await store.update(run.engine, run.id, searches=searches)
     search_prompt = prompts.load("search")
     report_prompt = prompts.load("report")
     versions = {"scan": prompts.load("scan").record(), "search": search_prompt.record()}
@@ -345,7 +347,7 @@ async def run_web(deps: Deps, args: ReportArgs, conn: AsyncConnection, ctx: JobC
         if out.status == "refused":
             await _final(run, "search", "budget_refused", out.code, {**stored, **records})
             return
-        await store.update(run.engine, run.id, searches=searches, dropped=dropped or None)
+        await store.update(run.engine, run.id, searches=searches)
         await _log_end(run, "search", index, out.status, out.code)
     stored = {"searches": searches, "web_search_requests": web_requests, **records}
     if not entries:

@@ -186,6 +186,25 @@ async def test_put_bibliography(pg: Pg, tmp_path: Path) -> None:
     assert unknown.json() == {"error": "bibliography_invalid", "field": "notes"}
 
 
+async def test_put_with_a_lone_surrogate_is_bibliography_invalid(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-1: a lone surrogate (a `\\ud800` JSON escape) is outside the bounds: 400, never a 500."""
+    w = await world(pg, tmp_path)
+    headers = {"content-type": "application/json"}
+    async with client(w) as c:
+        title = await c.put(path(w) + "/bibliography", content=b'{"title": "T\\ud800"}', headers=headers)
+        author = await c.put(
+            path(w) + "/bibliography", content=b'{"title": "T", "authors": ["A\\udfff"]}', headers=headers
+        )
+        key = await c.put(
+            path(w) + "/bibliography", content=b'{"title": "T", "k\\ud800": 1}', headers=headers
+        )
+        shown = (await c.get(path(w) + "/freshness")).json()["bibliography"]
+    assert (title.status_code, title.json()) == (400, {"error": "bibliography_invalid", "field": "title"})
+    assert (author.status_code, author.json()) == (400, {"error": "bibliography_invalid", "field": "authors"})
+    assert (key.status_code, key.json()) == (400, {"error": "bibliography_invalid", "field": "body"})
+    assert shown is None  # nothing stored
+
+
 async def test_only_the_materials_owner_sees_anything(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     report_id, _ = await full_check(w, tmp_path, FakeProvider(w.engine, _replies()))
@@ -600,6 +619,60 @@ async def test_daily_cap_refusal_inside_the_job(pg: Pg, tmp_path: Path) -> None:
     assert (row["status"], row["error"]) == ("budget_refused", "daily_budget_exhausted")
     assert row["searches"][0]["status"] == "refused"
     assert [c.stage for c in provider.calls] == ["scan"]
+
+
+async def test_the_ledger_run_cap_ends_the_check_budget_refused(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-9/-12: each call passes `run_cap_usd`; when this check's spend plus the next reserve would
+    cross it, the ledger refuses the call and the check ends `budget_refused` with `budget_exhausted`."""
+    from reader.agent import ledger
+
+    w = await world(pg, tmp_path)
+    jobs = FakeJobs()
+    async with client(w, jobs=jobs) as c:
+        await c.put(path(w) + "/bibliography", json=BIB)
+        report_id = (await post_check(c, w)).json()["report_id"]
+    provider = FakeProvider(w.engine, _replies())
+    d = deps(w, provider, jobs)
+    await run_job(w, "freshness.scan", uuid.UUID(report_id), d)  # $0.01 for this run
+    scope = ledger.Scope(w.users["ivan"], uuid.UUID(report_id), None, "x", "freshness_web", 999)
+    usd = Decimal("0.985")
+    caps = ledger.Caps(Decimal(5), None, None, None)
+    rid = await ledger.reserve(w.engine, scope, "claude-haiku-5-5", usd, caps)
+    await ledger.settle(w.engine, rid, usd, usd, usd, None, ledger.UpstreamRecord((200,), ()))
+    await run_job(w, "freshness.web", uuid.UUID(report_id), d)  # $0.995 + the first search's $0.01 > $1.00
+    row = await report_row(w, report_id)
+    assert (row["status"], row["error"]) == ("budget_refused", "budget_exhausted")
+    assert [s["status"] for s in row["searches"]][:1] == ["refused"]
+    assert [c.stage for c in provider.calls] == ["scan", "search"]  # refused at its reservation
+    assert row["cost_usd"] == Decimal("0.995000")
+
+
+async def test_a_second_web_attempt_counts_drops_once(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-12: a restarted web job starts from the scan's `dropped`; the first attempt's counts are not
+    added again."""
+    w = await world(pg, tmp_path)
+    jobs = FakeJobs()
+    async with client(w, jobs=jobs) as c:
+        await c.put(path(w) + "/bibliography", json=BIB)
+        report_id = (await post_check(c, w)).json()["report_id"]
+    denied = Reply(links=links(1), tool_input={"query": "something else"})
+    first = FakeProvider(w.engine, _replies([denied, *searches_ok(4)]))
+
+    def die_on_the_second_search(call: Any) -> None:
+        if call.stage == "search" and len([c for c in first.calls if c.stage == "search"]) == 2:
+            raise RuntimeError("worker restarted")
+
+    first.on_run = die_on_the_second_search
+    await run_job(w, "freshness.scan", uuid.UUID(report_id), deps(w, first, jobs))
+    with pytest.raises(RuntimeError):
+        await run_job(w, "freshness.web", uuid.UUID(report_id), deps(w, first, jobs))
+    assert (await report_row(w, report_id))["status"] == "running"
+    again = Reply(links=links(1), tool_input={"query": "other"})
+    second = FakeProvider(w.engine, _replies([again, *searches_ok(4)]))
+    await run_job(w, "freshness.web", uuid.UUID(report_id), deps(w, second, jobs), attempts=1)
+    row = await report_row(w, report_id)
+    assert row["status"] == "done"
+    assert row["dropped"]["query_denied"] == 1  # this attempt's one denial, not 2
 
 
 async def test_a_final_report_is_never_updated(pg: Pg, tmp_path: Path) -> None:

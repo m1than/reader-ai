@@ -6,7 +6,8 @@
 # (6) books = the first level-1 topic + "book" + the current year. Template words are the material's language plus
 # English. Over 120 characters, words go from the end of the longest variable part. A query holding a 6-word run of
 # a non-front span, once bibliography strings, surnames and topic titles are masked (removed from the query's and the
-# span's words alike), is dropped (`query_unsafe`). A claim failing the subject rule is skipped (`subject_too_long`).
+# span's words alike), is dropped (`query_unsafe`). A claim failing the subject rule is skipped (`subject_too_long`);
+# so is a claim whose subject forms a 6-word span run with an earlier chosen subject (`subject_split`).
 # Topics are [id, title, level]. No book text: every string is synthetic.
 
 cases:
@@ -126,3 +127,32 @@ cases:
         - [topic_docs, "Blocks official documentation"]
         - [books, "Ledgers book 2026"]
       dropped: { subject_too_long: 2 }
+
+  - name: joined_stored_subjects_and_a_run_split_across_claims
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # Stored claims held to FR-FRESH-3's words over the span below: `_` separates (6 words); concatenations and
+    # camelCase count as the span words they join (3 + 2 + 1 and 3 + 3 = 6 words); 40 CJK ideographs are 40 words:
+    # all four skipped. "alpha bravo charlie" is chosen; "delta echo foxtrot" after it would complete the span's
+    # 6-word run "alpha … foxtrot" across two queries, so it is skipped (`subject_split`) and the next claims fill
+    # the slots.
+    claims:
+      - { id: c1, subject: "alpha_bravo_charlie_delta_echo_foxtrot", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "alphabravocharlie deltaecho foxtrot", kind: version, confidence: high, page: 2 }
+      - { id: c3, subject: "AlphaBravoCharlie DeltaEchoFoxtrot", kind: version, confidence: high, page: 3 }
+      - { id: c4, subject: "共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识", kind: version, confidence: high, page: 4 }
+      - { id: c5, subject: "alpha bravo charlie", kind: version, confidence: high, page: 5 }
+      - { id: c6, subject: "delta echo foxtrot", kind: version, confidence: high, page: 6 }
+      - { id: c7, subject: "india juliet", kind: version, confidence: medium, page: 7 }
+      - { id: c8, subject: "golf hotel", kind: api, confidence: low, page: 8 }
+    non_front: ["alpha bravo charlie delta echo foxtrot golf hotel india juliet"]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "alpha bravo charlie latest version"]
+        - [claim, "india juliet latest version"]
+        - [claim, "golf hotel latest version"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_too_long: 4, subject_split: 1 }

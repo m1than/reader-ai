@@ -46,7 +46,14 @@ def test_one_check_completes_within_the_caps() -> None:
     assert report["stored_urls_in_r"] is True
     assert 0 < report["usd"] <= 1.00
     assert report["ledger_rows_with_web_search_requests"] >= 1
+    assert report["crosscheck_rows"] >= 1  # the cross-check compared at least one settle row
     assert report["crosscheck_ok"] is True
     for search in report["searches"]:
-        # run_input_tokens: the run's summed input (main loop + nested request), an upper bound of t (H-WS-3)
+        # run_input_tokens: the run's summed uncached input (main loop + nested request), input only (H-WS-3)
         assert set(search) == {"gate", "run_input_tokens", "status"}
+        assert search["gate"] in ("allowed", "denied")  # H-FRESH-2: the gate's decision, recorded
+        assert search["status"] in ("ok", "empty")
+        if search["status"] == "ok":
+            assert search["gate"] == "allowed"  # results come only from an allowed search
+        assert isinstance(search["run_input_tokens"], int)
+        assert search["run_input_tokens"] >= 0

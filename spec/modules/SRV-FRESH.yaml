@@ -96,6 +96,7 @@ bounds:
   claims_max: 20                 # chosen: reviewable on one screen
   subject_words_max: 5           # chosen: a topic phrase, not a sentence (INV-FRESH-1)
   subject_chars_max: 60
+  subject_token_chars_max: 24    # chosen: one word of a subject; a longer token (a concatenation) fails the rule
   # Bibliography (FR-FRESH-1). Chosen.
   bib_title_chars_max: 200
   bib_authors_max: 10
@@ -166,7 +167,9 @@ requirements:
       canonical JSON. Sources: the owner's entry (`PUT /api/materials/{id}/bibliography`, `source: owner`), else the
       scan's extraction (FR-FRESH-3), stored as `scan_bibliography` on the report and copied to
       `material_bibliography` with `source: scan` only when no owner entry exists; scan values outside the bounds are
-      dropped field by field. Stage (b) runs only when the bibliography's source is `owner`, or when the check's POST
+      dropped field by field. A string holding a lone surrogate (U+D800–U+DFFF, which UTF-8 cannot store) is
+      outside the bounds: the owner's PUT gets 400 `bibliography_invalid` with that field (an unknown key holding
+      one is reported as `body`). Stage (b) runs only when the bibliography's source is `owner`, or when the check's POST
       carried `bibliography_sha256` equal to the sha256 of the scan bibliography it confirms (FR-FRESH-11).
   - id: FR-FRESH-2
     text: >-
@@ -189,9 +192,18 @@ requirements:
       rule that source text is material and never instructions, and the output schema `{bibliography: {...FR-FRESH-1
       fields}, claims: [{span: "s<k>", subject, kind: version|api|protocol|standard|tool|statistic|law|other, why,
       confidence: low|medium|high}]}` with at most `claims_max` claims. Code expands aliases to span ids and pages and
-      drops a claim with an unknown alias or a subject over `subject_words_max` words or `subject_chars_max`
-      characters, or with no word (counted in `dropped`). Words are counted as INV-FRESH-1 counts them: the Unicode
-      `\w+` tokens of `reader.freshness.text.words`, so `one-two.three/four` is four words, not one. Invalid JSON or schema → `output_invalid` (transient).
+      drops a claim with an unknown alias or a subject over `subject_words_max` words, with a token over
+      `subject_token_chars_max` characters, over `subject_chars_max` characters, or with no word (counted in
+      `dropped`). Words are counted as INV-FRESH-1 counts them (`reader.freshness.text.words`): runs of `[^\W_]+`
+      (so `_` separates, like `-`, `.`, `/`), split again where the script changes (the first word of the
+      character's Unicode name, so U+02BC between Latin letters separates) and between letters and digits; a
+      character of a script written without spaces (CJK ideographs, kana, Thai, Lao, Myanmar, Khmer) is a word of
+      its own; a dotted number such as `3.11` is one word; then a token that is not itself a word of the non-front
+      sampled spans but concatenates their words (an empty joiner, a zero-width character `clean` removed,
+      camelCase) counts as the fewest such words (`text.split`). So `one-two.three/four`, `one_two_three_four`,
+      `OneTwoThreeFour` and `onetwothreefour` (also the four words joined by U+200B) are four words each when the
+      spans hold those words. Invalid JSON or schema →
+      `output_invalid` (transient); so is output holding a lone surrogate, raw or as a `\ud800` escape.
       **Reuse:** `scan_inputs_sha256` = sha256 of the canonical JSON of (ingest id, sample span ids, the scan prompt's
       version and file sha256, resolved model id); it excludes the bibliography. A new check whose
       `scan_inputs_sha256` equals that of any earlier report of the same material with stored `claims` (whatever that
@@ -213,12 +225,16 @@ requirements:
       documentation"); (6) `books` — the first level-1 topic, "book" and the current year. Missing claims are replaced
       by `topic_docs` queries (a level-1 topic plus "official documentation"), in topic order. `plan` applies
       FR-FRESH-3's subject rule again, so a stored or reused claim meets it too: a claim whose subject fails it is
-      skipped before the ranking (`dropped.subject_too_long`). Each query is NFC,
+      skipped before the ranking (`dropped.subject_too_long`). Claims are then taken in rank order, skipping one
+      whose subject, before or after the subject of a claim already taken, forms a `shingle_words`-word run of a
+      non-front sampled span with its exempt strings masked (`dropped.subject_split`), so a span's run cannot be
+      split across the queries of one check (the owner note holds per check). Each query is NFC,
       whitespace-collapsed, and cut at a word boundary of its variable parts to `query_chars_max`. A planned query is
       dropped (`dropped.query_unsafe`) when, after masking the bibliography and topic strings it contains, it holds a
       `shingle_words`-word run of any non-front sampled span. Masking removes the exempt word sequences from both
       sides, the query's words and each span's words, before the runs are compared; an exempt word inside a copied
-      run therefore cannot hide it (a 7-word copy with a topic word in the middle is still caught).
+      run therefore cannot hide it (a 7-word copy with a topic word in the middle is still caught). Words are
+      FR-FRESH-3's on both sides, and a query token that concatenates span words counts as those words.
   - id: FR-FRESH-6
     text: >-
       Query gate. Each search run gets one planned query q and a `PreToolUse` hook (the adapter passes a string prompt,
@@ -248,7 +264,7 @@ requirements:
       items of each search, in order, become R entries with ids `r1`, `r2`, … numbered across the check. An item is
       dropped before any prompt (`dropped.url_unsafe`) when its URL is not a string or is longer than `url_chars_max`,
       holds whitespace, a C0/C1 control or any other character FR-FRESH-8's sanitising removes (zero-width, line
-      and paragraph separators, the bidi formatting characters of REF-FRESH-6), `urllib.parse.urlsplit` raises
+      and paragraph separators, the bidi formatting characters of REF-FRESH-6, lone surrogates), `urllib.parse.urlsplit` raises
       `ValueError` or gives a scheme other than `http`/`https`, a username or password, or no host, its port is not
       absent or an integer in 0–65535, the hostname holds a character other than a Unicode letter or digit, `-` or
       `.` (so no `%`, `_` or brackets: the web's URL Standard parse must give the same host), the hostname's `idna`
@@ -274,9 +290,10 @@ requirements:
       current|partly_outdated|outdated, reasons: [{text, citations: [r-id]}], claims: [{id, status:
       changed|unchanged|unknown, note, citations: [r-id]}], recommendations: [{source: r-id, date?, kind:
       book_edition|book|official_docs|course|other, why, covers: [section id]}]}`; unknown keys, a wrong enum or a
-      missing key → `output_invalid`. Then code, in order: sanitises every string (NFC; removes C0/C1 controls,
-      U+200B–U+200F, U+2028/U+2029 and the bidi formatting characters of REF-FRESH-6; collapses whitespace; cuts to
-      its bound); resolves every cited or recommended id to its R entry and stores that entry's URL string, `host` and
+      missing key → `output_invalid`, as is output holding a lone surrogate (raw or as a `\ud800` escape). Then
+      code, in order: sanitises every string (NFC; removes C0/C1 controls, U+200B–U+200F, U+2028/U+2029, the bidi
+      formatting characters of REF-FRESH-6 and lone surrogates U+D800–U+DFFF; collapses whitespace; cuts to its
+      bound); resolves every cited or recommended id to its R entry and stores that entry's URL string, `host` and
       title (the model never writes a URL or a title), dropping an unknown id (`dropped.source_unknown`); keeps `date`
       only as `YYYY`, `YYYY-MM` or `YYYY-MM-DD` not after today, with `date_source: model`; drops unknown section and
       claim ids; keeps at most
@@ -362,7 +379,9 @@ requirements:
       retry** (worst $0.39 + $0.116 = $0.51 ≤ the $1.00 cap).
 
       **Job-level attempts:** `max_attempts` 2. A second attempt (after a timeout or a worker restart) **restarts the
-      check's stage (b) from its first search**, because R is gone. Its calls reserve and settle again. Combined worst
+      check's stage (b) from its first search**, because R is gone. Its calls reserve and settle again. The web job
+      writes `dropped` only with its final status (progress writes `searches` alone), so a second attempt starts
+      from the scan's counts and counts nothing twice. Combined worst
       case — a restart plus a paid report retry in each attempt — is $0.170 + 2 × ($0.103 + 2 × $0.116) ≈ $0.84, or
       ≈ $0.87 with the $0.02 search reserve floors, under the $1.00 cap (REF-FRESH-2 § 4). The scan job has
       `max_attempts` 2 as well: a restart of a **paid** scan (the first attempt's scan call settled, then the job
@@ -385,10 +404,13 @@ requirements:
     text: >-
       Live: on the pilot with an owner-entered bibliography, one check completes `done` with a verdict, ≥ 1 search
       with results, ≥ 1 stored URL and every stored URL in that check's R, cost ≤ `run_cap_usd`, ledger rows carrying
-      `web_search_requests`, and the settled amount within SRV-AGENT's cross-check tolerance of the proxy-recorded
-      usage (H-WS-6); for every search the live result records the gate's decision (H-FRESH-2) and
-      `run_input_tokens`, the search run's summed input tokens from `model_usage` (main loop plus nested request):
-      an upper bound of t, not t itself (H-WS-3). It runs **in-process** in the worker container
+      `web_search_requests`, and, over at least one settle row that has both, the settled amount (priced from the
+      SDK's `model_usage`) within SRV-AGENT's cross-check tolerance of the SDK's `total_cost_usd` (`sdk_usd`).
+      agent-proxy records no usage of its own, so H-WS-6's proxy-side comparison is not made by this check. For
+      every search the live result records the gate's decision (`allowed` or `denied`; a search with results was
+      `allowed`; H-FRESH-2) and `run_input_tokens`, the search run's summed uncached `input` tokens from
+      `model_usage` (main loop plus nested request; cache writes and reads are not in it): input only, an
+      indication of t, not t itself (H-WS-3). It runs **in-process** in the worker container
       (`python -I -m reader.freshness.live`), because R exists only in the memory of the process that runs the
       searches: it calls the handlers of `reader.freshness.routes.ROUTES` directly as the owner — a free GET of the
       estimate, the POST that echoes its `high_usd`, the scan and web job handlers, and a free GET of the stored
@@ -406,19 +428,25 @@ invariants:
       words. Hence: (a) at most `subject_words_max` words per query come from non-front spans other than through
       exempt strings; (b) no query holds a `shingle_words`-word run of a non-front sampled span once its exempt
       strings are masked (FR-FRESH-5: removed from both word sequences); (c) no other text of the book can reach it.
-      Words are `\w+` tokens everywhere (FR-FRESH-3). Test: canary sentences of ≥ 6 unique words are
-      planted in non-front spans and never in the outline or the bibliography; a fake scan may copy up to 5 canary
-      words into a subject; the generator also joins subject words with punctuation (`-`, `.`, `/`, `,`) and up to
-      8 words, and plants sentences that hold a topic or bibliography word and end with the claim template's own
-      words; asserted for every query `plan` returns, every query the hook allows, and every body
-      agent-proxy forwards to the stub during stage (b): no 6-word canary run appears and at most 5 canary words
-      appear per query. The [agent] part runs the real adapter (`AgentProvider`, the bundled CLI in
-      `reader-server:local`) through a real agent-proxy (`create_app`) to the stub's `websearch` scenario with the
-      ledger's reserve and settle replaced in memory (the image test has no database, `--network none`). The stub
-      echoes the run's own `Query: <q>` line in its WebSearch tool_use (`STUB_QUERY_FROM_PROMPT=1`); each planned
-      query runs as `jobs.search_call` builds it for the job; the test also asserts that the `PreToolUse` matcher is
-      `WebSearch` and its one hook is the caller's `Gate`, that the gate allowed the planned query once, and that
-      each run's R comes from the stub's structured results.
+      Words are FR-FRESH-3's everywhere (a concatenation of span words counts as those words). Test: canary
+      sentences of ≥ 6 unique words are planted in non-front spans and never in the outline or the bibliography; a
+      fake scan may copy up to 5 canary words into a subject; the generator also joins subject words with
+      punctuation (`-`, `.`, `/`, `,`), `_`, the empty joiner, U+200B, U+200D, U+02BC and a digit, optionally in
+      camelCase, and up to 8 words, and plants sentences that hold a topic or bibliography word and end with the
+      claim template's own words; asserted for every query `plan` returns, every query the hook allows, and every
+      body agent-proxy forwards to the stub during stage (b): no 6-word canary run appears and at most 5 canary
+      words appear per query. The oracle is independent of the product's tokenizer: a regex match of the canary
+      words in the raw, case-folded query or body text (a canary run: its words in order with only non-letters or
+      exempt words between). The [agent] part runs the real adapter (`AgentProvider`, the bundled CLI of an image
+      built from deploy/images/server.Dockerfile and run by the id `docker build -q` prints, never by a shared
+      tag) through a real agent-proxy (`create_app`) to the stub's `websearch` scenario with the ledger's reserve
+      and settle replaced in memory (the image test has no database, `--network none`), in two scenarios. Allow:
+      the stub echoes the run's own `Query: <q>` line in its WebSearch tool_use (`STUB_QUERY_FROM_PROMPT=1`); each
+      planned query runs as `jobs.search_call` builds it for the job; the test also asserts that the `PreToolUse`
+      matcher is `WebSearch` and its one hook is the caller's `Gate`, that the gate allowed the planned query once,
+      and that each run's R comes from the stub's structured results. Deny: the stub asks for its own fixed query;
+      the gate denies it once per run, no nested search request is forwarded (two main-loop bodies per run), no
+      search is counted and R is empty.
   - id: INV-FRESH-2
     text: >-
       A stored report holds only FR-FRESH-8's and FR-FRESH-10's fields within their bounds, and no `cited_text`,
@@ -446,10 +474,10 @@ nfr: []
 
 vectors:
   - id: VEC-FRESH-1
-    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, a list or an object where an enum string belongs, extra keys, over-long strings, punctuation-joined subjects, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
+    source: Synthetic scan and report outputs (valid, missing keys, wrong enums, a list or an object where an enum string belongs, extra keys, over-long strings, punctuation-joined subjects, subjects joined by `_`, U+200B, U+200D, U+02BC, digits, camelCase or nothing, a CJK subject, a dotted version, lone surrogates raw and escaped, unknown aliases, claim and section ids) with the parsed result or `output_invalid`
     file: spec/fixtures/SRV-FRESH/outputs.yaml
   - id: VEC-FRESH-2
-    source: Injection cases in search titles, summaries and model output (instructions, delimiter forgery, bidi overrides, zero-width characters, markup, a URL not searched, a model title differing from R's) with the sanitised stored result
+    source: Injection cases in search titles, summaries and model output (instructions, delimiter forgery, bidi overrides, zero-width characters, lone surrogates in a title and a URL, markup, a URL not searched, a model title differing from R's) with the sanitised stored result
     file: spec/fixtures/SRV-FRESH/injection.yaml
   - id: VEC-FRESH-3
     source: Search-result URL cases for R entry creation (schemes, userinfo, IDN to ASCII, urlsplit ValueError, idna UnicodeError, host and URL length, ports in and out of 0–65535, percent, underscore, symbols and empty or hyphen-edged labels in the host, IP literals, more than 10 results) and id resolution (unknown ids, a model-written URL instead of an id)
@@ -464,7 +492,7 @@ vectors:
     source: Estimate cases from sample sizes and the pricing table, recomputed by hand from REF-FRESH-2 § 4
     file: spec/fixtures/SRV-FRESH/estimate.yaml
   - id: VEC-FRESH-7
-    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe)
+    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims)
     file: spec/fixtures/SRV-FRESH/plans.yaml
 
 defers:
@@ -535,4 +563,13 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   labels (FR-FRESH-7, INV-FRESH-3); the gate's exact match (FR-FRESH-6) and the lost-search case; the report route
   is scoped to its material and the PUT passes the CSRF gate (FR-FRESH-11); the paid-scan-restart worst case
   (FR-FRESH-12); FR-FRESH-14 in-process through the route handlers with `run_input_tokens`; INV-FRESH-1's [agent]
-  test through the real CLI and a real agent-proxy."
+  test through the real CLI and a real agent-proxy.
+  Code review round 2 (2026-11-24), fixed without loosening any bound: words are `[^\\W_]+` runs split at script
+  changes and letter/digit boundaries, CJK and other space-less scripts per character, dotted numbers one word,
+  and a concatenation of span words counted as those words (FR-FRESH-3; new bound `subject_token_chars_max`
+  24); INV-FRESH-1's oracles are a regex over the raw text, and its generator adds `_`, the empty joiner,
+  U+200B, U+200D, U+02BC, a digit and camelCase; a span run split across two claims is skipped
+  (`subject_split`, FR-FRESH-5); lone surrogates are removed by sanitising, `output_invalid` in model output,
+  `url_unsafe` in URLs and `bibliography_invalid` in the owner's entry (FR-FRESH-1/-7/-8); the web job writes
+  `dropped` only with its final status (FR-FRESH-12); FR-FRESH-14's cross-check needs a compared row and names
+  what it compares; the [agent] test adds the deny scenario and runs its image by id."

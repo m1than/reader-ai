@@ -1,5 +1,6 @@
 """The bibliography (FR-FRESH-1): the owner's entry (validated, else `bibliography_invalid` with the field)
 and the scan's extraction (out-of-bound fields dropped one by one). Its sha256 is that of its canonical JSON.
+A string holding a lone surrogate (U+D800 to U+DFFF) is out of bounds: UTF-8 cannot store it.
 """
 
 from __future__ import annotations
@@ -11,7 +12,8 @@ from datetime import date
 from typing import Any, Final
 
 from reader.freshness import params
-from reader.freshness.text import clean
+from reader.freshness.text import clean as _clean
+from reader.freshness.text import has_surrogate
 
 FIELDS: Final = (
     "title",
@@ -42,6 +44,13 @@ class BibliographyInvalid(Exception):
         super().__init__("bibliography_invalid")
         self.code = "bibliography_invalid"
         self.field = field
+
+
+def clean(value: str) -> str:
+    """`text.clean`, refusing (ValueError) a string with a lone surrogate instead of dropping it."""
+    if has_surrogate(value):
+        raise ValueError
+    return _clean(value)
 
 
 def isbn_ok(value: str) -> bool:
@@ -130,7 +139,8 @@ def validate(raw: object, today: date) -> dict[str, Any]:
         raise BibliographyInvalid("body")
     for key in raw:
         if key not in FIELDS:
-            raise BibliographyInvalid(str(key)[:40])
+            name = str(key)[:40]
+            raise BibliographyInvalid("body" if has_surrogate(name) else name)
     out: dict[str, Any] = {}
     for name in FIELDS:
         try:

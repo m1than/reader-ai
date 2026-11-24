@@ -248,7 +248,11 @@ def test_sample_bounds_and_round_robin(rows: list[tuple[int, str, str]], levels:
 
 def _aliases(data: dict[str, Any]) -> dict[str, Any]:
     sample = _mods().sample
-    return {a: sample.Picked(seq, page, "text", "t", False) for a, (seq, page) in data["aliases"].items()}
+    texts = data.get("span_texts", {})
+    return {
+        a: sample.Picked(seq, page, "text", texts.get(a, "t"), False)
+        for a, (seq, page) in data["aliases"].items()
+    }
 
 
 @pytest.mark.parametrize("case", fixture("outputs.yaml")["scan"], ids=lambda c: c["name"])
@@ -265,6 +269,21 @@ def test_scan_output_vectors(case: dict[str, Any]) -> None:
     assert result.bibliography == case["expect"]["bibliography"]
     assert result.claims == case["expect"]["claims"]
     assert dict(result.dropped) == case["expect"]["dropped"]
+
+
+def test_a_raw_lone_surrogate_in_model_output_is_output_invalid() -> None:
+    """VEC-FRESH-1's escaped surrogates, raw: output_invalid from the shared JSON loader, never a crash
+    later."""
+    m = _mods()
+    data = fixture("outputs.yaml")
+    raw = json.dumps({"bibliography": {"title": "T"}, "claims": []}).replace("T", "T" + chr(0xD800))
+    with pytest.raises(m.errors.OutputInvalid):
+        m.scan.parse(raw, _aliases(data), data["material_sha256"], TODAY)
+    reason = {"text": "xX", "citations": []}
+    report = json.dumps({"verdict": "current", "reasons": [reason], "claims": [], "recommendations": []})
+    assert m.verdict.parse(report)  # valid without the surrogate
+    with pytest.raises(m.errors.OutputInvalid):
+        m.verdict.parse(report.replace("xX", "x" + chr(0xDFFF)))
 
 
 def test_scan_output_invalid_is_transient() -> None:
@@ -443,7 +462,25 @@ def test_report_output_vectors(case: dict[str, Any]) -> None:
 
 @pytest.mark.parametrize("case", fixture("injection.yaml")["sanitise"], ids=lambda c: c["out"][:20])
 def test_sanitise_vectors(case: dict[str, Any]) -> None:
-    assert _mods().text.sanitise(case["in"], case["limit"]) == case["out"]
+    value = json.loads(case["in_json"]) if "in_json" in case else case["in"]
+    assert _mods().text.sanitise(value, case["limit"]) == case["out"]
+
+
+def test_lone_surrogates_in_search_results() -> None:
+    """VEC-FRESH-2: a lone surrogate drops the URL (`url_unsafe`) and is removed from a title."""
+    m = _mods()
+    case = fixture("injection.yaml")["search_surrogates"]
+    content = [
+        {
+            "title": json.loads(item["title_json"]) if "title_json" in item else item["title"],
+            "url": json.loads(item["url_json"]) if "url_json" in item else item["url"],
+        }
+        for item in case["links"]
+    ]
+    found = m.links.collect([{"results": [{"content": content}, "summary"]}], 1)
+    assert [e.title for e in found.entries] == case["expect_titles"]
+    assert dict(found.dropped) == case["expect_dropped"]
+    json.dumps([e.citation() for e in found.entries], ensure_ascii=False).encode("utf-8")  # storable
 
 
 def test_web_text_cannot_forge_the_delimiter() -> None:
@@ -580,11 +617,38 @@ KIND_KEYS = {"version": "latest_version", "api": "latest_version", "protocol": "
              "statistic": "official_documentation", "law": "current_specification"}
 
 
-@settings(max_examples=150, deadline=None)
+# Joiners between copied words (INV-FRESH-1): punctuation, `_`, nothing, U+200B, U+200D, U+02BC and a digit.
+ZWSP, ZWJ, MODIFIER_APOSTROPHE = chr(0x200B), chr(0x200D), chr(0x02BC)
+JOINERS = [" ", "-", ".", "/", ",", "_", "", ZWSP, ZWJ, MODIFIER_APOSTROPHE, "1"]
+CANARY = re.compile(r"canary[a-f]{2}")
+# The independent oracle's gap between two words of a run: anything but a letter, or an exempt word.
+EXEMPT_GAP = (
+    f"(?:[\\W\\d_{MODIFIER_APOSTROPHE}]|" + "|".join(re.escape(w.casefold()) for w in EXEMPT_WORDS) + ")*"
+)
+
+
+def canary_count(text: str) -> int:
+    """INV-FRESH-1's oracle, independent of the product tokenizer: canary words found in the raw text."""
+    return len(CANARY.findall(text.casefold()))
+
+
+def holds_run(text: str, sentence: list[str], exempt: set[str]) -> bool:
+    """True when 6 consecutive words of the sentence (exempt words removed, as INV-FRESH-1 b masks them) occur
+    in the raw, case-folded text in order with only non-letters or exempt words between them."""
+    kept = [w.casefold() for w in sentence if w.casefold() not in exempt]
+    folded = text.casefold()
+    for i in range(len(kept) - 5):
+        if re.search(EXEMPT_GAP.join(re.escape(w) for w in kept[i : i + 6]), folded):
+            return True
+    return False
+
+
+@settings(max_examples=200, deadline=None)
 @given(
     picks=st.lists(st.integers(0, len(CANARY_WORDS) - 8), min_size=1, max_size=4),
     subject_len=st.integers(1, 8),
-    joiners=st.lists(st.sampled_from([" ", "-", ".", "/", ","]), min_size=7, max_size=7),
+    joiners=st.lists(st.sampled_from(JOINERS), min_size=7, max_size=7),
+    camel=st.booleans(),
     kinds=st.lists(
         st.sampled_from(["version", "api", "protocol", "statistic", "law"]), min_size=3, max_size=3
     ),
@@ -596,15 +660,17 @@ def test_no_canary_run_reaches_any_query(
     picks: list[int],
     subject_len: int,
     joiners: list[str],
+    camel: bool,
     kinds: list[str],
     lang: str,
     inserted: tuple[str, int] | None,
     template_tail: bool,
 ) -> None:
     """INV-FRESH-1 over plan(): canary sentences in non-front spans, optionally holding an exempt word and
-    ending with the claim template's own words; a fake scan copies a run of the sentence (punctuation-joined,
-    up to 8 words) into each subject. No query holds a 6-word run of a sentence or more than 5 canary
-    words."""
+    ending with the claim template's own words; a fake scan copies a run of the sentence (joined by
+    punctuation, `_`, nothing, zero-width or modifier characters or a digit, optionally camelCase, up to 8
+    words) into each subject. By a regex over the raw query (not the product tokenizer): no query holds a
+    6-word run of a sentence or more than 5 canary words."""
     m = _mods()
     sentences: list[list[str]] = []
     for i, p in enumerate(picks):
@@ -617,7 +683,7 @@ def test_no_canary_run_reaches_any_query(
     non_front = [f"Intro {' '.join(s)} outro." for s in sentences]
 
     def subject(words: list[str]) -> str:
-        head = words[:subject_len]
+        head = [w.title() if camel else w for w in words[:subject_len]]
         return head[0] + "".join(j + w for j, w in zip(joiners, head[1:], strict=False))
 
     claims = [
@@ -627,12 +693,10 @@ def test_no_canary_run_reaches_any_query(
     bib = {"title": "Practical Ledgers", "authors": ["Ada Example"], "year": 2019}
     topics = [m.sample.Topic(0, "Ledgers", 1), m.sample.Topic(1, "Blocks", 1)]
     plan = m.queries.plan(bib, topics, claims, lang, TODAY, non_front)
-    canary = set(CANARY_WORDS)
-    runs = m.queries.shingles([" ".join(s) for s in sentences])
+    exempt = {w.casefold() for e in EXEMPT_WORDS for w in e.split()}
     for query in plan.queries:
-        tokens = m.text.words(query.text)
-        assert sum(1 for t in tokens if t in canary) <= bounds()["subject_words_max"], query.text
-        assert not any(tuple(tokens[i : i + 6]) in runs for i in range(len(tokens) - 5)), query.text
+        assert canary_count(query.text) <= bounds()["subject_words_max"], query.text
+        assert not any(holds_run(query.text, s, exempt) for s in sentences), query.text
 
 
 @pytest.mark.anyio

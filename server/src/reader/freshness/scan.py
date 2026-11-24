@@ -4,9 +4,11 @@ delimiter, and the strict parse of its JSON output.
 Span k of the sample (1-based, in `seq` order) gets the alias `s<k>`; each renders as
 `⟦source⟧ s<k> p.<page> <kind> ⟦/source⟧` and its text, with the marker brackets replaced so span text
 cannot forge a marker.
-Code expands aliases to span ids and pages and drops a claim with an unknown alias, or with a subject over
-`subject_words_max` words (Unicode `\\w+` tokens, as INV-FRESH-1 counts them, so `a-b-c` is three words) or
-`subject_chars_max` characters (counted in `dropped`).
+Code expands aliases to span ids and pages and drops a claim with an unknown alias, or whose subject fails
+`queries.subject_ok` over the non-front sampled spans' vocabulary (words as INV-FRESH-1 counts them, so
+`a-b-c` and `a_b_c` are three words, and a concatenation of span words counts as those words; a token over
+`subject_token_chars_max` or a subject over `subject_chars_max` characters fails), counted in `dropped`.
+Output holding a lone surrogate (U+D800 to U+DFFF, which UTF-8 cannot store) is `output_invalid`.
 """
 
 from __future__ import annotations
@@ -24,7 +26,7 @@ from reader.freshness.errors import OutputInvalid
 from reader.freshness.prompts import Prompt
 from reader.freshness.queries import subject_ok
 from reader.freshness.sample import Picked, Sample, span_id
-from reader.freshness.text import clean, sanitise
+from reader.freshness.text import clean, has_surrogate, sanitise, vocabulary
 
 OPEN: Final = "⟦source⟧"
 CLOSE: Final = "⟦/source⟧"
@@ -60,13 +62,17 @@ def call_texts(sample: Sample, prompt: Prompt) -> tuple[str, str]:
 
 
 def load_json(text: str) -> Any:
-    """The output's one JSON value (a ```json fence around it is allowed); else `output_invalid`."""
+    """The output's one JSON value (a ```json fence around it is allowed); else `output_invalid`, also when
+    the text or a decoded string (a `\\ud800` escape) holds a lone surrogate."""
     fenced = _FENCE.match(text)
     body = fenced.group(1) if fenced else text
     try:
-        return json.loads(body)
+        data = json.loads(body)
     except ValueError:
         raise OutputInvalid from None
+    if has_surrogate(text) or has_surrogate(json.dumps(data, ensure_ascii=False)):
+        raise OutputInvalid
+    return data
 
 
 @dataclass(frozen=True)
@@ -99,6 +105,7 @@ def parse(text: str, aliases: Mapping[str, Picked], material_sha256: str, today:
     def drop(reason: str) -> None:
         dropped[reason] = dropped.get(reason, 0) + 1
 
+    vocab = vocabulary(span.text for span in aliases.values() if not span.front)
     kept: list[dict[str, Any]] = []
     for item in checked:
         if len(kept) == params.CLAIMS_MAX:
@@ -109,7 +116,7 @@ def parse(text: str, aliases: Mapping[str, Picked], material_sha256: str, today:
             drop("claim_span_unknown")
             continue
         subject = clean(item["subject"])
-        if not subject_ok(subject):
+        if not subject_ok(subject, vocab):
             drop("subject_too_long")
             continue
         kept.append(

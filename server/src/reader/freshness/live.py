@@ -12,8 +12,11 @@ are not exercised here):
      that keeps every search run's R (memory only) and gate decision;
   4. GET …/freshness/{report_id}, free: the stored report, whose URLs are compared with R.
 It prints one JSON object of ids, counts, flags and costs, and per search the gate's decision and the run's
-summed input tokens (`run_input_tokens`: the main loop's requests plus the nested search request, so an upper
-bound of t, never t itself). Never a query, title, URL, bibliography field or model text.
+summed uncached input tokens (`run_input_tokens`: `model_usage` input of the main loop's requests plus the
+nested search request; input only, no cache writes or reads, so an indication of t, never t itself). The
+cost cross-check compares each settle row's priced `usd` with the SDK's `sdk_usd` and holds only over at
+least one such row (agent-proxy records no usage). Never a query, title, URL, bibliography field or model
+text.
 """
 
 from __future__ import annotations
@@ -192,6 +195,7 @@ async def _run() -> dict[str, Any]:
         stored += [c["url"] for s in report["claim_status"] or [] for c in s["citations"]]
         stored += [r["url"] for r in report["recommendations"] or []]
         settles = await _settles(engine, report_id)
+        compared = [(Decimal(s[0]), Decimal(s[1])) for s in settles if s[0] is not None and s[1] is not None]
         return {
             "report": report_id.hex[:8],
             "estimate_high_usd": high_usd,
@@ -203,9 +207,8 @@ async def _run() -> dict[str, Any]:
             "stored_urls_in_r": all(u in recorder.urls for u in stored),
             "usd": float(await ledger.spent(engine, run_id=report_id)),
             "ledger_rows_with_web_search_requests": sum(1 for s in settles if s[2]),
-            "crosscheck_ok": all(
-                crosscheck_ok(Decimal(s[0]), Decimal(s[1])) for s in settles if s[0] and s[1]
-            ),
+            "crosscheck_rows": len(compared),
+            "crosscheck_ok": bool(compared) and all(crosscheck_ok(sdk, usd) for sdk, usd in compared),
             "searches": recorder.searches,
         }
     finally:
