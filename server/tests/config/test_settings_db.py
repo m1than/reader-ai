@@ -265,7 +265,7 @@ async def test_signup_turned_off_by_an_override_answers_404_without_a_restart(pg
 
 
 async def test_a_stored_open_override_never_opens_a_file_off_switch(pg: Pg, tmp_path: Path) -> None:
-    """Narrowing on the resolved file value, through SRV-AUTH's sign-up routes (the reader), not the function."""
+    """Narrowing on the resolved file value, through SRV-AUTH's sign-up routes (the reader)."""
     w = await world(pg, tmp_path, sharing='{ signup: "off" }')
     owner = w.users["ivan"]
     # Stored earlier (the file changed since): the route refuses to write it, so it is inserted directly.
@@ -294,7 +294,8 @@ async def test_numbers_at_the_overlay_bound_are_value_invalid(pg: Pg, tmp_path: 
         for key in ("budgets.monthly_usd", "tasks.draft.budget_usd_per_lesson"):
             for value in (1e15, 1e308, 10**15, 10**400):
                 r = await c.post(f"/api/settings/{key}", json={"value": value, "version": 0})
-                assert (r.status_code, r.json()) == (400, {"error": "value_invalid", "field": key}), (key, value)
+                refused = (400, {"error": "value_invalid", "field": key})
+                assert (r.status_code, r.json()) == refused, (key, value)
             r = await c.post(f"/api/settings/{key}", json={"value": 999999999999999, "version": 0})
             assert r.status_code == 200, (key, r.text)  # just below the bound
     assert await overrides(w.engine) == [

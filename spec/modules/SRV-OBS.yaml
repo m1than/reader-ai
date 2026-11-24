@@ -94,7 +94,11 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   V/manage-impl-web): e2e/live/lib/obs_browser.mjs's browser context passes `locale: 'en-US'`, so the live check
   reads the English interface whatever the host's language; no requirement changed. Merge of V/manage-impl into
   V/slice-integration (2026-11-24): test_summary's FR-OBS-17 seed inserts each course with a position (SRV-LESSON
-  FR-LESSON-20's CHECK: an active course has one); no oracle changed."
+  FR-LESSON-20's CHECK: an active course has one); no oracle changed. Code review of the management layer
+  (2026-11-24, V/manage-fix-auth; SRV-CONFIG FR-CONFIG-26 B5): tests/obs/test_overrides_db.py adds the [db] oracle
+  through the real readers: an `observability.retention_days` override reaches the retention job's cutoff (the
+  trace delete's and the obs_tracing prune's, FR-OBS-11) and the summary's trace cutoff (FR-OBS-1), where the file's
+  value would give another; no requirement changed."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0033, ADR-0035, ADR-0038, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
