@@ -1651,7 +1651,7 @@ tasks:
         (POST /api/archive and /api/transform measured on the pinned image), feedback WARNING, record early return,
         miss cache, FLUSH_MS note. Gate: pytest 1 failed + 103 errors, all Postgres-connect timeouts under load (and
         Docker Desktop's disk full); `pytest --lf` alone 104 passed: load flakes. Obs [image] tests 10 of 10 (9 in
-        the parallel run, then the edge test, updated for the read-only 8444, passed alone). Next: code review round 2." }
+        the parallel run, then the edge test, updated for the read-only 8444, passed alone). Stubbed browser suite: 465 passed. Next: code review round 2." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
