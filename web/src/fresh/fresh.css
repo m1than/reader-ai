@@ -79,7 +79,7 @@
   margin: 0 0 var(--acme-space-3);
   padding: var(--acme-space-3) var(--acme-space-4);
   border: 1px solid var(--acme-border);
-  border-radius: 8px;
+  border-radius: var(--radius-block);
   background: var(--acme-surface);
 }
 
@@ -113,7 +113,7 @@
 .fresh-stale {
   padding: 0 var(--acme-space-2);
   border: 1px solid var(--acme-warning);
-  border-radius: 4px;
+  border-radius: var(--radius-control);
   font-weight: 600;
 }
 
@@ -132,7 +132,7 @@
 .fresh-field textarea {
   padding: var(--acme-space-2);
   border: 1px solid var(--acme-control-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--acme-surface);
   color: var(--acme-text);
   font: inherit;
@@ -153,5 +153,5 @@
   margin: 0 0 var(--acme-space-3);
   padding: var(--acme-space-3);
   border: 1px solid var(--acme-border);
-  border-radius: 8px;
+  border-radius: var(--radius-block);
 }
