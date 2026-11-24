@@ -23,6 +23,9 @@ status: approved
 approved_by: agent
 approved_at: 2026-11-20
 review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code review round 1 changes (applied).
+  Paired change 2026-11-23 (for SRV-FRESH, ADR-0030 accepted by the owner): deploy/reader.example.yaml gains the
+  tasks freshness_scan (sonnet), freshness_web (haiku) and freshness_report (sonnet) (FR-DEPLOY-12 note); no test
+  of this module changed.
   Paired change 2026-11-21 (coordinator-scheduled, for SRV-LESSON and SRV-INGEST, the first writers to blobs): FR-DEPLOY-5
   adds the blobs mount point owned by 10001 in server.Dockerfile; measured by the SRV-LESSON reviewer (a 10001-owned
   image dir gives a fresh volume 10001:10001 755, writable under --cap-drop ALL --read-only).
@@ -288,7 +291,9 @@ requirements:
       materials, sectors, sharing, observability). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
       sized for two worst-case calls each (paired SRV-AGENT/SRV-PIPELINE change, 2026-11-22): draft 4.0, fact_check
       2.0, review 4.0. Paired SRV-OBS change (2026-11-24): a tenth section `observability` (SRV-CONFIG FR-CONFIG-17),
-      so the example has all ten sections.
+      so the example has all ten sections. Paired SRV-FRESH change (2026-11-23): the freshness check's three tasks
+      `freshness_scan: { model: sonnet }`, `freshness_web: { model: haiku }`, `freshness_report: { model: sonnet }`
+      (caps are SRV-FRESH's own bounds, not task budgets).
   - id: FR-DEPLOY-13
     text: >-
       Observability (paired SRV-OBS change, ADR-0032 accepted 2026-11-24; this item amends FR-DEPLOY-1, -3, -5, -6, -7,

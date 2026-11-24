@@ -1,5 +1,5 @@
-// [browser] tests (WEB-UI, WEB-RENDER, SRV-TUTOR's Ask panel, SRV-AUTH's pages, WEB-PLAN's /import, WEB-ACCOUNTS):
-// run on request, not in tools/ci-local.sh.
+// [browser] tests (WEB-UI, WEB-RENDER, SRV-TUTOR's Ask panel, SRV-AUTH's pages, WEB-PLAN's /import, WEB-ACCOUNTS,
+// WEB-FRESH's card): run on request, not in tools/ci-local.sh.
 //   npm run build && npm run build-storybook && npm run e2e
 // (`npm run e2e` sets NODE_PATH so specs under e2e/web resolve web/node_modules, e.g. @axe-core/playwright.)
 import { defineConfig, devices } from '@playwright/test';
@@ -14,6 +14,7 @@ export default defineConfig({
     'import/**/*.spec.ts',
     'accounts/**/*.spec.ts',
     'notebook/**/*.spec.ts',
+    'fresh/**/*.spec.ts',
   ],
   fullyParallel: false,
   // WEB-UI FR-UI-15: the test server's compile stub keeps global state, so one worker.
@@ -23,7 +24,14 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testMatch: ['ui/**/*.spec.ts', 'render/**/*.spec.ts', 'tutor/**/*.spec.ts', 'import/**/*.spec.ts', 'notebook/**/*.spec.ts'],
+      testMatch: [
+        'ui/**/*.spec.ts',
+        'render/**/*.spec.ts',
+        'tutor/**/*.spec.ts',
+        'import/**/*.spec.ts',
+        'notebook/**/*.spec.ts',
+        'fresh/**/*.spec.ts',
+      ],
       use: { ...devices['Desktop Chrome'] },
     },
     // SRV-AUTH FR-AUTH-21 and FR-AUTH-32, WEB-ACCOUNTS FR-ACCOUNTS-5: every state in dark and in light.

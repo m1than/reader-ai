@@ -16,6 +16,10 @@ tasks:
   fact_check: { model: sonnet, budget_usd_per_lesson: 2.0 }
   review:     { model: opus,   budget_usd_per_lesson: 4.0 }
   tutor:      { model: sonnet }
+  # The source freshness check (SRV-FRESH; caps are its own bounds: $1.00 per run, $2.00 per day).
+  freshness_scan:   { model: sonnet }
+  freshness_web:    { model: haiku }
+  freshness_report: { model: sonnet }
 budgets: { monthly_usd: 200, warn_at: 0.8 }
 kernels: [python3, rust, deno]
 materials:

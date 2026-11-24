@@ -99,6 +99,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       plan: createPlanApi(deps),
       signups: createSignupsApi(deps),
       obs: createObsApi(deps), // FR-UI-18
+      http: deps,
       notify,
       navigateAway,
       // FR-UI-6, FR-UI-15: the owner's CompileControl renders through the slot unless a caller supplies its own.

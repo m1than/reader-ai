@@ -67,6 +67,21 @@
 # `thinking`, the SDK's `usage.output_tokens_details.thinking_tokens` (measured present in spikes/tutor-call and
 # spikes/compile-cost). It is already inside `output`, so it is not priced; null when the SDK gives none. Additive
 # migration agent_0002 (a nullable column); VEC-AGENT-1's mapping and a [db] settle test cover it.
+# Amendment (ADR-0030, accepted by the owner 2026-11-23; V/freshness): FR-AGENT-15..17 (FR-AGENT-14..16 on
+# V/freshness and in ADR-0030's text; renumbered at the merge into V/slice-integration, 2026-11-24, because
+# integration's FR-AGENT-14 is SRV-OBS's tracing amendment), INV-AGENT-6, VEC-AGENT-3/-4,
+# REF-AGENT-8 — one task-scoped tool allowance (`freshness_web`: the CLI's WebSearch), the proxy-enforced search
+# allowance with a `max_uses` rewrite (the only field the proxy rewrites), the per-search fee and a Haiku 5.5 row in
+# pricing, and settlement of tool calls. Everything else here is unchanged for every other task. Promoted with its
+# Red tests (2026-11-23) after the three-part gate held: deep-reviewer rounds 1–2 changes, round 3 approve (with
+# SRV-FRESH); the shapes pinned by the stub run and confirmed by the owner's live call (spikes/web-search §§ 5a, 5b);
+# the owner's acceptance of ADR-0030.
+# Code review round 1 of V/freshness (2026-11-24; no requirement loosened): a WebSearchCall with no hook is
+# `tools_mismatch` before the reservation (FR-AGENT-15); FR-AGENT-17 states that an error result never settles at the
+# SDK cost, that a model_usage TTL breakdown that does not add up is `usage_unmapped`, and that the 100,000-token
+# tier boundary is inclusive. New oracles: placeholder pins and the nested tool's `name` (VEC-AGENT-3), an
+# error-result settlement (VEC-AGENT-4), the tier boundary, the lower tier for summed usage, and the search fee in
+# the reserve.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -75,7 +90,7 @@ approved_by: agent
 approved_at: 2026-11-22
 layer: server
 track: ai
-adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017]
+adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017, ADR-0030]
 slice: V.COMPILE-min
 
 paths:
@@ -106,6 +121,9 @@ normative:
   - id: REF-AGENT-7
     title: spikes/tutor-call/RESULT.md (origin/V/V.TUTOR-min) — a custom system_prompt replaces the CLI's 6,803-token prompt (≈ 410 tokens overhead); thinking off
     url: spikes/tutor-call/RESULT.md
+  - id: REF-AGENT-8
+    title: Anthropic — Web search tool (max_uses counts failed searches; usage.server_tool_use.web_search_requests; $10 per 1,000 searches), the pricing page (Haiku 5.5 tiers) and spikes/web-search/RESULT.md
+    url: https://platform.claude.com/docs/en/agents-and-tools/tool-use/web-search-tool
 
 bounds:
   run_token_ttl_s: 1500         # proxy_upstream_timeout_s + 600 s margin: a token outlives its longest call, and a
@@ -130,7 +148,8 @@ tables:
 
 errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, provider_missing, provider_unavailable,
   rate_limited, run_token_unknown, tools_mismatch, model_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
-  usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded, body_not_utf8]
+  usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded, body_not_utf8, tools_not_allowed,
+  search_cap, request_cap]
 
 requirements:
   - id: FR-AGENT-1
@@ -274,7 +293,9 @@ requirements:
       closed and the call raises `upstream_retry` (transient) instead of waiting out the CLI's own ~3-minute backoff.
       (e) With `deadline_s`, a call still running after that many seconds is closed and raises `deadline_exceeded`
       (transient). In (d) and (e) the run_token is still revoked and the reservation settled per FR-AGENT-9 from the
-      upstream record (no 2xx → $0; a 2xx without an SDK cost → the reserve).
+      upstream record (no 2xx → $0; a 2xx without an SDK cost → the reserve). Its [image] test builds the server image
+      from `deploy/images/server.Dockerfile` and runs it by the id `docker build -q` prints, never by a tag, so the
+      shared `reader-server:local` of other checkouts and the running stack is never rewritten.
   - id: FR-AGENT-11
     text: >-
       Live: one `claude-sonnet-5-5` call with `max_turns=1` and a one-word answer through agent-proxy with a run_token
@@ -292,8 +313,86 @@ requirements:
       call's stage is a declared pipeline stage (the tutor's calls carry none). The tokens are the mapped usage's
       input, output, cache read and cache write (5m + 1h); `reader.cost_usd` is the ledger's settled amount, also on a
       failed call, and differs from the SDK's figure whenever settlement does (e.g. two 2xx answers). A provider
-      constructed without a configuration adds nothing to the environment. [unit, db]
-      server/tests/agent/test_obs_env.py.
+      constructed without a configuration adds nothing to the environment. A FR-AGENT-15 tool call (SRV-FRESH's
+      search run) gets the same additions plus FR-AGENT-15's `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION` and nothing
+      else; its four content flags stay `0`, which keeps the search query, the result titles and URLs and the
+      nested model's summary out of the CLI's `claude_code.tool*` spans (measured zero-credit in
+      spikes/web-search-otel: only `OTEL_LOG_TOOL_CONTENT=1` puts them, as a `tool.output` event; SRV-FRESH
+      FR-FRESH-13). [unit, db] server/tests/agent/test_obs_env.py.
+  - id: FR-AGENT-15
+    text: >-
+      Task-scoped tool allowance with pinned shapes (ADR-0030 Decision 1; VEC-AGENT-3). `POST /run-tokens` takes an
+      optional `"task"` and, only with `"task": "freshness_web"`, an optional `"web_search": {"searches_max": n,
+      "searches_per_request_max": m, "requests_max": r}` (JSON integers ≥ 1, not booleans; any other task, or no task,
+      with `web_search` → 400 `tools_not_allowed`; a malformed allowance → 400 `bad_request`). A token without that
+      allowance, **including a `freshness_web` token without it**, is tool-less: FR-AGENT-4 and FR-AGENT-7 ("tools must
+      be empty") apply unchanged. With the allowance, a body is forwarded only in one of two shapes, else 403
+      `tools_mismatch`:
+      (a) **main loop** — `tools` holds exactly one element named `WebSearch` with exactly the keys `name`,
+      `description`, `input_schema`, no `type`, a description of ≤ 1,000 characters (not pinned by bytes: the CLI may
+      put dated text in it) and an `input_schema` whose canonical sha256 equals the pinned digest, plus at most one
+      `DeferredToolPlaceholder` element (exactly the keys `name`, `description`, `input_schema`, `defer_loading: true`,
+      pinned input_schema digest, description ≤ 200 characters); `tool_choice` absent or `{type: auto}`;
+      (b) **nested search** — `tools` is exactly one object with `type` = WEB_SEARCH_VERSION (`web_search_20250305`),
+      `name` = `web_search` and no keys beyond `type`, `name`, `max_uses`; `max_uses`, if present, a JSON integer ≥ 1
+      (absent is allowed; 0, a negative, a float, a string or a boolean → 403 `tools_mismatch`); no `allowed_domains`,
+      `blocked_domains`, `user_location`, `allowed_callers` or `search_profile`; `tool_choice` absent or
+      `{type: auto}`.
+      `mcp_servers` stays refused. Every request's `model` must equal the token's model, else 403 `model_mismatch`
+      (a nested request moved to another model by a CLI flag fails closed). More than `requests_max` requests on one
+      token → 403 `request_cap`. A refusal settles by FR-AGENT-9's record rule (no 2xx → $0; otherwise the reserve).
+      The adapter (FR-AGENT-6) takes tool use only through one optional StageCall field, `web_search:
+      WebSearchCall(allowance, hook, max_turns)`, so no StageCall field names a tool (SRV-TUTOR's no-tools test
+      holds); the tools come from the code table `TOOL_STAGES = {("freshness_web", "search"): ("WebSearch",)}`, and a
+      call with `web_search` for any other (task, stage), or with a `hook` of None (no tool runs ungated), raises
+      `tools_mismatch` before the reservation. For such a
+      call it passes `tools=["WebSearch"]`, `allowed_tools=[]`, the caller's `PreToolUse` hook (the prompt is a
+      string, so not `can_use_tool`), its `max_turns`, and `CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION=<searches_max>`;
+      the init check (FR-AGENT-7) then requires `tools == ["WebSearch"]` and empty `mcp_servers`. Pinned data (from the stub run and the owner's
+      live call, spikes/web-search §§ 3a, 5b): any other web search version or CLI pin needs a new deep-reviewer round;
+      the CLI paths seen only in the binary (`search_profile`, the small-model flag `tengu_plum_vx3`,
+      search-elsewhere, searchViaSearchService, a ccr-proxy, an auxiliary request) fail closed.
+  - id: FR-AGENT-16
+    text: >-
+      Search allowance and request cap enforced by the proxy (ADR-0030 Decision 2; VEC-AGENT-4). For each nested
+      search request, before forwarding, the proxy sets `max_uses` to min(the client's value or
+      `searches_per_request_max` when absent, `searches_per_request_max`, remaining) — the **only field the proxy ever
+      rewrites**, in the checked object it re-serialises (FR-AGENT-4) — and subtracts it from the token's remaining
+      allowance; with 0 remaining it refuses with 403 `search_cap` and forwards nothing. Every forwarded request counts
+      against `requests_max`, including the CLI's own retries of a 429, 529 or 5xx (REF-AGENT-4: up to 10 resends): a
+      retried nested request finds the allowance used and is refused, so retries cannot buy more searches. SRV-FRESH
+      sets `requests_max` = 3 (2 main-loop requests + 1 nested) and `abort_on_retry` (FR-AGENT-13 d). The upstream
+      record (FR-AGENT-3) of every `freshness_web` token, with or without an allowance, adds `searches_forwarded`
+      (0 without one); other tokens' records are unchanged. Failed searches still count against `max_uses` upstream
+      (REF-AGENT-8), so the allowance bounds billed searches from above. The proxy log line (FR-AGENT-5) adds the route
+      kind (`main` | `search`) and nothing else.
+  - id: FR-AGENT-17
+    text: >-
+      Search fee, Haiku 5.5 and settlement (VEC-AGENT-2, VEC-AGENT-4). `spec/fixtures/SRV-AGENT/pricing.yaml` gains
+      `web_search_usd: 0.01` per search (REF-AGENT-8, $10 per 1,000) and a row `claude-haiku-5-5` with two tiers by
+      prompt size (the pricing page fetched 2026-11-23): prompts ≤ 100,000 tokens `{input: 0.10, output: 0.50,
+      cache_write_5m: 0.125, cache_write_1h: 0.20, cache_read: 0.01}` and, under `above_100k`, `{input: 0.50, output:
+      2.50, cache_write_5m: 0.625, cache_write_1h: 1.00, cache_read: 0.05}`; `cost(model, usage)` chooses the tier by
+      the usage's prompt tokens (input + cache writes + cache reads), and the reserve uses the higher tier when the
+      estimated prompt exceeds 100,000 tokens. The alias data (FR-AGENT-6) adds `haiku` → `claude-haiku-5-5`.
+      `cost(model, usage)` adds `web_search_requests × web_search_usd` (absent → 0). Settle rows store
+      `web_search_requests` (additive migration `agent_0003`, a nullable int). The SDK's `ResultMessage.usage` covers
+      the main loop only, while `total_cost_usd` and `model_usage` include the nested request and the fee (stub run and
+      the owner's live call, spikes/web-search § 5b: SDK = proxy, observed once); so for a tool call the settle row's
+      usage fields and `web_search_requests` come from the sum over `model_usage` entries, and the cross-check
+      (FR-AGENT-8) recomputes from that sum at the **lower** tier. `model_usage` is a per-model sum, not a per-request
+      one, so it cannot say which request crossed 100,000 prompt tokens: when the summed prompt tokens of an entry
+      with an `above_100k` tier exceed 100,000, the cross-check logs an INFO `tier_unknown` (model, summed prompt
+      tokens) beside any `cost_crosscheck` warning, and the settle amount stays the SDK's (whether `total_cost_usd`
+      knows the Haiku tiers stays open, H-WS-6). For a tool call several 2xx are expected: when the record shows no
+      refusal, nothing in flight or failed, at most `requests_max` requests, the result is not an error result, and
+      the SDK reports a cost, the settle amount is `total_cost_usd`; every other case keeps FR-AGENT-9's rule. A
+      `model_usage` entry whose `cacheCreationInputTokens` is not the sum of its 5-minute and 1-hour parts is
+      `usage_unmapped` (the TTL breakdown decides the rate). The tier boundary is inclusive: exactly 100,000 prompt
+      tokens is the lower tier, 100,001 the higher. The reserve for a tool call is max(the
+      caller's floor, FR-AGENT-9's single-call estimate + `searches_max × web_search_usd`); the caller's floor must
+      cover the call's worst case by formula (SRV-FRESH `search_reserve_floor_usd`), knowing that the tokens a search
+      adds are not enforceable.
 
 invariants:
   - id: INV-AGENT-1
@@ -316,6 +415,13 @@ invariants:
       reserve/settle/void/crash sequences).
   - id: INV-AGENT-5
     text: No log line from agent-proxy or the adapter contains a token, a run_token, a prompt or model output (canary test).
+  - id: INV-AGENT-6
+    text: >-
+      For any sequence of run_token requests and bodies, including retries: a body with non-empty `tools` is
+      forwarded only on a token with a `web_search` allowance and only in one of FR-AGENT-15's two shapes; on such a
+      token every forwarded `max_uses` ≤ `searches_per_request_max`, their sum ≤ `searches_max`, and at most
+      `requests_max` requests are forwarded; `mcp_servers` is never forwarded non-empty (property test against a stub
+      upstream).
 
 nfr:
   # Structural bound: a first token takes 1.6–3.9 s on the measured models (spikes/agent-sdk-container), so 50 ms of
@@ -330,8 +436,14 @@ vectors:
     source: All 12 spikes/compile-cost stages (exact token counts, SDK-reported costs), usage-key mapping, edge cases, settlements from the measured error shapes
     file: spec/fixtures/SRV-AGENT/cost-vectors.yaml
   - id: VEC-AGENT-2
-    source: Pricing table (Anthropic API rates as cached 2026-11-03; cache multipliers from the prompt-caching economics)
+    source: Pricing table (Anthropic API rates as cached 2026-11-03; cache multipliers from the prompt-caching economics; Haiku 5.5 tiers and the web search fee from the pricing page fetched 2026-11-23)
     file: spec/fixtures/SRV-AGENT/pricing.yaml
+  - id: VEC-AGENT-3
+    source: The CLI's request shapes for WebSearch measured by the stub run (spikes/agent-proxy-handshake/results/20261123T2055*-websearch*) and confirmed by the owner's live call — main-loop tools with DeferredToolPlaceholder, the WebSearch definition with its input_schema digest, the nested tool — plus refused variants (including a changed placeholder input_schema, `defer_loading` false, a string or absent, an over-long placeholder description, and a nested tool with another or no `name`)
+    file: spec/fixtures/SRV-AGENT/websearch-shapes.yaml
+  - id: VEC-AGENT-4
+    source: Allowance and request-cap sequences (a retried nested request, 429 resends, requests_max reached, a tool-less freshness token), run-token issue cases, and tool-call settlements per FR-AGENT-9/-16 (including an error result with a clean record)
+    file: spec/fixtures/SRV-AGENT/websearch-sequences.yaml
 
 defers:
   - "`anthropic-api` keys, Bedrock and Vertex providers (ADR-0005); the slice serves `anthropic-subscription` only."

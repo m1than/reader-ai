@@ -1,0 +1,47 @@
+# VEC-FRESH-5 — the query gate (FR-FRESH-6): each case is a fresh run's gate for `planned` and a sequence of
+# PreToolUse inputs (tool name and tool input) with the expected decision. Allowed: the WebSearch input is exactly
+# {query}, the query trimmed equals `planned`, and no WebSearch was allowed earlier in the run. Denied with a fixed
+# reason that never echoes the query.
+
+planned: "Practical Distributed Ledgers Example new edition 2019"
+
+cases:
+  - name: verbatim
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: true }]
+  - name: surrounding_spaces
+    calls: [{ tool: WebSearch, input: { query: "  Practical Distributed Ledgers Example new edition 2019 \n" }, allow: true }]
+  - name: altered_by_one_word
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example newest edition 2019" }, allow: false }]
+  - name: with_allowed_domains
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019",
+                                        allowed_domains: ["publisher.example"] }, allow: false }]
+  - name: with_blocked_domains
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019",
+                                        blocked_domains: [] }, allow: false }]
+  - name: empty
+    calls: [{ tool: WebSearch, input: { query: "" }, allow: false }]
+  - name: not_a_string
+    calls: [{ tool: WebSearch, input: { query: ["Practical Distributed Ledgers Example new edition 2019"] }, allow: false }]
+  - name: another_tool
+    calls: [{ tool: Bash, input: { command: "echo" }, allow: false }]
+  # The match is exact (FR-FRESH-6): no prefix or suffix, no case folding, and only the tool named WebSearch.
+  - name: planned_plus_suffix
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019 pdf" }, allow: false }]
+  - name: prefix_plus_planned
+    calls: [{ tool: WebSearch, input: { query: "free Practical Distributed Ledgers Example new edition 2019" }, allow: false }]
+  - name: case_changed
+    calls: [{ tool: WebSearch, input: { query: "practical distributed ledgers example new edition 2019" }, allow: false }]
+  - name: another_tool_with_the_planned_query
+    calls: [{ tool: WebFetch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: false }]
+  - name: tool_name_case_changed
+    calls: [{ tool: websearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: false }]
+  - name: extra_key_beside_the_query
+    calls: [{ tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019", max_uses: 1 }, allow: false }]
+  - name: one_per_run
+    calls:
+      - { tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: true }
+      - { tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: false }
+  - name: denial_then_verbatim
+    calls:
+      - { tool: WebSearch, input: { query: "Distributed Ledgers new edition" }, allow: false }
+      - { tool: WebSearch, input: { query: "Practical Distributed Ledgers Example new edition 2019" }, allow: true }
