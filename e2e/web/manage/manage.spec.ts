@@ -29,7 +29,13 @@ const axe = async (page: Page, what: string) => {
 };
 const reset = (page: Page, query = '') => page.request.post(`/__test__/reset${query}`);
 const courseMenu = async (page: Page, title: string) => {
-  await page.getByRole('button', { name: `Actions for ${title}`, exact: true }).click();
+  // The previous menu must be gone (popup detached, trigger collapsed) before the next opens: a menu still closing
+  // made `getByRole('menu')` match two popups (strict-mode failure at 1280 px).
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  const trigger = page.getByRole('button', { name: `Actions for ${title}`, exact: true });
+  await expect(trigger).not.toHaveAttribute('aria-expanded', 'true');
+  await trigger.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   return page.getByRole('menu');
 };
 
