@@ -453,6 +453,90 @@ screenshots the result. Kept in `results/20261124T143808-round7-runs`.
     mix with compile Runs.
 - **CSP:** the same single `media-src` violation from the Overview demo video.
 
+## Round 8 (phase 2 design review round 1, B6 and B11: every write as raw REST), 2026-11-24
+
+`run-round8.sh` starts one fresh stack. `round8.py` sends each request as raw REST and records its method, path,
+status and body in `round8.json` `raw`. The client's own requests for the shapes copied from it (`log-inputs`, an
+assessment override) are recorded by wrapping `mlflow.utils.rest_utils`. Results are in
+`results/20261124T150936-round8-rest`.
+
+- **Experiments:** `get-by-name` on a missing name is 404, and `create` with tags is 200.
+- **Runs:**
+  - `runs/search` by tag, then `create`, `log-batch`, `update` and `set-tag reader.complete`, then a second
+    `log-batch` at step 1, all 200. After that, a single Run with `cost_usd.total` 2.1.
+  - A changed param value is 400 "Changing param values is not allowed": params are write-once.
+- **link-to-run:** 120 ids in one call is 400 "Cannot link more than 100 traces". 100 + 20 linked all 120.
+- **Deleted traces:** `delete-traces` of 5 returned `traces_deleted` 5. The Run's Traces tab then lists 115
+  (`r8/run-traces-after-delete.png`) and the Run itself renders unchanged.
+- **Dataset in `bench`:** `create` with tags, then `records`, inserted 2. A repeat updated 2 and inserted 0, so
+  records upsert. `log-inputs` (source_type `mlflow_evaluation_dataset`) shows the dataset on the bench Run
+  (`r8/bench-evaluation-runs.png`).
+- **LoggedModel:** `logged-models` create with params and tags, then `search` by tag, found 1. It shows "Pending"
+  until finalized; round 10 measures the finalize call.
+- **HUMAN assessment:** the first POST is 200. A second POST with `overrides` makes the first `valid: false`, and a
+  PATCH with `update_mask` also works.
+- **Verbatim check, rerun** with threshold 5, NFC and joined hyphenation (`quotes.json`):
+  - PDF sha256 61e8d4c3…, 247,927 words;
+  - bench-tutor-v2 longest shared run 4;
+  - questions.yaml (v1): q04, q07, q08 and q13 at 5;
+  - bench-fixed: 1.
+
+## Round 9 (MLflow operations and load), 2026-11-24
+
+`run-round9.sh` uses fresh stacks with the production flags under test (`compose.round9.yaml`), with the steps
+selectable through `STEPS`. Steps 1 and 2 are in `results/20261124T151501-round9-ops`; steps 3 and 4 are in
+`results/20261124T151935-round9-ops`, after a fix described below.
+
+- **Concurrency.** 8 writers × 40 iterations ran runs/create, log-batch, update and an assessment, while 40 tutor
+  traces streamed in.
+
+  | Journal mode | Requests | Errors | p50 | p95 | Max |
+  |---|---|---|---|---|---|
+  | default (`delete`) | 1,280 | 68 | — | 0.43 s | 2.69 s |
+  | WAL | 1,280 | 0 | 0.027 s | 0.20 s | 2.26 s |
+
+  The 68 errors in the default mode were all 404 "Trace … not found", for assessments posted to seed traces not
+  yet ingested; there was no lock error. MLflow already sets `busy_timeout` 20,000 ms.
+- **Disabled features.**
+  - With `MLFLOW_ENABLE_AI_GATEWAY=false`, the gateway budgets route answers 501 and the gateway endpoints 404.
+  - Assistant, jobs and MCP answer 404, and `/graphql` with an empty body answers 500.
+  - A cross-origin request gets no `Access-Control-Allow-Origin`.
+- **Health probes.** Rotel's OTLP receiver answers 400 to `{}`, which shows it is listening; Rotel 0.2.7 has no
+  health endpoint. Jaeger's `healthcheckv2` answers `/status` with 200.
+- **Online backup.** SQLite's backup API took 0.02 s for 5.1 MB, and every table's count was equal. A second MLflow
+  served the backup with all 98 traces after 5.1 s.
+- **VACUUM** after deleting 25 of 50 traces, with MLflow stopped, shrank the file from 5.1 MB to 4.3 MB.
+- **Finding: stop during migration.** Stopping MLflow during its first-start schema migration left the file
+  half-migrated ("table _alembic_tmp_experiments already exists"), and MLflow never started again
+  (`load-mlflow-failed-start.log`). The script now waits for `/health` before every stop.
+- **Load** (60 lessons × 8 jobs × 72 spans, plus 100 tutor traces of 10 spans, plus a bench upload of 40 records and
+  3 Runs):
+  - 35,560 spans sent in 12.5 s and 35,560 stored: 0 dropped;
+  - ingest p50 1.2 s, p95 11.5 s, max 12.7 s (40 sampled traces, all found);
+  - the database grew from 1.1 MB to 52.7 MB;
+  - peak use (`stats-load.txt`): MLflow 90 % CPU and 560 MiB of 1 GiB, Rotel 32 MiB, Jaeger 50 MiB.
+- **Upgrade.** A volume written by MLflow 3.10.0 (experiment `old`) was started by 3.18.0 without
+  `mlflow db upgrade`: it ran without error until the 60 s limit. `mlflow db upgrade` then exited 0, and the server
+  served `old` (`upgrade.txt`).
+
+## Round 10 (setup drift, finalize, retention deletes, Host and CORS), 2026-11-24
+
+`run-round10.sh` runs `round10.py` on round 9's flags. Results are in `results/20261124T153052-round10-setup`.
+
+- **Setup and drift.** The first setup made 6 writes: rename experiment 0 to `reader`, 3 experiment tags, create
+  `bench`, and the LoggedModel. The second setup made 0 writes, and the state dumps were equal (`drift` false).
+- **Finalize.** PATCH `logged-models/{id}` with status `LOGGED_MODEL_READY` answers 200, and the model is READY.
+- **Lookups and deletes.**
+  - `datasets/search` by name in `bench` found the dataset.
+  - `runs/delete` is 200, and the Run leaves `runs/search`.
+  - The LoggedModel DELETE is 200, and the model leaves `search`.
+- **Host check.** A foreign Host gets 403 on the API and 200 on `/health`.
+- **CORS preflight** answers 400 with `Access-Control-Allow-Methods` and `-Allow-Credentials` but no
+  `-Allow-Origin`.
+- **GraphQL.** `/graphql` answers 200 to a query, so MLflow's UI uses it.
+- **Note on the environment.** The first round 10 attempt failed with "database or disk is full": Docker Desktop's
+  disk was full. Removing only dangling images (`docker image prune`) freed 6.8 GB.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.

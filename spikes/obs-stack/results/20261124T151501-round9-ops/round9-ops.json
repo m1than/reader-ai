@@ -1,0 +1,45 @@
+{
+ "mode": "ops",
+ "health_s": 0.011190176010131836,
+ "disabled": {
+  "gateway_budgets": 501,
+  "gateway_endpoints": 404,
+  "assistant": 404,
+  "jobs": 404,
+  "mcp": 404,
+  "graphql": 500,
+  "cors_preflight": 0
+ },
+ "cors_header": null,
+ "cors_status": 200,
+ "bad_host_status": 200,
+ "rotel_probe": 400,
+ "jaeger_health": 200,
+ "jaeger_health_root": 404,
+ "live_counts": {
+  "experiments": 2,
+  "runs": 325,
+  "trace_info": 98,
+  "spans": 2040,
+  "assessments": 320,
+  "evaluation_datasets": 0,
+  "logged_models": 0,
+  "journal_mode": "wal"
+ },
+ "backup_s": 0.02,
+ "backup_bytes": 5115904,
+ "backup_counts": {
+  "experiments": 2,
+  "runs": 325,
+  "trace_info": 98,
+  "spans": 2040,
+  "assessments": 320,
+  "evaluation_datasets": 0,
+  "logged_models": 0,
+  "journal_mode": "wal"
+ },
+ "restore_health_s": 5.055225849151611,
+ "restore_runs": 100,
+ "restore_traces": 98,
+ "size_after_delete": 10158624
+}

@@ -1,0 +1,13 @@
+2026/11/24 11:24:12 INFO:     Waiting for child process [28]
+2026/11/24 11:24:12 INFO:     Waiting for child process [29]
+2026/11/24 11:24:12 INFO:     Waiting for child process [30]
+2026/11/24 11:24:12 INFO:     Stopping parent process [24]
+no-upgrade exit 124
+---
+2026/11/24 11:24:18 INFO mlflow.store.db.utils: Updating database tables
+upgrade exit 0
+---
+    "artifact_location": "mlflow-artifacts:/1",
+    "lifecycle_stage": "active",
+    "last_update_time": 1795519389497,
+    "creation_t

@@ -1568,8 +1568,18 @@ tasks:
         (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0038 (proposed; 0036 and 0037 are V/manage's) for
         the writes beyond ADR-0035. Round 7 (results/20261124T143808-round7-runs): a Run in its own experiment
         accepts link-to-run, but its Traces tab shows no traces (the UI searches only the Run's experiment), so
-        compile and import Runs stay in experiment 0 and bench datasets and runs go to experiment `bench`. Open:
-        VEC-OBS-5, design review rounds." }
+        compile and import Runs stay in experiment 0 and bench datasets and runs go to experiment `bench`. Design
+        review round 1 (b1a84d5): changes, B1-B11; revision 2 answers each (SRV-OBS phase2_review). Owner added
+        2026-11-24 \"production-ready MLflow\": FR-OBS-26..35 (MLflow operations) and ADR-0038 Decision 5. Round 8
+        (results/20261124T150936-round8-rest): every write as raw REST; params write-once; link-to-run max 100;
+        datasets upsert; HUMAN relabel by overrides; verbatim check rerun (threshold 5, NFC, hyphens). Round 9
+        (results/20261124T151501 and T151935-round9-ops): WAL 0 errors under 8 writers (p95 0.20 s); gateway off 501;
+        online backup and restore; VACUUM -16 %; a stop during first-start migration bricks the file (hence the
+        mlflow-migrate one-shot); load 35,560 spans 0 dropped, ingest p95 11.5 s, MLflow peak 560 MiB, +51.6 MB;
+        3.10 -> 3.18 upgrade ok. Round 10 (results/20261124T153052-round10-setup): setup drift-free, finalize,
+        retention deletes, allowed-hosts 403 on the API. VEC-OBS-5 (phase2.yaml), VEC-OBS-6 (mlflow-setup.yaml),
+        bench-tutor-v2.yaml (compose-bench.mjs). Docker Desktop's disk was full during round 10 (dangling images
+        pruned, 6.8 GB). Next: design review round 2." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
