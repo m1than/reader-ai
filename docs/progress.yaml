@@ -1432,10 +1432,16 @@ tasks:
         ids-only previews; code-sourced assessments fill the Quality dashboard; our static prompt files fill Prompts.
         Before/after screenshots of every tab: results/20261124T105821-round4-tabs/tabs/. Saved views: only q, groupBy
         and the time range survive in the traces URL. Timeline: MLflow's \"Show execution timeline\" is real but
-        narrow; Jaeger 2.23.0 as Rotel's second exporter gives a full waterfall at 12–35 MiB (ADR-0033 option A).
-        Spec: SRV-OBS proposed FR-OBS-12..17 and proposed paired changes (incl. OPS-DEPLOY's catalog mount); ADR-0033 proposed (Jaeger, opt-in content
-        mode). Flagged: FR-OBS-12 (f, g) need a new allow-list rule type (json_object/json_array of listed keys).
-        Next: deep-reviewer rounds (OTel and privacy are complex areas), then the owner's decision on ADR-0033." }
+        narrow; Jaeger 2.23.0 as Rotel's second exporter gives a full waterfall (ADR-0033).
+        Design review round 1 on ae2caa6: changes (B1-B10). Round 5 of the spike (zero credit) measured: a file://
+        catalog still lets MLflow price provider-less CLI spans and a missing mount prices all, so reader-mlflow's
+        image replaces the bundled catalog (all four CLI cases 0, span sum = ledger 0.48); the CLI's session.id wins
+        the trace session unless a job.session marker is exported first (measured both ways); Jaeger per-site gate,
+        3 KB per full span (max_traces 700 at 256m), MLflow delivery 0.6 s with Jaeger stopped and 16 s after its
+        OOM, the eval violation is a Zod-style allowsEval probe. Spec: MLflow keys derived by the exporter from
+        validated attributes (VEC-OBS-4 fixture, no new rule type); cost split output = total - input; FR-OBS-14/15
+        blocked on ADR-0035; ADRs 0033 (Jaeger), 0034 (content mode), 0035 (worker writes to MLflow), all proposed.
+        Next: design review round 2; the owner decides ADR-0033/0034/0035." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

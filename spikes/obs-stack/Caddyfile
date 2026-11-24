@@ -9,8 +9,10 @@
 }
 
 (gated) {
+	# Round 5 (review B8): the gate learns which site asks from a header Caddy sets (overriding any client value).
 	forward_auth gate:9000 {
 		uri /api/auth/owner-gate
+		header_up X-Reader-Site mlflow
 	}
 
 	# Round 2 finding: `respond @blocked 404` next to a catch-all `handle` never ran (Caddy orders `handle` before
@@ -60,6 +62,7 @@
 	header Content-Security-Policy "{$CSP_JAEGER}"
 	forward_auth gate:9000 {
 		uri /api/auth/owner-gate
+		header_up X-Reader-Site jaeger
 	}
 	reverse_proxy jaeger:16686 {
 		header_up -Cookie

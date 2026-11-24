@@ -299,6 +299,66 @@ in this run used placeholder prices (3/15/0.3/3.75 per million); `analytics_tabs
   - Retention: the in-memory store evicts beyond `max_traces` and empties on restart; Badger (on a volume) has a TTL.
   - Egress: none needed; the spike networks are internal.
 
+## Round 5 (V.obs-analytics design review round 1: B1, B2, B8), 2026-11-24
+
+Zero credit, project `reader-spike-obs`, no published port, every stack taken down (0 containers after each run).
+Commands: `bash run-round5.sh` (stacks A–D), then `bash run-round5e.sh <that result dir, absolute>` (stacks E, F).
+Driver `round5.py` (`PHASE=cost|session|gate|bulk|bulkfull|probe`); catalog generator `gen_catalog.py` (run inside the
+pinned MLflow image; it wrote `catalog/anthropic.json`: the image's 31 bundled Anthropic ids, pricing.yaml's two among
+them, all at 0); `mlflow-catalog.Dockerfile`, `compose.round5.yaml`, `compose.round5e.yaml`, `jaeger-pages.js`. The
+spike gate learned per-site origins (`SITE_ORIGINS`, header `X-Reader-Site` set by the spike Caddyfile). Results:
+`results/20261124T113402-round5/`.
+
+### B1: where MLflow can still price the CLI's spans
+
+Source (pinned image, `tracing/utils/__init__.py`, `utils/providers.py`; no litellm in the image): a span with a
+provider is priced from `MLFLOW_MODEL_CATALOG_URI` first (default: a GitHub release URL, fetched over HTTP), then the
+bundled file of that provider; a span without a provider scans every bundled provider file. An empty
+`MLFLOW_MODEL_CATALOG_URI` disables the remote fetch.
+
+| Stack (catalog) | pricing.yaml model | bundled model not in pricing (haiku-4-5) | no provider key | unknown model | span cost sum (ledger 0.48) |
+| --- | --- | --- | --- | --- | --- |
+| A: `file://` mount of the generated catalog | 0.0 | 0.0 | **0.0631** (bundled list price) | none | not isolated (stack A's other traces) |
+| B: URI set, mount empty | 0.0631 | 0.03305 | 0.0631 | none | 0.6062 (double count) |
+| C: mount empty, start guarded with `test -s … \|\| exit 78` | MLflow exited 78 (`guard.txt`) | | | | |
+| **E: bundled catalog replaced in the image, no mount** | **0.0** | **0.0** | **0.0** | none | **0.48** |
+
+So the design moves to E: the derived image deletes the bundled catalog files and copies the generated one in; no
+mount can go missing, and the provider-less scan finds only zero prices. The spec also sets the URI empty (read in
+source; stack E ran with the default URI on internal networks, where the fetch fails).
+
+### B2: the trace's session
+
+Source: `sqlalchemy_store.py` `log_spans` takes the first span of the first batch with `session.id` or
+`gen_ai.conversation.id`, and a later batch never overwrites it. CLI spans with VEC-OBS-2's full key sets
+(`session.json`):
+
+| Case | Trace session |
+| --- | --- |
+| s1: CLI spans exported first, root with `session.id` = the run | the CLI's session id |
+| s2: a `job.session` child with the run's `session.id` exported 1.5 s before the CLI | the run |
+| s3: the same marker with no gap | the run |
+
+### B8: Jaeger
+
+- **Per-site gate** (`gate.json`, POST with the owner's cookie, 18 cases): the MLflow site passed only with its own
+  origin, the Jaeger site only with its own; the other site's origin and no origin were 403; a client-sent
+  `X-Reader-Site` was overridden by Caddy's `header_up` (no case changed with it).
+- **Memory per span** (`stats.txt`, `stats-f.txt`): minimal spans (compile-like) 0.85–1.1 KB (13.7 → 22.9 → 37.5
+  MiB for 9,000 and 18,000 more spans); VEC-OBS-2 full key sets 2.95–3.26 KB (84.7 → 109.6 → 154.7 MiB for 8,000
+  and 16,000 more). Stack F's idle reading (84.7 MiB) was much higher than stack A's (12.8 MiB); not explained.
+- **A stopped or OOM-killed Jaeger:** stopped, MLflow had 5 probe traces complete 0.6 s after the flush; OOM-killed
+  (24m limit, `jaeger-oom-f.txt`: exit 137, OOMKilled true), 16.1–16.3 s; Rotel logged retries to Jaeger. A 48m
+  limit with 27,000 minimal spans did not OOM (`jaeger-oom.txt`; MLflow 2.1–2.6 s, Rotel logged timeouts).
+- **The eval violation** (`jaeger-pages.json`, ten pages): every page reports one `script-src eval` from
+  `static/schemas-hm98w7NF.js` line 2 column 6182, the bundle's `try{return Function(``),!0}catch{return!1}` probe
+  behind a `jitless` switch (fetched from a network-less Jaeger by run-round5e.sh; the 148 KB third-party bundle is
+  not kept), which matches Zod 4's
+  `allowsEval` check; every page rendered.
+- **CSP hashes:** recomputed from the served index: the same two hashes as configured.
+- **Round 4's memory result:** the first Jaeger pass (300 traces, 35.5 MiB) lost its result directory when
+  intermediate runs were cleaned; round 5's `stats.txt` and `stats-f.txt` replace it and are kept.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.

@@ -1,0 +1,5 @@
+# Spike only (never shipped), round 5 stack E (review B1): MLflow with its bundled catalog replaced in the image.
+services:
+  mlflow-sqlite:
+    image: reader-spike-mlflow-catalog:local
+    build: { context: ., dockerfile: mlflow-catalog.Dockerfile }

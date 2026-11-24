@@ -621,113 +621,171 @@ paired_changes:
       - "not_user_facing: none added."
 
 # V.obs-analytics (draft, 2026-11-24): the owner asked for "more detailed info in mlflow dashboards … all tabs for
-# tracing, all with best practices" and "a Jaeger-like view of spans". Measured in spikes/obs-stack round 4 (zero
-# credit; RESULT.md "Round 4"). Not approved: OTel and privacy are complex areas, so full deep-reviewer rounds
-# precede Green. Options that need the owner (a Jaeger view, an opt-in content mode) are in ADR-0033 (proposed).
+# tracing, all with best practices", "a Jaeger-like view of spans" and per-lesson pricing. Measured in
+# spikes/obs-stack rounds 4 and 5 (zero credit; RESULT.md "Round 4", "Round 5"). Not approved: OTel and privacy are
+# complex areas, so full deep-reviewer rounds precede Green. Design review round 1 (deep-reviewer, ae2caa6): changes,
+# B1–B10 and non-blocking items; this revision answers each (RESULT.md "Round 5" has the measurements). Owner
+# decisions, all proposed: ADR-0033 (a Jaeger view), ADR-0034 (an opt-in content mode), ADR-0035 (the worker's
+# assessment and prompt writes to MLflow; FR-OBS-14 and FR-OBS-15 stay blocked on it, the rest proceeds).
+# Test levels of the proposed requirements: FR-OBS-12 unit + image + live (the session and cost oracles);
+# FR-OBS-13 unit + image; FR-OBS-14 unit + db + image; FR-OBS-15 unit + image; FR-OBS-16 image + live; FR-OBS-17
+# unit + db + live. They join `test_levels` at approval.
 proposed_requirements:
   - id: FR-OBS-12
     text: >-
-      MLflow conventions on our spans (zero credit; values ids, enums and numbers only). (a) Span types: every span we
-      own carries `mlflow.spanType` explicitly (the stored type column, used by span search and per-type metrics,
-      takes only an explicit value; translated types are not stored, measured): job roots CHAIN; `agent.call` AGENT
-      (plus `gen_ai.operation.name: invoke_agent`, the GenAI semconv name, so MLflow never types it LLM and never prices
-      it); FR-OBS-13's children RETRIEVER, TOOL, PARSER or EMBEDDING as listed there; HTTP and WS spans unchanged
-      (no type). The CLI's spans are typed by MLflow's Claude Code translator (interaction AGENT, llm_request LLM,
-      tool TOOL; measured) and are not changed. (b) Tokens: `agent.call` uses the current GenAI semconv keys:
+      MLflow conventions on our spans (zero credit; values ids, enums and numbers only). Mechanism (review round 1,
+      B3): callers set only VEC-OBS-1/VEC-OBS-4 attributes; every MLflow key is DERIVED by AllowListExporter after
+      validation, from the span's name and its already-validated attributes, by the tables of VEC-OBS-4
+      (`spec/fixtures/SRV-OBS/analytics-proposed.yaml`, committed; merged into attributes.yaml at approval): no
+      caller-built JSON reaches an export, and no new value-rule type exists. A caller attribute whose key starts
+      with `mlflow.` or equals `session.id` is unlisted and removed like any other. Derived values are serialized
+      by the exporter (`json.dumps` of a dict of validated scalars, keys in table order, `ensure_ascii`), so a value
+      cannot break out of its JSON string. (a) Span types: every span we own gets `mlflow.spanType` from VEC-OBS-4
+      `span_types` (the stored type column, used by span search and per-type metrics, takes only an explicit value;
+      translated types are not stored, measured): job roots and `job.session` CHAIN; `agent.call` AGENT (with the
+      validated `gen_ai.operation.name: invoke_agent`, so MLflow never types it LLM and never prices it); FR-OBS-13's
+      children as listed there; HTTP and WS spans none. The CLI's spans are typed by MLflow's Claude Code translator
+      (interaction AGENT, llm_request LLM, tool TOOL; measured) and are not changed. (b) Tokens: `agent.call` uses the current GenAI semconv keys:
       `gen_ai.usage.input_tokens` = input + cache read + cache write (semconv counts cached input in the input, as
       MLflow's Claude Code translator does), `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`,
       `gen_ai.usage.cache_write.input_tokens`; the old `gen_ai.usage.cache_read_input_tokens` and
       `cache_creation_input_tokens` keys (not read by MLflow 3.18.0) leave VEC-OBS-1. Trace token usage then equals the
       call's (MLflow's tree aggregation lets `agent.call` hide the CLI's own counts; measured equal). (c) Cost, with
-      the ledger as MLflow's source (owner, 2026-11-24: "our pricing.yaml is the source of truth"): `agent.call` sets
-      `mlflow.llm.cost` = `{input_cost, output_cost, total_cost}` (USD numbers) where `total_cost` is the ledger's
-      settled amount for the call (SRV-AGENT's settle row, the same number as `reader.cost_usd`) and the input/output
-      split is pricing.yaml's prices for the call's tokens scaled to that total (the ledger records the total only).
-      An explicit cost on an AGENT span is kept by MLflow 3.18.0 (it auto-prices only non-AGENT spans; measured).
-      MLflow would otherwise price the CLI's `llm_request` spans from its bundled catalog as well, and its span-level
-      cost metrics sum every priced span with no dedup (measured before: 0.0401 on `agent.call` plus 0.0631 on the
-      CLI span for one call). So the mlflow service gets `MLFLOW_MODEL_CATALOG_URI=file:///catalog` with a read-only
-      mount of `deploy/mlflow-catalog/anthropic.json`, generated from pricing.yaml's model ids with every price 0
-      (a committed generator; no network, no list prices): the CLI spans are then priced 0 and our call is the one
-      priced span. Measured (round 4, `compose.catalog.yaml`): each trace's cost = its call's ledger amount (0.21,
-      0.23, 0.03; trace header and the traces table's Cost column), the span cost metric summed 1.55 = the sum of the
-      seven ledger amounts, and the CLI span's cost was 0.0. A call that billed nothing (a reserve voided) sets
-      total 0; a reserve never settled (a killed call) sets no cost, and /observability's spent(run) still counts it.
-      (d) Trace name and tags: each root span sets `mlflow.traceTag.mlflow.traceName` to its span name and
-      `mlflow.traceTag.<key>` for these keys when known, each value already valid under its VEC-OBS-1 rule:
-      `reader.job.kind`, `reader.job.outcome`, `reader.job.attempt`, `reader.error_code`, `reader.error_class`,
-      `reader.stage`, `reader.step`, `reader.task`, `reader.run_id`, `reader.lesson.id` and `reader.course.id` (new
-      keys, UUIDs; ids only, never titles), `reader.question_id`, `gen_ai.request.model` as `reader.model`,
-      `reader.cost_usd` (the job's settled amount: the sum over its calls, a decimal string with 4 places),
-      `reader.run.spent_usd` (pipeline roots: SRV-AGENT's spent(run) when the step's job ends, failed attempts and
-      open reserves included; a new key, a decimal string with 4 places), and `reader.cache_read_share` (new key, a
-      float 0..1 rendered with two decimals: cache read over input tokens). `agent.call` also carries
-      `reader.lesson.id`, `reader.course.id`, `reader.stage` and `reader.step` as attributes. Tag values are strings
-      (MLflow stores tags as strings), so the `mlflow.traceTag.` form of a numeric key gets an existing-type `pattern`
-      rule (`^[0-9]{1,6}(\.[0-9]{1,4})?$`). `mlflow.llm.cost` is a JSON object of three numbers: the `json_object` rule
-      type of (f). (e) Session: the root's `session.id` is the compile run id for
-      `pipeline.*` jobs and the lesson id for `tutor.answer`; other roots carry none. (f) Previews: the root's
-      `mlflow.spanInputs` and `mlflow.spanOutputs` are JSON objects (sent as JSON strings; MLflow unwraps them,
-      measured) whose keys come from a per-kind list and whose values pass existing rules: inputs
-      `{question_id, lesson_id}` (tutor), `{run_id, lesson_id, stage, step}` (pipeline), `{material_sha256}`
-      (ingest); outputs `{outcome, error_code?, citations?}`, `{outcome, error_code?}`, `{outcome, pages?, chunks?}`.
-      This needs a new VEC-OBS-1 rule type, `json_object` (listed keys, each with its own existing rule; nothing else;
-      at most 512 bytes), the one value shape outside today's rules: flagged for the owner and the reviewer before it
-      is approved. (g) Linked prompts: the root's `mlflow.traceTag.mlflow.linkedPrompts` = `[{"name", "version"}]` of
-      the FR-OBS-15 templates the job used (a `json_array` of such objects, the same new rule family). (h) Tool
-      spans set status OK on success (MLflow's tool-call success rate counts only OK; measured 0.00% with UNSET).
+      the ledger as MLflow's source (owner, 2026-11-24: "our pricing.yaml is the source of truth"). SRV-AGENT sets on
+      `agent.call`, after the settle, `reader.cost_usd` = the settle row's `settled_usd` (numeric(12,6), exact) and
+      `reader.cost_input_usd` = the input part (B7): with P = pricing.yaml's rates for the call's model and the settle
+      row's token columns, `priced_in` = input × P.input + cache_read × P.cache_read + cache_write_5m ×
+      P.cache_write_5m + cache_write_1h × P.cache_write_1h (each cache write at its own TTL's rate, the columns
+      SRV-AGENT's `map_usage` fills), `priced_out` = output × P.output; `reader.cost_input_usd` = round_half_even(
+      settled × priced_in / (priced_in + priced_out), 6), or 0 when priced_in + priced_out = 0 (a settle with no
+      usage: the whole amount counts as output; with settled 0 both are 0). The exporter derives `mlflow.llm.cost` =
+      {input_cost: reader.cost_input_usd, output_cost: reader.cost_usd − input_cost (so the parts always sum to the
+      total exactly at 6 places), total_cost: reader.cost_usd}; no `reader.cost_usd`, no `mlflow.llm.cost` (a
+      reserve never settled, e.g. a killed call; /observability's spent(run) still counts it). An explicit cost on an
+      AGENT span is kept by MLflow 3.18.0 (it auto-prices only non-AGENT spans; measured). MLflow would otherwise
+      also price the CLI's `llm_request` spans and its span cost metrics sum every priced span with no dedup
+      (measured round 4: 0.0401 on `agent.call` plus 0.0631 on the CLI span for one call). So reader-mlflow's image
+      REPLACES MLflow's bundled model catalog (B1): `deploy/otel/mlflow.Dockerfile` deletes every
+      `mlflow/utils/model_catalog/*.json` of the base image and copies one `anthropic.json` in, generated by the
+      committed generator `deploy/otel/mlflow_catalog.py` (`--write` / `--check`) from pricing.yaml's model ids plus
+      every model id of the pinned base image's bundled `anthropic.json` (kept in
+      `deploy/otel/mlflow-bundled-anthropic.txt`), every price 0. And the mlflow service's environment gains
+      `MLFLOW_MODEL_CATALOG_URI=` (empty): MLflow 3.18.0's default is a GitHub release URL that it would try first for
+      any span with a provider (`utils/providers.py` `_load_provider`: remote, then bundled; read in source), and an
+      empty value disables the remote fetch. No mount: a missing or broken mount cannot fall back to list prices.
+      Measured (round 5, stack E, the replaced image): a CLI `llm_request` for a pricing.yaml model, for a bundled
+      model absent from pricing.yaml (claude-haiku-4-5) and with NO provider key all cost 0.0; an unknown model gets
+      no cost; the span cost metric over those four traces summed 0.48 = the four ledger amounts. For contrast,
+      round 5 stack A (a `file://` catalog mount) priced the provider-less span at the bundled list price (0.0631),
+      and stack B (mount empty) priced every CLI span (span sum 0.6062 for a ledger sum 0.48). Measured earlier
+      (round 4): each trace's cost = its call's ledger amount (trace header, Cost column), span sum 1.55 = seven
+      ledger amounts. (d) Trace name and tags (root spans): `mlflow.traceTag.mlflow.traceName` = the span name, and
+      `mlflow.traceTag.<key>` = str(value) for each VEC-OBS-4 `trace_tags` key the root carries: `reader.job.kind`,
+      `reader.job.outcome`, `reader.job.attempt`, `reader.error_code`, `reader.error_class`, `reader.stage`,
+      `reader.step`, `reader.run_id`, `reader.lesson.id` and `reader.course.id` (new keys, UUIDs; ids only, never
+      titles), `reader.question_id`. No cost, run-total, model or cache tag (review: they duplicated the Cost column,
+      the span model dimension and the token counts; `reader.run.spent_usd` dropped, B7). `agent.call` also carries
+      `reader.lesson.id`, `reader.course.id`, `reader.stage` and `reader.step` as validated attributes. (e) Session
+      (B2): MLflow 3.18.0 sets a trace's session once, from the first span of the first batch it ingests that has
+      `session.id` or `gen_ai.conversation.id` (`sqlalchemy_store.py` `log_spans`: `if session_id is None`, and a
+      later batch never overwrites it; read in source). The CLI's spans carry both keys (VEC-OBS-2) with the CLI's
+      own session id, and they reach MLflow before our root, which ends last. Measured (round 5, the CLI spans with
+      VEC-OBS-2's full key sets): (s1) CLI first, root with `session.id` = the run → the trace's session was the
+      CLI's; (s2) a `job.session` marker exported 1.5 s before the CLI → the run; (s3) the marker exported with no
+      gap → the run. So: right after opening the job's root, the job wrapper opens and ends a zero-length child
+      `job.session` (CHAIN) carrying `reader.run_id` (pipeline) or `reader.lesson.id` (tutor), from which the
+      exporter derives `session.id`; then it calls `TracerProvider.force_flush(2000)` on a daemon thread (the job's
+      own task never waits, INV-OBS-3). The CLI's first export comes at its exit or its batch interval, after
+      process start-up, so the marker normally arrives first. Residual, declared: if the marker's export fails or
+      is slower than the CLI's first export, the trace's session is the CLI's (a one-trace session); the [live]
+      oracle checks that a tutor trace's session equals its lesson id. Other roots have no session. (f) Previews:
+      `mlflow.spanInputs` / `mlflow.spanOutputs` = the JSON object of VEC-OBS-4 `previews` for the root's job kind,
+      {preview key: validated value} for the keys the root carries (MLflow unwraps the JSON string, measured). The
+      tutor's outcome has its own key, `reader.tutor.state` ∈ {answered, failed, refused, expired} (the
+      `tutor_questions.state` at the job's end), beside `reader.job.outcome` (B3). No preview key is `model` or
+      another of VEC-OBS-4 `forbidden_preview_keys` (a fixture test fails CI otherwise). (g) BLOCKED with FR-OBS-15
+      (ADR-0035): linked prompts, `mlflow.traceTag.mlflow.linkedPrompts` = `[{"name": "reader.<stage>" or
+      "reader.tutor", "version": "<n>"}]`, derived from the root's `reader.stage` or job kind and a validated
+      `reader.prompt.version` (int 1..100000). (h) Tool spans set status OK on success (MLflow's tool-call success
+      rate counts only OK; measured 0.00% with UNSET). INV-OBS-1's property test is extended (B3): Hypothesis
+      generates hostile values for every key that feeds a derivation (quotes, backslashes, braces, `</script>`,
+      NUL, U+2028, 10 KB strings, NaN, ±inf, floats past the range, UUID look-alikes with extra characters) and
+      caller-supplied `mlflow.*` and `session.id` keys; the output then has only derived `mlflow.*` keys, each
+      `mlflow.spanInputs`/`Outputs`/`llm.cost` parses as JSON whose keys are exactly the table's and whose values
+      pass their rules, `input_cost + output_cost = total_cost` at 6 places, and no generated canary appears.
       [unit, image]
   - id: FR-OBS-13
     text: >-
       Child spans where a stage has measurable parts (counts, sizes and durations as numbers; names fixed): tutor
-      `tutor.retrieve` RETRIEVER {reader.retrieval.hits, reader.retrieval.candidates, reader.retrieval.top_score
-      0..1} and `tutor.citations` PARSER {reader.citations.total, reader.citations.valid}; pipeline `verify.claims`
-      PARSER {reader.claims.total, reader.claims.supported} and `verify.lab` TOOL {reader.kernel.cells,
-      reader.kernel.cells_ok, reader.kernel.ms}; kernel runs inside lab verification `kernel.run` TOOL
-      {reader.kernel.cells, reader.kernel.exit} (the kernel's code and output never); ingest `ingest.parse` PARSER
-      {reader.pages, reader.bytes} and `ingest.chunk` PARSER {reader.chunks}; `search.embed` batches `embed.batch`
-      EMBEDDING {reader.embed.vectors, reader.embed.batch}. Every key gets a VEC-OBS-1 rule (ints with ranges, floats
-      0..1); each span name joins the allow-list's names. Measured rendering: the trace detail shows each with its
-      type icon and duration; the tool-calls dashboard lists `verify.lab`. [unit, image]
+      `tutor.retrieve` RETRIEVER {reader.retrieval.hits, reader.retrieval.candidates} and `tutor.citations` PARSER
+      {reader.citations.total, reader.citations.valid}; pipeline `verify.claims` PARSER {reader.claims.total,
+      reader.claims.supported} and `verify.lab` TOOL {reader.kernel.cells, reader.kernel.cells_ok, reader.kernel.ms};
+      kernel runs inside lab verification `kernel.run` TOOL {reader.kernel.cells, reader.kernel.exit} (the kernel's
+      code and output never); ingest `ingest.parse` PARSER {reader.pages, reader.bytes} and `ingest.chunk` PARSER
+      {reader.chunks}; `search.embed` batches `embed.batch` EMBEDDING {reader.embed.vectors, reader.embed.batch}. The
+      round-1 draft's `reader.retrieval.top_score` (0..1) is dropped: SRV-SEARCH's fused score is a reciprocal-rank sum
+      (`search/fusion.py`), not a 0..1 similarity, and no source bounds it (review, non-blocking). Every key's rule and
+      each span's keys are in VEC-OBS-4 (`spec/fixtures/SRV-OBS/analytics-proposed.yaml`); the span types come from
+      its `span_types` table (FR-OBS-12 a). A child that ends with an exception sets status ERROR (no description);
+      otherwise OK (FR-OBS-12 h). Measured rendering: the trace detail shows each with its type icon and duration;
+      the tool-calls dashboard lists `verify.lab`. [unit, image]
   - id: FR-OBS-14
     text: >-
-      Code-sourced assessments (MLflow "Quality" dashboard; deterministic outcomes we already compute, never an LLM
-      judge, zero credit). Names and values: `fact_check.passed` bool with metadata {claims, supported};
-      `verify.passed` bool (the verifier's verdict); `verify.lab_passed` bool with {cells, cells_ok};
-      `freshness.verdict` enum {current, stale, unknown} (the freshness check of V/freshness, still in review; its
-      enum is aligned when that branch merges); `tutor.citations_valid` bool with
-      {total, valid} and `tutor.citation_share` float 0..1. Source `CODE`, `source_id` the module
-      (`reader.pipeline.fact_check`, `reader.pipeline.verify`, `reader.freshness`, `reader.tutor.citations`); no
-      rationale; metadata values are decimal strings. They are logged by a new job kind `obs.feedback` (args: job
-      id, key, name, value; key `[job_id, name]`), enqueued by the code that computes the outcome with `schedule_in`
-      60 s (after the trace's export), which POSTs `…/mlflow/traces/tr-<FR-OBS-5 trace id>/assessments` on `obs`
-      (the worker reaches MLflow already, FR-OBS-11); a 404 (trace not yet ingested) is transient, other failures
-      end the key dead; with tracing off the kind does nothing. Measured: 8 of 8 created; the Quality dashboard
-      showed a summary row, counts and averages per name, and per-value bars. [unit, db, image]
+      BLOCKED on ADR-0035 (proposed; a worker → MLflow write that ADR-0032 Decision 1 does not allow; the owner
+      decides). Code-sourced assessments (MLflow "Quality" dashboard; deterministic outcomes we already compute, never
+      an LLM judge, zero credit). The catalogue is data: VEC-OBS-4 `assessments` (name, value type or enum, metadata
+      keys with ranges, `source_id`): `fact_check.passed` bool {claims, supported}; `verify.passed` bool;
+      `verify.lab_passed` bool {cells, cells_ok}; `tutor.citations_valid` bool {total, valid}; `tutor.citation_share`
+      float 0..1. Freshness is not in this branch (review, non-blocking): its assessment is proposed with the
+      freshness spec once V/freshness merges. The POST body is built only by `reader.obs.feedback.body(name, value,
+      metadata)` from that catalogue: `assessment_name` = name, `feedback.value` = the value after its rule, `source`
+      = {`source_type`: CODE, `source_id`: the entry's}, `metadata` = the entry's keys only, each a decimal string
+      within its range, no `rationale`, no other field; a name, value or metadata key outside the catalogue raises
+      before any request. Job kind `obs.feedback` (declared in `reader.obs.jobs` with SRV-EVENTS' `JobKind`):
+      args {job_id, key, name, value, metadata} (the metadata travels in the args, so a retry posts the same body);
+      idempotency key [job_id, name]; `max_attempts` 3 with SRV-EVENTS' delays (5 s, 25 s); `timeout_s` 30; the
+      HTTP client timeout 10 s. The code that computes the outcome enqueues it with `schedule_in` 60 s (NFR-OBS-1's
+      30 s plus margin), inside its own try/except: an enqueue failure is logged (`obs feedback_enqueue_failed
+      name=<name>`) and never changes the job's outcome or result. The run: with tracing off it ends `skipped`;
+      otherwise it first GETs the trace (`…/mlflow/traces/tr-<FR-OBS-5 trace id>`) and ends `skipped` when an
+      assessment with the same name and `source_id` exists (idempotent across retries and a lost response); then it
+      POSTs `…/assessments`. A 404 from either call is transient (raised as a `transient` type) while attempts
+      remain; on the last attempt a 404 ends the key `skipped` with the log line `obs feedback_no_trace name=<name>`,
+      not `dead` (a trace that never arrived, e.g. tracing turned off in between, is not a failure of the job);
+      other HTTP errors and timeouts are transient; a 4xx other than 404 ends `failed`. Measured: 8 of 8 created;
+      the Quality dashboard showed a summary row, counts and averages per name, and per-value bars. [unit, db, image]
   - id: FR-OBS-15
     text: >-
-      Prompts tab: the worker registers our own static prompt templates at start, never book text: the four stage
-      instruction files `server/src/reader/pipeline/prompts/<stage>.<version>.md` and the tutor's
-      `server/src/reader/tutor/prompts/answer-v1.md` (FR-PIPELINE-3's runtime system prompt is the rendered book source
-      plus these; only the static file is registered). Name `reader.<stage>` / `reader.tutor`; a version is created
-      only when no version has tag `reader.prompt_sha256` equal to the file's sha256; tags `reader.prompt_sha256` and
-      `reader.version` (the package version; the image has no git sha). A unit test checks each file against the
-      secret scanner and that it contains no `{{…}}` placeholder that would be filled with book text when rendered by
-      MLflow's playground (they are plain instructions). The worker keeps the stage → version map for FR-OBS-12 (g).
-      Measured: 3 prompts registered, listed with their tags, and "1 linked prompt" on a trace. [unit, image]
+      BLOCKED on ADR-0035 (as FR-OBS-14). Prompts tab: our own static prompt templates, never book text, listed as
+      data in VEC-OBS-4 `prompts` (name → file: the four stage instruction files under
+      `server/src/reader/pipeline/prompts/` and the tutor's `server/src/reader/tutor/prompts/answer-v1.md`;
+      FR-PIPELINE-3's runtime system prompt is the rendered book source plus these, and only the static file is
+      registered). A job kind `obs.prompts` (key: the package version; `max_attempts` 3, SRV-EVENTS' delays) is
+      enqueued by the worker's start hook (SRV-EVENTS FR-EVENTS-1 hooks: enqueue-only, so registration never blocks
+      the worker's start; a failed enqueue is logged and the next start retries). Per file: the version is looked up
+      by sha (`search` of the prompt's versions for tag `reader.prompt_sha256` = the file's sha256); only when none
+      matches is a version created, with tags `reader.prompt_sha256` and `reader.version` (the package version; the
+      image has no git sha). The body is the file's bytes; INV-OBS-2's canary covers it (no book text, secret or
+      run token can be in a static file; a unit test also runs the secret scanner over each file and refuses a
+      `{{…}}` placeholder that a renderer would fill). The run ends `skipped` with tracing off. The worker reads the
+      stage → version map from MLflow on demand for FR-OBS-12 (g) (linked prompts), cached per process; an unknown
+      version links nothing. Measured: 3 prompts registered, listed with their tags, and "1 linked prompt" on a
+      trace. [unit, image]
   - id: FR-OBS-16
     text: >-
       Every tab of MLflow 3.18.0's GenAI experiment UI, and what reader-ai puts there (measured before and after in
       spikes/obs-stack round 4, results/20261124T105821-round4-tabs/tabs/): Traces — FR-OBS-12's types, tokens,
-      previews, tags, names; the execution timeline ("Show execution timeline", narrow; ADR-0033 option A offers
+      previews, tags, names; the execution timeline ("Show execution timeline", narrow; ADR-0033 offers
       Jaeger). Sessions (Traces/Sessions switch) — FR-OBS-12 (e). Dashboard › Usage — counts, latency p50/p90/p99,
-      errors, tokens with the cache split, MLflow's cost estimate. Dashboard › Quality — FR-OBS-14. Dashboard › Tool
-      calls — FR-OBS-13's TOOL spans. Prompts — FR-OBS-15. Overview — MLflow's onboarding guide; stays as is.
+      errors, tokens with the cache split, cost = the ledger's per-call amounts (FR-OBS-12 c). Dashboard › Quality —
+      FR-OBS-14 (blocked on ADR-0035; empty until then). Dashboard › Tool calls — FR-OBS-13's TOOL spans. Prompts —
+      FR-OBS-15 (blocked on ADR-0035). Overview — MLflow's onboarding guide; stays as is.
       Empty, with reasons: Issues (LLM-based issue detection: credit and a provider key in MLflow); Judges and
-      Evaluation runs (LLM judges spend credit; code scorers run server-side only with MLflow's job execution and its
-      docker executor backend, i.e. the Docker socket, which ADR-0025 and ADR-0032 keep away from every container;
-      the owner may run code scorers locally with `mlflow.genai.evaluate` over exported traces, not built);
-      Review (labeling queues need text to label; ADR-0033 option B); Datasets (evaluation records need inputs and
+      Evaluation runs (server-side judges and scorers run as MLflow jobs, and FR-OBS-8 sets
+      `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`; LLM judges would also spend credit, and code scorers' docker
+      executor would need the Docker socket, which ADR-0025 and ADR-0032 keep away from every container; the owner
+      may run code scorers locally with `mlflow.genai.evaluate` over exported traces, not built);
+      Review (labeling queues need text to label; ADR-0034); Datasets (evaluation records need inputs and
       expectations as text; an ids-only dataset has no use in the UI); Agent versions (needs logged models and
       `mlflow.modelId` trace metadata, which an OTLP client cannot set; not measured further); Playground and AI
       Gateway (provider keys and egress; their routes are blocked at the edge, FR-OBS-9). Saved views:
@@ -741,65 +799,80 @@ proposed_requirements:
     text: >-
       Cost per lesson (owner, 2026-11-24: "pricing of each lesson in traces and other data"). In MLflow (measured,
       round 4): the traces table has a Cost column (Display › Columns › Cost; shows each trace's ledger cost after
-      FR-OBS-12 c) and tag columns such as `reader.lesson.id` and `reader.cost_usd`, but it cannot sort by cost (Sort
+      FR-OBS-12 c) and tag columns such as `reader.lesson.id`, but it cannot sort by cost (Sort
       offers only Time, Duration and State; the column's menu offers only "Hide column"); the trace metrics API
       groups span cost only by `span_model_name` or `span_model_provider` (a tag dimension is refused with 400) and
       has no trace-level cost metric; a `trace.tag.\`reader.lesson.id\` = '<id>'` filter works on span cost (0.88 and
       0.67 for the two seeded lessons, equal to their ledger sums). So MLflow shows a lesson's traces and their costs
       (saved view `?q=<lesson id>`: 5 of 10 traces, exactly that lesson's; FR-OBS-16), and the ranking lives in
-      reader-ai. FR-OBS-10 gains a fifth view, (e) `lessons`, from the ledger, owner-scoped, over the window: one row
-      per lesson of the owner with a compile run started or a tutor settle row in the window: lesson id, title (the
-      `lessons.title` column; this page may show titles, MLflow never gets them), course id and title, `compile_usd`
-      = the sum of spent(run) over the lesson's runs started in the window (failed and abandoned runs included:
-      settle rows of failed attempts and open reserves count, FR-AGENT-9), `runs` = their count, `last_compile_usd`
-      = spent(run) of the newest of them, `tutor_usd` = the sum of `settled_usd` of the owner's tutor settle rows
-      whose question's lesson is this lesson, `total_usd` = compile_usd + tutor_usd, `usd_per_1k_chars` = total_usd
-      over the lesson's source length in characters ÷ 1000 (`sum(char_length(text))` of the `material_spans` rows
-      SRV-PIPELINE's `DbSpanReader` loads for the lesson: its `course_plans` row's material and pages pdf_first..
-      pdf_last; the database returns the number only, no text leaves it; null when the lesson has no plan row or no
-      spans), and `mlflow_url` =
-      `https://localhost:8443/#/experiments/0/traces?q=<lesson id>`. Plus a course total row per course (sums of the
-      lesson rows; `usd_per_1k_chars` over the summed lengths). Queries: one over the owner's runs in the window,
-      one over their `agent_spend` rows, one over the owner's tutor settle rows joined to `tutor_questions`, one over
-      the lessons and courses named, one for the source lengths; no text column but the two titles is returned. The page sorts the rows by any
-      column (client-side; default total_usd descending). VEC-OBS-3 gains a lesson whose run has a failed paid attempt
-      (a settle row on an attempt whose job ended failed) and an unsettled reserve, so `compile_usd` counts both, a
-      second lesson with tutor spend only, and the expected `lessons` JSON. [unit, db, live]
+      reader-ai. FR-OBS-10 gains a fifth view, (e) `lessons`, from the ledger, owner-scoped, over the window. Spend
+      is grouped by `agent_spend.lesson_id` (SRV-AGENT writes it on every reserve, settle and void of a call that has
+      a lesson; review, non-blocking): ONE grouped query over the owner's `agent_spend` rows created in the window
+      with a non-null `lesson_id`, grouping by (lesson_id, run_id, task = 'tutor'), where a group's amount is
+      spent(·) of FR-AGENT-9 over its rows: `settled_usd` of settle rows plus `usd` of reserves with neither a settle
+      nor a void. So open reserves (a call killed before its settle) count, in compile and tutor alike, and a voided
+      reserve counts 0; the page says so ("includes N open reserves" from the same query's count). Per lesson:
+      `compile_usd` = the sum over its non-tutor groups (failed attempts and abandoned runs included), `runs` = the
+      number of distinct non-tutor run ids, `last_compile_usd` = the amount of the run whose newest row is newest,
+      `tutor_usd` = the sum over its tutor groups, `total_usd` = compile_usd + tutor_usd, `open_reserves` = the count
+      of open reserves. Then one query for the lessons' and courses' ids and titles (`lessons.owner_id` = the caller;
+      this page may show titles, MLflow never gets them), and one for source lengths: `sum(char_length(s.text))` of
+      the `material_spans` rows SRV-PIPELINE's `DbSpanReader` loads for the lesson (its `course_plans` row's material
+      and pages pdf_first..pdf_last), joined through `materials` with `materials.owner_id` = the caller and
+      `course_plans.owner_id` = the caller (owner scope on the length too; review, non-blocking); the database
+      returns the number only. `usd_per_1k_chars` = total_usd ÷ (chars ÷ 1000), null when chars is null or 0 (no
+      division by zero). `mlflow_url` = `https://localhost:8443/#/experiments/0/traces?q=<lesson id>`. Rows: at most
+      200 lessons, those with the largest `total_usd` (ties by lesson id), with `truncated` true when more exist; a
+      course total row per course over the returned rows (`usd_per_1k_chars` over their summed non-null lengths).
+      No text column but the two titles is returned. The page sorts the rows by any column (client-side; default
+      total_usd descending). VEC-OBS-3 gains a lesson whose run has a failed paid attempt (a settle row on an
+      attempt whose job ended failed) and an open reserve, so `compile_usd` counts both, a voided reserve (counts 0),
+      a second lesson with tutor spend only and no source (null per 1k chars), a lesson with 0 source characters
+      (null), another owner's lesson (absent), and the expected `lessons` JSON. [unit, db, live]
 
 proposed_paired_changes:
   - spec: SRV-AGENT
     items:
       - "FR-AGENT-14: `agent.call` gains `mlflow.spanType: AGENT`, `gen_ai.operation.name: invoke_agent`,
         `gen_ai.provider.name: anthropic`, and FR-OBS-12 (b)'s token keys (input including the cache)."
-      - "FR-AGENT-14: after the settle, `agent.call` sets `mlflow.llm.cost` from the settle row and pricing.yaml
-        (FR-OBS-12 c), and `reader.lesson.id`, `reader.course.id`, `reader.stage`, `reader.step` from the caller's
-        context (a new optional `CallContext` argument; ids only)."
+      - "FR-AGENT-14: `StageCall` already carries owner, run, lesson and stage; it gains only `course_id: UUID |
+        None` and `step: int | None` (review: no separate CallContext). After the settle, `agent.call` sets
+        `reader.cost_usd` (settled_usd) and `reader.cost_input_usd` (FR-OBS-12 c's split from the settle row's token
+        columns and pricing.yaml), and `reader.lesson.id`, `reader.course.id`, `reader.step`. SRV-AGENT already writes
+        `agent_spend.lesson_id` on every row of a call with a lesson; FR-OBS-17 relies on it (a [db] test asserts it
+        for the tutor's calls too)."
   - spec: OPS-DEPLOY
     items:
-      - "mlflow service: `MLFLOW_MODEL_CATALOG_URI=file:///catalog` and a read-only mount of
-        `deploy/mlflow-catalog/`, whose `anthropic.json` (MLflow catalog schema 1.0, every price 0, the model ids of
-        pricing.yaml) comes from a committed generator checked by trace-check against pricing.yaml (FR-OBS-12 c)."
+      - "mlflow service: environment adds `MLFLOW_MODEL_CATALOG_URI=` (empty: no remote price fetch); reader-mlflow's
+        image replaces the bundled model catalog (FR-OBS-12 c): `deploy/otel/mlflow.Dockerfile` (and its
+        .dockerignore) gains the copy of `deploy/otel/mlflow-catalog/anthropic.json`. Generator
+        `deploy/otel/mlflow_catalog.py` (stdlib + PyYAML through `uv run --project server`; `--write` regenerates,
+        `--check` exits 1 on any difference) reads pricing.yaml's model ids and `deploy/otel/mlflow-bundled-anthropic.txt`.
+        Tests: [unit] `--check` passes and every pricing.yaml model is in the file; [image] the built image's
+        `mlflow/utils/model_catalog/` holds exactly that `anthropic.json` (fails when the replacement is missing),
+        the base image's bundled ids equal `mlflow-bundled-anthropic.txt` (a base-image bump fails until it is
+        regenerated), and through rotel a CLI-shaped `llm_request` for a model absent from pricing.yaml and one with
+        no provider key both cost 0.0 while `agent.call` keeps its ledger cost."
   - spec: SRV-PIPELINE
     items:
-      - "Root tags and session (FR-OBS-12 d, e) from the step's args, with `reader.lesson.id`, `reader.course.id`,
-        `reader.step`, `reader.cost_usd` and `reader.run.spent_usd` (spent(run) read when the step's job ends);
-        `verify.claims`, `verify.lab`, `kernel.run`
-        spans (FR-OBS-13); `obs.feedback` enqueues for fact_check.passed, verify.passed, verify.lab_passed
-        (FR-OBS-14); linked prompt versions (FR-OBS-12 g)."
+      - "Root attributes `reader.lesson.id`, `reader.course.id` (from the run's lesson row) and the `job.session`
+        marker with `reader.run_id` (FR-OBS-12 d, e); `verify.claims`, `verify.lab`, `kernel.run` spans (FR-OBS-13).
+        Blocked on ADR-0035: `obs.feedback` enqueues for fact_check.passed, verify.passed, verify.lab_passed
+        (FR-OBS-14) and `reader.prompt.version` (FR-OBS-12 g)."
   - spec: SRV-TUTOR
     items:
-      - "`tutor.retrieve` and `tutor.citations` spans (FR-OBS-13); `obs.feedback` for tutor.citations_valid and
-        tutor.citation_share (FR-OBS-14); `reader.lesson.id` and `reader.course.id` on the root and `agent.call`
-        (from the question row and its lesson), `reader.cost_usd` on the root (FR-OBS-12 d)."
+      - "Root attributes `reader.lesson.id`, `reader.course.id` (from the question row and its lesson),
+        `reader.tutor.state`, and the `job.session` marker with `reader.lesson.id` (FR-OBS-12 d, e, f);
+        `tutor.retrieve` and `tutor.citations` spans (FR-OBS-13). Blocked on ADR-0035: `obs.feedback` for
+        tutor.citations_valid and tutor.citation_share (FR-OBS-14)."
   - spec: SRV-INGEST
     items:
       - "`ingest.parse`, `ingest.chunk` spans (FR-OBS-13); `search.embed` `embed.batch` spans."
-  - spec: "the freshness spec of V/freshness (in review; not on this base)"
-    items:
-      - "`obs.feedback` for freshness.verdict (FR-OBS-14) where the verdict is computed, once that branch merges."
   - spec: SRV-EVENTS
     items:
-      - "KIND_MODULES unchanged (`reader.obs.jobs` gains the kind `obs.feedback`)."
+      - "FR-EVENTS-19's job wrapper opens the `job.session` marker after the root and flushes it off the job's task
+        (FR-OBS-12 e). KIND_MODULES unchanged; `reader.obs.jobs` gains the kinds `obs.feedback` and `obs.prompts`
+        (both blocked on ADR-0035)."
   - spec: WEB-UI
     items:
       - "/observability: a `Dashboards` list of FR-OBS-16's saved views (links to https://localhost:8443, `rel=noopener
@@ -810,6 +883,46 @@ proposed_paired_changes:
         compile total, runs, last compile, tutor, total, per 1k characters, a `Traces` link to `mlflow_url`), a
         course total row per course, sortable by every column (`aria-sort` on the active header; default total
         descending); a Storybook story with VEC-OBS-3's lessons."
+
+# Edits to this spec's approved text, applied in place when the amendment is approved (review, non-blocking).
+proposed_in_place_edits:
+  - "FR-OBS-2: the exporter also derives the MLflow keys of FR-OBS-12 (after validation, from VEC-OBS-4's tables);
+    a caller key starting with `mlflow.` or equal to `session.id` is removed as unlisted."
+  - "FR-OBS-5: the job wrapper opens the `job.session` marker after the root and flushes it on a daemon thread
+    (FR-OBS-12 e); the root carries `reader.lesson.id` and `reader.course.id` from the handler (VEC-OBS-4
+    `job_root_keys_from_handler`)."
+  - "FR-OBS-6: `agent.call`'s token keys become `gen_ai.usage.input_tokens` (input + cache read + cache write),
+    `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_write.input_tokens`;
+    it adds `gen_ai.operation.name: invoke_agent`, `gen_ai.provider.name: anthropic`, `reader.cost_input_usd`,
+    `reader.lesson.id`, `reader.course.id`, `reader.step`. The sentence 'cost is ours because the CLI's spans carry
+    tokens but no cost' gains: 'and reader-mlflow's catalog prices the CLI's spans at 0 (FR-OBS-12 c)'. The [live]
+    step adds: every `claude_code.llm_request` span of the canary tutor trace has cost 0, and the span cost metric
+    filtered to that trace equals its ledger settle amount."
+  - "FR-OBS-7: coverage adds FR-OBS-13's child spans and the `job.session` marker; 'no module-specific span beyond
+    agent.call' becomes 'no module-specific span beyond agent.call and FR-OBS-13's children'."
+  - "FR-OBS-8: mlflow's environment is exactly `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`,
+    `MLFLOW_DISABLE_TELEMETRY=true` and `MLFLOW_MODEL_CATALOG_URI=` (empty); the derived image replaces the bundled
+    model catalog (FR-OBS-12 c)."
+  - "FR-OBS-10: (e) `lessons` joins the four views (FR-OBS-17); 'renders the four views' becomes 'the five views';
+    the page's cost note says MLflow's Cost column shows settled per-call amounts and this page's totals also count
+    open reserves."
+  - "INV-OBS-1: also FR-OBS-12's hostile-input clause (derived keys only, parsable JSON with exactly the table's
+    keys, cost parts summing to the total)."
+  - "INV-OBS-2 (B4; with ADR-0035): the canary also covers the bytes of every `obs.feedback` job's args, every
+    assessment request body (captured by an in-test HTTP receiver standing in for MLflow) and every prompt
+    registration request body; a property test builds bodies from arbitrary (name, value, metadata) and asserts
+    that only catalogue entries produce a request and that the body's keys and values are exactly the catalogue's."
+  - "INV-OBS-5 (with ADR-0033): the per-site cross cases: the 8443 site refuses Origin https://localhost:8444 and
+    the 8444 site refuses https://localhost:8443, a client-sent X-Reader-Site is overridden, no site header is 403."
+  - "NFR-OBS-1's [live] step also checks a tutor trace's session equals its lesson id (FR-OBS-12 e)."
+  - "vectors: VEC-OBS-4, `spec/fixtures/SRV-OBS/analytics-proposed.yaml` (committed with this draft), hand-derived
+    from FR-OBS-12..15; at approval its attribute, span-name and key entries merge into VEC-OBS-1 and the file keeps
+    the derivation tables, the assessment catalogue and the prompt list. VEC-OBS-3 gains FR-OBS-17's rows."
+  - "test_levels: FR-OBS-12 'unit + image + live', FR-OBS-13 'unit + image', FR-OBS-14 'unit + db + image',
+    FR-OBS-15 'unit + image', FR-OBS-16 'image + live', FR-OBS-17 'unit + db + live'; FR-OBS-10 'unit + db + live'."
+  - "owner note 'What the traces never hold / hold': holds also course ids, the tutor's question state, child-span
+    counts (claims, cells, citations, pages, chunks) and the ledger's per-call cost; MLflow shows that cost in its
+    Cost column and Usage dashboard, while /observability's lesson and run totals also count open reserves."
 
 owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."
