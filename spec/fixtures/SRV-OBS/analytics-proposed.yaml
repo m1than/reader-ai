@@ -1,7 +1,8 @@
 # VEC-OBS-4 (proposed; SRV-OBS V.obs-analytics, not approved). The additions to VEC-OBS-1 (attributes.yaml) and the
 # derivation tables of FR-OBS-12..15, as data. Not read by shipped code until the amendment is approved; then its
-# attribute, span-name and key entries merge into attributes.yaml, and this file keeps the derivation tables, the
-# assessment catalogue and the prompt list. Value rules as in attributes.yaml.
+# attribute, span-name and key entries merge into attributes.yaml, and this file keeps the derivation tables. The
+# `blocked_on_ADR-0035` block (assessments, prompts, linked prompts) does not move until the owner accepts ADR-0035.
+# Value rules as in attributes.yaml.
 # Design review round 1 (B3): every MLflow key (`mlflow.spanType`, `mlflow.traceTag.*`, `mlflow.spanInputs`,
 # `mlflow.spanOutputs`, `mlflow.llm.cost`, `session.id`) is derived by AllowListExporter from the span's name and its
 # already-validated attributes. A caller-supplied key starting with `mlflow.` or equal to `session.id` is removed like
@@ -18,8 +19,6 @@ attributes:
   gen_ai.provider.name: { type: string, enum: [anthropic] }
   gen_ai.usage.cache_read.input_tokens: { type: int, range: [0, 1000000000] }
   gen_ai.usage.cache_write.input_tokens: { type: int, range: [0, 1000000000] }
-  # FR-OBS-12 (g), blocked with FR-OBS-15 (ADR-0035): the registered template version the job used.
-  reader.prompt.version: { type: int, range: [1, 100000] }
   # FR-OBS-12 (c): the input part of reader.cost_usd, computed by SRV-AGENT at the settle (B7).
   reader.cost_input_usd: { type: float, range: [0, 1000] }
   # FR-OBS-13 children.
@@ -46,7 +45,7 @@ span_names:
   - { pattern: "^(tutor\\.retrieve|tutor\\.citations|verify\\.claims|verify\\.lab|kernel\\.run|ingest\\.parse|ingest\\.chunk|embed\\.batch)$" }
 
 keys_by_span:
-  job: [reader.lesson.id, reader.course.id, reader.tutor.state, reader.prompt.version]   # added to VEC-OBS-1's
+  job: [reader.lesson.id, reader.course.id, reader.tutor.state]   # added to VEC-OBS-1's job keys
   job.session: [reader.run_id, reader.lesson.id]
   agent.call: [gen_ai.operation.name, gen_ai.provider.name, gen_ai.usage.cache_read.input_tokens,
     gen_ai.usage.cache_write.input_tokens, reader.cost_input_usd, reader.lesson.id, reader.course.id, reader.step]
@@ -105,33 +104,40 @@ previews:
 forbidden_preview_keys: [model, messages, prompt, input, output, content, text]
 
 # agent.call only, when reader.cost_usd is present (B7): input_cost = reader.cost_input_usd (0 when absent, capped
-# at the total), output_cost = reader.cost_usd − input_cost, total_cost = reader.cost_usd; 6 places (the ledger's
-# numeric(12,6)); omitted when reader.cost_usd is absent.
+# at the total), output_cost = reader.cost_usd − input_cost in 6-place Decimal arithmetic (never float),
+# total_cost = reader.cost_usd (the ledger's numeric(12,6)); omitted when reader.cost_usd is absent.
 llm_cost: { span: agent.call, total: reader.cost_usd, input: reader.cost_input_usd }
-
-# FR-OBS-12 (g), blocked: mlflow.linkedPrompts = [{"name": <prompt name>, "version": str(reader.prompt.version)}],
-# the name from the root's job kind and stage.
-linked_prompts: { tutor.answer: reader.tutor, pipeline.stage: "reader.<reader.stage>", pipeline.verify: none }
 
 # session.id: on `job.session` only, = reader.run_id (pipeline) or reader.lesson.id (tutor); see FR-OBS-12 (e).
 session: { span: job.session, from: [reader.run_id, reader.lesson.id] }
 
-# --- FR-OBS-14 (blocked on ADR-0035): the assessment catalogue. A POST body is built only from this. ---
-assessments:
-  - { name: fact_check.passed, value: bool, source_id: reader.pipeline.fact_check,
-      metadata: { claims: [0, 10000], supported: [0, 10000] } }
-  - { name: verify.passed, value: bool, source_id: reader.pipeline.verify, metadata: {} }
-  - { name: verify.lab_passed, value: bool, source_id: reader.pipeline.verify,
-      metadata: { cells: [0, 10000], cells_ok: [0, 10000] } }
-  - { name: tutor.citations_valid, value: bool, source_id: reader.tutor.citations,
-      metadata: { total: [0, 1000], valid: [0, 1000] } }
-  - { name: tutor.citation_share, value: { float: [0, 1] }, source_id: reader.tutor.citations, metadata: {} }
-assessment_body: { source_type: CODE, rationale: never, metadata_values: decimal_strings }
-
-# --- FR-OBS-15 (blocked on ADR-0035): the prompt templates registered, by name and file. ---
-prompts:
-  reader.draft: server/src/reader/pipeline/prompts/draft.v1.md
-  reader.fact_check: server/src/reader/pipeline/prompts/fact_check.v1.md
-  reader.adversarial_review: server/src/reader/pipeline/prompts/adversarial_review.v1.md
-  reader.revise: server/src/reader/pipeline/prompts/revise.v1.md
-  reader.tutor: server/src/reader/tutor/prompts/answer-v1.md
+# --- Blocked on ADR-0035 (review round 2, R2-1): nothing below moves at the amendment's approval. It moves, with
+# FR-OBS-14, FR-OBS-15 and FR-OBS-12 (g), only after the owner accepts ADR-0035. ---
+blocked_on_ADR-0035:
+  attributes:
+    # FR-OBS-12 (g): the registered template version the job used.
+    reader.prompt.version: { type: int, range: [1, 100000] }
+  keys_by_span:
+    job: [reader.prompt.version]
+  # FR-OBS-12 (g): mlflow.linkedPrompts = [{"name": <prompt name>, "version": str(reader.prompt.version)}], the name
+  # from the root's job kind and stage.
+  linked_prompts: { tutor.answer: reader.tutor, pipeline.stage: "reader.<reader.stage>", pipeline.verify: none }
+  # FR-OBS-14: the assessment catalogue. A POST body is built only from this.
+  assessments:
+    - { name: fact_check.passed, value: bool, source_id: reader.pipeline.fact_check,
+        metadata: { claims: [0, 10000], supported: [0, 10000] } }
+    - { name: verify.passed, value: bool, source_id: reader.pipeline.verify, metadata: {} }
+    - { name: verify.lab_passed, value: bool, source_id: reader.pipeline.verify,
+        metadata: { cells: [0, 10000], cells_ok: [0, 10000] } }
+    - { name: tutor.citations_valid, value: bool, source_id: reader.tutor.citations,
+        metadata: { total: [0, 1000], valid: [0, 1000] } }
+    - { name: tutor.citation_share, value: { float: [0, 1] }, source_id: reader.tutor.citations, metadata: {} }
+  assessment_body: { source_type: CODE, rationale: never, metadata_values: decimal_strings }
+  # FR-OBS-15: the prompt templates registered, by name and file.
+  prompts:
+    reader.draft: server/src/reader/pipeline/prompts/draft.v1.md
+    reader.fact_check: server/src/reader/pipeline/prompts/fact_check.v1.md
+    reader.adversarial_review: server/src/reader/pipeline/prompts/adversarial_review.v1.md
+    reader.revise: server/src/reader/pipeline/prompts/revise.v1.md
+    reader.tutor: server/src/reader/tutor/prompts/answer-v1.md
+  job_kinds: [obs.feedback, obs.prompts]

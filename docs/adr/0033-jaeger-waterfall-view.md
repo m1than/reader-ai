@@ -32,19 +32,25 @@ review, round 1 (B9); the content mode is ADR-0034. Round 5 measured the review'
   Jaeger is on neither `obs` nor `obs-ui`, so it shares no network with mlflow or the worker. VEC-DEPLOY-2 gains
   exactly the pairs rotel–jaeger and caddy–jaeger, and the `never` pairs jaeger–{api, worker, mlflow, postgres,
   embed, agent-proxy, mcp, every kernel}. Jaeger initiates no connection. Egress: none.
-- **Storage and retention:** in memory, `max_traces` = 700. Derivation: memory per span measured with VEC-OBS-2's full
-  CLI key sets at 2.95–3.26 KB (round 5 stack F: +24.9 MiB for 8,000 spans, +45.1 MiB for the next 16,000; with
-  minimal attributes 0.85–1.1 KB, stack A); the largest idle reading 84.7 MiB (stack F; 12.8 MiB in stack A);
-  usable = 256 MiB × 0.75 − 85 MiB ≈ 107 MiB; ÷ 3.3 KB ≈ 34,000 spans; ÷ 45 spans per trace (the compile-like
-  worst case) ≈ 750, rounded down to 700. Retention is by count, not by age: the oldest traces are evicted beyond
-  700 and everything is lost on restart. MLflow stays the store with its 30-day retention.
+- **Storage and retention:** in memory, `max_traces` = 450 at `mem_limit` 256m, with `GOMEMLIMIT=200MiB` (the Go
+  runtime's soft limit, below the container limit, so the collector collects harder before the kernel kills it).
+  Derivation (review round 2, R2-3): memory per span measured with VEC-OBS-2's full CLI key sets at 2.95–3.26 KB
+  (round 5 stack F: +24.9 MiB for 8,000 spans, +45.1 MiB for the next 16,000; with minimal attributes 0.85–1.1 KB,
+  stack A), taken as 3.3 KB; idle taken as the worst reading, 85 MiB (stack F's 84.7 MiB; stack A read 12.8 MiB;
+  the difference is declared, not explained); usable = 256 MiB × 0.75 − 85 MiB ≈ 107 MiB; a trace is sized at 72
+  spans, SRV-OBS's bound for one lesson stage (`bounds`; the compile-like spike trace had 45); 107 MiB ÷ (72 ×
+  3.3 KB) ≈ 460, rounded down to 450. Retention is by count, not by age: the oldest traces are evicted beyond 450.
+  Jaeger restarts empty (an OOM kill or a `reader up` loses every trace it held); a restart loop under sustained
+  load was not measured. MLflow stays the store with its 30-day retention.
 - **Access:** a third Caddy site `localhost:8444` (`tls internal`), published by `reader up` on 127.0.0.1 only
   while the option is on, behind `forward_auth` to `/api/obs/gate`. The gate learns which site asks from a header
   Caddy sets on the forward_auth request, `header_up X-Reader-Site mlflow|jaeger` (Caddy overrides any value the
   client sent), and accepts as `Origin` only that site's origin: `https://localhost:8443` for `mlflow`,
   `https://localhost:8444` for `jaeger`; a missing or unknown site is 403. Measured (round 5, `gate.json`, 18 cases
   with the owner's cookie on POST): each site passed only with its own origin; the other site's origin and no
-  origin were 403; a client-sent `X-Reader-Site` changed nothing. These cross cases join INV-OBS-5.
+  origin were 403; a client-sent `X-Reader-Site` changed nothing. These cross cases join INV-OBS-5. Because a
+  request without the header is refused, the main site's `https://localhost/api/obs/gate` route also gets
+  `X-Reader-Site: app` (Origin checked against `https://localhost`), so its answer there is unchanged.
 - **CSP of 8444:** FR-OBS-9's policy with two changes: `script-src 'self'` plus the UI's two inline-script hashes
   (`sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU=`, `sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ=`;
   round 5 recomputed both from the served index), and `base-uri 'self'` (the UI's `<base href>`; with `'none'` its
@@ -64,7 +70,9 @@ review, round 1 (B9); the content mode is ADR-0034. Round 5 measured the review'
   Jaeger outage under sustained load was not measured, nor why the OOM case was slower (Rotel's per-exporter
   queueing was not read), so the [image] test repeats this with the shipped limits.
 - **Tests if accepted:** [config] the networks and VEC-DEPLOY-2 pairs, the 8444 site and its CSP; [unit] the gate's
-  per-site table (INV-OBS-5's cross cases); [image] Jaeger starts under the hardening, receives a span through
-  Rotel, the CSP hashes recomputed from the image's served index equal the configured ones (an image bump that
+  per-site table (INV-OBS-5's cross cases and the main site's `app`); [image] Jaeger starts under the hardening,
+  receives a span through Rotel, holds `max_traces` × 72 spans with VEC-OBS-2's full key sets (32,400 spans) under
+  the shipped 256m limit and `GOMEMLIMIT` with no OOM kill (`docker inspect` OOMKilled false; `docker stats` below
+  the limit; never `docker exec`), the CSP hashes recomputed from the image's served index equal the configured ones (an image bump that
   changes the inline scripts fails), and MLflow delivery within 30 s with Jaeger stopped; [live] 8444 answers 401
   without a cookie and renders a trace for the owner.

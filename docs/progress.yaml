@@ -1437,10 +1437,12 @@ tasks:
         catalog still lets MLflow price provider-less CLI spans and a missing mount prices all, so reader-mlflow's
         image replaces the bundled catalog (all four CLI cases 0, span sum = ledger 0.48); the CLI's session.id wins
         the trace session unless a job.session marker is exported first (measured both ways); Jaeger per-site gate,
-        3 KB per full span (max_traces 700 at 256m), MLflow delivery 0.6 s with Jaeger stopped and 16 s after its
+        3 KB per full span (round 2: max_traces 450 at 256m from 72 spans per trace, GOMEMLIMIT 200MiB), delivery 0.6 s with Jaeger stopped and 16 s after its
         OOM, the eval violation is a Zod-style allowsEval probe. Spec: MLflow keys derived by the exporter from
         validated attributes (VEC-OBS-4 fixture, no new rule type); cost split output = total - input; FR-OBS-14/15
         blocked on ADR-0035; ADRs 0033 (Jaeger), 0034 (content mode), 0035 (worker writes to MLflow), all proposed.
+        Design review round 2 on 72a86b7: changes (R2-1 approval scope with blocked_on items, T11 proposed to
+        OPS-DOD; R2-2 session marker via reader.obs.session_marker; R2-3 Jaeger sizing), applied.
         Next: design review round 2; the owner decides ADR-0033/0034/0035." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
