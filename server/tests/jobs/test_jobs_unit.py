@@ -115,16 +115,18 @@ def test_kind_modules_are_a_declared_list() -> None:
     jobs = require_jobs()
     assert isinstance(jobs.KIND_MODULES, tuple)
     assert len(jobs.load_kinds(())) == 0
-    # SRV-INGEST, SRV-SEARCH, SRV-PIPELINE, SRV-TUTOR, SRV-OBS paired changes (FR-EVENTS-1 note, -19)
+    # SRV-INGEST, SRV-SEARCH, SRV-PIPELINE, SRV-TUTOR, SRV-OBS, SRV-FRESH paired changes (FR-EVENTS-1, -19)
     assert jobs.KIND_MODULES == (
         "reader.ingest.jobs",
         "reader.search.jobs",
         "reader.pipeline.jobs",
         "reader.tutor.jobs",
         "reader.obs.jobs",
+        "reader.freshness.jobs",
     )
     assert list(jobs.load_kinds()) == [
-        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer", "obs.retention"
+        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer", "obs.retention",
+        "freshness.scan", "freshness.web",
     ]
 
 

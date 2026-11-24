@@ -4,7 +4,7 @@ import type { SignupsApi } from '../accounts/api';
 import type { UploadApi } from '../import/api';
 import type { PlanApi } from '../import/plan/api';
 import type { TutorApi } from '../tutor/api';
-import type { Api, LessonSummary } from './api';
+import type { Api, ApiDeps, LessonSummary } from './api';
 import type { ObsApi } from './observability/api';
 
 /** Where a slot component renders: a lesson row or the lesson page. */
@@ -40,6 +40,8 @@ export interface Services {
   /** Rendered for every lesson row and on the lesson page (FR-UI-6); AppRoot's default renders FR-UI-15's
    * CompileControl for the owner. */
   compileSlot?: CompileSlot;
+  /** The shell's fetch and 401 hook, for clients built inside lazy chunks (WEB-FRESH's card). */
+  http?: ApiDeps;
   /** SRV-INGEST's upload client for the /import page's upload sections (FR-UI-13, WEB-IMPORT). */
   upload?: UploadApi;
 }

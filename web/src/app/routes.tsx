@@ -1,7 +1,8 @@
 // Route table (WEB-UI FR-UI-3, FR-UI-12): `/` the lesson list, `/lessons/$lessonId` the lesson view (lazy),
-// `/import` the import page for the owner (lazy), anything else not-found. A lesson id outside the pattern renders
-// not-found without a request. The root route renders the shell (FR-UI-11): skip link, header, course sidebar and the
-// single `main#content`, so header and sidebar links are router links.
+// `/import` the import page for the owner (lazy), `/materials/$materialId/freshness` the freshness card (lazy;
+// WEB-FRESH), anything else not-found. A lesson id outside the pattern renders not-found without a request. The root
+// route renders the shell (FR-UI-11): skip link, header, course sidebar and the single `main#content`, so header and
+// sidebar links are router links.
 import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
@@ -28,6 +29,10 @@ const ImportPage = lazy(() => import('../import/ImportPage').then((m) => ({ defa
 const SignupsPage = lazy(() => import('../accounts/SignupsPage').then((m) => ({ default: m.SignupsPage })));
 // FR-UI-18: the observability page, a lazy chunk, for the owner only.
 const ObservabilityPage = lazy(() => import('./observability/ObservabilityPage').then((m) => ({ default: m.ObservabilityPage })));
+
+// WEB-FRESH (paired change): the freshness card's own lazy route until it mounts in the sources list.
+const MATERIAL_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const FreshnessPage = lazy(() => import('../fresh/FreshnessPage').then((m) => ({ default: m.FreshnessPage })));
 
 /** FR-UI-13 first run: an owner with no lessons and no material at all lands on /import (history replace). */
 function useFirstRun(lessons: LessonSummary[] | undefined) {
@@ -235,6 +240,26 @@ const signupsRoute = createRoute({
   },
 });
 
+const freshnessRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/materials/$materialId/freshness',
+  component: function FreshnessRoute() {
+    const { materialId } = freshnessRoute.useParams();
+    if (!MATERIAL_ID.test(materialId)) return <NotFound />;
+    return (
+      <Suspense
+        fallback={
+          <div className="page">
+            <Loading label="Loading the freshness check" />
+          </div>
+        }
+      >
+        <FreshnessPage materialId={materialId} />
+      </Suspense>
+    );
+  },
+});
+
 const observabilityRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/observability',
@@ -257,7 +282,14 @@ const observabilityRoute = createRoute({
   },
 });
 
-const routeTree = rootRoute.addChildren([indexRoute, lessonRoute, importRoute, signupsRoute, observabilityRoute]);
+const routeTree = rootRoute.addChildren([
+  indexRoute,
+  lessonRoute,
+  importRoute,
+  signupsRoute,
+  observabilityRoute,
+  freshnessRoute,
+]);
 
 export const createAppRouter = (history: RouterHistory) =>
   createRouter({ routeTree, history, defaultNotFoundComponent: NotFound });

@@ -61,11 +61,16 @@ def catalogs(**overrides: Any) -> Any:
                 "ingest.import",
                 "search.embed",
                 "obs.retention",
+                "freshness.scan",
+                "freshness.web",
                 "test.effect",
             }
         ),
         "pipeline_stages": frozenset({"draft", "fact_check", "adversarial_review", "revise", "verify"}),
-        "tasks": frozenset({"draft", "fact_check", "tutor"}),  # fact_check: tests/agent's configured task
+        # fact_check: tests/agent's configured task; the freshness tasks: SRV-FRESH's (paired change)
+        "tasks": frozenset(
+            {"draft", "fact_check", "tutor", "freshness_scan", "freshness_web", "freshness_report"}
+        ),
         "models": frozenset({"claude-sonnet-5-5", "claude-opus-5-5"}),
     }
     values.update(overrides)

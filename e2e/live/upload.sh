@@ -5,12 +5,13 @@
 # cancelled upload leaves no row and no file; exactly 209,715,200 bytes pass and are fetched (time recorded); one
 # byte more is 413. Spends nothing. Cleans up only what it created, by id.
 #
-#   bash e2e/live/upload.sh --out DIR [--project NAME] [--with-offline --config READER_YAML]
+#   bash e2e/live/upload.sh --config READER_YAML --out DIR [--project NAME] [--with-offline]
 #
+# --config (required) is the reader.yaml `reader up` used: `reader status --config` reads the ingest watcher's lock
+# under its data_dir (without it, status cannot find the lock; live check 2026-11-24, the one false FAIL).
 # --with-offline (opt-in, ADR-0029 verified_by): stops only the ingest watcher (SIGTERM to its lock's pid; never the
 # stack), checks that a new upload stays `queued` and the converter reads `offline` after 60 s, then starts the
 # watcher again exactly as `reader up` does (FR-CLI-23's spawn, also on failure) and waits for it to be online.
-# --config is the reader.yaml `reader up` used (it locates the watcher's lock under data_dir).
 #
 # DIR must be outside the repository. OUT/upload-results.json holds numbers and ids only.
 set -euo pipefail
@@ -19,17 +20,21 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 source "$ROOT/e2e/live/lib.sh"
 OUT=""
 PROJECT="reader"
+CONFIG=""
 EXTRA=()
+USAGE="usage: $0 --config READER_YAML --out DIR [--project NAME] [--with-offline]"
 while (($#)); do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
     --project) PROJECT="$2"; shift 2 ;;
     --with-offline) EXTRA+=(--with-offline); shift ;;
-    --config) EXTRA+=(--config "$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"); shift 2 ;;
-    *) echo "usage: $0 --out DIR [--project NAME] [--with-offline --config READER_YAML]" >&2; exit 2 ;;
+    --config) CONFIG="$(cd "$(dirname "$2")" && pwd)/$(basename "$2")"; shift 2 ;;
+    *) echo "$USAGE" >&2; exit 2 ;;
   esac
 done
-[[ -n "$OUT" ]] || { echo "--out is required" >&2; exit 2; }
+[[ -n "$OUT" && -n "$CONFIG" ]] || { echo "$USAGE  (--out and --config are required)" >&2; exit 2; }
+[[ -f "$CONFIG" ]] || { echo "$CONFIG: no such file" >&2; exit 2; }
+EXTRA+=(--config "$CONFIG")
 mkdir -p "$OUT"
 case "$(cd "$OUT" && pwd -P)/" in
   "$(cd "$ROOT" && pwd -P)/"*) echo "$OUT must be outside the repository" >&2; exit 2 ;;
@@ -38,7 +43,7 @@ esac
 section "upload (SRV-INGEST revision 2, WEB-IMPORT)"
 check "api answers /api/healthz" curl -fsSk "$READER_URL/api/healthz"
 check "reader status reports the ingest watcher running" \
-  bash -c "cd '$ROOT/server' && uv run reader status --json | grep -q '\"ingest_watcher\": \"running\"'"
+  bash -c "cd '$ROOT/server' && uv run reader status --json --config '$CONFIG' | grep -q '\"ingest_watcher\": \"running\"'"
 rc=0
 (cd "$ROOT" && uv run --project server python e2e/live/lib/upload_live.py --project "$PROJECT" --url "$READER_URL" \
   --out "$OUT" ${EXTRA[@]+"${EXTRA[@]}"}) >"$OUT/upload.txt" 2>&1 || rc=$?

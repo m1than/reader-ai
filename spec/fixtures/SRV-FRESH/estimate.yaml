@@ -1,0 +1,40 @@
+# VEC-FRESH-6 — estimate cases (FR-FRESH-9), recomputed by hand from REF-FRESH-2 § 4 with the pricing table
+# (server/src/reader/agent/pricing.yaml): Sonnet 5.5 1-hour cache write $4/M, output $10/M; Haiku 5.5 1-hour write
+# $0.20/M, output $0.50/M; web search $0.01.
+#
+# scan reserve (FR-AGENT-9, custom system) = (1,000 + ceil(chars / 2.0)) × $4/M + 4,000 × $10/M
+# report worst = 19,100 × $4/M + 4,000 × $10/M = 0.0764 + 0.04 = $0.116400
+# high = scan reserve + 6 × $0.02 + $0.116400 = scan reserve + $0.236400   (string: rounded up to the cent)
+# low  = ceil(chars / 2.5) × $4/M + 2,600 × $10/M + 6 × $0.012 + (12,000 × $4/M + 2,500 × $10/M)
+#      = ceil(chars / 2.5) × $4/M + $0.026 + $0.072 + $0.073                    (string: nearest cent)
+# cap  = $1.00
+
+models: { scan: claude-sonnet-5-5, report: claude-sonnet-5-5 }
+
+cases:
+  - scan_prompt_chars: 63000      # a full 60,000-character sample plus 3,000 of prompt
+    scan_reserve: "0.170000"      # (1,000 + 31,500) × 4e-6 = 0.13, + 0.04
+    high_exact: "0.406400"
+    low_exact: "0.271800"         # 25,200 × 4e-6 = 0.1008, + 0.171
+    expect: { low_usd: "0.27", high_usd: "0.41", cap_usd: "1.00" }
+  - scan_prompt_chars: 10000
+    scan_reserve: "0.064000"      # 6,000 × 4e-6 = 0.024, + 0.04
+    high_exact: "0.300400"
+    low_exact: "0.187000"         # 4,000 × 4e-6 = 0.016, + 0.171
+    expect: { low_usd: "0.19", high_usd: "0.31", cap_usd: "1.00" }
+  - scan_prompt_chars: 2001
+    scan_reserve: "0.048004"      # ceil(1,000.5) = 1,001; 2,001 × 4e-6 = 0.008004, + 0.04
+    high_exact: "0.284404"
+    low_exact: "0.174204"         # ceil(800.4) = 801; 801 × 4e-6 = 0.003204, + 0.171
+    expect: { low_usd: "0.17", high_usd: "0.29", cap_usd: "1.00" }
+
+search_reserve:
+  # Haiku 5.5, custom system, 1,000 output tokens: (1,000 + ceil(600 / 2)) × 0.20e-6 + 1,000 × 0.50e-6 = 0.00076,
+  # + one search fee 0.01 = 0.01076, below the floor: the reserve is the floor.
+  - { model: claude-haiku-5-5, prompt_chars: 600, expect: "0.02" }
+
+daily:
+  # refused when spent today over the three tasks + the call's reserve > $2.00
+  - { spent: "1.70", reserve: "0.41", refused: true }
+  - { spent: "1.59", reserve: "0.41", refused: false }   # exactly $2.00 is allowed
+  - { spent: "0.00", reserve: "0.02", refused: false }

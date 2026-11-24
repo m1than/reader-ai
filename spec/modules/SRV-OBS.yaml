@@ -64,6 +64,13 @@ title: Tracing with an attribute allow-list, Rotel and MLflow behind an owner-on
 # Approved with Red on V/obs-impl (from V/slice-integration 04b2563), with the `obs.view` operation and the paired
 # items applied: OPS-DEPLOY FR-DEPLOY-13, OPS-CLI FR-CLI-22, SRV-CONFIG FR-CONFIG-17, SRV-AUTH FR-AUTH-33, SRV-EVENTS
 # FR-EVENTS-18/-19, SRV-AGENT FR-AGENT-14, WEB-UI FR-UI-18.
+# Paired change from SRV-FRESH (merge of V/freshness into V/slice-integration, 2026-11-24): VEC-OBS-1's `job_args`
+# lists `freshness.scan` and `freshness.web` with no argument copied (the report id is not exported); the
+# `error_codes` catalogue takes SRV-AGENT's new codes `tools_not_allowed`, `search_cap` and `request_cap` (it is
+# the union of the `errors` lists, unchanged as a rule); the `freshness_*` tasks reach `tasks` from reader.yaml as
+# every task does, and the [unit] test catalogs list them and the two kinds. The search run's CLI keeps the trace
+# export with the content flags `0`: spikes/web-search-otel measured that its `claude_code.tool*` spans then carry
+# no query, title, URL or summary (FR-OBS-6's CLI canary harness itself is unchanged; SRV-FRESH FR-FRESH-13).
 status: approved
 approved_by: agent
 approved_at: 2026-11-24
@@ -527,7 +534,8 @@ vectors:
 #            repository or on the owner's Docker uses 10.233/16. The ingest check reads the spans of
 #            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24).
 #   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (e2e/live/lib/obs_live.py, run
-#            as `python -I`, and obs_browser.mjs). It is run by hand until the stage-2 live check script
+#            as `python -I`, and obs_browser.mjs, which finds the summary's trace links by the exact name `Trace`:
+#            the page's "traces dashboard" link also contains it, live check 2026-11-24). It is run by hand until the stage-2 live check script
 #            (`e2e/live/stage-2.sh`, docs/roadmap.md) exists; that script will call it. DIR is resolved and checked to
 #            lie outside the repository before anything is created. Sessions: one owner and one live-check learner
 #            row, each created and deleted by its id hash only (each statement must report exactly one row), through

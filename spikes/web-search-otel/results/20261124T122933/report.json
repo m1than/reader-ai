@@ -1,0 +1,622 @@
+{
+  "runs": [
+    {
+      "mode": "content-off",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "UserMessage",
+        "AssistantMessage",
+        "ResultMessage"
+      ],
+      "tool_results": 1,
+      "trace_id": "74795d1a4acb16fa656e6980b83e4b47",
+      "gate": {
+        "allowed": 1,
+        "denied": 0
+      }
+    },
+    {
+      "mode": "content-unset",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "UserMessage",
+        "AssistantMessage",
+        "ResultMessage"
+      ],
+      "tool_results": 1,
+      "trace_id": "3227c623cc293890e398059d4f083d02",
+      "gate": {
+        "allowed": 1,
+        "denied": 0
+      }
+    },
+    {
+      "mode": "tool-details",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "UserMessage",
+        "AssistantMessage",
+        "ResultMessage"
+      ],
+      "tool_results": 1,
+      "trace_id": "8e5379d2e68ff28d2608e35d5386635c",
+      "gate": {
+        "allowed": 1,
+        "denied": 0
+      }
+    },
+    {
+      "mode": "tool-content",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "UserMessage",
+        "AssistantMessage",
+        "ResultMessage"
+      ],
+      "tool_results": 1,
+      "trace_id": "38efc5828abacf4a576a8a5039acef91",
+      "gate": {
+        "allowed": 1,
+        "denied": 0
+      }
+    }
+  ],
+  "modes": {
+    "content-off": {
+      "otlp_paths": [
+        "/v1/traces"
+      ],
+      "authorization_present": false,
+      "upstream_kinds": [
+        "main",
+        "search",
+        "final"
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_QUERY": 0,
+        "CANARY_TITLE": 0,
+        "CANARY_URL": 0,
+        "CANARY_SUMMARY": 0,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_QUERY": 0,
+        "CANARY_TITLE": 0,
+        "CANARY_URL": 0,
+        "CANARY_SUMMARY": 0,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_where": {
+        "CANARY_QUERY": [],
+        "CANARY_TITLE": [],
+        "CANARY_URL": [],
+        "CANARY_SUMMARY": [],
+        "CANARY_SYSTEM": [],
+        "HANDLE": []
+      },
+      "cli_span_names": [
+        "claude_code.llm_request",
+        "claude_code.tool.blocked_on_user",
+        "claude_code.llm_request",
+        "claude_code.tool.execution",
+        "claude_code.tool",
+        "claude_code.llm_request",
+        "claude_code.interaction"
+      ],
+      "cli_span_keys": {
+        "claude_code.llm_request": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "attempt",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+          "duration_ms",
+          "effort",
+          "first_content_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.request.model",
+          "gen_ai.response.finish_reasons",
+          "gen_ai.system",
+          "input_tokens",
+          "llm_request.context",
+          "model",
+          "output_tokens",
+          "query_source_safe",
+          "session.id",
+          "span.type",
+          "speed",
+          "stop_reason",
+          "success",
+          "terminal.type",
+          "ttft_ms",
+          "user.id"
+        ],
+        "claude_code.tool.blocked_on_user": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "decision",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "session.id",
+          "source",
+          "span.type",
+          "terminal.type",
+          "user.id"
+        ],
+        "claude_code.tool.execution": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "session.id",
+          "span.type",
+          "success",
+          "terminal.type",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.tool": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "gen_ai.tool.name",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "tool_name",
+          "tool_name_safe",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.interaction": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "interaction.duration_ms",
+          "interaction.sequence",
+          "parent.source",
+          "queued_sends",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "user.id",
+          "user_prompt",
+          "user_prompt_length"
+        ]
+      }
+    },
+    "content-unset": {
+      "otlp_paths": [
+        "/v1/traces"
+      ],
+      "authorization_present": false,
+      "upstream_kinds": [
+        "main",
+        "search",
+        "final"
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_QUERY": 0,
+        "CANARY_TITLE": 0,
+        "CANARY_URL": 0,
+        "CANARY_SUMMARY": 0,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_QUERY": 0,
+        "CANARY_TITLE": 0,
+        "CANARY_URL": 0,
+        "CANARY_SUMMARY": 0,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_where": {
+        "CANARY_QUERY": [],
+        "CANARY_TITLE": [],
+        "CANARY_URL": [],
+        "CANARY_SUMMARY": [],
+        "CANARY_SYSTEM": [],
+        "HANDLE": []
+      },
+      "cli_span_names": [
+        "claude_code.llm_request",
+        "claude_code.tool.blocked_on_user",
+        "claude_code.llm_request",
+        "claude_code.tool.execution",
+        "claude_code.tool",
+        "claude_code.llm_request",
+        "claude_code.interaction"
+      ],
+      "cli_span_keys": {
+        "claude_code.llm_request": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "attempt",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+          "duration_ms",
+          "effort",
+          "first_content_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.request.model",
+          "gen_ai.response.finish_reasons",
+          "gen_ai.system",
+          "input_tokens",
+          "llm_request.context",
+          "model",
+          "output_tokens",
+          "query_source_safe",
+          "session.id",
+          "span.type",
+          "speed",
+          "stop_reason",
+          "success",
+          "terminal.type",
+          "ttft_ms",
+          "user.id"
+        ],
+        "claude_code.tool.blocked_on_user": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "decision",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "session.id",
+          "source",
+          "span.type",
+          "terminal.type",
+          "user.id"
+        ],
+        "claude_code.tool.execution": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "session.id",
+          "span.type",
+          "success",
+          "terminal.type",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.tool": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "gen_ai.tool.name",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "tool_name",
+          "tool_name_safe",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.interaction": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "interaction.duration_ms",
+          "interaction.sequence",
+          "parent.source",
+          "queued_sends",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "user.id",
+          "user_prompt",
+          "user_prompt_length"
+        ]
+      }
+    },
+    "tool-details": {
+      "otlp_paths": [
+        "/v1/traces"
+      ],
+      "authorization_present": false,
+      "upstream_kinds": [
+        "main",
+        "search",
+        "final"
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_QUERY": 0,
+        "CANARY_TITLE": 0,
+        "CANARY_URL": 0,
+        "CANARY_SUMMARY": 0,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_QUERY": 0,
+        "CANARY_TITLE": 0,
+        "CANARY_URL": 0,
+        "CANARY_SUMMARY": 0,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_where": {
+        "CANARY_QUERY": [],
+        "CANARY_TITLE": [],
+        "CANARY_URL": [],
+        "CANARY_SUMMARY": [],
+        "CANARY_SYSTEM": [],
+        "HANDLE": []
+      },
+      "cli_span_names": [
+        "claude_code.llm_request",
+        "claude_code.tool.blocked_on_user",
+        "claude_code.llm_request",
+        "claude_code.tool.execution",
+        "claude_code.tool",
+        "claude_code.llm_request",
+        "claude_code.interaction"
+      ],
+      "cli_span_keys": {
+        "claude_code.llm_request": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "attempt",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+          "duration_ms",
+          "effort",
+          "first_content_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.request.model",
+          "gen_ai.response.finish_reasons",
+          "gen_ai.system",
+          "input_tokens",
+          "llm_request.context",
+          "model",
+          "output_tokens",
+          "query_source_safe",
+          "session.id",
+          "span.type",
+          "speed",
+          "stop_reason",
+          "success",
+          "terminal.type",
+          "ttft_ms",
+          "user.id"
+        ],
+        "claude_code.tool.blocked_on_user": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "decision",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "session.id",
+          "source",
+          "span.type",
+          "terminal.type",
+          "user.id"
+        ],
+        "claude_code.tool.execution": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "session.id",
+          "span.type",
+          "success",
+          "terminal.type",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.tool": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "gen_ai.tool.name",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "tool_name",
+          "tool_name_safe",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.interaction": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "interaction.duration_ms",
+          "interaction.sequence",
+          "parent.source",
+          "queued_sends",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "user.id",
+          "user_prompt",
+          "user_prompt_length"
+        ]
+      }
+    },
+    "tool-content": {
+      "otlp_paths": [
+        "/v1/traces"
+      ],
+      "authorization_present": false,
+      "upstream_kinds": [
+        "main",
+        "search",
+        "final"
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_QUERY": 1,
+        "CANARY_TITLE": 1,
+        "CANARY_URL": 1,
+        "CANARY_SUMMARY": 1,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_QUERY": 1,
+        "CANARY_TITLE": 1,
+        "CANARY_URL": 1,
+        "CANARY_SUMMARY": 1,
+        "CANARY_SYSTEM": 0,
+        "HANDLE": 0
+      },
+      "canary_where": {
+        "CANARY_QUERY": [],
+        "CANARY_TITLE": [],
+        "CANARY_URL": [],
+        "CANARY_SUMMARY": [],
+        "CANARY_SYSTEM": [],
+        "HANDLE": []
+      },
+      "cli_span_names": [
+        "claude_code.llm_request",
+        "claude_code.tool.blocked_on_user",
+        "claude_code.llm_request",
+        "claude_code.tool.execution",
+        "claude_code.tool",
+        "claude_code.llm_request",
+        "claude_code.interaction"
+      ],
+      "cli_span_keys": {
+        "claude_code.llm_request": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "attempt",
+          "cache_creation_tokens",
+          "cache_read_tokens",
+          "duration_ms",
+          "effort",
+          "first_content_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.request.model",
+          "gen_ai.response.finish_reasons",
+          "gen_ai.system",
+          "input_tokens",
+          "llm_request.context",
+          "model",
+          "output_tokens",
+          "query_source_safe",
+          "session.id",
+          "span.type",
+          "speed",
+          "stop_reason",
+          "success",
+          "terminal.type",
+          "ttft_ms",
+          "user.id"
+        ],
+        "claude_code.tool.blocked_on_user": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "decision",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "session.id",
+          "source",
+          "span.type",
+          "terminal.type",
+          "user.id"
+        ],
+        "claude_code.tool.execution": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "session.id",
+          "span.type",
+          "success",
+          "terminal.type",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.tool": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "duration_ms",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "gen_ai.tool.call.id",
+          "gen_ai.tool.name",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "tool_name",
+          "tool_name_safe",
+          "tool_use_id",
+          "user.id"
+        ],
+        "claude_code.interaction": [
+          "anthropic.custom_base_url",
+          "anthropic.provider",
+          "gen_ai.conversation.id",
+          "gen_ai.operation.name",
+          "gen_ai.provider.name",
+          "interaction.duration_ms",
+          "interaction.sequence",
+          "parent.source",
+          "queued_sends",
+          "session.id",
+          "span.type",
+          "terminal.type",
+          "user.id",
+          "user_prompt",
+          "user_prompt_length"
+        ]
+      }
+    }
+  }
+}

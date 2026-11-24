@@ -114,7 +114,20 @@ test.afterAll(async () => {
   await context.close();
 });
 
+// Session mode (web_live.py, the owner already has a passkey): one id-only session row, handed over as the cookie
+// value through the environment only; no bootstrap, no virtual passkey, the owner's credentials untouched.
+const SESSION = process.env.READER_SESSION ?? '';
+
 test('owner passkey registration through the bootstrap page', async () => {
+  if (SESSION) {
+    const baseURL = test.info().project.use.baseURL!;
+    await context.addCookies([{ name: '__Host-reader_session', value: SESSION, url: baseURL, secure: true, httpOnly: true, sameSite: 'Lax' }]);
+    await page.goto('/');
+    const me = await api.get('/api/me');
+    expect(me.status(), 'the id-only owner session signs in').toBe(200);
+    expect(((await me.json()) as { role: string }).role).toBe('owner');
+    return;
+  }
   const token = process.env.READER_BOOTSTRAP_TOKEN ?? '';
   expect(token.length, 'web_live.py hands a bootstrap token').toBeGreaterThan(20);
   await page.goto('/api/auth/signin');
@@ -675,6 +688,8 @@ const signUpThroughPage = async (p: Page, handle: string): Promise<{ status: num
 };
 const pendingList = async () => (await (await api.get('/api/auth/signups')).json()) as { pending: { id: string; handle: string }[] };
 const ownerSignsInAgain = async () => {
+  // Session mode has no virtual passkey to sign in again with, and its row is already recent.
+  if (SESSION) return;
   await page.goto('/');
   await page.getByRole('button', { name: 'Sign out' }).click();
   await page.waitForURL(/\/api\/auth\/signin$/);

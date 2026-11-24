@@ -715,3 +715,34 @@ operations:
       cost: { na: no provider call }
       observability: { items: [FR-CLI-19] }
       recovery: { items: [FR-CLI-12, FR-CLI-20] }
+
+  # Added 2026-11-23 (V/freshness) for SRV-FRESH, WEB-FRESH and SRV-AGENT's FR-AGENT-15..17 (ADR-0030 accepted).
+  # Rechecked with SRV-FRESH's Green (2026-11-23): its four routes are named; the cells map the traced items. Still
+  # missing: the live run FR-FRESH-14 (functional, cost), INV-FRESH-1's [agent] check through agent-proxy (privacy),
+  # axe pages evidence (a11y) and a latency budget.
+  - id: material.freshness
+    title: Check how current a material is and get recommendations for newer sources (estimate, run, read the report)
+    surface: [web, api]
+    specs: [SRV-FRESH, WEB-FRESH, SRV-AGENT]
+    routes: ["GET /api/materials/{material_id}/freshness", "POST /api/materials/{material_id}/freshness",
+             "GET /api/materials/{material_id}/freshness/{report_id}", "PUT /api/materials/{material_id}/bibliography"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-FRESH-1, FR-FRESH-2, FR-FRESH-3, FR-FRESH-4, FR-FRESH-5, FR-FRESH-7, FR-FRESH-8, FR-FRESH-10,
+                FR-FRESH-11, VEC-FRESH-1, VEC-FRESH-4, VEC-FRESH-7, FR-FRESHUI-1, FR-FRESHUI-2, FR-FRESHUI-3,
+                FR-FRESHUI-4, FR-FRESHUI-5, FR-FRESHUI-6, VEC-FRESHUI-1]
+        missing: "the live check FR-FRESH-14 has not run (owner, READER_LIVE=1, about $0.27 of budget.test_budget_usd)"
+      security:
+        items: [FR-AGENT-15, FR-AGENT-16, INV-AGENT-6, VEC-AGENT-3, VEC-AGENT-4, FR-FRESH-6, INV-FRESH-3, INV-FRESH-4,
+                INV-FRESH-5, VEC-FRESH-2, VEC-FRESH-3, VEC-FRESH-5, INV-FRESHUI-1, INV-FRESHUI-2]
+      privacy:
+        items: [INV-FRESH-1, INV-FRESH-2, FR-FRESH-13]
+        missing: "INV-FRESH-1's [agent] check (every body agent-proxy forwards to the stub during stage (b)) is not written; the plan and gate parts are"
+      a11y: { missing: "no axe.json pages evidence for the freshness card (WEB-FRESH FR-FRESHUI-7's [browser] axe runs are not pages evidence)" }
+      latency: { missing: "no sourced budget; the job timeouts are timeouts, not latency targets" }
+      cost:
+        items: [FR-FRESH-9, VEC-FRESH-6, FR-AGENT-17]
+        missing: "no measured cost per check yet (FR-FRESH-14 not run); estimate ≈ $0.27, run cap $1.00, daily cap $2.00"
+      observability: { items: [FR-FRESH-13, FR-AGENT-16] }
+      recovery: { items: [FR-FRESH-3, FR-FRESH-10, FR-FRESH-12] }

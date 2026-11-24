@@ -32,6 +32,19 @@ const fixtures = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-UI/lesson
 const notebook = readFileSync(join(repo, 'spec/fixtures/WEB-NOTEBOOK/lesson-w01.ipynb'), 'utf8');
 const signups = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-ACCOUNTS/signups.json'), 'utf8'));
 const me = { id: '0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10', handle: 'ivan', role: 'owner', display_name: 'Ivan', consent: { evaluation: true, tuning: false } };
+// WEB-FRESH (paired change): the freshness routes answer from VEC-FRESHUI-1, one state per material id.
+const fresh = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-FRESH/bodies.json'), 'utf8'));
+const freshState = (id) => Object.values(fresh.states).find((s) => s.material_id === id);
+
+const freshApi = (method, path) => {
+  const m = /^\/api\/materials\/([^/]+)\/(freshness|bibliography)$/.exec(path);
+  const state = m && freshState(decodeURIComponent(m[1]));
+  if (!state) return null;
+  if (method === 'GET' && m[2] === 'freshness') return [200, state.body];
+  if (method === 'PUT' && m[2] === 'bibliography') return [200, fresh.bibliography_saved];
+  if (method === 'POST' && m[2] === 'freshness') return [fresh.post_accepted.status, fresh.post_accepted.body];
+  return null;
+};
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
@@ -117,7 +130,7 @@ const api = (method, path) => {
   // WEB-UI FR-UI-12 / WEB-PLAN: one imported synthetic source without a stored plan.
   if (method === 'GET' && path === '/api/materials')
     return [200, { materials: [{ id: 'synthetic-plan', status: 'imported', page_count: 30 }, { id: 'queued-one', status: 'queued', page_count: null }] }];
-  return [404, { error: 'not_found' }];
+  return freshApi(method, path) ?? [404, { error: 'not_found' }];
 };
 
 /** WEB-PLAN preview and confirm stubs: a synthetic 30-page plan; fits from 2 weeks at 30 min or more a day. */

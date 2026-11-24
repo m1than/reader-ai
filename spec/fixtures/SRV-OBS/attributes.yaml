@@ -67,6 +67,8 @@ job_args:
   ingest.import: { material_sha256: reader.material_sha256 }
   search.embed: { material_sha256: reader.material_sha256, ingest_id: reader.ingest_id }
   obs.retention: {}
+  freshness.scan: {}   # SRV-FRESH paired change: the report id is not copied
+  freshness.web: {}
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
 instrumentation_scope: { name: reader, version: null }

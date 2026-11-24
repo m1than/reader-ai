@@ -1,0 +1,65 @@
+# VEC-FRESH-3 — search-result URL cases for R entries (FR-FRESH-7, INV-FRESH-3) and id resolution (FR-FRESH-8).
+# `host` is the expected ASCII host of a kept entry; `host: null` means the item is dropped (`url_unsafe`).
+# Bounds: url_chars_max 2,048; result_host_chars_max 100; results_per_search_max 10. Hosts by Python's `idna` codec.
+
+entries:
+  - { url: "https://publisher.example/books/pdl-4", host: publisher.example }
+  - { url: "http://Example.ORG/a", host: example.org }                       # urlsplit lower-cases the host
+  - { url: "https://example.org/page#frag", host: example.org }              # a fragment is kept in the URL
+  - { url: "https://bücher.example/ledgers", host: xn--bcher-kva.example }   # IDN to ASCII
+  - { url: "https://exаmple.org/", host: xn--exmple-4nf.org }          # Cyrillic a: a look-alike, shown as its ASCII host
+  - { url: "javascript:alert(1)", host: null }
+  - { url: "data:text/html,<b>hi</b>", host: null }
+  - { url: "ftp://example.org/file", host: null }
+  - { url: "https://user:pw@example.org/", host: null }                     # userinfo
+  - { url: "https://user@example.org/", host: null }
+  - { url: "https://[::1/x", host: null }                                   # urlsplit ValueError (invalid IPv6 brackets)
+  - { url: "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.example/", host: null }  # 64-char label: idna UnicodeError
+  - { url: "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.example/", host: null }  # 109-char host
+  - { url: "https:///nohost", host: null }
+  - { url: " https://example.org/", host: null }                            # leading whitespace
+  - { url: "https://example.org/‮evil", host: null }                   # a bidi override
+  - { url: 42, host: null }                                                 # not a string
+  - { url_repeat: { prefix: "https://example.org/", char: "a", length: 2049 }, host: null }  # over url_chars_max
+  - { url_repeat: { prefix: "https://example.org/", char: "a", length: 2048 }, host: example.org }
+  # Host and port rules (the web's URL Standard check compares hosts, so the server keeps only plain ones):
+  - { url: "https://example.org:443/a", host: example.org }                  # a port in range is kept
+  - { url: "https://example.org:65535/", host: example.org }
+  - { url: "https://example.org:65536/", host: null }                       # port out of 0..65535
+  - { url: "https://example.org:http/", host: null }                        # port not an integer
+  - { url: "https://exa%6Dple.org/", host: null }                           # percent in the host
+  - { url: "https://ex_ample.org/", host: null }                            # not LDH
+  - { url: "https://-bad.example/", host: null }                            # hyphen at a label's start
+  - { url: "https://bad-.example/", host: null }                            # hyphen at a label's end
+  - { url: "https://example.org./", host: null }                            # an empty label
+  - { url: "https://☃.example/", host: null }                               # a symbol, not a letter or digit
+  - { url: "https://[::1]/", host: null }                                   # an IPv6 literal is not LDH
+  - { url: "https://192.0.2.1/x", host: 192.0.2.1 }                         # IPv4 digits are LDH
+
+search:
+  # One run's UserMessage.tool_use_result with 12 links (spikes/web-search § 3a shape): the first 10 become
+  # r<first_k>…; the error string is not a summary.
+  first_k: 11
+  links: 12
+  expect_ids: [r11, r12, r13, r14, r15, r16, r17, r18, r19, r20]
+  summary_in: "A summary‮ with  spaces"
+  expect_summary: "A summary with spaces"
+
+resolution:
+  # R entries; the model cites ids. A URL or an unknown id is never resolved; known ids store R's url, host, title.
+  r:
+    - { id: r1, url: "https://publisher.example/books/pdl-4", host: publisher.example, title: "PDL, 4th edition" }
+    - { id: r2, url: "https://spec.example/consensus/v3", host: spec.example, title: "Consensus v3" }
+  cases:
+    - name: known_ids
+      citations: [r1, r2, r1]
+      expect: [r1, r2]                    # each id once, in order
+      dropped: {}
+    - name: unknown_id
+      citations: [r9]
+      expect: []
+      dropped: { source_unknown: 1 }
+    - name: model_written_url
+      citations: ["https://evil.example/"]
+      expect: []
+      dropped: { source_unknown: 1 }
