@@ -627,10 +627,10 @@ paired_changes:
 # B1–B10 and non-blocking items; this revision answers each (RESULT.md "Round 5" has the measurements). Owner
 # decisions, all proposed: ADR-0033 (a Jaeger view), ADR-0034 (an opt-in content mode), ADR-0035 (the worker's
 # assessment and prompt writes to MLflow; FR-OBS-14 and FR-OBS-15 stay blocked on it, the rest proceeds).
-# Approval scope (review round 2, R2-1). Approving this amendment moves into `requirements` ONLY FR-OBS-12 (a)-(f)
-# and (h), FR-OBS-13, FR-OBS-16 and FR-OBS-17, with the in-place edits not marked blocked, and VEC-OBS-4 without
-# its `blocked_on_ADR-0035` block. These stay under `proposed_requirements` until the owner accepts ADR-0035:
-# FR-OBS-14, FR-OBS-15, FR-OBS-12 (g), VEC-OBS-4's `blocked_on_ADR-0035` block (reader.prompt.version, linked
+# Approval scope (review round 2, R2-1). Approving this amendment moves into `requirements` ONLY FR-OBS-12 (whose
+# clause (g) moved to FR-OBS-18, review round 3), FR-OBS-13, FR-OBS-16 and FR-OBS-17, with the in-place edits not
+# marked blocked, and VEC-OBS-4 without its `blocked_on_ADR-0035` block. These stay under `proposed_requirements`
+# until the owner accepts ADR-0035: FR-OBS-14, FR-OBS-15, FR-OBS-18, VEC-OBS-4's `blocked_on_ADR-0035` block (reader.prompt.version, linked
 # prompts, the assessment catalogue, the prompt list), the kinds `obs.feedback` and `obs.prompts`, the INV-OBS-2
 # edit and their test levels. These stay until the owner accepts ADR-0033: the 8444 site, Jaeger's service and
 # networks, and the INV-OBS-5 cross cases. Each held item carries `blocked_on: ADR-00xx`. Enforcement: process (the
@@ -722,10 +722,8 @@ proposed_requirements:
       {preview key: validated value} for the keys the root carries (MLflow unwraps the JSON string, measured). The
       tutor's outcome has its own key, `reader.tutor.state` ∈ {answered, failed, refused, expired} (the
       `tutor_questions.state` at the job's end), beside `reader.job.outcome` (B3). No preview key is `model` or
-      another of VEC-OBS-4 `forbidden_preview_keys` (a fixture test fails CI otherwise). (g) BLOCKED with FR-OBS-15
-      (ADR-0035): linked prompts, `mlflow.traceTag.mlflow.linkedPrompts` = `[{"name": "reader.<stage>" or
-      "reader.tutor", "version": "<n>"}]`, derived from the root's `reader.stage` or job kind and a validated
-      `reader.prompt.version` (int 1..100000). (h) Tool spans set status OK on success (MLflow's tool-call success
+      another of VEC-OBS-4 `forbidden_preview_keys` (a fixture test fails CI otherwise). (g) Linked prompts: moved
+      to FR-OBS-18 (blocked on ADR-0035; review round 3). (h) Tool spans set status OK on success (MLflow's tool-call success
       rate counts only OK; measured 0.00% with UNSET). INV-OBS-1's property test is extended (B3): Hypothesis
       generates hostile values for every key that feeds a derivation (quotes, backslashes, braces, `</script>`,
       NUL, U+2028, 10 KB strings, NaN, ±inf, floats past the range, UUID look-alikes with extra characters) and
@@ -789,9 +787,16 @@ proposed_requirements:
       image has no git sha). The body is the file's bytes; INV-OBS-2's canary covers it (no book text, secret or
       run token can be in a static file; a unit test also runs the secret scanner over each file and refuses a
       `{{…}}` placeholder that a renderer would fill). The run ends `skipped` with tracing off. The worker reads the
-      stage → version map from MLflow on demand for FR-OBS-12 (g) (linked prompts), cached per process; an unknown
+      stage → version map from MLflow on demand for FR-OBS-18 (linked prompts), cached per process; an unknown
       version links nothing. Measured: 3 prompts registered, listed with their tags, and "1 linked prompt" on a
       trace. [unit, image]
+  - id: FR-OBS-18
+    blocked_on: ADR-0035
+    text: >-
+      BLOCKED on ADR-0035 (with FR-OBS-15; split out of FR-OBS-12 (g), review round 3). Linked prompts: the root's
+      `mlflow.traceTag.mlflow.linkedPrompts` = `[{"name": "reader.<stage>" or "reader.tutor", "version": "<n>"}]`,
+      derived by the exporter from the root's `reader.stage` or job kind and a validated `reader.prompt.version` (int
+      1..100000; VEC-OBS-4 `blocked_on_ADR-0035`). [unit, image]
   - id: FR-OBS-16
     text: >-
       Every tab of MLflow 3.18.0's GenAI experiment UI, and what reader-ai puts there (measured before and after in
@@ -874,7 +879,8 @@ proposed_paired_changes:
       - "mlflow service: environment adds `MLFLOW_MODEL_CATALOG_URI=` (empty: no remote price fetch); reader-mlflow's
         image replaces the bundled model catalog (FR-OBS-12 c): `deploy/otel/mlflow.Dockerfile` (and its
         .dockerignore) gains the copy of `deploy/otel/mlflow-catalog/anthropic.json`. Generator
-        `deploy/otel/mlflow_catalog.py` (stdlib + PyYAML through `uv run --project server`; `--write` regenerates,
+        `deploy/otel/mlflow_catalog.py` (stdlib + `ruamel.yaml`, the server's locked YAML library, through `uv run
+        --project server`; `--write` regenerates,
         `--check` exits 1 on any difference) reads pricing.yaml's model ids and `deploy/otel/mlflow-bundled-anthropic.txt`.
         Tests: [unit] `--check` passes and every pricing.yaml model is in the file; [image] the built image's
         `mlflow/utils/model_catalog/` has that `anthropic.json` as its only `*.json` (fails when the replacement is
@@ -887,7 +893,7 @@ proposed_paired_changes:
       - "Root attributes `reader.lesson.id`, `reader.course.id` (from the run's lesson row; the `job.session` marker
         with `reader.run_id` comes from the job wrapper, FR-OBS-12 e) (FR-OBS-12 d); `verify.claims`, `verify.lab`, `kernel.run` spans (FR-OBS-13).
         Blocked on ADR-0035: `obs.feedback` enqueues for fact_check.passed, verify.passed, verify.lab_passed
-        (FR-OBS-14) and `reader.prompt.version` (FR-OBS-12 g)."
+        (FR-OBS-14) and `reader.prompt.version` (FR-OBS-18)."
   - spec: SRV-TUTOR
     items:
       - "Root attributes `reader.lesson.id`, `reader.course.id` (from the question row and its lesson),

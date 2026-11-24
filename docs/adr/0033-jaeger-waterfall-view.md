@@ -73,6 +73,8 @@ review, round 1 (B9); the content mode is ADR-0034. Round 5 measured the review'
   per-site table (INV-OBS-5's cross cases and the main site's `app`); [image] Jaeger starts under the hardening,
   receives a span through Rotel, holds `max_traces` × 72 spans with VEC-OBS-2's full key sets (32,400 spans) under
   the shipped 256m limit and `GOMEMLIMIT` with no OOM kill (`docker inspect` OOMKilled false; `docker stats` below
-  the limit; never `docker exec`), the CSP hashes recomputed from the image's served index equal the configured ones (an image bump that
+  the limit; never `docker exec`) and records the fill's wall time, Jaeger's CPU from `docker stats` and the
+  seconds until Jaeger's API returns the last trace (a GC-bound collector that stays alive but stalls shows there),
+  the CSP hashes recomputed from the image's served index equal the configured ones (an image bump that
   changes the inline scripts fails), and MLflow delivery within 30 s with Jaeger stopped; [live] 8444 answers 401
   without a cookie and renders a trace for the owner.

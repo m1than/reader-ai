@@ -112,14 +112,14 @@ llm_cost: { span: agent.call, total: reader.cost_usd, input: reader.cost_input_u
 session: { span: job.session, from: [reader.run_id, reader.lesson.id] }
 
 # --- Blocked on ADR-0035 (review round 2, R2-1): nothing below moves at the amendment's approval. It moves, with
-# FR-OBS-14, FR-OBS-15 and FR-OBS-12 (g), only after the owner accepts ADR-0035. ---
+# FR-OBS-14, FR-OBS-15 and FR-OBS-18, only after the owner accepts ADR-0035. ---
 blocked_on_ADR-0035:
   attributes:
-    # FR-OBS-12 (g): the registered template version the job used.
+    # FR-OBS-18: the registered template version the job used.
     reader.prompt.version: { type: int, range: [1, 100000] }
   keys_by_span:
     job: [reader.prompt.version]
-  # FR-OBS-12 (g): mlflow.linkedPrompts = [{"name": <prompt name>, "version": str(reader.prompt.version)}], the name
+  # FR-OBS-18: mlflow.linkedPrompts = [{"name": <prompt name>, "version": str(reader.prompt.version)}], the name
   # from the root's job kind and stage.
   linked_prompts: { tutor.answer: reader.tutor, pipeline.stage: "reader.<reader.stage>", pipeline.verify: none }
   # FR-OBS-14: the assessment catalogue. A POST body is built only from this.
