@@ -18,7 +18,7 @@ interface ThemeModule {
   applyTheme: (choice: Theme, root: HTMLElement) => void;
 }
 interface NavModule {
-  NAV_ITEMS: { label: string; to: string; owner_only: boolean; badge?: () => ReactNode }[];
+  NAV_ITEMS: { label: string; to: string; owner_only: boolean; useBadge?: () => { shown: string; after: string } | null }[];
 }
 interface NoticesModule {
   NOTICE_CATALOGUE: Record<string, string>;
@@ -277,23 +277,16 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       { label: 'Lessons', to: '/', owner_only: false },
       { label: 'Import', to: '/import', owner_only: true },
       // FR-UI-14 (merge with V/signup): the Sign-ups entry with its count as the badge.
-      { label: 'Sign-ups', to: '/signups', owner_only: true, badge: expect.any(Function) },
+      { label: 'Sign-ups', to: '/signups', owner_only: true, useBadge: expect.any(Function) },
       // FR-UI-18 (paired SRV-OBS change).
       { label: 'Observability', to: '/observability', owner_only: true },
     ]);
     if (!mod.NAV_ITEMS) return;
-    // An appended entry with a badge appears without changes to the header.
-    // The badge shows its number and carries its hidden ", " and words (merge: the badge owns the separator, so an
-    // empty badge leaves the plain label).
-    const badge = () => (
-      <>
-        <span className="visually-hidden">, </span>
-        <span className="nav-badge">
-          7<span className="visually-hidden"> waiting</span>
-        </span>
-      </>
-    );
-    mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false, badge });
+    // An appended entry with a badge appears without changes to the header: its text is one inline run
+    // "<label>, <shown> <after>" whose separator and last word are the font-size-0 `.nav-words` (live fix
+    // 2026-11-24: clipped hidden spans put a space before the comma in Chromium; an aria-label failed axe).
+    const useBadge = () => ({ shown: '7', after: 'waiting' });
+    mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false, useBadge });
     try {
       await mount('/');
       const nav = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
@@ -301,10 +294,27 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       // The owner's Sign-ups count call fails here (404), so its badge renders nothing.
       expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Sign-ups', 'Observability', 'Test entry, 7 waiting']);
       expect(within(nav).getByRole('link', { name: 'Sign-ups' })).toBe(links[2]);
-      // The accessible name joins the parts (jsdom's name computation drops the spaces between inline parts, which a
-      // browser keeps: "Test entry, 7 waiting"), so compare without whitespace.
-      expect(within(nav).getByRole('link', { name: (n) => n.replace(/\s+/g, '') === 'Testentry,7waiting' })).toBe(links[4]);
-      expect(links[4]!.querySelector('.nav-badge')?.firstChild?.textContent).toBe('7');
+      expect(links[4]!.getAttribute('aria-label')).toBeNull();
+      expect(links[4]!.querySelector('.nav-text')?.children[0]?.className).toBe('nav-words');
+      expect([...links[4]!.querySelectorAll('.nav-words')].map((s) => s.textContent)).toEqual([', ', ' waiting']);
+      expect(links[4]!.querySelector('.nav-badge')?.textContent).toBe('7');
+      // Below 40rem the same nav sits in the Courses drawer (live fix 2026-11-24): same entries, same names.
+      fireEvent.click(screen.getByRole('button', { name: 'Courses' }));
+      const drawerNav = await waitFor(() => {
+        const n = document.querySelector('nav.drawer-nav');
+        if (!n) throw new Error('no drawer nav');
+        return n as HTMLElement;
+      });
+      expect(drawerNav.getAttribute('aria-label')).toBe('Main');
+      expect(within(drawerNav).getAllByRole('link').map((a) => a.textContent)).toEqual([
+        'Lessons',
+        'Import',
+        'Sign-ups',
+        'Observability',
+        'Test entry, 7 waiting',
+      ]);
+      fireEvent.click(within(drawerNav).getByRole('link', { name: 'Import' }));
+      await waitFor(() => expect(document.querySelector('nav.drawer-nav')).toBeNull());
       mod.NAV_ITEMS.pop();
       mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false });
       cleanup();

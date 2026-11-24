@@ -1094,6 +1094,33 @@ tasks:
         fetched with the panel's backoff until terminal.
         Checks: 335 Vitest tests, 212 Playwright tests (chromium, auth-dark, auth-light; run on port 4174 because another
         worktree's test server held 4173), LOCAL CI below." }
+  - { id: V.live-ui-fixes, stage: V, kind: fix, track: product, status: in_progress, needs: [V.design-pass],
+      branch: V/live-ui-fixes,
+      what: "Product and test bugs found by the live check at 647cfeb (V/slice-integration with SRV-OBS on the design
+        merge) and by the stubbed browser suite (37 failures there).",
+      findings: "Root causes — (1) header overflow 119px at 390 on every page: SRV-OBS's fourth owner entry; (2) 'Sign-ups,
+        1 waiting' not found at 1280/1024: Chromium computes 'Sign-ups , 1 waiting' when the separator and words are
+        visually hidden spans (probed: any clipped hidden span gets a leading space), the stubbed-suite failures of
+        signups.spec; (3) 7 style-src-attr reports per learner session: each came from keyboard.insertText replacing a
+        selection in the lab editor (trace: the action before each report; probe on the test server: one report, target
+        the editor's shadow host); Chromium's contenteditable engine writes markup with a style attribute to keep the
+        replaced text's look; CodeMirror itself only uses CSSOM; (4) 'one current section (390)' = 0: following an entry
+        closes the contents at 390 and getByRole finds no hidden nav; the marker itself was set (harness, not product);
+        (5) render.spec inline math timeout and keyword colour: the run's worktree served web/storybook-static built
+        2026-11-23 22:17, before the design pass (no inline-math story, single-theme Shiki), with no product fault; did
+        not reproduce on fresh builds; (6) compile.spec strict-mode: W02's linked title also in the Continue block.",
+      fixes: "FR-UI-11 nav in the Courses drawer below 40rem (nav.drawer-nav; header nav hidden) and NAV_ITEMS `useBadge`
+        returning {shown, after}: one inline text run '<label>, <shown> <after>' with ', ' and ' <after>' at font size 0
+        (probed in Chromium: names 'Sign-ups, 1 waiting', axe label-content-name-mismatch clean; an aria-label failed
+        that axe rule in the first fix round); FR-NOTEBOOK-9 beforeinput
+        insertText/insertReplacementText (not composing) applied as replaceSelection with preventDefault; the test
+        server refuses a dist or storybook-static older than web/src; tests: header.spec.ts (new), csp.spec.ts
+        interactions test at 1280 and 390 (menus, drawer, tutor, editor insert and type over a selection, compile dialog),
+        compile.spec rows scoped to #course-c-fixture, design.test and signups-link.test for the badge; live harness
+        fixes folded in (owner.slice: #tutor skipped, contents reopened for the 390 count, reload before the skip-link Tab
+        below 1280; slice.live: Continue .first(), the open cell's warning callout, Reset kernel in More lesson actions;
+        plan_shots: the plan's Lessons summary). The old owner-pages script with h1 sizes is not in the repository;
+        owner.slice.ts already checks the new scale (28/24 page titles, 32/28 lesson h1)." }
   - { id: V.titles-data, stage: V, kind: fix, track: product, status: todo, needs: [V.design-pass],
       what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
         material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.

@@ -78,7 +78,10 @@ review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.m
   root with role and description checked in the browser and an axe run over the lab, the probe committed (Chromium
   only), app-owned play and more icons, roving tab index and no Copy on code-cell toolbars, `j`/`k` by `event.code`,
   every design-pass item marked as owner-approved, one shared build with WEB-UI's build test. Approved by agent
-  (coordinator, 2026-11-23)"
+  (coordinator, 2026-11-23). Live fixes (2026-11-24, V/live-ui-fixes, from the live check at 647cfeb): FR-NOTEBOOK-9
+  plain text insertions go through a CodeMirror transaction (Chromium wrote a style attribute when replacing a
+  selection, 7 style-src-attr reports per learner session); FR-NOTEBOOK-11's [live] current-section count is read
+  with the contents reopened at 390 px (the marker was set; a hidden nav has no role) and skips the #tutor entry"
 layer: web
 track: product
 adr: [ADR-0004, ADR-0013, ADR-0014, ADR-0022]
@@ -287,6 +290,13 @@ requirements:
         `--acme-focus` outline on the focused editor (WEB-UI FR-UI-10) is declared in the editor's `EditorView.theme`,
         since app.css does not reach into the shadow root. The edited text lives in memory for the open view as
         before; Revert replaces the editor's text with the revision's source.
+        **Inserted text (live fix 2026-11-24).** When typed or inserted text replaced a selection across highlighted
+        spans, Chromium's contenteditable engine wrote markup with a `style` attribute, which the app CSP blocked and
+        reported (`style-src-attr`, 7 per learner session). A `beforeinput` of type `insertText` or
+        `insertReplacementText` outside a composition is therefore applied as a CodeMirror transaction
+        (`replaceSelection`) and its default prevented, so the browser never edits the editor's DOM for it; IME
+        composition stays with CodeMirror. [browser] WEB-UI INV-UI-4's e2e/web/ui/csp.spec.ts inserts text over a
+        selection and finds the text in the editor and zero violations.
       The lesson view takes the chunk loader as an optional prop `loadEditor` (default: the lazy import of
       `web/src/notebook/editor.ts`), so tests and stories can hold it pending, fail it or hand in a stub editor; the
       chunk exports `mountEditor(host: HTMLElement, {doc, label, onChange(text), onRun(text)})` returning
@@ -384,7 +394,10 @@ requirements:
       [live] the `ui` step: at 390 px the nav's links are hidden before the toggle and visible after
       it; at every width following the last entry, whose target is not in the viewport before the click, scrolls to that
       target and focuses it; at 1280 and 1024 px the button is hidden and the nav is visible; after the scroll exactly
-      one entry has `aria-current="location"`; the breadcrumb's current item reads L02's title.
+      one entry has `aria-current="location"` (at 390 px read after reopening the contents: following an entry closes
+      them, and a hidden nav has no accessible role, so the live run counted 0 on 2026-11-24 although the marker was
+      set); the last section entry is the last entry that is not "Ask the tutor" (`#tutor` opens the panel); the
+      breadcrumb's current item reads L02's title.
   - id: FR-NOTEBOOK-12
     text: >-
       Lesson page states, inside WEB-UI FR-UI-11's single `main`: while the lesson or its revision loads, a page

@@ -86,9 +86,11 @@ for (const width of WIDTHS) {
       await open(page, FX.one);
       await expect(page.getByRole('button', { name: 'Approve @lc-1a2b' })).toBeVisible();
       await expect(page.getByText('Disabled')).toBeVisible();
-      const link = page.getByRole('link', { name: 'Sign-ups, 1 waiting' });
-      await expect(link).toHaveAttribute('href', '/signups');
       await checks(page);
+      // Below 40rem the main nav lives in the Courses drawer (WEB-UI FR-UI-11, live fix 2026-11-24).
+      if ((page.viewportSize()?.width ?? 1280) < 640) await page.getByRole('button', { name: 'Courses' }).click();
+      const link = page.getByRole('link', { name: 'Sign-ups, 1 waiting', exact: true });
+      await expect(link).toHaveAttribute('href', '/signups');
     });
 
     test('twenty pending with a 64-code-point name (FR-ACCOUNTS-1)', async ({ page }) => {

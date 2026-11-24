@@ -14,6 +14,8 @@ const WIDTHS = [1280, 1024, 390] as const;
 const SHOTS = process.env.COMPILE_SHOTS;
 const TITLE = 'Fixture lesson W02: not compiled yet';
 const CHIP = 'draft, compile not finished';
+/** W02's row in its course group: once linked, the title also appears in the Continue block (design pass). */
+const ROW = (page: Page) => page.locator('#course-c-fixture li', { hasText: TITLE });
 
 const collectViolations = async (page: Page) => {
   await page.addInitScript(() => {
@@ -52,7 +54,7 @@ for (const width of WIDTHS) {
     await page.emulateMedia({ colorScheme: scheme });
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    const row = page.locator('li', { hasText: TITLE });
+    const row = ROW(page);
     await expect(row.getByText('not compiled yet', { exact: true })).toBeVisible();
     expect(await serious(page)).toEqual([]);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
@@ -95,7 +97,7 @@ test(`a stopped compile of a drafted lesson, ${scheme}: the link, the chip, its 
   for (const width of WIDTHS) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    const row = page.locator('li', { hasText: TITLE });
+    const row = ROW(page);
     await expect(row.getByRole('link', { name: TITLE })).toBeVisible();
     await expect(row.getByText(CHIP)).toBeVisible();
     await expect(row.getByText(/^Compile stopped at checking facts\. No AI provider is connected/)).toBeVisible();

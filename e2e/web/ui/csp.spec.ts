@@ -31,6 +31,60 @@ test('no CSP violation on the lesson list and the W01 lesson (INV-UI-4)', async 
   expect(consoleErrors.filter((e) => /Content Security Policy/i.test(e))).toEqual([]);
 });
 
+// INV-UI-4, live fix 2026-11-24: a learner session raised 7 `style-src-attr` reports, each when text replaced a
+// selection in the lab editor (Chromium's contenteditable engine wrote a `style` attribute). Every interactive layer
+// of the app, driven here, raises none.
+for (const width of [1280, 390])
+  test(`no CSP violation through the menus, drawer, tutor, editor and compile dialog at ${width} px (INV-UI-4)`, async ({ page, request }) => {
+    test.setTimeout(60_000);
+    expect((await request.post('/__test__/reset')).status()).toBe(204);
+    await collectViolations(page);
+    const csp = () => page.evaluate(() => (window as unknown as { __csp: string[] }).__csp.slice());
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/');
+    await expect(page.locator('#content #course-c-fixture')).toBeVisible();
+
+    await page.getByRole('button', { name: /^Account menu for / }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toBeHidden();
+    if (width < 1200) {
+      await page.getByRole('button', { name: 'Courses' }).click();
+      await expect(page.locator('#course-drawer')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('#course-drawer')).toBeHidden();
+    }
+
+    // The owner's Compile dialog on W02's row (FR-UI-15), cancelled: nothing is posted.
+    const row = page.locator('#course-c-fixture li', { hasText: 'Fixture lesson W02' });
+    await row.getByRole('button', { name: 'Compile' }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+
+    await page.goto('/lessons/w01');
+    await expect(page.getByRole('heading', { name: 'Digests' })).toBeVisible();
+    await page.getByRole('button', { name: 'More lesson actions' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click();
+    await expect(page.getByRole('button', { name: 'Close the tutor' })).toBeVisible();
+    await page.getByRole('button', { name: 'Close the tutor' }).click();
+
+    // The lab editor (WEB-NOTEBOOK FR-NOTEBOOK-9): inserted and typed text over a selection across highlighted spans.
+    const editor = page.locator('.cm-content').first();
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.insertText('print(1)');
+    await expect(editor).toHaveText('print(1)');
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.type('x = 2');
+    await expect(editor).toHaveText('x = 2');
+
+    expect(await csp()).toEqual([]);
+  });
+
 test('stories have no gradients, glass or glow in light and dark (INV-UI-3)', async ({ page, request }) => {
   const index = (await (await request.get('/storybook/index.json')).json()) as { entries: Record<string, { type: string; id: string }> };
   const stories = Object.values(index.entries).filter((e) => e.type === 'story');

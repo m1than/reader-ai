@@ -49,6 +49,23 @@ const theme = EditorView.theme({
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--acme-holo-soft)' },
 });
 
+// The app CSP has no 'unsafe-inline' for style attributes. When typed or inserted text replaces a selection that spans
+// highlighted spans, Chromium's contenteditable engine inserts markup with a `style` attribute (to keep the replaced
+// text's look), which the CSP blocks and reports (live run 2026-11-24, 7 reports per learner session). Plain text
+// insertions go through a CodeMirror transaction instead, so the browser never edits the DOM itself; composition
+// (IME) input stays with CodeMirror's own handling.
+const PLAIN_INSERTS = new Set(['insertText', 'insertReplacementText']);
+const insertThroughState = EditorView.domEventHandlers({
+  beforeinput: (event, view) => {
+    if (!PLAIN_INSERTS.has(event.inputType) || event.isComposing || view.composing) return false;
+    const text = event.data ?? event.dataTransfer?.getData('text/plain') ?? null;
+    if (text === null) return false;
+    event.preventDefault();
+    view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.type' });
+    return true;
+  },
+});
+
 let seq = 0;
 
 export const mountEditor = (host: HTMLElement, { doc, label, onChange, onRun }: EditorOptions): EditorHandle => {
@@ -82,6 +99,7 @@ export const mountEditor = (host: HTMLElement, { doc, label, onChange, onRun }: 
         python(),
         syntaxHighlighting(highlight),
         theme,
+        insertThroughState,
         // tabindex 0: the content already is a tab stop (contenteditable); stated so axe sees the scroller's focusable
         // content (scrollable-region-focusable).
         EditorView.contentAttributes.of({ 'aria-label': label, 'aria-describedby': hintId, 'aria-multiline': 'true', tabindex: '0' }),

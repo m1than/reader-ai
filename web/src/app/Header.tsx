@@ -1,13 +1,55 @@
 // The app header (WEB-UI FR-UI-11): Courses (below 75rem), the brand, the main nav from NAV_ITEMS and the user menu.
-// The user menu and the course drawer are lazy chunks loaded on their triggers' first activation (review B1); until
-// then the triggers are plain buttons styled like the library's ghost buttons.
+// Below 40rem the main nav moves into the Courses drawer (live run 2026-11-24: the owner's four entries overflowed a
+// 390px header by 119px). The user menu and the course drawer are lazy chunks loaded on their triggers' first
+// activation (review B1); until then the triggers are plain buttons styled like the library's ghost buttons.
 import { Link } from '@tanstack/react-router';
 import { Component, lazy, Suspense, useRef, useState, type ReactNode } from 'react';
 import { MarkIcon, MenuIcon } from '../ui/icons';
-import { isCurrent, NAV_ITEMS } from './nav';
+import { isCurrent, NAV_ITEMS, type NavBadge, type NavItem } from './nav';
 
 const UserMenu = lazy(() => import('./UserMenu'));
 const CourseDrawer = lazy(() => import('./CourseDrawer'));
+
+const noBadge = (): NavBadge | null => null;
+
+function NavEntry({ item, current, onNavigate }: { item: NavItem; current: boolean; onNavigate?: (() => void) | undefined }) {
+  // The badge hook is fixed per item (the entry's key), so the hook order of this component never changes.
+  const badge = (item.useBadge ?? noBadge)();
+  return (
+    <Link
+      to={item.to}
+      className="nav-link"
+      aria-current={current ? 'page' : undefined}
+      onClick={onNavigate}
+    >
+      {/* FR-UI-11: one inline run "<label>, <shown> <after>" whose separator and last word are text at font size 0.
+          Live run 2026-11-24: clipped, absolutely positioned hidden spans (and flex items) made Chromium read
+          "Sign-ups , 1 waiting"; an aria-label instead fails axe's label-content-name-mismatch. */}
+      <span className="nav-text">
+        {item.label}
+        {badge ? (
+          <>
+            <span className="nav-words">, </span>
+            <span className="nav-badge">{badge.shown}</span>
+            <span className="nav-words"> {badge.after}</span>
+          </>
+        ) : null}
+      </span>
+    </Link>
+  );
+}
+
+/** The main nav from NAV_ITEMS (FR-UI-11): `main-nav` in the header (hidden below 40rem), `drawer-nav` in the Courses
+ * drawer (shown only below 40rem), so exactly one "Main" navigation is rendered visibly at any width. */
+export function MainNav({ owner, path, className, onNavigate }: { owner: boolean; path: string; className: string; onNavigate?: () => void }) {
+  return (
+    <nav className={className} aria-label="Main">
+      {NAV_ITEMS.filter((item) => owner || !item.owner_only).map((item) => (
+        <NavEntry key={item.to} item={item} current={isCurrent(item, path)} onNavigate={onNavigate} />
+      ))}
+    </nav>
+  );
+}
 
 /** A lazy chunk that fails to load (FR-UI-11, code review) shows its fallback, the plain trigger, instead of
  * removing it. */
@@ -81,19 +123,7 @@ export function Header({
         <MarkIcon className="brand-mark" />
         <span className="brand-text">reader-ai</span>
       </Link>
-      <nav className="main-nav" aria-label="Main">
-        {NAV_ITEMS.filter((item) => owner || !item.owner_only).map((item) => {
-          const current = isCurrent(item, path);
-          return (
-            <Link key={item.to} to={item.to} className="nav-link" aria-current={current ? 'page' : undefined}>
-              {item.label}
-              {/* FR-UI-11: the badge brings its hidden ", " and words, so the link reads "<label>, <n> waiting" and
-                  plain "<label>" when the badge renders nothing. */}
-              {item.badge ? item.badge() : null}
-            </Link>
-          );
-        })}
-      </nav>
+      <MainNav owner={owner} path={path} className="main-nav" />
       <span className="header-end">
         {menuLoaded ? (
           <LazyBoundary fallback={<PlainUserTrigger displayName={displayName} />}>
@@ -108,7 +138,12 @@ export function Header({
       {drawerLoaded ? (
         <LazyBoundary fallback={null}>
           <Suspense fallback={null}>
-            <CourseDrawer open={drawerOpen} onClose={closeDrawer} current={currentLesson} />
+            <CourseDrawer
+              open={drawerOpen}
+              onClose={closeDrawer}
+              current={currentLesson}
+              nav={<MainNav owner={owner} path={path} className="drawer-nav" onNavigate={closeDrawer} />}
+            />
           </Suspense>
         </LazyBoundary>
       ) : null}

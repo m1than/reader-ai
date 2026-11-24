@@ -451,6 +451,13 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     }
     // FR-UI-11: the skip link is the first Tab stop and moves focus to main#content.
     await page.locator('body').focus();
+    // Below 75rem the drawer's Escape returned focus to the Courses button, and Chromium keeps that button as the
+    // sequential-focus starting point even after body.focus() or blur(); reload so the first Tab starts at the
+    // document (live run 2026-11-24).
+    if (w !== 1280) {
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
+    }
     await page.keyboard.press('Tab');
     await expect.soft(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
     await page.screenshot({ path: resolve(dir, `${w}-skip-link.png`) });
@@ -488,15 +495,21 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
       await expect.soft(firstEntry, `contents visible (${w})`).toBeVisible();
     }
     // Following the last entry (its target far down the page, not in view before) scrolls to it and focuses it.
-    const lastEntry = nav().getByRole('link').last();
+    // Since the design pass the contents end with "Ask the tutor" (#tutor, FR-NOTEBOOK-11), which opens the panel
+    // rather than scrolling to a section; take the last section entry.
+    const lastEntry = nav().locator('a:not([href="#tutor"])').last();
     const href = (await lastEntry.getAttribute('href')) ?? '';
     await expect.soft(page.locator(href), `${href} not in view before the click (${w})`).not.toBeInViewport();
     await lastEntry.click();
     await expect.soft(page.locator(href), `${href} focused (${w})`).toBeFocused();
     await expect.soft(page.locator(href), `${href} in view (${w})`).toBeInViewport();
     if (w === 390) await expect.soft(firstEntry, 'contents close after an entry (390)').toBeHidden();
-    // FR-NOTEBOOK-11 (design pass): after the scroll exactly one entry is the current section.
+    // FR-NOTEBOOK-11 (design pass): after the scroll exactly one entry is the current section. At 390 px following an
+    // entry closed the contents, and a hidden nav has no role, so getByRole found no nav and counted 0 (live run
+    // 2026-11-24); read the marker with the contents reopened.
+    if (w === 390) await toggle().click();
     await expect.soft(nav().locator('a[aria-current="location"]'), `one current section (${w})`).toHaveCount(1);
+    if (w === 390) await toggle().click();
     // Keyboard: the first Tab stops from the top of the lesson, screenshot of the focused control.
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('body').focus();

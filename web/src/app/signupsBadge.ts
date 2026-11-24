@@ -3,8 +3,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { SIGNUPS_KEY } from '../accounts/api';
 import { useServices } from './context';
+import type { NavBadge } from './nav';
 
-export function SignupsBadge() {
+export const useSignupsBadge = (): NavBadge | null => {
   const { signups } = useServices();
   const q = useQuery({
     queryKey: SIGNUPS_KEY,
@@ -13,15 +14,5 @@ export function SignupsBadge() {
     enabled: Boolean(signups),
   });
   const n = q.data?.pending.length ?? 0;
-  if (n === 0) return null;
-  // FR-UI-11: the link reads "Sign-ups, <n> waiting" and shows the number.
-  return (
-    <>
-      <span className="visually-hidden">, </span>
-      <span className="nav-badge">
-        {n}
-        <span className="visually-hidden"> waiting</span>
-      </span>
-    </>
-  );
-}
+  return n === 0 ? null : { shown: String(n), after: 'waiting' };
+};

@@ -104,8 +104,8 @@ requirements:
   - id: FR-ACCOUNTS-4
     text: >-
       **Header count.** For the owner, the shell asks `GET /api/auth/signups` once per page load and after each
-      approve, reject or disable, and shows the pending count in the "Sign-ups" header link (" (n)" with the
-      accessible name "Sign-ups, n waiting"); no polling (structural: a sign-up waits for days, not seconds; the
+      approve, reject or disable, and shows the pending count in the "Sign-ups" header link (the count as WEB-UI
+      FR-UI-11's nav badge, with the accessible name "Sign-ups, n waiting"); no polling (structural: a sign-up waits for days, not seconds; the
       7-day expiry is the bound). A failure of that call shows the link without a count. A non-owner never calls it.
       Notification beyond the app (Telegram) waits for SRV-NOTIFY (ADR-0031). [unit] owner with 0 and 3 pending,
       the call failing, a learner (no call, no link).
@@ -120,7 +120,8 @@ requirements:
       critical issue; `scrollWidth − clientWidth` of the document element ≤ 0; no `securitypolicyviolation` event;
       the 2px `--acme-focus` outline on a keyboard-focused button. [unit] the route and link for owner and learner,
       the learner's request log without `/api/auth/signups`; [browser] e2e/web/accounts/signups.spec.ts runs the
-      matrix above.
+      matrix above; below 40rem it finds the link in the Courses drawer, which holds the main nav there (WEB-UI
+      FR-UI-11, live fix 2026-11-24: the header overflowed 390 px by 119 px with four owner entries).
 
 invariants:
   - id: INV-ACCOUNTS-1

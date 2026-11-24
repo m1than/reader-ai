@@ -96,7 +96,9 @@ requirements:
       under it are muted. [unit] the `dl` terms and values for a fresh plan, a re-plan, a plan without a first lesson;
       the notes' order; the status text; in the does-not-fit case the callout precedes the `dl`; [browser]
       e2e/web/import/plan/import.spec.ts finds the estimate by its status line and its "Lessons" figure (the header's
-      "Lessons" link and the figure's term share the word, so the disclosure is found as a `summary`); [story] the same
+      "Lessons" link and the figure's term share the word, so the disclosure is found as a `summary`); below 40rem it
+      follows the Import link from the Courses drawer, which holds the main nav there (WEB-UI FR-UI-11, live fix
+      2026-11-24); [story] the same
       five states, Light and Dark.
   - id: FR-IMPORT-6
     text: >-

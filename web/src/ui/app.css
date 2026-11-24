@@ -599,10 +599,18 @@ h4 {
   font-weight: 600;
 }
 
-/* FR-UI-11: the nav badge (the Sign-ups count). */
+/* FR-UI-11: the nav badge (the Sign-ups count). Label, separator, badge and last word are one inline run, so
+   Chromium names the link "Sign-ups, 1 waiting" (block-level or clipped hidden parts add a space before the comma). */
+.nav-text {
+  white-space: nowrap;
+}
+
+.nav-words {
+  font-size: 0;
+}
+
 .nav-badge {
-  display: inline-block;
-  min-width: 1.25rem;
+  display: inline;
   margin-left: var(--acme-space-1);
   padding: 0 var(--acme-space-1);
   border-radius: 999px;
@@ -612,6 +620,21 @@ h4 {
   font-variant-numeric: tabular-nums;
   line-height: 1.25rem;
   text-align: center;
+}
+
+/* FR-UI-11: the main nav inside the Courses drawer, shown only below 40rem (see the narrow-screen rules). */
+.drawer-nav {
+  display: none;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--acme-space-1);
+  margin: 0 0 var(--acme-space-4);
+  padding: 0 0 var(--acme-space-3);
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.drawer-nav .nav-link {
+  min-height: 32px;
 }
 
 .row-link {
@@ -1457,6 +1480,19 @@ kbd {
 @media (max-width: 40rem) {
   .app-header {
     padding: 0 var(--acme-space-2);
+  }
+
+  /* FR-UI-11: the main nav moves into the Courses drawer (four owner entries overflowed 390px by 119px). */
+  .main-nav {
+    display: none;
+  }
+
+  .header-end {
+    margin-left: auto;
+  }
+
+  .drawer-nav {
+    display: flex;
   }
 
   .brand-text,

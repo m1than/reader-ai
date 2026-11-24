@@ -30,7 +30,9 @@ for (const width of WIDTHS) {
     await collectViolations(page);
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    await page.getByRole('link', { name: 'Import' }).click();
+    // Below 40rem the main nav lives in the Courses drawer (WEB-UI FR-UI-11, live fix 2026-11-24).
+    if (width < 640) await page.getByRole('button', { name: 'Courses' }).click();
+    await page.getByRole('link', { name: 'Import', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Import a source', level: 1 })).toBeVisible();
     await expect(page.getByText('synthetic-plan')).toBeVisible();
     expect(await serious(page)).toEqual([]);

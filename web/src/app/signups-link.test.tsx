@@ -38,12 +38,13 @@ describe('Sign-ups entry points (FR-UI-14, FR-ACCOUNTS-4)', () => {
       '/api/lessons': () => json(200, { lessons: [] }),
       '/api/auth/signups': () => json(200, pending(3)),
     });
-    // Merge with V/design-pass: the link is a NAV_ITEMS entry whose badge shows "3" with hidden words (FR-UI-11).
-    // jsdom's name computation drops the spaces between inline parts (a browser keeps them), so compare without them.
+    // The link is a NAV_ITEMS entry (FR-UI-11): one inline text run whose ", " and " waiting" are at font size 0, so it
+    // shows "Sign-ups 3" and reads "Sign-ups, 3 waiting" (live fix 2026-11-24; e2e/web/ui/header.spec.ts checks the
+    // name Chromium computes; jsdom drops the spaces between inline parts, so this compares without whitespace).
     const link = await screen.findByRole('link', { name: (n) => n.replace(/\s+/g, '') === 'Sign-ups,3waiting' });
     expect(link.getAttribute('href')).toBe('/signups');
     expect(link.textContent).toBe('Sign-ups, 3 waiting');
-    expect(link.querySelector('.nav-badge')?.firstChild?.textContent).toBe('3');
+    expect(link.querySelector('.nav-badge')?.textContent).toBe('3');
     expect(urls.filter((u) => u === '/api/auth/signups')).toHaveLength(1);
   });
 
