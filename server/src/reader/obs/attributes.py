@@ -87,7 +87,8 @@ JOB_CODES: Final = frozenset({
 SPEC_CODES: Final = frozenset({
     "already_started", "body_not_json", "body_not_utf8", "budget_exhausted", "cap_invalid", "cell_unknown",
     "citation_unknown_span", "compile_running", "course_deleted", "daily_budget_exhausted",
-    "deadline_exceeded", "expired", "input_not_ready", "labs_unverifiable", "lesson_inactive", "lesson_unknown", "lost",
+    "deadline_exceeded", "expired", "input_not_ready", "labs_unverifiable", "lesson_inactive",
+    "lesson_unknown", "lost",
     "model_mismatch", "monthly_budget_exhausted", "no_material", "no_source_spans", "not_found", "not_owner",
     "not_running", "origin_conflict",
     "output_cap", "output_invalid", "output_truncated", "provider_missing", "provider_unavailable",
