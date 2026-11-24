@@ -811,7 +811,11 @@ vectors:
 #            tests' internal networks take explicit subnets 10.233.<n>.0/24 (random n per network, a new n on an
 #            overlap), because Docker Desktop's predefined pools run out (measured 2026-11-24); nothing else in the
 #            repository or on the owner's Docker uses 10.233/16. The ingest check reads the spans of
-#            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24).
+#            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24);
+#            span attributes come back as OTLP values, a JSON object such as `mlflow.llm.cost` as a kvlist
+#            `{values: [{key, value: {double_value}}]}` (measured on the V.obs-analytics image run), which the
+#            FR-OBS-12 image test decodes. The V.obs-analytics image tests (test_images_analytics.py) use images by id
+#            and allow MLflow 180 s to turn healthy (over 60 s was measured on a loaded Mac).
 #   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (e2e/live/lib/obs_live.py, run
 #            as `python -I`, and obs_browser.mjs). It is run by hand until the stage-2 live check script
 #            (`e2e/live/stage-2.sh`, docs/roadmap.md) exists; that script will call it. DIR is resolved and checked to

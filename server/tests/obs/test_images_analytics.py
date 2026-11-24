@@ -144,11 +144,20 @@ print(json.dumps({"found": time.time() if out else None, "trace": out}))
 """
 
 
+def _value(v: Any) -> Any:
+    """An OTLP AnyValue as MLflow 3.18's get returns it: a kvlist {values: [{key, value}]} becomes a dict."""
+    if isinstance(v, dict) and set(v) == {"values"} and isinstance(v["values"], list):
+        return {item["key"]: _value(next(iter(item["value"].values()))) for item in v["values"]}
+    if isinstance(v, str) and v[:1] in "{[\"":
+        return json.loads(v)
+    return v
+
+
 def _attrs(span: dict[str, Any]) -> dict[str, Any]:
     raw = span.get("attributes") or {}
     if isinstance(raw, list):
         raw = {a["key"]: next(iter(a["value"].values())) for a in raw}
-    return {k: (json.loads(v) if isinstance(v, str) and v[:1] in "{[\"" else v) for k, v in raw.items()}
+    return {k: _value(v) for k, v in raw.items()}
 
 
 def test_ledger_cost_session_and_name_through_real_mlflow(prefix: str, canary_image: str, mlflow_image: str) -> None:
