@@ -811,10 +811,22 @@ requirements:
           paired VEC-OBS-4 edit in `phase2_in_place_edits`) = the value, `max_results` 500 with `page_token`
           paging until no token remains, then `link-to-run` in batches of at most 100 ids (round 8: 120 in one call
           is 400; 100 + 20 linked all 120). Re-linking a linked trace is accepted (measured).
-      (e) Ends the Run: `runs/update` status FINISHED or FAILED and end time, then, LAST, `set-tag`
-          `reader.complete` = `true`. A Run whose `reader.complete` is missing (a job that died between (b) and
+          An import has one end per job that writes its traces: end 1 when `ingest.import` succeeds, and end
+          1 + n when its n-th `search.embed` succeeds (n = the ingest's `search_embeds` rows; paired FR-INGEST-26),
+          so the embed's traces, which start after the import's end, are linked late, and that step's metrics
+          carry `chunks` (code review of 8466329).
+      (e) Ends the Run: `runs/update` with status and end time, then, LAST, `set-tag`
+          `reader.complete` = `true`. Status: FINISHED for a finished run and an import; FAILED for a failed or
+          dead run, whose end time is the newest `finished_at` of its step keys (a failed run has no
+          `finished_at`); KILLED with `reader.outcome` = `cancelled` for a cancelled run (FR-PIPELINE-20; its end
+          is counted by the cancel, paired FR-PIPELINE-18). A Run whose `reader.complete` is missing (a job that
+          died between (b) and
           (e)) is incomplete: the next attempt or end finds it in (a) and redoes (c)-(e), so an incomplete Run is
           completed, never duplicated.
+      (f) Metrics, from the snapshot: compile as VEC-OBS-5 `runs.compile.metrics` (the ledger's keys); import
+          `pages` (the material's page count), `spans`, `chunks` (the ingest's `search_chunks` rows),
+          `import_s` (the `ingest.import` key's `finished_at` − `created_at`) and `pages_per_min_import`
+          (pages ÷ import_s × 60; left out when import_s is 0). Each lookup is scoped to the ingest's owner.
       Every value is an id, an enum, a model id from pricing.yaml, a sha256 or a number. A failure is logged by
       code and never changes the run's outcome. With tracing off the job ends without a request. An MLflow that is
       down for longer than the job's 3 attempts (SRV-EVENTS' 5 s and 25 s delays, about 90 s with the timeouts)
@@ -825,6 +837,12 @@ requirements:
       list of locations"). In experiment 0, the Run's Traces tab lists its traces with their assessments (round 6).
       Bench runs go to their own experiment (FR-OBS-23), so experiment 0's Evaluation runs tab lists only compile
       and import Runs, which can be filtered by `tags.reader.kind`.
+      Known limit (declared, code review of 8466329): VEC-OBS-5's patterns for the code-sourced params
+      `reader_version` (`^[0-9A-Za-z.+-]{1,64}$`) and the bench's `hf_model` model names are shapes, not
+      allow-lists (a pricing.yaml `model` is an enum), so a bare canary of that shape (letters, digits, dashes)
+      passes them; INV-OBS-2's phase 2 clause holds because these values come from the package version and the
+      owner's own bench result file, never from material, questions or answers, not because the pattern would
+      refuse a canary.
   - id: FR-OBS-21
     text: >-
       Agent versions. A version key is the sha256 of the canonical JSON of {prompt_set_sha256, stage_models,
@@ -872,7 +890,9 @@ requirements:
       400 `bench_invalid` (the result's required `kind` (search | tutor) differs from the pinned set's kind, or the
       result fails VEC-OBS-5 `bench_results` for that kind: unknown key, pattern, enum or range, an id not in
       the set's registered records, an id twice, or no rows); 409 `already_recorded` (the same upload digest
-      exists); 202 {upload_id}
+      exists; known limit, declared in the code review of 8466329: the digest is UNIQUE across all users, not per
+      owner, so a second owner uploading a byte-identical result gets 409 too; v1 has one owner, ADR-0012); 202
+      {upload_id}
       otherwise. The route is used from /observability only (paired WEB-UI FR-UI-33: a file picker for the two
       files); there is no CLI command (review round 1, B10).
       The api stores the upload in Postgres table `obs_bench_results` (paired migration `obs_0002`: id uuid pk,
@@ -984,13 +1004,17 @@ requirements:
   - id: FR-OBS-26
     text: >-
       Declarative bootstrap (ADR-0038 Decision 5). `deploy/otel/mlflow-setup.yaml` (VEC-OBS-6, committed; proposed
-      content in spec/fixtures/SRV-OBS/mlflow-setup.yaml) is the only source of MLflow's experiments (experiment 0
+      content in spec/fixtures/SRV-OBS/mlflow-setup.yaml; the worker reads it at the code constant
+      `/etc/reader/mlflow-setup.yaml`, compose's read-only bind, when that file exists, else the package's copy,
+      which a [unit] test keeps equal to the fixture) is the only source of MLflow's experiments (experiment 0
       renamed `reader`, and `bench`), their descriptions (`mlflow.note.content`) and tags, the dataset names, the
       LoggedModel naming and the Run tag keys (the trace tag keys stay VEC-OBS-4's only; the file does not restate
       them, review round 2, N5). Nothing is created by hand. Setup is ONE idempotent function, `ensure_setup()`:
       it reads MLflow's state (`experiments/get`, `get-by-name`, `logged-models/search`), compares it with the
-      file and writes only the difference (`experiments/update` for a name, `set-experiment-tag` per differing
-      tag, `experiments/create` with tags, FR-OBS-21 b's LoggedModel); a tag or experiment in MLflow that the file
+      file and writes only the difference (`experiments/update` for a name, `set-experiment-tag` per missing or
+      differing tag of every experiment the file names, an existing `bench` included, `experiments/create` with
+      tags, FR-OBS-21 b's LoggedModel, and `PATCH logged-models/{id}` status LOGGED_MODEL_READY whenever the
+      version's LoggedModel is not READY, a new one or one left PENDING by a setup that died after its create); a tag or experiment in MLflow that the file
       does not name is left alone and listed in the log line by key only. A repeat on the same UTC day makes 0
       writes (round 10: the state dump before and after a re-run is equal, `drift` false); the first run of a new
       day makes exactly one, FR-OBS-31's `reader.last_started` tag (round 12: `PATCH logged-models/{id}/tags`
@@ -1138,7 +1162,10 @@ requirements:
   - id: FR-OBS-31
     text: >-
       Retention and size. `obs.retention` (FR-OBS-11) also deletes compile and import Runs in experiment 0 whose
-      `end_time` (the Run's last end; MLflow's own column) is older than `retention_days` (`runs/delete`: MLflow's
+      `end_time` (the Run's last end; MLflow's own column) is older than `retention_days`, found by one
+      `runs/search` per kind (filter ``tags.`reader.kind` = 'compile'``, then `'ingest'`, each with
+      ``attributes.end_time < <cutoff ms>``, `max_results` 1000 and `page_token` paging until no token remains;
+      code review of 8466329: MLflow 3.18 refuses `IN` on a tag, so one search per kind) (`runs/delete`: MLflow's
       soft delete, the Run's lifecycle stage becomes `deleted`; round 10: it leaves `runs/search` at once; its rows
       stay until `mlflow gc` removes them, which reader does not run, so soft-deleted rows are part of the store's
       size, declared) and LoggedModels whose version key is not "used": a key is used while a worker started
@@ -1169,7 +1196,10 @@ requirements:
       `obs.health` (every 30 minutes, queue obs; excluded from tracing, so it adds no trace: its kind is not
       traced, FR-OBS-5's root is skipped for it) records in Postgres table `obs_stack_status` (paired migration
       `obs_0002`): mlflow's /health and rotel's probe (a POST of `{}` to its OTLP receiver: 400 means listening,
-      round 9; Rotel 0.2.7 has no health endpoint). The api's summary gains `stack` from that table only and
+      round 9; Rotel 0.2.7 has no health endpoint; any other answer is `unhealthy`, no answer `unreachable`). With
+      tracing off the job ends without a probe, so the rows go stale by design: `reader.obs.health.stale(checked_at,
+      now, tracing_on)` is the one staleness rule (older than 75 minutes, and never while tracing is off), which
+      the alerts use. The api's summary gains `stack` from that table only and
       `obs_unhealthy` when a member failed its last probe or the row is older than 75 minutes (two missed runs plus
       margin). Jaeger is shown by `reader doctor`/`status` only; /observability shows "see reader doctor" for it.
   - id: FR-OBS-33
@@ -1207,7 +1237,10 @@ requirements:
       CPU, Rotel 32 MiB, Jaeger 50 MiB, the database +51.6 MB. Limits: mlflow 1g (stays; 45 % headroom at the
       burst), rotel 256m and jaeger 256m (unchanged), `store_bytes_max` 4 GiB (structural, FR-OBS-31). Growth:
       1.45 KB a stored span (51.6 MB / 35,560). An opt-in [image] burst test replays the same load and fails on a
-      dropped span, p95 above 30 s, or a peak above 80 % of a limit.
+      dropped span, p95 above 30 s, or a peak above 80 % of a limit. Not verified until implemented (code review
+      of 8466329): the replay is not built yet, so the limits above rest on round 9's spike only; the burst test
+      lives in the test suite (its replay is the test's own code, never shipped) and skips with that reason; the
+      shipped `reader.obs.burst` holds only the limits.
 
 invariants:
   - id: INV-OBS-1

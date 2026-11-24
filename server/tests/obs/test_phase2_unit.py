@@ -176,7 +176,7 @@ async def test_an_import_finds_its_traces_by_the_material_tag() -> None:
     snap = _snapshot(kind="ingest", key="40000000-0000-4000-8000-000000000001", name=f"import {mat[:8]}",
                      trace_tag=("reader.material_sha256", mat), params={"converter_version": "r2",
                                                                         "material_sha256": mat},
-                     metrics={"pages": 594, "chunks": 2285}, tags={})
+                     metrics={"pages": 594, "chunks": 2285}, tags={}, outcome="succeeded")
     async with mlflow.client() as c:
         await runs.sync(snap, c)
     search = next(b for p, b in zip(mlflow.paths(), mlflow.bodies(), strict=True) if p.endswith("traces/search"))
@@ -209,7 +209,11 @@ def _experiments(state: dict[str, Any]) -> dict[tuple[str, str], Any]:
                                     "tags": [{"key": k, "value": v} for k, v in exp["tags"].items()]}}
 
     def by_name(req: httpx.Request) -> tuple[int, dict[str, Any]]:
-        return (200, {"experiment": {"experiment_id": "1", "name": "bench", "tags": []}}) if state["bench"] else (404, {})
+        bench = state["bench"]
+        if bench is None:
+            return 404, {}
+        return 200, {"experiment": {"experiment_id": "1", "name": "bench",
+                                    "tags": [{"key": k, "value": v} for k, v in bench["tags"].items()]}}
 
     def update(req: httpx.Request) -> tuple[int, dict[str, Any]]:
         state["exp0"]["name"] = json.loads(req.content)["new_name"]
@@ -217,12 +221,11 @@ def _experiments(state: dict[str, Any]) -> dict[tuple[str, str], Any]:
 
     def tag(req: httpx.Request) -> tuple[int, dict[str, Any]]:
         b = json.loads(req.content)
-        if b["experiment_id"] == "0":
-            state["exp0"]["tags"][b["key"]] = b["value"]
+        state["exp0" if b["experiment_id"] == "0" else "bench"]["tags"][b["key"]] = b["value"]
         return 200, {}
 
     def create(req: httpx.Request) -> tuple[int, dict[str, Any]]:
-        state["bench"] = True
+        state["bench"] = {"tags": {t["key"]: t["value"] for t in json.loads(req.content).get("tags", [])}}
         return 200, {"experiment_id": "1"}
 
     def models(req: httpx.Request) -> tuple[int, dict[str, Any]]:
@@ -232,6 +235,10 @@ def _experiments(state: dict[str, Any]) -> dict[tuple[str, str], Any]:
     def model_create(req: httpx.Request) -> tuple[int, dict[str, Any]]:
         state["model"] = {"info": {"model_id": "m-1", "status": "LOGGED_MODEL_PENDING", "tags": []}}
         return 200, {"model": state["model"]}
+
+    def model_patch(req: httpx.Request) -> tuple[int, dict[str, Any]]:
+        state["model"]["info"]["status"] = json.loads(req.content)["status"]
+        return 200, {}
 
     def model_tags(req: httpx.Request) -> tuple[int, dict[str, Any]]:
         state["model"]["info"]["tags"] = json.loads(req.content)["tags"]
@@ -244,13 +251,50 @@ def _experiments(state: dict[str, Any]) -> dict[tuple[str, str], Any]:
             ("POST", "/api/2.0/mlflow/experiments/create"): create,
             ("POST", "/api/2.0/mlflow/logged-models/search"): models,
             ("POST", "/api/2.0/mlflow/logged-models"): model_create,
-            ("PATCH", "/api/2.0/mlflow/logged-models/m-1"): (200, {}),
+            ("PATCH", "/api/2.0/mlflow/logged-models/m-1"): model_patch,
             ("PATCH", "/api/2.0/mlflow/logged-models/m-1/tags"): model_tags}
+
+
+async def test_setup_reconciles_an_existing_bench_and_readies_a_pending_model() -> None:
+    """FR-OBS-26 (code review of 8466329): a differing tag of an existing `bench` is set, and a version's
+    LoggedModel left PENDING (a setup that died after its create) is made READY; then nothing on a repeat."""
+    boot = require("reader.obs.bootstrap")
+    bench_tags = dict(next(e for e in VEC6["experiments"] if e["name"] == "bench").get("tags") or {})
+    assert bench_tags, "VEC-OBS-6's bench names tags"
+    stale = {k: "old" for k in bench_tags}
+    model = {"info": {"model_id": "m-1", "status": "LOGGED_MODEL_PENDING",
+                      "tags": [{"key": "reader.last_started", "value": "2026-11-25"}]}}
+    state = {"exp0": {"name": "reader", "tags": dict(VEC6["experiments"][0].get("tags") or {})},
+             "bench": {"tags": stale}, "model": model}
+    mlflow = Mlflow(_experiments(state))
+    async with mlflow.client() as c:
+        await boot.ensure_setup(c, VEC6, version_key="ab" * 32, inputs={}, day="2026-11-25")
+        writes = mlflow.writes()
+        mlflow.requests.clear()
+        await boot.ensure_setup(c, VEC6, version_key="ab" * 32, inputs={}, day="2026-11-25")
+        assert mlflow.writes() == []
+    assert writes.count("POST /api/2.0/mlflow/experiments/set-experiment-tag") == len(bench_tags)
+    assert writes.count("PATCH /api/2.0/mlflow/logged-models/m-1") == 1
+    assert state["bench"]["tags"] == bench_tags and model["info"]["status"] == "LOGGED_MODEL_READY"
+
+
+def test_the_deployed_setup_file_wins_when_it_exists(tmp_path: Any) -> None:
+    """FR-OBS-26 (B6): the worker reads compose's bind at the code constant, else the package copy."""
+    from pathlib import Path
+
+    phase2 = require("reader.obs.phase2")
+    assert Path("/etc/reader/mlflow-setup.yaml") == phase2.SETUP_PATH
+    compose = (REPO / "deploy" / "compose.yaml").read_text(encoding="utf-8")
+    assert f":{phase2.SETUP_PATH}:ro" in compose  # the bind's target is the constant
+    assert phase2.setup_config(tmp_path / "missing.yaml") == phase2.SETUP == VEC6
+    deployed = tmp_path / "mlflow-setup.yaml"
+    deployed.write_text("version: 1\nexperiments: []\n", encoding="utf-8")
+    assert phase2.setup_config(deployed) == {"version": 1, "experiments": []}
 
 
 async def test_setup_writes_the_difference_then_nothing_the_same_day() -> None:
     boot = require("reader.obs.bootstrap")
-    state = {"exp0": {"name": "Default", "tags": {}}, "bench": False, "model": None}
+    state = {"exp0": {"name": "Default", "tags": {}}, "bench": None, "model": None}
     mlflow = Mlflow(_experiments(state))
     key = "ab" * 32
     async with mlflow.client() as c:
@@ -408,10 +452,23 @@ def test_alerts_from_postgres_rows_only() -> None:
 async def test_retention_deletes_old_runs_and_unused_versions() -> None:
     runs = require("reader.obs.runs")
     old, new = 1_790_000_000_000, 1_795_900_000_000
+    pages = {  # per kind, two pages: the second behind a page_token (code review B2)
+        "compile": [[{"info": {"run_id": "old", "end_time": old}, "data": {}}],
+                    [{"info": {"run_id": "old-2", "end_time": old}, "data": {}},
+                     {"info": {"run_id": "new", "end_time": new}, "data": {}}]],
+        "ingest": [[{"info": {"run_id": "old-i", "end_time": old}, "data": {}}], []],
+    }
+
+    def search(req: httpx.Request) -> tuple[int, dict[str, Any]]:
+        body = json.loads(req.content)
+        assert " IN " not in body["filter"]  # MLflow 3.18 refuses IN on a tag
+        kind = re.search(r"tags\.`reader\.kind` = '(\w+)'", body["filter"]).group(1)  # type: ignore[union-attr]
+        page = int(body.get("page_token") or 0)
+        more = {"next_page_token": str(page + 1)} if page + 1 < len(pages[kind]) else {}
+        return 200, {"runs": pages[kind][page], **more}
+
     mlflow = Mlflow({
-        ("POST", "/api/2.0/mlflow/runs/search"): {"runs": [
-            {"info": {"run_id": "old", "end_time": old}, "data": {}},
-            {"info": {"run_id": "new", "end_time": new}, "data": {}}]},
+        ("POST", "/api/2.0/mlflow/runs/search"): search,
         ("POST", "/api/2.0/mlflow/logged-models/search"): {"models": [
             {"info": {"model_id": "m-old", "tags": [{"key": "reader.version_key", "value": "c" * 12},
                                                      {"key": "reader.last_started", "value": "2026-09-01"}]}},
@@ -420,8 +477,9 @@ async def test_retention_deletes_old_runs_and_unused_versions() -> None:
     })
     async with mlflow.client() as c:
         await runs.prune(c, now=datetime(2026, 11, 25, tzinfo=UTC), retention_days=30, running_key="a" * 12)
-    assert ("POST /api/2.0/mlflow/runs/delete", {"run_id": "old"}) in list(zip(mlflow.paths(), mlflow.bodies(),
-                                                                               strict=True))
+    sent = list(zip(mlflow.paths(), mlflow.bodies(), strict=True))
+    deleted = [b["run_id"] for p, b in sent if p == "POST /api/2.0/mlflow/runs/delete"]
+    assert deleted == ["old", "old-2", "old-i"]  # both kinds, past the first page; the new Run stays
     deletes = [p for p in mlflow.paths() if p.startswith("DELETE")]
     assert deletes == ["DELETE /api/2.0/mlflow/logged-models/m-old"]  # the running key is kept
 
@@ -431,18 +489,64 @@ async def test_retention_deletes_old_runs_and_unused_versions() -> None:
 
 async def test_health_probe_records_mlflow_and_rotel() -> None:
     health = require("reader.obs.health")
+    sent: list[tuple[str, str, bytes]] = []
+
     def rotel(req: httpx.Request) -> httpx.Response:
+        sent.append((req.url.host, req.method, req.content))
         return httpx.Response(400 if req.url.host == "rotel" else 200, json={})
     async with httpx.AsyncClient(transport=httpx.MockTransport(rotel)) as c:
         got = await health.probe(c)
     assert got == {"mlflow": (True, "healthy"), "rotel": (True, "listening")}
+    assert ("rotel", "POST", b"{}") in sent  # an empty OTLP export (round 9)
     assert health.KIND_DECL.name == "obs.health" and health.KIND_DECL.traced is False
+
+    for status in (200, 404, 500):  # only the 400 of a listening receiver is healthy
+        def other(req: httpx.Request, status: int = status) -> httpx.Response:
+            return httpx.Response(status if req.url.host == "rotel" else 200, json={})
+        async with httpx.AsyncClient(transport=httpx.MockTransport(other)) as c:
+            assert (await health.probe(c))["rotel"] == (False, "unhealthy")
 
     def down(req: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("down", request=req)
     async with httpx.AsyncClient(transport=httpx.MockTransport(down)) as c:
         got = await health.probe(c)
     assert got == {"mlflow": (False, "unreachable"), "rotel": (False, "unreachable")}
+
+
+def test_stale_health_is_never_stale_while_tracing_is_off() -> None:
+    """FR-OBS-32: older than 75 minutes is stale, except with tracing off (the job then probes nothing)."""
+    from datetime import timedelta
+
+    health = require("reader.obs.health")
+    now = datetime(2026, 11, 25, 12, tzinfo=UTC)
+    assert health.stale(now - timedelta(minutes=76), now, True) is True
+    assert health.stale(now - timedelta(minutes=75), now, True) is False
+    assert health.stale(now - timedelta(days=3), now, False) is False
+
+
+async def test_a_cancelled_run_is_killed_and_a_late_import_end_is_valid() -> None:
+    """FR-OBS-20 (e): a cancelled run's Run ends KILLED with `reader.outcome` cancelled; an import's late end
+    (end 2, after its embed) carries the complete metrics; an outcome of the other kind is refused."""
+    runs = require("reader.obs.runs")
+    mlflow = Mlflow({("POST", "/api/2.0/mlflow/runs/search"): _search_reply([]),
+                     ("POST", "/api/2.0/mlflow/runs/create"): {"run": {"info": {"run_id": "r1"}, "data": {}}}})
+    async with mlflow.client() as c:
+        await runs.sync(_snapshot(status="KILLED", outcome="cancelled"), c)
+        sha = "ab" * 32
+        await runs.sync(_snapshot(kind="ingest", name=f"import {sha[:8]}", end=2, outcome="succeeded",
+                                  tags={"reader.material_sha256": sha},
+                                  params={"converter_version": "1.0.0", "material_sha256": sha},
+                                  metrics={"pages": 120, "spans": 4000, "chunks": 900, "import_s": 42.5,
+                                           "pages_per_min_import": 169.4},
+                                  trace_tag=("reader.material_sha256", sha)), c)
+        with pytest.raises(ValueError):
+            await runs.sync(_snapshot(outcome="succeeded"), c)  # an import's outcome on a compile Run
+    updates = [b for p, b in zip(mlflow.paths(), mlflow.bodies(), strict=True) if p.endswith("/runs/update")]
+    assert [u["status"] for u in updates] == ["KILLED", "FINISHED"]
+    batch = [b for p, b in zip(mlflow.paths(), mlflow.bodies(), strict=True) if p.endswith("/runs/log-batch")]
+    assert {"key": "reader.outcome", "value": "cancelled"} in batch[0]["tags"]
+    assert {m["key"] for m in batch[1]["metrics"]} == set(VEC5["runs"]["ingest"]["metrics"])
+    assert {m["step"] for m in batch[1]["metrics"]} == {2}
 
 
 # --- INV-OBS-2 (phase 2): no canary reaches any body ---

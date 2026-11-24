@@ -1,5 +1,6 @@
 # SRV-OBS VEC-OBS-6, shipped with the worker as the default for `obs.setup` (FR-OBS-26). The deployed copy is
-# deploy/otel/mlflow-setup.yaml, mounted read-only (READER_MLFLOW_SETUP); a [unit] test checks this file parses equal
+# deploy/otel/mlflow-setup.yaml, mounted read-only at /etc/reader/mlflow-setup.yaml (phase2.SETUP_PATH), read when it
+# exists; a [unit] test checks this file parses equal
 # to spec/fixtures/SRV-OBS/mlflow-setup.yaml.
 version: 1
 experiments:

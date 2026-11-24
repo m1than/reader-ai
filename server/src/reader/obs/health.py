@@ -1,7 +1,8 @@
 """SRV-OBS FR-OBS-32 (ADR-0038): the stack health probe. A periodic `*/30` entry enqueues one `obs.health`
 job per 30-minute slot; the job probes MLflow's /health and Rotel's OTLP HTTP listener and writes the newest
 result per member to `obs_stack_status`. The kind is untraced (`traced: false`), so probing adds no trace of
-its own. Any HTTP answer from Rotel means it is listening (its OTLP receiver refuses a bare GET with 4xx)."""
+its own. Rotel is listening when a POST of `{}` to its OTLP receiver answers 400; any other answer is
+unhealthy."""
 
 from __future__ import annotations
 
@@ -20,8 +21,15 @@ log = logging.getLogger("reader.obs")
 KIND: Final = "obs.health"
 CRON: Final = "*/30 * * * *"
 ROTEL: Final = "http://rotel:4318/v1/traces"
+ROTEL_LISTENING: Final = 400  # FR-OBS-32: the answer to a POST of `{}` (round 9)
 PROBE_TIMEOUT_S: Final = 5.0
 STALE_AFTER_S: Final = 75 * 60  # FR-OBS-32: two missed 30-minute probes and a margin
+
+
+def stale(checked_at: datetime, now: datetime, tracing_on: bool) -> bool:
+    """FR-OBS-32's one staleness rule for the alerts: older than STALE_AFTER_S, and never while tracing is off
+    (the job then probes nothing, so its rows go stale by design)."""
+    return tracing_on and (now - checked_at).total_seconds() > STALE_AFTER_S
 STORE_BYTES_MAX: Final = 4 * 1024**3  # FR-OBS-31: structural; doctor/status warn at the ratio below
 STORE_WARN_RATIO: Final = 0.8
 
@@ -45,9 +53,9 @@ async def probe(client: httpx.AsyncClient) -> dict[str, tuple[bool, str]]:
         out["mlflow"] = (True, "healthy") if r.status_code == 200 else (False, "unhealthy")
     except httpx.HTTPError:
         out["mlflow"] = (False, "unreachable")
-    try:
-        await client.get(ROTEL, timeout=PROBE_TIMEOUT_S)
-        out["rotel"] = (True, "listening")
+    try:  # an empty OTLP export: Rotel's receiver answers 400 when it listens (round 9)
+        r = await client.post(ROTEL, json={}, timeout=PROBE_TIMEOUT_S)
+        out["rotel"] = (True, "listening") if r.status_code == ROTEL_LISTENING else (False, "unhealthy")
     except httpx.HTTPError:
         out["rotel"] = (False, "unreachable")
     return out

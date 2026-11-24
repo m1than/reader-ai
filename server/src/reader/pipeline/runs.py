@@ -401,8 +401,21 @@ async def cancel(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
                 {"r": run_id, "o": owner_id},
             )
         ).scalar()
+        ends = None
         if lesson is not None:
             await audit.record(conn, owner_id, "compile.cancel", str(run_id), {"lesson_id": str(lesson)})
+            ends = (  # FR-PIPELINE-18: the cancel is the run's end; the step that sees it counts nothing
+                await conn.execute(
+                    text(
+                        "UPDATE compile_runs SET ends = ends + 1 WHERE id = :r AND ends < 100 RETURNING ends"
+                    ),
+                    {"r": run_id},
+                )
+            ).scalar()
+    if ends is not None:
+        from reader.obs import runs as obs_runs
+
+        await obs_runs.enqueue_end("compile", str(run_id), int(ends), jobs)
     if lesson is None:
         async with engine.connect() as conn:
             run = await load_run(conn, run_id, owner_id)

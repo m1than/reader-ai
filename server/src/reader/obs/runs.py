@@ -30,6 +30,7 @@ KIND: Final = "obs.runs"
 SCHEDULE_IN_S: Final = 60
 LINK_BATCH: Final = 100
 TRACE_PAGE: Final = 500
+RUNS_PAGE: Final = 1000  # runs/search's largest page (FR-OBS-31)
 EXPERIMENT: Final = "0"
 ID_TAG: Final = {"compile": "reader.run_id", "ingest": "reader.ingest_id"}
 
@@ -66,6 +67,9 @@ class Snapshot:
     trace_tag: tuple[str, str] | None = field(default=None)
 
 
+STATUSES: Final = ("FINISHED", "FAILED", "KILLED")  # KILLED: a cancelled compile run (FR-PIPELINE-20)
+
+
 def _rule(table: Mapping[str, Any], key: str) -> Any:
     if key in table:
         return table[key]
@@ -76,19 +80,14 @@ def _rule(table: Mapping[str, Any], key: str) -> Any:
     return None
 
 
-_OUTCOMES: Final = frozenset(
-    v for kind in ("compile", "ingest") for v in phase2.VEC["runs"][kind]["tags"]["reader.outcome"]["enum"]
-)
-
-
 def _validate(s: Snapshot) -> None:
     spec = phase2.VEC["runs"][s.kind]
     for k, v in s.tags.items():
         if not phase2.check(v, _rule(spec["tags"], k)):
             raise ValueError(f"run tag {k}")
-    if s.outcome not in _OUTCOMES or not phase2.check(s.snapshot_at, "datetime"):
+    if s.outcome not in spec["tags"]["reader.outcome"]["enum"] or not phase2.check(s.snapshot_at, "datetime"):
         raise ValueError("run outcome or snapshot")
-    if not phase2.check(s.end, phase2.VEC["runs"]["compile"]["tags"]["reader.ends"]):
+    if not phase2.check(s.end, spec["tags"]["reader.ends"]):
         raise ValueError("run end")
     for k, param in s.params.items():
         if not phase2.check(param, _rule(spec["params"], k)):
@@ -96,7 +95,7 @@ def _validate(s: Snapshot) -> None:
     for k, metric in s.metrics.items():
         if not phase2.check(metric, _rule(spec["metrics"], k)):
             raise ValueError(f"run metric {k}")
-    if s.status not in ("FINISHED", "FAILED"):
+    if s.status not in STATUSES:
         raise ValueError("run status")
 
 
@@ -200,14 +199,17 @@ async def sync(s: Snapshot, client: httpx.AsyncClient) -> str:
     return run_id
 
 
-async def enqueue_end(kind: str, ident: str, end: int) -> None:
-    """FR-PIPELINE-18, FR-INGEST-26: called after the end committed; never raises (INV-OBS-3)."""
+async def enqueue_end(kind: str, ident: str, end: int, jobs: Any = None) -> None:
+    """FR-PIPELINE-18, FR-INGEST-26: called after the end committed; never raises (INV-OBS-3). `jobs` is the
+    caller's queue (the api's cancel route); the worker's running queue otherwise."""
     try:
         if not phase2.tracing_on():
             return
-        from reader.jobs import running
+        if jobs is None:
+            from reader.jobs import running
 
-        await running().enqueue(
+            jobs = running()
+        await jobs.enqueue(
             KIND, {"kind": kind, "id": str(ident), "end": int(end)}, schedule_in=SCHEDULE_IN_S
         )
     except Exception:
@@ -217,8 +219,11 @@ async def enqueue_end(kind: str, ident: str, end: int) -> None:
 # --- the snapshot from Postgres (read once per job) ---
 
 _COMPILE_SQL: Final = (
-    "SELECT r.id, r.lesson_id, l.course_id, r.created_at, r.finished_at, r.loops FROM compile_runs r"
-    " JOIN lessons l ON l.id = r.lesson_id AND l.owner_id = r.owner_id WHERE r.id = :id"
+    "SELECT r.id, r.lesson_id, l.course_id, r.created_at, r.finished_at, r.cancelled_at, r.loops,"
+    # a failed run has no finished_at: its end is the newest end of its step keys (FR-OBS-20 e)
+    " (SELECT max(k.finished_at) FROM job_keys k WHERE k.kind IN ('pipeline.stage', 'pipeline.verify')"
+    " AND k.args->>'run_id' = CAST(r.id AS text)) AS last_at"
+    " FROM compile_runs r JOIN lessons l ON l.id = r.lesson_id AND l.owner_id = r.owner_id WHERE r.id = :id"
 )
 _SPEND_SQL: Final = (
     "SELECT s.stage, sum(CASE WHEN s.kind = 'settle' THEN s.settled_usd WHEN s.kind = 'reserve'"
@@ -231,8 +236,15 @@ _SPEND_SQL: Final = (
 )
 _MODELS_SQL: Final = "SELECT stage, max(model) AS model FROM compile_steps WHERE run_id = :id GROUP BY stage"
 _INGEST_SQL: Final = (
-    "SELECT i.id, i.converter_version, i.span_count, i.imported_at, m.sha256, m.page_count FROM ingests i"
-    " JOIN materials m ON m.id = i.material_id WHERE i.id = :id"
+    "SELECT i.id, i.converter_version, i.span_count, i.imported_at, m.sha256, m.page_count,"
+    " (SELECT count(*) FROM search_chunks c WHERE c.ingest_id = i.id AND c.owner_id = i.owner_id) AS chunks,"
+    " (SELECT max(e.embedded_at) FROM search_embeds e WHERE e.ingest_id = i.id AND e.owner_id = i.owner_id)"
+    " AS embedded_at,"
+    # FR-OBS-20 f: the import job's own key (enqueued to succeeded)
+    " (SELECT extract(epoch FROM max(k.finished_at - k.created_at)) FROM job_keys k"
+    " WHERE k.kind = 'ingest.import' AND k.outcome = 'succeeded' AND k.args->>'material_sha256' = m.sha256"
+    " AND k.args->>'converter_version' = i.converter_version) AS import_s"
+    " FROM ingests i JOIN materials m ON m.id = i.material_id AND m.owner_id = i.owner_id WHERE i.id = :id"
 )
 
 
@@ -266,7 +278,7 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
             tin, tout = tin + int(t_in or 0), tout + int(t_out or 0)
             if isinstance(stage, str) and stage:
                 metrics[f"cost_usd.{stage}"] = float(amount)
-        ended = row.finished_at or now
+        ended = row.finished_at or row.last_at or now
         metrics.update(
             {
                 "cost_usd.total": float(total),
@@ -281,15 +293,20 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
         for stage, model in (await conn.execute(text(_MODELS_SQL), {"id": args.id})).all():
             if isinstance(stage, str) and isinstance(model, str):
                 params[f"model.{stage}"] = model
-        finished = row.finished_at is not None
+        if row.cancelled_at is not None:
+            status, outcome = "KILLED", "cancelled"
+        elif row.finished_at is not None:
+            status, outcome = "FINISHED", "finished"
+        else:
+            status, outcome = "FAILED", "failed"
         return Snapshot(
             kind="compile",
             key=args.id,
             name=f"compile {args.id[:8]}",
             start_ms=_ms(row.created_at),
             end_ms=_ms(ended),
-            status="FINISHED" if finished else "FAILED",
-            outcome="finished" if finished else "failed",
+            status=status,
+            outcome=outcome,
             end=args.end,
             tags={"reader.lesson.id": str(row.lesson_id), "reader.course.id": str(row.course_id)},
             params=params,
@@ -299,18 +316,29 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
     row = (await conn.execute(text(_INGEST_SQL), {"id": args.id})).first()
     if row is None:
         return None
+    pages = int(row.page_count or 0)
+    ingest_metrics: dict[str, float | int] = {
+        "pages": pages,
+        "spans": int(row.span_count or 0),
+        "chunks": int(row.chunks or 0),
+    }
+    if row.import_s is not None:
+        import_s = max(float(row.import_s), 0.0)
+        ingest_metrics["import_s"] = import_s
+        if import_s > 0:
+            ingest_metrics["pages_per_min_import"] = pages / import_s * 60
     return Snapshot(
         kind="ingest",
         key=args.id,
         name=f"import {row.sha256[:8]}",
         start_ms=_ms(row.imported_at),
-        end_ms=_ms(row.imported_at),
+        end_ms=_ms(max(row.imported_at, row.embedded_at or row.imported_at)),  # the late end's time (d)
         status="FINISHED",
         outcome="succeeded",
         end=args.end,
         tags={"reader.material_sha256": row.sha256},
         params={"converter_version": row.converter_version, "material_sha256": row.sha256},
-        metrics={"pages": int(row.page_count or 0), "spans": int(row.span_count or 0)},
+        metrics=ingest_metrics,
         snapshot_at=_iso(now),
         trace_tag=("reader.material_sha256", row.sha256),
     )
@@ -343,22 +371,29 @@ async def prune(
     cutoff = now - timedelta(days=retention_days)
     cutoff_ms, cutoff_day = _ms(cutoff), cutoff.date().isoformat()
     deleted = 0
-    _, got = await request(
-        client,
-        "POST",
-        "/api/2.0/mlflow/runs/search",
-        {
-            "experiment_ids": [EXPERIMENT],
-            "filter": "tags.`reader.kind` IN ('compile', 'ingest')",
-            "max_results": 1000,
-        },
-    )
-    for run in got.get("runs") or []:
-        info = run.get("info") or {}
-        end = info.get("end_time")
-        if isinstance(end, int) and end < cutoff_ms:
-            await request(client, "POST", "/api/2.0/mlflow/runs/delete", {"run_id": info["run_id"]})
-            deleted += 1
+    old: list[str] = []
+    for kind in ID_TAG:  # MLflow 3.18 refuses `IN` on a tag: one search per kind, paged (FR-OBS-31)
+        token: str | None = None
+        while True:
+            body: dict[str, Any] = {
+                "experiment_ids": [EXPERIMENT],
+                "filter": f"tags.`reader.kind` = '{kind}' AND attributes.end_time < {cutoff_ms}",
+                "max_results": RUNS_PAGE,
+            }
+            if token:
+                body["page_token"] = token
+            _, got = await request(client, "POST", "/api/2.0/mlflow/runs/search", body)
+            for run in got.get("runs") or []:
+                info = run.get("info") or {}
+                end = info.get("end_time")
+                if isinstance(end, int) and end < cutoff_ms:  # the filter's rule, kept as the code's own
+                    old.append(str(info["run_id"]))
+            token = got.get("next_page_token") or None
+            if not token:
+                break
+    for run_id in old:  # deleted after the search, so a page never shifts under its token
+        await request(client, "POST", "/api/2.0/mlflow/runs/delete", {"run_id": run_id})
+        deleted += 1
     _, models = await request(
         client,
         "POST",

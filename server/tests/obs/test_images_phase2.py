@@ -10,7 +10,6 @@ Zero credit.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 from collections.abc import Iterator
 
@@ -58,7 +57,8 @@ from reader.obs import bootstrap, runs, labels, bench, health, phase2
 SETUP = phase2.SETUP
 seen = []
 async def log(request):
-    seen.append([request.method, request.url.path])
+    if request.url.host == "mlflow":  # MLflow's requests only (the health probe also POSTs to Rotel)
+        seen.append([request.method, request.url.path])
 async def main():
     async with httpx.AsyncClient(base_url="http://mlflow:5000", trust_env=False,
                                  event_hooks={"request": [log]}) as c:
@@ -158,11 +158,42 @@ print(json.dumps({"connect": connect(), "resolve": resolve(), "health": health()
     assert outside["connect"] is True and outside["resolve"] is True
 
 
-@pytest.mark.skipif(os.environ.get("READER_TEST_BURST") != "1", reason="burst test; set READER_TEST_BURST=1")
-def test_burst_limits(prefix: str, mlflow_image: str, server_image: str) -> None:
-    """FR-OBS-35: 60 lessons x 8 jobs x 72 spans plus 100 tutor questions; 0 dropped, p95 <= 30 s, peaks <= 80 %."""
+RETENTION = """
+import asyncio, json, httpx
+from datetime import UTC, datetime
+from reader.obs import runs
+runs.RUNS_PAGE = 2  # FR-OBS-31: every kind's search pages past its first page (page_token)
+OLD, NEW = 1790000000000, 1795900000000
+async def make(c, end, kind=None):
+    tags = [{"key": "reader.kind", "value": kind}] if kind else []
+    r = (await c.post("/api/2.0/mlflow/runs/create", json={"experiment_id": "0", "start_time": end - 1000,
+         "tags": tags})).json()["run"]["info"]["run_id"]
+    await c.post("/api/2.0/mlflow/runs/update", json={"run_id": r, "status": "FINISHED", "end_time": end})
+    return r
+async def main():
+    async with httpx.AsyncClient(base_url="http://mlflow:5000", trust_env=False) as c:
+        old = [await make(c, OLD, k) for k in ("compile", "ingest") for _ in range(3)]
+        keep = [await make(c, NEW, k) for k in ("compile", "ingest")] + [await make(c, OLD)]
+        deleted = await runs.prune(c, now=datetime(2026, 11, 25, tzinfo=UTC), retention_days=30, running_key="a" * 12)
+        left = (await c.post("/api/2.0/mlflow/runs/search", json={"experiment_ids": ["0"], "max_results": 100})).json()
+    return {"old": sorted(old), "keep": sorted(keep), "deleted": deleted,
+            "left": sorted(r["info"]["run_id"] for r in left.get("runs", []))}
+print(json.dumps(asyncio.run(main())))
+"""
+
+
+def test_retention_deletes_old_runs_of_both_kinds(prefix: str, mlflow_image: str, server_image: str) -> None:
+    """FR-OBS-31 (code review B2): one `=` search per kind, paged, against real MLflow 3.18 (which refuses `IN` on a
+    tag): the old compile and import Runs go, the new ones and a Run without `reader.kind` stay."""
     _backend(prefix, mlflow_image)
-    got = _worker(prefix, server_image, "import json\nfrom reader.obs import burst\n"
-                  "print(json.dumps(burst.run('http://rotel:4318', 'http://mlflow:5000')))", timeout=900)
-    assert got["sent"] == got["stored"] == 60 * 8 * 72 + 100 * 10
-    assert got["p95_s"] <= 30
+    got = _worker(prefix, server_image, RETENTION)
+    assert got["deleted"] == len(got["old"]) == 6
+    assert got["left"] == got["keep"]
+
+
+@pytest.mark.skip(reason="FR-OBS-35 is not verified until implemented: the burst replay is not built yet (code review "
+                         "of 8466329); its limits rest on spike round 9 only")
+def test_burst_limits(prefix: str, mlflow_image: str, server_image: str) -> None:
+    """FR-OBS-35: 60 lessons x 8 jobs x 72 spans plus 100 tutor questions; 0 dropped, p95 <= 30 s, peaks <= 80 %.
+    The replay is to be this test's own code (never shipped), after spikes/obs-stack/round9.py's `load`."""
+    raise AssertionError("not implemented")
