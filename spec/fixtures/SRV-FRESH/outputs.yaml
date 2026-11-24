@@ -81,6 +81,23 @@ scan:
         - { id: c3, span: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0", page: 1,
             subject: "共识算法", kind: tool, confidence: low }
       dropped: { subject_too_long: 7 }
+  - name: token_caps_one_rule_at_a_time
+    # Each subject fails (or passes) exactly one rule of FR-FRESH-3 over the span texts above: a 25-character
+    # Latin token that is no concatenation of span words is over subject_token_chars_max (dropped), a 24-character
+    # one is not (kept); 6 CJK ideographs are 6 words (dropped), 5 are 5 words (kept); "alphaʼbravo charlie delta
+    # echo foxtrot" is 7 words (U+02BC a word of its own), every token ≤ 24 characters (dropped by count). Words
+    # are taken over the NFKC form: the fullwidth "ａｌｐｈａｂｒａｖｏ" and the mathematical bold "𝐚𝐥𝐩𝐡𝐚𝐛𝐫𝐚𝐯𝐨" are
+    # "alphabravo", cut into alpha + bravo, so both subjects are 6 words (dropped).
+    output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s2", "subject": "abcdefghijklmnopqrstuvwxy", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s2", "subject": "abcdefghijklmnopqrstuvwx", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s1", "subject": "共识算法共识", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s1", "subject": "共识算法共", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s2", "subject": "alphaʼbravo charlie delta echo foxtrot", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s2", "subject": "ａｌｐｈａｂｒａｖｏ charlie delta echo foxtrot", "kind": "tool", "why": "w", "confidence": "low"}, {"span": "s2", "subject": "𝐚𝐥𝐩𝐡𝐚𝐛𝐫𝐚𝐯𝐨 charlie delta echo foxtrot", "kind": "tool", "why": "w", "confidence": "low"}]}'
+    expect:
+      bibliography: { title: "T", authors: [], edition: null, year: null, publisher: null, isbn: null,
+                      original_title: null, original_authors: null, original_edition: null, original_year: null }
+      claims:
+        - { id: c1, span: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:5", page: 12,
+            subject: "abcdefghijklmnopqrstuvwx", kind: tool, confidence: low }
+        - { id: c2, span: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0", page: 1,
+            subject: "共识算法共", kind: tool, confidence: low }
+      dropped: { subject_too_long: 5 }
   # A lone surrogate (UTF-8 cannot store it) as a JSON escape: output_invalid, never a crash at storage.
   - { name: escaped_lone_surrogate_in_a_subject, output: '{"bibliography": {"title": "T"}, "claims": [{"span": "s1", "subject": "a\ud800b", "kind": "tool", "why": "w", "confidence": "low"}]}', error: output_invalid }
   - { name: escaped_lone_surrogate_in_the_bibliography, output: '{"bibliography": {"title": "T\udc00"}, "claims": []}', error: output_invalid }

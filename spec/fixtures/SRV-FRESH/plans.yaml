@@ -7,7 +7,8 @@
 # English. Over 120 characters, words go from the end of the longest variable part. A query holding a 6-word run of
 # a non-front span, once bibliography strings, surnames and topic titles are masked (removed from the query's and the
 # span's words alike), is dropped (`query_unsafe`). A claim failing the subject rule is skipped (`subject_too_long`);
-# so is a claim whose subject forms a 6-word span run with an earlier chosen subject (`subject_split`).
+# so is a claim whose subject forms a 6-word span run with the subjects chosen before it, in any order of them all
+# (`subject_split`). Runs are compared as written and with number and modifier-letter tokens removed on both sides.
 # Topics are [id, title, level]. No book text: every string is synthetic.
 
 cases:
@@ -156,3 +157,101 @@ cases:
         - [claim, "golf hotel latest version"]
         - [books, "Ledgers book 2026"]
       dropped: { subject_too_long: 4, subject_split: 1 }
+
+  - name: number_and_modifier_joiners_do_not_break_a_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # U+02BC and a digit are words of their own; runs are also compared with number and modifier-letter tokens
+    # removed on both sides, so each claim query below ("echo foxtrot golf hotel latest version" once the joiner
+    # is removed) is a 6-word run of the span: all three are dropped. No two subjects form a run together.
+    claims:
+      - { id: c1, subject: "echo foxtrot golfʼhotel", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "echo foxtrot golf1hotel", kind: version, confidence: high, page: 2 }
+      - { id: c3, subject: "echo foxtrot golf 1 hotel", kind: version, confidence: high, page: 3 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 3 }
+
+  - name: a_modifier_joiner_does_not_break_a_run_across_claims
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # "alpha bravo charlieʼdelta" then "echo foxtrot golf" is the span's run "alpha … golf" once U+02BC is removed:
+    # the second claim is skipped.
+    claims:
+      - { id: c1, subject: "alpha bravo charlieʼdelta", kind: api, confidence: high, page: 1 }
+      - { id: c2, subject: "echo foxtrot golf", kind: api, confidence: high, page: 2 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "alpha bravo charlieʼdelta latest version"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_split: 1 }
+
+  - name: a_run_split_across_three_claims
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # No two of the subjects form a 6-word run in either order (at most 5 words), but the three in a row are the
+    # span's 8-word run "quick … dog": every order of the chosen subjects plus the candidate is checked, so the
+    # third is skipped.
+    claims:
+      - { id: c1, subject: "quick brown fox", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "jumps over", kind: version, confidence: high, page: 2 }
+      - { id: c3, subject: "the lazy dog", kind: version, confidence: high, page: 3 }
+    non_front: ["Then the quick brown fox jumps over the lazy dog near a quiet river bank today."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "quick brown fox latest version"]
+        - [claim, "jumps over latest version"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_split: 1 }
+
+  - name: a_run_split_with_the_candidate_first
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # The later candidate "bravo charlie delta" comes before the chosen "echo foxtrot golf" in the span: only the
+    # order candidate-then-chosen forms the run, and it is skipped.
+    claims:
+      - { id: c1, subject: "echo foxtrot golf", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "bravo charlie delta", kind: version, confidence: medium, page: 2 }
+    non_front: ["alpha bravo charlie delta echo foxtrot golf hotel"]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "echo foxtrot golf latest version"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_split: 1 }
+
+  - name: fullwidth_and_mathematical_letters_are_plain_letters
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # Words are taken over the NFKC form: the fullwidth "ｅｃｈｏｆｏｘｔｒｏｔ" is "echofoxtrot", cut into echo +
+    # foxtrot, and the mathematical bold "𝐞𝐜𝐡𝐨" is "echo": both claim queries are "echo foxtrot golf hotel latest
+    # version", a 6-word run of the span, and are dropped.
+    claims:
+      - { id: c1, subject: "ｅｃｈｏｆｏｘｔｒｏｔ golf hotel", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "𝐞𝐜𝐡𝐨 foxtrot golf hotel", kind: version, confidence: high, page: 2 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 2 }

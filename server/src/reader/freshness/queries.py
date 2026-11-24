@@ -11,9 +11,10 @@ A claim whose subject fails the scan's own subject rule (`subject_ok`: 1 to `sub
 `text.words` and `text.split` count them over the non-front spans' vocabulary, each token at most
 `subject_token_chars_max` characters, at most `subject_chars_max` characters in all) is skipped
 (`subject_too_long`), so a stored or reused claim is held to the same rule as a fresh scan's. A claim whose
-subject, with an earlier chosen claim's subject before or after it, forms a `shingle_words`-word run of a
-non-front span is skipped too (`subject_split`), so no two queries of one check carry a span's run between
-them.
+subject, with the subjects chosen before it in any order, forms a `shingle_words`-word run of a non-front span
+is skipped too (`subject_split`), so the queries of one check carry no span's run between them.
+Runs are compared as written and also with the number and modifier-letter tokens (`1`, `3.11`, U+02BC) removed
+on both sides, so such a joiner, a word of its own, cannot break a copied run.
 Each query is NFC, whitespace-collapsed and cut to `query_chars_max` by removing words from the end of its
 longest variable part. A query is dropped (`query_unsafe`) when, with the bibliography strings, author
 surnames and topic titles masked, it still holds a `shingle_words`-word run of a non-front sampled span
@@ -28,6 +29,7 @@ import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from itertools import permutations
 from typing import Any, Final
 
 from reader.freshness import params
@@ -189,21 +191,39 @@ def _unmasked(value: str, exempt: list[list[str]], vocab: frozenset[str] = froze
     return [token for token, masked in zip(tokens, mask, strict=True) if not masked]
 
 
+_FILLER_CATEGORIES: Final = frozenset({"Nd", "Nl", "No", "Lm"})
+
+
+def _filler(token: str) -> bool:
+    """A number token (`1`, `3.11`) or a modifier-letter token (U+02BC): a joiner `words` makes a word of its
+    own, so a run is also compared with these removed (INV-FRESH-1)."""
+    return all(ch == "." or unicodedata.category(ch) in _FILLER_CATEGORIES for ch in token)
+
+
+def _content(tokens: list[str]) -> list[str]:
+    return [token for token in tokens if not _filler(token)]
+
+
+def _runs(tokens: list[str], n: int) -> set[tuple[str, ...]]:
+    return {tuple(tokens[i : i + n]) for i in range(len(tokens) - n + 1)}
+
+
 def shingles(
     texts: Sequence[str], n: int = params.SHINGLE_WORDS, exempt: list[list[str]] | None = None
 ) -> set[tuple[str, ...]]:
-    """Every `n`-word run of the texts, after the exempt sequences are removed (none by default)."""
+    """Every `n`-word run of the texts, after the exempt sequences are removed (none by default), with and
+    without the number and modifier-letter tokens."""
     found: set[tuple[str, ...]] = set()
     for value in texts:
         tokens = _unmasked(value, exempt or [])
-        for i in range(len(tokens) - n + 1):
-            found.add(tuple(tokens[i : i + n]))
+        found |= _runs(tokens, n) | _runs(_content(tokens), n)
     return found
 
 
 def _holds_run(tokens: list[str], book: set[tuple[str, ...]]) -> bool:
+    """A run of `tokens`, with or without their number and modifier-letter tokens, is in `book`."""
     n = params.SHINGLE_WORDS
-    return any(tuple(tokens[i : i + n]) in book for i in range(len(tokens) - n + 1))
+    return not book.isdisjoint(_runs(tokens, n) | _runs(_content(tokens), n))
 
 
 def unsafe(
@@ -244,8 +264,8 @@ def _claims(
     book: set[tuple[str, ...]],
     vocab: frozenset[str],
 ) -> tuple[list[Mapping[str, Any]], int]:
-    """The `CLAIM_SLOTS` claims of highest rank, skipping one whose subject forms a span run with an earlier
-    chosen subject (in either order); returns them and the number skipped."""
+    """The `CLAIM_SLOTS` claims of highest rank, skipping one whose subject forms a span run with the subjects
+    chosen before it, in any order of them all (at most 3! orderings); returns them and the number skipped."""
     chosen: list[Mapping[str, Any]] = []
     tokens: list[list[str]] = []
     skipped = 0
@@ -253,7 +273,8 @@ def _claims(
         if len(chosen) == CLAIM_SLOTS:
             break
         mine = _unmasked(str(claim.get("subject") or ""), exempt, vocab)
-        if any(_holds_run(a + b, book) for other in tokens for a, b in ((other, mine), (mine, other))):
+        orders = permutations([*tokens, mine]) if tokens else ()
+        if any(_holds_run([t for seq in order for t in seq], book) for order in orders):
             skipped += 1
             continue
         chosen.append(claim)

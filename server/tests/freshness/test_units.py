@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from .conftest import bounds, fixture, need
@@ -608,6 +608,15 @@ def test_worst_case_fits_the_run_cap() -> None:
     assert with_scan_restart > params.RUN_CAP_USD
 
 
+def test_the_live_crosscheck_needs_a_compared_row() -> None:
+    """FR-FRESH-14: no settle row with both amounts is no pass; a row missing an amount is not compared."""
+    crosscheck = need("reader.freshness.live").crosscheck
+    assert crosscheck([]) == (0, False)
+    assert crosscheck([(None, "0.01", 1), ("0.01", None, 1)]) == (0, False)
+    assert crosscheck([("0.010000", "0.010000", 1), (None, "0.5", 0)]) == (1, True)
+    assert crosscheck([("0.010000", "0.010000", 1), ("0.010000", "0.500000", 1)]) == (2, False)
+
+
 # ---- INV-FRESH-1: what can reach a query -----------------------------------------------------------------
 
 CANARY_WORDS = [f"canary{chr(97 + i)}{chr(97 + j)}" for i in range(6) for j in range(6)]
@@ -644,6 +653,28 @@ def holds_run(text: str, sentence: list[str], exempt: set[str]) -> bool:
 
 
 @settings(max_examples=200, deadline=None)
+# Code review round 3: a U+02BC joiner in one subject and a sentence that holds the next one's words.
+@example(
+    picks=[0, 4],
+    subject_len=4,
+    joiners=[" ", " ", MODIFIER_APOSTROPHE, " ", " ", " ", " "],
+    camel=False,
+    kinds=["version"] * 3,
+    lang="en",
+    inserted=None,
+    template_tail=True,
+)
+# The same with a digit joiner.
+@example(
+    picks=[0, 4],
+    subject_len=4,
+    joiners=[" ", " ", "1", " ", " ", " ", " "],
+    camel=False,
+    kinds=["version"] * 3,
+    lang="en",
+    inserted=None,
+    template_tail=True,
+)
 @given(
     picks=st.lists(st.integers(0, len(CANARY_WORDS) - 8), min_size=1, max_size=4),
     subject_len=st.integers(1, 8),

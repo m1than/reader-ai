@@ -5,7 +5,8 @@
 Tab, newline and the other whitespace controls become a space before the collapse, so words stay apart.
 `cut`: at most a bound, at a word boundary.
 
-`words`: runs of `[^\\W_]+` (Unicode letters and digits; `_` separates), each split further where the script
+`words`: over the NFKC form (so fullwidth and mathematical letters are their plain letters), runs of
+`[^\\W_]+` (Unicode letters and digits; `_` separates), each split further where the script
 changes (the first word of the character's Unicode name: LATIN, CYRILLIC, MODIFIER, ...) and between letters
 and digits; a character of a script written without spaces (CJK ideographs, kana, Thai, Lao, Myanmar, Khmer)
 is a word of its own; a dotted number such as `3.11` or `1.1.1` is one word. Case-folded.
@@ -98,7 +99,7 @@ def _class(ch: str) -> str:
 def words(value: str) -> list[str]:
     """Case-folded word tokens, the unit of the subject rule and the shingle check (INV-FRESH-1); see the
     module docstring. `[^\\W_]` is `str.isalnum()`."""
-    text = unicodedata.normalize("NFC", "".join(ch for ch in value if not has_surrogate(ch)))
+    text = unicodedata.normalize("NFKC", "".join(ch for ch in value if not has_surrogate(ch)))
     found: list[str] = []
     current: list[str] = []
     kind = ""
