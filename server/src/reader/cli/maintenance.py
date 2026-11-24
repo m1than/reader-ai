@@ -58,14 +58,18 @@ GATE_TIMEOUT_S: Final = 5.0
 
 def gate_status(url: str, roots: Sequence[str | Path]) -> int | None:
     """FR-CLI-22: the HTTP status of a cookie-less GET of the dashboard, the certificate and host name
-    verified against `roots` (Caddy's roots recorded by `reader trust`); None when there is no answer or the
-    certificate does not verify. Redirects are not followed (a 3xx counts as an open gate)."""
+    verified against `roots` (PEM root files: those `reader trust` recorded and Caddy's current one); a
+    root file that does not load is skipped. None when there is no answer or the certificate does not
+    verify. Redirects are not followed (a 3xx counts as an open gate)."""
     import urllib.error
     import urllib.request
 
     context = ssl.create_default_context()  # CERT_REQUIRED and check_hostname
     for root in roots:
-        context.load_verify_locations(cafile=str(root))
+        try:
+            context.load_verify_locations(cafile=str(root))
+        except (ssl.SSLError, OSError, ValueError):
+            continue  # a bad or unreadable root is no root
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args: Any, **kwargs: Any) -> None:
@@ -86,11 +90,48 @@ def _login_keychain(ctx: Ctx) -> str:
     return str(Path(home) / "Library" / "Keychains" / "login.keychain-db")
 
 
-def trust_root(ctx: Ctx, project: str) -> int:
+def caddy_root_pem(ctx: Ctx, project: str) -> bytes | None:
+    """Caddy's public root certificate from the running stack, or None (stack down, not PEM)."""
     exported = docker(ctx, "docker", "compose", "-p", project, "exec", "-T", "caddy", "cat", ROOT_CRT)
-    if exported is None or exported.code != 0:
+    if exported is None or exported.code != 0 or not exported.out.strip():
+        return None
+    return exported.out
+
+
+DOCTOR_ROOT: Final = "doctor-root.pem"
+
+
+def valid_root(pem: bytes) -> bool:
+    """A PEM certificate that loads as a verification root (a bad or truncated one is no root)."""
+    try:
+        text = pem.decode("ascii")
+        ssl.PEM_cert_to_DER_cert(text)
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=text)
+    except (UnicodeDecodeError, ValueError, ssl.SSLError):
+        return False
+    return True
+
+
+def doctor_roots(ctx: Ctx, project: str | None, recorded: Sequence[Path]) -> list[Path]:
+    """FR-CLI-22: the roots `reader trust` recorded plus Caddy's current public root, saved under run/ for
+    this check only (never added to a keychain)."""
+    roots = list(recorded)
+    pem = caddy_root_pem(ctx, project) if project else None
+    if pem is not None and valid_root(pem):
+        ensure_run_dir(ctx)
+        path = ctx.run_dir / DOCTOR_ROOT
+        path.unlink(missing_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as out:
+            out.write(pem)
+        roots.append(path)
+    return roots
+
+
+def trust_root(ctx: Ctx, project: str) -> int:
+    pem = caddy_root_pem(ctx, project)
+    if pem is None:
         raise CliError("trust_failed", "cannot read Caddy's root certificate (is the stack up?)")
-    pem = exported.out
     der: bytes | None
     try:
         der = ssl.PEM_cert_to_DER_cert(pem.decode("ascii"))
@@ -213,8 +254,11 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         check("trust", trusted == {p.stem for p in roots}, f"{len(roots)} recorded root(s)")
     # FR-CLI-22: with the profile chosen, the dashboard answers 401 without a cookie (the gate is in front).
     if config.observability.enabled:
-        status = gate_status(TRACES_URL, roots)
-        if status == 401:
+        gate_roots = doctor_roots(ctx, project.model.name if project is not None else None, roots)
+        status = gate_status(TRACES_URL, gate_roots) if gate_roots else None
+        if not gate_roots:
+            check("observability", False, "unreachable: no Caddy root (stack down?)")
+        elif status == 401:
             check("observability", True, "gate ok")
         elif status is None:
             check("observability", False, "unreachable")

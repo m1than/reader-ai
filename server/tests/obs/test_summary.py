@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -23,6 +24,7 @@ from .conftest import FIXTURES, load_yaml, require
 
 VEC = load_yaml(FIXTURES / "summary.yaml")
 NOW = datetime(2026, 11, 24, 12, 0, tzinfo=UTC)
+TRACING = SimpleNamespace(**VEC["tracing"])  # the api's settings for VEC-OBS-3's expected result
 
 
 def _kind(name: str) -> Any:
@@ -107,6 +109,11 @@ async def _seed(engine: Any) -> None:
 
     async with engine.begin() as conn:
         await conn.execute(text("SET LOCAL session_replication_role = replica"))
+        for t in seed["obs_tracing"]:
+            await run(
+                text("INSERT INTO obs_tracing (started_at, enabled) VALUES (:s, :e)"),
+                {"s": t["started_at"], "e": t["enabled"]},
+            )
         for r in seed["compile_runs"]:
             await run(
                 text(
@@ -220,8 +227,8 @@ async def test_summary_on_vec_obs_3(pg: Any) -> None:
         await migrate(engine)
         await _seed(engine)
         async with engine.connect() as conn:
-            got = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW)
-            other = await summary.summary(conn, uuid.UUID(VEC["other_owner"]), days=7, now=NOW)
+            got = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW, tracing=TRACING)
+            other = await summary.summary(conn, uuid.UUID(VEC["other_owner"]), days=7, now=NOW, tracing=TRACING)
     finally:
         await engine.dispose()
     expected = _strip(VEC["expected"])
@@ -301,3 +308,105 @@ async def test_the_limits_are_applied(pg: Any, monkeypatch: pytest.MonkeyPatch) 
 def test_p95_is_nearest_rank(values: list[int], p50: int, p95: int) -> None:
     summary = require("reader.obs.summary")
     assert (summary.nearest_rank(values, 50), summary.nearest_rank(values, 95)) == (p50, p95)
+
+
+def _at(hours: float) -> datetime:
+    return NOW + timedelta(hours=hours)
+
+
+@pytest.mark.parametrize(
+    ("moment", "created", "periods", "enabled", "traced"),
+    [
+        (_at(-1), None, [(_at(-48), True)], True, True),
+        (_at(-1), None, [], True, False),  # before tracing ever started: the live check's skeleton links
+        (_at(-50), None, [(_at(-48), True)], True, False),  # finished before the first traced worker start
+        (_at(-1), None, [(_at(-48), True), (_at(-2), False)], True, False),  # tracing was off then
+        (_at(-1), None, [(_at(-48), False), (_at(-2), True)], True, True),
+        (_at(-2), None, [(_at(-2), True)], True, True),  # a start at the same instant counts
+        (_at(-1), None, [(_at(-48), True)], False, False),  # tracing off in the api now
+        (_at(-24 * 31), None, [(_at(-24 * 40), True)], True, False),  # older than retention_days (30)
+        (None, _at(-1), [(_at(-48), True)], True, True),  # not finished: its creation counts
+        (_at(-24 * 30), None, [(_at(-24 * 40), True)], True, True),  # exactly at the retention cutoff: counts
+        (_at(-24 * 30 - 0.001), None, [(_at(-24 * 40), True)], True, False),  # just before it: deleted
+        (None, None, [(_at(-48), True)], True, False),  # no moment at all
+        (_at(-1), None, [(_at(-2), True), (_at(-48), False)], True, True),  # periods in any order: latest wins
+    ],
+)
+def test_trace_gate(
+    moment: datetime | None,
+    created: datetime | None,
+    periods: list[tuple[datetime, bool]],
+    enabled: bool,
+    traced: bool,
+) -> None:
+    summary = require("reader.obs.summary")
+    gate = summary.TraceGate(enabled, tuple(periods), NOW - timedelta(days=30))
+    assert gate.traced(SimpleNamespace(finished_at=moment, created_at=created)) is traced
+
+
+@pytest.mark.anyio
+async def test_no_trace_ids_before_tracing_started(pg: Any) -> None:
+    """Live check 2026-11-24: jobs that ran before tracing existed get no trace link (FR-OBS-10)."""
+    from sqlalchemy import text
+
+    from jobs.conftest import target
+    from reader.db import make_engine, migrate
+
+    summary = require("reader.obs.summary")
+    engine = make_engine(target(pg))
+    try:
+        await migrate(engine)
+        await _seed(engine)
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM obs_tracing"))
+            # Tracing started after every seeded job finished (they finished by 11:31).
+            await conn.execute(
+                text("INSERT INTO obs_tracing (started_at, enabled) VALUES (:s, true)"), {"s": _at(-0.25)}
+            )
+        async with engine.connect() as conn:
+            got = await summary.summary(conn, uuid.UUID(VEC["owner"]), days=7, now=NOW, tracing=TRACING)
+            off = await summary.summary(
+                conn, uuid.UUID(VEC["owner"]), days=7, now=NOW, tracing=SimpleNamespace(enabled=False, retention_days=30)
+            )
+    finally:
+        await engine.dispose()
+    for body in (got, off):
+        text_ = json.dumps(body)
+        assert '"trace_id": null' in text_
+        assert all(not g["trace_ids"] for g in body["failures"]["jobs"] + body["failures"]["tutor"])
+        assert all(s["trace_id"] is None for r in body["compile_runs"] for s in r["steps"])
+        assert all(s["trace_id"] is None for s in body["tutor"]["slowest"])
+        assert all(r["trace_id"] is None for r in body["ingest"]["rows"])
+    assert [r["run_id"] for r in got["compile_runs"]] == ["10000000-0000-4000-8000-000000000001"]  # rows stay
+
+
+@pytest.mark.anyio
+async def test_the_worker_start_records_whether_tracing_is_on(pg: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    from sqlalchemy import text
+
+    from jobs.conftest import target
+    from reader.db import make_engine, migrate
+    from reader.obs import setup
+
+    jobs = require("reader.obs.jobs")
+    engine = make_engine(target(pg))
+    enqueued: list[Any] = []
+
+    class Queue:
+        def __init__(self) -> None:
+            self.engine = engine
+
+        async def enqueue(self, kind: str, args: Any, schedule_in: int = 0) -> None:
+            enqueued.append((kind, args))
+
+    try:
+        await migrate(engine)
+        for enabled in (True, False):
+            monkeypatch.setattr(setup, "current_settings", lambda e=enabled: setup.Settings(e, 30))
+            await jobs.on_worker_start(Queue(), now=NOW)
+        async with engine.connect() as conn:
+            rows = (await conn.execute(text("SELECT enabled FROM obs_tracing ORDER BY started_at"))).scalars().all()
+    finally:
+        await engine.dispose()
+    assert rows == [True, False]
+    assert enqueued == [("obs.retention", {"day": "2026-11-24"})] * 2

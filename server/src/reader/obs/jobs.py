@@ -98,14 +98,58 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
     from reader.obs import setup as obs_setup
 
     settings = obs_setup.current_settings()
+    now = datetime.now(UTC)
     async with httpx.AsyncClient(trust_env=False) as client:
         await retain(
             args.day, jobs=running(), enabled=settings.enabled, retention_days=settings.retention_days,
-            client=client, now=datetime.now(UTC),
+            client=client, now=now,
         )
+    if conn is not None:
+        await prune_starts(conn, now - timedelta(days=settings.retention_days))
+
+
+# FR-OBS-10: worker starts older than retention decide nothing any more, except the latest of them, which
+# still decides the rows between the cutoff and the next start.
+PRUNE_SQL: Final = (
+    "DELETE FROM obs_tracing WHERE started_at < :c"
+    " AND started_at < (SELECT max(started_at) FROM obs_tracing WHERE started_at < :c)"
+)
+
+
+async def prune_starts(conn: Any, cutoff: datetime) -> None:
+    from sqlalchemy import text
+
+    await conn.execute(text(PRUNE_SQL), {"c": cutoff})
+
+
+RECORD_START_SQL: Final = "INSERT INTO obs_tracing (started_at, enabled) VALUES (clock_timestamp(), :enabled)"
+RECORD_TRIES: Final = 3
+
+
+async def record_start(engine: Any, enabled: bool) -> bool:
+    """FR-OBS-10: one `obs_tracing` row per worker start, tried 3 times, 1 s apart. If every try fails, the
+    previous start's row still decides this start's jobs: a link may then be missing, or, when tracing was
+    turned off and that row says on, point to a trace that does not exist (logged, declared in FR-OBS-10)."""
+    from sqlalchemy import text
+
+    for attempt in range(1, RECORD_TRIES + 1):
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(RECORD_START_SQL), {"enabled": enabled})
+            return True
+        except Exception:
+            if attempt < RECORD_TRIES:
+                await asyncio.sleep(ENQUEUE_PAUSE_S)
+    logging.getLogger("reader.obs").warning("obs tracing start not recorded")
+    return False
 
 
 async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
+    from reader.obs import setup as obs_setup
+
+    engine = getattr(jobs, "engine", None)
+    if engine is not None:
+        await record_start(engine, obs_setup.current_settings().enabled)
     today = (now or datetime.now(UTC)).date().isoformat()
     await jobs.enqueue(KIND, {"day": today})
 
