@@ -229,6 +229,24 @@ async def preview(ctx: Ctx) -> Response:
 SHA256: Final = re.compile(r"[0-9a-f]{64}")
 
 
+async def _material_live_under_positions(conn: AsyncConnection, owner: uuid.UUID, sha256: str) -> None:
+    """FR-PLAN-20: before any write, the owner's position lock "RCPO" (after the plan-course lock: SRV-LESSON
+    INV-LESSON-23's order), then the material row FOR SHARE. A material delete holds RCPO from before its
+    check to its commit and updates that row, so it either committed first (deleted: 404 here) or waits
+    until this confirm has committed and then sees the new course (SRV-INGEST FR-INGEST-31)."""
+    from sqlalchemy import text
+
+    from reader.lessons.store import lock_positions
+
+    await lock_positions(conn, owner)
+    live = await conn.execute(
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NULL FOR SHARE"),
+        {"o": owner, "s": sha256},
+    )
+    if live.first() is None:
+        raise _Refused(404, "not_found")
+
+
 async def confirm(ctx: Ctx) -> Response:
     t0 = time.perf_counter()
     owner = ctx.signed_in.id
@@ -262,6 +280,7 @@ async def confirm(ctx: Ctx) -> Response:
                 result: planner.Plan = computed["plan"]
                 if not result.summary["fits"]:
                     raise _Refused(422, "does_not_fit")
+                await _material_live_under_positions(conn, owner, req.material.sha256)
                 titled = {x["id"]: x["title"] for x in computed["lessons"]}
                 plan = courses.Plan(
                     req.course,

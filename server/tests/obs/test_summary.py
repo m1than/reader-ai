@@ -319,6 +319,49 @@ async def test_lessons_truncated_at_the_row_limit(pg: Any, monkeypatch: pytest.M
 
 
 @pytest.mark.anyio
+async def test_tombstoned_lessons_and_courses_show_as_deleted_lessons(pg: Any) -> None:
+    """FR-OBS-17: a soft-deleted lesson, then every lesson of a soft-deleted course, is a `deleted` row with no
+    title; its spend stays, so the rows' total is unchanged."""
+    from sqlalchemy import text
+
+    from jobs.conftest import target
+    from reader.db import make_engine, migrate
+
+    summary = require("reader.obs.summary")
+    owner, two = uuid.UUID(VEC["owner"]), "20000000-0000-4000-8000-000000000002"
+    course = "50000000-0000-4000-8000-000000000001"
+    engine = make_engine(target(pg))
+
+    async def lessons() -> dict[str, Any]:
+        async with engine.connect() as conn:
+            got = await summary.summary(conn, owner, days=7, now=NOW, tracing=TRACING)
+        return {r["lesson_id"]: r for r in got["lessons"]["rows"]}
+
+    async def execute(sql: str) -> None:
+        async with engine.begin() as conn:
+            await conn.execute(text(sql))
+
+    try:
+        await migrate(engine)
+        await _seed(engine)
+        live = await lessons()
+        total = round(sum(r["total_usd"] for r in live.values()), 6)
+        await execute(f"UPDATE lessons SET deleted_at = now() WHERE id = '{two}'")  # noqa: S608
+        one_gone = await lessons()
+        await execute(f"UPDATE courses SET deleted_at = now(), position = NULL WHERE id = '{course}'")  # noqa: S608
+        course_gone = await lessons()
+    finally:
+        await engine.dispose()
+    blank = {"title": None, "course_id": None, "course_title": None, "deleted": True}
+    assert {k: one_gone[two][k] for k in blank} == blank
+    of_course = [lid for lid, r in live.items() if r["course_id"] == course]
+    assert all(not one_gone[lid]["deleted"] for lid in of_course if lid != two)  # only that lesson
+    assert of_course and all({k: course_gone[lid][k] for k in blank} == blank for lid in of_course)
+    for rows in (one_gone, course_gone):
+        assert round(sum(r["total_usd"] for r in rows.values()), 6) == total
+
+
+@pytest.mark.anyio
 async def test_truncated_when_the_published_read_hits_its_limit(pg: Any) -> None:
     from jobs.conftest import target
     from reader.db import make_engine, migrate

@@ -316,6 +316,7 @@ LESSON_SPEND_SQL: Final = (
 LESSON_TITLES_SQL: Final = (
     "SELECT l.id, l.title, c.id AS course_id, c.title AS course_title FROM lessons l"
     " JOIN courses c ON c.id = l.course_id WHERE l.owner_id = :o AND l.id = ANY(:ids)"
+    " AND l.deleted_at IS NULL AND c.deleted_at IS NULL"  # a tombstoned lesson or course shows as deleted
 )
 # SRV-PIPELINE's DbSpanReader's rows per lesson; owner-scoped at every table; the database returns numbers
 LESSON_CHARS_SQL: Final = (

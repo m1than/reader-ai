@@ -661,7 +661,11 @@ requirements:
       No text column but the two titles is returned. Spend on a lesson id with no `lessons` row of the caller (the
       lesson was deleted) is kept as a row with `title`, `course_id` and `course_title` null and `deleted` true
       (every other row has `deleted` false), so the rows' totals equal the ledger's; the page shows it as "deleted
-      lesson", and it joins no course total (code review round 1). The page sorts the rows by any column
+      lesson", and it joins no course total (code review round 1). A soft-deleted lesson (SRV-LESSON FR-LESSON-20:
+      `lessons.deleted_at` set) or a lesson of a soft-deleted course (`courses.deleted_at` set) counts as deleted the
+      same way: its title is never returned, the page shows "deleted lesson", its spend stays in the totals
+      (management code review, 2026-11-24; [db] a test tombstones one lesson, then its course, and expects those
+      rows deleted with the same total). The page sorts the rows by any column
       (client-side; default total_usd descending). VEC-OBS-3 gains a lesson whose run has a failed paid attempt (a settle row on an
       attempt whose job ended failed) and an open reserve, so `compile_usd` counts both, a voided reserve (counts 0),
       an open reserve and a settle row created before the window (both excluded: the query filters on
