@@ -451,6 +451,9 @@ review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 think
 
 # ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-4; status: draft; round 1: no tutor finding). Held under
 # `proposed_manage` until a deep-reviewer round approves it; ids FR-TUTOR-20..21 (15..19 left free).
+# Paired note: WEB-UI FR-UI-30 (interface language) moves the Ask panel's interface copy (FR-TUTOR-11) into
+# `web/src/tutor/messages.ts` ({en, ru}; the current English is the `en` value) when it is built; answers keep the
+# language the model wrote them in.
 # Why redact instead of delete: a tutor question's id is the `run_id` of its ledger rows (FR-TUTOR-9; agent_spend is
 # append-only and has no foreign key), and a question makes its lesson started (SRV-LESSON FR-LESSON-15). Clearing
 # keeps the row and its spend, and removes the text. This partly settles the "retention of tutor history" defer

@@ -1509,8 +1509,15 @@ tasks:
         re-reads and guarded UPDATEs, open-run definition and lock order with create_run, rename refusal and the
         full-cost recompile stated; no-op before version; ADR-0036 amends ADR-0031 §1 and ADR-0032 §6, file `off`
         wins, restore and processes, values not hashes; Enable gated on new ADR-0037) and the non-blocking items, all
-        applied in revision 1 (2026-11-24). Round 2 next.",
-      next: "deep-reviewer round 2 (auth, jobs and secrets items are complex areas: full rounds); then promote with
+        applied in revision 1 (2026-11-24). Round 2 on 3112546: changes — 14 of 15 round-1 blockers closed; 5 small
+        blocking (SRV-FRESH FR-FRESH-20 and material_busy on a running report; restore keeps an archived course
+        unpositioned; FR-CONFIG-26 narrows on the resolved sign-up value, ignores stale overrides, names the
+        task_budgets and obs-summary readers, a source-scan oracle; cancel's post-call re-read FOR UPDATE; FR-AUTH-43's
+        401 oracle) and the non-blocking items (nearest visible predecessor, Reset to plan order later, PUT in the
+        methods note, create_course, an owner position lock, Undo to the old position, NFR-MANAGE-1 as a delta
+        hypothesis, the interface language moved to WEB-UI FR-UI-30 with paired notes per area, the material_imported
+        query, GET /api/compiles/{run_id} among the tombstone reads), all applied in revision 2.",
+      next: "deep-reviewer round 3 (auth, jobs and secrets items are complex areas: full rounds); then promote with
         Red. P1: FR-MANAGE-1..8 and -10 — course rename/describe/dates/archive/delete+restore, lesson
         rename/skip/delete/done/revert/download, compile cancel and history, material rename/delete+cascade, tutor
         history clear, /settings (appearance with language, instance view, own passkeys and sessions, people, Data

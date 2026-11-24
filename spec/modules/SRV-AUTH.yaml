@@ -1070,9 +1070,9 @@ proposed_manage:
         the same handle (stated; the old passkey on the person's device names a user that no longer exists and signs
         in to nothing, as owner note 7 says for a rejected sign-up). [db] each refusal; a user with one tutor
         question or one bookmark cannot be deleted; a user with an open register ceremony (options issued, verify not
-        yet sent) is deleted and the later verify finds no challenge and answers 400 `register_failed` with no credential
-        created; the
-        late-violation path through a fault-injected insert; the handle reused by a new sign-up.
+        yet sent) is deleted, and the later `POST /api/auth/register/verify` with that user's old session cookie
+        answers 401 `unauthenticated` (its session rows are gone, FR-AUTH-10), after which no `webauthn_credentials`
+        row and no `users` row with that id exist; the late-violation path through a fault-injected insert; the handle reused by a new sign-up.
     - id: FR-AUTH-44
       text: >-
         **Own sessions.** `GET /api/auth/sessions` (`session`) → the caller's unrevoked, unexpired sessions `{sessions:

@@ -154,3 +154,8 @@ defers:
   - "Add as source (multi-source courses, SRV-FRESH defers)."
   - "An `Outdated` marker on lesson cells whose cited pages are flagged (WEB-NOTEBOOK change, SRV-FRESH defers)."
   - "Mounting in WEB-IMPORT's source list and the course page (paired changes for V/onboarding and V/plan)."
+
+# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
+# interface copy into `web/src/fresh/messages.ts` ({en, ru}; the current English is the `en` value) when it is built;
+# a deleted material's card is not shown (SRV-FRESH FR-FRESH-20 answers 404). Nothing here changes until those are
+# promoted.

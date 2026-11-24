@@ -487,3 +487,8 @@ vectors:
 # Owner notes:
 # - In the slice, edits to lab code and notes are lost when the page reloads; persistence arrives with stage 4b.
 # - Reset kernel clears every open lesson's Python state at once (the slice's reset is per user, SRV-KERNEL).
+
+# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
+# interface copy into `web/src/notebook/messages.ts` ({en, ru}; the current English is the `en` value) when it is
+# built; WEB-MANAGE FR-MANAGE-4 and -9 add lesson menu items, the bookmark toggle and the notes tab. Nothing here
+# changes until those are promoted.

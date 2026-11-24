@@ -453,7 +453,8 @@ owner_notes:
 # 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
 # renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose
 # `order_source` is `manual` (owner, 2026-11-24: manual lesson order survives a re-plan), plan order otherwise.
-# `ensure_course` places a new course first (SRV-LESSON FR-LESSON-20 `place_first`).
+# A new course goes first: SRV-LESSON's `create_course` shifts the owner's positioned courses, then inserts at 1
+# (SRV-LESSON FR-LESSON-20), so the course import needs no change of its own beyond calling it.
 proposed_manage:
   requirements:
     - id: FR-PIPELINE-20
@@ -462,15 +463,18 @@ proposed_manage:
         AND cancelled_at IS NULL`: derived `running`, `stalled` or `stage_failed`) is one statement on its own
         connection, `UPDATE compile_runs SET cancelled_at = now(), finished_at = now() WHERE id = :run AND owner_id
         = :o AND finished_at IS NULL AND cancelled_at IS NULL RETURNING id` (new nullable column `cancelled_at`;
-        migration `pipeline_0004`). It takes no advisory lock: the step handler holds its job transaction for minutes
-        (SRV-EVENTS owner note), and the run row is written by a step only in `_finish`, `_refused` and the
-        stage-error record, all at the step's end; so cancel waits at most for a step that is already committing.
-        No row returned → the run is re-read: already `cancelled` → 200 with the same body (idempotent); finished →
-        409 `not_running`. **The step handler** (`pipeline.stage` and `pipeline.verify`, steps.py) re-reads
-        `SELECT cancelled_at FROM compile_runs WHERE id = :run` (READ COMMITTED, so a committed cancel is seen):
-        (1) before it reserves budget, calls a model or runs the lab kernel — set → return without effect; (2) after
-        the model call or the lab run returns — set → skip `write_revision`, the `compile_steps` row and the enqueue
-        of the next step, and return; the model call has already settled or voided its reservation in the ledger
+        migration `pipeline_0004`). It takes no advisory lock (the step handler holds its job transaction for
+        minutes, SRV-EVENTS owner note); it waits only on the run row's lock, which a step holds from its re-read (2)
+        below to its commit. No row returned → the run is re-read: already `cancelled` → 200 with the same body
+        (idempotent); finished → 409 `not_running`. **The step handler** (`pipeline.stage` and `pipeline.verify`,
+        steps.py), in its job transaction: (1) before it reserves budget, calls a model or runs the lab kernel, reads
+        `SELECT cancelled_at FROM compile_runs WHERE id = :run` (READ COMMITTED, so a committed cancel is seen) — set
+        → return without effect; (2) after the model call or the lab run returns, reads `SELECT cancelled_at FROM
+        compile_runs WHERE id = :run FOR UPDATE`, which locks the run row until the step commits — set → skip
+        `write_revision`, the `compile_steps` row and the enqueue of the next step, and return. Because of that lock
+        a cancel either commits before (2), and the step writes nothing, or waits until the step has committed its
+        revision and its enqueue, and the next step's (1) then sees it; there is no window in which a step writes
+        after a committed cancel. The model call has already settled or voided its reservation in the ledger
         (SRV-AGENT FR-AGENT-9 runs on its own committed connection), so the spend stays recorded. `_finish` and
         `_refused` add `AND cancelled_at IS NULL` to their UPDATE and do nothing when it matches no row. `derive`
         checks `cancelled_at` first: set → state `cancelled`, no `ensure`, no requeue. A dead key of a cancelled
@@ -478,7 +482,8 @@ proposed_manage:
         [db] cancel between steps (no further reservation row); cancel during a stubbed model call (that call
         settles, no revision, no compile_steps row, nothing enqueued); cancel during a stubbed lab run (no stamped
         revision, no `_finish`); cancel, then SRV-LESSON revert, then the late step returns: the reverted revision
-        stays current; cancel twice; cancel a finished run; resume a cancelled run; the per-key idempotency of
+        stays current; a cancel sent while a step holds the row lock from (2) waits, then commits, and the next step
+        does nothing; cancel twice; cancel a finished run; resume a cancelled run; the per-key idempotency of
         SRV-EVENTS FR-EVENTS-5 unchanged.
     - id: FR-PIPELINE-21
       text: >-
@@ -496,6 +501,7 @@ proposed_manage:
         course maps to a deleted course answers 409 `{"error": "course_deleted", "course_id": <id>}` and writes
         nothing (restore the course first; SRV-PLAN FR-PLAN-20 does the same for a study plan). A run of a lesson whose
         material is deleted cannot start either: no course that is not deleted refers to a deleted material
-        (SRV-INGEST FR-INGEST-32), and as a second guard source.py's `material_imported` is false for a deleted
-        material, so an import refuses it with the existing `no_material` (courses.py). [db] each refusal; the manifest import onto a deleted
+        (SRV-INGEST FR-INGEST-32), and as a second guard source.py's `material_imported` query becomes `SELECT 1 FROM
+        materials WHERE owner_id = :o AND sha256 = :m AND deleted_at IS NULL` (today without the last condition), so
+        it is false for a deleted material, so an import refuses it with the existing `no_material` (courses.py). [db] each refusal; the manifest import onto a deleted
         course.

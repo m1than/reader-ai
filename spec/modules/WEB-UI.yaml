@@ -687,3 +687,33 @@ vectors:
 #   The slice uses the spike's adjusted Calm draft as is.
 # - The library tarball in web/vendor/ (about 354 KB) is built from the owner's tag v0.1.0 locally; nothing is pushed to
 #   the library.
+
+# ---- Proposed amendment (2026-11-24, V/manage, paired with WEB-MANAGE; status: draft). Held under `proposed_manage`
+# until a deep-reviewer round approves it; id FR-UI-30 (19..29 left free). Moved here from WEB-MANAGE's FR-MANAGE-10
+# at review round 2: the interface language is the shell's concern; WEB-MANAGE keeps only the Language control in
+# Settings → Appearance. Owner, 2026-11-24: Russian and English, the browser's language by default, a switcher in
+# Settings, P1. Each area spec gets a paired note (WEB-NOTEBOOK, WEB-RENDER, WEB-IMPORT, WEB-PLAN, WEB-ACCOUNTS,
+# WEB-FRESH, SRV-TUTOR's panel, WEB-MANAGE); the observability page (FR-UI-18) follows after V/obs-analytics-impl
+# merges. WEB-MANAGE's other paired WEB-UI changes (routes, the manage slot, the Settings menu item, theme.js
+# attributes, FR-UI-1 entries) are listed in WEB-MANAGE's header and are written with its Green.
+proposed_manage:
+  requirements:
+    - id: FR-UI-30
+      text: >-
+        **Interface language.** Every interface string of the SPA comes from message catalogues declared as data:
+        each area owns a file beside its code, `web/src/<area>/messages.ts`, exporting `{en, ru}` with the same keys
+        (a unit test per area checks key parity), so each spec still owns its own copy and a copy change pairs with
+        that spec and its tests (H2). The runtime is this spec's `web/src/ui/i18n.ts`: `t(key, values)` with Russian
+        plurals (one / few / many / other) through `Intl.PluralRules`, and `Intl` date and number formats in the
+        chosen locale. The locale is localStorage `reader-ai.locale` (`auto`, `en` or `ru`; WEB-MANAGE FR-MANAGE-10's
+        control), applied before first paint by theme.js (FR-UI-16) as `lang` on `html`; `auto` (the default, also
+        for a missing or unknown value) picks `ru` when the first entry of `navigator.languages` has the primary
+        subtag `ru`, else `en`. Switching re-renders without a reload and moves no focus. Lesson content keeps the
+        language of the material (FR-UI-10's lang rule on the lesson container). Server error codes are never shown,
+        so no server text needs translating; SRV-AUTH's static pages stay English until stage 4. The Russian
+        catalogues load lazily with their locale, so the initial chunk carries only the runtime and English (WEB-MANAGE
+        NFR-MANAGE-1). Tests keep matching English: jsdom reports `en-US`, and each spec's existing copy is its `en`
+        value. [unit] key parity per area; the browser rule for `ru-RU`, `ru`, `en-US`, `uk` and an empty list; a
+        missing Russian key falls back to English at run time and fails the parity test; Russian plurals for 1, 2, 5,
+        11, 21; [browser] /, a lesson and /settings in both languages at 390 px with no overflow (Russian strings are
+        longer), and the first paint already in the stored language.

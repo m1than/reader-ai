@@ -1387,7 +1387,8 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 # the material is hidden. Re-running an import stays unscheduled (span-id mapping rule; WEB-MANAGE D6).
 # Scope: only **imported** materials — those with a `materials` row — can be renamed or deleted. A reader.yaml
 # material that was never imported has no row and is listed as today, without these actions; this keeps
-# `page_count NOT NULL` and SRV-PIPELINE's `material_imported` (a row with an ingest) unchanged.
+# `page_count NOT NULL` unchanged. SRV-PIPELINE's `material_imported` (source.py, today `SELECT 1 FROM materials
+# WHERE owner_id = :o AND sha256 = :m`) gains `AND deleted_at IS NULL` (SRV-PIPELINE FR-PIPELINE-22).
 # What changes in approved text: `materials` adds `title text null CHECK (1..200 chars)`, `deleted_at timestamptz
 # null`, `version int NOT NULL DEFAULT 1`, and SRV-LESSON's `courses.deleted_by_material` records a cascade;
 # FR-INGEST-23's display title becomes `title ?? filename without .pdf ?? id`; GET /api/materials omits deleted
@@ -1412,14 +1413,17 @@ proposed_manage:
         lessons, uploads_open}`. `DELETE /api/materials/{material_id}` with `{confirm, cascade?: false}` on an
         imported material: `confirm` is compared as SRV-LESSON FR-LESSON-25 compares it (trimmed, NFC on both sides,
         the first 40 characters of the display title or all of it), else 400 `confirm_mismatch`; an open upload or a
-        running import or embed key for it → 409 `material_busy`; when courses that are not deleted use it and
+        running import or embed key for it, or a `running` freshness report of it (SRV-FRESH FR-FRESH-20) → 409
+        `material_busy`; when courses that are not deleted use it and
         `cascade` is not `true` → 409 `{"error": "material_in_use", "courses": [...]}`; with `cascade: true` each such
         course is soft-deleted through SRV-LESSON FR-LESSON-25's function with `deleted_by_material` = this material
         (its locks and its `compile_running` refusal apply, and any refusal aborts the whole request), in the same
         transaction. Then `deleted_at` = now. A second DELETE returns 200 with the same body. `POST
         /api/materials/{material_id}/restore` clears `deleted_at` and, in the same transaction, restores every course
         whose `deleted_by_material` is this material (clearing that field; these courses have a material, so the
-        title rule for courses without material cannot refuse them); the response lists `restored_courses`.
+        title rule for courses without material cannot refuse them), each by SRV-LESSON FR-LESSON-25's restore rule:
+        a course that was archived before the cascade returns to the archived list (no position), any other goes
+        first (`place_first`); the response lists `restored_courses`.
         Restore orders: a course deleted by the cascade cannot be restored on its own while the material is deleted
         (SRV-LESSON FR-LESSON-25: 409 `material_deleted`); a course deleted on its own before the material is not
         restored by the material's restore (its `deleted_by_material` is null) and is restored afterwards from its
@@ -1428,7 +1432,9 @@ proposed_manage:
         tutor** need no new branch: FR-INGEST-32 keeps every course that is not deleted away from a deleted material,
         so no compile run or tutor question can reach one (SRV-PIPELINE FR-PIPELINE-22 adds `material_imported` as
         a second guard; SRV-TUTOR's search excludes the chunks through FR-SEARCH-20). [db] in use with and without
-        cascade; cascade then material restore (its courses come back); a course deleted first, then the material,
+        cascade; cascade then material restore (its courses come back); an archived course cascaded and restored
+        returns archived with a null position (the position CHECK holds); a material busy with a running freshness
+        report; a course deleted first, then the material,
         then the material restored (that course stays deleted until its own restore); a cascade-deleted course's own
         restore refused while the material is deleted; search excludes and then includes its chunks; the inbox file
         and artifact directory unchanged.

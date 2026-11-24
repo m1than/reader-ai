@@ -579,3 +579,25 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   `url_unsafe` in URLs and `bibliography_invalid` in the owner's entry (FR-FRESH-1/-7/-8); the web job writes
   `dropped` only with its final status (FR-FRESH-12); FR-FRESH-14's cross-check needs a compared row and names
   what it compares; the [agent] test adds the deny scenario and runs its image by id."
+
+# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE; paired with SRV-INGEST FR-INGEST-31; status: draft).
+# Held under `proposed_manage` until a deep-reviewer round approves it; id FR-FRESH-20 (15..19 left free).
+# What changes in approved text: the four routes and the two job kinds read the material through one helper
+# `live_material(conn, owner_id, material_id)` that returns nothing for a deleted material (`materials.deleted_at
+# IS NOT NULL`, SRV-INGEST). Reports are kept (never deleted) and come back with the material's restore.
+proposed_manage:
+  requirements:
+    - id: FR-FRESH-20
+      text: >-
+        **Deleted materials.** `GET /api/materials/{id}/freshness`, `GET /api/materials/{id}/freshness/{report_id}`,
+        `POST /api/materials/{id}/freshness` and `PUT /api/materials/{id}/bibliography` answer 404 `not_found` for a
+        deleted material, before reading the body's estimate or writing any row. A `freshness.scan` or
+        `freshness.web` job re-reads the material at its start and again immediately before each model call (the
+        scan call and each search call); a material deleted meanwhile ends the job without a model call: the report
+        is finished `failed` with code `material_deleted`, any reservation of this job that is not settled is voided
+        (SRV-AGENT FR-AGENT-9), and no next job is enqueued. While a report is `running`, SRV-INGEST FR-INGEST-31
+        refuses the delete with 409 `material_busy`, so this path covers only a delete that wins the race with the
+        report's start. A restore makes the material's reports readable again unchanged. [db] each route on a
+        deleted material: 404 with zero rows written; a scan job whose material is deleted after enqueue and before
+        its model call: no agent call recorded, the report `failed` / `material_deleted`, no web job; the delete
+        refused while a report is running; delete → restore → the old reports listed again.

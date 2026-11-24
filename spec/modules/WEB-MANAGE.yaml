@@ -3,13 +3,13 @@
 # settings (owner, 2026-11-24, in Russian: "no edit buttons, no customization, no deletion"; task V.manage).
 #
 # Status: draft (2026-11-24, V/manage from V/slice-integration 9140885, merged up to 9bb014a with freshness).
-# Deep-review round 1 (840af4b): changes; revision 1 applies every blocking and non-blocking finding. Not approved:
-# round 2 next. Auth items (people, passkeys, sessions) are a complex area (AGENTS.md): full rounds until approve.
+# Deep-review round 1 (840af4b): changes; revision 1 (3112546) applied every finding. Round 2 (3112546): changes,
+# 5 small blocking items and the non-blocking ones; revision 2 applies them. Not approved: round 3 next. Auth items (people, passkeys, sessions) are a complex area (AGENTS.md): full rounds until approve.
 # The server routes live in their owning specs under a `proposed_manage` key (trace-check reads only `requirements`,
 # `invariants` and `vectors`; those specs stay approved): SRV-LESSON FR-LESSON-20..31 and INV-LESSON-20..23,
 # SRV-PIPELINE FR-PIPELINE-20..22, SRV-PLAN FR-PLAN-20..21, SRV-TUTOR FR-TUTOR-20..21, SRV-INGEST FR-INGEST-30..32,
 # SRV-SEARCH FR-SEARCH-20, SRV-AUTH FR-AUTH-40..48 and INV-AUTH-20..21, SRV-CONFIG FR-CONFIG-25..26, SRV-EVENTS
-# FR-EVENTS-30..31. Ids start above every id used on the integration line (SRV-FRESH, WEB-FRESH and FR-AGENT-15..17
+# FR-EVENTS-30..31, SRV-FRESH FR-FRESH-20; WEB-UI FR-UI-30 (interface language). Ids start above every id used on the integration line (SRV-FRESH, WEB-FRESH and FR-AGENT-15..17
 # included) and on V/obs-analytics and V/obs-analytics-impl (checked 2026-11-24 after merging 9bb014a). ADRs:
 # ADR-0036 (settings overlay) and ADR-0037 (re-enable), both `proposed`; 0033..0035 are V/obs-analytics's.
 #
@@ -64,8 +64,8 @@
 #     displayed lesson number as the visible position, and the compile status shown only while `latest_sha256`
 #     equals the run's `final_sha256` (FR-MANAGE-4's revert rule); FR-UI-11 the account menu gains "Settings" above
 #     "Sign out" (UserMenu.tsx; no NAV_ITEMS change, so the nav that V/obs-analytics-impl edits is untouched);
-#     FR-UI-16 theme.js also applies text size, reading width and `lang` before first paint; the i18n runtime of
-#     FR-MANAGE-10 (`web/src/ui/i18n.ts`); the test server gains the stubs of VEC-MANAGE-1; the Playwright config
+#     FR-UI-16 theme.js also applies text size, reading width and `lang` before first paint; the interface language
+#     is WEB-UI's own proposed FR-UI-30 (runtime `web/src/ui/i18n.ts`, catalogues per area); the test server gains the stubs of VEC-MANAGE-1; the Playwright config
 #     matches e2e/web/manage/**.
 #   - WEB-NOTEBOOK: the lesson header's "More lesson actions" menu gains this spec's lesson items (FR-MANAGE-4), each
 #     cell's toolbar gains the bookmark toggle (FR-MANAGE-9) and the notes panel mounts beside the tutor (FR-MANAGE-9).
@@ -78,13 +78,10 @@
 #   - WEB-FRESH: a material's freshness card is not shown for a deleted material (the material leaves the list).
 #     SRV-FRESH: its routes answer 404 for a deleted material and its scans skip it (paired with SRV-INGEST
 #     FR-INGEST-31).
-#   - Interface language (FR-MANAGE-10): each web spec keeps owning its own copy, in its own catalogue file beside its
-#     code (`web/src/<area>/messages.ts` exporting `{en, ru}`), so a copy change still pairs with its own spec and its
-#     own tests (H2); the shared runtime is WEB-UI's. Areas: WEB-UI (app, ui), WEB-NOTEBOOK (notebook), WEB-RENDER
-#     (render), WEB-IMPORT and WEB-PLAN (import), WEB-ACCOUNTS (accounts), SRV-TUTOR's panel (tutor), WEB-FRESH
-#     (fresh), this spec (manage). The observability page's strings move after V/obs-analytics-impl merges. jsdom's
-#     `navigator.language` is `en-US`, so existing tests that match English text stay valid; each spec's text keeps
-#     its English copy as the `en` value.
+#   - Interface language: WEB-UI FR-UI-30 (proposed there at review round 2), with a paired note in each area spec
+#     (WEB-NOTEBOOK, WEB-RENDER, WEB-IMPORT, WEB-PLAN, WEB-ACCOUNTS, WEB-FRESH, SRV-TUTOR's panel). Each spec keeps
+#     owning its own copy in `web/src/<area>/messages.ts`; this spec owns only the Language control (FR-MANAGE-10)
+#     and its own catalogue. The observability page's strings move after V/obs-analytics-impl merges.
 #   - SRV-AUTH FR-AUTH-14: the `next` allow-list gains the constant "/settings" (FR-AUTH-47).
 #   - SRV-OBS FR-OBS-17 (V/obs-analytics): a deleted lesson's cost row is labelled "(deleted lesson)" with its id.
 #   - OPS-DOD: one operation per new route group (manage.course, manage.lesson, manage.material, manage.people,
@@ -101,10 +98,12 @@
 #   D5. Manual lesson order is kept across a re-plan: a re-plan changes weeks and dates only (SRV-PLAN FR-PLAN-21).
 #   D6. Re-running an import stays unscheduled (SRV-INGEST defers it: old span ids must map to the same text).
 #   D7. Interface in Russian and English, P1: the browser's language by default, a switcher in Settings
-#       (FR-MANAGE-10).
+#       (WEB-UI FR-UI-30 and this spec's control, FR-MANAGE-10).
 #
-# ---- Priority. P1: FR-MANAGE-1..8 and -10; FR-MANAGE-11 once ADR-0036 is accepted; Enable (FR-MANAGE-7) once
-# ADR-0037 is accepted. P2: FR-MANAGE-9 (notes and bookmarks) and the Move up / Move down items of FR-MANAGE-3/-4.
+# ---- Priority. P1: FR-MANAGE-1..8 and -10 with WEB-UI FR-UI-30; FR-MANAGE-11 once ADR-0036 is accepted; Enable
+# (FR-MANAGE-7) once ADR-0037 is accepted. P2: FR-MANAGE-9 (notes and bookmarks) and the Move up / Move down items
+# of FR-MANAGE-3/-4. Later (not in this spec): "Reset to plan order" for a manually ordered course (SRV-PLAN
+# FR-PLAN-21).
 #
 # Test levels: [unit] Vitest in jsdom; [story] Storybook Light and Dark (FR-UI-8); [browser] Playwright against the
 # WEB-UI test server with stubbed routes at 1280, 1024 and 390 px in both schemes; [live] a `manage` step in
@@ -167,8 +166,9 @@ requirements:
       `compile_running` "Wait for the compile to finish, or cancel it, then rename." The edit routes that carry
       `version` send the version from the last read. (c) `ConfirmDialog` (FR-MANAGE-2). (d) `UndoToast`: the library
       toast with the text "<Object> deleted." or "<Object> archived." and an Undo button, shown for 10 s (paused while
-      hovered or focused; WCAG 2.2.1); Undo calls the restore route (for a note, it posts the same body again, since
-      notes are deleted for good, SRV-LESSON FR-LESSON-31) and announces "<Object> restored." in a `role="status"`
+      hovered or focused; WCAG 2.2.1); Undo calls the restore or unarchive route with `{at: "previous"}`, so a course
+      returns to the position it had (SRV-LESSON FR-LESSON-24/-25); for a note it posts the same body again, since
+      notes are deleted for good (SRV-LESSON FR-LESSON-31); it announces "<Object> restored." in a `role="status"`
       region. Every mutation goes through the app's api client (same origin, JSON body, FR-UI-4), invalidates the
       queries it changes, and maps responses the same way: 401 `unauthenticated` → the shell's sign-in redirect; 401
       `reauth_required` → "Sign in again to do this (required every 10 minutes for account actions)." with a link to
@@ -206,7 +206,8 @@ requirements:
       (FR-LESSON-24; refused with FR-MANAGE-2's `compile_running` message while a compile runs; Undo toast) and
       Delete… (FR-MANAGE-2 with typed confirmation; FR-LESSON-25; Undo toast). An archived course leaves the main list
       and the sidebar and appears under a closed "Archived (n)" disclosure at the end of `/` with Unarchive and
-      Delete…; unarchived and restored courses return at the top of the list (FR-LESSON-20 `place_first`); a deleted
+      Delete…; a course brought back by the Undo toast returns to its old position, one unarchived or restored later
+      (from the Archived list or Settings → Data) returns at the top (FR-LESSON-24/-25 `at`); a deleted
       course appears only in Settings → Data (FR-MANAGE-8). A course without a study plan (manifest import) has no
       "Change dates and pace" item. Restore answers 409 `material_deleted` with "Restore its source first
       (Settings → Data)." [unit] the menu per course state, each request's method, path and body, Move up hidden on
@@ -296,7 +297,8 @@ requirements:
       FR-LESSON-21 `state=deleted`, SRV-INGEST `GET /api/materials?state=deleted`) and, under each course that is not
       deleted, its deleted lessons (FR-LESSON-21's `GET /api/courses/{id}/lessons?state=deleted`), each with the
       deletion time and Restore (FR-LESSON-25, FR-LESSON-28, FR-INGEST-31). A restored course returns at the top of
-      the list with its lessons in their old state; a restored lesson returns at its old place; a restored source
+      the list with its lessons in their old state, or to the Archived list if it was archived before it was
+      deleted (SRV-LESSON FR-LESSON-25); a restored lesson returns at its old place; a restored source
       brings back the courses its own delete took (and says how many); a course whose source is deleted shows "Restore
       its source first." instead of Restore. "Activity": SRV-EVENTS FR-EVENTS-31's audit rows, newest first, 200 per
       page with "Older", each as "<when> · <who> · <action> · <object>" (read-only). "Export": "Download each lesson as
@@ -315,23 +317,14 @@ requirements:
       [unit] toggle, add, edit, delete and undo requests, both caps; [browser] the panel at the three widths.
   - id: FR-MANAGE-10
     text: >-
-      **Interface language** (P1; owner decision D7). Every interface string of the SPA — the shell, header, nav,
-      menus, the lesson list and page chrome, the tutor panel's chrome, /import, /signups, /observability, the
-      freshness card and this layer — comes from message catalogues declared as data: each area owns a file beside its
-      code, `web/src/<area>/messages.ts`, exporting `{en, ru}` with the same keys (one unit test per area checks key
-      parity), so each spec still owns its own copy and a copy change pairs with that spec (H2). The runtime is shared
-      WEB-UI code, `web/src/ui/i18n.ts` (paired): `t(key, values)` with Russian plurals (one / few / many / other)
-      through `Intl.PluralRules`, and `Intl` date and number formats in the chosen locale. Settings → Appearance has
-      "Language" with "Follow the browser" (default), "English" and "Русский", stored in localStorage
-      `reader-ai.locale` and applied before first paint by theme.js as `lang` on `html`; "Follow the browser" picks
-      `ru` when the first entry of `navigator.languages` has the primary subtag `ru`, else `en`. Switching re-renders
-      without a reload and moves no focus. Lesson content keeps the language of the material (FR-UI-10's lang rule
-      on the lesson container). Server error codes are never shown, so no server text needs translating. Tests keep
-      matching English: jsdom reports `en-US`, and each existing spec's copy is its `en` value. [unit] key parity per
-      area; the browser rule for `ru-RU`, `ru`, `en-US`, `uk` and an empty list; a missing Russian key falls back to
-      English at run time and fails the parity test; Russian plurals for 1, 2, 5, 11, 21; [browser] the switch on /,
-      a lesson and /settings in both languages at 390 px with no overflow (Russian strings are longer), and the first
-      paint already in the stored language.
+      **Language control** (P1; owner decision D7). The interface language itself — catalogues per area, the shared
+      runtime, the browser default and first-paint application — is WEB-UI FR-UI-30 (moved there at review round 2).
+      This spec owns the control: Settings → Appearance → "Language", a library radio group with "Follow the
+      browser" (default), "English" and "Русский", writing localStorage `reader-ai.locale` as `auto`, `en` or `ru` and
+      switching through FR-UI-30's runtime without a reload; focus stays on the chosen option. This layer's own
+      strings live in `web/src/manage/messages.ts` (`{en, ru}`, FR-UI-30's rule). [unit] the control writes each value
+      and the page re-renders in that language; the key parity of web/src/manage/messages.ts; [browser] the switch on
+      /settings in both languages at 390 px with no overflow.
   - id: FR-MANAGE-11
     text: >-
       **Edit instance settings** (owner; built once ADR-0036 is accepted, owner decision D2). In Settings → Instance
@@ -372,12 +365,13 @@ invariants:
 nfr:
   - id: NFR-MANAGE-1
     metric: >-
-      initial JavaScript chunk (gzip bytes) in WEB-UI NFR-UI-1's build after this layer and FR-MANAGE-10's runtime
-      land; baseline 117,829 B measured 2026-11-24 on this branch after merging 9bb014a (web/src/app/build.test.ts,
-      level-9 gzip over 2 initial chunks), growth allowed 1,024 B for the slot stubs and the i18n runtime with the
-      English catalogue of the initial routes (the Russian catalogue loads lazily with its locale); NFR-UI-1's own
-      cap of 121,153 B still holds (3,324 B of headroom at the baseline)
-    threshold: 118853
+      bytes (gzip, level 9) that this layer and WEB-UI FR-UI-30's runtime add to the initial JavaScript chunks of
+      WEB-UI NFR-UI-1's build, measured as a delta against the same build without them (web/src/app/build.test.ts
+      reports both); the slot stubs, the i18n runtime and the English catalogue of the initial routes count, the lazy
+      chunks and the Russian catalogues do not. The 1,024 B bound is a hypothesis, re-measured at Green and recorded
+      with the measured value. For scale: the initial chunks measured 117,829 B on 2026-11-24 after merging 9bb014a,
+      against NFR-UI-1's cap of 121,153 B, which still applies
+    threshold: 1024
     verified_by: test
 
 vectors:

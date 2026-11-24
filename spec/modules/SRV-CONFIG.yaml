@@ -371,21 +371,43 @@ proposed_manage:
         version int)`; `key` is one of the declared allow-list `OVERRIDABLE` = `sharing.signup`,
         `observability.retention_days`, `budgets.monthly_usd`, `budgets.warn_at`, `tasks.<name>.budget_usd_per_lesson`
         for a task present in reader.yaml (any other key → 400 `not_overridable`). One function
-        `effective_settings(conn, config) -> Settings` merges override ?? file ?? default and validates the merged
-        result with the same Pydantic models as the file (a value the file's schema refuses → 400 `value_invalid`
-        with the field name, never stored), with one narrowing rule: when the file's `sharing.signup` is `off` (or
-        `false`), the effective switch is `off` whatever the override says, and setting the override to `open` then
-        answers 409 `file_narrower` (ADR-0036). Every reader of an allow-listed key goes through it, and only
-        processes with a database connection read these keys (api and worker; ADR-0036): SRV-AUTH reads the sign-up
-        switch per request instead of at start (paired FR-AUTH-23 change), SRV-OBS's retention job and worker start
-        read it per run (paired FR-OBS-11 change), SRV-AGENT's budget checks per call in the worker (paired). Routes
-        (owner only, else 403 `owner_only`; `recent_session`): `POST /api/settings/{key}` with `{value, version}`
-        (409 `stale` on a version mismatch; 0 for a new key) sets the override; `DELETE /api/settings/{key}` with
-        `{}` removes it (idempotent). Each applied change writes the audit actions `settings.set` or `settings.reset`
-        (SRV-EVENTS FR-EVENTS-30) with the key and the old and new values (small numbers and enums, not secrets).
-        `reader up` and `reader status` print `override <key>: <value> (reader.yaml: <value>)` for each override, and
-        `override <key>: ignored (not in reader.yaml)` for an override whose task is gone (paired OPS-CLI change); a
-        `reader restore` brings overrides back with the database. Models, users, providers, secrets, materials and
-        kernels are never overridable. [unit] the merge, narrowing and validation table; [db] set, stale, reset,
-        not_overridable, value_invalid, file_narrower; sign-up turned off by an override answers 404 on the sign-up
+        `effective_settings(conn, config) -> Settings` resolves each key as override ?? file ?? default and validates
+        the result with the same Pydantic models as the file (a value the file's schema refuses → 400
+        `value_invalid` with the field name, never stored).
+        - **Narrowing on the resolved sign-up value.** The file's sign-up value is first resolved by FR-AUTH-23's rule,
+          defaults included (absent on a `localhost` RP ID → open; absent on any other host → off; `false` or `"off"`
+          → off). When that resolved file value is off, the effective switch is off whatever the override says;
+          setting the override to `open` then answers 409 `file_narrower`, and an `open` override stored earlier (the
+          file changed since) is ignored.
+        - **Stale overrides.** An override that no longer validates against the current file (its task was removed
+          from `tasks`, or a schema bound changed) or that narrowing ignores is not applied: `effective_settings`
+          skips it, logs `config override_ignored <key> <reason>` once per process start and per key, and the
+          settings view shows it as ignored; `reader up` and `reader status` print `override <key>: ignored
+          (<reason>)` (reasons `not_in_file`, `invalid`, `narrowed`; paired OPS-CLI change). It stays in the table
+          until reset, so the owner sees and removes it.
+        - **Budgets** take an override in either direction, raising included; that is accepted (ADR-0036) behind
+          `recent_session` and an audit row.
+        - **Readers.** Every reader of the five key families goes through `effective_settings`, and only processes
+          with a database connection read them (api and worker; ADR-0036). Paired changes: SRV-AUTH reads the sign-up
+          switch per request instead of at start (FR-AUTH-23); SRV-OBS's retention job and worker start read
+          retention per run (FR-OBS-11), and the obs summary (`reader.obs.summary`, which today reports the api's
+          start-time `retention_days`, FR-OBS-1) reads it per request; SRV-PIPELINE's `create_run` (runs.py), which
+          snapshots `tasks.<name>.budget_usd_per_lesson` into `compile_runs.task_budgets`, reads the effective
+          value at run creation (a running run keeps its snapshot); SRV-AGENT's monthly budget check per call in the
+          worker.
+        Routes (owner only, else 403 `owner_only`; `recent_session`): `POST /api/settings/{key}` with `{value,
+        version}` (409 `stale` on a version mismatch; 0 for a new key) sets the override; `DELETE
+        /api/settings/{key}` with `{}` removes it (idempotent). Each applied change writes the audit actions
+        `settings.set` or `settings.reset` (SRV-EVENTS FR-EVENTS-30) with the key and the old and new values (small
+        numbers and enums, not secrets). `reader up` and `reader status` print `override <key>: <value>
+        (reader.yaml: <value>)` for each applied override, and the ignored lines above; a `reader restore` brings
+        overrides back with the database. Models, users, providers, secrets, materials and kernels are never
+        overridable. [unit] the merge, narrowing and validation table, with the rows: signup key absent on a
+        non-localhost host plus an `open` override → off (ignored, `narrowed`); absent on localhost plus an `off`
+        override → off; file `open` plus `off` → off; file `off` plus `open` → off; [unit] a source scan of
+        server/src/reader: no module other than `reader.config.effective` reads `sharing.signup`,
+        `observability.retention_days`, `budgets.monthly_usd`, `budgets.warn_at` or `budget_usd_per_lesson` from a
+        loaded config (attribute or key access outside that module fails the test); [db] set, stale, reset,
+        not_overridable, value_invalid, file_narrower; an override for a task then removed from reader.yaml is
+        ignored, logged once and listed as ignored; sign-up turned off by an override answers 404 on the sign-up
         routes on the next request without a restart; a learner gets 403 with nothing written.

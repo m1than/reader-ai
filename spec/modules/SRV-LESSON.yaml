@@ -377,14 +377,16 @@ owner_notes:
 #     (lesson_progress, lesson_notes, lesson_bookmarks) make a lesson started — a re-plan never drops a lesson that
 #     a reader marked, annotated or bookmarked. Stated, not changed.
 #   - The schema's provenance stage enum gains `revert` (FR-LESSON-30; paired WEB-NOTEBOOK/ADR-0004 schema note).
-#   - Methods: SRV-AUTH's `Route.method` is GET, POST or DELETE (FR-AUTH-10), so edits are POST to the object's
+#   - Methods: SRV-AUTH's `Route.method` is GET, POST, PUT or DELETE (FR-AUTH-10; SRV-FRESH added PUT); this
+#     amendment uses GET, POST and DELETE only: edits are POST to the object's
 #     path and deletes are DELETE with a JSON body (FR-AUTH-12 checks Origin and content type on both).
 #   - `route_errors` gains: stale, title_invalid, title_taken, description_invalid, confirm_mismatch, order_mismatch,
 #     compile_running, revision_current, note_invalid, cell_unknown, limit, material_deleted.
 #   - Reads that hide tombstones, named (INV-LESSON-22): SRV-LESSON `can_open` (access.py), FR-LESSON-7/-8/-9;
 #     SRV-PIPELINE runs.py `load_lesson` (used by `create_run`, `derive`'s `ensure` and the step handler),
-#     FR-PIPELINE-17's `GET /api/compiles` (omits runs of deleted lessons), `GET /api/lessons/{id}/compile`,
-#     `/compiles` and SRV-PLAN FR-PLAN-13's `/estimate` (404); SRV-TUTOR through `can_open`. The live checks' lesson
+#     FR-PIPELINE-17's `GET /api/compiles` (omits runs of deleted lessons), `GET /api/compiles/{run_id}` (404 for any
+#     run of a deleted lesson, finished or not), `GET /api/lessons/{id}/compile`, `/compiles` and SRV-PLAN
+#     FR-PLAN-13's `/estimate` (404); SRV-TUTOR through `can_open`. The live checks' lesson
 #     pickers (e2e/live/lib/web_live.py `pick`, plan_live.py) choose from `GET /api/lessons`, which already hides
 #     tombstones; the `manage` live step works on a scratch course of its own.
 #   - Paired, other tracks: SRV-OBS FR-OBS-17 (V/obs-analytics) labels the cost row of a deleted lesson "(deleted
@@ -392,7 +394,7 @@ owner_notes:
 #     courses in its scans and hides their reports; SRV-SEARCH FR-SEARCH-20 (deleted materials).
 proposed_manage:
   tables:
-    courses_add: "description text null CHECK (≤ 2000 chars), position int null CHECK (>= 1), archived_at timestamptz null, deleted_at timestamptz null, deleted_by_material text null (the material id whose cascade deleted it, SRV-INGEST FR-INGEST-31), version int NOT NULL DEFAULT 1, order_source text NOT NULL DEFAULT 'plan' CHECK (IN ('plan', 'manual')); CHECK ((archived_at IS NULL AND deleted_at IS NULL) = (position IS NOT NULL)); UNIQUE INDEX (owner_id, position) WHERE position IS NOT NULL (not deferrable, so moves use reorder_lessons' two-statement method); the partial unique title index adds AND deleted_at IS NULL"
+    courses_add: "description text null CHECK (≤ 2000 chars), position int null CHECK (>= 1), archived_at timestamptz null, deleted_at timestamptz null, deleted_by_material text null (the material id whose cascade deleted it, SRV-INGEST FR-INGEST-31), version int NOT NULL DEFAULT 1, order_source text NOT NULL DEFAULT 'plan' CHECK (IN ('plan', 'manual')); last_position int null (the position before the last archive or delete, for Undo); CHECK ((archived_at IS NULL AND deleted_at IS NULL) = (position IS NOT NULL)); UNIQUE INDEX (owner_id, position) WHERE position IS NOT NULL (not deferrable, so moves use reorder_lessons' two-statement method); the partial unique title index adds AND deleted_at IS NULL"
     lessons_add: "skipped_at timestamptz null, deleted_at timestamptz null, version int NOT NULL DEFAULT 1"
     lesson_progress: "{ owner_id: true } user_id uuid → users, lesson_id uuid, done_at timestamptz; PRIMARY KEY (user_id, lesson_id); FK (lesson_id, owner_id) → lessons (id, owner_id)"
     lesson_notes: "{ owner_id: true } id uuid pk, user_id uuid → users, lesson_id uuid, cell_id text null, body text CHECK (1..10000 chars), created_at, updated_at; FK (lesson_id, owner_id) → lessons (id, owner_id); at most 500 per (user_id, lesson_id)"
@@ -403,12 +405,17 @@ proposed_manage:
         **Migration and new courses.** One migration on the `lessons` branch adds `proposed_manage.tables`. Existing
         courses get `position` = their rank by `created_at` descending per owner (1 = newest, the list's order today),
         `version` 1; existing lessons `version` 1. A course created later (SRV-PIPELINE's course import, SRV-PLAN's
-        confirm) goes first: `store.place_first(conn, owner_id, course_id)` shifts every positioned course of the
-        owner by one and sets the new course to 1, in reorder_lessons' two statements (paired SRV-PIPELINE change in
-        `ensure_course`). Every new foreign key is ON DELETE RESTRICT, not deferrable (FR-LESSON-15's catalog check
-        covers them). `user_id` is the reader; `owner_id` is the course owner (INV-LESSON-7); they are equal until
-        SRV-SHARE. [db] the migration's order for three courses; a new course goes first; the CHECK refuses a
-        positioned archived course.
+        confirm) goes first: `store.create_course` (store.py) shifts every positioned course of the owner by one, then
+        inserts the new course at position 1, in reorder_lessons' two statements. `store.place_at(conn, owner_id,
+        course_id, p)` does the same for an existing course at position p (clamped to 1..n+1); `place_first` is
+        `place_at(…, 1)`. **Position lock:** every write of `courses.position` — create, place_at, the order route,
+        and the archive and delete that null a position — first takes one owner-level advisory lock
+        `pg_advisory_xact_lock(<namespace "RCPO">, hashtext(owner_id))`, after any course and lesson locks the same
+        request takes (INV-LESSON-23's order, extended), so two position writes of one owner never interleave. Every
+        new foreign key is ON DELETE RESTRICT, not deferrable (FR-LESSON-15's catalog check covers them). `user_id`
+        is the reader; `owner_id` is the course owner (INV-LESSON-7); they are equal until SRV-SHARE. [db] the
+        migration's order for three courses; a new course goes first; the CHECK refuses a positioned archived
+        course; a create and an order route of one owner run together 50 times and always leave positions 1..n.
     - id: FR-LESSON-21
       text: >-
         **Courses list.** `GET /api/courses?state=active|archived|deleted` (session; default `active`) lists the
@@ -445,11 +452,14 @@ proposed_manage:
     - id: FR-LESSON-24
       text: >-
         **Archive.** `POST /api/courses/{id}/archive` with `{}` takes the header's locks, refuses with 409
-        `compile_running` while any of its lessons has an open run, then sets `archived_at` and clears `position`;
-        `/unarchive` clears `archived_at` and places the course first (`place_first`). Repeating either returns 200
-        with the same body (idempotent). An archived course's lessons still open by link (FR-LESSON-8/-9) and its
-        tutor works; SRV-PIPELINE refuses to compile them (FR-PIPELINE-22). [db] archive with an open run refused;
-        archive → unarchive returns the course to position 1.
+        `compile_running` while any of its lessons has an open run, then sets `archived_at`, copies `position` into
+        `last_position` and clears `position`; `/unarchive` with `{at?: "previous" | "first"}` (default `"first"`)
+        clears `archived_at` and, unless the course is also deleted, places it with `place_at` at `last_position`
+        for `"previous"` (WEB-MANAGE's Undo toast sends it, so Undo puts the course back where it was) or at 1 for
+        `"first"`. Repeating either returns 200 with the same body (idempotent). An archived course's lessons still
+        open by link (FR-LESSON-8/-9) and its tutor works; SRV-PIPELINE refuses to compile them (FR-PIPELINE-22). [db]
+        archive with an open run refused; archive → unarchive `"first"` returns the course to position 1; archive →
+        unarchive `"previous"` returns it to its old position with the others shifted.
     - id: FR-LESSON-25
       text: >-
         **Delete and restore a course.** `GET /api/courses/{id}/impact` → `{lessons, revisions, tutor_questions,
@@ -458,16 +468,22 @@ proposed_manage:
         compared after trimming and NFC-normalising both sides with the first 40 characters of the stored title, or
         the whole title when it is shorter (else 400 `confirm_mismatch`; WEB-MANAGE asks for exactly that text);
         under the header's locks, a course with an open run → 409 `compile_running` (cancel it first,
-        FR-PIPELINE-20); otherwise `deleted_at` = now and `position` = null in one transaction, and the response is
-        the impact body plus `deleted_at`. A second DELETE of a deleted course returns 200 with the same body.
-        `POST /api/courses/{id}/restore` with `{}` clears `deleted_at` and `deleted_by_material` and places the course
-        first; 409 `material_deleted` while its material is deleted (restore the material, which restores this
+        FR-PIPELINE-20); otherwise `deleted_at` = now, `last_position` = `position` (when it had one) and `position` =
+        null in one transaction, and the response is the impact body plus `deleted_at`. A second DELETE of a deleted
+        course returns 200 with the same body. `POST /api/courses/{id}/restore` with `{at?: "previous" | "first"}`
+        (default `"first"`) clears `deleted_at` and `deleted_by_material`; then, **only when `archived_at IS NULL`**,
+        it places the course with `place_at` (`last_position` for `"previous"`, the Undo toast's choice; 1 for
+        `"first"`); otherwise the course returns to the archived list with no position, so the CHECK of
+        `proposed_manage.tables` holds (a course has a position exactly when it is neither archived nor deleted).
+        SRV-INGEST FR-INGEST-31's cascade restore applies the same rule with `"first"`. 409 `material_deleted` while its material is deleted (restore the material, which restores this
         course too if its cascade deleted it, SRV-INGEST FR-INGEST-31); 409 `title_taken` when a course without
         material that is not deleted took the title meanwhile; repeating it is a no-op. Nothing else is deleted or
         updated: lessons, revisions, stage records, compile runs, tutor questions, notes and spend rows stay
         (INV-LESSON-22). [db] the counts; delete → every read of its lessons is 404 → restore → readable again; the
         rows of every table unchanged across delete and restore; restore refused while the material is deleted; a
-        41-character title confirmed by its first 40; an NFD-typed Cyrillic title matches.
+        41-character title confirmed by its first 40; an NFD-typed Cyrillic title matches; archive → delete →
+        restore returns the course archived with a null position (no CHECK violation), then unarchive places it;
+        delete → restore `"previous"` returns it to its old position.
     - id: FR-LESSON-26
       text: >-
         **Rename a lesson.** `POST /api/lessons/{id}` with `{version, title}` (owner of the course): FR-LESSON-22's

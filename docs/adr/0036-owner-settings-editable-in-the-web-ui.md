@@ -66,10 +66,16 @@ provider contract and pricing row; a typo there costs credit). Users, providers,
 file-only.
 
 - **Precedence.** effective = override ?? file ?? default, validated by the same Pydantic model as the file.
-- **Narrowing only for the sign-up switch.** When the file says `signup: off` (or `false`), sign-up is off whatever
-  the override says; an override can turn sign-up off when the file leaves it open, never open it when the file
-  closes it. The file is the owner's hard boundary for who can create an account. The other keys take the override
-  in either direction.
+- **Narrowing only for the sign-up switch.** The file's value is resolved first by SRV-AUTH FR-AUTH-23's rule,
+  defaults included (an absent key means open only on `localhost`, off on any other host). When that resolved value
+  is off, sign-up is off whatever the override says; an override can turn sign-up off when the file leaves it open,
+  never open it when the file closes it. The file is the owner's hard boundary for who can create an account.
+- **Budgets in either direction.** The budget keys take an override that raises them as well as one that lowers
+  them. That is accepted: a raise needs a recent sign-in and leaves an audit row with the old and new values, and
+  `reader status` prints it beside the file value.
+- **Ignored overrides.** An override that no longer validates against the current file (its task removed, a bound
+  changed) or that the narrowing rule overrides is not applied; it is logged once per process start, shown as
+  ignored on the page and printed by `reader status` as `ignored (<reason>)` until the owner resets it.
 - **Changes.** Every change requires a recent sign-in (SRV-AUTH `recent_session`) and writes one audit row with the
   key, the old and the new value (the values are small numbers or enums, not secrets; a hash of them would be
   trivially reversible and only hide them from the owner). "Reset to reader.yaml" deletes the override.
@@ -83,7 +89,7 @@ file-only.
 - **Backup and restore.** Overrides live in Postgres, so `reader backup` keeps them and `reader restore` brings them
   back with the rest of the database (OPS-CLI FR-CLI-17/-18). After a restore, `reader status` lists them; a restored
   override whose key the current reader.yaml no longer has (a task removed from `tasks`) is ignored and listed as
-  `override <key>: ignored (not in reader.yaml)`.
+  `override <key>: ignored (not_in_file)`, like any ignored override above.
 
 Until the owner accepts this ADR, option A ships.
 

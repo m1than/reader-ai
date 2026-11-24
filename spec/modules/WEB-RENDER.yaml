@@ -194,3 +194,7 @@ vectors:
       ADR-0013 rendering matrix as the slice renders it (one case per output type, plus hostile markdown, LaTeX, HTML and
       SVG probes), written for this spec
     file: spec/fixtures/WEB-RENDER/outputs.yaml
+
+# ---- Paired note (2026-11-24, V/manage; draft, not reviewed): WEB-UI FR-UI-30 (interface language) moves this spec's
+# interface copy (labels such as "Copy code"; never rendered content) into `web/src/render/messages.ts` ({en, ru};
+# the current English is the `en` value) when it is built. Nothing here changes until it is promoted.
