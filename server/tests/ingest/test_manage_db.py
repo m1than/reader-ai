@@ -353,6 +353,75 @@ async def test_delete_confirm_rules(pg: Pg, tmp_path: Path) -> None:
         assert nfd.status_code == 200, nfd.text
 
 
+async def test_delete_confirm_target_is_cut_to_40_then_trimmed(pg: Pg, tmp_path: Path) -> None:
+    async with world(pg, tmp_path) as w:
+        await course_columns(w)
+        await imported(w)
+        await execute(w, "UPDATE materials SET title = :t", t="a" * 39 + " tail words")  # target: "a" * 39
+        async with client(w) as c:
+            refused = await delete(c, SYN, {"confirm": "a" * 39 + " t"})
+            assert (refused.status_code, refused.json()) == (400, {"error": "confirm_mismatch"})
+            assert (await material_state(w))[0] is None
+            deleted = await delete(c, SYN, {"confirm": "a" * 39})
+        assert deleted.status_code == 200, deleted.text
+
+
+NON_SLUG = {"Bashir": "c" * 64, "bashir_4th": "e" * 64}  # ids SRV-CONFIG FR-CONFIG-18 accepts
+
+
+async def test_non_slug_reader_yaml_ids_are_renamed_deleted_and_audited(pg: Pg, tmp_path: Path) -> None:
+    from reader.config import load_config
+
+    async with world(pg, tmp_path) as w:
+        await course_columns(w)
+        rows = "".join(
+            f'  - {{ id: {mid}, file: ./{mid}.pdf, sha256: "{sha}",'
+            " license: personal-use, language: ru }\n"
+            for mid, sha in NON_SLUG.items()
+        )
+        path = tmp_path / "non-slug.yaml"
+        path.write_text(
+            'version: 1\ninstance: { url: "https://localhost", data_dir: ./data }\n'
+            "users:\n  - { handle: ivan, role: owner }\n  - { handle: anna, role: learner }\n"
+            "materials:\n" + rows + "sharing: {}\n",
+            encoding="utf-8",
+        )
+        w.config = load_config(path)
+        for mid, sha in NON_SLUG.items():
+            await imported(w, config_id=mid, sha=sha)
+        async with client(w) as c:
+            for mid in NON_SLUG:
+                renamed = await c.post(f"/api/materials/{mid}", json={"version": 1, "title": f"{mid} book"})
+                assert renamed.status_code == 200, renamed.text
+                deleted = await delete(c, mid, {"confirm": f"{mid} book"})
+                assert deleted.status_code == 200, deleted.text
+        assert await audit(w) == [
+            ("material.rename", "Bashir", {"version": 2}),
+            ("material.delete", "Bashir", {"courses": 0}),
+            ("material.rename", "bashir_4th", {"version": 2}),
+            ("material.delete", "bashir_4th", {"courses": 0}),
+        ]
+
+
+async def test_a_refused_audit_row_answers_audit_refused_and_writes_nothing(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from reader.jobs import audit as audit_mod
+
+    async with world(pg, tmp_path) as w:
+        await course_columns(w)
+        await imported(w)
+        monkeypatch.setitem(audit_mod._ID_RULES, "material", lambda value: False)
+        with caplog.at_level(logging.ERROR, logger="reader.jobs.audit"):
+            async with client(w) as c:
+                renamed = await c.post(f"/api/materials/{SYN}", json={"version": 1, "title": "Secret title"})
+        assert (renamed.status_code, renamed.json()) == (500, {"error": "audit_refused"})
+        assert await material_state(w) == (None, None, 1)  # rolled back with the refused row
+        assert await audit(w) == []
+        logged = [r.getMessage() for r in caplog.records if r.name == "reader.jobs.audit"]
+        assert logged == ["audit_refused reason=object_id"]
+
+
 async def test_delete_in_use_without_cascade_writes_nothing(pg: Pg, tmp_path: Path) -> None:
     async with world(pg, tmp_path) as w:
         await course_columns(w)

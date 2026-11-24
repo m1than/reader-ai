@@ -328,6 +328,41 @@ async def test_impact_delete_and_restore(pg: Pg, tmp_path: Path) -> None:
     await w.engine.dispose()
 
 
+async def test_confirm_target_is_cut_to_40_then_trimmed(pg: Pg, tmp_path: Path) -> None:
+    w = await manage_world(pg, tmp_path)
+    title = "a" * 39 + " tail words"  # the 40th code point is a space: the target is "a" * 39
+    course, _ = await make_course(w, "ivan", title)
+    async with client(w) as c:
+        refused = await c.request("DELETE", f"/api/courses/{course}", json={"confirm": "a" * 39 + " t"})
+        assert (refused.status_code, refused.json()["error"]) == (400, "confirm_mismatch")
+        assert await scalar(w.engine, "SELECT deleted_at FROM courses WHERE id = :c", c=course) is None
+        deleted = await c.request("DELETE", f"/api/courses/{course}", json={"confirm": "a" * 39})
+        assert deleted.status_code == 200, deleted.text
+    await w.engine.dispose()
+
+
+async def test_a_refused_audit_row_answers_audit_refused_and_writes_nothing(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    from reader.jobs import audit
+
+    w = await manage_world(pg, tmp_path)
+    course, _ = await make_course(w, "ivan", "Kept title")
+    before = await snapshot(w.engine)
+    monkeypatch.setitem(audit._ID_RULES, "uuid", lambda value: False)
+    with caplog.at_level(logging.ERROR, logger="reader.jobs.audit"):
+        async with client(w) as c:
+            r = await c.post(f"/api/courses/{course}", json={"version": 1, "title": "Secret new title"})
+    assert (r.status_code, r.json()) == (500, {"error": "audit_refused"})
+    assert await snapshot(w.engine) == before  # the rename rolled back with its refused row
+    assert [x.getMessage() for x in caplog.records if x.name == "reader.jobs.audit"] == [
+        "audit_refused reason=object_id"
+    ]
+    await w.engine.dispose()
+
+
 async def test_restore_refusals(pg: Pg, tmp_path: Path) -> None:
     w = await manage_world(pg, tmp_path)
     course, _ = await make_course(w, "ivan", "Twin")

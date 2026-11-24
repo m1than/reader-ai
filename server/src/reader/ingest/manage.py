@@ -74,8 +74,10 @@ def clean_title(value: Any) -> str | None:
 
 
 def confirm_matches(confirm: Any, display: str) -> bool:
-    """Trimmed and NFC on both sides; the first 40 characters of the display title, or all of it."""
-    return isinstance(confirm, str) and _nfc(confirm) == _nfc(display)[:CONFIRM_CHARS]
+    """FR-INGEST-31: the target is the display title NFC-normalised, cut to 40 code points, then trimmed;
+    `confirm` is NFC-normalised and trimmed (SRV-LESSON FR-LESSON-25's rule, character for character)."""
+    target = unicodedata.normalize("NFC", display)[:CONFIRM_CHARS].strip()
+    return isinstance(confirm, str) and _nfc(confirm) == target
 
 
 def default_title(material_id: str, filename: str | None) -> str:
@@ -185,45 +187,70 @@ async def busy(conn: AsyncConnection, owner: uuid.UUID, row: Material) -> bool:
 # ---- locks (SRV-LESSON INV-LESSON-23's order over the whole set) ----
 
 
-async def _lock_once(conn: AsyncConnection, owner: uuid.UUID, course_ids: Sequence[uuid.UUID]) -> None:
-    from reader.pipeline.courses import lock_course
-    from reader.pipeline.runs import LOCK_NAMESPACE
+@dataclass(frozen=True)
+class Affected:
+    """What a material request may write: the plan courses and lessons of its courses."""
 
+    plan_courses: frozenset[str]
+    lessons: frozenset[uuid.UUID]
+
+
+async def affected(conn: AsyncConnection, owner: uuid.UUID, sha: str, material_id: str) -> Affected:
+    """The courses using the material or deleted by its cascade, read as their plan courses and lessons."""
+    using = await courses_using(conn, owner, sha)
+    cascaded = await courses_cascaded(conn, owner, material_id)
+    course_ids = sorted({uuid.UUID(c["course_id"]) for c in (*using, *cascaded)})
     plans = await conn.execute(
         text(
             "SELECT DISTINCT cp.plan_course_id FROM course_plans cp JOIN lessons l ON l.id = cp.lesson_id"
             " WHERE cp.owner_id = :o AND l.course_id = ANY(:c)"
         ),
-        {"o": owner, "c": list(course_ids)},
+        {"o": owner, "c": course_ids},
     )
-    for plan_course_id in sorted(str(r[0]) for r in plans):
-        await lock_course(conn, owner, plan_course_id)
     lessons = await conn.execute(
         text("SELECT id FROM lessons WHERE owner_id = :o AND course_id = ANY(:c)"),
-        {"o": owner, "c": list(course_ids)},
+        {"o": owner, "c": course_ids},
     )
-    for lesson_id in sorted(r[0] for r in lessons):
-        await _advisory(conn, LOCK_NAMESPACE, str(lesson_id))
+    return Affected(frozenset(str(r[0]) for r in plans), frozenset(r[0] for r in lessons))
+
+
+def lock_sequence(found: Affected) -> list[tuple[str, str]]:
+    """INV-LESSON-23's global order: ("plan", plan_course_id) ascending, then ("lesson", lesson id) ascending
+    (the position lock comes last, once, in `lock_affected`)."""
+    plans = [("plan", p) for p in sorted(found.plan_courses)]
+    return plans + [("lesson", str(lesson)) for lesson in sorted(found.lessons)]
 
 
 async def _advisory(conn: AsyncConnection, namespace: int, key: str) -> None:
     await conn.execute(text("SELECT pg_advisory_xact_lock(:ns, hashtext(:k))"), {"ns": namespace, "k": key})
 
 
+async def _take(conn: AsyncConnection, owner: uuid.UUID, kind: str, key: str) -> None:
+    from reader.pipeline.courses import lock_course
+    from reader.pipeline.runs import LOCK_NAMESPACE
+
+    if kind == "plan":
+        await lock_course(conn, owner, key)
+    else:
+        await _advisory(conn, LOCK_NAMESPACE, key)
+
+
 async def lock_affected(conn: AsyncConnection, owner: uuid.UUID, sha: str, material_id: str) -> None:
-    """Course locks, lesson locks, then the position lock, for every course this request may write: the
-    courses using the material and those its cascade deleted. A course that appears after locking is locked
-    too."""
-    locked: set[uuid.UUID] = set()
+    """FR-INGEST-31: course locks, lesson locks, then the position lock, over every course this request may
+    write. After each round the affected set is read again; when it changed, the whole new set is walked again
+    in the same global order (a held lock is granted again at once; nothing is released), so the acquisition
+    sequence never inverts. A set that still changes after `_LOCK_ROUNDS` walks refuses `material_busy`."""
+    held: Affected | None = None
     for _ in range(_LOCK_ROUNDS):
-        using = await courses_using(conn, owner, sha)
-        cascaded = await courses_cascaded(conn, owner, material_id)
-        found = {uuid.UUID(c["course_id"]) for c in (*using, *cascaded)}
-        new = sorted(found - locked)
-        if not new:
+        found = await affected(conn, owner, sha, material_id)
+        if found == held:
             break
-        await _lock_once(conn, owner, new)
-        locked |= found
+        for kind, key in lock_sequence(found):
+            await _take(conn, owner, kind, key)
+        held = found
+    else:
+        if await affected(conn, owner, sha, material_id) != held:
+            raise refused(409, "material_busy")
     await _advisory(conn, POSITION_LOCK_NAMESPACE, str(owner))
 
 
