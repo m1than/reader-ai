@@ -1,0 +1,33 @@
+🏃 View run compile 10000000 at: http://mlflow:5000/#/experiments/1/runs/e66068e10200490fb00bc605bee47ec4
+🧪 View experiment at: http://mlflow:5000/#/experiments/1
+🏃 View run compile 10000000 at: http://mlflow:5000/#/experiments/0/runs/f7d950df1b7e46f6ab7eff83d6cc8f61
+🧪 View experiment at: http://mlflow:5000/#/experiments/0
+🏃 View run import aa11aa11 at: http://mlflow:5000/#/experiments/0/runs/aeeb8136143e4715a745d879437b3080
+🧪 View experiment at: http://mlflow:5000/#/experiments/0
+
+✨ Evaluation completed.
+
+Metrics and evaluation results are logged to the MLflow run:
+  Run name: [94msearch bench BAAI/bge-m3[0m
+  Run ID: [94m93d37f9f509447279fd7017412808c9e[0m
+View the evaluation results at [93mhttp://mlflow:5000/#/experiments/0/evaluation-runs?selectedRunUuid=93d37f9f509447279fd7017412808c9e[0m
+
+
+✨ Evaluation completed.
+
+Metrics and evaluation results are logged to the MLflow run:
+  Run name: [94msearch bench deepvk/USER-bge-m3[0m
+  Run ID: [94m03e37d78519047ecb076aadaca3d06a2[0m
+View the evaluation results at [93mhttp://mlflow:5000/#/experiments/0/evaluation-runs?selectedRunUuid=03e37d78519047ecb076aadaca3d06a2[0m
+
+
+✨ Evaluation completed.
+
+Metrics and evaluation results are logged to the MLflow run:
+  Run name: [94msearch bench intfloat/multilingual-e5-small[0m
+  Run ID: [94md7f31dd5844241ccbdaa1119d6ef7c66[0m
+View the evaluation results at [93mhttp://mlflow:5000/#/experiments/0/evaluation-runs?selectedRunUuid=d7f31dd5844241ccbdaa1119d6ef7c66[0m
+
+🏃 View run tutor bench 2026-11-23 at: http://mlflow:5000/#/experiments/0/runs/f20a002c2da4489fb2fcaf06fe9e9899
+🧪 View experiment at: http://mlflow:5000/#/experiments/0
+done

@@ -988,6 +988,156 @@ analytics_paired_changes:
         course total row per course, sortable by every column (`aria-sort` on the active header; default total
         descending); a Storybook story with VEC-OBS-3's lessons. Each trace link has a Jaeger twin (FR-OBS-19)."
 
+# V.obs-mlflow-phase2 (draft, 2026-11-24). The owner: "use all advantages of MLflow to manage everything here as a
+# dashboard": experiment Runs, evaluation datasets and runs, agent versions, labeling, budgets and alerts.
+# Measured in spikes/obs-stack round 6 (zero credit; RESULT.md "Round 6"; results/20261124T142803-round6-phase2).
+# Not approved. OTel, privacy and the worker's MLflow writes are complex areas, so deep-reviewer design rounds come
+# first. The writes go beyond ADR-0035, so ADR-0036 (proposed) is the owner's decision; FR-OBS-20, -22, -23, -24
+# and FR-OBS-21 (b) stay blocked on it. FR-OBS-21 (a) is OTLP through the allow-list; FR-OBS-25 reads only.
+# VEC-OBS-5 (spec/fixtures/SRV-OBS/phase2.yaml) is drafted with the first design round. Test levels: FR-OBS-20
+# unit + db + image; FR-OBS-21 unit + image; FR-OBS-22 unit; FR-OBS-23 unit + db + image; FR-OBS-24 unit + db +
+# image; FR-OBS-25 unit + db.
+proposed_requirements:
+  - id: FR-OBS-20
+    text: >-
+      Experiment Runs for compile runs and imports (ADR-0036 Decision 1). When a compile run ends (finished, failed
+      or dead) or an import ends, the outbox enqueues `obs.runs` with args {kind: compile | ingest, id}. The job:
+      (a) Looks up the experiment `runs` by name and creates it if missing. It then searches that experiment for a
+          Run tagged `reader.run_id` (or `reader.ingest_id`) = id; if one exists, the job ends `succeeded` without a
+          request.
+      (b) Otherwise it creates a Run named `compile <run id first 8>` or `import <sha256 first 8>`, with:
+          - tags: `reader.kind`, the id tag, `reader.lesson.id` and `reader.course.id` (compile);
+          - params, VEC-OBS-5 `run_params`: lesson_id, course_id, version_key (FR-OBS-21), reader_version, one
+            `model.<stage>` per declared stage (compile); converter_version and material_sha256 (ingest);
+          - metrics, VEC-OBS-5 `run_metrics`: ledger cost by stage and in total (agent_spend settles plus open
+            reserves, as in FR-OBS-17), token sums, duration, claims total and supported, lab cells and cells
+            passed, pages, loops; for an ingest: pages, spans, chunks, pages per minute, import seconds;
+          - status FINISHED or FAILED, from the run's outcome.
+      (c) Links the run's traces: it searches experiment 0 for `tag.reader.run_id` (or `tag.reader.ingest_id`) =
+          id and calls `link-to-run` in batches of at most 100.
+      Every value is an id, an enum, a model id from pricing.yaml, a sha256 or a number. A failure is logged by
+      code and never changes the run's outcome. Spike round 7 must show that the Traces tab of a Run in the `runs`
+      experiment lists traces stored in experiment 0; otherwise the Runs go to experiment 0, where every Run with
+      linked traces is listed under Evaluation runs (measured in round 6).
+  - id: FR-OBS-21
+    text: >-
+      Agent versions. A version key is the sha256 of the canonical JSON of {prompt_set_sha256, stage_models,
+      pipeline_config_sha256}:
+      - prompt_set_sha256 is the sha256 over FR-OBS-15's registered templates, by name;
+      - stage_models maps each declared (task, stage) to its model;
+      - pipeline_config_sha256 is the sha256 of the pipeline's declared stage table and caps.
+      (a) OTLP: the worker computes the key once at start and passes its first 12 hex characters as the
+          validated root attribute `reader.version_key` (VEC-OBS-1, pattern `^[0-9a-f]{12}$`). AllowListExporter
+          derives `mlflow.traceTag.reader.version_key` from it (VEC-OBS-4 `trace_tags`), so traces filter and group
+          by version.
+      (b) ADR-0036 Decision 2: at worker start, beside `obs.prompts`, the worker creates one LoggedModel
+          `reader-agent` per new key (`logged-models/search` by the tag `reader.version_key` first), with the
+          three inputs as params and `reader.version_key` as a tag.
+      The Agent versions tab lists versions with their params. OTLP cannot set `mlflow.modelId` metadata (measured),
+      so the tab's own per-version trace list stays empty; comparing versions on cost, latency and assessments
+      uses the Traces tab filtered by `tag.reader.version_key`. /observability's summary gains `by_version` rows
+      (version, traces, cost, p50/p95 duration, assessment pass share) from the ledger and job tables.
+  - id: FR-OBS-22
+    text: >-
+      Evaluation datasets (ADR-0036 Decision 3). VEC-OBS-5 `bench_sets` pins each committed bench set by path and
+      file sha256, together with the records it may register. The committed sets are:
+      - `spikes/embeddings-local/questions-v2.yaml` without v03, plus t01 from
+        `spec/fixtures/SRV-TUTOR/bench-fixed.yaml`: 40 records;
+      - `spikes/embeddings-local/questions.yaml` (v1) without q04, q07, q08 and q13: 26 records.
+      A record is pinned only if its question shares no run of 5 or more consecutive normalised words with the
+      pilot's text layer (spikes/obs-stack/check_bench_quotes.py; round 6: v2 longest run 4, t01 1, v1 four
+      records at 5). A dataset record holds `inputs` {question_id, question, chapter} and `expectations`
+      {gold_pages}. The question text is the agent's own committed wording, the only non-numeric content in phase
+      2. The worker never reads the set files: shipped code must not read `spikes/`. The owner's bench upload
+      (FR-OBS-23) carries the set file, which the api accepts only if its sha256 is pinned, and it registers only
+      the pinned record ids.
+  - id: FR-OBS-23
+    text: >-
+      Evaluation runs. `POST /api/obs/bench` is owner-only (FR-OBS-10's checks), at most 256 KiB, and takes
+      {set: <file text>, result: <bench result JSON>}:
+      - the set's sha256 must be pinned in VEC-OBS-5;
+      - the result must match VEC-OBS-5 `bench_results`, one of two kinds: `search` (the per-question ranks and
+        top pages, model, chunk_chars, overlap, embed_s, chunks_per_s) or `tutor` (e2e/live's summary: states,
+        shares, latency, USD, per_chapter);
+      - otherwise the call answers 400 `bench_invalid`.
+      The api enqueues `obs.bench` with the blob's id. The job:
+      (a) creates or updates the pinned dataset, by name and the tag `source_sha256`;
+      (b) creates one Run in experiment 0 with the tag `reader.bench` = search | tutor, params (model, chunking,
+          set sha256, commit) and metrics: for search, hit@1/3/10, reciprocal rank and per-question rank as a
+          stepwise metric; for tutor, grounded_share, gold_cited_share, latency p50/p95, mean_usd and total_usd;
+      (c) logs the dataset as the Run's input.
+      Scores come from code over ids and page numbers: no model call, no judge, no `mlflow.genai.evaluate`
+      (round 6: evaluate writes a client-side trace per row with its inputs, outside the allow-list, and exhausted
+      the SQLite pool at default parallelism). Each upload is a new Run, so the Evaluation runs tab charts
+      regressions from the earliest run to the latest (round 6). `reader obs bench <set> <result>` (OPS-CLI) posts
+      the upload with the owner's session.
+  - id: FR-OBS-24
+    text: >-
+      Labeling and review (ADR-0036 Decision 4). Labeling sessions are Databricks-only in 3.18.0; the OSS Review
+      tab is used instead.
+      (a) At worker start the worker creates the label schemas of VEC-OBS-5 `labels` if missing: `owner.lesson_ok`
+          and `owner.answer_ok`, type feedback, pass/fail with the labels good and bad, no comment. It also
+          creates a custom review queue `lessons` in experiment 0 with those schemas.
+      (b) After FR-OBS-20 links a compile run, the job adds the run's revise-stage trace to the queue by id.
+      (c) From the app: `POST /api/obs/labels` {target: lesson | answer, id, ok: bool, reason?: enum} is owner-only.
+          The reason enum (VEC-OBS-5) is wrong_fact, unclear, off_topic, broken_lab, bad_citation or other. The api
+          resolves the target's newest trace (compile: the run's revise stage; answer: the question's
+          `tutor.answer` job) and enqueues FR-OBS-14's `obs.feedback` with source HUMAN, source id `owner`, and
+          metadata holding only {lesson_id | question_id, reason}.
+      Free text never enters a label. The owner can also label in MLflow's Review tab, where the UI writes the
+      assessment itself; a comment typed there is the owner's own text in the owner's own store (owner note).
+  - id: FR-OBS-25
+    text: >-
+      Budgets and alerts. MLflow 3.18.0 has budgets only as AI-gateway policies: they count gateway traffic only
+      (round 6: a GLOBAL USD policy kept `current_spend` 0.0 after priced OTLP traces), and an exceeded window
+      fires a webhook from MLflow, which has no egress. The gateway is not used. /observability is therefore the
+      alert surface: the summary gains `alerts`, a list of {code, value, limit} computed on each request:
+      - `daily_spend_high`: a user's spend today ≥ 80 % of the daily cap (FR-AGENT-12);
+      - `run_over_cap`: an open run's spend ≥ 80 % of its run cap;
+      - `dead_jobs`: dead jobs in the window > 0;
+      - `bench_regressed`: the newest bench Run's hit@10 or grounded_share is below the previous Run's by more than
+        0.05. This one is read from MLflow and is optional: it is omitted when MLflow is unreachable.
+      The page shows a banner per alert. A push notification waits for SRV-NOTIFY.
+
+# Per-tab plan for phase 2. Privacy: every listed value is an id, an enum, a number or pinned committed repository
+# data. "Writes" names the worker → MLflow requests (ADR-0035 or ADR-0036); "none" means OTLP or read-only.
+phase2_tabs:
+  - tab: Training runs and Evaluation runs (Runs)
+    shows: one Run per compile run and import, with params, metrics and a cumulative-cost chart; the Run's Traces tab lists its stage traces with assessments
+    source: agent_spend, the pipeline and ingest tables, linked traces
+    privacy: ids, model ids, sha256s, numbers
+    writes: experiments/get-by-name|create, runs/search, runs/create, log-batch, runs/update, traces/link-to-run (ADR-0036)
+  - tab: Datasets
+    shows: tutor-bench-v2 (40) and search-bench-v1 (26) with question ids, questions, chapters and gold pages
+    source: the owner's upload of a set whose sha256 is pinned (FR-OBS-22)
+    privacy: the agent's own committed questions, with no 5-word run shared with the book (measured); ids and page numbers
+    writes: datasets/create, datasets/search, datasets/{id}/records (ADR-0036)
+  - tab: Evaluation runs
+    shows: one Run per bench upload; the tab's chart shows hit@k, reciprocal rank, grounded and gold-cited shares, latency and cost over time
+    source: committed bench result files (FR-OBS-23)
+    privacy: ids, numbers, model names
+    writes: runs/create, log-batch, log-inputs (ADR-0036)
+  - tab: Agent versions
+    shows: one LoggedModel per version key, with its params (prompt-set sha256, the stage → model map, the pipeline config sha256); traces are compared by the tag reader.version_key
+    source: worker start (FR-OBS-21)
+    privacy: sha256s, model ids
+    writes: logged-models, logged-models/search, logged-models/{id}/params|tags (ADR-0036); the root tag goes through OTLP
+  - tab: Review
+    shows: the `lessons` queue with compile traces to label good or bad; app labels appear as HUMAN assessments on traces
+    source: FR-OBS-24
+    privacy: pass/fail values and reason enums; any comment the owner types in MLflow is the owner's own
+    writes: label-schemas/create, review-queues/create, review-queues/items/add (ADR-0036); assessments (ADR-0035, source HUMAN)
+  - tab: Traces, Sessions, Overview, Dashboard, Prompts, Issues
+    shows: as in phase 1, plus the tags reader.version_key and mlflow.sourceRun (from the link) as filters
+    source: OTLP, FR-OBS-14/-15
+    privacy: unchanged (phase 1)
+    writes: none new
+  - tab: AI Gateway budgets
+    shows: not used; budgets count gateway traffic only, and their alert is an outbound webhook
+    source: none
+    privacy: n/a
+    writes: none (FR-OBS-25 keeps alerts on /observability)
+
 owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."
   - "If 8443 shows 401, you are not signed in: open https://localhost, sign in with your passkey, and reload the dashboard. It does not redirect to the sign-in page itself."

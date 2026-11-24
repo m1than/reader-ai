@@ -1551,6 +1551,23 @@ tasks:
         id: 9 passed (Jaeger fill 32,400 full-key spans, 143 MiB of 256, last trace 0.3 s after the flush; marker
         session, ledger cost, 0-cost CLI spans, span metric = ledger). Stubbed browser suite: 446 passed. Merged
         V/slice-integration 199d2f1. No reader up, no live step, no credit. Next: code review, full rounds." }
+  - { id: V.obs-mlflow-phase2, stage: 2, kind: design, track: engineering, status: in_progress,
+      needs: [V.obs-analytics-impl], branch: V/obs-mlflow-phase2,
+      what: "SRV-OBS phase 2 design: MLflow experiment Runs, evaluation datasets and runs, agent versions, review and
+        labels, budgets and alerts (owner, 2026-11-24: use all of MLflow as the dashboard). Spec and spike only.",
+      note: "Spike round 6 (spikes/obs-stack/run-phase2.sh, zero credit, own project, stopped at exit;
+        results/20261124T142803-round6-phase2 with before/after screenshots in p2/). Measured: Runs + link-to-run
+        work (the Run's Traces tab lists linked traces with assessments) but every Run with linked traces shows
+        under Evaluation runs as Eval; datasets 40 + 30 records; evaluation runs chart metrics over time;
+        mlflow.genai.evaluate writes a client trace per row with inputs (117 of 133 traces) and exhausted SQLite's
+        pool at default parallelism, so the design logs plain Runs over REST; OTLP cannot set mlflow.modelId
+        metadata and no API links traces to a LoggedModel, so versions compare by trace tag; labeling sessions are
+        Databricks-only, OSS label schemas + review queues work; budgets are AI-gateway-only (current_spend stayed 0
+        after OTLP spend; alert = outbound webhook), so /observability stays the alert surface. Book-text check
+        (check_bench_quotes.py, ids and lengths only): v2 max shared run 4 words, t01 1, v1 four records at 5
+        (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0036 (proposed) for
+        the writes beyond ADR-0035. Open: round 7 (cross-experiment Run traces tab), VEC-OBS-5, design review
+        rounds." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
