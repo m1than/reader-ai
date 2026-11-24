@@ -21,12 +21,15 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader import blobs
-from reader.agent.errors import BudgetRefused
+from reader.agent.errors import AgentError, BudgetRefused, TransientAgentError
 from reader.agent.provider import StageCall
 from reader.jobs import JobContext
 from reader.lessons.store import write_revision
+from reader.obs import feedback, prompts
+from reader.obs.spans import annotate_job, child_span
 from reader.pipeline import g2 as g2_mod
 from reader.pipeline import notebook as nb_mod
+from reader.pipeline import runs
 from reader.pipeline import runtime as runtime_mod
 from reader.pipeline.errors import InputNotReady
 from reader.pipeline.findings import Problem, append_findings, problems_from, stamp_labs
@@ -101,6 +104,7 @@ async def _model_step(
     attempt: int,
     current: dict[str, Any] | None,
     handle: str,
+    step: int | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str, Decimal]:
     """Run a model stage: (notebook or None, the step report, model, cost)."""
     sdef = rt.pipeline.stages[stage]
@@ -119,6 +123,8 @@ async def _model_step(
             max_output_tokens=sdef.max_output_tokens,
             floor_usd=sdef.floor_reserve_usd,
             run_cap_usd=run.cap_usd,
+            course_id=lesson.course_id,
+            step=step,
         )
     )
     aliases = lesson.source.aliases
@@ -143,7 +149,10 @@ async def _model_step(
     if stage == "fact_check":
         producer = next(s for s in reversed(steps) if s.stage in ("draft", "revise"))
         stripped = {(c, k) for c, k in producer.report.get("stripped", [])}
-        verdicts = validate_fact_report(parse_json(result.text), current, aliases, frozenset(stripped))
+        with child_span("verify.claims") as claims:  # SRV-OBS FR-OBS-13: counts only
+            verdicts = validate_fact_report(parse_json(result.text), current, aliases, frozenset(stripped))
+            claims.set({"reader.claims.total": len(verdicts),
+                        "reader.claims.supported": sum(1 for v in verdicts if v.verdict == "supported")})
         report: dict[str, Any] = {
             "verdicts": [
                 {
@@ -165,6 +174,32 @@ async def _model_step(
             ]
         }
     return None, report, result.model, result.sdk_usd
+
+
+async def _record_stage_error(
+    conn: AsyncConnection, run: RunRow, step: int, input_sha: str, code: str
+) -> None:
+    """FR-PIPELINE-16: an allow-listed code is recorded, any other permanent code clears the record.
+
+    Called through the `runs` module so tests can replace it; a failed write is logged (run and code only)
+    and swallowed, so the caller re-raises the original exception.
+    """
+    value = (
+        {"step": step, "input_sha256": input_sha, "code": code} if code in runs.STAGE_ERROR_CODES else None
+    )
+    try:
+        await runs.record_stage_error(conn.engine, run.id, value)
+    except Exception:  # the original failure matters, not the record's
+        log.warning("compile_stage_error_not_recorded run=%s code=%s", run.id, code)
+
+
+async def _cancelled(conn: AsyncConnection, run_id: uuid.UUID) -> bool:
+    """FR-PIPELINE-20 (2): re-read under the run row's lock, so a cancel either committed before (seen here)
+    or waits until this step has committed its revision and its enqueue."""
+    row = await conn.execute(
+        text("SELECT cancelled_at FROM compile_runs WHERE id = :r FOR UPDATE"), {"r": run_id}
+    )
+    return row.scalar() is not None
 
 
 async def _handle(conn: AsyncConnection, run: RunRow) -> str:
@@ -200,8 +235,16 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
     run = await load_run(conn, run_id)
     if run is None:
         raise InputNotReady()
+    if run.cancelled_at is not None:  # FR-PIPELINE-20 (1): before any reservation, model call or lab run
+        log.info("compile_step_cancelled run=%s step=%s", run.id, args.step)
+        return
     steps = await load_steps(conn, run_id)
     lesson = await load_lesson(conn, rt, run.owner_id, run.lesson_id)
+    # SRV-OBS FR-OBS-5 (e), FR-OBS-18: ids on the job's root; the session marker came from the wrapper.
+    version = await prompts.version_of(f"reader.{args.stage}")
+    annotate_job({"reader.lesson.id": str(run.lesson_id),
+                  "reader.course.id": str(lesson.course_id) if lesson.course_id else None,
+                  "reader.prompt.version": version})
     jobs = rt.jobs()
     if any(s.step == args.step for s in steps):  # already recorded: only make sure the run moves on
         await enqueue_next(jobs, rt, run, lesson, steps)
@@ -227,12 +270,22 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         else:
             try:
                 notebook, report, model, cost = await _model_step(
-                    rt, run, lesson, steps, stage, ctx.attempts, current, await _handle(conn, run)
+                    rt, run, lesson, steps, stage, ctx.attempts, current, await _handle(conn, run), args.step
                 )
+                if stage == "fact_check":  # FR-OBS-14; `record` never raises
+                    claims = len(report.get("verdicts", []))
+                    supported = sum(1 for v in report.get("verdicts", []) if v["verdict"] == "supported")
+                    counts = {"claims": min(claims, 10000), "supported": min(supported, 10000)}
+                    await feedback.record(ctx, "fact_check.passed", supported == claims, counts)
             except BudgetRefused as refused:
                 await _refused(conn, jobs, rt, run, lesson, steps, refused.code)
                 log.info("compile_budget_refused run=%s stage=%s code=%s", run.id, stage, refused.code)
                 return
+            except TransientAgentError:
+                raise
+            except AgentError as failure:  # FR-PIPELINE-16: a permanent code, recorded for the status routes
+                await _record_stage_error(conn, run, args.step, args.input_sha256, failure.code)
+                raise
         if notebook is None:
             notebook = current
         if stage in ("fact_check", "adversarial_review"):
@@ -250,10 +303,22 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         latest = latest_sha(steps)
         assert latest is not None  # noqa: S101
         before = await _blob(rt, latest)
-        lab_report = await rt.verify.run(before)
+        lab_started = time.monotonic()
+        with child_span("verify.lab") as lab:  # FR-OBS-13: cells, cells passed, milliseconds
+            lab_report = await rt.verify.run(before)
+            cells = len(lab_report.results)
+            cells_ok = sum(1 for r in lab_report.results.values() if r.get("passed"))
+            lab.set({"reader.kernel.cells": cells, "reader.kernel.cells_ok": cells_ok,
+                     "reader.kernel.ms": int((time.monotonic() - lab_started) * 1000)})
+        await feedback.record(ctx, "verify.lab_passed", cells_ok == cells,
+                              {"cells": min(cells, 10000), "cells_ok": min(cells_ok, 10000)})
+        await feedback.record(ctx, "verify.passed", not lab_report.problems)
         notebook = stamp_labs(before, lab_report)
         report = {"lab_report": lab_report.as_json()}
     assert notebook is not None  # noqa: S101
+    if await _cancelled(conn, run.id):  # FR-PIPELINE-20 (2): holds the run row until this step commits
+        log.info("compile_step_cancelled run=%s step=%s", run.id, args.step)
+        return
     duration = round(time.monotonic() - started, 3)
     provenance: dict[str, Any] = {
         "input_sha256": args.input_sha256,
@@ -326,16 +391,24 @@ async def _refused(
     steps: Sequence[StepRow],
     code: str,
 ) -> None:
-    await conn.execute(
-        text("UPDATE compile_runs SET budget_refused = coalesce(budget_refused, :c) WHERE id = :r"),
+    updated = await conn.execute(
+        text(
+            "UPDATE compile_runs SET budget_refused = coalesce(budget_refused, :c) WHERE id = :r"
+            " AND cancelled_at IS NULL RETURNING id"  # FR-PIPELINE-20: a cancelled run is left as it is
+        ),
         {"c": code, "r": run.id},
     )
+    if updated.first() is None:
+        return
     refused = RunRow(
         run.id, run.owner_id, run.lesson_id, run.cap_usd, run.task_budgets, code, None, None, None
     )
     if not any(s.stage in ("draft", "revise") for s in steps):  # no notebook: nothing more to do
         await conn.execute(
-            text("UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb) WHERE id = :r"),
+            text(
+                "UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb) WHERE id = :r"
+                " AND cancelled_at IS NULL"
+            ),
             {"r": run.id, "g": json.dumps({"publishable": False, "failing": [], "blocking_open": 0})},
         )
         return
@@ -389,7 +462,7 @@ async def _finish(
     await conn.execute(
         text(
             "UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb), final_sha256 = :f,"
-            " last_model_sha256 = :m WHERE id = :r"
+            " last_model_sha256 = :m WHERE id = :r AND cancelled_at IS NULL"  # FR-PIPELINE-20
         ),
         {"g": json.dumps(report), "f": final_sha, "m": m, "r": run.id},
     )

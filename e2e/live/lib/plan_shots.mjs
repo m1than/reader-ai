@@ -37,9 +37,11 @@ try {
     line(scroll <= 0, `plan: /import does not scroll horizontally at ${width} px`);
     await page.screenshot({ path: `${dir}/live-import-estimate-${width}.png`, fullPage: true });
     if (width === 1280) {
-      await page.getByText('Lessons', { exact: true }).click();
+      // The plan's "Lessons" disclosure: since the design pass "Lessons" is also a nav link and a breadcrumb.
+      const lessons = page.locator('#content summary', { hasText: 'Lessons' });
+      await lessons.click();
       await page.screenshot({ path: `${dir}/live-import-lessons-${width}.png`, fullPage: false });
-      await page.getByText('Lessons', { exact: true }).click();
+      await lessons.click();
     }
     // the realistic does-not-fit state: the whole pilot at 12 weeks × 60 min
     await weeks.fill('12');

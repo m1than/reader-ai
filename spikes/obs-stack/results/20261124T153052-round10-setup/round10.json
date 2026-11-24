@@ -1,0 +1,357 @@
+{
+ "raw": [
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/experiments/get?experiment_id=0",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/update",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "new_name": "reader"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/set-experiment-tag",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "key": "reader.kind",
+    "value": "traces"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/set-experiment-tag",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "key": "reader.managed_by",
+    "value": "obs.setup"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/set-experiment-tag",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "key": "mlflow.note.content",
+    "value": "reader-ai traces"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/experiments/get-by-name?experiment_name=bench",
+   "status": 404,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/create",
+   "status": 200,
+   "body": {
+    "name": "bench",
+    "tags": [
+     {
+      "key": "reader.kind",
+      "value": "bench"
+     },
+     {
+      "key": "reader.managed_by",
+      "value": "obs.setup"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.version_key` = 'abababababab'"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "name": "reader-agent",
+    "params": [
+     {
+      "key": "prompt_set_sha256",
+      "value": "abababababababababababababababababababababababababababababababab"
+     }
+    ],
+    "tags": [
+     {
+      "key": "reader.version_key",
+      "value": "abababababab"
+     }
+    ]
+   }
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/2.0/mlflow/logged-models/m-42d295f05cc047038e9f343bd7f359b6",
+   "status": 200,
+   "body": {
+    "model_id": "m-42d295f05cc047038e9f343bd7f359b6",
+    "status": "LOGGED_MODEL_READY"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/search",
+   "status": 200,
+   "body": {
+    "max_results": 100
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/experiments/get?experiment_id=0",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/experiments/get-by-name?experiment_name=bench",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.version_key` = 'abababababab'"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/search",
+   "status": 200,
+   "body": {
+    "max_results": 100
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/search",
+   "status": 200,
+   "body": {
+    "max_results": 100
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/datasets/create",
+   "status": 200,
+   "body": {
+    "name": "tutor-bench-v2",
+    "experiment_ids": [
+     "1"
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/datasets/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "1"
+    ],
+    "filter_string": "name = 'tutor-bench-v2'"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/create",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "run_name": "old"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/delete",
+   "status": 200,
+   "body": {
+    "run_id": "b9dba5b5bf0f4084a84573847d5387b1"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ]
+   }
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/2.0/mlflow/logged-models/m-42d295f05cc047038e9f343bd7f359b6",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ]
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/experiments/search?max_results=1",
+   "status": 403,
+   "body": null
+  },
+  {
+   "method": "GET",
+   "path": "/health",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "OPTIONS",
+   "path": "/api/2.0/mlflow/experiments/search",
+   "status": 400,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "status": 500,
+   "body": {}
+  },
+  {
+   "method": "POST",
+   "path": "/graphql",
+   "status": 200,
+   "body": {
+    "query": "{ __typename }"
+   }
+  }
+ ],
+ "finalize": {
+  "status": 200,
+  "model_status": "LOGGED_MODEL_READY"
+ },
+ "first_setup": [
+  "rename 0",
+  "tag 0 reader.kind",
+  "tag 0 reader.managed_by",
+  "tag 0 mlflow.note.content",
+  "create bench",
+  "create model"
+ ],
+ "second_setup": [],
+ "drift": false,
+ "state": {
+  "experiments": {
+   "1": {
+    "name": "bench",
+    "tags": {
+     "reader.kind": "bench",
+     "reader.managed_by": "obs.setup"
+    }
+   },
+   "0": {
+    "name": "reader",
+    "tags": {
+     "reader.kind": "traces",
+     "reader.managed_by": "obs.setup",
+     "mlflow.note.content": "reader-ai traces"
+    }
+   }
+  },
+  "models": [
+   [
+    "reader-agent",
+    "LOGGED_MODEL_READY"
+   ]
+  ]
+ },
+ "dataset_search": {
+  "status": 200,
+  "found": 1
+ },
+ "run_delete": 200,
+ "runs_listed_after_delete": 0,
+ "model_delete": 200,
+ "models_listed_after_delete": 0,
+ "bad_host_api": 403,
+ "bad_host_health": 200,
+ "preflight": {
+  "status": 400,
+  "headers": {
+   "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
+   "access-control-max-age": "600",
+   "access-control-allow-credentials": "true"
+  }
+ },
+ "graphql_empty": 500,
+ "graphql_query": 200
+}

@@ -57,6 +57,14 @@ class JobKind:
     transient: tuple[type[BaseException], ...] = ()
     timeout_s: float = 600.0
     priority: int = 0  # procrastinate job priority at every defer; higher first (FR-EVENTS-1 amendment)
+    traced: bool = True  # FR-EVENTS-32 (SRV-OBS FR-OBS-5 f): False opens no job root span and passes no trace
+    # A periodic entry (SRV-OBS FR-OBS-32): (cron, args at the tick's UTC time); each tick enqueues the kind
+    # once, so the key built from those args deduplicates ticks of one slot.
+    periodic: tuple[str, Callable[[Any], Mapping[str, Any]]] | None = None
+    # Called once after the transaction that set the key's outcome ("succeeded" or "dead") committed, with
+    # (engine, payload, outcome) (SRV-PIPELINE FR-PIPELINE-18, SRV-INGEST FR-INGEST-26). A failure is logged,
+    # never judged: the outcome is already recorded.
+    after_end: Callable[[Any, Mapping[str, Any], str], Awaitable[None]] | None = None
 
 
 @dataclass(frozen=True)

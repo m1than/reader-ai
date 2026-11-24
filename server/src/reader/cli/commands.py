@@ -13,6 +13,7 @@ from typing import Any, Concatenate, Final, TextIO
 
 import keyring.errors
 
+from reader.cli import ingest_watch
 from reader.cli.errors import CliError
 from reader.cli.log import LOGGER, log_event
 from reader.cli.resolve import (
@@ -34,7 +35,15 @@ from reader.cli.stack import (
     make_plan,
 )
 from reader.cli.watcher import encode_bundle, lock_holder, stop_watcher
-from reader.config import ConfigError, ReaderConfig, Secret, SecretRef, SecretResolutionError, load_config
+from reader.config import (
+    ConfigError,
+    ReaderConfig,
+    Secret,
+    SecretRef,
+    SecretResolutionError,
+    effective,
+    load_config,
+)
 
 READY_TIMEOUT: Final = 10  # s for the watcher's readiness byte (FR-CLI-8): two local daemon calls
 AGENT_PROXY_IMAGE: Final = "reader-agent-proxy:local"
@@ -67,6 +76,8 @@ class Ctx:
     sleep: Callable[[float], None]
     monotonic: Callable[[], float]
     kill: Callable[[int, int], None]
+    # FR-CLI-23: starts `reader-ingest --watch` detached; None starts no ingest watcher
+    ingest_spawn: Callable[[list[str], Mapping[str, str], Path], int] | None = None
 
 
 def guarded[**P](command: Callable[Concatenate[Ctx, P], int]) -> Callable[Concatenate[Ctx, P], int]:
@@ -101,7 +112,10 @@ class Project:
 
 
 ACTIVE_PROFILES: tuple[str, ...] = ("kernels",)  # FR-CLI-5: the default profile plus these, always
-OPTIONAL_PROFILES: tuple[str, ...] = ("agents",)  # FR-CLI-5: chosen by `reader up`, recorded in run/profiles
+# FR-CLI-5, FR-CLI-22: chosen by `reader up`, recorded in run/profiles
+OPTIONAL_PROFILES: tuple[str, ...] = ("agents", "observability")
+TRACES_URL: Final = "https://localhost:8443/"  # FR-CLI-22: the dashboard, published only with `observability`
+JAEGER_URL: Final = "https://localhost:8444/"  # FR-CLI-22 (SRV-OBS FR-OBS-19): the waterfall view
 
 
 def compose_argv(ctx: Ctx, *args: str, extra: Sequence[str] = ()) -> list[str]:
@@ -126,14 +140,17 @@ def recorded_profiles(ctx: Ctx) -> tuple[str, ...]:
 
 def choose_profiles(ctx: Ctx, config: ReaderConfig) -> tuple[str, ...]:
     """FR-CLI-5: `agents` when a provider is configured and the agent-proxy image exists; otherwise it stays
-    off with one line on stderr and `up` continues."""
-    if not any(u.providers for u in config.users):
-        return ()
-    found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
-    if found is not None and found.code == 0:
-        return ("agents",)
-    print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
-    return ()
+    off with one line on stderr and `up` continues. FR-CLI-22: `observability` when the config enables it."""
+    chosen: list[str] = []
+    if any(u.providers for u in config.users):
+        found = docker(ctx, "docker", "image", "inspect", AGENT_PROXY_IMAGE, timeout=30)
+        if found is not None and found.code == 0:
+            chosen.append("agents")
+        else:
+            print(f"note: profile agents stays off: image {AGENT_PROXY_IMAGE} does not exist", file=ctx.err)
+    if config.observability.enabled:
+        chosen.append("observability")
+    return tuple(chosen)
 
 
 def profile_services(ctx: Ctx, profile: str) -> list[str]:
@@ -152,7 +169,10 @@ def load(
     config = config if config is not None else load_config(config_path)
     active = tuple(sorted(profiles)) if profiles is not None else recorded_profiles(ctx)
     path = check_config_path(config_path)
-    override = build_override(load_compose_source(ctx.compose_file), [u.handle for u in config.users], path)
+    override = build_override(
+        load_compose_source(ctx.compose_file), [u.handle for u in config.users], path,
+        observability="observability" in active,
+    )
     data = json.dumps(override).encode()
     rendered = _checked(
         ctx, lambda: compose(ctx, data, "config", "--format", "json", extra=active), "compose_config"
@@ -211,6 +231,14 @@ def watcher_running(ctx: Ctx) -> bool:
     return lock_holder(ctx.run_dir / "watcher.lock") is not None
 
 
+def _ingest_data_dir(config_path: Path) -> Path | None:
+    """The ingest watcher's data_dir from reader.yaml; None when the configuration cannot be loaded."""
+    try:
+        return ingest_watch.data_dir_of(load_config(config_path), config_path)
+    except ConfigError, OSError:
+        return None
+
+
 # Health and status (FR-CLI-10, FR-CLI-13) -----------------------------------------------------------------
 
 
@@ -232,14 +260,19 @@ def ps(ctx: Ctx, project: str) -> list[dict[str, Any]] | None:
     return [row for row in rows if isinstance(row, dict)]
 
 
+# One-shot services that exit 0 when done (SRV-OBS FR-OBS-29's mlflow-migrate): never expected to be running.
+ONE_SHOT_SERVICES: Final = frozenset({"mlflow-migrate"})
+
+
 def status_code(services: Sequence[Mapping[str, Any]], expected: Collection[str], watcher: bool) -> int:
     """Bit 1: a default-profile service is not running or not healthy. Bit 2: the watcher is stopped."""
     state = {str(s.get("Service")): s for s in services}
-    unhealthy = not expected or any(
+    wanted = [name for name in expected if name not in ONE_SHOT_SERVICES]
+    unhealthy = not wanted or any(
         name not in state
         or state[name].get("State") != "running"
         or state[name].get("Health") not in ("healthy", "", None)
-        for name in expected
+        for name in wanted
     )
     return (1 if unhealthy else 0) | (0 if watcher else 2)
 
@@ -256,7 +289,7 @@ def wait_healthy(ctx: Ctx, model: Rendered) -> bool:
 
 
 @guarded
-def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
+def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False, obs_store_size: bool = False) -> int:
     project, expected = project_name(ctx, config_path)
     if project is None:
         print("error: no project (run `reader up` first)", file=ctx.err)
@@ -272,18 +305,96 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         {"name": str(s.get("Service")), "state": str(s.get("State")), "health": s.get("Health") or None}
         for s in services
     ]
+    data_dir = _ingest_data_dir(config_path)  # FR-CLI-23
+    # Without a loadable reader.yaml the watcher's lock cannot be found: `unknown`, never `stopped`.
+    problem = None if data_dir else ("config_missing" if not config_path.is_file() else "config_invalid")
+    ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "unknown"
+    converting = ingest_watch.converter(data_dir) if data_dir else "unknown"
+    overrides = _status_overrides(ctx, project, config_path)
+    obs = _status_obs(ctx, config_path, obs_store_size)
     if as_json:
+        body: dict[str, Any] = {
+            "project": project,
+            "watcher": "running" if watcher else "stopped",
+            "ingest_watcher": ingest,
+            "converter": converting,
+            "services": rows,
+            "overrides": overrides,
+        }
+        if obs:
+            body["obs"] = obs
+        if problem:
+            body["ingest_config"] = {"problem": problem, "path": str(config_path)}
+        print(json.dumps(body), file=ctx.out)
+    else:
         print(
-            json.dumps(
-                {"project": project, "watcher": "running" if watcher else "stopped", "services": rows}
-            ),
+            f"project {project}; watcher {'running' if watcher else 'stopped'}; ingest watcher {ingest};"
+            f" converter {converting}",
             file=ctx.out,
         )
-    else:
-        print(f"project {project}; watcher {'running' if watcher else 'stopped'}", file=ctx.out)
+        if problem:
+            print(
+                f"  ingest watcher unknown: {problem} ({config_path}); "
+                "pass --config <the reader.yaml of `reader up`>",
+                file=ctx.out,
+            )
         for row in rows:
             print(f"  {row['name']}: {row['state']} {row['health'] or ''}".rstrip(), file=ctx.out)
+        for line in (*overrides, *obs):
+            print(f"  {line}", file=ctx.out)
     return code
+
+
+# Settings overrides (SRV-CONFIG FR-CONFIG-26, paired) ---------------------------------------------------
+
+OVERRIDES_SQL: Final = "SELECT key, value FROM settings_overrides ORDER BY key"
+OVERRIDES_TIMEOUT: Final = 30  # s, one local psql query
+OVERRIDES_UNAVAILABLE: Final = "overrides: unavailable"
+
+
+def override_lines(ctx: Ctx, project: str, config: ReaderConfig) -> list[str]:
+    """One read of the overlay through the postgres container (no database driver here), evaluated
+    against the loaded reader.yaml with SRV-CONFIG's own rules; a failed read is one `unavailable` line,
+    never an error."""
+    result = docker(
+        ctx, "docker", "compose", "-p", project, "exec", "-T", "postgres",
+        "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", OVERRIDES_SQL,
+        timeout=OVERRIDES_TIMEOUT,
+    )
+    if result is None or result.code != 0:
+        return [OVERRIDES_UNAVAILABLE]
+    stored: dict[str, Any] = {}
+    for line in result.out.decode("utf-8", "replace").splitlines():
+        key, sep, raw = line.partition("|")
+        if not line.strip():
+            continue
+        try:
+            stored[key] = json.loads(raw) if sep else None
+        except ValueError:
+            return [OVERRIDES_UNAVAILABLE]
+    return effective.status_lines(effective.file_settings(config), stored)
+
+
+def _status_overrides(ctx: Ctx, project: str, config_path: Path) -> list[str]:
+    try:
+        config = load_config(config_path)
+    except ConfigError, OSError:
+        return []  # without the reader.yaml of `reader up` the overrides cannot be evaluated
+    return override_lines(ctx, project, config)
+
+
+def _status_obs(ctx: Ctx, config_path: Path, store_size: bool = False) -> list[str]:
+    """FR-CLI-24 (e): the doctor's obs lines, when `reader up` recorded the observability profile; the store
+    size (`docker system df -v`, slow) only with `reader status --obs`."""
+    if "observability" not in recorded_profiles(ctx):
+        return []
+    try:
+        project = load(ctx, config_path)
+    except ConfigError, CliError, OSError:
+        return []  # without the reader.yaml of `reader up` the stack's names cannot be rendered
+    from reader.cli.maintenance import obs_doctor_lines  # maintenance imports this module
+
+    return obs_doctor_lines(ctx, project.model, store_size=store_size)
 
 
 # The DB password (FR-CLI-14) ------------------------------------------------------------------------------
@@ -353,6 +464,38 @@ def watcher_argv(ctx: Ctx, project: str, since: str, plan: Plan) -> list[str]:
     ]
 
 
+def _obs_run(ctx: Ctx) -> Callable[[list[str], float], tuple[int, str]]:
+    """obs_store's runner over the CLI's own (fakeable) docker calls."""
+
+    def run(argv: list[str], timeout: float) -> tuple[int, str]:
+        result = docker(ctx, *argv, timeout=timeout)
+        if result is None:
+            return 1, ""
+        return result.code, (result.out + result.err).decode("utf-8", "replace")
+
+    return run
+
+
+def _migrate_failure(ctx: Ctx, model: Rendered) -> str | None:
+    """FR-CLI-24: when mlflow-migrate exited 10..13, the message for that code (11 names the version)."""
+    from reader.cli import obs_store
+
+    run = _obs_run(ctx)
+    container = f"{model.name}-mlflow-migrate-1"
+    code, out = run(["docker", "inspect", "--format", "{{.State.ExitCode}}", container], 60.0)
+    if code != 0 or not out.strip().isdigit() or int(out.strip()) not in obs_store.MIGRATE_CODES:
+        return None
+    exit_code = int(out.strip())
+    restored_for = None
+    if exit_code == 11:
+        volume = model.volumes.get("obs_mlflow", {}).get("name")
+        if isinstance(volume, str):
+            script = f"cat {obs_store.DATA}/backup/restored-for 2>/dev/null || true"
+            code, out = run(obs_store.one_off(model.image("mlflow"), volume, script), 60.0)
+            restored_for = out.strip() or None if code == 0 else None
+    return obs_store.migrate_message(exit_code, restored_for)
+
+
 def offer_trust(ctx: Ctx, project: str) -> None:
     """FR-CLI-16: only an interactive `reader up` offers trust; agent-run (non-TTY) runs skip it."""
     if not ctx.is_tty:
@@ -412,6 +555,10 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     started = docker(ctx, *compose_argv(ctx, "up", "-d", extra=project.profiles), stdin=project.override)
     if started is None or started.code != 0:
         process.terminate()
+        if "observability" in project.profiles:  # FR-CLI-24: say why mlflow-migrate stopped the stack
+            message = _migrate_failure(ctx, model)
+            if message is not None:
+                print(f"error: {message}", file=ctx.err)
         raise CliError("up_failed", "docker compose up failed; the watcher was stopped")
     if not wait_healthy(ctx, model):
         print(
@@ -419,8 +566,14 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
             file=ctx.err,
         )
         return 1
+    ingest_watch.ensure(ctx, config_path, config)  # FR-CLI-23; a failed spawn is reported, never fatal
     offer_trust(ctx, model.name)
     print(f"reader is up ({model.name}); the watcher keeps delivering secrets", file=ctx.out)
+    for line in override_lines(ctx, model.name, config):  # SRV-CONFIG FR-CONFIG-26 (paired)
+        print(f"  {line}", file=ctx.out)
+    if "observability" in project.profiles:  # FR-CLI-22
+        print(f"traces: {TRACES_URL}", file=ctx.out)
+        print(f"jaeger: {JAEGER_URL}", file=ctx.out)
     return 0
 
 
@@ -428,6 +581,9 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
 def cmd_down(ctx: Ctx, config_path: Path, untrust: bool = False) -> int:
     project, _ = project_name(ctx, config_path)
     stop_watcher(ctx)
+    data_dir = _ingest_data_dir(config_path)
+    if data_dir is not None:
+        ingest_watch.stop(ctx, data_dir)  # FR-CLI-23: before `docker compose down`
     code = 0
     if project is None:
         print("error: no project (nothing was started by `reader up`)", file=ctx.err)

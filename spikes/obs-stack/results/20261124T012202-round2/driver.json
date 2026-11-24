@@ -1,0 +1,267 @@
+{
+  "backend": "sqlite",
+  "duration_s": 7.0,
+  "bulk_lessons": 1,
+  "ready_s": 2.6,
+  "auth": {
+    "no_cookie_root": {
+      "status": 401,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "learner_root": {
+      "status": 403,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_root": {
+      "status": 200,
+      "bytes": 701,
+      "mlflow_ui": true,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_ajax_search": {
+      "status": 200,
+      "bytes": 284,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "no_cookie_ajax_search": {
+      "status": 401,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_post_no_origin": {
+      "status": 403,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_post_foreign_localhost_origin": {
+      "status": 403,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_post_app_origin": {
+      "status": 403,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_get_foreign_origin": {
+      "status": 403,
+      "bytes": 0,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_get_same_origin_acao": {
+      "status": 200,
+      "bytes": 284,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "direct_mlflow_foreign_origin_acao": {
+      "status": 200,
+      "bytes": 284,
+      "mlflow_ui": false,
+      "acao": "http://localhost:3000",
+      "set_cookie": false
+    },
+    "owner_text_plain_search": {
+      "status": 400,
+      "bytes": 181,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "direct_text_plain_search": {
+      "status": 400,
+      "bytes": 181,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "direct_text_plain_delete": {
+      "status": 400,
+      "bytes": 181,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_echo_cookie_auth": {
+      "status": 200,
+      "bytes": 136,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false,
+      "upstream_saw": [
+        "accept-encoding",
+        "host",
+        "origin",
+        "user-agent",
+        "via",
+        "x-forwarded-for",
+        "x-forwarded-host",
+        "x-forwarded-proto"
+      ]
+    },
+    "owner_ingest_blocked": {
+      "status": 404,
+      "bytes": 7,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_gateway_blocked": {
+      "status": 404,
+      "bytes": 7,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_assistant_blocked": {
+      "status": 404,
+      "bytes": 7,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_mcp_blocked": {
+      "status": 404,
+      "bytes": 7,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_api_gateway_blocked": {
+      "status": 404,
+      "bytes": 7,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    },
+    "owner_foreign_host": {
+      "status": 403,
+      "bytes": 60,
+      "mlflow_ui": false,
+      "acao": null,
+      "set_cookie": false
+    }
+  },
+  "sustained_start": 1795468928.4572594,
+  "sustained_end": 1795468935.5971627,
+  "stage_traces": {
+    "expected_spans": 72,
+    "complete": 7,
+    "traces": 7,
+    "rows": [
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1010
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1017
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1016
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1010
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1049
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1015
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1022
+      }
+    ]
+  },
+  "tutor_traces": {
+    "expected_spans": 3,
+    "complete": 0,
+    "traces": 0,
+    "rows": []
+  },
+  "poll": {
+    "n": 1,
+    "p50_s": 0.04,
+    "p95_s": 0.04,
+    "errors": []
+  },
+  "store_bytes_after_sustained": 1503232,
+  "bulk_start": 1795468945.7017767,
+  "bulk_emit_s": 0.0,
+  "bulk_spans": 504,
+  "bulk_end": 1795468965.7114673,
+  "bulk_traces": {
+    "expected_spans": 72,
+    "complete": 7,
+    "traces": 7
+  },
+  "traces_total": 14,
+  "store_bytes_after_bulk": 1957888,
+  "retention_cutoff": {
+    "before": {
+      "old": true,
+      "fresh": true
+    },
+    "delete_max_traces_1": {
+      "response": {
+        "traces_deleted": 1
+      },
+      "s": 0.01
+    },
+    "delete_rest": {
+      "response": {
+        "traces_deleted": 0
+      },
+      "s": 0.003
+    },
+    "after": {
+      "old": false,
+      "fresh": true
+    }
+  },
+  "linked": {
+    "request_trace": "6aa6ab2921017cee99ce17b68fc02e4c",
+    "job_trace": "ff4c5adf9952294cd4c5e4d9a0017c2c"
+  },
+  "sample_stage_trace": "fe65bc500d71545af1c66069e2afc4a6"
+}

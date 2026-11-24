@@ -7,6 +7,7 @@ The handler runs inside SRV-EVENTS' run transaction: every database write is the
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any, Final
 from uuid import UUID
 
@@ -17,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.obs.spans import child_span
 from reader.search import embed_client, params
 from reader.search.chunking import Span, chunk_spans
 from reader.search.errors import EmbedUnavailable, IngestNotReady, SearchError
@@ -94,16 +96,21 @@ async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) 
         text("SELECT seq, page, text FROM material_spans WHERE ingest_id = :i ORDER BY seq"),
         {"i": args.ingest_id},
     )
-    chunks = chunk_spans(
-        [Span(int(r[0]), int(r[1]), str(r[2])) for r in rows],
-        size=params.CHUNK_SIZE,
-        overlap=params.CHUNK_OVERLAP,
-        min_len=params.CHUNK_MIN,
-    )
+    with child_span("ingest.chunk") as chunked:  # SRV-OBS FR-OBS-13: counts only
+        chunks = chunk_spans(
+            [Span(int(r[0]), int(r[1]), str(r[2])) for r in rows],
+            size=params.CHUNK_SIZE,
+            overlap=params.CHUNK_OVERLAP,
+            min_len=params.CHUNK_MIN,
+        )
+        chunked.set({"reader.chunks": len(chunks)})
     vectors: list[list[float]] = []
     for start in range(0, len(chunks), params.PASSAGE_BATCH):
         batch = [c.text for c in chunks[start : start + params.PASSAGE_BATCH]]
-        vectors.extend(await embed_client.embed("passage", batch, params.PASSAGE_TIMEOUT_S))
+        with child_span("embed.batch", {"reader.embed.batch": len(batch)}) as embedded:
+            got = await embed_client.embed("passage", batch, params.PASSAGE_TIMEOUT_S)
+            embedded.set({"reader.embed.vectors": len(got)})
+        vectors.extend(got)
     if chunks:
         await conn.execute(
             text(
@@ -135,6 +142,28 @@ async def _handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
     await handle_embed(args, conn, ctx)
 
 
+async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> None:
+    """SRV-INGEST FR-INGEST-26's late end (SRV-OBS FR-OBS-20 d): a succeeded embed enqueues `obs.runs`
+    {ingest, ingest id, 1 + the ingest's embeds}, so the import's Run links the embed's traces and counts its
+    chunks."""
+    if outcome != "succeeded":
+        return
+    from reader.obs import runs as obs_runs
+
+    async with engine.connect() as conn:
+        embeds = (
+            await conn.execute(
+                text(
+                    "SELECT count(*) FROM search_embeds e JOIN ingests i ON i.id = e.ingest_id"
+                    " AND i.owner_id = e.owner_id WHERE e.ingest_id = :i"
+                ),
+                {"i": str(payload["ingest_id"])},
+            )
+        ).scalar()
+    if embeds:
+        await obs_runs.enqueue_end("ingest", str(payload["ingest_id"]), min(1 + int(embeds), 100))
+
+
 JOB_KINDS: Final[tuple[JobKind, ...]] = (
     JobKind(
         name=KIND,
@@ -152,6 +181,7 @@ JOB_KINDS: Final[tuple[JobKind, ...]] = (
             IngestNotReady,
         ),
         timeout_s=TIMEOUT_S,
+        after_end=after_end,
     ),
 )
 

@@ -1,0 +1,28 @@
+{
+ "link": [
+  200,
+  {}
+ ],
+ "search_exp0_by_run": {
+  "status": 200,
+  "count": 4,
+  "error": null
+ },
+ "search_runs_exp_by_run": {
+  "status": 200,
+  "count": 0,
+  "error": null
+ },
+ "search_runs_exp_all": {
+  "status": 200,
+  "count": 0,
+  "error": null
+ },
+ "client_search_by_run_error": "MlflowException: Run 9b4aa9483f23490a95b2101810409a6b belongs to experiment 1, which is not in the list of locations provided: ['0']. Please include experiment 1 in the `locations` parameter to search for traces from this run.",
+ "client_search_by_run_both": 4,
+ "runs_in_exp0": 0,
+ "runs_in_runs_exp": 1,
+ "runs_exp_tags": {
+  "reader.kind": "runs"
+ }
+}

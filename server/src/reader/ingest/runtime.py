@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 from reader.config import ConfigError, ReaderConfig, load_config
 from reader.db import make_engine
-from reader.ingest.errors import IngestError
+from reader.ingest.errors import Cancel, IngestError
 from reader.jobs.catalog import load_kinds
 from reader.jobs.queue import Jobs
 from reader.jobs.worker import make_app
@@ -69,6 +69,10 @@ def run_command(work: Callable[[Runtime], Awaitable[dict[str, Any]]]) -> int:
 
     try:
         emit(asyncio.run(main()))
+    except Cancel:  # FR-INGEST-20's one cancel shape (receive under a claim, FR-INGEST-23)
+        sys.stdout.write('{"cancel":true}\n')
+        sys.stdout.flush()
+        return 3
     except IngestError as error:
         emit({"error": error.code})
         return 1

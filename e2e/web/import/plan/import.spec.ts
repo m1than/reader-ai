@@ -30,16 +30,21 @@ for (const width of WIDTHS) {
     await collectViolations(page);
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/');
-    await page.getByRole('link', { name: 'Import' }).click();
+    // Below 75rem (a width under 1200 px) the main nav lives in the Courses drawer (WEB-UI FR-UI-11).
+    if (width < 1200) await page.getByRole('button', { name: 'Courses' }).click();
+    await page.getByRole('link', { name: 'Import', exact: true }).click();
     await expect(page.getByRole('heading', { name: 'Import a source', level: 1 })).toBeVisible();
-    await expect(page.getByText('synthetic-plan')).toBeVisible();
+    // WEB-MANAGE's "Manage your sources" lists the same source further down the page.
+    await expect(page.getByRole('region', { name: 'Your sources', exact: true }).getByText('synthetic-plan')).toBeVisible();
     expect(await serious(page)).toEqual([]);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/import-sources-${width}.png`, fullPage: true });
 
     await page.getByRole('button', { name: 'Plan study time' }).click();
     await page.getByLabel('Total weeks').fill('4');
-    await expect(page.getByText(/^28 lessons, one a day/)).toBeVisible();
-    await page.getByText('Lessons', { exact: true }).click();
+    // Design pass (FR-IMPORT-5): the headline is the status line; the count is the "Lessons" figure.
+    await expect(page.locator('.plan-estimate [role="status"]')).toHaveText(/^Estimate updated: 28 lessons, one a day/);
+    await expect(page.locator('.plan-figures dd').first()).toHaveText('28');
+    await page.locator('summary', { hasText: 'Lessons' }).click();
     expect(await serious(page)).toEqual([]);
     expect(await noScroll(page)).toBeLessThanOrEqual(0);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/import-estimate-${width}.png`, fullPage: true });

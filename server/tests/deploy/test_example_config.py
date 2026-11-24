@@ -3,7 +3,8 @@
 
 from .conftest import EXAMPLE, load_yaml
 
-SECTIONS = {"version", "instance", "users", "tasks", "budgets", "kernels", "materials", "sectors", "sharing"}
+SECTIONS = {"version", "instance", "users", "tasks", "budgets", "kernels", "materials", "sectors", "sharing",
+            "observability"}  # FR-DEPLOY-12, amended with SRV-CONFIG FR-CONFIG-17
 
 
 def test_example_loads_through_load_config() -> None:

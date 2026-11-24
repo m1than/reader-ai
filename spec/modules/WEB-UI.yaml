@@ -49,7 +49,9 @@
 # `server/src/reader/auth/static`, no other path) with the Caddyfile's Content-Security-Policy header and the api's
 # content types, and web/playwright.config.ts runs e2e/web/auth/** in two projects of its own, `auth-dark` and
 # `auth-light` (`colorScheme`), while the existing `chromium` project keeps the ui, render and tutor specs; the
-# ceremony POSTs are stubbed by the auth spec itself (page.route) (Playwright's browsers are not installed by ci-local); [live] `e2e/live/slice.sh` against
+# ceremony POSTs are stubbed by the auth spec itself (page.route) (Playwright's browsers are not installed by ci-local).
+# Design pass (2026-11-23): the `chromium` project also matches e2e/web/notebook/** (WEB-NOTEBOOK's lab editor under
+# the CSP, its kernel WebSocket routed by Playwright's `routeWebSocket`); [live] `e2e/live/slice.sh` against
 # `reader up`, signed in with the S1 `live-check` learner through a Chromium virtual authenticator.
 
 id: WEB-UI
@@ -57,7 +59,8 @@ title: App shell — pinned library build, Calm tokens, routing, API client, sig
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes"
+review: "deep-reviewer (Fable) single round (outside the complex areas, AGENTS.md): changes; findings applied per coordinator decisions (5de3f0a, faa5fb8); approved without a second round. Paired change from SRV-TUTOR (2026-11-23, FR-TUTOR-11; reviewed in SRV-TUTOR's code review): Services carries an optional `tutor` client (web/src/tutor/api.ts, built by AppRoot with the same fetch and 401 hook as the app's api), and web/playwright.config.ts also matches e2e/web/tutor/**; @axe-core/playwright joins the dev dependencies for the tutor panel's [browser] axe check; nothing else in the app shell changed. Amendment 2026-11-23 (V/WEB-polish, from the live screenshots): FR-UI-6 row layout; new FR-UI-10 (spacing, type scale, reading column, widths, focus outline; checked live by the `ui` step) and FR-UI-11 (skip link, shell loading state). deep-reviewer (Fable) single round (2026-11-23): changes; blocking items for this spec fixed — FR-UI-10's numbers are asserted live (font size, line height, family, h1, paragraph width > 0) or marked as an estimate, `ui` joins slice.sh's default steps; FR-UI-11 has one shell `main#content` checked on `/`, a lesson (loaded and error) and not-found; non-blocking applied: rem sizes, the named serif stack and no web font, `color-mix` and border/outline/shadow/fill/caret colours and offsets in the scan, skeletons with role status and hidden text. Approved by agent without a second round (coordinator, 2026-11-23). Code review (c0ccb05): VERDICT approve; 16 surviving mutants closed as test gaps — status regions without aria-busy, role=list on unbulleted lists, skip-link focus test, overflow against clientWidth, numbers-only ui results committed. Test fix (2026-11-23, final DoD run): INV-UI-4's [browser] test waited on getByText('Digests'), which FR-NOTEBOOK-11's contents link made ambiguous (strict-mode failure, no CSP violation); it now waits on the heading; no requirement changed. Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the test server serves the four static auth files under the Caddyfile CSP and the Playwright config matches e2e/web/auth/**; no app behaviour changes. Amendment 2026-11-23 (V.signup, ADR-0031 accepted by the owner): FR-UI-14 (the `/signups` route and the owner's Sign-ups header link of WEB-ACCOUNTS; test-server stubs and a fifth static auth file); reviewed with ADR-0031 and SRV-AUTH's sign-up items in deep-reviewer rounds 1–3 (round 3 approve); approved by agent with its Red tests; the Playwright config also matches e2e/web/accounts/** in the auth-dark and auth-light projects. Amendment 2026-11-23 (V/compile-ui): FR-UI-15 (the owner's Compile action and compile status in the list; base: the compile-status bullet of V/onboarding's proposed FR-UI-13, which stays the upload track's id; the upload track drops that bullet at merge), paired with WEB-NOTEBOOK FR-NOTEBOOK-12, SRV-PLAN FR-PLAN-13 (per-lesson estimate route) and SRV-PIPELINE FR-PIPELINE-16 (a stopped step's error code). Round 1 (cc817d0, changes): the control is keyed on run state, not on `latest_sha256` (the draft step writes a revision); the list reads the owner's open runs from FR-PIPELINE-17 instead of 10 per-lesson reads; a draft chip on linked rows with an open run; zero-character lessons; an in-flight guard; a 30-minute polling stop with Refresh; a realistic test-server sequence and `workers: 1`; the FR-UI-6 pointer. Round 2 on 08534df: VERDICT approve (deep-reviewer, run by the coordinator). Approved by agent. Green (2026-11-23): web/src/app/compile.test.tsx's `run` helper gets explicit step and run types so `npm run typecheck` accepts it against the client's `CompileStatus`; e2e/web/ui/compile.spec.ts waits for the dialog's open animations to finish before axe (mid-fade text measured 2.3–3.4:1; settled, none); no oracle or requirement changed. Code review (2026-11-24, on cb81aff): VERDICT approve; items applied with paired tests — `submitAction` (no POST while closed, resume without a run closes and never compiles), the polling window restarts when any run starts (a run started after 31 idle minutes is polled; kills mutant W19), axe on the Resume dialog and in dark, the 280 ms fade stated and the wait bounded at 2 s. Merge of V/design-pass into V/slice-integration (2026-11-24): FR-UI-15's CompileControl renders through FR-UI-6's compile slot (the slot's `Status` and `Action` take a `place` of `list` or `page`), and FR-UI-14's Sign-ups link is a `NAV_ITEMS` entry whose badge shows the count (FR-UI-11). Amendment 2026-11-23 (V/design-pass, the owner's approval of the design audit's P1 and P2 items): FR-UI-1 entries (breadcrumbs, menu, drawer, icon; tree-view and collapsible rejected, reasons in the text), FR-UI-2 and FR-UI-5 wording for the theme and the user menu, FR-UI-6 (Continue block, course groups with progress and the 12-row rule, full-width rows, compile slot), FR-UI-7 (catalogue sentence case, icon, +n more), FR-UI-10 (two typefaces, heading scale, figures, lesson lang and hyphens, wide blocks, table breaking, radii, button sizes and variants, motion), FR-UI-11 (header with NAV_ITEMS and user menu, state blocks), new FR-UI-16 (theme choice) and FR-UI-17 (course sidebar). deep-reviewer (Fable) single round on the spec diff (04e396b..d3c0a68, outside the complex areas): changes; all findings applied without a second round (coordinator, 2026-11-23), each with its fix in docs/progress.yaml V.design-pass `review`: B1 the user menu and the drawer load lazily on first open and the initial chunk holds no menu, drawer or icon module (FR-UI-11, FR-UI-17, NFR-UI-1 check; the initial chunk was 111,507 B of 121,153 and those modules add about 18 KB); B2 the compile slot is `{status, action}` called on every row (FR-UI-6, FR-UI-15's shape); B3 `NAV_ITEMS` entries take an optional `badge`; B5 the stored theme is applied before first paint by the classic external script web/public/theme.js (FR-UI-16, claimed in `paths`); non-blocking: one disclosure control per course group (the button under the list), lang on the lesson container from the Cyrillic rule only, named live hooks, the 56px header bound sourced, the dark overflow claim narrowed, no compile slot in the sidebar and distinct ids for its two copies, the 12/13-row, all-published, hash-scroll and drawer focus tests, one shared Vite build for NFR-UI-1 and NOTEBOOK's NFR-NOTEBOOK-1. Approved by agent (coordinator, 2026-11-23). Code review of c1e3103 (single round, outside the complex areas): changes, all applied without a second round (findings and fixes in docs/progress.yaml V.design-pass `code_review`): B1 theme.js moves to web/src/public with `publicDir: 'src/public'` (the production Caddy image copies src only) plus live asserts; non-blocking: the compile slot as `{Status, Action}` components with the empty-status fallback, the drawer popup id named by aria-controls, the nav badge's hidden words, error boundaries around the lazy menu and drawer, and the extra mutant-killing cases. Live fixes (2026-11-24, V/live-ui-fixes, from the live check at 647cfeb): FR-UI-11 the main nav moves into the Courses drawer below 40rem (119px overflow at 390 with four owner entries) and a badge names its link through one inline text run with its separator and last word at font size 0 (Chromium read clipped hidden spans as 'Sign-ups , 1 waiting'; an aria-label fails axe's label-content-name-mismatch); INV-UI-4 the interactions (menus, drawer, tutor, editor, compile dialog) under the CSP, after the lab editor's selection replacement raised style-src-attr reports; FR-UI-15's browser rows located in their course group; the test server refuses a dist or storybook-static older than web/src (a stale Storybook build failed two render.spec checks with no product fault). Code review of add0a02 (single round, outside the complex areas): changes, all applied without a second round (findings and fixes in docs/progress.yaml V.live-ui-fixes `code_review`): the drawer breakpoint is the Courses breakpoint, 75rem (`max-width: 74.98rem`), since 40rem still overflowed up to about 847px with a long name; the badge reads 'Sign-ups 1 waiting' with only 'waiting' hidden (the font-size-0 run is gone); a fallback nav when the drawer chunk fails; the fresh-build check covers package files, the lockfile, vite.config.ts and vendor, ignores .DS_Store, is a requirement sentence in INV-UI-4 and has a unit test. Amendment FR-UI-13 (2026-11-23, for WEB-IMPORT; drafted on V/onboarding and reviewed in its deep-reviewer rounds 1–7, ADR-0029 accepted by the owner): first-run redirect to /import, promoted on V/upload-impl with its Red tests; its mount note (the /import chunk composes WEB-PLAN's page with WEB-IMPORT's sections, so V/plan's files stay untouched) is an integration detail of that branch. Paired with FR-UI-13: FR-UI-12's lazy-chunk test names the WEB-IMPORT entry and checks that it renders WEB-PLAN's page. Scope (coordinator 2026-11-23): the compile status in the lesson list left FR-UI-13 for V/compile-ui (FR-UI-15). Merge of V/upload-impl into V/slice-integration (2026-11-24): FR-UI-13 moved from `proposed_requirements` into `requirements`; Services carries `upload` beside `signups`, `obs` and `compileSlot`; the first-run redirect sits in the shell's routes beside the NAV_ITEMS header and the Courses drawer, which it does not change. Paired change from WEB-FRESH (2026-11-23; merged into V/slice-integration 2026-11-24): routes.tsx registers the lazy `/materials/$materialId/freshness` route (a UUID id, else not-found); Services carries an optional `http` (the fetch and 401 hook AppRoot already builds), so the lazy card builds its own client without growing the initial chunk; the test server stubs the freshness routes from VEC-FRESHUI-1; web/playwright.config.ts also matches e2e/web/fresh/**; nothing else in the app shell changed. Red for FR-UI-30..32 (2026-11-24, V/manage-impl-web): web/src/ui/i18n.test.ts (parity over the catalogue glob, plurals, the locale and formatting-locale rules, one test per mapped enum, the collator, html[lang] on a switch, theme.js's resolver in node:vm), web/src/notebook/lang-split.test.tsx (FR-UI-32's four combinations) and e2e/web/ui/i18n.spec.ts (FR-UI-31); web/src/app/build.test.ts gains FR-UI-30's [build] line (no `messages.ru` module and no web/src/manage module other than the slot stubs in an initial chunk's source map). Green for FR-UI-30..32: web/src/app/import.test.tsx and web/src/app/observability/observability.test.tsx match the lazy route through `withAreas(() => import(…))` (FR-UI-31: the route's Russian catalogues load with its chunk); the oracle (a lazy import of that entry) is unchanged. The Russian loaders live in web/src/ui/ru-loaders.ts, registered by main.tsx and the Vitest setup (web/src/ui/test-setup.ts, which also clears `reader-ai.locale`), so only the entry chunk holds the dynamic imports and no second initial chunk needs Vite's preload helper; AppRoot no longer builds the tutor, observability and upload clients: their lazy chunks build them from `Services.http` (the same fetch and 401 hook), which keeps their schemas out of the initial chunk (NFR-UI-1: 119,454 B measured after FR-UI-30, against 117,829 B before). NAV_ITEMS keeps its English `label`, which the header maps through the app catalogue (`nav.<label>`; an unknown label is shown as given, FR-UI-30's enum rule). Paired with WEB-MANAGE (Green, 2026-11-24, V/manage-impl-web): FR-UI-1's list gains text-field, select, switch, tabs and radio-group (sourceScan.ts and design.test.tsx's expected list follow); FR-UI-3 routes `/settings` (any signed-in user, a lazy chunk); FR-UI-6 gains a `manage` slot in Services (`{CourseActions, LessonActions, ListFooter, Host}`, web/src/manage/slot.tsx, the one manage module of the initial chunk) on course headers, rows and the list's end, courses follow `course_position` before the title, the row number is the visible position, a skipped row is muted with its chip and never the Continue block's target, a done row shows a check with hidden text; FR-UI-15's control on the lesson page reads \"Reverted to an earlier revision\" while a finished run's revision is not the lesson's; FR-UI-11's user menu gains Settings above Sign out (its stories get the router decorator); FR-UI-16's theme.js also applies text size and reading width; app.css selects their token values; the test server stubs VEC-MANAGE-1 and `POST /__test__/reset?role=learner`; the Playwright config matches e2e/web/manage/**. web/src/app/compile.test.tsx mounts AppRoot with `manageSlot={null}`, so its row oracles (\"no button\" on a linked row) keep testing the compile control alone; e2e/web/ui/compile.spec.ts and csp.spec.ts locate the Compile button with `exact: true` (the row's manage menu is named \"Actions for Fixture lesson W02: not compiled yet\", which a substring match also finds); no oracle changed. Code-review fix B3 (2026-11-24, V/manage-fix-web; the observability i18n lost when V/manage merged into the phase-2 page): web/src/app/observability/ObservabilityPage.tsx takes every interface string of FR-UI-18 and FR-UI-33 (headings, captions, column heads, notes, the empty lines with the days as a plural, the label control with its reasons and mirror state as mapped enums, the bench form, the alert and stack lines, the dashboard names) from the `app/observability` catalogue through `useT`; ids, codes, span, kind, stage and model names, alert codes and subjects, service names and URLs stay untranslated (FR-UI-30's exceptions). The English copy is unchanged except that the reserve note is a plural (\"includes 1 open reserve\"), so observability.test.tsx's reserve oracle reads the plural; the new web/src/app/observability/observability-i18n.test.tsx renders the page in Russian (translated headings, column heads and empty lines; a run id, a stage value and a model id untranslated). Paired with WEB-MANAGE B6 (2026-11-24, V/manage-fix-web; FR-MANAGE-7's in-page \"Add a passkey\"): the test server stubs SRV-AUTH FR-AUTH-6's `POST /api/auth/register/options` (VEC-MANAGE-1's `register_options`, rp id `localhost`) and `POST /api/auth/register/verify` (200 for a `public-key` credential whose client data is a `webauthn.create` over that challenge, else 400 `register_failed`; no attestation check); `manageRoute` receives the parsed body for it. e2e/web/manage/passkey.spec.ts reaches the server as `http://localhost:4173` because a WebAuthn rp id cannot be an IP address. No other test-server or app shell change. Code review round 2 (V/manage-fix2, 2026-11-24): observability-i18n.test.tsx walks every text node of the Russian observability page and fails on any node that has no Cyrillic letter and matches none of the declared exceptions, an explicit allow-pattern list (ids and hashes, numbers with units and separators, dates, codes and span, kind, stage and model names, service names, URLs and punctuation). Owner live check fixes (V/live-fixes-4i, 2026-11-24): e2e/web/live/owner.slice.ts's `ui` step still read the lesson language from `div.lesson[lang]`, which FR-UI-32 removed (the container holds chrome, so it carries no lang); its hooks now follow FR-UI-32 — the title `h1` and the first `[data-markdown]` block must be present and carry `ru` on L02, and an output area, when the lesson shows one, carries `ru` too; no requirement changed."
+
 layer: web
 track: product
 adr: [ADR-0013, ADR-0020, ADR-0024, ADR-0004, ADR-0012]
@@ -70,6 +73,7 @@ paths:
   - web/scripts/**
   - web/vendor/**
   - web/index.html
+  - web/src/public/**
   - web/package.json
   - web/package-lock.json
   - web/vite.config.ts
@@ -121,7 +125,14 @@ requirements:
       the tarball and rewrites the lock file; it runs no git command that writes to a remote. A unit test hashes the
       committed tarball and compares it with the lock file. Imports use one entry per component (`@acme/ui/<entry>`),
       plus `@acme/ui/styles.css`. The slice uses these entries only: button, toast, progress, skeleton, tooltip,
-      dialog, chip, divider, link, typography, stack, container, app-bar, list-view, alert. [unit]
+      dialog, chip, divider, link, typography, stack, container, app-bar, list-view, alert, (design pass,
+      2026-11-23) breadcrumbs, menu, drawer and icon, and (WEB-MANAGE paired change, 2026-11-24) text-field, select,
+      switch, tabs and radio-group, used only by the lazy web/src/manage chunks. `tree-view` is not used: it is an ARIA `tree` whose items are
+      selected, not followed, so a tree of lesson links would announce links as tree items and take the arrow keys.
+      `collapsible` is not used either: its panel hides all of its content when closed, while a collapsed course group
+      keeps its published rows visible (FR-UI-6, FR-UI-17), so the groups use the app's own disclosure buttons
+      (`aria-expanded`, `aria-controls`; WAI-ARIA disclosure pattern). The allowed list in `web/src/app/sourceScan.ts`
+      equals this list in this order, then `styles.css`. [unit]
   - id: FR-UI-2
     text: >-
       Calm tokens are data: `web/src/ui/tokens/calm.tokens.json` (W3C Design Tokens, light and dark, starting from the
@@ -129,13 +140,14 @@ requirements:
       library's `--acme-*` variables unlayered, maps holo, glass and glow to flat values, and sets every duration to 0
       under `prefers-reduced-motion: reduce`. The generator is deterministic (same input, byte-identical output) and the
       committed `calm.css` equals its output (test). The app shell paints `--acme-canvas` on `html` (spike finding 4)
-      and follows `prefers-color-scheme`. [unit]
+      and follows `prefers-color-scheme`, unless the user chose Light or Dark (FR-UI-16). [unit]
   - id: FR-UI-3
     text: >-
       Routes (TanStack Router, declared as one route table): `/` the lesson list; `/lessons/$lessonId` the lesson view
       (WEB-NOTEBOOK); anything else a not-found view with a link to `/`. `$lessonId` must match
       `^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$` and must not be `.` or `..` (VEC-UI-2 `bad_ids`), otherwise the not-found
-      view renders and no request is made. [unit]
+      view renders and no request for that lesson is made (design pass: the shell's course sidebar, FR-UI-17, still
+      runs its `GET /api/lessons` list query on every page, so the oracle is "no `/api/lessons/<id>` request"). [unit]
   - id: FR-UI-4
     text: >-
       API client: one module with a typed function per route the slice calls (`me`, `signOut`, `listLessons`,
@@ -153,24 +165,77 @@ requirements:
       the live run, 2026-11-22: the client had expected a number and rejected every real response); on a 401 from it, or
       from any later API call, the app
       navigates the whole page to `/api/auth/signin` (SRV-AUTH FR-AUTH-14, which returns to `/` on success). The header
-      shows the signed-in `display_name` and a Sign out button that calls `POST /api/auth/signout`, clears the query
-      cache and then navigates to `/api/auth/signin`. The SPA never reads, stores or logs the session cookie, and keeps
+      shows the signed-in `display_name` as the user menu's trigger (FR-UI-11), and that menu's "Sign out" item calls
+      `POST /api/auth/signout`, clears the query cache and then navigates to `/api/auth/signin`. The SPA never reads, stores or logs the session cookie, and keeps
       no credential in `localStorage`, `sessionStorage` or IndexedDB. [unit]
   - id: FR-UI-6
     text: >-
       Lesson list: `GET /api/lessons`, grouped by course (`course_title`, courses sorted by title in the user's locale)
-      and within a course by `ordinal`. A lesson with `latest_sha256` set is a link to `/lessons/<lesson_id>` with its
-      title and updated date; a lesson with `latest_sha256: null` is shown without a link and with "not published yet".
+      and within a course by `ordinal`. A lesson with `latest_sha256` set is published: a link to `/lessons/<lesson_id>`
+      with its title and updated date; a lesson with `latest_sha256: null` is shown without a link and with "not
+      published yet".
       Each lesson is one row: its ordinal, its title, then the status ("not published yet") and the date as separate
       muted elements at the row's end (under the title below 40rem), so status and date never read as part of the
       title (the live list ran them together; live run 2026-11-23).
-      States: loading (skeleton), empty ("No lessons yet"), error (a calm message with Retry). [unit] [story]
+      **Design pass (2026-11-23; the owner's live list: 128 rows in two courses, 2 published, L02 about 107 rows down,
+      "the list of paragraphs, but no hyperlinks to courses"):**
+      - **Continue.** Above the courses, a section "Continue" (`h2`) lists the published lessons of every course,
+        most recent `updated_at` first, at most 5 rows (structural: a short block); each row shows the lesson title as
+        a link and its course title muted. No published lesson: no section.
+      - **Course groups.** Each course is a `section` with `id="course-<course_id>"`, labelled by its heading (`h2`,
+        the course title as plain text), followed by a muted summary "<P> of <N> published" and, when some lesson is
+        unpublished, " · next: <title of the lowest-ordinal unpublished lesson>". Expanded, the group shows all its
+        rows; collapsed, only the rows of its published lessons (so every published lesson is a visible link on `/`
+        without a click). One control toggles the state (review: one disclosure control per group): a button under the
+        list, "Show all <N> lessons" while collapsed and "Show published only" while expanded, with `aria-expanded` and
+        `aria-controls` naming the group's list; a group whose lessons are all published has no such button. A group
+        with at most 12 lessons (structural: one screen of rows) starts expanded; a larger group starts collapsed.
+        Opening `/#course-<course_id>` expands that group and scrolls it into view. The state is per course and lives
+        in memory.
+      - **Rows.** A row is full width with a hairline `--acme-border` separator and a `--acme-hover` fill on hover; a
+        published row's link covers the whole row (its hit area is the row). Ordinal, date and metadata use tabular
+        figures. The default status of an unpublished row is the neutral chip "not published yet"; an unpublished
+        title is muted. **Compile slot (shaped for FR-UI-15; code review: components, so V/compile-ui's stateful
+        control fits):** the app's `Services` carry an optional `compileSlot?: { Status?: ComponentType<{ lesson:
+        LessonSummary }>; Action?: ComponentType<{ lesson: LessonSummary }> }` (`AppRoot` takes it as a prop and puts it
+        there). When present, both are rendered as React components for **every** row of the list, published ones
+        included, and on the not-published page (WEB-NOTEBOOK FR-NOTEBOOK-1). Constraints:
+        - `Status` renders inside `span.slot-status`, followed by the default status in `span.status-default` (the chip
+          of an unpublished row; nothing on a published one); app.css hides the default while `.slot-status` is not
+          `:empty` and hides `.slot-status` while it is, so a `Status` that renders nothing (`null`) falls back to the
+          chip. The status is always visible and sits above the row link's hit area (`position: relative`,
+          `z-index: 1`), so a link or button inside it stays clickable;
+        - `Action` renders inside `span.row-action` at the row's end, also above the row link, revealed on row hover
+          and `:focus-within` and always shown under `(hover: none)`; interactive controls belong in `Action`;
+        - on the not-published page the parts render inside a `div` (not a `p`), with the action always visible.
+        Without the slot, rows show the default status. The course sidebar (FR-UI-17) renders no slot.
+        **The app's slot (merge of V/design-pass into V/slice-integration, 2026-11-24).** When no `compileSlot` prop is
+        given, `AppRoot` supplies its own: `Status` renders FR-UI-15's `CompileControl` for a user with role `owner`
+        and `null` for everyone else, so a learner's row keeps the default chip and makes no compile request. The
+        control therefore renders once per row and once on the not-published page, through the slot; `Status` and
+        `Action` take `{ lesson, place }` with `place` `'list'` or `'page'`. For the owner, FR-UI-15's compile state,
+        draft chip and Compile and Retry actions are what the slot shows; everything else holds for everyone.
+      States: loading (skeleton), empty ("No lessons yet"), error (FR-UI-11's state block with Retry). [unit] the
+      Continue block (order, cap, absence), the summary text, the 12-row rule at 12 and at 13 lessons, published rows
+      visible while collapsed, the toggle both ways with its `aria-expanded` and `aria-controls`, no toggle on an
+      all-published group, the hash expand and its `scrollIntoView`, the compile slot's `Status` and `Action` rendered
+      for every row (published ones included, an action on a published row too), a `Status` rendering `null` leaving
+      `.slot-status` empty beside the default chip (with app.css's two hiding rules checked by the CSS scan test), a
+      stateful slot component keeping its state across re-renders, and no slot; [story] Light,
+      Dark, Empty, a large course (30 lessons, 2 published) and WithCompileSlot (a stub slot); [live] the `ui` step:
+      on `/` every published lesson of `GET /api/lessons` has a visible `a[href="/lessons/<id>"]` before any click,
+      and each group of more than 12 lessons starts collapsed with exactly its published rows shown.
   - id: FR-UI-7
     text: >-
       Notices: one toast region for app-level messages (sign-out failure, network loss, the notebook's kernel notices
       handed over by WEB-NOTEBOOK). At most 3 toasts are visible (a structural bound for a calm screen); older ones
       collapse. Every message is plain text from a fixed catalogue keyed by code; no server text is shown as HTML.
-      [unit] [story]
+      Design pass (2026-11-23): every catalogue message is one or more sentences in sentence case, starting with a
+      capital letter and ending with a full stop (the live catalogue had "too many open lessons; close one or reset");
+      each notice shows an info icon (the library's `InfoIcon`, `aria-hidden`) before its text, and the collapsed
+      count reads "+<n> more" in a muted chip. The region stays this app's own (not the library's toast manager, whose
+      timeout would drop kernel notices before they are read). [unit] the catalogue rule over every entry, the icon and
+      the "+n more" text; [story]
   - id: FR-UI-8
     text: >-
       Stories: every exported React component in `web/src/{ui,app,notebook,render}/` (a PascalCase export of a `.tsx`
@@ -186,37 +251,81 @@ requirements:
       [unit] by inspecting the build output for `data:` URLs. The only `data:` URL allowed in the output is the one
       literal that the vendored library's own stylesheet carries at v0.1.0 (a `mask: url("data:image/svg+xml,…")` for
       the table sort indicator, a component the slice does not render; under the app CSP that mask would be blocked, so
-      it is an owner note for a library change, not an inlined asset). The test pins the number of distinct `data:`
-      URLs at exactly 1 (the minifier repeats it for `-webkit-mask`), so a new library literal fails the build check
-      until it is reviewed.
+      it is an owner note for a library change, not an inlined asset). Design pass (2026-11-23, reviewed here):
+      CodeMirror's `@codemirror/view` base theme carries one more literal, a `url('data:image/svg+xml,…')` background for
+      `.cm-highlightTab`, a class only the `highlightWhitespace()` extension sets, which the lab editor does not load
+      (WEB-NOTEBOOK FR-NOTEBOOK-9); it lives in the lazy editor chunk only, inside the editor's shadow root, and the
+      app CSP's `img-src 'self' blob:` would block it anyway. The test pins the distinct `data:` URLs at exactly these
+      2 — the library's (in the CSS) and CodeMirror's (in the chunk whose source map lists `@codemirror/view`, never
+      an initial chunk) — so any new literal fails the build check until it is reviewed.
   - id: FR-UI-10
     text: >-
-      Layout and type (WEB polish, from the live screenshots of 2026-11-23). Spacing uses the library's
-      `--acme-space-1..7` steps only; colours only Calm tokens (INV-UI-1 unchanged). Prose (lesson markdown, the
-      tutor's answers) is set in the serif stack `ui-serif, Georgia, 'Iowan Old Style', serif` (system fonts only: no
-      web font is fetched for text; KaTeX's bundled math fonts are the only font files, FR-UI-9) at 1.0625rem (17px) with line height 1.65, in a reading column at most 38rem wide (the `ui` step
-      records an estimated median of characters per line in slice-results.json, not asserted: 60 at 1280 and 1024 px
-      and 35 at 390 px on L02, 2026-11-23; the slice's 46rem column at 16px was estimated at about 90); the lesson `h1` is 2.25rem (1.875rem below
-      40rem), markdown headings
-      1.5 and 1.2rem; UI chrome (header, labels, buttons, references, list metadata) uses the library's sans
-      `--acme-font` at 0.8125–0.875rem. Widths: at 1280 and 1024 px the lesson shows its contents column beside the
-      reading column (WEB-NOTEBOOK FR-NOTEBOOK-11), below 60rem one column. Markdown tables fit the column (cells
-      wrap and long words break; a scrolling table is a scroll region keyboard users cannot reach, axe
-      `scrollable-region-focusable`, measured on L02 2026-11-23); display math scrolls inside its own box. At 1280, 1024 and 390 px no page scrolls horizontally. Every interactive element (links,
-      buttons, text areas, the disclosure summary, the skip link) shows a 2px `--acme-focus` outline on
-      `:focus-visible`.
-      [unit] a scan of `web/src/ui/app.css`: no literal colour (no hex value and no colour function, `color-mix`
-      included; every value of `color`, `background`, `background-color`, `border`, `border-*`, `outline`,
-      `outline-color`, `box-shadow`, `fill` and `caret-color` uses colours only as `var(--acme-…)`, `transparent`,
-      `inherit` or `currentColor`), every `padding`, `margin`, `gap`, `inset`, `top`, `right`, `bottom` and `left`
-      value made of `0`, `auto` and `var(--acme-space-N)` only, the reading column's `max-width: 38rem`, and a
-      `:focus-visible` rule whose outline is `2px solid var(--acme-focus)`. [live] the `ui` step of
-      e2e/web/live/owner.slice.ts on the running stack: at each width the document element's `scrollWidth` ≤ its
-      `clientWidth` (the viewport without a scrollbar) on the list and on L02, and the numbers-only `ui` object of
-      slice-results.json is committed to e2e/live/results/; on L02 the widest `[data-markdown] p` is > 0 and ≤ 608px, its computed `font-size` is 17px, its
-      `line-height` 28.05px (± 0.1) and its `font-family` begins with `ui-serif`, and the `h1` is 36px at 1280 and
-      1024 px and 30px at 390 px; axe reports no
-      serious or critical issue.
+      Layout and type (WEB polish, from the live screenshots of 2026-11-23; design pass, from the audit of the same
+      day). Spacing uses the library's `--acme-space-1..7` steps only; colours only Calm tokens (INV-UI-1 unchanged).
+      - **Two typefaces with fixed jobs.** Reading content (lesson markdown, the tutor's answers) is set in the serif
+        stack `ui-serif, Georgia, 'Iowan Old Style', serif` (system fonts only: no web font is fetched for text; KaTeX's
+        bundled math fonts are the only font files, FR-UI-9) at 1.0625rem (17px) with line height 1.65, in a reading
+        column at most 38rem wide (the `ui` step records an estimated median of characters per line, not asserted: 60
+        at 1280 and 1024 px and 35 at 390 px on L02, 2026-11-23). Everything else (header, navigation, page titles,
+        labels, buttons, references, list rows and metadata, forms, state blocks) uses the library's sans
+        `--acme-font`; code uses the library's `--acme-font-mono`, whose value app.css overrides (like calm.css does
+        for colours) to `ui-monospace, Menlo, 'SF Mono', 'Cascadia Mono', Consolas, monospace`: the library's stack led
+        with fonts Chromium could not use for Cyrillic, so Russian comments and strings in code fell back to a serif
+        (after-screenshots, 2026-11-24). Heading scale: an app page title (`h1` of the list,
+        import, not-found and state pages) 1.75rem sans (1.5rem below 40rem); the lesson title `h1` 2rem serif
+        (1.75rem below 40rem); markdown `h2` 1.375rem and `h3` 1.125rem serif; line height 1.25 for headings.
+      - **Figures.** Headings, lesson titles and table cells use `font-variant-numeric: lining-nums` (Georgia's
+        default old-style figures made "pp. 9–10" and "1964" look small, audit 2026-11-23); ordinals, dates, counts,
+        prices and other metadata use `tabular-nums`.
+      - **Language.** The lesson container (`div.lesson`, WEB-NOTEBOOK's lesson view root) carries `lang`: `ru` when
+        Cyrillic letters are more than half of the letters in the lesson's markdown sources, else `en` (review: no
+        metadata field exists for it today; a server field is a follow-up). Amended by FR-UI-32 (V/manage,
+        2026-11-24): that language is set on the lesson's content nodes, and the chrome carries the interface
+        language. Prose paragraphs, list items and table cells
+        set `hyphens: auto`. (The live L02 is Russian under `lang="en"`: no hyphenation, and the table rule below broke
+        "Отказоустойчивость" mid-letter; audit 2026-11-23.)
+      - **Widths.** Lesson cells sit in a container at most 50rem wide whose prose children keep the 38rem reading
+        column; wide blocks (class `wide`) — the lab (WEB-NOTEBOOK FR-NOTEBOOK-9), code blocks (WEB-RENDER
+        FR-RENDER-4), markdown tables of 5 or more columns and display math — take the container's full width. At 60rem and wider the lesson
+        shows its contents column beside the cells (WEB-NOTEBOOK FR-NOTEBOOK-11), at 75rem and wider also the course
+        sidebar (FR-UI-17); below 60rem one column. Markdown tables fit their width (cells wrap; long words hyphenate,
+        and break with `overflow-wrap: break-word` only where no hyphenation point fits, never `anywhere`; a scrolling
+        table is a scroll region keyboard users cannot reach, axe `scrollable-region-focusable`); display math scrolls
+        inside its own box. At 1280, 1024 and 390 px no page scrolls horizontally.
+      - **Shape and controls.** Three radii, declared once in `app.css` as `--radius-control: 6px` (buttons, inputs,
+        text areas, chips other than pills), `--radius-block: 8px` (code, lab, callouts, notices, cards of the recall
+        deck, the estimate) and `--radius-panel: 12px` (the tutor panel, the sidebar drawer, menus). Library buttons
+        take `--radius-control` (the library's 12px made 32px buttons read as pills); size `sm` is 28px tall (toolbars,
+        rows, cell toolbars) and the default size 32px (forms, state blocks). Actions are ghost neutral buttons
+        (transparent at rest, `--acme-hover` fill on hover, `--acme-pressed` when pressed); a view's one primary
+        action is solid: the lab's Run (per lab block), the tutor's Ask, the import's "Create the course" and a
+        dialog's confirm; the lesson toolbar has no solid button and the destructive "Reset kernel" sits in its "More"
+        menu (WEB-NOTEBOOK FR-NOTEBOOK-7). Rows, ghost buttons and menu items change background with a transition of
+        at most 150 ms (`calc(var(--acme-duration) * 0.75)`, so 0 under `prefers-reduced-motion`).
+      - **Focus.** Every interactive element (links, buttons, text areas, inputs, the disclosure summary, the skip link,
+        menu items, the editor) shows a 2px `--acme-focus` outline on `:focus-visible`.
+      [unit] a scan of `web/src/ui/app.css` (and every other `.css` file under `web/src/`): no literal colour (no hex
+      value and no colour function, `color-mix` included; every value of `color`, `background`, `background-color`,
+      `border`, `border-*`, `outline`, `outline-color`, `box-shadow`, `fill` and `caret-color` uses colours only as
+      `var(--acme-…)`, `var(--shiki-…)`, `transparent`, `inherit` or `currentColor`), every `padding`, `margin`, `gap`,
+      `inset`, `top`, `right`, `bottom` and `left` value made of `0`, `auto` and `var(--acme-space-N)` only (KaTeX's
+      inline box, WEB-RENDER FR-RENDER-3, is the one declared exception, in em), every `border-radius` one of `0`,
+      `50%`, `999px` or `var(--radius-control|block|panel)`, the reading column's `max-width: 38rem`, the cells'
+      `max-width: 50rem`, every `transition` duration a `var(…)` expression, and a `:focus-visible` rule whose outline
+      is `2px solid var(--acme-focus)`; [unit] the lesson `lang` rule (Cyrillic majority, Latin majority, code cells
+      not counted) and the attribute on `div.lesson`; [live] the `ui` step of e2e/web/live/owner.slice.ts on the
+      running stack (light): at each width the document element's `scrollWidth` ≤ its `clientWidth` on the list, L02,
+      an unpublished lesson, `/import` and not-found, and the numbers-only `ui` object of slice-results.json is
+      committed to e2e/live/results/; on L02 the widest `[data-markdown] p` is > 0 and ≤ 608px, its computed
+      `font-size` is 17px, its `line-height` 28.05px (± 0.1) and its `font-family` begins with `ui-serif`; the lesson
+      `h1` is 32px at 1280 and 1024 px and 28px at 390 px; the list's `#content h1` "Lessons" is 28px at 1280 and
+      1024 px and 24px at 390 px and its `font-family` does not begin with `ui-serif`; `#content div.lesson` has
+      `lang="ru"`; a `[data-markdown] td` has computed `hyphens: auto` and `overflow-wrap: break-word`; the first
+      `.lesson-toolbar .acme-button` has computed `border-radius: 6px` and height 28px; the lab block
+      (`.cell[data-kind="lab"] .lab`) is at least 64px wider than the widest paragraph and at most 800px wide at 1280
+      and 1024 px, and no wider than the column at 390 px; every one of these hooks is asserted present (non-null)
+      before its value; axe reports no serious or critical issue; and in dark at 1280 px only, the list and L02 have no
+      horizontal scroll and no serious or critical axe issue.
   - id: FR-UI-11
     text: >-
       Keyboard and states of the shell: the shell renders exactly one `<main id="content" tabIndex={-1}>`, around the
@@ -226,43 +335,376 @@ requirements:
       hidden text "Loading" (no `aria-busy`, which would make screen readers skip the status) and the library's
       `Skeleton` hidden from assistive technology, not a bare "Loading…" line; the lesson list's loading state follows
       the same pattern ("Loading the lessons"). The not-found view keeps FR-UI-3's link. Lists styled without bullets
-      (`list-style: none`) carry `role="list"`. [unit] on `/`, `/lessons/w01` (loaded and error states) and
-      `/no-such-page`: one `main#content` with tabindex -1 and the skip link first; following the skip link focuses
-      it; [live] the `ui` step follows the skip link with the keyboard and finds focus on `main#content`; overflow is
-      measured as `scrollWidth − clientWidth` of the document element. [story] the shell's loading state.
+      (`list-style: none`) carry `role="list"`.
+      **Header (design pass, 2026-11-23).** In order: below 75rem a "Courses" ghost button (an app-owned inline SVG
+      menu icon, `aria-expanded`, `aria-controls`) that opens the course sidebar (FR-UI-17); the brand, a link to `/`
+      holding the reader-ai mark (an inline SVG, `aria-hidden`) and the text "reader-ai" (the auth pages' name and
+      mark, SRV-AUTH FR-AUTH-19); a `nav` labelled "Main" whose links come from one declared array `NAV_ITEMS` of
+      `{label, to, owner_only, useBadge?}` (today "Lessons" `/`, "Import" `/import` owner-only, FR-UI-14's "Sign-ups"
+      `/signups` owner-only with the pending count as its badge, and FR-UI-18's "Observability" owner-only; other
+      branches append entries without changing the header's code; `useBadge` is an optional hook returning
+      `{shown, after}` or `null`: with a badge the link is "<label> <span class=nav-badge><shown></span><span
+      class=visually-hidden> <after></span>", so it shows "Sign-ups 3" and reads "Sign-ups 3 waiting"; without one
+      it reads "<label>". No punctuation sits in hidden text: Chromium computed "Sign-ups , 1 waiting" for a hidden
+      ", " (live run 2026-11-24), and an `aria-label` fails axe's label-content-name-mismatch), each a ghost link with `aria-current="page"` and the
+      `--acme-hover` fill when its route is the current one (`/` also for `/lessons/*`); then, at the end, the user
+      menu: a plain ghost button showing the `display_name`, with the accessible name "Account menu for
+      <display_name>" (the visible text is part of it, WCAG 2.5.3) and `aria-haspopup="menu"`, whose first activation
+      loads the library `Menu` as a lazy chunk and opens it, holding the theme choice (FR-UI-16) and "Sign out"
+      (FR-UI-5). If a lazy chunk (the user menu, the course drawer) fails to load, an error boundary keeps the plain
+      trigger on screen (code review) instead of removing it; when the drawer's chunk fails, the main nav also stays
+      reachable as plain links (`nav.nav-fallback` labelled "Main", a wrapping row in the header, displayed below
+      75rem), since the header's own nav is hidden there. **Initial chunk (review B1):** the header and the shell import no `@acme/ui/menu`, `@acme/ui/drawer`
+      or `@acme/ui/icon` module statically (the initial chunk measured 111,507 B against NFR-UI-1's 121,153 B, and those
+      modules add about 18 KB); icons in the shell are app-owned inline SVGs. The header is one row at every width
+      down to 360px (below 40rem the brand text and the display name are visually hidden, their icons stay); its
+      height is its declared `min-height: 3.5rem` (56px, the WEB polish value in app.css).
+      **Below the Courses breakpoint (live fix 2026-11-24).** With four owner entries the header overflowed a 390px
+      viewport by 119px on every page; a first fix at 40rem still overflowed above it (code review: 42px at 641px
+      with "Ivan", up to about 847px with a 12rem name). Below 75rem — the breakpoint where the "Courses" button
+      appears and the sidebar leaves (FR-UI-17), i.e. `max-width: 74.98rem`, the complement of the `min-width: 75rem`
+      rules, so a viewport is below it exactly when its CSS width is under 1200px — the header's `nav.main-nav` is not
+      displayed, and the "Courses" drawer holds the same `nav` labelled "Main" (`nav.drawer-nav`, the same
+      `NAV_ITEMS`, owner-only rules and badge names) above the course sidebar; following one of its links closes the
+      drawer. From 75rem up the drawer's copy is not displayed, so one "Main" navigation is rendered at any width.
+      **State blocks.** Every empty, not-found, not-published and error state renders one `StateBlock` component
+      (`web/src/ui/StateBlock.tsx`, root class `state-block`): an
+      icon (`aria-hidden`), its `h1` in the app page title style (FR-UI-10), a muted explanation line and its actions
+      in one row (Retry as the default-size outline button, links as ghost links). No error text is an `h1` in the
+      serif (the audit found "The lesson could not be loaded." as a 36px serif heading).
+      [unit] on `/`, `/lessons/w01` (loaded and error states) and `/no-such-page`: one `main#content` with tabindex -1
+      and the skip link first; following the skip link focuses it; the header's order, `NAV_ITEMS` driving the links
+      (an added test entry, with a badge, appears without other changes, shows its badge and has the name
+      "<label> <shown> <after>"), the drawer's copy of the nav with the same entries and, for a learner, without the
+      owner entries, the fallback nav when the drawer's chunk fails, `aria-current` on `/`,
+      `/lessons/w01` and `/import`, the Import entry absent for a learner, the user menu holding the theme group and
+      Sign out; every state view rendered by `StateBlock`; [unit] in the production build (the build test of NFR-UI-1)
+      the initial chunks' source maps list no module of `@acme/ui`'s menu, drawer or icon entries; [live] the `ui` step
+      follows the skip link with the keyboard and finds focus on `main#content`; overflow is measured as
+      `scrollWidth − clientWidth` of the document element; `header.app-header` is present and one row (its height ≤ the
+      declared 56px) at every width; [browser] e2e/web/ui/header.spec.ts, for the owner with the display names "Ivan",
+      a 64-code-point name and a 36-character Cyrillic name: at 390, 641, 768, 1024 and 1199 px no horizontal scroll
+      on `/`, a lesson, not-found and `/import`, the header's nav hidden, and the Courses drawer's "Main" nav holding
+      Lessons, Import, "Sign-ups 1 waiting" (the name Chromium computes) and Observability, with no serious or
+      critical axe issue while the drawer is open; at 1200 and 1280 px no horizontal scroll, the header's nav visible
+      with the same four names. [story] the shell's loading state, the header for an owner, an owner with a pending
+      sign-up (the badge) and a learner, the drawer's nav with the badge, `StateBlock` Light and Dark.
   # Amendment (2026-11-23, V/plan; reviewed with SRV-PLAN, deep-reviewer round 4 approve on d9f655a), promoted with
   # its Red tests. Until the upload track lands, `/import` shows WEB-PLAN's "Your sources" list and the study-time
   # and plan steps for already-imported materials; the drop zone joins later.
   - id: FR-UI-12
     text: >-
       **Import route and link.** The route table adds `/import` (the page component in `web/src/import/plan/`,
-      WEB-PLAN, loaded as a lazy chunk) and the header an "Import" link, shown only for a user with role `owner` (from
+      WEB-PLAN, loaded as a lazy chunk; since FR-UI-13 the chunk's entry is `web/src/import/ImportPage.tsx`, which
+      renders that page first) and the header an "Import" link, shown only for a user with role `owner` (from
       `/api/me`); a non-owner who opens `/import` sees the app's not-found view (web/src/app/routes.tsx `NotFound`).
       The page renders inside the shell's `main#content`. [unit] the link for owner and learner, the lazy route;
       [browser] `/import` under the production CSP.
-
-
-# ---- Amendment (DRAFT, 2026-11-23, V/onboarding, for WEB-IMPORT). Held under `proposed_requirements` (not read by
-# trace-check; this spec is approved) until reviewed; then it moves into `requirements` with its Red tests.
-# FR-UI-12 (route and header link) was promoted on V/plan; FR-UI-13 stays with V/onboarding. ----
-proposed_requirements:
+  # FR-UI-14: V/signup (ADR-0031, accepted 2026-11-23); FR-UI-12 is V/plan's, FR-UI-13 is V/onboarding's.
+  - id: FR-UI-14
+    text: >-
+      **Sign-ups entry points (WEB-ACCOUNTS).** The route table adds `/signups`, WEB-ACCOUNTS's page as a lazy chunk.
+      For a user whose `/api/me` role is `owner`, the header shows a link "Sign-ups" to `/signups`, with the pending
+      count of WEB-ACCOUNTS FR-ACCOUNTS-4; a learner sees no link, and on `/signups` a learner gets the not-found view
+      (FR-UI-3) without any request to `/api/auth/signups`. The shell's behaviour is otherwise unchanged: one
+      `main#content` (FR-UI-11), the skip link first, the 401 redirect of FR-UI-5. `web/test-server/` stubs
+      `GET /api/auth/signups` and the three POST routes from VEC-ACCOUNTS-1, and its fixed map of static auth files
+      adds `/api/auth/signup` → signup.html (SRV-AUTH FR-AUTH-31), five entries in all. [unit] the route table, the
+      link for owner and learner, the learner's request log on `/signups`; [browser] WEB-ACCOUNTS FR-ACCOUNTS-5's
+      matrix covers the link at 1280, 1024 and 390 px in both schemes.
+  # Amendment (2026-11-23, V/compile-ui): the owner could not study the 105 planned lessons, because the list links
+  # only published lessons and the only UI path that starts a compile is /import's "Start compiling lesson 1". Base:
+  # the "compile status in the list" bullet of V/onboarding's draft FR-UI-13 (WEB-UI.yaml `proposed_requirements`),
+  # extended with the Compile action. Ids (coordinator, 2026-11-23): FR-UI-13 stays the upload track's id, FR-UI-14 is
+  # V/signup's, FR-UI-16 and above are the design pass's. The upload track keeps its FR-UI-13 (first run) and drops
+  # its compile-status bullet at merge; this item supersedes it.
+  - id: FR-UI-15
+    text: >-
+      **Compile from the lesson list (owner).** One component, `CompileControl` in `web/src/app/compile/` (with its
+      status mapping and copy there; the five client functions `openCompiles`, `latestCompile`, `startCompile`,
+      `resumeCompile` and `lessonEstimate` join FR-UI-4's API module, validated at run time like the others), used by
+      the list rows and by WEB-NOTEBOOK FR-NOTEBOOK-12.
+      - **"Has a revision" is not "compiled".** The `draft` step writes a revision (L02: about 157 s into a 210 s
+        compile), so `latest_sha256` turns a row into FR-UI-6's link long before the run ends, and a run that stops
+        later leaves a linked draft behind. The control is therefore keyed on the run's state, never on
+        `latest_sha256` alone.
+      - **Who:** only for a user with role `owner` (from `/api/me`). For anyone else the list is FR-UI-6 unchanged: no
+        button, no status, no chip, and no request to a compile or estimate route.
+      - **The list's run-state source:** one `GET /api/compiles` (SRV-PIPELINE FR-PIPELINE-17) per list view gives
+        the owner's open runs: the latest run of each lesson whose state is not `converged` or `open_findings`.
+        A lesson in that answer shows its run's state; a lesson absent from it has no open run: "not compiled yet"
+        and a "Compile" button when `latest_sha256` is null, nothing beyond FR-UI-6 when it is set. The list makes
+        no per-lesson status read.
+      - **Draft chip:** a linked row (with `latest_sha256`) whose lesson has an open run shows, after the link, a
+        muted chip "draft, compile not finished" before its status text, so a draft whose compile still runs or has
+        stopped never reads as finished (owner feedback 2026-11-23: plan lesson 1 looked published, with open
+        findings, while its compile was not finished).
+      - **Status**, in FR-UI-6's status slot instead of "not published yet" (the stage labels: `draft` drafting,
+        `fact_check` checking facts, `adversarial_review` reviewing, `revise` revising, `findings` collecting
+        findings, `lab_verification` verifying labs; the stage is that of the last listed step that carries a
+        `status`, else of the last step), the same with or without `latest_sha256`:
+        - no run: "not compiled yet" and a "Compile" button;
+        - `running` or `stalled`: "Compiling: <stage label>", no button;
+        - `stage_failed`: "Compile stopped at <stage label>", then the message of the status's `error` code when it
+          has one (SRV-PIPELINE FR-PIPELINE-16; `provider_missing`: "No AI provider is connected for your account.
+          Connect one, then retry."; any other code: no extra text), and a "Retry" button;
+        - `budget_exhausted`: "Compile stopped:" and the message of `refusals[0]` (`budget_exhausted`: "it reached
+          its $<cap_usd> cap"; `task_budget_exhausted`: "a stage reached its own budget"; `monthly_budget_exhausted`:
+          "the monthly budget is used up"; `daily_budget_exhausted`: "the daily budget is used up"; any other:
+          "a budget was reached"), then "Spent $<spent_usd>.", and a "Compile" button (a new run);
+        - `converged` or `open_findings` (the lesson page's single read only; the list never sees them): nothing
+          beyond FR-UI-6;
+        - a failed read of the run state: no status text of its own (an unpublished row keeps "not published yet")
+          and, on an unpublished row, the "Compile" button (a running compile then answers 409, below).
+      - **Polling:** while any run in the list's answer (or the lesson page's run) is `running` or `stalled`, that
+        query refetches every `COMPILE_POLL_MS` = 5,000 ms (chosen: a stage takes tens of seconds, L02's whole
+        compile 210 s); otherwise never. TanStack Query does not refetch in a background tab. Polling stops
+        `COMPILE_POLL_MAX_MS` = 30 min (chosen: more than eight times L02's compile) after the query was last started
+        or refreshed; the status then adds a "Refresh" button that refetches once and restarts the window. The window
+        also restarts whenever a run starts, from any source: after this control's own POST, and whenever the
+        query's answer holds a `running` or `stalled` run whose `run_id` that query has not polled before (a run
+        started on another page or in another tab). So a run started after 30 idle minutes is polled. A status
+        read calls SRV-PIPELINE's `ensure` (FR-PIPELINE-6, -11, -17), so an owner's page view can re-enqueue a
+        stalled run; that is the server's recovery path, not a side effect to avoid.
+      - **Revisions:** when a run's `latest_sha256` is not null and differs from the row's (or the page's), or a run
+        leaves the answer or leaves `running`/`stalled`, the app invalidates the `['lessons']` and `['lesson', id]`
+        queries, so the row becomes FR-UI-6's link (with the chip while its run is open) and the lesson page loads
+        the newer revision.
+      - **Confirm:** "Compile" opens a dialog (the library's `Dialog`) titled "Compile lesson <ordinal>?" with the
+        lesson title, then:
+        - the estimate from `GET /api/lessons/{lesson_id}/estimate` (SRV-PLAN FR-PLAN-13, the plan's own per-lesson
+          formula, FR-PLAN-8): "Estimate: $<low_usd>–$<high_usd>" and "An estimate from one measured lesson (L02),
+          scaled by this lesson's <kchars> thousand characters; not a bound." (kchars with one decimal); when
+          `extrapolated`, also "This lesson is R× shorter than the measured one; the real cost is likely higher than
+          this range." (R = `basis_kchars / kchars`, one decimal) or, when longer, "This lesson is R× longer than the
+          measured one; the real cost may differ from this range." (R = `kchars / basis_kchars`); "Estimating…" while
+          it loads; "No estimate for this lesson." on 404 or any error; when `kchars` is "0.000", instead "This
+          lesson's pages have no text to compile." and the dialog's "Compile" is disabled (the server would answer
+          `no_source_spans`);
+        - "Stops at $<run_cap_usd>." (the estimate's `run_cap_usd`, else the client constant `RUN_CAP_USD` = "8.00",
+          which a unit test pins to SRV-PIPELINE `bounds.run_cap_usd`);
+        - "Compile" and "Cancel". "Compile" sends `POST /api/lessons/{lesson_id}/compile` with no body (the default
+          cap, FR-PIPELINE-11; bodiless, FR-UI-4) and is disabled while the request is in flight; an in-flight ref
+          guards it too, so two clicks in the same event-loop turn (before the disabled state renders) or Enter send
+          one request.
+        "Retry" opens the same dialog titled "Resume the compile of lesson <ordinal>?" with "Spent so far: $<spent_usd>
+        of $<cap_usd>." in place of the estimate and "Stops at $<cap_usd>."; its "Resume" sends
+        `POST /api/compiles/{run_id}/resume`. The decision is a pure function `submitAction(open, mode, run)`:
+        nothing while the dialog is not open; in resume mode with no run (the run left the state after the dialog
+        opened) it closes the dialog and posts nothing, never a new compile; otherwise resume or compile.
+      - **After the request:** a 202 closes the dialog, refetches the run state (the list's `GET /api/compiles`, or
+        the page's status) and moves focus to the row's (or page's) status text (`tabIndex={-1}`; the button that
+        opened the dialog is gone). `compile_running` (409),
+        `already_started` (409; not sent by this route today, FR-PIPELINE-15, mapped for completeness) and
+        `not_failed` (409, resume) close the dialog the same way, so the row shows the run, and add a notice (FR-UI-7)
+        "A compile of this lesson is already running.", "A lesson of this course is already compiled or compiling.",
+        "This compile is no longer stopped.". Any other error keeps the dialog open with a `role="alert"` line:
+        `lesson_unknown` and `not_found` "This lesson no longer exists. Reload the list." (and the list is
+        invalidated), `no_material` "The source of this lesson is not imported.", `no_source_spans` "This lesson's
+        pages have no text to compile.", `source_too_large` "This lesson is too long to compile in one run.",
+        `network` "The server could not be reached. Check the connection and try again.", anything else "Something
+        went wrong. Try again.". Budget refusals and `provider_missing` never come from these POSTs (a step meets
+        them); they reach the row through the status above.
+      - **Polish:** FR-UI-10 holds for the new CSS (tokens and spacing steps only, the 2px focus outline); the row's
+        buttons are the library's small outline buttons. At 1280, 1024 and 390 px no page scrolls horizontally and
+        axe reports no serious or critical issue on the list with a compiling row, a stopped row, the Compile dialog
+        and the Resume dialog open, in light and in dark. The library's dialog fades in over `--acme-duration-slow`
+        (280 ms in the library, 0 under `prefers-reduced-motion`; Calm does not change it), so the [browser] test
+        runs axe only after the dialog's animations have finished, waiting at most 2 s (a longer fade fails the test).
+      - **Test server:** `web/test-server/` serves, for the owner fixture, `GET /api/lessons/w02/estimate`, and a
+        compile of `w02` shaped like a real one: no run until `POST /api/lessons/w02/compile` (202); then `running`
+        at `fact_check` with a `latest_sha256` already set (the draft's revision) for two reads, while
+        `GET /api/lessons` lists w02 with that sha256 (a link with the draft chip); then `converged`, when w02 leaves
+        `GET /api/compiles`. `GET /api/compiles` and `GET /api/lessons/w02/compile` answer from the same state.
+        `POST /__test__/reset` (204) restores the start; `POST /__test__/reset?w02=stopped` starts from a
+        `stage_failed` run at `fact_check` with the draft's `latest_sha256` set and `error: "provider_missing"`.
+        Every other lesson has no run. Because this state is global, web/playwright.config.ts runs with
+        `workers: 1`.
+      [unit] web/src/app/compile.test.tsx: owner and learner, one `GET /api/compiles` and no per-lesson status read
+      on the list, every status and refusal mapping with and without `latest_sha256` (`stage_failed` and
+      `budget_exhausted` on a linked row keep the chip and their button), the chip only for open runs, the stage of
+      the last step with a `status`, the poll interval per state and its 30-minute stop with Refresh, a run started
+      after 31 idle minutes is polled, `submitAction` (closed dialog, resume without a run, resume, compile), the
+      confirm (estimate, extrapolated in both directions, missing estimate, zero characters, the cap, the bodiless
+      POST, two clicks inside one `act` send one request), resume, every error mapping, focus after success, the list refetch
+      that turns the row into a link, `RUN_CAP_USD` against SRV-PIPELINE's bounds; [story] CompileControl in each
+      state and the dialog, Light and Dark; [browser] e2e/web/ui/compile.spec.ts at 1280, 1024 and 390 px against
+      the test server: Compile, confirm, a link with the draft chip and "Compiling: checking facts", then the chip
+      gone; the stopped state with the chip, Retry and the Resume dialog; light and dark; axe and horizontal scroll as
+      above; no CSP violation. The row is located inside its course group (`#course-c-fixture li`): since the design
+      pass a published lesson's title also appears in the Continue block (fix 2026-11-24).
+  # Design pass (2026-11-23, V/design-pass, owner-approved P1/P2 audit items). FR-UI-13..15 belong to other branches
+  # (upload first run, sign-ups, compile UI); this pass starts at FR-UI-16.
+  - id: FR-UI-16
+    text: >-
+      **Theme.** The user menu (FR-UI-11) holds a radio group "Theme" with "System", "Light" and "Dark" (the library
+      `Menu`'s radio items). System removes `data-theme` from `html`, so `calm.css` follows `prefers-color-scheme`;
+      Light and Dark set `data-theme` to `light` or `dark`. The choice is stored in `localStorage` under
+      `reader-ai.theme` as `system`, `light` or `dark` (a display preference, not a credential: FR-UI-5's rule is about
+      credentials). **Before first paint (review B5):** `web/index.html` loads the classic external script
+      `/theme.js` (`web/src/public/theme.js`; vite.config.ts sets `publicDir: 'src/public'`, so the file is copied to
+      the build's root and reaches the production image, whose Caddy build copies `src` but not `web/public` — code
+      review B1; `<script src="/theme.js"></script>` in `<head>`,
+      before any stylesheet and the module script, no inline script, so the app CSP's `script-src 'self'` allows it),
+      which reads the stored value and sets the attribute synchronously while the document is parsed, so the first
+      painted frame already has the chosen scheme; the app's `web/src/ui/theme.ts` (`readTheme`, `applyTheme`) applies
+      later changes with the same rule. A missing, unreadable (storage blocked) or other value means System. Every
+      component follows a change without a reload, code blocks included (WEB-RENDER FR-RENDER-4) and the lab editor
+      (WEB-NOTEBOOK FR-NOTEBOOK-9). Declared gap: SRV-AUTH's sign-in and bootstrap pages read no app storage and keep
+      following the system scheme only (changing them is SRV-AUTH work, a complex area; not in this pass). [unit] the
+      apply function for each stored value, a throwing storage, the menu's radio state and the attribute after a
+      choice; `theme.js` run in a `node:vm` context with a fake document and storage gives the same attribute as
+      `applyTheme` for every stored value and a throwing storage; `index.html` loads it from `<head>` before the module
+      script and has no inline script (this regex check on index.html is the oracle for the placement; the build test
+      also finds `theme.js` at the build's root); [live] the `ui` step: `GET /theme.js` answers 200 with a JavaScript
+      content type, and with `dark` stored a reload gives `html[data-theme="dark"]`; [browser] with `colorScheme: 'dark'` and Light stored, `documentElement.dataset.theme`
+      read in the first `requestAnimationFrame` (an `addInitScript` hook) is `light`, `html`'s computed background is
+      the light `--acme-canvas`, and a python code token's colour changes without a reload after Dark is chosen; [story]
+      the user menu open in Light and Dark.
+  - id: FR-UI-17
+    text: >-
+      **Course sidebar.** A `nav` labelled "Courses" built from the same `GET /api/lessons` query (no other request):
+      one group per course in FR-UI-6's order, each headed by a disclosure button (`aria-expanded`, `aria-controls`)
+      with the course title and the count "<P>/<N>" (published of all, tabular figures, the visible text followed by a
+      visually hidden " published"); the group's list holds the course's lessons as rows (ordinal and title):
+      published lessons are links to their view, the current lesson's link has `aria-current="page"` and the
+      `--acme-hover` fill; unpublished rows are muted text, without the compile slot (review: the sidebar is
+      navigation, the list and the not-published page carry the slot). A closed group shows no rows; an
+      open group of at most 12 lessons shows them all; an open group of more than 12 shows its published rows and the
+      current one, plus "Show all <N>" (then "Show fewer"), as FR-UI-6. The group holding the current lesson starts
+      open, the others closed. It is links in disclosure lists, not the library's `tree-view` (FR-UI-1). While the
+      lessons load, the sidebar shows the library `Skeleton` hidden from assistive technology and no `role="status"`
+      (the page's own status speaks, FR-UI-11); if the query fails it shows "Courses could not be loaded." with a
+      Retry ghost button. Placement: at 75rem and wider a sticky column (15rem) at the inline start of every app page, at most
+      the viewport height tall and scrolling inside itself; below 75rem it is not displayed, and the header's "Courses"
+      button (FR-UI-11, a plain button) loads the library `Drawer` as a lazy chunk on its first activation (review B1)
+      and opens the sidebar in it (side inline-start, modal, Escape and the backdrop close it, following a link closes
+      it and focus returns to the button; the drawer's popup has `id="course-drawer"`, which the open button's
+      `aria-controls` names). The static column and the drawer's copy derive their element ids from
+      distinct prefixes (`sidebar-` and `drawer-`), so no id repeats in the document. [unit] grouping, counts, current
+      lesson, expansion, the 12-row rule, no compile slot, the drawer open, close, close-on-navigate and focus back on
+      the Courses button, no duplicate id with the drawer open; [story] Light, Dark, a large course; [live] the `ui`
+      step: at 1280 px the sidebar is visible on `/` and on L02 with L02's link `aria-current="page"`; at 1024 and 390
+      px it is hidden and the "Courses" button opens it.
+  - id: FR-UI-18
+    text: >-
+      Observability page (paired SRV-OBS change, FR-OBS-10; ADR-0032 accepted 2026-11-24). Route `/observability`, a
+      lazy chunk in `web/src/app/observability/`, for the owner only: anyone else gets not-found without any request
+      to /api/obs/*. It loads `GET /api/obs/summary?days=7`, validates the body, and renders four sections with
+      headings "Compile runs", "Tutor", "Failures" and "Ingest": runs with spent USD and their steps (stage, cost,
+      seconds, model); tutor count, p50 and p95 in ms, cost sum and mean per settled call, the slowest answers;
+      failures by kind and code (a `system` row marked "system"); imports with pages and pages per minute. Every
+      trace id renders as a link to `https://localhost:8443/#/experiments/0/traces?selectedEvaluationId=tr-<id>`
+      (text "Trace", `rel="noopener noreferrer"`); a null trace id (no trace can exist: SRV-OBS FR-OBS-10) shows
+      the text "no trace" and no link; a section whose data carries `truncated: true` shows "More rows
+      may exist." Values render as text only. A load failure shows a retry block; a 401 goes to the shell's sign-in
+      redirect (FR-UI-5). The header shows an "Observability" link for the owner. [unit]
+      web/src/app/observability/observability.test.tsx (VEC-OBS-3's expected JSON without its seeded-row references
+      `job` and `jobs: [ids]`); [story] the page with fixture data. Amended by SRV-OBS V.obs-analytics (FR-OBS-16,
+      -17, -19; 2026-11-24): a fifth section "Cost per lesson" renders the summary's `lessons` view: a table (Lesson,
+      Course, Compile USD, Runs, Last compile USD, Tutor USD, Total USD, USD per 1k characters, and a "Traces" link to
+      the row's `mlflow_url`), sortable by every column through a button in its header (`aria-sort` on the active
+      header; default Total USD descending; a missing value sorts last; ties by lesson id), a "Course totals" table,
+      the note that failed attempts and open reserves count ("includes N open reserves" when N > 0, a plural message:
+      "includes 1 open reserve") while MLflow's
+      Cost column shows each call's settled amount, and "More rows may exist." when truncated. A sixth section
+      "Dashboards" lists FR-OBS-16's saved views and Jaeger's search as links (`rel="noopener noreferrer"`). Every
+      trace link gains a "Jaeger (recent traces only)" twin to `https://localhost:8444/trace/<id>`, whose title says
+      that Jaeger keeps the newest 450 traces and starts empty after a restart. A row with `deleted` true (spend on a
+      deleted lesson) shows "deleted lesson" in the Lesson column and no course (SRV-OBS code review round 1). No
+      header, nav or app.css change.
+  # FR-UI-13: amendment for WEB-IMPORT (V/onboarding), promoted on V/upload-impl with its Red tests.
   - id: FR-UI-13
     text: >-
-      **Import first run and compile status.**
+      **Import first run.** (The compile status in the lesson list moved to V/compile-ui as FR-UI-15, coordinator
+      2026-11-23.)
+      - **Mount** (integration note, V/upload-impl): the `/import` route's lazy chunk is
+        `web/src/import/ImportPage.tsx` (WEB-IMPORT), which renders WEB-PLAN's page unchanged (its one `h1` and "Your
+        sources") followed by WEB-IMPORT's upload sections; Services gains an optional `upload` client built by
+        AppRoot with the same fetch and 401 hook, as for `plan`.
       - **First run:** on `/`, when `GET /api/lessons` returns no lessons and the user is the owner, the app asks
         `GET /api/materials`; if it lists no material at all (neither declared nor uploaded), the app replaces the
         location with `/import` (history `replace`, so Back does not loop). Any error of that call keeps the empty
         lesson list. A non-owner never calls it.
-      - **Compile status in the list:** for each lesson with `latest_sha256: null`, at most 10 per render in list
-        order (structural: one plan confirm starts one compile), the list asks `GET /api/lessons/{lesson_id}/compile`
-        (SRV-PIPELINE FR-PIPELINE-11); 404 shows "not compiled yet", a `running` or `stalled` run "Compiling", a
-        `stage_failed` or `budget_exhausted` run "Compile stopped", replacing "not published yet" in FR-UI-6's status
-        slot. While any shown lesson is compiling, these queries refetch every 10 s.
       - `web/test-server/` stubs WEB-IMPORT's routes from VEC-IMPORT-1 and `/api/materials` with an empty and a
         non-empty list.
-      [unit] the redirect (owner with nothing, owner with a material, non-owner, an error), the status mapping; [live]
-      the owner slice suite sees the new course's first lesson as "Compiling" or later after a confirm with compile,
-      run only with the owner's consent to spend; without it, "not compiled yet".
+      [unit] the redirect (owner with nothing, owner with a material, non-owner, an error); [browser] the first-run
+      redirect under the production CSP.
+  - id: FR-UI-33   # was FR-UI-31 on V/obs-mlflow-phase2-impl; renumbered at the merge (V/manage took FR-UI-30..32)
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-23, -24, -25, -32; ADR-0038). /observability gains, owner only:
+      (a) a "Bench upload" form with two file pickers (the set file and the result file), posting
+      `POST /api/obs/bench` {set: <text>, result: <parsed JSON>}; each error code of FR-OBS-23 (`too_large`,
+      `set_not_pinned`, `bench_invalid`, `already_recorded`) is shown by its code as text, 202 shows "recorded";
+      (b) on each Cost-per-lesson row and each Tutor answer row a "Label" control (good / bad and an optional reason
+      from VEC-OBS-5 `labels.reasons`) posting `POST /api/obs/labels` {target: lesson | answer, id, ok, reason?};
+      the response's `revision`
+      and `mirror` (`queued` | `off`) are shown; a 404 shows "not found";
+      (c) one banner per item of the summary's `alerts` (code, subject, value, limit), text only;
+      (d) a "Stack" row from the summary's `stack` (mlflow and rotel: healthy or not and when checked; jaeger: "see
+      reader doctor").
+      No header, nav or app.css change. Tests: [unit] Vitest: the upload posts both files and renders every error
+      code; a label posts the exact body and shows revision and mirror; banners render the fixture's alerts as text
+      (an `<img>` in a subject stays text); the stack row; [story] the page with alerts and stack fixtures.
+  # Interface language (V/manage, 2026-11-24; amendment note at the end of this file).
+  - id: FR-UI-30
+    text: >-
+      **Catalogues and runtime.** Every interface string of the SPA comes from message catalogues declared as data.
+      The areas are one list, `I18N_AREAS` in `web/src/ui/i18n.ts`: `app`, `app/observability`, `ui`, `notebook`,
+      `render`, `tutor`, `import`, `import/plan`, `accounts`, `fresh`, `manage`; each owns two modules beside its
+      code, `web/src/<area>/messages.en.ts` (imported statically) and `web/src/<area>/messages.ru.ts` (reached only
+      through `import()`), so each spec still owns its own copy and a copy change pairs with that spec and its tests
+      (H2). Messages are whole sentences (no concatenated fragments); placeholders are `{name}`. A plural message is
+      an object whose keys are exactly the locale's `Intl.PluralRules` categories (en: one, other; ru: one, few, many,
+      other). The runtime `t(key, values)` formats with `Intl.PluralRules`, `Intl.NumberFormat` and
+      `Intl.DateTimeFormat`; `Intl.Collator` (FR-UI-6's sorting) uses the same locale. **Formatting locale:** the
+      browser's full tag (`navigator.languages[0]`) when its primary subtag equals the chosen language, otherwise the
+      bare tag (`ru` or `en`). **Locale choice:** localStorage `reader-ai.locale` holds `auto`, `en` or `ru`
+      (WEB-MANAGE FR-MANAGE-10's control); `auto`, the default also for a missing or unknown value, picks `ru` when the
+      primary subtag of `navigator.languages[0]`, compared case-insensitively, is `ru`, else `en`; `auto` is resolved
+      once per page load and ignores later `languagechange` events (declared). With no provider mounted (tests,
+      stories) the runtime is English. **Server values:** a server enum value shown to the user (a state, kind, status
+      or reason code) is mapped through the owning area's catalogue; an unknown value is shown as received. Declared
+      exceptions, shown untranslated: identifiers (lesson, course, run and question ids, sha256 prefixes, model ids),
+      handles, URLs, file names, reader.yaml keys, and the observability page's span and kind names. [unit] one
+      parity test over `import.meta.glob('/src/**/messages.{en,ru}.ts')`: the glob's areas equal `I18N_AREAS`, the key
+      sets are equal, each plural message carries exactly its locale's categories, placeholder sets are equal across
+      locales; plural forms for 0, 1, 2, 5, 11, 12, 21, 22, 111 and 1.5 in Russian and English; the formatting-locale
+      rule for `ru-RU`, `RU`, `ru`, `en-GB`, `uk` and an empty list; one test per mapped enum (a known value
+      translated, an unknown one shown as received); `Intl.Collator` sorts with the chosen locale. [build]
+      web/src/app/build.test.ts (paired line in NFR-UI-1's test): no initial chunk's source map lists a
+      `messages.ru` module, and none lists a `web/src/manage/` module other than the slot stubs; NFR-UI-1's 121,153 B
+      stays the durable size gate. **Tests pin English:** web/playwright.config.ts sets `use.locale: 'en-US'`; the
+      Vitest setup clears `reader-ai.locale` before each test; the three live `newContext()` calls pass `locale:
+      'en-US'` (amendment note).
+  - id: FR-UI-31
+    text: >-
+      **First paint, lazy routes and failure.** theme.js (FR-UI-16) resolves the locale before first paint with the
+      same rule as the runtime (primary subtag, case-insensitive) and sets `lang` on `html`; `index.html` keeps a
+      static `<html lang="en">` as the fallback. The first React commit waits until the active locale's catalogues of
+      the initial route have loaded (English is static, so an English page never waits). Each lazy route loads its
+      `ru` catalogue together with its own chunk (one `Promise.all`) and renders once both are there. If a `ru`
+      catalogue fails to load, the app renders English, sets `html lang="en"`, keeps the stored choice, and tries
+      again on the next page load. The Settings control (WEB-MANAGE FR-MANAGE-10) switches without a reload, moves no
+      focus, and updates `html[lang]`. [unit] theme.js's resolver run in `node:vm` with the same table as the runtime
+      (stored `auto`, `en`, `ru`, `RU`, junk, missing × `navigator.languages` `ru-RU`, `en-US`, `uk`, empty) gives the
+      runtime's answer in every case; `html[lang]` updates on a switch; [browser] with `reader-ai.locale = ru`:
+      `html.lang` is `ru` in the first `requestAnimationFrame`, and a MutationObserver installed with `addInitScript`
+      never sees the English "Lessons" `h1`; with the `ru` chunk request aborted the page renders English with `html
+      lang="en"`, the stored value stays `ru`, and the next load (not aborted) is Russian; /, a lesson and /settings in
+      both languages at 390 px with no overflow (Russian strings are longer).
+  - id: FR-UI-32
+    text: >-
+      **Language of chrome and content.** `html[lang]` is the interface language. Content carries its own language,
+      set on the content nodes, never on a container that also holds chrome: in the lesson view (WEB-NOTEBOOK) the
+      title `h1`, every `[data-markdown]` block and every output area get `lang` from FR-UI-10's Cyrillic rule over
+      the lesson's markdown sources, while the lesson's toolbar, menus, labels and buttons inside `div.lesson` inherit
+      the interface language. Text that the user or a model wrote and that appears in chrome — course and lesson
+      titles in lists and the sidebar, tutor answers, notes, display names — gets `lang` from the same Cyrillic rule
+      over that text. This replaces FR-UI-10's sentence "the chrome stays `lang="en"`". [unit] the four combinations
+      of interface language × lesson language (en/en, en/ru, ru/en, ru/ru): the toolbar's computed language is the
+      interface's, the title, a markdown block and an output carry the lesson's; a Russian course title in an English
+      list carries `lang="ru"`.
 
 invariants:
   - id: INV-UI-1
@@ -289,7 +731,18 @@ invariants:
     text: >-
       Under the production CSP (the test server's header, read from `deploy/Caddyfile` as amended by
       V.OPS-DEPLOY-web), loading `/` and `/lessons/w01` with VEC-NOTEBOOK-1 raises zero `securitypolicyviolation`
-      events. [browser]
+      events. [browser] Live fix 2026-11-24 (7 `style-src-attr` reports per learner session, each when text replaced
+      a selection in the lab editor): the interactions raise none either — for the owner at 1280 and 390 px the user
+      menu, the Courses drawer, the lesson's "More lesson actions" menu, the tutor panel, text typed and inserted over
+      a selection in the lab editor (WEB-NOTEBOOK FR-NOTEBOOK-9) and the Compile dialog of FR-UI-15 (the drawer only
+      below 75rem, where its button shows). [browser] e2e/web/ui/csp.spec.ts.
+      **Fresh builds.** The [browser] tests run against the builds they test: `web/test-server/server.mjs` refuses to
+      start (exit 1, naming the stale build and the rebuild command) when `web/dist/index.html` or
+      `web/storybook-static/index.json` is older than the newest of `web/src/**`, `web/.storybook/**`,
+      `web/vendor/**`, `web/index.html`, `web/package.json`, `web/package-lock.json` and `web/vite.config.ts`
+      (`.DS_Store` files ignored). Live run 2026-11-24: a Storybook build from before the design pass failed two
+      render.spec checks with no product fault. [unit] web/src/app/stale.test.ts (over web/test-server/stale.mjs): fresh, a stale dist, a stale
+      Storybook build, a missing build, each listed input newer than the builds, a newer `.DS_Store` ignored.
 
 nfr:
   - id: NFR-UI-1
@@ -300,7 +753,10 @@ nfr:
       valibot, the library parts used, the app shell); threshold = measured + 10 %. Lazy chunks, for the record, from
       the same build: the lesson view with markdown, KaTeX (parsed by parse5) and the notebook 199,283 B; Shiki core and
       engine 47,284 B; the python grammar 9,012 B. For comparison, the spike's React-plus-20-component gallery measured
-      124,206 B (REF-UI-2).
+      124,206 B (REF-UI-2). Design pass (review B1, 2026-11-23): the initial chunk measured 111,507 B before the pass;
+      the user menu and the drawer load lazily (FR-UI-11, FR-UI-17), so the threshold is unchanged. The build test
+      shares one production build with WEB-NOTEBOOK's NFR-NOTEBOOK-1, built with `build.sourcemap: 'hidden'` (maps
+      written, no `sourceMappingURL` comment, so the measured bytes are those served).
     threshold: 121153
     verified_by: test
 
@@ -321,3 +777,13 @@ vectors:
 #   The slice uses the spike's adjusted Calm draft as is.
 # - The library tarball in web/vendor/ (about 354 KB) is built from the owner's tag v0.1.0 locally; nothing is pushed to
 #   the library.
+
+# Amendment (2026-11-24, V/manage, paired with WEB-MANAGE): FR-UI-30..32, the interface language (owner,
+# 2026-11-24: Russian and English, the browser's language by default, a switcher in Settings, P1). Moved here from
+# WEB-MANAGE's FR-MANAGE-10 at that spec's review round 2; WEB-MANAGE keeps only the Language control. deep-reviewer
+# (Fable) single round on 4997ec5 (outside the complex areas): changes, all applied without a second round (findings
+# and fixes in docs/progress.yaml V.manage `ui30_review`), then promoted with the Red tests. FR-UI-10's language
+# sentence is amended in the same change (FR-UI-32). Paired notes: WEB-NOTEBOOK, WEB-RENDER, WEB-IMPORT, WEB-PLAN,
+# WEB-ACCOUNTS, WEB-FRESH, SRV-TUTOR's panel, WEB-MANAGE; the observability page (`app/observability`) is an area of
+# this spec. Paired test-locale pins: e2e/web/live/slice.live.ts (SRV-AUTH), e2e/web/live/owner.slice.ts (WEB-UI)
+# and e2e/live/lib/obs_browser.mjs (SRV-OBS) pass `locale: 'en-US'` to `newContext()`.

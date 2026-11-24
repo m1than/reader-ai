@@ -1,7 +1,7 @@
 ---
 id: ADR-0018
 title: Agent bus, run traces and quality signals in v1; evaluation, local models and tuning in v2
-status: proposed
+status: accepted
 date: 2026-11-20
 verified_by: "SRV-AGENT tests: every agent run produces one run record and an OTel span tree with gen_ai.* attributes; quality signals attach to runs; content capture is off for personal-use material; pipeline stages advance only through events"
 revisit_when: "The OpenTelemetry GenAI conventions publish a stable release, or v2 work starts"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
@@ -23,6 +24,7 @@ from reader.ingest import store
 from reader.ingest.artifact import ArtifactError, artifact_id
 from reader.ingest.errors import import_error
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.obs.spans import child_span
 
 KIND: Final = "ingest.import"
 VersionFrozen = import_error("version_frozen")
@@ -30,6 +32,7 @@ ArtifactMissing = import_error("artifact_missing")
 ArtifactInvalid = import_error("artifact_invalid")
 NoOwner = import_error("no_owner")
 ArtifactMismatch = import_error("artifact_mismatch")
+UploadMissing = import_error("upload_missing")
 
 
 class ImportArgs(BaseModel):
@@ -65,14 +68,39 @@ async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha25
     await running().enqueue(EMBED_KIND, embed_args(material_sha256, ingest_id, fts_config))
 
 
+async def _deleted(conn: AsyncConnection, material_sha256: str) -> bool:
+    """The instance owner's row of this material is a tombstone (SRV-INGEST FR-INGEST-31)."""
+    owner = await store.owner_id(conn)
+    if owner is None:
+        return False
+    found = await conn.execute(
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NOT NULL"),
+        {"o": owner, "s": material_sha256},
+    )
+    return found.first() is not None
+
+
 def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
     async def handle(args: ImportArgs, conn: AsyncConnection, ctx: JobContext) -> None:
         del ctx
+        if await _deleted(conn, args.material_sha256):  # FR-INGEST-15 amendment: an import never clears it
+            store.log.info("ingest material_deleted %s", args.material_id)
+            return
+        if args.material_id.startswith("up-"):  # FR-INGEST-23: language and title come from the upload's row
+            found = await conn.execute(
+                text("SELECT 1 FROM uploads WHERE sha256 = :s"), {"s": args.material_sha256}
+            )
+            if found.first() is None:
+                raise UploadMissing()
         root = blobs_root / "ingest" / args.artifact_id
-        try:
-            manifest, members = await asyncio.to_thread(store.read_artifact, root)
-        except ArtifactError as error:
-            raise (ArtifactMissing if error.code == "missing" else ArtifactInvalid)() from None
+        with child_span("ingest.parse") as parsed:  # SRV-OBS FR-OBS-13: pages and bytes only
+            try:
+                manifest, members = await asyncio.to_thread(store.read_artifact, root)
+            except ArtifactError as error:
+                raise (ArtifactMissing if error.code == "missing" else ArtifactInvalid)() from None
+            page_count = manifest.get("page_count")
+            parsed.set({"reader.pages": page_count if isinstance(page_count, int) else None,
+                        "reader.bytes": sum(len(v) for v in members.values())})
         frozen = await store.frozen_version(conn, args.material_sha256)
         if frozen is not None and frozen != args.converter_version:
             raise VersionFrozen()
@@ -107,8 +135,29 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
                 ConnectorException,
             ),
             timeout_s=600.0,
+            after_end=after_end,
         ),
     )
+
+
+async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> None:
+    """FR-INGEST-26: a succeeded import enqueues `obs.runs` {ingest, ingest id, 1} after its commit (an import
+    ends once: one per material)."""
+    if outcome != "succeeded":
+        return
+    from reader.obs import runs as obs_runs
+
+    async with engine.connect() as conn:
+        owner = await store.owner_id(conn)
+        if owner is None:
+            return
+        ingest_id = (await conn.execute(text(
+            "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id AND m.owner_id = i.owner_id"
+            " WHERE m.owner_id = :o AND m.sha256 = :s AND m.config_id = :c AND i.converter_version = :v"),
+            {"o": owner, "s": str(payload["material_sha256"]), "c": str(payload["material_id"]),
+             "v": str(payload["converter_version"])})).scalar()
+    if ingest_id is not None:
+        await obs_runs.enqueue_end("ingest", str(ingest_id), 1)
 
 
 JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)

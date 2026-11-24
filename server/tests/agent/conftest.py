@@ -121,9 +121,13 @@ tasks:
   draft:      { model: opus,   budget_usd_per_lesson: 4.0 }
   fact_check: { model: sonnet, budget_usd_per_lesson: 2.0 }
   review:     { model: opus,   budget_usd_per_lesson: 4.0 }
+  freshness_web: { model: haiku }
 budgets: { monthly_usd: 200, warn_at: 0.8 }
 sharing: {}
+observability: { enabled: false }
 """
+# FR-AGENT-14 (paired SRV-OBS change): tracing is off here, so FR-AGENT-6's environment stays exact for these tests;
+# test_obs_env.py turns it on.
 
 
 def write_config(tmp: Path, text: str = CONFIG) -> Path:
@@ -308,6 +312,14 @@ class AssistantMessage:
 
 
 @dataclass
+class UserMessage:
+    """The CLI's tool result turn; `tool_use_result` is the structured WebSearch result (spikes/web-search § 3a)."""
+
+    content: list[Any]
+    tool_use_result: Any = None
+
+
+@dataclass
 class ResultMessage:
     subtype: str
     is_error: bool
@@ -315,6 +327,7 @@ class ResultMessage:
     usage: dict[str, Any] | None
     result: str | None
     stop_reason: str | None = None
+    model_usage: dict[str, Any] | None = None  # per model, camelCase as the SDK passes it (tool calls, FR-AGENT-17)
 
 
 def sdk_usage(output: int = 100, write_1h: int = 7000) -> dict[str, Any]:
@@ -347,6 +360,9 @@ class Script:
     api_retries: int = 0  # SystemMessage subtype api_retry before the answer (FR-AGENT-13 d)
     sleep_s: float = 0.0  # before the answer (FR-AGENT-13 e)
     send_init: bool = True  # False: the init SystemMessage never arrives (FR-AGENT-7)
+    model_usage: dict[str, Any] | None = None  # ResultMessage.model_usage (FR-AGENT-17)
+    searches_forwarded: int = 0  # the run_token record's allowance field (FR-AGENT-16)
+    tool_use_results: list[Any] = field(default_factory=list)  # one UserMessage each, before the answer
 
 
 @dataclass
@@ -378,6 +394,8 @@ class FakeCli:
                 yield SystemMessage("api_retry", {"attempt": attempt + 1, "error_status": 429})
             if script.sleep_s:
                 await asyncio.sleep(script.sleep_s)
+            for tur in script.tool_use_results:
+                yield UserMessage([], tur)
             yield AssistantMessage([TextBlock(script.text)], request.model, script.assistant_error)
             yield ResultMessage(
                 "success",
@@ -386,6 +404,7 @@ class FakeCli:
                 script.usage,
                 script.text if not script.is_error else "API Error",
                 script.stop_reason,
+                script.model_usage,
             )
         except GeneratorExit, asyncio.CancelledError:
             self.closed.append(True)  # the adapter closed the CLI early
@@ -402,12 +421,14 @@ class FakeProxyClient:
     issued: list[tuple[str, int, str]] = field(default_factory=list)
     revoked: list[str] = field(default_factory=list)
     missing: set[str] = field(default_factory=set)
+    issue_extras: list[dict[str, Any]] = field(default_factory=list)  # task and web_search per issue (FR-AGENT-15)
 
-    async def issue(self, handle: str, max_output_tokens: int, model: str) -> str:
+    async def issue(self, handle: str, max_output_tokens: int, model: str, **extra: Any) -> str:
         if handle in self.missing:
             errors = need("reader.agent.errors")
             raise errors.agent_error("provider_missing")
         self.issued.append((handle, max_output_tokens, model))
+        self.issue_extras.append(dict(extra))
         return "rt-" + secrets.token_urlsafe(8)
 
     async def revoke(self, run_token: str) -> Any:
@@ -416,4 +437,8 @@ class FakeProxyClient:
         if script.revoke_unknown:
             return None
         ledger = need("reader.agent.ledger")
+        if script.searches_forwarded:
+            return ledger.UpstreamRecord(
+                statuses=script.statuses, refused=script.refused, searches_forwarded=script.searches_forwarded
+            )
         return ledger.UpstreamRecord(statuses=script.statuses, refused=script.refused)

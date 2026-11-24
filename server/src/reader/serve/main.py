@@ -19,7 +19,7 @@ import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -85,6 +85,17 @@ def _settings(env: Env) -> Settings:
         raise Failure(error.code) from None
 
 
+def start_obs(role: str, env: Env) -> Any:
+    """FR-AUTH-33: SRV-OBS tracing for this role from the configuration's `observability` section."""
+    from reader.obs.setup import setup
+
+    try:
+        config = load_config(env.config)
+    except ConfigError as error:
+        raise Failure(error.problems[0].code if error.problems else "config_invalid") from None
+    return setup(role, config)
+
+
 def _target(env: Env) -> DbTarget:
     file = env.secrets_root / "db-password"
     try:
@@ -142,7 +153,7 @@ def _serve_api(bind: str, env: Env) -> None:
     import uvicorn
 
     from reader.api.app import create_app
-    from reader.auth.store import prepare
+    from reader.auth.store import HandleTakenBySignup, prepare
     from reader.jobs.catalog import load_kinds
     from reader.jobs.queue import Jobs
     from reader.jobs.worker import make_app
@@ -156,7 +167,10 @@ def _serve_api(bind: str, env: Env) -> None:
         try:
             try:
                 await migrate(engine)
-                await prepare(engine, settings)
+                superseded = await prepare(engine, settings)
+            except HandleTakenBySignup as taken:
+                # FR-AUTH-24, FR-AUTH-2: the one code naming a value; a handle is no secret (owner note 5).
+                raise Failure(f"handle_taken_by_signup {taken.handle}") from None
             except Exception:
                 raise Failure("database_unreachable") from None
             try:
@@ -165,11 +179,18 @@ def _serve_api(bind: str, env: Env) -> None:
             except OSError:
                 raise Failure("run_dir_unwritable") from None
             serving_logs()
+            auth_log = logging.getLogger("reader.auth")
+            for user_id in superseded:  # best-effort: lost if the api died before this line (owner note 5)
+                auth_log.info("auth signup_superseded %s", user_id)
+            if settings.signup_default_note:  # FR-AUTH-23
+                auth_log.info("auth signup_default_off non_localhost")
             # FR-AUTH-10 note: one SRV-EVENTS Jobs on the declared catalog, its own procrastinate app, for
             # routes that enqueue (SRV-PIPELINE, the tutor's ask).
             queue = make_app(target)
             await queue.open_async()
+            obs: Any = None
             try:
+                obs = start_obs("api", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1); a failure still closes the queue
                 jobs = Jobs(engine, queue, load_kinds(), (target.password.reveal(),))
                 app = create_app(settings, engine, jobs=jobs)
                 # log_config=None: uvicorn's records go through serving_logs' root handler (no tracebacks).
@@ -178,6 +199,8 @@ def _serve_api(bind: str, env: Env) -> None:
                 )
                 await server.serve()
             finally:
+                if obs is not None:
+                    obs.shutdown()
                 await queue.close_async()
         finally:
             await engine.dispose()
@@ -209,7 +232,14 @@ def _run_worker(env: Env) -> None:
 
                 # Every resolved secret this process holds: the worker role holds only the database password.
                 held = (target.password.reveal(),)
-                if await run_jobs(engine, target, stop, secret_values=held) != 0:
+                obs: Any = None
+                try:
+                    obs = start_obs("worker", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1), inside the try
+                    code = await run_jobs(engine, target, stop, secret_values=held)
+                finally:
+                    if obs is not None:
+                        obs.shutdown()
+                if code != 0:
                     raise Failure("database_unreachable")
         finally:
             await engine.dispose()
@@ -318,6 +348,9 @@ def serving_logs() -> None:
     reader = logging.getLogger("reader")
     own = logging.StreamHandler(sys.stderr)
     own.setFormatter(ReaderFormatter())
+    from reader.obs.logs import TraceFilter  # FR-AUTH-33 (SRV-OBS FR-OBS-4): ` trace=<32 hex>` inside a span
+
+    own.addFilter(TraceFilter())
     reader.addHandler(own)
     reader.setLevel(logging.INFO)
     reader.propagate = False

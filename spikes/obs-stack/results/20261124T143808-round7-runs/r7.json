@@ -1,0 +1,43 @@
+{
+ "tabs": {
+  "run-overview": {
+   "url": "/#/experiments/1/runs/9b4aa9483f23490a95b2101810409a6b",
+   "head": "3.18.0 GenAI Model training runs Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings runs Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (4) Metric Value cost_usd.total 1.84 cost_usd.draft 0.62 claims.supported 13 pages 24 Parameters (1) Parameter Value version_key abababababab About this run Created at 11/24/2026, 10:38:21 AM Created by — Experiment ID 1 Status Finished Run ID 9b4aa9483f23490a95b2101810409a6b Duration 32ms Source — Logged models — Registered prompts — Datasets None Tags reader.kind : compile reader.run_id : 10000000-0000-4000-8000-0000000000aa Registered models None MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identif"
+  },
+  "run-traces": {
+   "url": "/#/experiments/1/runs/9b4aa9483f23490a95b2101810409a6b/traces",
+   "head": "3.18.0 GenAI Model training runs Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings runs Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts #434a93 compile 10000000 compare to baseline run Filters Sort Columns 3/16 Actions Group by session Analyze 0 of 0 Other Attributes (2/13) Trace ID Execution time State No traces found. Try clearing your active filters to see more traces. MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "run-metrics": {
+   "url": "/#/experiments/1/runs/9b4aa9483f23490a95b2101810409a6b/model-metrics",
+   "head": "3.18.0 GenAI Model training runs Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings runs Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Auto-refresh Model metrics (4) Add chart claims.supported 13.00 0 5 10 compile 10000000 cost_usd.draft 0.62 0 0.2 0.4 0.6 compile 10000000 cost_usd.total 1.84 0 0.5 1 1.5 compile 10000000 pages 24.00 0 5 10 15 20 25 compile 10000000 Add section MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "runs-exp-runs": {
+   "url": "/#/experiments/1/runs?searchFilter=&orderByKey=attributes.start_time&orderByAsc=false&startTime=ALL&lifecycleFilter=Active&modelVersionFilter=All+Runs&datasetsFilter=W10%3D",
+   "head": "3.18.0 GenAI Model training runs Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments runs Training runs Views All time State: Active Datasets Sort: Created Columns Group by New run Run Name Created Dataset Duration Source Models Pin run #434a93 compile 10000000 29 seconds ago - 32ms - - 1 matching run MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "runs-exp-evaluation-runs": {
+   "url": "/#/experiments/1/evaluation-runs",
+   "head": "3.18.0 GenAI Model training runs Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments runs Evaluation runs Run evaluation Line chart Bar chart cost_usd.draft Earliest run Latest run cost_usd.draft 0% 50% 100% All time Display now Run Name Type Created at Dataset cost_usd.total cost_usd.draft claims.supported pages #434a93 compile 10000000 Eval 39 seconds ago - 1.84 0.62 13 24 1 run MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "runs-exp-traces": {
+   "url": "/#/experiments/1/traces",
+   "head": "3.18.0 GenAI Model training runs Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments runs Traces Default view Last 7 days Display now Detect Issues Start tracing your LLM application Traces show you how your LLM calls behave: what they cost, how they perform, and where things go wrong. Get started in a few minutes. Choose any of the following options to set up tracing One-line setup Copy for coding agent MLflow assistant Manual setup Run this from your project's Git repository to connect to MLflow and launch your coding agent to add tracing. Have Claude Code, Codex, or OpenCode installed first. curl -LsSf https://mlflow.org/wizard/setup.sh | sh MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, ident"
+  },
+  "exp0-evaluation-runs": {
+   "url": "/#/experiments/0/evaluation-runs",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Evaluation runs Run evaluation All time Display now Evaluate and improve the quality, cost, latency of your GenAI app Create evaluation datasets in order to iteratively evaluate and improve your app. Run evaluations to check that your fixes are working, and compare quality between app / prompt versions. Learn more Or use coding agents/code snippets Copy for coding agent Python MLflow assistant Copy this prompt and paste into Claude Code, Codex, Cursor, or any coding agent already running in your project. Run an evaluation on my GenAI app in MLflow. Target experiment ID: 0. 1. Add `mlflow` as a dependency if needed. 2. Set the tracking URI to match "
+  },
+  "exp0-traces": {
+   "url": "/#/experiments/0/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display now Detect Issues Time Input Output Session Duration State Tokens Tags 4 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 5 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 5 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 6 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 4 of 4 traces Rows per page 25 Page 1 MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about e"
+  },
+  "trace-detail": {
+   "url": "/#/experiments/0/traces?selectedEvaluationId=tr-c23b475df63534108f567cc6ca67e0c1",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 9 seconds ago Detect Issues Time Input Output Session Duration State Tokens Tags 4 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 5 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 5 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 6 minutes ago - - 10000000-0000-4000-8000-0000000000aa 40.0s OK 42050 reader.job.kind: pipeline.stage +7 4 of 4 traces Rows per page 25 Page 1 MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questio"
+  }
+ },
+ "csp": [
+  "Loading media from  'https://mlflow.org/docs/latest/images/llms/tracing/tracing-top.mp4#t=24' violates the following Content Security Policy directive: \"default-src 'self'\". Note that 'media-src' was "
+ ]
+}

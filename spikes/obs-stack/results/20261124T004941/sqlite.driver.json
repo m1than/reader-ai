@@ -1,0 +1,121 @@
+{
+  "backend": "sqlite",
+  "duration_s": 7.0,
+  "bulk_lessons": 20,
+  "ready_s": 5.6,
+  "auth": {
+    "no_cookie_root": {
+      "status": 401,
+      "bytes": 0
+    },
+    "learner_root": {
+      "status": 403,
+      "bytes": 0
+    },
+    "owner_root": {
+      "status": 200,
+      "bytes": 701,
+      "mlflow_ui": true
+    },
+    "owner_ajax_search": {
+      "status": 200,
+      "bytes": 284,
+      "mlflow_ui": false
+    },
+    "no_cookie_ajax_search": {
+      "status": 401,
+      "bytes": 0
+    },
+    "owner_ingest_blocked": {
+      "status": 404,
+      "bytes": 0
+    },
+    "owner_gateway_blocked": {
+      "status": 404,
+      "bytes": 0
+    },
+    "owner_foreign_host": {
+      "status": 403,
+      "bytes": 60
+    }
+  },
+  "sustained_start": 1795466991.2460468,
+  "sustained_end": 1795466998.2768602,
+  "stage_traces": {
+    "expected_spans": 72,
+    "complete": 7,
+    "traces": 7,
+    "rows": [
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1004
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1010
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1002
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1002
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1004
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1005
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 1003
+      }
+    ]
+  },
+  "tutor_traces": {
+    "expected_spans": 3,
+    "complete": 0,
+    "traces": 0,
+    "rows": []
+  },
+  "poll": {
+    "n": 1,
+    "p50_s": 0.089,
+    "p95_s": 0.089,
+    "errors": []
+  },
+  "store_bytes_after_sustained": 1490944,
+  "bulk_start": 1795467008.5472589,
+  "bulk_emit_s": 0.4,
+  "bulk_spans": 10080,
+  "bulk_end": 1795467028.958338,
+  "bulk_traces": {
+    "expected_spans": 72,
+    "complete": 140,
+    "traces": 140
+  },
+  "traces_total": 147,
+  "store_bytes_after_bulk": 10833920,
+  "deleted": 147,
+  "delete_s": 0.08,
+  "traces_after_delete": 0,
+  "store_bytes_after_delete": 10833920
+}

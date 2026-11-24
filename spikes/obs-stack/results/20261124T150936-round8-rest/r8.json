@@ -1,0 +1,37 @@
+{
+ "tabs": {
+  "run-overview": {
+   "url": "/#/experiments/0/runs/ca505e2256b8419881dd24439cfd30cc",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (3) Metric Value cost_usd.total 2.1 cost_usd.draft 0.62 claims.supported 13 Parameters (3) Parameter Value version_key abababababab snapshot_at 2026-11-24T12:00:00Z model.draft claude-sonnet-5-5 About this run Created at 11/24/2026, 11:09:42 AM Created by — Experiment ID 0 Status Finished Run ID ca505e2256b8419881dd24439cfd30cc Duration 2.7min Source — Logged models — Registered prompts — Datasets None Tags reader.kind : compile reader.run_id : 10000000-0000-4000-8000-0000000000aa reader.lesson.id : 20000000-0000-4000-8000-0000000000bb reader."
+  },
+  "run-traces-after-delete": {
+   "url": "/#/experiments/0/runs/ca505e2256b8419881dd24439cfd30cc/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts #115026 compile 10000000 compare to baseline run Filters Sort Columns 4/20 Actions Group by session Analyze 100 of 115 Assessments (1/1) Other Attributes (2/13) Trace ID owner.lesson_ok TRUE 100% True 100% Execution time State tr-c2b9982648382b82c8793364b18b0150 null 0s OK tr-0ee14a95eba6be56dd7d30a64e242646 null 0s OK tr-627af740b8886543dde413d125903277 null 0s OK tr-b79f068d29b5d817469c7bf97cab258b null 0s OK tr-d347d7efcdc33a7d7caaea5cc285546a null 0s OK tr-6fe9038c9f2f897d83750b4df20daf89 null 0s OK tr-94880a93b33e89c4de69da24fea72df2 null 0s OK tr-b5003830a456307fbebdb3a92"
+  },
+  "bench-datasets": {
+   "url": "/#/experiments/1/datasets",
+   "head": "3.18.0 GenAI Model training bench Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments bench Datasets Create dataset Name Created by Last updated Created at tutor-bench-v2 - 21 seconds ago 21 seconds ago MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "bench-dataset-detail": {
+   "url": "/#/experiments/1/datasets/d-2daa26b9673d4a3fb8af201c8aba83ca",
+   "head": "3.18.0 GenAI Model training bench Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments bench Datasets tutor-bench-v2 Dataset ID: d-2daa26b9673d4a3fb8af201c8aba83ca Columns (4/9) 2 records Evaluation Runs Add record Inputs Expectations Last updated Tags {\"question_id\":\"v02\",\"question\":\"Кто в начале девяностых придумал, как защитить отметки времени на электронных документах от подделки?\",\"chapter\":1} {\"gold_pages\":[36]} 30 seconds ago - {\"question_id\":\"v01\",\"question\":\"Чем сети, куда может войти любой желающий, отличаются от сетей с заранее отобранными участниками, и какие смешанные варианты встречаются?\",\"chapter\":1} {\"gold_pages\":[53,54,55,56]} 30 seconds ago - MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions abo"
+  },
+  "bench-evaluation-runs": {
+   "url": "/#/experiments/1/evaluation-runs",
+   "head": "3.18.0 GenAI Model training bench Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments bench Evaluation runs Run evaluation Line chart Bar chart All assessments Earliest run Latest run gold_cited_sharegrounded_share 0% 50% 100% All time Display now Run Name Type Created at Dataset grounded_share gold_cited_share #3ba65e tutor bench 2026-11-23 Eval 47 seconds ago tutor-bench-v2 0.625 0.575 1 run MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "bench-run": {
+   "url": "/#/experiments/1/runs/ebb8392fad5a48aca1459153af22a477",
+   "head": "3.18.0 GenAI Model training bench Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings bench Evaluations tutor bench 2026-11-23 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (2) Metric Value grounded_share 0.625 gold_cited_share 0.575 Parameters (2) Parameter Value commit 66fba58 set_sha256 abababababababababababababababababababababababababababababababab About this run Created at 11/24/2026, 11:09:42 AM Created by — Experiment ID 1 Status Finished Run ID ebb8392fad5a48aca1459153af22a477 Duration 9.2s Source — Logged models — Registered prompts — Datasets tutor-bench-v2 (76dc053e) Evaluation Tags reader.bench : tutor reader.bench_upload : uuuuuuuuuuuuuuuu Registered models None MLflow Assistant Beta Welcome to ML"
+  },
+  "agent-versions": {
+   "url": "/#/experiments/0/models",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Agent versions Table view Chart view Sort: Created Columns Group by Model attributes Model name Status Created Model attributes Parameters Logged from Source run Registered models Dataset pipeline_config_sha256 #8a63bf reader-agent Pending 55 seconds ago — - - - cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "trace-labels": {
+   "url": "/#/experiments/0/traces?selectedEvaluationId=tr-95c4388b0efbe76382a28e19d3359eab",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 1 minute ago Detect Issues Time Input Output Duration State Tokens Tags 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK - service.version: 0.1.0 +2 1 minute ago - - 0ms OK "
+  }
+ },
+ "csp": []
+}

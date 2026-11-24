@@ -1,0 +1,490 @@
+{
+  "ids": {
+    "job_trace": "e3960f9725d354e5f8c05627b94ad0d0",
+    "request_trace": "d6f5b1a18e135f94b707d019c63300d3",
+    "stage_trace": "1ee046c0e50cfc003823ba29dcb76c11"
+  },
+  "sites": {
+    "strict": {
+      "console": [
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-DOu86drLfwUr1Wcsx/wxfqAogK7tFvJGjVmF/300H/M='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-nzTgYzXYDNe6BAHiiI7NNlfK8n/auuOAhh2t92YvuXo='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-vGQdhYJbTuF+M8iCn1IZCHpdkiICocWHDq4qnQF4Rjw='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Applying inline style violates the following Content Security Policy directive 'default-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-vGQdhYJbTuF+M8iCn1IZCHpdkiICocWHDq4qnQF4Rjw='), or a nonce ('nonce-...') is required to enable inline execution. Note also that 'style-src' was not",
+        "null ResizeObserver loop completed with undelivered notifications."
+      ],
+      "pageerrors": [],
+      "foreign": [],
+      "failed": [
+        "404 GET /ajax-api/3.0/mlflow/assistant/config",
+        "404 GET /ajax-api/3.0/mlflow/assistant/providers",
+        "404 GET /ajax-api/3.0/mlflow/assistant/config",
+        "404 GET /ajax-api/3.0/mlflow/assistant/providers",
+        "404 GET /ajax-api/2.0/mlflow/users/current",
+        "404 GET /ajax-api/2.0/mlflow/users/current",
+        "404 GET /ajax-api/2.0/mlflow/users/current"
+      ],
+      "visits": [
+        {
+          "name": "root",
+          "path": "/",
+          "status": 200,
+          "text_len": 904,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            }
+          ]
+        },
+        {
+          "name": "traces",
+          "path": "/#/experiments/0/traces",
+          "status": null,
+          "text_len": 4178,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            }
+          ]
+        },
+        {
+          "name": "deep_selectedEvaluationId",
+          "path": "/#/experiments/0/traces?selectedEvaluationId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+          "status": null,
+          "text_len": 4395,
+          "names_visible": [
+            "job tutor.answer",
+            "agent.call",
+            "claude_code.interaction",
+            "claude_code.llm_request"
+          ],
+          "mentions_link": false,
+          "csp": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            }
+          ]
+        },
+        {
+          "name": "deep_selectedTraceId",
+          "path": "/#/experiments/0/traces?selectedTraceId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+          "status": null,
+          "text_len": 4189,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            }
+          ]
+        },
+        {
+          "name": "deep_stage_selectedEvaluationId",
+          "path": "/#/experiments/0/traces?selectedEvaluationId=tr-1ee046c0e50cfc003823ba29dcb76c11",
+          "status": null,
+          "text_len": 6587,
+          "names_visible": [
+            "pipeline.stage",
+            "claude_code.interaction",
+            "claude_code.llm_request"
+          ],
+          "mentions_link": false,
+          "csp": [
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            },
+            {
+              "directive": "style-src-elem",
+              "blocked": "inline",
+              "sample": ""
+            }
+          ]
+        }
+      ]
+    },
+    "none": {
+      "console": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "null ResizeObserver loop completed with undelivered notifications."
+      ],
+      "pageerrors": [],
+      "foreign": [],
+      "failed": [
+        "404 GET /ajax-api/3.0/mlflow/assistant/config",
+        "404 GET /ajax-api/3.0/mlflow/assistant/providers",
+        "404 GET /ajax-api/3.0/mlflow/assistant/config",
+        "404 GET /ajax-api/3.0/mlflow/assistant/providers",
+        "404 GET /ajax-api/2.0/mlflow/users/current",
+        "404 GET /ajax-api/2.0/mlflow/users/current",
+        "404 GET /ajax-api/2.0/mlflow/users/current"
+      ],
+      "visits": [
+        {
+          "name": "root",
+          "path": "/",
+          "status": 200,
+          "text_len": 910,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": []
+        },
+        {
+          "name": "traces",
+          "path": "/#/experiments/0/traces",
+          "status": null,
+          "text_len": 2207,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": []
+        },
+        {
+          "name": "deep_selectedEvaluationId",
+          "path": "/#/experiments/0/traces?selectedEvaluationId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+          "status": null,
+          "text_len": 2404,
+          "names_visible": [
+            "job tutor.answer",
+            "agent.call",
+            "claude_code.interaction",
+            "claude_code.llm_request"
+          ],
+          "mentions_link": true,
+          "csp": []
+        },
+        {
+          "name": "deep_selectedTraceId",
+          "path": "/#/experiments/0/traces?selectedTraceId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+          "status": null,
+          "text_len": 2207,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": []
+        },
+        {
+          "name": "deep_stage_selectedEvaluationId",
+          "path": "/#/experiments/0/traces?selectedEvaluationId=tr-1ee046c0e50cfc003823ba29dcb76c11",
+          "status": null,
+          "text_len": 4592,
+          "names_visible": [
+            "pipeline.stage",
+            "claude_code.interaction",
+            "claude_code.llm_request"
+          ],
+          "mentions_link": false,
+          "csp": []
+        }
+      ]
+    },
+    "candidate": {
+      "console": [
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        "null ResizeObserver loop completed with undelivered notifications.",
+        "null ResizeObserver loop completed with undelivered notifications."
+      ],
+      "pageerrors": [],
+      "foreign": [],
+      "failed": [
+        "404 GET /ajax-api/3.0/mlflow/assistant/config",
+        "404 GET /ajax-api/3.0/mlflow/assistant/providers",
+        "404 GET /ajax-api/3.0/mlflow/assistant/providers",
+        "404 GET /ajax-api/3.0/mlflow/assistant/config",
+        "404 GET /ajax-api/2.0/mlflow/users/current",
+        "404 GET /ajax-api/2.0/mlflow/users/current",
+        "404 GET /ajax-api/2.0/mlflow/users/current"
+      ],
+      "visits": [
+        {
+          "name": "root",
+          "path": "/",
+          "status": 200,
+          "text_len": 910,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": []
+        },
+        {
+          "name": "traces",
+          "path": "/#/experiments/0/traces",
+          "status": null,
+          "text_len": 2221,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": []
+        },
+        {
+          "name": "deep_selectedEvaluationId",
+          "path": "/#/experiments/0/traces?selectedEvaluationId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+          "status": null,
+          "text_len": 2418,
+          "names_visible": [
+            "job tutor.answer",
+            "agent.call",
+            "claude_code.interaction",
+            "claude_code.llm_request"
+          ],
+          "mentions_link": true,
+          "csp": []
+        },
+        {
+          "name": "deep_selectedTraceId",
+          "path": "/#/experiments/0/traces?selectedTraceId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+          "status": null,
+          "text_len": 2221,
+          "names_visible": [],
+          "mentions_link": false,
+          "csp": []
+        },
+        {
+          "name": "deep_stage_selectedEvaluationId",
+          "path": "/#/experiments/0/traces?selectedEvaluationId=tr-1ee046c0e50cfc003823ba29dcb76c11",
+          "status": null,
+          "text_len": 4606,
+          "names_visible": [
+            "pipeline.stage",
+            "claude_code.interaction",
+            "claude_code.llm_request"
+          ],
+          "mentions_link": false,
+          "csp": []
+        }
+      ]
+    }
+  },
+  "click": {
+    "url": "http://localhost:8446/#/experiments/0/traces?selectedEvaluationId=tr-e3960f9725d354e5f8c05627b94ad0d0",
+    "names_visible": [
+      "job tutor.answer",
+      "agent.call",
+      "claude_code.interaction",
+      "claude_code.llm_request"
+    ],
+    "subresources": {
+      "img": "error",
+      "script": "error",
+      "fetch_no_cors": "opaque",
+      "fetch_cors": "rejected"
+    }
+  }
+}

@@ -36,6 +36,8 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
   context = await browser.newContext({
+    // WEB-UI FR-UI-30: the live checks read the English interface whatever the host's language.
+    locale: 'en-US',
     recordVideo: { dir: resolve(OUT, 'video') },
     ignoreHTTPSErrors: false,
   });
@@ -136,7 +138,9 @@ test('POST without Origin is refused (403)', async ({ playwright }) => {
 test('sign out, then sign in through the real page with the same passkey', async () => {
   stackOnly();
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Design pass (WEB-UI FR-UI-5, FR-UI-11): Sign out is an item of the user menu.
+  await page.getByRole('button', { name: /^Account menu for / }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await page.waitForURL(/\/api\/auth\/signin$/);
   expect((await page.request.get('/api/me')).status()).toBe(401);
   await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
@@ -152,7 +156,8 @@ test('sign out, then sign in through the real page with the same passkey', async
 test('lesson list shows the fixture lesson', async () => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: LESSON.course })).toBeVisible();
-  await expect(page.getByRole('link', { name: LESSON.title })).toBeVisible();
+  // The design pass's Continue block links a published lesson a second time (WEB-UI FR-UI-6).
+  await expect(page.getByRole('link', { name: LESSON.title }).first()).toBeVisible();
   await shot('02-lesson-list');
   const axe = await new AxeBuilder({ page }).analyze();
   for (const v of axe.violations.filter((x) => x.impact === 'serious' || x.impact === 'critical'))
@@ -160,7 +165,7 @@ test('lesson list shows the fixture lesson', async () => {
 });
 
 test('lesson renders: markdown, references, open finding', async () => {
-  await page.getByRole('link', { name: LESSON.title }).click();
+  await page.getByRole('link', { name: LESSON.title }).first().click();
   if (LESSON.path) await expect(page).toHaveURL(new RegExp(`${LESSON.path}$`));
   await expect(page.getByRole('heading', { name: LESSON.heading })).toBeVisible();
   if (OFFLINE) {
@@ -168,7 +173,8 @@ test('lesson renders: markdown, references, open finding', async () => {
     await expect(page.locator('pre.shiki').first()).toBeVisible();
   }
   if (LESSON.reference) await expect(page.getByText(LESSON.reference).first()).toBeVisible();
-  await expect(page.locator('.open-finding').first()).toBeVisible();
+  // The design pass shows an open finding as the open cell's warning callout (WEB-NOTEBOOK FR-NOTEBOOK-3).
+  await expect(page.locator('.cell[data-kind="open"] .callout[data-tone="warning"]').first()).toBeVisible();
   await expect(page.getByRole('link', { name: /open finding/ })).toBeVisible();
   await shot('03-lesson');
   const axe = await new AxeBuilder({ page }).analyze();
@@ -178,8 +184,14 @@ test('lesson renders: markdown, references, open finding', async () => {
 
 // --- Notebook (SRV-KERNEL relay, OPS-SANDBOX kernel) ---------------------------------------------------------------
 const lab = () => page.locator('.lab').first();
+// Design pass (WEB-NOTEBOOK FR-NOTEBOOK-9): the lab is a CodeMirror editor ("Lab 1 code", contenteditable in a shadow
+// root that Playwright's locators pierce); the plain text area shows only until it has loaded.
 const runCode = async (code: string) => {
-  await lab().getByRole('textbox', { name: 'Lab code' }).fill(code);
+  const editor = lab().locator('.cm-content');
+  await expect(editor).toBeVisible({ timeout: 30_000 });
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.insertText(code);
   await lab().getByRole('button', { name: 'Run', exact: true }).click();
 };
 const outputs = () => lab().locator('.outputs');
@@ -260,10 +272,16 @@ test('sandbox: no egress, no secrets, no tokens in the environment', async () =>
 
 test('reset with confirmation, then the cell runs again', async () => {
   stackOnly();
-  await page.getByRole('button', { name: 'Reset kernel' }).click();
+  // The design pass moved Reset kernel into the toolbar's "More lesson actions" menu (WEB-NOTEBOOK FR-NOTEBOOK-7).
+  const more = page.getByRole('button', { name: 'More lesson actions' });
+  await more.click();
+  await page.getByRole('menuitem', { name: /Reset kernel/ }).click();
   await expect(page.getByRole('dialog')).toContainText('Reset the kernel?');
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Reset kernel' })).toBeEnabled({ timeout: 60_000 });
+  await expect(page.getByRole('dialog')).toBeHidden({ timeout: 60_000 });
+  await more.click();
+  await expect(page.getByRole('menuitem', { name: /Reset kernel/ })).toBeEnabled({ timeout: 60_000 });
+  await page.keyboard.press('Escape');
   await runCode('print(2)');
   await state('done', 90_000);
   await expect(outputs()).toContainText('2');

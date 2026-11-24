@@ -1,0 +1,24 @@
+reader-spike-obs-gate-1 14.36MiB / 11.62GiB
+reader-spike-obs-caddy-1 12.23MiB / 11.62GiB
+reader-spike-obs-jaeger-1 12.45MiB / 512MiB
+reader-spike-obs-mlflow-sqlite-1 368.5MiB / 1GiB
+reader-spike-obs-rotel-1 8.43MiB / 256MiB
+-- idle
+reader-spike-obs-gate-1 14.36MiB / 11.62GiB
+reader-spike-obs-caddy-1 12.23MiB / 11.62GiB
+reader-spike-obs-jaeger-1 12.5MiB / 512MiB
+reader-spike-obs-mlflow-sqlite-1 379.7MiB / 1GiB
+reader-spike-obs-rotel-1 10.65MiB / 256MiB
+-- after-analytics
+reader-spike-obs-gate-1 14.36MiB / 11.62GiB
+reader-spike-obs-caddy-1 12.23MiB / 11.62GiB
+reader-spike-obs-jaeger-1 17.58MiB / 512MiB
+reader-spike-obs-mlflow-sqlite-1 394.5MiB / 1GiB
+reader-spike-obs-rotel-1 20.32MiB / 256MiB
+-- after-bulk-50
+reader-spike-obs-gate-1 14.55MiB / 11.62GiB
+reader-spike-obs-caddy-1 15.24MiB / 11.62GiB
+reader-spike-obs-jaeger-1 24.49MiB / 512MiB
+reader-spike-obs-mlflow-sqlite-1 394.5MiB / 1GiB
+reader-spike-obs-rotel-1 20.3MiB / 256MiB
+-- after-browser

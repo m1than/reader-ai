@@ -11,6 +11,11 @@ class IngestError(Exception):
         self.code = code
 
 
+class Cancel(Exception):
+    """FR-INGEST-20's one cancel shape (exit 3, `{"cancel":true}`): the upload is gone, not under this
+    claim, or its import key exists."""
+
+
 def import_error(code: str) -> type[Exception]:
     """A permanent import failure whose class name is its code: SRV-EVENTS stores the class name only."""
     return type(code, (Exception,), {"__module__": __name__})

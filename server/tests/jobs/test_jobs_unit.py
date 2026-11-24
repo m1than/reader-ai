@@ -115,23 +115,36 @@ def test_kind_modules_are_a_declared_list() -> None:
     jobs = require_jobs()
     assert isinstance(jobs.KIND_MODULES, tuple)
     assert len(jobs.load_kinds(())) == 0
-    # SRV-INGEST, SRV-SEARCH, SRV-PIPELINE and SRV-TUTOR paired changes (FR-EVENTS-1 note)
+    # SRV-INGEST, SRV-SEARCH, SRV-PIPELINE, SRV-TUTOR, SRV-OBS, SRV-FRESH paired changes (FR-EVENTS-1, -19)
     assert jobs.KIND_MODULES == (
-        "reader.ingest.jobs", "reader.search.jobs", "reader.pipeline.jobs", "reader.tutor.jobs"
+        "reader.ingest.jobs",
+        "reader.search.jobs",
+        "reader.pipeline.jobs",
+        "reader.tutor.jobs",
+        "reader.obs.jobs",
+        "reader.freshness.jobs",
     )
     assert list(jobs.load_kinds()) == [
-        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer"
+        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer",
+        "obs.feedback", "obs.prompts", "obs.retention",  # SRV-OBS FR-OBS-14, -15 (V.obs-analytics)
+        "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health",  # SRV-OBS phase 2 (FR-EVENTS-32)
+        "freshness.scan", "freshness.web",
     ]
 
 
 def test_start_hooks_are_the_declared_modules_on_worker_start() -> None:
     """FR-EVENTS-1: `hooks=None` means these, in KIND_MODULES order (ingest and tutor export none)."""
     require_jobs()
+    import reader.obs.jobs
     import reader.pipeline.jobs
     import reader.search.jobs
     from reader.jobs.catalog import start_hooks
 
-    assert start_hooks() == [reader.search.jobs.on_worker_start, reader.pipeline.jobs.on_worker_start]
+    assert start_hooks() == [
+        reader.search.jobs.on_worker_start,
+        reader.pipeline.jobs.on_worker_start,
+        reader.obs.jobs.on_worker_start,
+    ]
     assert start_hooks(()) == []
 
 

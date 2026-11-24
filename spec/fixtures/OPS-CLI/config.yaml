@@ -20,3 +20,7 @@ users:
         token: secret://op/Private/anna-claude/token
       - kind: api-key
         token: secret://hostfile/tmp/reader-ai-test/anna-api-key
+# FR-CLI-22 (paired SRV-OBS change): off here, so the profile sets of the FR-CLI-5 tests stay as written;
+# server/tests/cli/test_observability.py turns it on.
+observability:
+  enabled: false

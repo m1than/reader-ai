@@ -1,0 +1,25 @@
+# Spike only (never shipped), round 5 (V.obs-analytics design review round 1: B1, B2, B8). Used with compose.yaml and
+# compose.jaeger.yaml by run-round5.sh.
+services:
+  mlflow-sqlite:
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+      MLFLOW_MODEL_CATALOG_URI: file:///catalog
+    volumes: ["mlflow_data:/var/lib/mlflow", "${CATALOG_DIR:?}:/catalog:ro"]
+    # GUARD is empty or `test -s /catalog/anthropic.json || exit 78; ` (B1: a missing catalog stops MLflow).
+    command:
+      - sh
+      - -c
+      - >-
+        ${GUARD:-}exec mlflow server --host 0.0.0.0 --port 5000 --workers 1
+        --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db
+        --artifacts-destination /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/
+        --allowed-hosts localhost:8443,localhost:8445,localhost:8446,mlflow:5000,mlflow
+
+  gate:
+    environment:
+      SITE_ORIGINS: "mlflow=http://localhost:8443|http://localhost:8445|http://localhost:8446,jaeger=http://localhost:8448"
+
+  jaeger:
+    mem_limit: ${JAEGER_MEM:-256m}
+    memswap_limit: ${JAEGER_MEM:-256m}

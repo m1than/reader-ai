@@ -8,6 +8,12 @@ revisit_when: "Ingestion moves into Docker (a Docker run meets ADR-0021's 51 s p
 supersedes: []
 ---
 
+> Amended by [ADR-0029](0029-browser-upload-host-side-confined-conversion.md) (accepted by the owner, 2026-11-23): browser upload with host-side confined conversion.
+> - **Profile.** The converter's profile is to be narrowed: `sysctl-read` only for an allow-list of hardware, VM and OS-identity names (nothing under `kern.proc` or `kern.procargs`), and no process-info about any process but itself (`(deny process-info*) (allow process-info* (target self))`). Measured in spikes/ingest-sysctl: under the current profile a confined child reads another same-uid process's arguments, environment and cwd; the two edits refuse those. One channel is still open under them (resolving another run's work directory by inode with `fsgetpath`), so the product profile changes only when every cross-process probe, the inode ones included, is refused (ADR-0029 Decision 3).
+> - **Receive.** `reader.ingest.receive` also accepts an uploaded material, not only a material declared in reader.yaml, and only under a live claim of that upload (`--upload-id`, `--claim`) whose sha256 equals the artifact's `material_sha256` (SRV-INGEST FR-INGEST-23).
+> - **"No new capability" restated.** The confined child gains nothing; the profile edit removes capabilities it had. The new host watcher (`reader-ingest --watch`), not the child, gains a long poll and a byte fetch over `docker exec` into the worker; it holds no secret.
+> - **Start.** Ingestion of an uploaded source is started from the browser; `reader-ingest <material id>` for reader.yaml materials stays as it is.
+
 ## Context
 
 ADR-0021 (accepted, 2026-11-20) chose a native host converter after both M1 runs missed its bound of ≤ 51 s per formula: 284.1 s per formula at 4 VM CPUs and 266.0 s at 13 (`spikes/ingest-docling/RESULT.md`, PR #24). Its Decision item 3 gives the mechanism:

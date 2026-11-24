@@ -74,7 +74,10 @@ review: "deep-reviewer round 1 on the first draft (V/V.DOD-index): changes, all 
   Paired change from SRV-AUTH (2026-11-23, V.auth-page-style, FR-AUTH-21; reviewed in SRV-AUTH's rounds): the
   operations index adds `GET /api/auth/static/auth.css` to the routes of auth.bootstrap and auth.signin (in the
   Green commit, with the route itself: T10 refuses a route that the registry does not have yet); their a11y
-  cells stay `missing` (the new [browser] axe runs are not `pages` evidence and axe.json has no producer yet)."
+  cells stay `missing` (the new [browser] axe runs are not `pages` evidence and axe.json has no producer yet).
+  Paired change from SRV-FRESH (2026-11-23, its Green): operation material.freshness names its four routes and
+  maps the traced items; 5 cells stay `missing` (live FR-FRESH-14 for functional and cost, INV-FRESH-1's [agent]
+  check for privacy, a11y pages, latency); no `waived`."
 layer: ops
 track: engineering
 adr: [ADR-0001, ADR-0019, ADR-0005]

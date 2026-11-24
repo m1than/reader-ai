@@ -1,7 +1,8 @@
-# @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3
+# @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3, FR-DEPLOY-13
 """OPS-DEPLOY [config]: networks, the api bind address, kernel isolation and the reachability matrix."""
 
 from .conftest import (
+    PROFILES,
     REACHABILITY,
     full_render,
     kernel_services,
@@ -36,6 +37,10 @@ def test_network_membership() -> None:
     assert members["embed"] == {"api", "worker", "embed"}
     assert networks_of(model["services"]["embed"]) == {"embed"}
     assert model["networks"]["embed"].get("internal") is True
+    # Paired SRV-OBS change (FR-DEPLOY-13, ADR-0032): otel, obs and obs-ui.
+    assert members["otel"] == {"api", "worker", "rotel"}
+    assert members["obs"] == {"rotel", "mlflow", "worker"}
+    assert members["obs-ui"] == {"caddy", "mlflow"}
     front = model["networks"]["front"]
     assert front["ipam"]["config"] == [{"subnet": "10.230.1.0/24", "ip_range": "10.230.1.128/25"}]
     assert model["services"]["api"]["networks"]["front"]["ipv4_address"] == API_FRONT
@@ -83,7 +88,7 @@ def test_sharing_pairs_equal_the_matrix() -> None:
 
 
 def test_override_adds_only_kernel_and_its_network() -> None:
-    base = render(("kernels", "agents", "mcp"))
+    base = render(PROFILES)  # the same profiles as full_render (observability included, FR-DEPLOY-13)
     merged = full_render()
     assert set(merged["services"]) - set(base["services"]) == {"kernel-user-ivan"}
     assert set(merged["networks"]) - set(base["networks"]) == {"sb-user-ivan"}

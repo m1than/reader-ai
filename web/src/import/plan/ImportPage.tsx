@@ -6,13 +6,20 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../../app/api';
 import { useServices } from '../../app/context';
+import { useLocale, useT } from '../../ui/i18n';
 import type { MaterialRow, PlanApi } from './api';
-import { message } from './messages';
+import en from './messages.en';
+import { message, type PlanT } from './messages';
 import { PlanSection } from './PlanSection';
 
-const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
+/** A status in sentence case, `_` as a space (FR-IMPORT-8, design pass): the fallback for a status the catalogue does
+ * not map (WEB-UI FR-UI-30). */
+const statusText = (s: string): string => {
+  const t = s.replaceAll('_', ' ');
+  return t.charAt(0).toUpperCase() + t.slice(1);
+};
 
-function SourceRow({ api, material, onPlan }: { api: PlanApi; material: MaterialRow; onPlan: () => void }) {
+function SourceRow({ api, material, chosen, onPlan, t }: { api: PlanApi; material: MaterialRow; chosen: boolean; onPlan: () => void; t: PlanT }) {
   const imported = material.status === 'imported';
   const stored = useQuery({
     queryKey: ['plan', 'stored', material.id],
@@ -20,22 +27,27 @@ function SourceRow({ api, material, onPlan }: { api: PlanApi; material: Material
     enabled: imported,
   });
   return (
-    <li className="source-row">
+    <li className="source-row" aria-current={chosen ? 'true' : undefined}>
       <span className="source-title">{material.id}</span>
       <span className="source-meta">
-        {imported ? `${material.page_count ?? '?'} pages` : material.status.replace('_', ' ')}
+        {imported ? (
+          t('sources.pages', { n: String(material.page_count ?? '?') })
+        ) : (
+          <span className="chip">{t.maybe(`enum.material_status.${material.status}`, undefined, statusText(material.status))}</span>
+        )}
       </span>
       {imported ? (
-        <Button variant="outline" color="neutral" size="sm" onClick={onPlan} disabled={stored.isPending}>
-          {stored.data ? 'Re-plan' : 'Plan study time'}
+        <Button variant="ghost" color="neutral" size="sm" onClick={onPlan} disabled={stored.isPending}>
+          {stored.data ? t('sources.replan') : t('sources.plan')}
         </Button>
       ) : null}
     </li>
   );
 }
 
-function Planner({ api, materialId }: { api: PlanApi; materialId: string }) {
+function Planner({ api, materialId, t }: { api: PlanApi; materialId: string; t: PlanT }) {
   const stored = useQuery({ queryKey: ['plan', 'stored', materialId], queryFn: () => api.stored(materialId) });
+  const { formatLocale } = useLocale();
   const heading = useRef<HTMLDivElement>(null);
   useEffect(() => {
     heading.current?.querySelector('h2')?.focus();
@@ -43,19 +55,20 @@ function Planner({ api, materialId }: { api: PlanApi; materialId: string }) {
   if (stored.isPending)
     return (
       <p role="status" className="muted">
-        Loading the plan
+        {t('plan.loading')}
       </p>
     );
-  if (stored.isError) return <p className="plan-error">{message(stored.error instanceof ApiError ? stored.error.code : 'unknown')}</p>;
+  if (stored.isError) return <p className="plan-error">{message(stored.error instanceof ApiError ? stored.error.code : 'unknown', t)}</p>;
   return (
     <div ref={heading} className="plan-wrap">
-      <PlanSection key={materialId} api={api} materialId={materialId} stored={stored.data} locale={locale()} />
+      <PlanSection key={materialId} api={api} materialId={materialId} stored={stored.data} locale={formatLocale} />
     </div>
   );
 }
 
 export function ImportPage() {
   const { plan } = useServices();
+  const t = useT('import/plan', en);
   const [chosen, setChosen] = useState<string | null>(null);
   const materials = useQuery({
     queryKey: ['plan', 'materials'],
@@ -64,31 +77,31 @@ export function ImportPage() {
   if (!plan) return null;
   return (
     <div className="page import-page">
-      <h1>Import a source</h1>
+      <h1>{t('page.title')}</h1>
       <section aria-labelledby="sources-h">
-        <h2 id="sources-h">Your sources</h2>
+        <h2 id="sources-h">{t('sources.heading')}</h2>
         {materials.isPending ? (
           <p role="status" className="muted">
-            Loading your sources
+            {t('sources.loading')}
           </p>
         ) : materials.isError ? (
           <div className="state-actions">
-            <p className="plan-error">{message(materials.error instanceof ApiError ? materials.error.code : 'unknown')}</p>
+            <p className="plan-error">{message(materials.error instanceof ApiError ? materials.error.code : 'unknown', t)}</p>
             <Button variant="outline" color="neutral" onClick={() => void materials.refetch()}>
-              Retry
+              {t('retry')}
             </Button>
           </div>
         ) : materials.data.materials.length === 0 ? (
-          <p className="muted">No sources yet.</p>
+          <p className="muted">{t('sources.none')}</p>
         ) : (
           <ul className="source-list">
             {materials.data.materials.map((m) => (
-              <SourceRow key={m.id} api={plan} material={m} onPlan={() => setChosen(m.id)} />
+              <SourceRow key={m.id} api={plan} material={m} chosen={chosen === m.id} onPlan={() => setChosen(m.id)} t={t} />
             ))}
           </ul>
         )}
       </section>
-      {chosen ? <Planner api={plan} materialId={chosen} /> : null}
+      {chosen ? <Planner api={plan} materialId={chosen} t={t} /> : null}
     </div>
   );
 }

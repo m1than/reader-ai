@@ -27,7 +27,23 @@ title: Host CLI `reader` — up/down/status with the secret-delivery watcher, bo
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20). Amended 2026-11-22 for V.OPS-CLI-kernels and V.OPS-CLI-agents (FR-CLI-4 bind to agent-proxy, FR-CLI-5 profiles, FR-CLI-8 step 0; paired with OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3); deep-reviewer review pending (secrets: full)."
+review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: names from the rendered model, fd-3 hand-off, allow-listed env, DB password item and generation rule, events --since plus reconcile and flock liveness, config-free commands, default profile, ADR-0024 trust, x-kernel from source, codes and bounds, backup/restore). Round 2 changes (backup DIR required, Compose major check, event label trust, 15 s stop, fd-4 readiness; plus reader bootstrap added). Round 3 changes (backup uid, bootstrap token never in exceptions with timeouts; plus reader.yaml bind added). Round 4 approve (97b422e), non-blocking items applied. Delta 97b422e..5c15d21 (caddy_config back in backup and restore per ADR-0012 and ADR-0024; one-off uid is the mounting services' common user or 0:0) confirmed: approve. Approved with the Red tests after OPS-DEPLOY merged (#27); paired additions at approval: `reader bootstrap --handle` (SRV-AUTH FR-AUTH-4) and the exact pg_dump/pg_restore/psql argv of FR-CLI-17/18 (role and database `postgres`). Amended with code review round 1 (H2, tests in the same commit): one-offs `--entrypoint \"\"` and timeouts (FR-CLI-17/18), stops inside the try, restore ignores alembic_version, `op read` 120 s, keychain_unavailable, failed reconcile counts as a failed subscription, T0 kept, count reset after a 4 s stream, lock retry and SIGKILL waits (FR-CLI-7), INFO log with the failing label (FR-CLI-9), interruptible waits and coded errors (FR-CLI-20). Amended 2026-11-22 for V.OPS-CLI-kernels and V.OPS-CLI-agents (FR-CLI-4 bind to agent-proxy, FR-CLI-5 profiles, FR-CLI-8 step 0; paired with OPS-DEPLOY FR-DEPLOY-5 and VEC-DEPLOY-3); deep-reviewer review pending (secrets: full). Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CLI-22
+  (profile `observability`, the 8443 port in the override, the traces line, the doctor gate check); reviewed in
+  SRV-OBS's code review. Paired change FR-CLI-23 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the
+  owner; drafted and promoted as FR-CLI-22, renumbered at the merge into V/slice-integration, 2026-11-24, because
+  SRV-OBS's item took that id first; ADR-0029's text still says FR-CLI-22): the ingest watcher started by `reader
+  up`, reported by `reader status`, stopped by `reader down`; drafted on V/onboarding and reviewed in its
+  deep-reviewer rounds 1–7 (secrets area: full rounds), promoted on V/upload-impl with its Red tests. Green: the
+  spawn is a `Ctx` field (`ingest_spawn`, set by `default_ctx`; the fake world of the existing tests has none, so
+  they start no watcher), and the Red test injects its recorder there instead of patching the module; no oracle
+  changed. The test reformatted for ruff (line length), no oracle change. Live-harness fix 2026-11-24
+  (V/live-harness-fixes, after the owner's live upload check): FR-CLI-23's status reads `unknown` with the config
+  problem, not `stopped`, when reader.yaml cannot be loaded; paired unit test. Paired change 2026-11-24 (V/manage,
+  SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): `reader status` (FR-CLI-13) and `reader up` print one line per stored
+  settings override, read with `docker compose exec -T postgres psql -U postgres -d postgres -At -c \"SELECT key,
+  value FROM settings_overrides ORDER BY key\"` (30 s) and evaluated against the loaded reader.yaml by
+  `reader.config.effective.status_lines`; a failed read prints `overrides: unavailable` and never changes the exit
+  code; `status --json` adds `overrides` (the same lines). Tests: server/tests/cli/test_overrides.py."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -334,6 +350,114 @@ requirements:
       local processes of the same user for the call's duration) because it is a short-lived, single-use token minted by
       SRV-AUTH, not a long-lived secret, and the browser needs the URL; it is not a resolved value, so INV-CLI-2 does not
       cover it.
+  - id: FR-CLI-22
+    text: >-
+      Observability (paired SRV-OBS change, ADR-0032 accepted 2026-11-24; amends FR-CLI-5, -8 and -15). (a)
+      `choose_profiles` also returns `observability` when the config's `observability.enabled` is true (SRV-CONFIG
+      FR-CONFIG-17's default true); `OPTIONAL_PROFILES` gains it, so it is recorded in run/profiles and withdrawn by
+      FR-CLI-5's rule when it turns false (rotel and mlflow removed; their volume stays). (b) The in-memory override
+      adds `ports: ["127.0.0.1:8443:8443"]` to `caddy` exactly when `observability` is among the active profiles, and
+      nothing else for it (the base compose.yaml publishes only 443, OPS-DEPLOY FR-DEPLOY-13). (c) After every service
+      is healthy, `reader up` prints `traces: https://localhost:8443/` when the profile is active. (d) `reader doctor`
+      adds the check `observability`: skipped (ok, detail `off`) when the profile is not chosen; otherwise an HTTPS GET
+      of `https://localhost:8443/` with no cookie (5 s timeout) must answer 401: detail `gate ok` (ok), `gate open`
+      (any 2xx or 3xx: fails), `status <n>` (any other answer: fails) or `unreachable` (no answer, or the certificate
+      does not verify: fails). The roots it verifies against are the ones recorded by FR-CLI-16's `reader trust` plus
+      Caddy's public root read from the running stack exactly as `reader trust` reads it (`docker compose exec -T
+      caddy cat` of the root certificate), kept in `run/doctor-root.pem` (mode 0600) and passed to the check only:
+      the doctor never adds trust to a keychain (`reader trust` changes the login keychain's trust settings, an owner
+      action), so it works without `reader trust` (live check 2026-11-24 reported `unreachable` with no recorded
+      root). Caddy's root counts only when it loads as a PEM verification root (a bad or truncated one is no root,
+      never a crash: live-fixes review); the file is rewritten on every run (unlinked, then created exclusively).
+      When no root is available the detail is `unreachable: no Caddy root (stack down?)`. `gate_status(url,
+      roots)` takes the roots as an argument, skips a root file that does not load, verifies the certificate and the
+      host name, and never follows a redirect; a unit test runs it against a local HTTPS server with a test CA
+      (code review round 1), including a bad root next to a good one. [unit] server/tests/cli/test_observability.py.
+      Amended by SRV-OBS FR-OBS-19 (ADR-0033 accepted 2026-11-24): (b) the override adds
+      `ports: ["127.0.0.1:8443:8443", "127.0.0.1:8444:8444"]` (Jaeger's site) under the same condition; (c) `reader
+      up` also prints `jaeger: https://localhost:8444/`; (d) the doctor adds the check `jaeger`, the same GET of
+      `https://localhost:8444/` with the same roots and details (`off` when the profile is not chosen).
+  - id: FR-CLI-23   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23); was FR-CLI-22 until the merge
+    text: >-
+      **The ingest watcher** (SRV-INGEST FR-INGEST-21). By default (owner 2026-11-23), `reader up`, after its step
+      (7) succeeded, starts `reader-ingest --watch --config <the resolved reader.yaml>` unless its lock
+      `<data_dir>/ingest/locks/watch.lock` is held. **A running watcher of other code:** the lock file holds the
+      watcher's pid and the `converter_source_sha256` of the code it runs (SRV-INGEST FR-INGEST-21). When that sha
+      differs from the checkout's and the watcher is idle (the lock file's `busy` field, which the watcher rewrites
+      at every claim and release; a lock file that does not parse as exactly `{pid, sha, busy}`, for instance one
+      caught mid-rewrite, counts as busy), `reader up` stops it as `reader down` does and starts the new one;
+      when it is busy, `reader up` leaves it, prints "ingest watcher runs older code; it restarts at the next `reader
+      up` when idle", and `reader status` shows `"ingest_watcher": "stale"`. Otherwise it leaves the running one.
+      The spawn, unlike the secret
+      watcher's (FR-CLI-8), passes nothing:
+      - argv: the `reader-ingest` console script of the same environment as `reader`, as a list;
+      - env: exactly FR-INGEST-2's allow-list (PATH, HOME, LANG, DOCKER_HOST when set), never the inherited one;
+      - `close_fds=True` and `pass_fds=()`: no fd 3 or 4 (the secret bundle and readiness pipes of FR-CLI-8 are
+        never inherited), only 0, 1 and 2 are open;
+      - stdin `/dev/null`; stdout and stderr appended to `~/Library/Application Support/reader-ai/run/ingest-watch.log`
+        (0600, created 0600 in the 0700 run directory, truncated to its last 5 MiB at each start);
+      - `start_new_session=True`, so it has its own session and no controlling terminal.
+      `reader status` (and `--json` as `"ingest_watcher": "running" | "stale" | "stopped"`) probes the lock as FR-CLI-7 probes
+      the secret watcher's, and reports `"converter": "running" | "idle"` by probing `<data_dir>/ingest/locks/
+      convert.lock` the same way (SRV-INGEST FR-INGEST-22: one converter run on the host at a time; a CLI
+      `reader-ingest` exits 3 `busy` while it is held, SRV-INGEST FR-INGEST-1). An idle watcher waits without
+      the lock (`next --peek`), so it reads `idle`; `running` means a conversion is under way. [unit] an idle
+      watcher's lock state reads `idle`; a held lock reads `running`. **Without a loadable reader.yaml** (the
+      `--config` path is not a file, or it does not load) the lock cannot be found, so `reader status` reports
+      `"ingest_watcher": "unknown"` and `"converter": "unknown"`, never `stopped`, plus `"ingest_config":
+      {"problem": "config_missing" | "config_invalid", "path": <the path>}` in `--json` and one text line naming
+      the problem and `--config` (live check 2026-11-24: status without `--config` read `stopped` while the watcher
+      ran); the exit code is unchanged. [unit] a missing and an invalid config each read `unknown` with their
+      problem. `reader down` stops it before `docker compose down`: SIGTERM to the pid written in the
+      lock file, only while the lock is held, then up to 15 s for the lock to be released, then SIGKILL (the
+      watcher's own handler kills its converter child first, FR-INGEST-21). A failed spawn is reported and does not
+      fail `up`: the stack runs and uploads wait as `queued` (ADR-0029 Decision 6).
+      [unit] a fake `reader-ingest` records its environment, its open file descriptors (`/dev/fd`), `os.getsid(0) ==
+      os.getpid()` and that opening `/dev/tty` fails: the environment equals the allow-list exactly (a canary
+      variable set in the parent is absent), the open fds are exactly {0, 1, 2}, stdin is `/dev/null`; `reader down`
+      signals only a pid whose lock is held; `reader up` with the lock held by a watcher of the same sha starts
+      nothing; with a different sha and an idle watcher it stops and restarts it; with a busy one it leaves it and
+      reports `stale`.
+  - id: FR-CLI-24
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-29, -30, -31, -32; ADR-0038). (a) `reader doctor` and `reader status`
+      print one line each for mlflow, rotel and jaeger from `docker inspect` (image, running, restart count, the
+      Docker health where there is one); for mlflow also the store size from `docker system df -v` for the
+      `obs_mlflow` volume (including `backup/pre-migrate.db`) with the warning `obs_store_large` at 80 % of 4 GiB,
+      the journal mode (read through the existing one-off helper, read-only), the last `obs.retention` and
+      `obs.setup` from the jobs table, and `obs mlflow: fresh store, schema <revision>` after a first start.
+      (b) `reader backup DIR` includes `obs_mlflow`, always through SQLite's backup API (stack up or down), to
+      `<DIR>/obs_mlflow.db` plus the artifacts directory, and writes `<DIR>/obs_mlflow.store.version` (the volume's
+      `store.version`, when present). `reader restore DIR` (stack down), in this order: removes the volume's
+      `store.version` and the markers `backup/in-progress`, `backup/fresh` and `backup/restored-for`, replaces
+      `mlflow.db` (copy first, through the backup API, into a temporary file in the volume; only then removes the
+      old `mlflow.db-wal` and `mlflow.db-shm` and moves the copy into place, so a failed copy leaves the old store
+      whole), then writes `store.version` from the backup (absent when the backup has none). It then runs
+      `mlflow-migrate` itself as a fresh one-shot (`docker compose run --rm --no-deps mlflow-migrate`, with the
+      `observability` profile) and starts mlflow again only when that run exited 0; any other exit leaves mlflow
+      stopped, prints that code's message as (d) and exits with `restore_failed` (code review round 1 of phase 2,
+      B3). The `obs_mlflow` volume's backup label changes from excluded to included (ADR-0038 Decision 6; OPS-DEPLOY
+      FR-DEPLOY-15).
+      (c) `reader restore-obs-premigrate [--force]` (stack down) restores `backup/pre-migrate.db` as SRV-OBS FR-OBS-29
+      describes; with `--force` it prints the version it rolls back to before copying. Exit codes (0..7): 0 restored
+      (prints the version), 2 the stack is up (stop it first), 3 no `pre-migrate.db`, 4 the backup API copy failed
+      (`mlflow.db` untouched), 5 the marker could not be written, 6 no `backup/in-progress` (rerun with `--force`),
+      7 no (or an empty) `backup/pre-migrate.version`: the version to restore for is unknown, so nothing is copied
+      (code review round 1 of phase 2: never restore for "unknown").
+      (d) `reader up` reports `mlflow-migrate`'s own exit codes (10 `obs_migration_incomplete` → run
+      restore-obs-premigrate; 11 `obs_restored_for_other_version` → the marker's version and the hint that the owner
+      reverts the pin in git; 12 `obs_migration_failed` and 13 `obs_migration_finish_failed` → restore-obs-premigrate),
+      which never overlap the restore command's 0..7. (e) `reader status` prints (a)'s obs lines when the
+      `observability` profile is recorded (`reader status --json`: the list `obs`); `reader status` skips the
+      slow `docker system df -v` call (seconds on a large Docker store; code review round 2 of phase 2), so its
+      mlflow line says `store unknown` and it never prints `obs_store_large`, unless `reader status --obs` asks for
+      the store size; `reader doctor` always measures it. `reader doctor --json` carries
+      each as an informational check `{name: obs, ok: true, detail: <line>}`, so the array's shape stays. Tests: [unit] the doctor and status lines from canned
+      `docker inspect` / `docker system df -v` output, the 80 % warning; the backup and restore command sequences
+      (argv) in order; restore-obs-premigrate's exit codes; `reader up`'s message per migrate code; [unit,
+      command level] `cmd_restore` with the obs volume runs `mlflow-migrate` after the store copy and before mlflow
+      starts, and leaves mlflow stopped when it exits non-zero; `cmd_backup` writes the three obs files; `cmd_up`
+      prints the migrate message when `up` fails with the profile.
 
 invariants:
   - id: INV-CLI-1

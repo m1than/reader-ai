@@ -19,7 +19,14 @@ from pydantic import (
     model_validator,
 )
 
-from reader.config.checks import FrozenDict, decimal_in_context, freeze_opaque, unique, url_problem
+from reader.config.checks import (
+    FrozenDict,
+    decimal_in_context,
+    freeze_opaque,
+    material_id_problem,
+    unique,
+    url_problem,
+)
 from reader.config.refs import SecretRef
 
 _FROZEN = ConfigDict(frozen=True, extra="forbid", strict=True)
@@ -28,6 +35,12 @@ _FROZEN = ConfigDict(frozen=True, extra="forbid", strict=True)
 def _url(value: str) -> str:
     if url_problem(value):
         raise ValueError("bad_url")
+    return value
+
+
+def _material_id(value: str) -> str:
+    if problem := material_id_problem(value):
+        raise ValueError(problem)
     return value
 
 
@@ -95,11 +108,19 @@ class Budgets(BaseModel):
 
 class Material(BaseModel):
     model_config = _FROZEN
-    id: Text
+    id: Annotated[Text, AfterValidator(_material_id)]
     file: Text
     sha256: Sha256
     license: Text
     language: Text
+
+
+class Observability(BaseModel):
+    """FR-CONFIG-17 (paired SRV-OBS change): tracing on or off, and the trace retention in days."""
+
+    model_config = _FROZEN
+    enabled: bool = True
+    retention_days: Annotated[int, Field(ge=1, le=365)] = 30
 
 
 class ReaderConfig(BaseModel):
@@ -114,6 +135,7 @@ class ReaderConfig(BaseModel):
     materials: tuple[Material, ...] = ()
     sectors: Opaque = Field(default_factory=_empty)
     sharing: Opaque = Field(default_factory=_empty)
+    observability: Observability = Field(default_factory=Observability)
 
     @model_validator(mode="after")
     def _unique(self) -> Self:

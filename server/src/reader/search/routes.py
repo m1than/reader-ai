@@ -15,7 +15,7 @@ from starlette.responses import JSONResponse, Response
 from reader.api.http import Ctx, Route, error
 from reader.config import ConfigError
 from reader.search import params
-from reader.search.store import search
+from reader.search.store import material_deleted, search
 
 log = logging.getLogger("reader.search")
 SHA: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -42,6 +42,9 @@ async def post_search(ctx: Ctx) -> Response:
         log.info("search refused: invalid input")
         return error(400, "invalid_search")
     q, k, material = parsed
+    if material is not None and await material_deleted(ctx.engine, ctx.signed_in.id, material):
+        log.info("search refused: not_found")  # FR-SEARCH-20: a deleted material's filter
+        return error(404, "not_found")
     try:
         result = await search(ctx.engine, ctx.signed_in.id, q, k, material)
     except (ConfigError, OSError):  # reader.yaml unreadable or invalid: no material language (FR-SEARCH-6)

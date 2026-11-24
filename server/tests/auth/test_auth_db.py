@@ -21,7 +21,7 @@ def test_version_locations_are_a_declared_list() -> None:
 
     ours, theirs = db.VERSION_LOCATIONS[:-1], db.VERSION_LOCATIONS[-1:]
     relative = [p.as_posix().split("/reader/", 1)[1] for p in ours]
-    # Paired changes of SRV-LESSON, -EVENTS, -INGEST, -SEARCH, -AGENT, -PIPELINE and -TUTOR (FR-AUTH-1 notes)
+    # Paired changes of SRV-LESSON, -EVENTS, -INGEST, -SEARCH, -AGENT, -PIPELINE, -TUTOR, -FRESH (FR-AUTH-1)
     assert relative == [
         "db/migrations/versions",
         "lessons/migrations",
@@ -32,6 +32,9 @@ def test_version_locations_are_a_declared_list() -> None:
         "pipeline/migrations",
         "tutor/migrations",
         "plan/migrations",  # SRV-PLAN paired change (FR-AUTH-10 note)
+        "obs/migrations",  # SRV-OBS paired change (FR-AUTH-33)
+        "freshness/migrations",
+        "config/migrations",  # SRV-CONFIG FR-CONFIG-26 paired change (FR-AUTH-1 note, V/manage)
     ]
     assert [p.as_posix().rsplit("/procrastinate/", 1)[1] for p in theirs] == ["contrib/alembic/versions"]
     assert all(p.is_dir() for p in db.VERSION_LOCATIONS)
@@ -81,7 +84,8 @@ async def test_not_at_heads_when_one_branch_is_missing(pg: Pg) -> None:
 
     engine = make_engine(target(pg))
     await migrate(engine)
-    await execute(engine, "DELETE FROM alembic_version WHERE version_num = 'jobs_0001'")
+    # The jobs branch's head (jobs_0003 since SRV-EVENTS FR-EVENTS-30's audit_log, V/manage).
+    await execute(engine, "DELETE FROM alembic_version WHERE version_num = 'jobs_0003'")
     assert await at_heads(engine) is False
     await engine.dispose()
 

@@ -1,0 +1,123 @@
+{
+ "link_cross_experiment": [
+  200,
+  {}
+ ],
+ "link_traces_to_run": [
+  200,
+  {}
+ ],
+ "traces_by_run_metadata": {
+  "status": 200,
+  "count": 4,
+  "error": null
+ },
+ "link_ingest": [
+  200,
+  {}
+ ],
+ "datasets": {
+  "tutor-bench-v2": {
+   "id": "d-a59cc214918048589422366194da66c8",
+   "records": 40
+  },
+  "search-bench-v1": {
+   "id": "d-b5ae172cab0646be90fea0f8847c4924",
+   "records": 30
+  }
+ },
+ "evals": [
+  {
+   "model": "BAAI/bge-m3",
+   "run_id": "93d37f9f509447279fd7017412808c9e",
+   "metrics": {
+    "reciprocal_rank/mean": 0.39825025000007663,
+    "hit_at_10/mean": 0.6666666666666666,
+    "hit_at_3/mean": 0.38461538461538464
+   }
+  },
+  {
+   "model": "deepvk/USER-bge-m3",
+   "run_id": "03e37d78519047ecb076aadaca3d06a2",
+   "metrics": {
+    "hit_at_10/mean": 0.7435897435897436,
+    "reciprocal_rank/mean": 0.39422981867964524,
+    "hit_at_3/mean": 0.4358974358974359
+   }
+  },
+  {
+   "model": "intfloat/multilingual-e5-small",
+   "run_id": "d7f31dd5844241ccbdaa1119d6ef7c66",
+   "metrics": {
+    "reciprocal_rank/mean": 0.23330362442307356,
+    "hit_at_3/mean": 0.23076923076923078,
+    "hit_at_10/mean": 0.38461538461538464
+   }
+  },
+  {
+   "tutor_bench_run": "f20a002c2da4489fb2fcaf06fe9e9899"
+  }
+ ],
+ "versions": {
+  "models": {
+   "abab": "m-7b5d5f9a140b4893a9840bde6ca94fd4",
+   "cdcd": "m-5763ea322d304bd68d70d7bc263bfb7f"
+  },
+  "by_metadata_otlp": 0,
+  "by_tag": 1,
+  "rest_link": "no client API",
+  "by_metadata_after_link": 0,
+  "search_errors": [
+   null,
+   null
+  ]
+ },
+ "labels": {
+  "assessment_id": "a-bef58153ce524f208eb98e6edbe945f6",
+  "trace": "6a6f404654fcc013808302a10295f994",
+  "on_trace": [
+   "owner.lesson_ok"
+  ],
+  "labeling_session_error": "UnsupportedLabelingStoreURIException: Labeling functionality is unavailable; got unsupported URI 'http://mlflow:5000' for labeling data storage. Supported URI schemes are: ['databricks'].",
+  "review_queue_error": "TypeError: InputPassFail.__init__() missing 2 required positional arguments: 'positive_label' and 'negative_label'"
+ },
+ "budgets": {
+  "list": [
+   200,
+   {}
+  ],
+  "create": [
+   200,
+   {
+    "budget_policy": {
+     "budget_policy_id": "bp-1d075c13a98844a7b81d68c2e8a71b97",
+     "budget_unit": "USD",
+     "budget_amount": 0.01,
+     "duration": {
+      "unit": "DAYS",
+      "value": 1
+     },
+     "target_scope": "GLOBAL",
+     "budget_action": "ALERT",
+     "created_by": "",
+     "created_at": 1795515763669,
+     "last_updated_by": "",
+     "last_updated_at": 1795515763669
+    }
+   }
+  ],
+  "windows": [
+   200,
+   {
+    "windows": [
+     {
+      "budget_policy_id": "bp-1d075c13a98844a7b81d68c2e8a71b97",
+      "window_start_ms": 1795478400000,
+      "window_end_ms": 1795564800000,
+      "current_spend": 0.0
+     }
+    ]
+   }
+  ]
+ }
+}

@@ -1,0 +1,308 @@
+{
+  "backend": "postgres",
+  "duration_s": 480.0,
+  "bulk_lessons": 20,
+  "ready_s": 4.6,
+  "auth": {
+    "no_cookie_root": {
+      "status": 401,
+      "bytes": 0
+    },
+    "learner_root": {
+      "status": 403,
+      "bytes": 0
+    },
+    "owner_root": {
+      "status": 200,
+      "bytes": 701,
+      "mlflow_ui": true
+    },
+    "owner_ajax_search": {
+      "status": 200,
+      "bytes": 284,
+      "mlflow_ui": false
+    },
+    "no_cookie_ajax_search": {
+      "status": 401,
+      "bytes": 0
+    },
+    "owner_ingest_blocked": {
+      "status": 404,
+      "bytes": 0
+    },
+    "owner_gateway_blocked": {
+      "status": 404,
+      "bytes": 0
+    },
+    "owner_foreign_host": {
+      "status": 403,
+      "bytes": 60
+    }
+  },
+  "sustained_start": 1795466460.8929474,
+  "sustained_end": 1795466940.9934936,
+  "stage_traces": {
+    "expected_spans": 72,
+    "complete": 7,
+    "traces": 7,
+    "rows": [
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68592
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68592
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68589
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68590
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68578
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68579
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68578
+      }
+    ]
+  },
+  "tutor_traces": {
+    "expected_spans": 3,
+    "complete": 31,
+    "traces": 31,
+    "rows": [
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 203
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 206
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 209
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 203
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 205
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 206
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      }
+    ]
+  },
+  "poll": {
+    "n": 94,
+    "p50_s": 0.059,
+    "p95_s": 0.165,
+    "errors": []
+  },
+  "store_bytes_after_sustained": 0,
+  "bulk_start": 1795466951.500653,
+  "bulk_emit_s": 0.3,
+  "bulk_spans": 10080,
+  "bulk_end": 1795466971.7807453,
+  "bulk_traces": {
+    "expected_spans": 72,
+    "complete": 140,
+    "traces": 140
+  },
+  "traces_total": 178,
+  "store_bytes_after_bulk": 0,
+  "deleted": 178,
+  "delete_s": 0.05,
+  "traces_after_delete": 0,
+  "store_bytes_after_delete": 0
+}

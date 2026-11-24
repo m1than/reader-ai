@@ -16,6 +16,10 @@ tasks:
   fact_check: { model: sonnet, budget_usd_per_lesson: 2.0 }
   review:     { model: opus,   budget_usd_per_lesson: 4.0 }
   tutor:      { model: sonnet }
+  # The source freshness check (SRV-FRESH; caps are its own bounds: $1.00 per run, $2.00 per day).
+  freshness_scan:   { model: sonnet }
+  freshness_web:    { model: haiku }
+  freshness_report: { model: sonnet }
 budgets: { monthly_usd: 200, warn_at: 0.8 }
 kernels: [python3, rust, deno]
 materials:
@@ -28,3 +32,9 @@ sectors:
   blockchain: { title: Blockchain }
 sharing:
   invitations: false
+  # Open sign-up with owner approval (ADR-0031, SRV-AUTH FR-AUTH-23): "open" or "off". Absent means "open" on
+  # localhost and "off" on any other host. New accounts wait in the app's Sign-ups screen until you approve them.
+  signup: "open"
+# Tracing (SRV-OBS, ADR-0032): spans of requests, jobs and agent calls, kept `retention_days` days, in an owner-only
+# dashboard at https://localhost:8443/ (`reader up` prints the link). Defaults: enabled, 30 days. No content is kept.
+observability: { enabled: true, retention_days: 30 }

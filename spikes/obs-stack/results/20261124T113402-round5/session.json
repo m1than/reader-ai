@@ -1,0 +1,20 @@
+{
+ "phase": "session",
+ "catalog": "",
+ "s1_cli_first": {
+  "session": "def7123d-0fe7-45dd-a52c-c5c1ca21a582",
+  "is_run": false,
+  "is_cli": true
+ },
+ "s2_marker_1500ms": {
+  "session": "10000000-0000-4000-8000-0000000000aa",
+  "is_run": true,
+  "is_cli": false
+ },
+ "s3_marker_no_gap": {
+  "session": "10000000-0000-4000-8000-0000000000aa",
+  "is_run": true,
+  "is_cli": false
+ },
+ "sessions_search": 200
+}

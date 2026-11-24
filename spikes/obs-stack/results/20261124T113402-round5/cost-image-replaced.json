@@ -1,0 +1,235 @@
+{
+ "phase": "cost",
+ "catalog": "bundled-replaced-in-image",
+ "pricing_model": {
+  "trace_cost": "{\"input_cost\": 0.08, \"output_cost\": 0.04, \"total_cost\": 0.12}",
+  "spans": {
+   "job tutor.answer": null,
+   "agent.call": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.08
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.04
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.12
+      }
+     }
+    ]
+   },
+   "claude_code.interaction": null,
+   "claude_code.llm_request": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     }
+    ]
+   }
+  },
+  "provider": {
+   "job tutor.answer": null,
+   "agent.call": "anthropic",
+   "claude_code.interaction": "anthropic",
+   "claude_code.llm_request": "anthropic"
+  }
+ },
+ "bundled_not_in_pricing": {
+  "trace_cost": "{\"input_cost\": 0.08, \"output_cost\": 0.04, \"total_cost\": 0.12}",
+  "spans": {
+   "job tutor.answer": null,
+   "agent.call": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.08
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.04
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.12
+      }
+     }
+    ]
+   },
+   "claude_code.interaction": null,
+   "claude_code.llm_request": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     }
+    ]
+   }
+  },
+  "provider": {
+   "job tutor.answer": null,
+   "agent.call": "anthropic",
+   "claude_code.interaction": "anthropic",
+   "claude_code.llm_request": "anthropic"
+  }
+ },
+ "no_provider": {
+  "trace_cost": "{\"input_cost\": 0.08, \"output_cost\": 0.04, \"total_cost\": 0.12}",
+  "spans": {
+   "job tutor.answer": null,
+   "agent.call": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.08
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.04
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.12
+      }
+     }
+    ]
+   },
+   "claude_code.interaction": null,
+   "claude_code.llm_request": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.0
+      }
+     }
+    ]
+   }
+  },
+  "provider": {
+   "job tutor.answer": null,
+   "agent.call": "anthropic",
+   "claude_code.interaction": null,
+   "claude_code.llm_request": null
+  }
+ },
+ "unknown_model": {
+  "trace_cost": "{\"input_cost\": 0.08, \"output_cost\": 0.04, \"total_cost\": 0.12}",
+  "spans": {
+   "job tutor.answer": null,
+   "agent.call": {
+    "values": [
+     {
+      "key": "input_cost",
+      "value": {
+       "double_value": 0.08
+      }
+     },
+     {
+      "key": "output_cost",
+      "value": {
+       "double_value": 0.04
+      }
+     },
+     {
+      "key": "total_cost",
+      "value": {
+       "double_value": 0.12
+      }
+     }
+    ]
+   },
+   "claude_code.interaction": null,
+   "claude_code.llm_request": null
+  },
+  "provider": {
+   "job tutor.answer": null,
+   "agent.call": "anthropic",
+   "claude_code.interaction": "anthropic",
+   "claude_code.llm_request": "anthropic"
+  }
+ },
+ "span_cost_sum_by_model": {
+  "status": 200,
+  "data_points": [
+   {
+    "metric_name": "total_cost",
+    "dimensions": {
+     "span_model_name": "claude-haiku-4-5"
+    },
+    "values": {
+     "SUM": 0.0
+    }
+   },
+   {
+    "metric_name": "total_cost",
+    "dimensions": {
+     "span_model_name": "claude-sonnet-5-5"
+    },
+    "values": {
+     "SUM": 0.48
+    }
+   }
+  ]
+ },
+ "expected_ledger_sum": 0.48
+}

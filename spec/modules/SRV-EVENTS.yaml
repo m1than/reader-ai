@@ -55,7 +55,7 @@ layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); FR-EVENTS-12's status read is also exposed as `reader.jobs.queue.job_status_of(conn, kind, key)` for callers without a procrastinate app (SRV-INGEST's routes), and `Jobs.job_status` uses it; no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review. Integration (V/slice-integration, 2026-11-23): KIND_MODULES ingest, search, pipeline, tutor (SRV-TUTOR's order). Final code review on 2924dcf (2026-11-23, deep-reviewer): changes, no live correctness bug, untested or unspecified behaviour. Applied on V/SRV-EVENTS-final, spec then tests then code: FR-EVENTS-1 injectable start hooks (`hooks=`), awaited once after the start sweep with `running()` set, failure and a 30 s timeout isolated, idempotent and enqueue-only, `running()` cleared in the finally; FR-EVENTS-15 skips unknown-kind keys (the reconcile's `dead`/`unknown_kind` write removed) and a failing enqueue no longer ends a sweep round; FR-EVENTS-9 a failing start sweep returns 1 and `stop` is observed during the start sweep and hooks; tests for FR-EVENTS-7's unknown-kind `dead` with the lock free, `wrapper_error`, the worker's own re-enqueue after a lost run, `requeue_dead` on a key with no outcome and no job, the stored sweep priority. Green: worker.run(hooks=), HOOK_TIMEOUT_S 30 s, `stop` raced against the start sweep and each hook, `_RUNNING` cleared in the finally; queue: the idempotency key computed inside the wrapper's try, the lost-run log names the failed step (count or re-enqueue), sweep enqueues guarded (`_sweep_defer`), the reconcile's unknown-kind `dead` removed. Round 2 (40900db): one test short of approve — the production default `hooks=None` had no test; added [unit] `start_hooks()` equals search's and pipeline's `on_worker_start` in KIND_MODULES order (empty for no modules) and [db] `run` without `hooks` awaits the declared hooks once; HOOK_TIMEOUT_S in `bounds` with its limit; `_unless_stopped` also cancels its task in the finally; a start sweep that fails while `stop` is set returns 0. Round 3 (6eeb576): VERDICT approve. Its items applied: a test where the start sweep sets `stop` and then raises (`run` returns 0; kills M36); a hook that cancels itself counts as a stop only when `stop` is set, so the worker still serves (FR-EVENTS-1 failure isolation), with a test"
+review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); FR-EVENTS-12's status read is also exposed as `reader.jobs.queue.job_status_of(conn, kind, key)` for callers without a procrastinate app (SRV-INGEST's routes), and `Jobs.job_status` uses it; no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review. Integration (V/slice-integration, 2026-11-23): KIND_MODULES ingest, search, pipeline, tutor (SRV-TUTOR's order). Final code review on 2924dcf (2026-11-23, deep-reviewer): changes, no live correctness bug, untested or unspecified behaviour. Applied on V/SRV-EVENTS-final, spec then tests then code: FR-EVENTS-1 injectable start hooks (`hooks=`), awaited once after the start sweep with `running()` set, failure and a 30 s timeout isolated, idempotent and enqueue-only, `running()` cleared in the finally; FR-EVENTS-15 skips unknown-kind keys (the reconcile's `dead`/`unknown_kind` write removed) and a failing enqueue no longer ends a sweep round; FR-EVENTS-9 a failing start sweep returns 1 and `stop` is observed during the start sweep and hooks; tests for FR-EVENTS-7's unknown-kind `dead` with the lock free, `wrapper_error`, the worker's own re-enqueue after a lost run, `requeue_dead` on a key with no outcome and no job, the stored sweep priority. Green: worker.run(hooks=), HOOK_TIMEOUT_S 30 s, `stop` raced against the start sweep and each hook, `_RUNNING` cleared in the finally; queue: the idempotency key computed inside the wrapper's try, the lost-run log names the failed step (count or re-enqueue), sweep enqueues guarded (`_sweep_defer`), the reconcile's unknown-kind `dead` removed. Round 2 (40900db): one test short of approve — the production default `hooks=None` had no test; added [unit] `start_hooks()` equals search's and pipeline's `on_worker_start` in KIND_MODULES order (empty for no modules) and [db] `run` without `hooks` awaits the declared hooks once; HOOK_TIMEOUT_S in `bounds` with its limit; `_unless_stopped` also cancels its task in the finally; a start sweep that fails while `stop` is set returns 0. Round 3 (6eeb576): VERDICT approve. Its items applied: a test where the start sweep sets `stop` and then raises (`run` returns 0; kills M36); a hook that cancels itself counts as a stop only when `stop` is set, so the worker still serves (FR-EVENTS-1 failure isolation), with a test. Paired amendment (2026-11-23, V/compile-ui, for SRV-PIPELINE FR-PIPELINE-16, asked by the coordinator after that spec's review round 2 approve on 08534df): FR-EVENTS-17 `dead_error_code_of`, a published read of `job_keys.error_code` so SRV-PIPELINE does not query the table; no write or behaviour of this module changes. Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-EVENTS-18 (key_rows_of, recent_keys_of, revision jobs_0002 with one index) and FR-EVENTS-19 (the `trace` task kwarg, the job span around the run, `reader.obs.jobs` in KIND_MODULES); reviewed in SRV-OBS's code review. Paired change from SRV-FRESH (2026-11-23, reviewed with SRV-FRESH's code; merged into V/slice-integration 2026-11-24): KIND_MODULES appends `reader.freshness.jobs` after `reader.obs.jobs` (kinds `freshness.scan`, `freshness.web`; no start hook); the declared-list test takes it; no behaviour of this module changed. Management code-review fix (V/manage-fix-srv, 2026-11-24, B2): the audit `material` id rule is SRV-CONFIG FR-CONFIG-18's own (the former slug pattern refused valid reader.yaml ids such as `Bashir`, so renaming or deleting them failed with a bare 500); FR-EVENTS-30 states that a refused row answers 500 `audit_refused` with the reason logged only. Code review round 2 (V/manage-fix2, 2026-11-24): `audit_actions` gains `self.credential_add` (kind user, id uuid, detail [pid]), written by SRV-AUTH FR-AUTH-6's register verify in its own transaction; the material id rule follows FR-CONFIG-18's refusal of `.` and `..` (test_audit.py's id table gains both)"
 
 paths:
   - server/src/reader/jobs/**
@@ -65,6 +65,7 @@ paths:
 tables:
   job_keys: { system: true, columns: "kind text, key text, args jsonb, attempts int, outcome text null, error_code text null, job_id bigint null, created_at, updated_at, finished_at null; pk (kind, key)" }
   "procrastinate_*": { system: true, columns: "procrastinate 3.12.0's own schema (its shipped Alembic chain)" }
+  audit_log: { system: true, columns: "id bigint GENERATED ALWAYS AS IDENTITY pk, at timestamptz, actor_id uuid (no FK), action text, object_kind text, object_id text, detail jsonb; trigger refuses UPDATE, DELETE, TRUNCATE (FR-EVENTS-30)" }
 
 normative:
   - id: REF-EVENTS-1
@@ -115,7 +116,8 @@ requirements:
       serves the `Catalog` that `reader.jobs.catalog.load_kinds()` builds from the declared module list
       `KIND_MODULES` (each module exports `JOB_KINDS`; SRV-INGEST, SRV-SEARCH, SRV-PIPELINE and SRV-TUTOR add
       theirs; integrated order on V/slice-integration: ingest, search, pipeline, tutor, giving kinds `ingest.import`,
-      `search.embed`, `pipeline.stage`, `pipeline.verify`, `tutor.answer`). Paired SRV-AGENT/SRV-PIPELINE amendment:
+      `search.embed`, `pipeline.stage`, `pipeline.verify`, `tutor.answer`; SRV-FRESH, paired change 2026-11-23,
+      appends `reader.freshness.jobs` with `freshness.scan` and `freshness.web`). Paired SRV-AGENT/SRV-PIPELINE amendment:
       a handler may
       (a) append spend rows through SRV-AGENT's ledger, which opens its own connection and commits at once (append-only,
       never an outcome effect, so a rolled-back run still records its spend), and (b) enqueue through
@@ -266,6 +268,17 @@ requirements:
       `job_status(kind, key)` returns one of `none`, `queued`, `running`, `succeeded`, `dead` from the key's outcome
       first and otherwise from its deciding procrastinate job, by VEC-EVENTS-3. The deciding job is a `doing` job if
       one exists (`aborting`, legacy, counts as `doing`), else a `todo` job, else the newest job by id.
+  # Paired amendment (2026-11-23, V/compile-ui, for SRV-PIPELINE FR-PIPELINE-16; coordinator after review round 2).
+  - id: FR-EVENTS-17
+    text: >-
+      **Dead error code.** `reader.jobs.queue.dead_error_code_of(conn, kind_name, key) -> str | None`, next to
+      `job_status_of` and like it a read on an open connection without a procrastinate app, returns the key row's
+      `error_code` when its outcome is `dead`, and None when the key has no row or another outcome. It is the
+      published read of that column (FR-EVENTS-6 writes it: the exception's class name, `timeout`, `exhausted`,
+      `stalled`, `orphaned` or `unknown_kind`); no module queries `job_keys` directly. [db]
+      server/tests/jobs/test_dead_error_code_db.py: no row, queued, succeeded (None); dead from a permanent
+      exception (its class name); dead from transient exhaustion (the transient class name); after `requeue_dead`
+      (None).
   - id: FR-EVENTS-13
     text: >-
       Key lock and outcome writes. `lock_id(key)` is the first 8 bytes of `sha256("reader.jobs\0" + key)` read as a
@@ -319,6 +332,103 @@ requirements:
       for job to finish: worker: <call string>"). The filter is idempotent: a record passing it twice (it is on
       several handlers) is left as the first pass left it. The module's own records carry kind, key, job id,
       attempt count and error code only.
+  - id: FR-EVENTS-18
+    text: >-
+      **Published key reads** (paired SRV-OBS change, FR-OBS-10). Next to `job_status_of` and `dead_error_code_of`,
+      read-only, on an open connection without a procrastinate app: `key_rows_of(conn, keys) -> list[KeyRow]` takes
+      keys of any kinds in one call (a key's kind is its `<kind>:` prefix; a row is returned only when its kind equals
+      that prefix; unknown keys are omitted; served by the primary key), and `recent_keys_of(conn, kind_names, outcome,
+      since, limit) -> tuple[list[KeyRow], bool]` returns rows of those kinds whose outcome equals `outcome` and whose
+      `finished_at` ≥ `since`, newest `finished_at` first, at most `limit` (1 ≤ limit ≤ 500, else `JobError("limit")`),
+      and `truncated` = (exactly `limit` rows were returned). `KeyRow = (kind, key, args, outcome, error_code, job_id,
+      attempts, created_at, finished_at)`. Revision `jobs_0002` (branch `jobs`, down_revision `jobs_0001`) adds the
+      index `job_keys_kind_outcome_finished` on (kind, outcome, finished_at); its downgrade drops it. The jobs
+      branch's head becomes `jobs_0002` (the migration-heads test checks it). `key_rows_of` matches (kind, key) with
+      the kind taken from the key's prefix in SQL, so a stored row whose kind differs from its key's prefix is never
+      returned, and its plan uses `job_keys_pkey` (EXPLAIN in the db test; code review round 1). [db]
+      server/tests/jobs/test_key_reads_db.py.
+  - id: FR-EVENTS-19
+    text: >-
+      **Trace context** (paired SRV-OBS change, FR-OBS-5; ADR-0032 accepted 2026-11-24). Every defer (FR-EVENTS-3's
+      enqueue, FR-EVENTS-6's retry, FR-EVENTS-4's lost-run re-enqueue, FR-EVENTS-8's requeue and the sweep's) passes a
+      second task kwarg `trace`, SRV-OBS's `current_traceparent()` of the moment of the defer, omitted when it is None;
+      the task accepts `trace: str | None = None`. `job_keys.args`, the idempotency key and FR-EVENTS-10's checks see
+      only `payload`. The wrapper runs FR-EVENTS-4's whole run (claim, handler, judge, re-enqueue) inside SRV-OBS's
+      `job_span(kind, job_id, key, attempt, payload, trace)`, so the retry and handler enqueues made during the run
+      carry the job span's context; the sweep runs outside any span, so its defers carry none. The span records the
+      outcome (`succeeded`, `skipped`, `failed`, `dead`, `aborted`) and the `JobFailed` code; a failure inside the span
+      helpers never changes the job's outcome. KIND_MODULES lists `reader.obs.jobs` (kind `obs.retention`) last, so
+      the integrated order is ingest, search, pipeline, tutor, obs, and `start_hooks()` is search's, pipeline's and
+      obs's `on_worker_start` in that order (FR-EVENTS-1's unit test updated). The root span's outcome is the key's:
+      `dead` with `reader.error_class` for a permanent failure, `dead` with `exhausted` for a run that finds the key
+      at max_attempts, `skipped` for a run that finds the key decided, and `dead` (not `failed`) for `session_lost` and
+      `wrapper_error` when that count ended the key dead (code review round 1), `failed` with `session_lost` when it
+      did not, and `aborted` for a cancelled run (round 2). [unit, db]
+      server/tests/jobs/test_trace_context.py. Amended by SRV-OBS V.obs-analytics (FR-OBS-12 e, -14, -15; ADR-0035
+      accepted 2026-11-24): for `pipeline.*` kinds the wrapper calls `reader.obs.spans.session_marker("reader.run_id",
+      <payload run_id>)` right after opening the root (only when the payload's `run_id` is a string; the helper never
+      raises and does nothing with tracing off); `reader.obs.jobs` also declares `obs.feedback` and `obs.prompts`,
+      and its `on_worker_start` also enqueues `obs.prompts` (enqueue-only, a failure logged); the integrated
+      catalog is ingest.import, search.embed, pipeline.stage, pipeline.verify, tutor.answer, obs.feedback,
+      obs.prompts, obs.retention (FR-EVENTS-1's unit test updated).
+  - id: FR-EVENTS-32
+    text: >-
+      Paired SRV-OBS phase 2 change (ADR-0038 accepted 2026-11-25; SRV-OBS `phase2_job_kinds`). `reader.obs.jobs`
+      declares five more kinds with SRV-EVENTS' `JobKind`, queue `obs`, delays 5 s and 25 s: `obs.setup` {digest}
+      key [digest], 3 attempts, 60 s, enqueued by the worker's start hook (enqueue-only); `obs.runs` {kind
+      compile|ingest, id, end 1..100} key [kind, id, end], 3 attempts, 60 s, `schedule_in` 60 s; `obs.bench`
+      {upload_id} key [upload_id], 3 attempts, 60 s; `obs.label` {label_id, revision} key [label_id, revision], 3
+      attempts, 30 s; `obs.health` {slot: the time truncated to 30 minutes} key [slot], 1 attempt, 20 s,
+      `traced: false`. A periodic entry of the worker's scheduler enqueues `obs.health` every 30 minutes. A
+      `JobKind` gains the optional field `traced: bool = True`; with `traced: false` the job wrapper opens no root
+      span and passes no trace context (SRV-OBS FR-OBS-5 f). Declared: `obs.runs` holds a second advisory lock,
+      `lock_id("obs.runs:<kind>:<id>")`, on its job's connection for the whole run beside the key lock, so it holds
+      one pooled connection for up to its 60 s timeout like every running job. A `JobKind` also gains the
+      optional hook `after_end(engine, payload, outcome)` (code review of 8466329): the wrapper calls it after
+      the transaction that records the key's `succeeded` or `dead` outcome has committed, on every path that
+      records one (the run's own, the judge's, a lost run's count, and the sweep's stalled and orphaned counts),
+      never inside that transaction (each path sets its own "ended dead" flag only after its transaction block
+      has exited cleanly, from that iteration's own count, never from the sweep report's list; code review round
+      2, R2-3); an exception from it is logged as `after_end failed: kind=<kind>
+      outcome=<outcome> error=<class>` and never changes the recorded outcome. The pipeline and import kinds use it
+      to count a run's end and enqueue `obs.runs` (SRV-PIPELINE FR-PIPELINE-18, SRV-INGEST FR-INGEST-26), and
+      `search.embed` for its late end (SRV-OBS FR-OBS-20 d). Tests: [unit] the catalogue lists the
+      kinds in KIND_MODULES order with exactly these declarations; a `traced: false` kind opens no root span and
+      its handler sees no trace context; [db]
+      the periodic entry enqueues one `obs.health` per slot; `after_end` runs after the succeeded and the dead
+      outcome have committed, and a raising `after_end` leaves the outcome recorded and logs the line; a lost
+      run, a stalled job and an orphaned key that each end dead call `after_end` exactly once (and a lost run
+      that is enqueued again, not dead, never calls it).
+  # Amendment (2026-11-24, V/manage, WEB-MANAGE; header note above `audit_actions`).
+  - id: FR-EVENTS-30
+    text: >-
+      **Audit rows.** A system table `audit_log(id bigint identity pk, at timestamptz, actor_id uuid, action text,
+      object_kind text, object_id text, detail jsonb)`; `actor_id` has no foreign key, so a deleted learner's rows
+      stay and never block SRV-AUTH FR-AUTH-43. A trigger refuses UPDATE, DELETE and TRUNCATE (as agent_spend's).
+      `reader.jobs.audit.record(conn, actor_id, action, object_id, detail)` checks the row against `audit_actions`
+      (declared as data in `AUDIT_ACTIONS`; the code's table equals this spec's, unit test): an unknown action, an
+      `object_id` that does not match its pattern, or a `detail` key outside its list raises before any insert.
+      `detail` values are integers, booleans, ids or hashes of the listed shapes, except `settings.*`, whose `old`,
+      `new` and `file` are the setting's value (a number, an enum or null; never free text); never a title,
+      description, note, question or handle. ≤ 2 KiB compact JSON. The row is inserted on the caller's connection, so
+      it commits or rolls back with the change. Progress, notes and bookmarks are not audited (the reader's own data).
+      A no-op request writes no row (SRV-LESSON INV-LESSON-21). **A refused row is a programming error**, never a
+      user error: every route wrapper that runs audited changes (SRV-LESSON's management routes, SRV-INGEST's
+      material routes, SRV-AUTH's people and self routes) catches `AuditRefused`, lets the transaction roll back,
+      logs `audit_refused reason=<rule>` (the rule's name only: no object id, no detail) and answers 500
+      `{"error": "audit_refused"}`; never a bare 500. [unit] the table equality and each refusal; a reader.yaml
+      material id accepted exactly when SRV-CONFIG FR-CONFIG-18 accepts it; [db] the trigger; one row per applied
+      action; rollback of the change removes its row; a forced refusal on a course rename and on a material rename
+      answers 500 `audit_refused`, writes nothing and logs only the reason.
+  - id: FR-EVENTS-31
+    text: >-
+      **Reading the audit.** `GET /api/audit?before=<id>` (`session`; owner only, else 403 `owner_only`; read-only)
+      → the newest 200 rows with an id below `before` (all rows when absent), `{rows: [{id, at, actor_id, action,
+      object_kind, object_id, detail}], next_before | null}`; a `before` that is not a positive integer → 400
+      `before_invalid`. WEB-MANAGE's Data tab lists them as "Activity" with the actor's handle and the object's current
+      title looked up by the client from the lists it already has (a deleted object shows its kind and the id's first
+      8 characters). The route is in `reader.jobs.audit_routes` (SRV-AUTH ROUTERS, paired). [db] paging; a learner
+      gets 403.
 
 invariants:
   - id: INV-EVENTS-1
@@ -454,3 +564,50 @@ owner_notes:
   - "Migrations: each module keeps its Alembic revisions in its own `reader/<module>/migrations/` with a branch label; SRV-AUTH's environment computes `version_locations` and upgrades to all heads."
   - "A running job holds one database transaction for its whole run (minutes for compile stages); worker sessions disable `idle_in_transaction_session_timeout`. At concurrency 1 this is one long transaction at a time."
   - "Never run two worker versions side by side: a worker's sweep cancels `todo` jobs of kinds its own catalog lacks (FR-EVENTS-15) and writes `dead`/`unknown_kind` for their stalled jobs (FR-EVENTS-7). Stop the old worker before starting the new one."
+
+# ---- Amendment (2026-11-24, V/manage, WEB-MANAGE): FR-EVENTS-30..31, promoted with their Red tests on
+# V/manage-impl after deep-review rounds 1–3 (round 3 on 2a7d86f: VERDICT approve). The transactional outbox and its
+# audit consumer stay deferred to stage 2; this is the smallest audit trail the management layer needs now, written
+# in the same transaction as each change. Code: `server/src/reader/jobs/audit.py` (record),
+# `server/src/reader/jobs/audit_routes.py` (the read route) and revision jobs_0003 on the `jobs` branch; tests in
+# server/tests/jobs/. Green (2026-11-24): the Red test reformatted for ruff (line length, PT012); no oracle changed.
+# jobs_0003 is now the `jobs` branch head, so the head checks of FR-EVENTS-11/-18 (test_jobs_db's migration heads,
+# test_key_reads_db's index test) name jobs_0003 as the head; the jobs_0002 index is still asserted.
+#
+# One row per action: object_kind, the pattern its object_id must match, and the only keys `detail` may hold.
+# uuid = canonical lowercase UUID; sid/pid = 16 lowercase hex; sha = 64 lowercase hex; a material id is
+# `up-<12 hex>` or a reader.yaml id by exactly SRV-CONFIG FR-CONFIG-18's rule (non-empty, at most 64 code points,
+# each printable and neither white space nor `/`, not `.` or `..`, not starting with `up-`;
+# `reader.config.checks.material_id_problem`
+# is the one definition, so every id reader.yaml accepts is auditable); an OVERRIDABLE key is SRV-CONFIG
+# FR-CONFIG-26's.
+audit_actions:
+    course.rename: { kind: course, id: uuid, detail: [version] }
+    course.describe: { kind: course, id: uuid, detail: [version] }
+    course.order: { kind: owner, id: uuid, detail: [count] }
+    course.archive: { kind: course, id: uuid, detail: [] }
+    course.unarchive: { kind: course, id: uuid, detail: [] }
+    course.delete: { kind: course, id: uuid, detail: [lessons, revisions, tutor_questions, compile_runs, spend_rows, by_material] }
+    course.restore: { kind: course, id: uuid, detail: [by_material] }
+    lesson.rename: { kind: lesson, id: uuid, detail: [version] }
+    lesson.order: { kind: course, id: uuid, detail: [count] }
+    lesson.skip: { kind: lesson, id: uuid, detail: [] }
+    lesson.unskip: { kind: lesson, id: uuid, detail: [] }
+    lesson.delete: { kind: lesson, id: uuid, detail: [] }
+    lesson.restore: { kind: lesson, id: uuid, detail: [] }
+    lesson.revert: { kind: lesson, id: uuid, detail: [from_sha256, to_sha256] }
+    material.rename: { kind: material, id: "a material id as GET /api/materials returns it (`up-<12 hex>` or a reader.yaml id)", detail: [version] }
+    material.delete: { kind: material, id: "a material id", detail: [courses] }
+    material.restore: { kind: material, id: "a material id", detail: [courses] }
+    compile.cancel: { kind: run, id: uuid, detail: [lesson_id] }
+    tutor.clear: { kind: lesson, id: uuid, detail: [count] }
+    user.sessions_revoke: { kind: user, id: uuid, detail: [count] }
+    user.credential_remove: { kind: user, id: uuid, detail: [pid] }
+    user.delete: { kind: user, id: uuid, detail: [] }
+    user.enable: { kind: user, id: uuid, detail: [] }
+    self.session_revoke: { kind: user, id: uuid, detail: [sid, count] }
+    self.credential_label: { kind: user, id: uuid, detail: [pid] }
+    self.credential_add: { kind: user, id: uuid, detail: [pid] }
+    self.credential_remove: { kind: user, id: uuid, detail: [pid, revoked_sessions] }
+    settings.set: { kind: setting, id: "an OVERRIDABLE key", detail: [old, new] }
+    settings.reset: { kind: setting, id: "an OVERRIDABLE key", detail: [old, file] }

@@ -18,6 +18,14 @@
 //            (axe, overflow, the button's focus outline; screenshots to READER_LIVE_OUT/auth), then slice.live.ts's
 //            sign-out and sign-in sequence for the owner with the same CDP virtual passkey (/api/me 401, then 200).
 //            Spends nothing.
+//   signup   SRV-AUTH FR-AUTH-32 [live] (ADR-0031): the stack's sign-up mode equals the one web_live.py derived from
+//            reader.yaml with FR-AUTH-23's rule (READER_SIGNUP_EXPECTED). In `off`, one assertion that the page and
+//            both POSTs are 404. In `open`, a second browser context with its own CDP virtual passkey signs up a
+//            run-generated `lc-<8 hex>`, sees `pending`, then `pending_approval` at sign-in; the owner (signed in again,
+//            so the session is recent) approves it on the Sign-ups screen; it signs in as a learner; a second
+//            run-generated request is rejected on the screen. The run's handles and ids go to
+//            READER_LIVE_OUT/signup-created.json; web_live.py deletes exactly those accounts by id afterwards. SKIP
+//            only when the pending cap is full or the first options call answers 429 rate_limited. Spends nothing.
 //   tutor-bench  SRV-TUTOR's bench (VEC-TUTOR-7): questions-v2 with v03 → t01 (40) over the HTTP API; ≈ $1.8.
 // Written: READER_LIVE_OUT/slice-results.json with numbers, states and ids only — never book text, a question, a
 // snippet or an answer. Screenshots go to READER_LIVE_OUT/screenshots and READER_LIVE_OUT/ui, and the `ui` step also
@@ -26,9 +34,12 @@
 // committed.
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type APIRequestContext, type BrowserContext, type CDPSession, type Page } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { benchSet, hitsGold, mergeRuns, summary, type BenchRecord } from '../../../web/src/tutor/bench.ts';
+import {
+  benchSet, hitsGold, mergeRuns, recordsFile, summary, summaryFile, type BenchHeader, type BenchRecord,
+} from '../../../web/src/tutor/bench.ts';
 
 const OUT = resolve(process.env.READER_LIVE_OUT ?? 'out');
 const SHOTS = resolve(OUT, 'screenshots');
@@ -83,7 +94,9 @@ const ensureLesson = async () => {
 test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async ({ browser }) => {
-  context = await browser.newContext({ ignoreHTTPSErrors: false });
+  // WEB-UI FR-UI-30: the live checks read the English interface whatever the host's language (the contexts made
+  // later in this file pass the same locale).
+  context = await browser.newContext({ ignoreHTTPSErrors: false, locale: 'en-US' });
   page = await context.newPage();
   api = page.request;
   cdp = await context.newCDPSession(page);
@@ -106,7 +119,20 @@ test.afterAll(async () => {
   await context.close();
 });
 
+// Session mode (web_live.py, the owner already has a passkey): one id-only session row, handed over as the cookie
+// value through the environment only; no bootstrap, no virtual passkey, the owner's credentials untouched.
+const SESSION = process.env.READER_SESSION ?? '';
+
 test('owner passkey registration through the bootstrap page', async () => {
+  if (SESSION) {
+    const baseURL = test.info().project.use.baseURL!;
+    await context.addCookies([{ name: '__Host-reader_session', value: SESSION, url: baseURL, secure: true, httpOnly: true, sameSite: 'Lax' }]);
+    await page.goto('/');
+    const me = await api.get('/api/me');
+    expect(me.status(), 'the id-only owner session signs in').toBe(200);
+    expect(((await me.json()) as { role: string }).role).toBe('owner');
+    return;
+  }
   const token = process.env.READER_BOOTSTRAP_TOKEN ?? '';
   expect(token.length, 'web_live.py hands a bootstrap token').toBeGreaterThan(20);
   await page.goto('/api/auth/signin');
@@ -252,8 +278,8 @@ test('lesson: L02 renders, a lab cell runs, citations render', async () => {
   await lab().scrollIntoViewIfNeeded();
   const t = now();
   await lab().getByRole('button', { name: 'Run', exact: true }).click();
-  // Scoped to the controls: an output reading exactly "done" must not match the state label.
-  const label = lab().locator('.lab-controls').getByText(/^(done|error|timed out)$/);
+  // Scoped to the run-state status (WEB-NOTEBOOK FR-NOTEBOOK-9): an output reading exactly "done" must not match.
+  const label = lab().getByRole('status').filter({ hasText: /^(done|error|timed out)$/ });
   await expect(label).toBeVisible({ timeout: 120_000 });
   const state = (await label.first().textContent())?.trim();
   const outputs = await lab().locator('.outputs').innerText().catch(() => '');
@@ -269,6 +295,8 @@ test('tutor: three questions through the Ask panel', async () => {
   await ensureLesson();
   if (!page.url().includes(lessonId)) await page.goto(`/lessons/${lessonId}`);
   const panel = page.getByRole('region', { name: 'Tutor' });
+  // Design pass (SRV-TUTOR FR-TUTOR-11): the panel is closed by default; the lesson toolbar opens it.
+  if (!(await panel.isVisible())) await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click({ timeout: 30_000 });
   await expect(panel).toBeVisible({ timeout: 30_000 });
   // t01 replaces questions-v2 v03, whose premise the book does not support (SRV-TUTOR VEC-TUTOR-7, 2026-11-23)
   const t01 = fixedQuestions()[0]!;
@@ -318,13 +346,24 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   mkdirSync(resolve(dir, 'data'), { recursive: true });
   const meta = (await (await api.get(`/api/lessons/${lessonId}`)).json()) as { lesson: { latest_sha256: string | null } };
   const sha = meta.lesson.latest_sha256;
-  writeFileSync(resolve(dir, 'data', 'lessons.json'), await (await api.get('/api/lessons')).text());
+  const lessonsText = await (await api.get('/api/lessons')).text();
+  writeFileSync(resolve(dir, 'data', 'lessons.json'), lessonsText);
+  type Listed = { lesson_id: string; course_id: string; course_title: string; title: string; latest_sha256: string | null };
+  const listed = (JSON.parse(lessonsText) as { lessons: Listed[] }).lessons;
+  const unpublished = listed.find((x) => !x.latest_sha256);
+  const l02Title = listed.find((x) => x.lesson_id === lessonId)?.title ?? '';
   writeFileSync(resolve(dir, 'data', 'lesson.json'), JSON.stringify(meta));
   if (sha) writeFileSync(resolve(dir, 'data', 'revision.json'), await (await api.get(`/api/lessons/${lessonId}/revisions/${sha}`)).text());
   writeFileSync(resolve(dir, 'data', 'questions.json'), await (await api.get(`/api/lessons/${lessonId}/questions`)).text());
   const axe: Record<string, string[]> = {};
   const signinAxe: Record<string, string[]> = {}; // SRV-AUTH's own page: recorded only (follow-up amendment)
-  type Layout = { overflow_px: number; widest_p_px: number; p_font_size: string; p_line_height: string; p_font_family: string; h1_px: string; chars_per_line_median: number | null };
+  type Layout = {
+    overflow_px: number; widest_p_px: number; p_font_size: string; p_line_height: string; p_font_family: string; h1_px: string;
+    h1_family: string; chars_per_line_median: number | null; title_lang: string | null; markdown_lang: string | null;
+    output_lang: string | null; output_present: boolean; td_hyphens: string | null;
+    td_overflow_wrap: string | null; toolbar_button_radius: string | null; toolbar_button_height: number | null;
+    lab_px: number | null; header_px: number | null;
+  };
   const layout: Record<string, Layout> = {};
   const serious = (r: { violations: { impact?: string | null; id: string; nodes: unknown[] }[] }) =>
     r.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}:${v.nodes.length}`);
@@ -343,7 +382,15 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         })
         .filter((x): x is number => x !== null)
         .sort((a, b) => a - b);
-      const h1 = document.querySelector('h1');
+      const h1 = document.querySelector('#content h1');
+      // Design pass (FR-UI-10, 2026-11-23): page title family, lesson language, table breaking, toolbar buttons, the
+      // lab block's width against the reading column, the header's height.
+      const td = document.querySelector('[data-markdown] td');
+      const tdCs = td ? getComputedStyle(td) : null;
+      const tb = document.querySelector('.lesson-toolbar .acme-button');
+      const tbCs = tb ? getComputedStyle(tb) : null;
+      const labBlock = document.querySelector('.cell[data-kind="lab"] .lab') as HTMLElement | null;
+      const header = document.querySelector('header.app-header') as HTMLElement | null;
       return {
         // clientWidth excludes a vertical scrollbar, which innerWidth includes.
         overflow_px: document.documentElement.scrollWidth - document.documentElement.clientWidth,
@@ -352,7 +399,20 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
         p_line_height: cs?.lineHeight ?? '',
         p_font_family: cs?.fontFamily ?? '',
         h1_px: h1 ? getComputedStyle(h1).fontSize : '',
+        h1_family: h1 ? getComputedStyle(h1).fontFamily : '',
         chars_per_line_median: perLine.length ? Math.round(perLine[Math.floor(perLine.length / 2)]!) : null,
+        // WEB-UI FR-UI-32: the lesson's language sits on its content nodes (the title, the markdown blocks, the
+        // output areas), never on div.lesson, which also holds chrome.
+        title_lang: document.querySelector('#content div.lesson h1')?.getAttribute('lang') ?? null,
+        markdown_lang: document.querySelector('#content [data-markdown]')?.getAttribute('lang') ?? null,
+        output_lang: document.querySelector('#content .outputs')?.getAttribute('lang') ?? null,
+        output_present: document.querySelector('#content .outputs') !== null,
+        td_hyphens: tdCs?.hyphens ?? null,
+        td_overflow_wrap: tdCs?.overflowWrap ?? null,
+        toolbar_button_radius: tbCs?.borderTopLeftRadius ?? null,
+        toolbar_button_height: tb ? Math.round(tb.getBoundingClientRect().height) : null,
+        lab_px: labBlock ? Math.round(labBlock.getBoundingClientRect().width) : null,
+        header_px: header ? Math.round(header.getBoundingClientRect().height) : null,
       };
     });
   };
@@ -366,7 +426,7 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
   const toggle = () => page.getByRole('button', { name: 'Contents' });
   for (const w of WIDTHS) {
     // Sign-in page in a fresh context (no session).
-    const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
+    const anon = await browser.newContext({ viewport: { width: w, height: 900 }, locale: 'en-US' });
     const p = await anon.newPage();
     await p.goto('/api/auth/signin');
     await p.screenshot({ path: resolve(dir, `${w}-signin.png`), fullPage: true });
@@ -378,8 +438,50 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
     await page.screenshot({ path: resolve(dir, `${w}-list.png`), fullPage: true });
     await check(`${w}-list`);
+    if (w === WIDTHS[0]) {
+      // FR-UI-16 (code review B1): the production image serves /theme.js, and a stored Dark applies on reload.
+      const theme = await page.request.get('/theme.js');
+      expect.soft(theme.status(), 'GET /theme.js').toBe(200);
+      expect.soft(theme.headers()['content-type'] ?? '', '/theme.js content type').toMatch(/javascript/);
+      await page.evaluate(() => localStorage.setItem('reader-ai.theme', 'dark'));
+      await page.reload();
+      await expect.soft(page.locator('html'), 'stored dark applies on reload').toHaveAttribute('data-theme', 'dark');
+      await page.evaluate(() => localStorage.removeItem('reader-ai.theme'));
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
+    }
+    // Design pass, FR-UI-6: every published lesson is a visible link on `/` before any click; a group of more than 12
+    // lessons starts collapsed with exactly its published rows.
+    for (const l of listed.filter((x) => x.latest_sha256))
+      await expect.soft(page.locator(`#content a[href="/lessons/${l.lesson_id}"]`).first(), `published ${l.lesson_id} linked (${w})`).toBeVisible();
+    const byCourse = new Map<string, Listed[]>();
+    for (const x of listed) byCourse.set(x.course_id, [...(byCourse.get(x.course_id) ?? []), x]);
+    for (const [courseId, ls] of byCourse) {
+      if (ls.length <= 12) continue;
+      const group = page.locator(`#content #course-${courseId}`);
+      await expect.soft(group.getByRole('button', { expanded: false }).first(), `course ${courseId} collapsed (${w})`).toBeVisible();
+      await expect.soft(group.getByRole('listitem'), `course ${courseId} shows its published rows (${w})`).toHaveCount(ls.filter((x) => x.latest_sha256).length);
+    }
+    // FR-UI-17: the sidebar beside the page at 1280, behind the header's Courses button below 75rem.
+    const sidebar = page.getByRole('navigation', { name: 'Courses' });
+    if (w === 1280) {
+      await expect.soft(sidebar.first(), 'sidebar visible (1280)').toBeVisible();
+    } else {
+      await expect.soft(sidebar.first(), `sidebar hidden (${w})`).toBeHidden();
+      await page.getByRole('button', { name: 'Courses' }).click();
+      await expect.soft(page.getByRole('dialog').getByRole('navigation', { name: 'Courses' }), `drawer opens (${w})`).toBeVisible();
+      await page.screenshot({ path: resolve(dir, `${w}-list-sidebar-drawer.png`) });
+      await page.keyboard.press('Escape');
+    }
     // FR-UI-11: the skip link is the first Tab stop and moves focus to main#content.
     await page.locator('body').focus();
+    // Below 75rem the drawer's Escape returned focus to the Courses button, and Chromium keeps that button as the
+    // sequential-focus starting point even after body.focus() or blur(); reload so the first Tab starts at the
+    // document (live run 2026-11-24).
+    if (w !== 1280) {
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Lessons' })).toBeVisible({ timeout: 30_000 });
+    }
     await page.keyboard.press('Tab');
     await expect.soft(page.getByRole('link', { name: 'Skip to content' })).toBeFocused();
     await page.screenshot({ path: resolve(dir, `${w}-skip-link.png`) });
@@ -392,10 +494,18 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
     if (w !== 390) await page.screenshot({ path: resolve(dir, `${w}-lesson-full.png`), fullPage: true });
     await el(`${w}-lesson-references`, '.cell:has(.references)');
     await el(`${w}-lesson-lab`, '.cell:has(.lab)');
-    await el(`${w}-lesson-tutor`, '.tutor');
-    await el(`${w}-lesson-open`, '.cell:has(.open-finding)');
-    await el(`${w}-lesson-recall`, '.cell[data-kind="recall"]');
+    await el(`${w}-lesson-open`, '.cell[data-kind="open"]');
+    await el(`${w}-lesson-recall`, '.recall-deck');
     await check(`${w}-lesson`);
+    // Design pass: breadcrumbs (FR-NOTEBOOK-11), the sidebar's current lesson at 1280 (FR-UI-17), the tutor panel
+    // opened from the toolbar (SRV-TUTOR FR-TUTOR-11).
+    await expect.soft(page.getByRole('navigation', { name: 'Breadcrumb' }).locator('[aria-current="page"]'), `breadcrumb current (${w})`).toHaveText(l02Title);
+    if (w === 1280)
+      await expect.soft(page.getByRole('navigation', { name: 'Courses' }).first().locator(`a[href="/lessons/${lessonId}"]`), 'sidebar marks L02').toHaveAttribute('aria-current', 'page');
+    await page.locator('.lesson-toolbar').getByRole('button', { name: 'Ask the tutor' }).click();
+    await el(`${w}-lesson-tutor`, '#tutor');
+    axe[`${w}-lesson-tutor-open`] = serious(await new AxeBuilder({ page }).include('#tutor').analyze());
+    await page.getByRole('button', { name: 'Close the tutor' }).click();
     // WEB-NOTEBOOK FR-NOTEBOOK-11: the contents column at 1280 and 1024, behind the toggle at 390.
     await page.evaluate(() => window.scrollTo(0, 0));
     const firstEntry = nav().getByRole('link').first();
@@ -409,13 +519,21 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
       await expect.soft(firstEntry, `contents visible (${w})`).toBeVisible();
     }
     // Following the last entry (its target far down the page, not in view before) scrolls to it and focuses it.
-    const lastEntry = nav().getByRole('link').last();
+    // Since the design pass the contents end with "Ask the tutor" (#tutor, FR-NOTEBOOK-11), which opens the panel
+    // rather than scrolling to a section; take the last section entry.
+    const lastEntry = nav().locator('a:not([href="#tutor"])').last();
     const href = (await lastEntry.getAttribute('href')) ?? '';
     await expect.soft(page.locator(href), `${href} not in view before the click (${w})`).not.toBeInViewport();
     await lastEntry.click();
     await expect.soft(page.locator(href), `${href} focused (${w})`).toBeFocused();
     await expect.soft(page.locator(href), `${href} in view (${w})`).toBeInViewport();
     if (w === 390) await expect.soft(firstEntry, 'contents close after an entry (390)').toBeHidden();
+    // FR-NOTEBOOK-11 (design pass): after the scroll exactly one entry is the current section. At 390 px following an
+    // entry closed the contents, and a hidden nav has no role, so getByRole found no nav and counted 0 (live run
+    // 2026-11-24); read the marker with the contents reopened.
+    if (w === 390) await toggle().click();
+    await expect.soft(nav().locator('a[aria-current="location"]'), `one current section (${w})`).toHaveCount(1);
+    if (w === 390) await toggle().click();
     // Keyboard: the first Tab stops from the top of the lesson, screenshot of the focused control.
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('body').focus();
@@ -424,19 +542,73 @@ test('ui: review screenshots and axe at 1280, 1024 and 390 px', async ({ browser
 
     await page.goto('/no-such-page');
     await page.screenshot({ path: resolve(dir, `${w}-notfound.png`), fullPage: true });
+    await check(`${w}-notfound`);
+    // Design pass (FR-UI-10): no overflow on an unpublished lesson and on /import either (GETs only; no plan is
+    // previewed or confirmed here).
+    if (unpublished) {
+      await page.goto(`/lessons/${unpublished.lesson_id}`);
+      await expect(page.locator('#content h1')).toBeVisible({ timeout: 30_000 });
+      await page.screenshot({ path: resolve(dir, `${w}-unpublished.png`), fullPage: true });
+      await check(`${w}-unpublished`);
+    }
+    await page.goto('/import');
+    await expect(page.getByRole('heading', { name: 'Import a source' })).toBeVisible({ timeout: 30_000 });
+    await page.screenshot({ path: resolve(dir, `${w}-import.png`), fullPage: true });
+    await check(`${w}-import`);
   }
+  // Design pass (FR-UI-10, FR-UI-16): the list and L02 in the dark scheme at 1280 px, axe and overflow.
+  const dark = await browser.newContext({ storageState: await context.storageState(), viewport: { width: 1280, height: 900 }, colorScheme: 'dark', locale: 'en-US' });
+  const dp = await dark.newPage();
+  for (const [name, path] of [['dark-1280-list', '/'], ['dark-1280-lesson', `/lessons/${lessonId}`]] as const) {
+    await dp.goto(path);
+    await expect(dp.locator('#content h1').first()).toBeVisible({ timeout: 30_000 });
+    await dp.screenshot({ path: resolve(dir, `${name}.png`) });
+    axe[name] = serious(await new AxeBuilder({ page: dp }).analyze());
+    const overflow = await dp.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect.soft(overflow, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
+  }
+  await dark.close();
   results.ui = { widths: [...WIDTHS], axe_serious_critical: axe, signin_axe_serious_critical_report_only: signinAxe, layout, revision: sha };
   for (const [name, issues] of Object.entries(axe)) expect.soft(issues, `axe ${name}`).toEqual([]);
   for (const [name, l] of Object.entries(layout)) {
     expect.soft(l.overflow_px, `no horizontal scroll ${name}`).toBeLessThanOrEqual(0);
-    if (!name.endsWith('-lesson')) continue;
     const w = Number(name.split('-')[0]);
+    // Design pass (FR-UI-11): the header is present and one row (its declared 3.5rem min-height) at every width.
+    expect.soft(l.header_px, `header present ${name}`).not.toBeNull();
+    expect.soft(l.header_px ?? Infinity, `header one row ${name}`).toBeLessThanOrEqual(56);
+    if (name.endsWith('-list')) {
+      // FR-UI-10 (design pass): the app page title in the sans.
+      expect.soft(l.h1_px, `page title size ${name}`).toBe(w === 390 ? '24px' : '28px');
+      expect.soft(l.h1_family.startsWith('ui-serif'), `page title family ${name}`).toBe(false);
+    }
+    if (!name.endsWith('-lesson')) continue;
     expect.soft(l.widest_p_px, `reading column > 0 ${name}`).toBeGreaterThan(0);
     expect.soft(l.widest_p_px, `reading column ≤ 608 ${name}`).toBeLessThanOrEqual(608);
     expect.soft(l.p_font_size, `prose size ${name}`).toBe('17px');
     expect.soft(Math.abs(parseFloat(l.p_line_height) - 28.05), `prose line height ${name}`).toBeLessThanOrEqual(0.1);
     expect.soft(l.p_font_family.startsWith('ui-serif'), `prose family ${name}`).toBe(true);
-    expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '30px' : '36px');
+    // Design pass (FR-UI-10): heading scale, language, table breaking, toolbar buttons, the wide lab block. Each hook
+    // must be present before its value is checked (review).
+    for (const [hook, value] of [
+      ['#content div.lesson h1[lang]', l.title_lang], ['#content [data-markdown][lang]', l.markdown_lang],
+      ['[data-markdown] td', l.td_hyphens],
+      ['.lesson-toolbar .acme-button', l.toolbar_button_height], ['.cell[data-kind="lab"] .lab', l.lab_px],
+    ] as const)
+      expect.soft(value, `${hook} present ${name}`).not.toBeNull();
+    expect.soft(l.h1_px, `h1 size ${name}`).toBe(w === 390 ? '28px' : '32px');
+    // WEB-UI FR-UI-32: the content nodes carry the lesson's language (L02 is Russian).
+    expect.soft(l.title_lang, `lesson title lang ${name}`).toBe('ru');
+    expect.soft(l.markdown_lang, `lesson markdown lang ${name}`).toBe('ru');
+    if (l.output_present) expect.soft(l.output_lang, `lesson output lang ${name}`).toBe('ru');
+    expect.soft(l.td_hyphens, `td hyphens ${name}`).toBe('auto');
+    expect.soft(l.td_overflow_wrap, `td overflow-wrap ${name}`).toBe('break-word');
+    expect.soft(l.toolbar_button_radius, `toolbar button radius ${name}`).toBe('6px');
+    expect.soft(l.toolbar_button_height, `toolbar button height ${name}`).toBe(28);
+    if (w === 390) expect.soft(l.lab_px ?? 0, `lab within the column ${name}`).toBeLessThanOrEqual(l.widest_p_px + 1);
+    else {
+      expect.soft(l.lab_px ?? 0, `lab wider than prose ${name}`).toBeGreaterThanOrEqual(l.widest_p_px + 64);
+      expect.soft(l.lab_px ?? 0, `lab at most 800 ${name}`).toBeLessThanOrEqual(800);
+    }
   }
 });
 
@@ -452,7 +624,7 @@ test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', 
     // A fresh context per page: no session, so the pages render as a visitor sees them. The bootstrap page is
     // opened without a token (the no-token state), so no bootstrap request is made.
     for (const name of ['signin', 'bootstrap'] as const) {
-      const anon = await browser.newContext({ viewport: { width: w, height: 900 } });
+      const anon = await browser.newContext({ viewport: { width: w, height: 900 }, locale: 'en-US' });
       const p = await anon.newPage();
       await p.goto(`/api/auth/${name}`);
       await expect(p.locator('main.auth')).toHaveAttribute('data-state', name === 'signin' ? 'ready' : 'no_token');
@@ -473,7 +645,9 @@ test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', 
   // slice.live.ts's sequence ("sign out, then sign in through the real page with the same passkey"), for the owner.
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto('/');
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // Design pass (WEB-UI FR-UI-5, FR-UI-11): Sign out is an item of the user menu.
+  await page.getByRole('button', { name: /^Account menu for / }).click();
+  await page.getByRole('menuitem', { name: 'Sign out' }).click();
   await page.waitForURL(/\/api\/auth\/signin$/);
   expect((await api.get('/api/me')).status(), 'signed out').toBe(401);
   await page.screenshot({ path: resolve(dir, 'signed-out.png') });
@@ -485,6 +659,151 @@ test('auth: the sign-in and bootstrap pages, then a real sign-out and sign-in', 
   results.auth = { widths: [...WIDTHS], axe_serious_critical: axe, overflow_px: overflow, signin_again: me.status() };
   for (const [k, v] of Object.entries(axe)) expect.soft(v, `axe ${k}`).toEqual([]);
   for (const [k, v] of Object.entries(overflow)) expect.soft(v, `overflow ${k}`).toBeLessThanOrEqual(0);
+});
+
+// SRV-AUTH FR-AUTH-32 [live]: open sign-up with owner approval (ADR-0031). Each test is its own PASS/FAIL line; a
+// SKIP is never evidence (OPS-DOD FR-DOD-5). The run touches only the accounts it creates: their handles and ids are
+// written to signup-created.json as soon as they are known, and web_live.py deletes exactly those by id.
+const SIGNUP_EXPECTED = process.env.READER_SIGNUP_EXPECTED ?? '';
+const signupState: { skip: string | null; visitor?: BrowserContext; vpage?: Page; handles: string[]; ids: Record<string, string> } = {
+  skip: null,
+  handles: [],
+  ids: {},
+};
+const runHandle = () => `lc-${[...crypto.getRandomValues(new Uint8Array(4))].map((b) => b.toString(16).padStart(2, '0')).join('')}`;
+const writeCreated = () =>
+  writeFileSync(resolve(OUT, 'signup-created.json'), `${JSON.stringify({ handles: signupState.handles, ids: Object.values(signupState.ids) })}\n`);
+const onlyOpen = () => {
+  only('signup');
+  test.skip(SIGNUP_EXPECTED !== 'open', 'signup off in reader.yaml');
+  test.skip(Boolean(signupState.skip), signupState.skip ?? '');
+};
+const withPasskey = async (ctx: BrowserContext, p: Page) => {
+  const session = await ctx.newCDPSession(p);
+  await session.send('WebAuthn.enable', { enableUI: false });
+  await session.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2', ctap2Version: 'ctap2_1', transport: 'internal', hasResidentKey: true,
+      hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true,
+    },
+  });
+};
+/** Sign up `handle` through the page in `p`; returns the options response's status and error code. */
+const signUpThroughPage = async (p: Page, handle: string): Promise<{ status: number; code: string }> => {
+  signupState.handles.push(handle);
+  writeCreated();
+  await p.goto('/api/auth/signup');
+  await p.locator('#handle').fill(handle);
+  await p.locator('#display-name').fill('Live Check');
+  const options = p.waitForResponse((r) => r.url().endsWith('/api/auth/signup/options'));
+  await p.getByRole('button', { name: 'Create account with a passkey' }).click();
+  const res = await options;
+  const body = (await res.json().catch(() => ({}))) as { error?: string };
+  return { status: res.status(), code: body.error ?? '' };
+};
+const pendingList = async () => (await (await api.get('/api/auth/signups')).json()) as { pending: { id: string; handle: string }[] };
+const ownerSignsInAgain = async () => {
+  // Session mode has no virtual passkey to sign in again with, and its row is already recent.
+  if (SESSION) return;
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await page.waitForURL(/\/api\/auth\/signin$/);
+  await page.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await page.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
+};
+
+test('signup: the stack serves the sign-up mode reader.yaml asks for', async () => {
+  only('signup');
+  expect(['open', 'off'], 'web_live.py derived the expected mode').toContain(SIGNUP_EXPECTED);
+  const status = (await api.get('/api/auth/signup')).status();
+  expect(status).toBe(SIGNUP_EXPECTED === 'open' ? 200 : 404);
+});
+
+test('signup off: GET /api/auth/signup and both POSTs are 404', async () => {
+  only('signup');
+  test.skip(SIGNUP_EXPECTED !== 'off', 'signup open in reader.yaml');
+  expect((await api.get('/api/auth/signup')).status()).toBe(404);
+  for (const path of ['/api/auth/signup/options', '/api/auth/signup/verify'])
+    expect((await post(path, { handle: 'lc-00000000', display_name: 'x' })).status(), path).toBe(404);
+});
+
+test('signup: a visitor signs up through the page and waits for approval', async ({ browser }) => {
+  onlyOpen();
+  test.setTimeout(3 * 60_000);
+  if ((await pendingList()).pending.length >= 20) {
+    signupState.skip = 'pending cap full';
+    test.skip(true, signupState.skip);
+  }
+  signupState.visitor = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
+  signupState.vpage = await signupState.visitor.newPage();
+  await withPasskey(signupState.visitor, signupState.vpage);
+  const handle = runHandle();
+  const first = await signUpThroughPage(signupState.vpage, handle);
+  if (first.status === 429 && first.code === 'rate_limited') {
+    signupState.skip = 'global sign-up limit used';
+    test.skip(true, signupState.skip);
+  }
+  expect(first.status, 'options').toBe(200);
+  await expect(signupState.vpage.locator('main.auth')).toHaveAttribute('data-state', 'pending', { timeout: 30_000 });
+  const row = (await pendingList()).pending.find((r) => r.handle === handle);
+  expect(row, 'the request is listed for the owner').toBeTruthy();
+  signupState.ids[handle] = row!.id;
+  writeCreated();
+});
+
+test('signup: the pending visitor sees pending_approval at sign-in and /api/me is 401', async () => {
+  onlyOpen();
+  const vp = signupState.vpage!;
+  await vp.goto('/api/auth/signin');
+  await vp.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await expect(vp.locator('main.auth')).toHaveAttribute('data-state', 'pending_approval', { timeout: 30_000 });
+  expect((await vp.request.get('/api/me')).status()).toBe(401);
+});
+
+test('signup: the owner approves the request on the Sign-ups screen', async () => {
+  onlyOpen();
+  const handle = signupState.handles[0]!;
+  await ownerSignsInAgain();
+  await page.goto('/signups');
+  await page.getByRole('button', { name: `Approve @${handle}` }).click();
+  await expect(page.getByText(`@${handle} approved.`)).toBeVisible();
+});
+
+test('signup: the approved account signs in as a learner', async () => {
+  onlyOpen();
+  const vp = signupState.vpage!;
+  await vp.goto('/api/auth/signin');
+  await vp.getByRole('button', { name: 'Sign in with a passkey' }).click();
+  await vp.waitForURL((u) => u.pathname === '/', { timeout: 30_000 });
+  const me = await vp.request.get('/api/me');
+  expect(me.status()).toBe(200);
+  const body = (await me.json()) as { handle: string; role: string };
+  expect([body.handle, body.role]).toEqual([signupState.handles[0], 'learner']);
+});
+
+test('signup: a second request is rejected on the screen and is gone', async ({ browser }) => {
+  onlyOpen();
+  test.setTimeout(3 * 60_000);
+  const other = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: 'en-US' });
+  try {
+    const op = await other.newPage();
+    await withPasskey(other, op);
+    const handle = runHandle();
+    expect((await signUpThroughPage(op, handle)).status, 'options').toBe(200);
+    await expect(op.locator('main.auth')).toHaveAttribute('data-state', 'pending', { timeout: 30_000 });
+    const row = (await pendingList()).pending.find((r) => r.handle === handle);
+    expect(row).toBeTruthy();
+    signupState.ids[handle] = row!.id;
+    writeCreated();
+    await page.goto('/signups');
+    await page.getByRole('button', { name: `Reject @${handle}` }).click();
+    await page.getByRole('button', { name: 'Reject', exact: true }).click();
+    await expect(page.getByText(`@${handle} rejected.`)).toBeVisible();
+    expect((await pendingList()).pending.some((r) => r.handle === handle)).toBe(false);
+  } finally {
+    await other.close();
+    await signupState.visitor?.close();
+  }
 });
 
 // SRV-TUTOR NFR-TUTOR-1..3 over the HTTP API (VEC-TUTOR-7): questions-v2 with v03 → t01 (40 independent questions),
@@ -510,11 +829,22 @@ test('tutor-bench: the 40 bench questions over the HTTP API', async () => {
   const runFile = resolve(dir, `tutor-bench-${new Date().toISOString().replace(/[:.]/g, '')}.json`);
   const records: BenchRecord[] = [];
   let stoppedAt: string | null = null;
+  // SRV-TUTOR FR-TUTOR-15: the records file is VEC-OBS-5 bench_results.tutor (the MLflow upload) and the summary
+  // VEC-TUTOR-8 (a report): a header of ids and a bare commit sha, then numbers, states and flags only.
+  const git = (...args: string[]) => execFileSync('git', args, { encoding: 'utf-8' }).trim();
+  const header: BenchHeader = {
+    date: new Date().toISOString().slice(0, 10), branch: git('rev-parse', '--abbrev-ref', 'HEAD'),
+    commit: git('rev-parse', '--short=12', 'HEAD'), lesson_id: lessonId,
+  };
   const report = () => {
-    writeFileSync(runFile, `${JSON.stringify({ lesson_id: lessonId, records }, null, 2)}\n`);
+    writeFileSync(runFile, `${JSON.stringify(recordsFile(header, records), null, 2)}\n`);
+    const merged = mergeRuns([...prior, records]);
+    // not `tutor-bench-*.json`: that pattern is the run files merged above
+    writeFileSync(resolve(dir, `summary-tutor-bench-${header.date}.json`),
+      `${JSON.stringify(summaryFile(header, merged, setIds, prior.length + 1), null, 2)}\n`);
     results.tutor_bench = {
       lesson_id: lessonId, dir_runs: prior.length + 1, from, stopped_at: stoppedAt, asked_this_run: records.length,
-      summary: summary(mergeRuns([...prior, records]), setIds),
+      summary: summary(merged, setIds),
     };
     save();
   };

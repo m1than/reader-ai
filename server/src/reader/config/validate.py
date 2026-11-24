@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Final
 
-from reader.config.checks import SHA256, FrozenDict, decimal_in_context, url_problem
+from reader.config.checks import SHA256, FrozenDict, decimal_in_context, material_id_problem, url_problem
 from reader.config.refs import SecretRef
 from reader.config.yaml_tree import OVERSIZED, Map, Node, Scalar, Seq
 
@@ -112,6 +112,27 @@ def decimal(upper: Decimal | None = None) -> Rule:
         if number <= 0 or (upper is not None and number > upper):
             return ctx.fail(node.line, path, "out_of_range")
         return number
+
+    return rule
+
+
+def boolean(node: Node, path: str, ctx: Context) -> Value:
+    """A YAML boolean only (FR-CONFIG-17)."""
+    if not (isinstance(node, Scalar) and node.kind == "bool"):
+        return ctx.fail(node.line, path, "wrong_type")
+    return node.value
+
+
+def integer(low: int, high: int) -> Rule:
+    """A YAML int only (no floats, strings or booleans), low <= n <= high (FR-CONFIG-17)."""
+
+    def rule(node: Node, path: str, ctx: Context) -> Value:
+        if not (isinstance(node, Scalar) and node.kind == "int"):
+            return ctx.fail(node.line, path, "wrong_type")
+        value = node.value
+        if value is OVERSIZED or not isinstance(value, int) or not low <= value <= high:
+            return ctx.fail(node.line, path, "out_of_range")
+        return value
 
     return rule
 
@@ -243,7 +264,7 @@ ROOT: Final = record({
     }), required=False),
     "kernels": Field(items(text(), unique=True), required=False),
     "materials": Field(items(record({
-        "id": Field(text()),
+        "id": Field(text(material_id_problem)),
         "file": Field(path_value),
         "sha256": Field(sha256),
         "license": Field(text()),
@@ -251,4 +272,8 @@ ROOT: Final = record({
     }), unique_by="id"), required=False),
     "sectors": Field(opaque, required=False),
     "sharing": Field(opaque, required=False),
+    "observability": Field(record({  # FR-CONFIG-17 (paired SRV-OBS change)
+        "enabled": Field(boolean, required=False),
+        "retention_days": Field(integer(1, 365), required=False),
+    }), required=False),
 })

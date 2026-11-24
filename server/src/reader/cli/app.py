@@ -8,6 +8,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
+from reader.cli import ingest_watch
 from reader.cli.commands import (
     Ctx,
     cmd_bootstrap,
@@ -18,7 +19,7 @@ from reader.cli.commands import (
     cmd_watcher_status,
     cmd_watcher_stop,
 )
-from reader.cli.maintenance import cmd_backup, cmd_doctor, cmd_restore, cmd_trust
+from reader.cli.maintenance import cmd_backup, cmd_doctor, cmd_restore, cmd_restore_obs_premigrate, cmd_trust
 from reader.cli.resolve import macos_keyring
 from reader.cli.runner import PosixSpawner, SubprocessRunner, safe_env
 
@@ -39,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     down.add_argument("--untrust", action="store_true", help="also remove every trusted local root")
     status = commands.add_parser("status", parents=[common], help="service health and watcher state")
     status.add_argument("--json", action="store_true")
+    status.add_argument("--obs", action="store_true", help="also measure the MLflow store size (slow)")
     watcher = commands.add_parser("watcher", help="the secret-delivery watcher")
     watcher_commands = watcher.add_subparsers(dest="watcher_command", required=True)
     watcher_commands.add_parser("status")
@@ -56,6 +58,13 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("dir", type=Path)
     restore = commands.add_parser("restore", parents=[common], help="restore onto a fresh stack")
     restore.add_argument("dir", type=Path)
+    premigrate = commands.add_parser(
+        "restore-obs-premigrate", parents=[common],
+        help="put MLflow's pre-migration backup back after a failed migration (stack down)",
+    )
+    premigrate.add_argument(
+        "--force", action="store_true", help="restore although no migration is in progress"
+    )
     return parser
 
 
@@ -78,6 +87,7 @@ def default_ctx() -> Ctx:
         sleep=time.sleep,
         monotonic=time.monotonic,
         kill=os.kill,
+        ingest_spawn=ingest_watch.spawn,  # FR-CLI-23
     )
 
 
@@ -103,7 +113,7 @@ def main(argv: Sequence[str] | None = None, ctx: Ctx | None = None) -> int:
         case "down":
             return cmd_down(ctx, args.config, args.untrust)
         case "status":
-            return cmd_status(ctx, args.config, args.json)
+            return cmd_status(ctx, args.config, args.json, args.obs)
         case "watcher":
             return cmd_watcher_status(ctx) if args.watcher_command == "status" else cmd_watcher_stop(ctx)
         case "bootstrap":
@@ -118,4 +128,6 @@ def main(argv: Sequence[str] | None = None, ctx: Ctx | None = None) -> int:
             return cmd_backup(ctx, args.config, args.dir)
         case "restore":
             return cmd_restore(ctx, args.config, args.dir)
+        case "restore-obs-premigrate":
+            return cmd_restore_obs_premigrate(ctx, args.config, args.force)
     return 2

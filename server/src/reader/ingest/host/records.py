@@ -9,14 +9,31 @@ work directory, because a pid can be reused by an unrelated process.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import secrets
 import shutil
 import signal
 import subprocess
+import time
 from pathlib import Path
 from typing import Any, Final, Protocol
+
+LOCK_RETRY_S: Final = 0.2
+
+
+def try_flock(fd: int) -> bool:
+    """An exclusive non-blocking flock, retried once after 0.2 s: `reader status` probes the ingest locks with
+    a short shared lock (OPS-CLI FR-CLI-23), which must not make a real run read `busy`."""
+    for attempt in (0, 1):
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except BlockingIOError:
+            if attempt == 0:
+                time.sleep(LOCK_RETRY_S)
+    return False
 
 
 class Probe(Protocol):
@@ -34,15 +51,29 @@ def _write(path: Path, record: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def new_run(run_dir: Path, work_root: Path, material_sha256: str) -> str:
-    """Write the record `{material_sha256, work}`, then create the 0700 work directory; returns its name."""
+def new_run(run_dir: Path, work_root: Path, material_sha256: str, upload_id: str | None = None) -> str:
+    """Write the record `{material_sha256, work}` (plus `upload_id` in watch mode, FR-INGEST-21), then create
+    the 0700 work directory; returns its name."""
     run_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     work_root.mkdir(parents=True, exist_ok=True, mode=0o700)
     name = secrets.token_hex(8)
     work = work_root / name
-    _write(run_dir / f"{name}.json", {"material_sha256": material_sha256, "work": str(work)})
-    work.mkdir(mode=0o700)
-    os.chmod(work, 0o700)
+    record: dict[str, Any] = {"material_sha256": material_sha256, "work": str(work)}
+    if upload_id is not None:
+        record["upload_id"] = upload_id
+    path, made = run_dir / f"{name}.json", False
+    try:
+        _write(path, record)
+        work.mkdir(mode=0o700)
+        made = True
+        os.chmod(work, 0o700)
+    except BaseException:  # leave nothing half-made: the record, its temporary file, a directory we created
+        for leftover in (path, path.with_name(f".{path.name}.tmp")):
+            with contextlib.suppress(OSError):
+                leftover.unlink()
+        if made:
+            shutil.rmtree(work, ignore_errors=True)
+        raise
     return name
 
 

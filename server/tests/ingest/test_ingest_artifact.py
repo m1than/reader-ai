@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from .conftest import ARTIFACT_OK_ID, artifact_files, build_artifact, canonical, need, write_dir
@@ -105,6 +105,38 @@ def test_normalise_code_keeps_soft_hyphen_and_line_breaks() -> None:
     assert artifact.normalise(raw, code=True) == "$ a\nb­ c\nd"
 
 
+@pytest.mark.parametrize(
+    ("raw", "code", "want"),
+    [
+        (" \x1f", True, ""),  # the control goes first, then the trailing space
+        ("a \r", True, "a"),  # a lone CR is a control: removed, then the space before it
+        ("x \x02\ny", True, "x\ny"),  # pdfium's U+0002 at a line end
+        ("e­́", False, "é"),  # U+00AD goes before NFC, so the accent composes
+        ("e\x01́", False, "é"),  # a control goes before NFC too (review: the NFC-first mutant)
+        ("e\x01́", True, "é"),
+        ("a\t\nb", True, "a\t\nb"),  # only spaces are stripped, never a tab (review: the bare-rstrip mutant)
+        ("a\rb", True, "ab"),  # a lone CR is a control, not a line break: a known join
+    ],
+)
+def test_normalise_removes_before_it_strips_and_composes(raw: str, code: bool, want: str) -> None:
+    artifact = need("reader.ingest.artifact")
+    assert artifact.normalise(raw, code=code) == want
+
+
+@settings(max_examples=300)
+@example(" \x1f", True)
+@example("e­́", False)
+@example("e\x01́", False)
+@example("e\x01́", True)
+@given(st.text(max_size=40), st.booleans())
+def test_normalise_is_idempotent(text: str, code: bool) -> None:
+    """INV-INGEST-1: normalise(x) is accepted by the validator and is a fixpoint."""
+    artifact = need("reader.ingest.artifact")
+    once = artifact.normalise(text, code=code)
+    assert artifact.normalise(once, code=code) == once
+    assert artifact._normalised(once, code=code)
+
+
 def test_span_id() -> None:
     artifact = need("reader.ingest.artifact")
     assert artifact.span_id("a" * 64, 7) == "a" * 64 + ":7"
@@ -195,6 +227,9 @@ texts = st.text(alphabet=st.characters(codec="utf-8", exclude_categories=("Cs",)
 
 
 @settings(max_examples=60, suppress_health_check=[HealthCheck.function_scoped_fixture])
+@example(rows=[("code", " \x1f")])  # investigator, 2026-11-24: not idempotent before the order fix
+@example(rows=[("code", "a \r")])
+@example(rows=[("text", "e­́")])
 @given(st.lists(st.tuples(st.sampled_from(["text", "code", "list_item"]), texts), min_size=1, max_size=6))
 def test_valid_generated_artifacts_pass(tmp_path: Path, rows: list[tuple[str, str]]) -> None:
     artifact = need("reader.ingest.artifact")

@@ -1,0 +1,308 @@
+{
+  "backend": "sqlite",
+  "duration_s": 480.0,
+  "bulk_lessons": 20,
+  "ready_s": 4.7,
+  "auth": {
+    "no_cookie_root": {
+      "status": 401,
+      "bytes": 0
+    },
+    "learner_root": {
+      "status": 403,
+      "bytes": 0
+    },
+    "owner_root": {
+      "status": 200,
+      "bytes": 701,
+      "mlflow_ui": true
+    },
+    "owner_ajax_search": {
+      "status": 200,
+      "bytes": 284,
+      "mlflow_ui": false
+    },
+    "no_cookie_ajax_search": {
+      "status": 401,
+      "bytes": 0
+    },
+    "owner_ingest_blocked": {
+      "status": 404,
+      "bytes": 0
+    },
+    "owner_gateway_blocked": {
+      "status": 404,
+      "bytes": 0
+    },
+    "owner_foreign_host": {
+      "status": 403,
+      "bytes": 60
+    }
+  },
+  "sustained_start": 1795465823.256502,
+  "sustained_end": 1795466303.347748,
+  "stage_traces": {
+    "expected_spans": 72,
+    "complete": 7,
+    "traces": 7,
+    "rows": [
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68578
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68579
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68586
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68581
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68586
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68579
+      },
+      {
+        "spans": 72,
+        "root": "pipeline.stage",
+        "state": "OK",
+        "duration_ms": 68596
+      }
+    ]
+  },
+  "tutor_traces": {
+    "expected_spans": 3,
+    "complete": 31,
+    "traces": 31,
+    "rows": [
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 202
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 202
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 203
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 202
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 202
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 204
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 211
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 202
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 203
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 200
+      },
+      {
+        "spans": 3,
+        "root": "tutor.answer",
+        "state": "OK",
+        "duration_ms": 201
+      }
+    ]
+  },
+  "poll": {
+    "n": 94,
+    "p50_s": 0.082,
+    "p95_s": 0.204,
+    "errors": []
+  },
+  "store_bytes_after_sustained": 1609728,
+  "bulk_emit_s": 0.3,
+  "bulk_start": 1795466314.8384018,
+  "bulk_spans": 10080,
+  "bulk_end": 1795466334.83896,
+  "bulk_traces": {
+    "expected_spans": 72,
+    "complete": 12,
+    "traces": 20
+  },
+  "traces_total": 132,
+  "store_bytes_after_bulk": 7479296,
+  "deleted": 132,
+  "delete_s": 0.06,
+  "traces_after_delete": 0,
+  "store_bytes_after_delete": 7479296
+}

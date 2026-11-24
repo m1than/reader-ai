@@ -7,8 +7,20 @@
 
 Log lines go to /out/requests.jsonl. No header values are logged except the auth scheme and whether the credential
 equals the expected handle.
+
+Scenario `websearch` (STUB_SCENARIO=websearch; spikes/web-search § 5a, 2026-11-23): a main-loop request that offers
+the client tool `WebSearch` and holds no tool_result yet is answered with a `tool_use` of WebSearch; a request whose
+`tools` hold a `web_search_*` server tool (the CLI's nested search request, hypothesis H-WS-1) is answered with a
+`server_tool_use` + `web_search_tool_result` (two synthetic results with page_age; STUB_WS_ERROR=<code> answers an
+error result instead) and a short text; any other request gets the final text. For these requests the log also holds
+the request's `tools` in full (the CLI's own definitions, no secret), their canonical sha256s, the top-level keys,
+the system prompt's size only, and a skeleton of the messages (roles, block types, the first 200 characters of each
+text and tool_result). Everything is synthetic: no book text and no real token exist in the container.
+STUB_QUERY_FROM_PROMPT=1 (SRV-FRESH's INV-FRESH-1 [agent] test): the main loop's tool_use carries the query from the
+first user line `Query: <q>` (the search run's prompt), so the caller's gate sees its own planned query.
 """
 
+import hashlib
 import json
 import os
 import socketserver
@@ -22,6 +34,152 @@ HANDLE = os.environ.get("EXPECT_HANDLE", "")
 ERROR_STATUS = int(os.environ.get("STUB_ERROR_STATUS", "0") or 0)  # 0: success; 429, 529 or 500: always that error
 DELAY_S = float(os.environ.get("STUB_DELAY_S", "0") or 0)  # seconds before answering /v1/messages (deadline tests)
 LOCK = threading.Lock()
+SCENARIO = os.environ.get("STUB_SCENARIO", "")
+WS_ERROR = os.environ.get("STUB_WS_ERROR", "")
+QUERY = "synthetic freshness query"
+QUERY_FROM_PROMPT = os.environ.get("STUB_QUERY_FROM_PROMPT", "") == "1"
+
+
+def prompt_query(payload: dict) -> str:
+    """The `Query: <q>` line of the request's user messages, or QUERY (STUB_QUERY_FROM_PROMPT=1 only)."""
+    if not QUERY_FROM_PROMPT:
+        return QUERY
+    for m in payload.get("messages") or []:
+        if m.get("role") != "user":
+            continue
+        content = m.get("content")
+        texts = [content] if isinstance(content, str) else [
+            b.get("text", "") for b in content or [] if isinstance(b, dict) and b.get("type") == "text"]
+        for text in texts:
+            for line in text.splitlines():
+                if line.startswith("Query: "):
+                    return line[len("Query: "):]
+    return QUERY
+
+
+def canonical_sha256(obj: object) -> str:
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+                          .encode()).hexdigest()
+
+
+def skeleton(messages: list) -> list:
+    """Roles and block types of each message, with at most 200 characters of text per block."""
+    out = []
+    for m in messages:
+        content = m.get("content")
+        if isinstance(content, str):
+            out.append({"role": m.get("role"), "text": content[:200]})
+            continue
+        blocks = []
+        for b in content or []:
+            e = {"type": b.get("type")}
+            if b.get("type") == "text":
+                e["text"] = b.get("text", "")[:200]
+            elif b.get("type") in ("tool_use", "server_tool_use"):
+                e["name"], e["input"] = b.get("name"), b.get("input")
+            elif b.get("type") == "tool_result":
+                c = b.get("content")
+                e["content"] = (json.dumps(c, ensure_ascii=False) if not isinstance(c, str) else c)[:200]
+                e["is_error"] = b.get("is_error")
+            blocks.append(e)
+        out.append({"role": m.get("role"), "blocks": blocks})
+    return out
+
+
+def describe(payload: dict) -> dict:
+    tools = payload.get("tools") or []
+    system = payload.get("system")
+    return {
+        "top_level_keys": sorted(payload.keys()),
+        "tools": tools,
+        "tools_sha256": [canonical_sha256(t) for t in tools],
+        "tool_choice": payload.get("tool_choice"),
+        "thinking": payload.get("thinking"),
+        "system_chars": len(json.dumps(system, ensure_ascii=False)) if system is not None else 0,
+        # the nested search request's own short system prompt (the CLI's, no secret); never the main loop's
+        "search_system": system if is_search_request(payload) else None,
+        "output_config": payload.get("output_config"),
+        "context_management": payload.get("context_management"),
+        "metadata_keys": sorted((payload.get("metadata") or {}).keys()),
+        "stream": payload.get("stream"),
+        "messages": skeleton(payload.get("messages") or []),
+        "query_in_body": QUERY in json.dumps(payload, ensure_ascii=False),
+    }
+
+
+def is_search_request(payload: dict) -> bool:
+    return any(str(t.get("type", "")).startswith("web_search") for t in payload.get("tools") or [])
+
+
+def offers_websearch(payload: dict) -> bool:
+    return any(t.get("name") == "WebSearch" for t in payload.get("tools") or [])
+
+
+def has_tool_result(payload: dict) -> bool:
+    for m in payload.get("messages") or []:
+        if isinstance(m.get("content"), list) and any(b.get("type") == "tool_result" for b in m["content"]):
+            return True
+    return False
+
+
+def websearch_stream(payload: dict) -> bytes:
+    model = payload.get("model", "stub")
+    msg = {"id": "msg_stub", "type": "message", "role": "assistant", "model": model, "content": [],
+           "stop_reason": None, "stop_sequence": None,
+           "usage": {"input_tokens": 10, "output_tokens": 1, "cache_creation_input_tokens": 0,
+                     "cache_read_input_tokens": 0}}
+    parts = [sse("message_start", {"type": "message_start", "message": msg})]
+    usage: dict = {"output_tokens": 5}
+    if is_search_request(payload):
+        parts += [
+            sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {
+                "type": "server_tool_use", "id": "srvtoolu_stub01", "name": "web_search", "input": {}}}),
+            sse("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {
+                "type": "input_json_delta", "partial_json": json.dumps({"query": QUERY})}}),
+            sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ]
+        result = ({"type": "web_search_tool_result_error", "error_code": WS_ERROR} if WS_ERROR else [
+            {"type": "web_search_result", "url": "https://example.com/new-edition", "title": "Synthetic Book, 5th ed.",
+             "encrypted_content": "c3R1Yg", "page_age": "March 3, 2026"},
+            {"type": "web_search_result", "url": "https://docs.example.org/guide", "title": "Synthetic Docs",
+             "encrypted_content": "c3R1Yg", "page_age": None},
+        ])
+        parts += [
+            sse("content_block_start", {"type": "content_block_start", "index": 1, "content_block": {
+                "type": "web_search_tool_result", "tool_use_id": "srvtoolu_stub01", "content": result}}),
+            sse("content_block_stop", {"type": "content_block_stop", "index": 1}),
+            sse("content_block_start", {"type": "content_block_start", "index": 2,
+                                        "content_block": {"type": "text", "text": ""}}),
+            sse("content_block_delta", {"type": "content_block_delta", "index": 2,
+                                        "delta": {"type": "text_delta", "text": "stub search summary"}}),
+            sse("content_block_stop", {"type": "content_block_stop", "index": 2}),
+        ]
+        usage["server_tool_use"] = {"web_search_requests": 0 if WS_ERROR else 1}
+        stop = "end_turn"
+    elif offers_websearch(payload) and not has_tool_result(payload):
+        parts += [
+            sse("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {
+                "type": "tool_use", "id": "toolu_stub01", "name": "WebSearch", "input": {}}}),
+            sse("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {
+                "type": "input_json_delta", "partial_json": json.dumps({"query": prompt_query(payload)})}}),
+            sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ]
+        stop = "tool_use"
+    else:
+        parts += [
+            sse("content_block_start", {"type": "content_block_start", "index": 0,
+                                        "content_block": {"type": "text", "text": ""}}),
+            sse("content_block_delta", {"type": "content_block_delta", "index": 0,
+                                        "delta": {"type": "text_delta", "text": "stub-final"}}),
+            sse("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ]
+        stop = "end_turn"
+    parts += [
+        sse("message_delta", {"type": "message_delta", "delta": {"stop_reason": stop, "stop_sequence": None},
+                              "usage": usage}),
+        sse("message_stop", {"type": "message_stop"}),
+    ]
+    return b"".join(parts)
 
 
 def log(entry: dict) -> None:
@@ -106,10 +264,18 @@ class Upstream(BaseHTTPRequestHandler):
             return
         if self.path.split("?")[0] == "/v1/messages":
             try:
-                model = json.loads(body).get("model", "stub")
+                payload = json.loads(body)
             except ValueError:
-                model = "stub"
-            data = message_stream(model)
+                payload = {}
+            model = payload.get("model", "stub")
+            if SCENARIO == "websearch":
+                kind = ("search" if is_search_request(payload)
+                        else "main" if offers_websearch(payload) else "other")
+                log({"server": "upstream", "t": time.time(), "websearch_kind": kind, "model": model,
+                     "max_tokens": payload.get("max_tokens"), **describe(payload)})
+                data = websearch_stream(payload)
+            else:
+                data = message_stream(model)
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(data)))

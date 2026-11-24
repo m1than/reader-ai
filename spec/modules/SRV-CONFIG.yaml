@@ -17,10 +17,10 @@ title: reader.yaml settings, JSON Schema export, secret references and the conta
 status: approved
 approved_by: agent
 approved_at: 2026-11-20
-review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording"
+review: "deep-reviewer (Fable) round 3 approve; amended after code review rounds 1 and 2 (2026-11-20): URL parsing, number limits, too_deep, SecretRef constructor, model validation, not_utf8_encodable, model_rule_mismatch, TOCTOU wording; amended for ADR-0026 (paired change, coordinator-scheduled): secret_env_var removed, FR-CONFIG-14 delivery wording; paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-CONFIG-17, the `observability` section, reviewed in SRV-OBS's code review; paired change FR-CONFIG-18 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner; drafted and promoted as FR-CONFIG-17, renumbered at the merge into V/slice-integration, 2026-11-24, because SRV-OBS's item took that id first): drafted on V/plan, reviewed in the onboarding deep-reviewer rounds 3–7, promoted with SRV-SEARCH FR-SEARCH-10 on V/upload-impl with its Red test; Green: the Red test's expected key path corrected to the loader's notation `materials.1.id` (FR-CONFIG-10's path form), no requirement changed; the test reformatted for ruff (line length), no oracle change. Amendment 2026-11-24 (V/manage, WEB-MANAGE FR-MANAGE-6): FR-CONFIG-25..26 and the system table `settings_overrides` promoted from `proposed_manage` with the Red tests (tests/config/test_settings_*.py, tests/cli/test_overrides.py) after deep-reviewer rounds 1–3 (round 3 approve on 2a7d86f); ADR-0036 accepted by the owner, so the overlay is built; paired notes in SRV-AUTH (FR-AUTH-1, -10, -23), SRV-OBS, SRV-PIPELINE, SRV-AGENT and OPS-CLI review strings. Approved by agent with Red (2026-11-24). Code review of the management layer (2026-11-24, V/manage-fix-auth): FR-CONFIG-26 states the overlay's number bound `OVERRIDE_MAX` (below 1e15; 1e15 and 1e308 → 400 `value_invalid`) and that budget enforcement is live per call while `compile_runs.task_budgets` is a display snapshot (the code already enforced live); oracles added through the real readers (B5): the sign-up routes with a file `off` and a stored `open` override (tests/config/test_settings_db.py), SRV-AGENT's reserve with lowered monthly and task budget overrides (tests/agent/test_provider_db.py), `create_run`'s snapshot and live enforcement during a run (tests/pipeline/test_overrides_db.py), the retention job's cutoff and the summary's trace cutoff (tests/obs/test_overrides_db.py), POST and DELETE with a stale session, and the bound's refusals at 1e15, 1e308, 10**15 and 10**400 with 999999999999999 accepted (tests/config/test_settings_db.py), and stored values at the bound ignored as `invalid` (the [unit] value table). Paired change (V/manage-fix-srv, 2026-11-24, management code review B2): FR-CONFIG-18 bounds material ids (≤ 64 printable code points, no white space, no `/`; code `bad_material_id`) so SRV-EVENTS' audit object_id rule for a reader.yaml material is exactly this rule; reviewed with the management code review. Code review round 2 (V/manage-fix2, 2026-11-24): FR-CONFIG-18 also refuses the ids `.` and `..` as `bad_material_id` (tests/config/test_reserved_ids.py); FR-CONFIG-26 states that a reset whose reader.yaml value is outside the audit value rule still removes the override (204) and records `file: null` (the route answered 500 before; tests/config/test_settings_db.py). Owner live check fixes (V/live-fixes-4i, 2026-11-24): the settings page read `{settings: [...]}` while this route answers `{rows, ignored}`, so the Instance tab said \"Could not reach reader-ai\"; FR-CONFIG-25 now states the body's shape and a [db] contract oracle (tests/config/test_settings_db.py compares the route's body with spec/fixtures/WEB-MANAGE/settings-view.json, which the web client parses in web/src/manage/contract.test.ts); no route behaviour changed."
 layer: server
 track: engineering
-adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026]
+adr: [ADR-0011, ADR-0006, ADR-0012, ADR-0017, ADR-0020, ADR-0026, ADR-0036]
 
 paths:
   - server/src/reader/config/**
@@ -79,6 +79,14 @@ fields:
   - { path: "materials[].language", type: str, required: true, constraint: "non-empty, open set" }
   - { path: sectors, type: "opaque mapping", required: false, constraint: "any core-schema value; schema owned by later specs (ADR-0016/0017)" }
   - { path: sharing, type: "opaque mapping", required: false, constraint: "any core-schema value; schema owned by later specs (ADR-0016)" }
+  - { path: observability, type: mapping, required: false, constraint: "keys: enabled, retention_days (FR-CONFIG-17)" }
+  - { path: observability.enabled, type: bool, required: false, constraint: "YAML boolean; default true" }
+  - { path: observability.retention_days, type: "int (YAML int only)", required: false, constraint: "1..365; default 30" }
+
+# Database tables (FR-CONFIG-26, migration `config_0001` on its own branch `config` in server/src/reader/config/migrations).
+# A system table: no user owns a setting (INV-AUTH-8 reads `system: true`).
+tables:
+  settings_overrides: { system: true, columns: "key text pk, value jsonb NOT NULL, updated_by uuid NOT NULL (no FK, as audit_log.actor_id), updated_at timestamptz NOT NULL DEFAULT now(), version int NOT NULL CHECK (version >= 1)" }
 
 requirements:
   # Loading and validation
@@ -230,6 +238,135 @@ requirements:
     text: >-
       This module's own log calls never include a resolved value or an input scalar; they log references, codes and key
       paths only. Redaction in the shared logger and event serializer is a dependency on SRV-OBS and SRV-EVENTS.
+  - id: FR-CONFIG-17
+    text: >-
+      Observability (paired SRV-OBS change, ADR-0032 accepted 2026-11-24). A tenth top-level section
+      `observability`, optional, a mapping with exactly two optional keys: `enabled` (a YAML boolean, default true) and
+      `retention_days` (a YAML int, 1 ≤ n ≤ 365, default 30). The field table gains these rows; `ReaderConfig` gains
+      `observability: Observability` with those defaults (an absent section equals `{}`), and the committed JSON Schema
+      is regenerated (FR-CONFIG-4). Codes: a non-boolean `enabled` or a non-int `retention_days` (a float, a string, a
+      boolean) is `wrong_type`; an int outside 1..365 is `out_of_range`; any other key is `unknown_key`. [unit]
+      server/tests/config/test_observability.py.
+  - id: FR-CONFIG-18   # paired change for SRV-INGEST revision 2 (ADR-0029); was FR-CONFIG-17 until the merge
+    text: >-
+      **Reserved material ids.** A `materials[].id` that starts with `up-` is a validation problem with code
+      `reserved_id` and the message "material ids starting with up- are reserved for uploads" (SRV-INGEST
+      FR-INGEST-23 names uploaded materials `up-<first 12 hex of sha256>`; SRV-SEARCH FR-SEARCH-10 reads an
+      `up-` material's language from its upload, never from reader.yaml). The match is case-sensitive, on the id's
+      characters as written, with no normalisation. The problem is reported like every other FR-CONFIG-10 problem
+      (at the item's path and line, collected with the others). **Well-formed material ids** (paired with
+      SRV-EVENTS FR-EVENTS-30, code review of the management layer): an id longer than 64 code points, or with a
+      character that is white space, not printable (Python `str.isprintable`) or `/`, or an id that is exactly `.`
+      or `..` (a dot segment, which a URL client resolves away before the request leaves), is a validation problem
+      with code `bad_material_id` and the message "material ids are at most 64 printable characters, without white
+      space or /, and not . or .." (the id is a path segment of SRV-INGEST's material routes and the audit
+      `object_id` of its management actions, whose pattern is exactly this rule;
+      `reader.config.checks.material_id_problem` is the one definition, used by the loader, the model and the
+      audit). [unit] refused: `up-`, `up-abc`; accepted: `upx`, `upload-notes`, `Up-x`; refused `bad_material_id`:
+      65 characters, `two words`, `a/b`, a U+200F mark, a tab, `.`, `..`; accepted: `Bashir`, `bashir_4th`,
+      `Башир-2025`, 64 characters, `...`, `.hidden`; the model refuses what the loader refuses.
+  # Amendment (2026-11-24, V/manage): FR-CONFIG-25..26, promoted with Red (see the note at the end of this file).
+  - id: FR-CONFIG-25
+    text: >-
+      **Effective settings view.** `GET /api/settings` (`session`; non-owner → 403 `owner_only`; read-only) loads
+      reader.yaml through `load_config` and returns an allow-listed projection, declared as one data table
+      `SETTINGS_VIEW` of `(name, path or constant, read_when)` rows: `signup` (`sharing.signup` with FR-AUTH-23's
+      default rule, `start`), `observability.enabled` and `observability.retention_days` (`start`),
+      `budgets.monthly_usd` and `budgets.warn_at` (`each job`), each `tasks.<name>.model` and
+      `tasks.<name>.budget_usd_per_lesson` (`each job`), and the constants SRV-PIPELINE `bounds.run_cap_usd` and
+      SRV-TUTOR `question_cap_usd` and `daily_cap_usd` (`fixed`). Each row: `{name, value, source: "reader.yaml" |
+      "default" | "fixed", key | null, read_when}`. Where `start` values come from: `signup` is read by the api, so
+      its value is the api process's own startup snapshot (the process serving this route; so the page never shows
+      a file value that is not in effect); `observability.*` is read by the worker at its start and by the daily
+      job, which the api cannot see, so its row shows the file's current value with `read_when` "worker start and
+      the daily job" and the page says "applies at the next run". `each job` values are the file's current values.
+      **Redaction.** Free-text names from the file are shown only when they match `^[a-z0-9][a-z0-9._-]{0,63}$`
+      (task names and model ids as reader.yaml writes them) and, for a model id, also appear in the pricing table
+      (SRV-AGENT); any other task name or model id, and any value that starts with `secret:` or `sk-` or contains
+      `://`, is replaced by the fixed string "(hidden)" and its row keeps its
+      index, so nothing typed into the file by mistake (a token pasted into `model`) reaches the browser. No other
+      key appears: users, providers, secret references, materials, kernels and instance URLs are never in the body.
+      An unreadable file → 503 `config_unavailable` (FR-INGEST-15's code). The route lives in
+      `reader.config.routes` (SRV-AUTH ROUTERS, paired). [unit] the projection of VEC-CONFIG fixtures; a config
+      holding `secret://` references in every field and a model id `sk-ant-…`-shaped yields a body with no
+      `secret://`, no `sk-` and the "(hidden)" rows; [db] the owner-only refusal. With FR-CONFIG-26 the row's
+      `source` adds `"override"` and the body carries `file_value` beside `value`. The body is `{rows, ignored}`:
+      `rows` the view's rows (each also with `version` and `ignored`, FR-CONFIG-26), `ignored` the stored overrides
+      that have no row of their own, each `{key, value, reason, version}`. [db] the body for the test's reader.yaml
+      with one applied override and one whose task is not in the file equals the committed contract fixture
+      spec/fixtures/WEB-MANAGE/settings-view.json, which WEB-MANAGE's client validator parses too (FR-MANAGE-6),
+      so the server and the settings page cannot drift.
+  - id: FR-CONFIG-26
+    text: >-
+      **Settings overlay** (ADR-0036 option B, owner decision 2026-11-24; ADR-0036 accepted). A system table
+      `settings_overrides(key text pk, value jsonb, updated_by uuid, updated_at, version int)`; `key` is one of the
+      declared allow-list `OVERRIDABLE` = `sharing.signup`, `observability.retention_days`, `budgets.monthly_usd`,
+      `budgets.warn_at`, `tasks.<name>.budget_usd_per_lesson` for a task present in reader.yaml (any other key →
+      400 `not_overridable`). One function `effective_settings(conn, config) -> Settings` resolves each key as
+      override ?? file ?? default and validates the result with the same Pydantic models as the file (a value the
+      file's schema refuses → 400 `value_invalid` with the field name, never stored). The overlay adds one bound
+      the file does not have: a number for `budgets.monthly_usd` or a task budget must be below 1e15
+      (`OVERRIDE_MAX`, below 2^53, so the settings page's JavaScript reads it exactly); a larger one (1e15, 1e308)
+      → 400 `value_invalid`, never 500, and a stored one is ignored as `invalid`.
+      - **Narrowing on the resolved sign-up value.** The file's sign-up value is first resolved by FR-AUTH-23's rule,
+        defaults included (absent on a `localhost` RP ID → open; absent on any other host → off; `false` or `"off"`
+        → off). When that resolved file value is off, the effective switch is off whatever the override says;
+        setting the override to `open` then answers 409 `file_narrower`, and an `open` override stored earlier (the
+        file changed since) is ignored.
+      - **Stale overrides.** An override that no longer validates against the current file (its task was removed
+        from `tasks`, or a schema bound changed) or that narrowing ignores is not applied: `effective_settings`
+        skips it, logs `config override_ignored <key> <reason>` once per process start and per key, and the
+        settings view shows it as ignored; `reader up` and `reader status` print `override <key>: ignored
+        (<reason>)` (reasons `not_in_file`, `invalid`, `narrowed`; paired OPS-CLI change). It stays in the table
+        until reset, so the owner sees and removes it.
+      - **Budgets** take an override in either direction, raising included; that is accepted (ADR-0036) behind
+        `recent_session` and an audit row.
+      - **Readers.** Every reader of the five key families goes through `effective_settings`, and only processes
+        with a database connection read them (api and worker; ADR-0036). Paired changes: SRV-AUTH reads the sign-up
+        switch per request instead of at start (FR-AUTH-23); SRV-OBS's retention job and worker start read
+        retention per run (FR-OBS-11), and the obs summary (`reader.obs.summary`, which today reports the api's
+        start-time `retention_days`, FR-OBS-1) reads it per request; SRV-PIPELINE's `create_run` (runs.py), which
+        snapshots `tasks.<name>.budget_usd_per_lesson` into `compile_runs.task_budgets`, reads the effective
+        value at run creation (a running run keeps its snapshot); SRV-AGENT's monthly budget check per call in the
+        worker.
+      - **Enforcement is live.** Every budget check reads the effective value at the moment of the check: SRV-AGENT's
+        reserve reads `tasks.<name>.budget_usd_per_lesson`, `budgets.monthly_usd` and `budgets.warn_at` through
+        `effective_settings` per call, so an override changed during a run applies to that run's next call.
+        `compile_runs.task_budgets` is a display snapshot only (the run status's `task_budgets`, the values in
+        effect when the run was created); no check reads it.
+      Routes (owner only, else 403 `owner_only`; `recent_session`): `POST /api/settings/{key}` with `{value,
+      version}` (409 `stale` on a version mismatch; 0 for a new key) sets the override; `DELETE
+      /api/settings/{key}` with `{}` removes it (idempotent). Each applied change writes the audit actions
+      `settings.set` or `settings.reset` (SRV-EVENTS FR-EVENTS-30) with the key and the old and new values (small
+      numbers and enums, not secrets). The reader.yaml value has no overlay bound, so a reset whose file value is
+      outside the audit value rule (a number of 2^53 or more, or a fraction of 1e15 or more) still removes the
+      override and answers 204; its audit row records `file: null`, never a 500. `reader up` and `reader status`
+      print `override <key>: <value>
+      (reader.yaml: <value>)` for each applied override, and the ignored lines above. The CLI reads the table the
+      way its other status reads do (paired OPS-CLI change to FR-CLI's status section): one `docker compose exec -T
+      postgres psql -U postgres -d <db> -At` query `SELECT key, value FROM settings_overrides ORDER BY key`, bounded
+      by the status command's timeout, then evaluates each row against the loaded reader.yaml with the same
+      resolution and validation rules as `effective_settings` (shared pure functions in `reader.config`, no
+      database driver in the CLI); a failed query prints `overrides: unavailable` and does not fail status. A
+      `reader restore` brings overrides back with the database. Models, users, providers, secrets, materials and
+      kernels are never overridable. [unit] the merge, narrowing and validation table, with the rows: signup key
+      absent on a non-localhost host plus an `open` override → off (ignored, `narrowed`); absent on localhost plus
+      an `off` override → off; file `open` plus `off` → off; file `off` plus `open` → off; [unit] a source scan of
+      server/src/reader: no module other than `reader.config.effective` reads `sharing.signup`,
+      `observability.retention_days`, `budgets.monthly_usd`, `budgets.warn_at` or `budget_usd_per_lesson` from a
+      loaded config (attribute or key access outside that module fails the test); [db] set, stale, reset,
+      not_overridable, value_invalid, file_narrower; an override for a task then removed from reader.yaml is
+      ignored, logged once and listed as ignored; sign-up turned off by an override answers 404 on the sign-up
+      routes on the next request without a restart; a learner gets 403 with nothing written; `budgets.monthly_usd`
+      and a task budget at 1e15 and 1e308 → 400 `value_invalid`; POST and DELETE with a session older than
+      `recent_session` → 401 `reauth_required` with nothing written or removed. [db] through each real reader, not
+      `effective_settings` alone: reader.yaml `sharing.signup: off` plus a stored `open` override → the three
+      sign-up routes answer 404 (SRV-AUTH FR-AUTH-23); a lowered `budgets.monthly_usd` override makes SRV-AGENT's
+      reserve refuse `monthly_budget_exhausted` where the file's value allows the call, and a lowered task budget
+      override set after the run's creation makes it refuse `task_budget_exhausted` (enforcement is live);
+      a task budget override appears in a new run's `compile_runs.task_budgets` (SRV-PIPELINE `create_run`); an
+      `observability.retention_days` override reaches the retention job's cutoff and the obs summary's trace
+      cutoff (SRV-OBS FR-OBS-11, FR-OBS-1).
 
 invariants:
   - id: INV-CONFIG-1
@@ -310,3 +447,13 @@ vectors:
 # - An empty port (`https://x:`) is accepted as a URL without a port; this is harmless.
 # - `ReaderConfig.model_validate` refuses any `version` whose type is not exactly int (True, 1.0, Decimal(1),
 #   1+0j), matching the loader.
+
+# ---- Amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-6): promoted with Red after deep-reviewer rounds 1–3
+# (round 3 approve on 2a7d86f); ADR-0036/0037 accepted. FR-CONFIG-25..26 now live in `requirements` (19..24 left
+# free), the table `settings_overrides` in `tables`. FR-CONFIG-25 is read-only; FR-CONFIG-26 is the editable overlay
+# of ADR-0036 (secrets-adjacent: the view never carries a secret reference). Implementation notes: the overlay and
+# its pure resolution functions live in `reader.config.effective` (shared with the CLI); the routes in
+# `reader.config.routes`; the migration `config_0001` in `reader/config/migrations` (branch `config`, paired
+# SRV-AUTH FR-AUTH-1 note). A JSON number arrives as an int or a float; a budget override is turned into a Decimal
+# through its shortest decimal text (`Decimal(str(value))`) before the file's models validate it, as the file's
+# Decimals are built from their source text (FR-CONFIG-10).

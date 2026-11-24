@@ -1,0 +1,444 @@
+{
+ "model": "claude-haiku-5-5",
+ "cap_usd": 0.1,
+ "wall_s": 9.7,
+ "error": null,
+ "requests": [
+  {
+   "kind": "main",
+   "model": "claude-haiku-5-5",
+   "max_tokens": 1000,
+   "top_level_keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "thinking": {
+    "type": "adaptive",
+    "display": "updates"
+   },
+   "tool_choice": null,
+   "output_config": {
+    "effort": "medium"
+   },
+   "tools": [
+    {
+     "name": "DeferredToolPlaceholder",
+     "type": null,
+     "keys": [
+      "defer_loading",
+      "description",
+      "input_schema",
+      "name"
+     ],
+     "max_uses_sent": null
+    },
+    {
+     "name": "WebSearch",
+     "type": null,
+     "keys": [
+      "description",
+      "input_schema",
+      "name"
+     ],
+     "max_uses_sent": null
+    }
+   ],
+   "cache_control_present": true,
+   "status": 200,
+   "seconds": 0.68,
+   "events": [
+    "content_block_delta",
+    "content_block_start",
+    "content_block_stop",
+    "message_delta",
+    "message_start",
+    "message_stop",
+    "ping"
+   ],
+   "block_types": [
+    "tool_use"
+   ],
+   "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 1281,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1281
+    },
+    "output_tokens": 76,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+     "thinking_tokens": 0
+    }
+   },
+   "search_results": {
+    "results": 0,
+    "with_page_age": 0,
+    "errors": []
+   },
+   "keys": {
+    "tool_use": [
+     "caller",
+     "id",
+     "input",
+     "name",
+     "type"
+    ],
+    "stop_reason": "tool_use"
+   },
+   "usd": 0.000294
+  },
+  {
+   "kind": "search",
+   "model": "claude-haiku-5-5",
+   "max_tokens": 1000,
+   "top_level_keys": [
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "tool_choice",
+    "tools"
+   ],
+   "thinking": null,
+   "tool_choice": {
+    "type": "auto"
+   },
+   "output_config": {
+    "effort": "medium"
+   },
+   "tools": [
+    {
+     "name": "web_search",
+     "type": "web_search_20250305",
+     "keys": [
+      "max_uses",
+      "name",
+      "type"
+     ],
+     "max_uses_sent": 8
+    }
+   ],
+   "cache_control_present": false,
+   "status": 200,
+   "seconds": 5.2,
+   "events": [
+    "content_block_delta",
+    "content_block_start",
+    "content_block_stop",
+    "message_delta",
+    "message_start",
+    "message_stop",
+    "ping"
+   ],
+   "block_types": [
+    "thinking",
+    "server_tool_use",
+    "web_search_tool_result",
+    "thinking",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text",
+    "text"
+   ],
+   "usage": {
+    "input_tokens": 14452,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 0
+    },
+    "output_tokens": 835,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+     "thinking_tokens": 290
+    },
+    "server_tool_use": {
+     "web_search_requests": 1,
+     "web_fetch_requests": 0
+    }
+   },
+   "search_results": {
+    "results": 10,
+    "with_page_age": 5,
+    "errors": []
+   },
+   "keys": {
+    "thinking": [
+     "signature",
+     "thinking",
+     "type"
+    ],
+    "server_tool_use": [
+     "id",
+     "input",
+     "name",
+     "type"
+    ],
+    "web_search_tool_result": [
+     "caller",
+     "content",
+     "tool_use_id",
+     "type"
+    ],
+    "web_search_result": [
+     "encrypted_content",
+     "page_age",
+     "title",
+     "type",
+     "url"
+    ],
+    "text": [
+     "text",
+     "type"
+    ],
+    "citation": [
+     "cited_text",
+     "encrypted_index",
+     "title",
+     "type",
+     "url"
+    ],
+    "stop_reason": "end_turn"
+   },
+   "usd": 0.011863
+  },
+  {
+   "kind": "main",
+   "model": "claude-haiku-5-5",
+   "max_tokens": 1000,
+   "top_level_keys": [
+    "context_management",
+    "max_tokens",
+    "messages",
+    "metadata",
+    "model",
+    "output_config",
+    "stream",
+    "system",
+    "thinking",
+    "tools"
+   ],
+   "thinking": {
+    "type": "adaptive",
+    "display": "updates"
+   },
+   "tool_choice": null,
+   "output_config": {
+    "effort": "medium"
+   },
+   "tools": [
+    {
+     "name": "DeferredToolPlaceholder",
+     "type": null,
+     "keys": [
+      "defer_loading",
+      "description",
+      "input_schema",
+      "name"
+     ],
+     "max_uses_sent": null
+    },
+    {
+     "name": "WebSearch",
+     "type": null,
+     "keys": [
+      "description",
+      "input_schema",
+      "name"
+     ],
+     "max_uses_sent": null
+    }
+   ],
+   "cache_control_present": true,
+   "status": 200,
+   "seconds": 1.58,
+   "events": [
+    "content_block_delta",
+    "content_block_start",
+    "content_block_stop",
+    "message_delta",
+    "message_start",
+    "message_stop",
+    "ping"
+   ],
+   "block_types": [
+    "thinking",
+    "text"
+   ],
+   "usage": {
+    "input_tokens": 2,
+    "cache_creation_input_tokens": 1500,
+    "cache_read_input_tokens": 1281,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1500
+    },
+    "output_tokens": 236,
+    "service_tier": "standard",
+    "inference_geo": "global",
+    "speed": "standard",
+    "output_tokens_details": {
+     "thinking_tokens": 152
+    }
+   },
+   "search_results": {
+    "results": 0,
+    "with_page_age": 0,
+    "errors": []
+   },
+   "keys": {
+    "thinking": [
+     "signature",
+     "thinking",
+     "type"
+    ],
+    "text": [
+     "text",
+     "type"
+    ],
+    "stop_reason": "end_turn"
+   },
+   "usd": 0.000431
+  }
+ ],
+ "refused": [],
+ "sdk": {
+  "init_tools": [
+   "WebSearch"
+  ],
+  "tool_use_result_keys": [
+   [
+    "durationSeconds",
+    "query",
+    "results",
+    "searchCount"
+   ]
+  ],
+  "tool_use_result_items": [
+   [
+    [
+     "links",
+     10
+    ],
+    [
+     "text",
+     1125
+    ]
+   ]
+  ],
+  "result": {
+   "subtype": "success",
+   "is_error": false,
+   "total_cost_usd": 0.012588110000000001,
+   "num_turns": 2,
+   "usage": {
+    "input_tokens": 4,
+    "cache_creation_input_tokens": 2781,
+    "cache_read_input_tokens": 1281,
+    "output_tokens": 312,
+    "output_tokens_details": {
+     "thinking_tokens": 152
+    },
+    "server_tool_use": {
+     "web_search_requests": 0,
+     "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 2781,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [],
+    "speed": "standard",
+    "fallback_credit": null
+   },
+   "model_usage": {
+    "claude-haiku-5-5": {
+     "inputTokens": 14456,
+     "outputTokens": 1147,
+     "cacheReadInputTokens": 1281,
+     "cacheCreationInputTokens": 2781,
+     "webSearchRequests": 1,
+     "costUSD": 0.012588110000000001,
+     "contextWindow": 1000000,
+     "maxOutputTokens": 128000,
+     "thinkingTokens": 442,
+     "cacheCreationEphemeral5mInputTokens": 0,
+     "cacheCreationEphemeral1hInputTokens": 2781,
+     "canonicalModel": "claude-haiku-5-5",
+     "provider": "firstParty",
+     "costBasis": "list"
+    }
+   },
+   "terminal_reason": "completed"
+  }
+ },
+ "gate": {
+  "gate_allowed": 1,
+  "gate_denied": 0,
+  "denied_oov_tokens": [
+   0
+  ],
+  "query_chars": [
+   68
+  ],
+  "verbatim": [
+   true
+  ],
+  "domains_passed": [
+   false
+  ]
+ },
+ "checks": {
+  "H-WS-1 nested search request seen": true,
+  "H-WS-2 nested models": [
+   "claude-haiku-5-5"
+  ],
+  "H-WS-3 t: nested input tokens per search request": [
+   14452
+  ],
+  "H-WS-4 sdk cost includes fee (sdk - proxy token-only sum)": 0.01,
+  "H-WS-6 per-model proxy sums": {
+   "claude-haiku-5-5": {
+    "requests": 3,
+    "input": 18518,
+    "output": 1147,
+    "web_search_requests": 1
+   }
+  },
+  "H-WS-6 sdk vs proxy usd": {
+   "sdk": 0.012588110000000001,
+   "proxy": 0.012588
+  },
+  "H-FRESH-2 denial rate (query not verbatim)": 0.0,
+  "max_uses rewrite accepted (search request status)": [
+   200
+  ]
+ }
+}

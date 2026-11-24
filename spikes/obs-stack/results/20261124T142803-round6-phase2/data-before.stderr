@@ -1,0 +1,5 @@
+ Container reader-spike-obs-driver2-run-560fa8be97a3 Creating 
+ Container reader-spike-obs-driver2-run-560fa8be97a3 Created 
+2026/11/24 10:28:18 INFO mlflow.store.model_registry.abstract_store: Waiting up to 300 seconds for prompt version to finish creation. Prompt name: reader.tutor, version 1
+2026/11/24 10:28:18 INFO mlflow.store.model_registry.abstract_store: Waiting up to 300 seconds for prompt version to finish creation. Prompt name: reader.fact_check, version 1
+2026/11/24 10:28:18 INFO mlflow.store.model_registry.abstract_store: Waiting up to 300 seconds for prompt version to finish creation. Prompt name: reader.review, version 1

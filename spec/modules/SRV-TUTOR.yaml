@@ -130,7 +130,7 @@ bounds:
   history_max: 50               # list size
 
 tables:
-  tutor_questions: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, revision_sha256 text, cell_id text null, question text CHECK (1..1000 chars), state text CHECK in (queued, answered, failed, refused, expired), answer jsonb null, grounded bool null, error_code text null, model text null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id); FK (lesson_id, revision_sha256) → lesson_revisions (lesson_id, sha256); UNIQUE (owner_id) WHERE state = 'queued'; index (owner_id, lesson_id, created_at)" }
+  tutor_questions: { owner_id: true, columns: "id uuid pk, owner_id → users.id, lesson_id uuid, revision_sha256 text, cell_id text null, question text CHECK (1..1000 chars while cleared_at is null; '' only when cleared_at is set — tutor_0002, FR-TUTOR-20), state text CHECK in (queued, answered, failed, refused, expired), answer jsonb null, grounded bool null, error_code text null, model text null, created_at, finished_at null; FK (lesson_id, owner_id) → lessons (id, owner_id); FK (lesson_id, revision_sha256) → lesson_revisions (lesson_id, sha256); UNIQUE (owner_id) WHERE state = 'queued'; index (owner_id, lesson_id, created_at); tutor_0002 (FR-TUTOR-20): cleared_at timestamptz null" }
 
 errors:                         # fixed catalogue, shared by api, worker and web (VEC-TUTOR-5); unknown codes → tutor_failed
   [question_invalid, cell_unknown, unknown_revision, not_found, tutor_busy, daily_budget_exhausted, budget_exhausted,
@@ -160,7 +160,8 @@ requirements:
       sums, `thinking_tokens` null when none recorded it), so the bench measures NFR-TUTOR-2 over HTTP; another user's row, a row of another lesson, an unknown or
       malformed id → 404 `not_found`. `GET /api/lessons/{lesson_id}/questions` returns at most `history_max` items
       `{"question_id", "question", "cell_id", "state", "grounded", "error_code", "created_at"}`, newest first. Both
-      first finalise a stale row (FR-TUTOR-10). [db]
+      first finalise a stale row (FR-TUTOR-10). Amendment 2026-11-24 (FR-TUTOR-20): both GETs omit cleared rows (a
+      cleared row's single GET answers 404 `not_found`). [db]
   - id: FR-TUTOR-3
     text: >-
       Job kind `tutor.answer` (SRV-EVENTS FR-EVENTS-1, `reader.tutor.jobs.JOB_KINDS`): args `{question_id}` (extra
@@ -174,7 +175,16 @@ requirements:
       here per question) ends `refused` / `budget_exhausted`; `provider_missing` ends `failed` with its own message;
       any other SRV-AGENT code (`tools_mismatch`, `sdk_error`, `unknown_model`, …) ends `failed` / `tutor_failed`. Every row
       transition, in the api and the worker, is `UPDATE … WHERE state = 'queued'`; the handler first checks that the
-      row is still `queued` and exits without a model call when it is not. [db]
+      row is still `queued` and exits without a model call when it is not. [db] Amended by SRV-OBS V.obs-analytics
+      (FR-OBS-12 d-f, -13, -14, -18; ADR-0035 accepted 2026-11-24; tracing only, no outcome changes): after loading the
+      row the handler sets the job root's `reader.lesson.id`, `reader.course.id` (the question's lesson and its
+      course, `store.load` reads `c.id`) and `reader.prompt.version` (SRV-OBS's registered version of the tutor's
+      template, None when unknown) and calls `session_marker("reader.lesson.id", …)` before any reservation; it sets
+      `reader.tutor.state` to the row's final state on every exit that writes one; retrieval runs inside a
+      `tutor.retrieve` child (hits = the span ids sent, candidates = the search results) and the answer check inside
+      a `tutor.citations` child (total = blocks, valid = supported blocks); then `obs.feedback` records
+      `tutor.citations_valid` (blocks > 0 and every block supported, {total, valid}) and, when there are blocks,
+      `tutor.citation_share` (valid ÷ total). The tutor's StageCall carries the course id. None of these can raise.
   - id: FR-TUTOR-4
     text: >-
       Expiry. Before reserving anything, the handler marks a row older than `question_ttl_s` `expired` and returns.
@@ -264,6 +274,46 @@ requirements:
       line "About: <the cell's contents label>" names it (the label comes from the lesson view's `aside` prop, so a
       cell without one says "About: the selected cell"). [unit] Vitest, [browser] Playwright with axe (no serious or
       critical issue in the panel)
+      **Design pass (web only, 2026-11-23; the audit found the panel after 27 cells at the foot of a 21,973px page,
+      with a 3,575px history of questions whose answers could not be reopened):**
+      - **Side panel.** The panel is closed by default and opens from the lesson toolbar's "Ask the tutor" button, the
+        contents entry, each cell toolbar's "Ask" (WEB-NOTEBOOK FR-NOTEBOOK-11) and the `/` key. Open, it is fixed to
+        the inline end of the viewport below the header, 24rem wide (the full viewport width below 30rem), at most the
+        viewport height tall and scrolling inside itself, on `--acme-surface-raised` with a `--acme-border` start edge
+        and no backdrop: it is non-modal, the lesson stays scrollable and interactive and keeps its focused cell. It
+        keeps `id="tutor"`, the heading "Tutor" and a "Close" ghost icon button (accessible name "Close the tutor").
+        Opening focuses the text area; Close, and Escape while focus is inside the panel or anywhere on the lesson page
+        outside an editable field (a text area, an input, a contenteditable such as the lab editor) and outside an open
+        dialog or menu (review: below 30rem the panel covers the page, so Escape must reach it from anywhere), close it
+        and return focus to the control that opened it, or to the lesson toolbar's "Ask the tutor" when that control
+        cannot take focus: it left the document, or it is hidden (below 60rem the contents entry sits in the closed
+        contents list), so `document.activeElement` is not that control after `focus()` (focus-return fallback; code
+        review B2). Asking, polling and the answer are unchanged; a question in flight keeps polling
+        while the panel is closed, and reopening shows its state. At 75rem and wider, while the panel is open, the
+        lesson's contents column is hidden and the cells' container ends where the panel begins, so the panel covers no
+        lesson text (the reading column may narrow, to 30rem at the 75rem viewport); below 75rem it overlays the lesson.
+        `AskPanel` takes `open` and `onClose` from the lesson view's panel state (WEB-NOTEBOOK FR-NOTEBOOK-11; without
+        `open` it renders open, as a standalone panel); closed, it stays mounted with the `hidden` attribute, so a
+        question in flight keeps its polling and state.
+      - **History.** "Earlier questions" (an `h3` that labels the list) shows the 3 most recent entries, then a button "Show <n> earlier questions"
+        (and "Show fewer") for the rest. Each entry is a disclosure button with the question text and its muted status;
+        expanding a terminal entry fetches its state once with `GET /api/lessons/{lesson_id}/questions/{question_id}`
+        and shows it with the same rendering as the current answer (blocks, citations, unsupported marks, the grounded
+        notice, or its message); a failed fetch shows `tutor_failed`'s message and a Retry. A queued entry (a question
+        still waiting when a newer one was asked, or a later queued one on load: the first resumes as the current one)
+        fetches its state when expanded and, while it is still queued and expanded, again with `poll_backoff_ms`,
+        showing "Waiting for the answer" until a terminal state, which it then shows like any other entry (code review:
+        a queued question moved into the history keeps being fetched). An expanded answer renders through the same pipeline as the current one, links as
+        plain text and no image (VEC-TUTOR-6), so a stored answer cannot inject a link or fetch a resource.
+      [unit] closed by default, each opener, focus on open and on close (and the fallback to the toolbar's "Ask the
+      tutor" when the opener was removed and when it is hidden), Escape inside the panel and from the page outside an editable field, not from inside a text area, the
+      non-modal panel (no backdrop, a lesson control still clickable), polling while closed; the history cap, the
+      toggle both ways, expanding fetches once and renders the answer, a failed fetch with Retry, an expanded answer
+      whose text holds `[x](https://example.test)` and `![i](https://example.test/i.png)` renders zero `a` and zero
+      `img` and makes no request other than the question's own GET; [browser] with axe on the open panel at 1280 and 390 px,
+      and at 1280 px no `[data-markdown] p` of the lesson intersects the open panel; [story] `web/src/tutor/AskPanel.stories.tsx`
+      exports `Light` and `Dark` (open, answered with citations) and `Closed`, `OpenEmpty`, `Waiting`, `Ungrounded`,
+      `Failed` and `History` (8 entries), each rendered by a [unit] test through `composeStories` without an error.
   - id: FR-TUTOR-12
     text: >-
       Logging. api and worker log ids, lengths, codes, model, spent(run) and timings; never question, cell, source,
@@ -281,6 +331,36 @@ requirements:
       whose quote is verified, and its ledger cost is ≤ `question_cap_usd`. Spends from `budget.test_budget_usd`. The
       live check and the bench never write answer, quote or question text (it holds book quotes) to committed files:
       committed outputs carry ids, counts, flags, timings and costs only. [live]
+  - id: FR-TUTOR-15
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-23, ADR-0038). The bench's records file (`tutor-bench-<UTC time>.json`
+      in READER_TUTOR_BENCH_DIR, VEC-TUTOR-7) gains a header, so it is exactly SRV-OBS VEC-OBS-5
+      `bench_results.tutor`: `kind: tutor`, `date` (UTC day), `branch`, `commit` (the sha only, pattern
+      `^[0-9a-f]{7,40}$`), `lesson_id`, `set: tutor-bench-v2`, and `records` (the BenchRecord rows, exactly the keys
+      of VEC-OBS-5 `tutor_record`). That file is what the owner uploads to MLflow from /observability. The bench's
+      summary is exactly VEC-TUTOR-8 (`tutor_summary`: no prose keys, commit sha only), a report, not an upload;
+      the committed e2e/live/results/2026-11-23-tutor-bench.json is migrated to it (commit `66fba58`, prose keys
+      dropped, numbers unchanged). Declared: the 2026-11-23 run's records file was not committed, so the first
+      upload needs a new bench run, which spends live-budget credit and waits for the owner. Tests: [unit]
+      web/src/tutor/bench.ts builds the header and records with exactly VEC-OBS-5's keys and the summary with
+      exactly VEC-TUTOR-8's; the committed summary validates against VEC-TUTOR-8.
+  # Amendment (2026-11-24, V/manage): FR-TUTOR-20..21, promoted with Red (see the note at the end of this file).
+  - id: FR-TUTOR-20
+    text: >-
+      **Clear history.** `POST /api/lessons/{lesson_id}/questions/clear` with `{}` (any reader who can open the
+      lesson; their own questions only) sets, for each of the caller's questions on that lesson that is not
+      `queued`, `question = ''`, `answer = null`, `cleared_at = now` in one transaction; `state`, `model`,
+      `error_code`, timestamps and every agent_spend row stay. While the caller has a `queued` question on that
+      lesson → 409 `tutor_busy` and nothing changes. 200 `{cleared: n}`; repeating it returns `{cleared: 0}`.
+      `DELETE /api/lessons/{lesson_id}/questions/{question_id}` with `{}` clears one question the same way (404 for
+      another user's or a cleared question; 409 `tutor_busy` for a queued one). [db] the text is gone from the
+      row and from both GETs; spend rows unchanged; another user's questions untouched; a learner and a second
+      owner get 404 with nothing changed (INV-TUTOR-1).
+  - id: FR-TUTOR-21
+    text: >-
+      **Deleted lessons.** Every SRV-TUTOR route answers 404 for a deleted lesson or a lesson of a deleted course
+      (SRV-LESSON INV-LESSON-22), through `can_open`; a queued question of a lesson deleted meanwhile finishes
+      `expired` without a model call. [db]
 
 invariants:
   - id: INV-TUTOR-1
@@ -375,6 +455,9 @@ vectors:
   - id: VEC-TUTOR-6
     source: answer block text with markdown links, raw HTML and images; expected rendering (links and images as text)
     file: spec/fixtures/SRV-TUTOR/render.yaml
+  - id: VEC-TUTOR-8
+    source: "SRV-OBS phase 2 (design review round 4): the numbers-only shape of the tutor bench summary (FR-TUTOR-15), moved from SRV-OBS VEC-OBS-5"
+    file: spec/fixtures/SRV-TUTOR/bench-summary.yaml
   - id: VEC-TUTOR-7
     source: >-
       bench questions: the curated questions-v2 set (spikes/embeddings-local/questions-v2.yaml: 40 independent,
@@ -407,4 +490,21 @@ owner_notes:
   - "An answer says when it is not grounded in the book instead of hiding it."
   - "Model choice: with Opus 5.5 as `tasks.tutor.model` the worst-case reserve is $0.296 per attempt (8.00 and 20.00 per million tokens), so a second attempt no longer fits the $0.30 question cap (it is refused as budget_exhausted) and the $3 daily cap allows about 10 questions; Sonnet 5.5 is the example's choice."
 
-review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 (30890d8): approve. Approved by agent with Red (2026-11-23), the round-3 notes folded in: FR-TUTOR-7's stalled-provider outcomes stated exactly as FR-AGENT-9/-13 settle them, with two [db] tests through the real adapter, and SRV-AGENT's `upstream_retry` / `deadline_exceeded` recorded as `provider_unavailable`; NFR-TUTOR-3's first bench run is its measurement; the bench generator confirms explain-cell titles on the compiled revision. Also: SRV-AGENT's remaining codes mapped (FR-TUTOR-3), priority 100 through the SRV-EVENTS amendment, enqueue through `app.state.jobs`. Green (2026-11-23): test corrections, no oracle weakened — the stale-row test's history order follows FR-TUTOR-2's newest-first; the Ask panel test reads the button's DOM `disabled` property (the web tests have no jest-dom matchers). Code review round 1 (25a5920): changes — five untested rules, all now pinned by tests: (1) span reads filter by owner (two owners with different text and page at one span id each see only their own); (2) SRV-AGENT's per-user lock (concurrent reserves, tests/agent); (3) the `finish` guard (a finished row refuses `answered`; a row flipped during the call is not overwritten); (4) VEC-TUTOR-1 cases for the first kept source and NFC; (5) the job key through the real SRV-EVENTS `Jobs`. Non-blocking applied: the Opus owner note, `ledger.spent(day=True)`, an insert-race 409 test, the handler logs the real `finish` outcome, the agent-proxy client closed after each call, VEC-TUTOR-4's queued + succeeded row, canary tests on the output_invalid and search-failure paths, the bench driver, citations through WEB-NOTEBOOK's formatter, the ask body read before a database connection, the stop-reason note. The new [db] tests are in server/tests/tutor/test_tutor_review_db.py; the Provider fakes became async context managers (Deps.provider). Code review round 2: approve (deep-reviewer, Fable); its non-blocking items applied: the bench records thinking tokens from SRV-AGENT's settle rows (`agent_spend.thinking`, paired SRV-AGENT change), and an empty assertion was removed from the search-failure canary test. Revision 2026-11-23 after the first live run (3 answered, 2 grounded; investigator: the ungrounded answer was correctly `insufficient`, its fact sat in a neighbouring span of the top chunk, never sent): FR-TUTOR-5 sends each hit's whole chunk (primary first, deduplicated, one alias per span); FR-TUTOR-6 caps aliases at sources_max 40; prompt_bytes_max 24000 → 29000 and system_bytes_max 4000 → 2000 from spikes/tutor-chunks (REF-TUTOR-9: reserve $0.148, two attempts $0.296 within the kept $0.30 cap; the sources budget is smaller than 8 hits at p95, said so in bounds); FR-TUTOR-2's GET adds the question's usage; VEC-TUTOR-1 pins partial-insufficient; VEC-TUTOR-7 replaces v03 (premise unsupported) with t01, four templates per explain cell for n = 40 + 1, and an HTTP driver in the owner slice suite; NFR-TUTOR-1/-3 gate on n ≥ 40 and report insufficient_share. Awaits deep-reviewer (cost math, new numbers); the prompt (answer-v1.md) is unchanged. Chunks review round 1: changes (the reserve math checked: $0.148, two attempts $0.296) — B1 alias cap: candidates are all primaries by rank first, then neighbours by rank, and sources_max 40 → 88 (8 × p95 spans per chunk) so only bytes bind; test: 8 hits of 9 small spans send all 8 primaries; B2 bench resume: READER_TUTOR_BENCH_FROM and READER_TUTOR_BENCH_DIR forwarded through slice.sh and slice_inputs, one record file per run, merged before summary() (unit test); B3 bench validity: the bench set is questions-v2 with v03 → t01 (40 independent questions, all 23 chapters), asked from L02 without a cell, gate on exactly those 40, a per-chapter breakdown; cell templates dropped. Non-blocking: a [db] test that a dropped alias's citation is removed, the prompt_bytes_max boundary pinned from below, a 429 counts as the daily cap only by its body code, mean_usd over answered and expired only, _USAGE filtered by owner, stale texts fixed, the one-span quote note. Chunks review round 2: approve (deep-reviewer, Fable); its pre-bench items applied: NFR-TUTOR-3 cites the retrieval predictor (gold page in the top 8 for 25 of 39) and the bench records `gold_in_top8` and `gold_cited` with a grounded split by `gold_in_top8`; `mean_usd` counts answered questions and expired ones with usd > 0; slice.sh resolves --tutor-bench-dir to an absolute path outside the repository and warns on --tutor-bench-from without it; bench.yaml states that failed, refused and timed-out questions stay in the 40 as not grounded and are never re-asked; the typical cost is for a question without a cell (about $0.046). Paired change from WEB polish (2026-11-23, V/WEB-polish; web only, nothing on the server): FR-TUTOR-11's citations grouped per material through WEB-NOTEBOOK FR-NOTEBOOK-2, and the panel layout (id, heading, hint, the focused cell's label); WEB polish deep-reviewer single round (2026-11-23): its tutor item applied (synthetic titles and headings in the Ask panel tests); approved by agent without a second round (coordinator)."
+review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 thinking/output cap (spike tutor-call run 2026-11-22, $0.038: 0 thinking tokens, 92–310 output tokens, custom system_prompt replaces the CLI prompt; bounds set from it), B2 no stuck queued rows, B3 byte-based reserve, B4 queue priority and expiry, B5 verbatim quotes and aliases, B6 cost derivation, B7 input checks; non-blocking applied; plus the V7 review item: abort on the first api_retry or after call_deadline_s. Round 2 (410314b): changes — 5 of 7 closed; bench daily-cap override removed (one bench run per UTC day), cache assumption removed (about $0.048 per question); non-blocking applied (settle per FR-AGENT-9 with the tutor's floor_usd, guarded transitions, 409 on the unique index, monthly_budget_exhausted and provider_missing messages, escaped prompt sizing, bench n and p95 rank, spike limits, no answer text in committed files). SRV-AGENT approved; its amendments are cross-spec items. Round 3 (30890d8): approve. Approved by agent with Red (2026-11-23), the round-3 notes folded in: FR-TUTOR-7's stalled-provider outcomes stated exactly as FR-AGENT-9/-13 settle them, with two [db] tests through the real adapter, and SRV-AGENT's `upstream_retry` / `deadline_exceeded` recorded as `provider_unavailable`; NFR-TUTOR-3's first bench run is its measurement; the bench generator confirms explain-cell titles on the compiled revision. Also: SRV-AGENT's remaining codes mapped (FR-TUTOR-3), priority 100 through the SRV-EVENTS amendment, enqueue through `app.state.jobs`. Green (2026-11-23): test corrections, no oracle weakened — the stale-row test's history order follows FR-TUTOR-2's newest-first; the Ask panel test reads the button's DOM `disabled` property (the web tests have no jest-dom matchers). Code review round 1 (25a5920): changes — five untested rules, all now pinned by tests: (1) span reads filter by owner (two owners with different text and page at one span id each see only their own); (2) SRV-AGENT's per-user lock (concurrent reserves, tests/agent); (3) the `finish` guard (a finished row refuses `answered`; a row flipped during the call is not overwritten); (4) VEC-TUTOR-1 cases for the first kept source and NFC; (5) the job key through the real SRV-EVENTS `Jobs`. Non-blocking applied: the Opus owner note, `ledger.spent(day=True)`, an insert-race 409 test, the handler logs the real `finish` outcome, the agent-proxy client closed after each call, VEC-TUTOR-4's queued + succeeded row, canary tests on the output_invalid and search-failure paths, the bench driver, citations through WEB-NOTEBOOK's formatter, the ask body read before a database connection, the stop-reason note. The new [db] tests are in server/tests/tutor/test_tutor_review_db.py; the Provider fakes became async context managers (Deps.provider). Code review round 2: approve (deep-reviewer, Fable); its non-blocking items applied: the bench records thinking tokens from SRV-AGENT's settle rows (`agent_spend.thinking`, paired SRV-AGENT change), and an empty assertion was removed from the search-failure canary test. Revision 2026-11-23 after the first live run (3 answered, 2 grounded; investigator: the ungrounded answer was correctly `insufficient`, its fact sat in a neighbouring span of the top chunk, never sent): FR-TUTOR-5 sends each hit's whole chunk (primary first, deduplicated, one alias per span); FR-TUTOR-6 caps aliases at sources_max 40; prompt_bytes_max 24000 → 29000 and system_bytes_max 4000 → 2000 from spikes/tutor-chunks (REF-TUTOR-9: reserve $0.148, two attempts $0.296 within the kept $0.30 cap; the sources budget is smaller than 8 hits at p95, said so in bounds); FR-TUTOR-2's GET adds the question's usage; VEC-TUTOR-1 pins partial-insufficient; VEC-TUTOR-7 replaces v03 (premise unsupported) with t01, four templates per explain cell for n = 40 + 1, and an HTTP driver in the owner slice suite; NFR-TUTOR-1/-3 gate on n ≥ 40 and report insufficient_share. Awaits deep-reviewer (cost math, new numbers); the prompt (answer-v1.md) is unchanged. Chunks review round 1: changes (the reserve math checked: $0.148, two attempts $0.296) — B1 alias cap: candidates are all primaries by rank first, then neighbours by rank, and sources_max 40 → 88 (8 × p95 spans per chunk) so only bytes bind; test: 8 hits of 9 small spans send all 8 primaries; B2 bench resume: READER_TUTOR_BENCH_FROM and READER_TUTOR_BENCH_DIR forwarded through slice.sh and slice_inputs, one record file per run, merged before summary() (unit test); B3 bench validity: the bench set is questions-v2 with v03 → t01 (40 independent questions, all 23 chapters), asked from L02 without a cell, gate on exactly those 40, a per-chapter breakdown; cell templates dropped. Non-blocking: a [db] test that a dropped alias's citation is removed, the prompt_bytes_max boundary pinned from below, a 429 counts as the daily cap only by its body code, mean_usd over answered and expired only, _USAGE filtered by owner, stale texts fixed, the one-span quote note. Chunks review round 2: approve (deep-reviewer, Fable); its pre-bench items applied: NFR-TUTOR-3 cites the retrieval predictor (gold page in the top 8 for 25 of 39) and the bench records `gold_in_top8` and `gold_cited` with a grounded split by `gold_in_top8`; `mean_usd` counts answered questions and expired ones with usd > 0; slice.sh resolves --tutor-bench-dir to an absolute path outside the repository and warns on --tutor-bench-from without it; bench.yaml states that failed, refused and timed-out questions stay in the 40 as not grounded and are never re-asked; the typical cost is for a question without a cell (about $0.046). Paired change from WEB polish (2026-11-23, V/WEB-polish; web only, nothing on the server): FR-TUTOR-11's citations grouped per material through WEB-NOTEBOOK FR-NOTEBOOK-2, and the panel layout (id, heading, hint, the focused cell's label); WEB polish deep-reviewer single round (2026-11-23): its tutor item applied (synthetic titles and headings in the Ask panel tests); approved by agent without a second round (coordinator). Amendment 2026-11-23 (V/design-pass, web only, the owner's approval of the design audit's P1 and P2 items): FR-TUTOR-11 the side panel (closed by default, openers, non-modal, focus and Escape, room beside the lesson at 75rem+) and the capped, expandable history; no server behaviour changes. deep-reviewer (Fable) single round on the design-pass spec diff (04e396b..d3c0a68): changes, applied without a second round (coordinator, 2026-11-23; findings and fixes in docs/progress.yaml V.design-pass `review`): B6 the history's injection oracle (a stored answer with a link and an image renders neither and fetches nothing); non-blocking: Escape reaches the panel from the page outside editable fields, dialogs and menus, and focus falls back to the toolbar's Ask the tutor. Approved by agent (coordinator, 2026-11-23). Amendment 2026-11-24 (V/manage, WEB-MANAGE FR-MANAGE-4): FR-TUTOR-20..21 promoted from `proposed_manage` with the Red tests (tests/tutor/test_tutor_manage_db.py) after deep-reviewer rounds 1–3 (round 3 approve on 2a7d86f); `tutor_questions.cleared_at` and the relaxed question CHECK (tutor_0002); FR-TUTOR-2's GETs omit cleared rows; the clear routes write SRV-EVENTS `tutor.clear` audit rows. Approved by agent with Red (2026-11-24)."
+
+# ---- Amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-4): promoted with Red after deep-reviewer rounds 1–3
+# (round 1: no tutor finding; round 3 approve on 2a7d86f); ids FR-TUTOR-20..21 (15..19 left free) now live in
+# `requirements`. The deleted-lesson reads come from SRV-LESSON's `can_open` (the lessons slice); this module's
+# own part is that every route and the handler go through it (the [db] test stands a deleted lesson in through a
+# `can_open` that answers false until SRV-LESSON's tombstones land; the integration re-runs it against them).
+# Paired note (reviewed with WEB-UI FR-UI-30..32): the Ask panel's interface copy (FR-TUTOR-11) moves into
+# `web/src/tutor/messages.en.ts` (static) and `messages.ru.ts` (behind `import()`); question states and error codes
+# shown to the user are mapped through this catalogue; answers keep the language the model wrote them in and carry
+# `lang` from the Cyrillic rule (WEB-UI FR-UI-32).
+# Why redact instead of delete: a tutor question's id is the `run_id` of its ledger rows (FR-TUTOR-9; agent_spend is
+# append-only and has no foreign key), and a question makes its lesson started (SRV-LESSON FR-LESSON-15). Clearing
+# keeps the row and its spend, and removes the text. This partly settles the "retention of tutor history" defer
+# (ADR-0017 data ownership); the export of tutor history stays deferred.
+# What changed in approved text (applied): `tutor_questions` adds `cleared_at timestamptz null` (tutor_0002);
+# FR-TUTOR-2's GETs omit cleared rows (the single GET answers 404); the question text CHECK allows '' only when
+# `cleared_at` is set.

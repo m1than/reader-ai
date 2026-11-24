@@ -1,0 +1,95 @@
+ Container reader-spike-obs-driver2-run-400313a9d6c0 Creating 
+ Container reader-spike-obs-driver2-run-400313a9d6c0 Created 
+2026/11/24 10:20:27 WARNING mlflow.utils.git_utils: Failed to import Git (the Git executable is probably not on your PATH), so Git SHA is not available. Error: Failed to initialize: Bad git executable.
+The git executable must be specified in one of the following ways:
+    - be included in your $PATH
+    - be set via $GIT_PYTHON_GIT_EXECUTABLE
+    - explicitly set via git.refresh(<full-path-to-git-executable>)
+
+All git commands will error until this is rectified.
+
+This initial message can be silenced or aggravated in the future by setting the
+$GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+    - quiet|q|silence|s|silent|none|n|0: for no message or exception
+    - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+    - error|e|exception|raise|r|2: for a raised exception
+
+Example:
+    export GIT_PYTHON_REFRESH=quiet
+
+2026/11/24 10:20:27 WARNING mlflow.utils.git_utils: Failed to import Git (the Git executable is probably not on your PATH), so Git branch is not available. Error: Failed to initialize: Bad git executable.
+The git executable must be specified in one of the following ways:
+    - be included in your $PATH
+    - be set via $GIT_PYTHON_GIT_EXECUTABLE
+    - explicitly set via git.refresh(<full-path-to-git-executable>)
+
+All git commands will error until this is rectified.
+
+This initial message can be silenced or aggravated in the future by setting the
+$GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+    - quiet|q|silence|s|silent|none|n|0: for no message or exception
+    - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+    - error|e|exception|raise|r|2: for a raised exception
+
+Example:
+    export GIT_PYTHON_REFRESH=quiet
+
+2026/11/24 10:20:27 WARNING mlflow.utils.git_utils: Failed to import Git (the Git executable is probably not on your PATH), so Git repository URL is not available. Error: Failed to initialize: Bad git executable.
+The git executable must be specified in one of the following ways:
+    - be included in your $PATH
+    - be set via $GIT_PYTHON_GIT_EXECUTABLE
+    - explicitly set via git.refresh(<full-path-to-git-executable>)
+
+All git commands will error until this is rectified.
+
+This initial message can be silenced or aggravated in the future by setting the
+$GIT_PYTHON_REFRESH environment variable. Use one of the following values:
+    - quiet|q|silence|s|silent|none|n|0: for no message or exception
+    - warn|w|warning|log|l|1: for a warning message (logging level CRITICAL, displayed by default)
+    - error|e|exception|raise|r|2: for a raised exception
+
+Example:
+    export GIT_PYTHON_REFRESH=quiet
+
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:20:58 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r). If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:20:58 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:20:58 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:21:28 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:21:28 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r). If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:21:28 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:21:28 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:21:28 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r). If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:21:28 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:21:28 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r). If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:21:28 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:21:28 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:21:28 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:21:28 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: RESOURCE_DOES_NOT_EXIST: Trace with ID 'tr-f040a3fee2b6491878cf77985ea35372' not found.. If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:21:28 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:21:28 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:21:28 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: RESOURCE_DOES_NOT_EXIST: Trace with ID 'tr-0f739d8865d5a5d16da170b31998433e' not found.. If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:21:28 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:22:01 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:01 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:01 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r). If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:22:01 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:22:01 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:01 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:01 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:01 WARNING mlflow.tracing.fluent: Failed to get trace from the tracking store: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r). If using async trace logging, pass flush=True to wait for pending writes. For full traceback, set logging level to debug.
+2026/11/24 10:22:01 WARNING mlflow.genai.evaluation.harness: Skipping logging tags and assessments to MLflow because no trace is available.
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)
+2026/11/24 10:22:35 WARNING mlflow.tracing.export.mlflow_v3: Failed to send trace to MLflow backend: BAD_REQUEST: QueuePool limit of size 5 overflow 10 reached, connection timed out, timeout 30.00 (Background on this error at: https://sqlalche.me/e/21/3o7r)

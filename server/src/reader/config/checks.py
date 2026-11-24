@@ -19,6 +19,26 @@ def forbidden(c: str) -> bool:
     return c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F
 
 
+UPLOAD_ID_PREFIX: Final = "up-"
+MATERIAL_ID_MAX: Final = 64
+DOT_SEGMENTS: Final = frozenset({".", ".."})  # resolved away by URL clients, so never a route segment
+
+
+def material_id_problem(value: str) -> str | None:
+    """FR-CONFIG-18. `reserved_id` for an id starting with `up-` (case-sensitive, as written): SRV-INGEST
+    names uploaded materials `up-<12 hex>`. `bad_material_id` for an id longer than 64 code points or with a
+    character that is white space, not printable (`str.isprintable`) or `/`, and for the dot segments `.`
+    and `..`: the id is a path segment of SRV-INGEST's routes and SRV-EVENTS' audit `object_id`, which
+    applies this same rule. The empty id is the caller's `empty_string`."""
+    if value.startswith(UPLOAD_ID_PREFIX):
+        return "reserved_id"
+    if value in DOT_SEGMENTS or len(value) > MATERIAL_ID_MAX:
+        return "bad_material_id"
+    if any(c.isspace() or not c.isprintable() or c == "/" for c in value):
+        return "bad_material_id"
+    return None
+
+
 def url_problem(value: str) -> str | None:
     """`bad_url` unless an absolute https URL with a host and a valid port, free of whitespace and `\\`.
 

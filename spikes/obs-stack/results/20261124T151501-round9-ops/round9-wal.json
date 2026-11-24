@@ -1,0 +1,4 @@
+{
+ "mode": "wal",
+ "journal_mode": "wal"
+}

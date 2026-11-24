@@ -1,0 +1,97 @@
+{
+ "dashboard_links": [],
+ "ui_filter": {
+  "buttons": [
+   "Got it"
+  ],
+  "steps": [
+   "filters button: 0"
+  ]
+ },
+ "candidates": {
+  "q=exhausted": {
+   "rows": [
+    "stage_review_dead"
+   ],
+   "count_line": "1 of 9 traces",
+   "url_after": "/#/experiments/0/traces?q=exhausted"
+  },
+  "q=dead": {
+   "rows": [
+    "stage_review_dead"
+   ],
+   "count_line": "1 of 9 traces",
+   "url_after": "/#/experiments/0/traces?q=dead"
+  },
+  "q=job tutor.answer": {
+   "rows": [
+    "tutor_slow",
+    "tutor_fast",
+    "tutor_baseline"
+   ],
+   "count_line": "3 of 9 traces",
+   "url_after": "/#/experiments/0/traces?q=job%20tutor.answer"
+  },
+  "q=fact_check": {
+   "rows": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check"
+   ],
+   "count_line": "4 of 9 traces",
+   "url_after": "/#/experiments/0/traces?q=fact_check"
+  },
+  "sort=execution_duration&dir=desc": {
+   "rows": [
+    "http_500",
+    "http_ok",
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check",
+    "tutor_slow",
+    "tutor_fast",
+    "tutor_baseline"
+   ],
+   "count_line": "9 of 9 traces",
+   "url_after": "/#/experiments/0/traces?sort=execution_duration&dir=desc"
+  },
+  "q=tutor.answer&sort=execution_duration&dir=desc": {
+   "rows": [
+    "tutor_slow",
+    "tutor_fast",
+    "tutor_baseline"
+   ],
+   "count_line": "3 of 9 traces",
+   "url_after": "/#/experiments/0/traces?q=tutor.answer&sort=execution_duration&dir=desc"
+  },
+  "groupBy=session": {
+   "rows": [
+    "http_500",
+    "http_ok",
+    "compile_like",
+    "tutor_slow",
+    "tutor_fast",
+    "tutor_baseline"
+   ],
+   "count_line": "1 session",
+   "url_after": "/#/experiments/0/traces?groupBy=session"
+  },
+  "startTimeLabel=LAST_24_HOURS": {
+   "rows": [
+    "http_500",
+    "http_ok",
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check",
+    "tutor_slow",
+    "tutor_fast",
+    "tutor_baseline"
+   ],
+   "count_line": "9 of 9 traces",
+   "url_after": "/#/experiments/0/traces?startTimeLabel=LAST_24_HOURS"
+  }
+ }
+}

@@ -2,7 +2,7 @@
 
 @trace FR-AUTH-4 FR-AUTH-5 FR-AUTH-6 FR-AUTH-7 FR-AUTH-8 FR-AUTH-9 FR-AUTH-10 FR-AUTH-11 FR-AUTH-12 FR-AUTH-13
 @trace FR-AUTH-14 FR-AUTH-18 INV-AUTH-1 INV-AUTH-2 INV-AUTH-3 INV-AUTH-5 INV-AUTH-6 INV-AUTH-7 INV-AUTH-9
-@trace FR-AUTH-21
+@trace FR-AUTH-21 FR-AUTH-23 FR-AUTH-29
 """
 
 from __future__ import annotations
@@ -335,7 +335,13 @@ async def test_add_passkey_requires_recent_session_and_rotates(pg: Pg, tmp_path:
         assert c.cookies.get(SESSION) != old_cookie
         assert await scalar(engine, "SELECT count(*) FROM webauthn_credentials") == 2
         assert await scalar(engine, "SELECT count(*) FROM auth_failures") == 1
-        stale = await c.get("/api/me", cookies={SESSION: old_cookie})
+        # One audit row for the added passkey (none for the failed attempt, none for the bootstrap).
+        owner_id = str(await scalar(engine, "SELECT id FROM users WHERE role = 'owner'"))
+        pid = hashlib.sha256(second.credential_id).hexdigest()[:16]
+        assert await scalar(engine, "SELECT count(*) FROM audit_log") == 1
+        row = "SELECT json_build_array(actor_id, action, object_kind, object_id, detail) FROM audit_log"
+        assert await scalar(engine, row) == [owner_id, "self.credential_add", "user", owner_id, {"pid": pid}]
+        stale =await c.get("/api/me", cookies={SESSION: old_cookie})
         assert stale.status_code == 401
         await execute(engine, "UPDATE sessions SET created_at = now() - interval '601 s'")
         late = await c.post("/api/auth/register/options", json={})
@@ -639,7 +645,7 @@ async def test_disabled_user_cannot_sign_in(pg: Pg, tmp_path: Path) -> None:
 def test_routers_are_a_declared_list() -> None:
     from reader.api.app import ROUTERS
 
-    # SRV-LESSON, -KERNEL, -INGEST, -SEARCH, -PIPELINE, -TUTOR add routers (paired changes, FR-AUTH-10 notes)
+    # SRV-LESSON, -KERNEL, -INGEST, -SEARCH, -PIPELINE, -TUTOR, -FRESH add routers (paired, FR-AUTH-10)
     assert list(ROUTERS) == [
         "reader.api.routes",
         "reader.auth.routes",
@@ -650,6 +656,10 @@ def test_routers_are_a_declared_list() -> None:
         "reader.pipeline.routes",
         "reader.tutor.routes",
         "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
+        "reader.obs.routes",  # SRV-OBS paired change (FR-AUTH-33)
+        "reader.freshness.routes",
+        "reader.jobs.audit_routes",  # SRV-EVENTS FR-EVENTS-31 (V/manage)
+        "reader.config.routes",  # SRV-CONFIG FR-CONFIG-25/-26 (FR-AUTH-10 note, V/manage)
     ]
 
 
@@ -678,11 +688,36 @@ def test_route_table_is_declared_as_data() -> None:
         ("GET", "/api/auth/signin"),
         ("GET", "/api/auth/static/passkey.js"),
         ("GET", "/api/auth/static/auth.css"),  # FR-AUTH-21
+        ("GET", "/api/auth/signup"),  # FR-AUTH-23, FR-AUTH-31
+        ("POST", "/api/auth/signup/options"),
+        ("POST", "/api/auth/signup/verify"),
+        ("GET", "/api/obs/gate"),  # FR-AUTH-33: answers 401/403/204 itself (SRV-OBS FR-OBS-9)
     }
     by_path = {(r.method, r.path): r.auth for r in ROUTES}
     assert by_path[("GET", "/api/me")] == "session"
     assert by_path[("POST", "/api/auth/register/options")] == "recent_session"
     assert by_path[("POST", "/api/auth/register/verify")] == "recent_session"
+    # FR-AUTH-29: the owner's sign-up routes.
+    assert by_path[("GET", "/api/auth/signups")] == "session"
+    for action in ["approve", "reject", "disable", "enable"]:  # enable: FR-AUTH-48
+        assert by_path[("POST", f"/api/auth/signups/{{user_id}}/{action}")] == "recent_session"
+    # FR-AUTH-40..46 (manage amendment): the `auth` kind each route names.
+    assert {k: v for k, v in by_path.items() if k[1].startswith(MANAGE_PREFIXES)} == MANAGE_ROUTES
+
+
+MANAGE_PREFIXES = ("/api/auth/users", "/api/auth/sessions", "/api/auth/credentials")
+MANAGE_ROUTES = {
+    ("GET", "/api/auth/users"): "session",
+    ("POST", "/api/auth/users/{user_id}/sessions/revoke"): "recent_session",
+    ("DELETE", "/api/auth/users/{user_id}/credentials/{pid}"): "recent_session",
+    ("DELETE", "/api/auth/users/{user_id}"): "recent_session",
+    ("GET", "/api/auth/sessions"): "session",
+    ("DELETE", "/api/auth/sessions/{sid}"): "session",
+    ("POST", "/api/auth/sessions/revoke-others"): "session",
+    ("GET", "/api/auth/credentials"): "session",
+    ("POST", "/api/auth/credentials/{pid}"): "session",
+    ("DELETE", "/api/auth/credentials/{pid}"): "recent_session",
+}
 
 
 async def test_get_routes_write_nothing(pg: Pg, tmp_path: Path) -> None:
@@ -836,7 +871,9 @@ async def test_more_than_one_origin_header_is_refused() -> None:
 
 
 async def test_signup_routes_are_404(pg: Pg, tmp_path: Path) -> None:
-    settings, engine = await _setup(pg, tmp_path)
+    # FR-AUTH-13 as amended by FR-AUTH-23: 404 while sign-up is off.
+    settings = settings_for(tmp_path, sharing="{ signup: false }")
+    engine = await ready_engine(pg, settings)
     async with client(settings, engine) as c:
         for path in ["/api/auth/signup/options", "/api/auth/signup/verify"]:
             assert (await c.post(path, json={})).status_code == 404
