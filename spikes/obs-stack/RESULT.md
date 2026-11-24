@@ -424,9 +424,34 @@ JSON and stderr only; it is described under Evaluation runs below.
 - **CSP:** one violation, a `media-src` from the Overview page's remote demo video, which is blocked and harmless.
   The same page showed it in round 4.
 - **Memory** (`stats.txt`): MLflow 424.6 MiB of 1 GiB after both data sets and every tab.
-- **Not measured:** whether the Traces tab of a Run in a *separate* experiment lists traces stored in experiment 0.
-  The link was accepted, but that page was not screenshotted with its traces. Round 7 measures it if the design
-  keeps Runs in their own experiment.
+- **Not measured here:** whether the Traces tab of a Run in a *separate* experiment lists traces stored in
+  experiment 0. Round 7 measured it.
+
+## Round 7 (SRV-OBS phase 2: where compile Runs live), 2026-11-24
+
+`run-round7.sh` uses one fresh stack. `round7.py` replays 4 stage traces into experiment 0 (OTLP), creates the
+experiment `runs` with one compile Run (4 metrics, 1 param), and links the traces to that Run. `round7-tabs.js`
+screenshots the result. Kept in `results/20261124T143808-round7-runs`.
+
+- **API** (`round7.json`):
+  - `link-to-run` returned 200.
+  - Searching experiment 0 for `metadata.mlflow.sourceRun = <run>` found 4 traces; the same search over the
+    `runs` experiment found 0.
+  - The client's `search_traces(run_id=…)` refused: "Run … belongs to experiment 1, which is not in the list of
+    locations provided: ['0']". With both experiments as locations it found 4.
+  - The Run is listed in `runs` (1) and not in experiment 0 (0).
+- **UI** (`r7.json`, `r7/*.png`):
+  - The Run's overview and metric charts show (`run-overview.png`, `run-metrics.png`).
+  - Its **Traces tab shows "No traces found"** (`run-traces.png`): the UI searches only the Run's own experiment.
+  - The `runs` experiment's Evaluation runs tab lists and charts the Run as `Eval` (`runs-exp-evaluation-runs.png`),
+    and its Traces tab is empty.
+  - Experiment 0's Evaluation runs tab is empty, and its Traces tab lists the 4 traces.
+- **Decision for the design:**
+  - Compile and import Runs stay in experiment 0, beside their traces. In round 6 the Run's Traces tab there listed
+    the traces with their assessments.
+  - Bench datasets and evaluation runs, which have no traces, go to their own experiment `bench`, so they no longer
+    mix with compile Runs.
+- **CSP:** the same single `media-src` violation from the Overview demo video.
 
 ## Limits
 

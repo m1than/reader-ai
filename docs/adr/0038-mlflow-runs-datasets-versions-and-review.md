@@ -3,7 +3,7 @@ id: ADR-0038
 title: MLflow Runs, evaluation datasets, agent versions and a review queue as the owner's dashboard (amends ADR-0035)
 status: proposed
 date: 2026-11-24
-verified_by: "spikes/obs-stack round 6 (results/20261124T142803-round6-phase2: phase2.json, p2-before.json, p2-after.json, p2/*.png, quotes.json; the pool-exhaustion run 20261124T141648); if accepted, SRV-OBS phase 2's [unit], [db] and [image] tests and INV-OBS-2's canary over every new request body"
+verified_by: "spikes/obs-stack round 6 (results/20261124T142803-round6-phase2: phase2.json, p2-before.json, p2-after.json, p2/*.png, quotes.json; the pool-exhaustion run 20261124T141648; round 7, results/20261124T143808-round7-runs: round7.json, r7.json, r7/*.png); if accepted, SRV-OBS phase 2's [unit], [db] and [image] tests and INV-OBS-2's canary over every new request body"
 revisit_when: "MLflow ingests run links, logged-model links or trace metadata through OTLP; or a bench needs a model call to score (an LLM judge); or a second user needs the dashboards; or the AI gateway is unblocked"
 supersedes: []
 ---
@@ -52,10 +52,9 @@ HTTP client, never through `mlflow.genai.evaluate`.
    - declared metrics: ledger cost by stage, token sums, durations and counts;
    - then `link-to-run` for that run's traces.
 
-   The job is idempotent by a `reader.run_id` or `reader.ingest_id` tag, looked up first. The Runs live in a
-   `runs` experiment, so they do not mix with bench runs in experiment 0's Evaluation runs tab. Spike round 7 first
-   confirms that such a Run's Traces tab lists the traces stored in experiment 0. If it does not, the Runs stay in
-   experiment 0 under the tag `reader.kind`.
+   The job is idempotent by a `reader.run_id` or `reader.ingest_id` tag, looked up first. The Runs live in
+   experiment 0, beside their traces. Spike round 7 put a Run in its own experiment: the link was accepted, but the
+   Run's Traces tab found no traces, because the UI searches only the Run's own experiment.
 2. **Agent versions (at worker start, beside `obs.prompts`).** One LoggedModel per distinct version key. The key is
    the sha256 of the prompt-set sha256, the stage → model map and the pipeline config's sha256, and those three are
    its params. Each job's root span carries `mlflow.traceTag.reader.version_key` (the key's first 12 hex characters)
@@ -69,7 +68,9 @@ HTTP client, never through `mlflow.genai.evaluate`.
    - Evaluation runs: one Run per bench run, holding the result's declared numbers (hit@k, reciprocal rank,
      grounded, gold cited, latency, cost) and per-question scores as stepwise metrics. The worker computes the
      scores from ids and page numbers: no model call, no judge.
-   - Datasets and evaluation runs live in experiment 0, so its Datasets and Evaluation runs tabs fill.
+   - Datasets and evaluation runs live in their own experiment `bench`. A bench Run has no traces, so it loses
+     nothing there (round 7: a separate experiment's Evaluation runs tab lists and charts its Runs). Experiment 0's
+     Evaluation runs tab then holds only compile and import Runs.
 4. **Review queue (at worker start).** One label schema per declared human label (pass/fail, no comment) and one
    custom review queue in experiment 0. Compile and tutor traces are added to the queue by id. The owner labels in
    MLflow's Review tab, or from the app: `POST /api/obs/labels` enqueues job `obs.feedback` with source `HUMAN` and

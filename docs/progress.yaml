@@ -1566,8 +1566,10 @@ tasks:
         after OTLP spend; alert = outbound webhook), so /observability stays the alert surface. Book-text check
         (check_bench_quotes.py, ids and lengths only): v2 max shared run 4 words, t01 1, v1 four records at 5
         (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0038 (proposed; 0036 and 0037 are V/manage's) for
-        the writes beyond ADR-0035. Open: round 7 (cross-experiment Run traces tab), VEC-OBS-5, design review
-        rounds." }
+        the writes beyond ADR-0035. Round 7 (results/20261124T143808-round7-runs): a Run in its own experiment
+        accepts link-to-run, but its Traces tab shows no traces (the UI searches only the Run's experiment), so
+        compile and import Runs stay in experiment 0 and bench datasets and runs go to experiment `bench`. Open:
+        VEC-OBS-5, design review rounds." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

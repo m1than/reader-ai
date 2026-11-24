@@ -990,7 +990,8 @@ analytics_paired_changes:
 
 # V.obs-mlflow-phase2 (draft, 2026-11-24). The owner: "use all advantages of MLflow to manage everything here as a
 # dashboard": experiment Runs, evaluation datasets and runs, agent versions, labeling, budgets and alerts.
-# Measured in spikes/obs-stack round 6 (zero credit; RESULT.md "Round 6"; results/20261124T142803-round6-phase2).
+# Measured in spikes/obs-stack rounds 6 and 7 (zero credit; RESULT.md "Round 6", "Round 7";
+# results/20261124T142803-round6-phase2, results/20261124T143808-round7-runs).
 # Not approved. OTel, privacy and the worker's MLflow writes are complex areas, so deep-reviewer design rounds come
 # first. The writes go beyond ADR-0035, so ADR-0038 (proposed) is the owner's decision; FR-OBS-20, -22, -23, -24
 # and FR-OBS-21 (b) stay blocked on it. FR-OBS-21 (a) is OTLP through the allow-list; FR-OBS-25 reads only.
@@ -1002,10 +1003,10 @@ proposed_requirements:
     text: >-
       Experiment Runs for compile runs and imports (ADR-0038 Decision 1). When a compile run ends (finished, failed
       or dead) or an import ends, the outbox enqueues `obs.runs` with args {kind: compile | ingest, id}. The job:
-      (a) Looks up the experiment `runs` by name and creates it if missing. It then searches that experiment for a
-          Run tagged `reader.run_id` (or `reader.ingest_id`) = id; if one exists, the job ends `succeeded` without a
-          request.
-      (b) Otherwise it creates a Run named `compile <run id first 8>` or `import <sha256 first 8>`, with:
+      (a) Searches experiment 0, where OTLP stores every trace, for a Run tagged `reader.run_id` (or
+          `reader.ingest_id`) = id; if one exists, the job ends `succeeded` without a request.
+      (b) Otherwise it creates a Run in experiment 0 named `compile <run id first 8>` or `import <sha256 first 8>`,
+          with:
           - tags: `reader.kind`, the id tag, `reader.lesson.id` and `reader.course.id` (compile);
           - params, VEC-OBS-5 `run_params`: lesson_id, course_id, version_key (FR-OBS-21), reader_version, one
             `model.<stage>` per declared stage (compile); converter_version and material_sha256 (ingest);
@@ -1016,9 +1017,12 @@ proposed_requirements:
       (c) Links the run's traces: it searches experiment 0 for `tag.reader.run_id` (or `tag.reader.ingest_id`) =
           id and calls `link-to-run` in batches of at most 100.
       Every value is an id, an enum, a model id from pricing.yaml, a sha256 or a number. A failure is logged by
-      code and never changes the run's outcome. Spike round 7 must show that the Traces tab of a Run in the `runs`
-      experiment lists traces stored in experiment 0; otherwise the Runs go to experiment 0, where every Run with
-      linked traces is listed under Evaluation runs (measured in round 6).
+      code and never changes the run's outcome. Why experiment 0 (spike round 7): a Run in its own experiment
+      accepted the link, but its Traces tab showed "No traces found", because the UI searches only the Run's own
+      experiment (the client's run-scoped search refuses with "Run … belongs to experiment 1, which is not in the
+      list of locations"). In experiment 0, the Run's Traces tab lists its traces with their assessments (round 6).
+      Bench runs go to their own experiment (FR-OBS-23), so experiment 0's Evaluation runs tab lists only compile
+      and import Runs, which can be filtered by `tags.reader.kind`.
   - id: FR-OBS-21
     text: >-
       Agent versions. A version key is the sha256 of the canonical JSON of {prompt_set_sha256, stage_models,
@@ -1061,15 +1065,17 @@ proposed_requirements:
         shares, latency, USD, per_chapter);
       - otherwise the call answers 400 `bench_invalid`.
       The api enqueues `obs.bench` with the blob's id. The job:
-      (a) creates or updates the pinned dataset, by name and the tag `source_sha256`;
-      (b) creates one Run in experiment 0 with the tag `reader.bench` = search | tutor, params (model, chunking,
+      (a) looks up the experiment `bench` by name and creates it if missing, then creates or updates the pinned
+          dataset there, by name and the tag `source_sha256`;
+      (b) creates one Run in `bench` with the tag `reader.bench` = search | tutor, params (model, chunking,
           set sha256, commit) and metrics: for search, hit@1/3/10, reciprocal rank and per-question rank as a
           stepwise metric; for tutor, grounded_share, gold_cited_share, latency p50/p95, mean_usd and total_usd;
       (c) logs the dataset as the Run's input.
       Scores come from code over ids and page numbers: no model call, no judge, no `mlflow.genai.evaluate`
       (round 6: evaluate writes a client-side trace per row with its inputs, outside the allow-list, and exhausted
-      the SQLite pool at default parallelism). Each upload is a new Run, so the Evaluation runs tab charts
-      regressions from the earliest run to the latest (round 6). `reader obs bench <set> <result>` (OPS-CLI) posts
+      the SQLite pool at default parallelism). A bench Run has no traces, so its own experiment loses nothing (round
+      7: a separate experiment's Evaluation runs tab lists and charts its Runs' metrics). Each upload is a new Run,
+      so `bench`'s Evaluation runs tab charts regressions from the earliest run to the latest (round 6). `reader obs bench <set> <result>` (OPS-CLI) posts
       the upload with the owner's session.
   - id: FR-OBS-24
     text: >-
@@ -1102,17 +1108,17 @@ proposed_requirements:
 # Per-tab plan for phase 2. Privacy: every listed value is an id, an enum, a number or pinned committed repository
 # data. "Writes" names the worker → MLflow requests (ADR-0035 or ADR-0038); "none" means OTLP or read-only.
 phase2_tabs:
-  - tab: Training runs and Evaluation runs (Runs)
-    shows: one Run per compile run and import, with params, metrics and a cumulative-cost chart; the Run's Traces tab lists its stage traces with assessments
+  - tab: Experiment 0 Training runs and Evaluation runs (Runs)
+    shows: one Run per compile run and import, with params, metrics and a cumulative-cost chart; the Run's Traces tab lists its stage traces with assessments (round 6; a Run in another experiment found none, round 7)
     source: agent_spend, the pipeline and ingest tables, linked traces
     privacy: ids, model ids, sha256s, numbers
-    writes: experiments/get-by-name|create, runs/search, runs/create, log-batch, runs/update, traces/link-to-run (ADR-0038)
-  - tab: Datasets
+    writes: runs/search, runs/create, log-batch, runs/update, traces/link-to-run (ADR-0038)
+  - tab: Experiment `bench` Datasets
     shows: tutor-bench-v2 (40) and search-bench-v1 (26) with question ids, questions, chapters and gold pages
     source: the owner's upload of a set whose sha256 is pinned (FR-OBS-22)
     privacy: the agent's own committed questions, with no 5-word run shared with the book (measured); ids and page numbers
-    writes: datasets/create, datasets/search, datasets/{id}/records (ADR-0038)
-  - tab: Evaluation runs
+    writes: experiments/get-by-name|create, datasets/create, datasets/search, datasets/{id}/records (ADR-0038)
+  - tab: Experiment `bench` Evaluation runs
     shows: one Run per bench upload; the tab's chart shows hit@k, reciprocal rank, grounded and gold-cited shares, latency and cost over time
     source: committed bench result files (FR-OBS-23)
     privacy: ids, numbers, model names
