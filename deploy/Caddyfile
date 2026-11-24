@@ -6,6 +6,9 @@
 localhost {
 	tls internal
 
+	# SRV-OBS FR-OBS-9: no upstream ever sees a client-sent site header; only Caddy sets it (below).
+	request_header -X-Reader-Site
+
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		Content-Security-Policy "default-src 'self'; img-src 'self' blob:; connect-src 'self' wss://localhost; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
@@ -20,6 +23,14 @@ localhost {
 			max_size 200MiB
 		}
 		reverse_proxy 10.230.1.10:8000
+	}
+
+	# The owner gate asked through the main site (SRV-OBS FR-OBS-9): the gate reads which site asks from this header,
+	# which Caddy sets and so overrides any value the client sent.
+	handle /api/obs/gate {
+		reverse_proxy 10.230.1.10:8000 {
+			header_up X-Reader-Site app
+		}
 	}
 
 	handle /api/* {
@@ -52,6 +63,8 @@ localhost {
 localhost:8443 {
 	tls internal
 
+	request_header -X-Reader-Site
+
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'"
@@ -61,6 +74,7 @@ localhost:8443 {
 
 	forward_auth 10.230.1.10:8000 {
 		uri /api/obs/gate
+		header_up X-Reader-Site mlflow
 	}
 
 	# Any depth, any case, repeated slashes: a middle `*` of a `path` pattern matches one segment only.
@@ -71,6 +85,48 @@ localhost:8443 {
 
 	handle {
 		reverse_proxy mlflow:5000 {
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+			header_down -Access-Control-*
+		}
+	}
+}
+
+# The Jaeger waterfall (SRV-OBS FR-OBS-19, ADR-0033): the same traces, owner only, on a third origin. Port 8444 is
+# published by `reader up` only while the `observability` profile is active. Its UI's two inline scripts are allowed
+# by hash (recomputed by the [image] test) and its <base href> needs base-uri 'self'; nothing else is relaxed.
+localhost:8444 {
+	tls internal
+
+	request_header -X-Reader-Site
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU=' 'sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	forward_auth 10.230.1.10:8000 {
+		uri /api/obs/gate
+		header_up X-Reader-Site jaeger
+	}
+
+	# Read-only (FR-OBS-19, measured against the pinned image): Jaeger 2.23.0 answers POST /api/archive/<id> and
+	# POST /api/transform; those paths are refused for every method and every other non-GET method is 405.
+	@jaeger_blocked path_regexp (?i)^/+api/+(?:archive|transform)(?:/|$)
+	handle @jaeger_blocked {
+		respond 404
+	}
+
+	@jaeger_write not method GET HEAD
+	handle @jaeger_write {
+		respond 405
+	}
+
+	handle {
+		reverse_proxy jaeger:16686 {
 			header_up -Cookie
 			header_up -Authorization
 			header_down -Set-Cookie

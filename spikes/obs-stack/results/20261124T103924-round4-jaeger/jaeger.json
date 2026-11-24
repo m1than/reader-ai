@@ -1,0 +1,46 @@
+{
+ "services": null,
+ "compile_like": {
+  "status": 200,
+  "spans": 45,
+  "names": [
+   "agent.call",
+   "claude_code.interaction",
+   "claude_code.llm_request",
+   "claude_code.tool",
+   "job pipeline.stage",
+   "stage draft",
+   "stage fact_check",
+   "stage review",
+   "stage revise"
+  ]
+ },
+ "tutor_slow": {
+  "status": 200,
+  "spans": 4,
+  "names": [
+   "agent.call",
+   "claude_code.interaction",
+   "claude_code.llm_request",
+   "job tutor.answer"
+  ]
+ },
+ "stage_review_dead": {
+  "status": 200,
+  "spans": 4,
+  "names": [
+   "agent.call",
+   "claude_code.interaction",
+   "claude_code.llm_request",
+   "job pipeline.stage"
+  ]
+ },
+ "bulk": {
+  "traces": 50,
+  "spans": 2250,
+  "seconds": 0.6,
+  "found_reader_worker_traces": {
+   "error": "HTTP Error 404: Not Found"
+  }
+ }
+}

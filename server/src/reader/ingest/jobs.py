@@ -23,6 +23,7 @@ from reader.ingest import store
 from reader.ingest.artifact import ArtifactError, artifact_id
 from reader.ingest.errors import import_error
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.obs.spans import child_span
 
 KIND: Final = "ingest.import"
 VersionFrozen = import_error("version_frozen")
@@ -76,10 +77,14 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
             if found.first() is None:
                 raise UploadMissing()
         root = blobs_root / "ingest" / args.artifact_id
-        try:
-            manifest, members = await asyncio.to_thread(store.read_artifact, root)
-        except ArtifactError as error:
-            raise (ArtifactMissing if error.code == "missing" else ArtifactInvalid)() from None
+        with child_span("ingest.parse") as parsed:  # SRV-OBS FR-OBS-13: pages and bytes only
+            try:
+                manifest, members = await asyncio.to_thread(store.read_artifact, root)
+            except ArtifactError as error:
+                raise (ArtifactMissing if error.code == "missing" else ArtifactInvalid)() from None
+            page_count = manifest.get("page_count")
+            parsed.set({"reader.pages": page_count if isinstance(page_count, int) else None,
+                        "reader.bytes": sum(len(v) for v in members.values())})
         frozen = await store.frozen_version(conn, args.material_sha256)
         if frozen is not None and frozen != args.converter_version:
             raise VersionFrozen()

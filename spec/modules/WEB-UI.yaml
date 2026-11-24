@@ -597,7 +597,18 @@ requirements:
       may exist." Values render as text only. A load failure shows a retry block; a 401 goes to the shell's sign-in
       redirect (FR-UI-5). The header shows an "Observability" link for the owner. [unit]
       web/src/app/observability/observability.test.tsx (VEC-OBS-3's expected JSON without its seeded-row references
-      `job` and `jobs: [ids]`); [story] the page with fixture data.
+      `job` and `jobs: [ids]`); [story] the page with fixture data. Amended by SRV-OBS V.obs-analytics (FR-OBS-16,
+      -17, -19; 2026-11-24): a fifth section "Cost per lesson" renders the summary's `lessons` view: a table (Lesson,
+      Course, Compile USD, Runs, Last compile USD, Tutor USD, Total USD, USD per 1k characters, and a "Traces" link to
+      the row's `mlflow_url`), sortable by every column through a button in its header (`aria-sort` on the active
+      header; default Total USD descending; a missing value sorts last; ties by lesson id), a "Course totals" table,
+      the note that failed attempts and open reserves count ("includes N open reserves" when N > 0) while MLflow's
+      Cost column shows each call's settled amount, and "More rows may exist." when truncated. A sixth section
+      "Dashboards" lists FR-OBS-16's saved views and Jaeger's search as links (`rel="noopener noreferrer"`). Every
+      trace link gains a "Jaeger (recent traces only)" twin to `https://localhost:8444/trace/<id>`, whose title says
+      that Jaeger keeps the newest 450 traces and starts empty after a restart. A row with `deleted` true (spend on a
+      deleted lesson) shows "deleted lesson" in the Lesson column and no course (SRV-OBS code review round 1). No
+      header, nav or app.css change.
   # FR-UI-13: amendment for WEB-IMPORT (V/onboarding), promoted on V/upload-impl with its Red tests.
   - id: FR-UI-13
     text: >-

@@ -36,6 +36,7 @@ from reader.agent.pricing import (
     log_crosscheck,
     map_model_usage,
     map_usage,
+    micro,
     resolve_model,
 )
 from reader.config import ReaderConfig
@@ -102,6 +103,8 @@ class StageCall:
     thinking_off: bool = False  # FR-AGENT-13 a
     abort_on_retry: bool = False  # FR-AGENT-13 d
     deadline_s: float | None = None  # FR-AGENT-13 e
+    course_id: uuid.UUID | None = None  # FR-AGENT-14 (SRV-OBS FR-OBS-12 d): on the `agent.call` span only
+    step: int | None = None  # FR-AGENT-14: the compile step, on the `agent.call` span only
     web_search: WebSearchCall | None = None  # FR-AGENT-15: only for a (task, stage) in TOOL_STAGES
 
     @property
@@ -315,7 +318,7 @@ class AgentProvider:
             raise agent_error("unknown_model")
         model = resolve_model(task.model)
         # FR-AGENT-14 (SRV-OBS FR-OBS-6): the call runs inside `agent.call`, current while the CLI starts.
-        with agent_call(call.task, call.stage, model) as span:
+        with agent_call(call.task, call.stage, model, call.lesson_id, call.course_id, call.step) as span:
             return await self._run(call, model, span)
 
     async def _run(self, call: StageCall, model: str, span: AgentSpan) -> StageResult:
@@ -386,9 +389,11 @@ class AgentProvider:
             usd = cost(model, usage, summed=tool_call) if usage is not None else None
             if usd is not None and sdk_usd is not None:
                 log_crosscheck(model, sdk_usd, usd, usage if tool_call else None)
+            # FR-AGENT-14: quantized once with the ledger's rounding; the ledger and the span get one value.
+            settled = micro(settled)
             await ledger.settle(self.engine, reservation, settled, sdk_usd, usd, usage, record)
-            stop_reason = getattr(seen.result, "stop_reason", None)
-            span.settled(usage, settled, stop_reason if isinstance(stop_reason, str) else None)
+            stop = getattr(seen.result, "stop_reason", None)
+            span.settled(usage, settled, stop if isinstance(stop, str) else None, summed=tool_call)
         log.info(
             "agent_call stage=%s run=%s model=%s settled=%s seconds=%.1f",
             call.stage,

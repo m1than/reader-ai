@@ -31,7 +31,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 CANARY_DIR = Path(__file__).resolve().parent / "cli_canary"
-MLFLOW_IMAGE = "reader-mlflow:local"
 ROTEL = "streamfold/rotel:v0.2.7@sha256:7a12878dae3dc494c27def53ebcccbdc18e13389ececf33abf116af3a07c3427"
 CADDY = "caddy:2-alpine@sha256:003a97808e781aa9f7e75cc2f43d34d461099031faf5e20faefb9f61126836f0"
 HARDEN = ["--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
@@ -81,32 +80,23 @@ def _sdk_pin() -> str:
     return match.group(1)
 
 
+def build_id(*args: str) -> str:
+    """`docker build -q` without `-t`: the tests use the image id, so they never retag a tag the running stack
+    uses (reader-mlflow:local belongs to `reader up`)."""
+    image = sh("docker", "build", "-q", *args).strip()
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", image), image
+    return image
+
+
 @pytest.fixture(scope="module")
 def canary_image() -> str:
-    """Run by the id `docker build -q` prints, never by a shared tag."""
-    return sh(
-        "docker",
-        "build",
-        "-q",
-        "--build-arg",
-        f"CLAUDE_AGENT_SDK={_sdk_pin()}",
-        str(CANARY_DIR),
-    ).strip()
+    return build_id("--build-arg", f"CLAUDE_AGENT_SDK={_sdk_pin()}", str(CANARY_DIR))
 
 
 @pytest.fixture(scope="module")
 def mlflow_image() -> str:
-    sh(
-        "docker",
-        "build",
-        "-q",
-        "-f",
-        str(REPO / "deploy/otel/mlflow.Dockerfile"),
-        "-t",
-        MLFLOW_IMAGE,
-        str(REPO / "deploy/otel"),
-    )
-    return MLFLOW_IMAGE
+    # The context is the repository; deploy/otel/mlflow.Dockerfile.dockerignore admits only the catalog file.
+    return build_id("-f", str(REPO / "deploy/otel/mlflow.Dockerfile"), str(REPO))
 
 
 @pytest.fixture
@@ -257,9 +247,28 @@ def _wait_healthy(prefix: str, name: str, limit: float = 60) -> float:
     raise AssertionError(f"{name} not healthy within {limit} s")
 
 
-def _backend(prefix: str, mlflow_image: str) -> None:
-    for net in ("otel", "obs"):
+JAEGER = "jaegertracing/jaeger:2.23.0@sha256:3823829974ccfc2485d2e48b165579091f32295022ae80ca49704e2f4834116e"
+ROTEL_ENV = (  # FR-OBS-19: two named exporters
+    "ROTEL_EXPORTER_MLFLOW_ENDPOINT=http://mlflow:5000", "ROTEL_EXPORTER_MLFLOW_PROTOCOL=http",
+    "ROTEL_EXPORTER_MLFLOW_CUSTOM_HEADERS=x-mlflow-experiment-id=0",
+    "ROTEL_EXPORTER_JAEGER_ENDPOINT=http://jaeger:4318", "ROTEL_EXPORTER_JAEGER_PROTOCOL=http",
+)
+
+
+def _jaeger(prefix: str, memory: str = "256m") -> None:
+    """FR-OBS-19's jaeger under the compose hardening, on jaeger-in (from rotel) and jaeger-ui (to the edge)."""
+    _run(
+        prefix, "jaeger", JAEGER, "--config", "/etc/jaeger/config.yaml", nets=("jaeger-in", "jaeger-ui"),
+        opts=("--user", "10006:10006", *HARDEN, "--tmpfs", "/tmp:size=16m,uid=10006", "-e", "GOMEMLIMIT=200MiB",
+              "-v", f"{REPO / 'deploy/otel/jaeger.yaml'}:/etc/jaeger/config.yaml:ro",
+              "--memory", memory, "--memory-swap", memory),
+    )
+
+
+def _backend(prefix: str, mlflow_image: str, jaeger_memory: str = "256m") -> None:
+    for net in ("otel", "obs", "jaeger-in", "jaeger-ui"):
         internal_network(f"{prefix}-{net}")
+    _jaeger(prefix, jaeger_memory)
     _run(
         prefix,
         "mlflow",
@@ -291,6 +300,8 @@ def _backend(prefix: str, mlflow_image: str) -> None:
             "MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false",
             "-e",
             "MLFLOW_DISABLE_TELEMETRY=true",
+            "-e",
+            "MLFLOW_MODEL_CATALOG_URI=",  # FR-OBS-12 (c)
             "-v",
             f"{prefix}-data:/var/lib/mlflow",
             "--memory",
@@ -304,16 +315,13 @@ def _backend(prefix: str, mlflow_image: str) -> None:
         prefix,
         "rotel",
         ROTEL,
-        "--exporter",
-        "otlp",
-        "--otlp-exporter-endpoint",
-        "http://mlflow:5000",
-        "--otlp-exporter-protocol",
-        "http",
-        "--otlp-exporter-custom-headers",
-        "x-mlflow-experiment-id=0",
-        nets=("otel", "obs"),
+        "--exporters",
+        "mlflow:otlp,jaeger:otlp",
+        "--exporters-traces",
+        "mlflow,jaeger",
+        nets=("otel", "obs", "jaeger-in"),
         opts=(
+            *[arg for env in ROTEL_ENV for arg in ("-e", env)],
             "--user",
             "10005:10005",
             *HARDEN,
@@ -326,7 +334,8 @@ def _backend(prefix: str, mlflow_image: str) -> None:
             *_health(ROTEL_HEALTH),
         ),
     )
-    _wait_healthy(prefix, "mlflow")
+    # 180 s: a cold MLflow start on a loaded Mac took over 60 s (V.obs-analytics image run, other suites running).
+    _wait_healthy(prefix, "mlflow", limit=180)
     _wait_healthy(prefix, "rotel")
 
 
@@ -425,7 +434,7 @@ class G(http.server.BaseHTTPRequestHandler):
         role = "owner" if "__Host-reader_session=owner" in self.headers.get("Cookie", "") else None
         h = self.headers
         status = decide(h.get("Origin"), h.get("X-Forwarded-Method"), h.get("Sec-Fetch-Site"),
-                        h.get("Sec-Fetch-Mode"), h.get("Sec-Fetch-Dest"), role)
+                        h.get("Sec-Fetch-Mode"), h.get("Sec-Fetch-Dest"), role, h.get("X-Reader-Site"))
         self.send_response(status); self.send_header("Content-Length", "0"); self.end_headers()
 class E(http.server.BaseHTTPRequestHandler):
     def log_message(self, *a): pass
@@ -436,18 +445,22 @@ class E(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
     do_GET = handle_one
     do_POST = handle_one
-for port, cls in ((9000, G), (5000, E)):
+for port, cls in ((9000, G), (5000, E), (16686, E)):
     threading.Thread(target=http.server.ThreadingHTTPServer(("0.0.0.0", port), cls).serve_forever).start()
 """
 
 
 def _edge_caddyfile() -> str:
-    """deploy/Caddyfile's 8443 site, served on plain :8443 against the stub gate and the echo upstream."""
+    """deploy/Caddyfile's 8443 and 8444 sites (FR-OBS-9, -19), served on plain HTTP against the stub gate and the
+    echo upstreams (`mlflow:5000`, `jaeger:16686`)."""
     text = (REPO / "deploy/Caddyfile").read_text(encoding="utf-8")
-    site = re.search(r"\nlocalhost:8443 \{\n(.*?)\n\}\n", text, re.S)
-    assert site is not None
-    body = site.group(1).replace("\ttls internal\n", "").replace("10.230.1.10:8000", "gate:9000")
-    return "{\n\tadmin off\n\tauto_https off\n}\n\n:8443 {\n" + body + "\n}\n"
+    out = "{\n\tadmin off\n\tauto_https off\n}\n"
+    for port in ("8443", "8444"):
+        site = re.search(rf"\nlocalhost:{port} \{{\n(.*?)\n\}}\n?", text, re.S)
+        assert site is not None, port
+        body = site.group(1).replace("\ttls internal\n", "").replace("10.230.1.10:8000", "gate:9000")
+        out += f"\n:{port} {{\n" + body + "\n}\n"
+    return out
 
 
 def test_edge_gate_and_header_stripping(prefix: str, canary_image: str, tmp_path: Path) -> None:
@@ -472,6 +485,8 @@ def test_edge_gate_and_header_stripping(prefix: str, canary_image: str, tmp_path
             "gate",
             "--network-alias",
             "mlflow",
+            "--network-alias",
+            "jaeger",
         ),
     )
     _run(
@@ -487,9 +502,10 @@ def test_edge_gate_and_header_stripping(prefix: str, canary_image: str, tmp_path
     time.sleep(3)
     probe = """
 import json, urllib.request, urllib.error
-def req(path, cookie=None, origin=None, method="GET", site=None, auth=False):
-    r = urllib.request.Request("http://caddy:8443" + path, method=method, data=b"{}" if method != "GET" else None)
-    r.add_header("Host", "localhost:8443")
+def req(path, cookie=None, origin=None, method="GET", site=None, auth=False, port="8443", spoof=None):
+    r = urllib.request.Request(f"http://caddy:{port}" + path, method=method, data=b"{}" if method != "GET" else None)
+    r.add_header("Host", f"localhost:{port}")
+    if spoof: r.add_header("X-Reader-Site", spoof)
     if cookie: r.add_header("Cookie", "__Host-reader_session=" + cookie)
     if origin: r.add_header("Origin", origin)
     if site: r.add_header("Sec-Fetch-Site", site); r.add_header("Sec-Fetch-Mode", "no-cors"); r.add_header("Sec-Fetch-Dest", "image")
@@ -506,6 +522,13 @@ out = {
   "post_none": req("/x", "owner", None, "POST"),
   "post_dash": req("/x", "owner", "https://localhost:8443", "POST"),
   "img_same_site": req("/x", "owner", site="same-site"),
+  # INV-OBS-5 per site (FR-OBS-9, -19): each site accepts only its own origin; a client X-Reader-Site is overridden.
+  "j_none": req("/", port="8444"), "j_owner": req("/search", "owner", port="8444"),
+  "j_post_own": req("/x", "owner", "https://localhost:8444", "POST", port="8444"),
+  "j_post_dash": req("/x", "owner", "https://localhost:8443", "POST", port="8444"),
+  "post_jaeger_origin": req("/x", "owner", "https://localhost:8444", "POST"),
+  "j_spoof": req("/x", "owner", "https://localhost:8443", "POST", port="8444", spoof="mlflow"),
+  "spoof": req("/x", "owner", "https://localhost:8444", "POST", spoof="jaeger"),
 }
 for p in BLOCKED_PATHS + OPEN_PATHS:
     out[p] = req(p, "owner")
@@ -524,6 +547,13 @@ print(json.dumps(out))
     for case in ("post_foreign", "post_app", "post_none", "img_same_site"):
         assert out[case]["status"] == 403, case
     assert out["post_dash"]["status"] == 200
+    assert out["j_none"]["status"] == 401
+    assert out["j_owner"]["status"] == 200
+    # The gate passes its own origin; the read-only 8444 edge then refuses the POST (code review round 1).
+    assert out["j_post_own"]["status"] == 405
+    for case in ("j_post_dash", "post_jaeger_origin", "j_spoof", "spoof"):
+        assert out[case]["status"] == 403, case
+    assert "cookie" not in json.loads(out["j_owner"]["body"])
     for path in EDGE_BLOCKED:
         assert out[path]["status"] == 404, path
         assert out[path]["body"] == "", path  # Caddy's own empty 404, never the upstream's

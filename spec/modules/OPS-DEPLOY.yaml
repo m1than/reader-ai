@@ -326,7 +326,23 @@ requirements:
       two. Existing checks follow: `reader-mlflow:local` joins the locally built images (INV-DEPLOY-6),
       `mlflow.Dockerfile` joins INV-DEPLOY-7's allow-list with no COPY source, FR-DEPLOY-7's "no `data:`, no
       `unsafe-inline`" applies to the app's site only, and FR-DEPLOY-5's override test compares renders with the same
-      profiles. [config; image: `caddy adapt`]
+      profiles. [config; image: `caddy adapt`] Amended by SRV-OBS V.obs-analytics (FR-OBS-12 c, FR-OBS-19; ADR-0033
+      and ADR-0035 accepted 2026-11-24): rotel's command becomes `[--exporters, "mlflow:otlp,jaeger:otlp",
+      --exporters-traces, "mlflow,jaeger"]` with the five `ROTEL_EXPORTER_{MLFLOW,JAEGER}_*` environment entries of
+      FR-OBS-19, and rotel joins `jaeger-in`; mlflow's environment adds `MLFLOW_MODEL_CATALOG_URI=` (empty), and
+      `mlflow.Dockerfile` copies exactly one source, `deploy/otel/mlflow-catalog/anthropic.json` (its .dockerignore
+      admits only that file), to replace MLflow's bundled model catalog; a service `jaeger`
+      (`jaegertracing/jaeger:2.23.0@sha256:3823829974ccfc2485d2e48b165579091f32295022ae80ca49704e2f4834116e`, user
+      10006, mem 256m, environment exactly `GOMEMLIMIT=200MiB`, the read-only bind `./otel/jaeger.yaml`, hardened like
+      the others, no healthcheck: the image has no shell) on the new internal networks `jaeger-in` 10.230.5.0/24 =
+      {rotel, jaeger} and `jaeger-ui` 10.230.6.0/24 = {caddy, jaeger}; VEC-DEPLOY-2 gains rotel–jaeger and
+      caddy–jaeger and the `never` pairs jaeger–{api, worker, mlflow, postgres, embed, agent-proxy, mcp, every
+      kernel}. The Caddyfile gains the site `localhost:8444` of FR-OBS-19, `header_up X-Reader-Site mlflow|jaeger` in
+      both forward_auth blocks, and the main site's `handle /api/obs/gate` (before `/api/*`) with `header_up
+      X-Reader-Site app`; every site strips a client's `X-Reader-Site` (`request_header -X-Reader-Site`), and the
+      8444 site answers 404 for `/api/archive*` and `/api/transform*` and 405 for any method but GET and HEAD
+      (SRV-OBS code review round 1); `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001, mlflow:5000, jaeger:16686};
+      INV-DEPLOY-2 (1)'s environment entries add rotel's five, mlflow's third and jaeger's one.
   - id: FR-DEPLOY-14   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23); was FR-DEPLOY-13 until the merge
     text: >-
       **Upload body limit.** The Caddyfile's site block gains, before `handle /api/*`, a `handle

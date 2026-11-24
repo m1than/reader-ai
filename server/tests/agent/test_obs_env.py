@@ -101,10 +101,18 @@ async def test_enabled_adds_exactly_the_telemetry_env_and_a_current_span(pg: Pg,
     assert attrs["reader.cost_usd"] == pytest.approx(0.05)
     assert attrs["reader.stop_reason"] == "end_turn"
     # sdk_usage(): input 2, output 100, cache read 0, cache creation 7000 (all 1h) — exact (round 1 survivors).
-    assert attrs["gen_ai.usage.input_tokens"] == 2
+    # SRV-OBS FR-OBS-12 (b): the GenAI semconv keys; the input count includes the cache.
+    assert attrs["gen_ai.usage.input_tokens"] == 2 + 7000
     assert attrs["gen_ai.usage.output_tokens"] == 100
-    assert attrs["gen_ai.usage.cache_read_input_tokens"] == 0
-    assert attrs["gen_ai.usage.cache_creation_input_tokens"] == 7000
+    assert attrs["gen_ai.usage.cache_read.input_tokens"] == 0
+    assert attrs["gen_ai.usage.cache_write.input_tokens"] == 7000
+    assert "gen_ai.usage.cache_read_input_tokens" not in attrs
+    assert attrs["gen_ai.operation.name"] == "invoke_agent"
+    assert attrs["gen_ai.provider.name"] == "anthropic"
+    # FR-OBS-12 (c): the input part by pricing.yaml (sonnet: input 2, output 10, 1h write 4 per million).
+    priced_in, priced_out = 2 * 2 + 7000 * 4, 100 * 10
+    assert attrs["reader.cost_input_usd"] == pytest.approx(round(0.05 * priced_in / (priced_in + priced_out), 6))
+    assert attrs["mlflow.spanType"] == "AGENT"
     assert call.kind.name == "CLIENT"
 
 
@@ -132,6 +140,38 @@ async def test_failed_but_billed_call_records_the_settled_amount(pg: Pg, tmp_pat
     assert attrs["reader.error_code"] == "rate_limited"
     assert attrs["gen_ai.usage.output_tokens"] == 100  # span.settled ran on the failure path
     assert call.status.status_code.name == "ERROR"
+
+
+async def test_lesson_course_and_step_reach_the_span(pg: Pg, tmp_path: Path) -> None:
+    """Code review round 2: the provider passes the StageCall's lesson, course and step to `agent.call`."""
+    w = await _enabled_world(pg, tmp_path, True)
+    cli = SpanCli([Script(text="answer", cost=0.05)])
+    cli.parents = []
+    lesson, course = uuid.uuid4(), uuid.uuid4()
+    call = dataclasses.replace(_call(w), lesson_id=lesson, course_id=course, step=4)
+    with obs_setup("worker") as (handle, memory):
+        await _provider(w, cli, tmp_path).run(call)
+        (span,) = [s for s in finished(handle, memory) if s.name == "agent.call"]
+    attrs = dict(span.attributes)
+    assert (attrs["reader.lesson.id"], attrs["reader.course.id"], attrs["reader.step"]) == (str(lesson), str(course), 4)
+
+
+async def test_the_settled_amount_is_quantized_once_for_ledger_and_span(pg: Pg, tmp_path: Path) -> None:
+    """Code review round 1: an SDK cost below a micro-dollar's half (2.5e-6) is rounded once, half up, to the
+    ledger's 0.000003, and the span records that same value; the input part derives from it."""
+    w = await _enabled_world(pg, tmp_path, True)
+    cli = SpanCli([Script(text="answer", cost=0.0000025)])
+    cli.parents = []
+    with obs_setup("worker") as (handle, memory):
+        await _provider(w, cli, tmp_path).run(_call(w))
+        (call,) = [s for s in finished(handle, memory) if s.name == "agent.call"]
+    settled = await _settled_usd(w)
+    assert settled == Decimal("0.000003")
+    attrs = dict(call.attributes)
+    assert attrs["reader.cost_usd"] == 0.000003
+    assert 0 <= attrs["reader.cost_input_usd"] <= 0.000003
+    assert Decimal(str(attrs["reader.cost_input_usd"])) == Decimal(str(attrs["reader.cost_input_usd"])).quantize(
+        Decimal("0.000001"))
 
 
 async def test_a_non_pipeline_stage_is_not_recorded(pg: Pg, tmp_path: Path, caplog: Any) -> None:

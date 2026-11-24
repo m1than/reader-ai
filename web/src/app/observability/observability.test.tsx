@@ -1,6 +1,7 @@
-// @trace FR-UI-18 FR-OBS-10
-// The owner's observability page (WEB-UI FR-UI-18, SRV-OBS FR-OBS-10): four views of GET /api/obs/summary, trace
-// links to the 8443 dashboard, text-only values, "More rows may exist." when a view is truncated, owner only.
+// @trace FR-UI-18 FR-OBS-10 FR-OBS-16 FR-OBS-17 FR-OBS-19
+// The owner's observability page (WEB-UI FR-UI-18, SRV-OBS FR-OBS-10, -16, -17, -19): five views of
+// GET /api/obs/summary, trace links to the 8443 dashboard and to Jaeger on 8444, the saved dashboard views, cost per
+// lesson sortable by every column, text-only values, "More rows may exist." when a view is truncated, owner only.
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -59,7 +60,7 @@ describe('observability page (FR-UI-18)', () => {
     expect(calls).toEqual(['/api/obs/summary?days=7']);
     for (const name of ['Tutor', 'Failures', 'Ingest']) expect(screen.getByRole('heading', { name })).toBeTruthy();
     expect(screen.getByText('fact_check')).toBeTruthy();
-    expect(screen.getByText('1.86')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: 'Compile runs' })).getByText('1.86')).toBeTruthy();
     expect(screen.getByText('4000', { selector: '[data-metric="p50"]' })).toBeTruthy(); // tutor p50 ms
     expect(screen.getByText('9000', { selector: '[data-metric="p95"]' })).toBeTruthy();
     expect(screen.getByText('297.0')).toBeTruthy(); // pages per minute (import)
@@ -101,6 +102,49 @@ describe('observability page (FR-UI-18)', () => {
     await mountPage(() => json(200, body));
     await waitFor(() => expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeTruthy());
     expect(document.querySelector('main img')).toBeNull();
+  });
+
+  it('links every trace to Jaeger too and lists the saved views (FR-OBS-16, -19)', async () => {
+    await mountPage(() => json(200, summary()));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Dashboards' })).toBeTruthy());
+    const links = screen.getAllByRole('link', { name: 'Jaeger (recent traces only)' });
+    const jaeger = links.map((a) => a.getAttribute('href'));
+    expect(jaeger).toContain('https://localhost:8444/trace/cf8a1cbe5cc23a546382dc30e5e2b16a');
+    expect(jaeger).toHaveLength(screen.getAllByRole('link', { name: 'Trace' }).length);
+    // Jaeger keeps the newest 450 traces and starts empty after a restart (code review round 1).
+    for (const a of links) expect(a.getAttribute('title')).toMatch(/newest 450 traces.*may have rotated out/);
+    const views = within(screen.getByRole('region', { name: 'Dashboards' })).getAllByRole('link');
+    expect(views.map((a) => a.getAttribute('href'))).toContain('https://localhost:8443/#/experiments/0/traces?q=dead');
+    for (const a of views) expect(a.getAttribute('rel')).toBe('noopener noreferrer');
+  });
+
+  it('shows cost per lesson from the ledger, sortable by every column (FR-OBS-17)', async () => {
+    await mountPage(() => json(200, summary()));
+    const region = await waitFor(() => screen.getByRole('region', { name: 'Cost per lesson' }));
+    const table = within(region).getByRole('table', { name: 'Cost per lesson' });
+    const titles = () => within(table).getAllByRole('row').slice(1).map((r) => r.querySelector('td')?.textContent);
+    // total USD, largest first; spend on a deleted lesson stays as a row (code review round 1)
+    expect(titles()).toEqual(['Lesson one', 'Lesson three', 'Lesson two', 'deleted lesson']);
+    const total = within(table).getByRole('columnheader', { name: 'Total USD' });
+    expect(total.getAttribute('aria-sort')).toBe('descending');
+    expect(within(region).getByText(/includes 1 open reserves/)).toBeTruthy();
+    const traces = within(table).getAllByRole('link', { name: 'Traces' });
+    expect(traces[0]!.getAttribute('href')).toBe('https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000001');
+    // Per 1k characters: lesson one 0.93; the others have none, so they stay last in both directions.
+    const per = () => within(table).getByRole('button', { name: 'USD per 1k characters' });
+    await act(async () => per().click());
+    expect(titles()[0]).toBe('Lesson one');
+    await act(async () => per().click());
+    // missing values tie by lesson id
+    expect(titles()).toEqual(['Lesson one', 'Lesson two', 'Lesson three', 'deleted lesson']);
+    expect(within(table).getByRole('columnheader', { name: 'USD per 1k characters' }).getAttribute('aria-sort')).toBe('ascending');
+    expect(total.getAttribute('aria-sort')).toBeNull();
+    await act(async () => within(table).getByRole('button', { name: 'Lesson' }).click());
+    // descending by title; the deleted lesson has none and sorts last
+    expect(titles()).toEqual(['Lesson two', 'Lesson three', 'Lesson one', 'deleted lesson']);
+    const courses = within(region).getByRole('table', { name: 'Cost per course' });
+    expect(within(courses).getByText('2.14')).toBeTruthy();
+    expect(within(courses).getByText('1.07')).toBeTruthy();
   });
 
   it('refuses an invalid body and offers a retry', async () => {

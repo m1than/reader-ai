@@ -216,11 +216,13 @@ def test_caddy_adapt_in_pinned_image() -> None:
     assert "forward_proxy" not in handlers
     proxies = [n for n in nodes if n.get("handler") == "reverse_proxy"]
     upstreams = {u["dial"] for n in proxies for u in n.get("upstreams", [])}
-    # FR-DEPLOY-13 (paired SRV-OBS change): the 8443 site adds forward_auth to the api and the MLflow proxy.
-    assert upstreams == {"10.230.1.10:8000", "mcp:8001", "mlflow:5000"}
+    # FR-DEPLOY-13 (paired SRV-OBS change): the 8443 site adds forward_auth to the api and the MLflow proxy;
+    # the 8444 site (SRV-OBS FR-OBS-19) the Jaeger proxy.
+    assert upstreams == {"10.230.1.10:8000", "mcp:8001", "mlflow:5000", "jaeger:16686"}
     proxied = {path: ups for path, ups in _path_upstreams(nodes).items() if ups}
     assert proxied == {
         "/api/materials/uploads": {"10.230.1.10:8000"},  # FR-DEPLOY-14: the upload's own body limit
+        "/api/obs/gate": {"10.230.1.10:8000"},  # FR-DEPLOY-13 (SRV-OBS FR-OBS-9): X-Reader-Site app
         "/api/*": {"10.230.1.10:8000"},
         "/mcp": {"mcp:8001"},
     }

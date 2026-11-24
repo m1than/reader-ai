@@ -14,6 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from reader.jobs.model import JobKind
+from reader.obs import feedback, prompts
 
 KIND: Final = "obs.retention"
 MLFLOW: Final = "http://mlflow:5000"
@@ -106,6 +107,14 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
         )
     if conn is not None:
         await prune_starts(conn, now - timedelta(days=settings.retention_days))
+    # FR-OBS-15: the daily run also enqueues the prompt registration (enqueue-only, never raises), so a worker
+    # that runs for days retries a dead key and registers changed templates.
+    try:
+        jobs = running()
+    except Exception:
+        logging.getLogger("reader.obs").warning("obs prompts not enqueued")
+        return
+    await prompts.on_worker_start(jobs, now)
 
 
 # FR-OBS-10: worker starts older than retention decide nothing any more, except the latest of them, which
@@ -151,10 +160,15 @@ async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
     if engine is not None:
         await record_start(engine, obs_setup.current_settings().enabled)
     today = (now or datetime.now(UTC)).date().isoformat()
-    await jobs.enqueue(KIND, {"day": today})
+    try:
+        await jobs.enqueue(KIND, {"day": today})
+    finally:
+        await prompts.on_worker_start(jobs, now)  # FR-OBS-15: enqueue-only, never raises
 
 
 JOB_KINDS: Final = (
+    feedback.KIND_DECL,
+    prompts.KIND_DECL,
     JobKind(
         name=KIND,
         queue="obs",

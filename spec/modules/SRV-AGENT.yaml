@@ -320,7 +320,17 @@ requirements:
       else; its four content flags stay `0`, which keeps the search query, the result titles and URLs and the
       nested model's summary out of the CLI's `claude_code.tool*` spans (measured zero-credit in
       spikes/web-search-otel: only `OTEL_LOG_TOOL_CONTENT=1` puts them, as a `tool.output` event; SRV-FRESH
-      FR-FRESH-13). [unit, db] server/tests/agent/test_obs_env.py.
+      FR-FRESH-13). [unit, db] server/tests/agent/test_obs_env.py. Amended by SRV-OBS V.obs-analytics (FR-OBS-12 b-d; 2026-11-24, reviewed in
+      SRV-OBS's design rounds 1-3 and its code review): the span also carries `gen_ai.operation.name: invoke_agent`,
+      `gen_ai.provider.name: anthropic` and, when the call has them, `reader.lesson.id`, `reader.course.id` and
+      `reader.step`; `StageCall` gains only `course_id: UUID | None = None` and `step: int | None = None` (no separate
+      context object). The tokens use the GenAI semconv keys: `gen_ai.usage.input_tokens` = input + cache read +
+      cache write (5m + 1h), `gen_ai.usage.output_tokens`, `gen_ai.usage.cache_read.input_tokens`,
+      `gen_ai.usage.cache_write.input_tokens`. The settled amount is quantized once with `pricing.micro` (6 places,
+      ROUND_HALF_UP) and that value goes to both `ledger.settle` and the span (code review round 1). With it the span
+      also sets `reader.cost_input_usd`: the input share by pricing.yaml's rates at `cost()`'s tier (FR-AGENT-17) for
+      the settle row's token columns, each cache write at its own TTL's rate, the search fee on the output side,
+      rounded half-up to 6 places (SRV-OBS FR-OBS-12 c); 0 when no usage was mapped.
   - id: FR-AGENT-15
     text: >-
       Task-scoped tool allowance with pinned shapes (ADR-0030 Decision 1; VEC-AGENT-3). `POST /run-tokens` takes an

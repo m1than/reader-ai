@@ -25,7 +25,8 @@ def anyio_backend() -> str:
 
 def test_kind_declaration() -> None:
     jobs = require("reader.obs.jobs")
-    (kind,) = jobs.JOB_KINDS
+    assert [k.name for k in jobs.JOB_KINDS] == ["obs.feedback", "obs.prompts", "obs.retention"]  # FR-OBS-14, -15
+    kind = jobs.JOB_KINDS[-1]
     assert kind.name == "obs.retention"
     assert kind.key == ("day",)
     assert kind.max_attempts == 3
@@ -211,7 +212,14 @@ async def test_on_worker_start_enqueues_today() -> None:
     log: list[str] = []
     fake = FakeJobs(log)
     await jobs.on_worker_start(fake, now=NOW)
-    assert fake.calls == [("obs.retention", {"day": "2026-11-24"}, 0)]
+    # FR-OBS-15: the start hook also enqueues the prompt registration, keyed by the templates and the start day.
+    from reader.obs import prompts
+    from reader.obs.export import reader_version
+
+    assert fake.calls == [
+        ("obs.retention", {"day": "2026-11-24"}, 0),
+        ("obs.prompts", {"version": reader_version(), "digest": prompts.digest("2026-11-24")}, 0),
+    ]
 
 
 @pytest.mark.parametrize(("enabled", "days"), [(True, 7), (False, 365)])
@@ -241,3 +249,9 @@ async def test_handle_takes_the_current_settings(
         days,
         queue,
     )
+    # FR-OBS-15 (code review round 2): the daily run also enqueues the prompt registration with today's digest.
+    from reader.obs import prompts
+
+    (enqueued,) = [c for c in queue.calls if c[0] == "obs.prompts"]
+    today = datetime.now(UTC).date().isoformat()
+    assert enqueued[1]["digest"] == prompts.digest(today)

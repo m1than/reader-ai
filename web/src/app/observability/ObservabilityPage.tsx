@@ -1,24 +1,33 @@
-// WEB-UI FR-UI-18 (SRV-OBS FR-OBS-10): the owner's observability page. Four views of the last 7 days from
-// GET /api/obs/summary: compile runs, tutor latency and cost, failures, ingest throughput. Every trace id links to
-// the traces dashboard on https://localhost:8443 (owner only, behind the gate). Values render as text only.
+// WEB-UI FR-UI-18 (SRV-OBS FR-OBS-10, -16, -17, -19): the owner's observability page. Five views of the last 7
+// days from GET /api/obs/summary: compile runs, tutor latency and cost, failures, ingest throughput and cost per
+// lesson. Every trace id links to the traces dashboard on https://localhost:8443 and to Jaeger on
+// https://localhost:8444 (owner only, behind the gate); the saved dashboard views are listed. Values render as text.
 import { Button } from '@acme/ui/button';
 import { useQuery } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { WarningIcon } from '../../ui/icons';
 import { StateBlock } from '../../ui/StateBlock';
 import { useServices } from '../context';
-import { OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, type ObsSummary } from './api';
+import { DASHBOARDS, jaegerUrl, OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, type ObsSummary } from './api';
 
 const MORE = 'More rows may exist.';
 // FR-UI-18: the server gives no trace id when no trace can exist (before tracing, tracing off, past retention).
 const NO_TRACE = 'no trace';
+// SRV-OBS FR-OBS-19: Jaeger keeps only the newest traces in memory, so its link may lead nowhere.
+const JAEGER_TITLE =
+  'Jaeger keeps the newest 450 traces and starts empty after a restart; an older trace may have rotated out';
 
 function TraceLink({ id }: { id: string | null }) {
   if (!id) return <span className="muted">{NO_TRACE}</span>;
   return (
-    <a href={traceUrl(id)} target="_blank" rel="noopener noreferrer">
-      Trace
-    </a>
+    <span className="obs-trace">
+      <a href={traceUrl(id)} target="_blank" rel="noopener noreferrer">
+        Trace
+      </a>{' '}
+      <a href={jaegerUrl(id)} target="_blank" rel="noopener noreferrer" title={JAEGER_TITLE}>
+        Jaeger (recent traces only)
+      </a>
+    </span>
   );
 }
 
@@ -199,6 +208,111 @@ function IngestView({ ingest }: { ingest: ObsSummary['ingest'] }) {
   );
 }
 
+type LessonRow = ObsSummary['lessons']['rows'][number];
+type SortKey = 'title' | 'course_title' | 'compile_usd' | 'runs' | 'last_compile_usd' | 'tutor_usd' | 'total_usd' | 'usd_per_1k_chars';
+const LESSON_COLUMNS: ReadonlyArray<{ key: SortKey; label: string }> = [
+  { key: 'title', label: 'Lesson' },
+  { key: 'course_title', label: 'Course' },
+  { key: 'compile_usd', label: 'Compile USD' },
+  { key: 'runs', label: 'Runs' },
+  { key: 'last_compile_usd', label: 'Last compile USD' },
+  { key: 'tutor_usd', label: 'Tutor USD' },
+  { key: 'total_usd', label: 'Total USD' },
+  { key: 'usd_per_1k_chars', label: 'USD per 1k characters' },
+];
+
+/** Rows by `key` in `sign` order (1 up, -1 down); a missing value sorts last either way; ties by lesson id. */
+const compare = (a: LessonRow, b: LessonRow, key: SortKey, sign: number): number => {
+  const x = a[key];
+  const y = b[key];
+  if (x === y) return a.lesson_id.localeCompare(b.lesson_id);
+  if (x === null) return 1;
+  if (y === null) return -1;
+  return sign * (typeof x === 'string' ? x.localeCompare(String(y)) : x - Number(y));
+};
+
+// SRV-OBS FR-OBS-17: one row per lesson, a course total per course, sortable by every column (client-side).
+function LessonsView({ lessons }: { lessons: ObsSummary['lessons'] }) {
+  const [sort, setSort] = useState<{ key: SortKey; dir: 'ascending' | 'descending' }>({ key: 'total_usd', dir: 'descending' });
+  if (lessons.rows.length === 0) return empty('spend on lessons');
+  const sign = sort.dir === 'ascending' ? 1 : -1;
+  const rows = [...lessons.rows].sort((a, b) => compare(a, b, sort.key, sign));
+  const toggle = (key: SortKey) =>
+    setSort((s) => ({ key, dir: s.key === key && s.dir === 'descending' ? 'ascending' : 'descending' }));
+  return (
+    <>
+      <p className="muted">
+        From the ledger: failed attempts and open reserves count
+        {lessons.open_reserves > 0 ? ` (includes ${lessons.open_reserves} open reserves)` : ''}. MLflow&apos;s Cost
+        column shows each call&apos;s settled amount.
+      </p>
+      <div className="obs-scroll">
+        <table className="obs-table">
+          <caption className="visually-hidden">Cost per lesson</caption>
+          <thead>
+            <tr>
+              {LESSON_COLUMNS.map((c) => (
+                <th key={c.key} scope="col" aria-sort={sort.key === c.key ? sort.dir : undefined}>
+                  <button type="button" className="obs-sort" onClick={() => toggle(c.key)}>
+                    {c.label}
+                  </button>
+                </th>
+              ))}
+              <th scope="col">Traces</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.lesson_id}>
+                <td>{r.deleted ? <span className="muted">deleted lesson</span> : r.title}</td>
+                <td>{r.course_title}</td>
+                <td>{num(r.compile_usd)}</td>
+                <td>{r.runs}</td>
+                <td>{num(r.last_compile_usd)}</td>
+                <td>{num(r.tutor_usd)}</td>
+                <td>{num(r.total_usd)}</td>
+                <td>{num(r.usd_per_1k_chars)}</td>
+                <td>
+                  <a href={r.mlflow_url} target="_blank" rel="noopener noreferrer">
+                    Traces
+                  </a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <h3>Course totals</h3>
+      <Table caption="Cost per course" head={['Course', 'Compile USD', 'Tutor USD', 'Total USD', 'USD per 1k characters']}>
+        {lessons.courses.map((c) => (
+          <tr key={c.course_id}>
+            <td>{c.title}</td>
+            <td>{num(c.compile_usd)}</td>
+            <td>{num(c.tutor_usd)}</td>
+            <td>{num(c.total_usd)}</td>
+            <td>{num(c.usd_per_1k_chars)}</td>
+          </tr>
+        ))}
+      </Table>
+      {lessons.truncated ? <p className="muted">{MORE}</p> : null}
+    </>
+  );
+}
+
+function Dashboards() {
+  return (
+    <ul className="obs-dashboards">
+      {DASHBOARDS.map((d) => (
+        <li key={d.href}>
+          <a href={d.href} target="_blank" rel="noopener noreferrer">
+            {d.label}
+          </a>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function ObservabilityPage() {
   const { obs } = useServices();
   const q = useQuery({
@@ -244,6 +358,12 @@ export function ObservabilityPage() {
           </Section>
           <Section id="obs-ingest" title="Ingest">
             <IngestView ingest={q.data.ingest} />
+          </Section>
+          <Section id="obs-lessons" title="Cost per lesson">
+            <LessonsView lessons={q.data.lessons} />
+          </Section>
+          <Section id="obs-dashboards" title="Dashboards">
+            <Dashboards />
           </Section>
         </>
       )}

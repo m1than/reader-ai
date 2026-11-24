@@ -877,7 +877,9 @@ requirements:
       The step uses two `signup/options` calls of the global limit per run.
   - id: FR-AUTH-33
     text: >-
-      Observability wiring (paired SRV-OBS change, ADR-0032 accepted 2026-11-24). (a) ROUTERS gains
+      Observability wiring (paired SRV-OBS change, ADR-0032 accepted 2026-11-24; amended by SRV-OBS FR-OBS-19,
+      ADR-0033 accepted 2026-11-24: the Caddyfile's CSPs are the app's, the 8443 dashboard's and the 8444 Jaeger
+      site's, in that order, and the gate reads `X-Reader-Site`, which Caddy sets). (a) ROUTERS gains
       `reader.obs.routes` (GET /api/obs/gate, GET /api/obs/summary; SRV-OBS FR-OBS-9, -10). (b) `create_app` installs
       SRV-OBS's `TraceMiddleware` outermost (outside the CSRF gate), given the route templates of ROUTES and WS_ROUTES.
       (c) `reader-server --role api|worker` calls `reader.obs.setup(role, config)` after loading the configuration and

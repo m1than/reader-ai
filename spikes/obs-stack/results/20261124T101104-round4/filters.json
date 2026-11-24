@@ -1,0 +1,27 @@
+{
+ "dashboard_links": [],
+ "ui_filter": {
+  "buttons": [
+   "Got it"
+  ],
+  "steps": [
+   "filters button: 0"
+  ]
+ },
+ "candidates": {
+  "filter state::=::ERROR": 8,
+  "filter state::EQUALS::ERROR": 8,
+  "filter state::==::ERROR": 8,
+  "filter STATE::=::ERROR": 8,
+  "filter status::=::ERROR": 8,
+  "filter tag::=::dead::reader.job.outcome": 8,
+  "filter TAG::reader.job.outcome::=::dead": 8,
+  "filters state::=::ERROR": 8,
+  "filters state::EQUALS::ERROR": 8,
+  "filters state::==::ERROR": 8,
+  "filters STATE::=::ERROR": 8,
+  "filters status::=::ERROR": 8,
+  "filters tag::=::dead::reader.job.outcome": 8,
+  "filters TAG::reader.job.outcome::=::dead": 8
+ }
+}

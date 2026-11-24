@@ -1,0 +1,132 @@
+{
+ "phase": "gate",
+ "catalog": "",
+ "rows": [
+  {
+   "site": "mlflow",
+   "origin": "http://localhost:8446",
+   "client_x_reader_site": null,
+   "status": 404,
+   "passed_gate": true
+  },
+  {
+   "site": "mlflow",
+   "origin": "http://localhost:8446",
+   "client_x_reader_site": "mlflow",
+   "status": 404,
+   "passed_gate": true
+  },
+  {
+   "site": "mlflow",
+   "origin": "http://localhost:8446",
+   "client_x_reader_site": "jaeger",
+   "status": 404,
+   "passed_gate": true
+  },
+  {
+   "site": "mlflow",
+   "origin": "http://localhost:8448",
+   "client_x_reader_site": null,
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "mlflow",
+   "origin": "http://localhost:8448",
+   "client_x_reader_site": "mlflow",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "mlflow",
+   "origin": "http://localhost:8448",
+   "client_x_reader_site": "jaeger",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "mlflow",
+   "origin": null,
+   "client_x_reader_site": null,
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "mlflow",
+   "origin": null,
+   "client_x_reader_site": "mlflow",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "mlflow",
+   "origin": null,
+   "client_x_reader_site": "jaeger",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "jaeger",
+   "origin": "http://localhost:8446",
+   "client_x_reader_site": null,
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "jaeger",
+   "origin": "http://localhost:8446",
+   "client_x_reader_site": "mlflow",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "jaeger",
+   "origin": "http://localhost:8446",
+   "client_x_reader_site": "jaeger",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "jaeger",
+   "origin": "http://localhost:8448",
+   "client_x_reader_site": null,
+   "status": 200,
+   "passed_gate": true
+  },
+  {
+   "site": "jaeger",
+   "origin": "http://localhost:8448",
+   "client_x_reader_site": "mlflow",
+   "status": 200,
+   "passed_gate": true
+  },
+  {
+   "site": "jaeger",
+   "origin": "http://localhost:8448",
+   "client_x_reader_site": "jaeger",
+   "status": 200,
+   "passed_gate": true
+  },
+  {
+   "site": "jaeger",
+   "origin": null,
+   "client_x_reader_site": null,
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "jaeger",
+   "origin": null,
+   "client_x_reader_site": "mlflow",
+   "status": 403,
+   "passed_gate": false
+  },
+  {
+   "site": "jaeger",
+   "origin": null,
+   "client_x_reader_site": "jaeger",
+   "status": 403,
+   "passed_gate": false
+  }
+ ]
+}

@@ -84,8 +84,11 @@ async def _gate(
 
     app = create_app(settings, engine, run_cleanup_task=False)
     jar = {"__Host-reader_session": cookie} if cookie else {}
+    # SRV-OBS FR-OBS-9: Caddy names the site on every gate request; the 8443 site unless a test says otherwise
+    # (an empty value sends no header).
+    sent = {k: v for k, v in {"X-Reader-Site": "mlflow", **headers}.items() if v}
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN, cookies=jar) as c:
-        return await c.get(f"/api/obs/gate?{query}", headers=headers)
+        return await c.get(f"/api/obs/gate?{query}", headers=sent)
 
 
 async def test_gate_on_real_sessions(pg: Pg, tmp_path: Path) -> None:
@@ -115,6 +118,15 @@ async def test_gate_on_real_sessions(pg: Pg, tmp_path: Path) -> None:
         for origin in ("HTTPS://LOCALHOST:8443", "https://localhost:8443/"):
             refused = await _gate(settings, engine, owner, Origin=origin, **post)
             assert refused.status_code == 403, origin
+        # Per site (SRV-OBS FR-OBS-9, -19): no site header is refused; each site accepts only its own origin.
+        site = "X-Reader-Site"
+        assert (await _gate(settings, engine, owner, **{site: ""})).status_code == 403
+        jaeger = {site: "jaeger", "Origin": "https://localhost:8444", **post}
+        assert (await _gate(settings, engine, owner, **jaeger)).status_code == 204
+        assert (await _gate(settings, engine, owner, **{**jaeger, "Origin": DASH})).status_code == 403
+        wrong = await _gate(settings, engine, owner, Origin="https://localhost:8444", **post)  # site mlflow
+        assert wrong.status_code == 403
+        assert (await _gate(settings, engine, owner, **{site: "app"})).status_code == 204
     finally:
         await engine.dispose()
 
@@ -169,7 +181,8 @@ async def test_summary_route_is_owner_only(pg: Pg, tmp_path: Path) -> None:
             cookies={"__Host-reader_session": cookies["ivan"]},
         ) as c:
             body = (await c.get("/api/obs/summary?days=7")).json()
-            assert set(body) == {"days", "compile_runs", "tutor", "failures", "ingest"}
+            # FR-OBS-17 adds `lessons`
+            assert set(body) == {"days", "compile_runs", "tutor", "failures", "ingest", "lessons"}
             for bad in ("0", "91", "x", "²", "٣", "007", "-1", "+5", " 7", "7 ", ""):  # "²": round 1, a 500
                 assert (await c.get(f"/api/obs/summary?days={bad}")).status_code == 400
     finally:
