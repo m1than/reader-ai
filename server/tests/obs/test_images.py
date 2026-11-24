@@ -287,8 +287,11 @@ def _backend(prefix: str, mlflow_image: str, jaeger_memory: str = "256m") -> Non
         "/var/lib/mlflow/artifacts",
         "--default-artifact-root",
         "mlflow-artifacts:/",
+        "--serve-artifacts",  # FR-OBS-27: the compose command exactly
         "--allowed-hosts",
         "localhost:8443,mlflow:5000,mlflow",
+        "--x-frame-options",
+        "DENY",
         nets=("obs",),
         opts=(
             "--user",
@@ -300,6 +303,12 @@ def _backend(prefix: str, mlflow_image: str, jaeger_memory: str = "256m") -> Non
             "MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false",
             "-e",
             "MLFLOW_DISABLE_TELEMETRY=true",
+            "-e",
+            "DO_NOT_TRACK=true",
+            "-e",
+            "MLFLOW_ENABLE_AI_GATEWAY=false",
+            "-e",
+            "MLFLOW_ENABLE_REMOTE_ASSISTANT=false",
             "-e",
             "MLFLOW_MODEL_CATALOG_URI=",  # FR-OBS-12 (c)
             "-v",

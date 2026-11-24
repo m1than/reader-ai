@@ -1,0 +1,39 @@
+# The declarative MLflow bootstrap (SRV-OBS FR-OBS-26, VEC-OBS-6; spec/fixtures/SRV-OBS/mlflow-setup.yaml is the
+# vector and must stay equal). Mounted read-only into the worker, whose `obs.setup` job (and the inline
+# `ensure_setup()`) compares MLflow's state with this file and writes only the difference: a re-run on the same day
+# makes 0 writes. It is the only source of MLflow's experiments, their descriptions and tags, the dataset names, the
+# LoggedModel naming and the Run tag keys; nothing is created by hand in the UI.
+version: 1
+experiments:
+  - id: "0"                 # MLflow's Default: OTLP sends every trace here (Rotel's x-mlflow-experiment-id=0)
+    name: reader            # renamed from Default by obs.setup (experiments/update)
+    description: "reader-ai traces, compile and import Runs, owner label mirrors (SRV-OBS)"
+    tags:
+      mlflow.note.content: "reader-ai traces, compile and import Runs, owner label mirrors (SRV-OBS)"
+      reader.kind: traces
+      reader.managed_by: obs.setup
+  - name: bench
+    description: "Bench datasets and evaluation Runs from owner uploads (SRV-OBS FR-OBS-22, -23)"
+    tags:
+      mlflow.note.content: "Bench datasets and evaluation Runs from owner uploads (SRV-OBS FR-OBS-22, -23)"
+      reader.kind: bench
+      reader.managed_by: obs.setup
+datasets:                   # created by obs.bench from a pinned set, in experiment `bench` (VEC-OBS-5 bench_sets)
+  names: [tutor-bench-v2, search-bench-v1]
+logged_models:
+  name: reader-agent        # one per version key (FR-OBS-21), experiment "0"
+  tag: reader.version_key
+  last_started_tag: reader.last_started   # the UTC start day, for retention's "used" (FR-OBS-31)
+  params: [prompt_set_sha256, stage_models, pipeline_config_sha256]
+# The trace tag keys are VEC-OBS-4's `trace_tags` only (not restated here).
+run_tags:                   # VEC-OBS-5 runs.*.tags
+  - reader.kind
+  - reader.run_id
+  - reader.ingest_id
+  - reader.material_sha256
+  - reader.outcome
+  - reader.ends
+  - reader.snapshot_at
+  - reader.complete
+  - reader.bench
+  - reader.bench_upload

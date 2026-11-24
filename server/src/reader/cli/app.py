@@ -19,7 +19,7 @@ from reader.cli.commands import (
     cmd_watcher_status,
     cmd_watcher_stop,
 )
-from reader.cli.maintenance import cmd_backup, cmd_doctor, cmd_restore, cmd_trust
+from reader.cli.maintenance import cmd_backup, cmd_doctor, cmd_restore, cmd_restore_obs_premigrate, cmd_trust
 from reader.cli.resolve import macos_keyring
 from reader.cli.runner import PosixSpawner, SubprocessRunner, safe_env
 
@@ -57,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     backup.add_argument("dir", type=Path)
     restore = commands.add_parser("restore", parents=[common], help="restore onto a fresh stack")
     restore.add_argument("dir", type=Path)
+    premigrate = commands.add_parser(
+        "restore-obs-premigrate", parents=[common],
+        help="put MLflow's pre-migration backup back after a failed migration (stack down)",
+    )
+    premigrate.add_argument(
+        "--force", action="store_true", help="restore although no migration is in progress"
+    )
     return parser
 
 
@@ -120,4 +127,6 @@ def main(argv: Sequence[str] | None = None, ctx: Ctx | None = None) -> int:
             return cmd_backup(ctx, args.config, args.dir)
         case "restore":
             return cmd_restore(ctx, args.config, args.dir)
+        case "restore-obs-premigrate":
+            return cmd_restore_obs_premigrate(ctx, args.config, args.force)
     return 2

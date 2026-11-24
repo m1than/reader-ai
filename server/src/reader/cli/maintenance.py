@@ -6,17 +6,20 @@ import os
 import plistlib
 import re
 import ssl
+import tempfile
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Final
 
+from reader.cli import obs_store
 from reader.cli.commands import (
     JAEGER_URL,
     TRACES_URL,
     Ctx,
     Project,
+    _obs_run,
     choose_profiles,
     docker,
     ensure_run_dir,
@@ -272,13 +275,78 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     else:
         check("observability", True, "off")
         check("jaeger", True, "off")
+    obs_on = project is not None and config.observability.enabled
+    obs_lines = obs_doctor_lines(ctx, project.model) if project is not None and obs_on else []
     ok = all(c["ok"] for c in checks)
     if as_json:
         print(json.dumps(checks), file=ctx.out)
     else:
         for c in checks:
             print(f"{'ok  ' if c['ok'] else 'FAIL'} {c['name']}: {c['detail']}".rstrip(": "), file=ctx.out)
+        for line in obs_lines:  # FR-CLI-24: the observability stack's own state
+            print(line, file=ctx.out)
     return 0 if ok else 1
+
+
+LAST_JOBS_SQL: Final = (  # a constant: nothing user-supplied enters the query
+    "SELECT kind || '=' || to_char(max(finished_at) AT TIME ZONE 'UTC', "
+    "'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') FROM job_keys WHERE kind IN ('obs.retention', 'obs.setup') "
+    "AND outcome = 'succeeded' GROUP BY kind"
+)
+_DATA: Final = obs_store.DATA
+STORE_FACTS: Final = (
+    f"test -f {_DATA}/mlflow.db || exit 0; python -c \"import sqlite3, os; "  # noqa: S608 (a shell constant)
+    f"c = sqlite3.connect('file:{_DATA}/mlflow.db?mode=ro', uri=True); "
+    "print(c.execute('pragma journal_mode').fetchone()[0]); "
+    "print(c.execute('select version_num from alembic_version').fetchone()[0]); "
+    f"print('fresh' if not os.path.exists('{_DATA}/backup/pre-migrate.db') else 'migrated')\""
+)
+
+
+def obs_doctor_lines(ctx: Ctx, model: Rendered) -> list[str]:
+    """FR-CLI-24: one line each for mlflow, rotel and jaeger from `docker inspect`, the store's size from
+    `docker system df -v` (host side, no worker mount), its journal mode, and the obs jobs' last runs."""
+    names = [f"{model.name}-{m}-1" for m in obs_store.MEMBERS if m in model.services]
+    inspected = docker(ctx, "docker", "inspect", *names) if names else None
+    try:
+        inspect = json.loads(inspected.out) if inspected is not None and inspected.code == 0 else []
+    except ValueError:
+        inspect = []
+    df = docker(ctx, "docker", "system", "df", "-v", "--format", "json")
+    df_text = df.out.decode("utf-8", "replace") if df is not None and df.code == 0 else "{}"
+    journal, fresh = None, None
+    volume = _obs_volume(ctx, model)
+    if volume is not None:
+        code, out = _obs_run(ctx)(obs_store.one_off(model.image("mlflow"), volume, STORE_FACTS), 60.0)
+        facts = out.strip().splitlines()[-3:] if code == 0 else []
+        if len(facts) == 3:
+            journal, revision, state = facts
+            fresh = obs_store.fresh_line(revision) if state == "fresh" else None
+    jobs = docker(ctx, *_psql(model.name, LAST_JOBS_SQL))
+    last: dict[str, str] = {}
+    if jobs is not None and jobs.code == 0:
+        for row in jobs.out.decode("utf-8", "replace").splitlines():
+            kind, _, when = row.partition("=")
+            if kind in obs_store.TRACKED_JOBS and when:
+                last[kind] = when
+    lines = obs_store.doctor_lines(inspect=inspect, df=df_text, journal_mode=journal, last_jobs=last)
+    return [*lines, fresh] if fresh else lines
+
+
+@guarded
+def cmd_restore_obs_premigrate(ctx: Ctx, config_path: Path, force: bool) -> int:
+    """FR-CLI-24 / SRV-OBS FR-OBS-29: put the pre-migration backup back after a failed migration (stack down).
+    Exit codes 0..6 (obs_store.PREMIGRATE_CODES)."""
+    project = load(ctx, config_path)
+    model = project.model
+    volume = _obs_volume(ctx, model)
+    if volume is None:
+        print("error: there is no MLflow store volume", file=ctx.err)
+        return obs_store.PREMIGRATE_CODES["no_backup"]
+    code, out = obs_store.restore_premigrate(volume=volume, image=model.image("mlflow"), force=force,
+                                             run=_obs_run(ctx))
+    print(out.strip(), file=ctx.out if code == 0 else ctx.err)
+    return code
 
 
 def _doctor_secrets(ctx: Ctx, project: Project, check: Any) -> None:
@@ -325,14 +393,74 @@ def _doctor_stack(ctx: Ctx, model: Rendered, check: Any) -> None:
 # Backup and restore (FR-CLI-17, FR-CLI-18) ----------------------------------------------------------------
 
 
+OBS_VOLUME: Final = "obs_mlflow"  # backed up through SQLite's backup API, never as a tar (SRV-OBS FR-OBS-30)
+OBS_FILES: Final = ("obs_mlflow.db", "obs_mlflow.artifacts.tar", "obs_mlflow.store.version")
+
+
 def backup_volumes(model: Rendered) -> list[str]:
-    """Volumes labelled include, except pgdata (dumped with pg_dump)."""
+    """Volumes labelled include and tarred, except pgdata (dumped with pg_dump) and obs_mlflow (FR-OBS-30)."""
     keys: list[str] = []
     for key, body in sorted(model.volumes.items()):
         labels = body.get("labels") if isinstance(body, dict) else None
-        if key != "pgdata" and isinstance(labels, dict) and labels.get(BACKUP_LABEL) == "include":
+        included = isinstance(labels, dict) and labels.get(BACKUP_LABEL) == "include"
+        if key not in ("pgdata", OBS_VOLUME) and included:
             keys.append(key)
     return keys
+
+
+def _obs_volume(ctx: Ctx, model: Rendered) -> str | None:
+    """The obs_mlflow volume's name when the model and Docker have it (the profile may never have run)."""
+    if OBS_VOLUME not in model.volumes or "mlflow" not in model.services:
+        return None
+    name = _volume_name(model, OBS_VOLUME)
+    found = docker(ctx, "docker", "volume", "inspect", name)
+    return name if found is not None and found.code == 0 else None
+
+
+def _obs_backup(ctx: Ctx, model: Rendered) -> dict[str, bytes]:
+    """FR-OBS-30: the store through the backup API, the artifacts, and store.version beside them."""
+    volume = _obs_volume(ctx, model)
+    if volume is None:
+        return {}
+    with tempfile.TemporaryDirectory(prefix="reader-obs-backup-") as tmp:
+        try:
+            obs_store.backup(
+                volume=volume, image=model.image("mlflow"), directory=Path(tmp), run=_obs_run(ctx)
+            )
+        except RuntimeError as error:
+            raise CliError("backup_failed", "the MLflow store backup failed") from error
+        return {n: (Path(tmp) / n).read_bytes() for n in OBS_FILES if (Path(tmp) / n).is_file()}
+
+
+def _migrate_once(ctx: Ctx, model: Rendered) -> None:
+    """After a restore, mlflow-migrate runs before mlflow starts again (FR-OBS-29, -30)."""
+    container = f"{model.name}-mlflow-migrate-1"
+    started = docker(ctx, "docker", "start", container)
+    if started is None or started.code != 0:
+        return  # never created (the profile has not run since): the next `reader up` runs it
+    waited = docker(ctx, "docker", "wait", container, timeout=ONE_OFF_TIMEOUT * 5)
+    code = waited.out.decode().strip() if waited is not None and waited.code == 0 else ""
+    if code != "0":
+        exit_code = int(code) if code.isdigit() else -1
+        raise CliError("restore_failed", obs_store.migrate_message(exit_code))
+
+
+def _obs_restore(ctx: Ctx, model: Rendered, files: dict[str, bytes]) -> None:
+    """FR-OBS-30, stack down: store.version and the markers first, the file through the backup API,
+    store.version from the backup; mlflow-migrate then runs before mlflow starts."""
+    volume = _obs_volume(ctx, model)
+    if volume is None or "obs_mlflow.db" not in files:
+        return
+    with tempfile.TemporaryDirectory(prefix="reader-obs-restore-") as tmp:
+        for name in OBS_FILES:
+            if name in files:
+                (Path(tmp) / name).write_bytes(files[name])
+        try:
+            obs_store.restore(
+                directory=Path(tmp), volume=volume, image=model.image("mlflow"), run=_obs_run(ctx)
+            )
+        except RuntimeError as error:
+            raise CliError("restore_failed", "the MLflow store restore failed") from error
 
 
 def _volume_name(model: Rendered, key: str) -> str:
@@ -437,6 +565,7 @@ def cmd_backup(ctx: Ctx, config_path: Path, directory: Path) -> int:
                 failed,
                 ONE_OFF_TIMEOUT,
             )
+        files.update(_obs_backup(ctx, model))  # SRV-OBS FR-OBS-30: online, through SQLite's backup API
         version_sql = _psql(model.name, "SHOW server_version")
         server = _capture(ctx, version_sql, "postgres version", failed, ONE_OFF_TIMEOUT).decode().strip()
     finally:
@@ -504,7 +633,8 @@ def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
         )
         if _capture(ctx, empty_check, "blobs check", failed, ONE_OFF_TIMEOUT).strip():
             raise CliError("blobs_not_empty", "the blobs volume is not empty")
-    stopped = [s for s in (*WRITERS, "caddy") if s in model.services]
+    obs = "obs_mlflow.db" in files and _obs_volume(ctx, model) is not None
+    stopped = [s for s in (*WRITERS, "caddy", *(("mlflow",) if obs else ())) if s in model.services]
     try:
         _services(ctx, model.name, "stop", stopped)
         _capture(
@@ -526,6 +656,9 @@ def cmd_restore(ctx: Ctx, config_path: Path, directory: Path) -> int:
                 ONE_OFF_TIMEOUT,
                 stdin=files[f"{key}.tar"],
             )
+        if obs:
+            _obs_restore(ctx, model, files)
+            _migrate_once(ctx, model)
     finally:
         _services(ctx, model.name, "start", stopped)
     print(f"restored from {source}", file=ctx.out)

@@ -65,6 +65,12 @@ localhost:8443 {
 
 	request_header -X-Reader-Site
 
+	# SRV-OBS FR-OBS-27: MLflow UI writes are small JSON bodies; no artifact upload goes through the edge.
+	# Structural, not measured.
+	request_body {
+		max_size 10MiB
+	}
+
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self'"

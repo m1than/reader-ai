@@ -988,7 +988,8 @@ requirements:
       edge), not measured. `--allowed-hosts` (round 10): a foreign Host gets 403 on the API and 200 only on /health, which 3.18.0
       exempts. CORS preflight (round 10): 400 with `Access-Control-Allow-Methods` and `-Allow-Credentials` but no
       `-Allow-Origin`; the edge strips every `Access-Control-*` header downstream (FR-OBS-9), so none reaches a
-      browser.
+      browser. The obs [image] tests start MLflow with exactly this command and environment (tests/obs/
+      test_images.py `_backend`), so the image tests check the shipped flags.
   - id: FR-OBS-28
     text: >-
       Backend store: SQLite stays, in WAL mode, decided by measurement (round 9). Under 8 concurrent writers (the

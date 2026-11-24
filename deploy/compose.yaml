@@ -99,7 +99,9 @@ services:
     memswap_limit: 2g
     volumes:
       - blobs:/var/lib/reader/blobs
-    # otel: spans to rotel; obs: the retention job's delete calls to mlflow (FR-DEPLOY-13, ADR-0032)
+      # SRV-OBS FR-OBS-26 (OPS-DEPLOY FR-DEPLOY-15): the declarative MLflow bootstrap, read by obs.setup
+      - ./otel/mlflow-setup.yaml:/etc/reader/mlflow-setup.yaml:ro
+    # otel: spans to rotel; obs: the worker's MLflow writes (retention, ADR-0035, ADR-0038) (FR-DEPLOY-13)
     networks: [core, agentnet, sb-verify, sb-agent, embed, otel, obs]
     healthcheck:
       <<: *health
@@ -226,21 +228,53 @@ services:
       <<: *health
       test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4318"]
 
+  # SRV-OBS FR-OBS-29 (OPS-DEPLOY FR-DEPLOY-15): the one-shot that migrates MLflow's SQLite store before the server
+  # starts (flock, one pre-migration backup, `mlflow db upgrade`, WAL, store.version; exit codes 10..13). Same image,
+  # volume and hardening as mlflow, and no network at all.
+  mlflow-migrate:
+    image: reader-mlflow:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: deploy/otel/mlflow.Dockerfile
+    profiles: [observability]
+    entrypoint: [sh, /opt/reader/mlflow-migrate.sh]
+    user: "10004:10004"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=10004
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    network_mode: none
+    volumes:
+      - obs_mlflow:/var/lib/mlflow
+      - ./otel/mlflow-migrate.sh:/opt/reader/mlflow-migrate.sh:ro
+
   mlflow:
-    # MLflow 3.18.0 minimal (spikes/trace-backend): one worker, the job runner off, SQLite on its own volume.
+    # MLflow 3.18.0 (SRV-OBS FR-OBS-27): every flag and variable pinned, each with its source. One uvicorn worker:
+    # SQLite has one writer (spikes/obs-stack round 9: 8 concurrent writers, 0 errors in WAL mode). Artifacts are
+    # served through the server; no CORS origin is allowed (no --cors-allowed-origins); the edge also sends
+    # frame-ancestors 'none'. No --static-prefix (8443 is MLflow's own origin), no --dev, no --expose-prometheus.
     image: reader-mlflow:local
     pull_policy: build
     build:
       context: ..   # the context is empty: deploy/otel/mlflow.Dockerfile.dockerignore excludes everything
       dockerfile: deploy/otel/mlflow.Dockerfile
     profiles: [observability]
+    depends_on:
+      mlflow-migrate:
+        condition: service_completed_successfully   # FR-OBS-29: the server never migrates the store itself
     command: [mlflow, server, --host, 0.0.0.0, --port, "5000", --workers, "1",
               --backend-store-uri, "sqlite:////var/lib/mlflow/mlflow.db",
               --artifacts-destination, /var/lib/mlflow/artifacts, --default-artifact-root, "mlflow-artifacts:/",
-              --allowed-hosts, "localhost:8443,mlflow:5000,mlflow"]
+              --serve-artifacts, --allowed-hosts, "localhost:8443,mlflow:5000,mlflow", --x-frame-options, DENY]
     environment:
-      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
-      MLFLOW_DISABLE_TELEMETRY: "true"
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"   # no job runner (mlflow/environment_variables.py)
+      MLFLOW_DISABLE_TELEMETRY: "true"   # 3.18.0 is_telemetry_disabled() reads both of these
+      DO_NOT_TRACK: "true"
+      MLFLOW_ENABLE_AI_GATEWAY: "false"   # default true in 3.18.0; off answers 501 (spike round 9)
+      MLFLOW_ENABLE_REMOTE_ASSISTANT: "false"   # its default, pinned
       MLFLOW_MODEL_CATALOG_URI: ""   # SRV-OBS FR-OBS-12 (c): no remote price fetch; the image's catalog is all zeros
     user: "10004:10004"
     read_only: true
@@ -307,4 +341,6 @@ volumes:
   blobs: { labels: { org.reader-ai.backup: include } }
   caddy_data: { labels: { org.reader-ai.backup: exclude } }
   caddy_config: { labels: { org.reader-ai.backup: include } }
-  obs_mlflow: { labels: { org.reader-ai.backup: exclude } }   # traces are diagnostic (ADR-0032)
+  # ADR-0038 Decision 6 replaces ADR-0032's exclusion: Runs, datasets and versions are backed up now, always
+  # through SQLite's backup API (SRV-OBS FR-OBS-30), never as a tar of the live files.
+  obs_mlflow: { labels: { org.reader-ai.backup: include } }

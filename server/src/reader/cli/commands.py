@@ -252,14 +252,19 @@ def ps(ctx: Ctx, project: str) -> list[dict[str, Any]] | None:
     return [row for row in rows if isinstance(row, dict)]
 
 
+# One-shot services that exit 0 when done (SRV-OBS FR-OBS-29's mlflow-migrate): never expected to be running.
+ONE_SHOT_SERVICES: Final = frozenset({"mlflow-migrate"})
+
+
 def status_code(services: Sequence[Mapping[str, Any]], expected: Collection[str], watcher: bool) -> int:
     """Bit 1: a default-profile service is not running or not healthy. Bit 2: the watcher is stopped."""
     state = {str(s.get("Service")): s for s in services}
-    unhealthy = not expected or any(
+    wanted = [name for name in expected if name not in ONE_SHOT_SERVICES]
+    unhealthy = not wanted or any(
         name not in state
         or state[name].get("State") != "running"
         or state[name].get("Health") not in ("healthy", "", None)
-        for name in expected
+        for name in wanted
     )
     return (1 if unhealthy else 0) | (0 if watcher else 2)
 
@@ -392,6 +397,38 @@ def watcher_argv(ctx: Ctx, project: str, since: str, plan: Plan) -> list[str]:
     ]
 
 
+def _obs_run(ctx: Ctx) -> Callable[[list[str], float], tuple[int, str]]:
+    """obs_store's runner over the CLI's own (fakeable) docker calls."""
+
+    def run(argv: list[str], timeout: float) -> tuple[int, str]:
+        result = docker(ctx, *argv, timeout=timeout)
+        if result is None:
+            return 1, ""
+        return result.code, (result.out + result.err).decode("utf-8", "replace")
+
+    return run
+
+
+def _migrate_failure(ctx: Ctx, model: Rendered) -> str | None:
+    """FR-CLI-24: when mlflow-migrate exited 10..13, the message for that code (11 names the version)."""
+    from reader.cli import obs_store
+
+    run = _obs_run(ctx)
+    container = f"{model.name}-mlflow-migrate-1"
+    code, out = run(["docker", "inspect", "--format", "{{.State.ExitCode}}", container], 60.0)
+    if code != 0 or not out.strip().isdigit() or int(out.strip()) not in obs_store.MIGRATE_CODES:
+        return None
+    exit_code = int(out.strip())
+    restored_for = None
+    if exit_code == 11:
+        volume = model.volumes.get("obs_mlflow", {}).get("name")
+        if isinstance(volume, str):
+            script = f"cat {obs_store.DATA}/backup/restored-for 2>/dev/null || true"
+            code, out = run(obs_store.one_off(model.image("mlflow"), volume, script), 60.0)
+            restored_for = out.strip() or None if code == 0 else None
+    return obs_store.migrate_message(exit_code, restored_for)
+
+
 def offer_trust(ctx: Ctx, project: str) -> None:
     """FR-CLI-16: only an interactive `reader up` offers trust; agent-run (non-TTY) runs skip it."""
     if not ctx.is_tty:
@@ -451,6 +488,10 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     started = docker(ctx, *compose_argv(ctx, "up", "-d", extra=project.profiles), stdin=project.override)
     if started is None or started.code != 0:
         process.terminate()
+        if "observability" in project.profiles:  # FR-CLI-24: say why mlflow-migrate stopped the stack
+            message = _migrate_failure(ctx, model)
+            if message is not None:
+                print(f"error: {message}", file=ctx.err)
         raise CliError("up_failed", "docker compose up failed; the watcher was stopped")
     if not wait_healthy(ctx, model):
         print(
