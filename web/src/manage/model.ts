@@ -69,6 +69,8 @@ export const problem = (code: string, object: ObjectKind, t: Tr = EN): Problem =
       return { text: t('notes.cell_unknown') };
     case 'last_passkey':
       return { text: t('passkey.last') };
+    case 'register_failed':
+      return { text: t('passkey.add_failed') };
     case 'user_has_data':
       return { text: t('person.has_data') };
     case 'file_narrower':

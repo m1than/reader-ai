@@ -114,7 +114,7 @@ title: Management layer — edit, reorder, archive, delete and restore courses, 
 status: approved
 approved_by: agent
 approved_at: 2026-11-24
-review: "deep-reviewer (Fable) round 1 on 840af4b: changes (16 blocking, applied in 3112546); round 2 on 3112546: changes (5 small blocking, applied in 2a7d86f); round 3 on 2a7d86f: VERDICT approve, its non-blocking items applied in 4997ec5. ADR-0036 and ADR-0037 accepted by the owner (fd9377a, 2026-11-25). Approved by agent with the Red tests on V/manage-impl. FR-MANAGE-10's runtime is WEB-UI FR-UI-30, promoted only after its own deep-reviewer round. Red (2026-11-24, V/manage-impl-web): VEC-MANAGE-1 written (spec/fixtures/WEB-MANAGE/responses.json, ids matching VEC-UI-2 so the WEB-UI test server serves both); unit tests web/src/manage/{primitives,course,lesson,sources,settings,notes}.test.tsx over a fake API (web/src/manage/testkit.ts) and e2e/web/manage/manage.spec.ts. Green (2026-11-24): web/src/manage/lesson.test.tsx waits for a row's lazy menu trigger (findByRole) instead of reading it at once (the first test raced the lazy chunk); no oracle changed. e2e/web/manage/manage.spec.ts reads WEB-PLAN's synthetic source on /import (the test server's /api/materials is shared with the plan specs). Initial chunks after Green (Vite 8 production build, zlib level 9): 120,254 B, +2,425 B against the recorded 117,829 B, within NFR-UI-1's 121,153 B. Declared deviations: the sources section is headed \"Manage your sources\" (WEB-PLAN's list on the same page is \"Your sources\"); the notes panel sits after the cells with a Notes toggle in the lesson toolbar, not as a second tab of the tutor panel; the Undo toast is an app-owned region (one host for the shell) like FR-UI-7's notices, not the library toast manager; \"Add a passkey\" is a hint (sign in on the new device with an existing passkey) until the shared ceremony script can run inside the SPA's CSP; select and switch joined FR-UI-1's list, the forms use native select and number inputs styled with tokens. Code-review fixes (2026-11-24, V/manage-fix-web): B1 FR-MANAGE-2 defines the typed-confirmation target once (NFC, the first 40 code points, then trimmed; the same sentence as SRV-LESSON FR-LESSON-25 and SRV-INGEST FR-INGEST-31) with a unit vector, and the sent `confirm` is the normalised input; web/src/manage/primitives.test.tsx gains the vector and the sent-body check."
+review: "deep-reviewer (Fable) round 1 on 840af4b: changes (16 blocking, applied in 3112546); round 2 on 3112546: changes (5 small blocking, applied in 2a7d86f); round 3 on 2a7d86f: VERDICT approve, its non-blocking items applied in 4997ec5. ADR-0036 and ADR-0037 accepted by the owner (fd9377a, 2026-11-25). Approved by agent with the Red tests on V/manage-impl. FR-MANAGE-10's runtime is WEB-UI FR-UI-30, promoted only after its own deep-reviewer round. Red (2026-11-24, V/manage-impl-web): VEC-MANAGE-1 written (spec/fixtures/WEB-MANAGE/responses.json, ids matching VEC-UI-2 so the WEB-UI test server serves both); unit tests web/src/manage/{primitives,course,lesson,sources,settings,notes}.test.tsx over a fake API (web/src/manage/testkit.ts) and e2e/web/manage/manage.spec.ts. Green (2026-11-24): web/src/manage/lesson.test.tsx waits for a row's lazy menu trigger (findByRole) instead of reading it at once (the first test raced the lazy chunk); no oracle changed. e2e/web/manage/manage.spec.ts reads WEB-PLAN's synthetic source on /import (the test server's /api/materials is shared with the plan specs). Initial chunks after Green (Vite 8 production build, zlib level 9): 120,254 B, +2,425 B against the recorded 117,829 B, within NFR-UI-1's 121,153 B. Declared deviations: the sources section is headed \"Manage your sources\" (WEB-PLAN's list on the same page is \"Your sources\"); the notes panel sits after the cells with a Notes toggle in the lesson toolbar, not as a second tab of the tutor panel; the Undo toast is an app-owned region (one host for the shell) like FR-UI-7's notices, not the library toast manager; \"Add a passkey\" is a hint (sign in on the new device with an existing passkey) until the shared ceremony script can run inside the SPA's CSP; select and switch joined FR-UI-1's list, the forms use native select and number inputs styled with tokens. Code-review fixes (2026-11-24, V/manage-fix-web): B1 FR-MANAGE-2 defines the typed-confirmation target once (NFC, the first 40 code points, then trimmed; the same sentence as SRV-LESSON FR-LESSON-25 and SRV-INGEST FR-INGEST-31) with a unit vector, and the sent `confirm` is the normalised input; web/src/manage/primitives.test.tsx gains the vector and the sent-body check. B6 the Green deviation \"Add a passkey is a hint\" is withdrawn: the Account tab runs FR-AUTH-6's ceremony in the page (the SPA's own module under `script-src 'self'`, so no CSP change), FR-MANAGE-7 states its messages, and the false hint text is gone; web/src/manage/settings.test.tsx gains the ceremony tests (stubbed `navigator.credentials`), e2e/web/manage/passkey.spec.ts runs it with a CDP virtual authenticator against the test server's register stubs (WEB-UI paired note)."
 layer: web
 track: product
 adr: [ADR-0013, ADR-0031, ADR-0017, ADR-0036, ADR-0037, ADR-0011, ADR-0016]
@@ -279,8 +279,18 @@ requirements:
       **Account and People.** Account (every user): "Passkeys" — the list of SRV-AUTH FR-AUTH-45 (label, created,
       last used, "synced" when backed up), Rename (RenameField; 1..64 characters), Remove… (FR-MANAGE-2;
       FR-AUTH-46; the dialog says "Your other sessions are signed out too; this one stays."; refused for the last
-      passkey with "Add another passkey before removing this one."), and "Add a passkey" (the existing register
-      ceremony, FR-AUTH-6, run by the shared passkey script); "Sessions" — the list of FR-AUTH-44 with this browser
+      passkey with "Add another passkey before removing this one."), and "Add a passkey": the register ceremony of
+      SRV-AUTH FR-AUTH-6 run in the page, in the same shape as the shared passkey script — `POST
+      /api/auth/register/options` with `{}`, then `navigator.credentials.create({publicKey:
+      PublicKeyCredential.parseCreationOptionsFromJSON(options)})`, then `POST /api/auth/register/verify` with the
+      credential's `toJSON()`; the button is disabled with "Waiting for your passkey…" while it runs; success says
+      "Passkey added." and refetches the list; a cancelled or timed-out prompt (`NotAllowedError`, `AbortError`) says
+      "The passkey request was cancelled or timed out. Nothing was added." (calm, not an alert); an authenticator that
+      already holds a passkey for the account (`InvalidStateError`) says "This device already has a passkey for your
+      account."; 400 `register_failed` says "That passkey could not be registered. Try again."; 401
+      `reauth_required` takes FR-MANAGE-1's recent-sign-in path (the message and the sign-in link); a browser without
+      `PublicKeyCredential.parseCreationOptionsFromJSON` shows "This browser cannot add passkeys here." and no
+      button; "Sessions" — the list of FR-AUTH-44 with this browser
       marked "This session", Sign out on each other row, and "Sign out everywhere else"; signing out "This session"
       ends at the sign-in page. People (owner): the list of FR-AUTH-40 — handle, display name, role, source
       ("reader.yaml" or "Sign-up"), state (active, pending, disabled, and "Locked" for a sign-up account with no
@@ -294,8 +304,11 @@ requirements:
       instead: this account has its own data."). A reader.yaml person has no Disable, Enable or Delete and the hint
       "Managed in reader.yaml.". The owner's own row has no actions (Account covers it). Every People action needs a
       recent sign-in (FR-MANAGE-1's `reauth_required` path). [unit] each list, each action's request and its
-      refusals (last passkey, configured user, user with data), the Locked state; [browser] the tabs at the three
-      widths in both schemes with the request oracle.
+      refusals (last passkey, configured user, user with data), the Locked state; Add a passkey with a stubbed
+      `navigator.credentials` and the fake API: the two requests in order with the credential's JSON, the refetch,
+      the cancel message, `reauth_required`; [browser] the tabs at the three widths in both schemes with the request
+      oracle; Add a passkey against the test server's stubbed register routes with a CDP virtual authenticator
+      (ctap2, internal, user verification).
   - id: FR-MANAGE-8
     text: >-
       **Data** (owner tab on /settings; P1). "Recently deleted": the deleted courses and materials (SRV-LESSON
@@ -383,7 +396,8 @@ vectors:
       Synthetic bodies written for this spec (no real person, no book text): courses in each state (active, archived,
       deleted, deleted by a material cascade, with and without a study plan), impact bodies, lessons in each state
       including deleted lessons of a course, a revisions list, a compile history, materials in use, unused and never
-      imported, people of every source and state (Locked included), own passkeys (one and three) and sessions, the
+      imported, people of every source and state (Locked included), own passkeys (one and three), the register
+      options of FR-AUTH-6 (rp id `localhost`, for the browser test's virtual authenticator) and sessions, the
       instance settings view with a "(hidden)" row, audit rows, and every refusal body of the proposed routes.
       Written with Red.
     file: spec/fixtures/WEB-MANAGE/responses.json

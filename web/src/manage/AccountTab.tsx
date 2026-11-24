@@ -82,7 +82,7 @@ function Passkeys() {
         ))}
       </ul>
       {list.length === 1 ? <p className="muted">{t('passkey.last')}</p> : null}
-      <p className="muted">{t('passkey.add_hint')}</p>
+      <AddPasskey />
       {note ? <p role="status">{note}</p> : null}
       <ProblemLine problem={issue} />
       {removing ? (
@@ -110,6 +110,60 @@ function Passkeys() {
         </ConfirmDialog>
       ) : null}
     </section>
+  );
+}
+
+/** FR-MANAGE-7 "Add a passkey": SRV-AUTH FR-AUTH-6's register ceremony in the page, the shape of the shared passkey
+ * script (options → navigator.credentials.create → verify with the credential's JSON). */
+const canRegister = (): boolean =>
+  typeof PublicKeyCredential === 'function' &&
+  typeof PublicKeyCredential.parseCreationOptionsFromJSON === 'function' &&
+  typeof navigator.credentials?.create === 'function';
+
+function AddPasskey() {
+  const t = useManageT();
+  const api = useManageApi();
+  const refresh = useRefresh();
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [calm, setCalm] = useState<string | null>(null);
+  const [issue, setIssue] = useState<Problem | null>(null);
+  if (!canRegister()) return <p className="muted">{t('passkey.add_unsupported')}</p>;
+  const add = async () => {
+    if (busy) return;
+    setBusy(true);
+    setDone(null);
+    setCalm(null);
+    setIssue(null);
+    try {
+      const options = await api.registerOptions();
+      const credential = (await navigator.credentials.create({ publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options) })) as PublicKeyCredential | null;
+      if (credential === null) {
+        setCalm(t('passkey.add_cancelled'));
+        return;
+      }
+      await api.registerVerify(credential.toJSON());
+      setDone(t('passkey.added'));
+      await refresh();
+    } catch (e) {
+      const name = e instanceof DOMException ? e.name : '';
+      if (name === 'NotAllowedError' || name === 'AbortError') setCalm(t('passkey.add_cancelled'));
+      else if (name === 'InvalidStateError') setIssue({ text: t('passkey.add_exists') });
+      else setIssue(problem(codeOf(e), 'passkey', t));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="manage-add-passkey">
+      <Button variant="outline" color="neutral" size="sm" disabled={busy} onClick={() => void add()}>
+        {t('passkey.add')}
+      </Button>
+      <p role="status" className="muted">
+        {busy ? t('passkey.adding') : (done ?? calm ?? '')}
+      </p>
+      <ProblemLine problem={issue} />
+    </div>
   );
 }
 
