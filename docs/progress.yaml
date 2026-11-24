@@ -1665,6 +1665,69 @@ tasks:
         after registration pinned; a tier test where the search fee and >100k prompt tokens coincide; lesson,
         course and step pinned on agent.call from the provider and the pipeline steps; tutor hits 3 vs candidates
         2). Then merged V/slice-integration and fast-forwarded it (see the commit and the report)." }
+  - { id: V.obs-mlflow-phase2, stage: 2, kind: design, track: engineering, status: done,
+      needs: [V.obs-analytics-impl], branch: V/obs-mlflow-phase2,
+      what: "SRV-OBS phase 2 design: MLflow experiment Runs, evaluation datasets and runs, agent versions, review and
+        labels, budgets and alerts (owner, 2026-11-24: use all of MLflow as the dashboard). Spec and spike only.",
+      note: "Spike round 6 (spikes/obs-stack/run-phase2.sh, zero credit, own project, stopped at exit;
+        results/20261124T142803-round6-phase2 with before/after screenshots in p2/). Measured: Runs + link-to-run
+        work (the Run's Traces tab lists linked traces with assessments) but every Run with linked traces shows
+        under Evaluation runs as Eval; datasets 40 + 30 records; evaluation runs chart metrics over time;
+        mlflow.genai.evaluate writes a client trace per row with inputs (117 of 133 traces) and exhausted SQLite's
+        pool at default parallelism, so the design logs plain Runs over REST; OTLP cannot set mlflow.modelId
+        metadata and no API links traces to a LoggedModel, so versions compare by trace tag; labeling sessions are
+        Databricks-only, OSS label schemas + review queues work; budgets are AI-gateway-only (current_spend stayed 0
+        after OTLP spend; alert = outbound webhook), so /observability stays the alert surface. Book-text check
+        (check_bench_quotes.py, ids and lengths only): v2 max shared run 4 words, t01 1, v1 four records at 5
+        (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0038 (proposed; 0036 and 0037 are V/manage's) for
+        the writes beyond ADR-0035. Round 7 (results/20261124T143808-round7-runs): a Run in its own experiment
+        accepts link-to-run, but its Traces tab shows no traces (the UI searches only the Run's experiment), so
+        compile and import Runs stay in experiment 0 and bench datasets and runs go to experiment `bench`. Design
+        review round 1 (b1a84d5): changes, B1-B11; revision 2 answers each (SRV-OBS phase2_review). Owner added
+        2026-11-24 \"production-ready MLflow\": FR-OBS-26..35 (MLflow operations) and ADR-0038 Decision 5. Round 8
+        (results/20261124T150936-round8-rest): every write as raw REST; params write-once; link-to-run max 100;
+        datasets upsert; HUMAN relabel by overrides; verbatim check rerun (threshold 5, NFC, hyphens). Round 9
+        (results/20261124T151501 and T151935-round9-ops): WAL 0 errors under 8 writers (p95 0.20 s); gateway off 501;
+        online backup and restore; VACUUM -16 %; a stop during first-start migration bricks the file (hence the
+        mlflow-migrate one-shot); load 35,560 spans 0 dropped, ingest p95 11.5 s, MLflow peak 560 MiB, +51.6 MB;
+        3.10 -> 3.18 upgrade ok. Round 10 (results/20261124T153052-round10-setup): setup drift-free, finalize,
+        retention deletes, allowed-hosts 403 on the API. VEC-OBS-5 (phase2.yaml), VEC-OBS-6 (mlflow-setup.yaml),
+        bench-tutor-v2.yaml (compose-bench.mjs). Docker Desktop's disk was full during round 10 (dangling images
+        pruned, 6.8 GB). Design review round 2 (ac3a79d): changes, N1-N10 plus non-blocking; revision 3 answers
+        each (SRV-OBS phase2_review_round2): snapshot_at a tag, inline idempotent setup, one kind per set, label
+        mirror found by name + revision, import traces by material tag, no VACUUM, flock-guarded migrate with one
+        pre-migration backup, backup API always, no Jaeger sidecar (doctor via docker inspect), owner_labels.
+        Round 11 (results/20261124T154753-round11-egress): mlflow's internal networks reach neither 1.1.1.1:443 nor
+        DNS; a normal network does. Design review round 3 (d03645c): changes, R1-R4; revision 4 answers each
+        (phase2_review_round3): only lacking params logged; scores recomputed from registered per-question records
+        (the tutor upload is the records file); restore marker and mlflow-migrate exit 3; FR-OBS-29's image test
+        first Red. Round 12 (results/20261124T155700-round12-rest): same-value param re-log 200, changed 400;
+        LoggedModel tag PATCH and read-back; egress probe reaches MLflow /health 200. Design review round 4
+        (03124aa): changes, F1 (the restore logic); revision 5: store.version, an in-progress marker that stops a
+        second run before the backup, named versions in the image test, distinct exit codes (migrate 10..13,
+        restore 0..5), the fresh-volume hypothesis with a fallback, tutor_summary moved to SRV-TUTOR. Design review
+        round 5 (46e9017): every crash point for an existing store and restore passes; G1 (an interrupted fresh
+        first start stuck) fixed in revision 6 with a backup/fresh marker that step 0 wipes and restarts from;
+        normal starts skip the backup; restore needs in-progress or --force. Design review round 6 (4b81738): H1
+        (the fallback could wipe a served store) and H2 (a restored older store skipped its migration) fixed in
+        revision 7: the fallback initialises the store inside mlflow-migrate (one SqlAlchemyStore call), step 0
+        tries db upgrade before any wipe, reader backup/restore carry store.version. Round 13
+        (results/20261124T164527-round13-init): db upgrade on a missing file and the SqlAlchemyStore call both
+        build 71 tables at head f4a9b2c7d1e6 and serve /health 200. Design review verdicts (deep-reviewer):
+        round 1 b1a84d5 changes (B1-B11); round 2 ac3a79d changes (N1-N10); round 3 d03645c changes (R1-R4);
+        round 4 03124aa changes (F1); round 5 46e9017 changes (G1); round 6 4b81738 changes (H1, H2); round 7
+        aedd89a VERDICT approve, with three non-blocking items applied after it (reader restore clears the
+        in-progress, fresh and restored-for markers; store.version removed before the file is replaced and
+        written back after; the hardened FR-OBS-29 [image] test stays the first Red test). Next: the owner's
+        decision on ADR-0038 (his script sets its status on this branch); then the phase 2 requirements move
+        into SRV-OBS with their Red tests. The owner accepted ADR-0038 (2026-11-25, b34b712)." }
+  - { id: V.obs-mlflow-phase2-impl, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [V.obs-mlflow-phase2], branch: V/obs-mlflow-phase2-impl,
+      what: "Red and Green of SRV-OBS phase 2 (FR-OBS-20..35, ADR-0038 accepted) with the paired FR-EVENTS-32,
+        FR-PIPELINE-18, FR-INGEST-26, FR-TUTOR-15, FR-UI-31, FR-CLI-24 and FR-DEPLOY-15. Ops first; the
+        hardened FR-OBS-29 [image] test is the first Red test.",
+      note: "Cut from V/slice-integration 87840d1 with origin/V/obs-mlflow-phase2 b34b712 merged. Zero credit;
+        the first tutor-records upload needs a paid bench run and waits for the owner." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

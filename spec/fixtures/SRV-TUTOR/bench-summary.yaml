@@ -1,0 +1,35 @@
+# Proposed with SRV-OBS phase 2 (paired SRV-TUTOR FR-TUTOR-15; moved here from SRV-OBS VEC-OBS-5 in design review
+# round 4): the numbers-only shape of the tutor bench SUMMARY, e2e/live/results/<date>-tutor-bench.json. It is a
+# report, not an MLflow upload (the upload is the per-question records file, VEC-OBS-5 bench_results.tutor). Unknown
+# keys are rejected; patterns as in spec/fixtures/SRV-OBS/phase2.yaml `patterns`. The committed 2026-11-23 summary
+# is migrated to this shape when FR-TUTOR-15 is implemented (commit 66fba58, prose keys dropped).
+tutor_summary:
+  required:
+    kind: { enum: [tutor] }
+    date: date
+    branch: branch
+    commit: commit
+    lesson_id: uuid
+    set: { enum: [tutor-bench-v2] }
+    n: { int: [1, 1000] }
+    states: { keys: { enum: [answered, failed, insufficient, expired] }, values: { int: [0, 1000] } }
+    grounded_share: { float: [0, 1] }
+    gold_cited_share: { float: [0, 1] }
+    latency_s: { p50: { float: [0, 3600] }, p95: { float: [0, 3600] }, max: { float: [0, 3600] } }
+    mean_usd: { float: [0, 100] }
+    total_usd: { float: [0, 1000] }
+  optional:
+    runs: { int: [1, 100] }
+    stopped_by_daily_cap: bool
+    failed: { list: { id: question_id, chapter: { int: [1, 23] }, wall_s: { float: [0, 3600] },
+                      usd: { float: [0, 100] }, output_tokens: { int: [0, 1000000] },
+                      error_code: { enum_or_null: SRV-TUTOR error codes } }, max: 1000 }
+    insufficient_share: { float: [0, 1] }
+    verified_block_share: { float: [0, 1] }
+    grounded_given_gold_in_top8: { in_top8: top8_cell, not_in_top8: top8_cell }
+    per_chapter: { keys: "^([1-9]|1[0-9]|2[0-3])$", values: { pair: { int: [0, 1000] } } }
+    output_tokens_mean: { float: [0, 1000000] }
+    thinking_tokens_nonzero: { count: { int: [0, 1000] }, values: { list: { int: [0, 1000000] }, max: 1000 } }
+    nfr: { keys: "^(gate_n_met|NFR-TUTOR-[0-9]+_[A-Za-z0-9_.]+)$", values: bool }
+  top8_cell: { n: { int: [0, 1000] }, grounded: { int: [0, 1000] }, share: { float: [0, 1] } }
+  rule: "every failed id is a question id of the bench set"

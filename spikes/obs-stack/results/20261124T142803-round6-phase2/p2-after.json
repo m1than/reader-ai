@@ -1,0 +1,76 @@
+{
+ "variant": "after",
+ "tabs": {
+  "overview": {
+   "url": "/#/experiments/0/overview",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Overview Let's improve your agent with MLflow Help me create an evaluation Build a continuous quality loop in 4 steps Trace, analyze, evaluate, and monitor your agent as it evolves. Learn how it works ↗ TRACE 133 traces View traces ANALYZE Recommended Review real traces to surface failure modes and quality issues worth fixing. Detect issues EVAL/TEST 4 eval runs View eval runs MONITOR Run scorers on live traffic to catch quality regressions in production. Add monitor MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions abou"
+  },
+  "evaluation-runs": {
+   "url": "/#/experiments/0/evaluation-runs",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Evaluation runs Run evaluation Line chart Bar chart 5 assessments Earliest run Latest run gold_cited_sharegrounded_sharehit_at_10/meanhit_at_3/meanmean_usd 0% 50% 100% All time Display now Run Name Type Created at Dataset grounded_share gold_cited_share latency_p50_s latency_p95_s mean_usd total_usd embed_s chunks_per_s hit_at_3/mean hit_at_10/mean reciprocal_rank/mean pages spans chunks pages_per_min_import import_s embed_chunks_per_s cost_usd.draft cost_usd.fact_check cost_usd.adversarial_review cost_usd.revise cost_usd.total tokens.input tokens.ou"
+  },
+  "runs": {
+   "url": "/#/experiments/0/runs?searchFilter=&orderByKey=attributes.start_time&orderByAsc=false&startTime=ALL&lifecycleFilter=Active&modelVersionFilter=All+Runs&datasetsFilter=W10%3D",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Training runs Views All time State: Active Datasets Sort: Created Columns Group by New run Run Name Created Dataset Duration Source Models Pin run #308613 tutor bench 2026-11-23 24 seconds ago Pin run #434a93 search bench intfloat/multilingual-e5-small 27 seconds ago Pin run #a6630c search bench deepvk/USER-bge-m3 31 seconds ago Pin run #b45091 search bench BAAI/bge-m3 34 seconds ago Pin run #8acaff import aa11aa11 35 seconds ago Pin run #8396a5 compile 10000000 40 seconds ago - 27ms phase2.py - dataset (74c97077) 3.2s phase2.py - dataset (74c97077) "
+  },
+  "datasets": {
+   "url": "/#/experiments/0/datasets",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Datasets Create dataset Name Created by Last updated Created at search-bench-v1 root 44 seconds ago 44 seconds ago tutor-bench-v2 root 44 seconds ago 45 seconds ago MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "agent-versions": {
+   "url": "/#/experiments/0/models",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Agent versions Table view Chart view Sort: Created Columns Group by Model attributes Model name Status Created Model attributes Parameters Logged from Source run Registered models Dataset model.tutor #be501e reader-agent Ready 43 seconds ago #8acaff reader-agent Ready 43 seconds ago phase2.py - - - claude-sonnet-5-5 phase2.py - - - claude-sonnet-5-5 MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "review": {
+   "url": "/#/experiments/0/review-queue?selectedQueueId=rq-8519bbce83a0447494f877875d26646f",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Review Default Manage questions New queue Queue To do Default lessons 4 Default 2 questions No traces in this queue yet Add traces from the Traces tab to start reviewing them with your team. Add traces MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "prompts": {
+   "url": "/#/experiments/0/prompts",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Prompts Create prompt Name Latest version Last modified Tags reader.fact_check Version 1 11/24/2026, 10:28:18 AM reader.git_sha : 2ffc1ee077d4736b7b1d4d4eaa016c3700c65397 reader.review Version 1 11/24/2026, 10:28:18 AM reader.git_sha : 2ffc1ee077d4736b7b1d4d4eaa016c3700c65397 reader.tutor Version 1 11/24/2026, 10:28:18 AM reader.git_sha : 2ffc1ee077d4736b7b1d4d4eaa016c3700c65397 Previous Next MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. "
+  },
+  "traces": {
+   "url": "/#/experiments/0/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display now Detect Issues Time Input Output Duration State Tokens Tags gold_pages hit_at_10 hit_at_3 reciprocal_rank 1 minute ago - - 0ms OK - reader.version: abab +2 1 minute ago {\"question_id\": \"v40\", \"question\": \"Как платформа может менять собственные правила по голосованию держателей, не раскалываясь надвое?\"} {\"top_pages\": [727, 170, 180, 489, 477, 486, 193, 907, 864, 177], \"rank\": 18} 0ms OK - - [ 889, 890, 891 ] False False 0.06 1 minute ago {\"question_id\": \"v39\", \"question\": \"Какая платформа обещает согласовани"
+  },
+  "experiments": {
+   "url": "/#/experiments",
+   "head": "3.18.0 GenAI Model training Home Experiments AI Registry AI Gateway New Docs Settings Experiments Create Compare Delete Tag Name Time created Last modified Description Tags compile 11/24/2026, 10:29:41 AM 11/24/2026, 10:29:41 AM - reader.kind : compile Default 11/24/2026, 10:28:07 AM 11/24/2026, 10:28:07 AM - Add tags Previous Next 25 / page MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "run-compile": {
+   "url": "/#/experiments/0/runs/a3e6ed1dcf9d4807b9666aecd299b30a",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (15) Metric Value cost_usd.draft 0.62 cost_usd.fact_check 0.21 cost_usd.adversarial_review 0.3 cost_usd.revise 0.71 cost_usd.total 1.84 tokens.input 152200 tokens.output 16000 duration_s.total 160 claims.total 14 claims.supported 13 labs.cells 12 labs.cells_ok 12 pages 24 loops 1 cost_usd.cumulative 1.84 Parameters (9) Parameter Value lesson_id 20000000-0000-4000-8000-0000000000bb course_id 50000000-0000-4000-8000-0000000000cc pipeline_version v"
+  },
+  "run-compile-traces": {
+   "url": "/#/experiments/0/runs/a3e6ed1dcf9d4807b9666aecd299b30a/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts #8396a5 compile 10000000 compare to baseline run Filters Sort Columns 6/25 Actions Group by session Analyze 4 of 4 Other Attributes (4/13) Assessments (1/1) Session Tokens Execution time State Trace ID owner.lesson_ok TRUE 0% False 100% 10000000-0000-4000-8000-0000000000aa 0/1 168200 2.7min OK MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0%"
+  },
+  "run-compile-metrics": {
+   "url": "/#/experiments/0/runs/a3e6ed1dcf9d4807b9666aecd299b30a/model-metrics",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Auto-refresh Model metrics (15) Add chart claims.supported 13.00 0 5 10 compile 10000000 claims.total 14.00 0 5 10 compile 10000000 cost_usd.adversarial_review 0.30 0 0.1 0.2 0.3 compile 10000000 cost_usd.cumulative 1 2 3 4 1 1.5 Step compile 10000000 (cost_usd.cumulative) cost_usd.draft 0.62 0 0.2 0.4 0.6 compile 10000000 cost_usd.fact_check 0.21 0 0.05 0.1 0.15 0.2 compile 10000000 cost_usd.revise 0.71 0 0.2 0.4 0.6 compile 10000000 cost_usd.total 1.84 0 0.5 1 1.5 compile 10000"
+  },
+  "run-ingest": {
+   "url": "/#/experiments/0/runs/97eb63f7260641d48349c3ea3acde355",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations import aa11aa11 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (6) Metric Value pages 594 spans 9463 chunks 2285 pages_per_min_import 297 import_s 120 embed_chunks_per_s 2.71 Parameters (2) Parameter Value converter_version r2 material_sha256 aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11 About this run Created at 11/24/2026, 10:29:52 AM Created by — Experiment ID 0 Status Finished Run ID 97eb63f7260641d48349c3ea3acde355 Duration 47ms Source — Logged models — Registered prompts — Datasets N"
+  },
+  "run-cross-experiment": {
+   "url": "/#/experiments/1/runs/f1d04d06c20242acaa97df12fe32cd1c",
+   "head": "3.18.0 GenAI Model training compile Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings compile Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (0) No metrics recorded Parameters (0) No parameters recorded About this run Created at 11/24/2026, 10:29:47 AM Created by — Experiment ID 1 Status Finished Run ID f1d04d06c20242acaa97df12fe32cd1c Duration 25ms Source — Logged models — Registered prompts — Datasets None Tags reader.run_id : 10000000-0000-4000-8000-0000000000aa Registered models None MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, ide"
+  },
+  "agent-version-detail": {
+   "url": "/#/experiments/0/models/m-fe954c29894d454f92c99b44e89616af",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Models reader-agent Not registered Register model Overview Traces Artifacts Description No description Metrics (0) No metrics recorded Parameters (3) Parameter Value model.tutor claude-sonnet-5-5 pipeline_version v1 prompt_set_sha256 abababababababababababababababababababababababababababababababab Runs No runs Prompts Prompt Name Version No prompts About this logged model Created at 2 minutes ago Created by root Status Ready Model ID m-fe954c29894d454f92c99b44e89616af Logged from phase2.py Datasets used None Model versions None MLflow Assistant Beta Welcome to M"
+  },
+  "agent-version-traces": {
+   "url": "/#/experiments/0/models/m-fe954c29894d454f92c99b44e89616af/traces?startTime=2026-11-24T10%3A29%3A54.530Z&endTime=2026-11-24T10%3A32%3A24.158Z&startTimeLabel=CUSTOM",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Models reader-agent Not registered Register model Overview Traces Artifacts Filters Sort: Request time Columns 7/20 Actions Group by session Detect Issues 0 of 0 Start tracing your LLM application Traces show you how your LLM calls behave: what they cost, how they perform, and where things go wrong. Get started in a few minutes. Choose any of the following options to set up tracing One-line setup Copy for coding agent MLflow assistant Manual setup Run this from your project's Git repository to connect to MLflow and launch your coding agent to add tracing. Have C"
+  },
+  "dataset-detail": {
+   "url": "/#/experiments/0/datasets/d-afb205c0c9524ff2a60fbd06b0719d95",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Datasets tutor-bench-v2 Dataset ID: d-afb205c0c9524ff2a60fbd06b0719d95 Columns (4/9) 40 records Evaluation Runs Add record Inputs Expectations Last updated Tags {\"question_id\":\"v20\",\"question\":\"Какие ещё средства написания программ для этой платформы существуют помимо самого распространённого, например похожие на популярный язык сценариев с отступами?\",\"chapter\":11} {\"gold_pages\":[406]} 2 minutes ago mlflow.user: root {\"question_id\":\"v02\",\"question\":\"Кто в начале девяностых придумал, как защитить отметки времени на электронных документах от подделки?"
+  }
+ },
+ "csp": [
+  "Loading media from  'https://mlflow.org/docs/latest/images/llms/tracing/tracing-top.mp4#t=24' violates the following Content Security Policy directive: \"default-src 'self'\". Note that 'media-src' was "
+ ]
+}

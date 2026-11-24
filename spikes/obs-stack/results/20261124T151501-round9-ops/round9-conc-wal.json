@@ -1,0 +1,21 @@
+{
+ "mode": "conc",
+ "writers": 8,
+ "requests": 1280,
+ "errors": 0,
+ "error_samples": [],
+ "p50_s": 0.027,
+ "p95_s": 0.2012,
+ "max_s": 2.261,
+ "wall_s": 10.4,
+ "db": {
+  "experiments": 1,
+  "runs": 320,
+  "trace_info": 48,
+  "spans": 1040,
+  "assessments": 320,
+  "evaluation_datasets": 0,
+  "logged_models": 0,
+  "journal_mode": "wal"
+ }
+}

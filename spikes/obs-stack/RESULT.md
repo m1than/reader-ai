@@ -359,6 +359,236 @@ Source: `sqlalchemy_store.py` `log_spans` takes the first span of the first batc
 - **Round 4's memory result:** the first Jaeger pass (300 traces, 35.5 MiB) lost its result directory when
   intermediate runs were cleaned; round 5's `stats.txt` and `stats-f.txt` replace it and are kept.
 
+## Round 6 (SRV-OBS phase 2: Runs, datasets, evaluation runs, agent versions, review, budgets), 2026-11-24
+
+The owner asked to "use all advantages of MLflow to manage everything here as a dashboard". Here `run-phase2.sh`
+starts one stack with the zero-price catalog. `before` is the implemented V.obs-analytics data
+(`analytics_tabs.py VARIANT=after`). `after` adds `phase2.py`, run in `driver2.Dockerfile` (the full `mlflow==3.18.0`
+client) with only the committed bench files mounted read-only. `phase2-tabs.js` screenshots each tab under the
+candidate CSP. The kept run is `results/20261124T142803-round6-phase2`. The first run, `20261124T141648`, keeps its
+JSON and stderr only; it is described under Evaluation runs below.
+
+- **Book-text check** (`quotes.json`, from `check_bench_quotes.py` over the pilot PDF's text layer, 256,083
+  words): for every question, the longest run of consecutive words it shares with the book. The script prints ids
+  and lengths only. Results by set:
+  - questions-v2: 40 questions, longest shared run 4 words;
+  - bench-fixed: t01, longest run 1 word;
+  - questions.yaml (v1): 30 questions, longest run 5 words, reached by q04, q07, q08 and q13.
+
+  No question shares 6 or more words with the book. v1 was not written under v2's paraphrase rules, so its four
+  5-word records are excluded by the proposed bar: no record that shares 5 or more consecutive words is registered.
+- **Runs** (`phase2.json` `link_traces_to_run`, `traces_by_run_metadata`; `p2/after-run-compile*.png`,
+  `after-run-ingest.png`):
+  - A compile Run carries 9 params and 15 metrics (ledger cost by stage, tokens, duration, claims, lab cells,
+    pages, loops), plus a stepwise `cost_usd.cumulative`.
+  - `POST /api/2.0/mlflow/traces/link-to-run` returned 200 and wrote `mlflow.sourceRun` on the 4 stage traces.
+    The Run's Traces tab lists them with their assessments.
+  - An import Run carries 6 metrics.
+  - A link from a Run in another experiment was also accepted (200).
+  - **Finding:** in a GenAI experiment, a Run with linked traces is listed in the **Evaluation runs** tab with type
+    `Eval`. Compile and import Runs therefore mix with bench runs there (`after-evaluation-runs.png`).
+- **Datasets** (`after-datasets.png`, `after-dataset-detail.png`): `tutor-bench-v2` (40 records: v2 without v03,
+  plus t01; gold pages as expectations) and `search-bench-v1` (30) were created through `mlflow.genai.datasets`.
+  The detail page lists the records with their inputs and expectations.
+- **Evaluation runs** (`after-evaluation-runs.png`):
+  - Three search-bench runs went through `mlflow.genai.evaluate` with code scorers only (hit@3, hit@10, reciprocal
+    rank) over the committed per-question ranks; no `predict_fn`, no model call. For bge-m3: hit@10 0.667, hit@3
+    0.385, reciprocal rank 0.398 over the 39 shared ids.
+  - The tutor bench ran as a Run with metrics (grounded 0.625, gold cited 0.575, p50/p95 latency, mean and total
+    USD).
+  - The tab charts the metrics from the earliest run to the latest, so a re-run is a new point.
+  - **Findings:** `evaluate` writes its own trace per row: 117 of the experiment's 133 traces carry the question
+    text as their input. That write comes from the MLflow client and does not pass through our allow-list. With
+    the default parallelism it also exhausted MLflow's SQLite pool: in the first run, 32 `QueuePool limit of size
+    5 overflow 10` errors, a load failure. With `MLFLOW_GENAI_EVAL_MAX_WORKERS=1` there were 0.
+- **Agent versions** (`phase2.json` `versions`; `after-agent-versions.png`, `after-agent-version-*.png`):
+  - Two `create_external_model` versions with params (prompt-set sha, model, pipeline version) are listed with
+    their parameters.
+  - OTLP never sets trace metadata: a root `mlflow.modelId` attribute gave 0 traces by `metadata.mlflow.modelId`.
+    `mlflow.traceTag.mlflow.modelId` gave 1 trace by `tag.mlflow.modelId`.
+  - The client has no link-traces-to-model API, and REST has no set-trace-metadata call. So the version's Traces
+    tab stays empty for OTLP traces (`after-agent-version-traces.png`), and comparing versions works through the
+    tag filter.
+- **Labeling and Review** (`phase2.json` `labels`; `after-review.png`, `after-run-compile-traces.png`):
+  - A `HUMAN` assessment `owner.lesson_ok` = false, with ids-only metadata, landed on the trace. It shows in the
+    Run's Traces tab as an assessment column (False 100 %).
+  - `create_labeling_session` is Databricks-only (`UnsupportedLabelingStoreURIException`).
+  - The OSS label schema (pass/fail "good"/"bad", no comment) and a custom review queue `lessons` with the 4 stage
+    traces were created, and the queue is listed with 4 to-do items.
+- **Budgets and alerts** (`phase2.json` `budgets`):
+  - `gateway/budgets/create` (USD 0.01 a day, GLOBAL, ALERT) returned 200. Its window's `current_spend` stayed 0.0
+    after the run's priced OTLP traces: budgets count AI-gateway traffic only.
+  - An exceeded window fires a `budget_policy.exceeded` webhook, which is an outbound call from MLflow
+    (`mlflow/gateway/budget.py`). The only webhook entities are registry, prompt and budget-policy events.
+  - MLflow 3.18 therefore has no budget or alert for our spend, and `/observability` stays the alert surface.
+- **CSP:** one violation, a `media-src` from the Overview page's remote demo video, which is blocked and harmless.
+  The same page showed it in round 4.
+- **Memory** (`stats.txt`): MLflow 424.6 MiB of 1 GiB after both data sets and every tab.
+- **Not measured here:** whether the Traces tab of a Run in a *separate* experiment lists traces stored in
+  experiment 0. Round 7 measured it.
+
+## Round 7 (SRV-OBS phase 2: where compile Runs live), 2026-11-24
+
+`run-round7.sh` uses one fresh stack. `round7.py` replays 4 stage traces into experiment 0 (OTLP), creates the
+experiment `runs` with one compile Run (4 metrics, 1 param), and links the traces to that Run. `round7-tabs.js`
+screenshots the result. Kept in `results/20261124T143808-round7-runs`.
+
+- **API** (`round7.json`):
+  - `link-to-run` returned 200.
+  - Searching experiment 0 for `metadata.mlflow.sourceRun = <run>` found 4 traces; the same search over the
+    `runs` experiment found 0.
+  - The client's `search_traces(run_id=…)` refused: "Run … belongs to experiment 1, which is not in the list of
+    locations provided: ['0']". With both experiments as locations it found 4.
+  - The Run is listed in `runs` (1) and not in experiment 0 (0).
+- **UI** (`r7.json`, `r7/*.png`):
+  - The Run's overview and metric charts show (`run-overview.png`, `run-metrics.png`).
+  - Its **Traces tab shows "No traces found"** (`run-traces.png`): the UI searches only the Run's own experiment.
+  - The `runs` experiment's Evaluation runs tab lists and charts the Run as `Eval` (`runs-exp-evaluation-runs.png`),
+    and its Traces tab is empty.
+  - Experiment 0's Evaluation runs tab is empty, and its Traces tab lists the 4 traces.
+- **Decision for the design:**
+  - Compile and import Runs stay in experiment 0, beside their traces. In round 6 the Run's Traces tab there listed
+    the traces with their assessments.
+  - Bench datasets and evaluation runs, which have no traces, go to their own experiment `bench`, so they no longer
+    mix with compile Runs.
+- **CSP:** the same single `media-src` violation from the Overview demo video.
+
+## Round 8 (phase 2 design review round 1, B6 and B11: every write as raw REST), 2026-11-24
+
+`run-round8.sh` starts one fresh stack. `round8.py` sends each request as raw REST and records its method, path,
+status and body in `round8.json` `raw`. The client's own requests for the shapes copied from it (`log-inputs`, an
+assessment override) are recorded by wrapping `mlflow.utils.rest_utils`. Results are in
+`results/20261124T150936-round8-rest`.
+
+- **Experiments:** `get-by-name` on a missing name is 404, and `create` with tags is 200.
+- **Runs:**
+  - `runs/search` by tag, then `create`, `log-batch`, `update` and `set-tag reader.complete`, then a second
+    `log-batch` at step 1, all 200. After that, a single Run with `cost_usd.total` 2.1.
+  - A changed param value is 400 "Changing param values is not allowed": params are write-once.
+- **link-to-run:** 120 ids in one call is 400 "Cannot link more than 100 traces". 100 + 20 linked all 120.
+- **Deleted traces:** `delete-traces` of 5 returned `traces_deleted` 5. The Run's Traces tab then lists 115
+  (`r8/run-traces-after-delete.png`) and the Run itself renders unchanged.
+- **Dataset in `bench`:** `create` with tags, then `records`, inserted 2. A repeat updated 2 and inserted 0, so
+  records upsert. `log-inputs` (source_type `mlflow_evaluation_dataset`) shows the dataset on the bench Run
+  (`r8/bench-evaluation-runs.png`).
+- **LoggedModel:** `logged-models` create with params and tags, then `search` by tag, found 1. It shows "Pending"
+  until finalized; round 10 measures the finalize call.
+- **HUMAN assessment:** the first POST is 200. A second POST with `overrides` makes the first `valid: false`, and a
+  PATCH with `update_mask` also works.
+- **Verbatim check, rerun** with threshold 5, NFC and joined hyphenation (`quotes.json`):
+  - PDF sha256 61e8d4c3…, 247,927 words;
+  - bench-tutor-v2 longest shared run 4;
+  - questions.yaml (v1): q04, q07, q08 and q13 at 5;
+  - bench-fixed: 1.
+
+## Round 9 (MLflow operations and load), 2026-11-24
+
+`run-round9.sh` uses fresh stacks with the production flags under test (`compose.round9.yaml`), with the steps
+selectable through `STEPS`. Steps 1 and 2 are in `results/20261124T151501-round9-ops`; steps 3 and 4 are in
+`results/20261124T151935-round9-ops`, after a fix described below.
+
+- **Concurrency.** 8 writers × 40 iterations ran runs/create, log-batch, update and an assessment, while 40 tutor
+  traces streamed in.
+
+  | Journal mode | Requests | Errors | p50 | p95 | Max |
+  |---|---|---|---|---|---|
+  | default (`delete`) | 1,280 | 68 | — | 0.43 s | 2.69 s |
+  | WAL | 1,280 | 0 | 0.027 s | 0.20 s | 2.26 s |
+
+  The 68 errors in the default mode were all 404 "Trace … not found", for assessments posted to seed traces not
+  yet ingested; there was no lock error. MLflow already sets `busy_timeout` 20,000 ms.
+- **Disabled features.**
+  - With `MLFLOW_ENABLE_AI_GATEWAY=false`, the gateway budgets route answers 501 and the gateway endpoints 404.
+  - Assistant, jobs and MCP answer 404, and `/graphql` with an empty body answers 500.
+  - A cross-origin request gets no `Access-Control-Allow-Origin`.
+- **Health probes.** Rotel's OTLP receiver answers 400 to `{}`, which shows it is listening; Rotel 0.2.7 has no
+  health endpoint. Jaeger's `healthcheckv2` answers `/status` with 200.
+- **Online backup.** SQLite's backup API took 0.02 s for 5.1 MB, and every table's count was equal. A second MLflow
+  served the backup with all 98 traces after 5.1 s.
+- **VACUUM** after deleting 25 of 50 traces, with MLflow stopped, shrank the file from 5.1 MB to 4.3 MB.
+- **Finding: stop during migration.** Stopping MLflow during its first-start schema migration left the file
+  half-migrated ("table _alembic_tmp_experiments already exists"), and MLflow never started again
+  (`load-mlflow-failed-start.log`). The script now waits for `/health` before every stop.
+- **Load** (60 lessons × 8 jobs × 72 spans, plus 100 tutor traces of 10 spans, plus a bench upload of 40 records and
+  3 Runs):
+  - 35,560 spans sent in 12.5 s and 35,560 stored: 0 dropped;
+  - ingest p50 1.2 s, p95 11.5 s, max 12.7 s (40 sampled traces, all found);
+  - the database grew from 1.1 MB to 52.7 MB;
+  - peak use (`stats-load.txt`): MLflow 90 % CPU and 560 MiB of 1 GiB, Rotel 32 MiB, Jaeger 50 MiB.
+- **Upgrade.** A volume written by MLflow 3.10.0 (experiment `old`) was started by 3.18.0 without
+  `mlflow db upgrade`: it ran without error until the 60 s limit. `mlflow db upgrade` then exited 0, and the server
+  served `old` (`upgrade.txt`).
+
+## Round 10 (setup drift, finalize, retention deletes, Host and CORS), 2026-11-24
+
+`run-round10.sh` runs `round10.py` on round 9's flags. Results are in `results/20261124T153052-round10-setup`.
+
+- **Setup and drift.** The first setup made 6 writes: rename experiment 0 to `reader`, 3 experiment tags, create
+  `bench`, and the LoggedModel. The second setup made 0 writes, and the state dumps were equal (`drift` false).
+- **Finalize.** PATCH `logged-models/{id}` with status `LOGGED_MODEL_READY` answers 200, and the model is READY.
+- **Lookups and deletes.**
+  - `datasets/search` by name in `bench` found the dataset.
+  - `runs/delete` is 200, and the Run leaves `runs/search`.
+  - The LoggedModel DELETE is 200, and the model leaves `search`.
+- **Host check.** A foreign Host gets 403 on the API and 200 on `/health`.
+- **CORS preflight** answers 400 with `Access-Control-Allow-Methods` and `-Allow-Credentials` but no
+  `-Allow-Origin`.
+- **GraphQL.** `/graphql` answers 200 to a query, so MLflow's UI uses it.
+- **Note on the environment.** The first round 10 attempt failed with "database or disk is full": Docker Desktop's
+  disk was full. Removing only dangling images (`docker image prune`) freed 6.8 GB.
+
+## Round 11 (no egress, design review round 2, N9), 2026-11-24
+
+`run-round11.sh` starts the spike MLflow alone and runs a probe container on exactly its networks: the two spike
+networks `reader-spike-obs_obs` and `reader-spike-obs_obs-ui`, both `internal=true`. Results are in
+`results/20261124T154753-round11-egress`.
+
+| Probe on | TCP connect to 1.1.1.1:443 | DNS lookup of example.com |
+|---|---|---|
+| MLflow's two internal networks | fails (`OSError`) | fails (`gaierror`) |
+| A normal network (positive control) | connects | resolves |
+
+The probe also tried `mlflow:5000`, which was not reachable from either run: the server had only just started. That
+check is not part of the egress result.
+
+## Round 12 (design review round 3: R1, R2, and the egress probe reaching MLflow), 2026-11-24
+
+`run-round12.sh` runs `round12.py` on round 9's flags, then the egress probe after MLflow is healthy. Results are in
+`results/20261124T155700-round12-rest`. Every request is in `round12.json` `raw`, with its method, path, status and
+body.
+
+- **R1, params.** On a new Run:
+
+  | Request | Status |
+  |---|---|
+  | `log-batch` of `version_key` | 200 |
+  | the same value again | 200 |
+  | a different value | 400 |
+
+  `runs/search` returns the Run's params, so logging the one it lacked (`model.draft`) is 200. Afterwards the Run
+  has both params, with the first `version_key`.
+- **R2, LoggedModel tag.** `PATCH /api/2.0/mlflow/logged-models/{id}/tags` with
+  `{"tags": [{"key": "reader.last_started", "value": "2026-11-24"}]}` answers 200, and `logged-models/search` by
+  `reader.version_key` reads back `2026-11-24`. A second PATCH with `2026-11-25` answers 200 and reads back
+  `2026-11-25`.
+- **Egress probe on MLflow's two internal networks**, with MLflow healthy:
+  - a TCP connect to 1.1.1.1:443 fails (`OSError`);
+  - a lookup of example.com fails (`gaierror`);
+  - `http://mlflow:5000/health` answers 200, so the probe is on the right networks.
+
+## Round 13 (initialising an empty store, design review round 6, H1), 2026-11-24
+
+`run-round13.sh` runs the pinned image with no network, each case on its own fresh volume. Results are in
+`results/20261124T164527-round13-init`.
+
+| Case | How the empty store is made | Exit | Tables | Alembic head | Second `db upgrade` | Server `/health` |
+|---|---|---|---|---|---|---|
+| A | `mlflow db upgrade` on a missing file | 0 | 71 | f4a9b2c7d1e6 | exit 0, no change | 200 |
+| B | `SqlAlchemyStore('sqlite:///…', '/v/art')`, one Python call | 0 | 71 | f4a9b2c7d1e6 | exit 0, no change | 200 |
+
+So for MLflow 3.18.0, FR-OBS-29's fresh-volume hypothesis holds: case A, `db upgrade` on a missing file, builds the
+full schema. Case B is the fallback, and it gives the identical store.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.

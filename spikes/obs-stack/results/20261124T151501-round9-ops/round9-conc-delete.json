@@ -1,0 +1,27 @@
+{
+ "mode": "conc",
+ "writers": 8,
+ "requests": 1280,
+ "errors": 68,
+ "error_samples": [
+  "404 {\"error_code\": \"RESOURCE_DOES_NOT_EXIST\", \"message\": \"Trace with ID 'tr-074e5c9d59a5d019570111f9075f",
+  "404 {\"error_code\": \"RESOURCE_DOES_NOT_EXIST\", \"message\": \"Trace with ID 'tr-d7e13d5760af2b20511bf3e021d2",
+  "404 {\"error_code\": \"RESOURCE_DOES_NOT_EXIST\", \"message\": \"Trace with ID 'tr-074e5c9d59a5d019570111f9075f",
+  "404 {\"error_code\": \"RESOURCE_DOES_NOT_EXIST\", \"message\": \"Trace with ID 'tr-d7e13d5760af2b20511bf3e021d2",
+  "404 {\"error_code\": \"RESOURCE_DOES_NOT_EXIST\", \"message\": \"Trace with ID 'tr-ea11edcf09659626275296793a2d"
+ ],
+ "p50_s": 0.0248,
+ "p95_s": 0.4288,
+ "max_s": 2.686,
+ "wall_s": 14.9,
+ "db": {
+  "experiments": 1,
+  "runs": 320,
+  "trace_info": 48,
+  "spans": 1040,
+  "assessments": 252,
+  "evaluation_datasets": 0,
+  "logged_models": 0,
+  "journal_mode": "delete"
+ }
+}

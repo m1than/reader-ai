@@ -1,0 +1,27 @@
+# Spike only (never shipped), round 9 (SRV-OBS phase 2, MLflow operations). Used with compose.yaml,
+# compose.catalog.yaml, compose.jaeger.yaml and compose.phase2.yaml by run-round9.sh: MLflow with the production
+# flags under test, and the driver with the MLflow volume mounted (read-only queries while MLflow runs; WAL and
+# VACUUM only while it is stopped).
+services:
+  mlflow-sqlite:
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"
+      MLFLOW_DISABLE_TELEMETRY: "true"
+      DO_NOT_TRACK: "true"
+      MLFLOW_ENABLE_AI_GATEWAY: "false"
+      MLFLOW_ENABLE_REMOTE_ASSISTANT: "false"
+      MLFLOW_MODEL_CATALOG_URI: file:///catalog
+    command: >-
+      mlflow server --host 0.0.0.0 --port 5000 --workers 1
+      --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db
+      --artifacts-destination /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/ --serve-artifacts
+      --allowed-hosts localhost:8443,localhost:8445,localhost:8446,mlflow:5000,mlflow
+      --x-frame-options DENY
+
+  driver2:
+    volumes:
+      - "mlflow_data:/mlflowdata"
+      - "./round9.py:/spike/round9.py:ro"
+    environment:
+      WRITERS: "${WRITERS:-8}"
+      LESSONS: "${LESSONS:-60}"

@@ -1,0 +1,63 @@
+{
+ "variant": "after",
+ "tabs": {
+  "overview": {
+   "url": "/#/experiments/0/overview",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Overview Let's improve your agent with MLflow Help me create an evaluation Build a continuous quality loop in 4 steps Trace, analyze, evaluate, and monitor your agent as it evolves. Learn how it works ↗ TRACE 131 traces View traces ANALYZE Recommended Review real traces to surface failure modes and quality issues worth fixing. Detect issues EVAL/TEST 4 eval runs View eval runs MONITOR Run scorers on live traffic to catch quality regressions in production. Add monitor MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions abou"
+  },
+  "evaluation-runs": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Evaluation runs', exact: true }).first()\n"
+  },
+  "datasets": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Datasets', exact: true }).first()\n"
+  },
+  "agent-versions": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Agent versions', exact: true }).first()\n"
+  },
+  "review": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Review', exact: true }).first()\n"
+  },
+  "prompts": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Prompts', exact: true }).first()\n"
+  },
+  "experiments": {
+   "url": "/#/experiments",
+   "head": "3.18.0 GenAI Model training Home Experiments AI Registry AI Gateway New Docs Settings Experiments Create Compare Delete Tag Name Time created Last modified Description Tags compile 11/24/2026, 10:20:16 AM 11/24/2026, 10:20:16 AM - reader.kind : compile Default 11/24/2026, 10:16:53 AM 11/24/2026, 10:16:53 AM - Add tags Previous Next 25 / page MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "run-compile": {
+   "url": "/#/experiments/0/runs/f7d950df1b7e46f6ab7eff83d6cc8f61",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (15) Metric Value cost_usd.draft 0.62 cost_usd.fact_check 0.21 cost_usd.adversarial_review 0.3 cost_usd.revise 0.71 cost_usd.total 1.84 tokens.input 152200 tokens.output 16000 duration_s.total 160 claims.total 14 claims.supported 13 labs.cells 12 labs.cells_ok 12 pages 24 loops 1 cost_usd.cumulative 1.84 Parameters (9) Parameter Value lesson_id 20000000-0000-4000-8000-0000000000bb course_id 50000000-0000-4000-8000-0000000000cc pipeline_version v"
+  },
+  "run-compile-traces": {
+   "url": "/#/experiments/0/runs/f7d950df1b7e46f6ab7eff83d6cc8f61/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts #de7921 compile 10000000 compare to baseline run Filters Sort Columns 6/25 Actions Group by session Analyze 4 of 4 Other Attributes (4/13) Assessments (1/1) Session Tokens Execution time State Trace ID owner.lesson_ok TRUE 0% False 100% 10000000-0000-4000-8000-0000000000aa 0/1 168200 2.7min OK MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  },
+  "run-compile-metrics": {
+   "url": "/#/experiments/0/runs/f7d950df1b7e46f6ab7eff83d6cc8f61/model-metrics",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Auto-refresh Model metrics (15) Add chart claims.supported 13.00 0 5 10 compile 10000000 claims.total 14.00 0 5 10 compile 10000000 cost_usd.adversarial_review 0.30 0 0.1 0.2 0.3 compile 10000000 cost_usd.cumulative 1 2 3 4 1 1.5 Step compile 10000000 (cost_usd.cumulative) cost_usd.draft 0.62 0 0.2 0.4 0.6 compile 10000000 cost_usd.fact_check 0.21 0 0.05 0.1 0.15 0.2 compile 10000000 cost_usd.revise 0.71 0 0.2 0.4 0.6 compile 10000000 cost_usd.total 1.84 0 0.5 1 1.5 compile 10000"
+  },
+  "run-ingest": {
+   "url": "/#/experiments/0/runs/aeeb8136143e4715a745d879437b3080",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Evaluations import aa11aa11 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (6) Metric Value pages 594 spans 9463 chunks 2285 pages_per_min_import 297 import_s 120 embed_chunks_per_s 2.71 Parameters (2) Parameter Value converter_version r2 material_sha256 aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11 About this run Created at 11/24/2026, 10:20:27 AM Created by — Experiment ID 0 Status Finished Run ID aeeb8136143e4715a745d879437b3080 Duration 34ms Source — Logged models — Registered prompts — Datasets N"
+  },
+  "run-cross-experiment": {
+   "url": "/#/experiments/1/runs/e66068e10200490fb00bc605bee47ec4",
+   "head": "3.18.0 GenAI Model training compile Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings compile Evaluations compile 10000000 Overview Model metrics System metrics Traces Artifacts Description No description Metrics (0) No metrics recorded Parameters (0) No parameters recorded About this run Created at 11/24/2026, 10:20:22 AM Created by — Experiment ID 1 Status Finished Run ID e66068e10200490fb00bc605bee47ec4 Duration 19ms Source — Logged models — Registered prompts — Datasets None Tags reader.run_id : 10000000-0000-4000-8000-0000000000aa Registered models None MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, ide"
+  },
+  "agent-version-detail": {
+   "url": "/#/experiments/0/models/m-7b5d5f9a140b4893a9840bde6ca94fd4",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Models reader-agent Not registered Register model Overview Traces Artifacts Description No description Metrics (0) No metrics recorded Parameters (3) Parameter Value model.tutor claude-sonnet-5-5 pipeline_version v1 prompt_set_sha256 abababababababababababababababababababababababababababababababab Runs No runs Prompts Prompt Name Version No prompts About this logged model Created at 3 minutes ago Created by root Status Ready Model ID m-7b5d5f9a140b4893a9840bde6ca94fd4 Logged from phase2.py Datasets used None Model versions None MLflow Assistant Beta Welcome to M"
+  },
+  "agent-version-traces": {
+   "url": "/#/experiments/0/models/m-7b5d5f9a140b4893a9840bde6ca94fd4/traces?startTime=2026-11-24T10%3A20%3A28.163Z&endTime=2026-11-24T10%3A26%3A46.340Z&startTimeLabel=CUSTOM",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Default Models reader-agent Not registered Register model Overview Traces Artifacts Filters Sort: Request time Columns 7/20 Actions Group by session Detect Issues 0 of 0 Start tracing your LLM application Traces show you how your LLM calls behave: what they cost, how they perform, and where things go wrong. Get started in a few minutes. Choose any of the following options to set up tracing One-line setup Copy for coding agent MLflow assistant Manual setup Run this from your project's Git repository to connect to MLflow and launch your coding agent to add tracing. Have C"
+  },
+  "dataset-detail": {
+   "url": "/#/experiments/0/datasets/d-a59cc214918048589422366194da66c8",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Datasets tutor-bench-v2 Dataset ID: d-a59cc214918048589422366194da66c8 Columns (4/9) 40 records Evaluation Runs Add record Inputs Expectations Last updated Tags {\"question_id\":\"v23\",\"question\":\"Почему отказ от добычи перебором сократил расход электричества второй по величине сети почти полностью?\",\"chapter\":13} {\"gold_pages\":[476,484]} 6 minutes ago mlflow.user: root {\"question_id\":\"v27\",\"question\":\"Как проекты собирали деньги, создавая свои цифровые единицы, и почему такие сборы часто заканчивались мошенничеством?\",\"chapter\":15} {\"gold_pages\":[556,5"
+  }
+ },
+ "csp": [
+  "Loading media from  'https://mlflow.org/docs/latest/images/llms/tracing/tracing-top.mp4#t=24' violates the following Content Security Policy directive: \"default-src 'self'\". Note that 'media-src' was "
+ ]
+}

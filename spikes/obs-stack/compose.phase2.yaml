@@ -1,0 +1,19 @@
+# Spike only (never shipped), round 6 (SRV-OBS phase 2). Used with compose.yaml and compose.catalog.yaml by
+# run-phase2.sh: a driver with the full MLflow client (datasets, evaluate, logged models, review queues) and the
+# committed bench files mounted read-only, one file at a time (nothing else of the repository).
+services:
+  driver2:
+    image: reader-spike-obs-driver2:local
+    build: { context: ., dockerfile: driver2.Dockerfile }
+    profiles: [driver]
+    volumes:
+      - "${OUT:?}:/out"
+      - "./analytics.py:/spike/analytics.py:ro"
+      - "./analytics_tabs.py:/spike/analytics_tabs.py:ro"
+      - "./phase2.py:/spike/phase2.py:ro"
+      - "../embeddings-local/questions.yaml:/repo/spikes/embeddings-local/questions.yaml:ro"
+      - "../embeddings-local/questions-v2.yaml:/repo/spikes/embeddings-local/questions-v2.yaml:ro"
+      - "../embeddings-local/results/20261120T232835-v2:/repo/spikes/embeddings-local/results/20261120T232835-v2:ro"
+      - "../../spec/fixtures/SRV-TUTOR/bench-fixed.yaml:/repo/spec/fixtures/SRV-TUTOR/bench-fixed.yaml:ro"
+      - "../../e2e/live/results/2026-11-23-tutor-bench.json:/repo/e2e/live/results/2026-11-23-tutor-bench.json:ro"
+    networks: [obs, obs-ui]
