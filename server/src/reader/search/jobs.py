@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.obs.spans import child_span
 from reader.search import embed_client, params
 from reader.search.chunking import Span, chunk_spans
 from reader.search.errors import EmbedUnavailable, IngestNotReady, SearchError
@@ -94,16 +95,21 @@ async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) 
         text("SELECT seq, page, text FROM material_spans WHERE ingest_id = :i ORDER BY seq"),
         {"i": args.ingest_id},
     )
-    chunks = chunk_spans(
-        [Span(int(r[0]), int(r[1]), str(r[2])) for r in rows],
-        size=params.CHUNK_SIZE,
-        overlap=params.CHUNK_OVERLAP,
-        min_len=params.CHUNK_MIN,
-    )
+    with child_span("ingest.chunk") as chunked:  # SRV-OBS FR-OBS-13: counts only
+        chunks = chunk_spans(
+            [Span(int(r[0]), int(r[1]), str(r[2])) for r in rows],
+            size=params.CHUNK_SIZE,
+            overlap=params.CHUNK_OVERLAP,
+            min_len=params.CHUNK_MIN,
+        )
+        chunked.set({"reader.chunks": len(chunks)})
     vectors: list[list[float]] = []
     for start in range(0, len(chunks), params.PASSAGE_BATCH):
         batch = [c.text for c in chunks[start : start + params.PASSAGE_BATCH]]
-        vectors.extend(await embed_client.embed("passage", batch, params.PASSAGE_TIMEOUT_S))
+        with child_span("embed.batch", {"reader.embed.batch": len(batch)}) as embedded:
+            got = await embed_client.embed("passage", batch, params.PASSAGE_TIMEOUT_S)
+            embedded.set({"reader.embed.vectors": len(got)})
+        vectors.extend(got)
     if chunks:
         await conn.execute(
             text(

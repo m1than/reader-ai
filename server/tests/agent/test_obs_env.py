@@ -101,10 +101,18 @@ async def test_enabled_adds_exactly_the_telemetry_env_and_a_current_span(pg: Pg,
     assert attrs["reader.cost_usd"] == pytest.approx(0.05)
     assert attrs["reader.stop_reason"] == "end_turn"
     # sdk_usage(): input 2, output 100, cache read 0, cache creation 7000 (all 1h) — exact (round 1 survivors).
-    assert attrs["gen_ai.usage.input_tokens"] == 2
+    # SRV-OBS FR-OBS-12 (b): the GenAI semconv keys; the input count includes the cache.
+    assert attrs["gen_ai.usage.input_tokens"] == 2 + 7000
     assert attrs["gen_ai.usage.output_tokens"] == 100
-    assert attrs["gen_ai.usage.cache_read_input_tokens"] == 0
-    assert attrs["gen_ai.usage.cache_creation_input_tokens"] == 7000
+    assert attrs["gen_ai.usage.cache_read.input_tokens"] == 0
+    assert attrs["gen_ai.usage.cache_write.input_tokens"] == 7000
+    assert "gen_ai.usage.cache_read_input_tokens" not in attrs
+    assert attrs["gen_ai.operation.name"] == "invoke_agent"
+    assert attrs["gen_ai.provider.name"] == "anthropic"
+    # FR-OBS-12 (c): the input part by pricing.yaml (sonnet: input 2, output 10, 1h write 4 per million).
+    priced_in, priced_out = 2 * 2 + 7000 * 4, 100 * 10
+    assert attrs["reader.cost_input_usd"] == pytest.approx(round(0.05 * priced_in / (priced_in + priced_out), 6))
+    assert attrs["mlflow.spanType"] == "AGENT"
     assert call.kind.name == "CLIENT"
 
 

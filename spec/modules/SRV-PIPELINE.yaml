@@ -193,7 +193,16 @@ requirements:
       this run or an earlier one, if one exists (no provider call, `cost_usd` 0, `reused_from` set); otherwise runs the stage; writes its effect; enqueues
       the next step; returns. A budget refusal before a model step (SRV-AGENT FR-AGENT-9: run cap, task budget or month)
       sets `budget_refused` and skips the remaining model steps: the run continues with `findings` and
-      `lab_verification`. One run per lesson at a time (`compile_running`).
+      `lab_verification`. One run per lesson at a time (`compile_running`). Amended by SRV-OBS V.obs-analytics
+      (FR-OBS-12 d, -13, -14, -18; ADR-0035 accepted 2026-11-24; tracing only, no outcome changes): the handler sets
+      the job root's `reader.lesson.id`, `reader.course.id` (`load_lesson` reads `c.id`) and `reader.prompt.version`
+      (the registered version of `reader.<stage>`'s template, None for stages without one); a model step's StageCall
+      carries the course id and the step; the fact report's validation runs inside a `verify.claims` child (total
+      verdicts, supported verdicts) and `obs.feedback` records `fact_check.passed` (every verdict supported, {claims,
+      supported}); lab verification runs inside a `verify.lab` child (cells = labs, cells_ok = passing labs, ms) with
+      one `kernel.run` child per run of the labs (cells, exit 0 when every lab passed that run, else 1), and records
+      `verify.lab_passed` ({cells, cells_ok}) and `verify.passed` (no problem in the lab report). None of these can
+      raise. The session marker comes from SRV-EVENTS' wrapper.
   - id: FR-PIPELINE-6
     text: >-
       Run state, derived from the run's job keys (SRV-EVENTS `job_status`) and steps, never stored: `running` while any key

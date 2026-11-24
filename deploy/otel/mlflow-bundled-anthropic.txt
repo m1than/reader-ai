@@ -1,0 +1,35 @@
+# The model ids of the bundled mlflow/utils/model_catalog/anthropic.json of
+# ghcr.io/mlflow/mlflow:v3.18.0@sha256:257204c77980b0f3450a26eb6089e487603fcdd4509529eadaf88f90669f5c13
+# (SRV-OBS FR-OBS-12 c). Read from the image in spikes/obs-stack round 5; the [image] test compares this list with
+# the base image, so a base-image bump fails until the list and mlflow-catalog/anthropic.json are regenerated.
+claude-3-7-sonnet-20250219
+claude-3-haiku-20240307
+claude-3-opus-20240229
+claude-4-opus-20250514
+claude-4-sonnet-20250514
+claude-fable-5
+claude-fable-5-1
+claude-haiku-4-5
+claude-haiku-4-5-20251001
+claude-haiku-5-5
+claude-mythos-5
+claude-mythos-5-1
+claude-mythos-preview
+claude-opus-4-1
+claude-opus-4-1-20250805
+claude-opus-4-20250514
+claude-opus-4-5
+claude-opus-4-5-20251101
+claude-opus-4-6
+claude-opus-4-6-20260205
+claude-opus-4-7
+claude-opus-4-7-20260416
+claude-opus-4-8
+claude-opus-5
+claude-opus-5-5
+claude-sonnet-4-20250514
+claude-sonnet-4-5
+claude-sonnet-4-5-20250929
+claude-sonnet-4-6
+claude-sonnet-5
+claude-sonnet-5-5

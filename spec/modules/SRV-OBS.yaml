@@ -550,8 +550,10 @@ requirements:
       {reader.citations.total, reader.citations.valid}; pipeline `verify.claims` PARSER {reader.claims.total,
       reader.claims.supported} and `verify.lab` TOOL {reader.kernel.cells, reader.kernel.cells_ok, reader.kernel.ms};
       kernel runs inside lab verification `kernel.run` TOOL {reader.kernel.cells, reader.kernel.exit} (the kernel's
-      code and output never); ingest `ingest.parse` PARSER {reader.pages, reader.bytes} and `ingest.chunk` PARSER
-      {reader.chunks}; `search.embed` batches `embed.batch` EMBEDDING {reader.embed.vectors, reader.embed.batch}. The
+      code and output never); ingest `ingest.parse` PARSER {reader.pages, reader.bytes} in `ingest.import`, and
+      `ingest.chunk` PARSER {reader.chunks} where the material is chunked, in `search.embed` (Green, 2026-11-24: the
+      import writes spans, the embed job chunks them); `search.embed` batches `embed.batch` EMBEDDING
+      {reader.embed.vectors, reader.embed.batch}. The
       round-1 draft's `reader.retrieval.top_score` (0..1) is dropped: SRV-SEARCH's fused score is a reciprocal-rank sum
       (`search/fusion.py`), not a 0..1 similarity, and no source bounds it (review, non-blocking). Every key's rule and
       each span's keys are in VEC-OBS-1 (merged from VEC-OBS-4); the span types come from VEC-OBS-4's `span_types`
@@ -635,13 +637,16 @@ requirements:
       SRV-EVENTS' delays (5 s, 25 s); `timeout_s` 30; the HTTP client timeout 10 s. The code that computes the
       outcome enqueues it with `schedule_in` 60 s (NFR-OBS-1's 30 s plus margin), inside its own try/except: an
       enqueue failure is logged (`obs feedback_enqueue_failed name=<name>`) and never changes the job's outcome or
-      result. The run: with tracing off it ends `skipped`; otherwise it first GETs the trace
-      (`…/mlflow/traces/tr-<FR-OBS-5 trace id>`) and ends `skipped` when an assessment with the same name and
+      result. The run: with tracing off it ends without a request; otherwise it first GETs the trace
+      (`…/mlflow/traces/tr-<FR-OBS-5 trace id>`) and ends without a request when an assessment with the same name and
       `source_id` exists (idempotent across retries and a lost response); then it POSTs `…/assessments`. A 404 from
       either call is transient (raised as a `transient` type) while attempts remain; on the last attempt a 404 ends
-      the key `skipped` with the log line `obs feedback_no_trace name=<name>`, not `dead` (a trace that never
+      without a request with the log line `obs feedback_no_trace name=<name>`, not `dead` (a trace that never
       arrived, e.g. tracing turned off in between, is not a failure of the job); other HTTP errors and timeouts are
-      transient; a 4xx other than 404 ends `failed`. Measured: 8 of 8 created; the Quality dashboard showed a
+      transient; a 4xx other than 404 raises `FeedbackRefused` (the key ends `dead` with that class name). "Ends
+      without a request" means the handler returns, so the key ends `succeeded`: SRV-EVENTS gives a handler no
+      `skipped` outcome (Green, 2026-11-24). Paths: GET `/ajax-api/3.0/mlflow/traces/get?trace_id=tr-<id>`, POST
+      `/ajax-api/3.0/mlflow/traces/tr-<id>/assessments` (the spike's). Measured: 8 of 8 created; the Quality dashboard showed a
       summary row, counts and averages per name, and per-value bars. [unit, db, image]
   - id: FR-OBS-15
     text: >-
@@ -656,7 +661,7 @@ requirements:
       `reader.prompt_sha256` and `reader.version` (the package version; the image has no git sha). The body is the
       file's bytes; INV-OBS-2's canary covers it (no book text, secret or run token can be in a static file; a unit
       test also runs the secret scanner over each file and refuses a `{{…}}` placeholder that a renderer would fill).
-      The run ends `skipped` with tracing off. The worker reads the stage → version map from MLflow on demand for
+      With tracing off the run ends without a request. The worker reads the stage → version map from MLflow on demand for
       FR-OBS-18 (linked prompts), cached per process; an unknown version links nothing. Measured: 3 prompts
       registered, listed with their tags, and "1 linked prompt" on a trace. [unit, image]
   - id: FR-OBS-18

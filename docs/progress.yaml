@@ -1521,8 +1521,21 @@ tasks:
         OPS-DOD; R2-2 session marker via reader.obs.session_marker; R2-3 Jaeger sizing), applied. Round 3 on
         6ccbb08: VERDICT approve for the approval scope FR-OBS-12 (a-f, h), -13, -16, -17; nits applied (clause (g)
         split to FR-OBS-18, blocked; the Jaeger fill test records times; the catalog generator uses ruamel.yaml).
-        Build of the approved scope: V/obs-analytics-impl. FR-OBS-14/15/18 and the Jaeger items wait for the
-        owner's ADR-0033/0035 decisions; ADR-0034 is the owner's too." }
+        Owner 2026-11-24: ADR-0033 and ADR-0035 accepted, ADR-0034 rejected; the whole amendment is built on
+        V/obs-analytics-impl." }
+  - { id: V.obs-analytics-impl, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [V.obs-analytics], branch: V/obs-analytics-impl,
+      what: "Red and Green of SRV-OBS FR-OBS-12..19 (V.obs-analytics; ADR-0033, ADR-0035 accepted) with the paired
+        SRV-AGENT, SRV-EVENTS, SRV-TUTOR, SRV-PIPELINE, SRV-INGEST, SRV-SEARCH, OPS-DEPLOY, OPS-CLI and WEB-UI
+        changes.",
+      note: "Cut from V/slice-integration 9140885 with origin/V/obs-analytics 4e6c104 merged. Red: FR-OBS-12..19 and
+        VEC-OBS-4 moved into requirements and vectors; VEC-OBS-1 gains the new keys and span names; the in-place
+        edits applied (FR-OBS-2, -5, -6, -7, -8, -9, -10, INV-OBS-1, -2, -3, -5, NFR-OBS-1, test_levels, owner
+        notes); paired FR texts amended. Green: reader.obs.analytics (derivation), spans (session marker, root
+        attributes, child spans), feedback (obs.feedback), prompts (obs.prompts), the agent span's semconv keys and
+        cost split, summary's lessons view, the per-site gate, the catalog generator and replaced catalog, jaeger,
+        the 8444 site and reader up/doctor lines, /observability's cost-per-lesson and dashboards. Gate and image
+        tests: see the PR. No reader up, no live step, no credit. Next: code review, full rounds." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

@@ -110,7 +110,8 @@ def test_job_span_links_to_the_enqueuer_in_a_new_derived_trace() -> None:
     assert [format(link.context.trace_id, "032x") for link in root.links] == [enqueuer.split("-")[1]]
     assert [format(link.context.span_id, "016x") for link in root.links] == [enqueuer.split("-")[2]]
     assert root.kind.name == "CONSUMER"
-    assert dict(root.attributes) == {
+    # FR-OBS-12's derived MLflow keys are tested in test_analytics.py; here the job's own attributes.
+    assert {k: v for k, v in root.attributes.items() if not k.startswith("mlflow.")} == {
         "reader.job.kind": "tutor.answer",
         "reader.job.id": 41,
         "reader.job.attempt": 2,

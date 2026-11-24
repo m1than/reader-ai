@@ -255,7 +255,10 @@ requirements:
          chunk, then the `search_embeds` row, as the run transaction's last statements (SRV-EVENTS FR-EVENTS-4).
       [db] with a fake embed service, including an ingest that is aborted between enqueue and run (IngestNotReady at
       once, then success once the import commits), a superseded ingest (`ingest_superseded`), a language change
-      between enqueue and run (`params_mismatch`), and more than one passage batch (every call ≤ 8 texts).
+      between enqueue and run (`params_mismatch`), and more than one passage batch (every call ≤ 8 texts). Amended by
+      SRV-OBS FR-OBS-13 (2026-11-24; tracing only): chunking runs inside an `ingest.chunk` child span (the chunk
+      count) and each passage batch inside an `embed.batch` child (the batch size and the vectors returned); counts
+      only.
   - id: FR-SEARCH-6
     text: >-
       **Full-text configuration.** A material's `fts_config` comes from its reader.yaml `materials[].language`, looked up

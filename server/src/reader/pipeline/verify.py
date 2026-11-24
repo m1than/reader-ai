@@ -22,6 +22,7 @@ from typing import Any, Final
 from reader.kernels import upstream
 from reader.kernels.protocol import EXEC_OUTPUT_MAX
 from reader.kernels.upstream import Endpoint, UpstreamError
+from reader.obs.spans import child_span
 from reader.pipeline.errors import VerifyUnavailable
 from reader.pipeline.findings import Problem, labs_of, labs_sha256, source_sha256, source_text
 
@@ -142,6 +143,20 @@ class VerifyClient:
             raise VerifyUnavailable() from None
         session = uuid.uuid4().hex
         self._used = 0  # text collected in this run (S4: at most EXEC_OUTPUT_MAX)
+        # SRV-OBS FR-OBS-13: one `kernel.run` per run of the labs; counts only, never code or output.
+        with child_span("kernel.run", {"reader.kernel.cells": len(labs)}) as run_span:
+            await self._run_labs(labs, passed, outputs, connection, kernel, session)
+            run_span.set({"reader.kernel.exit": 0 if all(passed[c["id"]] for _, c in labs) else 1})
+
+    async def _run_labs(
+        self,
+        labs: list[tuple[int, dict[str, Any]]],
+        passed: dict[str, bool],
+        outputs: dict[str, list[str]],
+        connection: Any,
+        kernel: str,
+        session: str,
+    ) -> None:
         try:
             for _, cell in labs:
                 cid = cell["id"]

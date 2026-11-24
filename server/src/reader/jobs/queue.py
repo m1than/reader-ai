@@ -37,7 +37,7 @@ from reader.jobs.model import (
     lock_id,
 )
 from reader.jobs.states import RECONCILE_ENQUEUE, RECONCILE_STALL_LIKE, deciding_status, status_of
-from reader.obs import propagation
+from reader.obs import propagation, spans
 
 log = logging.getLogger("reader.jobs")
 READ_LIMIT_MAX: Final = 500  # FR-EVENTS-18: structural bound of recent_keys_of
@@ -294,6 +294,9 @@ class Jobs:
             span_key = ""
         # FR-EVENTS-19: the whole run inside the job's root span, so retries and handler enqueues carry it.
         with propagation.job_span(kind.name, job_id, span_key, payload, trace):
+            # SRV-OBS FR-OBS-12 (e): the pipeline's session is its run; the marker never raises.
+            if kind.name.startswith("pipeline.") and isinstance(payload.get("run_id"), str):
+                spans.session_marker("reader.run_id", payload["run_id"])
             await self._run_in_span(kind, job_id, payload)
 
     async def _run_in_span(self, kind: JobKind, job_id: int, payload: dict[str, Any]) -> None:

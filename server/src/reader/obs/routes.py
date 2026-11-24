@@ -26,11 +26,12 @@ async def gate(ctx: Ctx) -> Response:
     h = ctx.request.headers
     shape = (h.get("origin"), h.get("x-forwarded-method"), h.get("sec-fetch-site"), h.get("sec-fetch-mode"),
              h.get("sec-fetch-dest"))
-    refused = precheck(*shape)
+    site = h.get("x-reader-site")  # FR-OBS-9: set by Caddy, never trusted from a client (Caddy overrides it)
+    refused = precheck(*shape, site)
     if refused is not None:
         return Response(status_code=refused)
     user = await store.session_user(ctx.engine, ctx.request.cookies.get(SESSION_COOKIE))
-    return Response(status_code=decide(*shape, user.role if user is not None else None))
+    return Response(status_code=decide(*shape, user.role if user is not None else None, site))
 
 
 async def summary(ctx: Ctx) -> Response:

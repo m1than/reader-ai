@@ -17,6 +17,7 @@ from opentelemetry.sdk.util.instrumentation import InstrumentationScope
 from opentelemetry.trace import Link, SpanContext, Status, TraceState
 from opentelemetry.util.types import AttributeValue
 
+from reader.obs.analytics import derive
 from reader.obs.attributes import FALLBACK_NAME, SCOPE, AllowList, key_name
 
 log = logging.getLogger("reader.obs")
@@ -63,7 +64,9 @@ class AllowListExporter(SpanExporter):
         for key in given:
             if key not in kept:
                 self._drop(key)
-        links = tuple(Link(ctx) for link in span.links if (ctx := _bare(link.context)) is not None)
+        if klass:  # FR-OBS-12, -18: the MLflow keys, derived from validated attributes only (VEC-OBS-4)
+            kept.update(derive(klass, span.name, kept, span.parent is None))
+        links =tuple(Link(ctx) for link in span.links if (ctx := _bare(link.context)) is not None)
         return ReadableSpan(
             name=span.name if klass else FALLBACK_NAME,
             context=_bare(span.context),

@@ -14,6 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from reader.jobs.model import JobKind
+from reader.obs import feedback, prompts
 
 KIND: Final = "obs.retention"
 MLFLOW: Final = "http://mlflow:5000"
@@ -151,10 +152,15 @@ async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
     if engine is not None:
         await record_start(engine, obs_setup.current_settings().enabled)
     today = (now or datetime.now(UTC)).date().isoformat()
-    await jobs.enqueue(KIND, {"day": today})
+    try:
+        await jobs.enqueue(KIND, {"day": today})
+    finally:
+        await prompts.on_worker_start(jobs)  # FR-OBS-15: enqueue-only, never raises
 
 
 JOB_KINDS: Final = (
+    feedback.KIND_DECL,
+    prompts.KIND_DECL,
     JobKind(
         name=KIND,
         queue="obs",

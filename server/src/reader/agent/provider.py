@@ -65,6 +65,8 @@ class StageCall:
     thinking_off: bool = False  # FR-AGENT-13 a
     abort_on_retry: bool = False  # FR-AGENT-13 d
     deadline_s: float | None = None  # FR-AGENT-13 e
+    course_id: uuid.UUID | None = None  # FR-AGENT-14 (SRV-OBS FR-OBS-12 d): on the `agent.call` span only
+    step: int | None = None  # FR-AGENT-14: the compile step, on the `agent.call` span only
 
 
 @dataclass(frozen=True)
@@ -256,7 +258,7 @@ class AgentProvider:
             raise agent_error("unknown_model")
         model = resolve_model(task.model)
         # FR-AGENT-14 (SRV-OBS FR-OBS-6): the call runs inside `agent.call`, current while the CLI starts.
-        with agent_call(call.task, call.stage, model) as span:
+        with agent_call(call.task, call.stage, model, call.lesson_id, call.course_id, call.step) as span:
             return await self._run(call, model, span)
 
     async def _run(self, call: StageCall, model: str, span: AgentSpan) -> StageResult:

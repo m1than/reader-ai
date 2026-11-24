@@ -27,6 +27,8 @@ allowed:
   - [rotel, mlflow]            # obs
   - [worker, mlflow]           # obs: the retention job only (ADR-0032 amends ADR-0025 rule 5)
   - [caddy, mlflow]            # obs-ui
+  - [rotel, jaeger]            # jaeger-in (ADR-0033, SRV-OBS FR-OBS-19)
+  - [caddy, jaeger]            # jaeger-ui
 internet_egress: [caddy, agent-proxy]   # members of the only non-internal networks (edge, egress)
 never:
   # explicit negatives, also implied by `allowed` being exact
@@ -63,3 +65,15 @@ never:
   - [rotel, kernel-agent]
   - [rotel, kernel-pair-1]
   - [rotel, kernel-user-ivan]
+  # ADR-0033: Jaeger reaches nothing and is reached by rotel and caddy only.
+  - [jaeger, api]
+  - [jaeger, worker]
+  - [jaeger, mlflow]
+  - [jaeger, postgres]
+  - [jaeger, embed]
+  - [jaeger, agent-proxy]
+  - [jaeger, mcp]
+  - [jaeger, kernel-verify]
+  - [jaeger, kernel-agent]
+  - [jaeger, kernel-pair-1]
+  - [jaeger, kernel-user-ivan]

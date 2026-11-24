@@ -362,7 +362,11 @@ requirements:
       at max_attempts, `skipped` for a run that finds the key decided, and `dead` (not `failed`) for `session_lost` and
       `wrapper_error` when that count ended the key dead (code review round 1), `failed` with `session_lost` when it
       did not, and `aborted` for a cancelled run (round 2). [unit, db]
-      server/tests/jobs/test_trace_context.py.
+      server/tests/jobs/test_trace_context.py. Amended by SRV-OBS V.obs-analytics (FR-OBS-12 e, -14, -15; ADR-0035
+      accepted 2026-11-24): for `pipeline.*` kinds the wrapper calls `reader.obs.spans.session_marker("reader.run_id",
+      <payload run_id>)` right after opening the root (only when the payload's `run_id` is a string; the helper never
+      raises and does nothing with tracing off); `reader.obs.jobs` also declares `obs.feedback` and `obs.prompts`,
+      and its `on_worker_start` also enqueues `obs.prompts` (enqueue-only, a failure logged).
 
 invariants:
   - id: INV-EVENTS-1

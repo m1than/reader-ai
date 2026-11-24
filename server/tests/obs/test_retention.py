@@ -25,7 +25,8 @@ def anyio_backend() -> str:
 
 def test_kind_declaration() -> None:
     jobs = require("reader.obs.jobs")
-    (kind,) = jobs.JOB_KINDS
+    assert [k.name for k in jobs.JOB_KINDS] == ["obs.feedback", "obs.prompts", "obs.retention"]  # FR-OBS-14, -15
+    kind = jobs.JOB_KINDS[-1]
     assert kind.name == "obs.retention"
     assert kind.key == ("day",)
     assert kind.max_attempts == 3
@@ -211,7 +212,13 @@ async def test_on_worker_start_enqueues_today() -> None:
     log: list[str] = []
     fake = FakeJobs(log)
     await jobs.on_worker_start(fake, now=NOW)
-    assert fake.calls == [("obs.retention", {"day": "2026-11-24"}, 0)]
+    # FR-OBS-15: the start hook also enqueues the prompt registration for this package version.
+    from reader.obs.export import reader_version
+
+    assert fake.calls == [
+        ("obs.retention", {"day": "2026-11-24"}, 0),
+        ("obs.prompts", {"version": reader_version()}, 0),
+    ]
 
 
 @pytest.mark.parametrize(("enabled", "days"), [(True, 7), (False, 365)])

@@ -366,6 +366,10 @@ requirements:
       roots)` takes the roots as an argument, skips a root file that does not load, verifies the certificate and the
       host name, and never follows a redirect; a unit test runs it against a local HTTPS server with a test CA
       (code review round 1), including a bad root next to a good one. [unit] server/tests/cli/test_observability.py.
+      Amended by SRV-OBS FR-OBS-19 (ADR-0033 accepted 2026-11-24): (b) the override adds
+      `ports: ["127.0.0.1:8443:8443", "127.0.0.1:8444:8444"]` (Jaeger's site) under the same condition; (c) `reader
+      up` also prints `jaeger: https://localhost:8444/`; (d) the doctor adds the check `jaeger`, the same GET of
+      `https://localhost:8444/` with the same roots and details (`off` when the profile is not chosen).
   - id: FR-CLI-23   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23); was FR-CLI-22 until the merge
     text: >-
       **The ingest watcher** (SRV-INGEST FR-INGEST-21). By default (owner 2026-11-23), `reader up`, after its step

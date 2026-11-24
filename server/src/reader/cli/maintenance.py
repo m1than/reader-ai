@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from reader.cli.commands import (
+    JAEGER_URL,
     TRACES_URL,
     Ctx,
     Project,
@@ -253,21 +254,24 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         trusted = _still_trusted(ctx, {p.stem for p in roots})
         check("trust", trusted == {p.stem for p in roots}, f"{len(roots)} recorded root(s)")
     # FR-CLI-22: with the profile chosen, the dashboard answers 401 without a cookie (the gate is in front).
+    # SRV-OBS FR-OBS-19: the Jaeger site, behind the same gate, is checked the same way.
     if config.observability.enabled:
         gate_roots = doctor_roots(ctx, project.model.name if project is not None else None, roots)
-        status = gate_status(TRACES_URL, gate_roots) if gate_roots else None
-        if not gate_roots:
-            check("observability", False, "unreachable: no Caddy root (stack down?)")
-        elif status == 401:
-            check("observability", True, "gate ok")
-        elif status is None:
-            check("observability", False, "unreachable")
-        elif 200 <= status < 400:
-            check("observability", False, "gate open")
-        else:
-            check("observability", False, f"status {status}")
+        for name, url in (("observability", TRACES_URL), ("jaeger", JAEGER_URL)):
+            status = gate_status(url, gate_roots) if gate_roots else None
+            if not gate_roots:
+                check(name, False, "unreachable: no Caddy root (stack down?)")
+            elif status == 401:
+                check(name, True, "gate ok")
+            elif status is None:
+                check(name, False, "unreachable")
+            elif 200 <= status < 400:
+                check(name, False, "gate open")
+            else:
+                check(name, False, f"status {status}")
     else:
         check("observability", True, "off")
+        check("jaeger", True, "off")
     ok = all(c["ok"] for c in checks)
     if as_json:
         print(json.dumps(checks), file=ctx.out)

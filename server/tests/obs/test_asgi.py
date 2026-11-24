@@ -73,6 +73,7 @@ async def test_http_span_has_the_route_template_only(caplog: Any) -> None:
         "http.request.method": "GET",
         "http.route": "/api/lessons/{lesson_id}",
         "http.response.status_code": 200,
+        "mlflow.traceTag.mlflow.traceName": "GET /api/lessons/{lesson_id}",  # FR-OBS-12 (d): a root's name
     }
     assert span.kind.name == "SERVER"
     assert format(span.context.trace_id, "032x") != "a" * 32  # the client's traceparent is ignored

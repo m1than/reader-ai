@@ -1,6 +1,6 @@
 """SRV-OBS [unit, db]: the owner's views (GET /api/obs/summary) on VEC-OBS-3.
 
-@trace FR-OBS-10 VEC-OBS-3
+@trace FR-OBS-10 FR-OBS-17 VEC-OBS-3
 
 [unit] VEC-OBS-3's keys are recomputed from their args with reader.jobs.model.idempotency_key and its trace ids with
 FR-OBS-5's derivation (this test, not spec/fixtures/SRV-OBS/trace-ids.mjs, is the gate for the fixture); the
@@ -150,14 +150,15 @@ async def _seed(engine: Any) -> None:
         for a in seed["agent_spend"]:
             await run(
                 text(
-                    "INSERT INTO agent_spend (id, owner_id, run_id, stage, task, attempt, kind, reservation_id, model,"
-                    " usd, settled_usd, created_at) OVERRIDING SYSTEM VALUE"
-                    " VALUES (:id, :o, :r, :t, :t, :a, :k, :res, 'claude-sonnet-5-5', :usd, :settled, :at)"
+                    "INSERT INTO agent_spend (id, owner_id, run_id, lesson_id, stage, task, attempt, kind,"
+                    " reservation_id, model, usd, settled_usd, created_at) OVERRIDING SYSTEM VALUE"
+                    " VALUES (:id, :o, :r, :l, :t, :t, :a, :k, :res, 'claude-sonnet-5-5', :usd, :settled, :at)"
                 ),
                 {
                     "id": a["id"],
                     "o": a["owner_id"],
                     "r": a["run_id"],
+                    "l": a.get("lesson_id") or seed["agent_spend_lessons"].get(a["run_id"]),  # FR-OBS-17
                     "t": a["task"],
                     "a": a.get("attempt", 1),
                     "k": a["kind"],
@@ -190,6 +191,46 @@ async def _seed(engine: Any) -> None:
                     "INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, 'm', :p)"
                 ),
                 {"o": m["owner_id"], "s": m["sha256"], "p": m["page_count"]},
+            )
+        # FR-OBS-17: the lessons, courses and source spans the cost-per-lesson view reads.
+        for c in seed["courses"]:
+            await run(
+                text("INSERT INTO courses (id, owner_id, title) VALUES (:id, :o, :t)"),
+                {"id": c["id"], "o": c["owner_id"], "t": c["title"]},
+            )
+        for lesson in seed["lessons"]:
+            await run(
+                text(
+                    "INSERT INTO lessons (id, owner_id, course_id, ordinal, title) VALUES (:id, :o, :c, :n, :t)"
+                ),
+                {"id": lesson["id"], "o": lesson["owner_id"], "c": lesson["course_id"], "n": lesson["ordinal"],
+                 "t": lesson["title"]},
+            )
+        for p in seed["course_plans"]:
+            await run(
+                text(
+                    "INSERT INTO course_plans (owner_id, plan_course_id, plan_lesson_id, lesson_id, material_sha256,"
+                    " pdf_first, pdf_last) VALUES (:o, 'c', :pl, :l, :m, :f, :t)"
+                ),
+                {"o": p["owner_id"], "pl": p["lesson_id"], "l": p["lesson_id"], "m": p["material_sha256"],
+                 "f": p["pdf_first"], "t": p["pdf_last"]},
+            )
+        for i in seed["ingests"]:
+            await run(
+                text(
+                    "INSERT INTO ingests (id, owner_id, material_id, converter_version, artifact_id, span_count,"
+                    " outline_count, outline_source, pages_without_text) SELECT :id, :o, m.id, 'r2', :a, 0, 0,"
+                    " 'headings', '{}' FROM materials m WHERE m.sha256 = :s AND m.owner_id = :o"
+                ),
+                {"id": i["id"], "o": i["owner_id"], "a": "b" * 64, "s": i["material_sha256"]},
+            )
+        for s in seed["material_spans"]:
+            await run(
+                text(
+                    "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                    " VALUES (:i, :o, :n, :p, 'text', :t, 0, 0, 1, 1)"
+                ),
+                {"i": s["ingest_id"], "o": s["owner_id"], "n": s["seq"], "p": s["page"], "t": "x" * s["chars"]},
             )
         for k in seed["job_keys"]:
             await run(
@@ -245,6 +286,8 @@ async def test_summary_on_vec_obs_3(pg: Any) -> None:
     }
     assert [(t["error_code"], t["count"]) for t in other["failures"]["tutor"]] == [("tutor_failed", 1)]
     assert other["ingest"]["rows"] == []
+    # FR-OBS-17: the other owner sees only its own lesson; the owner's lessons never appear there.
+    assert [r["lesson_id"] for r in other["lessons"]["rows"]] == ["20000000-0000-4000-8000-000000000009"]
     assert '"question"' not in json.dumps(got)  # no text column is read (`question_id` is an id)
 
 
@@ -409,4 +452,5 @@ async def test_the_worker_start_records_whether_tracing_is_on(pg: Any, monkeypat
     finally:
         await engine.dispose()
     assert rows == [True, False]
-    assert enqueued == [("obs.retention", {"day": "2026-11-24"})] * 2
+    # FR-OBS-15's obs.prompts enqueue rides the same hook (tested in test_retention.py).
+    assert [e for e in enqueued if e[0] == "obs.retention"] == [("obs.retention", {"day": "2026-11-24"})] * 2

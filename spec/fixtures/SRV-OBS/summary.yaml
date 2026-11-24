@@ -43,6 +43,42 @@ seed:
     - { id: 12, owner_id: 00000000-0000-4000-8000-000000000002, run_id: 30000000-0000-4000-8000-000000000009, task: tutor, kind: settle, reservation_id: 17, settled_usd: 9.99 }
     - { id: 18, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000008, task: tutor, kind: reserve, usd: 0.30, created_at: "2026-11-10T11:00:00Z" }   # old
     - { id: 19, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 30000000-0000-4000-8000-000000000008, task: tutor, kind: settle, reservation_id: 18, settled_usd: 5.00, created_at: "2026-11-10T11:00:00Z" }   # old
+    # FR-OBS-17 (cost per lesson): a voided reserve in run 1 (counts 0), an old open reserve of lesson 1 (outside the
+    # window: counts nowhere), and lesson 3's one paid call (its source has 0 characters).
+    - { id: 20, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000001, task: review, attempt: 2, kind: reserve, usd: 0.80, lesson_id: 20000000-0000-4000-8000-000000000001 }
+    - { id: 21, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000001, task: review, attempt: 2, kind: void, reservation_id: 20, usd: 0, lesson_id: 20000000-0000-4000-8000-000000000001 }
+    - { id: 22, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000007, task: draft, attempt: 1, kind: reserve, usd: 2.00, lesson_id: 20000000-0000-4000-8000-000000000001, created_at: "2026-11-10T11:00:00Z" }   # old, open
+    - { id: 23, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000003, task: draft, attempt: 1, kind: reserve, usd: 0.50, lesson_id: 20000000-0000-4000-8000-000000000003 }
+    - { id: 24, owner_id: 00000000-0000-4000-8000-000000000001, run_id: 10000000-0000-4000-8000-000000000003, task: draft, attempt: 1, kind: settle, reservation_id: 23, settled_usd: 0.10, lesson_id: 20000000-0000-4000-8000-000000000003 }
+  # FR-OBS-17: SRV-AGENT writes agent_spend.lesson_id on every row of a call with a lesson; the rows above without
+  # their own `lesson_id` get it from their run here (tutor calls: the question's lesson).
+  agent_spend_lessons:
+    10000000-0000-4000-8000-000000000001: 20000000-0000-4000-8000-000000000001
+    30000000-0000-4000-8000-000000000001: 20000000-0000-4000-8000-000000000002
+    30000000-0000-4000-8000-000000000002: 20000000-0000-4000-8000-000000000002
+    30000000-0000-4000-8000-000000000003: 20000000-0000-4000-8000-000000000002
+    30000000-0000-4000-8000-000000000004: 20000000-0000-4000-8000-000000000002
+    30000000-0000-4000-8000-000000000008: 20000000-0000-4000-8000-000000000001   # old rows of lesson 1
+    30000000-0000-4000-8000-000000000009: 20000000-0000-4000-8000-000000000009   # other owner's lesson
+  courses:
+    - { id: 50000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, title: Course one }
+    - { id: 50000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, title: Other course }
+  lessons:
+    - { id: 20000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, course_id: 50000000-0000-4000-8000-000000000001, ordinal: 1, title: Lesson one }
+    - { id: 20000000-0000-4000-8000-000000000002, owner_id: 00000000-0000-4000-8000-000000000001, course_id: 50000000-0000-4000-8000-000000000001, ordinal: 2, title: Lesson two }
+    - { id: 20000000-0000-4000-8000-000000000003, owner_id: 00000000-0000-4000-8000-000000000001, course_id: 50000000-0000-4000-8000-000000000001, ordinal: 3, title: Lesson three }
+    - { id: 20000000-0000-4000-8000-000000000009, owner_id: 00000000-0000-4000-8000-000000000002, course_id: 50000000-0000-4000-8000-000000000009, ordinal: 1, title: Other lesson }
+  # The source of lessons 1 and 3: pages of the owner's material; lesson 2 has no plan row (no source).
+  course_plans:
+    - { lesson_id: 20000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", pdf_first: 1, pdf_last: 2 }
+    - { lesson_id: 20000000-0000-4000-8000-000000000003, owner_id: 00000000-0000-4000-8000-000000000001, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", pdf_first: 4, pdf_last: 4 }
+  ingests:
+    - { id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11" }
+  material_spans:   # `chars`: the text is that many "x" characters (no text in the fixture)
+    - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 0, page: 1, chars: 1200 }
+    - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 1, page: 2, chars: 800 }
+    - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 2, page: 3, chars: 500 }   # outside every plan
+    - { ingest_id: 40000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, seq: 3, page: 4, chars: 0 }
   tutor_questions:   # latency = finished_at − created_at
     - { id: 30000000-0000-4000-8000-000000000001, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:00:00.000Z", finished_at: "2026-11-24T11:00:02.000Z" }
     - { id: 30000000-0000-4000-8000-000000000002, owner_id: 00000000-0000-4000-8000-000000000001, state: answered, created_at: "2026-11-24T11:01:00.000Z", finished_at: "2026-11-24T11:01:04.000Z" }
@@ -113,3 +149,25 @@ expected:
     rows:
       - { material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", page_count: 594, import_s: 120,
           pages_per_min_import: 297.0, job: 301, trace_id: c7c885850da1d6bbde90e0f9302cbf7f }
+  # FR-OBS-17: largest total first. Lesson 1: 0.62 + 0.23 (the failed paid attempt) + 0.21 settled + 0.80 open
+  # reserve; the voided reserve and the old open reserve count 0. Lesson 2: tutor settles only, no source. Lesson 3:
+  # 0 source characters, so no per-1k figure. The other owner's lesson is absent.
+  lessons:
+    truncated: false
+    open_reserves: 1
+    rows:
+      - { lesson_id: 20000000-0000-4000-8000-000000000001, title: Lesson one, course_id: 50000000-0000-4000-8000-000000000001,
+          course_title: Course one, compile_usd: 1.86, runs: 1, last_compile_usd: 1.86, tutor_usd: 0.0, total_usd: 1.86,
+          open_reserves: 1, chars: 2000, usd_per_1k_chars: 0.93,
+          mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000001" }
+      - { lesson_id: 20000000-0000-4000-8000-000000000002, title: Lesson two, course_id: 50000000-0000-4000-8000-000000000001,
+          course_title: Course one, compile_usd: 0.0, runs: 0, last_compile_usd: null, tutor_usd: 0.13, total_usd: 0.13,
+          open_reserves: 0, chars: null, usd_per_1k_chars: null,
+          mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000002" }
+      - { lesson_id: 20000000-0000-4000-8000-000000000003, title: Lesson three, course_id: 50000000-0000-4000-8000-000000000001,
+          course_title: Course one, compile_usd: 0.1, runs: 1, last_compile_usd: 0.1, tutor_usd: 0.0, total_usd: 0.1,
+          open_reserves: 0, chars: 0, usd_per_1k_chars: null,
+          mlflow_url: "https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000003" }
+    courses:
+      - { course_id: 50000000-0000-4000-8000-000000000001, title: Course one, compile_usd: 1.96, tutor_usd: 0.13,
+          total_usd: 2.09, chars: 2000, usd_per_1k_chars: 1.045 }

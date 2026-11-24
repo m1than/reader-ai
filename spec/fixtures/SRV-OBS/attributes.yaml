@@ -109,6 +109,8 @@ job_args:
   ingest.import: { material_sha256: reader.material_sha256 }
   search.embed: { material_sha256: reader.material_sha256, ingest_id: reader.ingest_id }
   obs.retention: {}
+  obs.feedback: {}   # FR-OBS-14: no argument reaches the span
+  obs.prompts: {}    # FR-OBS-15
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
 instrumentation_scope: { name: reader, version: null }

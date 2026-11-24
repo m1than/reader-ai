@@ -142,7 +142,8 @@ async def test_worker_start_rows_and_their_pruning(pg: Any, monkeypatch: pytest.
             rows = (await conn.execute(text("SELECT started_at, enabled FROM obs_tracing ORDER BY 1"))).all()
         assert [r.enabled for r in rows] == [True, False]
         assert all(before <= r.started_at <= after for r in rows)  # the database clock at the start
-        assert enqueued == [("obs.retention", {"day": "2026-11-24"})] * 2
+        # FR-OBS-15's obs.prompts enqueue rides the same hook (tested in test_retention.py).
+        assert [e for e in enqueued if e[0] == "obs.retention"] == [("obs.retention", {"day": "2026-11-24"})] * 2
         # Pruning keeps every start after the cutoff and the latest one before it.
         await _starts(engine, [(_h(-24 * 50), True), (_h(-24 * 40), False), (_h(-24 * 35), True), (_h(-1), True)])
         async with engine.begin() as conn:

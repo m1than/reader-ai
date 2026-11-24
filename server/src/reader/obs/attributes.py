@@ -41,14 +41,42 @@ ATTRIBUTES: Final[Mapping[str, Mapping[str, Any]]] = {
     "gen_ai.request.model": {"type": "string", "enum_from": "models"},
     "gen_ai.usage.input_tokens": {"type": "int", "range": TOKENS},
     "gen_ai.usage.output_tokens": {"type": "int", "range": TOKENS},
-    "gen_ai.usage.cache_read_input_tokens": {"type": "int", "range": TOKENS},
-    "gen_ai.usage.cache_creation_input_tokens": {"type": "int", "range": TOKENS},
+    "gen_ai.usage.cache_read.input_tokens": {"type": "int", "range": TOKENS},
+    "gen_ai.usage.cache_write.input_tokens": {"type": "int", "range": TOKENS},
+    "gen_ai.operation.name": {"type": "string", "enum": ("invoke_agent",)},
+    "gen_ai.provider.name": {"type": "string", "enum": ("anthropic",)},
     "reader.cost_usd": {"type": "float", "range": (0, 1000)},
+    "reader.cost_input_usd": {"type": "float", "range": (0, 1000)},
     "reader.stop_reason": {
         "type": "string",
         "enum": ("end_turn", "max_tokens", "stop_sequence", "tool_use", "pause_turn", "refusal"),
     },
+    "reader.lesson.id": {"type": "string", "pattern": UUID},
+    "reader.course.id": {"type": "string", "pattern": UUID},
+    "reader.tutor.state": {"type": "string", "enum": ("answered", "failed", "refused", "expired")},
+    "reader.prompt.version": {"type": "int", "range": (1, 100000)},
+    "reader.retrieval.hits": {"type": "int", "range": (0, 1000)},
+    "reader.retrieval.candidates": {"type": "int", "range": (0, 10000)},
+    "reader.citations.total": {"type": "int", "range": (0, 1000)},
+    "reader.citations.valid": {"type": "int", "range": (0, 1000)},
+    "reader.claims.total": {"type": "int", "range": (0, 10000)},
+    "reader.claims.supported": {"type": "int", "range": (0, 10000)},
+    "reader.kernel.cells": {"type": "int", "range": (0, 10000)},
+    "reader.kernel.cells_ok": {"type": "int", "range": (0, 10000)},
+    "reader.kernel.ms": {"type": "int", "range": (0, 86400000)},
+    "reader.kernel.exit": {"type": "int", "range": (-255, 255)},
+    "reader.pages": {"type": "int", "range": (0, 100000)},
+    "reader.bytes": {"type": "int", "range": (0, 10000000000)},
+    "reader.chunks": {"type": "int", "range": (0, 10000000)},
+    "reader.embed.vectors": {"type": "int", "range": (0, 10000000)},
+    "reader.embed.batch": {"type": "int", "range": (0, 100000)},
 }
+
+# FR-OBS-12 (e) and FR-OBS-13: span names listed literally (the session marker and the child spans).
+CHILD_SPANS: Final = (
+    "job.session", "tutor.retrieve", "tutor.citations", "verify.claims", "verify.lab", "kernel.run",
+    "ingest.parse", "ingest.chunk", "embed.batch",
+)
 
 KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
     "http": ("http.request.method", "http.route", "http.response.status_code"),
@@ -56,14 +84,25 @@ KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
     "job": (
         "reader.job.kind", "reader.job.id", "reader.job.attempt", "reader.job.outcome", "reader.error_code",
         "reader.error_class", "reader.run_id", "reader.step", "reader.stage", "reader.question_id",
-        "reader.ingest_id", "reader.material_sha256",
+        "reader.ingest_id", "reader.material_sha256", "reader.lesson.id", "reader.course.id",
+        "reader.tutor.state", "reader.prompt.version",
     ),
     "agent.call": (
         "reader.task", "reader.stage", "gen_ai.request.model", "gen_ai.usage.input_tokens",
-        "gen_ai.usage.output_tokens", "gen_ai.usage.cache_read_input_tokens",
-        "gen_ai.usage.cache_creation_input_tokens", "reader.cost_usd", "reader.stop_reason",
-        "reader.error_code",
+        "gen_ai.usage.output_tokens", "gen_ai.usage.cache_read.input_tokens",
+        "gen_ai.usage.cache_write.input_tokens", "reader.cost_usd", "reader.stop_reason",
+        "reader.error_code", "gen_ai.operation.name", "gen_ai.provider.name", "reader.cost_input_usd",
+        "reader.lesson.id", "reader.course.id", "reader.step",
     ),
+    "job.session": ("reader.run_id", "reader.lesson.id"),
+    "tutor.retrieve": ("reader.retrieval.hits", "reader.retrieval.candidates"),
+    "tutor.citations": ("reader.citations.total", "reader.citations.valid"),
+    "verify.claims": ("reader.claims.total", "reader.claims.supported"),
+    "verify.lab": ("reader.kernel.cells", "reader.kernel.cells_ok", "reader.kernel.ms"),
+    "kernel.run": ("reader.kernel.cells", "reader.kernel.exit"),
+    "ingest.parse": ("reader.pages", "reader.bytes"),
+    "ingest.chunk": ("reader.chunks",),
+    "embed.batch": ("reader.embed.vectors", "reader.embed.batch"),
 }
 
 # FR-OBS-5 (b): argument fields copied from a job's validated args to its root span; no other field is read.
@@ -74,6 +113,8 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "ingest.import": {"material_sha256": "reader.material_sha256"},
     "search.embed": {"material_sha256": "reader.material_sha256", "ingest_id": "reader.ingest_id"},
     "obs.retention": {},
+    "obs.feedback": {},  # FR-OBS-14: its args name another job and a catalogue entry; none reaches the span
+    "obs.prompts": {},  # FR-OBS-15
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares
@@ -126,11 +167,12 @@ class AllowList:
         self._patterns = {k: re.compile(r["pattern"]) for k, r in ATTRIBUTES.items() if "pattern" in r}
 
     def span_class(self, name: object) -> str | None:
-        """`http`, `ws`, `job` or `agent.call` for a listed span name; None for anything else."""
+        """`http`, `ws`, `job`, `agent.call` or a child span's own name for a listed span name; None for
+        anything else."""
         if not isinstance(name, str):
             return None
-        if name == "agent.call":
-            return "agent.call"
+        if name == "agent.call" or name in CHILD_SPANS:
+            return name
         head, sep, rest = name.partition(" ")
         if not sep:
             return None

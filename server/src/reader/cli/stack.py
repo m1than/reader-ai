@@ -24,6 +24,7 @@ TOKEN_CONSUMER: Final = "agent-proxy"  # noqa: S105 - a service name
 CONFIG_ROLES: Final = ("api", "worker", "mcp", "agent-proxy")  # FR-CLI-4: the reader.yaml bind
 CONFIG_TARGET: Final = "/etc/reader/reader.yaml"
 DASHBOARD_PORT: Final = "127.0.0.1:8443:8443"  # FR-CLI-22 (SRV-OBS FR-OBS-9)
+JAEGER_PORT: Final = "127.0.0.1:8444:8444"  # FR-CLI-22 (SRV-OBS FR-OBS-19, ADR-0033)
 _USER: Final = re.compile(r"(\d+)(?::\d+)?")
 
 
@@ -77,7 +78,7 @@ def build_override(
         services[role] = {"volumes": [bind]}
     services["api"]["networks"] = {f"sb-user-{h}": {} for h in handles}
     if observability:  # FR-CLI-22: the dashboard's loopback port, only while the profile is active
-        services["caddy"] = {"ports": [DASHBOARD_PORT]}
+        services["caddy"] = {"ports": [DASHBOARD_PORT, JAEGER_PORT]}
     return {"services": services, "networks": networks}
 
 

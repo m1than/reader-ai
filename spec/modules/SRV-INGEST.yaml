@@ -539,7 +539,10 @@ requirements:
       `artifact_id` (else `artifact_mismatch`). Memory is bounded at the caps: it holds the validated member bytes
       (at most 64 MiB of spans) and parses and inserts the spans 1,000 lines at a time, never all spans as objects. The owner is the one `users` row with role `owner`
       (SRV-AUTH). Importing `reader.ingest.jobs`, `reader.ingest.receive`, `reader.ingest.status` and
-      `reader.ingest.routes` never imports `reader.ingest.host` or `docling`. [db; unit for the import check]
+      `reader.ingest.routes` never imports `reader.ingest.host` or `docling`. [db; unit for the import check] Amended
+      by SRV-OBS FR-OBS-13 (2026-11-24; tracing only): reading and validating the artifact runs inside an
+      `ingest.parse` child span carrying the manifest's `page_count` and the member bytes' total length, never a
+      text or a name.
   - id: FR-INGEST-14
     text: >-
       Migration `reader/ingest/migrations/<rev>_ingest.py` has branch label `ingest` and `depends_on` SRV-AUTH's base

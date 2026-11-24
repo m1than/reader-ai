@@ -42,7 +42,8 @@ def test_override_publishes_8443_only_with_the_profile(tmp_path: Path) -> None:
     config = write_config(tmp_path / "c")
     source = load_compose_source(COMPOSE)
     with_obs: dict[str, Any] = build_override(source, ["ivan"], config, observability=True)
-    assert with_obs["services"]["caddy"] == {"ports": ["127.0.0.1:8443:8443"]}
+    # SRV-OBS FR-OBS-19 (ADR-0033): Jaeger's site comes with the same profile.
+    assert with_obs["services"]["caddy"] == {"ports": ["127.0.0.1:8443:8443", "127.0.0.1:8444:8444"]}
     without: dict[str, Any] = build_override(source, ["ivan"], config, observability=False)
     assert "caddy" not in without["services"]
     assert "caddy" not in build_override(source, ["ivan"], config)["services"]
@@ -54,6 +55,7 @@ def test_up_with_the_profile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     for argv in _compose_calls(world).values():
         assert _profiles(argv) == ["kernels", "observability"]
     assert "traces: https://localhost:8443/" in world.out
+    assert "jaeger: https://localhost:8444/" in world.out
     assert (world.ctx.run_dir / "profiles").read_text().split() == ["observability"]
 
 
@@ -100,9 +102,11 @@ def test_doctor_gate_check(
     rc = maintenance.cmd_doctor(world.ctx, _cfg(tmp_path, True), True)
     listed = json.loads(world.out.strip().splitlines()[-1])
     checks = {c["name"]: c for c in listed}
-    assert calls == ["https://localhost:8443/"]
-    assert seen_roots == [root_pem]  # Caddy's current public root, read the way `reader trust` reads it
+    assert calls == ["https://localhost:8443/", "https://localhost:8444/"]  # FR-OBS-19: Jaeger's site too
+    # Caddy's current public root, read the way `reader trust` reads it, for both sites
+    assert seen_roots == [root_pem, root_pem]
     assert (checks["observability"]["ok"], checks["observability"]["detail"]) == (ok, detail)
+    assert (checks["jaeger"]["ok"], checks["jaeger"]["detail"]) == (ok, detail)
     assert rc == (0 if all(c["ok"] for c in listed) else 1)  # the check feeds the exit code
     saved = world.ctx.run_dir / "doctor-root.pem"
     assert saved.stat().st_mode & 0o777 == 0o600
@@ -166,7 +170,7 @@ def test_doctor_uses_the_recorded_root_and_caddys_and_runs_twice(
     for caddy in (second, first):  # a second run replaces run/doctor-root.pem (unlink, then O_EXCL)
         world.runner.on("exec", "-T", "caddy", "cat", result=caddy)
         maintenance.cmd_doctor(world.ctx, _cfg(tmp_path, True), True)
-    assert seen == [[first, second], [first, first]]
+    assert seen == [[first, second], [first, second], [first, first], [first, first]]  # two sites per run
     assert (world.ctx.run_dir / "doctor-root.pem").read_bytes() == first
 
 
@@ -180,6 +184,7 @@ def test_doctor_gate_check_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     maintenance.cmd_doctor(world.ctx, _cfg(tmp_path, False), True)
     checks = {c["name"]: c for c in json.loads(world.out.strip().splitlines()[-1])}
     assert (checks["observability"]["ok"], checks["observability"]["detail"]) == (True, "off")
+    assert (checks["jaeger"]["ok"], checks["jaeger"]["detail"]) == (True, "off")
 
 
 def _test_ca(tmp: Path) -> tuple[Path, Path, Path]:
