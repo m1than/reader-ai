@@ -531,6 +531,8 @@ owner_notes:
 # in the same transaction as each change. Code: `server/src/reader/jobs/audit.py` (record),
 # `server/src/reader/jobs/audit_routes.py` (the read route) and revision jobs_0003 on the `jobs` branch; tests in
 # server/tests/jobs/. Green (2026-11-24): the Red test reformatted for ruff (line length, PT012); no oracle changed.
+# jobs_0003 is now the `jobs` branch head, so the head checks of FR-EVENTS-11/-18 (test_jobs_db's migration heads,
+# test_key_reads_db's index test) name jobs_0003 as the head; the jobs_0002 index is still asserted.
 #
 # One row per action: object_kind, the pattern its object_id must match, and the only keys `detail` may hold.
 # uuid = canonical lowercase UUID; sid/pid = 16 lowercase hex; sha = 64 lowercase hex; a material id is

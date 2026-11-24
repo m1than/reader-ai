@@ -310,7 +310,8 @@ requirements:
       `reader/freshness/migrations` follows `reader/obs/migrations`; a route's `method` may also be `PUT` (its
       `PUT /api/materials/{material_id}/bibliography`; non-GET, so under the same CSRF gate and JSON body rule).
       Paired SRV-EVENTS change (2026-11-24, V/manage, FR-EVENTS-31): ROUTERS appends `reader.jobs.audit_routes`
-      after `reader.freshness.routes`, and the declared-list test takes it.
+      after `reader.freshness.routes`, and the declared-list test takes it; FR-AUTH-1's readiness test removes the
+      `jobs` branch head, which is now jobs_0003 (SRV-EVENTS FR-EVENTS-30's revision).
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row
