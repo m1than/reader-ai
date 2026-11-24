@@ -1579,7 +1579,12 @@ tasks:
         3.10 -> 3.18 upgrade ok. Round 10 (results/20261124T153052-round10-setup): setup drift-free, finalize,
         retention deletes, allowed-hosts 403 on the API. VEC-OBS-5 (phase2.yaml), VEC-OBS-6 (mlflow-setup.yaml),
         bench-tutor-v2.yaml (compose-bench.mjs). Docker Desktop's disk was full during round 10 (dangling images
-        pruned, 6.8 GB). Next: design review round 2." }
+        pruned, 6.8 GB). Design review round 2 (ac3a79d): changes, N1-N10 plus non-blocking; revision 3 answers
+        each (SRV-OBS phase2_review_round2): snapshot_at a tag, inline idempotent setup, one kind per set, label
+        mirror found by name + revision, import traces by material tag, no VACUUM, flock-guarded migrate with one
+        pre-migration backup, backup API always, no Jaeger sidecar (doctor via docker inspect), owner_labels.
+        Round 11 (results/20261124T154753-round11-egress): mlflow's internal networks reach neither 1.1.1.1:443 nor
+        DNS; a normal network does. Next: design review round 3." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

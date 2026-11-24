@@ -3,7 +3,7 @@ id: ADR-0038
 title: MLflow Runs, evaluation datasets, agent versions, owner labels and MLflow operations (amends ADR-0035 and ADR-0032)
 status: proposed
 date: 2026-11-24
-verified_by: "spikes/obs-stack rounds 6-9: results/20261124T142803-round6-phase2 (tabs before/after, quotes.json), results/20261124T141648-round6-phase2 (pool exhaustion under evaluate), results/20261124T143808-round7-runs (Runs in another experiment), results/20261124T150936-round8-rest (every write as raw REST: round8.json `raw`, r8/*.png, quotes.json), results/20261124T151501-round9-ops (SQLite journal modes under 8 writers, disabled features, health probes, online backup and restore, VACUUM, load, upgrade); if accepted, SRV-OBS phase 2's [unit], [db], [image] and [live] tests and INV-OBS-2's canary over every new request body"
+verified_by: "spikes/obs-stack rounds 6-11: results/20261124T142803-round6-phase2 (tabs before/after, quotes.json), results/20261124T141648-round6-phase2 (pool exhaustion under evaluate), results/20261124T143808-round7-runs (Runs in another experiment), results/20261124T150936-round8-rest (every write as raw REST: round8.json `raw`, r8/*.png, quotes.json), results/20261124T151501-round9-ops and results/20261124T151935-round9-ops (SQLite journal modes under 8 writers, disabled features, health probes, online backup and restore, the stop-during-migration failure, load, upgrade), results/20261124T153052-round10-setup (setup drift, finalize, retention deletes, Host and CORS checks), results/20261124T154753-round11-egress (no egress from mlflow's networks, with a positive control); if accepted, SRV-OBS phase 2's [unit], [db], [image] and [live] tests and INV-OBS-2's canary over every new request body"
 revisit_when: "MLflow ingests run links, logged-model links or trace metadata through OTLP; or a bench needs a model call to score (an LLM judge); or a second user needs the dashboards; or the AI gateway is unblocked; or the measured SQLite limits of FR-OBS-28 are reached"
 supersedes: []
 ---
@@ -31,7 +31,7 @@ traces, so that MLflow's chat view, Review queues and text Datasets would have c
 So MLflow's Review queues and label schemas, which would show empty traces without text, are not used. That is the
 view ADR-0034 was rejected for.
 
-What MLflow 3.18.0 offers, measured in spike rounds 6 to 9 (zero credit, own stacks):
+What MLflow 3.18.0 offers, measured in spike rounds 6 to 11 (zero credit, own stacks):
 
 - **Links.** OTLP sets a trace's session, user and `mlflow.traceTag.*` tags only.
   - A trace reaches a Run only through `link-to-run`, at most 100 trace ids a call (round 8: 120 gave 400). The
@@ -56,7 +56,9 @@ What MLflow 3.18.0 offers, measured in spike rounds 6 to 9 (zero credit, own sta
     journal mode gave p95 0.43 s, and its 68 errors were assessments posted before their traces were ingested.
   - An online backup through the sqlite3 backup API took 0.02 s and served every trace again from a second
     MLflow.
-  - VACUUM shrank the file by 16 %.
+  - A server stopped during its own first-start migration left the file unable to start, and 3.18.0 runs pending
+    migrations itself at start.
+  - Round 10: setup made 0 writes on a re-run. Round 11: mlflow's networks reach neither an IP literal nor DNS.
 
 ## Decision (proposed)
 
@@ -81,24 +83,33 @@ assessments with the names `owner.lesson_ok` and `owner.answer_ok`.
 - A relabel posts a new revision with `overrides`.
 - ADR-0035's canary and failure rules apply unchanged.
 
-**3. Labels have Postgres as the record.** The owner's label is stored in `lesson_labels` first. MLflow holds a mirror
+**3. Labels have Postgres as the record.** The owner's label is stored in `owner_labels` first. MLflow holds a mirror
 that may lag or be missing (tracing off, no trace yet), and it never feeds back.
 
 **4. Bench results have Postgres as the record.** `obs_bench_results` holds each upload's declared numbers. The api's
 alerts read Postgres only; the api never reads MLflow.
 
 **5. Operations as code.**
-- MLflow's experiments, tags and names come from `deploy/otel/mlflow-setup.yaml`, applied idempotently by `obs.setup`.
+- MLflow's experiments, tags and names come from `deploy/otel/mlflow-setup.yaml`. One idempotent setup function
+  applies them, from the `obs.setup` job and inline wherever an experiment is needed.
 - Every server flag and environment variable is pinned in compose with its source.
-- The store is SQLite in WAL mode on the `obs_mlflow` volume (FR-OBS-28).
-- Schema migrations run in a one-shot `mlflow-migrate` service before the server starts (FR-OBS-29).
-- `obs_mlflow` joins `reader backup` through an online SQLite backup, with traces kept: they are in the same file
-  (FR-OBS-30).
+- The store is SQLite in WAL mode on the `obs_mlflow` volume (FR-OBS-28). Freed pages are reused, so there is no
+  VACUUM.
+- Schema migrations run in a one-shot `mlflow-migrate` service before the server starts (FR-OBS-29). It works
+  under an exclusive `flock`, keeps exactly one pre-migration backup, and has a manual restore command.
 - Retention covers traces, Runs and LoggedModels (FR-OBS-31).
-- The stack's own health is shown on `/observability` and by `reader doctor` (FR-OBS-32).
+- The stack's health:
+  - `reader doctor` and `reader status` read `docker inspect` and the volume's size on the host;
+  - `/observability` shows `obs_stack_status`, which a 30-minute untraced `obs.health` job fills (FR-OBS-32).
 
-**6. ADR-0032's "worker reaches mlflow for retention only" is widened** to the job kinds of Decision 1. The api still
-never reaches MLflow.
+**6. Backup and reach, replacing two parts of ADR-0032 Decision 1.**
+- ADR-0032 Decision 1 put `obs_mlflow` outside `reader backup`. This Decision replaces that exclusion: `obs_mlflow`
+  joins `reader backup` (FR-OBS-30).
+  - The copy always goes through SQLite's backup API, with the stack up or down.
+  - Traces come along, because they share the file.
+  - The volume's backup label in compose changes accordingly (OPS-DEPLOY FR-DEPLOY-15).
+- ADR-0032's "the worker reaches mlflow for retention only" is widened to the job kinds of Decision 1. The api still
+  never reaches MLflow.
 
 Each request body passes INV-OBS-2's canary test. A failed write is logged; it never changes a job's outcome and never
 blocks the worker's start (INV-OBS-3). Budgets and alerts stay outside MLflow, on `/observability` (FR-OBS-25), and a

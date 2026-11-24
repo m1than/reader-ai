@@ -25,9 +25,8 @@ runs:
     name: "compile {run_id[:8]}"
     tags: { reader.kind: { enum: [compile] }, reader.run_id: uuid, reader.lesson.id: uuid, reader.course.id: uuid,
             reader.outcome: { enum: [finished, failed, dead] }, reader.ends: { int: [1, 100] },
-            reader.complete: { enum: ["true"] } }
-    params: { version_key: version_key, reader_version: "^[0-9A-Za-z.+-]{1,64}$", "model.<stage>": model,
-              snapshot_at: datetime }
+            reader.complete: { enum: ["true"] }, reader.snapshot_at: datetime }
+    params: { version_key: version_key, reader_version: "^[0-9A-Za-z.+-]{1,64}$", "model.<stage>": model }
     metrics:
       "cost_usd.<stage>": { float: [0, 1000] }
       cost_usd.total: { float: [0, 1000] }
@@ -44,8 +43,9 @@ runs:
   ingest:
     name: "import {material_sha256[:8]}"
     tags: { reader.kind: { enum: [ingest] }, reader.ingest_id: uuid, reader.material_sha256: sha256,
-            reader.outcome: { enum: [succeeded, dead] }, reader.complete: { enum: ["true"] } }
-    params: { converter_version: "^[0-9A-Za-z.+-]{1,32}$", material_sha256: sha256, snapshot_at: datetime }
+            reader.outcome: { enum: [succeeded, dead] }, reader.complete: { enum: ["true"] },
+            reader.snapshot_at: datetime }
+    params: { converter_version: "^[0-9A-Za-z.+-]{1,32}$", material_sha256: sha256 }
     metrics: { pages: { int: [0, 100000] }, spans: { int: [0, 10000000] }, chunks: { int: [0, 10000000] },
                pages_per_min_import: { float: [0, 100000] }, import_s: { float: [0, 1000000] } }
 
@@ -61,20 +61,19 @@ bench_sets:
     sha256: e543202459cc89d896e99145a875fab7bf62d16bca2d1041aff2f042a7e40f04
     kind: search
     exclude: [q04, q07, q08, q13]   # each shares a 5-word run with the book (round 8 check)
-  search-bench-v2:
-    file: spec/fixtures/SRV-OBS/bench-tutor-v2.yaml   # the search bench of 2026-11-20 ran questions-v2 (with v03)
-    sha256: 1ff4434c027aa3d8f9aa981eb946d0dcef8e7fdf097de4c463f92384c8b6fdce
-    kind: search
-    records: all
+# One set, one kind: the upload's result carries a required `kind`, which must equal its set's (review round 2, N3).
+# A search set over questions-v2 is not pinned for now (its 2026-11-20 run used v03, which the composed file lacks).
 # A dataset record: exactly these keys.
 dataset_record:
   inputs: { question_id: question_id, question: { pinned: true }, chapter: { int: [1, 23] } }
   expectations: { gold_pages: { list: { int: [1, 2000] }, min: 1, max: 20 } }
 
-# FR-OBS-23: the result files an upload may carry. `kind` is decided by the pinned set.
+# FR-OBS-23: the result files an upload may carry. Each carries a required `kind`, which must equal the pinned set's
+# kind (else 400 bench_invalid; review round 2, N3).
 bench_results:
-  search:   # spikes/embeddings-local/bench.py's output, as committed
-    required: { model: hf_model, chunk_chars: { int: [100, 100000] }, overlap: { int: [0, 10000] },
+  search:   # spikes/embeddings-local/bench.py's output plus `kind: search` (paired change at Green: bench.py writes it)
+    required: { kind: { enum: [search] }, model: hf_model, chunk_chars: { int: [100, 100000] },
+                overlap: { int: [0, 10000] },
                 questions: { int: [1, 1000] }, per_question: { list: per_question, max: 1000 } }
     optional:
       pages: { list: { int: [1, 100000] }, max: 2 }
@@ -131,7 +130,8 @@ bench_results:
     rule: "every failed id is a record id of the uploaded set"
 upload: { max_bytes: 262144, content_type: application/json }
 
-# FR-OBS-24: owner labels (Postgres `lesson_labels` is the record; MLflow gets a HUMAN assessment mirror).
+# FR-OBS-24: owner labels (Postgres `owner_labels` is the record; MLflow gets a HUMAN assessment mirror; the mirror is
+# found again by assessment_name + metadata.revision).
 labels:
   targets:
     lesson: { assessment: owner.lesson_ok, trace: "the lesson's newest compile run's revise-stage job" }
@@ -146,13 +146,12 @@ alerts:
   - { code: run_over_cap, value: "an open run's spend", limit: "0.8 × its run cap" }
   - { code: dead_jobs, value: "dead jobs in the window", limit: 0 }
   - { code: bench_regressed, value: "newest bench result's hit@10 or grounded_share", limit: "previous same (kind, set, model) − 0.05" }
-  - { code: obs_store_large, value: "obs_mlflow volume bytes", limit: "0.8 × store_bytes_max (FR-OBS-31)" }
-  - { code: obs_unhealthy, value: "a stack member's health", limit: "healthy (FR-OBS-32)" }
+  - { code: obs_unhealthy, value: "a stack member's last probe", limit: "ok and younger than 75 minutes (FR-OBS-32)" }
+# obs_store_large is a reader doctor/status warning (FR-OBS-31), not an api alert (review round 2, N8).
 
 # The worker → MLflow requests of phase 2 (ADR-0038), measured as raw REST in round 8
 # (results/20261124T150936-round8-rest/round8.json `raw`) and round 10 (results/20261124T153052-round10-setup:
 # setup, finalize, dataset search, retention deletes). Body keys only; values come from the tables above.
-# /version is not yet measured (round 11 at Green; obs.health falls back to the image's pinned version).
 writes:
   - { kind: obs.setup, method: GET, path: /api/2.0/mlflow/experiments/get, query: [experiment_id] }
   - { kind: obs.setup, method: GET, path: /api/2.0/mlflow/experiments/get-by-name, query: [experiment_name] }
@@ -167,7 +166,8 @@ writes:
   - { kind: obs.runs, method: POST, path: /api/2.0/mlflow/runs/log-batch, body: [run_id, params, metrics, tags] }
   - { kind: obs.runs, method: POST, path: /api/2.0/mlflow/runs/update, body: [run_id, status, end_time] }
   - { kind: obs.runs, method: POST, path: /api/2.0/mlflow/runs/set-tag, body: [run_id, key, value] }
-  - { kind: obs.runs, method: POST, path: /ajax-api/3.0/mlflow/traces/search, body: [locations, filter, max_results] }
+  - { kind: obs.runs, method: POST, path: /ajax-api/3.0/mlflow/traces/search, body: [locations, filter, max_results, page_token],
+      max_results: 500 }
   - { kind: obs.runs, method: POST, path: /api/2.0/mlflow/traces/link-to-run, body: [trace_ids, run_id], max_ids: 100 }
   - { kind: obs.bench, method: POST, path: /api/3.0/mlflow/datasets/search, body: [experiment_ids, filter_string] }
   - { kind: obs.bench, method: POST, path: /api/3.0/mlflow/datasets/create, body: [name, experiment_ids, tags] }
@@ -176,7 +176,7 @@ writes:
   - { kind: obs.label, method: POST, path: "/api/3.0/mlflow/traces/{trace_id}/assessments", body: [assessment],
       assessment_keys: [assessment_name, trace_id, source, feedback, metadata, overrides] }
   - { kind: obs.health, method: GET, path: /health }
-  - { kind: obs.health, method: GET, path: /version }
-  - { kind: obs.label, method: GET, path: "/api/3.0/mlflow/traces/{trace_id}/assessments/{assessment_id}" }
+  - { kind: obs.label, method: GET, path: /ajax-api/3.0/mlflow/traces/get, query: [trace_id] }
   - { kind: obs.retention, method: POST, path: /api/2.0/mlflow/runs/delete, body: [run_id] }
   - { kind: obs.retention, method: DELETE, path: "/api/2.0/mlflow/logged-models/{id}" }
+  - { kind: obs.setup, method: PATCH, path: "/api/2.0/mlflow/logged-models/{id}/tags", body: [tags], tag: reader.last_started }
