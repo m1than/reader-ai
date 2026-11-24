@@ -1,4 +1,4 @@
-// @trace FR-AUTH-31 FR-AUTH-32 FR-AUTH-14 FR-AUTH-21
+// @trace FR-AUTH-31 FR-AUTH-32 FR-AUTH-14 FR-AUTH-21 FR-AUTH-47
 // [browser] SRV-AUTH's sign-up page, the sign-in page's `pending_approval` state and link, and the sign-in `next`
 // allow-list, against WEB-UI's test server (five static auth files under the Caddyfile CSP), in the auth-dark and
 // auth-light projects at 1280, 1024 and 390 px. Ceremony POSTs are stubbed with page.route, WebAuthn is replaced in
@@ -205,6 +205,12 @@ const NEXT_CASES: Array<[string, string, string]> = [
   ['signin', '?next=/signups&next=/x', '/'],
   ['signin', '?x=1&next=/signups', '/'],
   ['bootstrap', '?next=/signups', '/'],
+  // FR-AUTH-47 (V/manage): the second constant, by the same raw comparison.
+  ['signin', '?next=/settings', '/settings'],
+  ['signin', '?next=/settings/x', '/'],
+  ['signin', '?next=%2Fsettings', '/'],
+  ['signin', '?x=1&next=/settings', '/'],
+  ['bootstrap', '?next=/settings', '/'],
 ];
 
 for (const [kind, search, expected] of NEXT_CASES) {

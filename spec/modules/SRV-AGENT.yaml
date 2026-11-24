@@ -82,6 +82,9 @@
 # tier boundary is inclusive. New oracles: placeholder pins and the nested tool's `name` (VEC-AGENT-3), an
 # error-result settlement (VEC-AGENT-4), the tier boundary, the lower tier for summed usage, and the search fee in
 # the reserve.
+# Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): the provider's caps (task budget,
+# monthly budget, warn level) are read per call through `reader.config.effective` (reader.yaml plus the owner's
+# overrides), so a budget override applies to the next call without a worker restart; no oracle changed.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)

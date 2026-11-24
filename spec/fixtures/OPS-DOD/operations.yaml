@@ -849,3 +849,88 @@ operations:
       cost: { na: no provider call }
       observability: { items: [FR-INGEST-31] }
       recovery: { items: [FR-INGEST-31, FR-INGEST-32] }
+
+  - id: manage.people
+    title: Manage people (owner, Settings → People) — list, sign out everywhere, remove a passkey, delete, enable
+    surface: [web, api]
+    specs: [SRV-AUTH, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "GET /api/auth/users"
+      - "POST /api/auth/users/{user_id}/sessions/revoke"
+      - "DELETE /api/auth/users/{user_id}/credentials/{pid}"
+      - "DELETE /api/auth/users/{user_id}"
+      - "POST /api/auth/signups/{user_id}/enable"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-40, FR-AUTH-41, FR-AUTH-42, FR-AUTH-43, FR-AUTH-48]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [INV-AUTH-20, INV-AUTH-21, FR-AUTH-43] }
+      privacy: { items: [FR-AUTH-40, FR-EVENTS-30] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-AUTH-48, FR-AUTH-43] }
+
+  - id: manage.self
+    title: My sessions and passkeys (any user, Settings → Account) — list, sign out others, rename, remove
+    surface: [web, api]
+    specs: [SRV-AUTH, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "GET /api/auth/sessions"
+      - "DELETE /api/auth/sessions/{sid}"
+      - "POST /api/auth/sessions/revoke-others"
+      - "GET /api/auth/credentials"
+      - "POST /api/auth/credentials/{pid}"
+      - "DELETE /api/auth/credentials/{pid}"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-44, FR-AUTH-45, FR-AUTH-46, FR-AUTH-47]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [INV-AUTH-20, INV-AUTH-21] }
+      privacy: { items: [FR-AUTH-44] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-AUTH-46, INV-AUTH-21] }
+
+  - id: manage.settings
+    title: Read and override instance settings (owner, Settings → Instance)
+    surface: [web, api, cli]
+    specs: [SRV-CONFIG, SRV-EVENTS, OPS-CLI, WEB-MANAGE]
+    routes: ["GET /api/settings", "POST /api/settings/{key}", "DELETE /api/settings/{key}"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CONFIG-25, FR-CONFIG-26]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [FR-CONFIG-25, FR-CONFIG-26] }
+      privacy: { items: [FR-CONFIG-25] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: "no provider call (budget overrides change caps, not calls)" }
+      observability: { items: [FR-CONFIG-26, FR-EVENTS-30] }
+      recovery: { items: [FR-CONFIG-26] }
+
+  - id: manage.tutor
+    title: Clear my tutor history on a lesson, or one question
+    surface: [web, api]
+    specs: [SRV-TUTOR, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "POST /api/lessons/{lesson_id}/questions/clear"
+      - "DELETE /api/lessons/{lesson_id}/questions/{question_id}"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-TUTOR-20, FR-TUTOR-21]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [INV-TUTOR-1, FR-TUTOR-21] }
+      privacy: { items: [FR-TUTOR-20] }
+      a11y: { missing: "no axe.json pages evidence for the Ask panel's clear control (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-TUTOR-20] }

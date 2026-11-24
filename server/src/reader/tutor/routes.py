@@ -19,6 +19,7 @@ from starlette.responses import JSONResponse, Response
 from reader import blobs
 from reader.agent import ledger
 from reader.api.http import Ctx, Route, error
+from reader.jobs import audit
 from reader.lessons.access import can_open, lesson_uuid
 from reader.lessons.store import current_sha256
 from reader.tutor import params, store
@@ -171,7 +172,7 @@ async def get_question(ctx: Ctx) -> Response:
             await conn.execute(
                 text(
                     "SELECT state, answer, grounded, error_code FROM tutor_questions"
-                    " WHERE id = :q AND owner_id = :u AND lesson_id = :l"
+                    " WHERE id = :q AND owner_id = :u AND lesson_id = :l AND cleared_at IS NULL"
                 ),
                 {"q": qid, "u": ctx.signed_in.id, "l": lesson},
             )
@@ -213,7 +214,8 @@ async def list_questions(ctx: Ctx) -> Response:
         rows = await conn.execute(
             text(
                 "SELECT id, question, cell_id, state, grounded, error_code, created_at FROM tutor_questions"
-                " WHERE owner_id = :u AND lesson_id = :l ORDER BY created_at DESC, id LIMIT :n"
+                " WHERE owner_id = :u AND lesson_id = :l AND cleared_at IS NULL"
+                " ORDER BY created_at DESC, id LIMIT :n"
             ),
             {"u": ctx.signed_in.id, "l": lesson, "n": params.HISTORY_MAX},
         )
@@ -232,8 +234,72 @@ async def list_questions(ctx: Ctx) -> Response:
     return JSONResponse({"questions": items})
 
 
+_CLEAR: Final = (
+    "UPDATE tutor_questions SET question = '', answer = NULL, cleared_at = now()"
+    " WHERE owner_id = :u AND lesson_id = :l AND state <> 'queued' AND cleared_at IS NULL"
+)
+
+
+async def _clear(ctx: Ctx, one: uuid.UUID | None) -> Response:
+    """FR-TUTOR-20: clear the caller's questions on the lesson (all, or `one`); the text goes, the row and
+    its spend stay. A queued question of the caller on that lesson makes it 409 `tutor_busy`, nothing
+    changed."""
+    user = ctx.signed_in.id
+    async with ctx.engine.connect() as conn:
+        lesson = await _openable(ctx, conn)
+    if lesson is None:
+        return _not_found()
+    await finalize_stale(ctx, user)
+    async with ctx.engine.begin() as conn:
+        where = {"u": user, "l": lesson}
+        if one is not None:
+            state = (
+                await conn.execute(
+                    text(
+                        "SELECT state FROM tutor_questions WHERE id = :q AND owner_id = :u AND lesson_id = :l"
+                        " AND cleared_at IS NULL FOR UPDATE"
+                    ),
+                    {**where, "q": one},
+                )
+            ).scalar()
+            if state is None:
+                return _not_found()
+            if state == "queued":
+                return error(409, "tutor_busy")
+        else:
+            busy = await conn.execute(
+                text(
+                    "SELECT 1 FROM tutor_questions WHERE owner_id = :u AND lesson_id = :l"
+                    " AND state = 'queued'"
+                ),
+                where,
+            )
+            if busy.first() is not None:
+                return error(409, "tutor_busy")
+        sql = _CLEAR + (" AND id = :q" if one is not None else "") + " RETURNING id"
+        count = len((await conn.execute(text(sql), {**where, "q": one} if one else where)).all())
+        if count:
+            await audit.record(conn, user, "tutor.clear", str(lesson), {"count": count})
+    log.info("tutor_clear lesson=%s count=%d", lesson, count)
+    return JSONResponse({"cleared": count})
+
+
+async def clear_history(ctx: Ctx) -> Response:
+    return await _clear(ctx, None)
+
+
+async def clear_question(ctx: Ctx) -> Response:
+    qid = lesson_uuid(ctx.request.path_params["question_id"])
+    if qid is None:
+        return _not_found()
+    return await _clear(ctx, qid)
+
+
 ROUTES: Final[tuple[Route, ...]] = (
     Route("POST", "/api/lessons/{lesson_id}/ask", "session", ask),
     Route("GET", "/api/lessons/{lesson_id}/questions/{question_id}", "session", get_question),
     Route("GET", "/api/lessons/{lesson_id}/questions", "session", list_questions),
+    # FR-TUTOR-20 (manage amendment): clear the history, or one question.
+    Route("POST", "/api/lessons/{lesson_id}/questions/clear", "session", clear_history),
+    Route("DELETE", "/api/lessons/{lesson_id}/questions/{question_id}", "session", clear_question),
 )

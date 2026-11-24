@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from reader.agent import ledger
 from reader.agent.errors import AgentError
 from reader.agent.pricing import resolve_model
+from reader.config.effective import effective_settings
 from reader.jobs import audit, idempotency_key
 from reader.jobs.queue import dead_error_code_of
 from reader.lessons.store import current_sha256
@@ -467,12 +468,13 @@ async def ensure_all(engine: AsyncEngine, jobs: Any) -> None:
             continue
 
 
-def task_budgets(rt: Runtime) -> dict[str, str]:
-    return {
-        name: str(task.budget_usd_per_lesson)
-        for name, task in rt.config.tasks.items()
-        if task.budget_usd_per_lesson is not None and name in {s.task for s in rt.pipeline.stages.values()}
-    }
+async def task_budgets(conn: AsyncConnection, rt: Runtime) -> dict[str, str]:
+    """The run's snapshot of the per-lesson task budgets: reader.yaml plus the owner's overrides at run
+    creation (SRV-CONFIG FR-CONFIG-26, paired); a running run keeps it."""
+    settings = await effective_settings(conn, rt.config)
+    stages = {s.task for s in rt.pipeline.stages.values()}
+    budgets = settings.task_budgets.items()
+    return {name: str(budget) for name, budget in budgets if budget is not None and name in stages}
 
 
 async def create_run(
@@ -526,6 +528,7 @@ async def create_run(
         for (other,) in unfinished:
             if (await derive(engine, jobs, owner_id, other))["state"] in ("running", "stalled"):
                 raise PipelineError("compile_running")
+        budgets = await task_budgets(conn, rt)
         run_id: uuid.UUID = (
             await conn.execute(
                 text(
@@ -536,11 +539,11 @@ async def create_run(
                     "o": owner_id,
                     "l": lesson_id,
                     "c": cap_usd,
-                    "t": json.dumps(task_budgets(rt)),
+                    "t": json.dumps(budgets),
                     "b": await current_sha256(conn, lesson_id),
                 },
             )
         ).scalar_one()
-    run = RunRow(run_id, owner_id, lesson_id, cap_usd, task_budgets(rt), None, None, None, None)
+    run = RunRow(run_id, owner_id, lesson_id, cap_usd, budgets, None, None, None, None)
     await enqueue_next(jobs, rt, run, lesson, [])
     return run_id

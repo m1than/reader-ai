@@ -9,6 +9,7 @@ from typing import Final, Literal
 from urllib.parse import urlsplit
 
 from reader.config import ReaderConfig
+from reader.config.effective import file_signup
 
 CHALLENGE_BYTES: Final = 32
 CHALLENGE_TTL_S: Final = 300
@@ -162,27 +163,20 @@ def settings_from_config(config: ReaderConfig) -> Settings:
         problems.append("owner_count")
     if any(u.role not in ROLES for u in config.users):
         problems.append("unknown_role")
-    value = config.sharing.get("signup", _ABSENT)
-    if value is not _ABSENT and value is not False and value not in ("off", "open"):
+    # FR-AUTH-23 through SRV-CONFIG's overlay module, the only reader of `sharing.signup` (FR-CONFIG-26): an
+    # absent key opens sign-up only on localhost ("this Mac only", ADR-0031); None is an unsupported value.
+    mode, absent = file_signup(config)
+    if mode is None:
         problems.append("signup_not_supported")
     if problems:
         raise StartupError(min(problems, key=CONFIG_ERROR_CODES.index))
     rp_id, origin = _origin(config.instance.url)
     users = tuple(UserEntry(u.handle, u.role) for u in config.users)
-    # FR-AUTH-23: an absent key opens sign-up only on localhost ("this Mac only", ADR-0031).
-    mode: SignupMode
-    if value is _ABSENT:
-        mode = "open" if rp_id == "localhost" else "off"
-    else:
-        mode = "open" if value == "open" else "off"
     return Settings(
         rp_id=rp_id,
         origin=origin,
         users=users,
         owner_handle=owners[0].handle,
-        signup=mode,
-        signup_default_note=value is _ABSENT and rp_id != "localhost",
+        signup=mode or "off",
+        signup_default_note=absent and rp_id != "localhost",
     )
-
-
-_ABSENT: Final = object()

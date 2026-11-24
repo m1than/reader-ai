@@ -85,7 +85,10 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   items, applied in 5677fb3. Round 4 (5677fb3): VERDICT approve; its three nits applied at approval (view (c)'s
   key_rows_of for failed questions, one kind per stage in view (a), 'more rows may exist'). The owner accepted ADR-0018 and
   ADR-0032 on 2026-11-24 (973cd62). Approved by agent with Red on V/obs-impl (2026-11-24); the paired items live in
-  their own specs."
+  their own specs. Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): `setup` takes the
+  file's retention through `reader.config.effective`, and the retention job (FR-OBS-11) and the summary (FR-OBS-1)
+  read the owner's retention override per run and per request (`setup.effective_settings(conn)`); no oracle
+  changed."
 layer: server
 track: engineering
 adr: [ADR-0018, ADR-0032, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
