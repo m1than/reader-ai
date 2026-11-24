@@ -537,6 +537,20 @@ selectable through `STEPS`. Steps 1 and 2 are in `results/20261124T151501-round9
 - **Note on the environment.** The first round 10 attempt failed with "database or disk is full": Docker Desktop's
   disk was full. Removing only dangling images (`docker image prune`) freed 6.8 GB.
 
+## Round 11 (no egress, design review round 2, N9), 2026-11-24
+
+`run-round11.sh` starts the spike MLflow alone and runs a probe container on exactly its networks: the two spike
+networks `reader-spike-obs_obs` and `reader-spike-obs_obs-ui`, both `internal=true`. Results are in
+`results/20261124T154753-round11-egress`.
+
+| Probe on | TCP connect to 1.1.1.1:443 | DNS lookup of example.com |
+|---|---|---|
+| MLflow's two internal networks | fails (`OSError`) | fails (`gaierror`) |
+| A normal network (positive control) | connects | resolves |
+
+The probe also tried `mlflow:5000`, which was not reachable from either run: the server had only just started. That
+check is not part of the egress result.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.
