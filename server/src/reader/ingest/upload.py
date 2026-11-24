@@ -154,7 +154,16 @@ async def _store(ctx: Ctx, root: Path, body: Body, filename: str, language: str)
 
 
 async def _admit(ctx: Ctx, body: Body, materials: Sequence[Material]) -> Response | None:
-    """Steps 8 to 10: dedupe (before the quota), quota, id collision. A response ends the upload."""
+    """Steps 8 to 10: dedupe (before the quota), quota, id collision. A response ends the upload. Bytes
+    whose material row is deleted are refused first (FR-INGEST-31: restore it instead), before any row is
+    written."""
+    async with ctx.engine.connect() as conn:
+        deleted = await conn.execute(
+            text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NOT NULL"),
+            {"o": ctx.signed_in.id, "s": body.sha256},
+        )
+        if deleted.first() is not None:
+            return error(409, "material_deleted")
     declared = next((m for m in materials if m.sha256 == body.sha256), None)
     if declared is not None:
         return JSONResponse({"material_id": declared.id, "upload": None})

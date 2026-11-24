@@ -288,7 +288,7 @@ operations:
     routes: ["POST /api/search"]
     gate: tracked
     criteria:
-      functional: { items: [FR-SEARCH-7, FR-SEARCH-8, VEC-SEARCH-1] }
+      functional: { items: [FR-SEARCH-7, FR-SEARCH-8, VEC-SEARCH-1, FR-SEARCH-20] }
       security: { items: [INV-SEARCH-1, INV-SEARCH-7] }
       privacy: { items: [INV-SEARCH-5] }
       a11y: { na: no web search surface in the slice (api for compile and tutor) }
@@ -731,7 +731,7 @@ operations:
       functional:
         items: [FR-FRESH-1, FR-FRESH-2, FR-FRESH-3, FR-FRESH-4, FR-FRESH-5, FR-FRESH-7, FR-FRESH-8, FR-FRESH-10,
                 FR-FRESH-11, VEC-FRESH-1, VEC-FRESH-4, VEC-FRESH-7, FR-FRESHUI-1, FR-FRESHUI-2, FR-FRESHUI-3,
-                FR-FRESHUI-4, FR-FRESHUI-5, FR-FRESHUI-6, VEC-FRESHUI-1]
+                FR-FRESHUI-4, FR-FRESHUI-5, FR-FRESHUI-6, VEC-FRESHUI-1, FR-FRESH-20]
         missing: "the live check FR-FRESH-14 has not run (owner, READER_LIVE=1, about $0.27 of budget.test_budget_usd)"
       security:
         items: [FR-AGENT-15, FR-AGENT-16, INV-AGENT-6, VEC-AGENT-3, VEC-AGENT-4, FR-FRESH-6, INV-FRESH-3, INV-FRESH-4,
@@ -828,3 +828,24 @@ operations:
       cost: { na: no provider call }
       observability: { items: [FR-PIPELINE-20] }
       recovery: { items: [INV-LESSON-21, FR-PIPELINE-20] }
+
+  # Added 2026-11-24 (V/manage-impl-ingest) for SRV-INGEST FR-INGEST-30..32 with SRV-SEARCH FR-SEARCH-20 and
+  # SRV-FRESH FR-FRESH-20 (the paired reads that hide a deleted material).
+  - id: manage.material
+    title: Rename, delete (with its courses) and restore a material (owner, Materials page)
+    surface: [web, api]
+    specs: [SRV-INGEST, SRV-SEARCH, SRV-FRESH, WEB-MANAGE]
+    routes: ["POST /api/materials/{material_id}", "GET /api/materials/{material_id}/impact",
+             "DELETE /api/materials/{material_id}", "POST /api/materials/{material_id}/restore"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-INGEST-30, FR-INGEST-31, FR-SEARCH-20, FR-FRESH-20]
+        missing: "no live run yet: the `manage` live step works on a scratch course of its own"
+      security: { items: [FR-INGEST-32] }
+      privacy: { missing: "no test asserts that a renamed title or a confirm text never reaches a log line" }
+      a11y: { missing: "no axe.json pages evidence for the Materials page (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-INGEST-31] }
+      recovery: { items: [FR-INGEST-31, FR-INGEST-32] }

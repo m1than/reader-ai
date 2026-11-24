@@ -1,8 +1,9 @@
 """Freshness routes (SRV-FRESH FR-FRESH-1, -9, -11; INV-FRESH-4), declared as data for SRV-AUTH's ROUTERS.
 
-Session, owner role and the material's owner only: anyone else, an unknown id and a malformed id get the same
-404 `not_found`. The models and the material's language come from reader.yaml (`app.state.freshness_config` in
-tests); without it the routes answer 503 `config_unavailable`. Logs carry ids and codes, never a field value.
+Session, owner role and the material's owner only: anyone else, an unknown id, a malformed id and a deleted
+material (FR-FRESH-20) get the same 404 `not_found`. The models and the material's language come from
+reader.yaml (`app.state.freshness_config` in tests); without it the routes answer 503 `config_unavailable`.
+Logs carry ids and codes, never a field value.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from reader.config import ReaderConfig, load_config
 from reader.freshness import check, params, store
 from reader.freshness.bibliography import BibliographyInvalid, validate
 from reader.freshness.errors import FreshError
+from reader.ingest import manage
 from reader.jobs.model import idempotency_key
 
 log = logging.getLogger("reader.freshness")
@@ -48,7 +50,7 @@ async def _material(ctx: Ctx) -> store.MaterialRow | None:
     if ctx.signed_in.role != "owner":
         return None
     async with ctx.engine.connect() as conn:
-        return await store.find_material(conn, ctx.signed_in.id, ctx.request.path_params["material_id"])
+        return await store.live_material(conn, ctx.signed_in.id, ctx.request.path_params["material_id"])
 
 
 def _fresh_error(failure: FreshError) -> JSONResponse:
@@ -221,6 +223,10 @@ async def _enqueue(ctx: Ctx, report_id: uuid.UUID) -> str:
         return "job_failed"
     return "queued"
 
+
+# FR-FRESH-20: SRV-INGEST's material delete is refused while a report of it runs (409 material_busy).
+if store.running_for not in manage.BUSY_CHECKS:
+    manage.BUSY_CHECKS.append(store.running_for)
 
 ROUTES: Final[tuple[Route, ...]] = (
     Route("GET", "/api/materials/{material_id}/freshness", "session", get_freshness),

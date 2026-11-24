@@ -66,9 +66,24 @@ async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha25
     await running().enqueue(EMBED_KIND, embed_args(material_sha256, ingest_id, fts_config))
 
 
+async def _deleted(conn: AsyncConnection, material_sha256: str) -> bool:
+    """The instance owner's row of this material is a tombstone (SRV-INGEST FR-INGEST-31)."""
+    owner = await store.owner_id(conn)
+    if owner is None:
+        return False
+    found = await conn.execute(
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NOT NULL"),
+        {"o": owner, "s": material_sha256},
+    )
+    return found.first() is not None
+
+
 def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
     async def handle(args: ImportArgs, conn: AsyncConnection, ctx: JobContext) -> None:
         del ctx
+        if await _deleted(conn, args.material_sha256):  # FR-INGEST-15 amendment: an import never clears it
+            store.log.info("ingest material_deleted %s", args.material_id)
+            return
         if args.material_id.startswith("up-"):  # FR-INGEST-23: language and title come from the upload's row
             found = await conn.execute(
                 text("SELECT 1 FROM uploads WHERE sha256 = :s"), {"s": args.material_sha256}
