@@ -992,7 +992,7 @@ analytics_paired_changes:
 # dashboard": experiment Runs, evaluation datasets and runs, agent versions, labeling, budgets and alerts.
 # Measured in spikes/obs-stack round 6 (zero credit; RESULT.md "Round 6"; results/20261124T142803-round6-phase2).
 # Not approved. OTel, privacy and the worker's MLflow writes are complex areas, so deep-reviewer design rounds come
-# first. The writes go beyond ADR-0035, so ADR-0036 (proposed) is the owner's decision; FR-OBS-20, -22, -23, -24
+# first. The writes go beyond ADR-0035, so ADR-0038 (proposed) is the owner's decision; FR-OBS-20, -22, -23, -24
 # and FR-OBS-21 (b) stay blocked on it. FR-OBS-21 (a) is OTLP through the allow-list; FR-OBS-25 reads only.
 # VEC-OBS-5 (spec/fixtures/SRV-OBS/phase2.yaml) is drafted with the first design round. Test levels: FR-OBS-20
 # unit + db + image; FR-OBS-21 unit + image; FR-OBS-22 unit; FR-OBS-23 unit + db + image; FR-OBS-24 unit + db +
@@ -1000,7 +1000,7 @@ analytics_paired_changes:
 proposed_requirements:
   - id: FR-OBS-20
     text: >-
-      Experiment Runs for compile runs and imports (ADR-0036 Decision 1). When a compile run ends (finished, failed
+      Experiment Runs for compile runs and imports (ADR-0038 Decision 1). When a compile run ends (finished, failed
       or dead) or an import ends, the outbox enqueues `obs.runs` with args {kind: compile | ingest, id}. The job:
       (a) Looks up the experiment `runs` by name and creates it if missing. It then searches that experiment for a
           Run tagged `reader.run_id` (or `reader.ingest_id`) = id; if one exists, the job ends `succeeded` without a
@@ -1030,7 +1030,7 @@ proposed_requirements:
           validated root attribute `reader.version_key` (VEC-OBS-1, pattern `^[0-9a-f]{12}$`). AllowListExporter
           derives `mlflow.traceTag.reader.version_key` from it (VEC-OBS-4 `trace_tags`), so traces filter and group
           by version.
-      (b) ADR-0036 Decision 2: at worker start, beside `obs.prompts`, the worker creates one LoggedModel
+      (b) ADR-0038 Decision 2: at worker start, beside `obs.prompts`, the worker creates one LoggedModel
           `reader-agent` per new key (`logged-models/search` by the tag `reader.version_key` first), with the
           three inputs as params and `reader.version_key` as a tag.
       The Agent versions tab lists versions with their params. OTLP cannot set `mlflow.modelId` metadata (measured),
@@ -1039,7 +1039,7 @@ proposed_requirements:
       (version, traces, cost, p50/p95 duration, assessment pass share) from the ledger and job tables.
   - id: FR-OBS-22
     text: >-
-      Evaluation datasets (ADR-0036 Decision 3). VEC-OBS-5 `bench_sets` pins each committed bench set by path and
+      Evaluation datasets (ADR-0038 Decision 3). VEC-OBS-5 `bench_sets` pins each committed bench set by path and
       file sha256, together with the records it may register. The committed sets are:
       - `spikes/embeddings-local/questions-v2.yaml` without v03, plus t01 from
         `spec/fixtures/SRV-TUTOR/bench-fixed.yaml`: 40 records;
@@ -1073,7 +1073,7 @@ proposed_requirements:
       the upload with the owner's session.
   - id: FR-OBS-24
     text: >-
-      Labeling and review (ADR-0036 Decision 4). Labeling sessions are Databricks-only in 3.18.0; the OSS Review
+      Labeling and review (ADR-0038 Decision 4). Labeling sessions are Databricks-only in 3.18.0; the OSS Review
       tab is used instead.
       (a) At worker start the worker creates the label schemas of VEC-OBS-5 `labels` if missing: `owner.lesson_ok`
           and `owner.answer_ok`, type feedback, pass/fail with the labels good and bad, no comment. It also
@@ -1100,33 +1100,33 @@ proposed_requirements:
       The page shows a banner per alert. A push notification waits for SRV-NOTIFY.
 
 # Per-tab plan for phase 2. Privacy: every listed value is an id, an enum, a number or pinned committed repository
-# data. "Writes" names the worker → MLflow requests (ADR-0035 or ADR-0036); "none" means OTLP or read-only.
+# data. "Writes" names the worker → MLflow requests (ADR-0035 or ADR-0038); "none" means OTLP or read-only.
 phase2_tabs:
   - tab: Training runs and Evaluation runs (Runs)
     shows: one Run per compile run and import, with params, metrics and a cumulative-cost chart; the Run's Traces tab lists its stage traces with assessments
     source: agent_spend, the pipeline and ingest tables, linked traces
     privacy: ids, model ids, sha256s, numbers
-    writes: experiments/get-by-name|create, runs/search, runs/create, log-batch, runs/update, traces/link-to-run (ADR-0036)
+    writes: experiments/get-by-name|create, runs/search, runs/create, log-batch, runs/update, traces/link-to-run (ADR-0038)
   - tab: Datasets
     shows: tutor-bench-v2 (40) and search-bench-v1 (26) with question ids, questions, chapters and gold pages
     source: the owner's upload of a set whose sha256 is pinned (FR-OBS-22)
     privacy: the agent's own committed questions, with no 5-word run shared with the book (measured); ids and page numbers
-    writes: datasets/create, datasets/search, datasets/{id}/records (ADR-0036)
+    writes: datasets/create, datasets/search, datasets/{id}/records (ADR-0038)
   - tab: Evaluation runs
     shows: one Run per bench upload; the tab's chart shows hit@k, reciprocal rank, grounded and gold-cited shares, latency and cost over time
     source: committed bench result files (FR-OBS-23)
     privacy: ids, numbers, model names
-    writes: runs/create, log-batch, log-inputs (ADR-0036)
+    writes: runs/create, log-batch, log-inputs (ADR-0038)
   - tab: Agent versions
     shows: one LoggedModel per version key, with its params (prompt-set sha256, the stage → model map, the pipeline config sha256); traces are compared by the tag reader.version_key
     source: worker start (FR-OBS-21)
     privacy: sha256s, model ids
-    writes: logged-models, logged-models/search, logged-models/{id}/params|tags (ADR-0036); the root tag goes through OTLP
+    writes: logged-models, logged-models/search, logged-models/{id}/params|tags (ADR-0038); the root tag goes through OTLP
   - tab: Review
     shows: the `lessons` queue with compile traces to label good or bad; app labels appear as HUMAN assessments on traces
     source: FR-OBS-24
     privacy: pass/fail values and reason enums; any comment the owner types in MLflow is the owner's own
-    writes: label-schemas/create, review-queues/create, review-queues/items/add (ADR-0036); assessments (ADR-0035, source HUMAN)
+    writes: label-schemas/create, review-queues/create, review-queues/items/add (ADR-0038); assessments (ADR-0035, source HUMAN)
   - tab: Traces, Sessions, Overview, Dashboard, Prompts, Issues
     shows: as in phase 1, plus the tags reader.version_key and mlflow.sourceRun (from the link) as filters
     source: OTLP, FR-OBS-14/-15

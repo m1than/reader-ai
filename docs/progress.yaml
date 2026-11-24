@@ -1565,7 +1565,7 @@ tasks:
         Databricks-only, OSS label schemas + review queues work; budgets are AI-gateway-only (current_spend stayed 0
         after OTLP spend; alert = outbound webhook), so /observability stays the alert surface. Book-text check
         (check_bench_quotes.py, ids and lengths only): v2 max shared run 4 words, t01 1, v1 four records at 5
-        (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0036 (proposed) for
+        (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0038 (proposed; 0036 and 0037 are V/manage's) for
         the writes beyond ADR-0035. Open: round 7 (cross-experiment Run traces tab), VEC-OBS-5, design review
         rounds." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
