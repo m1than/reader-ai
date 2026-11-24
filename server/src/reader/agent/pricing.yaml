@@ -8,7 +8,14 @@
 # Claude Opus 5.5 and Claude Sonnet 5.5. ADR-0005: the subscription's Agent SDK credit is billed at API rates.
 # Cross-check against measurement (VEC-AGENT-1): all 12 spikes/compile-cost stages recompute within 0.38–1.78 % of the
 # SDK-reported cost.
+# Added 2026-11-23 (SRV-AGENT FR-AGENT-17, ADR-0030), from https://platform.claude.com/docs/en/about-claude/pricing
+# fetched 2026-11-23 (spikes/web-search/RESULT.md § 2): Claude Haiku 5.5 with its two tiers by prompt size (prompts
+# over 100,000 tokens are billed in full at `above_100k`), and the web search fee, $10 per 1,000 searches. The owner's
+# live call recomputed to the cent with these Haiku rates (spikes/web-search § 5b, observed once).
 as_of: 2026-11-03
+web_search_usd: 0.01
 models:
   claude-opus-5-5:   { input: 4.00, output: 20.00, cache_write_5m: 5.00, cache_write_1h: 8.00, cache_read: 0.20 }
   claude-sonnet-5-5: { input: 2.00, output: 10.00, cache_write_5m: 2.50, cache_write_1h: 4.00, cache_read: 0.10 }
+  claude-haiku-5-5:  { input: 0.10, output: 0.50, cache_write_5m: 0.125, cache_write_1h: 0.20, cache_read: 0.01,
+                       above_100k: { input: 0.50, output: 2.50, cache_write_5m: 0.625, cache_write_1h: 1.00, cache_read: 0.05 } }

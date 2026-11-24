@@ -100,6 +100,7 @@ export function AppRoot({ initialPath, fetch: fetchFn, navigateAway = defaultNav
       plan: createPlanApi(deps),
       signups: createSignupsApi(deps),
       obs: createObsApi(deps), // FR-UI-18
+      http: deps,
       upload: createUploadApi(deps), // FR-UI-13
       notify,
       navigateAway,

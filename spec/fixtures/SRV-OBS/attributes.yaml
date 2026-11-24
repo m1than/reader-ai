@@ -111,6 +111,8 @@ job_args:
   obs.retention: {}
   obs.feedback: {}   # FR-OBS-14: no argument reaches the span
   obs.prompts: {}    # FR-OBS-15
+  freshness.scan: {}   # SRV-FRESH paired change: the report id is not copied
+  freshness.web: {}
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
 instrumentation_scope: { name: reader, version: null }

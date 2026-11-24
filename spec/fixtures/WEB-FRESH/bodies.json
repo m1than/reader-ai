@@ -1,0 +1,334 @@
+{
+  "_about": "VEC-FRESHUI-1: synthetic route bodies for every state of the freshness card (WEB-FRESH; shapes chosen in the spec header where SRV-FRESH FR-FRESH-11 leaves them open). No book text. `states.<name>.body` is the GET /api/materials/{material_id}/freshness body; `expect` lists texts the card shows for it. Reused by web/test-server and the stories.",
+  "post_accepted": { "status": 202, "body": { "report_id": "a0000000-0000-4000-8000-00000000aa01" } },
+  "bibliography_saved": {
+    "title": "Practical Distributed Ledgers",
+    "authors": ["Ada Example", "Grace Sample"],
+    "edition": "3rd",
+    "year": 2019,
+    "publisher": "Example Press",
+    "isbn": "9780306406157",
+    "original_title": null,
+    "original_authors": null,
+    "original_edition": null,
+    "original_year": null,
+    "source": "owner",
+    "sha256": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
+  },
+  "errors": {
+    "estimate_changed": { "status": 409, "body": { "error": "estimate_changed", "estimate": { "low_usd": "0.31", "high_usd": "0.45", "cap_usd": "1.00" } } },
+    "freshness_running": { "status": 409, "body": { "error": "freshness_running" } },
+    "bibliography_unconfirmed": { "status": 409, "body": { "error": "bibliography_unconfirmed" } },
+    "nothing_to_confirm": { "status": 409, "body": { "error": "nothing_to_confirm" } },
+    "daily_budget_exhausted": { "status": 429, "body": { "error": "daily_budget_exhausted", "daily_cap_usd": "2.00", "spent_usd": "1.84" } },
+    "bibliography_invalid": { "status": 400, "body": { "error": "bibliography_invalid", "field": "isbn" } }
+  },
+  "states": {
+    "empty": {
+      "material_id": "f0000000-0000-4000-8000-000000000001",
+      "expect": ["No check yet", "Run check"],
+      "body": {
+        "report": null,
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": null,
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "estimate": {
+      "material_id": "f0000000-0000-4000-8000-000000000002",
+      "expect": ["Practical Distributed Ledgers", "from you", "About $0.27–$0.39, at most $1.00", "Run for up to $0.39"],
+      "body": {
+        "report": null,
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers",
+          "authors": ["Ada Example", "Grace Sample"],
+          "edition": "2nd",
+          "year": 2017,
+          "publisher": "Example Press",
+          "isbn": "0306406152",
+          "original_title": "Distributed Ledgers in Practice",
+          "original_authors": ["Ada Example"],
+          "original_edition": "1st",
+          "original_year": 2015,
+          "source": "owner",
+          "sha256": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "running": {
+      "material_id": "f0000000-0000-4000-8000-000000000003",
+      "expect": ["Searching the web (2 of 6)"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000003",
+          "status": "running",
+          "created_at": "2026-11-23T10:00:00Z",
+          "finished_at": null,
+          "error": null,
+          "progress": { "stage": "search", "done": 2, "total": 6 },
+          "verdict": null, "reasons": null, "claims": null, "claim_status": null, "recommendations": null, "topics": null, "dropped": null
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "current": {
+      "material_id": "f0000000-0000-4000-8000-000000000004",
+      "expect": ["Current", "Checked 2026-11-23"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000004",
+          "status": "done",
+          "created_at": "2026-11-23T10:00:00Z",
+          "finished_at": "2026-11-23T10:04:00Z",
+          "error": null,
+          "progress": null,
+          "verdict": "current",
+          "reasons": [
+            { "text": "No newer edition was found; the covered protocol versions are still the latest.", "citations": [{ "url": "https://publisher.example/books/pdl-2", "host": "publisher.example", "title": "Practical Distributed Ledgers, 2nd edition" }] }
+          ],
+          "claims": [
+            { "id": "c1", "subject": "consensus protocol v2", "kind": "protocol", "confidence": "medium", "page": 41, "span": "c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1c1:12", "cell": null }
+          ],
+          "claim_status": [
+            { "id": "c1", "status": "unchanged", "note": "Version 2 is still the current specification.", "citations": [{ "url": "https://spec.example/consensus/v2", "host": "spec.example", "title": "Consensus specification v2" }] }
+          ],
+          "recommendations": [],
+          "topics": [{ "id": 1, "title": "Ledgers" }, { "id": 7, "title": "Consensus" }],
+          "dropped": {}
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "partly_outdated": {
+      "material_id": "f0000000-0000-4000-8000-000000000005",
+      "expect": ["Partly outdated", "p. 88", "changed"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000005",
+          "status": "done",
+          "created_at": "2026-11-22T09:00:00Z",
+          "finished_at": "2026-11-22T09:05:00Z",
+          "error": null,
+          "progress": null,
+          "verdict": "partly_outdated",
+          "reasons": [
+            { "text": "The client library chapter describes an API that was replaced in 2022.", "citations": [{ "url": "https://docs.lib.example/migration/v3", "host": "docs.lib.example", "title": "Migrating to v3" }] },
+            { "text": "The theory chapters are unaffected.", "citations": [] }
+          ],
+          "claims": [
+            { "id": "c1", "subject": "client library v1 API", "kind": "api", "confidence": "high", "page": 88, "span": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2:40", "cell": { "lesson_id": "w01", "cell_id": "e" } },
+            { "id": "c2", "subject": "block size limit", "kind": "statistic", "confidence": "low", "page": 102, "span": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2:51", "cell": null }
+          ],
+          "claim_status": [
+            { "id": "c1", "status": "changed", "note": "Version 3 replaced this API.", "citations": [{ "url": "https://docs.lib.example/migration/v3", "host": "docs.lib.example", "title": "Migrating to v3" }] },
+            { "id": "c2", "status": "unknown", "note": "No source in this check's results.", "citations": [] }
+          ],
+          "recommendations": [
+            { "url": "https://docs.lib.example/guide", "host": "docs.lib.example", "title": "Client library guide", "date": "2025-03", "date_source": "model", "kind": "official_docs", "why": "Covers the current API.", "covers": [7] },
+            { "url": "https://publisher.example/books/pdl-3", "host": "publisher.example", "title": "Practical Distributed Ledgers, 3rd edition", "date": "2024", "date_source": "model", "kind": "book_edition", "why": "Newer edition of this book.", "covers": [1, 7] },
+            { "url": "https://courses.example/ledgers", "host": "courses.example", "title": "Ledgers course", "date": null, "date_source": "model", "kind": "course", "why": "Hands-on with the current library.", "covers": [7] }
+          ],
+          "topics": [{ "id": 1, "title": "Ledgers" }, { "id": 7, "title": "Client libraries" }],
+          "dropped": { "source_unknown": 1 }
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "outdated": {
+      "material_id": "f0000000-0000-4000-8000-000000000006",
+      "expect": ["Outdated", "2024-06 (as reported)", "Covers: Ledgers, Consensus"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000006",
+          "status": "done",
+          "created_at": "2026-11-21T09:00:00Z",
+          "finished_at": "2026-11-21T09:06:00Z",
+          "error": null,
+          "progress": null,
+          "verdict": "outdated",
+          "reasons": [
+            { "text": "A 4th edition (2024) rewrites most chapters.", "citations": [{ "url": "https://publisher.example/books/pdl-4", "host": "publisher.example", "title": "Practical Distributed Ledgers, 4th edition" }] }
+          ],
+          "claims": [
+            { "id": "c1", "subject": "consensus protocol v1", "kind": "protocol", "confidence": "high", "page": 12, "span": "c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3:3", "cell": null }
+          ],
+          "claim_status": [
+            { "id": "c1", "status": "changed", "note": "Version 3 is current.", "citations": [{ "url": "https://spec.example/consensus/v3", "host": "spec.example", "title": "Consensus specification v3" }] }
+          ],
+          "recommendations": [
+            { "url": "https://publisher.example/books/pdl-4", "host": "publisher.example", "title": "Practical Distributed Ledgers, 4th edition", "date": "2024-06", "date_source": "model", "kind": "book_edition", "why": "The current edition of this book.", "covers": [1, 7] },
+            { "url": "https://spec.example/consensus/v3", "host": "spec.example", "title": "Consensus specification v3", "date": "2025-01-15", "date_source": "model", "kind": "official_docs", "why": "The current protocol.", "covers": [7] },
+            { "url": "https://xn--bcher-kva.example/ledgers", "host": "xn--bcher-kva.example", "title": "Ledgers today", "date": "2023", "date_source": "model", "kind": "book", "why": "A newer book on the same topics.", "covers": [1] },
+            { "url": "https://courses.example/ledgers?from=reader&q=consensus-protocol-version-three-and-the-long-tail-of-a-very-long-query-string-that-must-wrap-anywhere-without-overflowing-a-narrow-screen-at-390-pixels-wide-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "host": "courses.example", "title": "Ledgers course", "date": null, "date_source": "model", "kind": "course", "why": "Hands-on with the current protocol.", "covers": [7] },
+            { "url": "javascript:alert(1)", "host": "evil.example", "title": "Not a web link", "date": null, "date_source": "model", "kind": "other", "why": "Shown as text only.", "covers": [] }
+          ],
+          "topics": [{ "id": 1, "title": "Ledgers" }, { "id": 7, "title": "Consensus" }],
+          "dropped": { "source_unknown": 2, "url_unsafe": 1 }
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "stale": {
+      "material_id": "f0000000-0000-4000-8000-000000000007",
+      "expect": ["Stale", "older than 90 days", "Run again"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000007",
+          "status": "done",
+          "created_at": "2026-07-01T09:00:00Z",
+          "finished_at": "2026-07-01T09:05:00Z",
+          "error": null,
+          "progress": null,
+          "verdict": "current",
+          "reasons": [{ "text": "No newer edition was found.", "citations": [] }],
+          "claims": [],
+          "claim_status": [],
+          "recommendations": [],
+          "topics": [],
+          "dropped": null
+        },
+        "stale": true,
+        "stale_reason": "ttl",
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "failed": {
+      "material_id": "f0000000-0000-4000-8000-000000000008",
+      "expect": ["The web searches returned no results", "Run again"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000008",
+          "status": "failed",
+          "created_at": "2026-11-23T08:00:00Z",
+          "finished_at": "2026-11-23T08:03:00Z",
+          "error": "no_results",
+          "progress": null,
+          "verdict": null, "reasons": null, "claims": null, "claim_status": null, "recommendations": null, "topics": null, "dropped": null
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "budget_refused": {
+      "material_id": "f0000000-0000-4000-8000-000000000009",
+      "expect": ["Daily limit for freshness checks reached ($2.00); try again tomorrow", "Run again"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-000000000009",
+          "status": "budget_refused",
+          "created_at": "2026-11-23T08:00:00Z",
+          "finished_at": "2026-11-23T08:00:05Z",
+          "error": "daily_budget_exhausted",
+          "progress": null,
+          "verdict": null, "reasons": null, "claims": null, "claim_status": null, "recommendations": null, "topics": null, "dropped": null
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": null, "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "owner", "sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2"
+        },
+        "scan_bibliography": null,
+        "estimate": { "low_usd": "0.27", "high_usd": "0.39", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    },
+    "scan_only": {
+      "material_id": "f0000000-0000-4000-8000-00000000000a",
+      "expect": ["read from the book's first pages", "Check these details before the web search", "These details are right"],
+      "body": {
+        "report": {
+          "id": "a0000000-0000-4000-8000-00000000000a",
+          "status": "done",
+          "created_at": "2026-11-23T09:00:00Z",
+          "finished_at": "2026-11-23T09:01:00Z",
+          "error": null,
+          "progress": null,
+          "verdict": null,
+          "reasons": null,
+          "claims": [
+            { "id": "c1", "subject": "consensus protocol v1", "kind": "protocol", "confidence": "high", "page": 12, "span": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4:3", "cell": null }
+          ],
+          "claim_status": null,
+          "recommendations": null,
+          "topics": null,
+          "dropped": null
+        },
+        "stale": false,
+        "stale_reason": null,
+        "bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": "Example Press", "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "source": "scan", "sha256": "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5"
+        },
+        "scan_bibliography": {
+          "title": "Practical Distributed Ledgers", "authors": ["Ada Example"], "edition": "2nd", "year": 2017, "publisher": "Example Press", "isbn": null,
+          "original_title": null, "original_authors": null, "original_edition": null, "original_year": null,
+          "sha256": "c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5c5"
+        },
+        "estimate": { "low_usd": "0.21", "high_usd": "0.33", "cap_usd": "1.00" },
+        "daily_cap_usd": "2.00"
+      }
+    }
+  }
+}

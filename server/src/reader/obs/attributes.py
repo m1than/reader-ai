@@ -115,6 +115,8 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "obs.retention": {},
     "obs.feedback": {},  # FR-OBS-14: its args name another job and a catalogue entry; none reaches the span
     "obs.prompts": {},  # FR-OBS-15
+    "freshness.scan": {},  # SRV-FRESH paired change: no argument (the report id) is copied
+    "freshness.web": {},
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares
@@ -129,10 +131,10 @@ SPEC_CODES: Final = frozenset({
     "input_not_ready", "labs_unverifiable", "lesson_unknown", "lost", "model_mismatch",
     "monthly_budget_exhausted", "no_material", "no_source_spans", "not_found", "not_owner", "origin_conflict",
     "output_cap", "output_invalid", "output_truncated", "provider_missing", "provider_unavailable",
-    "question_invalid", "rate_limited", "run_token_unknown", "sdk_error", "source_too_large",
-    "sources_unavailable", "started_lesson_dropped", "task_budget_exhausted", "tools_mismatch", "tutor_busy",
-    "tutor_failed", "unknown_model", "unknown_revision", "upstream_retry", "usage_unmapped",
-    "verify_unavailable",
+    "question_invalid", "rate_limited", "request_cap", "run_token_unknown", "sdk_error", "search_cap",
+    "source_too_large", "sources_unavailable", "started_lesson_dropped", "task_budget_exhausted",
+    "tools_mismatch", "tools_not_allowed", "tutor_busy", "tutor_failed", "unknown_model", "unknown_revision",
+    "upstream_retry", "usage_unmapped", "verify_unavailable",
 })
 ERROR_CODES: Final = SPEC_CODES | JOB_CODES
 _KEY_NAME: Final = re.compile(r"[a-z][a-z0-9_.]{0,63}")

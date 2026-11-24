@@ -1,8 +1,9 @@
 # @trace FR-AGENT-6, FR-AGENT-13
-"""[image] The adapter's CLI path with the real bundled CLI in reader-server:local, against the handshake spike's
-stub on 127.0.0.1 (--network none, no token, no credit): a 300,000-character system prompt starts (code review
-B1: the argv limit is 131,071 bytes, so the prompt travels as a file), and a deadline kills the CLI at once
-(S6: no 5 s close grace)."""
+"""[image] The adapter's CLI path with the real bundled CLI in the server image (built from
+deploy/images/server.Dockerfile and run by the id `docker build -q` prints, so the shared `reader-server:local`
+tag is never rewritten), against the handshake spike's stub on 127.0.0.1 (--network none, no token, no credit):
+a 300,000-character system prompt starts (code review B1: the argv limit is 131,071 bytes, so the prompt
+travels as a file), and a deadline kills the CLI at once (S6: no 5 s close grace)."""
 
 from __future__ import annotations
 
@@ -16,7 +17,6 @@ import pytest
 
 from .conftest import DOCKER, REPO
 
-IMAGE = "reader-server:local"
 STUB = REPO / "spikes" / "agent-proxy-handshake" / "stub.py"
 CHECK = Path(__file__).resolve().parent / "cli_check.py"
 pytestmark = pytest.mark.skipif(not DOCKER, reason="docker daemon not reachable")
@@ -28,11 +28,11 @@ def _docker(*args: str, timeout: float = 1800) -> subprocess.CompletedProcess[st
 
 @pytest.fixture(scope="module")
 def image() -> str:
-    build = _docker(
-        "build", "-q", "-t", IMAGE, "-f", str(REPO / "deploy" / "images" / "server.Dockerfile"), str(REPO)
-    )
+    build = _docker("build", "-q", "-f", str(REPO / "deploy" / "images" / "server.Dockerfile"), str(REPO))
     assert build.returncode == 0, build.stderr[-2000:]
-    return IMAGE
+    image_id = build.stdout.strip().splitlines()[-1]
+    assert image_id.startswith("sha256:"), image_id
+    return image_id
 
 
 def _run(image: str, tmp: Path, mode: str, **env: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:

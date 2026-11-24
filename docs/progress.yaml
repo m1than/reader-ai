@@ -20,7 +20,8 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 8.7416      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 8.7542      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+                         # (+ V.freshness live web-search call 0.012588, 2026-11-23)
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
                          #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
                          #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
@@ -46,6 +47,10 @@ budget:
     - { task: V.live, usd: 1.0870, date: 2026-11-23, funding: test_budget_usd,
         what: "SRV-TUTOR bench, 40 questions over the HTTP API (sum of the questions' usage.usd, 1.086955); mean $0.0267;
           e2e/live/results/2026-11-23-tutor-bench.json" }
+    - { task: V.freshness, usd: 0.012588, date: 2026-11-23, funding: test_budget_usd,
+        what: "spikes/web-search § 5b live call, run by the owner (cap $0.10): one WebSearch run on Haiku 5.5, 3 upstream
+          requests, 1 search ($0.01 fee included); SDK total_cost_usd = the recording proxy's sum;
+          spikes/web-search/results/20261123T214429/live.json. Whether the fee draws from the Agent SDK credit: unknown" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -1278,6 +1283,90 @@ tasks:
         need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding and V/plan add
         `proposed_requirements` keys to SRV-AUTH (FR-AUTH-22) and WEB-UI (FR-UI-12/-13); this branch has none left,
         so their keys merge without a duplicate." }
+  - { id: V.freshness, stage: V, kind: module, track: ai, status: in_progress, needs: [V.live],
+      branch: V/freshness,
+      what: "Owner 2026-11-23: 'validate how current the source is; if it's out of date, recommend another resource to
+        study from'. Owner decision 2026-11-23: Claude's server-side web search (egress stays api.anthropic.com).
+        Drafts: spikes/web-search/RESULT.md (sourced facts: web_search_20250305/20260209/20260318, max_uses per turn,
+        allowed/blocked domains, citations ≤ 150 chars, usage.server_tool_use.web_search_requests, $0.01 per search),
+        ADR-0030 (proposed), SRV-FRESH and WEB-FRESH (draft), SRV-AGENT proposed FR-AGENT-14..16 / INV-AGENT-6 /
+        VEC-AGENT-3/-4, OPS-DOD operation material.freshness (8 missing). Revision 2 after deep-reviewer round 1
+        (changes, 12 blocking): code-planned queries, one search per Haiku search run, a tool-less Sonnet report call,
+        structural tool pin, retries only after a $0 settle, scan reuse, bibliography confirmation by sha256.",
+      owner_decisions: "2026-11-23: (1) subscription only, Agent SDK WebSearch, dates 'as reported'; (2) live call
+        approved, at most $0.10 from test_budget_usd, one search, preferably Haiku 5.5; (3) caps as proposed: $1.00 per
+        run, $2.00 per day, 6 searches per check, 90-day TTL; (4) queries may contain title, edition, authors and
+        outline topics, never book text. Recorded in ADR-0030 'Owner decisions'.",
+      measured: "Stub run, zero credit (2026-11-23, spikes/agent-proxy-handshake/results/20261123T2055*-websearch*):
+        WebSearch makes a nested /v1/messages request (web_search_20250305, max_uses 8, tool_choice auto, no thinking,
+        no cache_control, same model as the main loop, max_tokens from CLAUDE_CODE_MAX_OUTPUT_TOKENS); the main loop
+        sends WebSearch plus DeferredToolPlaceholder; a PreToolUse deny stops the search; ResultMessage.usage covers
+        the main loop only while total_cost_usd/model_usage include the nested request and the $0.01 fee; the main
+        loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Live call, observed once
+        (owner, 2026-11-23, spikes/web-search/results/20261123T214429/live.json, $0.012588): Haiku 5.5, 3 requests,
+        nested model Haiku; H-WS-3: the nested request's input was 14,452 tokens as recorded per request by the
+        proxy, so t (the tokens the search results add) ≈ 13,950 after the ≈ 500-token search prompt, an estimate since
+        no field reports t alone, under the 20,000 planning bound (FR-FRESH-14's live check records
+        `run_input_tokens`, the run's summed model_usage input, 14,456 here: an upper bound of t); fee inside the SDK cost,
+        SDK = proxy (18,518 input-side tokens, 1,147 output, 1 search, same dollars), query passed verbatim (denial rate
+        0), max_uses rewrite accepted (200), thinking 152 (main) + 290 (nested) tokens with MAX_THINKING_TOKENS=0; fee
+        vs subscription credit unknown. No spec bound changes. Estimate (not measured): ≈ $0.27 per check, worst
+        ≈ $0.39 by formula.",
+      review: "deep-reviewer (Fable) on ADR-0030, SRV-FRESH, WEB-FRESH and the SRV-AGENT amendment: round 1 changes
+        (12 blocking), round 2 changes (3 blocking), round 3 VERDICT approve (2026-11-23). Round 3's three fixes applied
+        without a new round: the Haiku tier jump in the tail cost, the cross-check's lower-tier rule with `tier_unknown`
+        and the tier part of H-WS-6, and the combined worst case ≈ $0.84–0.87 under the $1.00 cap.",
+      built: "2026-11-23, after the owner accepted ADR-0030 (7e247a8). Live script hardened after the owner's run
+        (15bb6c7): Haiku only, non-SSE usage or the worst case, a reserve/settle ledger so a killed run counts, the
+        exception type only in errors, init tools must be [WebSearch], only web_search_20250305; and an RLock (the
+        original refused requests under a non-reentrant lock, a deadlock that the owner's run never reached).
+        SRV-AGENT FR-AGENT-14..16, INV-AGENT-6, VEC-AGENT-3/-4 promoted with Red (292ef48) and Green (c71a42f): the
+        proxy's freshness_web allowance with two pinned shapes, the max_uses rewrite, search_cap/request_cap, the
+        adapter's WebSearchCall (one StageCall field, so SRV-TUTOR's no-tools test holds), settlement from
+        total_cost_usd, Haiku 5.5 with its above_100k tier, web_search_usd, migration agent_0003. WEB-FRESH approved
+        with Red and Green (b8a2adc, 2966aec; V/freshness-web merged): the card, 37 Vitest + 19 Playwright tests;
+        paired route registration in WEB-UI files. SRV-FRESH approved (revision 4) with Red and Green (9e16bf9,
+        977d55b), paired registrations (0cb3701: SRV-EVENTS KIND_MODULES, SRV-AUTH ROUTERS, VERSION_LOCATIONS and PUT
+        in Route.method, OPS-DEPLOY example tasks), OPS-DOD material.freshness routes and items (0dbb759); 429
+        daily_budget_exhausted aligned with SRV-TUTOR on both sides and the read keys pinned to WEB-FRESH's fixture
+        (8d4458e). Merged origin/V/slice-integration (plan and onboarding: registration lists combined).
+        Code review round 1 fixes (2026-11-24, 5c3ba73 and later on V/freshness): subject words as \\w+ tokens in the
+        scan and again in the plan; masking removes exempt words from query and span alike; enum checks never hash a
+        list or dict; R hosts need a 0–65535 port, a letter/digit charset and LDH labels; gate exact-match cases; an
+        ungated WebSearchCall is tools_mismatch; oracles for placeholder pins, error-result settlement, the 100k tier
+        boundary, the summed lower tier, the TTL breakdown, the fee in the reserve, a reservation without a settle row,
+        the time-left guard and scan_inputs reuse; FR-FRESH-12 states the ≈ $1.04 paid-scan-restart case (the run cap
+        refuses); the live check runs in-process through the route handlers (free GET before and after), records
+        run_input_tokens and requires ≥ 1 stored URL (not run); INV-FRESH-1 [agent] test through the real CLI and a real
+        agent-proxy against the stub (zero credit).
+        Code review round 2 fixes (2026-11-24, V/freshness): words are [^\\W_]+ runs split at script changes and
+        letter/digit boundaries, space-less scripts per character, dotted numbers one word, and a concatenation of
+        span words counted as those words (text.split over the non-front vocabulary; new bound
+        subject_token_chars_max 24), so `_`, ZWSP/ZWJ, camelCase, digit and U+02BC joins and 40 CJK characters no
+        longer pass; INV-FRESH-1 oracles are a regex over the raw query and forwarded body, the generator adds `_`,
+        the empty joiner, U+200B, U+200D, U+02BC, a digit and camelCase; lone surrogates are removed by clean,
+        output_invalid in load_json, url_unsafe in R, 400 bibliography_invalid on the owner PUT; subject_split drops a
+        claim that completes a span run with an earlier subject; the ledger run cap ends a check budget_refused
+        (test); the [agent] test adds the deny path through the real CLI and builds its image by id (also SRV-AGENT's
+        cli image test); crosscheck_ok needs a compared row and FR-FRESH-14 names what it compares; test_live asserts
+        the gate decision; the web job writes `dropped` only with its final status (a second attempt counted it
+        twice). Residual, stated: a token joining span words with a non-span letter between (for example `alphaxbravo`)
+        counts as one word, bounded by subject_token_chars_max.
+        Merged into V/slice-integration (2026-11-24, two-parent merge): the freshness SRV-AGENT ids are renumbered
+        FR-AGENT-14→15, 15→16, 16→17 (integration's FR-AGENT-14 is SRV-OBS tracing; INV-AGENT-6 and VEC-AGENT-3/-4
+        did not collide); the ids above in this entry are the old ones. ADR-0030 still cites FR-AGENT-14 and -14..16:
+        an owner script (dry run by default) shows the two-line wording change. provider.py: `run` keeps the
+        tools_mismatch pre-check before the span and the reservation, `_run` passes the summed model_usage to
+        span.settled. spikes/web-search-otel (zero credit): with SRV-OBS's content flags 0 the search run's CLI spans
+        carry no query, title, URL or summary (only OTEL_LOG_TOOL_CONTENT=1 does), so the search run keeps the trace
+        export; test_obs_env pins its environment (additions + CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION). SRV-OBS
+        allow-lists: freshness.scan/web job_args {}, error codes tools_not_allowed, search_cap, request_cap.
+        live._owner selects an active, enabled user.",
+      next: "1) Code review round 3 on the round-2 fixes and the merge (coordinator). 2) Before any live check
+        or `reader up`: the coordinator's approval (a real check ≈ $0.27). 3) WEB-IMPORT and the course page mount the
+        card; SRV-INGEST PDF Info dictionary (later, paired).",
+      paired_later: "SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount the card
+        (V/onboarding, V/plan)." }
   - { id: V.ingest-profile-v2, stage: V, kind: fix, track: engineering, status: in_progress, branch: V/ingest-profile-v2,
       needs: [V.live],
       what: "Security fix to the current converter profile (SRV-INGEST FR-INGEST-4, INV-INGEST-4), found in the

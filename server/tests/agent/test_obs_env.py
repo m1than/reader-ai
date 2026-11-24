@@ -1,6 +1,6 @@
 """SRV-AGENT FR-AGENT-14 with SRV-OBS FR-OBS-6: the agent.call span and the CLI's telemetry environment. [db]
 
-@trace FR-AGENT-14 FR-OBS-6
+@trace FR-AGENT-14 FR-AGENT-15 FR-OBS-6 FR-FRESH-13
 """
 
 from __future__ import annotations
@@ -154,6 +154,47 @@ async def test_a_non_pipeline_stage_is_not_recorded(pg: Pg, tmp_path: Path, capl
         (span,) = [s for s in finished(handle, memory) if s.name == "agent.call"]
     assert "reader.stage" not in dict(span.attributes)
     assert not any("key=reader.stage" in r.getMessage() for r in caplog.records)  # never set, so never dropped
+
+
+async def test_a_search_run_gets_the_telemetry_env_with_content_off(pg: Pg, tmp_path: Path) -> None:
+    """FR-AGENT-14 with FR-AGENT-15 (SRV-FRESH FR-FRESH-13): a WebSearch call with observability on gets the
+    telemetry additions and the search cap and nothing else; the tool content and detail flags are 0, which
+    spikes/web-search-otel measured as keeping the query, titles, URLs and summary out of the exported spans."""
+    cli_env = need("reader.obs.cli_env")
+    provider = need("reader.agent.provider")
+    w = await _enabled_world(pg, tmp_path, True)
+    cli = SpanCli([Script(text="one line", cost=0.01, init_tools=["WebSearch"])])
+    cli.parents = []
+
+    async def hook(input_data: Any, tool_use_id: Any, context: Any) -> dict[str, Any]:
+        return {}
+
+    call = dataclasses.replace(
+        _call(w), stage="search", task="freshness_web", max_output_tokens=1000, floor_usd=Decimal("0.02"),
+        run_cap_usd=Decimal("1.00"), thinking_off=True, abort_on_retry=True,
+        web_search=provider.WebSearchCall(
+            allowance=provider.WebSearchAllowance(searches_max=1, searches_per_request_max=1, requests_max=3),
+            hook=hook, max_turns=2,
+        ),
+    )
+    with obs_setup("worker"):
+        try:
+            await _provider(w, cli, tmp_path).run(call)
+        except need("reader.agent.errors").AgentError:
+            pass  # the fake's usage shape is not the point here; the environment is
+    env = cli.requests[0].env
+    additions = cli_env.cli_env_additions()
+    assert {k: env[k] for k in additions} == additions
+    assert set(env) == {
+        "PATH", "HOME", "LANG", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_BASE_URL",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "DISABLE_TELEMETRY", "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+        "MAX_THINKING_TOKENS", "CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION", *additions,
+    }
+    assert env["CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION"] == "1"
+    for flag in ("OTEL_LOG_TOOL_CONTENT", "OTEL_LOG_TOOL_DETAILS", "OTEL_LOG_USER_PROMPTS"):
+        assert env[flag] == "0"
+    assert env["OTEL_LOGS_EXPORTER"] == "none"
+    assert "OTEL_LOG_RAW_API_BODIES" not in env
 
 
 async def test_disabled_keeps_fr_agent_6_exact(pg: Pg, tmp_path: Path) -> None:

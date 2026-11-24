@@ -1,0 +1,157 @@
+/* The freshness card (WEB-FRESH) under Calm: tokens and the library's spacing steps only (WEB-UI FR-UI-10). Loaded
+   with the card's lazy chunk. */
+.fresh {
+  font-family: var(--acme-font);
+}
+
+.fresh-section {
+  margin: 0 0 var(--acme-space-6);
+}
+
+.fresh-section h2 {
+  margin: 0 0 var(--acme-space-3);
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.fresh-rec h3 {
+  margin: 0 0 var(--acme-space-1);
+  font-size: 1.0625rem;
+  line-height: 1.4;
+}
+
+.fresh p {
+  margin: 0 0 var(--acme-space-2);
+}
+
+/* Web text and URLs of any length wrap anywhere (FR-FRESHUI-7: no overflow at 390 px for a 2,048-character URL). */
+.fresh,
+.fresh a,
+.fresh-url,
+.fresh-host {
+  overflow-wrap: anywhere;
+}
+
+.fresh-host {
+  font-size: 0.8125rem;
+  color: var(--acme-text-muted);
+}
+
+.fresh-url {
+  font-family: ui-monospace, 'SF Mono', Menlo, monospace;
+  font-size: 0.8125rem;
+}
+
+.fresh-bib {
+  display: grid;
+  gap: var(--acme-space-1);
+  margin: 0 0 var(--acme-space-3);
+}
+
+.fresh-bib div {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: var(--acme-space-3);
+}
+
+.fresh-bib dt {
+  min-width: 9rem;
+  color: var(--acme-text-muted);
+}
+
+.fresh-bib dd {
+  margin: 0;
+}
+
+.fresh-list,
+.fresh-recs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fresh-list li {
+  padding: var(--acme-space-2) 0;
+  border-bottom: 1px solid var(--acme-border);
+}
+
+.fresh-rec {
+  margin: 0 0 var(--acme-space-3);
+  padding: var(--acme-space-3) var(--acme-space-4);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface);
+}
+
+.fresh-subject {
+  font-weight: 600;
+}
+
+/* The verdict badge: text and icon, never colour alone (REF-FRESHUI-4 1.4.1). */
+.fresh-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-1) var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.fresh-badge-current svg {
+  color: var(--acme-success);
+}
+
+.fresh-badge-partly svg {
+  color: var(--acme-warning);
+}
+
+.fresh-badge-outdated svg {
+  color: var(--acme-danger);
+}
+
+.fresh-stale {
+  padding: 0 var(--acme-space-2);
+  border: 1px solid var(--acme-warning);
+  border-radius: var(--radius-control);
+  font-weight: 600;
+}
+
+.fresh-form {
+  display: grid;
+  gap: var(--acme-space-3);
+  max-width: 38rem;
+}
+
+.fresh-field {
+  display: grid;
+  gap: var(--acme-space-1);
+}
+
+.fresh-field input,
+.fresh-field textarea {
+  padding: var(--acme-space-2);
+  border: 1px solid var(--acme-control-border);
+  border-radius: var(--radius-control);
+  background: var(--acme-surface);
+  color: var(--acme-text);
+  font: inherit;
+}
+
+.fresh-field input:focus-visible,
+.fresh-confirm input:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+.fresh-field-error {
+  color: var(--acme-danger);
+  font-size: 0.875rem;
+}
+
+.fresh-confirm {
+  margin: 0 0 var(--acme-space-3);
+  padding: var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+}
