@@ -60,7 +60,9 @@ async def _run(pg: Pg, tmp: Path, case: dict[str, Any], monkeypatch: pytest.Monk
                 await env.work()
             course = await env.scalar("SELECT course_id FROM lessons WHERE id = :l", l=env.lesson)
             spans = finished(handle, memory)
-            return run, env.lesson, course, spans, captured.enqueued
+            # Phase 2 (FR-PIPELINE-18): the run's end also enqueues `obs.runs`, pinned by its own test.
+            feedback = [e for e in captured.enqueued if e[0] != "obs.runs"]
+            return run, env.lesson, course, spans, feedback
 
 
 def _children(spans: list[Any], name: str) -> list[tuple[Any, Any]]:

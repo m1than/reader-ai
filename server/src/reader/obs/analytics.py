@@ -31,6 +31,7 @@ TRACE_TAGS: Final = (
     "reader.job.kind", "reader.job.outcome", "reader.job.attempt", "reader.error_code", "reader.error_class",
     "reader.stage", "reader.step", "reader.run_id", "reader.lesson.id", "reader.course.id",
     "reader.question_id",
+    "reader.material_sha256", "reader.version_key",  # phase 2: FR-OBS-20 (d), FR-OBS-21 (a)
 )
 
 _RUN_INPUTS: Final = (

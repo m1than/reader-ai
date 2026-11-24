@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Final
 
 from pydantic import BaseModel, ConfigDict
@@ -34,12 +35,35 @@ class StageArgs(BaseModel):
 
 KEY: Final = ("run_id", "step", "stage", "input_sha256")
 
+# FR-PIPELINE-18: a run's end is recorded by the step that finished it (lab verification, or a budget refusal
+# with no notebook) or by a step key going dead (the run stops failed). Counted once per committed end.
+_ENDED_SQL: Final = (
+    "UPDATE compile_runs SET ends = ends + 1 WHERE id = CAST(:r AS uuid) AND ends < 100"
+    " AND (:dead OR (finished_at IS NOT NULL AND (:last OR budget_refused IS NOT NULL))) RETURNING ends"
+)
+
+
+async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> None:
+    from sqlalchemy import text
+
+    from reader.obs import runs as obs_runs
+
+    async with engine.begin() as conn:  # the end is counted with tracing off too; only the enqueue is skipped
+        ends = (await conn.execute(text(_ENDED_SQL), {
+            "r": str(payload["run_id"]), "dead": outcome == "dead",
+            "last": payload.get("stage") == "lab_verification"})).scalar()
+    if ends is not None:
+        await obs_runs.enqueue_end("compile", str(payload["run_id"]), int(ends))
+
+
 JOB_KINDS: Final = (
     JobKind(
-        KIND_STAGE, "pipeline", StageArgs, KEY, handle, STAGE_MAX_ATTEMPTS, TRANSIENT, STAGE_JOB_TIMEOUT_S
+        KIND_STAGE, "pipeline", StageArgs, KEY, handle, STAGE_MAX_ATTEMPTS, TRANSIENT, STAGE_JOB_TIMEOUT_S,
+        after_end=after_end,
     ),
     JobKind(
-        KIND_VERIFY, "pipeline", StageArgs, KEY, handle, STAGE_MAX_ATTEMPTS, TRANSIENT, VERIFY_JOB_TIMEOUT_S
+        KIND_VERIFY, "pipeline", StageArgs, KEY, handle, STAGE_MAX_ATTEMPTS, TRANSIENT, VERIFY_JOB_TIMEOUT_S,
+        after_end=after_end,
     ),
 )
 

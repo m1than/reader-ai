@@ -79,6 +79,11 @@ def _start(kind: str, job_id: int, key: str, payload: Mapping[str, Any], trace_v
     for field, name in JOB_ARGS.get(kind, {}).items():
         if field in payload:
             attributes[name] = payload[field]
+    from reader.obs import _STATE
+
+    version = _STATE.get("version_key")  # SRV-OBS FR-OBS-21 (a): set once at the worker's start
+    if isinstance(version, str):
+        attributes["reader.version_key"] = version
     parent = parse_traceparent(trace_value)
     with next_trace_id(derive_trace_id(job_id, key)):
         return tracer().start_span(

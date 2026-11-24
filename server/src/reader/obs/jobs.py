@@ -14,7 +14,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from reader.jobs.model import JobKind
-from reader.obs import feedback, prompts
+from reader.obs import bench, bootstrap, feedback, health, labels, prompts, runs
 
 KIND: Final = "obs.retention"
 MLFLOW: Final = "http://mlflow:5000"
@@ -105,6 +105,16 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
             args.day, jobs=running(), enabled=settings.enabled, retention_days=settings.retention_days,
             client=client, now=now,
         )
+        if settings.enabled:  # FR-OBS-31: Runs and unused LoggedModels past retention (phase 2)
+            from reader.obs import _STATE
+
+            key = _STATE.get("version_key")
+            try:  # the trace delete above is the job's outcome; a prune failure waits for tomorrow's run
+                await runs.prune(client, now=now, retention_days=settings.retention_days,
+                                 running_key=key if isinstance(key, str) else None)
+            except Exception as failure:
+                name = type(failure).__name__
+                logging.getLogger("reader.obs").warning("obs retention prune_failed error=%s", name)
     if conn is not None:
         await prune_starts(conn, now - timedelta(days=settings.retention_days))
     # FR-OBS-15: the daily run also enqueues the prompt registration (enqueue-only, never raises), so a worker
@@ -164,6 +174,7 @@ async def on_worker_start(jobs: Any, now: datetime | None = None) -> None:
         await jobs.enqueue(KIND, {"day": today})
     finally:
         await prompts.on_worker_start(jobs, now)  # FR-OBS-15: enqueue-only, never raises
+        await bootstrap.on_worker_start(jobs, now)  # FR-OBS-21, -26: enqueue-only, never raises
 
 
 JOB_KINDS: Final = (
@@ -179,4 +190,10 @@ JOB_KINDS: Final = (
         transient=(httpx.TransportError,),
         timeout_s=60,
     ),
+    # SRV-OBS phase 2 (phase2_job_kinds, ADR-0038)
+    bootstrap.KIND_DECL,
+    runs.KIND_DECL,
+    bench.KIND_DECL,
+    labels.KIND_DECL,
+    health.KIND_DECL,
 )

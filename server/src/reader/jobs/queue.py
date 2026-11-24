@@ -69,6 +69,17 @@ def _mark_attempt(attempts: int) -> None:
     except Exception:
         log.warning("job span attempt not recorded")
 
+async def _after_end(engine: AsyncEngine, kind: JobKind, payload: Mapping[str, Any], outcome: str) -> None:
+    """A kind's `after_end` hook, after the outcome committed; never raises (the outcome stands)."""
+    if kind.after_end is None:
+        return
+    try:
+        await kind.after_end(engine, payload, outcome)
+    except Exception as failure:  # the class name only, never the message
+        name = type(failure).__name__
+        log.warning("after_end failed: kind=%s outcome=%s error=%s", kind.name, outcome, name)
+
+
 STALLED_AFTER_S: Final = 30.0
 RECONCILE_AGE_S: Final = 60.0
 FIRST_RETRY_DELAY_S: Final = 5
@@ -211,6 +222,25 @@ class Jobs:
             name=SWEEP_TASK, queue=SWEEP_TASK, queueing_lock=SWEEP_TASK, priority=SWEEP_PRIORITY
         )(sweep_task)
         self.app.periodic(cron="* * * * *", periodic_id=SWEEP_TASK)(task)
+        for kind in self.catalog.values():
+            if kind.periodic is not None:
+                self._register_periodic(kind, *kind.periodic)
+
+    def _register_periodic(
+        self, kind: JobKind, cron: str, args_at: Callable[[Any], Mapping[str, Any]]
+    ) -> None:
+        """A tick on the sweep queue that only enqueues `kind` (its key deduplicates a slot's ticks)."""
+        from datetime import UTC, datetime
+
+        async def tick(timestamp: int) -> None:
+            try:
+                await self.enqueue(kind.name, args_at(datetime.fromtimestamp(timestamp, UTC)))
+            except Exception:
+                log.warning("periodic enqueue failed: kind=%s", kind.name)
+
+        name = f"{kind.name}.tick"
+        task = self.app.task(name=name, queue=SWEEP_TASK, queueing_lock=name, priority=SWEEP_PRIORITY)(tick)
+        self.app.periodic(cron=cron, periodic_id=name)(task)
 
     @property
     def queues(self) -> list[str]:
@@ -269,7 +299,7 @@ class Jobs:
             options["schedule_in"] = {"seconds": schedule_in}
         kwargs: dict[str, Any] = {"payload": payload}
         trace = _traceparent()  # FR-EVENTS-19: not part of `payload`, the key or the payload checks
-        if trace is not None:
+        if trace is not None and kind.traced:  # FR-EVENTS-32: an untraced kind gets no trace context
             kwargs["trace"] = trace
         try:
             job_id = await self.app.configure_task(kind.name, **options).defer_async(**kwargs)
@@ -292,6 +322,9 @@ class Jobs:
             span_key = idempotency_key(kind, payload)
         except Exception:  # judged below exactly as before; the span only needs some key
             span_key = ""
+        if not kind.traced:  # FR-EVENTS-32 (SRV-OBS FR-OBS-5 f): no root span, so the job adds no trace
+            await self._run_in_span(kind, job_id, payload)
+            return
         # FR-EVENTS-19: the whole run inside the job's root span, so retries and handler enqueues carry it.
         with propagation.job_span(kind.name, job_id, span_key, payload, trace):
             # SRV-OBS FR-OBS-12 (e): the pipeline's session is its run; the marker never raises.
@@ -387,6 +420,7 @@ class Jobs:
                 await _set_outcome(conn, kind.name, key, "dead", "exhausted", job_id)
                 await tx.commit()
                 _mark("dead", "exhausted")
+                await _after_end(self.engine, kind, payload, "dead")
                 raise JobFailed("exhausted")
             deadline = asyncio.timeout(kind.timeout_s)
             try:
@@ -406,6 +440,7 @@ class Jobs:
                     return None
                 await tx.commit()
                 _mark("succeeded")
+                await _after_end(self.engine, kind, payload, "succeeded")
                 return None
             except asyncio.CancelledError:
                 with contextlib.suppress(Exception):
@@ -438,6 +473,8 @@ class Jobs:
             await _lock(conn, key)
             counted = await _count(conn, kind, key, code, job_id, dead=not transient)
         _mark("dead" if counted is not None and counted[1] else "failed", code)
+        if counted is not None and counted[1]:
+            await _after_end(self.engine, kind, payload, "dead")
         if counted is not None:
             attempts, dead = counted
             log.info("job failed: kind=%s job_id=%s attempts=%s code=%s", kind.name, job_id, attempts, code)

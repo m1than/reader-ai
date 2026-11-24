@@ -55,6 +55,7 @@ ATTRIBUTES: Final[Mapping[str, Mapping[str, Any]]] = {
     "reader.course.id": {"type": "string", "pattern": UUID},
     "reader.tutor.state": {"type": "string", "enum": ("answered", "failed", "refused", "expired")},
     "reader.prompt.version": {"type": "int", "range": (1, 100000)},
+    "reader.version_key": {"type": "string", "pattern": "^[0-9a-f]{12}$"},  # phase 2, FR-OBS-21 (a)
     "reader.retrieval.hits": {"type": "int", "range": (0, 1000)},
     "reader.retrieval.candidates": {"type": "int", "range": (0, 10000)},
     "reader.citations.total": {"type": "int", "range": (0, 1000)},
@@ -85,7 +86,7 @@ KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
         "reader.job.kind", "reader.job.id", "reader.job.attempt", "reader.job.outcome", "reader.error_code",
         "reader.error_class", "reader.run_id", "reader.step", "reader.stage", "reader.question_id",
         "reader.ingest_id", "reader.material_sha256", "reader.lesson.id", "reader.course.id",
-        "reader.tutor.state", "reader.prompt.version",
+        "reader.tutor.state", "reader.prompt.version", "reader.version_key",
     ),
     "agent.call": (
         "reader.task", "reader.stage", "gen_ai.request.model", "gen_ai.usage.input_tokens",
@@ -117,6 +118,11 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "obs.prompts": {},  # FR-OBS-15
     "freshness.scan": {},  # SRV-FRESH paired change: no argument (the report id) is copied
     "freshness.web": {},
+    "obs.setup": {},  # phase 2 (ADR-0038): no argument reaches the span
+    "obs.runs": {},
+    "obs.bench": {},
+    "obs.label": {},
+    "obs.health": {},  # traced: false (FR-OBS-32), listed for the catalogue's completeness
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares

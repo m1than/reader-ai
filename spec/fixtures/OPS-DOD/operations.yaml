@@ -566,6 +566,23 @@ operations:
       observability: { items: [FR-OBS-4] }
       recovery: { items: [INV-OBS-3, FR-OBS-11] }
 
+  # Added 2026-11-24 (SRV-OBS phase 2, ADR-0038): the owner records a bench result and labels lessons and answers.
+  - id: obs.evaluate
+    title: Record a bench result and label a lesson or an answer
+    surface: [web]
+    specs: [SRV-OBS, WEB-UI]
+    routes: ["POST /api/obs/bench", "POST /api/obs/labels"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-OBS-22, FR-OBS-23, FR-OBS-24] }
+      security: { items: [FR-OBS-23, FR-OBS-24] }
+      privacy: { items: [INV-OBS-2] }
+      a11y: { missing: "no page-level a11y check for the label and upload controls yet" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for an upload or a label" }
+      recovery: { items: [INV-OBS-3] }
+
   - id: stack.backup
     title: Back up the stack (reader backup DIR)
     surface: [cli]

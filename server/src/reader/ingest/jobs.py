@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
@@ -119,8 +120,26 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
                 ConnectorException,
             ),
             timeout_s=600.0,
+            after_end=after_end,
         ),
     )
+
+
+async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> None:
+    """FR-INGEST-26: a succeeded import enqueues `obs.runs` {ingest, ingest id, 1} after its commit (an import
+    ends once: one per material)."""
+    if outcome != "succeeded":
+        return
+    from reader.obs import runs as obs_runs
+
+    async with engine.connect() as conn:
+        ingest_id = (await conn.execute(text(
+            "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id WHERE m.sha256 = :s"
+            " AND m.config_id = :c AND i.converter_version = :v"),
+            {"s": str(payload["material_sha256"]), "c": str(payload["material_id"]),
+             "v": str(payload["converter_version"])})).scalar()
+    if ingest_id is not None:
+        await obs_runs.enqueue_end("ingest", str(ingest_id), 1)
 
 
 JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)

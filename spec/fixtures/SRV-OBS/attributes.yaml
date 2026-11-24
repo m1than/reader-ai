@@ -114,6 +114,13 @@ job_args:
   obs.prompts: {}    # FR-OBS-15
   freshness.scan: {}   # SRV-FRESH paired change: the report id is not copied
   freshness.web: {}
+  # Phase 2 (ADR-0038): no argument reaches the span; obs.runs' Run is found by its own tags (FR-OBS-20), and
+  # obs.health opens no span at all (traced: false, FR-OBS-32).
+  obs.setup: {}
+  obs.runs: {}
+  obs.bench: {}
+  obs.label: {}
+  obs.health: {}
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
 instrumentation_scope: { name: reader, version: null }

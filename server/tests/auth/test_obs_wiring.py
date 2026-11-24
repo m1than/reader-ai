@@ -181,8 +181,9 @@ async def test_summary_route_is_owner_only(pg: Pg, tmp_path: Path) -> None:
             cookies={"__Host-reader_session": cookies["ivan"]},
         ) as c:
             body = (await c.get("/api/obs/summary?days=7")).json()
-            # FR-OBS-17 adds `lessons`
-            assert set(body) == {"days", "compile_runs", "tutor", "failures", "ingest", "lessons"}
+            # FR-OBS-17 adds `lessons`; phase 2 adds `alerts` (FR-OBS-25) and `stack` (FR-OBS-32)
+            assert set(body) == {"days", "compile_runs", "tutor", "failures", "ingest", "lessons", "alerts",
+                                 "stack"}
             for bad in ("0", "91", "x", "²", "٣", "007", "-1", "+5", " 7", "7 ", ""):  # "²": round 1, a 500
                 assert (await c.get(f"/api/obs/summary?days={bad}")).status_code == 400
     finally:
