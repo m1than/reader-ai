@@ -1110,8 +1110,21 @@ tasks:
         the time-left guard and scan_inputs reuse; FR-FRESH-12 states the ≈ $1.04 paid-scan-restart case (the run cap
         refuses); the live check runs in-process through the route handlers (free GET before and after), records
         run_input_tokens and requires ≥ 1 stored URL (not run); INV-FRESH-1 [agent] test through the real CLI and a real
-        agent-proxy against the stub (zero credit).",
-      next: "1) Code review round 2 (coordinator; full rounds for the proxy, cost and security parts). 2) Before any live check
+        agent-proxy against the stub (zero credit).
+        Code review round 2 fixes (2026-11-24, V/freshness): words are [^\\W_]+ runs split at script changes and
+        letter/digit boundaries, space-less scripts per character, dotted numbers one word, and a concatenation of
+        span words counted as those words (text.split over the non-front vocabulary; new bound
+        subject_token_chars_max 24), so `_`, ZWSP/ZWJ, camelCase, digit and U+02BC joins and 40 CJK characters no
+        longer pass; INV-FRESH-1 oracles are a regex over the raw query and forwarded body, the generator adds `_`,
+        the empty joiner, U+200B, U+200D, U+02BC, a digit and camelCase; lone surrogates are removed by clean,
+        output_invalid in load_json, url_unsafe in R, 400 bibliography_invalid on the owner PUT; subject_split drops a
+        claim that completes a span run with an earlier subject; the ledger run cap ends a check budget_refused
+        (test); the [agent] test adds the deny path through the real CLI and builds its image by id (also SRV-AGENT's
+        cli image test); crosscheck_ok needs a compared row and FR-FRESH-14 names what it compares; test_live asserts
+        the gate decision; the web job writes `dropped` only with its final status (a second attempt counted it
+        twice). Residual, stated: a token joining span words with a non-span letter between (for example `alphaxbravo`)
+        counts as one word, bounded by subject_token_chars_max.",
+      next: "1) Code review round 3 on the round-2 fixes (coordinator). 2) Before any live check
         or `reader up`: the coordinator's approval (a real check ≈ $0.27). 3) WEB-IMPORT and the course page mount the
         card; SRV-INGEST PDF Info dictionary (later, paired).",
       paired_later: "SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount the card
