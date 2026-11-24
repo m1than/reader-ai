@@ -1,7 +1,7 @@
 ---
 id: ADR-0036
 title: Owner settings editable in the web UI as a database overlay over reader.yaml
-status: proposed
+status: accepted
 date: 2026-11-24
 verified_by: "SRV-CONFIG FR-CONFIG-26 [unit] merge, narrowing and validation table and [db] set, stale, reset and refusal cases; the sign-up switch turned off by an override answers 404 without a restart, and an override cannot open sign-up that the file turns off; WEB-MANAGE FR-MANAGE-11 [browser]; `reader status` prints every override"
 revisit_when: "An override is ever found disagreeing with reader.yaml without the `reader status` line (one occurrence); the allow-list is asked to grow beyond 5 key families; the stack listens on anything other than 127.0.0.1"

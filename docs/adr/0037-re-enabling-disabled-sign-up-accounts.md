@@ -1,7 +1,7 @@
 ---
 id: ADR-0037
 title: Re-enabling disabled sign-up accounts
-status: proposed
+status: accepted
 date: 2026-11-24
 verified_by: "SRV-AUTH FR-AUTH-48 [db]: disable → enable → sign-in with the kept passkey; enable twice is idempotent; pending and configured users refused; a learner gets 403 with nothing changed; WEB-ACCOUNTS and WEB-MANAGE show Enable only on a disabled sign-up account"
 revisit_when: "Sign-up is served beyond 127.0.0.1 (the VPS ADR); or more than 5 enable actions in a month, which would mean disable is used as a temporary suspension and deserves its own state"
