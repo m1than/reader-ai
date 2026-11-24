@@ -32,9 +32,9 @@ _CONTROLS: Final = re.compile(r"[\x00-\x08\x0b-\x1f\ud800-\udfff]")
 
 
 def normalise_code(text: str) -> str:
-    """FR-INGEST-7, written independently of reader.ingest.artifact."""
-    text = "\n".join(line.rstrip(" ") for line in text.replace("\r\n", "\n").split("\n"))
-    return unicodedata.normalize("NFC", _CONTROLS.sub("", text))
+    """FR-INGEST-7, independent of reader.ingest.artifact: remove controls, strip lines, then NFC."""
+    text = _CONTROLS.sub("", text.replace("\r\n", "\n"))
+    return unicodedata.normalize("NFC", "\n".join(line.rstrip(" ") for line in text.split("\n")))
 
 
 def _open(path: str) -> Any:
@@ -179,7 +179,7 @@ def _outline(pdf: Any) -> dict[str, Any]:
     entries = []
     for item in pdf.get_toc():  # pypdfium2 5.x bookmark API
         raw_title = str(item.get_title() or "")
-        title = unicodedata.normalize("NFC", _CONTROLS.sub("", raw_title)).replace("­", "")
+        title = unicodedata.normalize("NFC", _CONTROLS.sub("", raw_title.replace("­", "")))  # FR-INGEST-6
         dest = item.get_dest()
         index = dest.get_index() if dest is not None else None
         entries.append((int(item.level) + 1, title, None if index is None else int(index) + 1))

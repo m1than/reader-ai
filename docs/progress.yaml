@@ -1163,6 +1163,12 @@ tasks:
       what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
         material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.
         9–10') from the outline. SRV-PLAN / SRV-LESSON / SRV-INGEST amendments; the web shows whatever the API returns." }
+  - { id: V.ingest-code-hyphen, stage: V, kind: fix, track: engineering, status: todo, needs: [V.live],
+      what: "pdfium replaces a line-end hyphen and its break with U+0002 in code, so `alpha-`/`beta + 1` becomes
+        `alphabeta + 1`, against FR-INGEST-7's 'no line joined' (investigator, 2026-11-24, synthetic PDF; found with
+        the normalisation-order fix on V/ingest-normalise). Fix in FR-INGEST-7's text-layer read (e.g. map U+0002 back
+        to `-` plus the line break before control removal), with a [host] test on a generated PDF; whether the pilot's
+        code pages hit it is not measured." }
   # Follow-ups from the final slice PR (2026-11-23)
   - { id: V.tutor-retrieval, stage: V, kind: fix, track: ai, status: todo, needs: [V.live],
       what: "NFR-TUTOR-3 fails on the live bench: grounded 0.625 against 0.8. Grounding given gold in the top 8 is 0.808
