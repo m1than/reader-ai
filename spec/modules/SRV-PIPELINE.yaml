@@ -526,7 +526,10 @@ owner_notes:
 # tombstone only, and first by resume, so a skipped lesson's stopped run answers `lesson_inactive`, not
 # `not_failed`); `runs.cancel` and `runs.history`; the cancel and history tests are test_cancel_db.py. No oracle
 # of an existing test changed. Merge with the SRV-INGEST slice (2026-11-24): source.py's `material_imported` adds
-# `AND deleted_at IS NULL` (FR-PIPELINE-22's second guard), with a [db] test.
+# `AND deleted_at IS NULL` (FR-PIPELINE-22's second guard), with a [db] test. V/manage-fix (2026-11-24): the
+# SRV-OBS phase-2 revision for FR-PIPELINE-18's `compile_runs.ends` also claimed id `pipeline_0004`, so the branch
+# had two revisions with one id and `cancelled_at` could be missing after a migrate; that revision is renumbered
+# `pipeline_0005` (down_revision `pipeline_0004`), so the order is cancel, then ends.
 # What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
 # 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
 # renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose

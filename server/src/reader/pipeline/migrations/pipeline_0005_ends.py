@@ -1,16 +1,17 @@
 """SRV-PIPELINE FR-PIPELINE-18 (paired SRV-OBS phase 2): `compile_runs.ends`, the run's count of recorded ends
 (finished, failed or dead); the `end` of each `obs.runs` enqueue. A resumed run that ends again counts 2.
 
-Revision ID: pipeline_0004
-Revises: pipeline_0003 (same branch `pipeline`).
+Revision ID: pipeline_0005
+Revises: pipeline_0004 (same branch `pipeline`; renumbered at the merge of V/manage, whose pipeline_0004 adds
+`cancelled_at`: two revisions with one id left the branch with an undefined order).
 """
 
 from __future__ import annotations
 
 from alembic import op
 
-revision = "pipeline_0004"
-down_revision = "pipeline_0003"
+revision = "pipeline_0005"
+down_revision = "pipeline_0004"
 branch_labels = None
 depends_on = None
 
