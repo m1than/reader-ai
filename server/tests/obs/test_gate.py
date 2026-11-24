@@ -72,9 +72,41 @@ def test_decision_table(
 ) -> None:
     routes = require("reader.obs.routes")
     assert routes.DASHBOARD_ORIGIN == DASH
-    assert routes.decide(origin, method, site, mode, dest, role) == status
+    assert routes.decide(origin, method, site, mode, dest, role, "mlflow") == status
 
 
 def test_missing_forwarded_method_counts_as_get() -> None:
     routes = require("reader.obs.routes")
-    assert routes.decide(None, None, None, None, None, "owner") == 204
+    assert routes.decide(None, None, None, None, None, "owner", "mlflow") == 204
+
+
+JAEGER = "https://localhost:8444"
+APP = "https://localhost"
+SITE_CASES = [
+    # X-Reader-Site (set by Caddy), origin, forwarded method, role -> status (FR-OBS-9, -19; INV-OBS-5 per site)
+    ("mlflow", DASH, "POST", "owner", 204),
+    ("mlflow", JAEGER, "POST", "owner", 403),
+    ("mlflow", JAEGER, "GET", "owner", 403),
+    ("jaeger", JAEGER, "POST", "owner", 204),
+    ("jaeger", DASH, "POST", "owner", 403),
+    ("jaeger", DASH, "GET", "owner", 403),
+    ("jaeger", None, "GET", "owner", 204),
+    ("jaeger", None, "POST", "owner", 403),
+    ("jaeger", None, "GET", None, 401),
+    ("app", None, "GET", "owner", 204),  # https://localhost/api/obs/gate answers as before
+    ("app", APP, "GET", "learner", 403),
+    ("app", DASH, "GET", "owner", 403),
+    (None, None, "GET", "owner", 403),  # no site header: never came through Caddy
+    ("", DASH, "GET", "owner", 403),
+    ("Mlflow", DASH, "GET", "owner", 403),
+    ("other", None, "GET", "owner", 403),
+    (None, None, "GET", None, 403),  # refused before the session is looked at
+]
+
+
+@pytest.mark.parametrize(("reader_site", "origin", "method", "role", "status"), SITE_CASES)
+def test_per_site_origins(reader_site: str | None, origin: str | None, method: str, role: str | None,
+                          status: int) -> None:
+    rules = require("reader.obs.gate_rules")
+    assert rules.SITE_ORIGINS == {"mlflow": DASH, "jaeger": JAEGER, "app": APP}
+    assert rules.decide(origin, method, None, None, None, role, reader_site) == status

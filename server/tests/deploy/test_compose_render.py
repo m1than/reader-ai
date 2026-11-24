@@ -116,8 +116,9 @@ COPY_ALLOW_LIST = {
         "server/src/reader/search/embed_service.py", "server/src/reader/search/fetch_model.py",
         "server/src/reader/search/models.lock.json",
     },
-    # FR-DEPLOY-13 (paired SRV-OBS change): the pinned MLflow image plus a data directory; nothing copied.
-    "mlflow.Dockerfile": set(),
+    # FR-DEPLOY-13 (paired SRV-OBS change): the pinned MLflow image plus a data directory and, since SRV-OBS
+    # FR-OBS-12 (c), the generated all-zero model catalog that replaces MLflow's bundled one.
+    "mlflow.Dockerfile": {"deploy/otel/mlflow-catalog/anthropic.json"},
 }
 
 

@@ -1,0 +1,14 @@
+{
+ "phase": "probe",
+ "catalog": "",
+ "sent": 5,
+ "complete": 5,
+ "seconds": [
+  0.6,
+  0.6,
+  0.6,
+  0.6,
+  0.6
+ ],
+ "within_30s": true
+}

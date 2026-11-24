@@ -285,9 +285,15 @@ def _check_clean(out: Any, allowed: Any, given: dict[str, Any] | None = None) ->
     name_ok = out.name == "reader.unlisted" or allowed.span_class(out.name) is not None
     assert name_ok, out.name
     klass = allowed.span_class(out.name)
-    source = dict(out.attributes) if given is None else given
-    # The oracle (VEC-OBS-1 read independently), applied to what went in: exactly the valid listed keys survive.
-    assert dict(out.attributes) == (oracle_clean(klass, source) if klass else {})
+    from .test_analytics import decoded, oracle_derive
+
+    base = {k: v for k, v in out.attributes.items() if not k.startswith("mlflow.") and k != "session.id"}
+    source = base if given is None else given
+    # The oracle (VEC-OBS-1 read independently), applied to what went in: exactly the valid listed keys survive,
+    # plus only the MLflow keys VEC-OBS-4 derives from them (FR-OBS-12, INV-OBS-1).
+    clean = oracle_clean(klass, source) if klass else {}
+    assert base == clean
+    assert decoded(dict(out.attributes)) == oracle_derive(klass, out.name, clean, out.parent is None)
     assert list(out.events) == []
     assert out.status.description is None
     assert all(dict(link.attributes or {}) == {} for link in out.links)
@@ -319,7 +325,12 @@ def test_exporter_rebuilds_every_part() -> None:
     assert first.name == "reader.unlisted"
     assert dict(first.attributes) == {}
     assert second.name == "job tutor.answer"
-    assert dict(second.attributes) == {"reader.job.kind": "tutor.answer"}
+    assert dict(second.attributes) == {  # FR-OBS-12: the root's derived type, name and tag
+        "reader.job.kind": "tutor.answer",
+        "mlflow.spanType": "CHAIN",
+        "mlflow.traceTag.mlflow.traceName": "job tutor.answer",
+        "mlflow.traceTag.reader.job.kind": "tutor.answer",
+    }
     allowed = require("reader.obs.attributes").AllowList(catalogs())
     for out in capture.spans:
         _check_clean(out, allowed)

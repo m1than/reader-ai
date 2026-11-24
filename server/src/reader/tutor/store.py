@@ -119,6 +119,7 @@ class Question:
     age_s: float
     material_sha256: str | None
     course_title: str
+    course_id: uuid.UUID | None = None  # SRV-OBS FR-OBS-12 (d): an id for the trace, never the title
 
 
 async def load(conn: AsyncConnection, question_id: uuid.UUID) -> Question | None:
@@ -126,7 +127,7 @@ async def load(conn: AsyncConnection, question_id: uuid.UUID) -> Question | None
         await conn.execute(
             text(
                 "SELECT q.id, q.owner_id, u.handle, q.lesson_id, q.revision_sha256, q.cell_id, q.question,"
-                " q.state, extract(epoch FROM now() - q.created_at), c.material_sha256, c.title"
+                " q.state, extract(epoch FROM now() - q.created_at), c.material_sha256, c.title, c.id"
                 " FROM tutor_questions q JOIN users u ON u.id = q.owner_id"
                 " JOIN lessons l ON l.id = q.lesson_id JOIN courses c ON c.id = l.course_id"
                 " WHERE q.id = :i"
@@ -137,7 +138,8 @@ async def load(conn: AsyncConnection, question_id: uuid.UUID) -> Question | None
     if row is None:
         return None
     return Question(
-        row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], float(row[8]), row[9], row[10]
+        row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], float(row[8]), row[9], row[10],
+        row[11] if len(row) > 11 else None,
     )
 
 

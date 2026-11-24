@@ -17,6 +17,10 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ALLOWED = {o for o in os.environ.get("EXPECT_ORIGINS", "http://localhost:8443").split(",") if o}
+# Round 5 (review B8): per-site origins. When SITE_ORIGINS is set (`mlflow=<origin>|<origin>,jaeger=<origin>`), the
+# allowed origins are those of the site named by X-Reader-Site (set by Caddy); no or an unknown site is refused.
+SITE_ORIGINS = {k: set(v.split("|")) for k, v in (p.split("=", 1) for p in os.environ.get("SITE_ORIGINS", "").split(",")
+                                                   if "=" in p)}
 
 
 class Gate(BaseHTTPRequestHandler):
@@ -32,15 +36,19 @@ class Gate(BaseHTTPRequestHandler):
         mode = self.headers.get("Sec-Fetch-Mode")
         dest = self.headers.get("Sec-Fetch-Dest")
         top_nav = site == "same-site" and mode == "navigate" and dest == "document" and method == "GET"
-        if origin is not None and origin not in ALLOWED:
+        allowed = SITE_ORIGINS.get(self.headers.get("X-Reader-Site") or "", set()) if SITE_ORIGINS else ALLOWED
+        if SITE_ORIGINS and not allowed:
             status = 403
-        elif method not in ("GET", "HEAD") and origin not in ALLOWED:
+        elif origin is not None and origin not in allowed:
+            status = 403
+        elif method not in ("GET", "HEAD") and origin not in allowed:
             status = 403
         elif site is not None and site not in ("same-origin", "none") and not top_nav:
             status = 403  # review round 2 N1: only a top-level GET navigation may arrive same-site
         else:
             status = 204 if who == "owner" else 403 if who == "learner" else 401
         print(json.dumps({"path": self.path, "status": status, "fwd_method": method, "origin": origin,
+                          "reader_site": self.headers.get("X-Reader-Site"),
                           "sec_fetch": [site, mode, dest], "fwd_uri": self.headers.get("X-Forwarded-Uri")}),
               file=sys.stderr, flush=True)
         self.send_response(status)

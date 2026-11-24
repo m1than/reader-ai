@@ -1,0 +1,86 @@
+# VEC-OBS-4 (SRV-OBS FR-OBS-12..15, -18; V.obs-analytics, design review rounds 1-3, approved; ADR-0035 accepted
+# 2026-11-24). The derivation tables AllowListExporter applies after validation, the root keys handlers set, the
+# assessment catalogue and the prompt list, as data. The attribute, span-name and key entries of the reviewed draft
+# are merged into VEC-OBS-1 (attributes.yaml). A test compares reader.obs.analytics with this file.
+# Design review round 1 (B3): every MLflow key (`mlflow.spanType`, `mlflow.traceTag.*`, `mlflow.spanInputs`,
+# `mlflow.spanOutputs`, `mlflow.llm.cost`, `session.id`) is derived by AllowListExporter from the span's name and its
+# already-validated attributes. A caller-supplied key starting with `mlflow.` or equal to `session.id` is removed like
+# any unlisted key. No JSON comes from a caller; no new rule type exists.
+version: 1
+
+# Root keys a handler learns from its own rows and sets through reader.obs.annotate_job (FR-OBS-5 e).
+job_root_keys_from_handler:
+  pipeline.stage: [reader.lesson.id, reader.course.id, reader.prompt.version]
+  pipeline.verify: [reader.lesson.id, reader.course.id]
+  tutor.answer: [reader.lesson.id, reader.course.id, reader.tutor.state, reader.prompt.version]
+
+# mlflow.spanType by span name; "job *" is every job root; HTTP and WS spans get none.
+span_types:
+  "job *": CHAIN
+  job.session: CHAIN
+  agent.call: AGENT
+  tutor.retrieve: RETRIEVER
+  tutor.citations: PARSER
+  verify.claims: PARSER
+  verify.lab: TOOL
+  kernel.run: TOOL
+  ingest.parse: PARSER
+  ingest.chunk: PARSER
+  embed.batch: EMBEDDING
+
+# Root spans only: `mlflow.traceTag.mlflow.traceName` = the span name, and `mlflow.traceTag.<key>` = str(value) for
+# each of these keys the root carries (already validated; ints in decimal). No cost or cache tag.
+trace_tags: [reader.job.kind, reader.job.outcome, reader.job.attempt, reader.error_code, reader.error_class,
+  reader.stage, reader.step, reader.run_id, reader.lesson.id, reader.course.id, reader.question_id]
+
+# Previews: `mlflow.spanInputs` / `mlflow.spanOutputs` = a JSON object of {preview key: validated value} for the keys
+# the root carries, in this order; nothing else (no key: no preview). A preview key is never one of the forbidden.
+previews:
+  tutor.answer:
+    inputs: { question_id: reader.question_id, lesson_id: reader.lesson.id }
+    outputs: { outcome: reader.job.outcome, tutor_state: reader.tutor.state, error_code: reader.error_code }
+  pipeline.stage:
+    inputs: { run_id: reader.run_id, lesson_id: reader.lesson.id, stage: reader.stage, step: reader.step }
+    outputs: { outcome: reader.job.outcome, error_code: reader.error_code }
+  pipeline.verify:
+    inputs: { run_id: reader.run_id, lesson_id: reader.lesson.id, stage: reader.stage, step: reader.step }
+    outputs: { outcome: reader.job.outcome, error_code: reader.error_code }
+  ingest.import:
+    inputs: { material_sha256: reader.material_sha256 }
+    outputs: { outcome: reader.job.outcome, error_code: reader.error_code }
+forbidden_preview_keys: [model, messages, prompt, input, output, content, text]
+
+# agent.call only, when reader.cost_usd is present (B7): input_cost = reader.cost_input_usd (0 when absent, capped
+# at the total), output_cost = reader.cost_usd − input_cost in 6-place Decimal arithmetic (never float),
+# total_cost = reader.cost_usd (the ledger's numeric(12,6)); omitted when reader.cost_usd is absent.
+llm_cost: { span: agent.call, total: reader.cost_usd, input: reader.cost_input_usd }
+
+# session.id: on `job.session` only, = its reader.run_id (pipeline) or reader.lesson.id (tutor); FR-OBS-12 (e).
+session: { span: job.session, from: [reader.run_id, reader.lesson.id] }
+
+# FR-OBS-18: mlflow.linkedPrompts on the root = [{"name": <prompt name>, "version": str(reader.prompt.version)}],
+# the name from the root's job kind (tutor) or "reader." + its reader.stage (pipeline.stage) when that name is in
+# `prompts`; nothing otherwise.
+linked_prompts: { tutor.answer: reader.tutor, pipeline.stage: "reader.<reader.stage>" }
+
+# FR-OBS-14: the assessment catalogue. A POST body is built only from this.
+assessments:
+  - { name: fact_check.passed, value: bool, source_id: reader.pipeline.fact_check,
+      metadata: { claims: [0, 10000], supported: [0, 10000] } }
+  - { name: verify.passed, value: bool, source_id: reader.pipeline.verify, metadata: {} }
+  - { name: verify.lab_passed, value: bool, source_id: reader.pipeline.verify,
+      metadata: { cells: [0, 10000], cells_ok: [0, 10000] } }
+  - { name: tutor.citations_valid, value: bool, source_id: reader.tutor.citations,
+      metadata: { total: [0, 1000], valid: [0, 1000] } }
+  - { name: tutor.citation_share, value: { float: [0, 1] }, source_id: reader.tutor.citations, metadata: {} }
+assessment_body: { source_type: CODE, rationale: never, metadata_values: decimal_strings }
+
+# FR-OBS-15: the prompt templates registered, by name and file.
+prompts:
+  reader.draft: server/src/reader/pipeline/prompts/draft.v1.md
+  reader.fact_check: server/src/reader/pipeline/prompts/fact_check.v1.md
+  reader.adversarial_review: server/src/reader/pipeline/prompts/adversarial_review.v1.md
+  reader.revise: server/src/reader/pipeline/prompts/revise.v1.md
+  reader.tutor: server/src/reader/tutor/prompts/answer-v1.md
+
+job_kinds: [obs.feedback, obs.prompts]

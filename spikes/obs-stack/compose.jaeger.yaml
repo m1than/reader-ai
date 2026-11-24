@@ -1,0 +1,42 @@
+# Spike only (never shipped), round 4: Jaeger all-in-one as Rotel's second exporter, next to MLflow. Profile `jaeger`;
+# hardened like the other spike services; no published port (the browser reaches it through the spike Caddy :8448).
+services:
+  gate:
+    # Jaeger's UI loads ES modules (Sec-Fetch-Mode cors, Origin sent): its own origin must pass the gate's Origin rule.
+    environment:
+      EXPECT_ORIGINS: "http://localhost:8443,http://localhost:8445,http://localhost:8446,http://localhost:8448"
+
+  caddy:
+    environment:
+      CSP_CANDIDATE: "${CSP_CANDIDATE}"
+      CSP_JAEGER: "${CSP_JAEGER}"
+
+  jaeger:
+    image: jaegertracing/jaeger:2.23.0@sha256:3823829974ccfc2485d2e48b165579091f32295022ae80ca49704e2f4834116e
+    profiles: [jaeger]
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    environment:
+      JAEGER_MAX_TRACES: "${JAEGER_MAX_TRACES:-10000}"
+    volumes: ["./jaeger.yaml:/etc/jaeger/config.yaml:ro"]
+    user: "10006:10006"
+    read_only: true
+    tmpfs: ["/tmp:size=16m,uid=10006"]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 512m
+    memswap_limit: 512m
+    networks: { obs: { aliases: [jaeger] }, obs-ui: { aliases: [jaeger] } }
+
+  rotel:
+    # Two named exporters: MLflow (as today) and Jaeger. A named exporter takes its settings from
+    # ROTEL_EXPORTER_<NAME>_<FIELD> (measured: ROTEL_OTLP_EXPORTER_<NAME>_ENDPOINT is not read, "Exporter[mlflow]:
+    # must specify an endpoint for OTLP traces").
+    command:
+      - --exporters=mlflow:otlp,jaeger:otlp
+      - --exporters-traces=mlflow,jaeger
+    environment:
+      ROTEL_EXPORTER_MLFLOW_ENDPOINT: http://mlflow:5000
+      ROTEL_EXPORTER_MLFLOW_PROTOCOL: http
+      ROTEL_EXPORTER_MLFLOW_CUSTOM_HEADERS: x-mlflow-experiment-id=0
+      ROTEL_EXPORTER_JAEGER_ENDPOINT: http://jaeger:4318
+      ROTEL_EXPORTER_JAEGER_PROTOCOL: http

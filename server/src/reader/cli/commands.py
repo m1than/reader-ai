@@ -107,6 +107,7 @@ ACTIVE_PROFILES: tuple[str, ...] = ("kernels",)  # FR-CLI-5: the default profile
 # FR-CLI-5, FR-CLI-22: chosen by `reader up`, recorded in run/profiles
 OPTIONAL_PROFILES: tuple[str, ...] = ("agents", "observability")
 TRACES_URL: Final = "https://localhost:8443/"  # FR-CLI-22: the dashboard, published only with `observability`
+JAEGER_URL: Final = "https://localhost:8444/"  # FR-CLI-22 (SRV-OBS FR-OBS-19): the waterfall view
 
 
 def compose_argv(ctx: Ctx, *args: str, extra: Sequence[str] = ()) -> list[str]:
@@ -462,6 +463,7 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     print(f"reader is up ({model.name}); the watcher keeps delivering secrets", file=ctx.out)
     if "observability" in project.profiles:  # FR-CLI-22
         print(f"traces: {TRACES_URL}", file=ctx.out)
+        print(f"jaeger: {JAEGER_URL}", file=ctx.out)
     return 0
 
 

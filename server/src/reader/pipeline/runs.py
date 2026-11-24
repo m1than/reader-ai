@@ -90,6 +90,7 @@ class Lesson:
     source: Source
     title: str
     material_title: str
+    course_id: uuid.UUID | None = None  # SRV-OBS FR-OBS-12 (d): an id for the trace, never the title
 
 
 async def load_run(
@@ -131,8 +132,9 @@ async def load_lesson(
     plan = (
         await conn.execute(
             text(
-                "SELECT p.material_sha256, p.pdf_first, p.pdf_last, l.title, c.title FROM course_plans p"
-                " JOIN lessons l ON l.id = p.lesson_id JOIN courses c ON c.id = l.course_id"
+                "SELECT p.material_sha256, p.pdf_first, p.pdf_last, l.title, c.title, c.id"
+                " FROM course_plans p JOIN lessons l ON l.id = p.lesson_id"
+                " JOIN courses c ON c.id = l.course_id"
                 " WHERE p.lesson_id = :l AND p.owner_id = :o"
             ),
             {"l": lesson_id, "o": owner_id},
@@ -141,7 +143,9 @@ async def load_lesson(
     if plan is None:
         raise PipelineError("lesson_unknown")
     spans, _ = await rt.spans.load(conn, owner_id, plan[0], plan[1], plan[2])
-    return Lesson(render(spans), str(plan[3]), str(plan[4]))  # citations name the course title (as SRV-TUTOR)
+    # citations name the course title (as SRV-TUTOR); the course id is for the trace only
+    course_id = plan[5] if len(plan) > 5 and isinstance(plan[5], uuid.UUID) else None
+    return Lesson(render(spans), str(plan[3]), str(plan[4]), course_id)
 
 
 def done_list(steps: Sequence[StepRow]) -> list[Done]:

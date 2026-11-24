@@ -9,8 +9,10 @@
 }
 
 (gated) {
+	# Round 5 (review B8): the gate learns which site asks from a header Caddy sets (overriding any client value).
 	forward_auth gate:9000 {
 		uri /api/auth/owner-gate
+		header_up X-Reader-Site mlflow
 	}
 
 	# Round 2 finding: `respond @blocked 404` next to a catch-all `handle` never ran (Caddy orders `handle` before
@@ -52,6 +54,22 @@
 :8446 {
 	header Content-Security-Policy "{$CSP_CANDIDATE}"
 	import gated
+}
+
+# Round 4 (the owner's Jaeger question): Jaeger's UI behind the same gate and the candidate CSP, on its own port.
+:8448 {
+	# Jaeger UI 2.23.0 runs two inline scripts (measured, round 4): their hashes, never 'unsafe-inline'.
+	header Content-Security-Policy "{$CSP_JAEGER}"
+	forward_auth gate:9000 {
+		uri /api/auth/owner-gate
+		header_up X-Reader-Site jaeger
+	}
+	reverse_proxy jaeger:16686 {
+		header_up -Cookie
+		header_up -Authorization
+		header_down -Set-Cookie
+		header_down -Access-Control-*
+	}
 }
 
 # Round 3 (review N1): a stand-in for the app's /observability page on another port of the same site. It is not

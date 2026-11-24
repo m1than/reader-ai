@@ -1,0 +1,7 @@
+{
+ "phase": "bulkfull",
+ "catalog": "",
+ "traces": 6000,
+ "spans": 24000,
+ "seconds": 1.0
+}

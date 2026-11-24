@@ -25,6 +25,8 @@ from reader.agent.errors import AgentError, BudgetRefused, TransientAgentError
 from reader.agent.provider import StageCall
 from reader.jobs import JobContext
 from reader.lessons.store import write_revision
+from reader.obs import feedback, prompts
+from reader.obs.spans import annotate_job, child_span
 from reader.pipeline import g2 as g2_mod
 from reader.pipeline import notebook as nb_mod
 from reader.pipeline import runs
@@ -102,6 +104,7 @@ async def _model_step(
     attempt: int,
     current: dict[str, Any] | None,
     handle: str,
+    step: int | None = None,
 ) -> tuple[dict[str, Any] | None, dict[str, Any], str, Decimal]:
     """Run a model stage: (notebook or None, the step report, model, cost)."""
     sdef = rt.pipeline.stages[stage]
@@ -120,6 +123,8 @@ async def _model_step(
             max_output_tokens=sdef.max_output_tokens,
             floor_usd=sdef.floor_reserve_usd,
             run_cap_usd=run.cap_usd,
+            course_id=lesson.course_id,
+            step=step,
         )
     )
     aliases = lesson.source.aliases
@@ -144,7 +149,10 @@ async def _model_step(
     if stage == "fact_check":
         producer = next(s for s in reversed(steps) if s.stage in ("draft", "revise"))
         stripped = {(c, k) for c, k in producer.report.get("stripped", [])}
-        verdicts = validate_fact_report(parse_json(result.text), current, aliases, frozenset(stripped))
+        with child_span("verify.claims") as claims:  # SRV-OBS FR-OBS-13: counts only
+            verdicts = validate_fact_report(parse_json(result.text), current, aliases, frozenset(stripped))
+            claims.set({"reader.claims.total": len(verdicts),
+                        "reader.claims.supported": sum(1 for v in verdicts if v.verdict == "supported")})
         report: dict[str, Any] = {
             "verdicts": [
                 {
@@ -220,6 +228,11 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         raise InputNotReady()
     steps = await load_steps(conn, run_id)
     lesson = await load_lesson(conn, rt, run.owner_id, run.lesson_id)
+    # SRV-OBS FR-OBS-5 (e), FR-OBS-18: ids on the job's root; the session marker came from the wrapper.
+    version = await prompts.version_of(f"reader.{args.stage}")
+    annotate_job({"reader.lesson.id": str(run.lesson_id),
+                  "reader.course.id": str(lesson.course_id) if lesson.course_id else None,
+                  "reader.prompt.version": version})
     jobs = rt.jobs()
     if any(s.step == args.step for s in steps):  # already recorded: only make sure the run moves on
         await enqueue_next(jobs, rt, run, lesson, steps)
@@ -245,8 +258,13 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         else:
             try:
                 notebook, report, model, cost = await _model_step(
-                    rt, run, lesson, steps, stage, ctx.attempts, current, await _handle(conn, run)
+                    rt, run, lesson, steps, stage, ctx.attempts, current, await _handle(conn, run), args.step
                 )
+                if stage == "fact_check":  # FR-OBS-14; `record` never raises
+                    claims = len(report.get("verdicts", []))
+                    supported = sum(1 for v in report.get("verdicts", []) if v["verdict"] == "supported")
+                    counts = {"claims": min(claims, 10000), "supported": min(supported, 10000)}
+                    await feedback.record(ctx, "fact_check.passed", supported == claims, counts)
             except BudgetRefused as refused:
                 await _refused(conn, jobs, rt, run, lesson, steps, refused.code)
                 log.info("compile_budget_refused run=%s stage=%s code=%s", run.id, stage, refused.code)
@@ -273,7 +291,16 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         latest = latest_sha(steps)
         assert latest is not None  # noqa: S101
         before = await _blob(rt, latest)
-        lab_report = await rt.verify.run(before)
+        lab_started = time.monotonic()
+        with child_span("verify.lab") as lab:  # FR-OBS-13: cells, cells passed, milliseconds
+            lab_report = await rt.verify.run(before)
+            cells = len(lab_report.results)
+            cells_ok = sum(1 for r in lab_report.results.values() if r.get("passed"))
+            lab.set({"reader.kernel.cells": cells, "reader.kernel.cells_ok": cells_ok,
+                     "reader.kernel.ms": int((time.monotonic() - lab_started) * 1000)})
+        await feedback.record(ctx, "verify.lab_passed", cells_ok == cells,
+                              {"cells": min(cells, 10000), "cells_ok": min(cells_ok, 10000)})
+        await feedback.record(ctx, "verify.passed", not lab_report.problems)
         notebook = stamp_labs(before, lab_report)
         report = {"lab_report": lab_report.as_json()}
     assert notebook is not None  # noqa: S101

@@ -1,0 +1,40 @@
+# Jaeger v2 all-in-one for the waterfall view (SRV-OBS FR-OBS-19, ADR-0033): OTLP/HTTP in from Rotel's second
+# exporter, in-memory storage capped at 450 traces (ADR-0033's sizing: 3.3 KB per full-key span, 72 spans per trace,
+# 256m limit), the query UI on 16686, no telemetry export. The same shape was measured in spikes/obs-stack round 5.
+service:
+  extensions: [jaeger_storage, jaeger_query]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [jaeger_storage_exporter]
+  telemetry:
+    metrics:
+      level: none
+    logs:
+      level: warn
+
+extensions:
+  jaeger_query:
+    storage:
+      traces: mem
+    http:
+      endpoint: 0.0.0.0:16686
+  jaeger_storage:
+    backends:
+      mem:
+        memory:
+          max_traces: 450
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  jaeger_storage_exporter:
+    trace_storage: mem

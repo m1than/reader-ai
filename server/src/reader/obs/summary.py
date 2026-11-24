@@ -300,6 +300,95 @@ async def trace_gate(conn: AsyncConnection, since: datetime, now: datetime, trac
     return TraceGate(bool(tracing.enabled), periods, oldest)
 
 
+# FR-OBS-17: ONE grouped query over the owner's spend rows of the window, by (lesson, run, tutor or not); a
+# group's amount is FR-AGENT-9's spent: settled_usd of settles plus usd of reserves with no settle or void.
+LESSON_SPEND_SQL: Final = (
+    "SELECT s.lesson_id, s.run_id, s.task = :tutor AS tutor,"
+    " sum(CASE WHEN s.kind = 'settle' THEN s.settled_usd"
+    "  WHEN s.kind = 'reserve' AND NOT EXISTS (SELECT 1 FROM agent_spend x WHERE x.reservation_id = s.id)"
+    "  THEN s.usd ELSE 0 END) AS amount,"
+    " count(*) FILTER (WHERE s.kind = 'reserve'"
+    "  AND NOT EXISTS (SELECT 1 FROM agent_spend x WHERE x.reservation_id = s.id)) AS open_reserves,"
+    " max(s.created_at) AS newest"
+    " FROM agent_spend s WHERE s.owner_id = :o AND s.created_at >= :s AND s.lesson_id IS NOT NULL"
+    " GROUP BY s.lesson_id, s.run_id, s.task = :tutor"
+)
+LESSON_TITLES_SQL: Final = (
+    "SELECT l.id, l.title, c.id AS course_id, c.title AS course_title FROM lessons l"
+    " JOIN courses c ON c.id = l.course_id WHERE l.owner_id = :o AND l.id = ANY(:ids)"
+)
+# SRV-PIPELINE's DbSpanReader's rows per lesson; owner-scoped at every table; the database returns numbers
+LESSON_CHARS_SQL: Final = (
+    "SELECT p.lesson_id, sum(char_length(s.text)) AS chars FROM course_plans p"
+    " JOIN materials m ON m.sha256 = p.material_sha256 AND m.owner_id = :o"
+    " JOIN ingests i ON i.material_id = m.id"
+    " JOIN material_spans s ON s.ingest_id = i.id AND s.owner_id = :o"
+    " AND s.page BETWEEN p.pdf_first AND p.pdf_last"
+    " WHERE p.owner_id = :o AND p.lesson_id = ANY(:ids) GROUP BY p.lesson_id"
+)
+LESSONS_LIMIT: Final = 200
+MLFLOW_LESSON_URL: Final = "https://localhost:8443/#/experiments/0/traces?q={}"
+
+
+def _per_1k(total: Decimal, chars: int | None) -> float | None:
+    if not chars:
+        return None
+    return float(round(total / (Decimal(chars) / 1000), 6))
+
+
+async def _lessons(conn: AsyncConnection, owner: uuid.UUID, since: datetime) -> dict[str, Any]:
+    groups = await _rows(conn, LESSON_SPEND_SQL, o=owner, s=since, tutor=TUTOR_TASK)
+    per: dict[uuid.UUID, dict[str, Any]] = {}
+    for g in groups:
+        row = per.setdefault(g.lesson_id, {"compile": Decimal(0), "tutor": Decimal(0), "runs": {}, "open": 0})
+        amount = Decimal(g.amount or 0)
+        row["open"] += int(g.open_reserves or 0)
+        if g.tutor:
+            row["tutor"] += amount
+        else:
+            row["compile"] += amount
+            row["runs"][g.run_id] = (g.newest, amount)
+    ids = sorted(per)
+    titles = {r.id: r for r in await _rows(conn, LESSON_TITLES_SQL, o=owner, ids=ids)} if ids else {}
+    chars: dict[uuid.UUID, int] = {}
+    if titles and (await conn.execute(text("SELECT to_regclass('material_spans')"))).scalar() is not None:
+        found = await _rows(conn, LESSON_CHARS_SQL, o=owner, ids=list(titles))
+        chars = {r.lesson_id: int(r.chars) for r in found}
+    rows: list[dict[str, Any]] = []
+    for lesson_id, p in per.items():
+        t = titles.get(lesson_id)  # None: the lesson was deleted; its spend stays (totals equal the ledger)
+        total = p["compile"] + p["tutor"]
+        newest = max(p["runs"].values(), key=lambda v: v[0], default=None)
+        rows.append({
+            "lesson_id": str(lesson_id), "title": t.title if t else None,
+            "course_id": str(t.course_id) if t else None, "course_title": t.course_title if t else None,
+            "deleted": t is None, "compile_usd": _usd(p["compile"]), "runs": len(p["runs"]),
+            "last_compile_usd": _usd(newest[1]) if newest else None, "tutor_usd": _usd(p["tutor"]),
+            "total_usd": _usd(total), "open_reserves": p["open"], "chars": chars.get(lesson_id),
+            "usd_per_1k_chars": _per_1k(total, chars.get(lesson_id)),
+            "mlflow_url": MLFLOW_LESSON_URL.format(lesson_id),
+        })
+    rows.sort(key=lambda r: (-r["total_usd"], r["lesson_id"]))
+    kept = rows[:LESSONS_LIMIT]
+    courses: dict[str, dict[str, Any]] = {}
+    for r in kept:
+        if r["course_id"] is None:  # a deleted lesson joins no course total
+            continue
+        c = courses.setdefault(r["course_id"], {"title": r["course_title"], "compile": Decimal(0),
+                                                "tutor": Decimal(0), "chars": 0})
+        c["compile"] += Decimal(str(r["compile_usd"]))
+        c["tutor"] += Decimal(str(r["tutor_usd"]))
+        c["chars"] += r["chars"] or 0
+    totals = []
+    for course_id, c in sorted(courses.items()):
+        whole = c["compile"] + c["tutor"]
+        totals.append({"course_id": course_id, "title": c["title"], "compile_usd": _usd(c["compile"]),
+                       "tutor_usd": _usd(c["tutor"]), "total_usd": _usd(whole), "chars": c["chars"] or None,
+                       "usd_per_1k_chars": _per_1k(whole, c["chars"])})
+    return {"truncated": len(rows) > LESSONS_LIMIT, "open_reserves": sum(r["open_reserves"] for r in kept),
+            "rows": kept, "courses": totals}
+
+
 async def summary(
     conn: AsyncConnection,
     owner: uuid.UUID,
@@ -318,4 +407,5 @@ async def summary(
         "tutor": await _tutor(conn, owner, since, catalog, gate),
         "failures": await _failures(conn, owner, since, catalog, read_limit, gate),
         "ingest": await _ingest(conn, owner, since, read_limit, gate),
+        "lessons": await _lessons(conn, owner, since),
     }

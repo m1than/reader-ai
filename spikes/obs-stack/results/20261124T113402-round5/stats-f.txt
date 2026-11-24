@@ -1,0 +1,6 @@
+-- F-idle
+reader-spike-obs-jaeger-1 84.71MiB / 256MiB
+-- F-after-8000-full-spans
+reader-spike-obs-jaeger-1 109.6MiB / 256MiB
+-- F-after-24000-full-spans
+reader-spike-obs-jaeger-1 154.7MiB / 256MiB

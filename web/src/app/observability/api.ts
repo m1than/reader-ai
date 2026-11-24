@@ -47,7 +47,47 @@ const Ingest = v.object({
     }),
   ),
 });
-const Summary = v.object({ days: v.number(), compile_runs: v.array(Run), tutor: Tutor, failures: Failures, ingest: Ingest });
+// SRV-OBS FR-OBS-17: cost per lesson from the ledger (titles shown here only; MLflow never gets them).
+const LessonRow = v.object({
+  lesson_id: v.string(),
+  // null with `deleted` true: spend on a lesson that no longer exists (it stays, so totals equal the ledger)
+  title: v.nullable(v.string()),
+  course_id: v.nullable(v.string()),
+  course_title: v.nullable(v.string()),
+  deleted: v.boolean(),
+  compile_usd: v.number(),
+  runs: v.number(),
+  last_compile_usd: v.nullable(v.number()),
+  tutor_usd: v.number(),
+  total_usd: v.number(),
+  open_reserves: v.number(),
+  chars: v.nullable(v.number()),
+  usd_per_1k_chars: v.nullable(v.number()),
+  mlflow_url: v.pipe(v.string(), v.startsWith('https://localhost:8443/')),
+});
+const CourseTotal = v.object({
+  course_id: v.string(),
+  title: v.string(),
+  compile_usd: v.number(),
+  tutor_usd: v.number(),
+  total_usd: v.number(),
+  chars: v.nullable(v.number()),
+  usd_per_1k_chars: v.nullable(v.number()),
+});
+const Lessons = v.object({
+  truncated: v.boolean(),
+  open_reserves: v.number(),
+  rows: v.array(LessonRow),
+  courses: v.array(CourseTotal),
+});
+const Summary = v.object({
+  days: v.number(),
+  compile_runs: v.array(Run),
+  tutor: Tutor,
+  failures: Failures,
+  ingest: Ingest,
+  lessons: Lessons,
+});
 
 export type ObsSummary = v.InferOutput<typeof Summary>;
 
@@ -57,6 +97,18 @@ export const OBS_KEY = ['obs', 'summary', SUMMARY_DAYS] as const;
 /** The dashboard's deep link for one trace (measured in spikes/obs-stack, ADR-0032). */
 export const traceUrl = (traceId: string): string =>
   `https://localhost:8443/#/experiments/0/traces?selectedEvaluationId=tr-${traceId}`;
+/** The same trace in Jaeger's waterfall (SRV-OBS FR-OBS-19, ADR-0033; owner only, behind the same gate). */
+export const jaegerUrl = (traceId: string): string => `https://localhost:8444/trace/${traceId}`;
+/** FR-OBS-16's saved views: the traces tab keeps only `q`, `groupBy` and the time range in its URL (measured). */
+export const DASHBOARDS: ReadonlyArray<{ label: string; href: string }> = [
+  { label: 'Dead jobs', href: 'https://localhost:8443/#/experiments/0/traces?q=dead' },
+  { label: 'Tutor answers', href: 'https://localhost:8443/#/experiments/0/traces?q=job%20tutor.answer' },
+  { label: 'Sessions', href: 'https://localhost:8443/#/experiments/0/traces?groupBy=session' },
+  { label: 'Usage', href: 'https://localhost:8443/#/experiments/0/dashboard/usage' },
+  { label: 'Quality', href: 'https://localhost:8443/#/experiments/0/dashboard/quality' },
+  { label: 'Tool calls', href: 'https://localhost:8443/#/experiments/0/dashboard/tool-calls' },
+  { label: 'Jaeger search', href: 'https://localhost:8444/search' },
+];
 
 export const createObsApi = (deps: ApiDeps) => ({
   summary: async (): Promise<ObsSummary> => {

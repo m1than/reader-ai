@@ -174,7 +174,16 @@ requirements:
       here per question) ends `refused` / `budget_exhausted`; `provider_missing` ends `failed` with its own message;
       any other SRV-AGENT code (`tools_mismatch`, `sdk_error`, `unknown_model`, …) ends `failed` / `tutor_failed`. Every row
       transition, in the api and the worker, is `UPDATE … WHERE state = 'queued'`; the handler first checks that the
-      row is still `queued` and exits without a model call when it is not. [db]
+      row is still `queued` and exits without a model call when it is not. [db] Amended by SRV-OBS V.obs-analytics
+      (FR-OBS-12 d-f, -13, -14, -18; ADR-0035 accepted 2026-11-24; tracing only, no outcome changes): after loading the
+      row the handler sets the job root's `reader.lesson.id`, `reader.course.id` (the question's lesson and its
+      course, `store.load` reads `c.id`) and `reader.prompt.version` (SRV-OBS's registered version of the tutor's
+      template, None when unknown) and calls `session_marker("reader.lesson.id", …)` before any reservation; it sets
+      `reader.tutor.state` to the row's final state on every exit that writes one; retrieval runs inside a
+      `tutor.retrieve` child (hits = the span ids sent, candidates = the search results) and the answer check inside
+      a `tutor.citations` child (total = blocks, valid = supported blocks); then `obs.feedback` records
+      `tutor.citations_valid` (blocks > 0 and every block supported, {total, valid}) and, when there are blocks,
+      `tutor.citation_share` (valid ÷ total). The tutor's StageCall carries the course id. None of these can raise.
   - id: FR-TUTOR-4
     text: >-
       Expiry. Before reserving anything, the handler marks a row older than `question_ttl_s` `expired` and returns.
