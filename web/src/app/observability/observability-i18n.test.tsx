@@ -14,6 +14,18 @@ afterEach(() => {
 });
 
 const RUN = '10000000-0000-4000-8000-000000000001';
+const CYRILLIC = /\p{Script=Cyrillic}/u;
+// FR-UI-30's declared exceptions, each a whole-string pattern: what stays as received or is not language at all.
+const EXCEPTIONS: readonly RegExp[] = [
+  /^[\p{P}\p{S}\s]+$/u, // punctuation and symbols alone (·, —, /, %, $)
+  /^[-+−]?[$]?\d[\d\s.,:/%×x−-]*\s*(?:USD|ms|s|%|KB|MB|GB)?$/u, // numbers, money, ratios, times, sizes
+  /^\d{4}-\d{2}-\d{2}(?:[T ][\d:.]+(?:Z|[+-]\d{2}:\d{2})?)?$/, // ISO dates and times
+  /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/, // ids (uuid)
+  /^[0-9a-f]{8,64}$/, // hashes, span and trace ids
+  /^https?:\/\/\S+$/, // URLs
+  /^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)+$/, // codes, kinds, stage and span names (fact_check, daily_spend_high, compile.run)
+  /^claude-[a-z0-9.-]+$/, // model ids
+];
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const summary = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
   days: 7,
@@ -88,5 +100,37 @@ describe('the observability page in Russian (FR-UI-30)', () => {
     await mountRu(body);
     const runs = await waitFor(() => screen.getByRole('region', { name: 'Запуски сборки' }));
     expect(within(runs).getByText('За последние 7 дней запусков сборки не было.')).toBeTruthy();
+  });
+
+  it.each([
+    ['a full summary', summary()],
+    ['empty sections', summary({ compile_runs: [], alerts: [], lessons: { ...(summary().lessons as object), rows: [], courses: [], open_reserves: 0 } })],
+  ])('leaves no untranslated text node with %s: each has Cyrillic or is a declared exception', async (_, body) => {
+    // Values shown as received (titles, error codes, kinds): every string leaf of the response body.
+    const received = new Set<string>();
+    const collect = (value: unknown): void => {
+      if (typeof value === 'string') received.add(value.trim());
+      else if (Array.isArray(value)) value.forEach(collect);
+      else if (value && typeof value === 'object') Object.values(value).forEach(collect);
+    };
+    collect(body);
+    await mountRu(body);
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Запуски сборки' })).toBeTruthy());
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const texts: string[] = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = (node.textContent ?? '').trim();
+      if (text) texts.push(text);
+    }
+    // Interface strings a user reads but that are not text nodes.
+    for (const el of document.body.querySelectorAll('[aria-label], [title], [placeholder], [alt]'))
+      for (const name of ['aria-label', 'title', 'placeholder', 'alt']) {
+        const value = el.getAttribute(name)?.trim();
+        if (value) texts.push(value);
+      }
+    expect(texts.length).toBeGreaterThan(30);
+    const declared = (text: string) => received.has(text) || EXCEPTIONS.some((pattern) => pattern.test(text));
+    const leaks = texts.filter((text) => !CYRILLIC.test(text) && !declared(text));
+    expect(leaks).toEqual([]);
   });
 });
