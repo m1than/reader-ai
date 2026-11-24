@@ -1,7 +1,7 @@
 ---
 id: ADR-0038
 title: MLflow Runs, evaluation datasets, agent versions, owner labels and MLflow operations (amends ADR-0035 and ADR-0032)
-status: proposed
+status: accepted
 date: 2026-11-24
 verified_by: "spikes/obs-stack rounds 6-11: results/20261124T142803-round6-phase2 (tabs before/after, quotes.json), results/20261124T141648-round6-phase2 (pool exhaustion under evaluate), results/20261124T143808-round7-runs (Runs in another experiment), results/20261124T150936-round8-rest (every write as raw REST: round8.json `raw`, r8/*.png, quotes.json), results/20261124T151501-round9-ops and results/20261124T151935-round9-ops (SQLite journal modes under 8 writers, disabled features, health probes, online backup and restore, the stop-during-migration failure, load, upgrade), results/20261124T153052-round10-setup (setup drift, finalize, retention deletes, Host and CORS checks), results/20261124T154753-round11-egress (no egress from mlflow's networks, with a positive control); if accepted, SRV-OBS phase 2's [unit], [db], [image] and [live] tests and INV-OBS-2's canary over every new request body"
 revisit_when: "MLflow ingests run links, logged-model links or trace metadata through OTLP; or a bench needs a model call to score (an LLM judge); or a second user needs the dashboards; or the AI gateway is unblocked; or the measured SQLite limits of FR-OBS-28 are reached"
