@@ -764,3 +764,67 @@ operations:
       cost: { na: no provider call }
       observability: { items: [FR-EVENTS-30] }
       recovery: { items: [FR-EVENTS-31] }
+
+  - id: manage.course
+    title: Manage courses (rename, describe, order, archive, delete and restore; re-plan from a course)
+    surface: [web, api]
+    specs: [SRV-LESSON, SRV-PLAN, SRV-PIPELINE, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "GET /api/courses"
+      - "POST /api/courses/order"
+      - "POST /api/courses/{course_id}"
+      - "POST /api/courses/{course_id}/archive"
+      - "POST /api/courses/{course_id}/unarchive"
+      - "GET /api/courses/{course_id}/impact"
+      - "DELETE /api/courses/{course_id}"
+      - "POST /api/courses/{course_id}/restore"
+      - "GET /api/courses/{course_id}/lessons"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-LESSON-20, FR-LESSON-21, FR-LESSON-22, FR-LESSON-23, FR-LESSON-24, FR-LESSON-25, FR-PLAN-20,
+          FR-PLAN-21, FR-PIPELINE-22]
+        missing: "no live run yet: the `manage` live step works on a scratch course of its own"
+      security: { items: [INV-LESSON-20, INV-LESSON-23] }
+      privacy: { items: [INV-LESSON-20] }
+      a11y: { missing: "no axe.json pages evidence for the course management pages (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-LESSON-25] }
+      recovery: { items: [INV-LESSON-21, INV-LESSON-22] }
+
+  - id: manage.lesson
+    title: Manage lessons (rename, order, skip, delete, done, revert, notes, bookmarks; cancel a compile and its history)
+    surface: [web, api]
+    specs: [SRV-LESSON, SRV-PIPELINE, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "POST /api/courses/{course_id}/lessons/order"
+      - "POST /api/lessons/{lesson_id}"
+      - "POST /api/lessons/{lesson_id}/skip"
+      - "POST /api/lessons/{lesson_id}/unskip"
+      - "DELETE /api/lessons/{lesson_id}"
+      - "POST /api/lessons/{lesson_id}/restore"
+      - "POST /api/lessons/{lesson_id}/progress"
+      - "POST /api/lessons/{lesson_id}/revert"
+      - "GET /api/lessons/{lesson_id}/notes"
+      - "POST /api/lessons/{lesson_id}/notes"
+      - "POST /api/lessons/{lesson_id}/notes/{note_id}"
+      - "DELETE /api/lessons/{lesson_id}/notes/{note_id}"
+      - "POST /api/lessons/{lesson_id}/bookmarks/{cell_id}"
+      - "DELETE /api/lessons/{lesson_id}/bookmarks/{cell_id}"
+      - "GET /api/bookmarks"
+      - "POST /api/compiles/{run_id}/cancel"
+      - "GET /api/lessons/{lesson_id}/compiles"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-LESSON-26, FR-LESSON-27, FR-LESSON-28, FR-LESSON-29, FR-LESSON-30, FR-LESSON-31, FR-PIPELINE-20,
+          FR-PIPELINE-21, FR-PIPELINE-22]
+        missing: "no live run yet: the `manage` live step works on a scratch course of its own"
+      security: { items: [INV-LESSON-20, INV-LESSON-23] }
+      privacy: { items: [INV-LESSON-20] }
+      a11y: { missing: "no axe.json pages evidence for the lesson management pages (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-PIPELINE-20] }
+      recovery: { items: [INV-LESSON-21, FR-PIPELINE-20] }

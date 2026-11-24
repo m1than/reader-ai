@@ -56,7 +56,9 @@ async def _other_owner_run(env: Any) -> None:
     async with env.engine.begin() as conn:
         course = (
             await conn.execute(
-                text("INSERT INTO courses (owner_id, title) VALUES (:o, 'Other course') RETURNING id"), {"o": anna}
+                # position 1: an active course has a position (SRV-LESSON FR-LESSON-20's CHECK)
+                text("INSERT INTO courses (owner_id, title, position) VALUES (:o, 'Other course', 1) RETURNING id"),
+                {"o": anna},
             )
         ).scalar_one()
         lesson = (

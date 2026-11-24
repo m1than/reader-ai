@@ -185,6 +185,15 @@ async def _record_stage_error(
         log.warning("compile_stage_error_not_recorded run=%s code=%s", run.id, code)
 
 
+async def _cancelled(conn: AsyncConnection, run_id: uuid.UUID) -> bool:
+    """FR-PIPELINE-20 (2): re-read under the run row's lock, so a cancel either committed before (seen here)
+    or waits until this step has committed its revision and its enqueue."""
+    row = await conn.execute(
+        text("SELECT cancelled_at FROM compile_runs WHERE id = :r FOR UPDATE"), {"r": run_id}
+    )
+    return row.scalar() is not None
+
+
 async def _handle(conn: AsyncConnection, run: RunRow) -> str:
     handle = (
         await conn.execute(text("SELECT handle FROM users WHERE id = :u"), {"u": run.owner_id})
@@ -218,6 +227,9 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
     run = await load_run(conn, run_id)
     if run is None:
         raise InputNotReady()
+    if run.cancelled_at is not None:  # FR-PIPELINE-20 (1): before any reservation, model call or lab run
+        log.info("compile_step_cancelled run=%s step=%s", run.id, args.step)
+        return
     steps = await load_steps(conn, run_id)
     lesson = await load_lesson(conn, rt, run.owner_id, run.lesson_id)
     jobs = rt.jobs()
@@ -277,6 +289,9 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         notebook = stamp_labs(before, lab_report)
         report = {"lab_report": lab_report.as_json()}
     assert notebook is not None  # noqa: S101
+    if await _cancelled(conn, run.id):  # FR-PIPELINE-20 (2): holds the run row until this step commits
+        log.info("compile_step_cancelled run=%s step=%s", run.id, args.step)
+        return
     duration = round(time.monotonic() - started, 3)
     provenance: dict[str, Any] = {
         "input_sha256": args.input_sha256,
@@ -349,16 +364,24 @@ async def _refused(
     steps: Sequence[StepRow],
     code: str,
 ) -> None:
-    await conn.execute(
-        text("UPDATE compile_runs SET budget_refused = coalesce(budget_refused, :c) WHERE id = :r"),
+    updated = await conn.execute(
+        text(
+            "UPDATE compile_runs SET budget_refused = coalesce(budget_refused, :c) WHERE id = :r"
+            " AND cancelled_at IS NULL RETURNING id"  # FR-PIPELINE-20: a cancelled run is left as it is
+        ),
         {"c": code, "r": run.id},
     )
+    if updated.first() is None:
+        return
     refused = RunRow(
         run.id, run.owner_id, run.lesson_id, run.cap_usd, run.task_budgets, code, None, None, None
     )
     if not any(s.stage in ("draft", "revise") for s in steps):  # no notebook: nothing more to do
         await conn.execute(
-            text("UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb) WHERE id = :r"),
+            text(
+                "UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb) WHERE id = :r"
+                " AND cancelled_at IS NULL"
+            ),
             {"r": run.id, "g": json.dumps({"publishable": False, "failing": [], "blocking_open": 0})},
         )
         return
@@ -412,7 +435,7 @@ async def _finish(
     await conn.execute(
         text(
             "UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb), final_sha256 = :f,"
-            " last_model_sha256 = :m WHERE id = :r"
+            " last_model_sha256 = :m WHERE id = :r AND cancelled_at IS NULL"  # FR-PIPELINE-20
         ),
         {"g": json.dumps(report), "f": final_sha, "m": m, "r": run.id},
     )
