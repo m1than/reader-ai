@@ -1,0 +1,598 @@
+{
+ "raw": [
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/experiments/get-by-name?experiment_name=bench",
+   "status": 404,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/experiments/create",
+   "status": 200,
+   "body": {
+    "name": "bench",
+    "tags": [
+     {
+      "key": "reader.kind",
+      "value": "bench"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.run_id` = '10000000-0000-4000-8000-0000000000aa'",
+    "max_results": 2
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/create",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "run_name": "compile 10000000",
+    "start_time": 1795518582011,
+    "tags": [
+     {
+      "key": "reader.kind",
+      "value": "compile"
+     },
+     {
+      "key": "reader.run_id",
+      "value": "10000000-0000-4000-8000-0000000000aa"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 200,
+   "body": {
+    "run_id": "ca505e2256b8419881dd24439cfd30cc",
+    "params": [
+     {
+      "key": "version_key",
+      "value": "abababababab"
+     },
+     {
+      "key": "snapshot_at",
+      "value": "2026-11-24T12:00:00Z"
+     },
+     {
+      "key": "model.draft",
+      "value": "claude-sonnet-5-5"
+     }
+    ],
+    "metrics": [
+     {
+      "key": "cost_usd.total",
+      "value": 1.84,
+      "timestamp": 1795518582011,
+      "step": 0
+     },
+     {
+      "key": "cost_usd.draft",
+      "value": 0.62,
+      "timestamp": 1795518582011,
+      "step": 0
+     },
+     {
+      "key": "claims.supported",
+      "value": 13,
+      "timestamp": 1795518582011,
+      "step": 0
+     }
+    ],
+    "tags": [
+     {
+      "key": "reader.lesson.id",
+      "value": "20000000-0000-4000-8000-0000000000bb"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/update",
+   "status": 200,
+   "body": {
+    "run_id": "ca505e2256b8419881dd24439cfd30cc",
+    "status": "FINISHED",
+    "end_time": 1795518742011
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/set-tag",
+   "status": 200,
+   "body": {
+    "run_id": "ca505e2256b8419881dd24439cfd30cc",
+    "key": "reader.complete",
+    "value": "true"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 200,
+   "body": {
+    "run_id": "ca505e2256b8419881dd24439cfd30cc",
+    "metrics": [
+     {
+      "key": "cost_usd.total",
+      "value": 2.1,
+      "timestamp": 1795518582012,
+      "step": 1
+     }
+    ],
+    "params": [],
+    "tags": [
+     {
+      "key": "reader.ends",
+      "value": "2"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.run_id` = '10000000-0000-4000-8000-0000000000aa'",
+    "max_results": 2
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/runs/get?run_id=ca505e2256b8419881dd24439cfd30cc",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 400,
+   "body": {
+    "run_id": "ca505e2256b8419881dd24439cfd30cc",
+    "params": [
+     {
+      "key": "snapshot_at",
+      "value": "2026-11-24T13:00:00Z"
+     }
+    ],
+    "metrics": [],
+    "tags": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/traces/link-to-run",
+   "status": 400,
+   "body": {
+    "trace_ids": "<120 ids>",
+    "run_id": "ca505e2256b8419881dd24439cfd30cc"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/traces/link-to-run",
+   "status": 200,
+   "body": {
+    "trace_ids": "<100 ids>",
+    "run_id": "ca505e2256b8419881dd24439cfd30cc"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/traces/link-to-run",
+   "status": 200,
+   "body": {
+    "trace_ids": "<20 ids>",
+    "run_id": "ca505e2256b8419881dd24439cfd30cc"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/ajax-api/3.0/mlflow/traces/search",
+   "status": 200,
+   "body": {
+    "locations": [
+     {
+      "type": "MLFLOW_EXPERIMENT",
+      "mlflow_experiment": {
+       "experiment_id": "0"
+      }
+     }
+    ],
+    "filter": "metadata.`mlflow.sourceRun` = 'ca505e2256b8419881dd24439cfd30cc'",
+    "max_results": 500
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/traces/delete-traces",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "request_ids": [
+     "tr-aa1a369011c7e897b16596f219f35362",
+     "tr-5bbfc35a54823c3032819f3fbaeaac10",
+     "tr-09effdaafa014d86b722ebb1f0b2cd95",
+     "tr-17d93c6aa03308bc04e305eb7c1d4beb",
+     "tr-0cb626b679df27d531f27f73fb86f947"
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/ajax-api/3.0/mlflow/traces/search",
+   "status": 200,
+   "body": {
+    "locations": [
+     {
+      "type": "MLFLOW_EXPERIMENT",
+      "mlflow_experiment": {
+       "experiment_id": "0"
+      }
+     }
+    ],
+    "filter": "metadata.`mlflow.sourceRun` = 'ca505e2256b8419881dd24439cfd30cc'",
+    "max_results": 500
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/datasets/create",
+   "status": 200,
+   "body": {
+    "name": "tutor-bench-v2",
+    "experiment_ids": [
+     "1"
+    ],
+    "tags": "{\"reader.source_sha256\": \"abababababababababababababababababababababababababababababababab\", \"reader.bench\": \"tutor\"}"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/datasets/d-2daa26b9673d4a3fb8af201c8aba83ca/records",
+   "status": 200,
+   "body": {
+    "records": "[{\"inputs\": {\"question_id\": \"v01\", \"question\": \"\\u0427\\u0435\\u043c \\u0441\\u0435\\u0442\\u0438, \\u043a\\u0443\\u0434\\u0430 \\u043c\\u043e\\u0436\\u0435\\u0442 \\u0432\\u043e\\u0439\\u0442\\u0438 \\u043b\\u044e\\u0431\\u043e\\u0439 \\u0436\\u0435\\u043b\\u0430\\u044e\\u0449\\u0438\\u0439, \\u043e\\u0442\\u043b\\u0438\\u0447\\u0430\\u044e\\u0442\\u0441\\u044f \\u043e\\u0442 \\u0441\\u0435\\u0442\\u0435\\u0439 \\u0441 \\u0437\\u0430\\u0440\\u0430\\u043d\\u0435\\u0435 \\u043e\\u0442\\u043e\\u0431\\u0440\\u0430\\u043d\\u043d\\u044b\\u043c\\u0438 \\u0443\\u0447\\u0430\\u0441\\u0442\\u043d\\u0438\\u043a\\u0430\\u043c\\u0438, \\u0438 \\u043a\\u0430\\u043a\\u0438\\u0435 \\u0441\\u043c\\u0435\\u0448\\u0430\\u043d\\u043d\\u044b\\u0435 \\u0432\\u0430\\u0440\\u0438\\u0430\\u043d\\u0442\\u044b \\u0432\\u0441\\u0442\\u0440\\u0435\\u0447\\u0430\\u044e\\u0442\\u0441\\u044f?\", \"chapter\": 1}, \"expectations\": {\"gold_pages\": [53, 54, 55, 56]}}, {\"inputs\": {\"question_id\": \"v02\", \"question\": \"\\u041a\\u0442\\u043e \\u0432 \\u043d\\u0430\\u0447\\u0430\\u043b\\u0435 \\u0434\\u0435\\u0432\\u044f\\u043d\\u043e\\u0441\\u0442\\u044b\\u0445 \\u043f\\u0440\\u0438\\u0434\\u0443\\u043c\\u0430\\u043b, \\u043a\\u0430\\u043a \\u0437\\u0430\\u0449\\u0438\\u0442\\u0438\\u0442\\u044c \\u043e\\u0442\\u043c\\u0435\\u0442\\u043a\\u0438 \\u0432\\u0440\\u0435\\u043c\\u0435\\u043d\\u0438 \\u043d\\u0430 \\u044d\\u043b\\u0435\\u043a\\u0442\\u0440\\u043e\\u043d\\u043d\\u044b\\u0445 \\u0434\\u043e\\u043a\\u0443\\u043c\\u0435\\u043d\\u0442\\u0430\\u0445 \\u043e\\u0442 \\u043f\\u043e\\u0434\\u0434\\u0435\\u043b\\u043a\\u0438?\", \"chapter\": 1}, \"expectations\": {\"gold_pages\": [36]}}]"
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/datasets/d-2daa26b9673d4a3fb8af201c8aba83ca/records",
+   "status": 200,
+   "body": {
+    "records": "[{\"inputs\": {\"question_id\": \"v01\", \"question\": \"\\u0427\\u0435\\u043c \\u0441\\u0435\\u0442\\u0438, \\u043a\\u0443\\u0434\\u0430 \\u043c\\u043e\\u0436\\u0435\\u0442 \\u0432\\u043e\\u0439\\u0442\\u0438 \\u043b\\u044e\\u0431\\u043e\\u0439 \\u0436\\u0435\\u043b\\u0430\\u044e\\u0449\\u0438\\u0439, \\u043e\\u0442\\u043b\\u0438\\u0447\\u0430\\u044e\\u0442\\u0441\\u044f \\u043e\\u0442 \\u0441\\u0435\\u0442\\u0435\\u0439 \\u0441 \\u0437\\u0430\\u0440\\u0430\\u043d\\u0435\\u0435 \\u043e\\u0442\\u043e\\u0431\\u0440\\u0430\\u043d\\u043d\\u044b\\u043c\\u0438 \\u0443\\u0447\\u0430\\u0441\\u0442\\u043d\\u0438\\u043a\\u0430\\u043c\\u0438, \\u0438 \\u043a\\u0430\\u043a\\u0438\\u0435 \\u0441\\u043c\\u0435\\u0448\\u0430\\u043d\\u043d\\u044b\\u0435 \\u0432\\u0430\\u0440\\u0438\\u0430\\u043d\\u0442\\u044b \\u0432\\u0441\\u0442\\u0440\\u0435\\u0447\\u0430\\u044e\\u0442\\u0441\\u044f?\", \"chapter\": 1}, \"expectations\": {\"gold_pages\": [53, 54, 55, 56]}}, {\"inputs\": {\"question_id\": \"v02\", \"question\": \"\\u041a\\u0442\\u043e \\u0432 \\u043d\\u0430\\u0447\\u0430\\u043b\\u0435 \\u0434\\u0435\\u0432\\u044f\\u043d\\u043e\\u0441\\u0442\\u044b\\u0445 \\u043f\\u0440\\u0438\\u0434\\u0443\\u043c\\u0430\\u043b, \\u043a\\u0430\\u043a \\u0437\\u0430\\u0449\\u0438\\u0442\\u0438\\u0442\\u044c \\u043e\\u0442\\u043c\\u0435\\u0442\\u043a\\u0438 \\u0432\\u0440\\u0435\\u043c\\u0435\\u043d\\u0438 \\u043d\\u0430 \\u044d\\u043b\\u0435\\u043a\\u0442\\u0440\\u043e\\u043d\\u043d\\u044b\\u0445 \\u0434\\u043e\\u043a\\u0443\\u043c\\u0435\\u043d\\u0442\\u0430\\u0445 \\u043e\\u0442 \\u043f\\u043e\\u0434\\u0434\\u0435\\u043b\\u043a\\u0438?\", \"chapter\": 1}, \"expectations\": {\"gold_pages\": [36]}}]"
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/3.0/mlflow/datasets/d-2daa26b9673d4a3fb8af201c8aba83ca",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/create",
+   "status": 200,
+   "body": {
+    "experiment_id": "1",
+    "run_name": "tutor bench 2026-11-23",
+    "start_time": 1795518582011,
+    "tags": [
+     {
+      "key": "reader.bench",
+      "value": "tutor"
+     },
+     {
+      "key": "reader.bench_upload",
+      "value": "uuuuuuuuuuuuuuuu"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 200,
+   "body": {
+    "run_id": "ebb8392fad5a48aca1459153af22a477",
+    "params": [
+     {
+      "key": "commit",
+      "value": "66fba58"
+     },
+     {
+      "key": "set_sha256",
+      "value": "abababababababababababababababababababababababababababababababab"
+     }
+    ],
+    "metrics": [
+     {
+      "key": "grounded_share",
+      "value": 0.625,
+      "timestamp": 1795518582011,
+      "step": 0
+     },
+     {
+      "key": "gold_cited_share",
+      "value": 0.575,
+      "timestamp": 1795518582011,
+      "step": 0
+     }
+    ],
+    "tags": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/3.0/mlflow/datasets/d-2daa26b9673d4a3fb8af201c8aba83ca",
+   "status": 200,
+   "body": null,
+   "client": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-inputs",
+   "status": 200,
+   "body": {
+    "run_id": "ebb8392fad5a48aca1459153af22a477",
+    "datasets": [
+     {
+      "tags": [
+       {
+        "key": "mlflow.data.context",
+        "value": "evaluation"
+       }
+      ],
+      "dataset": {
+       "name": "tutor-bench-v2",
+       "digest": "76dc053e",
+       "source_type": "mlflow_evaluation_dataset",
+       "source": "{\"dataset_id\": \"d-2daa26b9673d4a3fb8af201c8aba83ca\"}",
+       "schema": "{\"inputs\": {\"question_id\": \"string\", \"question\": \"string\", \"chapter\": \"integer\"}, \"outputs\": {}, \"expectations\": {\"gold_pages\": \"array\"}, \"version\": \"1.0\"}",
+       "profile": "{\"num_records\": 2}"
+      }
+     }
+    ]
+   },
+   "client": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/runs/get",
+   "status": 200,
+   "body": null,
+   "client": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/update",
+   "status": 200,
+   "body": {
+    "run_uuid": "ebb8392fad5a48aca1459153af22a477",
+    "status": "FINISHED",
+    "end_time": 1795518591220,
+    "run_id": "ebb8392fad5a48aca1459153af22a477"
+   },
+   "client": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "name": "reader-agent",
+    "params": [
+     {
+      "key": "prompt_set_sha256",
+      "value": "abababababababababababababababababababababababababababababababab"
+     },
+     {
+      "key": "pipeline_config_sha256",
+      "value": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+     },
+     {
+      "key": "stage_models",
+      "value": "fact_check=claude-sonnet-5-5"
+     }
+    ],
+    "tags": [
+     {
+      "key": "reader.version_key",
+      "value": "abababababab"
+     }
+    ]
+   },
+   "client": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.version_key` = 'abababababab'"
+   },
+   "client": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/traces/tr-95c4388b0efbe76382a28e19d3359eab/assessments",
+   "status": 200,
+   "body": {
+    "assessment": {
+     "assessment_name": "owner.lesson_ok",
+     "trace_id": "tr-95c4388b0efbe76382a28e19d3359eab",
+     "source": {
+      "source_type": "HUMAN",
+      "source_id": "owner"
+     },
+     "create_time": "2026-11-24T11:09:51.242Z",
+     "last_update_time": "2026-11-24T11:09:51.242Z",
+     "feedback": {
+      "value": true
+     },
+     "metadata": {
+      "lesson_id": "20000000-0000-4000-8000-0000000000bb"
+     },
+     "valid": true
+    }
+   },
+   "client": true
+  },
+  {
+   "method": "GET",
+   "path": "/api/3.0/mlflow/traces/tr-95c4388b0efbe76382a28e19d3359eab/assessments/a-7f20afea9ee24dbba6c8afc5bfb03bee",
+   "status": 200,
+   "body": null,
+   "client": true
+  },
+  {
+   "method": "POST",
+   "path": "/api/3.0/mlflow/traces/tr-95c4388b0efbe76382a28e19d3359eab/assessments",
+   "status": 200,
+   "body": {
+    "assessment": {
+     "assessment_name": "owner.lesson_ok",
+     "trace_id": "tr-95c4388b0efbe76382a28e19d3359eab",
+     "source": {
+      "source_type": "HUMAN",
+      "source_id": "owner"
+     },
+     "create_time": "2026-11-24T11:09:51.252Z",
+     "last_update_time": "2026-11-24T11:09:51.252Z",
+     "feedback": {
+      "value": false
+     },
+     "metadata": {
+      "reason": "wrong_fact",
+      "lesson_id": "20000000-0000-4000-8000-0000000000bb"
+     },
+     "overrides": "a-7f20afea9ee24dbba6c8afc5bfb03bee",
+     "valid": true
+    }
+   },
+   "client": true
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/3.0/mlflow/traces/tr-95c4388b0efbe76382a28e19d3359eab/assessments/a-73a94c7014554dbf9d8618562b4d40cc",
+   "status": 200,
+   "body": {
+    "assessment": {
+     "assessment_id": "a-73a94c7014554dbf9d8618562b4d40cc",
+     "assessment_name": "owner.lesson_ok",
+     "trace_id": "tr-95c4388b0efbe76382a28e19d3359eab",
+     "feedback": {
+      "value": true
+     }
+    },
+    "update_mask": "assessmentName,feedback"
+   },
+   "client": true
+  },
+  {
+   "method": "GET",
+   "path": "/ajax-api/3.0/mlflow/traces/get?trace_id=tr-95c4388b0efbe76382a28e19d3359eab",
+   "status": 200,
+   "body": null
+  }
+ ],
+ "bench_missing_status": 404,
+ "search_before": 0,
+ "search_after": 1,
+ "run_after": {
+  "status": "FINISHED",
+  "metrics": {
+   "cost_usd.total": 2.1,
+   "cost_usd.draft": 0.62,
+   "claims.supported": 13.0
+  },
+  "params": {
+   "version_key": "abababababab",
+   "snapshot_at": "2026-11-24T12:00:00Z",
+   "model.draft": "claude-sonnet-5-5"
+  },
+  "tags": [
+   "mlflow.runName",
+   "reader.complete",
+   "reader.ends",
+   "reader.kind",
+   "reader.lesson.id",
+   "reader.run_id"
+  ]
+ },
+ "param_rewrite_status": 400,
+ "param_rewrite_error": "{\"error_code\": \"INVALID_PARAMETER_VALUE\", \"message\": \"Changing param values is not allowed. Params were already logged='[{'key': 'snapshot_at', 'old_value': '20",
+ "link_120": {
+  "status": 400,
+  "error": "{\"error_code\": \"INVALID_PARAMETER_VALUE\", \"message\": \"Cannot link more than 100 traces to a run in a single request. Provided 120 traces.\", \"sqlstate\": \"KAM00\", \"error_class\": \"INVALID_PARAMETER_VALUE"
+ },
+ "linked": 120,
+ "deleted": {
+  "status": 200,
+  "count": 5
+ },
+ "linked_after_delete": 115,
+ "records": {
+  "inserted_count": 2,
+  "updated_count": 0
+ },
+ "records_again": {
+  "inserted_count": 0,
+  "updated_count": 2
+ },
+ "dataset": {
+  "name": "tutor-bench-v2",
+  "digest": "76dc053e",
+  "experiment_ids": null,
+  "tags": "{\"reader.source_sha256\": \"abababababababababababababababababababababababababababababababab\", \"reader.bench\": \"tutor\"}"
+ },
+ "log_inputs": "ok",
+ "logged_model_search": 1,
+ "override": {
+  "first": "a-7f20afea9ee24dbba6c8afc5bfb03bee",
+  "second": "a-73a94c7014554dbf9d8618562b4d40cc"
+ },
+ "update": "a-73a94c7014554dbf9d8618562b4d40cc",
+ "assessments_on_trace": [
+  {
+   "assessment_id": "a-7f20afea9ee24dbba6c8afc5bfb03bee",
+   "assessment_name": "owner.lesson_ok",
+   "valid": false,
+   "overrides": null,
+   "feedback": {
+    "value": true
+   }
+  },
+  {
+   "assessment_id": "a-73a94c7014554dbf9d8618562b4d40cc",
+   "assessment_name": "owner.lesson_ok",
+   "valid": true,
+   "overrides": "a-7f20afea9ee24dbba6c8afc5bfb03bee",
+   "feedback": {
+    "value": true
+   }
+  }
+ ]
+}

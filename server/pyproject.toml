@@ -21,6 +21,8 @@ dependencies = [
   "websockets==17.4",          # SRV-KERNEL: Uvicorn's WebSocket support for the kernel relay (FR-AUTH-10 note)
   "httpx>=0.28.1,<0.29",       # SRV-AGENT: agent-proxy's upstream client and the worker's agent-proxy client;
                                # SRV-SEARCH: the api's and worker's client of the embed service (FR-SEARCH-5, -7)
+  "opentelemetry-sdk==1.45.2",                    # SRV-OBS FR-OBS-1: tracer provider, batch processor, links
+  "opentelemetry-exporter-otlp-proto-http==1.45.2",  # SRV-OBS FR-OBS-1: OTLP/HTTP protobuf to Rotel
 ]
 
 [project.optional-dependencies]
@@ -68,7 +70,8 @@ line-length = 110
 target-version = "py314"
 src = ["src", "tests"]
 # Packaged lesson fixtures are generated data (spec/fixtures/SRV-LESSON/gen_f01.py), not source.
-extend-exclude = ["src/reader/lessons/fixtures"]
+# tests/obs/cli_canary is a container harness (SRV-OBS INV-OBS-2) run inside its own image, not test code of this package.
+extend-exclude = ["src/reader/lessons/fixtures", "tests/obs/cli_canary"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "ASYNC", "S", "PT", "TID"]
@@ -89,7 +92,17 @@ known-first-party = ["reader"]
 # subprocesses; S108 fixed /tmp paths are option values, never opened; E501 the formatter keeps long docstrings,
 # SQL and @trace lines whole.
 "tests/agent/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+# SRV-OBS: PT018 compound expectations on one span or response; S603/S607 the [image] tests run docker with fixed
+# argv; S104/S108 0.0.0.0 and /tmp are option values passed to containers, never bound or opened here; RUF012 a
+# test receiver's shared capture list; PT011 retention asserts a pydantic validation failure; E501 the formatter keeps
+# long docstrings, SQL and @trace lines whole.
+"tests/obs/**" = ["S101", "PT018", "S603", "S607", "S104", "S108", "RUF012", "PT011", "E501"]
+"tests/jobs/test_key_reads_db.py" = ["S101", "PT018", "E501"]
 "tests/pipeline/**" = ["S101", "PT018", "S603", "S607", "S108", "E501"]
+# SRV-LESSON management tests (V/manage): PT018 compound status-and-body expectations on one response; E501 the
+# long URL, SQL and @trace lines stay whole; S608 the row digest names tables read from pg_tables.
+"tests/lessons/test_manage_*.py" = ["S101", "PT018", "E501"]
+"tests/lessons/manage_support.py" = ["S101", "E501", "S608"]
 # SRV-INGEST: PT018 compound expectations on one result; S603 the [host] tests run the converter and probes as
 # subprocesses with fixed argv; S108 /tmp appears only as a literal path under test; RUF001 the fixtures are
 # Russian text on purpose (Cyrillic letters that look Latin).

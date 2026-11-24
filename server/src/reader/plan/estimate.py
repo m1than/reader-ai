@@ -28,6 +28,21 @@ def _usd(value: Decimal) -> str:
     return str(value.quantize(CENT, ROUND_HALF_UP))
 
 
+def lesson_estimate(chars: int) -> dict[str, Any]:
+    """FR-PLAN-13: one lesson's estimate from its span characters (FR-PLAN-8's per-lesson low and high)."""
+    kchars = Decimal(chars) / 1000
+    low, high = ESTIMATE_BAND
+    return {
+        "kchars": str(kchars.quantize(MILLI, ROUND_HALF_UP)),
+        "low_usd": _usd(_low(chars)),
+        "high_usd": _usd(_high(chars)),
+        "run_cap_usd": _usd(RUN_CAP_USD),
+        "basis": "L02",
+        "basis_kchars": str(L02_KCHARS),
+        "extrapolated": not low * L02_KCHARS <= kchars <= high * L02_KCHARS,
+    }
+
+
 def estimate(free_chars: Sequence[int], first_chars: int | None) -> dict[str, Any]:
     mean = (
         (Decimal(sum(free_chars)) / len(free_chars) / 1000).quantize(MILLI, ROUND_HALF_UP)

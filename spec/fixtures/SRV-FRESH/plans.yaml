@@ -1,0 +1,308 @@
+# VEC-FRESH-7 — query plans (FR-FRESH-5) for synthetic bibliographies, topics and claims; worked by hand from the
+# templates: (1) original_edition = original title, first original author's surname, "new edition after", original
+# edition, original year (only with an original title); (2) edition = title, first author's surname, publisher,
+# "new edition", year; (3–5) claim = subject + the kind's words, for the three claims of highest confidence then
+# lowest page; missing claims → topic_docs = a level-1 topic + "official documentation", in topic order;
+# (6) books = the first level-1 topic + "book" + the current year. Template words are the material's language plus
+# English. Over 120 characters, words go from the end of the longest variable part. A query holding a 6-word run of
+# a non-front span, once bibliography strings, surnames and topic titles are masked (removed from the query's and the
+# span's words alike), is dropped (`query_unsafe`). A claim failing the subject rule is skipped (`subject_too_long`);
+# so is a claim whose subject forms a 6-word span run with the subjects chosen before it, in any order of them all
+# (`subject_split`). Runs are compared as written and with number and modifier-letter tokens removed on both sides.
+# Topics are [id, title, level]. No book text: every string is synthetic.
+
+cases:
+  - name: english_full
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Practical Distributed Ledgers", authors: ["Ada Example", "Grace Sample"], edition: "3rd",
+                    year: 2019, publisher: "Example Press" }
+    topics: [[0, "Ledgers", 1], [1, "Blocks", 2], [2, "Consensus", 1], [4, "Clients", 1]]
+    claims:
+      - { id: c1, subject: "consensus protocol v1", kind: protocol, confidence: medium, page: 40 }
+      - { id: c2, subject: "client library v1 API", kind: api, confidence: high, page: 88 }
+      - { id: c3, subject: "block size limit", kind: statistic, confidence: high, page: 50 }
+      - { id: c4, subject: "wallet format", kind: standard, confidence: low, page: 10 }
+    non_front: ["alpha beta gamma"]
+    expect:
+      queries:
+        - [edition, "Practical Distributed Ledgers Example Example Press new edition 2019"]
+        - [claim, "block size limit official documentation"]        # high, page 50
+        - [claim, "client library v1 API latest version"]           # high, page 88
+        - [claim, "consensus protocol v1 current specification"]    # medium
+        - [books, "Ledgers book 2026"]
+      dropped: {}
+
+  - name: russian_with_original_and_one_claim
+    language: ru
+    today: "2026-11-23"
+    bibliography: { title: "Распределённые реестры на практике", authors: ["Ада Пример"], edition: "4-е изд.",
+                    year: 2023, publisher: "Пример Пресс", original_title: "Practical Distributed Ledgers",
+                    original_authors: ["Example, Ada"], original_edition: "4th", original_year: 2022 }
+    topics: [[3, "Реестры", 1], [5, "Консенсус", 1], [9, "Клиенты", 1]]
+    claims:
+      - { id: c1, subject: "протокол консенсуса v1", kind: protocol, confidence: high, page: 12 }
+    non_front: []
+    expect:
+      queries:
+        - [original_edition, "Practical Distributed Ledgers Example новое издание после new edition after 4th 2022"]
+        - [edition, "Распределённые реестры на практике Пример Пример Пресс новое издание new edition 2023"]
+        - [claim, "протокол консенсуса v1 актуальная спецификация current specification"]
+        - [topic_docs, "Реестры официальная документация official documentation"]
+        - [topic_docs, "Консенсус официальная документация official documentation"]
+        - [books, "Реестры книга book 2026"]
+      dropped: {}
+
+  - name: over_long_title
+    language: en
+    today: "2026-11-23"
+    # The title is "Longword01 … Longword25" (274 characters). Fixed parts: surname 7 + publisher 13 + words 11 + year
+    # 4 + 4 spaces = 39, one more space before them: the title keeps 7 words (76 characters), 116 in all.
+    bibliography: { title: "Longword01 Longword02 Longword03 Longword04 Longword05 Longword06 Longword07 Longword08 Longword09 Longword10 Longword11 Longword12 Longword13 Longword14 Longword15 Longword16 Longword17 Longword18 Longword19 Longword20 Longword21 Longword22 Longword23 Longword24 Longword25",
+                    authors: ["Ada Example"], year: 2019, publisher: "Example Press" }
+    topics: [[1, "Topic", 1]]
+    claims: []
+    non_front: []
+    expect:
+      queries:
+        - [edition, "Longword01 Longword02 Longword03 Longword04 Longword05 Longword06 Longword07 Example Example Press new edition 2019"]
+        - [topic_docs, "Topic official documentation"]
+        - [books, "Topic book 2026"]
+      dropped: {}
+
+  - name: unsafe_claim_query_dropped_and_topic_masked
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[2, "Proof of work chains explained", 1]]
+    claims:
+      - { id: c1, subject: "nonce search target adjusts", kind: version, confidence: high, page: 20 }
+      - { id: c2, subject: "difficulty rule", kind: law, confidence: low, page: 30 }
+    # "nonce search target adjusts latest version" is a 6-word run of this span: that claim query is dropped. The
+    # topic query "Proof of work chains explained official documentation" is also a run of it, but the topic title is
+    # masked, so only 2 unmasked words remain and it is kept.
+    non_front: ["We see the nonce search target adjusts latest version each time. Proof of work chains explained official documentation book 2026 here."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "difficulty rule current specification"]
+        - [topic_docs, "Proof of work chains explained official documentation"]
+        - [books, "Proof of work chains explained book 2026"]
+      dropped: { query_unsafe: 1 }
+
+  - name: exempt_word_inside_a_copied_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[1, "Ledgers", 1]]
+    claims:
+      - { id: c1, subject: "alpha beta gamma Ledgers delta", kind: version, confidence: high, page: 5 }
+    # The claim query "alpha beta gamma Ledgers delta latest version" is a 7-word copy of the span with the topic
+    # word in the middle. Masking removes "ledgers" from both sides, leaving the 6-word run "alpha beta gamma delta
+    # latest version" in both: dropped. (Masking that only skipped runs touching a masked word let it through.)
+    non_front: ["Then alpha beta gamma Ledgers delta latest version shipped."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 1 }
+
+  - name: stored_claims_held_to_the_subject_rule
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1], [1, "Blocks", 1]]
+    # Claims as stored or reused (not from this scan): a punctuation-joined subject of six \w+ words and a subject
+    # over 60 characters are skipped before the ranking, so the low-confidence claim takes a slot.
+    claims:
+      - { id: c1, subject: "one-two-three-four-five-six", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "averyveryverylongwordnumberone averyveryverylongwordnumbertwo x", kind: api, confidence: high, page: 2 }
+      - { id: c3, subject: "wallet format", kind: standard, confidence: low, page: 10 }
+    non_front: []
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "wallet format current specification"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [topic_docs, "Blocks official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_too_long: 2 }
+
+  - name: joined_stored_subjects_and_a_run_split_across_claims
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # Stored claims held to FR-FRESH-3's words over the span below: `_` separates (6 words); concatenations and
+    # camelCase count as the span words they join (3 + 2 + 1 and 3 + 3 = 6 words); 40 CJK ideographs are 40 words:
+    # all four skipped. "alpha bravo charlie" is chosen; "delta echo foxtrot" after it would complete the span's
+    # 6-word run "alpha … foxtrot" across two queries, so it is skipped (`subject_split`) and the next claims fill
+    # the slots.
+    claims:
+      - { id: c1, subject: "alpha_bravo_charlie_delta_echo_foxtrot", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "alphabravocharlie deltaecho foxtrot", kind: version, confidence: high, page: 2 }
+      - { id: c3, subject: "AlphaBravoCharlie DeltaEchoFoxtrot", kind: version, confidence: high, page: 3 }
+      - { id: c4, subject: "共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识共识", kind: version, confidence: high, page: 4 }
+      - { id: c5, subject: "alpha bravo charlie", kind: version, confidence: high, page: 5 }
+      - { id: c6, subject: "delta echo foxtrot", kind: version, confidence: high, page: 6 }
+      - { id: c7, subject: "india juliet", kind: version, confidence: medium, page: 7 }
+      - { id: c8, subject: "golf hotel", kind: api, confidence: low, page: 8 }
+    non_front: ["alpha bravo charlie delta echo foxtrot golf hotel india juliet"]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "alpha bravo charlie latest version"]
+        - [claim, "india juliet latest version"]
+        - [claim, "golf hotel latest version"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_too_long: 4, subject_split: 1 }
+
+  - name: number_and_modifier_joiners_do_not_break_a_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # U+02BC and a digit are words of their own; runs are also compared with number and modifier-letter tokens
+    # removed on both sides, so each claim query below ("echo foxtrot golf hotel latest version" once the joiner
+    # is removed) is a 6-word run of the span: all three are dropped. No two subjects form a run together.
+    claims:
+      - { id: c1, subject: "echo foxtrot golfʼhotel", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "echo foxtrot golf1hotel", kind: version, confidence: high, page: 2 }
+      - { id: c3, subject: "echo foxtrot golf 1 hotel", kind: version, confidence: high, page: 3 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 3 }
+
+  - name: a_number_inside_the_copied_span_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # The span holds "alpha bravo 5 charlie delta latest version"; the claim query "alpha bravo charlie delta latest
+    # version" has no number. With the number token removed on the span's side, the span holds the query's 6-word
+    # run: dropped. (Comparing the span only as written lets it through.)
+    claims:
+      - { id: c1, subject: "alpha bravo charlie delta", kind: version, confidence: high, page: 1 }
+    non_front: ["Intro alpha bravo 5 charlie delta latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 1 }
+
+  - name: a_run_with_a_dotted_number_caught_as_written
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # "3.11" is one word: the claim query "alpha bravo 3.11 charlie latest version" is, as written, a 6-word run of
+    # the span. With the number removed the query keeps only 5 words, so only the as-written comparison drops it.
+    claims:
+      - { id: c1, subject: "alpha bravo 3.11 charlie", kind: version, confidence: high, page: 1 }
+    non_front: ["Intro alpha bravo 3.11 charlie latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 1 }
+
+  - name: an_underscore_joiner_does_not_break_a_run
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # `_` separates words like a space, so "echo foxtrot golf_hotel latest version" is a 6-word run of the span.
+    claims:
+      - { id: c1, subject: "echo foxtrot golf_hotel", kind: version, confidence: high, page: 1 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 1 }
+
+  - name: a_modifier_joiner_does_not_break_a_run_across_claims
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # "alpha bravo charlieʼdelta" then "echo foxtrot golf" is the span's run "alpha … golf" once U+02BC is removed:
+    # the second claim is skipped.
+    claims:
+      - { id: c1, subject: "alpha bravo charlieʼdelta", kind: api, confidence: high, page: 1 }
+      - { id: c2, subject: "echo foxtrot golf", kind: api, confidence: high, page: 2 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "alpha bravo charlieʼdelta latest version"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_split: 1 }
+
+  - name: a_run_split_across_three_claims
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # No two of the subjects form a 6-word run in either order (at most 5 words), but the three in a row are the
+    # span's 8-word run "quick … dog": every order of the chosen subjects plus the candidate is checked, so the
+    # third is skipped.
+    claims:
+      - { id: c1, subject: "quick brown fox", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "jumps over", kind: version, confidence: high, page: 2 }
+      - { id: c3, subject: "the lazy dog", kind: version, confidence: high, page: 3 }
+    non_front: ["Then the quick brown fox jumps over the lazy dog near a quiet river bank today."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "quick brown fox latest version"]
+        - [claim, "jumps over latest version"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_split: 1 }
+
+  - name: a_run_split_with_the_candidate_first
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # The later candidate "bravo charlie delta" comes before the chosen "echo foxtrot golf" in the span: only the
+    # order candidate-then-chosen forms the run, and it is skipped.
+    claims:
+      - { id: c1, subject: "echo foxtrot golf", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "bravo charlie delta", kind: version, confidence: medium, page: 2 }
+    non_front: ["alpha bravo charlie delta echo foxtrot golf hotel"]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [claim, "echo foxtrot golf latest version"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { subject_split: 1 }
+
+  - name: fullwidth_and_mathematical_letters_are_plain_letters
+    language: en
+    today: "2026-11-23"
+    bibliography: { title: "Mining", authors: [] }
+    topics: [[0, "Ledgers", 1]]
+    # Words are taken over the NFKC form: the fullwidth "ｅｃｈｏｆｏｘｔｒｏｔ" is "echofoxtrot", cut into echo +
+    # foxtrot, and the mathematical bold "𝐞𝐜𝐡𝐨" is "echo": both claim queries are "echo foxtrot golf hotel latest
+    # version", a 6-word run of the span, and are dropped.
+    claims:
+      - { id: c1, subject: "ｅｃｈｏｆｏｘｔｒｏｔ golf hotel", kind: version, confidence: high, page: 1 }
+      - { id: c2, subject: "𝐞𝐜𝐡𝐨 foxtrot golf hotel", kind: version, confidence: high, page: 2 }
+    non_front: ["Intro alpha bravo charlie delta echo foxtrot golf hotel latest version outro."]
+    expect:
+      queries:
+        - [edition, "Mining new edition"]
+        - [topic_docs, "Ledgers official documentation"]
+        - [books, "Ledgers book 2026"]
+      dropped: { query_unsafe: 2 }

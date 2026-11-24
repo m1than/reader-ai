@@ -1,0 +1,918 @@
+{
+  "runs": [
+    {
+      "mode": "agent-env",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "ResultMessage"
+      ],
+      "trace_id": "20a218fb13996f5479634946571ca87c"
+    },
+    {
+      "mode": "agent-env-explicit-off",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "ResultMessage"
+      ],
+      "trace_id": "a80e602f7a3b5e8d3ca95db92498f47d"
+    },
+    {
+      "mode": "positive-control",
+      "error": null,
+      "messages": [
+        "SystemMessage",
+        "AssistantMessage",
+        "RateLimitEvent",
+        "ResultMessage"
+      ],
+      "trace_id": "2cd78df348e81ba5f8d16c7634333979"
+    }
+  ],
+  "modes": {
+    "agent-env": {
+      "otlp_requests": [
+        {
+          "path": "/v1/traces",
+          "bytes": 1854,
+          "header_names": [
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        },
+        {
+          "path": "/v1/traces",
+          "bytes": 334,
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        },
+        {
+          "path": "/v1/traces",
+          "bytes": 322,
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        }
+      ],
+      "upstream_requests": [
+        {
+          "method": "POST",
+          "path": "/v1/messages"
+        }
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_PROMPT": 0,
+        "CANARY_SYSTEM": 0,
+        "CANARY_RESPONSE": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_PROMPT": 0,
+        "CANARY_SYSTEM": 0,
+        "CANARY_RESPONSE": 0,
+        "HANDLE": 0
+      },
+      "cli_spans": [
+        {
+          "service": "claude-code",
+          "scope": "com.anthropic.claude_code.tracing",
+          "name": "claude_code.llm_request",
+          "parent": "R5C8lZmLXT4=",
+          "resource_keys": [
+            "host.arch",
+            "os.type",
+            "os.version",
+            "service.name",
+            "service.version"
+          ],
+          "events": [
+            {
+              "name": "gen_ai.request.attempt",
+              "keys": [
+                "attempt"
+              ]
+            }
+          ],
+          "attribute_keys": [
+            "anthropic.custom_base_url",
+            "anthropic.provider",
+            "attempt",
+            "cache_creation_tokens",
+            "cache_read_tokens",
+            "duration_ms",
+            "effort",
+            "first_content_ms",
+            "gen_ai.conversation.id",
+            "gen_ai.provider.name",
+            "gen_ai.request.model",
+            "gen_ai.response.finish_reasons",
+            "gen_ai.system",
+            "input_tokens",
+            "llm_request.context",
+            "model",
+            "output_tokens",
+            "query_source_safe",
+            "session.id",
+            "span.type",
+            "speed",
+            "stop_reason",
+            "success",
+            "terminal.type",
+            "ttft_ms",
+            "user.id"
+          ]
+        },
+        {
+          "service": "claude-code",
+          "scope": "com.anthropic.claude_code.tracing",
+          "name": "claude_code.interaction",
+          "parent": "TDzTEZcoLMM=",
+          "resource_keys": [
+            "host.arch",
+            "os.type",
+            "os.version",
+            "service.name",
+            "service.version"
+          ],
+          "events": [],
+          "attribute_keys": [
+            "anthropic.custom_base_url",
+            "anthropic.provider",
+            "gen_ai.conversation.id",
+            "gen_ai.operation.name",
+            "gen_ai.provider.name",
+            "interaction.duration_ms",
+            "interaction.sequence",
+            "parent.source",
+            "queued_sends",
+            "session.id",
+            "span.type",
+            "terminal.type",
+            "user.id",
+            "user_prompt",
+            "user_prompt_length"
+          ]
+        }
+      ],
+      "cli_span_attributes": [
+        {
+          "name": "claude_code.llm_request",
+          "attributes": {
+            "user.id": {
+              "stringValue": "dca57b24488cbcd04d0007b690d2b114e2fb2d860b608a9033e79d82fb78e802"
+            },
+            "session.id": {
+              "stringValue": "efda318f-9c8e-4554-93ed-8700bd521581"
+            },
+            "anthropic.provider": {
+              "stringValue": "firstParty"
+            },
+            "anthropic.custom_base_url": {
+              "boolValue": true
+            },
+            "terminal.type": {
+              "stringValue": "non-interactive"
+            },
+            "gen_ai.provider.name": {
+              "stringValue": "anthropic"
+            },
+            "span.type": {
+              "stringValue": "llm_request"
+            },
+            "model": {
+              "stringValue": "claude-sonnet-5-5"
+            },
+            "gen_ai.system": {
+              "stringValue": "anthropic"
+            },
+            "gen_ai.request.model": {
+              "stringValue": "claude-sonnet-5-5"
+            },
+            "llm_request.context": {
+              "stringValue": "interaction"
+            },
+            "speed": {
+              "stringValue": "normal"
+            },
+            "gen_ai.conversation.id": {
+              "stringValue": "efda318f-9c8e-4554-93ed-8700bd521581"
+            },
+            "query_source_safe": {
+              "stringValue": "sdk"
+            },
+            "duration_ms": {
+              "intValue": "26"
+            },
+            "input_tokens": {
+              "intValue": "10"
+            },
+            "output_tokens": {
+              "intValue": "3"
+            },
+            "cache_read_tokens": {
+              "intValue": "0"
+            },
+            "cache_creation_tokens": {
+              "intValue": "0"
+            },
+            "success": {
+              "boolValue": true
+            },
+            "attempt": {
+              "intValue": "1"
+            },
+            "ttft_ms": {
+              "intValue": "17"
+            },
+            "first_content_ms": {
+              "intValue": "18"
+            },
+            "effort": {
+              "stringValue": "medium"
+            },
+            "stop_reason": {
+              "stringValue": "end_turn"
+            },
+            "gen_ai.response.finish_reasons": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "stringValue": "end_turn"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "name": "claude_code.interaction",
+          "attributes": {
+            "user.id": {
+              "stringValue": "dca57b24488cbcd04d0007b690d2b114e2fb2d860b608a9033e79d82fb78e802"
+            },
+            "session.id": {
+              "stringValue": "efda318f-9c8e-4554-93ed-8700bd521581"
+            },
+            "anthropic.provider": {
+              "stringValue": "firstParty"
+            },
+            "anthropic.custom_base_url": {
+              "boolValue": true
+            },
+            "terminal.type": {
+              "stringValue": "non-interactive"
+            },
+            "gen_ai.provider.name": {
+              "stringValue": "anthropic"
+            },
+            "span.type": {
+              "stringValue": "interaction"
+            },
+            "gen_ai.operation.name": {
+              "stringValue": "invoke_agent"
+            },
+            "gen_ai.conversation.id": {
+              "stringValue": "efda318f-9c8e-4554-93ed-8700bd521581"
+            },
+            "user_prompt": {
+              "stringValue": "<REDACTED>"
+            },
+            "user_prompt_length": {
+              "intValue": "56"
+            },
+            "interaction.sequence": {
+              "intValue": "1"
+            },
+            "parent.source": {
+              "stringValue": "env"
+            },
+            "queued_sends": {
+              "intValue": "0"
+            },
+            "interaction.duration_ms": {
+              "intValue": "74"
+            }
+          }
+        }
+      ],
+      "cli_in_our_trace": true,
+      "cli_roots_under_stage": [
+        "claude_code.interaction"
+      ],
+      "trace_ids": [
+        "IKIY+xOZb1R5Y0lGVxyofA=="
+      ]
+    },
+    "agent-env-explicit-off": {
+      "otlp_requests": [
+        {
+          "path": "/v1/traces",
+          "bytes": 1854,
+          "header_names": [
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        },
+        {
+          "path": "/v1/traces",
+          "bytes": 334,
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        },
+        {
+          "path": "/v1/traces",
+          "bytes": 322,
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        }
+      ],
+      "upstream_requests": [
+        {
+          "method": "POST",
+          "path": "/v1/messages"
+        }
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_PROMPT": 0,
+        "CANARY_SYSTEM": 0,
+        "CANARY_RESPONSE": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_PROMPT": 0,
+        "CANARY_SYSTEM": 0,
+        "CANARY_RESPONSE": 0,
+        "HANDLE": 0
+      },
+      "cli_spans": [
+        {
+          "service": "claude-code",
+          "scope": "com.anthropic.claude_code.tracing",
+          "name": "claude_code.llm_request",
+          "parent": "tOjS3eL3fCY=",
+          "resource_keys": [
+            "host.arch",
+            "os.type",
+            "os.version",
+            "service.name",
+            "service.version"
+          ],
+          "events": [
+            {
+              "name": "gen_ai.request.attempt",
+              "keys": [
+                "attempt"
+              ]
+            }
+          ],
+          "attribute_keys": [
+            "anthropic.custom_base_url",
+            "anthropic.provider",
+            "attempt",
+            "cache_creation_tokens",
+            "cache_read_tokens",
+            "duration_ms",
+            "effort",
+            "first_content_ms",
+            "gen_ai.conversation.id",
+            "gen_ai.provider.name",
+            "gen_ai.request.model",
+            "gen_ai.response.finish_reasons",
+            "gen_ai.system",
+            "input_tokens",
+            "llm_request.context",
+            "model",
+            "output_tokens",
+            "query_source_safe",
+            "session.id",
+            "span.type",
+            "speed",
+            "stop_reason",
+            "success",
+            "terminal.type",
+            "ttft_ms",
+            "user.id"
+          ]
+        },
+        {
+          "service": "claude-code",
+          "scope": "com.anthropic.claude_code.tracing",
+          "name": "claude_code.interaction",
+          "parent": "Gv6dHyOEAkw=",
+          "resource_keys": [
+            "host.arch",
+            "os.type",
+            "os.version",
+            "service.name",
+            "service.version"
+          ],
+          "events": [],
+          "attribute_keys": [
+            "anthropic.custom_base_url",
+            "anthropic.provider",
+            "gen_ai.conversation.id",
+            "gen_ai.operation.name",
+            "gen_ai.provider.name",
+            "interaction.duration_ms",
+            "interaction.sequence",
+            "parent.source",
+            "queued_sends",
+            "session.id",
+            "span.type",
+            "terminal.type",
+            "user.id",
+            "user_prompt",
+            "user_prompt_length"
+          ]
+        }
+      ],
+      "cli_span_attributes": [
+        {
+          "name": "claude_code.llm_request",
+          "attributes": {
+            "user.id": {
+              "stringValue": "bb054cea4bb28cad8be1199b5733624bdd7cfae9cdde8b44782ba48ff19dad90"
+            },
+            "session.id": {
+              "stringValue": "a0ec7add-575a-4a98-bcd8-792073b2285b"
+            },
+            "anthropic.provider": {
+              "stringValue": "firstParty"
+            },
+            "anthropic.custom_base_url": {
+              "boolValue": true
+            },
+            "terminal.type": {
+              "stringValue": "non-interactive"
+            },
+            "gen_ai.provider.name": {
+              "stringValue": "anthropic"
+            },
+            "span.type": {
+              "stringValue": "llm_request"
+            },
+            "model": {
+              "stringValue": "claude-sonnet-5-5"
+            },
+            "gen_ai.system": {
+              "stringValue": "anthropic"
+            },
+            "gen_ai.request.model": {
+              "stringValue": "claude-sonnet-5-5"
+            },
+            "llm_request.context": {
+              "stringValue": "interaction"
+            },
+            "speed": {
+              "stringValue": "normal"
+            },
+            "gen_ai.conversation.id": {
+              "stringValue": "a0ec7add-575a-4a98-bcd8-792073b2285b"
+            },
+            "query_source_safe": {
+              "stringValue": "sdk"
+            },
+            "duration_ms": {
+              "intValue": "12"
+            },
+            "input_tokens": {
+              "intValue": "10"
+            },
+            "output_tokens": {
+              "intValue": "3"
+            },
+            "cache_read_tokens": {
+              "intValue": "0"
+            },
+            "cache_creation_tokens": {
+              "intValue": "0"
+            },
+            "success": {
+              "boolValue": true
+            },
+            "attempt": {
+              "intValue": "1"
+            },
+            "ttft_ms": {
+              "intValue": "6"
+            },
+            "first_content_ms": {
+              "intValue": "6"
+            },
+            "effort": {
+              "stringValue": "medium"
+            },
+            "stop_reason": {
+              "stringValue": "end_turn"
+            },
+            "gen_ai.response.finish_reasons": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "stringValue": "end_turn"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "name": "claude_code.interaction",
+          "attributes": {
+            "user.id": {
+              "stringValue": "bb054cea4bb28cad8be1199b5733624bdd7cfae9cdde8b44782ba48ff19dad90"
+            },
+            "session.id": {
+              "stringValue": "a0ec7add-575a-4a98-bcd8-792073b2285b"
+            },
+            "anthropic.provider": {
+              "stringValue": "firstParty"
+            },
+            "anthropic.custom_base_url": {
+              "boolValue": true
+            },
+            "terminal.type": {
+              "stringValue": "non-interactive"
+            },
+            "gen_ai.provider.name": {
+              "stringValue": "anthropic"
+            },
+            "span.type": {
+              "stringValue": "interaction"
+            },
+            "gen_ai.operation.name": {
+              "stringValue": "invoke_agent"
+            },
+            "gen_ai.conversation.id": {
+              "stringValue": "a0ec7add-575a-4a98-bcd8-792073b2285b"
+            },
+            "user_prompt": {
+              "stringValue": "<REDACTED>"
+            },
+            "user_prompt_length": {
+              "intValue": "56"
+            },
+            "interaction.sequence": {
+              "intValue": "1"
+            },
+            "parent.source": {
+              "stringValue": "env"
+            },
+            "queued_sends": {
+              "intValue": "0"
+            },
+            "interaction.duration_ms": {
+              "intValue": "52"
+            }
+          }
+        }
+      ],
+      "cli_in_our_trace": true,
+      "cli_roots_under_stage": [
+        "claude_code.interaction"
+      ],
+      "trace_ids": [
+        "qA5gL3o7Xo08qV25JJj0fQ=="
+      ]
+    },
+    "positive-control": {
+      "otlp_requests": [
+        {
+          "path": "/v1/traces",
+          "bytes": 1900,
+          "header_names": [
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        },
+        {
+          "path": "/v1/traces",
+          "bytes": 334,
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        },
+        {
+          "path": "/v1/traces",
+          "bytes": 322,
+          "header_names": [
+            "accept",
+            "accept-encoding",
+            "connection",
+            "content-length",
+            "content-type",
+            "host",
+            "user-agent"
+          ],
+          "authorization_present": false
+        }
+      ],
+      "upstream_requests": [
+        {
+          "method": "POST",
+          "path": "/v1/messages"
+        }
+      ],
+      "other_hosts": [],
+      "canary_hits_decoded": {
+        "CANARY_PROMPT": 1,
+        "CANARY_SYSTEM": 0,
+        "CANARY_RESPONSE": 0,
+        "HANDLE": 0
+      },
+      "canary_hits_raw": {
+        "CANARY_PROMPT": 1,
+        "CANARY_SYSTEM": 0,
+        "CANARY_RESPONSE": 0,
+        "HANDLE": 0
+      },
+      "cli_spans": [
+        {
+          "service": "claude-code",
+          "scope": "com.anthropic.claude_code.tracing",
+          "name": "claude_code.llm_request",
+          "parent": "MWOeApKMM/c=",
+          "resource_keys": [
+            "host.arch",
+            "os.type",
+            "os.version",
+            "service.name",
+            "service.version"
+          ],
+          "events": [
+            {
+              "name": "gen_ai.request.attempt",
+              "keys": [
+                "attempt"
+              ]
+            }
+          ],
+          "attribute_keys": [
+            "anthropic.custom_base_url",
+            "anthropic.provider",
+            "attempt",
+            "cache_creation_tokens",
+            "cache_read_tokens",
+            "duration_ms",
+            "effort",
+            "first_content_ms",
+            "gen_ai.conversation.id",
+            "gen_ai.provider.name",
+            "gen_ai.request.model",
+            "gen_ai.response.finish_reasons",
+            "gen_ai.system",
+            "input_tokens",
+            "llm_request.context",
+            "model",
+            "output_tokens",
+            "query_source_safe",
+            "session.id",
+            "span.type",
+            "speed",
+            "stop_reason",
+            "success",
+            "terminal.type",
+            "ttft_ms",
+            "user.id"
+          ]
+        },
+        {
+          "service": "claude-code",
+          "scope": "com.anthropic.claude_code.tracing",
+          "name": "claude_code.interaction",
+          "parent": "zy7WAs8tqTM=",
+          "resource_keys": [
+            "host.arch",
+            "os.type",
+            "os.version",
+            "service.name",
+            "service.version"
+          ],
+          "events": [],
+          "attribute_keys": [
+            "anthropic.custom_base_url",
+            "anthropic.provider",
+            "gen_ai.conversation.id",
+            "gen_ai.operation.name",
+            "gen_ai.provider.name",
+            "interaction.duration_ms",
+            "interaction.sequence",
+            "parent.source",
+            "queued_sends",
+            "session.id",
+            "span.type",
+            "terminal.type",
+            "user.id",
+            "user_prompt",
+            "user_prompt_length"
+          ]
+        }
+      ],
+      "cli_span_attributes": [
+        {
+          "name": "claude_code.llm_request",
+          "attributes": {
+            "user.id": {
+              "stringValue": "8c095270e91529d79ca51ec5904269466d0bf6a896e0e47e16f8d4616ac72f0c"
+            },
+            "session.id": {
+              "stringValue": "6e9ad2a2-2780-4ac3-89f6-2ef2e7efe76c"
+            },
+            "anthropic.provider": {
+              "stringValue": "firstParty"
+            },
+            "anthropic.custom_base_url": {
+              "boolValue": true
+            },
+            "terminal.type": {
+              "stringValue": "non-interactive"
+            },
+            "gen_ai.provider.name": {
+              "stringValue": "anthropic"
+            },
+            "span.type": {
+              "stringValue": "llm_request"
+            },
+            "model": {
+              "stringValue": "claude-sonnet-5-5"
+            },
+            "gen_ai.system": {
+              "stringValue": "anthropic"
+            },
+            "gen_ai.request.model": {
+              "stringValue": "claude-sonnet-5-5"
+            },
+            "llm_request.context": {
+              "stringValue": "interaction"
+            },
+            "speed": {
+              "stringValue": "normal"
+            },
+            "gen_ai.conversation.id": {
+              "stringValue": "6e9ad2a2-2780-4ac3-89f6-2ef2e7efe76c"
+            },
+            "query_source_safe": {
+              "stringValue": "sdk"
+            },
+            "duration_ms": {
+              "intValue": "15"
+            },
+            "input_tokens": {
+              "intValue": "10"
+            },
+            "output_tokens": {
+              "intValue": "3"
+            },
+            "cache_read_tokens": {
+              "intValue": "0"
+            },
+            "cache_creation_tokens": {
+              "intValue": "0"
+            },
+            "success": {
+              "boolValue": true
+            },
+            "attempt": {
+              "intValue": "1"
+            },
+            "ttft_ms": {
+              "intValue": "7"
+            },
+            "first_content_ms": {
+              "intValue": "8"
+            },
+            "effort": {
+              "stringValue": "medium"
+            },
+            "stop_reason": {
+              "stringValue": "end_turn"
+            },
+            "gen_ai.response.finish_reasons": {
+              "arrayValue": {
+                "values": [
+                  {
+                    "stringValue": "end_turn"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "name": "claude_code.interaction",
+          "attributes": {
+            "user.id": {
+              "stringValue": "8c095270e91529d79ca51ec5904269466d0bf6a896e0e47e16f8d4616ac72f0c"
+            },
+            "session.id": {
+              "stringValue": "6e9ad2a2-2780-4ac3-89f6-2ef2e7efe76c"
+            },
+            "anthropic.provider": {
+              "stringValue": "firstParty"
+            },
+            "anthropic.custom_base_url": {
+              "boolValue": true
+            },
+            "terminal.type": {
+              "stringValue": "non-interactive"
+            },
+            "gen_ai.provider.name": {
+              "stringValue": "anthropic"
+            },
+            "span.type": {
+              "stringValue": "interaction"
+            },
+            "gen_ai.operation.name": {
+              "stringValue": "invoke_agent"
+            },
+            "gen_ai.conversation.id": {
+              "stringValue": "6e9ad2a2-2780-4ac3-89f6-2ef2e7efe76c"
+            },
+            "user_prompt": {
+              "stringValue": "Explain this passage: bookcanary14d860b0eafb79524c40473e"
+            },
+            "user_prompt_length": {
+              "intValue": "56"
+            },
+            "interaction.sequence": {
+              "intValue": "1"
+            },
+            "parent.source": {
+              "stringValue": "env"
+            },
+            "queued_sends": {
+              "intValue": "0"
+            },
+            "interaction.duration_ms": {
+              "intValue": "62"
+            }
+          }
+        }
+      ],
+      "cli_in_our_trace": true,
+      "cli_roots_under_stage": [
+        "claude_code.interaction"
+      ],
+      "trace_ids": [
+        "LNeN80joG6X40Wx2NDM5eQ=="
+      ]
+    }
+  }
+}

@@ -1,9 +1,10 @@
-/* The planning part of /import (WEB-PLAN) under Calm: tokens only, the library's --acme-space-* steps,
-   UI chrome in the library sans, the 2px focus outline (WEB-UI FR-UI-10). */
+/* The planning part of /import (WEB-PLAN) under Calm: tokens only, the library's --acme-space-* steps, the app's
+   radii (WEB-UI FR-UI-10), UI chrome in the library sans, the 2px focus outline. Design pass: source rows, the
+   estimate as figures and notes, the does-not-fit callout first, the reason under a disabled Create. */
 .import-page h2 {
   margin: var(--acme-space-6) 0 var(--acme-space-3);
-  font-size: 1.25rem;
-  line-height: 1.35;
+  font-size: 1.125rem;
+  line-height: 1.3;
 }
 
 .import-page h2:focus {
@@ -21,19 +22,26 @@
   grid-template-columns: minmax(0, 1fr) auto auto;
   column-gap: var(--acme-space-3);
   align-items: center;
-  padding: var(--acme-space-3) 0;
+  padding: var(--acme-space-2);
   border-bottom: 1px solid var(--acme-border);
+  border-radius: var(--radius-control);
+  transition: background-color calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+.source-row:hover,
+.source-row[aria-current='true'] {
+  background: var(--acme-hover);
 }
 
 .source-title {
-  overflow-wrap: anywhere;
+  font-weight: 600;
+  overflow-wrap: break-word;
 }
 
 .source-meta,
 .plan-hint,
 .plan-lesson-meta {
   color: var(--acme-text-muted);
-  font-family: var(--acme-font);
   font-size: 0.8125rem;
   font-variant-numeric: tabular-nums;
 }
@@ -54,15 +62,16 @@
   display: flex;
   flex-direction: column;
   gap: var(--acme-space-1);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
 }
 
 .plan-field input {
-  width: 9rem;
-  padding: var(--acme-space-2) var(--acme-space-3);
+  box-sizing: border-box;
+  width: 8rem;
+  height: 32px;
+  padding: 0 var(--acme-space-3);
   border: 1px solid var(--acme-control-border);
-  border-radius: 6px;
+  border-radius: var(--radius-control);
   background: var(--acme-surface);
   color: var(--acme-text);
   font: inherit;
@@ -79,21 +88,45 @@
 }
 
 .plan-hint,
-.plan-error {
+.plan-error,
+.plan-why {
   margin: 0;
 }
 
 .plan-error {
   color: var(--acme-danger);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
 }
 
+.plan-why {
+  color: var(--acme-text-muted);
+  font-size: 0.8125rem;
+}
+
+/* Disclosures with the app's chevron in place of the browser marker. */
 .plan-pace summary,
 .plan-lessons summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--acme-space-1);
+  list-style: none;
   cursor: pointer;
-  font-family: var(--acme-font);
   font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.plan-pace summary::-webkit-details-marker,
+.plan-lessons summary::-webkit-details-marker {
+  display: none;
+}
+
+.disclosure-chevron {
+  color: var(--acme-text-muted);
+  transition: transform calc(var(--acme-duration) * 0.75) var(--acme-ease);
+}
+
+details[open] > summary .disclosure-chevron {
+  transform: rotate(90deg);
 }
 
 .plan-pace .plan-field {
@@ -103,28 +136,63 @@
 .plan-estimate {
   padding: var(--acme-space-4);
   border: 1px solid var(--acme-border);
-  border-radius: 8px;
+  border-radius: var(--radius-block);
   background: var(--acme-surface-raised);
-}
-
-.plan-estimate p {
-  margin: 0 0 var(--acme-space-2);
 }
 
 .plan-estimate.is-updating {
   opacity: 0.6;
 }
 
-.plan-headline {
-  font-size: 1.125rem;
+/* FR-IMPORT-5 (design pass): the figures as a definition list. */
+.plan-figures {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--acme-space-2) var(--acme-space-5);
+  margin: 0 0 var(--acme-space-3);
+  font-variant-numeric: tabular-nums lining-nums;
+}
+
+.plan-figure {
+  display: contents;
+}
+
+.plan-figures dt {
+  color: var(--acme-text-muted);
+  font-size: 0.875rem;
+}
+
+.plan-figures dd {
+  margin: 0;
   font-weight: 600;
 }
 
+.plan-figures.is-unfit dd {
+  color: var(--acme-text-muted);
+  font-weight: 400;
+}
+
+.plan-notes {
+  color: var(--acme-text-muted);
+  font-size: 0.8125rem;
+}
+
+.plan-notes p {
+  margin: 0 0 var(--acme-space-1);
+}
+
 .plan-notice {
-  margin: var(--acme-space-3) 0;
-  padding: var(--acme-space-3);
-  border-left: 3px solid var(--acme-warning);
-  background: var(--acme-surface);
+  display: grid;
+  gap: var(--acme-space-2);
+  margin: 0 0 var(--acme-space-4);
+}
+
+.plan-notice p {
+  margin: 0;
+}
+
+.callout-icon {
+  color: var(--acme-warning);
 }
 
 .plan-lessons ol {
@@ -144,14 +212,13 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--acme-space-3);
+  gap: var(--acme-space-2);
 }
 
 .plan-check {
   display: flex;
   align-items: center;
   gap: var(--acme-space-2);
-  font-family: var(--acme-font);
   font-size: 0.875rem;
 }
 

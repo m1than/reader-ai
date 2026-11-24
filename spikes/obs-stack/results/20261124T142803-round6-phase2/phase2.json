@@ -1,0 +1,129 @@
+{
+ "link_cross_experiment": [
+  200,
+  {}
+ ],
+ "link_traces_to_run": [
+  200,
+  {}
+ ],
+ "traces_by_run_metadata": {
+  "status": 200,
+  "count": 4,
+  "error": null
+ },
+ "link_ingest": [
+  200,
+  {}
+ ],
+ "datasets": {
+  "tutor-bench-v2": {
+   "id": "d-afb205c0c9524ff2a60fbd06b0719d95",
+   "records": 40
+  },
+  "search-bench-v1": {
+   "id": "d-3e78b75ec709457db8546247ff95da23",
+   "records": 30
+  }
+ },
+ "evals": [
+  {
+   "model": "BAAI/bge-m3",
+   "run_id": "1ecb29a6ae5f4cc8872e1b8920202cfd",
+   "metrics": {
+    "hit_at_3/mean": 0.38461538461538464,
+    "reciprocal_rank/mean": 0.39825025000007663,
+    "hit_at_10/mean": 0.6666666666666666
+   }
+  },
+  {
+   "model": "deepvk/USER-bge-m3",
+   "run_id": "a635550a29a243e6b11a95b67eb87191",
+   "metrics": {
+    "hit_at_3/mean": 0.4358974358974359,
+    "hit_at_10/mean": 0.7435897435897436,
+    "reciprocal_rank/mean": 0.39422981867964524
+   }
+  },
+  {
+   "model": "intfloat/multilingual-e5-small",
+   "run_id": "0fc94ad8660143d9b1782c9411b66aa7",
+   "metrics": {
+    "hit_at_3/mean": 0.23076923076923078,
+    "hit_at_10/mean": 0.38461538461538464,
+    "reciprocal_rank/mean": 0.23330362442307356
+   }
+  },
+  {
+   "tutor_bench_run": "e4c5f60e5eaa4a40a2985670e9de2907"
+  }
+ ],
+ "versions": {
+  "models": {
+   "abab": "m-fe954c29894d454f92c99b44e89616af",
+   "cdcd": "m-18858085667341afb3c165f0926a8486"
+  },
+  "by_metadata_otlp": 0,
+  "by_tag": 1,
+  "rest_link": "no client API",
+  "by_metadata_after_link": 0,
+  "search_errors": [
+   null,
+   null
+  ]
+ },
+ "labels": {
+  "assessment_id": "a-a3ccda08d6c6415da0d54a94fc84941e",
+  "trace": "c104f8ab7754670920ec194c466133dd",
+  "on_trace": [
+   "owner.lesson_ok"
+  ],
+  "labeling_session_error": "UnsupportedLabelingStoreURIException: Labeling functionality is unavailable; got unsupported URI 'http://mlflow:5000' for labeling data storage. Supported URI schemes are: ['databricks'].",
+  "review_queue": {
+   "schema": "ls-18895d814f8c47f4af26eb486bcb9c5d",
+   "queue": "rq-8b8ef087454543fba69855cef28b3fd1",
+   "items": 4
+  }
+ },
+ "budgets": {
+  "list": [
+   200,
+   {}
+  ],
+  "create": [
+   200,
+   {
+    "budget_policy": {
+     "budget_policy_id": "bp-e352e5f3c4394e3482da6c98f0fc832c",
+     "budget_unit": "USD",
+     "budget_amount": 0.01,
+     "duration": {
+      "unit": "DAYS",
+      "value": 1
+     },
+     "target_scope": "GLOBAL",
+     "budget_action": "ALERT",
+     "created_by": "",
+     "created_at": 1795516208846,
+     "last_updated_by": "",
+     "last_updated_at": 1795516208846
+    }
+   }
+  ],
+  "windows": [
+   200,
+   {
+    "windows": [
+     {
+      "budget_policy_id": "bp-e352e5f3c4394e3482da6c98f0fc832c",
+      "window_start_ms": 1795478400000,
+      "window_end_ms": 1795564800000,
+      "current_spend": 0.0
+     }
+    ]
+   }
+  ]
+ },
+ "trace_count": 133,
+ "eval_traces": 117
+}

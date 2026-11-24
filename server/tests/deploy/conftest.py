@@ -26,7 +26,7 @@ FIXTURES = REPO / "spec" / "fixtures" / "OPS-DEPLOY"
 OVERRIDE = FIXTURES / "cli-override.example.yaml"
 REACHABILITY = FIXTURES / "reachability.yaml"
 
-PROFILES = ("kernels", "agents", "mcp")
+PROFILES = ("kernels", "agents", "mcp", "observability")  # observability: FR-DEPLOY-13 (paired SRV-OBS)
 PROFILE_SETS: list[tuple[str, ...]] = [
     combo for n in range(len(PROFILES) + 1) for combo in itertools.combinations(PROFILES, n)
 ]

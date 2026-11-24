@@ -27,6 +27,7 @@ TAGGED_DIGEST = re.compile(r"^[^@:]+:[^@:/]+@sha256:[0-9a-f]{64}$")
 LOCAL_IMAGES = {
     "reader-server:local", "reader-postgres:local", "reader-kernel:local", "reader-agent-proxy:local",
     "reader-caddy:local", "reader-embed:local",
+    "reader-mlflow:local",  # FR-DEPLOY-13 (paired SRV-OBS change)
 }
 BASE = {"caddy", "api", "worker", "postgres", "embed"}  # embed: paired SRV-SEARCH change (FR-DEPLOY-1)
 
@@ -115,6 +116,9 @@ COPY_ALLOW_LIST = {
         "server/src/reader/search/embed_service.py", "server/src/reader/search/fetch_model.py",
         "server/src/reader/search/models.lock.json",
     },
+    # FR-DEPLOY-13 (paired SRV-OBS change): the pinned MLflow image plus a data directory and, since SRV-OBS
+    # FR-OBS-12 (c), the generated all-zero model catalog that replaces MLflow's bundled one.
+    "mlflow.Dockerfile": {"deploy/otel/mlflow-catalog/anthropic.json"},
 }
 
 
@@ -228,10 +232,21 @@ def _binds(svc: dict[str, Any]) -> list[dict[str, Any]]:
     return [m for m in svc.get("volumes") or [] if m["type"] == "bind"]
 
 
+SETUP_BIND_TARGET = "/etc/reader/mlflow-setup.yaml"  # FR-DEPLOY-15 (d), (g): the worker's one read-only bind
+
+
 def test_base_has_no_bind_on_server_roles() -> None:
     for profiles in PROFILE_SETS:
         services = render(profiles)["services"]
-        assert not any(_binds(services[r]) for r in SERVER_ROLES if r in services), profiles
+        for role in SERVER_ROLES:
+            if role not in services:
+                continue
+            binds = _binds(services[role])
+            if role == "worker":  # FR-DEPLOY-15 (g): exactly the setup file, read-only
+                got = [(b["target"], b.get("read_only")) for b in binds]
+                assert got == [(SETUP_BIND_TARGET, True)], profiles
+            else:
+                assert not binds, (role, profiles)
 
 
 def test_override_binds_the_config_file_into_server_roles_and_agent_proxy_only() -> None:
@@ -242,7 +257,8 @@ def test_override_binds_the_config_file_into_server_roles_and_agent_proxy_only()
     }
     assert with_config == {*SERVER_ROLES, "agent-proxy"}
     for role in (*SERVER_ROLES, "agent-proxy"):
-        assert _binds(services[role]) == [CONFIG_BIND], role
+        binds = [b for b in _binds(services[role]) if b["target"] != SETUP_BIND_TARGET or role != "worker"]
+        assert binds == [CONFIG_BIND], role  # FR-DEPLOY-15 (g): the worker also keeps its setup-file bind
     for role in SERVER_ROLES:
         assert services[role]["environment"] == {"READER_CONFIG": CONFIG_BIND["target"]}, role
     assert not services["agent-proxy"].get("environment")
@@ -292,7 +308,11 @@ def test_unconfined_pattern_covers_both_forms() -> None:
 def test_forbidden_options() -> None:
     for model in all_renders():
         for name, svc in model["services"].items():
-            assert not any(svc.get(k) for k in FORBIDDEN_KEYS), name
+            keys = FORBIDDEN_KEYS
+            if name == "mlflow-migrate":  # FR-DEPLOY-15 (g): the one network-less one-shot
+                assert svc.get("network_mode") == "none", name
+                keys = tuple(k for k in FORBIDDEN_KEYS if k != "network_mode")
+            assert not any(svc.get(k) for k in keys), name
             assert not svc.get("privileged"), name
             assert all(svc.get(ns) != "host" for ns in HOST_NAMESPACES), name
             opts = svc.get("security_opt") or []

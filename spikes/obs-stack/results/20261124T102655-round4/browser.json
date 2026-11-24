@@ -1,0 +1,294 @@
+{
+ "visits": {
+  "list": {
+   "headers": [
+    "Time",
+    "Input",
+    "Output",
+    "Session",
+    "Duration",
+    "State",
+    "Tokens",
+    "Tags"
+   ],
+   "shows_trace_names": [],
+   "shows_tokens": true,
+   "shows_cost": false,
+   "shows_tags": [
+    "dead"
+   ],
+   "inputs": [
+    "INPUT radio  Traces",
+    "INPUT radio  Sessions",
+    "INPUT search Add a filter Type something to use full text search",
+    "INPUT checkbox  Select all traces on this page",
+    "INPUT checkbox  Select trace tr-cb96512c4c18c1dc1ca31d5457f8ecd3",
+    "INPUT checkbox  Select trace tr-cf46c853c7cb1194f274fa46a14694e9",
+    "INPUT checkbox  Select trace tr-d84a62a82f3eb721cb5867d51dbbf0c3",
+    "INPUT checkbox  Select trace tr-4d29fb0fd98bdbb883821d1ac935699b",
+    "INPUT checkbox  Select trace tr-e1141a123029e3c05de312377960bbf6",
+    "INPUT checkbox  Select trace tr-49670206c80478767ee96cca605a493b",
+    "INPUT checkbox  Select trace tr-bc3ee7a99f6fa93dac1f3c4d65fe151d",
+    "INPUT checkbox  Select trace tr-a0fa2e8b2bde44ac419cd7427c506bd3",
+    "INPUT checkbox  Select trace tr-76b2fa3eb15904ef11fbb599ce8f0cb6",
+    "INPUT hidden"
+   ]
+  },
+  "search": {
+   "url": "/#/experiments/0/traces",
+   "text_has_review": false,
+   "reloaded_rows_mention_dead": true
+  },
+  "saved_views": {
+   "failed_compile_stages": {
+    "query": "filter=state%3A%3A%3D%3A%3AERROR&filter=TAG%3A%3A%3D%3A%3Apipeline.stage%3A%3Areader.job.kind",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=state%3A%3A%3D%3A%3AERROR&filter=TAG%3A%3A%3D%3A%3Apipeline.stage%3A%3Areader.job.kind"
+   },
+   "dead_jobs": {
+    "query": "filter=TAG%3A%3A%3D%3A%3Adead%3A%3Areader.job.outcome",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=TAG%3A%3A%3D%3A%3Adead%3A%3Areader.job.outcome"
+   },
+   "stage_review": {
+    "query": "filter=TAG%3A%3A%3D%3A%3Areview%3A%3Areader.stage",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=TAG%3A%3A%3D%3A%3Areview%3A%3Areader.stage"
+   },
+   "error_code_exhausted": {
+    "query": "filter=TAG%3A%3A%3D%3A%3Aexhausted%3A%3Areader.error_code",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=TAG%3A%3A%3D%3A%3Aexhausted%3A%3Areader.error_code"
+   },
+   "slow_tutor_answers": {
+    "query": "filter=trace_name%3A%3A%3D%3A%3Ajob%20tutor.answer&filter=execution_duration%3A%3A%3E%3A%3A5000",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=trace_name%3A%3A%3D%3A%3Ajob%20tutor.answer&filter=execution_duration%3A%3A%3E%3A%3A5000"
+   },
+   "tutor_slowest_first": {
+    "query": "filter=trace_name%3A%3A%3D%3A%3Ajob%20tutor.answer&sort=execution_duration%3A%3Anumber%3A%3Afalse",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=trace_name%3A%3A%3D%3A%3Ajob%20tutor.answer&sort=execution_duration%3A%3Anumber%3A%3Afalse"
+   },
+   "one_run_session": {
+    "query": "filter=session%3A%3A%3D%3A%3A10000000-0000-4000-8000-0000000000aa",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=session%3A%3A%3D%3A%3A10000000-0000-4000-8000-0000000000aa"
+   },
+   "agent_spans": {
+    "query": "filter=span.type%3A%3A%3D%3A%3AAGENT",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?filter=span.type%3A%3A%3D%3A%3AAGENT"
+   },
+   "last_7_days_errors": {
+    "query": "startTimeLabel=LAST_7_DAYS&filter=state%3A%3A%3D%3A%3AERROR",
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ],
+    "url_after": "/#/experiments/0/traces?startTimeLabel=LAST_7_DAYS&filter=state%3A%3A%3D%3A%3AERROR"
+   },
+   "none": {
+    "rows": [
+     "http_500",
+     "http_ok",
+     "stage_draft_with_cost",
+     "compile_like",
+     "stage_review_dead",
+     "stage_fact_check",
+     "tutor_slow",
+     "tutor_fast",
+     "tutor_baseline"
+    ]
+   }
+  },
+  "sessions_switch": {
+   "url": "/#/experiments/0/traces",
+   "run_listed": true
+  },
+  "detail": {
+   "span_names": [
+    "job tutor.answer",
+    "agent.call",
+    "claude_code.interaction",
+    "claude_code.llm_request"
+   ],
+   "types_in_text": [
+    "Agent"
+   ],
+   "tokens_in_text": true,
+   "cost_in_text": true
+  },
+  "detail_baseline": {
+   "types_in_text": []
+  },
+  "tabs": [
+   "Overview",
+   "Traces",
+   "Issues",
+   "Dashboard",
+   "Sessions",
+   "Judges",
+   "Review",
+   "Datasets",
+   "Evaluation runs",
+   "Playground",
+   "Prompts",
+   "Agent versions"
+  ],
+  "overview": {
+   "url": "/#/experiments/0/overview",
+   "headings": [
+    "Let's improve your agent with MLflow",
+    "Build a continuous quality loop in 4 steps",
+    "Welcome to MLflow Assistant"
+   ],
+   "mentions": [
+    "Traces",
+    "Sessions"
+   ],
+   "run_session_listed": false,
+   "text_head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Overview Let's improve your agent with MLflow Help me create an evaluation Build a continuous quality loop in 4 steps Trace, analyze, evaluate, and monitor your agent as it evolves. Learn how it works ↗ TRACE 9 traces View traces ANALYZE Recommended Review real traces to surface failure modes and quality issues worth fixing. Detect issues EVAL/TEST Turn issues into a regression test and catch them before you ship. Set up eval MONITOR Run scorers on liv"
+  },
+  "dashboard": {
+   "url": "/#/experiments/0/dashboard/usage",
+   "headings": [
+    "9",
+    "31.34s",
+    "2 (Overall error rate: 22.2%)",
+    "170.45K (146.45K input, 24.00K output, 118.00K cache read, 27.00K cache write)",
+    "24.35K avg per trace",
+    "≈$0.93774 Total Cost",
+    "≈$0.93774 Total Cost",
+    "Welcome to MLflow Assistant"
+   ],
+   "mentions": [
+    "Latency",
+    "Error",
+    "Token",
+    "Cost",
+    "Traces",
+    "Sessions",
+    "Tool",
+    "claude-sonnet-5-5"
+   ],
+   "run_session_listed": false,
+   "text_head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Filters Time Unit: Day Last 7 days Detect Issues Traces 9 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 3 6 9 12 AVG (1) Latency 31.34s p50p90p99 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 25000 50000 75000 100000 AVG (31.34s) Errors 2 (Overall error rate: 22.2%) Error CountError Rate 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 0.5 1 1.5 2 0% 25% 50% 75% 100% AVG (2.8%) Token Usage 170.45K (146.45K in"
+  },
+  "issues": {
+   "url": "/#/experiments/0/issues",
+   "headings": [
+    "Discover issues automatically",
+    "Welcome to MLflow Assistant"
+   ],
+   "mentions": [
+    "Cost",
+    "Traces",
+    "Sessions",
+    "Tool"
+   ],
+   "run_session_listed": false,
+   "text_head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Issues Cost increased 3× last week Agent response violated policy Tool error: invalid argument Discover issues automatically Scan your traces to surface failure modes, quality regressions, and cost anomalies, then triage and fix them in one place. Run issue detection Learn how it works MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0.25"
+  },
+  "sessions": {
+   "url": "/#/experiments/0/chat-sessions",
+   "headings": [
+    "Welcome to MLflow Assistant"
+   ],
+   "mentions": [
+    "Traces",
+    "Sessions"
+   ],
+   "run_session_listed": false,
+   "text_head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Chat sessions The Sessions view has moved to the Traces tab. Select \"Sessions\" in the Traces/Sessions switcher to see the session-level view. View Sessions in Traces tab → MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 0.25"
+  }
+ },
+ "csp": []
+}

@@ -70,7 +70,8 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
-    networks: [edge, front]
+    # obs-ui: the 8443 dashboard site reaches mlflow (FR-DEPLOY-13); jaeger-ui: the 8444 site reaches jaeger
+    networks: [edge, front, obs-ui, jaeger-ui]
     healthcheck:
       # 127.0.0.1, not localhost: the admin endpoint listens on IPv4 loopback only, and busybox wget tries ::1 first.
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
@@ -86,6 +87,7 @@ services:
       core: {}
       sb-pair-1: {}
       embed: {}
+      otel: {}   # FR-DEPLOY-13: spans to rotel
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "api", "--healthcheck"]
@@ -97,7 +99,10 @@ services:
     memswap_limit: 2g
     volumes:
       - blobs:/var/lib/reader/blobs
-    networks: [core, agentnet, sb-verify, sb-agent, embed]
+      # SRV-OBS FR-OBS-26 (OPS-DEPLOY FR-DEPLOY-15): the declarative MLflow bootstrap, read by obs.setup
+      - ./otel/mlflow-setup.yaml:/etc/reader/mlflow-setup.yaml:ro
+    # otel: spans to rotel; obs: the worker's MLflow writes (retention, ADR-0035, ADR-0038) (FR-DEPLOY-13)
+    networks: [core, agentnet, sb-verify, sb-agent, embed, otel, obs]
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
@@ -194,6 +199,125 @@ services:
     <<: *kernel
     networks: [sb-pair-1]
 
+  # SRV-OBS (ADR-0032; OPS-DEPLOY FR-DEPLOY-13): the collector and the trace backend, profile `observability`.
+  # Neither holds a secret, publishes a port or reaches egress. Rotel's image entrypoint already sets its receivers
+  # (4317, 4318); repeating them fails. Its image has bash and no HTTP client, so its healthcheck is a TCP probe.
+  rotel:
+    image: streamfold/rotel:v0.2.7@sha256:7a12878dae3dc494c27def53ebcccbdc18e13389ececf33abf116af3a07c3427
+    profiles: [observability]
+    # Two named exporters (SRV-OBS FR-OBS-19, ADR-0033): MLflow and Jaeger; a named exporter reads its settings from
+    # ROTEL_EXPORTER_<NAME>_<FIELD> (measured: the ROTEL_OTLP_EXPORTER_<NAME>_* form is not read).
+    command: [--exporters, "mlflow:otlp,jaeger:otlp", --exporters-traces, "mlflow,jaeger"]
+    environment:
+      ROTEL_EXPORTER_MLFLOW_ENDPOINT: "http://mlflow:5000"
+      ROTEL_EXPORTER_MLFLOW_PROTOCOL: http
+      ROTEL_EXPORTER_MLFLOW_CUSTOM_HEADERS: x-mlflow-experiment-id=0
+      ROTEL_EXPORTER_JAEGER_ENDPOINT: "http://jaeger:4318"
+      ROTEL_EXPORTER_JAEGER_PROTOCOL: http
+    user: "10005:10005"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,uid=10005
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+    networks: [otel, obs, jaeger-in]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/4318"]
+
+  # SRV-OBS FR-OBS-29 (OPS-DEPLOY FR-DEPLOY-15): the one-shot that migrates MLflow's SQLite store before the server
+  # starts (flock, one pre-migration backup, `mlflow db upgrade`, WAL, store.version; exit codes 10..13). Same image,
+  # volume and hardening as mlflow, and no network at all.
+  mlflow-migrate:
+    image: reader-mlflow:local
+    pull_policy: build
+    build:
+      context: ..
+      dockerfile: deploy/otel/mlflow.Dockerfile
+    profiles: [observability]
+    entrypoint: [sh, /opt/reader/mlflow-migrate.sh]
+    user: "10004:10004"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=10004
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: "no"
+    network_mode: none
+    # Structural (OPS-DEPLOY FR-DEPLOY-15 (b)): one `db upgrade` of a SQLite file, half of mlflow's 1g; equal to
+    # memswap_limit, so no swap.
+    mem_limit: 512m
+    memswap_limit: 512m
+    volumes:
+      - obs_mlflow:/var/lib/mlflow
+      - ./otel/mlflow-migrate.sh:/opt/reader/mlflow-migrate.sh:ro
+
+  mlflow:
+    # MLflow 3.18.0 (SRV-OBS FR-OBS-27): every flag and variable pinned, each with its source. One uvicorn worker:
+    # SQLite has one writer (spikes/obs-stack round 9: 8 concurrent writers, 0 errors in WAL mode). Artifacts are
+    # served through the server; no CORS origin is allowed (no --cors-allowed-origins); the edge also sends
+    # frame-ancestors 'none'. No --static-prefix (8443 is MLflow's own origin), no --dev, no --expose-prometheus.
+    image: reader-mlflow:local
+    pull_policy: build
+    build:
+      context: ..   # the context is empty: deploy/otel/mlflow.Dockerfile.dockerignore excludes everything
+      dockerfile: deploy/otel/mlflow.Dockerfile
+    profiles: [observability]
+    depends_on:
+      mlflow-migrate:
+        condition: service_completed_successfully   # FR-OBS-29: the server never migrates the store itself
+    command: [mlflow, server, --host, 0.0.0.0, --port, "5000", --workers, "1",
+              --backend-store-uri, "sqlite:////var/lib/mlflow/mlflow.db",
+              --artifacts-destination, /var/lib/mlflow/artifacts, --default-artifact-root, "mlflow-artifacts:/",
+              --serve-artifacts, --allowed-hosts, "localhost:8443,mlflow:5000,mlflow", --x-frame-options, DENY]
+    environment:
+      MLFLOW_SERVER_ENABLE_JOB_EXECUTION: "false"   # no job runner (mlflow/environment_variables.py)
+      MLFLOW_DISABLE_TELEMETRY: "true"   # 3.18.0 is_telemetry_disabled() reads both of these
+      DO_NOT_TRACK: "true"
+      MLFLOW_ENABLE_AI_GATEWAY: "false"   # default true in 3.18.0; off answers 501 (spike round 9)
+      MLFLOW_ENABLE_REMOTE_ASSISTANT: "false"   # its default, pinned
+      MLFLOW_MODEL_CATALOG_URI: ""   # SRV-OBS FR-OBS-12 (c): no remote price fetch; the image's catalog is all zeros
+    user: "10004:10004"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,uid=10004
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 1g
+    memswap_limit: 1g
+    restart: unless-stopped
+    volumes:
+      - obs_mlflow:/var/lib/mlflow
+    networks: [obs, obs-ui]
+    healthcheck:
+      <<: *health
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(urllib.request.urlopen('http://127.0.0.1:5000/health',timeout=2).status!=200)"]
+
+  jaeger:
+    # The Jaeger waterfall view (SRV-OBS FR-OBS-19, ADR-0033): Rotel's second exporter, in-memory, owner only through
+    # the 8444 site. Distroless (no shell), so no healthcheck; GOMEMLIMIT keeps the Go heap below the limit.
+    image: jaegertracing/jaeger:2.23.0@sha256:3823829974ccfc2485d2e48b165579091f32295022ae80ca49704e2f4834116e
+    profiles: [observability]
+    command: [--config, /etc/jaeger/config.yaml]
+    environment:
+      GOMEMLIMIT: 200MiB
+    volumes:
+      - ./otel/jaeger.yaml:/etc/jaeger/config.yaml:ro
+    user: "10006:10006"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,uid=10006
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+    networks: [jaeger-in, jaeger-ui]
+
 networks:
   edge: {}
   egress: {}
@@ -209,9 +333,18 @@ networks:
   sb-agent: { internal: true }
   sb-pair-1: { internal: true }
   embed: { internal: true }   # ADR-0028: api, worker and embed only
+  # ADR-0032: explicit subnets (no free predefined pool on the owner's Docker Desktop, measured 2026-11-24).
+  otel: { internal: true, ipam: { config: [{ subnet: 10.230.2.0/24 }] } }     # api, worker, rotel
+  obs: { internal: true, ipam: { config: [{ subnet: 10.230.3.0/24 }] } }      # rotel, mlflow, worker (retention)
+  obs-ui: { internal: true, ipam: { config: [{ subnet: 10.230.4.0/24 }] } }   # caddy, mlflow
+  jaeger-in: { internal: true, ipam: { config: [{ subnet: 10.230.5.0/24 }] } }  # rotel, jaeger (ADR-0033)
+  jaeger-ui: { internal: true, ipam: { config: [{ subnet: 10.230.6.0/24 }] } }  # caddy, jaeger
 
 volumes:
   pgdata: { labels: { org.reader-ai.backup: include } }
   blobs: { labels: { org.reader-ai.backup: include } }
   caddy_data: { labels: { org.reader-ai.backup: exclude } }
   caddy_config: { labels: { org.reader-ai.backup: include } }
+  # ADR-0038 Decision 6 replaces ADR-0032's exclusion: Runs, datasets and versions are backed up now, always
+  # through SQLite's backup API (SRV-OBS FR-OBS-30), never as a tar of the live files.
+  obs_mlflow: { labels: { org.reader-ai.backup: include } }

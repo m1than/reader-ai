@@ -37,8 +37,48 @@ from reader.jobs.model import (
     lock_id,
 )
 from reader.jobs.states import RECONCILE_ENQUEUE, RECONCILE_STALL_LIKE, deciding_status, status_of
+from reader.obs import propagation, spans
 
 log = logging.getLogger("reader.jobs")
+READ_LIMIT_MAX: Final = 500  # FR-EVENTS-18: structural bound of recent_keys_of
+
+
+def _traceparent() -> str | None:
+    """FR-EVENTS-19: the current span's traceparent for the `trace` kwarg; a failure never fails a defer."""
+    try:
+        return propagation.current_traceparent()
+    except Exception:
+        return None
+
+
+def _mark(outcome: str, code: str | None = None) -> None:
+    """FR-EVENTS-19: record the run's outcome on the job span that is current (a no-op without one)."""
+    try:
+        from opentelemetry import trace
+
+        propagation.JobSpan(trace.get_current_span()).outcome(outcome, code)
+    except Exception:
+        log.warning("job span outcome not recorded")
+
+
+def _mark_attempt(attempts: int) -> None:
+    try:
+        from opentelemetry import trace
+
+        propagation.JobSpan(trace.get_current_span()).attempt(attempts)
+    except Exception:
+        log.warning("job span attempt not recorded")
+
+async def _after_end(engine: AsyncEngine, kind: JobKind, payload: Mapping[str, Any], outcome: str) -> None:
+    """A kind's `after_end` hook, after the outcome committed; never raises (the outcome stands)."""
+    if kind.after_end is None:
+        return
+    try:
+        await kind.after_end(engine, payload, outcome)
+    except Exception as failure:  # the class name only, never the message
+        name = type(failure).__name__
+        log.warning("after_end failed: kind=%s outcome=%s error=%s", kind.name, outcome, name)
+
 
 STALLED_AFTER_S: Final = 30.0
 RECONCILE_AGE_S: Final = 60.0
@@ -166,8 +206,10 @@ class Jobs:
     # ---- registration -------------------------------------------------------------------------------------
 
     def _register(self, kind: JobKind) -> None:
-        async def task(context: procrastinate.JobContext, payload: dict[str, Any]) -> None:
-            await self._run(kind, context, payload)
+        async def task(
+            context: procrastinate.JobContext, payload: dict[str, Any], trace: str | None = None
+        ) -> None:
+            await self._run(kind, context, payload, trace)
 
         self.app.task(name=kind.name, queue=kind.queue, pass_context=True)(task)
 
@@ -180,6 +222,25 @@ class Jobs:
             name=SWEEP_TASK, queue=SWEEP_TASK, queueing_lock=SWEEP_TASK, priority=SWEEP_PRIORITY
         )(sweep_task)
         self.app.periodic(cron="* * * * *", periodic_id=SWEEP_TASK)(task)
+        for kind in self.catalog.values():
+            if kind.periodic is not None:
+                self._register_periodic(kind, *kind.periodic)
+
+    def _register_periodic(
+        self, kind: JobKind, cron: str, args_at: Callable[[Any], Mapping[str, Any]]
+    ) -> None:
+        """A tick on the sweep queue that only enqueues `kind` (its key deduplicates a slot's ticks)."""
+        from datetime import UTC, datetime
+
+        async def tick(timestamp: int) -> None:
+            try:
+                await self.enqueue(kind.name, args_at(datetime.fromtimestamp(timestamp, UTC)))
+            except Exception:
+                log.warning("periodic enqueue failed: kind=%s", kind.name)
+
+        name = f"{kind.name}.tick"
+        task = self.app.task(name=name, queue=SWEEP_TASK, queueing_lock=name, priority=SWEEP_PRIORITY)(tick)
+        self.app.periodic(cron=cron, periodic_id=name)(task)
 
     @property
     def queues(self) -> list[str]:
@@ -236,17 +297,42 @@ class Jobs:
         }
         if schedule_in > 0:
             options["schedule_in"] = {"seconds": schedule_in}
+        kwargs: dict[str, Any] = {"payload": payload}
+        trace = _traceparent()  # FR-EVENTS-19: not part of `payload`, the key or the payload checks
+        if trace is not None and kind.traced:  # FR-EVENTS-32: an untraced kind gets no trace context
+            kwargs["trace"] = trace
         try:
-            job_id = await self.app.configure_task(kind.name, **options).defer_async(payload=payload)
+            job_id = await self.app.configure_task(kind.name, **options).defer_async(**kwargs)
         except pexc.AlreadyEnqueued:
             return Result("already_queued")
         return Result("queued", job_id)
 
     # ---- the worker wrapper (FR-EVENTS-4, -6) -------------------------------------------------------------
 
-    async def _run(self, kind: JobKind, context: procrastinate.JobContext, payload: dict[str, Any]) -> None:
+    async def _run(
+        self,
+        kind: JobKind,
+        context: procrastinate.JobContext,
+        payload: dict[str, Any],
+        trace: str | None = None,
+    ) -> None:
         job_id = context.job.id
         assert job_id is not None  # noqa: S101
+        try:
+            span_key = idempotency_key(kind, payload)
+        except Exception:  # judged below exactly as before; the span only needs some key
+            span_key = ""
+        if not kind.traced:  # FR-EVENTS-32 (SRV-OBS FR-OBS-5 f): no root span, so the job adds no trace
+            await self._run_in_span(kind, job_id, payload)
+            return
+        # FR-EVENTS-19: the whole run inside the job's root span, so retries and handler enqueues carry it.
+        with propagation.job_span(kind.name, job_id, span_key, payload, trace):
+            # SRV-OBS FR-OBS-12 (e): the pipeline's session is its run; the marker never raises.
+            if kind.name.startswith("pipeline.") and isinstance(payload.get("run_id"), str):
+                spans.session_marker("reader.run_id", payload["run_id"])
+            await self._run_in_span(kind, job_id, payload)
+
+    async def _run_in_span(self, kind: JobKind, job_id: int, payload: dict[str, Any]) -> None:
         key: str | None = None
         try:
             key = idempotency_key(kind, payload)
@@ -257,21 +343,28 @@ class Jobs:
                 # the cause is the run itself. Taking the key lock again in _judge serializes with the sweep.
                 if lost and not timed_out:
                     log.warning("job session lost: kind=%s job_id=%s", kind.name, job_id)
-                    await self._count_lost_run(kind, key, payload, job_id, "session_lost")
+                    dead = await self._count_lost_run(kind, key, payload, job_id, "session_lost")
+                    _mark("dead" if dead else "failed", "session_lost")
                     raise JobFailed("session_lost")
                 await self._judge(kind, key, payload, job_id, error, timed_out)
-        except JobFailed, asyncio.CancelledError:
-            raise  # JobFailed carries only a code; cancellation is a shutdown abort (procrastinate: aborted)
+        except JobFailed:
+            raise  # JobFailed carries only a code
+        except asyncio.CancelledError:
+            _mark("aborted")
+            raise  # cancellation is a shutdown abort (procrastinate: aborted)
         except Exception:  # a database or wrapper failure: never let its message or args out
             log.warning("job wrapper failed: kind=%s job_id=%s", kind.name, job_id)
+            dead = False
             if key is not None:  # without a key (payload not keyable) there is no key row to count against
-                await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
+                dead = await self._count_lost_run(kind, key, payload, job_id, "wrapper_error")
+            _mark("dead" if dead else "failed", "wrapper_error")
             raise JobFailed("wrapper_error") from None
 
     async def _count_lost_run(
         self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int, code: str
-    ) -> None:
-        """Count a run that ended without a judged outcome, unless the sweep already counted it.
+    ) -> bool:
+        """Count a run that ended without a judged outcome, unless the sweep already counted it. True when
+        this count ended the key dead (the job span then says `dead`, FR-EVENTS-19).
 
         On a fresh connection, under the key lock: while this job is still `doing` and the key has no outcome,
         no one else has counted the run (the sweep finishes the jobs it counts), so it is counted here like a
@@ -279,8 +372,9 @@ class Jobs:
         counted here; the job ends `failed` and FR-EVENTS-15 counts it after 60 s.
         """
         step = "count"
+        dead = False
         try:
-            enqueue = False
+            enqueue = counted_dead = False
             async with self.engine.begin() as conn:
                 await _lock(conn, key)
                 status = (
@@ -290,9 +384,11 @@ class Jobs:
                 ).scalar()
                 row = await _row(conn, kind.name, key)
                 if status != "doing" or row is None or row["outcome"] is not None:
-                    return
+                    return False
                 counted = await _count(conn, kind, key, code, job_id)
+                counted_dead = counted is not None and counted[1]
                 enqueue = counted is not None and not counted[1]
+            dead = counted_dead  # only once the transaction that recorded it has committed
             if enqueue:
                 step = "re-enqueue"
                 await self._defer(kind, key, payload, {"outcome": None, "job_id": None}, 0)
@@ -301,6 +397,9 @@ class Jobs:
                 log.warning("lost run not counted: kind=%s job_id=%s", kind.name, job_id)
             else:
                 log.warning("lost run counted, re-enqueue failed: kind=%s job_id=%s", kind.name, job_id)
+        if dead:
+            await _after_end(self.engine, kind, payload, "dead")
+        return dead
 
     async def _attempt(
         self, kind: JobKind, key: str, payload: dict[str, Any], job_id: int
@@ -312,14 +411,19 @@ class Jobs:
             row = await _row(conn, kind.name, key)
             if row is None:
                 log.warning("job without key row: kind=%s job_id=%s", kind.name, job_id)
+                _mark("failed", "no_key_row")
                 raise JobFailed("no_key_row")
             if row["outcome"] is not None:
                 log.info("job skipped: kind=%s job_id=%s outcome=%s", kind.name, job_id, row["outcome"])
+                _mark("skipped")
                 return None
             attempts = int(row["attempts"])
+            _mark_attempt(attempts)
             if attempts >= kind.max_attempts:
                 await _set_outcome(conn, kind.name, key, "dead", "exhausted", job_id)
                 await tx.commit()
+                _mark("dead", "exhausted")
+                await _after_end(self.engine, kind, payload, "dead")
                 raise JobFailed("exhausted")
             deadline = asyncio.timeout(kind.timeout_s)
             try:
@@ -335,8 +439,11 @@ class Jobs:
                         job_id,
                         winner["outcome"] if winner else None,
                     )
+                    _mark("skipped")
                     return None
                 await tx.commit()
+                _mark("succeeded")
+                await _after_end(self.engine, kind, payload, "succeeded")
                 return None
             except asyncio.CancelledError:
                 with contextlib.suppress(Exception):
@@ -368,6 +475,9 @@ class Jobs:
         async with self.engine.begin() as conn:
             await _lock(conn, key)
             counted = await _count(conn, kind, key, code, job_id, dead=not transient)
+        _mark("dead" if counted is not None and counted[1] else "failed", code)
+        if counted is not None and counted[1]:
+            await _after_end(self.engine, kind, payload, "dead")
         if counted is not None:
             attempts, dead = counted
             log.info("job failed: kind=%s job_id=%s attempts=%s code=%s", kind.name, job_id, attempts, code)
@@ -461,7 +571,7 @@ class Jobs:
                 if await self._finish(job, Status.FAILED):
                     report.finished.append(job_id)
                 continue
-            enqueue = False
+            enqueue = counted_dead = False
             finish_status = Status.FAILED
             async with self.engine.begin() as conn:
                 if not await _try_lock(conn, key):
@@ -476,8 +586,11 @@ class Jobs:
                     counted = await _count(conn, kind, key, "stalled", job_id)
                     if counted is not None and counted[1]:
                         report.dead.append(key)
+                        counted_dead = True  # this iteration's own count
                     else:
                         enqueue = True
+            if counted_dead and row is not None:  # reached only after the commit
+                await _after_end(self.engine, kind, row["args"], "dead")
             if enqueue and row is not None and await self._sweep_defer(kind, key, row["args"]):
                 report.reenqueued.append(key)
             if await self._finish(job, finish_status):
@@ -499,6 +612,7 @@ class Jobs:
         for kind_name, key in candidates:
             kind = self.catalog.get(kind_name)
             action = "-"
+            counted_dead = False
             row: Mapping[str, Any] | None = None
             async with self.engine.begin() as conn:
                 if not await _try_lock(conn, key):
@@ -516,9 +630,12 @@ class Jobs:
                     counted = await _count(conn, kind, key, "orphaned", newest)
                     if counted is not None and counted[1]:
                         report.dead.append(key)
+                        counted_dead = True  # this iteration's own count
                         action = "-"
                     else:
                         action = RECONCILE_ENQUEUE
+            if counted_dead and kind is not None and row is not None:  # reached only after the commit
+                await _after_end(self.engine, kind, row["args"], "dead")
             if (
                 action == RECONCILE_ENQUEUE
                 and kind is not None
@@ -564,3 +681,77 @@ async def job_status_of(conn: AsyncConnection, kind_name: str, key: str) -> str:
     row = await _row(conn, kind_name, key)
     deciding = deciding_status(await _job_statuses(conn, key))
     return status_of(deciding, row["outcome"] if row else None, row is not None)[0]
+
+
+async def dead_error_code_of(conn: AsyncConnection, kind_name: str, key: str) -> str | None:
+    """FR-EVENTS-17: the key's `error_code` when its outcome is `dead`; None for no row or another outcome."""
+    code = (
+        await conn.execute(
+            text("SELECT error_code FROM job_keys WHERE kind = :kind AND key = :key AND outcome = 'dead'"),
+            {"kind": kind_name, "key": key},
+        )
+    ).scalar()
+    return None if code is None else str(code)
+
+
+@dataclass(frozen=True)
+class KeyRow:
+    """A `job_keys` row as FR-EVENTS-18 publishes it (read-only)."""
+
+    kind: str
+    key: str
+    args: dict[str, Any]
+    outcome: str | None
+    error_code: str | None
+    job_id: int | None
+    attempts: int
+    created_at: Any
+    finished_at: Any
+
+
+_KEY_ROW_COLUMNS: Final = (
+    "kind, key, args::text AS args, outcome, error_code, job_id, attempts, created_at, finished_at"
+)
+
+
+def _key_row(row: Any) -> KeyRow:
+    return KeyRow(
+        str(row.kind), str(row.key), json.loads(row.args), row.outcome, row.error_code,
+        None if row.job_id is None else int(row.job_id), int(row.attempts), row.created_at, row.finished_at,
+    )
+
+
+async def key_rows_of(conn: AsyncConnection, keys: Iterable[str]) -> list[KeyRow]:
+    """FR-EVENTS-18: rows for keys of any kinds; a row is returned only when its kind is its key's prefix."""
+    wanted = list(keys)
+    if not wanted:
+        return []
+    rows = await conn.execute(text(KEY_ROWS_SQL), {"keys": wanted})
+    return [_key_row(r) for r in rows]
+
+
+# The kind is the key's `<kind>:` prefix, so a row whose kind differs from its key's prefix never matches, and
+# the primary key (kind, key) serves the lookup (the db test checks both, with EXPLAIN).
+KEY_ROWS_SQL: Final = (
+    f"SELECT {_KEY_ROW_COLUMNS} FROM job_keys"  # noqa: S608 (fixed columns)
+    " WHERE (kind, key) IN (SELECT split_part(k, ':', 1), k FROM unnest(CAST(:keys AS text[])) AS k)"
+)
+
+
+async def recent_keys_of(
+    conn: AsyncConnection, kind_names: Iterable[str], outcome: str, since: Any, limit: int
+) -> tuple[list[KeyRow], bool]:
+    """FR-EVENTS-18: rows of these kinds with this outcome, finished since `since`, newest first, at most
+    `limit` (1..500); `truncated` is True when exactly `limit` rows came back."""
+    if not 1 <= limit <= READ_LIMIT_MAX:
+        raise JobError("limit")
+    rows = await conn.execute(
+        text(
+            f"SELECT {_KEY_ROW_COLUMNS} FROM job_keys"  # noqa: S608 (fixed columns)
+            " WHERE kind = ANY(:kinds) AND outcome = :outcome"
+            " AND finished_at >= :since ORDER BY finished_at DESC, key LIMIT :limit"
+        ),
+        {"kinds": list(kind_names), "outcome": outcome, "since": since, "limit": limit},
+    )
+    found = [_key_row(r) for r in rows]
+    return found, len(found) == limit

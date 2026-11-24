@@ -1,6 +1,7 @@
 // SRV-AUTH FR-AUTH-14: the bootstrap and sign-in ceremonies for the two stage-1 pages (WEB-UI replaces them).
 // FR-AUTH-20: the page states and their fixed messages. The ceremony itself (routes, bodies, headers, WebAuthn calls,
 // fragment handling, the navigation on success) is unchanged by the restyle (FR-AUTH-14 amendment, 2026-11-23).
+// FR-AUTH-31: the sign-up page (ADR-0031), the sign-in `pending_approval` state and the sign-in `next` allow-list.
 // Same-origin script only (no inline code), so a `script-src 'self'` CSP holds.
 "use strict";
 
@@ -9,6 +10,10 @@
   const main = document.querySelector("main.auth");
   const status = document.getElementById("status");
   const button = document.getElementById("go");
+  const form = document.getElementById("signup-form");
+  const handleInput = document.getElementById("handle");
+  const nameInput = document.getElementById("display-name");
+  const handleHint = handleInput ? handleInput.getAttribute("aria-describedby") : null;
 
   // The bootstrap token travels in the URL fragment, which the browser never sends to a server. Read it once and
   // clear it at once, so it leaves the address bar and the history entry.
@@ -18,7 +23,8 @@
     history.replaceState(null, "", location.pathname);
   }
 
-  // FR-AUTH-20: every message the page can show. Nothing from a server response or an exception is ever displayed.
+  // FR-AUTH-20, FR-AUTH-31: every message the page can show. Nothing from a server response or an exception is ever
+  // displayed. `field` names the input a state is about: it gets focus and aria-invalid.
   const STATES = {
     ready: { message: "", button: "enabled" },
     unsupported: {
@@ -43,7 +49,10 @@
       button: "hidden",
     },
     not_registered: {
-      message: "That passkey could not be registered. Try again; if it keeps failing, run `reader bootstrap` again.",
+      message:
+        kind === "signup"
+          ? "That passkey could not be registered. Try again."
+          : "That passkey could not be registered. Try again; if it keeps failing, run `reader bootstrap` again.",
       button: "enabled",
     },
     rate_limited: { message: "Too many attempts. Try again later.", button: "enabled" },
@@ -56,17 +65,53 @@
       message: kind === "bootstrap" ? "Passkey created. Opening reader-ai…" : "Signed in. Opening reader-ai…",
       button: "disabled",
     },
+    handle_invalid: {
+      message: "Use 3–32 lower-case letters, digits and hyphens, starting with a letter.",
+      button: "enabled",
+      field: "handle",
+    },
+    display_name_invalid: {
+      message: "Enter a display name of up to 64 characters.",
+      button: "enabled",
+      field: "display-name",
+    },
+    handle_unavailable: { message: "This handle is not available. Choose another.", button: "enabled", field: "handle" },
+    signup_full: {
+      message: "Sign-ups are paused until the owner reviews the waiting requests. Try again later.",
+      button: "hidden",
+    },
+    pending: { message: "Account created. The owner must approve it before you can sign in.", button: "hidden" },
+    pending_approval: {
+      message: "This account is waiting for the owner's approval. Try again later.",
+      button: "enabled",
+    },
   };
 
-  /** Show a state. `afterCeremony` moves focus: the button when it can be used again, else the status line. */
+  const fields = { handle: handleInput, "display-name": nameInput };
+
+  /** Show a state. `afterCeremony` moves focus: the state's field, the button when it can be used again, else the
+   * status line. */
   const show = (name, afterCeremony = false, message = STATES[name].message) => {
     const state = STATES[name];
     main.dataset.state = name;
     status.textContent = message;
     button.hidden = state.button === "hidden";
     button.disabled = state.button !== "enabled";
+    for (const [key, input] of Object.entries(fields)) {
+      if (!input) continue;
+      input.disabled = name === "waiting";
+      if (state.field === key) {
+        input.setAttribute("aria-invalid", "true");
+        input.setAttribute("aria-describedby", "status");
+      } else {
+        input.removeAttribute("aria-invalid");
+        if (key === "handle" && handleHint) input.setAttribute("aria-describedby", handleHint);
+        else input.removeAttribute("aria-describedby");
+      }
+    }
     if (!afterCeremony) return;
-    if (state.button === "enabled") button.focus();
+    if (state.field && fields[state.field]) fields[state.field].focus();
+    else if (state.button === "enabled") button.focus();
     else if (state.button === "hidden") status.focus();
   };
 
@@ -116,6 +161,14 @@
     await post("/api/auth/signin/verify", credential.toJSON(), "verify");
   };
 
+  const signUp = async (handle, displayName) => {
+    const options = await post("/api/auth/signup/options", { handle, display_name: displayName }, "options");
+    const credential = await navigator.credentials.create({
+      publicKey: PublicKeyCredential.parseCreationOptionsFromJSON(options),
+    });
+    await post("/api/auth/signup/verify", credential.toJSON(), "verify");
+  };
+
   const minutes = (retryAfter) => {
     // Whole seconds, at most six digits (FR-AUTH-11's limit is at most an hour); anything else reads "later".
     if (retryAfter === null || !/^\d{1,6}$/.test(retryAfter.trim())) return STATES.rate_limited.message;
@@ -123,15 +176,24 @@
     return `Too many attempts. Try again in ${n} ${n === 1 ? "minute" : "minutes"}.`;
   };
 
-  /** FR-AUTH-20's table: the state for a failure, and its message when the message is computed. */
+  /** FR-AUTH-20's and FR-AUTH-31's table: the state for a failure, and its message when the message is computed. */
   const classify = (failure) => {
     if (failure instanceof RequestFailure) {
       const { step, httpStatus, code } = failure;
       if (httpStatus === 0 || httpStatus >= 500) return ["unreachable"];
       if (httpStatus === 429 && code === "rate_limited") return ["rate_limited", minutes(failure.retryAfter)];
       if (httpStatus === 400 && code === "signin_failed" && kind === "signin" && step === "verify") return ["rejected"];
+      if (httpStatus === 403 && code === "pending_approval" && kind === "signin" && step === "verify") {
+        return ["pending_approval"];
+      }
       if (httpStatus === 400 && code === "bootstrap_failed" && kind === "bootstrap") {
         return [step === "options" ? "expired" : "not_registered"];
+      }
+      if (kind === "signup") {
+        if (httpStatus === 409 && code === "handle_unavailable") return ["handle_unavailable"];
+        if (httpStatus === 429 && code === "signup_full") return ["signup_full"];
+        if (httpStatus === 400 && code === "display_name_invalid" && step === "options") return ["display_name_invalid"];
+        if (httpStatus === 400 && code === "signup_failed" && step === "verify") return ["not_registered"];
       }
       return ["failed"];
     }
@@ -141,21 +203,55 @@
     return ["failed"];
   };
 
+  // The sign-up page's own checks (FR-AUTH-25's form rules), before any request.
+  const HANDLE = /^[a-z][a-z0-9-]{2,31}$/;
+  const handleOk = (h) => HANDLE.test(h) && !h.includes("--") && !h.endsWith("-");
+
   const run = async () => {
+    let handle = "";
+    let displayName = "";
+    if (kind === "signup") {
+      handle = handleInput.value;
+      displayName = nameInput.value.trim();
+      if (!handleOk(handle)) {
+        show("handle_invalid", true);
+        return;
+      }
+      if (displayName === "") {
+        show("display_name_invalid", true);
+        return;
+      }
+    }
     show("waiting");
     try {
-      await (kind === "bootstrap" ? register() : signIn());
+      if (kind === "bootstrap") await register();
+      else if (kind === "signup") await signUp(handle, displayName);
+      else await signIn();
     } catch (failure) {
       const [name, message] = classify(failure);
       show(name, true, message ?? STATES[name].message);
       return;
     }
+    if (kind === "signup") {
+      show("pending", true);
+      return;
+    }
     show("done");
-    location.assign("/");
+    // FR-AUTH-31, FR-AUTH-47: the sign-in page compares its raw query with each allow-listed value and navigates to
+    // that value's constant, never to the input; the other pages never read the query.
+    const target =
+      kind !== "signin"
+        ? "/"
+        : location.search === "?next=/signups"
+          ? "/signups"
+          : location.search === "?next=/settings"
+            ? "/settings"
+            : "/";
+    location.assign(target);
   };
 
   const pkc = window.PublicKeyCredential;
-  const parse = kind === "bootstrap" ? "parseCreationOptionsFromJSON" : "parseRequestOptionsFromJSON";
+  const parse = kind === "signin" ? "parseRequestOptionsFromJSON" : "parseCreationOptionsFromJSON";
   if (kind === "bootstrap" && !token) {
     show("no_token");
     return;
@@ -165,5 +261,12 @@
     return;
   }
   show("ready");
-  button.addEventListener("click", run);
+  if (form) {
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      run();
+    });
+  } else {
+    button.addEventListener("click", run);
+  }
 })();

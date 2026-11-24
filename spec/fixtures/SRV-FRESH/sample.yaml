@@ -1,0 +1,91 @@
+# VEC-FRESH-4 — synthetic materials (spans, outlines; no book text) with their expected samples (FR-FRESH-2), topics
+# (FR-FRESH-4) and one scan_inputs_sha256 (FR-FRESH-3). Bounds are the spec's: front_pages 6, front_chars_max 8,000,
+# span_chars_max 1,500, sample_chars_max 60,000. Expected values worked by hand from the rules:
+#   - front spans: pages ≤ 6 in seq order, each cut to 1,500 at a word boundary, until the next would pass 8,000;
+#   - the other spans of kind text, list_item, table or code, grouped by level-1 outline entries (from their page
+#     to the next entry's page; spans before the first entry go to the first section) or, without them, by
+#     ceil(page_count / 20) pages; ranked by score (version numbers, years 1990–2099, listed word stems) then seq;
+#     taken round-robin by rank until the next would pass 60,000.
+# `spans` rows are [seq, page, kind, text]. `generate` builds spans by a rule stated next to it.
+
+cases:
+  - name: outline_sections
+    language: en
+    page_count: 30
+    outline:  # [seq, level, title, page]
+      - [0, 1, "Ledgers", 7]
+      - [1, 2, "Blocks​ and  chains", 8]  # a zero-width space and a double space: sanitised in topics
+      - [2, 1, "Consensus", 15]
+      - [3, 3, "Deep detail", 16]               # level 3: not a topic
+      - [4, 1, "Clients", 22]
+    spans:
+      - [0, 1, heading, "Practical Distributed Ledgers"]
+      - [1, 2, text, "Third edition, Example Press, 2019."]
+      - [2, 7, text, "alpha beta gamma delta"]                  # section 0, score 0
+      - [3, 8, text, "version 2.1 released in 2018"]           # section 0, score 4 (2.1, 2018, version, release)
+      - [4, 9, code, "x = 1"]                                  # section 0, score 0
+      - [5, 15, text, "the protocol is current"]               # section 1, score 1
+      - [6, 16, figure, "Figure caption 2020"]                 # kind figure: never sampled
+      - [7, 22, list_item, "deprecated API in 3.0"]            # section 2, score 2
+      - [8, 23, text, "plain words here"]                      # section 2, score 0
+    expect:
+      front: [0, 1]
+      seqs: [0, 1, 2, 3, 4, 5, 7, 8]
+      chars: 179            # 29 + 35 front, 22 + 28 + 5 + 23 + 21 + 16 body
+      topics: [[0, "Ledgers", 1], [1, "Blocks and chains", 2], [2, "Consensus", 1], [4, "Clients", 1]]
+
+  - name: more_sections_than_budget
+    language: en
+    page_count: 120
+    # 50 level-1 entries at pages 11, 13, …, 109 (seq i, title "Part <i>"). Section i holds two 1,500-character
+    # spans: seq 2i on page 11 + 2i, text "version " × 187 + "abcd" (high score), and seq 2i + 1 on page 12 + 2i,
+    # text "lorem " × 249 + "ipsum1" (score 0). No span sits on pages 1–6, so there are no front spans. 60,000 / 1,500
+    # = 40 spans fit: the rank-1 spans of sections 0–39; the 41st rank-1 span would pass the budget, so the walk
+    # stops and no section gets a second span.
+    generate: { sections: 50, first_page: 11 }
+    expect:
+      front: []
+      seqs: [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38,
+             40, 42, 44, 46, 48, 50, 52, 54, 56, 58, 60, 62, 64, 66, 68, 70, 72, 74, 76, 78]
+      chars: 60000
+
+  - name: no_outline
+    language: en
+    page_count: 45          # ceil(45 / 20) = 3 pages per section
+    outline: []
+    spans:
+      - [0, 1, text, "Title page"]
+      - [1, 7, text, "alpha"]            # pages 7–9: section 2, score 0
+      - [2, 8, text, "version 1.2"]      # section 2, score 2
+      - [3, 10, text, "beta 2021"]       # pages 10–12: section 3, score 1
+      - [4, 40, table, "gamma"]          # pages 40–42: section 13
+    expect:
+      front: [0]
+      seqs: [0, 1, 2, 3, 4]
+      chars: 40             # 10 + 5 + 11 + 9 + 5
+      topics: []
+
+  - name: front_budget_and_cut
+    language: en
+    page_count: 10          # no outline: one page per section
+    outline: []
+    # seq 0–6 on pages 1, 2, 3, 4, 5, 6, 6, each "lorem " × 249 + "ipsum1" (1,500 characters, score 0). The front
+    # takes seq 0–4 (7,500); seq 5 would make 9,000 > 8,000, so the front stops and seq 5 and 6 become body spans
+    # of section 5 (page 6). seq 7 on page 9 is "word " × 320 (1,600 characters): cut at the word boundary before
+    # 1,500 gives 300 words, 1,499 characters. Rank 1: seq 5, seq 7; rank 2: seq 6. 7,500 + 1,500 + 1,499 + 1,500.
+    generate: { front_budget: true }
+    expect:
+      front: [0, 1, 2, 3, 4]
+      seqs: [0, 1, 2, 3, 4, 5, 6, 7]
+      chars: 11999
+
+scan_inputs:
+  # canonical JSON (sorted keys, no spaces, UTF-8) of the reuse key, and its sha256 (FR-FRESH-3)
+  ingest: "00000000-0000-4000-8000-000000000001"
+  spans: ["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:3"]
+  prompt_version: v1
+  prompt_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  model: claude-sonnet-5-5
+  canonical: '{"ingest":"00000000-0000-4000-8000-000000000001","model":"claude-sonnet-5-5","prompt_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prompt_version":"v1","spans":["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:0","aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:3"]}'
+  sha256: 4fb18a8de5bd2fca47e26bfe177bb1d458b511871683c7402463b8fc1387aad9

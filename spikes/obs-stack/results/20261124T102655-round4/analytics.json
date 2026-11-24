@@ -1,0 +1,1786 @@
+{
+ "traces": {
+  "tutor_baseline": {
+   "trace_id": "76b2fa3eb15904ef11fbb599ce8f0cb6",
+   "variant": "baseline",
+   "ms": 4000,
+   "ledger_usd": 0.05,
+   "usage": [
+    20,
+    300,
+    9000,
+    0
+   ]
+  },
+  "tutor_fast": {
+   "trace_id": "a0fa2e8b2bde44ac419cd7427c506bd3",
+   "variant": "proposed",
+   "ms": 2000,
+   "ledger_usd": 0.03,
+   "usage": [
+    20,
+    200,
+    9000,
+    0
+   ]
+  },
+  "tutor_slow": {
+   "trace_id": "bc3ee7a99f6fa93dac1f3c4d65fe151d",
+   "variant": "proposed",
+   "ms": 9000,
+   "ledger_usd": 0.11,
+   "usage": [
+    30,
+    900,
+    9000,
+    2000
+   ]
+  },
+  "stage_fact_check": {
+   "trace_id": "49670206c80478767ee96cca605a493b",
+   "variant": "proposed",
+   "ms": 40000,
+   "ledger_usd": 0.21,
+   "usage": [
+    50,
+    4000,
+    30000,
+    8000
+   ]
+  },
+  "stage_review_dead": {
+   "trace_id": "e1141a123029e3c05de312377960bbf6",
+   "variant": "proposed",
+   "ms": 60000,
+   "ledger_usd": 0.3,
+   "usage": [
+    50,
+    6000,
+    30000,
+    8000
+   ]
+  },
+  "stage_draft_with_cost": {
+   "trace_id": "d84a62a82f3eb721cb5867d51dbbf0c3",
+   "variant": "with_cost",
+   "ms": 95000,
+   "ledger_usd": 0.62,
+   "usage": [
+    80,
+    12000,
+    40000,
+    9000
+   ]
+  },
+  "compile_like": {
+   "trace_id": "4d29fb0fd98bdbb883821d1ac935699b",
+   "variant": "compile_like"
+  },
+  "http_ok": {
+   "trace_id": "cf46c853c7cb1194f274fa46a14694e9",
+   "variant": "http"
+  },
+  "http_500": {
+   "trace_id": "cb96512c4c18c1dc1ca31d5457f8ecd3",
+   "variant": "http"
+  }
+ },
+ "views": {
+  "tutor_baseline": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 20, \"output_tokens\": 300, \"total_tokens\": 320}",
+    "mlflow.trace.cost": "{\"input_cost\": 3.9999999999999996e-05, \"output_cost\": 0.003, \"total_cost\": 0.00304}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "os.version": "6",
+    "host.arch": "arm64",
+    "service.name": "claude-code",
+    "service.version": "2.1.330",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-76b2fa3eb15904ef11fbb599ce8f0cb6/artifacts",
+    "os.type": "linux"
+   },
+   "state": "OK",
+   "execution_duration": "4s",
+   "spans": [
+    {
+     "name": "job tutor.answer"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 20
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 300
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 320
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 3.9999999999999996e-05
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.003
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.00304
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 9020
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 300
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 9320
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 0
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0009400000000000001
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.003
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.00394
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "tutor_fast": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 9020, \"output_tokens\": 200, \"total_tokens\": 9220, \"cache_read_input_tokens\": 9000, \"cache_creation_input_tokens\": 0}",
+    "mlflow.trace.cost": "{\"input_cost\": 0.0009400000000000001, \"output_cost\": 0.002, \"total_cost\": 0.00294}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "reader.job.outcome": "succeeded",
+    "mlflow.traceName": "job tutor.answer",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-a0fa2e8b2bde44ac419cd7427c506bd3/artifacts",
+    "host.arch": "arm64",
+    "reader.job.kind": "tutor.answer",
+    "service.version": "2.1.330",
+    "os.version": "6",
+    "os.type": "linux"
+   },
+   "state": "OK",
+   "execution_duration": "2s",
+   "spans": [
+    {
+     "name": "job tutor.answer",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 9020
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 200
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 9220
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 0
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 9020
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 200
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 9220
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 0
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0009400000000000001
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.002
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.00294
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "tutor_slow": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 11030, \"output_tokens\": 900, \"total_tokens\": 11930, \"cache_read_input_tokens\": 9000, \"cache_creation_input_tokens\": 2000}",
+    "mlflow.trace.cost": "{\"input_cost\": 0.00596, \"output_cost\": 0.009000000000000001, \"total_cost\": 0.014960000000000001}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "reader.job.outcome": "succeeded",
+    "mlflow.traceName": "job tutor.answer",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-bc3ee7a99f6fa93dac1f3c4d65fe151d/artifacts",
+    "host.arch": "arm64",
+    "reader.job.kind": "tutor.answer",
+    "service.version": "2.1.330",
+    "os.version": "6",
+    "os.type": "linux"
+   },
+   "state": "OK",
+   "execution_duration": "9s",
+   "spans": [
+    {
+     "name": "job tutor.answer",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 11030
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 900
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 11930
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 2000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 11030
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 900
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 11930
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 2000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.00596
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.009000000000000001
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.014960000000000001
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "stage_fact_check": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 38050, \"output_tokens\": 4000, \"total_tokens\": 42050, \"cache_read_input_tokens\": 30000, \"cache_creation_input_tokens\": 8000}",
+    "mlflow.trace.session": "10000000-0000-4000-8000-0000000000aa",
+    "mlflow.trace.cost": "{\"input_cost\": 0.0231, \"output_cost\": 0.04, \"total_cost\": 0.0631}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "reader.job.outcome": "succeeded",
+    "mlflow.traceName": "job pipeline.stage",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-49670206c80478767ee96cca605a493b/artifacts",
+    "reader.stage": "fact_check",
+    "host.arch": "arm64",
+    "reader.job.kind": "pipeline.stage",
+    "service.version": "2.1.330",
+    "os.version": "6",
+    "os.type": "linux"
+   },
+   "state": "OK",
+   "execution_duration": "40s",
+   "spans": [
+    {
+     "name": "job pipeline.stage",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 38050
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 4000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 42050
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 30000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 8000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 38050
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 4000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 42050
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 30000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 8000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0231
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.04
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.0631
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "stage_review_dead": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 38050, \"output_tokens\": 6000, \"total_tokens\": 44050, \"cache_read_input_tokens\": 30000, \"cache_creation_input_tokens\": 8000}",
+    "mlflow.trace.session": "10000000-0000-4000-8000-0000000000aa",
+    "mlflow.trace.cost": "{\"input_cost\": 0.0231, \"output_cost\": 0.060000000000000005, \"total_cost\": 0.08310000000000001}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "reader.job.outcome": "dead",
+    "mlflow.traceName": "job pipeline.stage",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-e1141a123029e3c05de312377960bbf6/artifacts",
+    "reader.stage": "review",
+    "host.arch": "arm64",
+    "reader.error_code": "exhausted",
+    "reader.job.kind": "pipeline.stage",
+    "service.version": "2.1.330",
+    "os.version": "6",
+    "os.type": "linux"
+   },
+   "state": "ERROR",
+   "execution_duration": "60s",
+   "spans": [
+    {
+     "name": "job pipeline.stage",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 38050
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 6000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 44050
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 30000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 8000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 38050
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 6000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 44050
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 30000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 8000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0231
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.060000000000000005
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.08310000000000001
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "stage_draft_with_cost": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 49080, \"output_tokens\": 12000, \"total_tokens\": 61080, \"cache_read_input_tokens\": 40000, \"cache_creation_input_tokens\": 9000}",
+    "mlflow.trace.session": "10000000-0000-4000-8000-0000000000aa",
+    "mlflow.trace.cost": "{\"input_cost\": 0.0, \"output_cost\": 0.0, \"total_cost\": 0.62}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "reader.job.outcome": "succeeded",
+    "mlflow.traceName": "job pipeline.stage",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-d84a62a82f3eb721cb5867d51dbbf0c3/artifacts",
+    "reader.stage": "draft",
+    "host.arch": "arm64",
+    "reader.job.kind": "pipeline.stage",
+    "service.version": "2.1.330",
+    "os.version": "6",
+    "os.type": "linux"
+   },
+   "state": "OK",
+   "execution_duration": "95s",
+   "spans": [
+    {
+     "name": "job pipeline.stage",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 49080
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 12000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 61080
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 40000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.0
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.0
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.62
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT",
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 49080
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 12000
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 61080
+        }
+       },
+       {
+        "key": "cache_read_input_tokens",
+        "value": {
+         "int_value": 40000
+        }
+       },
+       {
+        "key": "cache_creation_input_tokens",
+        "value": {
+         "int_value": 9000
+        }
+       }
+      ]
+     },
+     "mlflow.llm.cost": {
+      "values": [
+       {
+        "key": "input_cost",
+        "value": {
+         "double_value": 0.026660000000000003
+        }
+       },
+       {
+        "key": "output_cost",
+        "value": {
+         "double_value": 0.12000000000000001
+        }
+       },
+       {
+        "key": "total_cost",
+        "value": {
+         "double_value": 0.14666
+        }
+       }
+      ]
+     },
+     "mlflow.llm.model": "claude-sonnet-5-5",
+     "mlflow.llm.provider": "anthropic"
+    }
+   ]
+  },
+  "compile_like": {
+   "status": 200,
+   "metadata": {
+    "mlflow.trace.tokenUsage": "{\"input_tokens\": 1200, \"output_tokens\": 600, \"total_tokens\": 1800}"
+   },
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "mlflow.traceName": "job pipeline.stage",
+    "service.name": "claude-code",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-4d29fb0fd98bdbb883821d1ac935699b/artifacts",
+    "host.arch": "arm64",
+    "service.version": "2.1.330",
+    "os.version": "6",
+    "os.type": "linux"
+   },
+   "state": "OK",
+   "execution_duration": "72s",
+   "spans": [
+    {
+     "name": "job pipeline.stage",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "stage draft",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "stage fact_check",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "stage review",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "stage revise",
+     "mlflow.spanType": "CHAIN"
+    },
+    {
+     "name": "agent.call",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    },
+    {
+     "name": "claude_code.interaction",
+     "mlflow.spanType": "AGENT"
+    },
+    {
+     "name": "claude_code.llm_request",
+     "mlflow.spanType": "LLM",
+     "mlflow.chat.tokenUsage": {
+      "values": [
+       {
+        "key": "input_tokens",
+        "value": {
+         "int_value": 100
+        }
+       },
+       {
+        "key": "output_tokens",
+        "value": {
+         "int_value": 50
+        }
+       },
+       {
+        "key": "total_tokens",
+        "value": {
+         "int_value": 150
+        }
+       }
+      ]
+     },
+     "mlflow.llm.provider": "anthropic"
+    },
+    {
+     "name": "claude_code.tool",
+     "mlflow.spanType": "TOOL"
+    }
+   ]
+  },
+  "http_ok": {
+   "status": 200,
+   "metadata": {},
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "mlflow.traceName": "GET /api/obs/summary",
+    "service.name": "reader-worker",
+    "service.version": "0.1.0",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-cf46c853c7cb1194f274fa46a14694e9/artifacts"
+   },
+   "state": "OK",
+   "execution_duration": "0.030s",
+   "spans": [
+    {
+     "name": "GET /api/obs/summary"
+    }
+   ]
+  },
+  "http_500": {
+   "status": 200,
+   "metadata": {},
+   "tags": {
+    "mlflow.trace.spansLocation": "TRACKING_STORE",
+    "mlflow.traceName": "GET /api/lessons/{lesson_id}",
+    "service.name": "reader-worker",
+    "service.version": "0.1.0",
+    "mlflow.artifactLocation": "mlflow-artifacts:/0/traces/tr-cb96512c4c18c1dc1ca31d5457f8ecd3/artifacts"
+   },
+   "state": "ERROR",
+   "execution_duration": "0.012s",
+   "spans": [
+    {
+     "name": "GET /api/lessons/{lesson_id}"
+    }
+   ]
+  }
+ },
+ "searches": {
+  "failed (state)": {
+   "status": 200,
+   "matches": [
+    "http_500",
+    "stage_review_dead"
+   ],
+   "error": null
+  },
+  "dead jobs (tag)": {
+   "status": 200,
+   "matches": [
+    "stage_review_dead"
+   ],
+   "error": null
+  },
+  "stage review (tag)": {
+   "status": 200,
+   "matches": [
+    "stage_review_dead"
+   ],
+   "error": null
+  },
+  "tutor (tag kind)": {
+   "status": 200,
+   "matches": [
+    "tutor_slow",
+    "tutor_fast"
+   ],
+   "error": null
+  },
+  "tutor (trace name)": {
+   "status": 200,
+   "matches": [
+    "tutor_slow",
+    "tutor_fast"
+   ],
+   "error": null
+  },
+  "slow tutor > 5 s": {
+   "status": 200,
+   "matches": [
+    "tutor_slow"
+   ],
+   "error": null
+  },
+  "slow > 5 s (alone)": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check",
+    "tutor_slow"
+   ],
+   "error": null
+  },
+  "slow > 5 s (tag kind)": {
+   "status": 200,
+   "matches": [
+    "tutor_slow"
+   ],
+   "error": null
+  },
+  "slowest tutor first (tag)": {
+   "status": 200,
+   "matches": [
+    "tutor_slow",
+    "tutor_fast"
+   ],
+   "error": null
+  },
+  "error code (tag)": {
+   "status": 200,
+   "matches": [
+    "stage_review_dead"
+   ],
+   "error": null
+  },
+  "span type CHAIN": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check",
+    "tutor_slow",
+    "tutor_fast"
+   ],
+   "error": null
+  },
+  "run session": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "stage_review_dead",
+    "stage_fact_check"
+   ],
+   "error": null
+  },
+  "newest first": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check"
+   ],
+   "error": null
+  },
+  "slowest first": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check"
+   ],
+   "error": null
+  },
+  "span type AGENT": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check",
+    "tutor_slow",
+    "tutor_fast"
+   ],
+   "error": null
+  },
+  "span name agent.call": {
+   "status": 200,
+   "matches": [
+    "stage_draft_with_cost",
+    "compile_like",
+    "stage_review_dead",
+    "stage_fact_check",
+    "tutor_slow",
+    "tutor_fast",
+    "tutor_baseline"
+   ],
+   "error": null
+  }
+ },
+ "metrics": {
+  "trace_count by name": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "trace_count",
+     "dimensions": {
+      "trace_name": "GET /api/lessons/{lesson_id}"
+     },
+     "values": {
+      "COUNT": 1.0
+     }
+    },
+    {
+     "metric_name": "trace_count",
+     "dimensions": {
+      "trace_name": "GET /api/obs/summary"
+     },
+     "values": {
+      "COUNT": 1.0
+     }
+    },
+    {
+     "metric_name": "trace_count",
+     "dimensions": {
+      "trace_name": "job pipeline.stage"
+     },
+     "values": {
+      "COUNT": 4.0
+     }
+    },
+    {
+     "metric_name": "trace_count",
+     "dimensions": {
+      "trace_name": "job tutor.answer"
+     },
+     "values": {
+      "COUNT": 2.0
+     }
+    }
+   ]
+  },
+  "latency p95 by name": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "latency",
+     "dimensions": {
+      "trace_name": "GET /api/lessons/{lesson_id}"
+     },
+     "values": {
+      "P95.0": 12.0
+     }
+    },
+    {
+     "metric_name": "latency",
+     "dimensions": {
+      "trace_name": "GET /api/obs/summary"
+     },
+     "values": {
+      "P95.0": 30.0
+     }
+    },
+    {
+     "metric_name": "latency",
+     "dimensions": {
+      "trace_name": "job pipeline.stage"
+     },
+     "values": {
+      "P95.0": 91550.0
+     }
+    },
+    {
+     "metric_name": "latency",
+     "dimensions": {
+      "trace_name": "job tutor.answer"
+     },
+     "values": {
+      "P95.0": 8650.0
+     }
+    }
+   ]
+  },
+  "trace status counts": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "trace_count",
+     "dimensions": {
+      "trace_status": "ERROR"
+     },
+     "values": {
+      "COUNT": 2.0
+     }
+    },
+    {
+     "metric_name": "trace_count",
+     "dimensions": {
+      "trace_status": "OK"
+     },
+     "values": {
+      "COUNT": 7.0
+     }
+    }
+   ]
+  },
+  "total_tokens sum by name": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "total_tokens",
+     "dimensions": {
+      "trace_name": "job pipeline.stage"
+     },
+     "values": {
+      "SUM": 148980.0
+     }
+    },
+    {
+     "metric_name": "total_tokens",
+     "dimensions": {
+      "trace_name": "job tutor.answer"
+     },
+     "values": {
+      "SUM": 21150.0
+     }
+    }
+   ]
+  },
+  "span total_cost sum by span name": {
+   "status": 400,
+   "data_points": "{\"error_code\": \"INVALID_PARAMETER_VALUE\", \"message\": \"Found invalid dimension(s): ['span_name']. Supported dimensions: ['span_model_name', 'span_model_provider']\", \"sqlstate\": \"KAM00\", \"error_class\": \"INVALID_PARAMETER_VALUE\"}"
+  },
+  "span total_cost sum by model": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "total_cost",
+     "dimensions": {
+      "span_model_name": "claude-sonnet-5-5"
+     },
+     "values": {
+      "SUM": 0.93774
+     }
+    }
+   ]
+  },
+  "span count by type": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "span_count",
+     "dimensions": {
+      "span_type": "AGENT"
+     },
+     "values": {
+      "COUNT": 9.0
+     }
+    },
+    {
+     "metric_name": "span_count",
+     "dimensions": {
+      "span_type": "CHAIN"
+     },
+     "values": {
+      "COUNT": 10.0
+     }
+    }
+   ]
+  },
+  "span latency p95 by type": {
+   "status": 400,
+   "data_points": "{\"error_code\": \"INVALID_PARAMETER_VALUE\", \"message\": \"Found invalid dimension(s): ['span_type']. Supported dimensions: ['span_name', 'span_status']\", \"sqlstate\": \"KAM00\", \"error_class\": \"INVALID_PARAMETER_VALUE\"}"
+  },
+  "tokens by name (tutor)": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "total_tokens",
+     "dimensions": {
+      "trace_name": "job tutor.answer"
+     },
+     "values": {
+      "SUM": 21150.0
+     }
+    }
+   ]
+  },
+  "tagged: trace_count of dead": {
+   "status": 200,
+   "data_points": [
+    {
+     "metric_name": "trace_count",
+     "values": {
+      "COUNT": 1.0
+     }
+    }
+   ]
+  }
+ }
+}

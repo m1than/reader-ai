@@ -23,6 +23,9 @@ status: approved
 approved_by: agent
 approved_at: 2026-11-20
 review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code review round 1 changes (applied).
+  Paired change 2026-11-23 (for SRV-FRESH, ADR-0030 accepted by the owner): deploy/reader.example.yaml gains the
+  tasks freshness_scan (sonnet), freshness_web (haiku) and freshness_report (sonnet) (FR-DEPLOY-12 note); no test
+  of this module changed.
   Paired change 2026-11-21 (coordinator-scheduled, for SRV-LESSON and SRV-INGEST, the first writers to blobs): FR-DEPLOY-5
   adds the blobs mount point owned by 10001 in server.Dockerfile; measured by the SRV-LESSON reviewer (a 10001-owned
   image dir gives a fresh volume 10001:10001 755, writable under --cap-drop ALL --read-only).
@@ -36,7 +39,19 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   (the precheck now maps the checkpoint; 3g kept, memory.peak 2,114 MiB cold, memory.events max 0) and `init: true`
   added; the config test checks `init`. Round 2 (approve, 2026-11-23): the limit is sized on memory.stat anon
   (max 1,192 MiB), not memory.peak, which counts the reclaimable mapped weights; embed.Dockerfile fetches the model
-  before copying the service (FR-DEPLOY-2, -9)."
+  before copying the service (FR-DEPLOY-2, -9).
+  Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted by the owner; SRV-OBS design review rounds 1–4, approve):
+  FR-DEPLOY-13 adds profile `observability` (rotel, mlflow), networks otel/obs/obs-ui, volume obs_mlflow, the 8443
+  Caddy site, mlflow's environment allow-list; FR-DEPLOY-12's example gains `observability`; VEC-DEPLOY-2 extended.
+  Reviewed in SRV-OBS's code review.
+  Paired change 2026-11-23 (for SRV-INGEST revision 2, ADR-0029 accepted by the owner): FR-DEPLOY-14 (drafted and
+  promoted as FR-DEPLOY-13; renumbered at the merge into V/slice-integration, 2026-11-24, because SRV-OBS's item
+  took that id first; ADR-0029's text still says FR-DEPLOY-13), drafted on V/onboarding and reviewed in its
+  deep-reviewer rounds 1–7, promoted on V/upload-impl with its Red tests; it also states the converter-source-hash
+  line of server.Dockerfile that SRV-INGEST FR-INGEST-23 names (round 4). Its test reformatted for ruff (line
+  length, split assertions), no oracle change. The [image] `caddy adapt` test's set of proxied paths gains
+  `/api/materials/uploads` (same api upstream), as FR-DEPLOY-14 requires; at the merge it sits beside SRV-OBS's
+  8443 site and its upstreams."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -280,10 +295,102 @@ requirements:
     text: >-
       `deploy/reader.example.yaml` is the single documented example configuration: it loads through SRV-CONFIG's
       `load_config` without errors, holds secret references only, uses `instance.url: https://localhost`, and contains
-      all nine top-level sections of SRV-CONFIG's field table (version, instance, users, tasks, budgets, kernels,
-      materials, sectors, sharing). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
+      all ten top-level sections of SRV-CONFIG's field table (version, instance, users, tasks, budgets, kernels,
+      materials, sectors, sharing, observability). [config, VEC-DEPLOY-1] Its compile task budgets are spent per compile run and
       sized for two worst-case calls each (paired SRV-AGENT/SRV-PIPELINE change, 2026-11-22): draft 4.0, fact_check
-      2.0, review 4.0.
+      2.0, review 4.0. Paired SRV-OBS change (2026-11-24): a tenth section `observability` (SRV-CONFIG FR-CONFIG-17),
+      so the example has all ten sections. Paired SRV-FRESH change (2026-11-23): the freshness check's three tasks
+      `freshness_scan: { model: sonnet }`, `freshness_web: { model: haiku }`, `freshness_report: { model: sonnet }`
+      (caps are SRV-FRESH's own bounds, not task budgets).
+  - id: FR-DEPLOY-13
+    text: >-
+      Observability (paired SRV-OBS change, ADR-0032 accepted 2026-11-24; this item amends FR-DEPLOY-1, -3, -5, -6, -7,
+      -9, -11 and INV-DEPLOY-2, -3, -4 for these services only). Profile `observability`: `rotel`
+      (`streamfold/rotel:v0.2.7@sha256:7a12878dae3dc494c27def53ebcccbdc18e13389ececf33abf116af3a07c3427`, the image's
+      entrypoint, command exactly `[--exporter, otlp, --otlp-exporter-endpoint, "http://mlflow:5000",
+      --otlp-exporter-protocol, http, --otlp-exporter-custom-headers, x-mlflow-experiment-id=0]`, `user: "10005:10005"`,
+      mem 256m) and `mlflow` (`reader-mlflow:local` built from SRV-OBS's `deploy/otel/mlflow.Dockerfile`, `pull_policy:
+      build`, `user: "10004:10004"`, mem 1g, command SRV-OBS FR-OBS-8's, environment exactly
+      `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false` and `MLFLOW_DISABLE_TELEMETRY=true`, volume `obs_mlflow` at
+      `/var/lib/mlflow`, label `org.reader-ai.backup=exclude`). Both `read_only: true`, tmpfs `/tmp`, `cap_drop: [ALL]`,
+      `no-new-privileges`, `restart: unless-stopped`, `memswap_limit` equal to `mem_limit`, no `ports`, no secrets, and
+      the healthchecks of FR-OBS-8 with the server roles' timing. Networks, internal with explicit subnets: `otel`
+      10.230.2.0/24 = {api, worker, rotel}; `obs` 10.230.3.0/24 = {rotel, mlflow, worker}; `obs-ui` 10.230.4.0/24 =
+      {caddy, mlflow}. VEC-DEPLOY-2 gains exactly api–rotel, worker–rotel, rotel–mlflow, worker–mlflow and caddy–mlflow,
+      and the `never` pairs of SRV-OBS's paired change. The base compose.yaml publishes only 443; caddy's
+      `127.0.0.1:8443:8443` comes from OPS-CLI's override (FR-CLI-22). The Caddyfile gains the site `localhost:8443` of
+      SRV-OBS FR-OBS-9 (forward_auth to `10.230.1.10:8000` uri `/api/obs/gate`, the blocked paths as FR-OBS-9's one
+      `path_regexp` in a `handle` block, the MLflow reverse proxy with `header_up -Cookie`, `header_up -Authorization`, `header_down -Set-Cookie`,
+      `header_down -Access-Control-*`, and its CSP); `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001,
+      mlflow:5000}. INV-DEPLOY-2 (1)'s only environment entries become READER_CONFIG on the server roles plus mlflow's
+      two. Existing checks follow: `reader-mlflow:local` joins the locally built images (INV-DEPLOY-6),
+      `mlflow.Dockerfile` joins INV-DEPLOY-7's allow-list with no COPY source, FR-DEPLOY-7's "no `data:`, no
+      `unsafe-inline`" applies to the app's site only, and FR-DEPLOY-5's override test compares renders with the same
+      profiles. [config; image: `caddy adapt`] Amended by SRV-OBS V.obs-analytics (FR-OBS-12 c, FR-OBS-19; ADR-0033
+      and ADR-0035 accepted 2026-11-24): rotel's command becomes `[--exporters, "mlflow:otlp,jaeger:otlp",
+      --exporters-traces, "mlflow,jaeger"]` with the five `ROTEL_EXPORTER_{MLFLOW,JAEGER}_*` environment entries of
+      FR-OBS-19, and rotel joins `jaeger-in`; mlflow's environment adds `MLFLOW_MODEL_CATALOG_URI=` (empty), and
+      `mlflow.Dockerfile` copies exactly one source, `deploy/otel/mlflow-catalog/anthropic.json` (its .dockerignore
+      admits only that file), to replace MLflow's bundled model catalog; a service `jaeger`
+      (`jaegertracing/jaeger:2.23.0@sha256:3823829974ccfc2485d2e48b165579091f32295022ae80ca49704e2f4834116e`, user
+      10006, mem 256m, environment exactly `GOMEMLIMIT=200MiB`, the read-only bind `./otel/jaeger.yaml`, hardened like
+      the others, no healthcheck: the image has no shell) on the new internal networks `jaeger-in` 10.230.5.0/24 =
+      {rotel, jaeger} and `jaeger-ui` 10.230.6.0/24 = {caddy, jaeger}; VEC-DEPLOY-2 gains rotel–jaeger and
+      caddy–jaeger and the `never` pairs jaeger–{api, worker, mlflow, postgres, embed, agent-proxy, mcp, every
+      kernel}. The Caddyfile gains the site `localhost:8444` of FR-OBS-19, `header_up X-Reader-Site mlflow|jaeger` in
+      both forward_auth blocks, and the main site's `handle /api/obs/gate` (before `/api/*`) with `header_up
+      X-Reader-Site app`; every site strips a client's `X-Reader-Site` (`request_header -X-Reader-Site`), and the
+      8444 site answers 404 for `/api/archive*` and `/api/transform*` and 405 for any method but GET and HEAD
+      (SRV-OBS code review round 1); `caddy adapt` yields upstreams {10.230.1.10:8000, mcp:8001, mlflow:5000, jaeger:16686};
+      INV-DEPLOY-2 (1)'s environment entries add rotel's five, mlflow's third and jaeger's one.
+  - id: FR-DEPLOY-14   # paired change for SRV-INGEST revision 2 (ADR-0029, accepted by the owner 2026-11-23); was FR-DEPLOY-13 until the merge
+    text: >-
+      **Upload body limit.** The Caddyfile's site block gains, before `handle /api/*`, a `handle
+      /api/materials/uploads` with `request_body { max_size 200MiB }` and the same `reverse_proxy` as `/api/*`, so a
+      body over 209,715,200 bytes is refused with 413 at the edge (owner 2026-11-23: 200 MiB). The path matcher is
+      exact, so `/api/materials/uploads/{id}` routes keep the `/api/*` handler.
+      **Read timeout: in the api, numerically 300 s for the whole body** (SRV-INGEST FR-INGEST-18, 408
+      `body_timeout`). It is not set in Caddy: Caddy's `servers { timeouts { read_body … } }` is server-wide, so it
+      would also bound every other request, including the WebSocket kernel relays (SRV-KERNEL), and whether it is
+      cleared after the upgrade is not verified. 300 s is structural: v1 serves only `localhost` (ADR-0012), where a
+      200 MiB body takes seconds, and the bound limits how long a stalled client holds the single upload lock.
+      **Converter source hash** (the paired line SRV-INGEST FR-INGEST-23 names): `server.Dockerfile` runs SRV-INGEST
+      FR-INGEST-3's closure function (`reader.ingest.host.closure.source_sha256`) over the copied `/opt/reader/src`
+      at build and writes the hex digest to `/usr/local/share/reader/converter_source_sha256` (0444), so the api
+      compares the watcher's sha with it without importing `reader.ingest.host` at run time.
+      [unit] the config check parses the Caddyfile: exactly one `request_body` block, on exactly that path, with
+      `max_size 200MiB`, and no server-wide `read_body`; the Dockerfile writes that file from that function; [live]
+      209,715,200 bytes pass the edge and the api, and 209,715,201 bytes are 413 (SRV-INGEST FR-INGEST-18's live
+      case). The live check does not assert which of Caddy or the api answered the 413: both enforce the same cap,
+      and the config check above pins Caddy's.
+  - id: FR-DEPLOY-15
+    text: >-
+      Paired SRV-OBS phase 2 change (FR-OBS-26..33, ADR-0038). (a) The mlflow service's command and environment are
+      exactly SRV-OBS FR-OBS-27's, each flag and variable with a comment and its source: `mlflow server --host
+      0.0.0.0 --port 5000 --workers 1 --backend-store-uri sqlite:////var/lib/mlflow/mlflow.db --artifacts-destination
+      /var/lib/mlflow/artifacts --default-artifact-root mlflow-artifacts:/ --serve-artifacts --allowed-hosts
+      localhost:8443,mlflow:5000,mlflow --x-frame-options DENY`; environment exactly
+      `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, `MLFLOW_DISABLE_TELEMETRY=true`, `DO_NOT_TRACK=true`,
+      `MLFLOW_ENABLE_AI_GATEWAY=false`, `MLFLOW_ENABLE_REMOTE_ASSISTANT=false`, `MLFLOW_MODEL_CATALOG_URI=`.
+      (b) A one-shot service `mlflow-migrate` (the reader-mlflow image, the `obs_mlflow` volume, uid 10004,
+      read_only, tmpfs /tmp, cap_drop ALL, no-new-privileges, no network, `restart: "no"`, `mem_limit: 512m`
+      equal to its `memswap_limit` (no swap; a structural cap on one `db upgrade` of a SQLite file, code review
+      round 1 of phase 2)) runs
+      `deploy/otel/mlflow-migrate.sh` (FR-OBS-29: flock, the markers, the one pre-migration backup, `mlflow db
+      upgrade`, WAL, `store.version`); `mlflow` depends on it with `condition: service_completed_successfully`.
+      (c) No new healthchecks (rotel and jaeger have no shell; `obs.health` and `reader doctor` cover them).
+      (d) `deploy/otel/mlflow-setup.yaml` (VEC-OBS-6) is mounted read-only into the worker.
+      (e) The 8443 site caps request bodies at 10 MiB (`request_body max_size 10MiB`, structural).
+      (f) The `obs_mlflow` volume's backup label changes from `exclude` to `include` (ADR-0038 Decision 6 replaces
+      ADR-0032 Decision 1's exclusion); VEC-DEPLOY-3's backup list is updated. (g) Exceptions to earlier
+      [config] rules, exactly these and nothing else: `mlflow-migrate` is the one service with `network_mode:
+      none` (FR-DEPLOY-9's no-`network_mode` rule keeps every other service) and the one service without a
+      healthcheck besides jaeger (a one-shot that exits); the worker has exactly one bind in the base model, the
+      read-only `./otel/mlflow-setup.yaml:/etc/reader/mlflow-setup.yaml`, and with the override that bind plus
+      the config bind; mlflow's environment is (a)'s six entries; the Caddyfile has exactly two `request_body`
+      blocks, the upload path's 200 MiB and the 8443 site's 10 MiB. Tests: [config] the rendered model's
+      mlflow command and environment equal (a) exactly; mlflow-migrate's hardening, memory limit, network-less
+      placement and the dependency; the worker's read-only mount; the 8443 body limit in the Caddyfile; the volume's backup label.
 
 invariants:
   - id: INV-DEPLOY-1
@@ -296,7 +403,7 @@ invariants:
       `secrets`, no service `secrets` and no `env_file`, and the tmpfs `/run/secrets` (service uid, 0700, 256k) is on
       exactly the consumers of FR-DEPLOY-10 (b), each of which has `memswap_limit` equal to `mem_limit` (FR-DEPLOY-9).
       The only `environment` entry of any rendered service is `READER_CONFIG=/etc/reader/reader.yaml`, on exactly the
-      server roles (FR-DEPLOY-5). [config] (2) The source text of `deploy/compose.yaml` contains no `$` that is not
+      server roles (FR-DEPLOY-5), plus mlflow's two non-secret entries (FR-DEPLOY-13). [config] (2) The source text of `deploy/compose.yaml` contains no `$` that is not
       followed by another `$` (which rejects `${NAME}` and unbraced `$NAME` under any key, and allows only the escape
       `$$`); the allow-list of non-secret variables is empty for stage 1 (the reader.yaml path arrives through the
       override, FR-DEPLOY-5). Dockerfiles and scripts under `deploy/images/**` are out of this rule's

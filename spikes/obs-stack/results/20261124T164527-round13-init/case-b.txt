@@ -1,0 +1,11 @@
+--- init
+init exit 0
+2026/11/24 12:45:37 INFO mlflow.store.db.utils: Creating initial MLflow database tables...
+2026/11/24 12:45:37 INFO mlflow.store.db.utils: Updating database tables
+--- after init
+{"tables": 71, "alembic": [["f4a9b2c7d1e6"]]}
+--- second db upgrade
+upgrade exit 0
+{"tables": 71, "alembic": [["f4a9b2c7d1e6"]]}
+--- server
+200

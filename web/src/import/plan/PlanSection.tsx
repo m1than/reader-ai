@@ -2,9 +2,12 @@
 import { Button } from '@acme/ui/button';
 import { useEffect, useId, useRef, useState } from 'react';
 import { ApiError } from '../../app/api';
+import { textLang, useT } from '../../ui/i18n';
+import { ChevronIcon, WarningIcon } from '../../ui/icons';
 import type { Confirmed, PlanApi, PlanBody, Preview, StoredPlan } from './api';
+import en from './messages.en';
 import { message } from './messages';
-import { check, estimateLines, localDate, MINUTES, RATE, WEEKS, type Fields } from './model';
+import { check, estimateLines, estimateNotes, estimateRows, localDate, MINUTES, RATE, WEEKS, type Fields } from './model';
 
 export const PREVIEW_DEBOUNCE_MS = 300;
 
@@ -71,6 +74,7 @@ function NumberField(props: {
 
 export function PlanSection({ api, materialId, stored, locale, today = () => localDate(new Date()) }: PlanSectionProps) {
   const ids = useId();
+  const t = useT('import/plan', en);
   const [fields, setFields] = useState<Fields>({
     weeks: stored ? String(stored.inputs.total_weeks) : '',
     minutes: stored ? String(stored.inputs.minutes_per_day) : String(MINUTES.default),
@@ -90,7 +94,7 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [done, setDone] = useState<Confirmed | null>(null);
   const latest = useRef(0);
-  const { errors, value } = check(fields);
+  const { errors, value } = check(fields, t);
 
   useEffect(() => {
     if (!value) return undefined;
@@ -126,7 +130,7 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
   };
   const blur = (field: Field) => setTouched((t) => ({ ...t, [field]: true }));
 
-  const lines = preview ? estimateLines(preview, locale) : null;
+  const lines = preview ? estimateLines(preview, locale, t) : null;
   // Confirm only the plan on screen: its inputs equal the current valid fields, nothing is pending or failed.
   const current =
     shown !== null &&
@@ -155,16 +159,26 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
   };
 
   const suggest = preview?.summary.suggest ?? null;
+  // FR-IMPORT-6 (design pass): why "Create the course" is disabled, the first reason that applies.
+  const blocked: string | null = sending
+    ? t('why.creating')
+    : confirmable
+      ? null
+      : fields.weeks.trim() === ''
+        ? t('why.weeks')
+        : value === null
+          ? t('why.fields')
+          : previewError !== null && !pending && !loading
+            ? t('why.failed')
+            : pending || loading || !current
+              ? t('why.updating')
+              : t('why.unfit');
   return (
     <section className="plan" aria-labelledby={`${ids}-h`}>
       <h2 id={`${ids}-h`} tabIndex={-1}>
-        How long do you want to study this source?
+        {t('plan.heading')}
       </h2>
-      {stored && stored.started > 0 ? (
-        <p className="muted">
-          {stored.started} started {stored.started === 1 ? 'lesson keeps its' : 'lessons keep their'} pages.
-        </p>
-      ) : null}
+      {stored && stored.started > 0 ? <p className="muted">{t('plan.started', { count: stored.started, n: String(stored.started) })}</p> : null}
       <form
         noValidate
         onSubmit={(e) => {
@@ -175,7 +189,7 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
         <div className="plan-fields">
           <NumberField
             id={`${ids}-weeks`}
-            label="Total weeks"
+            label={t('plan.weeks')}
             value={fields.weeks}
             error={errors.weeks}
             shown={touched.weeks === true}
@@ -188,7 +202,7 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
           />
           <NumberField
             id={`${ids}-minutes`}
-            label="Minutes per day"
+            label={t('plan.minutes')}
             value={fields.minutes}
             error={errors.minutes}
             shown={touched.minutes === true}
@@ -201,10 +215,13 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
           />
         </div>
         <details className="plan-pace">
-          <summary>Study pace</summary>
+          <summary>
+            <ChevronIcon className="disclosure-chevron" />
+            {t('plan.pace')}
+          </summary>
           <NumberField
             id={`${ids}-rate`}
-            label="Minutes per 1,000 characters"
+            label={t('plan.rate')}
             value={fields.rate}
             error={errors.rate}
             shown={touched.rate === true}
@@ -214,56 +231,72 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
             max={RATE.max}
             step="0.01"
             inputMode="decimal"
-            hint="From your own pilot plan."
+            hint={t('plan.rate_hint')}
           />
         </details>
 
         <div className={`plan-estimate${loading && preview ? ' is-updating' : ''}`}>
           <p role="status" className="visually-hidden">
-            {loading ? 'Updating the estimate' : preview ? 'Estimate updated' : ''}
+            {loading ? t('plan.updating') : lines ? t('plan.updated', { headline: lines.headline }) : ''}
           </p>
           {previewError ? (
-            <p className="plan-error">{message(previewError)}</p>
-          ) : lines ? (
+            <p className="plan-error">{message(previewError, t)}</p>
+          ) : lines && preview ? (
             <>
-              <p className="plan-headline">{lines.headline}</p>
-              {lines.deadline ? <p className="muted">{lines.deadline}</p> : null}
-              <p className="muted">{lines.reading}</p>
-              {lines.fills ? <p>{lines.fills}</p> : null}
-              <p>{lines.course}</p>
-              {lines.first ? <p>{lines.first}</p> : null}
-              {lines.extrapolation ? <p className="muted">{lines.extrapolation}</p> : null}
               {lines.notices.length > 0 ? (
-                <div className="plan-notice">
+                <div className="plan-notice callout" data-tone="warning">
+                  <WarningIcon className="callout-icon" />
                   {lines.notices.map((n) => (
                     <p key={n}>{n}</p>
                   ))}
                   <div className="state-actions">
                     {suggest?.minutes_per_day != null ? (
                       <Button variant="outline" color="neutral" size="sm" onClick={() => set('minutes', String(suggest.minutes_per_day))}>
-                        {`Use ${suggest.minutes_per_day} min a day`}
+                        {t('plan.use_minutes', { n: String(suggest.minutes_per_day) })}
                       </Button>
                     ) : null}
                     {suggest?.total_weeks != null ? (
                       <Button variant="outline" color="neutral" size="sm" onClick={() => set('weeks', String(suggest.total_weeks))}>
-                        {`Use ${suggest.total_weeks} weeks`}
+                        {t('plan.use_weeks', { n: String(suggest.total_weeks) })}
                       </Button>
                     ) : null}
-                    {suggest?.minutes_per_day == null && suggest?.total_weeks == null ? (
-                      <p>Choose more weeks or more minutes a day.</p>
-                    ) : null}
+                    {suggest?.minutes_per_day == null && suggest?.total_weeks == null ? <p>{t('plan.choose_more')}</p> : null}
                   </div>
                 </div>
               ) : null}
+              <dl className={lines.notices.length > 0 ? 'plan-figures is-unfit' : 'plan-figures'}>
+                {estimateRows(preview, locale, t).map(([term, value]) => (
+                  <div key={term} className="plan-figure">
+                    <dt>{term}</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <div className="plan-notes">
+                {estimateNotes(lines, t).map((n) => (
+                  <p key={n}>{n}</p>
+                ))}
+              </div>
               <details className="plan-lessons">
-                <summary>Lessons</summary>
+                <summary>
+                  <ChevronIcon className="disclosure-chevron" />
+                  {t('plan.lessons')}
+                </summary>
                 <ol>
                   {preview?.lessons.map((l) => (
                     <li key={l.id}>
-                      <span className="plan-lesson-title">{l.title}</span>
+                      <span className="plan-lesson-title" lang={textLang(l.title)}>
+                        {l.title}
+                      </span>
                       <span className="plan-lesson-meta">
-                        {`${l.pages[0] === l.pages[1] ? `p. ${l.pages[0]}` : `pp. ${l.pages[0]}–${l.pages[1]}`} · ${l.minutes} min`}
-                        {l.fixed ? ' · Started, stays as it is' : ''}
+                        {t('plan.lesson_meta', {
+                          pages:
+                            l.pages[0] === l.pages[1]
+                              ? t('plan.page', { page: String(l.pages[0]) })
+                              : t('plan.pages', { from: String(l.pages[0]), to: String(l.pages[1]) }),
+                          minutes: String(l.minutes),
+                        })}
+                        {l.fixed ? t('plan.fixed') : ''}
                       </span>
                     </li>
                   ))}
@@ -271,7 +304,7 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
               </details>
             </>
           ) : (
-            <p className="muted">Enter the weeks to see the plan.</p>
+            <p className="muted">{t('plan.enter_weeks')}</p>
           )}
         </div>
 
@@ -280,21 +313,30 @@ export function PlanSection({ api, materialId, stored, locale, today = () => loc
             <label className="plan-check">
               <input type="checkbox" checked={compileFirst} onChange={(e) => setCompileFirst(e.target.checked)} />
               {preview?.estimate.first_lesson
-                ? `Start compiling lesson 1 now ($${preview.estimate.first_lesson.low_usd}–$${preview.estimate.first_lesson.high_usd}, stops at $${preview.estimate.run_cap_usd})`
-                : 'Start compiling lesson 1 now'}
+                ? t('plan.compile_first_cost', {
+                    low: `$${preview.estimate.first_lesson.low_usd}`,
+                    high: `$${preview.estimate.first_lesson.high_usd}`,
+                    cap: `$${preview.estimate.run_cap_usd}`,
+                  })
+                : t('plan.compile_first')}
             </label>
           )}
-          <Button type="submit" disabled={!confirmable || sending}>
-            Create the course
+          <Button type="submit" disabled={!confirmable || sending} aria-describedby={blocked ? `${ids}-why` : undefined}>
+            {t('plan.create')}
           </Button>
-          {confirmError ? <p className="plan-error">{message(confirmError)}</p> : null}
+          {blocked ? (
+            <p id={`${ids}-why`} className="plan-why">
+              {blocked}
+            </p>
+          ) : null}
+          {confirmError ? <p className="plan-error">{message(confirmError, t)}</p> : null}
           {done ? (
             <div role="status" className="plan-done">
-              <p>{`Course created: ${done.lessons.length} ${done.lessons.length === 1 ? 'lesson' : 'lessons'}.`}</p>
-              {done.compile && 'run_id' in done.compile ? <p>Lesson 1 is compiling.</p> : null}
-              {done.compile && 'error' in done.compile ? <p>{message(done.compile.error)}</p> : null}
+              <p>{t('done.created', { count: done.lessons.length, n: String(done.lessons.length) })}</p>
+              {done.compile && 'run_id' in done.compile ? <p>{t('done.compiling')}</p> : null}
+              {done.compile && 'error' in done.compile ? <p>{message(done.compile.error, t)}</p> : null}
               <p>
-                <a href="/">Go to the lesson list</a>
+                <a href="/">{t('done.list')}</a>
               </p>
             </div>
           ) : null}

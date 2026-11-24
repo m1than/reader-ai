@@ -1,0 +1,29 @@
+{
+ "variant": "before",
+ "tabs": {
+  "overview": {
+   "url": "/#/experiments/0/overview",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Overview Let's improve your agent with MLflow Help me create an evaluation Build a continuous quality loop in 4 steps Trace, analyze, evaluate, and monitor your agent as it evolves. Learn how it works ↗ TRACE 10 traces View traces ANALYZE Recommended Review real traces to surface failure modes and quality issues worth fixing. Detect issues EVAL/TEST Turn issues into a regression test and catch them before you ship. Set up eval MONITOR Run scorers on live traffic to catch quality regressions in production. Add monitor MLflow Assistant Beta Welcome to "
+  },
+  "evaluation-runs": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Evaluation runs', exact: true }).first()\n"
+  },
+  "datasets": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Datasets', exact: true }).first()\n"
+  },
+  "agent-versions": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Agent versions', exact: true }).first()\n"
+  },
+  "review": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Review', exact: true }).first()\n"
+  },
+  "prompts": {
+   "error": "TimeoutError: locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for getByRole('link', { name: 'Prompts', exact: true }).first()\n"
+  },
+  "experiments": {
+   "url": "/#/experiments",
+   "head": "3.18.0 GenAI Model training Home Experiments AI Registry AI Gateway New Docs Settings Experiments Create Compare Delete Tag Name Time created Last modified Description Tags Default 11/24/2026, 10:16:53 AM 11/24/2026, 10:16:53 AM - Add tags Previous Next 25 / page MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces."
+  }
+ },
+ "csp": []
+}

@@ -1,0 +1,18 @@
+{
+ "compile_experiment": "1",
+ "compile_run_cross": "e66068e10200490fb00bc605bee47ec4",
+ "compile_run": "f7d950df1b7e46f6ab7eff83d6cc8f61",
+ "ingest_run": "aeeb8136143e4715a745d879437b3080",
+ "stage_traces": {
+  "draft": "66080088fd1c921d9bad1e55bc4c1cba",
+  "fact_check": "58ff381ca6af6ad787e0b7c9cef34012",
+  "adversarial_review": "af0ad15a3a8e63e394fa722f5155b6c1",
+  "revise": "6a6f404654fcc013808302a10295f994"
+ },
+ "dataset": "d-a59cc214918048589422366194da66c8",
+ "models": {
+  "abab": "m-7b5d5f9a140b4893a9840bde6ca94fd4",
+  "cdcd": "m-5763ea322d304bd68d70d7bc263bfb7f"
+ },
+ "versioned_trace": "08ce3a0301743efb583e1a59a8b5369f"
+}

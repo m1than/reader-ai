@@ -1,0 +1,33 @@
+# @trace FR-AGENT-6
+"""[unit] A provider without an engine (the freshness agent [image] check, whose ledger is in memory) reads its
+caps from reader.yaml alone: no database, so no overrides (SRV-AGENT note, phase 2 code review round 2)."""
+
+from __future__ import annotations
+
+import uuid
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+
+from .conftest import need, write_config
+
+pytestmark = pytest.mark.anyio
+
+
+async def test_caps_without_an_engine_are_the_files(tmp_path: Path) -> None:
+    from reader.config import load_config
+    from reader.config.effective import file_settings
+
+    provider = need("reader.agent.provider")
+    config = load_config(write_config(tmp_path))
+    call = provider.StageCall(
+        owner_id=uuid.uuid4(), handle="ivan", run_id=uuid.uuid4(), lesson_id=None, stage="fact_check",
+        task="fact_check", attempt=0, system="S", prompt="P", max_output_tokens=100, floor_usd=Decimal("0.25"),
+        run_cap_usd=Decimal("8.00"), daily_budget_usd=Decimal("2.00"),
+    )
+    caps = await provider.AgentProvider(None, config, None)._caps(call)  # type: ignore[arg-type]
+    want = file_settings(config)
+    assert (caps.task_budget_usd, caps.monthly_usd, caps.warn_at) == (
+        want.task_budgets.get("fact_check"), want.monthly_usd, want.warn_at)
+    assert (caps.run_cap_usd, caps.daily_task_usd) == (Decimal("8.00"), Decimal("2.00"))

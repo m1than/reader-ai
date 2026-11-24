@@ -1,0 +1,3 @@
+mlflow networks: reader-spike-obs_obs reader-spike-obs_obs-ui 
+reader-spike-obs_obs internal=true
+reader-spike-obs_obs-ui internal=true

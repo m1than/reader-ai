@@ -73,14 +73,15 @@ class ArtifactError(Exception):
 
 
 def normalise(text: str, *, code: bool) -> str:
-    """NFC without U+0000, C0 controls other than \\n and \\t, and lone surrogates.
+    """FR-INGEST-6/-7, in an order that makes it idempotent: remove first, then strip, NFC last.
 
-    Code: CRLF becomes LF and each line loses its trailing spaces first; U+00AD stays. Other text: no U+00AD.
+    Removed: U+0000, C0 controls other than \\n and \\t, lone surrogates, and U+00AD outside code. Code: CRLF
+    becomes LF before the removal, and each line loses its trailing spaces after it; U+00AD stays.
     """
+    text = _CONTROLS.sub("", text.replace("\r\n", "\n") if code else text.replace(SOFT_HYPHEN, ""))
     if code:
-        text = "\n".join(line.rstrip(" ") for line in text.replace("\r\n", "\n").split("\n"))
-    text = unicodedata.normalize("NFC", _CONTROLS.sub("", text))
-    return text if code else text.replace(SOFT_HYPHEN, "")
+        text = "\n".join(line.rstrip(" ") for line in text.split("\n"))
+    return unicodedata.normalize("NFC", text)
 
 
 def _normalised(text: str, *, code: bool) -> bool:

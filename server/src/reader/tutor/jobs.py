@@ -30,6 +30,9 @@ from reader.agent.pricing import resolve_model
 from reader.agent.provider import Provider, StageCall
 from reader.config import ReaderConfig, load_config
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.lessons.access import can_open
+from reader.obs import feedback, prompts
+from reader.obs.spans import annotate_job, child_span, session_marker
 from reader.tutor import params, store
 from reader.tutor.answer import Span, build_prompt, check, floor_usd, parse, system_prompt
 from reader.tutor.errors import TRANSIENT, TutorError, TutorTransient, outcome
@@ -123,8 +126,11 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
     if q.material_sha256 is None:
         raise TutorError("sources_unavailable")
     engine = conn.engine
-    found = await deps.search(engine, q.owner_id, q.question, params.RETRIEVE_K, q.material_sha256)
-    span_ids = candidate_span_ids(found.results)[: params.SOURCES_MAX]  # beyond the alias cap nothing is sent
+    with child_span("tutor.retrieve") as retrieved:  # SRV-OBS FR-OBS-13: counts only
+        found = await deps.search(engine, q.owner_id, q.question, params.RETRIEVE_K, q.material_sha256)
+        span_ids = candidate_span_ids(found.results)[: params.SOURCES_MAX]  # beyond the alias cap: not sent
+        retrieved.set({"reader.retrieval.hits": len(span_ids),
+                       "reader.retrieval.candidates": len(found.results)})
     if not span_ids:
         raise TutorError("sources_unavailable")
     loaded = await store.spans_by_ids(conn, q.owner_id, span_ids)
@@ -157,6 +163,7 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
         thinking_off=True,
         abort_on_retry=True,
         deadline_s=deps.deadline_s,
+        course_id=q.course_id,
     )
     async with deps.provider(engine) as provider:
         result = await provider.run(call)
@@ -164,7 +171,15 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
         log.warning("reserve_exceeded question=%s floor=%s sdk_usd=%s", q.id, floor, result.sdk_usd)
     if result.stop_reason == "max_tokens":
         raise TutorError("output_truncated")
-    checked = check(parse(result.text), prompt.sources)
+    with child_span("tutor.citations") as cited:  # FR-OBS-13: blocks checked, blocks supported
+        checked = check(parse(result.text), prompt.sources)
+        total, valid = len(checked.blocks), sum(1 for b in checked.blocks if b.supported)
+        cited.set({"reader.citations.total": total, "reader.citations.valid": valid})
+    # SRV-OBS FR-OBS-14: deterministic outcomes as code assessments; `record` never raises.
+    counts = {"total": min(total, 1000), "valid": min(valid, 1000)}
+    await feedback.record(ctx, "tutor.citations_valid", total > 0 and valid == total, counts)
+    if total:
+        await feedback.record(ctx, "tutor.citation_share", valid / total)
     by_alias = {s.alias: s for s in prompt.sources}
     return {
         "answer": {
@@ -194,8 +209,16 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
     if q is None or q.state != "queued":
         log.info("tutor_skip question=%s state=%s", args.question_id, q.state if q else None)
         return
-    if q.age_s > params.QUESTION_TTL_S:  # FR-TUTOR-4: before any reservation
+    # SRV-OBS FR-OBS-5 (e), FR-OBS-12 (e), FR-OBS-18: ids on the root, the lesson as the trace's session.
+    annotate_job({"reader.lesson.id": str(q.lesson_id),
+                  "reader.course.id": str(q.course_id) if q.course_id else None,
+                  "reader.prompt.version": await prompts.version_of("reader.tutor")})
+    session_marker("reader.lesson.id", str(q.lesson_id))
+    # FR-TUTOR-4: before any reservation. FR-TUTOR-21: a lesson deleted meanwhile (SRV-LESSON's `can_open`
+    # hides tombstones) ends the question `expired` without a model call.
+    if q.age_s > params.QUESTION_TTL_S or not await can_open(conn, q.owner_id, str(q.lesson_id)):
         written = await store.finish(conn, q.id, "expired", error_code="expired")
+        annotate_job({"reader.tutor.state": "expired"})
         log.info("tutor_answer question=%s state=expired written=%s", q.id, written)
         return
     last = ctx.attempts + 1 >= params.ATTEMPTS_MAX
@@ -224,6 +247,7 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
     if code is not None:
         state, stored = outcome(code)
         written = await store.finish(conn, q.id, state, error_code=stored)
+        annotate_job({"reader.tutor.state": state})
         log.info(
             "tutor_answer question=%s attempt=%s state=%s code=%s written=%s spent=%s seconds=%.1f",
             q.id, ctx.attempts + 1, state, stored, written, spent, seconds,
@@ -233,6 +257,7 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
     written = await store.finish(
         conn, q.id, "answered", answer=fields["answer"], grounded=fields["grounded"], model=fields["model"]
     )
+    annotate_job({"reader.tutor.state": "answered"})
     log.info(
         "tutor_answer question=%s attempt=%s state=answered written=%s model=%s sources=%s blocks=%s"
         " grounded=%s retrieval=%s spent=%s seconds=%.1f",

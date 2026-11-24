@@ -1,0 +1,202 @@
+{
+  "$comment": "VEC-MANAGE-1: synthetic response bodies for WEB-MANAGE, shaped as the server specs' routes answer (SRV-LESSON FR-LESSON-21..31, SRV-PIPELINE FR-PIPELINE-20..21, SRV-PLAN FR-PLAN-20, SRV-TUTOR FR-TUTOR-20, SRV-INGEST FR-INGEST-30..31, SRV-AUTH FR-AUTH-40..48, SRV-CONFIG FR-CONFIG-25..26, SRV-EVENTS FR-EVENTS-31). No real person, no book text. Course ids c-fixture and c-other and lesson ids w01, w02, x01 match VEC-UI-2 (spec/fixtures/WEB-UI/lessons.json), so the WEB-UI test server can serve both.",
+  "me_owner": { "id": "0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10", "handle": "ivan", "role": "owner", "display_name": "Ivan", "consent": { "evaluation": true, "tuning": false } },
+  "me_learner": { "id": "1b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b11", "handle": "lena", "role": "learner", "display_name": "Lena", "consent": { "evaluation": false, "tuning": false } },
+  "lessons": {
+    "lessons": [
+      { "lesson_id": "w01", "course_id": "c-fixture", "course_title": "Fixture course", "ordinal": 1, "title": "Fixture lesson W01: one cell of every kind", "updated_at": "2026-11-21T09:00:00Z", "latest_sha256": "1111111111111111111111111111111111111111111111111111111111111111", "skipped": false, "done": true, "course_position": 1, "version": 2 },
+      { "lesson_id": "w02", "course_id": "c-fixture", "course_title": "Fixture course", "ordinal": 2, "title": "Fixture lesson W02: not compiled yet", "updated_at": "2026-11-21T09:00:00Z", "latest_sha256": null, "skipped": false, "done": false, "course_position": 1, "version": 1 },
+      { "lesson_id": "w04", "course_id": "c-fixture", "course_title": "Fixture course", "ordinal": 4, "title": "Распределённый консенсус", "updated_at": "2026-11-22T09:00:00Z", "latest_sha256": "4444444444444444444444444444444444444444444444444444444444444444", "skipped": true, "done": false, "course_position": 1, "version": 1 },
+      { "lesson_id": "x01", "course_id": "c-other", "course_title": "Another course", "ordinal": 1, "title": "Another course, lesson 1", "updated_at": "2026-11-20T09:00:00Z", "latest_sha256": "2222222222222222222222222222222222222222222222222222222222222222", "skipped": false, "done": false, "course_position": 2, "version": 1 }
+    ]
+  },
+  "courses": {
+    "active": {
+      "courses": [
+        { "course_id": "c-fixture", "title": "Fixture course", "description": "A course for the tests.", "position": 1, "state": "active", "archived_at": null, "deleted_at": null, "version": 3, "lesson_count": 3, "material_id": "up-aaaaaaaaaaaa", "plan": { "total_weeks": 4, "minutes_per_day": 30, "start_date": "2026-11-02", "finish_by": "2026-11-29" } },
+        { "course_id": "c-other", "title": "Another course", "description": null, "position": 2, "state": "active", "archived_at": null, "deleted_at": null, "version": 1, "lesson_count": 1, "material_id": null, "plan": null }
+      ]
+    },
+    "archived": {
+      "courses": [
+        { "course_id": "c-archived", "title": "Archived notes", "description": null, "position": null, "state": "archived", "archived_at": "2026-11-20T10:00:00Z", "deleted_at": null, "version": 2, "lesson_count": 2, "material_id": null, "plan": null }
+      ]
+    },
+    "deleted": {
+      "courses": [
+        { "course_id": "c-deleted", "title": "Deleted course", "description": null, "position": null, "state": "deleted", "archived_at": null, "deleted_at": "2026-11-23T10:00:00Z", "version": 1, "lesson_count": 4, "material_id": null, "plan": null },
+        { "course_id": "c-cascade", "title": "Course of a deleted book", "description": null, "position": null, "state": "deleted", "archived_at": null, "deleted_at": "2026-11-22T10:00:00Z", "version": 1, "lesson_count": 6, "material_id": "up-cccccccccccc", "plan": { "total_weeks": 2, "minutes_per_day": 20, "start_date": "2026-11-02", "finish_by": "2026-11-15" } }
+      ]
+    }
+  },
+  "deleted_lessons": {
+    "c-fixture": { "lessons": [ { "lesson_id": "w03", "title": "Fixture lesson W03: deleted", "ordinal": 3, "deleted_at": "2026-11-23T08:00:00Z" } ] },
+    "c-other": { "lessons": [] }
+  },
+  "course_impact": { "lessons": 3, "revisions": 5, "tutor_questions": 7, "compile_runs": 2, "spend_rows": 9, "open_runs": 0 },
+  "course_deleted": { "lessons": 3, "revisions": 5, "tutor_questions": 7, "compile_runs": 2, "spend_rows": 9, "open_runs": 0, "deleted_at": "2026-11-24T12:00:00Z" },
+  "course_renamed": { "course_id": "c-fixture", "title": "Renamed course", "description": "A course for the tests.", "position": 1, "state": "active", "archived_at": null, "deleted_at": null, "version": 4, "lesson_count": 3, "material_id": "up-aaaaaaaaaaaa", "plan": { "total_weeks": 4, "minutes_per_day": 30, "start_date": "2026-11-02", "finish_by": "2026-11-29" } },
+  "lesson_detail": {
+    "lesson": { "lesson_id": "w01", "course_id": "c-fixture", "course_title": "Fixture course", "ordinal": 1, "title": "Fixture lesson W01: one cell of every kind", "updated_at": "2026-11-21T09:00:00Z", "latest_sha256": "1111111111111111111111111111111111111111111111111111111111111111" },
+    "revisions": [
+      { "sha256": "1111111111111111111111111111111111111111111111111111111111111111", "byte_size": 20480, "cell_count": 10, "created_at": "2026-11-21T09:00:00Z", "stages": ["draft", "fact_check", "revise"] },
+      { "sha256": "5555555555555555555555555555555555555555555555555555555555555555", "byte_size": 18000, "cell_count": 9, "created_at": "2026-11-20T09:00:00Z", "stages": ["draft"] }
+    ]
+  },
+  "stored_plan": { "course_id": "c-fixture", "plan_course_id": "pc-fixture", "inputs": { "material_id": "up-aaaaaaaaaaaa", "total_weeks": 4, "minutes_per_day": 30, "rate": "1.50", "start_date": "2026-11-02" }, "plan_sha256": "6666666666666666666666666666666666666666666666666666666666666666", "started": 1 },
+  "plan_preview": {
+    "plan_sha256": "7777777777777777777777777777777777777777777777777777777777777777",
+    "inputs": { "material_id": "up-aaaaaaaaaaaa", "total_weeks": 6, "minutes_per_day": 30, "rate": "1.50", "start_date": "2026-11-02", "today": "2026-11-24" },
+    "lessons": [ { "id": "pl-1", "pages": [1, 10], "minutes": 28, "fixed": true, "title": "Fixture lesson W01: one cell of every kind" }, { "id": "pl-2", "pages": [11, 20], "minutes": 29, "fixed": false, "title": "Fixture lesson W02: not compiled yet" } ],
+    "summary": { "lesson_count": 2, "fixed_count": 1, "new_count": 1, "study_days": 42, "start_date": "2026-11-02", "end": "2026-12-13", "days_left": 20, "spare_days": 18, "minutes_mean": 28.5, "minutes_max": 29, "required_minutes": 57, "finish_by": "2026-12-13", "fits": true, "reasons": [], "suggest": null },
+    "estimate": { "course_low_usd": "3.00", "course_high_usd": "6.00", "first_lesson": { "low_usd": "1.50", "high_usd": "3.00" }, "run_cap_usd": "8.00", "basis": "L02", "basis_kchars": "18.000", "mean_lesson_kchars": "17.500", "extrapolated": false }
+  },
+  "plan_confirmed": { "course_id": "c-fixture", "plan_course_id": "pc-fixture", "lessons": [ { "plan_lesson_id": "pl-1", "lesson_id": "w01", "ordinal": 1 }, { "plan_lesson_id": "pl-2", "lesson_id": "w02", "ordinal": 2 } ], "created": 0, "removed": 0, "replayed": false, "compile": null },
+  "revert_applied": { "applied": true, "latest_sha256": "5555555555555555555555555555555555555555555555555555555555555555" },
+  "compile_history": {
+    "runs": [
+      { "run_id": "run-2", "state": "converged", "created_at": "2026-11-21T08:56:00Z", "finished_at": "2026-11-21T09:00:00Z", "spent_usd": "2.10", "cap_usd": "8.00", "steps": 4, "error": null },
+      { "run_id": "run-1", "state": "cancelled", "created_at": "2026-11-20T08:00:00Z", "finished_at": "2026-11-20T08:02:30Z", "spent_usd": "0.60", "cap_usd": "8.00", "steps": 1, "error": null }
+    ]
+  },
+  "progress_done": { "done": true, "done_at": "2026-11-24T12:00:00Z" },
+  "progress_undone": { "done": false, "done_at": null },
+  "tutor_cleared": { "cleared": 3 },
+  "materials": {
+    "active": {
+      "materials": [
+        { "id": "up-aaaaaaaaaaaa", "status": "imported", "page_count": 120, "source": "upload", "title": null, "display_title": "Distributed systems notes", "version": 1, "courses": [ { "course_id": "c-fixture", "title": "Fixture course" } ] },
+        { "id": "up-bbbbbbbbbbbb", "status": "imported", "page_count": 40, "source": "upload", "title": "A short book", "display_title": "A short book", "version": 2, "courses": [] },
+        { "id": "sre-book", "status": "declared", "page_count": null, "source": "config", "title": null, "display_title": "sre-book", "version": null, "courses": [] }
+      ]
+    },
+    "deleted": {
+      "materials": [
+        { "id": "up-cccccccccccc", "status": "imported", "page_count": 300, "source": "upload", "title": null, "display_title": "A deleted book", "version": 1, "courses": [], "deleted_at": "2026-11-22T10:00:00Z" }
+      ]
+    }
+  },
+  "material_impact": { "up-aaaaaaaaaaaa": { "courses": [ { "course_id": "c-fixture", "title": "Fixture course" } ], "lessons": 3, "uploads_open": 0 }, "up-bbbbbbbbbbbb": { "courses": [], "lessons": 0, "uploads_open": 0 } },
+  "material_restored": { "restored_courses": [ { "course_id": "c-cascade", "title": "Course of a deleted book" } ] },
+  "people": {
+    "users": [
+      { "id": "0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10", "handle": "ivan", "display_name": "Ivan", "role": "owner", "source": "config", "state": "active", "disabled_at": null, "locked": false, "created_at": "2026-11-01T09:00:00Z", "last_signin_at": "2026-11-24T08:00:00Z", "passkeys": [ { "pid": "p-ivan-1", "label": "MacBook", "created_at": "2026-11-01T09:00:00Z", "last_used_at": "2026-11-24T08:00:00Z" } ], "sessions_active": 2, "owns_data": true },
+      { "id": "2b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b12", "handle": "anna", "display_name": "Anna", "role": "learner", "source": "config", "state": "active", "disabled_at": null, "locked": false, "created_at": "2026-11-02T09:00:00Z", "last_signin_at": null, "passkeys": [], "sessions_active": 0, "owns_data": false },
+      { "id": "3b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b13", "handle": "boris", "display_name": "Борис", "role": "learner", "source": "signup", "state": "active", "disabled_at": null, "locked": false, "created_at": "2026-11-10T09:00:00Z", "last_signin_at": "2026-11-23T18:00:00Z", "passkeys": [ { "pid": "p-boris-1", "label": "Phone", "created_at": "2026-11-10T09:00:00Z", "last_used_at": "2026-11-23T18:00:00Z" } ], "sessions_active": 1, "owns_data": true },
+      { "id": "1b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b11", "handle": "lena", "display_name": "Lena", "role": "learner", "source": "signup", "state": "active", "disabled_at": null, "locked": false, "created_at": "2026-11-11T09:00:00Z", "last_signin_at": "2026-11-20T18:00:00Z", "passkeys": [ { "pid": "p-lena-1", "label": "Laptop", "created_at": "2026-11-11T09:00:00Z", "last_used_at": "2026-11-20T18:00:00Z" }, { "pid": "p-lena-2", "label": null, "created_at": "2026-11-12T09:00:00Z", "last_used_at": null } ], "sessions_active": 1, "owns_data": false },
+      { "id": "4b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b14", "handle": "max", "display_name": "Max", "role": "learner", "source": "signup", "state": "active", "disabled_at": null, "locked": true, "created_at": "2026-11-12T09:00:00Z", "last_signin_at": null, "passkeys": [], "sessions_active": 0, "owns_data": false },
+      { "id": "5b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b15", "handle": "olga", "display_name": "Olga", "role": "learner", "source": "signup", "state": "pending", "disabled_at": null, "locked": false, "created_at": "2026-11-24T07:00:00Z", "last_signin_at": null, "passkeys": [ { "pid": "p-olga-1", "label": null, "created_at": "2026-11-24T07:00:00Z", "last_used_at": null } ], "sessions_active": 0, "owns_data": false },
+      { "id": "6b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b16", "handle": "petr", "display_name": "Petr", "role": "learner", "source": "signup", "state": "active", "disabled_at": "2026-11-21T09:00:00Z", "locked": false, "created_at": "2026-11-13T09:00:00Z", "last_signin_at": "2026-11-19T09:00:00Z", "passkeys": [ { "pid": "p-petr-1", "label": "Tablet", "created_at": "2026-11-13T09:00:00Z", "last_used_at": "2026-11-19T09:00:00Z" } ], "sessions_active": 0, "owns_data": false }
+    ]
+  },
+  "credentials_one": { "credentials": [ { "pid": "p-ivan-1", "label": "MacBook", "created_at": "2026-11-01T09:00:00Z", "last_used_at": "2026-11-24T08:00:00Z", "backed_up": true, "transports": ["internal"] } ] },
+  "credentials_three": {
+    "credentials": [
+      { "pid": "p-ivan-1", "label": "MacBook", "created_at": "2026-11-01T09:00:00Z", "last_used_at": "2026-11-24T08:00:00Z", "backed_up": true, "transports": ["internal"] },
+      { "pid": "p-ivan-2", "label": null, "created_at": "2026-11-05T09:00:00Z", "last_used_at": null, "backed_up": false, "transports": ["usb"] },
+      { "pid": "p-ivan-3", "label": "Телефон", "created_at": "2026-11-06T09:00:00Z", "last_used_at": "2026-11-23T09:00:00Z", "backed_up": true, "transports": ["hybrid"] }
+    ]
+  },
+  "register_options": {
+    "challenge": "c3ludGhldGljLXJlZ2lzdGVyLWNoYWxsZW5nZS0wMDAx",
+    "rp": { "id": "localhost", "name": "reader-ai" },
+    "user": { "id": "MGI1YzFmM2UtNmQyYS00ZjdlLTlhNDEtMmM4ZDVlN2Y5YjEw", "name": "ivan", "displayName": "Ivan" },
+    "pubKeyCredParams": [ { "type": "public-key", "alg": -7 }, { "type": "public-key", "alg": -8 }, { "type": "public-key", "alg": -257 } ],
+    "timeout": 60000,
+    "excludeCredentials": [],
+    "authenticatorSelection": { "residentKey": "required", "userVerification": "required" },
+    "attestation": "none"
+  },
+  "sessions": {
+    "sessions": [
+      { "sid": "s-current", "created_at": "2026-11-24T08:00:00Z", "expires_at": "2026-12-08T08:00:00Z", "current": true },
+      { "sid": "s-other-1", "created_at": "2026-11-23T08:00:00Z", "expires_at": "2026-12-07T08:00:00Z", "current": false },
+      { "sid": "s-other-2", "created_at": "2026-11-20T08:00:00Z", "expires_at": "2026-12-04T08:00:00Z", "current": false }
+    ]
+  },
+  "settings": {
+    "rows": [
+      { "name": "signup", "value": "open", "file_value": "open", "source": "reader.yaml", "key": "sharing.signup", "read_when": "start", "version": 0, "ignored": null },
+      { "name": "observability.enabled", "value": true, "file_value": true, "source": "default", "key": null, "read_when": "worker start and the daily job", "version": 0, "ignored": null },
+      { "name": "observability.retention_days", "value": 14, "file_value": 30, "source": "override", "key": "observability.retention_days", "read_when": "worker start and the daily job", "version": 2, "ignored": null },
+      { "name": "budgets.monthly_usd", "value": 50, "file_value": 50, "source": "reader.yaml", "key": "budgets.monthly_usd", "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "budgets.warn_at", "value": 0.8, "file_value": 0.8, "source": "reader.yaml", "key": "budgets.warn_at", "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "tasks.draft.model", "value": "claude-opus-5-5", "file_value": "claude-opus-5-5", "source": "reader.yaml", "key": null, "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "tasks.draft.budget_usd_per_lesson", "value": 3, "file_value": 3, "source": "reader.yaml", "key": "tasks.draft.budget_usd_per_lesson", "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "tasks.(hidden).model", "value": "(hidden)", "file_value": "(hidden)", "source": "reader.yaml", "key": null, "read_when": "each job", "version": 0, "ignored": null },
+      { "name": "pipeline.run_cap_usd", "value": 8, "file_value": 8, "source": "fixed", "key": null, "read_when": "fixed", "version": 0, "ignored": null },
+      { "name": "tutor.question_cap_usd", "value": 0.3, "file_value": 0.3, "source": "fixed", "key": null, "read_when": "fixed", "version": 0, "ignored": null },
+      { "name": "tutor.daily_cap_usd", "value": 3, "file_value": 3, "source": "fixed", "key": null, "read_when": "fixed", "version": 0, "ignored": null }
+    ],
+    "ignored": [
+      { "key": "tasks.gone.budget_usd_per_lesson", "value": 3, "reason": "not_in_file", "version": 1 }
+    ]
+  },
+  "settings_signup_file_off": { "name": "signup", "value": "off", "file_value": "off", "source": "reader.yaml", "key": "sharing.signup", "read_when": "start", "version": 0, "ignored": null },
+  "audit_page1": {
+    "rows": [
+      { "id": 402, "at": "2026-11-24T11:00:00Z", "actor_id": "0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10", "action": "course.rename", "object_kind": "course", "object_id": "c-fixture", "detail": { "version": 3 } },
+      { "id": 401, "at": "2026-11-24T10:00:00Z", "actor_id": "0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10", "action": "course.delete", "object_kind": "course", "object_id": "9f8e7d6c-0000-4000-8000-000000000001", "detail": { "lessons": 2 } }
+    ],
+    "next_before": 401
+  },
+  "audit_page2": {
+    "rows": [
+      { "id": 12, "at": "2026-11-01T10:00:00Z", "actor_id": "0b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b10", "action": "user.delete", "object_kind": "user", "object_id": "7b5c1f3e-6d2a-4f7e-9a41-2c8d5e7f9b17", "detail": {} }
+    ],
+    "next_before": null
+  },
+  "notes": {
+    "notes": [
+      { "note_id": "n-2", "cell_id": "w01-explain", "body": "Проверить, как это работает в Raft.", "created_at": "2026-11-24T10:00:00Z", "updated_at": "2026-11-24T10:00:00Z" },
+      { "note_id": "n-1", "cell_id": null, "body": "<b>not bold</b> plain text", "created_at": "2026-11-23T10:00:00Z", "updated_at": "2026-11-23T10:00:00Z" }
+    ]
+  },
+  "note_created": { "note_id": "n-3", "cell_id": null, "body": "A new note", "created_at": "2026-11-24T12:00:00Z", "updated_at": "2026-11-24T12:00:00Z" },
+  "bookmarks": {
+    "bookmarks": [
+      { "lesson_id": "w01", "cell_id": "w01-lab", "created_at": "2026-11-24T09:00:00Z", "stale": false },
+      { "lesson_id": "w01", "cell_id": "w01-gone", "created_at": "2026-11-20T09:00:00Z", "stale": true }
+    ]
+  },
+  "refusals": {
+    "stale_course": { "status": 409, "body": { "error": "stale", "course": { "course_id": "c-fixture", "title": "Changed elsewhere", "version": 5 } } },
+    "stale": { "status": 409, "body": { "error": "stale" } },
+    "title_taken": { "status": 409, "body": { "error": "title_taken" } },
+    "title_invalid": { "status": 400, "body": { "error": "title_invalid" } },
+    "description_invalid": { "status": 400, "body": { "error": "description_invalid" } },
+    "compile_running": { "status": 409, "body": { "error": "compile_running" } },
+    "confirm_mismatch": { "status": 400, "body": { "error": "confirm_mismatch" } },
+    "order_mismatch": { "status": 409, "body": { "error": "order_mismatch" } },
+    "material_deleted": { "status": 409, "body": { "error": "material_deleted" } },
+    "material_in_use": { "status": 409, "body": { "error": "material_in_use", "courses": [ { "course_id": "c-fixture", "title": "Fixture course" } ] } },
+    "material_busy": { "status": 409, "body": { "error": "material_busy" } },
+    "notes_cell_removed": { "status": 400, "body": { "error": "notes_cell_removed" } },
+    "unknown_revision": { "status": 404, "body": { "error": "unknown_revision" } },
+    "not_running": { "status": 409, "body": { "error": "not_running" } },
+    "lesson_inactive": { "status": 409, "body": { "error": "lesson_inactive" } },
+    "course_deleted": { "status": 409, "body": { "error": "course_deleted", "course_id": "c-fixture" } },
+    "course_archived": { "status": 409, "body": { "error": "course_archived" } },
+    "tutor_busy": { "status": 409, "body": { "error": "tutor_busy" } },
+    "note_invalid": { "status": 400, "body": { "error": "note_invalid" } },
+    "cell_unknown": { "status": 400, "body": { "error": "cell_unknown" } },
+    "limit": { "status": 409, "body": { "error": "limit" } },
+    "last_passkey": { "status": 409, "body": { "error": "last_passkey" } },
+    "label_invalid": { "status": 400, "body": { "error": "label_invalid" } },
+    "use_own_sessions": { "status": 409, "body": { "error": "use_own_sessions" } },
+    "use_own_passkeys": { "status": 409, "body": { "error": "use_own_passkeys" } },
+    "configured_user": { "status": 409, "body": { "error": "configured_user" } },
+    "not_learner": { "status": 409, "body": { "error": "not_learner" } },
+    "user_has_data": { "status": 409, "body": { "error": "user_has_data" } },
+    "pending": { "status": 409, "body": { "error": "pending" } },
+    "not_overridable": { "status": 400, "body": { "error": "not_overridable" } },
+    "value_invalid": { "status": 400, "body": { "error": "value_invalid", "field": "observability.retention_days" } },
+    "file_narrower": { "status": 409, "body": { "error": "file_narrower" } },
+    "before_invalid": { "status": 400, "body": { "error": "before_invalid" } },
+    "owner_only": { "status": 403, "body": { "error": "owner_only" } },
+    "not_found": { "status": 404, "body": { "error": "not_found" } },
+    "reauth_required": { "status": 401, "body": { "error": "reauth_required" } },
+    "unauthenticated": { "status": 401, "body": { "error": "unauthenticated" } },
+    "server_error": { "status": 500, "body": { "error": "internal" } }
+  }
+}

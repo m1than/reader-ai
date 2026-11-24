@@ -1,0 +1,9 @@
+done cost -generated
+done session 
+done gate 
+done bulk -200
+done bulk -600
+done probe -jaeger-stopped
+done cost -mount-empty
+done bulk -oom
+done probe -jaeger-oom

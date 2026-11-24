@@ -125,6 +125,50 @@ operations:
       observability: { items: [FR-AUTH-18] }
       recovery: { items: [FR-AUTH-11] }
 
+  # Added 2026-11-23 (V/signup; ADR-0031 accepted by the owner): SRV-AUTH FR-AUTH-23..32, INV-AUTH-10..15 and
+  # WEB-ACCOUNTS, mapped with Green to the items their tests trace. FR-AUTH-12 is mapped because its Origin and
+  # Content-Type gate runs for every non-GET /api/* route by construction. Live evidence for both operations comes
+  # only from a run with `sharing.signup: "open"`: the owner suite's `signup` step (FR-AUTH-32), not yet run (the
+  # owner tests the stack by hand); its SKIP lines are no evidence (FR-DOD-5). The a11y cells stay `missing`: only the
+  # live run's axe.json is `pages` evidence, and it has no producer yet (V.DOD-gaps).
+  - id: auth.signup
+    title: Ask for an account on the sign-up page (handle, display name, passkey); wait for the owner's approval
+    surface: [web]
+    specs: [SRV-AUTH]
+    routes: ["GET /api/auth/signup", "POST /api/auth/signup/options", "POST /api/auth/signup/verify"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-23, FR-AUTH-24, FR-AUTH-25, FR-AUTH-26, FR-AUTH-27, FR-AUTH-31, FR-AUTH-32]
+        missing: "no live run yet: the owner suite's `signup` step in open mode (FR-AUTH-32 [live])"
+      security:
+        items: [FR-AUTH-12, FR-AUTH-26, FR-AUTH-28, INV-AUTH-10, INV-AUTH-12, INV-AUTH-13, INV-AUTH-14, INV-AUTH-15]
+      privacy: { items: [FR-AUTH-30] }
+      a11y: { missing: "no live axe run on /api/auth/signup (the [browser] axe runs of FR-AUTH-32 are not pages evidence; axe.json has no producer yet)" }
+      latency: { missing: "no sourced budget for the sign-up ceremony" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-30] }
+      recovery: { items: [FR-AUTH-27, FR-AUTH-30, FR-AUTH-31] }
+
+  - id: auth.approve
+    title: Approve, reject or disable sign-up accounts on the owner's Sign-ups screen
+    surface: [web]
+    specs: [SRV-AUTH, WEB-ACCOUNTS, WEB-UI]
+    routes: ["GET /api/auth/signups", "POST /api/auth/signups/{user_id}/approve",
+             "POST /api/auth/signups/{user_id}/reject", "POST /api/auth/signups/{user_id}/disable"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-29, FR-ACCOUNTS-1, FR-ACCOUNTS-2, FR-ACCOUNTS-3, FR-ACCOUNTS-4, FR-ACCOUNTS-5, FR-UI-14, VEC-ACCOUNTS-1]
+        missing: "no live run yet: the owner suite's `signup` step approves and rejects through the screen in open mode"
+      security: { items: [FR-AUTH-12, FR-AUTH-29, INV-AUTH-11, INV-ACCOUNTS-1] }
+      privacy: { items: [FR-AUTH-30, INV-ACCOUNTS-2] }
+      a11y: { missing: "no live axe run on /signups (the [browser] axe runs of FR-ACCOUNTS-5 are not pages evidence; axe.json has no producer yet)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-AUTH-30] }
+      recovery: { items: [FR-ACCOUNTS-2, FR-AUTH-29] }
+
   - id: material.ingest
     title: Add a material to reader.yaml and ingest it (reader-ingest, confined native converter, import job)
     surface: [cli]
@@ -175,25 +219,31 @@ operations:
       observability: { items: [FR-INGEST-12] }
       recovery: { items: [FR-EVENTS-8, INV-INGEST-2] }
 
-  # Added 2026-11-23 (V/onboarding) from the DRAFT items of SRV-INGEST revision 2, SRV-PLAN and WEB-IMPORT
-  # (ADR-0029 proposed). No route or command is named yet: they enter the registry only when implemented, and are
-  # added here then (POST /api/materials/uploads, GET /api/materials/uploads/{id}, …/cancel, …/retry, DELETE …,
-  # GET /api/materials/converter; reader-ingest --watch; POST /api/plans/preview, POST /api/plans/confirm,
-  # GET /api/plans?material_id=…). Every cell without a test or a live label is `missing`.
+  # Added 2026-11-23 (V/onboarding) from the items of SRV-INGEST revision 2 and WEB-IMPORT (ADR-0029, accepted by
+  # the owner); cells filled on V/upload-impl when the items were promoted with their tests. Routes and commands are
+  # named here in the Green commit that adds them to the registry.
   - id: material.upload
     title: Upload a PDF in the browser, follow its host-side conversion and indexing, cancel or retry it
     surface: [web, api]
-    specs: [SRV-INGEST, WEB-IMPORT]
+    specs: [SRV-INGEST, WEB-IMPORT, WEB-UI, SRV-AUTH, OPS-DEPLOY, OPS-CLI, SRV-SEARCH, SRV-CONFIG]
+    routes:
+      - "POST /api/materials/uploads"
+      - "GET /api/materials/uploads/{upload_id}"
+      - "POST /api/materials/uploads/{upload_id}/cancel"
+      - "POST /api/materials/uploads/{upload_id}/retry"
+      - "DELETE /api/materials/uploads/{upload_id}"
+      - "GET /api/materials/converter"
+    commands: ["reader-ingest --watch"]
     gate: tracked
     criteria:
-      functional: { items: [FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3] }
-      security: { missing: "SRV-INGEST proposed FR-INGEST-18, FR-INGEST-22, INV-INGEST-8..10 (under review) plus INV-INGEST-4 for a watcher-started child, and WEB-IMPORT INV-IMPORT-1/-3; no test yet" }
-      privacy: { missing: "SRV-INGEST proposed FR-INGEST-25 and INV-INGEST-5 extended to the upload path; no canary test yet" }
-      a11y: { missing: "no axe run on /import yet (WEB-IMPORT FR-IMPORT-9; pages /import at 1280, 1024 and 390 px once implemented)" }
-      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher" }
+      functional: { items: [FR-INGEST-18, FR-INGEST-20, FR-INGEST-21, FR-INGEST-23, VEC-INGEST-6, VEC-INGEST-7, FR-IMPORT-1, FR-IMPORT-2, FR-IMPORT-3, FR-UI-13, FR-CLI-23] }
+      security: { items: [FR-INGEST-22, INV-INGEST-4, INV-INGEST-8, INV-INGEST-9, INV-INGEST-10, FR-AUTH-22, FR-DEPLOY-14, FR-CONFIG-18, INV-IMPORT-1, INV-IMPORT-3] }
+      privacy: { items: [FR-INGEST-24, INV-INGEST-5, FR-IMPORT-7] }
+      a11y: { missing: "axe runs on /import in the [browser] test (WEB-IMPORT FR-IMPORT-9, e2e/web/import/upload.spec.ts at 1280, 1024 and 390 px), but no live pages evidence of /import is produced yet" }
+      latency: { missing: "no sourced budget for upload and pickup; conversion keeps material.ingest's 6,000 ms/page target, not yet measured under the watcher; fetch throughput is an ADR-0029 hypothesis that the [live] exact-cap case records" }
       cost: { na: no provider call (local converter) }
-      observability: { missing: "SRV-INGEST proposed FR-INGEST-25; no test yet" }
-      recovery: { missing: "SRV-INGEST proposed FR-INGEST-19..21 (lease, cancel, retry) and WEB-IMPORT INV-IMPORT-2; no test yet" }
+      observability: { items: [FR-INGEST-24] }
+      recovery: { items: [FR-INGEST-19, FR-INGEST-21, FR-INGEST-23, FR-SEARCH-10, INV-IMPORT-2] }
 
   - id: course.plan
     title: Answer the study-time question, preview the plan and its estimate, confirm or re-plan the course
@@ -238,7 +288,7 @@ operations:
     routes: ["POST /api/search"]
     gate: tracked
     criteria:
-      functional: { items: [FR-SEARCH-7, FR-SEARCH-8, VEC-SEARCH-1] }
+      functional: { items: [FR-SEARCH-7, FR-SEARCH-8, VEC-SEARCH-1, FR-SEARCH-20] }
       security: { items: [INV-SEARCH-1, INV-SEARCH-7] }
       privacy: { items: [INV-SEARCH-5] }
       a11y: { na: no web search surface in the slice (api for compile and tutor) }
@@ -387,15 +437,16 @@ operations:
 
   - id: lesson.compile
     title: Compile a lesson with agents (draft, fact-check, review, revise, labs, G2 report)
-    surface: [api]
-    specs: [SRV-PIPELINE, SRV-AGENT, SRV-EVENTS, SRV-LESSON]
-    routes: ["POST /api/lessons/{lesson_id}/compile"]
+    surface: [api, web]
+    specs: [SRV-PIPELINE, SRV-AGENT, SRV-EVENTS, SRV-LESSON, SRV-PLAN, WEB-UI]
+    # V/compile-ui (2026-11-23): the owner's Compile confirm reads the per-lesson estimate (SRV-PLAN FR-PLAN-13).
+    routes: ["POST /api/lessons/{lesson_id}/compile", "GET /api/lessons/{lesson_id}/estimate"]
     gate: tracked
     criteria:
-      functional: { items: [FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-5, FR-PIPELINE-7, FR-PIPELINE-9, FR-PIPELINE-12, FR-AGENT-6, FR-LESSON-4] }
+      functional: { items: [FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-5, FR-PIPELINE-7, FR-PIPELINE-9, FR-PIPELINE-12, FR-AGENT-6, FR-LESSON-4, FR-PLAN-13, FR-UI-15] }
       security: { items: [FR-PIPELINE-3, FR-PIPELINE-11, VEC-PIPELINE-5, INV-AGENT-1, INV-AGENT-2, INV-AGENT-3, FR-AGENT-4, FR-AGENT-7] }
       privacy: { items: [INV-PIPELINE-4, INV-AGENT-5] }
-      a11y: { na: "no web surface in the slice (owner route, no compile UI)" }
+      a11y: { missing: "axe runs on the Compile confirm only in the [browser] spec against the test server (e2e/web/ui/compile.spec.ts, 1280/1024/390); not yet in the live ui step" }
       latency:
         budget: { p95_ms_max: 2700000, n_min: 1, kind: target,
                   source: "NFR-PIPELINE-1, 45 min per lesson (ADR-0005 / spikes/compile-cost pass criterion); measured 8.3–9.4 min for L02. n_min 1: each sample costs ≈ $2.4–3.0 (structural)" }
@@ -408,15 +459,16 @@ operations:
 
   - id: lesson.compile_status
     title: Watch a compile run (state, stages, spend)
-    surface: [api]
-    specs: [SRV-PIPELINE]
-    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile"]
+    surface: [api, web]
+    specs: [SRV-PIPELINE, SRV-EVENTS, WEB-UI, WEB-NOTEBOOK]
+    # V/compile-ui (2026-11-23): the owner's open runs for the list (FR-PIPELINE-17) and the stopped step's code.
+    routes: ["GET /api/compiles/{run_id}", "GET /api/lessons/{lesson_id}/compile", "GET /api/compiles"]
     gate: tracked
     criteria:
-      functional: { items: [FR-PIPELINE-6, FR-PIPELINE-11] }
-      security: { items: [FR-PIPELINE-11] }
+      functional: { items: [FR-PIPELINE-6, FR-PIPELINE-11, FR-PIPELINE-16, FR-PIPELINE-17, FR-EVENTS-17, FR-UI-15, FR-NOTEBOOK-12] }
+      security: { items: [FR-PIPELINE-11, FR-PIPELINE-17] }
       privacy: { items: [INV-PIPELINE-4] }
-      a11y: { na: no web surface in the slice (owner route) }
+      a11y: { missing: "axe runs on the list's compile states only in the [browser] spec against the test server (e2e/web/ui/compile.spec.ts); not yet in the live ui step" }
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call (reads the ledger) }
       observability: { items: [FR-PIPELINE-6] }
@@ -496,6 +548,40 @@ operations:
       cost: { na: no provider call (reads stored answers) }
       observability: { items: [FR-TUTOR-12] }
       recovery: { items: [FR-TUTOR-2, FR-TUTOR-10, INV-TUTOR-6] }
+
+  # Added 2026-11-24 (SRV-OBS, ADR-0032): the traces dashboard on https://localhost:8443 and the owner's page.
+  - id: obs.view
+    title: Open the traces dashboard and the observability page
+    surface: [web]
+    specs: [SRV-OBS, OPS-DEPLOY, WEB-UI]
+    routes: ["GET /api/obs/gate", "GET /api/obs/summary"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-OBS-9, FR-OBS-10, FR-UI-18] }
+      security: { items: [INV-OBS-5, FR-OBS-9] }
+      privacy: { items: [INV-OBS-1, INV-OBS-2] }
+      a11y: { items: [FR-UI-18], pages: ["/observability"] }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-OBS-4] }
+      recovery: { items: [INV-OBS-3, FR-OBS-11] }
+
+  # Added 2026-11-24 (SRV-OBS phase 2, ADR-0038): the owner records a bench result and labels lessons and answers.
+  - id: obs.evaluate
+    title: Record a bench result and label a lesson or an answer
+    surface: [web]
+    specs: [SRV-OBS, WEB-UI]
+    routes: ["POST /api/obs/bench", "POST /api/obs/labels"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-OBS-22, FR-OBS-23, FR-OBS-24] }
+      security: { items: [FR-OBS-23, FR-OBS-24] }
+      privacy: { items: [INV-OBS-2] }
+      a11y: { missing: "no page-level a11y check for the label and upload controls yet" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "no spec requires a log line for an upload or a label" }
+      recovery: { items: [INV-OBS-3] }
 
   - id: stack.backup
     title: Back up the stack (reader backup DIR)
@@ -646,3 +732,222 @@ operations:
       cost: { na: no provider call }
       observability: { items: [FR-CLI-19] }
       recovery: { items: [FR-CLI-12, FR-CLI-20] }
+
+  # Added 2026-11-23 (V/freshness) for SRV-FRESH, WEB-FRESH and SRV-AGENT's FR-AGENT-15..17 (ADR-0030 accepted).
+  # Rechecked with SRV-FRESH's Green (2026-11-23): its four routes are named; the cells map the traced items. Still
+  # missing: the live run FR-FRESH-14 (functional, cost), INV-FRESH-1's [agent] check through agent-proxy (privacy),
+  # axe pages evidence (a11y) and a latency budget.
+  - id: material.freshness
+    title: Check how current a material is and get recommendations for newer sources (estimate, run, read the report)
+    surface: [web, api]
+    specs: [SRV-FRESH, WEB-FRESH, SRV-AGENT]
+    routes: ["GET /api/materials/{material_id}/freshness", "POST /api/materials/{material_id}/freshness",
+             "GET /api/materials/{material_id}/freshness/{report_id}", "PUT /api/materials/{material_id}/bibliography"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-FRESH-1, FR-FRESH-2, FR-FRESH-3, FR-FRESH-4, FR-FRESH-5, FR-FRESH-7, FR-FRESH-8, FR-FRESH-10,
+                FR-FRESH-11, VEC-FRESH-1, VEC-FRESH-4, VEC-FRESH-7, FR-FRESHUI-1, FR-FRESHUI-2, FR-FRESHUI-3,
+                FR-FRESHUI-4, FR-FRESHUI-5, FR-FRESHUI-6, VEC-FRESHUI-1, FR-FRESH-20]
+        missing: "the live check FR-FRESH-14 has not run (owner, READER_LIVE=1, about $0.27 of budget.test_budget_usd)"
+      security:
+        items: [FR-AGENT-15, FR-AGENT-16, INV-AGENT-6, VEC-AGENT-3, VEC-AGENT-4, FR-FRESH-6, INV-FRESH-3, INV-FRESH-4,
+                INV-FRESH-5, VEC-FRESH-2, VEC-FRESH-3, VEC-FRESH-5, INV-FRESHUI-1, INV-FRESHUI-2]
+      privacy:
+        items: [INV-FRESH-1, INV-FRESH-2, FR-FRESH-13]
+        missing: "INV-FRESH-1's [agent] check (every body agent-proxy forwards to the stub during stage (b)) is not written; the plan and gate parts are"
+      a11y: { missing: "no axe.json pages evidence for the freshness card (WEB-FRESH FR-FRESHUI-7's [browser] axe runs are not pages evidence)" }
+      latency: { missing: "no sourced budget; the job timeouts are timeouts, not latency targets" }
+      cost:
+        items: [FR-FRESH-9, VEC-FRESH-6, FR-AGENT-17]
+        missing: "no measured cost per check yet (FR-FRESH-14 not run); estimate ≈ $0.27, run cap $1.00, daily cap $2.00"
+      observability: { items: [FR-FRESH-13, FR-AGENT-16] }
+      recovery: { items: [FR-FRESH-3, FR-FRESH-10, FR-FRESH-12] }
+
+  - id: manage.audit
+    title: Read the activity log of management actions (owner, Settings → Data → Activity)
+    surface: [web, api]
+    specs: [SRV-EVENTS, WEB-MANAGE]
+    routes: ["GET /api/audit"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-EVENTS-30, FR-EVENTS-31]
+        missing: "no live run yet: the `manage` live step reads the audit after its course actions"
+      security: { items: [FR-EVENTS-31] }
+      privacy: { items: [FR-EVENTS-30] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-EVENTS-31] }
+
+  - id: manage.course
+    title: Manage courses (rename, describe, order, archive, delete and restore; re-plan from a course)
+    surface: [web, api]
+    specs: [SRV-LESSON, SRV-PLAN, SRV-PIPELINE, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "GET /api/courses"
+      - "POST /api/courses/order"
+      - "POST /api/courses/{course_id}"
+      - "POST /api/courses/{course_id}/archive"
+      - "POST /api/courses/{course_id}/unarchive"
+      - "GET /api/courses/{course_id}/impact"
+      - "DELETE /api/courses/{course_id}"
+      - "POST /api/courses/{course_id}/restore"
+      - "GET /api/courses/{course_id}/lessons"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-LESSON-20, FR-LESSON-21, FR-LESSON-22, FR-LESSON-23, FR-LESSON-24, FR-LESSON-25, FR-PLAN-20,
+          FR-PLAN-21, FR-PIPELINE-22]
+        missing: "no live run yet: the `manage` live step works on a scratch course of its own"
+      security: { items: [INV-LESSON-20, INV-LESSON-23] }
+      privacy: { items: [INV-LESSON-20] }
+      a11y: { missing: "no axe.json pages evidence for the course management pages (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-LESSON-25] }
+      recovery: { items: [INV-LESSON-21, INV-LESSON-22] }
+
+  - id: manage.lesson
+    title: Manage lessons (rename, order, skip, delete, done, revert, notes, bookmarks; cancel a compile and its history)
+    surface: [web, api]
+    specs: [SRV-LESSON, SRV-PIPELINE, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "POST /api/courses/{course_id}/lessons/order"
+      - "POST /api/lessons/{lesson_id}"
+      - "POST /api/lessons/{lesson_id}/skip"
+      - "POST /api/lessons/{lesson_id}/unskip"
+      - "DELETE /api/lessons/{lesson_id}"
+      - "POST /api/lessons/{lesson_id}/restore"
+      - "POST /api/lessons/{lesson_id}/progress"
+      - "POST /api/lessons/{lesson_id}/revert"
+      - "GET /api/lessons/{lesson_id}/notes"
+      - "POST /api/lessons/{lesson_id}/notes"
+      - "POST /api/lessons/{lesson_id}/notes/{note_id}"
+      - "DELETE /api/lessons/{lesson_id}/notes/{note_id}"
+      - "POST /api/lessons/{lesson_id}/bookmarks/{cell_id}"
+      - "DELETE /api/lessons/{lesson_id}/bookmarks/{cell_id}"
+      - "GET /api/bookmarks"
+      - "POST /api/compiles/{run_id}/cancel"
+      - "GET /api/lessons/{lesson_id}/compiles"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-LESSON-26, FR-LESSON-27, FR-LESSON-28, FR-LESSON-29, FR-LESSON-30, FR-LESSON-31, FR-PIPELINE-20,
+          FR-PIPELINE-21, FR-PIPELINE-22]
+        missing: "no live run yet: the `manage` live step works on a scratch course of its own"
+      security: { items: [INV-LESSON-20, INV-LESSON-23] }
+      privacy: { items: [INV-LESSON-20] }
+      a11y: { missing: "no axe.json pages evidence for the lesson management pages (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-PIPELINE-20] }
+      recovery: { items: [INV-LESSON-21, FR-PIPELINE-20] }
+
+  # Added 2026-11-24 (V/manage-impl-ingest) for SRV-INGEST FR-INGEST-30..32 with SRV-SEARCH FR-SEARCH-20 and
+  # SRV-FRESH FR-FRESH-20 (the paired reads that hide a deleted material).
+  - id: manage.material
+    title: Rename, delete (with its courses) and restore a material (owner, Materials page)
+    surface: [web, api]
+    specs: [SRV-INGEST, SRV-SEARCH, SRV-FRESH, WEB-MANAGE]
+    routes: ["POST /api/materials/{material_id}", "GET /api/materials/{material_id}/impact",
+             "DELETE /api/materials/{material_id}", "POST /api/materials/{material_id}/restore"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-INGEST-30, FR-INGEST-31, FR-SEARCH-20, FR-FRESH-20]
+        missing: "no live run yet: the `manage` live step works on a scratch course of its own"
+      security: { items: [FR-INGEST-32] }
+      privacy: { missing: "no test asserts that a renamed title or a confirm text never reaches a log line" }
+      a11y: { missing: "no axe.json pages evidence for the Materials page (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-INGEST-31] }
+      recovery: { items: [FR-INGEST-31, FR-INGEST-32] }
+
+  - id: manage.people
+    title: Manage people (owner, Settings → People) — list, sign out everywhere, remove a passkey, delete, enable
+    surface: [web, api]
+    specs: [SRV-AUTH, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "GET /api/auth/users"
+      - "POST /api/auth/users/{user_id}/sessions/revoke"
+      - "DELETE /api/auth/users/{user_id}/credentials/{pid}"
+      - "DELETE /api/auth/users/{user_id}"
+      - "POST /api/auth/signups/{user_id}/enable"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-40, FR-AUTH-41, FR-AUTH-42, FR-AUTH-43, FR-AUTH-48]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [INV-AUTH-20, INV-AUTH-21, FR-AUTH-43] }
+      privacy: { items: [FR-AUTH-40, FR-EVENTS-30] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-AUTH-48, FR-AUTH-43] }
+
+  - id: manage.self
+    title: My sessions and passkeys (any user, Settings → Account) — list, sign out others, rename, remove
+    surface: [web, api]
+    specs: [SRV-AUTH, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "GET /api/auth/sessions"
+      - "DELETE /api/auth/sessions/{sid}"
+      - "POST /api/auth/sessions/revoke-others"
+      - "GET /api/auth/credentials"
+      - "POST /api/auth/credentials/{pid}"
+      - "DELETE /api/auth/credentials/{pid}"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-AUTH-44, FR-AUTH-45, FR-AUTH-46, FR-AUTH-47]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [INV-AUTH-20, INV-AUTH-21] }
+      privacy: { items: [FR-AUTH-44] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-AUTH-46, INV-AUTH-21] }
+
+  - id: manage.settings
+    title: Read and override instance settings (owner, Settings → Instance)
+    surface: [web, api, cli]
+    specs: [SRV-CONFIG, SRV-EVENTS, OPS-CLI, WEB-MANAGE]
+    routes: ["GET /api/settings", "POST /api/settings/{key}", "DELETE /api/settings/{key}"]
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-CONFIG-25, FR-CONFIG-26]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [FR-CONFIG-25, FR-CONFIG-26] }
+      privacy: { items: [FR-CONFIG-25] }
+      a11y: { missing: "no axe.json pages evidence for /settings (WEB-MANAGE FR-MANAGE-8)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: "no provider call (budget overrides change caps, not calls)" }
+      observability: { items: [FR-CONFIG-26, FR-EVENTS-30] }
+      recovery: { items: [FR-CONFIG-26] }
+
+  - id: manage.tutor
+    title: Clear my tutor history on a lesson, or one question
+    surface: [web, api]
+    specs: [SRV-TUTOR, SRV-EVENTS, WEB-MANAGE]
+    routes:
+      - "POST /api/lessons/{lesson_id}/questions/clear"
+      - "DELETE /api/lessons/{lesson_id}/questions/{question_id}"
+    gate: tracked
+    criteria:
+      functional:
+        items: [FR-TUTOR-20, FR-TUTOR-21]
+        missing: "no live run yet: the `manage` live step"
+      security: { items: [INV-TUTOR-1, FR-TUTOR-21] }
+      privacy: { items: [FR-TUTOR-20] }
+      a11y: { missing: "no axe.json pages evidence for the Ask panel's clear control (WEB-MANAGE)" }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-EVENTS-30] }
+      recovery: { items: [FR-TUTOR-20] }

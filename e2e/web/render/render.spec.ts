@@ -1,4 +1,4 @@
-// @trace INV-RENDER-2 FR-RENDER-3 FR-RENDER-5 VEC-RENDER-1
+// @trace INV-RENDER-2 FR-RENDER-3 FR-RENDER-4 FR-RENDER-5 VEC-RENDER-1
 // [browser] Run on request: `cd web && npx vite build && npm run build-storybook && NODE_PATH=$PWD/node_modules npx playwright test`.
 // The stories render VEC-RENDER-1's `svg-script` case, a PNG and an inline `\raisebox`; the test server serves the
 // built Storybook under /storybook/.
@@ -50,4 +50,49 @@ test('inline math cannot spill outside its line (FR-RENDER-3)', async ({ page })
   expect(box.overflow).toBe('hidden');
   expect(box.height).toBeLessThan(100);
   expect(box.page).toBeLessThan(2000);
+});
+
+// Design pass (2026-11-23): superscripts, subscripts and fractions paint inside the inline box (the audit measured the
+// top of 2^{n/2} 8.2px above it), and math is set at 1.05 × the paragraph's size. Story: render-markdown--inline-math
+// holds `$2^{n/2}$`, `$x_{i,j}^{2}$` and `$\frac{a}{b}$` inline in one paragraph.
+test('inline math keeps its scripts inside its box at 1.05em (FR-RENDER-3)', async ({ page }) => {
+  await page.goto(story('render-markdown--inline-math'));
+  await page.waitForSelector('#storybook-root [data-markdown] p .katex');
+  const boxes = await page.evaluate(() =>
+    [...document.querySelectorAll('#storybook-root [data-markdown] p .katex')].map((k) => {
+      const kr = k.getBoundingClientRect();
+      const spans = [...k.querySelectorAll('.katex-html span')].map((s) => s.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0);
+      const p = k.closest('p') as HTMLElement;
+      return {
+        text: k.textContent ?? '',
+        above: kr.top - Math.min(...spans.map((r) => r.top)),
+        below: Math.max(...spans.map((r) => r.bottom)) - kr.bottom,
+        ratio: parseFloat(getComputedStyle(k).fontSize) / parseFloat(getComputedStyle(p).fontSize),
+      };
+    }),
+  );
+  expect(boxes).toHaveLength(3);
+  for (const b of boxes) {
+    expect(b.above, `${b.text} above`).toBeLessThanOrEqual(0.5);
+    expect(b.below, `${b.text} below`).toBeLessThanOrEqual(0.5);
+    expect(b.ratio, `${b.text} size`).toBeCloseTo(1.05, 2);
+  }
+});
+
+// Design pass (2026-11-23): both Shiki themes ride on CSS custom properties, so switching `data-theme` recolours a
+// rendered block without a re-render.
+test('a python keyword changes colour with data-theme on the same block (FR-RENDER-4)', async ({ page }) => {
+  await page.goto(story('render-code--light'));
+  const keyword = page.locator('#storybook-root pre.shiki span', { hasText: /^import$/ }).first();
+  await expect(keyword).toBeVisible();
+  const colour = (theme: 'light' | 'dark') =>
+    keyword.evaluate((el, t) => {
+      document.documentElement.dataset.theme = t;
+      return getComputedStyle(el).color;
+    }, theme);
+  const handle = await keyword.elementHandle();
+  const light = await colour('light');
+  const dark = await colour('dark');
+  expect(dark).not.toBe(light);
+  expect(await keyword.evaluate((el, h) => el === h, handle)).toBe(true);
 });

@@ -136,6 +136,11 @@ HEALTH_TIMING = {"interval": "2s", "timeout": "2s", "retries": 3, "start_period"
 def test_every_service_has_a_healthcheck() -> None:
     services = full_render()["services"]
     for name, svc in services.items():
+        if name in ("jaeger", "mlflow-migrate"):
+            # FR-DEPLOY-13: jaeger is distroless (no shell, no probe tool);
+            # FR-DEPLOY-15 (g): mlflow-migrate is a one-shot that exits
+            assert not svc.get("healthcheck"), name
+            continue
         assert (svc.get("healthcheck") or {}).get("test"), name
     expected = {
         "postgres": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
@@ -161,6 +166,23 @@ def test_only_server_roles_have_environment() -> None:
             env = svc.get("environment") or {}
             if name in SERVER_ROLES:
                 assert env == {"READER_CONFIG": "/etc/reader/reader.yaml"}, name
+            elif name == "mlflow":  # FR-DEPLOY-15 (a), (g): SRV-OBS FR-OBS-27's six non-secret entries
+                assert env == {
+                    "MLFLOW_SERVER_ENABLE_JOB_EXECUTION": "false",
+                    "MLFLOW_DISABLE_TELEMETRY": "true",
+                    "DO_NOT_TRACK": "true",
+                    "MLFLOW_ENABLE_AI_GATEWAY": "false",
+                    "MLFLOW_ENABLE_REMOTE_ASSISTANT": "false",
+                    "MLFLOW_MODEL_CATALOG_URI": "",
+                }
+            elif name == "rotel":  # FR-DEPLOY-13: its two named exporters (SRV-OBS FR-OBS-19)
+                assert set(env) == {
+                    "ROTEL_EXPORTER_MLFLOW_ENDPOINT", "ROTEL_EXPORTER_MLFLOW_PROTOCOL",
+                    "ROTEL_EXPORTER_MLFLOW_CUSTOM_HEADERS", "ROTEL_EXPORTER_JAEGER_ENDPOINT",
+                    "ROTEL_EXPORTER_JAEGER_PROTOCOL",
+                }
+            elif name == "jaeger":
+                assert env == {"GOMEMLIMIT": "200MiB"}
             else:
                 assert not env, name
 

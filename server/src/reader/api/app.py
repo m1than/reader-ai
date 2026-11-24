@@ -24,6 +24,7 @@ from starlette.websockets import WebSocket
 
 from reader.api.http import Ctx, Route, WsRoute, error
 from reader.auth import store
+from reader.auth.csrf import raw_body_type
 from reader.auth.policy import CLEANUP_INTERVAL_S, RECENT_SESSION_S, SESSION_COOKIE, Settings
 
 ROUTERS: Final = (
@@ -36,6 +37,10 @@ ROUTERS: Final = (
     "reader.pipeline.routes",
     "reader.tutor.routes",  # SRV-TUTOR paired change (FR-AUTH-10 note)
     "reader.plan.routes",  # SRV-PLAN paired change (FR-AUTH-10 note)
+    "reader.obs.routes",  # SRV-OBS paired change (FR-AUTH-33): the owner gate and the summary
+    "reader.freshness.routes",  # SRV-FRESH paired change (FR-AUTH-10 note)
+    "reader.jobs.audit_routes",  # SRV-EVENTS FR-EVENTS-31 paired change (FR-AUTH-10 note, V/manage)
+    "reader.config.routes",  # SRV-CONFIG FR-CONFIG-25/-26 paired change (FR-AUTH-10 note, V/manage)
 )
 ROUTES: Final[tuple[Route, ...]] = tuple(
     route for module in ROUTERS for route in importlib.import_module(module).ROUTES
@@ -72,10 +77,12 @@ class CsrfGate:
             return
         length = headers.get("content-length", "0").strip()
         has_body = not length.isdigit() or int(length) > 0 or "transfer-encoding" in headers
+        raw_path = scope.get("raw_path") or scope["path"].encode("utf-8")
+        allowed = raw_body_type(method, raw_path.split(b"?", 1)[0]) or "application/json"  # FR-AUTH-22
         if (
             method not in _SAFE_METHODS
             and has_body
-            and _media_type(headers.get("content-type", "")) != ("application/json")
+            and _media_type(headers.get("content-type", "")) != allowed
         ):
             await self._refuse(scope, receive, send, error(415, "content_type"))
             return
@@ -162,4 +169,9 @@ def create_app(
         return error(404, "not_found")
 
     app.add_middleware(CsrfGate, origin=settings.origin)
+    # FR-AUTH-33 (SRV-OBS FR-OBS-3): added last, so it is the outermost middleware, outside the CSRF gate.
+    from reader.obs.asgi import TraceMiddleware
+
+    templates = [r.path for r in ROUTES] + [w.path for w in WS_ROUTES]
+    app.add_middleware(TraceMiddleware, templates=templates)
     return app

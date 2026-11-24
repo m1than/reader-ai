@@ -1,0 +1,225 @@
+{
+  "sdk_version": "0.2.187",
+  "cli_on_path": "not on PATH",
+  "python": "3.14.10",
+  "runs": [
+    {
+      "mode": "websearch",
+      "messages": [
+        {
+          "type": "SystemMessage",
+          "t": 0.311,
+          "subtype": "init",
+          "data_keys": [
+            "additional_directories",
+            "agents",
+            "analytics_disabled",
+            "apiKeySource",
+            "capabilities",
+            "claude_code_version",
+            "cwd",
+            "fast_mode_disabled_reason",
+            "fast_mode_state",
+            "mcp_servers",
+            "memory_paths",
+            "messaging_socket_path",
+            "model",
+            "original_cwd",
+            "output_style",
+            "per_turn_effort_active",
+            "permissionMode",
+            "plugins",
+            "product_feedback_disabled",
+            "served_by_anthropic",
+            "session_id",
+            "skills",
+            "slash_commands",
+            "subtype",
+            "terminal_slash_commands",
+            "tools",
+            "type",
+            "ultrathink_available",
+            "ultrathink_typed_raises",
+            "uuid",
+            "view_mode"
+          ]
+        },
+        {
+          "type": "AssistantMessage",
+          "t": 0.354,
+          "error": null,
+          "model": "claude-haiku-5-5",
+          "blocks": [
+            {
+              "type": "ToolUseBlock",
+              "name": "WebSearch",
+              "input": {
+                "query": "synthetic freshness query"
+              },
+              "id": "toolu_stub01"
+            }
+          ]
+        },
+        {
+          "type": "RateLimitEvent",
+          "t": 0.366
+        },
+        {
+          "type": "UserMessage",
+          "t": 0.432,
+          "blocks": [
+            {
+              "type": "ToolResultBlock",
+              "tool_use_id": "toolu_stub01",
+              "is_error": null,
+              "content": "\"Web search results for query: \\\"synthetic freshness query\\\"\\n\\nLinks: [{\\\"title\\\":\\\"Synthetic Book, 5th ed.\\\",\\\"url\\\":\\\"https://example.com/new-edition\\\"},{\\\"title\\\":\\\"Synthetic Docs\\\",\\\"url\\\":\\\"https://docs.example.org/guide\\\"}]\\n\\nstub search summary\\n\\n\\nREMINDER: You MUST include the sources above in your response to the user using markdown hyperlinks.\""
+            }
+          ],
+          "tool_use_result": {
+            "query": "synthetic freshness query",
+            "results": [
+              {
+                "tool_use_id": "srvtoolu_stub01",
+                "content": [
+                  {
+                    "title": "Synthetic Book, 5th ed.",
+                    "url": "https://example.com/new-edition"
+                  },
+                  {
+                    "title": "Synthetic Docs",
+                    "url": "https://docs.example.org/guide"
+                  }
+                ]
+              },
+              "stub search summary"
+            ],
+            "durationSeconds": 0.05281941699999999,
+            "searchCount": 1
+          }
+        },
+        {
+          "type": "AssistantMessage",
+          "t": 0.486,
+          "error": null,
+          "model": "claude-haiku-5-5",
+          "blocks": [
+            {
+              "type": "TextBlock",
+              "text": "stub-final"
+            }
+          ]
+        },
+        {
+          "type": "ResultMessage",
+          "t": 0.492,
+          "model_usage": {
+            "claude-haiku-5-5": {
+              "inputTokens": 30,
+              "outputTokens": 15,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0,
+              "webSearchRequests": 1,
+              "costUSD": 0.0100105,
+              "contextWindow": 1000000,
+              "maxOutputTokens": 128000,
+              "thinkingTokens": 0,
+              "cacheCreationEphemeral5mInputTokens": 0,
+              "cacheCreationEphemeral1hInputTokens": 0,
+              "canonicalModel": "claude-haiku-5-5",
+              "provider": "firstParty",
+              "costBasis": "list"
+            }
+          },
+          "subtype": "success",
+          "is_error": false,
+          "total_cost_usd": 0.0100105,
+          "usage_keys": [
+            "cache_creation",
+            "cache_creation_input_tokens",
+            "cache_read_input_tokens",
+            "fallback_credit",
+            "inference_geo",
+            "input_tokens",
+            "iterations",
+            "output_tokens",
+            "output_tokens_details",
+            "server_tool_use",
+            "service_tier",
+            "speed"
+          ],
+          "usage": {
+            "input_tokens": 20,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "output_tokens": 10,
+            "output_tokens_details": {
+              "thinking_tokens": 0
+            },
+            "server_tool_use": {
+              "web_search_requests": 0,
+              "web_fetch_requests": 0
+            },
+            "service_tier": "standard",
+            "cache_creation": {
+              "ephemeral_1h_input_tokens": 0,
+              "ephemeral_5m_input_tokens": 0
+            },
+            "inference_geo": "",
+            "iterations": [],
+            "speed": "standard",
+            "fallback_credit": null
+          },
+          "result": "stub-final",
+          "fields": {
+            "subtype": "success",
+            "duration_ms": 197,
+            "duration_api_ms": 127,
+            "is_error": false,
+            "num_turns": 2,
+            "session_id": "26902529-5f82-4096-99de-d3daaaf2901d",
+            "stop_reason": "end_turn",
+            "total_cost_usd": 0.0100105,
+            "result": "stub-final",
+            "structured_output": null,
+            "permission_denials": [],
+            "deferred_tool_use": null,
+            "errors": null,
+            "api_error_status": null,
+            "uuid": "b5f222f0-cdac-4f84-ad6f-97a3bb95e4ec",
+            "terminal_reason": "completed",
+            "origin": null,
+            "user_message_uuid": null,
+            "user_message_uuids": null
+          }
+        }
+      ],
+      "init_tools": [
+        "WebSearch"
+      ],
+      "error": null,
+      "init_model": "claude-haiku-5-5",
+      "init_mcp_servers": [],
+      "wall_s": 0.52,
+      "hook_calls": [
+        {
+          "tool_name": "WebSearch",
+          "tool_input": {
+            "query": "synthetic freshness query"
+          },
+          "keys": [
+            "cwd",
+            "effort",
+            "hook_event_name",
+            "permission_mode",
+            "prompt_id",
+            "session_id",
+            "tool_input",
+            "tool_name",
+            "tool_use_id",
+            "transcript_path"
+          ]
+        }
+      ]
+    }
+  ]
+}

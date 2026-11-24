@@ -126,7 +126,12 @@ h1 {
     [data-state='not_registered'],
     [data-state='rate_limited'],
     [data-state='unreachable'],
-    [data-state='failed']
+    [data-state='failed'],
+    [data-state='handle_invalid'],
+    [data-state='display_name_invalid'],
+    [data-state='handle_unavailable'],
+    [data-state='signup_full'],
+    [data-state='pending_approval']
   )
   .auth-status {
   padding: var(--acme-space-1) 0 var(--acme-space-1) var(--acme-space-3);
@@ -134,7 +139,7 @@ h1 {
   color: var(--acme-danger);
 }
 
-.auth[data-state='done'] .auth-status {
+.auth:is([data-state='done'], [data-state='pending']) .auth-status {
   color: var(--acme-text);
 }
 
@@ -169,9 +174,66 @@ h1 {
 }
 
 .auth-button:focus-visible,
-.auth-status:focus-visible {
+.auth-status:focus-visible,
+.auth-input:focus-visible,
+.auth-alt a:focus-visible {
   outline: 2px solid var(--acme-focus);
   outline-offset: 2px;
+}
+
+/* SRV-AUTH FR-AUTH-31: the sign-up form and the links between the pages. */
+.auth-form {
+  margin: 0;
+}
+
+.auth-field {
+  margin: 0 0 var(--acme-space-4);
+}
+
+.auth-label {
+  display: block;
+  margin: 0 0 var(--acme-space-1);
+  font-size: var(--acme-text-md);
+  font-weight: 600;
+}
+
+.auth-hint {
+  margin: var(--acme-space-1) 0 0;
+  color: var(--acme-text-muted);
+  font-size: var(--acme-text-sm);
+}
+
+.auth-input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-block-size: var(--acme-control-lg);
+  padding: 0 var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--acme-radius);
+  background: var(--acme-canvas);
+  color: var(--acme-text);
+  font: 400 var(--acme-text-md) / 1.2 var(--acme-font);
+}
+
+.auth-input[aria-invalid='true'] {
+  border-color: var(--acme-danger);
+}
+
+.auth-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.auth-alt {
+  margin: var(--acme-space-4) 0 0;
+  color: var(--acme-text-muted);
+  font-size: var(--acme-text-md);
+}
+
+.auth-alt a {
+  color: var(--acme-accent);
+  text-underline-offset: 2px;
 }
 
 @media (max-width: 30rem) {

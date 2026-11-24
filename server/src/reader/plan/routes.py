@@ -33,10 +33,24 @@ log = logging.getLogger("reader.plan")
 
 
 class _Refused(Exception):
-    def __init__(self, status: int, code: str) -> None:
+    def __init__(self, status: int, code: str, **extra: str) -> None:
         super().__init__(code)
         self.status = status
         self.code = code
+        self.extra = extra
+
+    def response(self) -> JSONResponse:
+        return JSONResponse({"error": self.code, **self.extra}, status_code=self.status)
+
+
+async def _course_gate(conn: AsyncConnection, owner: uuid.UUID, plan_course_id: str, *, active: bool) -> None:
+    """FR-PLAN-20: a study plan whose course is deleted answers `course_deleted` with its id (restore it
+    first); with `active` (preview and confirm), an archived course answers `course_archived`."""
+    state = await store.course_state(conn, owner, plan_course_id=plan_course_id)
+    if state is not None and state.deleted:
+        raise _Refused(409, "course_deleted", course_id=str(state.course_id))
+    if state is not None and active and state.archived:
+        raise _Refused(409, "course_archived")
 
 
 def _materials(ctx: Ctx) -> Sequence[Material]:
@@ -196,9 +210,10 @@ async def preview(ctx: Ctx) -> Response:
         req = _Request(ctx, await ctx.json())
         _today_in_range(req.today)
         async with ctx.engine.connect() as conn:
+            await _course_gate(conn, ctx.signed_in.id, req.course, active=True)
             computed = await _compute(conn, ctx.signed_in.id, req)
     except _Refused as e:
-        return error(e.status, e.code)
+        return e.response()
     s = computed["summary"]
     log.info(
         "plan.preview material=%s lessons=%d fits=%s sha=%s duration_ms=%d",
@@ -212,6 +227,24 @@ async def preview(ctx: Ctx) -> Response:
 
 
 SHA256: Final = re.compile(r"[0-9a-f]{64}")
+
+
+async def _material_live_under_positions(conn: AsyncConnection, owner: uuid.UUID, sha256: str) -> None:
+    """FR-PLAN-20: before any write, the owner's position lock "RCPO" (after the plan-course lock: SRV-LESSON
+    INV-LESSON-23's order), then the material row FOR SHARE. A material delete holds RCPO from before its
+    check to its commit and updates that row, so it either committed first (deleted: 404 here) or waits
+    until this confirm has committed and then sees the new course (SRV-INGEST FR-INGEST-31)."""
+    from sqlalchemy import text
+
+    from reader.lessons.store import lock_positions
+
+    await lock_positions(conn, owner)
+    live = await conn.execute(
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NULL FOR SHARE"),
+        {"o": owner, "s": sha256},
+    )
+    if live.first() is None:
+        raise _Refused(404, "not_found")
 
 
 async def confirm(ctx: Ctx) -> Response:
@@ -230,6 +263,7 @@ async def confirm(ctx: Ctx) -> Response:
         created = removed = 0
         async with ctx.engine.begin() as conn:
             await courses.lock_course(conn, owner, req.course)
+            await _course_gate(conn, owner, req.course, active=True)  # FR-PLAN-20: before replay or import
             saved = await store.stored(conn, owner, req.course)
             replayed = False
             if saved is not None and saved.plan_sha256 == sha:  # the stored sha alone decides
@@ -246,6 +280,7 @@ async def confirm(ctx: Ctx) -> Response:
                 result: planner.Plan = computed["plan"]
                 if not result.summary["fits"]:
                     raise _Refused(422, "does_not_fit")
+                await _material_live_under_positions(conn, owner, req.material.sha256)
                 titled = {x["id"]: x["title"] for x in computed["lessons"]}
                 plan = courses.Plan(
                     req.course,
@@ -278,16 +313,19 @@ async def confirm(ctx: Ctx) -> Response:
                     for p, lid, o in imported.lessons
                 ]
     except _Refused as e:
-        return error(e.status, e.code)
+        return e.response()
     compiled: dict[str, str] | None = None
-    if compile_first and lessons:
-        first = min(lessons, key=lambda x: x["ordinal"])
+    first: uuid.UUID | None = None
+    if compile_first and lessons:  # FR-PIPELINE-22: the first lesson that is neither skipped nor deleted
+        async with ctx.engine.connect() as conn:
+            first = await store.first_active(conn, owner, [uuid.UUID(x["lesson_id"]) for x in lessons])
+    if first is not None:
         try:
             run = await runs.create_run(
                 ctx.engine,
                 ctx.request.app.state.jobs,
                 owner,
-                uuid.UUID(first["lesson_id"]),
+                first,
                 params.RUN_CAP_USD,
                 require_course_unstarted=True,
             )
@@ -319,24 +357,41 @@ async def confirm(ctx: Ctx) -> Response:
     )
 
 
+async def _material_of(ctx: Ctx, conn: AsyncConnection, owner: uuid.UUID) -> Material:
+    """GET /api/plans' two forms: `material_id` (FR-PLAN-9) or `course_id` (FR-PLAN-20), exactly one."""
+    ids = ctx.request.query_params.getlist("material_id")
+    course_ids = ctx.request.query_params.getlist("course_id")
+    if len(ids) + len(course_ids) != 1:
+        raise _Refused(400, "material_id")
+    if ids:
+        material = next((x for x in _materials(ctx) if x.id == ids[0]), None)
+    else:
+        try:
+            course_id = uuid.UUID(course_ids[0])
+        except ValueError:
+            raise _Refused(404, "not_found") from None
+        state = await store.course_state(conn, owner, course_id=course_id)
+        sha = None if state is None else state.material_sha256
+        material = next((x for x in _materials(ctx) if x.sha256 == sha), None)
+    if material is None:
+        raise _Refused(404, "not_found")
+    return material
+
+
 async def get_plan(ctx: Ctx) -> Response:
     try:
         _owner_only(ctx)
-        ids = ctx.request.query_params.getlist("material_id")
-        if len(ids) != 1:
-            raise _Refused(400, "material_id")
-        material = next((x for x in _materials(ctx) if x.id == ids[0]), None)
-        if material is None:
-            raise _Refused(404, "not_found")
-        course = f"plan-{material.sha256[:12]}"
         owner = ctx.signed_in.id
         async with ctx.engine.connect() as conn:
+            material = await _material_of(ctx, conn, owner)
+            course = f"plan-{material.sha256[:12]}"
+            await _course_gate(conn, owner, course, active=False)
             saved = await store.stored(conn, owner, course)
             if saved is None:
                 raise _Refused(404, "not_found")
             started = len(await store.fixed(conn, owner, course))
     except _Refused as e:
-        return error(e.status, e.code)
+        return e.response()
     return JSONResponse(
         {
             "course_id": str(saved.course_id),
@@ -354,8 +409,26 @@ async def get_plan(ctx: Ctx) -> Response:
     )
 
 
+async def lesson_estimate(ctx: Ctx) -> Response:
+    """FR-PLAN-13: one lesson's compile estimate, read-only."""
+    try:
+        _owner_only(ctx)
+        try:
+            lesson = uuid.UUID(ctx.request.path_params["lesson_id"])
+        except ValueError:
+            raise _Refused(404, "not_found") from None
+        async with ctx.engine.connect() as conn:
+            chars = await store.lesson_chars(conn, ctx.signed_in.id, lesson)
+        if chars is None:
+            raise _Refused(404, "not_found")
+    except _Refused as e:
+        return error(e.status, e.code)
+    return JSONResponse({"lesson_id": str(lesson), **estimate.lesson_estimate(chars)})
+
+
 ROUTES: tuple[Route, ...] = (
     Route("POST", "/api/plans/preview", "session", preview),
     Route("POST", "/api/plans/confirm", "session", confirm),
     Route("GET", "/api/plans", "session", get_plan),
+    Route("GET", "/api/lessons/{lesson_id}/estimate", "session", lesson_estimate),
 )

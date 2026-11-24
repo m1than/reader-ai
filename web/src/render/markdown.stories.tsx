@@ -17,3 +17,13 @@ export const Light: Story = { decorators: [themed('light')] };
 export const Dark: Story = { decorators: [themed('dark')] };
 /** Inline math that tries to paint far below its line: clipped (FR-RENDER-3 [browser]). */
 export const RaiseBox: Story = { args: { source: 'before $\\raisebox{-500em}{X}$ after' }, decorators: [themed('light')] };
+/** Ordinary scripts and a fraction inline: painted inside the inline box at 1.05em (FR-RENDER-3, design pass). */
+export const InlineMath: Story = {
+  args: { source: 'A collision after about $2^{n/2}$ tries; an entry $x_{i,j}^{2}$; a ratio $\\frac{a}{b}$ in a line.' },
+  decorators: [themed('light')],
+};
+/** A wide table (5 or more columns) and a fenced block without a language (WEB-UI FR-UI-10, FR-RENDER-4). */
+export const WideTable: Story = {
+  args: { source: '| a | b | c | d | e |\n|---|---|---|---|---|\n| 1 | 2 | 3 | 4 | 5 |\n\n```\nplain text\n```' },
+  decorators: [themed('light')],
+};

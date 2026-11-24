@@ -14,7 +14,8 @@ describe('notices (FR-UI-7)', () => {
       'kernel_unavailable', 'kernel_upstream', 'too_many_kernels', 'connect_failed', 'sign_out_failed', 'network',
     ];
     for (const code of codes) expect(noticeText(code)).toMatch(/\S/);
-    expect(noticeText('too_many_kernels')).toBe('too many open lessons; close one or reset');
+    // Design pass (FR-UI-7): sentence case with a full stop.
+    expect(noticeText('too_many_kernels')).toBe('Too many open lessons; close one or reset the kernel.');
     expect(noticeText('<img src=x onerror=alert(1)>')).toBe(noticeText('unknown'));
   });
 

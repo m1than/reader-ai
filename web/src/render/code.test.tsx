@@ -9,7 +9,8 @@ describe('Shiki (FR-RENDER-4)', () => {
   it('highlights python into a hast tree with the JavaScript engine', async () => {
     const { highlight } = await load(() => import('./highlight'));
     expect(highlight).toBeTypeOf('function');
-    const tree = await highlight('print(1)', 'python', 'light');
+    // Design pass: both schemes at once, so no scheme argument.
+    const tree = await highlight('print(1)', 'python');
     expect(tree?.type).toBe('root');
     expect(JSON.stringify(tree)).toContain('print');
   });
@@ -17,7 +18,7 @@ describe('Shiki (FR-RENDER-4)', () => {
   it('returns null for other languages', async () => {
     const { highlight } = await load(() => import('./highlight'));
     expect(highlight).toBeTypeOf('function');
-    expect(await highlight('fn main() {}', 'rust', 'light')).toBeNull();
+    expect(await highlight('fn main() {}', 'rust')).toBeNull();
   });
 
   it('renders plain monospace first, then highlighted tokens as React elements', async () => {
@@ -34,6 +35,7 @@ describe('Shiki (FR-RENDER-4)', () => {
     expect(Code).toBeTypeOf('function');
     const { container } = render(<Code code={'<b>x</b>'} language="html" />);
     expect(container.querySelector('b')).toBeNull();
-    expect(container.textContent).toBe('<b>x</b>');
+    // Design pass: the block has a header (language, Copy); the code itself is the `pre`.
+    expect(container.querySelector('pre')?.textContent).toBe('<b>x</b>');
   });
 });

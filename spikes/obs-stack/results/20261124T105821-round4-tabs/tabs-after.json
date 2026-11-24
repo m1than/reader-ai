@@ -1,0 +1,119 @@
+{
+ "variant": "after",
+ "tabs": {
+  "overview": {
+   "url": "/#/experiments/0/overview",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Overview Let's improve your agent with MLflow Help me create an evaluation Build a continuous quality loop in 4 steps Trace, analyze, evaluate, and monitor your agent as it evolves. Learn how it works ↗ TRACE 10 traces View traces ANALYZE Recommended Review real traces to surface failure modes and quality issues worth fixing. Detect issues EVAL/TEST Turn"
+  },
+  "traces": {
+   "url": "/#/experiments/0/traces",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display now Detect Issues Time Input Output Session Duration State Tokens Tags fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed 1 minute ago - - - 30ms OK - service.name: reader-worker +1 2 minutes ago - - - 1.2min OK 1800 service.name: claude-code +4 3 minutes ago {\"run_id\":"
+  },
+  "trace-detail": {
+   "url": "/#/experiments/0/traces?selectedEvaluationId=tr-1cb540817b3afeabaecf10e325be1723",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 9 seconds ago Detect Issues Time Input Output Session Duration State Tokens Tags fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed 1 minute ago - - - 30ms OK - service.name: reader-worker +1 2 minutes ago - - - 1.2min OK 1800 service.name: claude-code +4 3 minutes ago "
+  },
+  "trace-detail-compile": {
+   "url": "/#/experiments/0/traces?selectedEvaluationId=tr-dfdcc8aa073ea412871be1bdb9a34d82",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 18 seconds ago Detect Issues Time Input Output Session Duration State Tokens Tags fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed 1 minute ago - - - 30ms OK - service.name: reader-worker +1 2 minutes ago - - - 1.2min OK 1800 service.name: claude-code +4 3 minutes ago"
+  },
+  "sessions": {
+   "url": "/#/experiments/0/traces?groupBy=session",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 27 seconds ago Detect Issues Session Input Output Time Duration State Tokens Tags fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed - - - 1 minute ago 30ms OK - service.name: reader-worker +1 - - - 3 minutes ago 1.2min OK 1800 service.name: claude-code +4 10000000-0000"
+  },
+  "traces-lesson": {
+   "url": "/#/experiments/0/traces?q=20000000-0000-4000-8000-0000000000bb",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Traces Default view Last 7 days Display 36 seconds ago Detect Issues Time Input Output Session Duration State Tokens Tags fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed 4 minutes ago {\"run_id\": \"10000000-0000-4000-8000-0000000000aa\", \"lesson_id\": \"20000000-0000-4000-8000-0000000000bb\", \"stage\": \"review\", "
+  },
+  "issues": {
+   "url": "/#/experiments/0/issues",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Issues Cost increased 3× last week Agent response violated policy Tool error: invalid argument Discover issues automatically Scan your traces to surface failure modes, quality regressions, and cost anomalies, then triage and fix them in one place. Run issue detection Learn how it works MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask"
+  },
+  "dashboard-usage": {
+   "url": "/#/experiments/0/dashboard/usage",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Filters Time Unit: Day Last 7 days Detect Issues Traces 10 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 3 6 9 12 AVG (1) Latency 38.60s p50p90p99 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 30000 60000 90000 120000 AVG (38.60s) Errors 2 (Overall error rate: 20.0%) Error CountError Rate 11/17 11/18 11/19 11/20"
+  },
+  "dashboard-quality": {
+   "url": "/#/experiments/0/dashboard/quality",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Time Unit: Day Last 7 days Detect Issues Quality Insights Quality metrics computed by scorers. Quality Summary Scorer Total Count Average Value fact_check.passed 2 - tutor.citations_valid 2 - verify.lab_passed 2 - freshness.verdict 1 - tutor.citation_share 1 0.75 fact_check.passed Total aggregate scores count 0 1 2 3 4 "
+  },
+  "dashboard-tool-calls": {
+   "url": "/#/experiments/0/dashboard/tool-calls",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Dashboard Usage Quality Tool calls Time Unit: Day Last 7 days Detect Issues 4 Total Tool Calls 3.00s Avg Latency 0.00% Success Rate 2 Failed Calls Tool Performance Summary Tool Calls Success Latency (AVG) verify.lab 4 0.00% 3.00s Tool Usage Over Time All tools verify.lab 11/17 11/18 11/19 11/20 11/21 11/22 11/23 11/24 0 1 2 3 4 Latency Comparison All too"
+  },
+  "judges": {
+   "url": "/#/experiments/0/judges",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Judges Add a judge to your experiment to measure your GenAI app quality Choose from a selection of built-in LLM judges or create your own custom code based judge. Learn more New LLM judge New custom code judge MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for f"
+  },
+  "review": {
+   "url": "/#/experiments/0/review-queue?selectedQueueId=rq-86efc25e0c6046ce8b592c0cb393cc29",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Review Default Manage questions New queue Queue To do Default Default 1 question No traces in this queue yet Add traces from the Traces tab to start reviewing them with your team. Add traces MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable fixes for failed traces. 750"
+  },
+  "datasets": {
+   "url": "/#/experiments/0/datasets",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Datasets Create an evaluation dataset Create evaluation datasets in order to iteratively evaluate and improve your app. For example, build a dataset from production traces with negative feedback. Learn more Create dataset MLflow Assistant Beta Welcome to MLflow Assistant 1. Debug Issues Ask questions about errors, identify root causes, and get actionable"
+  },
+  "evaluation-runs": {
+   "url": "/#/experiments/0/evaluation-runs",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Evaluation runs Run evaluation All time Display now Evaluate and improve the quality, cost, latency of your GenAI app Create evaluation datasets in order to iteratively evaluate and improve your app. Run evaluations to check that your fixes are working, and compare quality between app / prompt versions. Learn more Or use coding agents/code snippets Copy "
+  },
+  "prompts": {
+   "url": "/#/experiments/0/prompts",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Prompts Create prompt Name Latest version Last modified Tags reader.fact_check Version 1 11/24/2026, 07:01:48 AM reader.git_sha : 2ffc1ee077d4736b7b1d4d4eaa016c3700c65397 reader.review Version 1 11/24/2026, 07:01:48 AM reader.git_sha : 2ffc1ee077d4736b7b1d4d4eaa016c3700c65397 reader.tutor Version 1 11/24/2026, 07:01:48 AM reader.git_sha : 2ffc1ee077d4736"
+  },
+  "agent-versions": {
+   "url": "/#/experiments/0/models",
+   "head": "3.18.0 GenAI Model training Default Overview Observability Traces Issues Dashboard Sessions Evaluation Judges Review Datasets Evaluation runs Prompts & versions Playground Prompts Agent versions AI Gateway New Docs Settings Experiments Default Agent versions Table view Chart view Sort: Created Columns Group by Model attributes Model name Status Created Model attributes Logged from Source run Registered models Dataset Track and compare versions of your GenAI app Track every version of your app's code and prompts to understand how quality changes over time. Learn more Create version MLflow Assis"
+  }
+ },
+ "headers": [
+  "",
+  "Time",
+  "Input",
+  "Output",
+  "Session",
+  "Duration",
+  "State",
+  "Tokens",
+  "Tags",
+  "fact_check.passed",
+  "freshness.verdict",
+  "tutor.citation_share",
+  "tutor.citations_valid",
+  "verify.lab_passed"
+ ],
+ "chooser_found": 1,
+ "chooser_menu": "Columns Sort Time Row height Compact",
+ "sort_menu": "Columns Sort Time Row height Compact | Time (descending) Time (ascending) Duration (descending) Duration (ascending) State (descending) State (ascending)",
+ "columns_menu": "Columns Sort Time Row height Compact | Trace ID Trace name Time Input Output User Session Duration State Source Run name Tokens Cost Tags Metadata fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed Tags host.arch os.type os.version reader.cache_read_share reader.cost_usd reader.course.id reader.error_code reader.job.attempt reader.job.kind reader.job.outcome reader.lesson.id reader.model reader.run_id reader.run.spent_usd reader.stage reader.step reader.task service.name service.version Assessments Reset to defaults",
+ "cost_option": 2,
+ "headers_with_cost": [
+  "",
+  "Time",
+  "Input",
+  "Output",
+  "Session",
+  "Duration",
+  "State",
+  "Tokens",
+  "Cost",
+  "Tags",
+  "fact_check.passed",
+  "freshness.verdict",
+  "tutor.citation_share",
+  "tutor.citations_valid",
+  "verify.lab_passed"
+ ],
+ "cost_sort_url": "/#/experiments/0/traces",
+ "cost_sorted_rows": [
+  "Time Input Output Session Duration State Tokens Cost Tags fact_check.passed freshness.verdict tutor.citation_share tutor.citations_valid verify.lab_passed",
+  "3 minutes ago - - - 30ms OK - - service.name: reader-worker +1",
+  "5 minutes ago - - - 1.2min OK 1800 - service.name: claude-code +4",
+  "5 minutes ago {\"run_id\": \"10000000-0000-4000-8000-0000000000ee\", \"lesson_id\": \"20000000-0000-4000-8000-0000000000dd\", \"stage\": \"draft\", \"step\": 1} {\"outcome\": \"",
+  "6 minutes ago {\"run_id\": \"10000000-0000-4000-8000-0000000000aa\", \"lesson_id\": \"20000000-0000-4000-8000-0000000000bb\", \"stage\": \"review\", \"step\": 3} {\"outcome\": ",
+  "7 minutes ago {\"material_sha256\": \"aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11\"} {\"outcome\": \"succeeded\", \"pages\": 594, \"chunks\": 2310} - 2",
+  "7 minutes ago {\"run_id\": \"10000000-0000-4000-8000-0000000000aa\", \"lesson_id\": \"20000000-0000-4000-8000-0000000000bb\", \"stage\": \"fact_check\", \"step\": 2} {\"outcom",
+  "8 minutes ago {\"run_id\": \"10000000-0000-4000-8000-0000000000aa\", \"lesson_id\": \"20000000-0000-4000-8000-0000000000bb\", \"stage\": \"fact_check\", \"step\": 2} {\"outcom"
+ ],
+ "csp": []
+}

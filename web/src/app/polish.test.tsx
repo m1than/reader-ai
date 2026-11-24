@@ -20,15 +20,19 @@ const mount = async (path: string, route: (url: string) => Response | Promise<Re
   });
 };
 
+const group = () => document.querySelector('#content #course-c-fixture') as HTMLElement;
+
 describe('lesson rows (FR-UI-6, amended)', () => {
   it('shows ordinal, title, status and date as separate elements of one row', async () => {
-    await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
-    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
-    const row = screen.getByText('Fixture lesson W02: not compiled yet').closest('li') as HTMLElement;
+    // A learner: the owner's rows carry FR-UI-15's control through the compile slot (merge with V/compile-ui).
+    await mount('/', (url) => (url === '/api/me' ? json(200, { ...me, role: 'learner' }) : json(200, list())));
+    // Design pass: titles also appear in the sidebar and the Continue block; look inside the course group.
+    await waitFor(() => expect(group()).toBeTruthy());
+    const row = within(group()).getByText('Fixture lesson W02: not compiled yet').closest('li') as HTMLElement;
     expect(within(row).getByText('2', { exact: true })).toBeTruthy();
     expect(within(row).getByText('not published yet', { exact: true })).toBeTruthy();
     expect(row.querySelector('time')).toBeTruthy();
-    const published = screen.getByText('Fixture lesson W01: one cell of every kind').closest('a') as HTMLElement;
+    const published = within(group()).getByText('Fixture lesson W01: one cell of every kind').closest('a') as HTMLElement;
     expect(published.textContent).toBe('Fixture lesson W01: one cell of every kind');
   });
 });
@@ -49,7 +53,7 @@ const shellTarget = () => {
 describe('skip link, one main and shell loading (FR-UI-11)', () => {
   it('on the lesson list', async () => {
     await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
-    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
+    await waitFor(() => expect(group()).toBeTruthy());
     shellTarget();
   });
 
@@ -89,14 +93,14 @@ describe('skip link, one main and shell loading (FR-UI-11)', () => {
 
   it('following the skip link focuses main#content', async () => {
     await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
-    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
+    await waitFor(() => expect(group()).toBeTruthy());
     fireEvent.click(screen.getByRole('link', { name: 'Skip to content' }));
     await waitFor(() => expect(document.activeElement).toBe(document.getElementById('content')));
   });
 
   it('marks the unbulleted lesson list as a list', async () => {
     await mount('/', (url) => (url === '/api/me' ? json(200, me) : json(200, list())));
-    await waitFor(() => expect(screen.getByText('Fixture course')).toBeTruthy());
+    await waitFor(() => expect(group()).toBeTruthy());
     for (const ul of document.querySelectorAll('.lesson-list ul')) expect(ul.getAttribute('role')).toBe('list');
   });
 });

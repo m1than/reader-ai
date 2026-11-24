@@ -1,0 +1,157 @@
+/* The upload sections of /import (WEB-IMPORT FR-IMPORT-9) under Calm: tokens only, the library's --acme-space-*
+   steps, UI chrome in the library sans, the 2px focus outline (WEB-UI FR-UI-10). */
+.upload-zone,
+.upload-processing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-3);
+  margin-block-start: var(--acme-space-6);
+  padding: var(--acme-space-4);
+  border: 1px dashed var(--acme-control-border);
+  border-radius: var(--radius-block);
+}
+
+.upload-processing {
+  border-style: solid;
+  border-color: var(--acme-border);
+}
+
+.upload-zone-over {
+  border-style: solid;
+  border-color: var(--acme-accent);
+}
+
+.upload-zone h2,
+.upload-processing h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  line-height: 1.35;
+}
+
+.upload-processing h2:focus {
+  outline: none;
+}
+
+.upload-processing h2:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+.upload-pick,
+.upload-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--acme-space-3);
+}
+
+.upload-hint,
+.upload-field {
+  color: var(--acme-text-muted);
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-hint:empty {
+  display: none;
+}
+
+.upload-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-1);
+  max-inline-size: 16rem;
+}
+
+.upload-field select {
+  padding: var(--acme-space-2);
+  border: 1px solid var(--acme-control-border);
+  border-radius: var(--radius-control);
+  background: var(--acme-surface);
+  color: var(--acme-text);
+  font: inherit;
+}
+
+.upload-field select:focus-visible {
+  outline: 2px solid var(--acme-focus);
+  outline-offset: 2px;
+}
+
+.upload-file {
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--acme-font);
+}
+
+.upload-error {
+  margin: 0;
+  color: var(--acme-danger);
+}
+
+.upload-warning {
+  margin: 0;
+  padding-inline-start: var(--acme-space-3);
+  border-inline-start: 3px solid var(--acme-warning);
+}
+
+.bar {
+  flex: 1 1 12rem;
+  block-size: var(--acme-space-2);
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--acme-surface-raised);
+  border: 1px solid var(--acme-border);
+}
+
+.bar-fill {
+  block-size: 100%;
+  background: var(--acme-accent);
+}
+
+.upload-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--acme-space-2) var(--acme-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--acme-font);
+  font-size: 0.875rem;
+  color: var(--acme-text-muted);
+}
+
+.upload-steps .done {
+  color: var(--acme-text);
+}
+
+.upload-steps [aria-current='step'] {
+  color: var(--acme-text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 0.25em;
+}
+
+.upload-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--acme-space-2);
+  padding: var(--acme-space-3);
+  border: 1px solid var(--acme-border);
+  border-radius: var(--radius-block);
+  background: var(--acme-surface-raised);
+}
+
+.upload-confirm h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.upload-confirm p {
+  margin: 0;
+}
+
+.upload-processing code,
+.upload-warning code {
+  font-size: 0.875em;
+}

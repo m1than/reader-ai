@@ -1,0 +1,29 @@
+{
+ "console": [
+  "The resource http://localhost:8448/trace/static/schemas-hm98w7NF.js was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded inten",
+  "The resource http://localhost:8448/trace/static/NewWindowIcon-D1wfK3-F.js was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded",
+  "The resource http://localhost:8448/trace/static/debounce-BdENcevr.js was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloaded inte",
+  "The resource http://localhost:8448/trace/static/withRouteProps-B1twQXx9.js was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is preloade",
+  "The resource http://localhost:8448/trace/static/useTraceDiscovery-Dmlm3NJx.js was preloaded using link preload but not used within a few seconds from the window's load event. Please make sure it has an appropriate `as` value and it is prelo"
+ ],
+ "foreign": [],
+ "failed": [],
+ "status": 200,
+ "csp_header": "default-src 'self'; script-src 'self' 'sha256-eoBUh2b2awnlKCd0fkQUIXAAxPdxWV4aIas48E/3hLU=' 'sha256-07X4W69Q7ST165IvjVZwZU+G34LWjkh2Xj2s9fMwqYQ='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'",
+ "text_mentions": [
+  "job pipeline.stage",
+  "stage fact_check",
+  "claude_code.llm_request",
+  "Trace Start",
+  "Duration",
+  "Services",
+  "Depth",
+  "Total Spans"
+ ],
+ "csp": [
+  "script-src eval "
+ ],
+ "csp_search": [
+  "script-src eval "
+ ]
+}

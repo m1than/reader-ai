@@ -20,7 +20,8 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 8.7416      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 8.7542      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+                         # (+ V.freshness live web-search call 0.012588, 2026-11-23)
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
                          #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
                          #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
@@ -46,6 +47,10 @@ budget:
     - { task: V.live, usd: 1.0870, date: 2026-11-23, funding: test_budget_usd,
         what: "SRV-TUTOR bench, 40 questions over the HTTP API (sum of the questions' usage.usd, 1.086955); mean $0.0267;
           e2e/live/results/2026-11-23-tutor-bench.json" }
+    - { task: V.freshness, usd: 0.012588, date: 2026-11-23, funding: test_budget_usd,
+        what: "spikes/web-search § 5b live call, run by the owner (cap $0.10): one WebSearch run on Haiku 5.5, 3 upstream
+          requests, 1 search ($0.01 fee included); SDK total_cost_usd = the recording proxy's sum;
+          spikes/web-search/results/20261123T214429/live.json. Whether the fee draws from the Agent SDK credit: unknown" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -998,6 +1003,185 @@ tasks:
         step PASS on b42a170. Unit: 207 Vitest tests pass.",
       note: "Screenshots and the L02 replay data stay outside the repository (book text). The stack now runs from the
         V/WEB-polish worktree (reader up); the live agent's next `reader up` from its own worktree restores its build." }
+  - { id: V.design-pass, stage: V, kind: fix, track: product, status: in_progress, needs: [V.WEB-polish],
+      branch: V/design-pass,
+      merge: "2026-11-24, into V/slice-integration (two-parent merge of V/design-pass 34666f8 onto cc6f300, both sides
+        kept on conflicts, one proposed_* key per kind): FR-UI-15's CompileControl renders through the compile slot
+        (AppRoot's default slot: Status = the control for the owner, null for anyone else; `place` list or page; the
+        control is a lazy chunk so the initial chunk stays under NFR-UI-1) on the list rows, the not-published page
+        and above a published draft — one control, not two; FR-UI-14's Sign-ups link is a NAV_ITEMS entry whose badge
+        (SignupsBadge) owns its hidden ', ' and ' waiting'; tests adapted where titles now also appear in the sidebar
+        and Continue block and where the not-published sentence changed (compile.test, notebook/compile.test,
+        signups-link.test, design.test, polish.test, app.test); signups CSS uses overflow-wrap break-word (FR-UI-10).",
+      what: "Owner 2026-11-23: 'pretty for each engineer', 'the same style buttons like Notion, or like this instrument'.
+        The design audit's P1 and P2 items, all approved by the owner, with CodeMirror 6 for the lab editor. Specs
+        amended: WEB-UI FR-UI-1/2/5/6/7/10/11 and new FR-UI-16 (theme) and FR-UI-17 (course sidebar); WEB-NOTEBOOK
+        FR-NOTEBOOK-1/3/7/9/10/11/12 and new NFR-NOTEBOOK-1; WEB-RENDER FR-RENDER-3/4; WEB-PLAN FR-IMPORT-4/5/6/8;
+        SRV-TUTOR FR-TUTOR-11 (web only). SRV-AUTH unchanged: the auth pages keep following the system scheme only
+        (gap documented in FR-UI-16).",
+      findings: "Audit 2026-11-23 (screenshots outside the repository): 128 list rows with 2 published lessons, L02 about
+        107 rows down; unpublished lesson pages a dead end; Russian prose under lang=en, a table word broken mid-letter;
+        inline math clipping the top of superscripts (8.2px above the box for 2^{n/2}); 32px buttons with a 12px radius
+        reading as pills, Reset kernel in red next to the title; the lab a 24-row text area without highlighting or
+        copy; the tutor after 27 cells on a 21,973px page with a 3,575px history whose answers could not be reopened;
+        error text as a 36px serif h1; the code theme read once from matchMedia. Spike codemirror-bundle: the editor
+        chunk is 125,244 B gzip, and the app CSP blocks CodeMirror's style element in the document, so the editor
+        mounts in a shadow root (adopted stylesheet, no violation).",
+      coordination: "V/compile-ui fills the compile slot (Services.compileAction) and FR-UI-15's status; V/signup adds
+        a NAV_ITEMS entry (FR-UI-14); V/onboarding owns the /import drop zone (WEB-IMPORT); V/freshness's card uses the
+        same radii and state blocks.",
+      tests: "Red 2026-11-23: 92 unit tests failed as intended across 10 files. Green 2026-11-24: 322 Vitest tests pass
+        (27 files); 14 Playwright [browser] specs pass in the chromium project (editor under the CSP with no violation,
+        theme on first frame, tutor panel axe and no overlap, render, import, CSP); the live `ui` step (owner.slice.ts)
+        and slice.live.ts are updated but not run (the owner is using the stack; run with the coordinator's go-ahead).",
+      measured: "Vite production build 2026-11-24: initial JS 114,881 B gzip (NFR-UI-1 limit 121,153; 111,507 before
+        the pass); CodeMirror editor chunk 122,538 B gzip in 1 lazy chunk (NFR-NOTEBOOK-1 limit 137,768; the esbuild
+        spike measured 125,244). After-screenshots on the replayed owner data (read-only capture; owner counts 1/1/1
+        before and after): 46 pages at 1280/1024/390 in light and dark with 0 serious or critical axe issues, 0
+        horizontal overflow, 0 CSP violations. Found and fixed while capturing: a Continue row's long course title and
+        L02's 7-column table overflowed 390 px (table-layout fixed below 40rem), code and editor scrollers were not
+        focusable scroll regions (a labelled region with tabindex 0; tabindex on the editor content), Cyrillic in code
+        fell back to a serif (app-level --acme-font-mono order), and CodeMirror's .cm-highlightTab data: literal
+        (reviewed in FR-UI-9).",
+      review: "Spec: deep-reviewer (Fable) single round on 04e396b..d3c0a68, VERDICT changes; every finding applied
+        without a second round (coordinator, 2026-11-23). Findings and fixes —
+        B1 bundle (initial chunk 111,507 of 121,153 B; menu, drawer and icons about +18 KB): the user menu and the
+        drawer load lazily on first open from plain-button triggers, shell icons are app-owned SVGs (WEB-UI FR-UI-11,
+        FR-UI-17, NFR-UI-1 note); build.test asserts the initial chunks' source maps hold no @acme/ui menu, drawer or
+        icon entry and no CodeMirror module; the review note's 'collapsible' mention fixed.
+        B2 compile slot: `compileSlot(lesson) => {status, action} | null`, called for every list row (published too) and
+        the not-published page; status always visible, action revealed on hover/focus-within (FR-UI-6, FR-NOTEBOOK-1);
+        tests for every row, a null result and a null part (design.test.tsx in app/ and notebook/).
+        B3 NAV_ITEMS: optional `badge: () => ReactNode` rendered inside the link; the toEqual test plus a badge case.
+        B4 shortcut guard: no shortcut when defaultPrevented, a modifier, or the composed path holds a textarea, input,
+        select, contenteditable, role=dialog/menu/alertdialog (FR-NOTEBOOK-11); unit cases for each and for the open
+        shortcuts dialog; editor.spec types '# j k / ?' and asserts the text, focus in the editor, #tutor hidden, no
+        dialog.
+        B5 theme before first paint: classic external web/public/theme.js loaded in <head> before the module script,
+        no inline script, claimed in WEB-UI `paths` (FR-UI-16); unit: index.html order and theme.js in node:vm agreeing
+        with applyTheme; theme.spec records dataset.theme in the first requestAnimationFrame.
+        B6 tutor history injection: an expanded stored answer with a markdown link and image renders zero a, zero img
+        and makes no request beyond its own GET (FR-TUTOR-11, panel.design.test.tsx).
+        Non-blocking — editor accessibility: hint inside the shadow root, focus outline in EditorView.theme, role and
+        resolvable description and an axe run over the lab in editor.spec; spike probe.mjs committed, Chromium only,
+        Safari unmeasured (RESULT.md, REF-NOTEBOOK-7); tutor: Escape closes it from the page outside editable fields,
+        dialogs and menus, focus falls back to the toolbar's Ask the tutor (tests); live asserts: hooks named in
+        FR-UI-10, each asserted non-null first, the 56px header bound sourced (app.css min-height 3.5rem), dark claim
+        narrowed to 1280 px list and L02; 12-row rule tested at 12 and 13, all-published group without toggle, hash
+        scrollIntoView, drawer focus return and no duplicate ids; one disclosure control per list group (the button
+        under the list); lang from the Cyrillic rule only on div.lesson (metadata rule dropped) with a precise test;
+        play and more icons app-owned SVGs; cell toolbars roving (tabIndex -1 until focus is in the cell), no Copy on
+        code-cell toolbars; j/k by event.code (Russian layout case tested); no compile slot in the sidebar and distinct
+        sidebar-/drawer- id prefixes; scope: shortcuts, cell toolbar, recall deck and current section marked
+        owner-approved in FR-NOTEBOOK-11; NFR-UI-1 and NFR-NOTEBOOK-1 share one build (sourcemap hidden), bundle.test.ts
+        removed.",
+      code_review: "deep-reviewer code review of c1e3103 (single round, outside the complex areas): changes, 2 blocking;
+        every finding applied without a second round (coordinator, 2026-11-24). Findings and fixes —
+        B1 theme.js never reached the production image (the Caddy build copies src only, so /theme.js fell back to
+        index.html and was refused under nosniff): moved to web/src/public with `publicDir: 'src/public'`
+        (vite.config.ts), WEB-UI `paths` updated; build.test finds theme.js at the build root; the live `ui` step asserts
+        GET /theme.js 200 with a JavaScript content type and that a stored dark applies on reload; FR-UI-16 names the
+        index.html regex as the placement oracle.
+        B2 closing the tutor dropped focus to <body> below 60rem when it was opened from the hidden contents entry:
+        after focus() the lesson view falls back to the toolbar's Ask the tutor whenever document.activeElement is not
+        the opener (FR-TUTOR-11 wording: 'cannot take focus'); panel.design.test.tsx case with an opener that refuses
+        focus.
+        Non-blocking — drawer popup id course-drawer named by aria-controls (asserted); mutants killed: Alt and Meta,
+        input and select, alertdialog, / calling preventDefault, / and ? by code Slash with Russian-layout keys, lang at
+        exactly half and with a Cyrillic-heavy code cell, an action on a published row, exact Copy texts (lab and code
+        block), INV-RENDER-1 with a 5-column table and a forged data-render-chrome in raw HTML (stays text); compile
+        slot as `{Status, Action}` components (stateful component test), an empty Status falls back to the chip via
+        .slot-status:empty CSS (rules checked by the CSS scan), status and action above the row link (z-index), a div on
+        the not-published page (FR-UI-6, FR-NOTEBOOK-1); nav badge with hidden words and a hidden ', ' so the link reads
+        'Sign-ups, 3 waiting'; code blocks are role=group with a tab stop only while they overflow (ResizeObserver);
+        error boundaries keep the plain triggers when the user-menu or drawer chunk fails (lazy.test.tsx); the editor
+        takes the fallback's text and focus when it arrives mid-typing; a queued question in the history keeps being
+        fetched with the panel's backoff until terminal.
+        Checks: 335 Vitest tests, 212 Playwright tests (chromium, auth-dark, auth-light; run on port 4174 because another
+        worktree's test server held 4173), LOCAL CI below." }
+  - { id: V.live-harness-fixes, stage: V, kind: fix, track: engineering, status: done, needs: [V.live-ui-fixes],
+      branch: V/live-harness-fixes,
+      notes: "After the owner's live upload check (2026-11-24, 9140885): upload.sh passes --config to `reader status`
+        (the one false FAIL); `reader status` without a loadable reader.yaml reports `unknown` with the config problem
+        (OPS-CLI FR-CLI-23, unit test); obs_browser.mjs matches the summary's `Trace` links exactly; web_live.py
+        --owner never deletes owner credentials: with a passkey it signs in with one id-only session row deleted by
+        id (owner.slice.ts READER_SESSION mode), without one it removes only rows created since the run started;
+        --reset-owner-passkeys is refused. Gate: all steps PASS except pytest's 95 tutor [db] TimeoutErrors under
+        parallel load; tests/tutor rerun alone: 128 passed (load flake, owner 2026-11-25: run tracks in parallel)." }
+  - { id: V.live-ui-fixes, stage: V, kind: fix, track: product, status: in_progress, needs: [V.design-pass],
+      branch: V/live-ui-fixes,
+      what: "Product and test bugs found by the live check at 647cfeb (V/slice-integration with SRV-OBS on the design
+        merge) and by the stubbed browser suite (37 failures there).",
+      findings: "Root causes — (1) header overflow 119px at 390 on every page: SRV-OBS's fourth owner entry; (2) 'Sign-ups,
+        1 waiting' not found at 1280/1024: Chromium computes 'Sign-ups , 1 waiting' when the separator and words are
+        visually hidden spans (probed: any clipped hidden span gets a leading space), the stubbed-suite failures of
+        signups.spec; (3) 7 style-src-attr reports per learner session: each came from keyboard.insertText replacing a
+        selection in the lab editor (trace: the action before each report; probe on the test server: one report, target
+        the editor's shadow host); Chromium's contenteditable engine writes markup with a style attribute to keep the
+        replaced text's look; CodeMirror itself only uses CSSOM; (4) 'one current section (390)' = 0: following an entry
+        closes the contents at 390 and getByRole finds no hidden nav; the marker itself was set (harness, not product);
+        (5) render.spec inline math timeout and keyword colour: the run's worktree served web/storybook-static built
+        2026-11-23 22:17, before the design pass (no inline-math story, single-theme Shiki), with no product fault; did
+        not reproduce on fresh builds; (6) compile.spec strict-mode: W02's linked title also in the Continue block.",
+      fixes: "FR-UI-11 nav in the Courses drawer below 40rem (nav.drawer-nav; header nav hidden) and NAV_ITEMS `useBadge`
+        returning {shown, after}: one inline text run '<label>, <shown> <after>' with ', ' and ' <after>' at font size 0
+        (probed in Chromium: names 'Sign-ups, 1 waiting', axe label-content-name-mismatch clean; an aria-label failed
+        that axe rule in the first fix round); FR-NOTEBOOK-9 beforeinput
+        insertText/insertReplacementText (not composing) applied as replaceSelection with preventDefault; the test
+        server refuses a dist or storybook-static older than web/src; tests: header.spec.ts (new), csp.spec.ts
+        interactions test at 1280 and 390 (menus, drawer, tutor, editor insert and type over a selection, compile dialog),
+        compile.spec rows scoped to #course-c-fixture, design.test and signups-link.test for the badge; live harness
+        fixes folded in (owner.slice: #tutor skipped, contents reopened for the 390 count, reload before the skip-link Tab
+        below 1280; slice.live: Continue .first(), the open cell's warning callout, Reset kernel in More lesson actions;
+        plan_shots: the plan's Lessons summary). The old owner-pages script with h1 sizes is not in the repository;
+        owner.slice.ts already checks the new scale (28/24 page titles, 32/28 lesson h1).",
+      code_review: "deep-reviewer, one round on add0a02 (outside the complex areas): changes; all applied without a second
+        round (coordinator, 2026-11-24). Findings and fixes —
+        B1 the header still overflowed just above 40rem (42px at 641px with 'Ivan', 0 only from 683px; a 12rem name
+        overflowed up to about 847px, iPad portrait scrolled): the drawer breakpoint is now the Courses breakpoint,
+        75rem, written `max-width: 74.98rem` (the complement of the `min-width: 75rem` rules; a CSS width under 1200px),
+        and every test uses `width < 1200`; header.spec.ts runs 390, 641, 768, 1024, 1199, 1200 and 1280px with 'Ivan',
+        a 64-code-point name and a 36-character Cyrillic name on /, a lesson, not-found and /import (no overflow, nav
+        hidden or visible by the breakpoint), with axe while the drawer is open; signups.spec, import.spec and csp.spec
+        conditions and FR-UI-11, FR-ACCOUNTS-5 and WEB-PLAN's text follow.
+        B2 editor beforeinput ignored getTargetRanges() and intercepted insertReplacementText (macOS double-space period,
+        text replacement): narrowed to `insertText` outside composition while some selection range is non-empty; caret
+        only and insertReplacementText are left alone; a non-empty selection takes the event's target ranges (posAtDOM)
+        when present, else the selection. editor.spec.ts kills the guard mutants with synthetic beforeinput events: a
+        caret-only insert not prevented, an isComposing insert over a selection not prevented, insertReplacementText
+        not prevented (the input-type filter), a target range [3,4] wins over the selection, no target replaces the
+        selection, a real insertion over a selection leaves zero CSP reports.
+        Non-blocking — a learner case for the drawer nav (owner entries absent; kills `owner={true}`); badge markup
+        'Sign-ups <badge>1</badge><hidden> waiting</hidden>' named 'Sign-ups 1 waiting' (no comma: FR-ACCOUNTS-4,
+        FR-UI-11), the font-size-0 run removed, the name asserted in the browser; a fallback nav (nav.nav-fallback,
+        'Main') when the drawer chunk fails (lazy.test.tsx); the fresh-build check moved to web/test-server/stale.mjs,
+        also over package.json, the lockfile, vite.config.ts and vendor/, .DS_Store ignored, stated in INV-UI-4 and
+        unit-tested in web/src/app/stale.test.ts; Header stories PendingSignups and DrawerNavWithBadge.",
+      owner_notes: "On the Mac, type two spaces after a word in a lab editor: with the system setting 'Add period with
+        double-space' on, they become '. ' (FR-NOTEBOOK-9, the editor no longer takes over that input)." }
+  - { id: V.titles-data, stage: V, kind: fix, track: product, status: todo, needs: [V.design-pass],
+      what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
+        material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.
+        9–10') from the outline. SRV-PLAN / SRV-LESSON / SRV-INGEST amendments; the web shows whatever the API returns." }
+  - { id: V.ingest-code-hyphen, stage: V, kind: fix, track: engineering, status: todo, needs: [V.live],
+      what: "pdfium replaces a line-end hyphen and its break with U+0002 in code, so `alpha-`/`beta + 1` becomes
+        `alphabeta + 1`, against FR-INGEST-7's 'no line joined' (investigator, 2026-11-24, synthetic PDF; found with
+        the normalisation-order fix on V/ingest-normalise). Fix in FR-INGEST-7's text-layer read (e.g. map U+0002 back
+        to `-` plus the line break before control removal), with a [host] test on a generated PDF; whether the pilot's
+        code pages hit it is not measured. Known join of the same kind: a lone `\r` is a control, not a line break, so
+        `a\rb` → `ab` (FR-INGEST-7, stated after the V.ingest-normalise review)." }
+  - { id: V.ingest-normalise, stage: V, kind: fix, track: engineering, status: done, branch: V/ingest-normalise,
+      needs: [V.live],
+      what: "test_valid_generated_artifacts_pass failed on integration (eea8cbf): artifact.normalise was not idempotent
+        (code stripped trailing spaces before removing controls; non-code applied NFC before removing U+00AD), as
+        FR-INGEST-6/-7 prescribed. Now remove, strip, NFC last; INV-INGEST-1 states no trailing space in code and the
+        fixpoint property. VEC-INGEST-3/-4 regenerated byte-identical; CONVERTER_VERSION stays r2 (INV-INGEST-2).",
+      review: "deep-reviewer, single round (outside the complex areas), on 8158a5e: changes. Code verified a fixpoint,
+        accept set unchanged, version decision sound. Blocking (tests): the NFC-before-removal mutant survived →
+        `e` U+0001 U+0301 added to the exact-output cases and the idempotence examples, both kinds. Non-blocking, all
+        applied: `a\\t\\nb` kills a bare-rstrip mutant; FR-INGEST-7 states a lone `\\r` is a control (known join,
+        noted in V.ingest-code-hyphen); FR-INGEST-6's parenthesis reworded; the idempotence test also asserts the
+        validator accepts; the dead `\\r\\n` replace kept (mirrors the spec)." }
   # Follow-ups from the final slice PR (2026-11-23)
   - { id: V.tutor-retrieval, stage: V, kind: fix, track: ai, status: todo, needs: [V.live],
       what: "NFR-TUTOR-3 fails on the live bench: grounded 0.625 against 0.8. Grounding given gold in the top 8 is 0.808
@@ -1050,6 +1234,173 @@ tasks:
         (verify-all.sh writing pytest/vitest/Playwright results and running report.mjs; slice.live.ts writing axe.json;
         timings.jsonl and ledger.jsonl with V.cost-optimize). Done when every operation is `enforced` and PASS in the
         latest live run (OPS-DOD owner note)." }
+  - { id: V.signup, stage: V, kind: module, track: product, status: in_progress, needs: [V.auth-page-style],
+      branch: V/signup,
+      what: "Owner 2026-11-23: a 'Sign up' page from the sign-in screen; the owner chose open sign-up and accepted rate
+        limiting and owner approval of new accounts. Drafts (stop for review): ADR-0031 (proposed), SRV-AUTH
+        FR-AUTH-23..32 and INV-AUTH-10..15 under `proposed_*` keys, WEB-ACCOUNTS (draft; WEB-UI FR-UI-14 reserved as
+        a pointer), OPS-DOD operations auth.signup and auth.approve with every cell missing except FR-AUTH-12.",
+      owner_answers: "2026-11-23: (1) default `open` (against the draft's recommendation of off); (2) approval required;
+        (3) lower-case Latin handles with the lookalike check and the reserved list; (4) this Mac only, for now; (5) an
+        empty lesson list for approved learners before stage 8 is acceptable. Recorded in ADR-0031 'Resolved
+        questions'.",
+      review: "ADR-0031 round 1 (deep-reviewer, coordinator): changes, no privilege-escalation path found. Blocking, all
+        fixed in revision 1: (1) per-client limit, XFF parsing, salt, client key and the signup-client-ip spike removed;
+        one global limit of 60 per hour; any local process can close sign-up for the hour (residual), per-client
+        limiting moves to the VPS ADR; enumeration and privacy claims corrected; (2) handle_skeleton with a partial
+        unique index on sign-up rows, written for config rows too, [db] case for two config handles sharing one;
+        (3) a pending sign-up row loses to a configured handle (deleted in the sync transaction); only an active or
+        disabled one stops the api with `handle_taken_by_signup <handle>` (FR-AUTH-2, owner note 5, exact-handle only);
+        (4) display names refuse Cc, Cf, Cs, Co, Cn, Zl, Zp, counted in code points after NFC, unit table and property
+        test; (5) the [live] step is a real oracle: evidence only in open mode, SKIP never fills a cell, off → 404 a
+        separate assertion. Non-blocking applied: auth_failures.scope; FOR UPDATE and state re-check in approve,
+        reject, disable and expiry; seam before the lock; quoted null/off; INV-AUTH-15 (handles fit OPS-CLI FR-CLI-4);
+        kernel-session case for a sign-up learner; SRV-MCP note; approved_at dropped (state kept), skeleton step order
+        defined; learner case with a recent session; WEB-ACCOUNTS: Disable stated permanent, no passkey recovery,
+        [browser] on FR-ACCOUNTS-1/-3, FR-ACCOUNTS-5 (route, link, axe, overflow), return to /signups after re-auth
+        through an allow-listed `next` on the sign-in page (FR-AUTH-31); disable is one transaction; a device passkey
+        can outlive a reject (owner note 7). Residuals stated: pending-cap DoS and the sign-up limit on localhost.
+        Round 2: changes, all round-1 blockers resolved. Blocking, fixed in revision 2: (1) skeleton step 4 adds
+        i→l (admin and adm1n → admln, ivan meets lvan), table rows rechecked with their skeletons, ADR Decision 6
+        mirrored; (2) `next`: raw `location.search === \"?next=/signups\"`, navigation to the allow-list constant;
+        FR-AUTH-14 (sign-in only) and FR-AUTH-21 (done target) amendments listed; bootstrap ignores ?next=/signups
+        (browser case). Non-blocking applied: absent-key default open only on RP ID localhost, otherwise off with a
+        startup note (ADR guard from 'this Mac only'); reject deletes challenges by signup_handle, sync leaves them to
+        expire (verify re-checks); collisions name the first handle in users[] order; `signup_superseded <user id>`
+        log record; the live SKIP is exactly a full pending cap or a 429 on the first options call; ZWNJ/ZWJ refusal
+        stated as a known limit; WEB-UI proposed FR-UI-14 drafted (12 is V/plan's, 13 V/onboarding's). Round 3
+        (b0b4808): VERDICT approve. Folded in after it: FR-AUTH-32's live mode derived with FR-AUTH-23's rule (absent
+        key on a non-localhost host = off); owner note 5's signup_superseded record is best-effort; FR-AUTH-29 reject
+        also cancels another person's open ceremony for the same handle (signup_failed). ADR-0031 stays proposed: the
+        owner accepts it; Red and Green start only after that and the coordinator's go. ADR-0031 accepted by the
+        owner (49f93ce, 2026-11-23); go from the coordinator.",
+      red: "33e5cbf (after merging origin/V/slice-integration 3c4dbf3, which holds auth-page-style and
+        SRV-EVENTS-final; no other proposed_requirements key existed to combine): SRV-AUTH FR-AUTH-23..32,
+        INV-AUTH-10..15 and policy/tables/config_errors promoted, WEB-UI FR-UI-14 promoted, WEB-ACCOUNTS approved by
+        agent; [unit], [db], CLI, Vitest and [browser] tests; VEC-ACCOUNTS-1.",
+      green: "Migration 0002_signup; reader.auth.handles, reader.auth.signup; store (sync collisions, failure scopes,
+        pending refusal, expiry), routes, serve (handle_taken_by_signup line, superseded and default-off notes);
+        signup.html, signup-link fragment, passkey.js states and the `next` allow-list, auth.css; web/src/accounts
+        (screen, client, stories), the header link and /signups route; test server; owner.slice.ts `signup` step,
+        web_live.py id-only cleanup and expected mode, verify-all --config, slice.sh default steps; example config;
+        OPS-DOD operations mapped to their traced items. Green test corrections (spec review note): the CLI test binds
+        a free port; the sign-up tests refactored for the 110-column limit. Checks: 273 auth tests, 236 web unit
+        tests, 414 [browser] tests (auth-dark and auth-light at three widths), LOCAL CI: PASS (209589e). Live step
+        written, not run: the owner tests the stack by hand; the coordinator decides when.",
+      code_review: "Round 1 on 209589e: changes (39 of 41 server mutants killed, 2 equivalent). Blocking fixed:
+        web_live.py's cleanup guards the sessions and credentials deletes by `owner_id IN (SELECT id FROM users WHERE
+        id = <uid> AND source = 'signup')` and uses fullmatch for handles and ids; new [db] test
+        server/tests/auth/test_signup_live_cleanup.py runs the cleanup with psql through the test container: a
+        configured user's id deletes nothing, the run's accounts are deleted by id, malformed entries are ignored.
+        Non-blocking applied: anyio.fail_after on the SKIP LOCKED test; display names trimmed of Unicode White_Space
+        only (U+001F + name refused); review note says refactored; FR-AUTH-32's cleanup sentence matches the code;
+        the 80-way race test noted as probabilistic. Round 2 on 2eb4f42: VERDICT approve; its note applied (a
+        `<uuid>\\n` id and a newline-suffixed handle join the cleanup test's malformed entries). Next: merged into
+        V/slice-integration; the live `signup` step waits for the coordinator's batched restart with the owner's OK.",
+      notes: "Complex area (auth): full deep-reviewer rounds, run by the coordinator. Found while drafting: sync_users
+        disables every user not in users[], and the agent proxy loads provider tokens by handle, so sign-up accounts
+        need users.source and the collision rule of FR-AUTH-24. Merge note: V/onboarding and V/plan add
+        `proposed_requirements` keys to SRV-AUTH (FR-AUTH-22) and WEB-UI (FR-UI-12/-13); this branch has none left,
+        so their keys merge without a duplicate." }
+  - { id: V.freshness, stage: V, kind: module, track: ai, status: in_progress, needs: [V.live],
+      branch: V/freshness,
+      what: "Owner 2026-11-23: 'validate how current the source is; if it's out of date, recommend another resource to
+        study from'. Owner decision 2026-11-23: Claude's server-side web search (egress stays api.anthropic.com).
+        Drafts: spikes/web-search/RESULT.md (sourced facts: web_search_20250305/20260209/20260318, max_uses per turn,
+        allowed/blocked domains, citations ≤ 150 chars, usage.server_tool_use.web_search_requests, $0.01 per search),
+        ADR-0030 (proposed), SRV-FRESH and WEB-FRESH (draft), SRV-AGENT proposed FR-AGENT-14..16 / INV-AGENT-6 /
+        VEC-AGENT-3/-4, OPS-DOD operation material.freshness (8 missing). Revision 2 after deep-reviewer round 1
+        (changes, 12 blocking): code-planned queries, one search per Haiku search run, a tool-less Sonnet report call,
+        structural tool pin, retries only after a $0 settle, scan reuse, bibliography confirmation by sha256.",
+      owner_decisions: "2026-11-23: (1) subscription only, Agent SDK WebSearch, dates 'as reported'; (2) live call
+        approved, at most $0.10 from test_budget_usd, one search, preferably Haiku 5.5; (3) caps as proposed: $1.00 per
+        run, $2.00 per day, 6 searches per check, 90-day TTL; (4) queries may contain title, edition, authors and
+        outline topics, never book text. Recorded in ADR-0030 'Owner decisions'.",
+      measured: "Stub run, zero credit (2026-11-23, spikes/agent-proxy-handshake/results/20261123T2055*-websearch*):
+        WebSearch makes a nested /v1/messages request (web_search_20250305, max_uses 8, tool_choice auto, no thinking,
+        no cache_control, same model as the main loop, max_tokens from CLAUDE_CODE_MAX_OUTPUT_TOKENS); the main loop
+        sends WebSearch plus DeferredToolPlaceholder; a PreToolUse deny stops the search; ResultMessage.usage covers
+        the main loop only while total_cost_usd/model_usage include the nested request and the $0.01 fee; the main
+        loop sends thinking adaptive despite MAX_THINKING_TOKENS=0 (for V.agent-thinking). Live call, observed once
+        (owner, 2026-11-23, spikes/web-search/results/20261123T214429/live.json, $0.012588): Haiku 5.5, 3 requests,
+        nested model Haiku; H-WS-3: the nested request's input was 14,452 tokens as recorded per request by the
+        proxy, so t (the tokens the search results add) ≈ 13,950 after the ≈ 500-token search prompt, an estimate since
+        no field reports t alone, under the 20,000 planning bound (FR-FRESH-14's live check records
+        `run_input_tokens`, the run's summed model_usage input, 14,456 here: an upper bound of t); fee inside the SDK cost,
+        SDK = proxy (18,518 input-side tokens, 1,147 output, 1 search, same dollars), query passed verbatim (denial rate
+        0), max_uses rewrite accepted (200), thinking 152 (main) + 290 (nested) tokens with MAX_THINKING_TOKENS=0; fee
+        vs subscription credit unknown. No spec bound changes. Estimate (not measured): ≈ $0.27 per check, worst
+        ≈ $0.39 by formula.",
+      review: "deep-reviewer (Fable) on ADR-0030, SRV-FRESH, WEB-FRESH and the SRV-AGENT amendment: round 1 changes
+        (12 blocking), round 2 changes (3 blocking), round 3 VERDICT approve (2026-11-23). Round 3's three fixes applied
+        without a new round: the Haiku tier jump in the tail cost, the cross-check's lower-tier rule with `tier_unknown`
+        and the tier part of H-WS-6, and the combined worst case ≈ $0.84–0.87 under the $1.00 cap.",
+      built: "2026-11-23, after the owner accepted ADR-0030 (7e247a8). Live script hardened after the owner's run
+        (15bb6c7): Haiku only, non-SSE usage or the worst case, a reserve/settle ledger so a killed run counts, the
+        exception type only in errors, init tools must be [WebSearch], only web_search_20250305; and an RLock (the
+        original refused requests under a non-reentrant lock, a deadlock that the owner's run never reached).
+        SRV-AGENT FR-AGENT-14..16, INV-AGENT-6, VEC-AGENT-3/-4 promoted with Red (292ef48) and Green (c71a42f): the
+        proxy's freshness_web allowance with two pinned shapes, the max_uses rewrite, search_cap/request_cap, the
+        adapter's WebSearchCall (one StageCall field, so SRV-TUTOR's no-tools test holds), settlement from
+        total_cost_usd, Haiku 5.5 with its above_100k tier, web_search_usd, migration agent_0003. WEB-FRESH approved
+        with Red and Green (b8a2adc, 2966aec; V/freshness-web merged): the card, 37 Vitest + 19 Playwright tests;
+        paired route registration in WEB-UI files. SRV-FRESH approved (revision 4) with Red and Green (9e16bf9,
+        977d55b), paired registrations (0cb3701: SRV-EVENTS KIND_MODULES, SRV-AUTH ROUTERS, VERSION_LOCATIONS and PUT
+        in Route.method, OPS-DEPLOY example tasks), OPS-DOD material.freshness routes and items (0dbb759); 429
+        daily_budget_exhausted aligned with SRV-TUTOR on both sides and the read keys pinned to WEB-FRESH's fixture
+        (8d4458e). Merged origin/V/slice-integration (plan and onboarding: registration lists combined).
+        Code review round 1 fixes (2026-11-24, 5c3ba73 and later on V/freshness): subject words as \\w+ tokens in the
+        scan and again in the plan; masking removes exempt words from query and span alike; enum checks never hash a
+        list or dict; R hosts need a 0–65535 port, a letter/digit charset and LDH labels; gate exact-match cases; an
+        ungated WebSearchCall is tools_mismatch; oracles for placeholder pins, error-result settlement, the 100k tier
+        boundary, the summed lower tier, the TTL breakdown, the fee in the reserve, a reservation without a settle row,
+        the time-left guard and scan_inputs reuse; FR-FRESH-12 states the ≈ $1.04 paid-scan-restart case (the run cap
+        refuses); the live check runs in-process through the route handlers (free GET before and after), records
+        run_input_tokens and requires ≥ 1 stored URL (not run); INV-FRESH-1 [agent] test through the real CLI and a real
+        agent-proxy against the stub (zero credit).
+        Code review round 2 fixes (2026-11-24, V/freshness): words are [^\\W_]+ runs split at script changes and
+        letter/digit boundaries, space-less scripts per character, dotted numbers one word, and a concatenation of
+        span words counted as those words (text.split over the non-front vocabulary; new bound
+        subject_token_chars_max 24), so `_`, ZWSP/ZWJ, camelCase, digit and U+02BC joins and 40 CJK characters no
+        longer pass; INV-FRESH-1 oracles are a regex over the raw query and forwarded body, the generator adds `_`,
+        the empty joiner, U+200B, U+200D, U+02BC, a digit and camelCase; lone surrogates are removed by clean,
+        output_invalid in load_json, url_unsafe in R, 400 bibliography_invalid on the owner PUT; subject_split drops a
+        claim that completes a span run with an earlier subject; the ledger run cap ends a check budget_refused
+        (test); the [agent] test adds the deny path through the real CLI and builds its image by id (also SRV-AGENT's
+        cli image test); crosscheck_ok needs a compared row and FR-FRESH-14 names what it compares; test_live asserts
+        the gate decision; the web job writes `dropped` only with its final status (a second attempt counted it
+        twice). Residual, stated: a token joining span words with a non-span letter between (for example `alphaxbravo`)
+        counts as one word, bounded by subject_token_chars_max.
+        Merged into V/slice-integration (2026-11-24, two-parent merge): the freshness SRV-AGENT ids are renumbered
+        FR-AGENT-14→15, 15→16, 16→17 (integration's FR-AGENT-14 is SRV-OBS tracing; INV-AGENT-6 and VEC-AGENT-3/-4
+        did not collide); the ids above in this entry are the old ones. ADR-0030 still cites FR-AGENT-14 and -14..16:
+        an owner script (dry run by default) shows the two-line wording change. provider.py: `run` keeps the
+        tools_mismatch pre-check before the span and the reservation, `_run` passes the summed model_usage to
+        span.settled. spikes/web-search-otel (zero credit): with SRV-OBS's content flags 0 the search run's CLI spans
+        carry no query, title, URL or summary (only OTEL_LOG_TOOL_CONTENT=1 does), so the search run keeps the trace
+        export; test_obs_env pins its environment (additions + CLAUDE_CODE_MAX_WEB_SEARCHES_PER_SESSION). SRV-OBS
+        allow-lists: freshness.scan/web job_args {}, error codes tools_not_allowed, search_cap, request_cap.
+        live._owner selects an active, enabled user.
+        Code review round 3 fixes (2026-11-24, V/fresh-r3 into V/slice-integration): runs are also compared with
+        number and modifier-letter tokens removed on both sides (a U+02BC or digit joiner no longer breaks a run, in
+        one query or across two); subject_split checks every order of the chosen subjects plus the candidate (a run
+        split across three claims); words over NFKC (fullwidth, mathematical bold); VEC-FRESH-1 tests each token cap
+        alone; INV-FRESH-1 and the owner note state the hard bound (60 subject characters per query, 3 claim queries
+        per check) and the stray-letter residual; tools_mismatch before the agent.call span (test); live._owner's
+        filter ([db]) and crosscheck with zero rows ([unit]) tested; SRV-OBS's CLI canary runs the WebSearch call in
+        allow, deny and tool-content modes, and VEC-OBS-2 lists the claude_code.tool* spans.
+        Code review round 3 (deep-reviewer, 2026-11-24): changes, 4 blocking, fixed in V/fresh-r3 (14f9aae, merged
+        as eea8cbf). Code review round 4 (2026-11-24): VERDICT approve on 14f9aae; 19 of 21 mutants killed; nits
+        applied in V/fresh-r4-nits: VEC-FRESH-7 adds a number inside the copied span run and a run with `3.11` caught
+        only as written (now 21 of 21 killed: `filler: book side raw only` and `filler: query side content only`),
+        INV-FRESH-1 and the owner note widen the residual to a stray or substituted letter (another script's letter,
+        an NFKC compatibility letter, a substituted accent or `İ`), still bounded by 60 subject characters per query.
+        Note: SRV-OBS's test_cli_canary runs only with READER_TEST_IMAGE_BUILD=1 (tools/ci-local.sh does not set it, so the gate skips it).",
+      next: "1) Before any live check
+        or `reader up`: the coordinator's approval (a real check ≈ $0.27). 2) WEB-IMPORT and the course page mount the
+        card; SRV-INGEST PDF Info dictionary (later, paired).",
+      paired_later: "SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount the card
+        (V/onboarding, V/plan)." }
   - { id: V.ingest-profile-v2, stage: V, kind: fix, track: engineering, status: in_progress, branch: V/ingest-profile-v2,
       needs: [V.live],
       what: "Security fix to the current converter profile (SRV-INGEST FR-INGEST-4, INV-INGEST-4), found in the
@@ -1125,10 +1476,378 @@ tasks:
         vectors, Hypothesis invariants, estimate vectors, [db] routes, replay, lost-response retry, race, migration,
         bench) plus pipeline/lessons/auth suites green; web 228 unit tests; browser /import under the production CSP
         with axe 0 serious at 1280/1024/390." }
+  - { id: V.compile-ui, stage: V, kind: module, track: product, status: in_progress, branch: V/compile-ui,
+      needs: [V.onboarding-plan],
+      what: "The owner cannot study the 105 planned lessons: the list links only published lessons and the only UI path
+        that starts a compile is /import's 'Start compiling lesson 1'. An owner-only Compile action with a confirm
+        (per-lesson estimate, stops at $8.00) and compile status in the list (FR-UI-15) and on the not-published page
+        (FR-NOTEBOOK-12). Two server pieces were missing and are added: a per-lesson estimate route (SRV-PLAN
+        FR-PLAN-13; no route exposed a lesson's characters) and a stopped step's error code in the status (SRV-PIPELINE
+        FR-PIPELINE-16; `provider_missing` reached SRV-EVENTS only as the class name AgentError).",
+      next: "Round 1 (cc817d0) changes applied with Red tests: run state, not latest_sha256, decides 'finished' (the
+        draft step writes a revision); new FR-PIPELINE-17 GET /api/compiles (the owner's open runs) replaces the
+        10 per-lesson reads; a 'draft, compile not finished' chip; FR-PIPELINE-16 records {step, input_sha256, code}
+        from an allow-list and reports it only for a dead AgentError key of that input; FR-PLAN-13 gets a pure
+        lesson_estimate with band-edge vectors. Round 2 on 08534df: VERDICT approve; folded in SRV-EVENTS
+        FR-EVENTS-17 dead_error_code_of, off-list codes clear the record, the open-runs cost notes and a 101-run test.
+        Green built (server routes, migration pipeline_0003, CompileControl, list chip, page control, test-server
+        stub); browser suite 211 passed incl. e2e/web/ui/compile.spec.ts at 1280/1024/390 (axe 0 serious/critical,
+        no horizontal scroll, no CSP violation). Code review on cb81aff: VERDICT approve; its items applied with
+        paired tests (submitAction, polling window restart on any new run, AgentError in derive, id tie-break, owner
+        filter with the other owner first, axe on the Resume dialog and in dark). Merged into V/slice-integration;
+        live checks batched by the coordinator after the owner's OK. No compile started by the agent; no live step.",
+      note: "Coordination (coordinator, 2026-11-23): this item is FR-UI-15. FR-UI-13 stays the upload track's id
+        (V/onboarding, left untouched here): it keeps its first-run bullet and drops its compile-status bullet at merge,
+        which FR-UI-15 supersedes. FR-UI-14 is V/signup's; FR-UI-16 and above are the design pass's." }
+  - { id: V.onboarding-upload, stage: V, kind: module, track: product, status: in_progress, branch: V/upload-impl,
+      needs: [V.live, V.WEB-polish],
+      what: "The upload track of V.onboarding (ADR-0029, accepted by the owner with its amendment note): SRV-INGEST
+        revision 2 (FR-INGEST-18..24, INV-INGEST-8..10, VEC-INGEST-6..7, INV-INGEST-4's run-time probe), SRV-AUTH
+        FR-AUTH-22, OPS-DEPLOY FR-DEPLOY-14, OPS-CLI FR-CLI-23, SRV-SEARCH FR-SEARCH-10, SRV-CONFIG FR-CONFIG-18,
+        WEB-IMPORT (approved), WEB-UI FR-UI-13, OPS-DOD material.upload. Branch from V/onboarding with
+        V/slice-integration, V/plan and V/ingest-profile-v2 merged in. Ids renumbered at the merge into
+        V/slice-integration (2026-11-24), because SRV-OBS took them first: FR-DEPLOY-13 → 14, FR-CLI-22 → 23,
+        FR-CONFIG-17 → 18 (ADR-0029's text keeps the old numbers; it is the owner's file).",
+      next: "Code review (deep-reviewer, coordinator; sandbox, egress and jobs: full rounds): round 1 (8270d1b) and
+        round 2 (dc5fce4) changes, fixed in dc5fce4 and 67a2615; round 3 on 67a2615 VERDICT approve, its non-blocking
+        items applied in 7e5fd0e. Merged into V/slice-integration (two-parent merge, 2026-11-24). Live check
+        (e2e/live/upload.sh) waits for the coordinator's go with the owner's OK on the restart: it needs `reader up`
+        from the merged line (the uploads migration, the new routes and the watcher).",
+      note: "Specs promoted with Red, then Green: server (upload route, uploads state machine, inbox commands, receive
+        under a claim, routes), host (watch mode, convert.lock shared with the CLI, watchdogs by getsid plus
+        proc_pidpath plus cwd/args, bounded execs, caffeinate, run-time cross-process probe), CLI (reader up/status/
+        down), web (drop zone, progress, processing, converter state, Cancel/Retry/Discard; first-run redirect). The
+        compile status in the lesson list moved to V/compile-ui as FR-UI-15 (coordinator 2026-11-23). Tests 2026-11-23: server ingest 389 passed (10 skipped [host]/[local] by default), cli 243,
+        config 255, search/auth/deploy upload cases; [host] on this Mac: watchdog stand-ins (setsid, setpgid) killed at
+        the limit, lock not inherited and the orphan cleaned, the converter-level host tests 6 passed under the v2
+        profile, the run-time probe returns ready; web 306 unit, 212 browser, Storybook build. Bundles: /import lazy
+        7,910 B gzip (NFR-IMPORT-1 30,000), initial 113,752 B (NFR-UI-1 121,153). Spec corrections in Green:
+        FR-INGEST-19's busy column is the three-valued text FR-INGEST-20/-23 use; the run-time probe's package copy
+        is a data file (cross_process_probe.txt); FR-UI-12's chunk sentence points to FR-UI-13's mount." }
+  - { id: V.manage, stage: V, kind: module, track: product, status: in_progress, branch: V/manage,
+      needs: [V.design-pass, V.onboarding-upload, V.compile-ui],
+      what: "Owner 2026-11-24 (Russian): no edit buttons, no customization, no deletion. The management layer: every
+        create, edit, delete and customize action for courses, lessons, revisions, compile runs, materials, tutor
+        history, people, passkeys, sessions and personal settings. Audit of 9140885 on the stubbed test server (owner
+        and learner) is in WEB-MANAGE's header. Drafted (status draft, nothing approved): WEB-MANAGE (new) and
+        `proposed_manage` blocks in SRV-LESSON FR-LESSON-20..31 / INV-LESSON-20..23, SRV-PIPELINE FR-PIPELINE-20..22,
+        SRV-PLAN FR-PLAN-20..21, SRV-TUTOR FR-TUTOR-20..21, SRV-INGEST FR-INGEST-30..32, SRV-SEARCH FR-SEARCH-20,
+        SRV-AUTH FR-AUTH-40..48 / INV-AUTH-20..21, SRV-CONFIG FR-CONFIG-25..26, SRV-EVENTS FR-EVENTS-30..31; ADR-0036
+        (settings overlay) and ADR-0037 (re-enable a disabled sign-up account), both proposed. Merged
+        V/slice-integration 9bb014a (freshness) into V/manage; ids re-checked against SRV-FRESH, WEB-FRESH and
+        FR-AGENT-15..17: no collision.",
+      review: "deep-reviewer round 1 on 840af4b: changes — 16 blocking (auth: learner delete with challenges and a
+        catalog-wide owns_data, passkey lists, last sign-in from last_used_at, own passkey removal revokes other
+        sessions; soft delete: partial position index, Recently deleted in P1 with lessons, material cascade and both
+        restore orders, plans onto a deleted course, imported materials only, FR-SEARCH-20; compile: cancel's
+        re-reads and guarded UPDATEs, open-run definition and lock order with create_run, rename refusal and the
+        full-cost recompile stated; no-op before version; ADR-0036 amends ADR-0031 §1 and ADR-0032 §6, file `off`
+        wins, restore and processes, values not hashes; Enable gated on new ADR-0037) and the non-blocking items, all
+        applied in revision 1 (2026-11-24). Round 2 on 3112546: changes — 14 of 15 round-1 blockers closed; 5 small
+        blocking (SRV-FRESH FR-FRESH-20 and material_busy on a running report; restore keeps an archived course
+        unpositioned; FR-CONFIG-26 narrows on the resolved sign-up value, ignores stale overrides, names the
+        task_budgets and obs-summary readers, a source-scan oracle; cancel's post-call re-read FOR UPDATE; FR-AUTH-43's
+        401 oracle) and the non-blocking items (nearest visible predecessor, Reset to plan order later, PUT in the
+        methods note, create_course, an owner position lock, Undo to the old position, NFR-MANAGE-1 as a delta
+        hypothesis, the interface language moved to WEB-UI FR-UI-30 with paired notes per area, the material_imported
+        query, GET /api/compiles/{run_id} among the tombstone reads), all applied in revision 2.",
+      impl: "2026-11-24, branch V/manage-impl (from V/manage 4997ec5 + e3e7fe1). Round 3 on 2a7d86f: VERDICT approve;
+        ADR-0036 and ADR-0037 accepted by the owner (fd9377a). Promoted with Red, then Green, in five slices merged
+        into V/manage-impl: audit (SRV-EVENTS FR-EVENTS-30..31, jobs_0003); lessons/plan/pipeline (FR-LESSON-20..31,
+        INV-LESSON-20..23, FR-PLAN-20..21, FR-PIPELINE-20..22; lessons_0002, pipeline_0004); auth/config/tutor
+        (FR-AUTH-40..48, INV-AUTH-20..21, FR-CONFIG-25..26 with the settings overlay, FR-TUTOR-20..21; config_0001,
+        0003_manage, tutor_0002); ingest/search/fresh (FR-INGEST-30..32, FR-SEARCH-20, FR-FRESH-20; ingest_0003);
+        web (WEB-UI FR-UI-30..32 interface language in 11 areas, WEB-MANAGE approved by agent with Red and built).
+        Merge points applied by the coordinator: materials.deleted_at in material_is_live, material_imported and
+        plan page_chars; SRV-OBS's error-code enum takes the new pipeline codes. Measured: initial chunks 120,254 B
+        gzip (+2,425 B over 117,829 B; NFR-UI-1 cap 121,153 B). Declared deviations (in the specs' review strings):
+        the notes panel sits after the cells behind a toolbar toggle (FR-MANAGE-9), 'Add a passkey' is a hint, not
+        an in-page ceremony (FR-MANAGE-7), /import's manage section is headed 'Manage your sources', WEB-PLAN's own
+        page shows course_deleted without a Restore button. Not done: the `manage` live step in e2e/live/slice.sh.",
+      next: "code review (deep-reviewer, full rounds: auth and sessions, jobs and idempotency, secrets) of
+        V/manage-impl; then the `manage` live step; owner decides on the declared deviations.",
+      owner_decisions: "Owner 2026-11-24 (via the coordinator): D1 soft delete only with restore, no purge ADR; D2
+        ADR-0036 yes (option B), the owner flips its status after review, the agent does not; D5 manual lesson order
+        kept across re-plan (re-plan changes weeks and dates only; SRV-PLAN FR-PLAN-21, courses.order_source); D7
+        Russian and English UI, browser language by default, switcher in Settings, P1. Coordinator defaults: D3 P1
+        export is the per-lesson .ipynb download; D4 Enable for a disabled sign-up account, drafted as ADR-0037
+        (proposed) because it reverses accepted ADR-0031 decision 4, FR-AUTH-48 gated on it; D6 re-import
+        unscheduled. Owner asks: accept or reject ADR-0036 and ADR-0037.",
+      note: "Paired changes in files of active tracks are listed in WEB-MANAGE's header and are written with Green
+        only: WEB-UI (routes, manage slot, UserMenu Settings item, theme.js, test server, Playwright config),
+        WEB-NOTEBOOK (lesson menu, bookmark toggle, notes tab), WEB-IMPORT (Your sources), OPS-DOD operations. No
+        NAV_ITEMS change, so V/obs-analytics-impl's nav is untouched.",
+      ui30_review: "deep-reviewer (Fable) single round on 4997ec5 for WEB-UI FR-UI-30 and the area notes (outside the
+        complex areas): changes, all applied without a second round (2026-11-24), then promoted as FR-UI-30..32 with
+        Red. Blocking: (1) lazy Russian needs two modules → `messages.en.ts` (static) and `messages.ru.ts` (behind
+        `import()`) per area in all nine places, one parity test, a [build] oracle that no initial chunk's source map
+        lists a `messages.ru` module; (2) first paint and failure → FR-UI-31: the first commit waits for the active
+        locale's catalogues, lazy routes load their `ru` catalogue with their chunk, a failed load renders English
+        with `html lang=en` and retries next load, oracles (first rAF lang, a MutationObserver never sees the English
+        h1, an aborted `ru` chunk); (3) chrome versus content `lang` → FR-UI-32 on content nodes (title h1,
+        `[data-markdown]`, outputs), FR-UI-10's 'chrome stays lang=en' amended, the WEB-NOTEBOOK note, a 4-combination
+        unit oracle; (4) server enums mapped through the owning catalogue, unknown shown as received, one test per
+        enum, FreshnessCard's kind/confidence/status named, declared exceptions listed; (5) bundle gate → the
+        recorded-baseline delta test (NFR-MANAGE-1) dropped, NFR-UI-1 stays the durable gate, a structural build check,
+        the delta recorded once at Green. Non-blocking: theme.js resolver with a node:vm parity oracle, primary-subtag
+        case-insensitive, static `<html lang=en>` kept; tests pin English (Playwright `use.locale`, three live
+        `newContext()` calls, Vitest setup clears the key, no-provider runtime is English); plurals 0/12/22/111/1.5,
+        exact categories per locale, equal placeholder sets, whole sentences; the formatting locale rule (full tag on
+        a primary-subtag match), also for Intl.Collator; the Language options carry their own lang, html[lang] updates
+        on switch, `auto` ignores languagechange; tutor answers, notes and titles in chrome get lang from the Cyrillic
+        rule; areas enumerated as data (`I18N_AREAS`, incl. app and app/observability) with one glob parity test; the
+        owner note on English sign-in pages; e3e7fe1 merged before promotion (done in ec38b96)." }
 
   # Stage 2 — event backbone and notifications
   - { id: S2.SRV-EVENTS, stage: 2, kind: module, track: engineering, status: todo, needs: [S1.live] }
-  - { id: S2.SRV-OBS, stage: 2, kind: module, track: engineering, status: todo, needs: [S2.SRV-EVENTS, S0.spike.trace-backend] }
+  - { id: S2.SRV-OBS, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [S2.SRV-EVENTS, S0.spike.trace-backend], branch: V/obs-impl,
+      what: "Owner 2026-11-24: 'the tracing system via dashboard for this system'.",
+      note: "Draft spec spec/modules/SRV-OBS.yaml and ADR-0032 (proposed): MLflow on its own SQLite volume, the UI on
+        https://localhost:8443 behind Caddy forward_auth to GET /api/obs/gate (owner only), one trace per job linked to
+        its enqueuer, an attribute allow-list exporter, the CLI's content flags at 0, 30-day retention by a worker job,
+        the owner's views from reader-ai's own tables (MLflow 3.18.0 cannot group cost by stage or failures by code).
+        ADR-0018 is still proposed. Spikes (zero credit): spikes/cli-otel-content (CLI 2.1.330 exports under SRV-AGENT's
+        env; no canary with content flags off; the positive control finds the prompt), spikes/obs-stack (hardened Rotel
+        and MLflow, SQLite vs Postgres memory over an 8-minute lesson replay, the gate path, storage per span, deletion).
+        Paired changes are listed in the spec (OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS, SRV-AGENT, SRV-CONFIG)
+        and not edited here, because active branches change those files. Design review round 1 (2026-11-24): changes,
+        7 blockers (networks, gate Origin rules, cookie stripping, CSP and deep link measured, CLI pin test, retention
+        order and cutoff test, cost from the ledger) plus non-blocking items, all applied; spikes/obs-stack round 2
+        measured the gate, header stripping, MLflow's credentialed CORS for any localhost origin, text/plain 400,
+        retention with a real cutoff, a blocked-path ordering bug in the round-1 Caddyfile, and the CSP and deep link in
+        a headless browser. Round 2 (fc208f8): changes, 3 blockers (Sec-Fetch rule blocked the app's own deep-link
+        click; a wrong fixture trace id from a Python octal escape, now checked by spec/fixtures/SRV-OBS/trace-ids.mjs;
+        job_keys read only through published SRV-EVENTS functions, FR-EVENTS-18 paired) plus non-blocking items, all
+        applied; spike round 3 measured the cross-port click (same-site/navigate/document passes) and refusals of
+        same-site image, script and fetch. Round 3 (dfa6f9e): changes, 1 blocker (fixture keys were placeholders):
+        VEC-OBS-3 now seeds real FR-EVENTS-2 keys of fixed args, generated by trace-ids.mjs and spot-checked against
+        reader.jobs.model.idempotency_key; key_rows_of across kinds, recent_keys_of `truncated`, the unaudited
+        fragment-write residual declared. Round 4 (5677fb3): VERDICT approve; three nits applied. The spec's status stays
+        draft on V/obs: trace-check T5 (no Red tests yet) and T10 (SRV-OBS not in the OPS-DOD index, a file active
+        branches edit) refuse `approved` now; the flip lands with Red and the obs.view operation on the integration
+        base. ADR-0032 and ADR-0018 stay proposed for the owner. Next: implementation (Red/Green) only after the
+        owner accepts ADR-0032 (it amends accepted ADR-0025 rule 5), on V/slice-integration's versions of the paired
+        specs (OPS-DEPLOY, OPS-CLI, OPS-DOD, SRV-AUTH, SRV-EVENTS incl. FR-EVENTS-17/18, SRV-AGENT, SRV-CONFIG, WEB-UI).
+        On main S2.SRV-EVENTS still reads todo; its slice revision is approved and implemented, which is what this spec
+        builds on. 2026-11-24: the owner accepted ADR-0018 and ADR-0032 (973cd62). Implementation on V/obs-impl (from
+        V/slice-integration 04b2563, V/obs merged): Red 2c73e40 (SRV-OBS approved by agent; paired changes in OPS-DEPLOY
+        FR-DEPLOY-13, OPS-CLI FR-CLI-22, SRV-CONFIG FR-CONFIG-17, SRV-AUTH FR-AUTH-33, SRV-EVENTS FR-EVENTS-18/19,
+        SRV-AGENT FR-AGENT-14, WEB-UI FR-UI-18, OPS-DOD obs.view; the CLI canary harness under server/tests/obs/
+        cli_canary). Green: reader.obs (allow-list exporter, ids, propagation, asgi, logs, gate, summary, retention
+        job, agent span), jobs_0002 index, the trace kwarg and job span in reader.jobs.queue, key_rows_of and
+        recent_keys_of, config, serve wiring, provider span and CLI env, `reader up`/doctor, rotel and mlflow in
+        compose.yaml, deploy/otel/mlflow.Dockerfile, the 8443 Caddy site, the /observability page. Learned at Green:
+        OTel SDK 1.45 sets W3C's random-trace-id flag (traceparent ...-03) unless the id generator says its ids are not
+        random, so JobIdGenerator returns False (flags stay 01, derived ids are not random); OTLPSpanExporter exposes
+        no timeout attribute, so the spec pins EXPORTER_KWARGS. [image] obs tests (87771f4): 4/4 after explicit
+        10.233.<n>.0/24 test subnets (Docker Desktop's pools were exhausted) and MLflow 3.18's `trace.spans` response
+        shape. Code review round 1 (on 08700c5): changes, 3 blockers fixed: (1) the Caddy `@blocked` path pattern's
+        middle `*` matched one segment, so deep gateway, assistant and gateway-proxy paths reached MLflow; now one
+        case-insensitive path_regexp (deep, `//` and `%2F` variants 404 through the pinned Caddy); (2) `days=²`
+        gave a 500; now `^[0-9]{1,2}$`; (3) surviving mutants killed (gate rows, an independent VEC-OBS-1 oracle,
+        exact agent.call tokens and settled cost on a failed billed call, late-run retention, other-owner and old
+        VEC-OBS-3 seeds, root-span outcomes, job_span under an active span). Non-blocking items applied: no stage on
+        tutor calls, gate_status(url, roots) with a real-TLS test and `status <n>`, guarded middleware, `**BATCH`
+        and env headers cleared while the exporter is built, retention enqueue retries and bad-200 handling,
+        failures view bounded by the dead rows' ids, lost runs marked dead, start_obs inside the try, FR-OBS-1's
+        dependency wording (8a0e679). Code review round 2 (on 8a0e679): VERDICT approve; the blocked regexp held
+        against every bypass tried (no passing variant is a real MLflow route), Caddy's internal root passes
+        Python's strict X.509 verification (the doctor risk is closed), 170 of 188 mutants killed, the rest
+        equivalent or small gaps; the cheap gaps were then closed with tests only (upper-case traceparent, aborted
+        and session_lost root marks, the retention handler reading current_settings). Live steps still not run
+        (owner's rule for this task); the stage-2 live check covers them. Live check on the owner's stack at 647cfeb
+        (2026-11-24, ad-hoc probes, zero credit): 20 of 20 passed (gate 401/403/204 and every refused Origin,
+        method and Sec-Fetch case; the blocked paths 404; no Set-Cookie or ACAO; zero CSP violations; the span
+        tree renders; an assessment note saved and cleared; mlflow 620 MiB of 1 GiB, rotel 46 MiB). Fixed on
+        V/obs-live-fixes: e2e/live/obs.sh did not exist (now committed with obs_live.py and obs_browser.mjs; id-only
+        sessions, no OWNER_RESET_SQL, credit parts behind --with-credit); `reader doctor` said `unreachable`
+        without `reader trust` (it now also reads Caddy's public root the way `reader trust` does, for the check
+        only; `reader trust` changes the login keychain, an owner action); links of jobs that ran before tracing
+        existed left MLflow on its loading skeleton (table obs_tracing records each worker start, and a trace id
+        is given only when a trace can exist; the page shows `no trace`). Declared: the live stack has no stub
+        provider, so the trace nesting check (job → agent.call → CLI spans) needs real credit (obs.sh
+        --with-credit); without credit it is covered by the [image] CLI canary and the [db] propagation tests.
+        Review of af406a4 (deep-reviewer, outside the complex areas, one round): VERDICT changes; each finding and
+        its fix: (B1) `reader doctor` crashed with ssl.SSLError on a bad or truncated Caddy root: `valid_root`
+        loads the PEM before it counts, `gate_status` skips a root file that does not load, tests run the real
+        function with a bad and a missing root and the doctor with five bad exports and a truncated one. (B2) the
+        FR-OBS-6 (c) subset check and the full chain were missing from `--with-credit`: each link job → agent.call →
+        claude_code.interaction → claude_code.llm_request is checked, and the CLI's span names, attribute keys and
+        the trace's resource keys against VEC-OBS-2. (B3) the zero-credit run passed vacuously without summary
+        trace ids: the detail, CSP and UI write take the newest trace from MLflow's traces/search; only the link
+        click depends on summary ids and is a counted SKIP when there are none; obs.sh prints the SKIP count apart
+        from the passes. (B4) the rule's db half was not pinned: tests/obs/test_tracing_db.py runs summary() over
+        an enabled → disabled → enabled sequence with a start before the window, rows inserted newest first, a
+        start at a row's instant, rows older than retention_days (with a 3,650-day contrast), and tracing off now.
+        Non-blocking, all applied: doctor tests for a recorded root plus Caddy's, two runs (unlink then O_EXCL),
+        the PEM check and the exit code, and the gate_status docstring; record_start tried 3 times with an honest
+        docstring, started_at pinned to the database clock; FR-OBS-10 declares one worker and the rare false-link
+        cases; boundary cases (exactly at the cutoff, just before, no moment, any order); obs.retention prunes
+        obs_tracing rows older than retention but the latest one before the cutoff; the gate is passed as an
+        argument (no ContextVar); obs_0001 downgrade test; obs_0001 backfills one enabled row at the oldest
+        obs.retention key row (the first start with the obs code), so already-traced jobs keep their links
+        (assumes tracing was on then, declared); obs.sh resolves and checks the out-dir before mkdir, runs
+        `python -I`, and checks that each session statement touched one row; the live sample is named
+        (first 20 of N); the probe's assessments are deleted through MLflow's REST whatever the UI did; the canary
+        question staying in the tutor history is noted; the spec now says obs.sh runs by hand until
+        e2e/live/stage-2.sh exists.",
+      review: "deep-reviewer (Fable): design rounds 1–3 changes (7, 3 and 1 blockers, all applied), round 4 approve
+        (5677fb3); details in the spec's review field. Code review (Fable): round 1 on 08700c5 changes (3 blockers:
+        deep blocked paths, days=² 500, surviving mutants in complex areas; plus non-blocking items, all applied in
+        8a0e679); round 2 on 8a0e679 VERDICT approve." }
+  - { id: V.obs-analytics, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [S2.SRV-OBS], branch: V/obs-analytics,
+      what: "Owner 2026-11-24: customize the MLflow dashboard for better analytics with best practices; use every tab;
+        is there a Jaeger-like view of spans.",
+      note: "Research and spec draft, zero credit. spikes/obs-stack round 4 (RESULT.md): MLflow 3.18.0 read in the
+        pinned image's source, then measured. Findings: today agent.call is typed LLM and priced from cache-less input
+        tokens, so trace tokens are wrong and the dashboard cost double-counts; with mlflow.spanType on our spans,
+        gen_ai.operation.name invoke_agent and semconv token keys including the cache, MLflow counts tokens right.
+        Cost (owner: the ledger is the source of truth): agent.call carries the ledger amount as mlflow.llm.cost and
+        a file:// zero-price model catalog stops MLflow pricing the CLI spans; measured trace cost = ledger, span cost
+        sum 1.55 = the seven ledger amounts, no double count. Per lesson: the traces table has a Cost column (not
+        sortable), cost groups only by model, a lesson tag filter works (0.88/0.67), ?q=<lesson id> lists a lesson's
+        traces; the ranking goes to /observability (FR-OBS-17). Root-span mlflow.traceTag.* gives trace tags,
+        the trace name and linked prompts; session.id gives sessions; JSON-string mlflow.spanInputs/Outputs give
+        ids-only previews; code-sourced assessments fill the Quality dashboard; our static prompt files fill Prompts.
+        Before/after screenshots of every tab: results/20261124T105821-round4-tabs/tabs/. Saved views: only q, groupBy
+        and the time range survive in the traces URL. Timeline: MLflow's \"Show execution timeline\" is real but
+        narrow; Jaeger 2.23.0 as Rotel's second exporter gives a full waterfall (ADR-0033).
+        Design review round 1 on ae2caa6: changes (B1-B10). Round 5 of the spike (zero credit) measured: a file://
+        catalog still lets MLflow price provider-less CLI spans and a missing mount prices all, so reader-mlflow's
+        image replaces the bundled catalog (all four CLI cases 0, span sum = ledger 0.48); the CLI's session.id wins
+        the trace session unless a job.session marker is exported first (measured both ways); Jaeger per-site gate,
+        3 KB per full span (round 2: max_traces 450 at 256m from 72 spans per trace, GOMEMLIMIT 200MiB), delivery 0.6 s with Jaeger stopped and 16 s after its
+        OOM, the eval violation is a Zod-style allowsEval probe. Spec: MLflow keys derived by the exporter from
+        validated attributes (VEC-OBS-4 fixture, no new rule type); cost split output = total - input; FR-OBS-14/15
+        blocked on ADR-0035; ADRs 0033 (Jaeger), 0034 (content mode), 0035 (worker writes to MLflow), all proposed.
+        Design review round 2 on 72a86b7: changes (R2-1 approval scope with blocked_on items, T11 proposed to
+        OPS-DOD; R2-2 session marker via reader.obs.session_marker; R2-3 Jaeger sizing), applied. Round 3 on
+        6ccbb08: VERDICT approve for the approval scope FR-OBS-12 (a-f, h), -13, -16, -17; nits applied (clause (g)
+        split to FR-OBS-18, blocked; the Jaeger fill test records times; the catalog generator uses ruamel.yaml).
+        Owner 2026-11-24: ADR-0033 and ADR-0035 accepted, ADR-0034 rejected; the whole amendment is built on
+        V/obs-analytics-impl." }
+  - { id: V.obs-analytics-impl, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [V.obs-analytics], branch: V/obs-analytics-impl,
+      what: "Red and Green of SRV-OBS FR-OBS-12..19 (V.obs-analytics; ADR-0033, ADR-0035 accepted) with the paired
+        SRV-AGENT, SRV-EVENTS, SRV-TUTOR, SRV-PIPELINE, SRV-INGEST, SRV-SEARCH, OPS-DEPLOY, OPS-CLI and WEB-UI
+        changes.",
+      note: "Cut from V/slice-integration 9140885 with origin/V/obs-analytics 4e6c104 merged. Red: FR-OBS-12..19 and
+        VEC-OBS-4 moved into requirements and vectors; VEC-OBS-1 gains the new keys and span names; the in-place
+        edits applied (FR-OBS-2, -5, -6, -7, -8, -9, -10, INV-OBS-1, -2, -3, -5, NFR-OBS-1, test_levels, owner
+        notes); paired FR texts amended. Green: reader.obs.analytics (derivation), spans (session marker, root
+        attributes, child spans), feedback (obs.feedback), prompts (obs.prompts), the agent span's semconv keys and
+        cost split, summary's lessons view, the per-site gate, the catalog generator and replaced catalog, jaeger,
+        the 8444 site and reader up/doctor lines, /observability's cost-per-lesson and dashboards. Checks: the gate
+        ran under parallel load and ended `LOCAL CI: FAIL (1 step(s))` on pytest only, 2285 passed and 139
+        errors, all Postgres-container connect timeouts in db tests; those tests passed alone (tests/plan and
+        tests/pipeline 156 passed; `pytest --lf` 87 passed): load flakes by the coordinator's rule. ruff, mypy,
+        trace-check, guard-tests, web typecheck, vitest and the storybook build passed. Obs [image] tests by image
+        id: 9 passed (Jaeger fill 32,400 full-key spans, 143 MiB of 256, last trace 0.3 s after the flush; marker
+        session, ledger cost, 0-cost CLI spans, span metric = ledger). Stubbed browser suite: 446 passed. Merged
+        V/slice-integration 199d2f1. No reader up, no live step, no credit. Code review round 1 (3198cb2): changes;
+        fixed on top of the V/slice-integration 9bb014a merge (freshness): obs.prompts keyed by template digest +
+        start day; settled amount quantized once (pricing.micro) for ledger and span, cost_input at cost()'s tier
+        with the search fee on the output side, HALF_UP everywhere; per-handler [db] call-site tests (tutor,
+        pipeline, verify, search, ingest, queue marker) with canaries; an [image] test of feedback.post,
+        prompts.register and child spans against real MLflow, which found a real defect: MLflow 3.18 hides prompt
+        versions from model-version search unless the filter names the prompt tag (fixed); live obs.sh gains the
+        session, lessons, 8444 gate/edge, Jaeger lookup and catalog cost oracle checks; surviving mutants killed;
+        non-blocking: deleted-lesson rows, Jaeger link label, X-Reader-Site stripped site-wide, 8444 read-only
+        (POST /api/archive and /api/transform measured on the pinned image), feedback WARNING, record early return,
+        miss cache, FLUSH_MS note. Gate: pytest 1 failed + 103 errors, all Postgres-connect timeouts under load (and
+        Docker Desktop's disk full); `pytest --lf` alone 104 passed: load flakes. Obs [image] tests 10 of 10 (9 in
+        the parallel run, then the edge test, updated for the read-only 8444, passed alone). Stubbed browser suite: 465 passed. Code review verdicts: round 1 (3198cb2)
+        changes, fixed in ced6600; round 2 (5b10c25) VERDICT approve, with nits applied in one commit (obs.prompts
+        also enqueued by the daily obs.retention run, FR-OBS-15; the failed-lookup miss cache and the miss cleared
+        after registration pinned; a tier test where the search fee and >100k prompt tokens coincide; lesson,
+        course and step pinned on agent.call from the provider and the pipeline steps; tutor hits 3 vs candidates
+        2). Then merged V/slice-integration and fast-forwarded it (see the commit and the report)." }
+  - { id: V.obs-mlflow-phase2, stage: 2, kind: design, track: engineering, status: done,
+      needs: [V.obs-analytics-impl], branch: V/obs-mlflow-phase2,
+      what: "SRV-OBS phase 2 design: MLflow experiment Runs, evaluation datasets and runs, agent versions, review and
+        labels, budgets and alerts (owner, 2026-11-24: use all of MLflow as the dashboard). Spec and spike only.",
+      note: "Spike round 6 (spikes/obs-stack/run-phase2.sh, zero credit, own project, stopped at exit;
+        results/20261124T142803-round6-phase2 with before/after screenshots in p2/). Measured: Runs + link-to-run
+        work (the Run's Traces tab lists linked traces with assessments) but every Run with linked traces shows
+        under Evaluation runs as Eval; datasets 40 + 30 records; evaluation runs chart metrics over time;
+        mlflow.genai.evaluate writes a client trace per row with inputs (117 of 133 traces) and exhausted SQLite's
+        pool at default parallelism, so the design logs plain Runs over REST; OTLP cannot set mlflow.modelId
+        metadata and no API links traces to a LoggedModel, so versions compare by trace tag; labeling sessions are
+        Databricks-only, OSS label schemas + review queues work; budgets are AI-gateway-only (current_spend stayed 0
+        after OTLP spend; alert = outbound webhook), so /observability stays the alert surface. Book-text check
+        (check_bench_quotes.py, ids and lengths only): v2 max shared run 4 words, t01 1, v1 four records at 5
+        (excluded). Drafted SRV-OBS proposed_requirements FR-OBS-20..25 and phase2_tabs; ADR-0038 (proposed; 0036 and 0037 are V/manage's) for
+        the writes beyond ADR-0035. Round 7 (results/20261124T143808-round7-runs): a Run in its own experiment
+        accepts link-to-run, but its Traces tab shows no traces (the UI searches only the Run's experiment), so
+        compile and import Runs stay in experiment 0 and bench datasets and runs go to experiment `bench`. Design
+        review round 1 (b1a84d5): changes, B1-B11; revision 2 answers each (SRV-OBS phase2_review). Owner added
+        2026-11-24 \"production-ready MLflow\": FR-OBS-26..35 (MLflow operations) and ADR-0038 Decision 5. Round 8
+        (results/20261124T150936-round8-rest): every write as raw REST; params write-once; link-to-run max 100;
+        datasets upsert; HUMAN relabel by overrides; verbatim check rerun (threshold 5, NFC, hyphens). Round 9
+        (results/20261124T151501 and T151935-round9-ops): WAL 0 errors under 8 writers (p95 0.20 s); gateway off 501;
+        online backup and restore; VACUUM -16 %; a stop during first-start migration bricks the file (hence the
+        mlflow-migrate one-shot); load 35,560 spans 0 dropped, ingest p95 11.5 s, MLflow peak 560 MiB, +51.6 MB;
+        3.10 -> 3.18 upgrade ok. Round 10 (results/20261124T153052-round10-setup): setup drift-free, finalize,
+        retention deletes, allowed-hosts 403 on the API. VEC-OBS-5 (phase2.yaml), VEC-OBS-6 (mlflow-setup.yaml),
+        bench-tutor-v2.yaml (compose-bench.mjs). Docker Desktop's disk was full during round 10 (dangling images
+        pruned, 6.8 GB). Design review round 2 (ac3a79d): changes, N1-N10 plus non-blocking; revision 3 answers
+        each (SRV-OBS phase2_review_round2): snapshot_at a tag, inline idempotent setup, one kind per set, label
+        mirror found by name + revision, import traces by material tag, no VACUUM, flock-guarded migrate with one
+        pre-migration backup, backup API always, no Jaeger sidecar (doctor via docker inspect), owner_labels.
+        Round 11 (results/20261124T154753-round11-egress): mlflow's internal networks reach neither 1.1.1.1:443 nor
+        DNS; a normal network does. Design review round 3 (d03645c): changes, R1-R4; revision 4 answers each
+        (phase2_review_round3): only lacking params logged; scores recomputed from registered per-question records
+        (the tutor upload is the records file); restore marker and mlflow-migrate exit 3; FR-OBS-29's image test
+        first Red. Round 12 (results/20261124T155700-round12-rest): same-value param re-log 200, changed 400;
+        LoggedModel tag PATCH and read-back; egress probe reaches MLflow /health 200. Design review round 4
+        (03124aa): changes, F1 (the restore logic); revision 5: store.version, an in-progress marker that stops a
+        second run before the backup, named versions in the image test, distinct exit codes (migrate 10..13,
+        restore 0..5), the fresh-volume hypothesis with a fallback, tutor_summary moved to SRV-TUTOR. Design review
+        round 5 (46e9017): every crash point for an existing store and restore passes; G1 (an interrupted fresh
+        first start stuck) fixed in revision 6 with a backup/fresh marker that step 0 wipes and restarts from;
+        normal starts skip the backup; restore needs in-progress or --force. Design review round 6 (4b81738): H1
+        (the fallback could wipe a served store) and H2 (a restored older store skipped its migration) fixed in
+        revision 7: the fallback initialises the store inside mlflow-migrate (one SqlAlchemyStore call), step 0
+        tries db upgrade before any wipe, reader backup/restore carry store.version. Round 13
+        (results/20261124T164527-round13-init): db upgrade on a missing file and the SqlAlchemyStore call both
+        build 71 tables at head f4a9b2c7d1e6 and serve /health 200. Design review verdicts (deep-reviewer):
+        round 1 b1a84d5 changes (B1-B11); round 2 ac3a79d changes (N1-N10); round 3 d03645c changes (R1-R4);
+        round 4 03124aa changes (F1); round 5 46e9017 changes (G1); round 6 4b81738 changes (H1, H2); round 7
+        aedd89a VERDICT approve, with three non-blocking items applied after it (reader restore clears the
+        in-progress, fresh and restored-for markers; store.version removed before the file is replaced and
+        written back after; the hardened FR-OBS-29 [image] test stays the first Red test). Next: the owner's
+        decision on ADR-0038 (his script sets its status on this branch); then the phase 2 requirements move
+        into SRV-OBS with their Red tests. The owner accepted ADR-0038 (2026-11-25, b34b712)." }
+  - { id: V.obs-mlflow-phase2-impl, stage: 2, kind: module, track: engineering, status: in_progress,
+      needs: [V.obs-mlflow-phase2], branch: V/obs-mlflow-phase2-impl,
+      what: "Red and Green of SRV-OBS phase 2 (FR-OBS-20..35, ADR-0038 accepted) with the paired FR-EVENTS-32,
+        FR-PIPELINE-18, FR-INGEST-26, FR-TUTOR-15, FR-UI-31, FR-CLI-24 and FR-DEPLOY-15. Ops first; the
+        hardened FR-OBS-29 [image] test is the first Red test.",
+      note: "Cut from V/slice-integration 87840d1 with origin/V/obs-mlflow-phase2 b34b712 merged. Zero credit;
+        the first tutor-records upload needs a paid bench run and waits for the owner. RED done (2026-11-25):
+        FR-OBS-20..35 moved into SRV-OBS requirements, every phase2_in_place_edit applied, VEC-OBS-5/6 and the
+        paired FR-EVENTS-32, FR-PIPELINE-18, FR-INGEST-26, FR-TUTOR-15 (+ VEC-TUTOR-8), FR-UI-31, FR-CLI-24 and
+        FR-DEPLOY-15 written; trace-check 0 errors. Red tests: test_images_migrate.py first (N = mlflow v3.10.0
+        @sha256:f1e71127..., N+1 = reader-mlflow by id; fails on the missing deploy/otel/mlflow-migrate.sh),
+        test_phase2_unit/_config/_images_phase2 (obs), test_obs_phase2_kinds (jobs), the pipeline and ingest
+        enqueue [db] tests, test_obs_phase2_routes (auth), cli test_obs_phase2, and the vitests
+        observability-phase2.test.tsx and bench-upload.test.ts. Existing assertions updated with the spec: the
+        obs kinds list (test_retention, test_jobs_unit), mlflow command/env and the obs_mlflow backup label
+        (test_deploy_config). Green must also update test_images._backend to compose's FR-OBS-27 command and
+        write deploy/otel/UPGRADE.md (FR-OBS-34's checklist source, a path the Red test chose). GREEN (owner:
+        build everything, fast checks only, review later): ops 3afcfb9 (mlflow-migrate.sh with flock, markers,
+        store.version, exit codes 10..13 and an automatic SqlAlchemyStore fallback, because MLflow 3.10.0's db
+        upgrade fails on a missing file; compose per FR-OBS-27/FR-DEPLOY-15; reader doctor, backup and restore,
+        restore-obs-premigrate 0..6), server f245ff7..47584a2 (runs, bootstrap, bench, labels, alerts, health;
+        obs_0002 and pipeline_0004 `compile_runs.ends`; JobKind traced/periodic/after_end; routes; version key),
+        web and tutor bench f245ff7 (FR-UI-31; records and summary files; the committed 2026-11-23 summary
+        migrated, its three prose notes, latency polling 0.5 s, thinking tokens follow-up and the v18 failure,
+        recorded here only); integration: FR-DEPLOY-15 (g) exceptions and the six deploy tests, the owner slice
+        writes the records and summary files, mirror `queued`. Fast checks: ruff, mypy strict, trace-check 0
+        errors, vitest 537 passed, targeted pytest green; image migrate test 13/14 before the test fix. Not run:
+        the full gate, test_images_phase2, the burst test (burst.run not implemented yet), the browser suite." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

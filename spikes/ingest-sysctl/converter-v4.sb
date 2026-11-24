@@ -1,0 +1,31 @@
+(version 1)
+; Spike ingest-sysctl, variant v4: the product profile, unchanged except for two rules at the end that limit
+; process-info to the process itself. v3 showed that sysctl-read rules do not mediate kern.procargs2 or kern.proc.pid
+; for another pid; the process-info operations do.
+(deny default)
+
+(allow file-read* file-map-executable
+  (subpath (param "PYROOT"))
+  (subpath (param "VENV"))
+  (subpath "/usr/lib")
+  (subpath "/System/Library")
+  (subpath "/System/Cryptexes")
+  (subpath "/private/var/db/dyld"))
+(allow file-read* (subpath (param "MODELS")))
+(allow file-read* (literal "/dev/urandom") (literal "/dev/null"))
+(allow file-read* (literal "/"))
+(allow file-read* (literal "/private/etc/apache2/mime.types"))
+(allow file-read-metadata)
+
+(allow file-read* file-write* (subpath (param "WORK")))
+(allow file-write-data (literal "/dev/null"))
+
+(allow process-exec
+  (literal (string-append (param "VENV") "/bin/python"))
+  (literal (string-append (param "PYROOT") "/bin/python3.14")))
+(allow process-fork)
+(allow sysctl-read)
+
+; New: no information about other processes (arguments, environment, cwd, paths, process lists).
+(deny process-info*)
+(allow process-info* (target self))

@@ -1,0 +1,51 @@
+// SRV-TUTOR's Ask panel interface copy (WEB-UI FR-UI-30): Russian, reached only through the runtime's import().
+import type { Translation } from '../ui/i18n';
+import type en from './messages.en';
+
+const ru: Translation<typeof en> = {
+  'code.question_invalid': 'Введите вопрос (до 1000 символов).',
+  'code.cell_unknown': 'Этой ячейки больше нет в уроке. Перезагрузите урок.',
+  'code.unknown_revision': 'Урок изменился. Перезагрузите его, чтобы спросить о текущей версии.',
+  'code.not_found': 'Этот урок или вопрос недоступен.',
+  'code.tutor_busy': 'Наставник ещё отвечает на ваш предыдущий вопрос.',
+  'code.daily_budget_exhausted': 'Дневной бюджет наставника исчерпан. Попробуйте завтра.',
+  'code.budget_exhausted': 'Вопрос упёрся в лимит стоимости и остался без ответа.',
+  'code.monthly_budget_exhausted': 'Месячный бюджет на ИИ исчерпан. Наставник приостановлен до следующего месяца.',
+  'code.provider_missing': 'Для вашей учётной записи не подключён поставщик ИИ. Попросите владельца подключить его.',
+  'code.sources_unavailable': 'Для этого урока ещё нет проиндексированного источника, поэтому наставник не может ответить по книге.',
+  'code.output_invalid': 'Не удалось прочитать ответ наставника. Спросите ещё раз.',
+  'code.output_truncated': 'Ответ оказался слишком длинным и был обрезан. Задайте вопрос поуже.',
+  'code.provider_unavailable': 'Наставник сейчас недоступен. Попробуйте через минуту.',
+  'code.rate_limited': 'Наставник сейчас занят. Попробуйте через минуту.',
+  'code.expired': 'Вопрос ждал слишком долго и остался без ответа. Спросите ещё раз.',
+  'code.lost': 'Вопрос потерялся, не дождавшись ответа. Спросите ещё раз.',
+  'code.tutor_failed': 'Наставник не смог ответить на этот вопрос. Спросите ещё раз.',
+  unsupported: 'источник этого не подтверждает',
+  answering: 'Наставник отвечает…',
+  not_grounded: 'Этот ответ не полностью опирается на книгу.',
+  'history.waiting': 'ожидает ответа',
+  'history.answered': 'есть ответ',
+  'history.answered_ungrounded': 'есть ответ, не полностью по книге',
+  'history.waiting_answer': 'Ждём ответа',
+  'history.loading': 'Загружаем ответ',
+  retry: 'Повторить',
+  'panel.label': 'Наставник',
+  'panel.heading': 'Наставник',
+  'panel.close': 'Закрыть наставника',
+  'panel.about': 'О чём: {label}',
+  'panel.about_selected': 'О чём: выбранная ячейка',
+  'panel.ask_label': 'Спросить наставника',
+  'panel.count': '{n} / {max}',
+  'panel.hint': 'Ctrl+Enter или ⌘+Enter — отправить вопрос',
+  'panel.ask': 'Спросить',
+  'history.heading': 'Прошлые вопросы',
+  'history.fewer': 'Показать меньше',
+  'history.more': {
+    one: 'Показать ещё {count} прошлый вопрос',
+    few: 'Показать ещё {count} прошлых вопроса',
+    many: 'Показать ещё {count} прошлых вопросов',
+    other: 'Показать ещё {count} прошлого вопроса',
+  },
+};
+
+export default ru;

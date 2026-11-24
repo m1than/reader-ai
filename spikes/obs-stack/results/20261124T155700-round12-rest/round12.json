@@ -1,0 +1,186 @@
+{
+ "raw": [
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/create",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "run_name": "compile r12",
+    "start_time": 1795521428372,
+    "tags": [
+     {
+      "key": "reader.run_id",
+      "value": "r12"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 200,
+   "body": {
+    "run_id": "6f7912dc60594cd1b58dc6aaa6d2a672",
+    "params": [
+     {
+      "key": "version_key",
+      "value": "abababababab"
+     }
+    ],
+    "metrics": [],
+    "tags": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 200,
+   "body": {
+    "run_id": "6f7912dc60594cd1b58dc6aaa6d2a672",
+    "params": [
+     {
+      "key": "version_key",
+      "value": "abababababab"
+     }
+    ],
+    "metrics": [],
+    "tags": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.run_id` = 'r12'",
+    "max_results": 2
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 200,
+   "body": {
+    "run_id": "6f7912dc60594cd1b58dc6aaa6d2a672",
+    "params": [
+     {
+      "key": "model.draft",
+      "value": "claude-sonnet-5-5"
+     }
+    ],
+    "metrics": [],
+    "tags": []
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/runs/log-batch",
+   "status": 400,
+   "body": {
+    "run_id": "6f7912dc60594cd1b58dc6aaa6d2a672",
+    "params": [
+     {
+      "key": "version_key",
+      "value": "cdcdcdcdcdcd"
+     }
+    ],
+    "metrics": [],
+    "tags": []
+   }
+  },
+  {
+   "method": "GET",
+   "path": "/api/2.0/mlflow/runs/get?run_id=6f7912dc60594cd1b58dc6aaa6d2a672",
+   "status": 200,
+   "body": null
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models",
+   "status": 200,
+   "body": {
+    "experiment_id": "0",
+    "name": "reader-agent",
+    "tags": [
+     {
+      "key": "reader.version_key",
+      "value": "abababababab"
+     }
+    ]
+   }
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/2.0/mlflow/logged-models/m-818ff7dbae1848eca517858d464e6818/tags",
+   "status": 200,
+   "body": {
+    "tags": [
+     {
+      "key": "reader.last_started",
+      "value": "2026-11-24"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.version_key` = 'abababababab'"
+   }
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/2.0/mlflow/logged-models/m-818ff7dbae1848eca517858d464e6818/tags",
+   "status": 200,
+   "body": {
+    "tags": [
+     {
+      "key": "reader.last_started",
+      "value": "2026-11-25"
+     }
+    ]
+   }
+  },
+  {
+   "method": "POST",
+   "path": "/api/2.0/mlflow/logged-models/search",
+   "status": 200,
+   "body": {
+    "experiment_ids": [
+     "0"
+    ],
+    "filter": "tags.`reader.version_key` = 'abababababab'"
+   }
+  }
+ ],
+ "first_log": 200,
+ "same_value_relog": 200,
+ "params_from_search": {
+  "version_key": "abababababab"
+ },
+ "missing_log": 200,
+ "changed_value_relog": 400,
+ "params_after": {
+  "version_key": "abababababab",
+  "model.draft": "claude-sonnet-5-5"
+ },
+ "tag_2026-11-24": {
+  "patch_status": 200,
+  "search_status": 200,
+  "read_back": "2026-11-24"
+ },
+ "tag_2026-11-25": {
+  "patch_status": 200,
+  "search_status": 200,
+  "read_back": "2026-11-25"
+ }
+}
