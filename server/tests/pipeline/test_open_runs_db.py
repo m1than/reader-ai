@@ -130,23 +130,22 @@ async def test_a_cancelled_run_is_never_open(pg: Pg, tmp_path: Path) -> None:
     run is cancelled is not listed, even a row whose `finished_at` is still null or that carries a budget refusal."""
     from sqlalchemy import text
 
-    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
-        async with client(env) as c:
-            r = await c.post("/api/pipeline/courses", json=copy.deepcopy(five_lessons()))
-            ids = {x["plan_lesson_id"]: x["lesson_id"] for x in r.json()["lessons"]}
-            ivan = env.users["ivan"]
-            await _finished_run(env, ivan, uuid.UUID(ids["C"]), dt.timedelta(minutes=30), refused="budget_exhausted")
-            async with env.engine.begin() as conn:
-                await conn.execute(
-                    text(
-                        "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets, budget_refused,"
-                        " cancelled_at) VALUES (:o, :a, 8.00, '{}'::jsonb, NULL, now()),"
-                        " (:o, :b, 8.00, '{}'::jsonb, 'budget_exhausted', now())"
-                    ),
-                    {"o": ivan, "a": uuid.UUID(ids["A"]), "b": uuid.UUID(ids["B"])},
-                )
-            listed = (await c.get("/api/compiles")).json()["runs"]
-            assert [x["lesson_id"] for x in listed] == [ids["C"]]
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env, client(env) as c:
+        r = await c.post("/api/pipeline/courses", json=copy.deepcopy(five_lessons()))
+        ids = {x["plan_lesson_id"]: x["lesson_id"] for x in r.json()["lessons"]}
+        ivan = env.users["ivan"]
+        await _finished_run(env, ivan, uuid.UUID(ids["C"]), dt.timedelta(minutes=30), refused="budget_exhausted")
+        async with env.engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets, budget_refused,"
+                    " cancelled_at) VALUES (:o, :a, 8.00, '{}'::jsonb, NULL, now()),"
+                    " (:o, :b, 8.00, '{}'::jsonb, 'budget_exhausted', now())"
+                ),
+                {"o": ivan, "a": uuid.UUID(ids["A"]), "b": uuid.UUID(ids["B"])},
+            )
+        listed = (await c.get("/api/compiles")).json()["runs"]
+        assert [x["lesson_id"] for x in listed] == [ids["C"]]
 
 
 async def test_open_runs_are_bounded_newest_first(pg: Pg, tmp_path: Path) -> None:

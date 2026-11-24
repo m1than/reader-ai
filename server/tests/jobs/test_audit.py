@@ -128,12 +128,22 @@ def test_detail_is_bounded() -> None:
     assert caught.value.reason in {"detail_value", "detail_size"}
 
 
+def test_allowed_value_is_the_detail_rule() -> None:
+    audit = _audit()
+    assert audit.allowed_value("file", 200) is True
+    assert audit.allowed_value("file", None) is True
+    for value in (10**20, 1e15, float("inf"), float("nan"), "free text"):
+        assert audit.allowed_value("file", value) is False, value
+    assert audit.allowed_value("no_such_key", 1) is False
+
+
 def test_accepted_rows() -> None:
     audit = _audit()
     audit.check("course.delete", COURSE_ID, {"lessons": 3, "revisions": 4, "tutor_questions": 0,
                                              "compile_runs": 1, "spend_rows": 7, "by_material": False})
     audit.check("lesson.revert", COURSE_ID, {"from_sha256": "a" * 64, "to_sha256": "b" * 64})
     audit.check("self.session_revoke", OWNER_ID, {"sid": "0123456789abcdef", "count": 1})
+    audit.check("self.credential_add", OWNER_ID, {"pid": "0123456789abcdef"})
     audit.check("settings.set", "sharing.signup", {"old": "open", "new": "off"})
     audit.check("settings.set", "tasks.draft.budget_usd_per_lesson", {"old": None, "new": 2.5})
     audit.check("material.delete", "up-0123456789ab", {"courses": 2})
@@ -143,7 +153,7 @@ def test_accepted_rows() -> None:
 @pytest.mark.parametrize(
     "material_id",
     ["bashir", "Bashir", "bashir_4th", "Башир-2025", "a" * 64, "a" * 65, "two words", "a/b", "rtl‏mark",
-     "up-abc", "up-0123456789ab", "up-0123456789AB", ""],
+     "up-abc", "up-0123456789ab", "up-0123456789AB", "", ".", "..", "...", ".hidden"],
 )
 def test_material_id_rule_is_the_config_rule(material_id: str) -> None:
     from reader.config.checks import material_id_problem
@@ -151,7 +161,7 @@ def test_material_id_rule_is_the_config_rule(material_id: str) -> None:
     audit = _audit()
     upload = audit._UPLOAD_ID.fullmatch(material_id) is not None
     expected = upload or (material_id != "" and material_id_problem(material_id) is None)
-    accepted = {"bashir", "Bashir", "bashir_4th", "Башир-2025", "a" * 64, "up-0123456789ab"}
+    accepted = {"bashir", "Bashir", "bashir_4th", "Башир-2025", "a" * 64, "up-0123456789ab", "...", ".hidden"}
     assert expected == (material_id in accepted)
     if expected:
         audit.check("material.rename", material_id, {"version": 2})

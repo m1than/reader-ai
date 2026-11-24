@@ -5,10 +5,10 @@ Revision ID: pipeline_0005
 Revises: pipeline_0004 (same branch `pipeline`; renumbered at the merge of V/manage, whose pipeline_0004 adds
 `cancelled_at`: two revisions with one id left the branch with an undefined order).
 
-Convergent (V/manage-fix2): a database that applied the old `pipeline_0004` (the `ends` revision under that id)
-carries `ends` and no `cancelled_at`, and alembic runs only this revision on it. So every statement is idempotent:
-both columns are added if missing, and the CHECK is added under the name Postgres gave the old inline CHECK
-(`compile_runs_ends_check`) only if no constraint of that name exists on the table.
+Convergent (V/manage-fix2): a database that applied the old `pipeline_0004` (the `ends` revision under that
+id) carries `ends` and no `cancelled_at`, and alembic runs only this revision on it. So every statement is
+idempotent: both columns are added if missing, and the CHECK is added under the name Postgres gave the old
+inline CHECK (`compile_runs_ends_check`) only if no constraint of that name exists on the table.
 """
 
 from __future__ import annotations

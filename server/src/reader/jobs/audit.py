@@ -144,10 +144,18 @@ AUDIT_ACTIONS: Final[Mapping[str, Action]] = {
     "user.enable": _a("user", "uuid"),
     "self.session_revoke": _a("user", "uuid", "sid", "count"),
     "self.credential_label": _a("user", "uuid", "pid"),
+    "self.credential_add": _a("user", "uuid", "pid"),
     "self.credential_remove": _a("user", "uuid", "pid", "revoked_sessions"),
     "settings.set": _a("setting", "setting", "old", "new"),
     "settings.reset": _a("setting", "setting", "old", "file"),
 }
+
+
+def allowed_value(key: str, value: Any) -> bool:
+    """True when `value` passes the audit rule of the detail key `key` (a caller that may hold a value outside
+    the rule, such as SRV-CONFIG's reset with a file value ≥ 1e15, checks before it records)."""
+    rule = _VALUE_RULES.get(key)
+    return rule is not None and rule(value)
 
 
 def check(action: str, object_id: str, detail: Mapping[str, Any]) -> str:

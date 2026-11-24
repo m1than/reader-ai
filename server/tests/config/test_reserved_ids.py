@@ -39,7 +39,7 @@ def test_other_ids_are_accepted(tmp_path: Path, material_id: str) -> None:
     assert [m.id for m in config.materials] == [material_id]
 
 
-@pytest.mark.parametrize("material_id", ["a" * 65, "two words", "a/b", "rtl‏mark", "tab\tid"])
+@pytest.mark.parametrize("material_id", ["a" * 65, "two words", "a/b", "rtl‏mark", "tab\tid", ".", ".."])
 def test_ill_formed_ids_are_refused_by_the_loader_and_the_model(tmp_path: Path, material_id: str) -> None:
     import pydantic
 
@@ -50,14 +50,15 @@ def test_ill_formed_ids_are_refused_by_the_loader_and_the_model(tmp_path: Path, 
         load_config(path)
     got = [(p.line, p.path, p.code) for p in caught.value.problems]
     assert got == [(5, "materials.1.id", "bad_material_id")]
-    valid = load_config(write_config(tmp_path, HEAD + _material("fine"))).model_dump()
+    assert "without white space or /, and not . or .." in str(caught.value)
+    valid =load_config(write_config(tmp_path, HEAD + _material("fine"))).model_dump()
     ReaderConfig.model_validate(valid)  # the dump itself validates: the id alone makes the model refuse
     valid["materials"][0]["id"] = material_id
     with pytest.raises(pydantic.ValidationError):
         ReaderConfig.model_validate(valid)
 
 
-@pytest.mark.parametrize("material_id", ["Bashir", "bashir_4th", "Башир-2025", "b" * 64])
+@pytest.mark.parametrize("material_id", ["Bashir", "bashir_4th", "Башир-2025", "b" * 64, "...", ".hidden"])
 def test_well_formed_ids_are_accepted(tmp_path: Path, material_id: str) -> None:
     from reader.config import load_config
 

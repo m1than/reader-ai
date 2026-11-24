@@ -159,6 +159,35 @@ async def test_revoke_a_persons_sessions(pg: Pg, tmp_path: Path) -> None:
     await engine.dispose()
 
 
+async def test_a_refused_audit_row_answers_500_and_writes_nothing(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """X12: `guarded` turns SRV-EVENTS' AuditRefused (a programming error) into 500 `audit_refused` after the
+    transaction rolled back, on a people route and on a self route; only the rule's name is logged."""
+    from reader.jobs import audit
+
+    s, engine = await setup(pg, tmp_path)
+    _, session, _ = await owner(engine)
+    anna, anna_session, _ = await learner(engine)
+    await new_session(engine, anna)
+    declared = dict(audit.AUDIT_ACTIONS)
+    for action in ("user.sessions_revoke", "self.session_revoke"):
+        del declared[action]
+    monkeypatch.setattr(audit, "AUDIT_ACTIONS", declared)
+    before = await snapshot(engine)
+    caplog.set_level(logging.ERROR, logger="reader.jobs.audit")
+    async with as_user(s, engine, session) as c:
+        r = await c.post(f"/api/auth/users/{anna}/sessions/revoke", json={})
+        assert (r.status_code, r.json()) == (500, {"error": "audit_refused"})
+    async with as_user(s, engine, anna_session) as c:
+        r = await c.post("/api/auth/sessions/revoke-others", json={})
+        assert (r.status_code, r.json()) == (500, {"error": "audit_refused"})
+    assert await snapshot(engine) == before
+    assert await live_sessions(engine, anna) == 2
+    assert [rec.getMessage() for rec in caplog.records] == ["audit_refused reason=unknown_action"] * 2
+    await engine.dispose()
+
+
 # FR-AUTH-42 — remove a person's passkey ------------------------------------------------------------------
 
 

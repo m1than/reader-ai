@@ -335,7 +335,13 @@ async def test_add_passkey_requires_recent_session_and_rotates(pg: Pg, tmp_path:
         assert c.cookies.get(SESSION) != old_cookie
         assert await scalar(engine, "SELECT count(*) FROM webauthn_credentials") == 2
         assert await scalar(engine, "SELECT count(*) FROM auth_failures") == 1
-        stale = await c.get("/api/me", cookies={SESSION: old_cookie})
+        # One audit row for the added passkey (none for the failed attempt, none for the bootstrap).
+        owner_id = str(await scalar(engine, "SELECT id FROM users WHERE role = 'owner'"))
+        pid = hashlib.sha256(second.credential_id).hexdigest()[:16]
+        assert await scalar(engine, "SELECT count(*) FROM audit_log") == 1
+        row = "SELECT json_build_array(actor_id, action, object_kind, object_id, detail) FROM audit_log"
+        assert await scalar(engine, row) == [owner_id, "self.credential_add", "user", owner_id, {"pid": pid}]
+        stale =await c.get("/api/me", cookies={SESSION: old_cookie})
         assert stale.status_code == 401
         await execute(engine, "UPDATE sessions SET created_at = now() - interval '601 s'")
         late = await c.post("/api/auth/register/options", json={})

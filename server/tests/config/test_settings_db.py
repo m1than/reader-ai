@@ -305,6 +305,31 @@ async def test_numbers_at_the_overlay_bound_are_value_invalid(pg: Pg, tmp_path: 
     await w.engine.dispose()
 
 
+async def test_a_reset_over_a_huge_file_value_applies_and_records_null(pg: Pg, tmp_path: Path) -> None:
+    """The file has no overlay bound: a reset whose reader.yaml value is outside the audit rule still removes
+    the override (204) and records `file: null`, never a 500."""
+    w = await world(pg, tmp_path)
+    async with client(w, await session_for(w, "ivan")) as c:
+        for key in ("budgets.monthly_usd", "tasks.draft.budget_usd_per_lesson"):
+            r = await c.post(f"/api/settings/{key}", json={"value": 300, "version": 0})
+            assert r.status_code == 200, r.text
+        huge = (
+            CONFIG.replace("SHARING", "{}")
+            .replace("monthly_usd: 200", "monthly_usd: 100000000000000000000")
+            .replace("budget_usd_per_lesson: 2.0", "budget_usd_per_lesson: 1234567890123456.5")
+        )
+        write_config(w.path.parent, huge)
+        for key in ("budgets.monthly_usd", "tasks.draft.budget_usd_per_lesson"):
+            r = await c.request("DELETE", f"/api/settings/{key}", json={})
+            assert r.status_code == 204, (key, r.text)
+    assert await overrides(w.engine) == []
+    assert (await audit(w.engine))[-2:] == [
+        ("settings.reset", "budgets.monthly_usd", {"old": 300, "file": None}),
+        ("settings.reset", "tasks.draft.budget_usd_per_lesson", {"old": 300, "file": None}),
+    ]
+    await w.engine.dispose()
+
+
 async def test_a_stale_session_neither_sets_nor_resets(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     async with client(w, await session_for(w, "ivan")) as c:

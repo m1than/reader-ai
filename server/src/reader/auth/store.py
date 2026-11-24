@@ -50,6 +50,7 @@ from reader.auth.policy import (
     FailureReason,
     Settings,
 )
+from reader.jobs import audit
 
 Json = dict[str, Any]
 log = logging.getLogger("reader.auth")
@@ -510,12 +511,19 @@ async def _register(
     challenge: bytes,
     credential: Json,
     presented: str | None,
+    *,
+    audited: bool = False,
 ) -> str:
+    """Verify and store the credential, then start the session. `audited` (FR-AUTH-6's add, not the bootstrap)
+    writes SRV-EVENTS' `self.credential_add` row in the same transaction."""
     result = seam.verify_registration(settings.rp_id, settings.origin, challenge, credential)
     if isinstance(result, FailureReason):
         raise _Rollback(result)
     if not await _store_credential(conn, user_id, result):
         raise _Rollback(FailureReason.credential_id_taken)
+    if audited:
+        pid = hashlib.sha256(result.credential_id).hexdigest()[:16]
+        await audit.record(conn, user_id, "self.credential_add", str(user_id), {"pid": pid})
     return await _start_session(conn, user_id, presented)
 
 
@@ -539,7 +547,9 @@ async def register_verify(
             consumed = await _consume_ceremony(conn, ceremony, "register")
             if consumed is None or consumed.user_id != user.id:
                 raise _Rollback(FailureReason.ceremony_invalid)
-            return await _register(conn, settings, user.id, bytes(consumed.challenge), credential, presented)
+            return await _register(
+                conn, settings, user.id, bytes(consumed.challenge), credential, presented, audited=True
+            )
     except _Rollback as failure:
         await record_failure(engine, failure.reason)
         return failure.reason

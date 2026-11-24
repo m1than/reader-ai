@@ -222,7 +222,10 @@ async def reset_override(ctx: Ctx) -> Response:
             if not effective.overridable(file, key):
                 return error(400, "not_overridable")
             return Response(status_code=204)
-        detail = {"old": row[0], "file": effective.file_value(file, key)}
+        # The file has no overlay bound: a value outside the audit rule (≥ 2^53, a fraction ≥ 1e15) is
+        # recorded as null, so the reset still applies (FR-CONFIG-26).
+        file_value = effective.file_value(file, key)
+        detail = {"old": row[0], "file": file_value if audit.allowed_value("file", file_value) else None}
         await audit.record(conn, ctx.signed_in.id, "settings.reset", key, detail)
     return Response(status_code=204)
 

@@ -552,7 +552,7 @@ owner_notes:
 # `pipeline_0004` with only `ends`; with only `cancelled_at`), upgrades to heads and asserts both columns, the CHECK
 # and `at_heads`. K10: FR-PIPELINE-17's open runs (and SRV-LESSON's open-run checks) filter `cancelled_at IS
 # NULL` on their own, not only through `finished_at`: test_open_runs_db.py lists no lesson whose latest run is
-# cancelled, even a row with `finished_at` still null.
+# cancelled, even a row with `finished_at` still null (reformatted for ruff SIM117, no oracle change).
 # What changes in approved text: the run states add `cancelled` (terminal; not `running`, so FR-PIPELINE-11's
 # 409 `compile_running` no longer applies after it); FR-PIPELINE-17's open runs exclude it. FR-PIPELINE-14's
 # renumbering after an import calls `reorder_lessons` with SRV-PLAN FR-PLAN-21's order for a course whose
