@@ -135,7 +135,7 @@ async def test_labels_record_relabel_and_errors(pg: Pg, tmp_path: Path) -> None:
         await engine.dispose()
 
 
-async def test_summary_carries_alerts_and_stack(pg: Pg, tmp_path: Path) -> None:
+async def test_summary_carries_alerts_and_stack(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
     from sqlalchemy import text
     from sqlalchemy.exc import IntegrityError
 
@@ -151,9 +151,15 @@ async def test_summary_carries_alerts_and_stack(pg: Pg, tmp_path: Path) -> None:
                 async with conn.begin_nested():
                     await conn.execute(text("INSERT INTO obs_stack_status (member, ok, detail, checked_at) "
                                             "VALUES ('jaeger', true, 'healthy', now())"))
+        from reader.obs import phase2
+
         app = create_app(settings, engine, run_cleanup_task=False)
         async with _as(app, cookies["ivan"]) as c:
+            monkeypatch.setattr(phase2, "tracing_on", lambda: False)
+            off = (await c.get("/api/obs/summary")).json()
+            monkeypatch.setattr(phase2, "tracing_on", lambda: True)
             body = (await c.get("/api/obs/summary")).json()
+        assert not any(a["code"] == "obs_unhealthy" for a in off["alerts"])  # tracing off: nothing probes
         assert {"alerts", "stack"} <= set(body)
         assert {"code": "obs_unhealthy", "subject": "rotel"}.items() <= next(
             a for a in body["alerts"] if a["code"] == "obs_unhealthy").items()

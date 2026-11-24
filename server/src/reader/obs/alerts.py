@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any, Final
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 
 SHARE: Final = 0.8  # of a cap
 REGRESSION: Final = 0.05
@@ -25,8 +26,11 @@ def compute(
     bench: Sequence[tuple[str, str, str | None, Mapping[str, float]]],
     stack: Mapping[str, tuple[bool, datetime]],
     now: datetime,
+    tracing: bool = True,
 ) -> list[dict[str, Any]]:
-    """`bench` is oldest first; `open_runs` is (run id, spend, cap); `stack` is member → (ok, checked_at)."""
+    """`bench` is oldest first; `open_runs` is (run id, spend, cap); `stack` is member → (ok, checked_at).
+    `task_spend_today` is keyed by cap subject (see `subject`). With tracing off nothing probes the stack, so
+    its rows are stale by design and raise no `obs_unhealthy`."""
     out: list[dict[str, Any]] = []
     for task, spend in sorted(task_spend_today.items()):
         cap = task_daily_caps.get(task)
@@ -56,7 +60,7 @@ def compute(
                     "limit": round(previous - REGRESSION, 6),
                 }
             )
-    for member, (ok, checked_at) in sorted(stack.items()):
+    for member, (ok, checked_at) in sorted(stack.items() if tracing else ()):
         age = now - checked_at
         if not ok or age > STALE:
             out.append(
@@ -87,13 +91,41 @@ BENCH_SQL: Final = (
 STACK_SQL: Final = "SELECT member, ok, detail, checked_at FROM obs_stack_status ORDER BY member"
 
 
+UNDEFINED_TABLE: Final = "42P01"
+
+
 async def _rows(conn: Any, sql: str, params: Mapping[str, Any]) -> list[Any]:
-    """A missing table (a module not migrated in this deployment) reads as no rows, in a savepoint."""
+    """A missing table (a module not migrated in this deployment) reads as no rows, in a savepoint; any other
+    database error propagates (code review round 1 of phase 2: an error never reads as "no alert")."""
     try:
         async with conn.begin_nested():
             return list((await conn.execute(text(sql), params)).all())
-    except Exception:
+    except ProgrammingError as failed:
+        if _sqlstate(failed) != UNDEFINED_TABLE:
+            raise
         return []
+
+
+def _sqlstate(failed: ProgrammingError) -> str | None:
+    orig = failed.orig
+    code = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+    cause = getattr(orig, "__cause__", None)
+    return str(code or getattr(cause, "sqlstate", None) or "") or None
+
+
+def subject(task: str) -> str:
+    """The daily cap a task's spend counts against: the freshness tasks share FR-FRESH-9's one daily cap."""
+    from reader.freshness import params as freshness
+
+    return "freshness" if task in freshness.TASKS else task
+
+
+def daily_caps() -> dict[str, float]:
+    """FR-AGENT-12's per-task daily caps, by subject: the tutor's and the freshness check's."""
+    from reader.freshness import params as freshness
+    from reader.tutor import params as tutor
+
+    return {tutor.TASK: float(tutor.DAILY_CAP_USD), "freshness": float(freshness.DAILY_CAP_USD)}
 
 
 async def stack(conn: Any) -> dict[str, dict[str, Any]]:
@@ -103,15 +135,14 @@ async def stack(conn: Any) -> dict[str, dict[str, Any]]:
     }
 
 
-async def load(conn: Any, owner: Any, dead_jobs: Mapping[str, int], now: datetime) -> list[dict[str, Any]]:
-    from reader.tutor.params import DAILY_CAP_USD
-
+async def load(
+    conn: Any, owner: Any, dead_jobs: Mapping[str, int], now: datetime, *, tracing: bool = True
+) -> list[dict[str, Any]]:
     day = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    spend = {
-        str(t): float(Decimal(v or 0))
-        for t, v in await _rows(conn, SPEND_TODAY_SQL, {"o": owner, "day": day})
-    }
-    caps = {"tutor": float(DAILY_CAP_USD)}
+    spend: dict[str, float] = {}
+    for t, v in await _rows(conn, SPEND_TODAY_SQL, {"o": owner, "day": day}):
+        spend[subject(str(t))] = spend.get(subject(str(t)), 0.0) + float(Decimal(v or 0))
+    caps = daily_caps()
     runs = [
         (str(i), float(Decimal(s or 0)), float(c))
         for i, c, s in await _rows(conn, OPEN_RUNS_SQL, {"o": owner})
@@ -128,4 +159,5 @@ async def load(conn: Any, owner: Any, dead_jobs: Mapping[str, int], now: datetim
         bench=bench,
         stack=members,
         now=now,
+        tracing=tracing,
     )

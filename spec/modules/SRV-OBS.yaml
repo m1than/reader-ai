@@ -870,8 +870,9 @@ requirements:
       checks), JSON at most 256 KiB, {set: <set file text>, result: <bench result object>}. Errors (body `{"error":
       code}`): 401/403 as FR-OBS-10; 413 `too_large`; 400 `set_not_pinned` (the set's sha256 is not in VEC-OBS-5),
       400 `bench_invalid` (the result's required `kind` (search | tutor) differs from the pinned set's kind, or the
-      result fails VEC-OBS-5 `bench_results` for that kind: unknown key, pattern, enum or range, or an id not in
-      the set); 409 `already_recorded` (the same upload digest exists); 202 {upload_id}
+      result fails VEC-OBS-5 `bench_results` for that kind: unknown key, pattern, enum or range, an id not in
+      the set's registered records, an id twice, or no rows); 409 `already_recorded` (the same upload digest
+      exists); 202 {upload_id}
       otherwise. The route is used from /observability only (paired WEB-UI FR-UI-33: a file picker for the two
       files); there is no CLI command (review round 1, B10).
       The api stores the upload in Postgres table `obs_bench_results` (paired migration `obs_0002`: id uuid pk,
@@ -888,7 +889,9 @@ requirements:
           pinned records (`datasets/{id}/records`);
       (c) finds a Run tagged `reader.bench_upload` = upload id (`runs/search`): found and tagged `reader.complete`
           → ends `succeeded` without a request; otherwise creates it (tags `reader.bench` = kind, `reader.bench_upload`)
-          or reuses the incomplete one, logs params (model, chunk_chars, overlap, set_sha256, commit) and the
+          or reuses the incomplete one, logs the params that apply to the kind (search: model, chunk_chars,
+          overlap; tutor: lesson_id, date, since a tutor bench has no model or chunking; both: set_sha256, and
+          commit when the result has one; code review round 1 of phase 2) and the
           stored row's scores as metrics: search, from `per_question` over registered ids: hit@1, hit@3, hit@10,
           reciprocal rank (mean; an absent rank counts 0), and the per-question rank as a metric `rank` at step =
           the record's index; tutor, from the records file's per-question rows over registered ids (VEC-TUTOR-7's
@@ -921,8 +924,10 @@ requirements:
       neither is used (review round 1, B8; the round 6 queue was dropped).
       (a) The record: table `owner_labels` (paired migration `obs_0002`: id uuid pk, owner_id, target lesson |
           answer, target_id uuid (lesson id or question id), lesson_revision_sha256 char(64) (the lesson revision
-          the owner saw: the lesson's current revision for a lesson label, the question's `revision_sha256` for an
-          answer label), ok bool, reason text null CHECK in VEC-OBS-5 `labels.reasons`, revision int ≥ 1 (the
+          the owner saw: the lesson's current revision for a lesson label (`reader.lessons.store.current_sha256`,
+          FR-LESSON-4, not `published_sha256`; '' when the lesson has no revision yet), the question's
+          `revision_sha256` for an answer label), ok bool, reason text null CHECK in VEC-OBS-5
+          `labels.reasons`, revision int ≥ 1 (the
           label's own revision), assessment_id text null (the mirror's), created_at, updated_at; UNIQUE (owner_id,
           target, target_id, lesson_revision_sha256)). A relabel of the same lesson revision updates the row and
           increments `revision`; a label on a newer lesson revision is a new row.
@@ -936,9 +941,16 @@ requirements:
           `no_trace` path is dropped); a trace that is missing anyway (tracing turned on later, or rotated out by
           retention) is FR-OBS-14's transient-then-no-trace rule, and the record stays.
       (c) The mirror: `obs.label` first reads the row: a job whose revision is below the row's current revision
-          ends without a request (a newer relabel's job will post). It resolves the target's trace (lesson: the
-          newest compile run's revise-stage job for that lesson revision; answer: the question's `tutor.answer`
-          job; FR-OBS-5's derivation), GETs the trace and looks for an assessment whose `assessment_name` is the
+          ends without a request (a newer relabel's job will post). It resolves the target's trace, exactly one row
+          per label (code review round 1 of phase 2, B5): lesson: the compile run of the lesson (same owner) whose
+          `final_sha256` equals the row's `lesson_revision_sha256` (the lesson's current revision when labelled,
+          `reader.lessons.store.current_sha256`), the newest such run by (created_at, id); in it the `revise`
+          stage's job, or the `draft` stage's when the run has no `revise` (a first pass that converged), the
+          newest key by (created_at, job_id); a revision no compile run produced (edited by hand) has no trace, so
+          the job ends without a request (logged `obs label no_trace`); answer: the question's `tutor.answer` job
+          (newest by (created_at, job_id)); FR-OBS-5's derivation. A 404 from the GET or the POST follows FR-OBS-14's
+          rule: transient while attempts remain, on the last attempt the job ends without a request (logged), never
+          dead. It GETs the trace and looks for an assessment whose `assessment_name` is the
           label's and whose `metadata.revision` equals the job's revision: found → stores its id and ends (a retry
           or a lost response never posts twice). Otherwise it POSTs a HUMAN assessment (`owner.lesson_ok` |
           `owner.answer_ok`, source {HUMAN, owner}, value ok, metadata {lesson_id | question_id, reason, revision});
@@ -955,13 +967,17 @@ requirements:
       alert surface: the summary gains `alerts`, a list of {code, subject, value, limit} (VEC-OBS-5 `alerts`)
       computed on each request from Postgres only (the api never reads MLflow):
       - `daily_spend_high`: per task (FR-AGENT-12's caps are per task), today's (UTC) spend of that task ≥ 80 % of
-        its daily cap; subject = the task;
+        its daily cap; subject = the task (`tutor`: SRV-TUTOR's daily cap), or `freshness` for the three
+        freshness tasks summed against FR-FRESH-9's one daily cap (code review round 1 of phase 2);
       - `run_over_cap`: an open run's spend ≥ 80 % of its run cap; subject = the run id;
       - `dead_jobs`: dead jobs in the window > 0; subject = the kind;
       - `bench_regressed`: from `obs_bench_results` only, the newest upload's hit@10 (search) or grounded_share
         (tutor) is below the previous upload of the SAME (kind, set_name, model) by more than 0.05; subject =
         kind/set/model; no previous upload → no alert;
-      - `obs_unhealthy`: FR-OBS-32 (from `obs_stack_status`). The store size alert is `reader doctor`/`status`
+      - `obs_unhealthy`: FR-OBS-32 (from `obs_stack_status`), only while tracing is on: with tracing off
+        nothing probes, so the rows are stale by design and raise no alert. The rows are read in a savepoint;
+        a missing table reads as no rows, any other database error fails the request (it never reads as "no
+        alert"). The store size alert is `reader doctor`/`status`
         output, not an api alert (FR-OBS-31; review round 2, N8).
       The page shows a banner per alert (paired WEB-UI FR-UI-33). A push notification waits for SRV-NOTIFY.
   # --- MLflow operations (owner, 2026-11-24: "production-ready"; rounds 9 and 10) ---

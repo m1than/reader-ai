@@ -48,7 +48,7 @@ async def summary(ctx: Ctx) -> Response:
     if not DAYS_TEXT.fullmatch(raw) or not DAYS[0] <= int(raw) <= DAYS[1]:
         return error(400, "days")
     days = int(raw)
-    from reader.obs import alerts
+    from reader.obs import alerts, phase2
 
     now = datetime.now(UTC)
     async with ctx.engine.connect() as conn:
@@ -56,7 +56,7 @@ async def summary(ctx: Ctx) -> Response:
         dead: dict[str, int] = {}
         for group in body["failures"]["jobs"]:  # FR-OBS-25 dead_jobs: the summary's own window and scope
             dead[str(group["kind"])] = dead.get(str(group["kind"]), 0) + int(group["count"])
-        found = await alerts.load(conn, user.id, dead, now)
+        found = await alerts.load(conn, user.id, dead, now, tracing=phase2.tracing_on())
         stack = await alerts.stack(conn)
     return JSONResponse({"days": days, **body, "alerts": found, "stack": stack})
 
