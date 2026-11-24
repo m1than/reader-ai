@@ -372,12 +372,19 @@ async def test_migration_creates_and_drops_the_tables(pg: Pg, tmp_path: Path) ->
 
     w = await world(pg, tmp_path)
     assert await scalar(w.engine, TABLES) == 4
+    learner = "SELECT count(*) FROM pg_tables WHERE tablename IN ('lesson_progress', 'lesson_notes', 'lesson_bookmarks')"
+    assert await scalar(w.engine, learner) == 3
 
     def downgrade(connection: Any) -> None:
         config = alembic_config()
         config.attributes["connection"] = connection
         command.downgrade(config, "lessons@-1")
 
+    # Amendment V/manage: lessons_0002 (FR-LESSON-20) is the branch head; its downgrade drops only its own tables.
+    async with w.engine.connect() as conn:
+        await conn.run_sync(downgrade)
+        await conn.commit()
+    assert (await scalar(w.engine, learner), await scalar(w.engine, TABLES)) == (0, 4)
     async with w.engine.connect() as conn:
         await conn.run_sync(downgrade)
         await conn.commit()

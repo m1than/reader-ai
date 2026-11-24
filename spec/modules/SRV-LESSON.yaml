@@ -55,7 +55,7 @@ layer: server
 track: product
 adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
 slice: V.SRV-LESSON-min
-review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed."
+review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed. Amendment V/manage (2026-11-24): FR-LESSON-20..31 and INV-LESSON-20..23, deep-reviewer rounds 1–3 (round 3 VERDICT approve on 2a7d86f), promoted with Red; two existing tests change with it — the lesson routes' declared set gains the amendment's routes, and the migration test downgrades `lessons@-1` twice (the new head first), each oracle extended, none weakened."
 
 paths:
   - server/src/reader/lessons/**
@@ -107,16 +107,21 @@ bounds:
 # (INV-LESSON-7). Every foreign key is
 # ON DELETE RESTRICT. A trigger refuses UPDATE and DELETE on lesson_revisions and lesson_revision_stages (INV-LESSON-6).
 tables:
-  courses: { owner_id: true, columns: "id uuid pk, title text CHECK (1..200 chars), material_sha256 text null CHECK (64 lowercase hex), created_at; UNIQUE (id, owner_id); UNIQUE (owner_id, title) WHERE material_sha256 IS NULL" }
-  lessons: { owner_id: true, columns: "id uuid pk, course_id uuid, ordinal int CHECK (>= 1), title text CHECK (1..200 chars), published_sha256 text null, created_at, updated_at; UNIQUE (course_id, ordinal); UNIQUE (id, owner_id); FK (course_id, owner_id) → courses (id, owner_id); FK (id, published_sha256) → lesson_revisions (lesson_id, sha256)" }
+  courses: { owner_id: true, columns: "id uuid pk, title text CHECK (1..200 chars), material_sha256 text null CHECK (64 lowercase hex), created_at; UNIQUE (id, owner_id); UNIQUE (owner_id, title) WHERE material_sha256 IS NULL AND deleted_at IS NULL (FR-LESSON-20 adds the tombstone condition); FR-LESSON-20: description text null CHECK (≤ 2000 chars), position int null CHECK (>= 1), archived_at timestamptz null, deleted_at timestamptz null, deleted_by_material text null (the material id whose cascade deleted it, SRV-INGEST FR-INGEST-31), version int NOT NULL DEFAULT 1, order_source text NOT NULL DEFAULT 'plan' CHECK (IN ('plan', 'manual')); last_position int null (the position before the last archive or delete, for Undo); CHECK ((archived_at IS NULL AND deleted_at IS NULL) = (position IS NOT NULL)); UNIQUE INDEX (owner_id, position) WHERE position IS NOT NULL (not deferrable, so moves use reorder_lessons' two-statement method)" }
+  lessons: { owner_id: true, columns: "id uuid pk, course_id uuid, ordinal int CHECK (>= 1), title text CHECK (1..200 chars), published_sha256 text null, created_at, updated_at; UNIQUE (course_id, ordinal); UNIQUE (id, owner_id); FK (course_id, owner_id) → courses (id, owner_id); FK (id, published_sha256) → lesson_revisions (lesson_id, sha256); FR-LESSON-20: skipped_at timestamptz null, deleted_at timestamptz null, version int NOT NULL DEFAULT 1" }
   lesson_revisions: { owner_id: true, columns: "seq bigint GENERATED ALWAYS AS IDENTITY UNIQUE, lesson_id uuid, sha256 text CHECK (64 lowercase hex), byte_size int, cell_count int, created_at; PRIMARY KEY (lesson_id, sha256); FK (lesson_id, owner_id) → lessons (id, owner_id)" }
   lesson_revision_stages: { owner_id: true, columns: "id bigint GENERATED ALWAYS AS IDENTITY pk, lesson_id uuid, sha256 text, stage text, provenance jsonb, created_at; FK (lesson_id, sha256) → lesson_revisions (lesson_id, sha256); FK (lesson_id, owner_id) → lessons (id, owner_id)" }
+  lesson_progress: { owner_id: true, columns: "user_id uuid → users, lesson_id uuid, done_at timestamptz; PRIMARY KEY (user_id, lesson_id); FK (lesson_id, owner_id) → lessons (id, owner_id)" }
+  lesson_notes: { owner_id: true, columns: "id uuid pk, user_id uuid → users, lesson_id uuid, cell_id text null, body text CHECK (1..10000 chars), created_at, updated_at; FK (lesson_id, owner_id) → lessons (id, owner_id); at most 500 per (user_id, lesson_id)" }
+  lesson_bookmarks: { owner_id: true, columns: "user_id uuid → users, lesson_id uuid, cell_id text, created_at; PRIMARY KEY (user_id, lesson_id, cell_id); FK (lesson_id, owner_id) → lessons (id, owner_id); at most 200 per (user_id, lesson_id)" }
 
 # Fixed error codes. The write path (FR-LESSON-4) raises `LessonWriteError(code)`; routes answer JSON `{"error": code}`.
 write_errors: [not_utf8, not_nbformat, duplicate_cell_id, missing_reader_metadata, cell_schema, cell_type_mismatch,
   too_large, too_many_cells, notes_cell_removed, bad_provenance, not_owner, unknown_lesson, lesson_started,
   lessons_mismatch]
-route_errors: [not_found, unknown_revision, blob_unavailable]
+route_errors: [not_found, unknown_revision, blob_unavailable, stale, title_invalid, title_taken, description_invalid,
+  confirm_mismatch, order_mismatch, compile_running, revision_current, note_invalid, cell_unknown, limit,
+  material_deleted]
 
 requirements:
   - id: FR-LESSON-1
@@ -271,6 +276,160 @@ requirements:
       must be exactly the course's lessons, to 1..n in list order, in two statements: first every ordinal +
       (current max + n), then the final values, because `UNIQUE (course_id, ordinal)` is not deferrable and `ordinal
       ≥ 1`; a list that is not the course's lessons raises `LessonWriteError("lessons_mismatch")`. [db]
+  # Amendment (2026-11-24, V/manage, WEB-MANAGE): FR-LESSON-20..31 and INV-LESSON-20..23; see the note at the end.
+  - id: FR-LESSON-20
+    text: >-
+      **Migration and new courses.** One migration on the `lessons` branch adds the FR-LESSON-20 columns and the
+      three learner tables of `tables`. Existing
+      courses get `position` = their rank by `created_at` descending per owner (1 = newest, the list's order today),
+      `version` 1; existing lessons `version` 1. A course created later (SRV-PIPELINE's course import, SRV-PLAN's
+      confirm) goes first: `store.create_course` (store.py) shifts every positioned course of the owner by one, then
+      inserts the new course at position 1, in reorder_lessons' two statements. `store.place_at(conn, owner_id,
+      course_id, p)` does the same for an existing course at position p (clamped to 1..n+1); `place_first` is
+      `place_at(…, 1)`. **Position lock:** every write of `courses.position` — create, place_at, the order route,
+      and the archive and delete that null a position — first takes one owner-level advisory lock
+      `pg_advisory_xact_lock(<namespace "RCPO">, hashtext(owner_id))`, after any course and lesson locks the same
+      request takes (INV-LESSON-23's order, extended), so two position writes of one owner never interleave. Every
+      new foreign key is ON DELETE RESTRICT, not deferrable (FR-LESSON-15's catalog check covers them). `user_id`
+      is the reader; `owner_id` is the course owner (INV-LESSON-7); they are equal until SRV-SHARE. [db] the
+      migration's order for three courses; a new course goes first; the CHECK refuses a positioned archived
+      course; a create and an order route of one owner run together 50 times and always leave positions 1..n.
+  - id: FR-LESSON-21
+    text: >-
+      **Courses list.** `GET /api/courses?state=active|archived|deleted` (session; default `active`) lists the
+      caller's own courses in that state by `position`, then `created_at`: `{courses: [{course_id, title,
+      description, position, state, archived_at, deleted_at, version, lesson_count, material_id | null, plan:
+      {total_weeks, minutes_per_day, start_date, finish_by} | null}]}` (`plan` from SRV-PLAN's study_plans;
+      `material_id` from SRV-INGEST by `material_sha256`). Active courses come by `position`; archived and deleted
+      ones (no position) by `archived_at` or `deleted_at`, newest first. A non-owner of every course gets an empty
+      list (the list is scoped, never 403). `GET /api/courses/{id}/lessons?state=deleted` (owner of a course that
+      is not deleted, else 404) lists that course's deleted lessons `{lessons: [{lesson_id, title, ordinal,
+      deleted_at}]}`, newest deletion first, for WEB-MANAGE's "Recently deleted". [db] each state, ordering,
+      another owner's courses absent; the deleted-lessons list.
+  - id: FR-LESSON-22
+    text: >-
+      **Edit a course.** `POST /api/courses/{id}` with `{version, title?, description?}` (at least one field) →
+      200 the course row as in FR-LESSON-21 with `version + 1`. Order of checks: a deleted course → 404; field
+      validation — `title` trimmed and NFC-normalised, 1..200 characters, no Cc characters (else 400
+      `title_invalid`), `description` trimmed, ≤ 2000 characters, `""` clears it (else 400 `description_invalid`);
+      then the **no-op check**: when every given field equals the stored value, 200 with the current row and
+      version, nothing written, whatever `version` says (INV-LESSON-21); then `version` not equal to the stored one
+      → 409 `{"error": "stale", "course": <current>}`; then, for a course without material, a title that another
+      course of the owner that is not deleted holds → 409 `title_taken`. Renaming a planned course does not change
+      its plan id (SRV-PLAN keys plans by `plan_course_id`, not by title). Revisions written before a rename keep
+      the old course name wherever they quote it (citations and the notebook's metadata are immutable revisions;
+      stated, not changed). [db] each field, each refusal, the no-op with a stale version.
+  - id: FR-LESSON-23
+    text: >-
+      **Order courses.** `POST /api/courses/order` with `{course_ids: [...]}` — exactly the caller's active courses
+      (archived and deleted ones have no position), else 409 `order_mismatch` with the current list — sets
+      `position` 1..n in list order in one transaction, in two statements (the partial unique index is not
+      deferrable). The exact-set check is this route's concurrency guard: it carries no `version`, and of two
+      concurrent orders of the same set the later one wins (stated; the order is one owner's own arrangement).
+      Repeating the current order is a no-op. [db] order, mismatch, no-op.
+  - id: FR-LESSON-24
+    text: >-
+      **Archive.** `POST /api/courses/{id}/archive` with `{}` takes the header's locks, refuses with 409
+      `compile_running` while any of its lessons has an open run, then sets `archived_at`, copies `position` into
+      `last_position` and clears `position`; `/unarchive` with `{at?: "previous" | "first"}` (default `"first"`)
+      on a deleted course answers 404 `not_found` (restore it first; nothing written); otherwise it clears
+      `archived_at` and places it with `place_at` at `last_position`
+      for `"previous"` (WEB-MANAGE's Undo toast sends it, so Undo puts the course back where it was) or at 1 for
+      `"first"`. Repeating either returns 200 with the same body (idempotent). An archived course's lessons still
+      open by link (FR-LESSON-8/-9) and its tutor works; SRV-PIPELINE refuses to compile them (FR-PIPELINE-22). [db]
+      archive with an open run refused; archive → unarchive `"first"` returns the course to position 1; archive →
+      unarchive `"previous"` returns it to its old position with the others shifted.
+  - id: FR-LESSON-25
+    text: >-
+      **Delete and restore a course.** `GET /api/courses/{id}/impact` → `{lessons, revisions, tutor_questions,
+      compile_runs, spend_rows, open_runs}` (counts over the course; `spend_rows` counts SRV-AGENT rows whose
+      `lesson_id` is one of its lessons; read-only). `DELETE /api/courses/{id}` with `{confirm}`: `confirm` is
+      compared after trimming and NFC-normalising both sides with the first 40 characters of the stored title, or
+      the whole title when it is shorter (else 400 `confirm_mismatch`; WEB-MANAGE asks for exactly that text);
+      under the header's locks, a course with an open run → 409 `compile_running` (cancel it first,
+      FR-PIPELINE-20); otherwise `deleted_at` = now, `last_position` = `position` (when it had one) and `position` =
+      null in one transaction, and the response is the impact body plus `deleted_at`. A second DELETE of a deleted
+      course returns 200 with the same body. `POST /api/courses/{id}/restore` with `{at?: "previous" | "first"}`
+      (default `"first"`) clears `deleted_at` and `deleted_by_material`; then, **only when `archived_at IS NULL`**,
+      it places the course with `place_at` (`last_position` for `"previous"`, the Undo toast's choice; 1 for
+      `"first"`); otherwise the course returns to the archived list with no position, so the CHECK of
+      `tables.courses` holds (a course has a position exactly when it is neither archived nor deleted).
+      SRV-INGEST FR-INGEST-31's cascade restore applies the same rule with `"first"`. 409 `material_deleted` while
+      its material is deleted (restore the material, which restores this
+      course too if its cascade deleted it, SRV-INGEST FR-INGEST-31); 409 `title_taken` when a course without
+      material that is not deleted took the title meanwhile; repeating it is a no-op. Nothing else is deleted or
+      updated: lessons, revisions, stage records, compile runs, tutor questions, notes and spend rows stay
+      (INV-LESSON-22). [db] the counts; delete → every read of its lessons is 404 → restore → readable again; the
+      rows of every table unchanged across delete and restore; restore refused while the material is deleted; a
+      41-character title confirmed by its first 40; an NFD-typed Cyrillic title matches; archive → delete →
+      restore returns the course archived with a null position (no CHECK violation), then unarchive places it;
+      delete → restore `"previous"` returns it to its old position.
+  - id: FR-LESSON-26
+    text: >-
+      **Rename a lesson.** `POST /api/lessons/{id}` with `{version, title}` (owner of the course): FR-LESSON-22's
+      title, no-op and `stale` rules, in that order; under the lesson's run lock, 409 `compile_running` while the
+      lesson has an open run (the running steps read the title). 200 the lesson row of FR-LESSON-7. A re-plan keeps
+      the title (FR-PIPELINE-14's `ensure_lesson` never rewrites titles). **Cost:** the title is part of the
+      notebook the draft step builds (`metadata.reader`, FR-PIPELINE-3) and so of every step's input hash; the next
+      compile after a rename reuses no step and costs about a full compile (SRV-PLAN FR-PLAN-13's estimate). This is
+      stated, not changed: removing the title from the hash would need an SRV-PIPELINE change to FR-PIPELINE-3, and
+      WEB-MANAGE warns in the rename field instead. The current revision keeps the old title in its metadata until
+      that compile. [db] rename with an open run refused; the next compile's first step is not reused.
+  - id: FR-LESSON-27
+    text: >-
+      **Order lessons.** `POST /api/courses/{id}/lessons/order` with `{lesson_ids}` — exactly the course's lessons
+      that are not deleted, else 409 `order_mismatch` — calls `reorder_lessons` (FR-LESSON-15) with the deleted
+      lessons appended after them in their current order, and sets `courses.order_source = 'manual'` (a no-op order
+      leaves it as it is). A later re-plan keeps this order and places new lessons by SRV-PLAN FR-PLAN-21's rule
+      (WEB-MANAGE owner decision D5: a re-plan changes weeks and dates only). Like FR-LESSON-23 it carries no
+      `version`: the exact-set check guards it, and the later of two concurrent orders wins. It runs under the
+      plan-course lock, so it cannot interleave with a re-plan's renumbering. [db]
+  - id: FR-LESSON-28
+    text: >-
+      **Skip and delete a lesson.** Under the header's locks: `POST /api/lessons/{id}/skip` and `/unskip` set or
+      clear `skipped_at` (skip → 409 `compile_running` while the lesson has an open run); `DELETE
+      /api/lessons/{id}` with `{}` sets `deleted_at` (409 `compile_running` likewise); `POST
+      /api/lessons/{id}/restore` clears it (404 while its course is deleted). All four are idempotent. A deleted
+      lesson is `not_found` on every read but keeps its ordinal, so ordinals have gaps; clients number the visible
+      lessons 1..n on display and never show the stored ordinal (WEB-MANAGE). A re-plan that still contains it keeps
+      it deleted, and one that drops it and finds it unstarted removes it through FR-LESSON-15 (SRV-PLAN
+      FR-PLAN-21). [db] each route twice; skip and delete refused with an open run.
+  - id: FR-LESSON-29
+    text: >-
+      **Done.** `POST /api/lessons/{id}/progress` with `{done: true | false}` for the caller (any reader who can open
+      the lesson): `true` upserts `lesson_progress` with `done_at` = now (an existing row keeps its first
+      `done_at`), `false` deletes the row. 200 `{done, done_at | null}`; idempotent. Input to WEB-SESSION later. [db]
+  - id: FR-LESSON-30
+    text: >-
+      **Revert.** `POST /api/lessons/{id}/revert` with `{sha256}` (owner of the course): the sha256 must be one of
+      the lesson's revisions (else 404 `unknown_revision`) and not the current one (else 200 `{applied: false}`);
+      the stored blob is passed to `write_revision` with stage `revert` and provenance `{input_sha256: <the
+      current sha256>}`, so the revision becomes current by FR-LESSON-4's rule (a new stage record, no UPDATE).
+      FR-LESSON-4's checks apply, so a revert that would drop a notes cell id of the current revision fails with
+      400 `notes_cell_removed` (INV-LESSON-3). Under the header's locks, 409 `compile_running` while the lesson has
+      an open run. 200 `{applied: true, latest_sha256}`. **Status after a revert:** a run's G2 report and state
+      belong to that run's `final_sha256` (SRV-PIPELINE); after a revert the current revision may be one that no
+      run reported on, so clients show a run's status only while `latest_sha256` equals that run's
+      `final_sha256`, and otherwise "Reverted to an earlier revision" (WEB-MANAGE). **Recompile after a revert:**
+      a new run starts from the current (reverted) revision; steps whose input hash equals an earlier step's are
+      reused (FR-PIPELINE-5), so recompiling a revision that an earlier run started from replays that run's cached
+      chain at no model cost until an input differs. Both stated, not changed. [db] revert to the first revision
+      and back; the stage records appended; the refusal; a late step of a cancelled run after a revert writes no
+      revision (SRV-PIPELINE FR-PIPELINE-20).
+  - id: FR-LESSON-31
+    text: >-
+      **Notes and bookmarks** (any reader who can open the lesson; rows are the caller's own). `GET
+      /api/lessons/{id}/notes` → the caller's notes, newest first; `POST` with `{body, cell_id?}` → 201 the note (a
+      501st note on the lesson → 409 `limit`); `POST /api/lessons/{id}/notes/{note_id}` with `{body}`; `DELETE`
+      deletes the row (hard: a note is the reader's private text and nothing else refers to it, so keeping a
+      tombstone would only keep text the reader asked to remove; WEB-MANAGE's Undo posts the same body again as a
+      new note). `body` is 1..10,000 characters after trimming (else 400 `note_invalid`); `cell_id`, when given,
+      must be a cell of the current revision (else 400 `cell_unknown`). `POST` and `DELETE
+      /api/lessons/{id}/bookmarks/{cell_id}` add or remove a bookmark (idempotent; adding validates `cell_id`
+      against the current revision, else 400 `cell_unknown`; a 201st bookmark on the lesson → 409 `limit`); `GET
+      /api/bookmarks` lists the caller's bookmarks across lessons that are not deleted, a bookmark whose cell left
+      the current revision marked `stale: true`. Another user's note id → 404. [db] each route, both caps, an
+      unknown cell.
 
 invariants:
   - id: INV-LESSON-1
@@ -303,6 +462,43 @@ invariants:
     text: >-
       `owner_id` of lessons, revisions and stage records always equals the owning course's `owner_id` (composite
       foreign keys; a test inserts a mismatching row and expects the database to refuse it).
+  - id: INV-LESSON-20
+    text: >-
+      **Access.** Every route of this amendment is `auth: session` and runs FR-AUTH-12's Origin and content-type
+      checks before its handler. An id of a course or lesson that the caller does not own (or cannot open, for
+      FR-LESSON-29/-31) answers 404 `not_found`, exactly as a missing id, with no row written; no route here answers
+      403, so a learner cannot learn that an object exists. [db] for every route: a learner and a second owner get
+      404 with zero rows changed in every table; a foreign Origin gets 403 `origin` with zero rows changed.
+  - id: INV-LESSON-21
+    text: >-
+      **Idempotency.** Every mutation is idempotent by state: the same request repeated returns the same status
+      and body and writes no further row (no second audit row, SRV-EVENTS FR-EVENTS-30), except note creation
+      (each POST is a new note). The edit routes that carry `version` (course edit, lesson rename; SRV-INGEST's
+      material rename) check for a no-op first and the version second, so a repeated edit is 200 even after its
+      own version bump, and a different concurrent edit is 409 `stale`. The order routes carry no version and are
+      guarded by their exact-set check (FR-LESSON-23/-27). [db] each route twice; two concurrent different edits
+      with the same version: one 200, one 409; the same edit twice with the same version: 200 and 200.
+  - id: INV-LESSON-22
+    text: >-
+      **Tombstones only.** No route of this amendment issues UPDATE or DELETE on lesson_revisions,
+      lesson_revision_stages or agent_spend, or removes a blob; a deleted course or lesson (or a lesson of a
+      deleted course) is `not_found` on FR-LESSON-7/-8/-9, SRV-TUTOR's routes and SRV-PIPELINE's routes until
+      restored, through the reads named in the amendment note. [db] the triggers stay installed; table row counts
+      before and after a delete–restore cycle.
+  - id: INV-LESSON-23
+    text: >-
+      **Lock order.** Every route here that refuses on an open run takes `lock_course` (when the course has a plan),
+      then the affected lessons' run locks in ascending lesson id order, then reads run state and tombstones; and
+      `create_run` reads the tombstones and archive state after the same two locks. So no compile run starts on a
+      deleted, skipped or archived lesson, and no lesson is deleted, skipped, archived or reverted under an open
+      run. Multi-object writes (a course delete or archive over its lessons, SRV-INGEST FR-INGEST-31's cascade over
+      several courses) take all their course locks in ascending `plan_course_id` order, then all lesson locks in
+      ascending lesson id order, then the owner's position lock "RCPO", before any check. [db] the race: a delete and
+      a compile of one lesson started together, 50 times; every outcome is either (compile 202, delete 409
+      `compile_running`) or (delete 200, compile 404), never both applied; a material cascade over two courses and a
+      compile of a lesson in the second course started together, 50 times: either the cascade is refused with 409
+      `compile_running` and nothing is deleted, or the compile gets 404, with no deadlock (each request finishes
+      within 10 s); a cascade and a course order route of the same owner together, 50 times: positions stay 1..n.
 
 nfr: []
 
@@ -345,11 +541,10 @@ owner_notes:
   - "cell.schema.json lives under spec/fixtures/SRV-LESSON/ (ADR-0004 named spec/fixtures/lesson/); ADR-0004 is proposed and its path was a placeholder ('to be drafted with SRV-LESSON')."
   - "A lab's `verified.input_sha256` is the sha256 of that cell's source, a narrowing of ADR-0009's 'input hash'; SRV-PIPELINE decides the final binding."
 
-# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE; status: draft). Deep-review round 1 (840af4b):
-# changes; revision 1 below. Held under `proposed_manage` (trace-check reads only `requirements`, `invariants` and
-# `vectors`; this spec stays approved) until a deep-reviewer round approves it; then the items move into `tables`,
-# `requirements` and `invariants` with their Red tests. Ids FR-LESSON-20..31 and INV-LESSON-20..23 (16..19 left free
-# for parallel branches).
+# ---- Amendment (2026-11-24, V/manage, WEB-MANAGE): FR-LESSON-20..31 and INV-LESSON-20..23 (16..19 left free for
+# parallel branches), promoted with their Red tests after deep-review rounds 1–3 (round 1 on 840af4b: changes; round 3
+# on 2a7d86f: VERDICT approve). The column and table text moved into `tables`; two references to the former
+# `proposed_manage.tables` key now name `tables` (wording only). The notes below are the amendment's rationale.
 #
 # Why soft delete: a hard delete of a course or a started lesson is impossible by design — lesson_revisions and
 # lesson_revision_stages refuse DELETE (INV-LESSON-6), compile runs and tutor questions refer to lessons with RESTRICT,
@@ -392,200 +587,3 @@ owner_notes:
 #   - Paired, other tracks: SRV-OBS FR-OBS-17 (V/obs-analytics) labels the cost row of a deleted lesson "(deleted
 #     lesson)" with its id and still counts it (spend stays); SRV-FRESH (V/freshness) skips deleted lessons and
 #     courses in its scans and hides their reports; SRV-SEARCH FR-SEARCH-20 (deleted materials).
-proposed_manage:
-  tables:
-    courses_add: "description text null CHECK (≤ 2000 chars), position int null CHECK (>= 1), archived_at timestamptz null, deleted_at timestamptz null, deleted_by_material text null (the material id whose cascade deleted it, SRV-INGEST FR-INGEST-31), version int NOT NULL DEFAULT 1, order_source text NOT NULL DEFAULT 'plan' CHECK (IN ('plan', 'manual')); last_position int null (the position before the last archive or delete, for Undo); CHECK ((archived_at IS NULL AND deleted_at IS NULL) = (position IS NOT NULL)); UNIQUE INDEX (owner_id, position) WHERE position IS NOT NULL (not deferrable, so moves use reorder_lessons' two-statement method); the partial unique title index adds AND deleted_at IS NULL"
-    lessons_add: "skipped_at timestamptz null, deleted_at timestamptz null, version int NOT NULL DEFAULT 1"
-    lesson_progress: "{ owner_id: true } user_id uuid → users, lesson_id uuid, done_at timestamptz; PRIMARY KEY (user_id, lesson_id); FK (lesson_id, owner_id) → lessons (id, owner_id)"
-    lesson_notes: "{ owner_id: true } id uuid pk, user_id uuid → users, lesson_id uuid, cell_id text null, body text CHECK (1..10000 chars), created_at, updated_at; FK (lesson_id, owner_id) → lessons (id, owner_id); at most 500 per (user_id, lesson_id)"
-    lesson_bookmarks: "{ owner_id: true } user_id uuid → users, lesson_id uuid, cell_id text, created_at; PRIMARY KEY (user_id, lesson_id, cell_id); FK (lesson_id, owner_id) → lessons (id, owner_id); at most 200 per (user_id, lesson_id)"
-  requirements:
-    - id: FR-LESSON-20
-      text: >-
-        **Migration and new courses.** One migration on the `lessons` branch adds `proposed_manage.tables`. Existing
-        courses get `position` = their rank by `created_at` descending per owner (1 = newest, the list's order today),
-        `version` 1; existing lessons `version` 1. A course created later (SRV-PIPELINE's course import, SRV-PLAN's
-        confirm) goes first: `store.create_course` (store.py) shifts every positioned course of the owner by one, then
-        inserts the new course at position 1, in reorder_lessons' two statements. `store.place_at(conn, owner_id,
-        course_id, p)` does the same for an existing course at position p (clamped to 1..n+1); `place_first` is
-        `place_at(…, 1)`. **Position lock:** every write of `courses.position` — create, place_at, the order route,
-        and the archive and delete that null a position — first takes one owner-level advisory lock
-        `pg_advisory_xact_lock(<namespace "RCPO">, hashtext(owner_id))`, after any course and lesson locks the same
-        request takes (INV-LESSON-23's order, extended), so two position writes of one owner never interleave. Every
-        new foreign key is ON DELETE RESTRICT, not deferrable (FR-LESSON-15's catalog check covers them). `user_id`
-        is the reader; `owner_id` is the course owner (INV-LESSON-7); they are equal until SRV-SHARE. [db] the
-        migration's order for three courses; a new course goes first; the CHECK refuses a positioned archived
-        course; a create and an order route of one owner run together 50 times and always leave positions 1..n.
-    - id: FR-LESSON-21
-      text: >-
-        **Courses list.** `GET /api/courses?state=active|archived|deleted` (session; default `active`) lists the
-        caller's own courses in that state by `position`, then `created_at`: `{courses: [{course_id, title,
-        description, position, state, archived_at, deleted_at, version, lesson_count, material_id | null, plan:
-        {total_weeks, minutes_per_day, start_date, finish_by} | null}]}` (`plan` from SRV-PLAN's study_plans;
-        `material_id` from SRV-INGEST by `material_sha256`). Active courses come by `position`; archived and deleted
-        ones (no position) by `archived_at` or `deleted_at`, newest first. A non-owner of every course gets an empty
-        list (the list is scoped, never 403). `GET /api/courses/{id}/lessons?state=deleted` (owner of a course that
-        is not deleted, else 404) lists that course's deleted lessons `{lessons: [{lesson_id, title, ordinal,
-        deleted_at}]}`, newest deletion first, for WEB-MANAGE's "Recently deleted". [db] each state, ordering,
-        another owner's courses absent; the deleted-lessons list.
-    - id: FR-LESSON-22
-      text: >-
-        **Edit a course.** `POST /api/courses/{id}` with `{version, title?, description?}` (at least one field) →
-        200 the course row as in FR-LESSON-21 with `version + 1`. Order of checks: a deleted course → 404; field
-        validation — `title` trimmed and NFC-normalised, 1..200 characters, no Cc characters (else 400
-        `title_invalid`), `description` trimmed, ≤ 2000 characters, `""` clears it (else 400 `description_invalid`);
-        then the **no-op check**: when every given field equals the stored value, 200 with the current row and
-        version, nothing written, whatever `version` says (INV-LESSON-21); then `version` not equal to the stored one
-        → 409 `{"error": "stale", "course": <current>}`; then, for a course without material, a title that another
-        course of the owner that is not deleted holds → 409 `title_taken`. Renaming a planned course does not change
-        its plan id (SRV-PLAN keys plans by `plan_course_id`, not by title). Revisions written before a rename keep
-        the old course name wherever they quote it (citations and the notebook's metadata are immutable revisions;
-        stated, not changed). [db] each field, each refusal, the no-op with a stale version.
-    - id: FR-LESSON-23
-      text: >-
-        **Order courses.** `POST /api/courses/order` with `{course_ids: [...]}` — exactly the caller's active courses
-        (archived and deleted ones have no position), else 409 `order_mismatch` with the current list — sets
-        `position` 1..n in list order in one transaction, in two statements (the partial unique index is not
-        deferrable). The exact-set check is this route's concurrency guard: it carries no `version`, and of two
-        concurrent orders of the same set the later one wins (stated; the order is one owner's own arrangement).
-        Repeating the current order is a no-op. [db] order, mismatch, no-op.
-    - id: FR-LESSON-24
-      text: >-
-        **Archive.** `POST /api/courses/{id}/archive` with `{}` takes the header's locks, refuses with 409
-        `compile_running` while any of its lessons has an open run, then sets `archived_at`, copies `position` into
-        `last_position` and clears `position`; `/unarchive` with `{at?: "previous" | "first"}` (default `"first"`)
-        on a deleted course answers 404 `not_found` (restore it first; nothing written); otherwise it clears
-        `archived_at` and places it with `place_at` at `last_position`
-        for `"previous"` (WEB-MANAGE's Undo toast sends it, so Undo puts the course back where it was) or at 1 for
-        `"first"`. Repeating either returns 200 with the same body (idempotent). An archived course's lessons still
-        open by link (FR-LESSON-8/-9) and its tutor works; SRV-PIPELINE refuses to compile them (FR-PIPELINE-22). [db]
-        archive with an open run refused; archive → unarchive `"first"` returns the course to position 1; archive →
-        unarchive `"previous"` returns it to its old position with the others shifted.
-    - id: FR-LESSON-25
-      text: >-
-        **Delete and restore a course.** `GET /api/courses/{id}/impact` → `{lessons, revisions, tutor_questions,
-        compile_runs, spend_rows, open_runs}` (counts over the course; `spend_rows` counts SRV-AGENT rows whose
-        `lesson_id` is one of its lessons; read-only). `DELETE /api/courses/{id}` with `{confirm}`: `confirm` is
-        compared after trimming and NFC-normalising both sides with the first 40 characters of the stored title, or
-        the whole title when it is shorter (else 400 `confirm_mismatch`; WEB-MANAGE asks for exactly that text);
-        under the header's locks, a course with an open run → 409 `compile_running` (cancel it first,
-        FR-PIPELINE-20); otherwise `deleted_at` = now, `last_position` = `position` (when it had one) and `position` =
-        null in one transaction, and the response is the impact body plus `deleted_at`. A second DELETE of a deleted
-        course returns 200 with the same body. `POST /api/courses/{id}/restore` with `{at?: "previous" | "first"}`
-        (default `"first"`) clears `deleted_at` and `deleted_by_material`; then, **only when `archived_at IS NULL`**,
-        it places the course with `place_at` (`last_position` for `"previous"`, the Undo toast's choice; 1 for
-        `"first"`); otherwise the course returns to the archived list with no position, so the CHECK of
-        `proposed_manage.tables` holds (a course has a position exactly when it is neither archived nor deleted).
-        SRV-INGEST FR-INGEST-31's cascade restore applies the same rule with `"first"`. 409 `material_deleted` while its material is deleted (restore the material, which restores this
-        course too if its cascade deleted it, SRV-INGEST FR-INGEST-31); 409 `title_taken` when a course without
-        material that is not deleted took the title meanwhile; repeating it is a no-op. Nothing else is deleted or
-        updated: lessons, revisions, stage records, compile runs, tutor questions, notes and spend rows stay
-        (INV-LESSON-22). [db] the counts; delete → every read of its lessons is 404 → restore → readable again; the
-        rows of every table unchanged across delete and restore; restore refused while the material is deleted; a
-        41-character title confirmed by its first 40; an NFD-typed Cyrillic title matches; archive → delete →
-        restore returns the course archived with a null position (no CHECK violation), then unarchive places it;
-        delete → restore `"previous"` returns it to its old position.
-    - id: FR-LESSON-26
-      text: >-
-        **Rename a lesson.** `POST /api/lessons/{id}` with `{version, title}` (owner of the course): FR-LESSON-22's
-        title, no-op and `stale` rules, in that order; under the lesson's run lock, 409 `compile_running` while the
-        lesson has an open run (the running steps read the title). 200 the lesson row of FR-LESSON-7. A re-plan keeps
-        the title (FR-PIPELINE-14's `ensure_lesson` never rewrites titles). **Cost:** the title is part of the
-        notebook the draft step builds (`metadata.reader`, FR-PIPELINE-3) and so of every step's input hash; the next
-        compile after a rename reuses no step and costs about a full compile (SRV-PLAN FR-PLAN-13's estimate). This is
-        stated, not changed: removing the title from the hash would need an SRV-PIPELINE change to FR-PIPELINE-3, and
-        WEB-MANAGE warns in the rename field instead. The current revision keeps the old title in its metadata until
-        that compile. [db] rename with an open run refused; the next compile's first step is not reused.
-    - id: FR-LESSON-27
-      text: >-
-        **Order lessons.** `POST /api/courses/{id}/lessons/order` with `{lesson_ids}` — exactly the course's lessons
-        that are not deleted, else 409 `order_mismatch` — calls `reorder_lessons` (FR-LESSON-15) with the deleted
-        lessons appended after them in their current order, and sets `courses.order_source = 'manual'` (a no-op order
-        leaves it as it is). A later re-plan keeps this order and places new lessons by SRV-PLAN FR-PLAN-21's rule
-        (WEB-MANAGE owner decision D5: a re-plan changes weeks and dates only). Like FR-LESSON-23 it carries no
-        `version`: the exact-set check guards it, and the later of two concurrent orders wins. It runs under the
-        plan-course lock, so it cannot interleave with a re-plan's renumbering. [db]
-    - id: FR-LESSON-28
-      text: >-
-        **Skip and delete a lesson.** Under the header's locks: `POST /api/lessons/{id}/skip` and `/unskip` set or
-        clear `skipped_at` (skip → 409 `compile_running` while the lesson has an open run); `DELETE
-        /api/lessons/{id}` with `{}` sets `deleted_at` (409 `compile_running` likewise); `POST
-        /api/lessons/{id}/restore` clears it (404 while its course is deleted). All four are idempotent. A deleted
-        lesson is `not_found` on every read but keeps its ordinal, so ordinals have gaps; clients number the visible
-        lessons 1..n on display and never show the stored ordinal (WEB-MANAGE). A re-plan that still contains it keeps
-        it deleted, and one that drops it and finds it unstarted removes it through FR-LESSON-15 (SRV-PLAN
-        FR-PLAN-21). [db] each route twice; skip and delete refused with an open run.
-    - id: FR-LESSON-29
-      text: >-
-        **Done.** `POST /api/lessons/{id}/progress` with `{done: true | false}` for the caller (any reader who can open
-        the lesson): `true` upserts `lesson_progress` with `done_at` = now (an existing row keeps its first
-        `done_at`), `false` deletes the row. 200 `{done, done_at | null}`; idempotent. Input to WEB-SESSION later. [db]
-    - id: FR-LESSON-30
-      text: >-
-        **Revert.** `POST /api/lessons/{id}/revert` with `{sha256}` (owner of the course): the sha256 must be one of
-        the lesson's revisions (else 404 `unknown_revision`) and not the current one (else 200 `{applied: false}`);
-        the stored blob is passed to `write_revision` with stage `revert` and provenance `{input_sha256: <the
-        current sha256>}`, so the revision becomes current by FR-LESSON-4's rule (a new stage record, no UPDATE).
-        FR-LESSON-4's checks apply, so a revert that would drop a notes cell id of the current revision fails with
-        400 `notes_cell_removed` (INV-LESSON-3). Under the header's locks, 409 `compile_running` while the lesson has
-        an open run. 200 `{applied: true, latest_sha256}`. **Status after a revert:** a run's G2 report and state
-        belong to that run's `final_sha256` (SRV-PIPELINE); after a revert the current revision may be one that no
-        run reported on, so clients show a run's status only while `latest_sha256` equals that run's
-        `final_sha256`, and otherwise "Reverted to an earlier revision" (WEB-MANAGE). **Recompile after a revert:**
-        a new run starts from the current (reverted) revision; steps whose input hash equals an earlier step's are
-        reused (FR-PIPELINE-5), so recompiling a revision that an earlier run started from replays that run's cached
-        chain at no model cost until an input differs. Both stated, not changed. [db] revert to the first revision
-        and back; the stage records appended; the refusal; a late step of a cancelled run after a revert writes no
-        revision (SRV-PIPELINE FR-PIPELINE-20).
-    - id: FR-LESSON-31
-      text: >-
-        **Notes and bookmarks** (any reader who can open the lesson; rows are the caller's own). `GET
-        /api/lessons/{id}/notes` → the caller's notes, newest first; `POST` with `{body, cell_id?}` → 201 the note (a
-        501st note on the lesson → 409 `limit`); `POST /api/lessons/{id}/notes/{note_id}` with `{body}`; `DELETE`
-        deletes the row (hard: a note is the reader's private text and nothing else refers to it, so keeping a
-        tombstone would only keep text the reader asked to remove; WEB-MANAGE's Undo posts the same body again as a
-        new note). `body` is 1..10,000 characters after trimming (else 400 `note_invalid`); `cell_id`, when given,
-        must be a cell of the current revision (else 400 `cell_unknown`). `POST` and `DELETE
-        /api/lessons/{id}/bookmarks/{cell_id}` add or remove a bookmark (idempotent; adding validates `cell_id`
-        against the current revision, else 400 `cell_unknown`; a 201st bookmark on the lesson → 409 `limit`); `GET
-        /api/bookmarks` lists the caller's bookmarks across lessons that are not deleted, a bookmark whose cell left
-        the current revision marked `stale: true`. Another user's note id → 404. [db] each route, both caps, an
-        unknown cell.
-  invariants:
-    - id: INV-LESSON-20
-      text: >-
-        **Access.** Every route of this amendment is `auth: session` and runs FR-AUTH-12's Origin and content-type
-        checks before its handler. An id of a course or lesson that the caller does not own (or cannot open, for
-        FR-LESSON-29/-31) answers 404 `not_found`, exactly as a missing id, with no row written; no route here answers
-        403, so a learner cannot learn that an object exists. [db] for every route: a learner and a second owner get
-        404 with zero rows changed in every table; a foreign Origin gets 403 `origin` with zero rows changed.
-    - id: INV-LESSON-21
-      text: >-
-        **Idempotency.** Every mutation is idempotent by state: the same request repeated returns the same status
-        and body and writes no further row (no second audit row, SRV-EVENTS FR-EVENTS-30), except note creation
-        (each POST is a new note). The edit routes that carry `version` (course edit, lesson rename; SRV-INGEST's
-        material rename) check for a no-op first and the version second, so a repeated edit is 200 even after its
-        own version bump, and a different concurrent edit is 409 `stale`. The order routes carry no version and are
-        guarded by their exact-set check (FR-LESSON-23/-27). [db] each route twice; two concurrent different edits
-        with the same version: one 200, one 409; the same edit twice with the same version: 200 and 200.
-    - id: INV-LESSON-22
-      text: >-
-        **Tombstones only.** No route of this amendment issues UPDATE or DELETE on lesson_revisions,
-        lesson_revision_stages or agent_spend, or removes a blob; a deleted course or lesson (or a lesson of a
-        deleted course) is `not_found` on FR-LESSON-7/-8/-9, SRV-TUTOR's routes and SRV-PIPELINE's routes until
-        restored, through the reads named in the header. [db] the triggers stay installed; table row counts before
-        and after a delete–restore cycle.
-    - id: INV-LESSON-23
-      text: >-
-        **Lock order.** Every route here that refuses on an open run takes `lock_course` (when the course has a plan),
-        then the affected lessons' run locks in ascending lesson id order, then reads run state and tombstones; and
-        `create_run` reads the tombstones and archive state after the same two locks. So no compile run starts on a
-        deleted, skipped or archived lesson, and no lesson is deleted, skipped, archived or reverted under an open
-        run. Multi-object writes (a course delete or archive over its lessons, SRV-INGEST FR-INGEST-31's cascade over
-        several courses) take all their course locks in ascending `plan_course_id` order, then all lesson locks in
-        ascending lesson id order, then the owner's position lock "RCPO", before any check. [db] the race: a delete and
-        a compile of one lesson started together, 50 times; every outcome is either (compile 202, delete 409
-        `compile_running`) or (delete 200, compile 404), never both applied; a material cascade over two courses and a
-        compile of a lesson in the second course started together, 50 times: either the cascade is refused with 409
-        `compile_running` and nothing is deleted, or the compile gets 404, with no deadlock (each request finishes
-        within 10 s); a cascade and a course order route of the same owner together, 50 times: positions stay 1..n.

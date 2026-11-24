@@ -18,6 +18,7 @@ import httpx
 import pytest
 
 from .conftest import F01, Pg, client, course_and_lesson, need, spec_data, world, write
+from .manage_support import MANAGE_ROUTES
 
 pytestmark = pytest.mark.anyio
 F01_SHA = hashlib.sha256(F01).hexdigest()
@@ -64,7 +65,7 @@ def test_routes_are_declared_as_data() -> None:
         ("GET", "/api/lessons", "session"),
         ("GET", "/api/lessons/{lesson_id}", "session"),
         ("GET", "/api/lessons/{lesson_id}/revisions/{sha256}", "session"),
-    }
+    } | {(method, path, "session") for method, path in MANAGE_ROUTES}  # amendment V/manage (FR-LESSON-20..31)
 
 
 async def test_list_shows_only_own_lessons_in_order(pg: Pg, tmp_path: Path) -> None:

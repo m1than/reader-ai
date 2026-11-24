@@ -304,6 +304,44 @@ requirements:
       `course_plans` cannot name another owner's lesson, its foreign key is (lesson_id, owner_id)) change nothing
       for the owner, and `lesson_chars` with the second owner's id is None; 404 for a non-UUID id, an
       unknown id and a lesson whose `course_plans` row is gone; 403 for a learner; no row written.
+  # Amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-3): FR-PLAN-20..21; see the note after `review`.
+  - id: FR-PLAN-20
+    text: >-
+      **Re-plan from a course.** `GET /api/plans?course_id=<uuid>` (owner; same body as the `material_id` form)
+      finds the study plan by `course_id`; 404 for a course without a study plan or another owner's course; 403
+      `owner_only` for a non-owner as FR-PLAN-9. The client sends FR-PLAN-9's preview and confirm with the returned
+      `inputs.material_id`; a target date `d` is sent as `total_weeks = ceil((d − start_date + 1) / 7)`, clamped to
+      1..104 (the client shows the resulting finish date from the preview, never its own). Preview and confirm
+      answer 404 for a deleted material (SRV-INGEST FR-INGEST-31) and 409 `course_archived` for an archived course.
+      **A plan whose course is deleted.** `GET /api/plans` (both forms), `POST /api/plans/preview` and `POST
+      /api/plans/confirm` (the Plan page's "Create the course" for a material whose study plan's course is
+      deleted) answer 409 `{"error": "course_deleted", "course_id": <id>}` and write nothing, so WEB-PLAN offers
+      "Restore the course" (SRV-LESSON FR-LESSON-25) instead of creating a second course for the same plan id;
+      SRV-PIPELINE FR-PIPELINE-22 does the same for the manifest import. [db] the lookup, each refusal, confirm
+      onto a deleted course writes no row; [unit] the client's week conversion for a date in the first week, on a
+      week boundary and past 104 weeks.
+  - id: FR-PLAN-21
+    text: >-
+      **Re-plan and tombstones.** In FR-PIPELINE-14's import, a soft-deleted lesson (SRV-LESSON FR-LESSON-28) is
+      treated like any lesson of the plan: if it is started it is fixed and stays deleted; if it is unstarted and
+      the new plan drops or moves it, it is removed by `delete_unstarted_lesson` (its tombstone goes with it);
+      if the new plan keeps it unchanged it stays deleted. A skipped lesson keeps `skipped_at`.
+      **Manual order is kept** (owner, 2026-11-24, WEB-MANAGE D5: a re-plan changes weeks and dates only). A course
+      whose lessons were reordered by SRV-LESSON FR-LESSON-27 has `courses.order_source = 'manual'` (new column,
+      `'plan'` by default; FR-LESSON-27 sets it, nothing resets it). For such a course FR-PIPELINE-14's final
+      `reorder_lessons` call gets this order instead of plan order: the kept lessons (same lesson id before and
+      after) in their current relative order; each new lesson placed directly after its nearest **visible**
+      predecessor in the new plan's order — the closest earlier lesson in that order that is kept or new and not
+      deleted — or first when there is none; deleted lessons keep their slots after the visible ones (FR-LESSON-27's
+      rule); removed lessons gone. Titles are never rewritten (already so). For `'plan'` courses nothing changes.
+      A per-lesson calendar does not exist yet; how a future schedule (WEB-SESSION, stage 6) maps days to a manual
+      order is deferred to that spec. "Reset to plan order" (setting `order_source` back to `'plan'` and
+      renumbering) is a later item, not in this amendment. Paired SRV-PIPELINE change: FR-PIPELINE-14's
+      renumbering sentence names this rule. [db] a manual course re-planned with 0, 1 and 3 new lessons, one in
+      front; a removed lesson between two kept ones; a new lesson whose plan predecessor is deleted lands after the
+      nearest visible one; a `'plan'` course unchanged; [unit] the placement function as a pure function of
+      (current order, new plan order, kept set, deleted set), with a fast-check property that kept lessons keep
+      their relative order and every new lesson follows its nearest visible plan predecessor.
 
 invariants:
   - id: INV-PLAN-1
@@ -394,48 +432,9 @@ owner_notes:
   - "4. A re-plan keeps your deadline: the start date of your first plan stays, started lessons stay as they are, and the rest of the source is spread over the days left until the deadline. Past the deadline the page suggests more weeks; changing the weeks moves the deadline from the original start. A lesson you start ahead of its calendar day takes no day, so compiling ahead leaves more days for the rest. This rule was decided by the coordinator for you (owner decision 4); you can overrule it, for example to restart the deadline from the re-plan day."
   - "5. Confirm with 'compile lesson 1' spends credit (about the first lesson's estimate) under your existing compile cap and monthly budget; the checkbox shows the amount."
 
-review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent. Green (2026-11-23): one Red oracle was a hand error and is corrected — the hash test's pages (1000, 2000, 3000) pack into [1-2], [3] (t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end, is dropped), not [1], [2], [3]; no requirement changed. Code review of e244aa4 (changes): VEC-PLAN-1 adds the ceil-vs-floor and `days`-reason cases; [db] tests pin that confirm and the manifest route wait for the course lock, owner-only on confirm and GET with nothing written, and the store's owner filters; INV-PLAN-5(c) names `lesson_unknown` and marks the race test's second half sequential; the live check restores an existing owner plan; the confirm UI fix is WEB-PLAN's. Code review round 2 on a8a0408: VERDICT approve, every mutant killed. Before the merge: the live check previews the owner's stored inputs first and skips its mutating steps when that plan does not fit today, so the restore cannot fail halfway (fake-tested). Amendment 2026-11-23 (V/compile-ui): FR-PLAN-13, a read-only per-lesson estimate route for WEB-UI FR-UI-15's Compile confirm, reusing FR-PLAN-8's functions. Round 1 (cc817d0, changes): a pure `lesson_estimate(chars)` with band-edge and cap vectors, `lesson_chars` with owner filters pinned by a second owner's rows; the [db] test pins only the wiring. Round 2 on 08534df: VERDICT approve (deep-reviewer, run by the coordinator). Approved by agent. Code review (2026-11-24, on cb81aff): VERDICT approve; the owner-filter test now inserts the second owner's material first."
+review: "deep-reviewer (Fable), 2026-11-23. Round 1 on 62a86b2: changes — B11 confirm idempotency (fixed out of the hash, first-lesson compile target only while the course has no run, lost-response retry), B12 one course lock across fixed/hash/import shared with create_run, B13 uncompilable lessons (source size cap with header bound, no_text, zero-character pages merged), B14 exact packing with a testable bound; non-blocking applied. Round 2 on 7b074ca's parent: B11/B12 closed (no deadlock); changes — cut rule left 0-character lessons in 8,385 of 20k simulations (step 2 drops tail cuts; count bounds replace the equality), re-plan keeps the deadline (owner decision 4, decided by the coordinator), cost extrapolation flag; non-blocking applied. Round 3 on 7b074ca: changes — lessons_max dropped (a 104-week re-plan raised it), today clamped to the stored start; non-blocking applied (replay before the today check, null mean lesson, wording, owner note). Round 4 on d9f655a: VERDICT approve. Red pins that FR-PLAN-10's pre-image uses the clamped today (preview and confirm agree). Approved by agent. Green (2026-11-23): one Red oracle was a hand error and is corrected — the hash test's pages (1000, 2000, 3000) pack into [1-2], [3] (t1 = 2000 is reached on page 2; t2 = 4000 on page 3, the interval's end, is dropped), not [1], [2], [3]; no requirement changed. Code review of e244aa4 (changes): VEC-PLAN-1 adds the ceil-vs-floor and `days`-reason cases; [db] tests pin that confirm and the manifest route wait for the course lock, owner-only on confirm and GET with nothing written, and the store's owner filters; INV-PLAN-5(c) names `lesson_unknown` and marks the race test's second half sequential; the live check restores an existing owner plan; the confirm UI fix is WEB-PLAN's. Code review round 2 on a8a0408: VERDICT approve, every mutant killed. Before the merge: the live check previews the owner's stored inputs first and skips its mutating steps when that plan does not fit today, so the restore cannot fail halfway (fake-tested). Amendment 2026-11-23 (V/compile-ui): FR-PLAN-13, a read-only per-lesson estimate route for WEB-UI FR-UI-15's Compile confirm, reusing FR-PLAN-8's functions. Round 1 (cc817d0, changes): a pure `lesson_estimate(chars)` with band-edge and cap vectors, `lesson_chars` with owner filters pinned by a second owner's rows; the [db] test pins only the wiring. Round 2 on 08534df: VERDICT approve (deep-reviewer, run by the coordinator). Approved by agent. Code review (2026-11-24, on cb81aff): VERDICT approve; the owner-filter test now inserts the second owner's material first. Amendment V/manage (2026-11-24): FR-PLAN-20..21, deep-reviewer rounds 1–3 (round 3 VERDICT approve on 2a7d86f), promoted with Red; the week conversion is the pure `planner.weeks_until` and the manual-order placement the pure `reader.plan.order.placement`, each with unit tests."
 
-# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-3; status: draft; round 1 changes applied). Held under
-# `proposed_manage` until a deep-reviewer round approves it; ids FR-PLAN-20..21 (14..19 left free). No new
-# planning rule: "Change dates and pace" from a course is FR-PLAN-9's preview and confirm with that course's
-# material. Owner decision 4 (the deadline keeps the first start date) still holds.
-proposed_manage:
-  requirements:
-    - id: FR-PLAN-20
-      text: >-
-        **Re-plan from a course.** `GET /api/plans?course_id=<uuid>` (owner; same body as the `material_id` form)
-        finds the study plan by `course_id`; 404 for a course without a study plan or another owner's course; 403
-        `owner_only` for a non-owner as FR-PLAN-9. The client sends FR-PLAN-9's preview and confirm with the returned
-        `inputs.material_id`; a target date `d` is sent as `total_weeks = ceil((d − start_date + 1) / 7)`, clamped to
-        1..104 (the client shows the resulting finish date from the preview, never its own). Preview and confirm
-        answer 404 for a deleted material (SRV-INGEST FR-INGEST-31) and 409 `course_archived` for an archived course.
-        **A plan whose course is deleted.** `GET /api/plans` (both forms), `POST /api/plans/preview` and `POST
-        /api/plans/confirm` (the Plan page's "Create the course" for a material whose study plan's course is
-        deleted) answer 409 `{"error": "course_deleted", "course_id": <id>}` and write nothing, so WEB-PLAN offers
-        "Restore the course" (SRV-LESSON FR-LESSON-25) instead of creating a second course for the same plan id;
-        SRV-PIPELINE FR-PIPELINE-22 does the same for the manifest import. [db] the lookup, each refusal, confirm
-        onto a deleted course writes no row; [unit] the client's week conversion for a date in the first week, on a
-        week boundary and past 104 weeks.
-    - id: FR-PLAN-21
-      text: >-
-        **Re-plan and tombstones.** In FR-PIPELINE-14's import, a soft-deleted lesson (SRV-LESSON FR-LESSON-28) is
-        treated like any lesson of the plan: if it is started it is fixed and stays deleted; if it is unstarted and
-        the new plan drops or moves it, it is removed by `delete_unstarted_lesson` (its tombstone goes with it);
-        if the new plan keeps it unchanged it stays deleted. A skipped lesson keeps `skipped_at`.
-        **Manual order is kept** (owner, 2026-11-24, WEB-MANAGE D5: a re-plan changes weeks and dates only). A course
-        whose lessons were reordered by SRV-LESSON FR-LESSON-27 has `courses.order_source = 'manual'` (new column,
-        `'plan'` by default; FR-LESSON-27 sets it, nothing resets it). For such a course FR-PIPELINE-14's final
-        `reorder_lessons` call gets this order instead of plan order: the kept lessons (same lesson id before and
-        after) in their current relative order; each new lesson placed directly after its nearest **visible**
-        predecessor in the new plan's order — the closest earlier lesson in that order that is kept or new and not
-        deleted — or first when there is none; deleted lessons keep their slots after the visible ones (FR-LESSON-27's
-        rule); removed lessons gone. Titles are never rewritten (already so). For `'plan'` courses nothing changes.
-        A per-lesson calendar does not exist yet; how a future schedule (WEB-SESSION, stage 6) maps days to a manual
-        order is deferred to that spec. "Reset to plan order" (setting `order_source` back to `'plan'` and
-        renumbering) is a later item, not in this amendment. Paired SRV-PIPELINE change: FR-PIPELINE-14's
-        renumbering sentence names this rule. [db] a manual course re-planned with 0, 1 and 3 new lessons, one in
-        front; a removed lesson between two kept ones; a new lesson whose plan predecessor is deleted lands after the
-        nearest visible one; a `'plan'` course unchanged; [unit] the placement function as a pure function of
-        (current order, new plan order, kept set, deleted set), with a fast-check property that kept lessons keep
-        their relative order and every new lesson follows its nearest visible plan predecessor.
+# ---- Amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-3): FR-PLAN-20..21 (14..19 left free), promoted with their
+# Red tests after deep-review rounds 1–3 (round 3 on 2a7d86f: VERDICT approve). No new planning rule: "Change dates
+# and pace" from a course is FR-PLAN-9's preview and confirm with that course's material. Owner decision 4 (the
+# deadline keeps the first start date) still holds.
