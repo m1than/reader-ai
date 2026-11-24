@@ -30,6 +30,7 @@ from reader.agent.pricing import resolve_model
 from reader.agent.provider import Provider, StageCall
 from reader.config import ReaderConfig, load_config
 from reader.jobs.model import JobContext, JobKind, idempotency_key
+from reader.lessons.access import can_open
 from reader.tutor import params, store
 from reader.tutor.answer import Span, build_prompt, check, floor_usd, parse, system_prompt
 from reader.tutor.errors import TRANSIENT, TutorError, TutorTransient, outcome
@@ -194,7 +195,9 @@ async def answer_question(deps: Deps, args: AnswerArgs, conn: AsyncConnection, c
     if q is None or q.state != "queued":
         log.info("tutor_skip question=%s state=%s", args.question_id, q.state if q else None)
         return
-    if q.age_s > params.QUESTION_TTL_S:  # FR-TUTOR-4: before any reservation
+    # FR-TUTOR-4: before any reservation. FR-TUTOR-21: a lesson deleted meanwhile (SRV-LESSON's `can_open`
+    # hides tombstones) ends the question `expired` without a model call.
+    if q.age_s > params.QUESTION_TTL_S or not await can_open(conn, q.owner_id, str(q.lesson_id)):
         written = await store.finish(conn, q.id, "expired", error_code="expired")
         log.info("tutor_answer question=%s state=expired written=%s", q.id, written)
         return

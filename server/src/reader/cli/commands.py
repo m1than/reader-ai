@@ -35,7 +35,15 @@ from reader.cli.stack import (
     make_plan,
 )
 from reader.cli.watcher import encode_bundle, lock_holder, stop_watcher
-from reader.config import ConfigError, ReaderConfig, Secret, SecretRef, SecretResolutionError, load_config
+from reader.config import (
+    ConfigError,
+    ReaderConfig,
+    Secret,
+    SecretRef,
+    SecretResolutionError,
+    effective,
+    load_config,
+)
 
 READY_TIMEOUT: Final = 10  # s for the watcher's readiness byte (FR-CLI-8): two local daemon calls
 AGENT_PROXY_IMAGE: Final = "reader-agent-proxy:local"
@@ -296,6 +304,7 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     problem = None if data_dir else ("config_missing" if not config_path.is_file() else "config_invalid")
     ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "unknown"
     converting = ingest_watch.converter(data_dir) if data_dir else "unknown"
+    overrides = _status_overrides(ctx, project, config_path)
     if as_json:
         body: dict[str, Any] = {
             "project": project,
@@ -303,6 +312,7 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
             "ingest_watcher": ingest,
             "converter": converting,
             "services": rows,
+            "overrides": overrides,
         }
         if problem:
             body["ingest_config"] = {"problem": problem, "path": str(config_path)}
@@ -321,7 +331,47 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
             )
         for row in rows:
             print(f"  {row['name']}: {row['state']} {row['health'] or ''}".rstrip(), file=ctx.out)
+        for line in overrides:
+            print(f"  {line}", file=ctx.out)
     return code
+
+
+# Settings overrides (SRV-CONFIG FR-CONFIG-26, paired) ---------------------------------------------------
+
+OVERRIDES_SQL: Final = "SELECT key, value FROM settings_overrides ORDER BY key"
+OVERRIDES_TIMEOUT: Final = 30  # s, one local psql query
+OVERRIDES_UNAVAILABLE: Final = "overrides: unavailable"
+
+
+def override_lines(ctx: Ctx, project: str, config: ReaderConfig) -> list[str]:
+    """One read of the overlay through the postgres container (no database driver here), evaluated
+    against the loaded reader.yaml with SRV-CONFIG's own rules; a failed read is one `unavailable` line,
+    never an error."""
+    result = docker(
+        ctx, "docker", "compose", "-p", project, "exec", "-T", "postgres",
+        "psql", "-U", "postgres", "-d", "postgres", "-At", "-c", OVERRIDES_SQL,
+        timeout=OVERRIDES_TIMEOUT,
+    )
+    if result is None or result.code != 0:
+        return [OVERRIDES_UNAVAILABLE]
+    stored: dict[str, Any] = {}
+    for line in result.out.decode("utf-8", "replace").splitlines():
+        key, sep, raw = line.partition("|")
+        if not line.strip():
+            continue
+        try:
+            stored[key] = json.loads(raw) if sep else None
+        except ValueError:
+            return [OVERRIDES_UNAVAILABLE]
+    return effective.status_lines(effective.file_settings(config), stored)
+
+
+def _status_overrides(ctx: Ctx, project: str, config_path: Path) -> list[str]:
+    try:
+        config = load_config(config_path)
+    except ConfigError, OSError:
+        return []  # without the reader.yaml of `reader up` the overrides cannot be evaluated
+    return override_lines(ctx, project, config)
 
 
 # The DB password (FR-CLI-14) ------------------------------------------------------------------------------
@@ -460,6 +510,8 @@ def cmd_up(ctx: Ctx, config_path: Path) -> int:
     ingest_watch.ensure(ctx, config_path, config)  # FR-CLI-23; a failed spawn is reported, never fatal
     offer_trust(ctx, model.name)
     print(f"reader is up ({model.name}); the watcher keeps delivering secrets", file=ctx.out)
+    for line in override_lines(ctx, model.name, config):  # SRV-CONFIG FR-CONFIG-26 (paired)
+        print(f"  {line}", file=ctx.out)
     if "observability" in project.profiles:  # FR-CLI-22
         print(f"traces: {TRACES_URL}", file=ctx.out)
     return 0

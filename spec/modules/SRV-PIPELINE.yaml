@@ -76,6 +76,9 @@
 #   - OPS-DEPLOY: `deploy/reader.example.yaml` task budgets sized for two worst-case calls per run (draft 4.00,
 #     fact_check 2.00, review 4.00).
 #   - OPS-CLI: profiles `agents` and `kernels` (progress tasks V.OPS-CLI-agents, V.OPS-CLI-kernels).
+# Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): `create_run` snapshots
+# `compile_runs.task_budgets` from `reader.config.effective` (reader.yaml plus the owner's overrides at run creation;
+# a running run keeps its snapshot); `runs.task_budgets(conn, rt)` is async; no oracle changed.
 
 id: SRV-PIPELINE
 title: Compile pipeline — stages as data, one revise loop, budgeted agent stages, findings as open cells, lab verification, G2 report (slice)

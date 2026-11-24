@@ -8,10 +8,11 @@ from functools import cache
 from importlib.resources import files
 from typing import Any, Final
 
+from sqlalchemy.exc import SQLAlchemyError
 from starlette.responses import JSONResponse, Response
 
 from reader.api.http import Ctx, Handler, Route, error, set_cookie
-from reader.auth import signup, store
+from reader.auth import manage, signup, store
 from reader.auth.policy import (
     CEREMONY_COOKIE,
     CHALLENGE_TTL_S,
@@ -20,6 +21,7 @@ from reader.auth.policy import (
     FailureReason,
     SignupMode,
 )
+from reader.config import effective
 
 log = logging.getLogger("reader.auth")
 _STATIC = files("reader.auth") / "static"
@@ -47,11 +49,17 @@ def _limited(handler: Handler, scope: store.Scope = "auth") -> Handler:
     return wrapped
 
 
+async def signup_mode(ctx: Ctx) -> SignupMode:
+    """FR-AUTH-23 per request (paired SRV-CONFIG FR-CONFIG-26): the startup value narrowed by an override."""
+    async with ctx.engine.connect() as conn:
+        return await effective.signup_mode(conn, ctx.settings.signup)
+
+
 def _signup_open(handler: Handler) -> Handler:
     """FR-AUTH-23: while sign-up is off, 404 before the body is read, a row is written or a limit applies."""
 
     async def wrapped(ctx: Ctx) -> Response:
-        if ctx.settings.signup != "open":
+        if await signup_mode(ctx) != "open":
             return error(404, "not_found")
         return await handler(ctx)
 
@@ -188,6 +196,14 @@ def _owner_only(handler: Handler) -> Handler:
     return wrapped
 
 
+def _owner(handler: Handler) -> Handler:
+    return manage.guarded(handler, owner=True)
+
+
+def _own(handler: Handler) -> Handler:
+    return manage.guarded(handler)
+
+
 async def signups_list(ctx: Ctx) -> Response:
     return JSONResponse(await signup.listing(ctx.engine))
 
@@ -235,7 +251,12 @@ def _static(name: str, media_type: str) -> Handler:
 
 async def signin_html(ctx: Ctx) -> Response:
     try:
-        content = signin_page(ctx.settings.signup)
+        mode = await signup_mode(ctx)
+    except SQLAlchemyError, OSError:  # the page still serves; without the override it shows no sign-up link
+        log.warning("signup_mode_unavailable %s", ctx.request.url.path)
+        mode = "off"
+    try:
+        content = signin_page(mode)
     except OSError:
         log.warning("static_unavailable %s", ctx.request.url.path)
         return error(503, "unavailable")
@@ -263,4 +284,22 @@ ROUTES: tuple[Route, ...] = (
     Route("POST", "/api/auth/signups/{user_id}/approve", "recent_session", _owner_only(_action("approve"))),
     Route("POST", "/api/auth/signups/{user_id}/reject", "recent_session", _owner_only(_action("reject"))),
     Route("POST", "/api/auth/signups/{user_id}/disable", "recent_session", _owner_only(_action("disable"))),
+    # FR-AUTH-40..43, FR-AUTH-48 (manage amendment): the owner's people routes.
+    Route("GET", "/api/auth/users", "session", _owner(manage.people)),
+    Route(
+        "POST", "/api/auth/users/{user_id}/sessions/revoke", "recent_session", _owner(manage.revoke_person)
+    ),
+    Route(
+        "DELETE", "/api/auth/users/{user_id}/credentials/{pid}", "recent_session",
+        _owner(manage.remove_persons_passkey),
+    ),
+    Route("DELETE", "/api/auth/users/{user_id}", "recent_session", _owner(manage.delete_person)),
+    Route("POST", "/api/auth/signups/{user_id}/enable", "recent_session", _owner(manage.enable)),
+    # FR-AUTH-44..46: every user's own sessions and passkeys.
+    Route("GET", "/api/auth/sessions", "session", _own(manage.own_sessions)),
+    Route("DELETE", "/api/auth/sessions/{sid}", "session", _own(manage.revoke_own_session)),
+    Route("POST", "/api/auth/sessions/revoke-others", "session", _own(manage.revoke_other_sessions)),
+    Route("GET", "/api/auth/credentials", "session", _own(manage.own_passkeys)),
+    Route("POST", "/api/auth/credentials/{pid}", "session", _own(manage.label_passkey)),
+    Route("DELETE", "/api/auth/credentials/{pid}", "recent_session", _own(manage.remove_own_passkey)),
 )

@@ -39,6 +39,7 @@ from reader.agent.pricing import (
     resolve_model,
 )
 from reader.config import ReaderConfig
+from reader.config.effective import effective_settings
 from reader.obs.agent import AgentSpan, agent_call
 from reader.obs.cli_env import cli_env_additions
 
@@ -294,14 +295,15 @@ class AgentProvider:
         self.home_root = home_root
         self.proxy_url = proxy_url
 
-    def _caps(self, call: StageCall) -> Caps:
-        task = self.config.tasks.get(call.task)
-        budgets = self.config.budgets
+    async def _caps(self, call: StageCall) -> Caps:
+        # SRV-CONFIG FR-CONFIG-26 (paired): the budgets as reader.yaml plus the owner's overrides, per call.
+        async with self.engine.connect() as conn:
+            settings = await effective_settings(conn, self.config)
         return Caps(
             run_cap_usd=call.run_cap_usd,
-            task_budget_usd=task.budget_usd_per_lesson if task else None,
-            monthly_usd=budgets.monthly_usd if budgets else None,
-            warn_at=budgets.warn_at if budgets else None,
+            task_budget_usd=settings.task_budgets.get(call.task),
+            monthly_usd=settings.monthly_usd,
+            warn_at=settings.warn_at,
             daily_task_usd=call.daily_budget_usd,
         )
 
@@ -335,7 +337,7 @@ class AgentProvider:
             ) + fees
             reserve = max(call.floor_usd, estimate)
         scope = Scope(call.owner_id, call.run_id, call.lesson_id, call.stage, call.task, call.attempt)
-        reservation = await ledger.reserve(self.engine, scope, model, reserve, self._caps(call))
+        reservation = await ledger.reserve(self.engine, scope, model, reserve, await self._caps(call))
         started = time.monotonic()
         home: Path | None = None
         run_token: str | None = None

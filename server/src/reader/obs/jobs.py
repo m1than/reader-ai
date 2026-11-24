@@ -97,7 +97,7 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
     from reader.jobs import running
     from reader.obs import setup as obs_setup
 
-    settings = obs_setup.current_settings()
+    settings = await obs_setup.effective_settings(conn)  # the retention override per run (FR-CONFIG-26)
     now = datetime.now(UTC)
     async with httpx.AsyncClient(trust_env=False) as client:
         await retain(

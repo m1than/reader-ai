@@ -237,9 +237,16 @@
       return;
     }
     show("done");
-    // FR-AUTH-31: the sign-in page compares its raw query with one allow-listed value and navigates to the constant,
-    // never to the input; the other pages never read the query.
-    const target = kind === "signin" && location.search === "?next=/signups" ? "/signups" : "/";
+    // FR-AUTH-31, FR-AUTH-47: the sign-in page compares its raw query with each allow-listed value and navigates to
+    // that value's constant, never to the input; the other pages never read the query.
+    const target =
+      kind !== "signin"
+        ? "/"
+        : location.search === "?next=/signups"
+          ? "/signups"
+          : location.search === "?next=/settings"
+            ? "/settings"
+            : "/";
     location.assign(target);
   };
 
