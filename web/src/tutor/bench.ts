@@ -121,3 +121,73 @@ export const summary = (records: BenchRecord[], setIds: string[]) => {
     },
   };
 };
+
+// SRV-TUTOR FR-TUTOR-15 (paired SRV-OBS FR-OBS-23): the files the bench writes. The records file is the MLflow
+// upload, VEC-OBS-5 `bench_results.tutor` exactly: a header above the per-question records (ids, states, flags,
+// timings, costs only); the summary is a report, VEC-TUTOR-8 `tutor_summary` exactly. Neither holds prose.
+export const BENCH_SET = 'tutor-bench-v2';
+export interface BenchHeader {
+  date: string; // YYYY-MM-DD (UTC)
+  branch: string;
+  commit: string; // a bare git sha, 7..40 hex
+  lesson_id: string;
+}
+const HEADER_RULES: ReadonlyArray<[keyof BenchHeader, RegExp]> = [
+  ['date', /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/],
+  ['branch', /^[A-Za-z0-9._/-]{1,100}$/],
+  ['commit', /^[0-9a-f]{7,40}$/],
+  ['lesson_id', /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/],
+];
+const RECORD_KEYS: ReadonlyArray<keyof BenchRecord> = [
+  'id', 'chapter', 'question_id', 'state', 'wall_s', 'usd', 'output_tokens', 'thinking_tokens', 'grounded',
+  'insufficient', 'blocks', 'blocks_with_verified_quote', 'gold_in_top8', 'gold_cited',
+];
+
+const checkedHeader = (h: BenchHeader) => {
+  for (const [key, rule] of HEADER_RULES) {
+    if (!rule.test(h[key])) throw new BenchError(`bench header ${key} does not match ${rule.source}`);
+  }
+  return { kind: 'tutor' as const, date: h.date, branch: h.branch, commit: h.commit, lesson_id: h.lesson_id, set: BENCH_SET };
+};
+
+/** The records file: the header and each record with exactly BenchRecord's keys. */
+export const recordsFile = (header: BenchHeader, records: BenchRecord[]) => ({
+  ...checkedHeader(header),
+  records: records.map((r) => Object.fromEntries(RECORD_KEYS.map((k) => [k, r[k]]))),
+});
+
+/** The summary report of the merged records (VEC-TUTOR-8): numbers, states and ids only. */
+export const summaryFile = (header: BenchHeader, records: BenchRecord[], setIds: string[], runs = 1) => {
+  const s = summary(records, setIds);
+  const states: Record<string, number> = {};
+  for (const r of records) if (r.state !== null) states[r.state] = (states[r.state] ?? 0) + 1;
+  const walls = records.map((r) => r.wall_s).sort((a, b) => a - b);
+  const p50 = walls.length ? walls[Math.ceil(0.5 * walls.length) - 1]! : 0;
+  const thinking = records.map((r) => r.thinking_tokens ?? 0).filter((t) => t > 0);
+  return {
+    ...checkedHeader(header),
+    runs,
+    n: s.n,
+    states,
+    failed: records
+      .filter((r) => r.state === 'failed')
+      .map((r) => ({ id: r.id, chapter: r.chapter, wall_s: r.wall_s, usd: r.usd, output_tokens: r.output_tokens, error_code: null })),
+    grounded_share: s.grounded_share ?? 0,
+    insufficient_share: s.insufficient_share ?? 0,
+    verified_block_share: s.verified_block_share ?? 0,
+    gold_cited_share: s.gold_cited_share ?? 0,
+    grounded_given_gold_in_top8: s.grounded_given_gold_in_top8,
+    per_chapter: Object.fromEntries(Object.entries(s.per_chapter).map(([c, v]) => [c, [v.n, v.grounded]])),
+    latency_s: { p50, p95: s.p95_s ?? 0, max: walls.length ? walls[walls.length - 1]! : 0 },
+    mean_usd: s.mean_usd ?? 0,
+    total_usd: round(records.reduce((a, r) => a + r.usd, 0), 6),
+    output_tokens_mean: records.length ? round(records.reduce((a, r) => a + r.output_tokens, 0) / records.length, 1) : 0,
+    thinking_tokens_nonzero: { count: thinking.length, values: thinking },
+    nfr: {
+      gate_n_met: s.gate_n_met,
+      'NFR-TUTOR-1_p95_le_30s': s.pass['NFR-TUTOR-1'],
+      'NFR-TUTOR-2_mean_le_0.06': s.pass['NFR-TUTOR-2'],
+      'NFR-TUTOR-3_grounded_ge_0.8': s.pass['NFR-TUTOR-3'],
+    },
+  };
+};

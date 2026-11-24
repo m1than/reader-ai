@@ -80,6 +80,14 @@ const Lessons = v.object({
   rows: v.array(LessonRow),
   courses: v.array(CourseTotal),
 });
+// SRV-OBS FR-OBS-25 / FR-OBS-32 (WEB-UI FR-UI-31): alerts from Postgres and the stack's last probes.
+const Alert = v.object({
+  code: v.string(),
+  subject: v.nullable(v.string()),
+  value: v.nullable(v.union([v.number(), v.string()])),
+  limit: v.nullable(v.union([v.number(), v.string()])),
+});
+const Member = v.object({ ok: v.boolean(), checked_at: v.nullable(v.string()) });
 const Summary = v.object({
   days: v.number(),
   compile_runs: v.array(Run),
@@ -87,6 +95,8 @@ const Summary = v.object({
   failures: Failures,
   ingest: Ingest,
   lessons: Lessons,
+  alerts: v.optional(v.array(Alert), []),
+  stack: v.optional(v.record(v.string(), Member), {}),
 });
 
 export type ObsSummary = v.InferOutput<typeof Summary>;
@@ -110,7 +120,43 @@ export const DASHBOARDS: ReadonlyArray<{ label: string; href: string }> = [
   { label: 'Jaeger search', href: 'https://localhost:8444/search' },
 ];
 
-export const createObsApi = (deps: ApiDeps) => ({
+// FR-OBS-24's reason enum (VEC-OBS-5 `labels.reasons`).
+export const LABEL_REASONS = ['wrong_fact', 'unclear', 'off_topic', 'broken_lab', 'bad_citation', 'other'] as const;
+export type LabelReason = (typeof LABEL_REASONS)[number];
+export interface LabelBody {
+  target: 'lesson' | 'answer';
+  id: string;
+  ok: boolean;
+  reason?: LabelReason;
+}
+/** A write's outcome: the status and the JSON body (or {} when there is none). */
+export interface PostResult {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+export const createObsApi = (deps: ApiDeps) => {
+  const post = async (path: string, body: unknown): Promise<PostResult> => {
+    let res: Response;
+    try {
+      res = await deps.fetch(path, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch {
+      throw new ApiError(0, 'network');
+    }
+    if (res.status === 401) deps.onUnauthorized();
+    const parsed: unknown = await res.json().catch(() => ({}));
+    return { status: res.status, body: parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {} };
+  };
+  return {
+  /** FR-OBS-23: record a bench result with its pinned set file (never starts a bench). */
+  bench: (set: string, result: unknown): Promise<PostResult> => post('/api/obs/bench', { set, result }),
+  /** FR-OBS-24: the owner's label on a lesson or an answer. */
+  label: (body: LabelBody): Promise<PostResult> => post('/api/obs/labels', body),
   summary: async (): Promise<ObsSummary> => {
     let res: Response;
     try {
@@ -126,6 +172,7 @@ export const createObsApi = (deps: ApiDeps) => ({
     if (!parsed.success) throw new ApiError(res.status, 'bad_response');
     return parsed.output;
   },
-});
+  };
+};
 
 export type ObsApi = ReturnType<typeof createObsApi>;

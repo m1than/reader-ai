@@ -134,6 +134,7 @@ def main() -> None:
     n = max(len(per_q), 1)
     cps = timing["chunks_per_s"]
     print(json.dumps({
+        "kind": "search",  # SRV-OBS FR-OBS-23 / VEC-OBS-5: an MLflow bench upload names its kind
         "model": a.model, "pages": [first, last], "chunk_chars": a.chunk_chars, "overlap": a.overlap,
         "chunks": len(chunks), "full_pilot_chunks": len(all_chunks), "max_seq_length": model.max_seq_length,
         "load_s": round(load_s, 2), "cache": cache_state,

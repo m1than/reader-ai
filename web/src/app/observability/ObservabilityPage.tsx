@@ -8,7 +8,138 @@ import { useState, type ReactNode } from 'react';
 import { WarningIcon } from '../../ui/icons';
 import { StateBlock } from '../../ui/StateBlock';
 import { useServices } from '../context';
-import { DASHBOARDS, jaegerUrl, OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, type ObsSummary } from './api';
+import {
+  DASHBOARDS,
+  jaegerUrl,
+  LABEL_REASONS,
+  OBS_KEY,
+  SUMMARY_DAYS,
+  traceUrl,
+  type LabelBody,
+  type LabelReason,
+  type ObsApi,
+  type ObsSummary,
+  type PostResult,
+} from './api';
+
+// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-24): the owner's good/bad label on a lesson or an answer; the reply's revision
+// and mirror (or its error code) are shown as text. Postgres is the record; MLflow gets a mirror.
+function LabelControl({ target, id }: { target: LabelBody['target']; id: string }) {
+  const { obs } = useServices();
+  const [reason, setReason] = useState<'' | LabelReason>('');
+  const [note, setNote] = useState<string | null>(null);
+  const send = async (ok: boolean) => {
+    const body: LabelBody = reason ? { target, id, ok, reason } : { target, id, ok };
+    let r: PostResult;
+    try {
+      r = await (obs as ObsApi).label(body);
+    } catch {
+      setNote('network');
+      return;
+    }
+    if (r.status === 200) setNote(`revision ${String(r.body.revision)}, mirror ${String(r.body.mirror)}`);
+    else if (r.status === 404) setNote('not found');
+    else setNote(typeof r.body.error === 'string' ? r.body.error : `http_${r.status}`);
+  };
+  return (
+    <span className="obs-label">
+      <label>
+        <span className="visually-hidden">Reason</span>
+        <select aria-label="Reason" value={reason} onChange={(e) => setReason(e.target.value as '' | LabelReason)}>
+          <option value="">no reason</option>
+          {LABEL_REASONS.map((r) => (
+            <option key={r} value={r}>
+              {r}
+            </option>
+          ))}
+        </select>
+      </label>{' '}
+      <button type="button" onClick={() => void send(true)}>
+        Good
+      </button>{' '}
+      <button type="button" onClick={() => void send(false)}>
+        Bad
+      </button>
+      {note ? <span className="muted"> {note}</span> : null}
+    </span>
+  );
+}
+
+// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-23): record a bench result with its pinned set file; it never starts a bench.
+function BenchUpload() {
+  const { obs } = useServices();
+  const [setFile, setSetFile] = useState<File | null>(null);
+  const [resultFile, setResultFile] = useState<File | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const upload = async () => {
+    if (!setFile || !resultFile) {
+      setNote('choose both files');
+      return;
+    }
+    const [setText, resultText] = await Promise.all([setFile.text(), resultFile.text()]);
+    let result: unknown;
+    try {
+      result = JSON.parse(resultText);
+    } catch {
+      setNote('bench_invalid');
+      return;
+    }
+    try {
+      const r = await (obs as ObsApi).bench(setText, result);
+      setNote(r.status === 202 ? 'recorded' : typeof r.body.error === 'string' ? r.body.error : `http_${r.status}`);
+    } catch {
+      setNote('network');
+    }
+  };
+  return (
+    <>
+      <p className="muted">A pinned bench set and its result file. Recording a result never starts a bench.</p>
+      <label>
+        Set file <input type="file" onChange={(e) => setSetFile(e.target.files?.[0] ?? null)} />
+      </label>{' '}
+      <label>
+        Result file <input type="file" onChange={(e) => setResultFile(e.target.files?.[0] ?? null)} />
+      </label>{' '}
+      <button type="button" onClick={() => void upload()}>
+        Upload
+      </button>
+      {note ? <p role="status">{note}</p> : null}
+    </>
+  );
+}
+
+// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-25): one banner per alert; every value renders as text.
+function Alerts({ alerts }: { alerts: ObsSummary['alerts'] }) {
+  if (alerts.length === 0) return null;
+  return (
+    <div className="obs-alerts">
+      {alerts.map((a, i) => (
+        <p key={`${a.code} ${a.subject ?? ''} ${i}`} role="alert" className="obs-alert">
+          {a.code}
+          {a.subject ? `: ${a.subject}` : ''} ({String(a.value ?? '-')} of {String(a.limit ?? '-')})
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// WEB-UI FR-UI-31 (SRV-OBS FR-OBS-32): the stack's own health from its last probes; Jaeger is reader doctor's.
+function StackView({ stack }: { stack: ObsSummary['stack'] }) {
+  return (
+    <ul className="obs-stack">
+      {['mlflow', 'rotel'].map((name) => {
+        const m = stack[name];
+        return (
+          <li key={name}>
+            {name}: {m === undefined ? 'no probe yet' : m.ok ? 'healthy' : 'not healthy'}
+            {m?.checked_at ? ` (checked ${m.checked_at})` : ''}
+          </li>
+        );
+      })}
+      <li>jaeger: see reader doctor</li>
+    </ul>
+  );
+}
 
 const MORE = 'More rows may exist.';
 // FR-UI-18: the server gives no trace id when no trace can exist (before tracing, tracing off, past retention).
@@ -122,7 +253,7 @@ function TutorView({ tutor }: { tutor: ObsSummary['tutor'] }) {
       {tutor.slowest.length === 0 ? (
         empty('answers')
       ) : (
-        <Table caption="Slowest answers" head={['Question', 'ms', 'Trace']}>
+        <Table caption="Slowest answers" head={['Question', 'ms', 'Trace', 'Label']}>
           {tutor.slowest.map((q) => (
             <tr key={q.question_id}>
               <td>
@@ -131,6 +262,9 @@ function TutorView({ tutor }: { tutor: ObsSummary['tutor'] }) {
               <td>{q.ms}</td>
               <td>
                 <TraceLink id={q.trace_id} />
+              </td>
+              <td>
+                <LabelControl target="answer" id={q.question_id} />
               </td>
             </tr>
           ))}
@@ -259,6 +393,7 @@ function LessonsView({ lessons }: { lessons: ObsSummary['lessons'] }) {
                 </th>
               ))}
               <th scope="col">Traces</th>
+              <th scope="col">Label</th>
             </tr>
           </thead>
           <tbody>
@@ -277,6 +412,7 @@ function LessonsView({ lessons }: { lessons: ObsSummary['lessons'] }) {
                     Traces
                   </a>
                 </td>
+                <td>{r.deleted ? null : <LabelControl target="lesson" id={r.lesson_id} />}</td>
               </tr>
             ))}
           </tbody>
@@ -347,6 +483,7 @@ export function ObservabilityPage() {
         </StateBlock>
       ) : (
         <>
+          <Alerts alerts={q.data.alerts} />
           <Section id="obs-runs" title="Compile runs">
             <CompileRuns runs={q.data.compile_runs} />
           </Section>
@@ -364,6 +501,12 @@ export function ObservabilityPage() {
           </Section>
           <Section id="obs-dashboards" title="Dashboards">
             <Dashboards />
+          </Section>
+          <Section id="obs-bench" title="Bench upload">
+            <BenchUpload />
+          </Section>
+          <Section id="obs-stack" title="Stack">
+            <StackView stack={q.data.stack} />
           </Section>
         </>
       )}

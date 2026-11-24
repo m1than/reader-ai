@@ -139,6 +139,15 @@ const vec: ObsSummary = {
       },
     ],
   },
+  // WEB-UI FR-UI-31 (SRV-OBS FR-OBS-25, -32): one banner per alert and the stack row.
+  alerts: [
+    { code: 'daily_spend_high', subject: 'tutor', value: 2.5, limit: 2.4 },
+    { code: 'dead_jobs', subject: 'pipeline.stage', value: 1, limit: 0 },
+  ],
+  stack: {
+    mlflow: { ok: true, checked_at: '2026-11-25T12:00:00Z' },
+    rotel: { ok: false, checked_at: '2026-11-25T11:30:00Z' },
+  },
 };
 
 const truncated: ObsSummary = {
@@ -154,6 +163,8 @@ const empty: ObsSummary = {
   failures: { truncated: false, jobs: [], tutor: [] },
   ingest: { truncated: false, rows: [] },
   lessons: { truncated: false, open_reserves: 0, rows: [], courses: [] },
+  alerts: [],
+  stack: {},
 };
 
 const withSummary =
