@@ -58,14 +58,18 @@ GATE_TIMEOUT_S: Final = 5.0
 
 def gate_status(url: str, roots: Sequence[str | Path]) -> int | None:
     """FR-CLI-22: the HTTP status of a cookie-less GET of the dashboard, the certificate and host name
-    verified against `roots` (Caddy's roots recorded by `reader trust`); None when there is no answer or the
-    certificate does not verify. Redirects are not followed (a 3xx counts as an open gate)."""
+    verified against `roots` (PEM root files: those `reader trust` recorded and Caddy's current one); a
+    root file that does not load is skipped. None when there is no answer or the certificate does not
+    verify. Redirects are not followed (a 3xx counts as an open gate)."""
     import urllib.error
     import urllib.request
 
     context = ssl.create_default_context()  # CERT_REQUIRED and check_hostname
     for root in roots:
-        context.load_verify_locations(cafile=str(root))
+        try:
+            context.load_verify_locations(cafile=str(root))
+        except (ssl.SSLError, OSError, ValueError):
+            continue  # a bad or unreadable root is no root
 
     class NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, *args: Any, **kwargs: Any) -> None:
@@ -97,12 +101,23 @@ def caddy_root_pem(ctx: Ctx, project: str) -> bytes | None:
 DOCTOR_ROOT: Final = "doctor-root.pem"
 
 
+def valid_root(pem: bytes) -> bool:
+    """A PEM certificate that loads as a verification root (a bad or truncated one is no root)."""
+    try:
+        text = pem.decode("ascii")
+        ssl.PEM_cert_to_DER_cert(text)
+        ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).load_verify_locations(cadata=text)
+    except (UnicodeDecodeError, ValueError, ssl.SSLError):
+        return False
+    return True
+
+
 def doctor_roots(ctx: Ctx, project: str | None, recorded: Sequence[Path]) -> list[Path]:
     """FR-CLI-22: the roots `reader trust` recorded plus Caddy's current public root, saved under run/ for
     this check only (never added to a keychain)."""
     roots = list(recorded)
     pem = caddy_root_pem(ctx, project) if project else None
-    if pem is not None and pem.lstrip().startswith(b"-----BEGIN CERTIFICATE-----"):
+    if pem is not None and valid_root(pem):
         ensure_run_dir(ctx)
         path = ctx.run_dir / DOCTOR_ROOT
         path.unlink(missing_ok=True)

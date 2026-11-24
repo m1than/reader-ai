@@ -353,10 +353,12 @@ requirements:
       caddy cat` of the root certificate), kept in `run/doctor-root.pem` (mode 0600) and passed to the check only:
       the doctor never adds trust to a keychain (`reader trust` changes the login keychain's trust settings, an owner
       action), so it works without `reader trust` (live check 2026-11-24 reported `unreachable` with no recorded
-      root). When neither is available the detail is `unreachable: no Caddy root (stack down?)`. `gate_status(url,
-      roots)` takes the roots as an argument, verifies the certificate and the host name, and never follows a
-      redirect; a unit test runs it against a local HTTPS server with a test CA (code review round 1). [unit]
-      server/tests/cli/test_observability.py.
+      root). Caddy's root counts only when it loads as a PEM verification root (a bad or truncated one is no root,
+      never a crash: live-fixes review); the file is rewritten on every run (unlinked, then created exclusively).
+      When no root is available the detail is `unreachable: no Caddy root (stack down?)`. `gate_status(url,
+      roots)` takes the roots as an argument, skips a root file that does not load, verifies the certificate and the
+      host name, and never follows a redirect; a unit test runs it against a local HTTPS server with a test CA
+      (code review round 1), including a bad root next to a good one. [unit] server/tests/cli/test_observability.py.
 
 invariants:
   - id: INV-CLI-1

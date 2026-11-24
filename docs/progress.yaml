@@ -1386,7 +1386,31 @@ tasks:
         existed left MLflow on its loading skeleton (table obs_tracing records each worker start, and a trace id
         is given only when a trace can exist; the page shows `no trace`). Declared: the live stack has no stub
         provider, so the trace nesting check (job → agent.call → CLI spans) needs real credit (obs.sh
-        --with-credit); without credit it is covered by the [image] CLI canary and the [db] propagation tests.",
+        --with-credit); without credit it is covered by the [image] CLI canary and the [db] propagation tests.
+        Review of af406a4 (deep-reviewer, outside the complex areas, one round): VERDICT changes; each finding and
+        its fix: (B1) `reader doctor` crashed with ssl.SSLError on a bad or truncated Caddy root: `valid_root`
+        loads the PEM before it counts, `gate_status` skips a root file that does not load, tests run the real
+        function with a bad and a missing root and the doctor with five bad exports and a truncated one. (B2) the
+        FR-OBS-6 (c) subset check and the full chain were missing from `--with-credit`: each link job → agent.call →
+        claude_code.interaction → claude_code.llm_request is checked, and the CLI's span names, attribute keys and
+        the trace's resource keys against VEC-OBS-2. (B3) the zero-credit run passed vacuously without summary
+        trace ids: the detail, CSP and UI write take the newest trace from MLflow's traces/search; only the link
+        click depends on summary ids and is a counted SKIP when there are none; obs.sh prints the SKIP count apart
+        from the passes. (B4) the rule's db half was not pinned: tests/obs/test_tracing_db.py runs summary() over
+        an enabled → disabled → enabled sequence with a start before the window, rows inserted newest first, a
+        start at a row's instant, rows older than retention_days (with a 3,650-day contrast), and tracing off now.
+        Non-blocking, all applied: doctor tests for a recorded root plus Caddy's, two runs (unlink then O_EXCL),
+        the PEM check and the exit code, and the gate_status docstring; record_start tried 3 times with an honest
+        docstring, started_at pinned to the database clock; FR-OBS-10 declares one worker and the rare false-link
+        cases; boundary cases (exactly at the cutoff, just before, no moment, any order); obs.retention prunes
+        obs_tracing rows older than retention but the latest one before the cutoff; the gate is passed as an
+        argument (no ContextVar); obs_0001 downgrade test; obs_0001 backfills one enabled row at the oldest
+        obs.retention key row (the first start with the obs code), so already-traced jobs keep their links
+        (assumes tracing was on then, declared); obs.sh resolves and checks the out-dir before mkdir, runs
+        `python -I`, and checks that each session statement touched one row; the live sample is named
+        (first 20 of N); the probe's assessments are deleted through MLflow's REST whatever the UI did; the canary
+        question staying in the tutor history is noted; the spec now says obs.sh runs by hand until
+        e2e/live/stage-2.sh exists.",
       review: "deep-reviewer (Fable): design rounds 1–3 changes (7, 3 and 1 blockers, all applied), round 4 approve
         (5677fb3); details in the spec's review field. Code review (Fable): round 1 on 08700c5 changes (3 blockers:
         deep blocked paths, days=² 500, surviving mutants in complex areas; plus non-blocking items, all applied in

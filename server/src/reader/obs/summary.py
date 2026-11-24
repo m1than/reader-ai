@@ -10,7 +10,6 @@ from __future__ import annotations
 import math
 import uuid
 from collections.abc import Iterable, Mapping, Sequence
-from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -48,9 +47,9 @@ def _iso(value: datetime | None) -> str | None:
 
 @dataclass(frozen=True)
 class TraceGate:
-    """FR-OBS-10: whether a key row's trace can exist. `periods` are (started_at, enabled) worker starts,
-    oldest first; a row's moment (finished_at, else created_at) is traced when tracing is on in the api now,
-    the latest start at or before it was enabled, and it is not older than `oldest` (retention deletes)."""
+    """FR-OBS-10: whether a key row's trace can exist. `periods` are (started_at, enabled) worker starts, in
+    any order; a row's moment (finished_at, else created_at) is traced when tracing is on in the api now, the
+    latest start at or before it was enabled, and it is not older than `oldest` (retention deletes)."""
 
     enabled: bool
     periods: tuple[tuple[datetime, bool], ...]
@@ -60,24 +59,22 @@ class TraceGate:
         moment = row.finished_at or row.created_at
         if not self.enabled or moment is None or moment < self.oldest:
             return False
-        before = [on for started, on in self.periods if started <= moment]
-        return bool(before) and before[-1]
+        latest = max(((started, on) for started, on in self.periods if started <= moment), default=None)
+        return latest is not None and latest[1]
+
+    def trace_id(self, row: Any) -> str | None:
+        """FR-OBS-5's id of the row's newest job, or None when no trace can exist."""
+        if row is None or row.job_id is None or not self.traced(row):
+            return None
+        return format(derive_trace_id(row.job_id, row.key), "032x")
 
 
-_GATE: ContextVar[TraceGate | None] = ContextVar("reader_obs_trace_gate", default=None)
-
+# The starts inside the window plus the one latest before it (the one that decides the window's first rows).
 PERIODS_SQL: Final = (
     "SELECT started_at, enabled FROM obs_tracing WHERE started_at >= :s"
     " UNION ALL (SELECT started_at, enabled FROM obs_tracing WHERE started_at < :s"
-    " ORDER BY started_at DESC LIMIT 1) ORDER BY started_at"
+    " ORDER BY started_at DESC LIMIT 1)"
 )
-
-
-def _trace(row: Any) -> str | None:
-    gate = _GATE.get()
-    if row is None or row.job_id is None or gate is None or not gate.traced(row):
-        return None
-    return format(derive_trace_id(row.job_id, row.key), "032x")
 
 
 def _uuids(values: Iterable[object]) -> list[uuid.UUID]:
@@ -114,7 +111,9 @@ async def _key_rows(conn: AsyncConnection, keys: Iterable[str]) -> dict[str, Any
     return {r.key: r for r in await key_rows_of(conn, wanted)} if wanted else {}
 
 
-async def _compile_runs(conn: AsyncConnection, owner: uuid.UUID, since: datetime, catalog: Any) -> list[Any]:
+async def _compile_runs(
+    conn: AsyncConnection, owner: uuid.UUID, since: datetime, catalog: Any, gate: TraceGate
+) -> list[Any]:
     from reader.pipeline.runs import kind_for
 
     runs = await _rows(
@@ -150,7 +149,7 @@ async def _compile_runs(conn: AsyncConnection, owner: uuid.UUID, since: datetime
     for s in steps:
         by_run.setdefault(s.run_id, []).append({
             "step": s.step, "stage": s.stage, "cost_usd": _usd(s.cost_usd), "duration_s": float(s.duration_s),
-            "model": s.model, "trace_id": _trace(keys.get(key_of(s))),
+            "model": s.model, "trace_id": gate.trace_id(keys.get(key_of(s))),
         })
     return [
         {"run_id": str(r.id), "lesson_id": str(r.lesson_id), "started_at": _iso(r.created_at),
@@ -160,7 +159,9 @@ async def _compile_runs(conn: AsyncConnection, owner: uuid.UUID, since: datetime
     ]
 
 
-async def _tutor(conn: AsyncConnection, owner: uuid.UUID, since: datetime, catalog: Any) -> dict[str, Any]:
+async def _tutor(
+    conn: AsyncConnection, owner: uuid.UUID, since: datetime, catalog: Any, gate: TraceGate
+) -> dict[str, Any]:
     answered = await _rows(
         conn,
         "SELECT id, created_at, finished_at FROM tutor_questions WHERE owner_id = :o AND state = 'answered'"
@@ -184,12 +185,14 @@ async def _tutor(conn: AsyncConnection, owner: uuid.UUID, since: datetime, catal
         "p95_ms": nearest_rank([m for m, _ in ms], 95),
         "cost_usd_sum": _usd(total),
         "cost_usd_mean_per_settled_call": _usd(total / len(settles)) if settles else None,
-        "slowest": [{"question_id": q, "ms": m, "trace_id": _trace(rows.get(keys[q]))} for m, q in slowest],
+        "slowest": [
+            {"question_id": q, "ms": m, "trace_id": gate.trace_id(rows.get(keys[q]))} for m, q in slowest
+        ],
     }
 
 
 async def _failures(
-    conn: AsyncConnection, owner: uuid.UUID, since: datetime, catalog: Any, limit: int
+    conn: AsyncConnection, owner: uuid.UUID, since: datetime, catalog: Any, limit: int, gate: TraceGate
 ) -> dict[str, Any]:
     from reader.jobs.queue import recent_keys_of
 
@@ -240,7 +243,7 @@ async def _failures(
             groups.setdefault((row.kind, str(row.error_code), system), []).append(row)
     jobs: list[dict[str, Any]] = [
         {"kind": k, "error_code": c, "count": len(rows), "system": s,
-         "trace_ids": [t for t in (_trace(r) for r in rows[:TRACE_IDS]) if t]}
+         "trace_ids": [t for t in (gate.trace_id(r) for r in rows[:TRACE_IDS]) if t]}
         for (k, c, s), rows in groups.items()
     ]
     jobs.sort(key=lambda g: (-int(g["count"]), str(g["kind"]), str(g["error_code"])))
@@ -257,14 +260,16 @@ async def _failures(
         by_code.setdefault(str(r.error_code), []).append(str(r.id))
     tutor: list[dict[str, Any]] = [
         {"error_code": code, "count": len(ids),
-         "trace_ids": [t for t in (_trace(key_rows.get(keys[q])) for q in ids[:TRACE_IDS]) if t]}
+         "trace_ids": [t for t in (gate.trace_id(key_rows.get(keys[q])) for q in ids[:TRACE_IDS]) if t]}
         for code, ids in by_code.items()
     ]
     tutor.sort(key=lambda g: (-int(g["count"]), str(g["error_code"])))
     return {"truncated": truncated, "jobs": jobs, "tutor": tutor}
 
 
-async def _ingest(conn: AsyncConnection, owner: uuid.UUID, since: datetime, limit: int) -> dict[str, Any]:
+async def _ingest(
+    conn: AsyncConnection, owner: uuid.UUID, since: datetime, limit: int, gate: TraceGate
+) -> dict[str, Any]:
     from reader.jobs.queue import recent_keys_of
 
     done, truncated = await recent_keys_of(conn, ["ingest.import"], "succeeded", since, limit)
@@ -283,7 +288,7 @@ async def _ingest(conn: AsyncConnection, owner: uuid.UUID, since: datetime, limi
         rows.append({
             "material_sha256": sha, "page_count": pages[sha], "import_s": seconds,
             "pages_per_min_import": round(pages[sha] / (seconds / 60), 1) if seconds > 0 else None,
-            "trace_id": _trace(r),
+            "trace_id": gate.trace_id(r),
         })
     return {"truncated": truncated, "rows": rows[:INGEST_LIMIT]}
 
@@ -308,13 +313,9 @@ async def summary(
     since = now - timedelta(days=days)
     catalog = _kinds()
     gate = await trace_gate(conn, since, now, tracing if tracing is not None else current_settings())
-    token = _GATE.set(gate)
-    try:
-        return {
-            "compile_runs": await _compile_runs(conn, owner, since, catalog),
-            "tutor": await _tutor(conn, owner, since, catalog),
-            "failures": await _failures(conn, owner, since, catalog, read_limit),
-            "ingest": await _ingest(conn, owner, since, read_limit),
-        }
-    finally:
-        _GATE.reset(token)
+    return {
+        "compile_runs": await _compile_runs(conn, owner, since, catalog, gate),
+        "tutor": await _tutor(conn, owner, since, catalog, gate),
+        "failures": await _failures(conn, owner, since, catalog, read_limit, gate),
+        "ingest": await _ingest(conn, owner, since, read_limit, gate),
+    }

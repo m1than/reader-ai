@@ -394,12 +394,19 @@ requirements:
       exist (live check 2026-11-24: links of jobs that ran before tracing existed left MLflow on its loading
       skeleton): table `obs_tracing (started_at timestamptz primary key, enabled boolean)`, Alembic branch `obs`
       (`server/src/reader/obs/migrations`, revision obs_0001, paired SRV-AUTH VERSION_LOCATIONS change), gets one row
-      per worker start from `reader.obs.jobs.on_worker_start` (now, `observability.enabled`). A key row's moment is its
-      `finished_at`, else its `created_at`; its trace id is shown only when tracing is enabled in the api now, the
-      latest `obs_tracing` row at or before that moment says `enabled`, and the moment is within the last
-      `retention_days` (older traces are deleted, FR-OBS-11); otherwise `trace_id` is null (the page shows "no
-      trace") and a group's `trace_ids` omit it. The rows read are those started within the window plus the one
-      latest before it.
+      per worker start from `reader.obs.jobs.on_worker_start` (`clock_timestamp()`, `observability.enabled`; tried 3
+      times, 1 s apart, then logged). A key row's moment is its `finished_at`, else its `created_at`; its trace id is
+      shown only when tracing is enabled in the api now, the latest `obs_tracing` row at or before that moment (by
+      `started_at`, whatever order the rows come in) says `enabled`, and the moment is not older than the last
+      `retention_days` (a moment exactly at the cutoff counts; older traces are deleted, FR-OBS-11); otherwise
+      `trace_id` is null (the page shows "no trace") and a group's `trace_ids` omit it. The rows read are those
+      started within the window plus the one latest before it. obs_0001 backfills one `enabled` row at the
+      `created_at` of the oldest `obs.retention` key row (the first worker start with the obs code, which enqueues
+      that day's key), so jobs traced before the table existed keep their links; it assumes tracing was on then
+      (the default). Declared (live-fixes review): one worker is assumed (with several, one start's row decides for
+      all); a job still running when its worker was killed, and a job queued while tracing was on that never ran,
+      can get a link to a trace that does not exist (their moment falls in an enabled period); so can every job of
+      a start whose row could not be written after tracing was turned off.
   - id: FR-OBS-11
     text: >-
       Retention. Job kind `obs.retention` (`reader.obs.jobs`, listed in SRV-EVENTS' KIND_MODULES; args `{day:
@@ -418,7 +425,9 @@ requirements:
       `RetentionFailed`, so the day's key ends `dead` with `error_code` `RetentionFailed` (FR-EVENTS-6
       records a permanent failure by its class name; amended at Red, 2026-11-24, from `obs_retention_failed`, which no
       job wrapper can write). SQLite does not shrink on delete (measured);
-      freed pages are reused, so the store's size stays bounded by the retained traces.
+      freed pages are reused, so the store's size stays bounded by the retained traces. In the same run the handler
+      deletes the `obs_tracing` rows (FR-OBS-10) started before now − `retention_days`, except the latest of them,
+      which still decides the rows between the cutoff and the next start.
 
 invariants:
   - id: INV-OBS-1
@@ -517,23 +526,31 @@ vectors:
 #            overlap), because Docker Desktop's predefined pools run out (measured 2026-11-24); nothing else in the
 #            repository or on the owner's Docker uses 10.233/16. The ingest check reads the spans of
 #            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24).
-#   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (run by the stage-2 live check;
-#            e2e/live/lib/obs_live.py and obs_browser.mjs). Sessions: one owner and one live-check learner row,
-#            each created and deleted by its id hash only, through the live library's `docker compose exec -T
-#            postgres psql` helper (the script itself runs no `docker exec`); it never runs OWNER_RESET_SQL and never
-#            touches the owner's passkeys or other sessions. Caddy's public root is read the way `reader trust`
-#            reads it and is never trusted system-wide. Zero credit by default: 8443 answers 401 without a cookie,
-#            403 for a learner, 2xx for the owner; the INV-OBS-5 Origin, method and Sec-Fetch cases; FR-OBS-9's
-#            blocked paths (deep, upper-case, repeated slashes) answer 404; no Set-Cookie or Access-Control-* and the
-#            CSP on 8443; the summary is refused to a learner; and every summary trace id (FR-OBS-10) opens an
-#            existing MLflow trace. In the browser (Playwright, real Chromium over TLS): a trace link on
-#            /observability opens https://localhost:8443 with the span tree; no CSP violation on the UI, the traces
-#            list and a trace's detail; one write in the UI (an assessment note saved, then cleared) succeeds.
-#            `--with-credit` (off by default; spends Agent SDK credit): one tutor question carrying a canary
-#            produces a `job tutor.answer` trace, nested job → agent.call → the CLI's spans, within NFR-OBS-1, and
-#            the canary is absent from the trace JSON. The live stack has no stub provider, so that nesting check
-#            needs real credit; without it, the nesting against a stub upstream is covered by the [image] CLI canary
-#            and [db] propagation tests (declared, live check 2026-11-24).
+#   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (e2e/live/lib/obs_live.py, run
+#            as `python -I`, and obs_browser.mjs). It is run by hand until the stage-2 live check script
+#            (`e2e/live/stage-2.sh`, docs/roadmap.md) exists; that script will call it. DIR is resolved and checked to
+#            lie outside the repository before anything is created. Sessions: one owner and one live-check learner
+#            row, each created and deleted by its id hash only (each statement must report exactly one row), through
+#            the live library's `docker compose exec -T postgres psql` helper (the script itself runs no `docker
+#            exec`); it never runs OWNER_RESET_SQL and never touches the owner's passkeys or other sessions. Caddy's
+#            public root is read the way `reader trust` reads it and is never trusted system-wide. Zero credit by
+#            default: 8443 answers 401 without a cookie, 403 for a learner, 2xx for the owner; the INV-OBS-5 Origin,
+#            method and Sec-Fetch cases; FR-OBS-9's blocked paths (deep, upper-case, repeated slashes) answer
+#            Caddy's empty 404; no Set-Cookie or Access-Control-* and the CSP on 8443; the summary is refused to a
+#            learner; the first 20 summary trace ids (FR-OBS-10) each open an existing MLflow trace. In the browser
+#            (Playwright, real Chromium over TLS): a trace link on /observability opens https://localhost:8443 with
+#            the span tree; the newest trace from MLflow's own traces/search (request traces exist at zero credit)
+#            gives the detail page, its CSP and one UI write (an assessment note saved; the probe's assessments are
+#            then deleted through MLflow's REST whatever happened); no CSP violation anywhere. A check that cannot
+#            run on the stack's data (the link click when the summary gives no trace id) prints SKIP, counted apart
+#            from the passes. `--with-credit` (off by default; spends Agent SDK credit; the canary question stays in
+#            the owner's tutor history): within NFR-OBS-1 a `job tutor.answer` trace with each link of the chain job →
+#            agent.call → claude_code.interaction → claude_code.llm_request; the CLI's span names, attribute keys
+#            (MLflow's own `mlflow.*` keys aside) and the trace's resource keys (MLflow keeps them as trace tags; the
+#            CLI's and FR-OBS-1's allowed) within VEC-OBS-2 (FR-OBS-6 c); the canary absent from the trace JSON. The
+#            live stack has no stub provider, so those checks need real credit; without it, the nesting against a
+#            stub upstream is covered by the [image] CLI canary and [db] propagation tests (declared, live check
+#            2026-11-24).
 test_levels:
   FR-OBS-1: unit
   FR-OBS-2: unit

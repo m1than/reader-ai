@@ -326,6 +326,10 @@ def _at(hours: float) -> datetime:
         (_at(-1), None, [(_at(-48), True)], False, False),  # tracing off in the api now
         (_at(-24 * 31), None, [(_at(-24 * 40), True)], True, False),  # older than retention_days (30)
         (None, _at(-1), [(_at(-48), True)], True, True),  # not finished: its creation counts
+        (_at(-24 * 30), None, [(_at(-24 * 40), True)], True, True),  # exactly at the retention cutoff: counts
+        (_at(-24 * 30 - 0.001), None, [(_at(-24 * 40), True)], True, False),  # just before it: deleted
+        (None, None, [(_at(-48), True)], True, False),  # no moment at all
+        (_at(-1), None, [(_at(-2), True), (_at(-48), False)], True, True),  # periods in any order: latest wins
     ],
 )
 def test_trace_gate(
