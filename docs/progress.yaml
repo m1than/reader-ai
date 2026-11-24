@@ -1543,8 +1543,14 @@ tasks:
         notes); paired FR texts amended. Green: reader.obs.analytics (derivation), spans (session marker, root
         attributes, child spans), feedback (obs.feedback), prompts (obs.prompts), the agent span's semconv keys and
         cost split, summary's lessons view, the per-site gate, the catalog generator and replaced catalog, jaeger,
-        the 8444 site and reader up/doctor lines, /observability's cost-per-lesson and dashboards. Gate and image
-        tests: see the PR. No reader up, no live step, no credit. Next: code review, full rounds." }
+        the 8444 site and reader up/doctor lines, /observability's cost-per-lesson and dashboards. Checks: the gate
+        ran under parallel load and ended `LOCAL CI: FAIL (1 step(s))` on pytest only, 2285 passed and 139
+        errors, all Postgres-container connect timeouts in db tests; those tests passed alone (tests/plan and
+        tests/pipeline 156 passed; `pytest --lf` 87 passed): load flakes by the coordinator's rule. ruff, mypy,
+        trace-check, guard-tests, web typecheck, vitest and the storybook build passed. Obs [image] tests by image
+        id: 9 passed (Jaeger fill 32,400 full-key spans, 143 MiB of 256, last trace 0.3 s after the flush; marker
+        session, ledger cost, 0-cost CLI spans, span metric = ledger). Stubbed browser suite: 446 passed. Merged
+        V/slice-integration 199d2f1. No reader up, no live step, no credit. Next: code review, full rounds." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
