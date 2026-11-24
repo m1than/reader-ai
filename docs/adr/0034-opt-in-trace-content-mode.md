@@ -1,7 +1,7 @@
 ---
 id: ADR-0034
 title: An opt-in trace content mode for the owner's own material (amends ADR-0032 privacy, bounded by ADR-0018)
-status: proposed
+status: rejected
 date: 2026-11-24
 verified_by: "Nothing is built under this ADR. If accepted, a separate SRV-OBS revision with its own review round, whose INV-OBS-1/-2 tests cover the mode's off state, its truncation and the personal-use refusal"
 revisit_when: "MLflow's chat view, Review queues or text Datasets become necessary to debug the tutor or the pipeline; or the CLI gains a selective prompt-logging flag that can exclude the system prompt"

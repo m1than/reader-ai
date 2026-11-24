@@ -1,7 +1,7 @@
 ---
 id: ADR-0033
 title: A Jaeger waterfall view beside MLflow, on its own origin behind the owner gate (amends ADR-0032)
-status: proposed
+status: accepted
 date: 2026-11-24
 verified_by: "spikes/obs-stack rounds 4 and 5 (results/20261124T103924-round4-jaeger; results/20261124T113402-round5: gate.json, jaeger-pages.json, stats.txt, stats-f.txt, probe-jaeger-*.json, jaeger-oom*.txt); if accepted, SRV-OBS's [config], [image] and [live] tests listed under Consequences"
 revisit_when: "MLflow's execution timeline gets a full-width or zoomable view; or Jaeger's UI needs 'unsafe-eval' or 'unsafe-inline' to render; or a second user needs the dashboards; or the in-memory cap proves too small"

@@ -1,7 +1,7 @@
 ---
 id: ADR-0035
 title: Worker writes of code assessments and prompt templates to MLflow (amends ADR-0032 Decision 1)
-status: proposed
+status: accepted
 date: 2026-11-24
 verified_by: "spikes/obs-stack round 4 (results/20261124T105821-round4-tabs: 8 of 8 assessments created, 3 prompts registered, the Quality dashboard and Prompts tab filled); if accepted, SRV-OBS FR-OBS-14/-15's [unit], [db] and [image] tests and INV-OBS-2's canary over both request bodies"
 revisit_when: "MLflow can ingest assessments or prompt links through OTLP; or the worker gains any other MLflow write"
