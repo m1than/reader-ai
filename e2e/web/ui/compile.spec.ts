@@ -59,7 +59,8 @@ for (const width of WIDTHS) {
     expect(await serious(page)).toEqual([]);
     expect(await overflow(page)).toBeLessThanOrEqual(0);
 
-    await row.getByRole('button', { name: 'Compile' }).click();
+    // exact: the row's WEB-MANAGE menu is named "Actions for … not compiled yet".
+    await row.getByRole('button', { name: 'Compile', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('heading', { name: 'Compile lesson 2?' })).toBeVisible();
     await expect(dialog.getByText(/^Estimate: \$\d+\.\d{2}–\$\d+\.\d{2}$/)).toBeVisible();
@@ -69,7 +70,7 @@ for (const width of WIDTHS) {
     expect(await overflow(page)).toBeLessThanOrEqual(0);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/compile-confirm-${width}.png`, fullPage: true });
 
-    await dialog.getByRole('button', { name: 'Compile' }).click();
+    await dialog.getByRole('button', { name: 'Compile', exact: true }).click();
     await expect(dialog).toBeHidden();
     // the draft's revision exists from the first running read: a link, but with the chip and the run's state
     await expect(row.getByRole('link', { name: TITLE })).toHaveAttribute('href', '/lessons/w02');

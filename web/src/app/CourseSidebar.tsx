@@ -5,14 +5,15 @@ import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from '@tanstack/react-router';
 import { useState } from 'react';
+import { textLang, useLocale, useT } from '../ui/i18n';
 import { ChevronIcon } from '../ui/icons';
+import en from './messages.en';
 import type { LessonSummary } from './api';
 import { useServices } from './context';
 import { groupLessons, type CourseGroup } from './lessons';
 import { EXPANDED_MAX } from './LessonList';
 import { queries } from './queries';
 
-const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 const published = (l: LessonSummary) => l.latest_sha256 !== null;
 
 function Group({ group, current, prefix, onNavigate }: { group: CourseGroup; current: string | null; prefix: string; onNavigate?: () => void }) {
@@ -23,14 +24,17 @@ function Group({ group, current, prefix, onNavigate }: { group: CourseGroup; cur
   const done = group.lessons.filter(published).length;
   const large = group.lessons.length > EXPANDED_MAX;
   const rows = !large || all ? group.lessons : group.lessons.filter((l) => published(l) || l.lesson_id === current);
+  const t = useT('app', en);
   return (
     <li className="sidebar-group">
       <button type="button" className="sidebar-course" aria-expanded={open} aria-controls={listId} onClick={() => setOpen((o) => !o)}>
         <ChevronIcon className="sidebar-chevron" />
-        <span className="sidebar-course-title">{group.course_title}</span>
+        <span className="sidebar-course-title" lang={textLang(group.course_title)}>
+          {group.course_title}
+        </span>
         <span className="sidebar-count">
           {`${done}/${group.lessons.length}`}
-          <span className="visually-hidden"> published</span>
+          <span className="visually-hidden"> {t('sidebar.published')}</span>
         </span>
       </button>
       <ul id={listId} role="list" hidden={!open}>
@@ -47,14 +51,14 @@ function Group({ group, current, prefix, onNavigate }: { group: CourseGroup; cur
                     <span className="sidebar-ordinal" aria-hidden="true">
                       {l.ordinal}
                     </span>
-                    {l.title}
+                    <span lang={textLang(l.title)}>{l.title}</span>
                   </Link>
                 ) : (
                   <span>
                     <span className="sidebar-ordinal" aria-hidden="true">
                       {l.ordinal}
                     </span>
-                    {l.title}
+                    <span lang={textLang(l.title)}>{l.title}</span>
                   </span>
                 )}
               </li>
@@ -63,7 +67,7 @@ function Group({ group, current, prefix, onNavigate }: { group: CourseGroup; cur
       </ul>
       {open && large ? (
         <Button variant="ghost" color="neutral" size="sm" className="sidebar-more" onClick={() => setAll((a) => !a)}>
-          {all ? 'Show fewer' : `Show all ${group.lessons.length}`}
+          {all ? t('sidebar.show_fewer') : t('sidebar.show_all', { count: group.lessons.length })}
         </Button>
       ) : null}
     </li>
@@ -83,8 +87,10 @@ export function CourseSidebar({
 }) {
   const { api } = useServices();
   const q = useQuery(queries(api).lessons());
+  const t = useT('app', en);
+  const { formatLocale } = useLocale();
   return (
-    <nav className="course-sidebar" aria-label="Courses">
+    <nav className="course-sidebar" aria-label={t('sidebar.label')}>
       {q.isPending ? (
         <div aria-hidden="true">
           <Skeleton.Root>
@@ -94,14 +100,14 @@ export function CourseSidebar({
         </div>
       ) : q.isError ? (
         <div className="sidebar-error">
-          <p>Courses could not be loaded.</p>
+          <p>{t('sidebar.error')}</p>
           <Button variant="ghost" color="neutral" size="sm" onClick={() => void q.refetch()}>
-            Retry
+            {t('sidebar.retry')}
           </Button>
         </div>
       ) : (
         <ul role="list" className="sidebar-groups">
-          {groupLessons(q.data.lessons, locale()).map((g) => (
+          {groupLessons(q.data.lessons, formatLocale).map((g) => (
             <Group key={g.course_id} group={g} current={current} prefix={prefix} {...(onNavigate ? { onNavigate } : {})} />
           ))}
         </ul>

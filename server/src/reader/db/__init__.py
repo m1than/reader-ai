@@ -50,6 +50,7 @@ VERSION_LOCATIONS: Final[list[Path]] = [
     _HERE.parent / "plan" / "migrations",  # SRV-PLAN paired change (FR-AUTH-10 note)
     _HERE.parent / "obs" / "migrations",  # SRV-OBS paired change (FR-AUTH-33): obs_tracing
     _HERE.parent / "freshness" / "migrations",  # SRV-FRESH paired change (FR-AUTH-1 note)
+    _HERE.parent / "config" / "migrations",  # SRV-CONFIG FR-CONFIG-26 paired change (FR-AUTH-1 note)
     _procrastinate_versions(),
 ]
 # pg_advisory_lock(namespace, key): this namespace is for migrations only ("RDMG"); SRV-EVENTS uses another.

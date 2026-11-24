@@ -38,7 +38,12 @@ review: "deep-reviewer (Fable), 2026-11-20. Spec round 1 changes (B1–B10: name
   they start no watcher), and the Red test injects its recorder there instead of patching the module; no oracle
   changed. The test reformatted for ruff (line length), no oracle change. Live-harness fix 2026-11-24
   (V/live-harness-fixes, after the owner's live upload check): FR-CLI-23's status reads `unknown` with the config
-  problem, not `stopped`, when reader.yaml cannot be loaded; paired unit test."
+  problem, not `stopped`, when reader.yaml cannot be loaded; paired unit test. Paired change 2026-11-24 (V/manage,
+  SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): `reader status` (FR-CLI-13) and `reader up` print one line per stored
+  settings override, read with `docker compose exec -T postgres psql -U postgres -d postgres -At -c \"SELECT key,
+  value FROM settings_overrides ORDER BY key\"` (30 s) and evaluated against the loaded reader.yaml by
+  `reader.config.effective.status_lines`; a failed read prints `overrides: unavailable` and never changes the exit
+  code; `status --json` adds `overrides` (the same lines). Tests: server/tests/cli/test_overrides.py."
 layer: ops
 track: engineering
 adr: [ADR-0011, ADR-0012, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]

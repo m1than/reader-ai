@@ -32,10 +32,23 @@ _CURRENT: Final = (
     "WITH cur AS (SELECT * FROM unnest(CAST(:ci AS uuid[]), CAST(:cp AS text[]))"
     " AS cur(ingest_id, params_sha256))"
 )
+# FR-SEARCH-20: a deleted material's chunks are never ranked (they are kept, so a restore needs no re-embed).
 _FILTER: Final = (
     " FROM search_chunks c JOIN cur ON cur.ingest_id = c.ingest_id AND cur.params_sha256 = c.params_sha256"
-    " WHERE c.owner_id = :o AND c.model = :m AND (CAST(:mat AS text) IS NULL OR c.material_sha256 = :mat)"
+    " JOIN materials m ON m.owner_id = c.owner_id AND m.sha256 = c.material_sha256"
+    " WHERE c.owner_id = :o AND c.model = :m AND m.deleted_at IS NULL"
+    " AND (CAST(:mat AS text) IS NULL OR c.material_sha256 = :mat)"
 )
+
+
+async def material_deleted(engine: AsyncEngine, owner_id: UUID, material_sha256: str) -> bool:
+    """FR-SEARCH-20: the owner's row of this material is a tombstone (its filter answers 404)."""
+    async with engine.connect() as conn:
+        row = await conn.execute(
+            text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NOT NULL"),
+            {"o": owner_id, "s": material_sha256},
+        )
+        return row.first() is not None
 
 
 @dataclass(frozen=True)

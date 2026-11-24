@@ -191,6 +191,69 @@ const planRoute = (method, path, body) => {
   return null;
 };
 
+// WEB-MANAGE (paired WEB-UI change): the management routes answer from VEC-MANAGE-1, whose course and lesson ids match
+// VEC-UI-2. Stateless apart from the role: `POST /__test__/reset?role=learner` serves the learner until the next reset.
+const manage = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-MANAGE/responses.json'), 'utf8'));
+const session = { role: 'owner' };
+const manageRoute = (method, path, query) => {
+  const m = (re) => re.exec(path);
+  const ok = (body) => [200, body];
+  const learner = session.role === 'learner';
+  if (method === 'GET' && path === '/api/me') return ok(learner ? manage.me_learner : me);
+  // A learner owns no course: the list is scoped (empty), the owner-only collections answer 403 (INV-MANAGE-2).
+  if (learner && method === 'GET' && path === '/api/courses') return ok({ courses: [] });
+  if (learner && /^\/api\/(courses|materials|auth\/users|settings|audit|compiles|plans)/.test(path)) return [403, { error: 'owner_only' }];
+  if (method === 'GET') {
+    if (path === '/api/courses') return ok(manage.courses[query.get('state') ?? 'active'] ?? { courses: [] });
+    let r = m(/^\/api\/courses\/([^/]+)\/lessons$/);
+    if (r) return ok(manage.deleted_lessons[decodeURIComponent(r[1])] ?? { lessons: [] });
+    if (m(/^\/api\/courses\/[^/]+\/impact$/)) return ok(manage.course_impact);
+    if (path === '/api/plans' && query.get('course_id')) return ok(manage.stored_plan);
+    if (path === '/api/lessons/w01') return ok({ lesson: fixtures.list.lessons[0], revisions: manage.lesson_detail.revisions });
+    if (m(/^\/api\/lessons\/[^/]+\/compiles$/)) return ok(manage.compile_history);
+    if (m(/^\/api\/lessons\/[^/]+\/notes$/)) return ok(manage.notes);
+    if (path === '/api/bookmarks') return ok(manage.bookmarks);
+    if (path === '/api/materials' && query.get('state') === 'deleted') return ok(manage.materials.deleted);
+    r = m(/^\/api\/materials\/([^/]+)\/impact$/);
+    if (r) return ok(manage.material_impact[decodeURIComponent(r[1])] ?? { courses: [], lessons: 0, uploads_open: 0 });
+    if (path === '/api/auth/users') return ok(manage.people);
+    if (path === '/api/auth/credentials') return ok(manage.credentials_three);
+    if (path === '/api/auth/sessions') return ok(manage.sessions);
+    if (path === '/api/settings') return ok(manage.settings);
+    if (path === '/api/audit') return ok(query.get('before') ? manage.audit_page2 : manage.audit_page1);
+    return null;
+  }
+  if (method === 'POST' && path === '/api/courses/order') return ok(manage.courses.active);
+  const course = m(/^\/api\/courses\/([^/]+)(\/(archive|unarchive|restore))?$/);
+  if (course) {
+    const all = [...manage.courses.active.courses, ...manage.courses.archived.courses, ...manage.courses.deleted.courses];
+    const row = all.find((c) => c.course_id === decodeURIComponent(course[1]));
+    if (!row) return [404, { error: 'not_found' }];
+    if (method === 'DELETE') return ok(manage.course_deleted);
+    return ok(course[3] ? row : { ...row, version: row.version + 1 });
+  }
+  if (m(/^\/api\/courses\/[^/]+\/lessons\/order$/)) return ok({});
+  if (m(/^\/api\/lessons\/[^/]+\/(skip|unskip|restore)$/)) return ok({});
+  if (m(/^\/api\/lessons\/[^/]+\/progress$/)) return ok(manage.progress_done);
+  if (m(/^\/api\/lessons\/[^/]+\/revert$/)) return ok(manage.revert_applied);
+  if (m(/^\/api\/lessons\/[^/]+\/questions\/clear$/)) return ok(manage.tutor_cleared);
+  if (m(/^\/api\/lessons\/[^/]+\/notes$/)) return [201, manage.note_created];
+  if (m(/^\/api\/lessons\/[^/]+\/notes\/[^/]+$/)) return method === 'DELETE' ? [204, null] : ok(manage.note_created);
+  if (m(/^\/api\/lessons\/[^/]+\/bookmarks\/[^/]+$/)) return [method === 'DELETE' ? 204 : 201, null];
+  if (m(/^\/api\/lessons\/[^/]+$/)) return method === 'DELETE' ? ok({}) : ok(fixtures.list.lessons[0]);
+  if (m(/^\/api\/compiles\/[^/]+\/cancel$/)) return ok({});
+  if (m(/^\/api\/materials\/[^/]+\/restore$/)) return ok(manage.material_restored);
+  if (m(/^\/api\/materials\/(?!uploads)[^/]+$/)) return method === 'DELETE' ? ok({ deleted_at: '2026-11-24T12:00:00Z' }) : ok({});
+  if (m(/^\/api\/auth\/credentials\/[^/]+$/)) return ok(method === 'DELETE' ? { revoked_sessions: 2 } : {});
+  if (m(/^\/api\/auth\/sessions\/revoke-others$/)) return ok({ revoked: 2 });
+  if (m(/^\/api\/auth\/sessions\/[^/]+$/)) return [204, null];
+  if (m(/^\/api\/auth\/users\/[^/]+\/sessions\/revoke$/)) return ok({ revoked: 1 });
+  if (m(/^\/api\/auth\/users\/[^/]+(\/credentials\/[^/]+)?$/)) return [204, null];
+  if (m(/^\/api\/auth\/signups\/[^/]+\/enable$/)) return ok({ status: 'active' });
+  if (m(/^\/api\/settings\/[^/]+$/)) return ok(manage.settings);
+  return null;
+};
+
 const file = (root, path) => {
   const target = normalize(join(root, decodeURIComponent(path)));
   if (!target.startsWith(root)) return null;
@@ -234,6 +297,7 @@ createServer((req, res) => {
   }
   if (req.method === 'POST' && path === '/__test__/reset') {
     resetCompile(url.searchParams.get('w02'));
+    session.role = url.searchParams.get('role') === 'learner' ? 'learner' : 'owner';
     res.writeHead(204).end();
     return;
   }
@@ -250,6 +314,7 @@ createServer((req, res) => {
       }
       const firstRun = (req.headers.cookie ?? '').includes('stub-first-run=1');
       const [status, body] =
+        manageRoute(req.method, path, url.searchParams) ??
         uploadRoute(req.method, path, firstRun) ??
         compileRoute(req.method, path) ??
         planRoute(req.method, path, parsed) ??

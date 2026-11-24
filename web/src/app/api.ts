@@ -32,6 +32,11 @@ const LessonSummary = v.object({
   title: v.string(),
   updated_at: v.string(),
   latest_sha256: v.nullable(sha),
+  // SRV-LESSON's management amendment (WEB-MANAGE): additive fields; absent on servers before it.
+  skipped: v.optional(v.boolean()),
+  done: v.optional(v.boolean()),
+  course_position: v.optional(v.nullable(v.number())),
+  version: v.optional(v.number()),
 });
 
 const LessonList = v.object({ lessons: v.array(LessonSummary) });

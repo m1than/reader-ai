@@ -25,6 +25,15 @@ export interface CompileSlot {
   Action?: ComponentType<SlotProps>;
 }
 
+/** The manage slot (WEB-MANAGE paired change to FR-UI-6): course group headers, lesson rows, the list's end and one
+ * shell-wide host for the Undo toast; each part is a lazy chunk (web/src/manage/slot.tsx). */
+export interface ManageSlot {
+  CourseActions?: ComponentType<{ courseId: string; title: string }>;
+  LessonActions?: ComponentType<{ lesson: LessonSummary }>;
+  ListFooter?: ComponentType<object>;
+  Host?: ComponentType<object>;
+}
+
 export interface Services {
   api: Api;
   notify: (code: string) => void;
@@ -40,6 +49,8 @@ export interface Services {
   /** Rendered for every lesson row and on the lesson page (FR-UI-6); AppRoot's default renders FR-UI-15's
    * CompileControl for the owner. */
   compileSlot?: CompileSlot;
+  /** WEB-MANAGE's controls; AppRoot supplies web/src/manage/slot.tsx unless a caller passes its own. */
+  manageSlot?: ManageSlot;
   /** The shell's fetch and 401 hook, for clients built inside lazy chunks (WEB-FRESH's card). */
   http?: ApiDeps;
   /** SRV-INGEST's upload client for the /import page's upload sections (FR-UI-13, WEB-IMPORT). */

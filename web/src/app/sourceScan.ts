@@ -35,7 +35,9 @@ export const forbiddenUses = (): string[] =>
 /** FR-UI-1: the library entries the slice may import. */
 export const allowedEntries = [
   'button', 'toast', 'progress', 'skeleton', 'tooltip', 'dialog', 'chip', 'divider', 'link', 'typography', 'stack',
-  'container', 'app-bar', 'list-view', 'alert', 'breadcrumbs', 'menu', 'drawer', 'icon', 'styles.css',
+  'container', 'app-bar', 'list-view', 'alert', 'breadcrumbs', 'menu', 'drawer', 'icon',
+  // WEB-MANAGE paired change (2026-11-24): the management layer's fields and tabs, in its lazy chunks only.
+  'text-field', 'select', 'switch', 'tabs', 'radio-group', 'styles.css',
 ];
 
 export const libraryImports = (): string[] => {

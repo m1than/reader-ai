@@ -4,11 +4,11 @@
 // https://localhost:8444 (owner only, behind the gate); the saved dashboard views are listed. Values render as text.
 import { Button } from '@acme/ui/button';
 import { useQuery } from '@tanstack/react-query';
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { WarningIcon } from '../../ui/icons';
 import { StateBlock } from '../../ui/StateBlock';
 import { useServices } from '../context';
-import { DASHBOARDS, jaegerUrl, OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, type ObsSummary } from './api';
+import { createObsApi, DASHBOARDS, jaegerUrl, OBS_KEY, SUMMARY_DAYS, traceUrl, type ObsApi, type ObsSummary } from './api';
 
 const MORE = 'More rows may exist.';
 // FR-UI-18: the server gives no trace id when no trace can exist (before tracing, tracing off, past retention).
@@ -314,7 +314,9 @@ function Dashboards() {
 }
 
 export function ObservabilityPage() {
-  const { obs } = useServices();
+  // WEB-UI FR-UI-30 merge: AppRoot no longer builds this client; the lazy chunk builds it from `Services.http`.
+  const { obs: given, http } = useServices();
+  const obs = useMemo(() => given ?? (http ? createObsApi(http) : undefined), [given, http]);
   const q = useQuery({
     queryKey: OBS_KEY,
     queryFn: () => (obs as ObsApi).summary(),

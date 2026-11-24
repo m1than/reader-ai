@@ -397,11 +397,13 @@ async def summary(
     read_limit: int = READ_LIMIT,
     tracing: Any = None,
 ) -> dict[str, Any]:
-    from reader.obs.setup import current_settings
+    from reader.obs.setup import effective_settings
 
     since = now - timedelta(days=days)
     catalog = _kinds()
-    gate = await trace_gate(conn, since, now, tracing if tracing is not None else current_settings())
+    # The api's settings with the retention override read per request (SRV-CONFIG FR-CONFIG-26, paired).
+    tracing = tracing if tracing is not None else await effective_settings(conn)
+    gate = await trace_gate(conn, since, now, tracing)
     return {
         "compile_runs": await _compile_runs(conn, owner, since, catalog, gate),
         "tutor": await _tutor(conn, owner, since, catalog, gate),

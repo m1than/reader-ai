@@ -28,7 +28,11 @@ __all__ = [
     "current_sha256",
     "delete_unstarted_lesson",
     "ensure_lesson",
+    "lock_positions",
+    "place_at",
+    "place_first",
     "reorder_lessons",
+    "shift_positions",
     "started_lessons",
     "write_revision",
 ]
@@ -169,14 +173,82 @@ def _provenance_json(stage: str, provenance: object) -> str:
     return compact
 
 
+# FR-LESSON-20: pg_advisory_xact_lock(namespace, hashtext(owner)) before any write of courses.position
+# ("RCPO"), taken after every course and lesson lock of the same request (INV-LESSON-23's order).
+POSITION_LOCK_NAMESPACE: Final = 0x5243504F
+
+
+async def lock_positions(conn: AsyncConnection, owner_id: uuid.UUID) -> None:
+    """The owner's position lock, held to the end of the caller's transaction (FR-LESSON-20)."""
+    await conn.execute(
+        text("SELECT pg_advisory_xact_lock(:ns, hashtext(:o))"),
+        {"ns": POSITION_LOCK_NAMESPACE, "o": str(owner_id)},
+    )
+
+
+async def shift_positions(conn: AsyncConnection, owner_id: uuid.UUID, start: int, delta: int) -> None:
+    """Move every position >= `start` by `delta` (±1) in two statements (the index is not deferrable)."""
+    offset = int(
+        (
+            await conn.execute(
+                text("SELECT coalesce(max(position), 0) + 1 FROM courses WHERE owner_id = :o"),
+                {"o": owner_id},
+            )
+        ).scalar_one()
+    )
+    await conn.execute(
+        text("UPDATE courses SET position = position + :d WHERE owner_id = :o AND position >= :p"),
+        {"d": offset, "o": owner_id, "p": start},
+    )
+    await conn.execute(
+        text("UPDATE courses SET position = position - :d WHERE owner_id = :o AND position >= :p"),
+        {"d": offset - delta, "o": owner_id, "p": start + offset},
+    )
+
+
+async def place_at(conn: AsyncConnection, owner_id: uuid.UUID, course_id: uuid.UUID, position: int) -> int:
+    """FR-LESSON-20: put a course that has no position at `position` (clamped to 1..n+1), clearing its archive
+    and tombstone in the same statement (the position CHECK); returns the position taken."""
+    await lock_positions(conn, owner_id)
+    count = int(
+        (
+            await conn.execute(
+                text("SELECT count(*) FROM courses WHERE owner_id = :o AND position IS NOT NULL"),
+                {"o": owner_id},
+            )
+        ).scalar_one()
+    )
+    at = min(max(position, 1), count + 1)
+    await shift_positions(conn, owner_id, at, 1)
+    await conn.execute(
+        text(
+            "UPDATE courses SET position = :p, archived_at = NULL, deleted_at = NULL"
+            " WHERE id = :c AND owner_id = :o AND position IS NULL"
+        ),
+        {"p": at, "c": course_id, "o": owner_id},
+    )
+    return at
+
+
+async def place_first(conn: AsyncConnection, owner_id: uuid.UUID, course_id: uuid.UUID) -> int:
+    return await place_at(conn, owner_id, course_id, 1)
+
+
 async def create_course(
     conn: AsyncConnection, owner_id: uuid.UUID, title: str, material_sha256: str | None
 ) -> uuid.UUID:
+    """FR-LESSON-6; FR-LESSON-20: a new course goes first (the owner's other courses move down by one)."""
     if material_sha256 is not None and not blobs.is_sha256(material_sha256):
         raise ValueError("material_sha256 must be 64 lowercase hex characters")
+    clean = _title(title)
+    await lock_positions(conn, owner_id)
+    await shift_positions(conn, owner_id, 1, 1)
     row = await conn.execute(
-        text("INSERT INTO courses (owner_id, title, material_sha256) VALUES (:o, :t, :m) RETURNING id"),
-        {"o": owner_id, "t": _title(title), "m": material_sha256},
+        text(
+            "INSERT INTO courses (owner_id, title, material_sha256, position) VALUES (:o, :t, :m, 1)"
+            " RETURNING id"
+        ),
+        {"o": owner_id, "t": clean, "m": material_sha256},
     )
     course_id: uuid.UUID = row.scalar_one()
     return course_id

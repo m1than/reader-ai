@@ -84,6 +84,9 @@
 # the reserve.
 # Code review round 3 of the freshness merge (2026-11-24; no requirement loosened): FR-AGENT-15 states that the
 # `tools_mismatch` refusal also comes before the `agent.call` span opens, pinned by the [db] refusal test.
+# Paired note 2026-11-24 (V/manage, SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): the provider's caps (task budget,
+# monthly budget, warn level) are read per call through `reader.config.effective` (reader.yaml plus the owner's
+# overrides), so a budget override applies to the next call without a worker restart; no oracle changed.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)

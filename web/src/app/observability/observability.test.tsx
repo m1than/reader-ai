@@ -194,7 +194,8 @@ describe('observability route (FR-UI-18)', () => {
 
   it('loads the page as a lazy chunk', () => {
     const routes = readFileSync(`${webRoot}src/app/routes.tsx`, 'utf8');
-    expect(routes).toMatch(/lazy\(\(\) => import\('\.\/observability\/ObservabilityPage'\)/);
+    // FR-UI-31: the lazy route loads its Russian catalogues with its chunk (withAreas).
+    expect(routes).toMatch(/lazy\(\s*withAreas\(\(\) => import\('\.\/observability\/ObservabilityPage'\)/);
     expect(routes).not.toMatch(/^import .*ObservabilityPage/m);
   });
 });

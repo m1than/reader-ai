@@ -248,7 +248,7 @@
       "required": ["stage"],
       "additionalProperties": false,
       "properties": {
-        "stage": { "enum": ["template", "fixture", "draft", "fact_check", "lab_verification", "adversarial_review", "revise", "findings"] },
+        "stage": { "enum": ["template", "fixture", "draft", "fact_check", "lab_verification", "adversarial_review", "revise", "findings", "revert"] },
         "input_sha256": { "$ref": "#/$defs/sha256" },
         "prompt_version": { "type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "$ref": "#/$defs/single_line" },
         "model": { "type": "string", "pattern": "^[A-Za-z0-9._:/-]{1,128}$", "$ref": "#/$defs/single_line" }

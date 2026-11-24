@@ -1,25 +1,21 @@
 // WEB-ACCOUNTS FR-ACCOUNTS-1..3: the owner's Sign-ups screen. Pending requests with Approve and Reject (Reject asks
 // first), approved sign-up accounts with Disable (asks first; permanent in the product). Every change is one click on
-// the row's own button (INV-ACCOUNTS-1); names reach the DOM as text only (INV-ACCOUNTS-2). Messages come from the
-// fixed table below, never from a server response.
+// the row's own button (INV-ACCOUNTS-1); names reach the DOM as text only (INV-ACCOUNTS-2). Messages come from this
+// area's fixed catalogue (messages.en.ts, messages.ru.ts; WEB-UI FR-UI-30), never from a server response.
 import { Button } from '@acme/ui/button';
 import { Skeleton } from '@acme/ui/skeleton';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { ApiError } from '../app/api';
 import { useServices } from '../app/context';
+import { interleave, textLang, useLocale, useT, type T } from '../ui/i18n';
 import { SIGNUPS_KEY, type PendingSignup, type SignupAccount, type SignupAction, type SignupsApi } from './api';
+import en from './messages.en';
 
-const MESSAGES = {
-  reauth_required: 'Sign in again to approve or reject (required every 10 minutes for these actions).',
-  not_found: 'This request is no longer waiting.',
-  unreachable: 'Could not reach reader-ai. Try again.',
-  failed: 'Something went wrong. Try again.',
-} as const;
-type Problem = keyof typeof MESSAGES;
+type Problem = 'reauth_required' | 'not_found' | 'unreachable' | 'failed';
+type AccountsT = T<typeof en>;
 
 const REAUTH_URL = '/api/auth/signin?next=/signups';
-const DONE: Record<SignupAction, string> = { approve: 'approved', reject: 'rejected', disable: 'disabled' };
 
 const problemOf = (e: unknown): Problem | null => {
   if (!(e instanceof ApiError)) return 'unreachable';
@@ -30,17 +26,18 @@ const problemOf = (e: unknown): Problem | null => {
   return 'failed';
 };
 
-const locale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
+const navigatorLocale = () => (typeof navigator !== 'undefined' && navigator.language) || 'en';
 
-/** "3 hours ago" from an ISO time; the exact time stays in the `<time datetime>` attribute. */
-export const relativeTime = (iso: string, now: number = Date.now()): string => {
+/** "3 hours ago" from an ISO time, in the formatting locale (WEB-UI FR-UI-30); the exact time stays in the
+ * `<time datetime>` attribute. */
+export const relativeTime = (iso: string, now: number = Date.now(), locale: string = navigatorLocale()): string => {
   const seconds = Math.round((Date.parse(iso) - now) / 1000);
   const units: Array<[Intl.RelativeTimeFormatUnit, number]> = [
     ['day', 86400],
     ['hour', 3600],
     ['minute', 60],
   ];
-  const fmt = new Intl.RelativeTimeFormat(locale(), { numeric: 'auto' });
+  const fmt = new Intl.RelativeTimeFormat(locale, { numeric: 'auto' });
   for (const [unit, size] of units) if (Math.abs(seconds) >= size) return fmt.format(Math.round(seconds / size), unit);
   return fmt.format(0, 'minute');
 };
@@ -50,9 +47,11 @@ type RowProps = {
   kind: 'pending' | 'account';
   signups: SignupsApi;
   onDone: (row: PendingSignup | SignupAccount, action: SignupAction) => Promise<void>;
+  t: AccountsT;
+  locale: string;
 };
 
-function Row({ row, kind, signups, onDone }: RowProps) {
+function Row({ row, kind, signups, onDone, t, locale }: RowProps) {
   const [confirming, setConfirming] = useState<SignupAction | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
@@ -79,51 +78,54 @@ function Row({ row, kind, signups, onDone }: RowProps) {
   };
 
   const disabled = 'disabled' in row && row.disabled;
-  const confirmText =
-    confirming === 'reject'
-      ? `Reject ${handle}? The request is deleted and the handle becomes free.`
-      : `Disable ${handle}? Their sessions end and they can no longer sign in. This cannot be undone here.`;
+  const confirmText = confirming === 'reject' ? t('confirm.reject', { handle }) : t('confirm.disable', { handle });
+  const time = <time dateTime={row.requested_at}>{relativeTime(row.requested_at, Date.now(), locale)}</time>;
 
   return (
     <li className="signup-row" data-row={row.id}>
       <div className="signup-who">
         <span className="signup-handle">{handle}</span>
-        <span className="signup-name">{row.display_name}</span>
-        <span className="signup-time muted">
-          {kind === 'account' ? 'Requested ' : ''}
-          <time dateTime={row.requested_at}>{relativeTime(row.requested_at)}</time>
+        <span className="signup-name" lang={textLang(row.display_name)}>
+          {row.display_name}
         </span>
+        <span className="signup-time muted">{kind === 'account' ? interleave(t('requested'), { when: time }) : time}</span>
       </div>
       {confirming ? (
         <div className="signup-confirm">
           <p>{confirmText}</p>
           <div className="state-actions">
             <Button variant="outline" color="danger" size="sm" onClick={() => void run(confirming)}>
-              {confirming === 'reject' ? 'Reject' : 'Disable'}
+              {confirming === 'reject' ? t('reject') : t('disable')}
             </Button>
             <Button ref={cancelRef} variant="ghost" color="neutral" size="sm" onClick={() => setConfirming(null)}>
-              Cancel
+              {t('cancel')}
             </Button>
           </div>
         </div>
       ) : kind === 'pending' ? (
         <div className="signup-actions state-actions">
-          <Button data-first="pending" size="sm" aria-label={`Approve ${handle}`} disabled={busy} onClick={() => void run('approve')}>
-            Approve
+          <Button data-first="pending" size="sm" aria-label={t('approve.label', { handle })} disabled={busy} onClick={() => void run('approve')}>
+            {t('approve')}
           </Button>
           <Button
             variant="outline"
             color="danger"
             size="sm"
-            aria-label={`Reject ${handle}`}
+            aria-label={t('reject.label', { handle })}
             disabled={busy}
             onClick={() => setConfirming('reject')}
           >
-            Reject
+            {t('reject')}
           </Button>
         </div>
       ) : disabled ? (
-        <span className="signup-disabled muted">Disabled</span>
+        <div className="signup-actions state-actions">
+          <span className="signup-disabled muted">{t('disabled')}</span>
+          {/* WEB-MANAGE paired change (ADR-0037): Enable restores access; Disable undoes it. */}
+          <Button variant="outline" color="neutral" size="sm" aria-label={t('enable.label', { handle })} disabled={busy} onClick={() => void run('enable')}>
+            {t('enable')}
+          </Button>
+        </div>
       ) : (
         <div className="signup-actions state-actions">
           <Button
@@ -131,30 +133,30 @@ function Row({ row, kind, signups, onDone }: RowProps) {
             variant="outline"
             color="danger"
             size="sm"
-            aria-label={`Disable ${handle}`}
+            aria-label={t('disable.label', { handle })}
             disabled={busy}
             onClick={() => setConfirming('disable')}
           >
-            Disable
+            {t('disable')}
           </Button>
         </div>
       )}
       {problem ? (
         <div className="signup-problem error">
-          <p>{MESSAGES[problem]}</p>
-          {problem === 'reauth_required' ? <a href={REAUTH_URL}>Sign in again</a> : null}
+          <p>{t(`problem.${problem}`)}</p>
+          {problem === 'reauth_required' ? <a href={REAUTH_URL}>{t('sign_in_again')}</a> : null}
         </div>
       ) : null}
     </li>
   );
 }
 
-function Loading() {
+function Loading({ t }: { t: AccountsT }) {
   return (
     <div>
       {/* FR-UI-11: a status with hidden text, no aria-busy. */}
       <p role="status" className="visually-hidden">
-        Loading sign-ups
+        {t('loading')}
       </p>
       <div aria-hidden="true">
         <Skeleton.Root>
@@ -169,6 +171,8 @@ function Loading() {
 export function SignupsPage() {
   const { signups } = useServices();
   if (!signups) throw new Error('signups client missing');
+  const t = useT('accounts', en);
+  const { formatLocale } = useLocale();
   const client = useQueryClient();
   const q = useQuery({ queryKey: SIGNUPS_KEY, queryFn: signups.list, staleTime: Infinity });
   const [announcement, setAnnouncement] = useState('');
@@ -180,7 +184,7 @@ export function SignupsPage() {
     const selector = `[data-first="${action === 'disable' ? 'account' : 'pending'}"]`;
     const firsts = () => [...(listRef.current?.querySelectorAll<HTMLElement>(selector) ?? [])];
     const index = firsts().findIndex((el) => el.closest('[data-row]')?.getAttribute('data-row') === row.id);
-    setAnnouncement(`@${row.handle} ${DONE[action]}.`);
+    setAnnouncement(t(`done.${action}`, { handle: `@${row.handle}` }));
     await client.invalidateQueries({ queryKey: SIGNUPS_KEY });
     window.setTimeout(() => {
       const now = firsts();
@@ -195,16 +199,16 @@ export function SignupsPage() {
   return (
     <section className="page signups" aria-labelledby="signups-title">
       <h1 id="signups-title" ref={headingRef} tabIndex={-1}>
-        Sign-ups
+        {t('title')}
       </h1>
-      <p className="lead">New accounts wait here until you approve them. Approved accounts can sign in as learners.</p>
+      <p className="lead">{t('lead')}</p>
       {q.isPending ? (
-        <Loading />
+        <Loading t={t} />
       ) : q.isError ? (
         <div className="error state-actions">
-          <p>The sign-ups could not be loaded.</p>
+          <p>{t('load_failed')}</p>
           <Button variant="outline" color="neutral" onClick={() => void q.refetch()}>
-            Retry
+            {t('retry')}
           </Button>
         </div>
       ) : (
@@ -212,30 +216,27 @@ export function SignupsPage() {
           <p role="status" className="signups-announce">
             {announcement}
           </p>
-          <h2 id="signups-waiting">Waiting for approval</h2>
+          <h2 id="signups-waiting">{t('waiting')}</h2>
           {sortedPending.length === 0 ? (
-            <p className="muted">No sign-ups are waiting.</p>
+            <p className="muted">{t('waiting.none')}</p>
           ) : (
             <ul role="list" aria-labelledby="signups-waiting" className="signup-list">
               {sortedPending.map((row) => (
-                <Row key={row.id} row={row} kind="pending" signups={signups} onDone={onDone} />
+                <Row key={row.id} row={row} kind="pending" signups={signups} onDone={onDone} t={t} locale={formatLocale} />
               ))}
             </ul>
           )}
-          <h2 id="signups-accounts">Accounts</h2>
+          <h2 id="signups-accounts">{t('accounts')}</h2>
           {q.data.accounts.length === 0 ? (
-            <p className="muted">No approved sign-up accounts.</p>
+            <p className="muted">{t('accounts.none')}</p>
           ) : (
             <ul role="list" aria-labelledby="signups-accounts" className="signup-list">
               {q.data.accounts.map((row) => (
-                <Row key={row.id} row={row} kind="account" signups={signups} onDone={onDone} />
+                <Row key={row.id} row={row} kind="account" signups={signups} onDone={onDone} t={t} locale={formatLocale} />
               ))}
             </ul>
           )}
-          <p className="muted signups-help">
-            A sign-up account that loses its passkey cannot recover it. Disable it; the person can sign up again with
-            another handle.
-          </p>
+          <p className="muted signups-help">{t('help')}</p>
         </div>
       )}
     </section>

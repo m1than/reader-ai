@@ -25,7 +25,8 @@ async def page_chars(
         await conn.execute(
             text(
                 "SELECT i.id, m.page_count FROM materials m JOIN ingests i ON i.material_id = m.id"
-                " WHERE m.owner_id = :o AND m.sha256 = :s"
+                # FR-PLAN-20: a deleted material is not planned (404).
+                " WHERE m.owner_id = :o AND m.sha256 = :s AND m.deleted_at IS NULL"
             ),
             {"o": owner_id, "s": material_sha256},
         )
@@ -58,7 +59,9 @@ async def lesson_chars(conn: AsyncConnection, owner_id: uuid.UUID, lesson_id: uu
                 "SELECT i.id, p.pdf_first, p.pdf_last FROM course_plans p"
                 " JOIN materials m ON m.owner_id = p.owner_id AND m.sha256 = p.material_sha256"
                 " JOIN ingests i ON i.material_id = m.id AND i.owner_id = p.owner_id"
+                " JOIN lessons l ON l.id = p.lesson_id JOIN courses c ON c.id = l.course_id"
                 " WHERE p.owner_id = :o AND p.lesson_id = :l"
+                " AND l.deleted_at IS NULL AND c.deleted_at IS NULL"  # SRV-LESSON INV-LESSON-22
             ),
             {"o": owner_id, "l": lesson_id},
         )
@@ -111,6 +114,52 @@ async def stored(conn: AsyncConnection, owner_id: uuid.UUID, plan_course_id: str
         )
     ).first()
     return None if row is None else Stored(*row)
+
+
+@dataclass(frozen=True)
+class CourseState:
+    course_id: uuid.UUID
+    plan_course_id: str
+    material_sha256: str
+    deleted: bool
+    archived: bool
+
+
+async def course_state(
+    conn: AsyncConnection,
+    owner_id: uuid.UUID,
+    *,
+    plan_course_id: str | None = None,
+    course_id: uuid.UUID | None = None,
+) -> CourseState | None:
+    """FR-PLAN-20: the owner's study-plan course (by plan id or course id), deleted or archived or neither."""
+    row = (
+        await conn.execute(
+            text(
+                "SELECT s.course_id, s.plan_course_id, s.material_sha256, c.deleted_at IS NOT NULL,"
+                " c.archived_at IS NOT NULL FROM study_plans s JOIN courses c ON c.id = s.course_id"
+                " WHERE s.owner_id = :o AND (s.plan_course_id = :p OR s.course_id = :c)"
+            ),
+            {"o": owner_id, "p": plan_course_id, "c": course_id},
+        )
+    ).first()
+    return None if row is None else CourseState(*row)
+
+
+async def first_active(
+    conn: AsyncConnection, owner_id: uuid.UUID, lesson_ids: list[uuid.UUID]
+) -> uuid.UUID | None:
+    """FR-PIPELINE-22: compile-first skips skipped and deleted lessons; the first remaining one by ordinal."""
+    value: uuid.UUID | None = (
+        await conn.execute(
+            text(
+                "SELECT id FROM lessons WHERE owner_id = :o AND id = ANY(CAST(:ids AS uuid[]))"
+                " AND skipped_at IS NULL AND deleted_at IS NULL ORDER BY ordinal LIMIT 1"
+            ),
+            {"o": owner_id, "ids": lesson_ids},
+        )
+    ).scalar()
+    return value
 
 
 async def course_of(conn: AsyncConnection, owner_id: uuid.UUID, plan_course_id: str) -> uuid.UUID | None:

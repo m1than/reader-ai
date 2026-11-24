@@ -28,6 +28,13 @@ export const MarkIcon = (p: IconProps) => (
   </svg>
 );
 
+/** A done lesson (WEB-MANAGE FR-MANAGE-4). */
+export const CheckIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="m3.5 8.5 3 3 6-7" />
+  </svg>
+);
+
 export const MenuIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />

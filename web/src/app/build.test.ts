@@ -1,4 +1,4 @@
-// @trace FR-UI-9 NFR-UI-1 FR-UI-11 NFR-NOTEBOOK-1
+// @trace FR-UI-9 NFR-UI-1 FR-UI-11 NFR-NOTEBOOK-1 FR-UI-30
 // One production build for the build checks, WEB-UI's initial-chunk budget and WEB-NOTEBOOK's editor-chunk budget
 // (design pass review: shared build). `sourcemap: 'hidden'` writes maps without a sourceMappingURL comment, so the
 // measured bytes are the served ones.
@@ -110,6 +110,20 @@ describe('lazy menu, drawer and icons (FR-UI-11, design pass review B1)', () => 
     expect(sources.length).toBeGreaterThan(10);
     expect(sources.filter((s) => /@acme\/ui\/dist\/esm\/(menu|drawer|icon)\.js$/.test(s))).toEqual([]);
     expect(sources.filter((s) => /node_modules\/@(codemirror|lezer)\//.test(s))).toEqual([]);
+  });
+});
+
+describe('lazy Russian catalogues and management layer (FR-UI-30)', () => {
+  it('lists no messages.ru module and no web/src/manage module other than the slot stubs in an initial chunk', () => {
+    const initial = initialChunks();
+    const sources = initial.flatMap(sourcesOf);
+    expect(sources.length).toBeGreaterThan(10);
+    expect(sources.filter((s) => /messages\.ru\.ts$/.test(s))).toEqual([]);
+    expect(sources.filter((s) => /src\/manage\//.test(s) && !/src\/manage\/slot\.tsx$/.test(s))).toEqual([]);
+    // The English catalogue of the shell is static; the Russian one exists, in a lazy chunk.
+    expect(sources.some((s) => /src\/app\/messages\.en\.ts$/.test(s))).toBe(true);
+    const assets = readdirSync(join(outDir, 'assets')).filter((f) => f.endsWith('.js')).map((f) => `assets/${f}`);
+    expect(assets.some((a) => sourcesOf(a).some((s) => /src\/app\/messages\.ru\.ts$/.test(s)))).toBe(true);
   });
 });
 
