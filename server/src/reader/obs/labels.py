@@ -179,9 +179,21 @@ LESSON_JOB_SQL: Final = (
     " ORDER BY r.created_at DESC, r.id DESC LIMIT 1)"
     " ORDER BY (k.args->>'stage' = 'revise') DESC, k.created_at DESC, k.job_id DESC LIMIT 1"
 )
-ANSWER_JOB_SQL: Final = (
+# Fallback (code review round 2): a run that stopped before finishing has no final_sha256, yet its draft or
+# revise step may have produced the labelled revision; that step's own job, newest run first.
+LESSON_STEP_JOB_SQL: Final = (
+    "SELECT k.job_id, k.key FROM compile_steps s JOIN compile_runs r ON r.id = s.run_id AND r.owner_id = :o"
+    " JOIN job_keys k ON k.kind = 'pipeline.stage' AND k.job_id IS NOT NULL"
+    " AND k.args->>'run_id' = r.id::text AND k.args->>'step' = s.step::text"
+    " WHERE r.lesson_id = :tid AND s.owner_id = :o AND s.stage IN ('revise', 'draft') AND :rev <> ''"
+    " AND s.output_sha256 = :rev"
+    " ORDER BY r.created_at DESC, r.id DESC, s.step DESC, k.created_at DESC, k.job_id DESC LIMIT 1"
+)
+ANSWER_JOB_SQL: Final = (  # the question must be the label owner's (owner-scoped, code review round 2)
     "SELECT k.job_id, k.key FROM job_keys k WHERE k.kind = 'tutor.answer' AND k.job_id IS NOT NULL"
-    " AND k.args->>'question_id' = CAST(:tid AS text) ORDER BY k.created_at DESC, k.job_id DESC LIMIT 1"
+    " AND k.args->>'question_id' = CAST(:tid AS text)"
+    " AND EXISTS (SELECT 1 FROM tutor_questions q WHERE q.id = CAST(:tid AS uuid) AND q.owner_id = :o)"
+    " ORDER BY k.created_at DESC, k.job_id DESC LIMIT 1"
 )
 SAVE_SQL: Final = "UPDATE owner_labels SET assessment_id = :a WHERE id = :id AND revision = :r"
 
@@ -196,7 +208,10 @@ async def labelled_job(conn: Any, row: Any) -> Any:
     """The (job_id, key) of the labelled thing's traced job, or None (FR-OBS-24 c)."""
     params = {"tid": str(row.target_id), "o": row.owner_id, "rev": row.lesson_revision_sha256 or ""}
     sql = LESSON_JOB_SQL if row.target == "lesson" else ANSWER_JOB_SQL
-    return (await conn.execute(text(sql), params)).first()
+    found = (await conn.execute(text(sql), params)).first()
+    if found is None and row.target == "lesson":  # a run that stopped before finishing
+        found = (await conn.execute(text(LESSON_STEP_JOB_SQL), params)).first()
+    return found
 
 
 async def handle(args: LabelArgs, conn: Any, ctx: Any) -> None:

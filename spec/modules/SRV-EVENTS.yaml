@@ -387,13 +387,18 @@ requirements:
       optional hook `after_end(engine, payload, outcome)` (code review of 8466329): the wrapper calls it after
       the transaction that records the key's `succeeded` or `dead` outcome has committed, on every path that
       records one (the run's own, the judge's, a lost run's count, and the sweep's stalled and orphaned counts),
-      never inside that transaction; an exception from it is logged as `after_end failed: kind=<kind>
+      never inside that transaction (each path sets its own "ended dead" flag only after its transaction block
+      has exited cleanly, from that iteration's own count, never from the sweep report's list; code review round
+      2, R2-3); an exception from it is logged as `after_end failed: kind=<kind>
       outcome=<outcome> error=<class>` and never changes the recorded outcome. The pipeline and import kinds use it
       to count a run's end and enqueue `obs.runs` (SRV-PIPELINE FR-PIPELINE-18, SRV-INGEST FR-INGEST-26), and
       `search.embed` for its late end (SRV-OBS FR-OBS-20 d). Tests: [unit] the catalogue lists the
-      kinds in KIND_MODULES order with exactly these declarations; a `traced: false` kind opens no root span; [db]
+      kinds in KIND_MODULES order with exactly these declarations; a `traced: false` kind opens no root span and
+      its handler sees no trace context; [db]
       the periodic entry enqueues one `obs.health` per slot; `after_end` runs after the succeeded and the dead
-      outcome have committed, and a raising `after_end` leaves the outcome recorded and logs the line.
+      outcome have committed, and a raising `after_end` leaves the outcome recorded and logs the line; a lost
+      run, a stalled job and an orphaned key that each end dead call `after_end` exactly once (and a lost run
+      that is enqueued again, not dead, never calls it).
   # Amendment (2026-11-24, V/manage, WEB-MANAGE; header note above `audit_actions`).
   - id: FR-EVENTS-30
     text: >-

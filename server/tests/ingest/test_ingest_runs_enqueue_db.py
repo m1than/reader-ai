@@ -118,3 +118,17 @@ async def test_a_failing_enqueue_leaves_the_import_succeeded(
         _, enqueued, outcome = await _import(pg, tmp_path, monkeypatch, fail=True)
     assert enqueued == [] and outcome == "succeeded"
     assert any("obs runs_enqueue_failed kind=ingest" in r.getMessage() for r in caplog.records)
+
+
+async def test_a_dead_import_enqueues_nothing(pg: Pg, tmp_path: Path,
+                                              monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-INGEST-26 (code review round 2): the hook of a dead import, even for a material whose ingest exists,
+    enqueues nothing (a dead import's own rows rolled back; it has no Run)."""
+    ingest_jobs = need("reader.ingest.jobs")
+
+    async def inside(w: Any, ingest_id: Any) -> None:
+        payload = json.loads(await w.scalar("SELECT args::text FROM job_keys WHERE kind = 'ingest.import'"))
+        await ingest_jobs.after_end(w.engine, payload, "dead")
+
+    _, enqueued, _ = await _import(pg, tmp_path, monkeypatch, inside=inside)
+    assert [e[1]["end"] for e in enqueued] == [1]  # the import's own end only, none from the dead call

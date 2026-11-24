@@ -153,15 +153,17 @@ async def sync(s: Snapshot, client: httpx.AsyncClient) -> str:
         )
         run_id = str(made["run"]["info"]["run_id"])
         have: dict[str, str] = {}
+        prior = 0
     else:
         run_id = str(found["info"]["run_id"])
         have = _kv((found.get("data") or {}).get("params"))
-    tags = {
-        **s.tags,
-        "reader.outcome": s.outcome,
-        "reader.ends": str(s.end),
-        "reader.snapshot_at": s.snapshot_at,
-    }
+        ends_tag = _kv((found.get("data") or {}).get("tags")).get("reader.ends", "0")
+        prior = int(ends_tag) if ends_tag.isdigit() else 0
+    # `reader.ends` never moves backwards: an older end's job that runs late (a retry) keeps the newer end's
+    # tags; its metrics still land at their own step (FR-OBS-20 c).
+    tags = {"reader.ends": str(max(prior, s.end))}
+    if s.end >= prior:
+        tags = {**s.tags, "reader.outcome": s.outcome, **tags, "reader.snapshot_at": s.snapshot_at}
     await request(
         client,
         "POST",
@@ -184,12 +186,13 @@ async def sync(s: Snapshot, client: httpx.AsyncClient) -> str:
             "/api/2.0/mlflow/traces/link-to-run",
             {"trace_ids": ids[start : start + LINK_BATCH], "run_id": run_id},
         )
-    await request(
-        client,
-        "POST",
-        "/api/2.0/mlflow/runs/update",
-        {"run_id": run_id, "status": s.status, "end_time": s.end_ms},
-    )
+    if s.end >= prior:  # a late older end never rewinds the Run's status or end time
+        await request(
+            client,
+            "POST",
+            "/api/2.0/mlflow/runs/update",
+            {"run_id": run_id, "status": s.status, "end_time": s.end_ms},
+        )
     await request(
         client,
         "POST",

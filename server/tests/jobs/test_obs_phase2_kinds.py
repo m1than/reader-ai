@@ -57,15 +57,28 @@ def test_the_health_slot_is_the_time_truncated_to_30_minutes() -> None:
 
 @pytest.mark.anyio
 async def test_an_untraced_kind_opens_no_root_span(pg: Pg) -> None:
-    untraced = dataclasses.replace(effect_kind(), traced=False)
+    """Enqueued from inside a live span, an untraced kind still carries no trace context, and its handler runs
+    with no valid current span (code review round 2)."""
+    from opentelemetry import trace
+
+    seen: list[bool] = []
+    base = effect_kind()
+
+    async def handler(args: Any, conn: Any, ctx: Any) -> None:
+        seen.append(trace.get_current_span().get_span_context().is_valid)
+        await base.handler(args, conn, ctx)
+
+    untraced = dataclasses.replace(base, traced=False, handler=handler)
     with obs_setup("worker") as (handle, memory):
         async with jobs_env(pg, kinds=[untraced]) as env:
-            await env.jobs.enqueue(KIND, {"name": "u"})
+            with require("reader.obs").tracer().start_as_current_span("caller"):
+                await env.jobs.enqueue(KIND, {"name": "u"})
             (job_args,) = [r[0] for r in await env.rows("SELECT args FROM procrastinate_jobs")]
             await env.work()
             assert await env.effects("u") == 1
             spans: list[Any] = finished(handle, memory)
-    assert "trace" not in job_args  # no trace context passed
+    assert "trace" not in job_args  # no trace context passed, though the caller had one
+    assert seen == [False]
     assert [s for s in spans if s.name == f"job {KIND}"] == []
 
 
@@ -99,6 +112,77 @@ async def test_after_end_runs_after_commit_and_never_changes_the_outcome(pg: Pg,
     assert sorted(lines) == [f"after_end failed: kind={KIND} outcome={o} error=RuntimeError"
                              for o in ("dead", "succeeded")]
     assert not any("hook-secret-message" in r.getMessage() for r in caplog.records)
+
+
+def _hooked(max_attempts: int, handler: Any = None) -> tuple[Any, list[tuple[str, str, Any]]]:
+    """The test kind with an `after_end` that records (name, outcome, the key's committed outcome)."""
+    from sqlalchemy import text
+
+    calls: list[tuple[str, str, Any]] = []
+
+    async def hook(engine: Any, payload: Any, outcome: str) -> None:
+        async with engine.connect() as conn:
+            row = (await conn.execute(text("SELECT outcome FROM job_keys WHERE args->>'name' = :n"),
+                                      {"n": payload["name"]})).scalar()
+        calls.append((payload["name"], outcome, row))
+
+    kind = dataclasses.replace(effect_kind(max_attempts=max_attempts), after_end=hook)
+    if handler is not None:
+        kind = dataclasses.replace(kind, handler=handler)
+    return kind, calls
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(("attempts", "want"), [(1, [("lost", "dead", "dead")]), (3, [])])
+async def test_a_lost_run_calls_after_end_once_when_its_count_ends_it_dead(
+    pg: Pg, attempts: int, want: list[Any]
+) -> None:
+    """FR-EVENTS-32, R2-3: the lost-run path (the run's own session died); re-enqueued instead → no call."""
+    from sqlalchemy import text
+
+    from .test_jobs_db import _claim, _run_claimed
+
+    async def kills_own_session(args: Any, conn: Any, ctx: Any) -> None:
+        await conn.execute(text("SELECT pg_terminate_backend(pg_backend_pid())"))
+
+    kind, calls = _hooked(attempts, kills_own_session)
+    async with jobs_env(pg, kinds=[kind]) as env:
+        await env.jobs.enqueue(KIND, {"name": "lost"})
+        job = await _claim(env)
+        assert await _run_claimed(env, kind, job) == "session_lost"
+    assert calls == want
+
+
+@pytest.mark.anyio
+async def test_a_stalled_job_that_ends_dead_calls_after_end_once(pg: Pg) -> None:
+    """FR-EVENTS-32, R2-3: the sweep's stalled path; a second sweep calls nothing more."""
+    kind, calls = _hooked(1)
+    async with jobs_env(pg, kinds=[kind]) as env:
+        await env.jobs.enqueue(KIND, {"name": "s"})
+        await env.stall_next()
+        report = await env.jobs.sweep()
+        assert env.key("s") in report.dead
+        await env.jobs.sweep()
+    assert calls == [("s", "dead", "dead")]
+
+
+@pytest.mark.anyio
+async def test_an_orphaned_key_that_ends_dead_calls_after_end_once(pg: Pg) -> None:
+    """FR-EVENTS-32, R2-3: the sweep's reconcile path (a key with no live job, counted `orphaned`)."""
+    from .test_jobs_db import _failed
+
+    kind, calls = _hooked(1)
+    async with jobs_env(pg, kinds=[kind]) as env:
+        await env.jobs.enqueue(KIND, {"name": "o"})
+        job = await env.stall_next()
+        await env.app.job_manager.finish_job(job, _failed(), delete_job=False)  # no live job, no outcome
+        await env.age_keys()
+        report = await env.jobs.sweep()
+        assert env.key("o") in report.dead
+        assert (await env.key_row("o")).error_code == "orphaned"
+        await env.age_keys()
+        await env.jobs.sweep()
+    assert calls == [("o", "dead", "dead")]
 
 
 @pytest.mark.anyio

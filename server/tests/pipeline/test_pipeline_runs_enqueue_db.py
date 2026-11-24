@@ -2,9 +2,10 @@
 with `schedule_in` 60 s after its transaction commits; a failing enqueue never changes the run (INV-OBS-3). Only
 the step that ended the run counts an end; a resumed run ends again with end 2; a cancel counts its own end. The
 `obs.runs` handler against the real ledger: its snapshot (FINISHED, FAILED at the last step's end, KILLED), two
-concurrent ends serialised by the advisory lock, and no request with tracing off (SRV-OBS FR-OBS-20).
+concurrent ends serialised by the advisory lock, and no request with tracing off (SRV-OBS FR-OBS-20). The
+ending-step rule case by case, and the label mirror's lookup for a run that stopped before finishing (FR-OBS-24).
 
-@trace FR-PIPELINE-18 FR-OBS-20 INV-OBS-3
+@trace FR-PIPELINE-18 FR-OBS-20 FR-OBS-24 INV-OBS-3
 """
 
 from __future__ import annotations
@@ -166,6 +167,66 @@ async def test_a_failed_run_ends_at_its_last_steps_end(pg: Pg, tmp_path: Path,
     snap = got["snap"]
     assert (snap.status, snap.outcome) == ("FAILED", "failed")
     assert snap.end_ms == _ms(got["last"])  # its real end, not the time the job read it
+
+
+async def test_the_ending_step_rule_case_by_case(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """On a finished run: an earlier step's succeeded hook and a dead step's count nothing; the final step's
+    counts (the hook runs once per committed outcome, so a call is an end); on a cancelled run nothing counts."""
+    from reader.pipeline import jobs as pipeline_jobs
+
+    got: dict[str, Any] = {}
+
+    async def inside(env: Any, run: Any) -> None:
+        last = int(await env.scalar("SELECT max(step) FROM compile_steps WHERE run_id = :r", r=run))
+
+        async def end(step: int, outcome: str) -> int:
+            await pipeline_jobs.after_end(env.engine, {"run_id": str(run), "step": step, "stage": "x"}, outcome)
+            return int(await env.scalar("SELECT ends FROM compile_runs WHERE id = :r", r=run))
+
+        got["earlier"] = await end(last - 1, "succeeded")
+        got["dead"] = await end(last, "dead")
+        got["final"] = await end(last, "succeeded")
+        from sqlalchemy import text
+
+        async with env.engine.begin() as conn:
+            await conn.execute(text("UPDATE compile_runs SET cancelled_at = now() WHERE id = :r"), {"r": run})
+        got["cancelled"] = await end(last, "succeeded")
+
+    _, enqueued, _ = await _compile(pg, tmp_path, "clean-first-pass", monkeypatch, inside=inside)
+    assert got == {"earlier": 1, "dead": 1, "final": 2, "cancelled": 2}
+    assert [e[1]["end"] for e in enqueued] == [1, 2]
+
+
+async def test_a_stopped_runs_revision_is_labelled_through_its_draft_step(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """FR-OBS-24 (c), code review round 2: a run that stopped before finishing has no final_sha256, yet its draft
+    step produced the lesson's current revision; the mirror finds that step's own job."""
+    from reader.obs import labels
+
+    got: dict[str, Any] = {}
+
+    async def inside(env: Any, run: Any) -> None:
+        rev = await env.scalar("SELECT output_sha256 FROM compile_steps WHERE run_id = :r AND stage = 'draft'",
+                               r=run)
+        owner = await env.scalar("SELECT owner_id FROM compile_runs WHERE id = :r", r=run)
+        lesson = await env.scalar("SELECT lesson_id FROM compile_runs WHERE id = :r", r=run)
+        got["final"] = await env.scalar("SELECT final_sha256 FROM compile_runs WHERE id = :r", r=run)
+        got["draft_job"] = await env.scalar(
+            "SELECT job_id FROM job_keys WHERE kind = 'pipeline.stage' AND args->>'run_id' = :r"
+            " AND args->>'stage' = 'draft'", r=str(run))
+        async with env.engine.connect() as conn:
+            row = SimpleNamespace(target="lesson", target_id=lesson, owner_id=owner, lesson_revision_sha256=rev)
+            got["job"] = await labels.labelled_job(conn, row)
+            other = SimpleNamespace(target="lesson", target_id=lesson, owner_id=owner,
+                                    lesson_revision_sha256="0" * 64)
+            got["hand_edited"] = await labels.labelled_job(conn, other)
+
+    _, _, state = await _compile(pg, tmp_path, "invalid-fact-report-exhausts-attempts", monkeypatch,
+                                 inside=inside)
+    assert state == "stage_failed" and got["final"] is None
+    assert got["job"] is not None and got["job"].job_id == got["draft_job"]
+    assert got["hand_edited"] is None  # a revision no run produced has no trace
 
 
 async def test_tracing_off_the_handler_makes_no_request(pg: Pg, tmp_path: Path,

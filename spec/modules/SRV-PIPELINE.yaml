@@ -413,7 +413,11 @@ requirements:
       after commit; the step that sees the cancel counts nothing. Tests: [db] a finished and a failed run each enqueue exactly
       one `obs.runs` with end 1 after commit; a resumed run's second end enqueues end 2; a cancelled run enqueues
       end 1; a failing enqueue leaves the run's end recorded and logs the line; a raising `after_end` leaves the
-      step's outcome recorded.
+      step's outcome recorded; the ending-step rule pinned case by case (code review round 2): on a finished run
+      an earlier step's succeeded `after_end` and a dead step's count nothing, the final step's counts once and a
+      second call for it counts again only as a new end of a run that is still finished (the hook runs once per
+      committed outcome); on a cancelled run nothing counts; a run stopped before finishing labels its lesson
+      through the step that produced the revision (SRV-OBS FR-OBS-24 c).
   # Amendment (2026-11-24, V/manage, WEB-MANAGE): FR-PIPELINE-20..22; see the note at the end.
   # Code-review fixes (V/manage-fix-srv, 2026-11-24): FR-PIPELINE-20's tests gain the paused real step (B4), the
   # budget-refusal and budget-stopped cancel cases and owner scope on cancel and history (surviving mutants).

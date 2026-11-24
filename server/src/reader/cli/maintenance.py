@@ -305,16 +305,17 @@ STORE_FACTS: Final = (
 )
 
 
-def obs_doctor_lines(ctx: Ctx, model: Rendered) -> list[str]:
+def obs_doctor_lines(ctx: Ctx, model: Rendered, *, store_size: bool = True) -> list[str]:
     """FR-CLI-24: one line each for mlflow, rotel and jaeger from `docker inspect`, the store's size from
-    `docker system df -v` (host side, no worker mount), its journal mode, and the obs jobs' last runs."""
+    `docker system df -v` (host side, no worker mount; skipped with `store_size=False`, `reader status`
+    without `--obs`: that call takes seconds), its journal mode, and the obs jobs' last runs."""
     names = [f"{model.name}-{m}-1" for m in obs_store.MEMBERS if m in model.services]
     inspected = docker(ctx, "docker", "inspect", *names) if names else None
     try:
         inspect = json.loads(inspected.out) if inspected is not None and inspected.code == 0 else []
     except ValueError:
         inspect = []
-    df = docker(ctx, "docker", "system", "df", "-v", "--format", "json")
+    df = docker(ctx, "docker", "system", "df", "-v", "--format", "json") if store_size else None
     df_text = df.out.decode("utf-8", "replace") if df is not None and df.code == 0 else "{}"
     journal, fresh = None, None
     volume = _obs_volume(ctx, model)

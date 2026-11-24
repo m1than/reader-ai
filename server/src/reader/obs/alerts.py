@@ -115,19 +115,22 @@ def _sqlstate(failed: ProgrammingError) -> str | None:
     return str(code or getattr(cause, "sqlstate", None) or "") or None
 
 
+# FR-FRESH-3's task names and FR-FRESH-9's daily cap, mirrored: INV-FRESH-5 quarantines `reader.freshness` (no
+# module outside it imports it); a [unit] test keeps these equal to reader.freshness.params.
+FRESHNESS_TASKS: Final = ("freshness_scan", "freshness_web", "freshness_report")
+FRESHNESS_DAILY_CAP_USD: Final = Decimal("2.00")
+
+
 def subject(task: str) -> str:
     """The daily cap a task's spend counts against: the freshness tasks share FR-FRESH-9's one daily cap."""
-    from reader.freshness import params as freshness
-
-    return "freshness" if task in freshness.TASKS else task
+    return "freshness" if task in FRESHNESS_TASKS else task
 
 
 def daily_caps() -> dict[str, float]:
     """FR-AGENT-12's per-task daily caps, by subject: the tutor's and the freshness check's."""
-    from reader.freshness import params as freshness
     from reader.tutor import params as tutor
 
-    return {tutor.TASK: float(tutor.DAILY_CAP_USD), "freshness": float(freshness.DAILY_CAP_USD)}
+    return {tutor.TASK: float(tutor.DAILY_CAP_USD), "freshness": float(FRESHNESS_DAILY_CAP_USD)}
 
 
 async def stack(conn: Any) -> dict[str, dict[str, Any]]:

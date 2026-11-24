@@ -17,6 +17,7 @@ import httpx
 import pytest
 from auth_helpers import ORIGIN, bootstrap, bootstrap_token, client, ready_engine, scalar, settings_for
 from conftest import Pg
+from obs_helpers import import_material, load_yaml, plan, synthetic_spans
 from softauthn import SoftAuthenticator
 
 pytestmark = pytest.mark.anyio
@@ -46,8 +47,6 @@ def _as(app: Any, cookie: str | None) -> httpx.AsyncClient:
 
 
 def _result(**over: Any) -> dict[str, Any]:
-    from obs.conftest import load_yaml
-
     ids = [q["id"] for q in load_yaml(REPO / "spikes/embeddings-local/questions.yaml")["questions"]]
     sets = load_yaml(REPO / "spec/fixtures/SRV-OBS/phase2.yaml")["bench_sets"]
     excluded = set(sets["search-bench-v1"]["exclude"])
@@ -71,6 +70,12 @@ async def test_bench_upload_statuses_and_the_stored_row(pg: Pg, tmp_path: Path) 
         async with _as(app, cookies["ivan"]) as c:
             big = await c.post("/api/obs/bench", json={"set": V1 + " " * 262_144, "result": _result()})
             assert (big.status_code, big.json()) == (413, {"error": "too_large"})
+            big = await c.post("/api/obs/bench", json={"set": V1, "result": _result(pad=" " * 262_144)})
+            assert (big.status_code, big.json()) == (413, {"error": "too_large"})  # the result alone
+            for shape in ({"set": V1}, {"result": _result()}, {"set": V1, "result": _result(), "note": "x"},
+                          {"set": 1, "result": _result()}, []):  # exact keys, a string set, an object
+                r = await c.post("/api/obs/bench", json=shape)
+                assert (r.status_code, r.json()) == (400, {"error": "bad_request"}), shape
             r = await c.post("/api/obs/bench", json={"set": V1 + "\n# " + CANARY, "result": _result()})
             assert (r.status_code, r.json()) == (400, {"error": "set_not_pinned"})
             r = await c.post("/api/obs/bench", json={"set": V1, "result": _result(note=CANARY)})
@@ -95,7 +100,6 @@ async def test_bench_upload_statuses_and_the_stored_row(pg: Pg, tmp_path: Path) 
 
 
 async def test_labels_record_relabel_and_errors(pg: Pg, tmp_path: Path) -> None:
-    from pipeline.conftest import import_material, plan, synthetic_spans
     from reader.api.app import create_app
     from reader.pipeline import courses
 
@@ -113,9 +117,11 @@ async def test_labels_record_relabel_and_errors(pg: Pg, tmp_path: Path) -> None:
             assert (first.status_code, first.json()) == (200, {"revision": 1, "mirror": "off"})
             second = await c.post("/api/obs/labels", json={"target": "lesson", "id": lesson, "ok": True})
             assert second.json() == {"revision": 2, "mirror": "off"}
-            unknown = {"target": "lesson", "id": str(uuid.uuid4()), "ok": True}
-            missing = await c.post("/api/obs/labels", json=unknown)
-            assert (missing.status_code, missing.json()) == (404, {"error": "not_found"})
+            for target in ("lesson", "answer"):  # not the caller's (owner-scoped lookup, round 2): 404
+                unknown = {"target": target, "id": str(uuid.uuid4()), "ok": True}
+                missing = await c.post("/api/obs/labels", json=unknown)
+                assert (missing.status_code, missing.json()) == (404, {"error": "not_found"}), target
+            assert set(second.json()) == {"revision", "mirror"}  # exact keys
             for bad in ({"target": "course", "id": lesson, "ok": True},
                         {"target": "lesson", "id": lesson, "ok": "yes"},
                         {"target": "lesson", "id": lesson, "ok": True, "reason": CANARY},

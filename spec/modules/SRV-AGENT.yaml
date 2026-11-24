@@ -92,6 +92,9 @@
 # tests/agent/test_provider_db.py adds the [db] oracle: a lowered `budgets.monthly_usd` override refuses
 # `monthly_budget_exhausted` and a lowered task budget override refuses `task_budget_exhausted` on calls the file's
 # values allow, with nothing reserved; after the overrides are removed the same call succeeds.
+# Phase 2 code review round 2 (2026-11-24, V/p2-fix3): a provider built without an engine (the freshness agent
+# [image] check, whose ledger is in memory) reads the caps from reader.yaml alone (`file_settings`), since there
+# is no database holding overrides; a [unit] test pins it. No oracle loosened.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)

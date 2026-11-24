@@ -1092,7 +1092,9 @@ requirements:
       {ingest, ingest_id, 1 + the ingest's `search_embeds` rows} the same way (SRV-SEARCH's kind declares the
       `after_end` hook). Tests: [db] a
       succeeded import enqueues exactly one `obs.runs` {ingest, ingest_id, 1}, and its embed one with end 2; a
-      failing enqueue leaves the import succeeded and logs the line.
+      failing enqueue leaves the import succeeded and logs the line; a dead import enqueues nothing (code review
+      round 2: its rows rolled back with its run, so there is no ingest id and no Run; the dead key shows on
+      /observability's failures, declared).
   - id: FR-INGEST-30
     text: >-
       **Rename.** `POST /api/materials/{material_id}` with `{version, title}` on an imported material (no row or a

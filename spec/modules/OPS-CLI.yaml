@@ -448,7 +448,10 @@ requirements:
       restore-obs-premigrate; 11 `obs_restored_for_other_version` → the marker's version and the hint that the owner
       reverts the pin in git; 12 `obs_migration_failed` and 13 `obs_migration_finish_failed` → restore-obs-premigrate),
       which never overlap the restore command's 0..7. (e) `reader status` prints (a)'s obs lines when the
-      `observability` profile is recorded (`reader status --json`: the list `obs`), and `reader doctor --json` carries
+      `observability` profile is recorded (`reader status --json`: the list `obs`); `reader status` skips the
+      slow `docker system df -v` call (seconds on a large Docker store; code review round 2 of phase 2), so its
+      mlflow line says `store unknown` and it never prints `obs_store_large`, unless `reader status --obs` asks for
+      the store size; `reader doctor` always measures it. `reader doctor --json` carries
       each as an informational check `{name: obs, ok: true, detail: <line>}`, so the array's shape stays. Tests: [unit] the doctor and status lines from canned
       `docker inspect` / `docker system df -v` output, the 80 % warning; the backup and restore command sequences
       (argv) in order; restore-obs-premigrate's exit codes; `reader up`'s message per migrate code; [unit,

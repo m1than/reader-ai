@@ -806,6 +806,11 @@ requirements:
           end's and the params stay the first end's (a changed model or version key shows only in the tags of the
           job roots, FR-OBS-21, not in the Run's params; declared). The ledger snapshot is read once per job and
           never refreshed: a settle that lands after `reader.snapshot_at` shows at the next end only (declared).
+          `reader.ends` never moves backwards (code review round 2): a job whose `end` is below the Run's
+          `reader.ends` (an older end retried late) logs its metrics at its own step and links its traces, but
+          keeps the newer end's tags, status and end time. Every param, metric and tag key must be one VEC-OBS-5
+          declares for the kind (a `<stage>` suffix must be a declared stage): an unknown key fails the job before
+          any request.
       (d) Links the run's traces: `traces/search` in experiment 0 for `tag.reader.run_id` (compile) or
           `tag.reader.material_sha256` (ingest: the import job's root carries the material, not an ingest id;
           paired VEC-OBS-4 edit in `phase2_in_place_edits`) = the value, `max_results` 500 with `page_token`
@@ -966,8 +971,10 @@ requirements:
           `final_sha256` equals the row's `lesson_revision_sha256` (the lesson's current revision when labelled,
           `reader.lessons.store.current_sha256`), the newest such run by (created_at, id); in it the `revise`
           stage's job, or the `draft` stage's when the run has no `revise` (a first pass that converged), the
-          newest key by (created_at, job_id); a revision no compile run produced (edited by hand) has no trace, so
-          the job ends without a request (logged `obs label no_trace`); answer: the question's `tutor.answer` job
+          newest key by (created_at, job_id); when no run's `final_sha256` is that revision (a run that stopped
+          before finishing; code review round 2), the `draft` or `revise` step whose `output_sha256` is the
+          revision, newest run first, and that step's own job; a revision no compile run produced (edited by hand) has no trace, so
+          the job ends without a request (logged `obs label no_trace`); answer: the question's (the label owner's question only) `tutor.answer` job
           (newest by (created_at, job_id)); FR-OBS-5's derivation. A 404 from the GET or the POST follows FR-OBS-14's
           rule: transient while attempts remain, on the last attempt the job ends without a request (logged), never
           dead. It GETs the trace and looks for an assessment whose `assessment_name` is the
@@ -988,7 +995,11 @@ requirements:
       computed on each request from Postgres only (the api never reads MLflow):
       - `daily_spend_high`: per task (FR-AGENT-12's caps are per task), today's (UTC) spend of that task ≥ 80 % of
         its daily cap; subject = the task (`tutor`: SRV-TUTOR's daily cap), or `freshness` for the three
-        freshness tasks summed against FR-FRESH-9's one daily cap (code review round 1 of phase 2);
+        freshness tasks summed against FR-FRESH-9's one daily cap (code review round 1 of phase 2). The three
+        task names and the cap are mirrored in `reader.obs.alerts` as constants, never imported from
+        `reader.freshness` (SRV-FRESH INV-FRESH-5's quarantine: no module outside the package imports it); a
+        [unit] test, which may import the package, keeps the mirror equal to `reader.freshness.params` (full
+        gate on a0443d1);
       - `run_over_cap`: an open run's spend ≥ 80 % of its run cap; subject = the run id;
       - `dead_jobs`: dead jobs in the window > 0; subject = the kind;
       - `bench_regressed`: from `obs_bench_results` only, the newest upload's hit@10 (search) or grounded_share
@@ -1179,7 +1190,7 @@ requirements:
       `retention_days` and the key is not the running worker's). Bench Runs and
       datasets are kept (small: one Run and at most 40 records per upload; their record is Postgres). There is no
       VACUUM: SQLite reuses freed pages, and the size alert covers growth (review round 2, N6). Size:
-      `reader doctor`/`status` measure the `obs_mlflow` volume on the host (`docker system df -v` for the volume;
+      `reader doctor` (and `reader status --obs`; OPS-CLI FR-CLI-24 e) measure the `obs_mlflow` volume on the host (`docker system df -v` for the volume;
       no worker mount; the size includes `backup/pre-migrate.db`, at most one copy of the store) and print a
       warning `obs_store_large` at 80 % of `store_bytes_max` = 4 GiB. The 4 GiB is
       structural, not measured (round 9: a whole book plus 100 questions added 51.6 MB, 1.45 KB a span, so 30

@@ -303,7 +303,8 @@ def uploads(draw: Any) -> tuple[str, Any]:
             result[draw(st.sampled_from(["note", "summary", "question", "answer"]))] = draw(PROSE)
         elif edit == "row_field" and isinstance(result.get(rows), list) and result[rows]:
             row = result[rows][draw(st.integers(0, len(result[rows]) - 1))]
-            row[draw(st.sampled_from([*sorted(row), "text"]))] = draw(VALUES)
+            if isinstance(row, dict):  # an earlier set_key may have replaced a row with a scalar (R2-1)
+                row[draw(st.sampled_from([*sorted(row), "text"]))] = draw(VALUES)
         else:
             set_text = set_text + "\n# " + draw(PROSE)
     return set_text, result

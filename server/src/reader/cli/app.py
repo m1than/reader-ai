@@ -40,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     down.add_argument("--untrust", action="store_true", help="also remove every trusted local root")
     status = commands.add_parser("status", parents=[common], help="service health and watcher state")
     status.add_argument("--json", action="store_true")
+    status.add_argument("--obs", action="store_true", help="also measure the MLflow store size (slow)")
     watcher = commands.add_parser("watcher", help="the secret-delivery watcher")
     watcher_commands = watcher.add_subparsers(dest="watcher_command", required=True)
     watcher_commands.add_parser("status")
@@ -112,7 +113,7 @@ def main(argv: Sequence[str] | None = None, ctx: Ctx | None = None) -> int:
         case "down":
             return cmd_down(ctx, args.config, args.untrust)
         case "status":
-            return cmd_status(ctx, args.config, args.json)
+            return cmd_status(ctx, args.config, args.json, args.obs)
         case "watcher":
             return cmd_watcher_status(ctx) if args.watcher_command == "status" else cmd_watcher_stop(ctx)
         case "bootstrap":

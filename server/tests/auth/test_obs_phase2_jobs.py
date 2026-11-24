@@ -10,7 +10,6 @@ tracing off, a re-run reads the same stored row), and the routes' owner scoping,
 from __future__ import annotations
 
 import json
-import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -22,13 +21,12 @@ import pytest
 from auth_helpers import ORIGIN, bootstrap, bootstrap_token, client, ready_engine, scalar, settings_for
 from conftest import Pg
 from manage_helpers import course_for
+from obs_helpers import load_yaml, obs_setup
 from softauthn import SoftAuthenticator
 from sqlalchemy import text
 
 pytestmark = pytest.mark.anyio
 REPO = Path(__file__).resolve().parents[3]
-if str(REPO / "server" / "tests") not in sys.path:  # `obs.conftest` (obs_setup) when this file runs alone
-    sys.path.insert(0, str(REPO / "server" / "tests"))
 V1 = (REPO / "spikes/embeddings-local/questions.yaml").read_text(encoding="utf-8")
 PHASE2 = REPO / "spec/fixtures/SRV-OBS/phase2.yaml"
 # One owner per instance (FR-AUTH-1): another user's data (live-check's) stands for "not the caller's".
@@ -56,8 +54,6 @@ def _as(app: Any, cookie: str | None, origin: str = ORIGIN) -> httpx.AsyncClient
 
 
 def _result(rank: int | None = 1, chunk_chars: int = 1200) -> dict[str, Any]:
-    from obs.conftest import load_yaml
-
     ids = [q["id"] for q in load_yaml(REPO / "spikes/embeddings-local/questions.yaml")["questions"]]
     excluded = set(load_yaml(PHASE2)["bench_sets"]["search-bench-v1"]["exclude"])
     hit = rank is not None
@@ -156,7 +152,6 @@ async def test_a_label_is_for_the_current_revision_and_finds_its_run(pg: Pg, tmp
 
 
 async def test_the_label_handler_off_stale_and_saved(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
-    from obs.conftest import obs_setup
     from reader.obs import labels
 
     _, engine, _ = await _sessions(pg, tmp_path)
@@ -197,8 +192,71 @@ async def test_the_label_handler_off_stale_and_saved(pg: Pg, tmp_path: Path, mon
         await engine.dispose()
 
 
+async def test_a_relabel_during_the_mirror_keeps_the_older_jobs_id_out(
+    pg: Pg, tmp_path: Path, monkeypatch: Any
+) -> None:
+    """FR-OBS-24 (c), SAVE_SQL's guard (code review round 2): a job whose revision the row left while it
+    mirrored never stores its assessment id."""
+    from reader.obs import labels
+
+    _, engine, _ = await _sessions(pg, tmp_path)
+    try:
+        ivan = await scalar(engine, "SELECT id FROM users WHERE handle = 'ivan'")
+        _, lesson, sha = await course_for(engine, ivan, tmp_path)
+        async with engine.begin() as conn:
+            run = await _run(conn, ivan, lesson, sha, "2026-11-21T10:00:00Z")
+            await _stage_key(conn, run, "revise", 7, "2026-11-21T10:02:00Z")
+            await _label_row(conn, ivan, lesson, sha)
+        label_id = str(await scalar(engine, "SELECT id FROM owner_labels"))
+
+        async def mirror(label: Any, **kw: Any) -> str | None:
+            async with engine.begin() as other:  # the owner relabels while this job mirrors
+                await other.execute(text("UPDATE owner_labels SET revision = 2"))
+            return "a-1"
+
+        monkeypatch.setattr(labels, "mirror", mirror)
+        with obs_setup("worker"):
+            async with engine.begin() as conn:
+                await labels.handle(labels.LabelArgs(label_id=label_id, revision=1), conn,
+                                    SimpleNamespace(attempts=0))
+        assert await scalar(engine, "SELECT assessment_id FROM owner_labels") is None
+    finally:
+        await engine.dispose()
+
+
+async def test_an_answers_job_is_looked_up_for_the_owners_question_only(pg: Pg, tmp_path: Path) -> None:
+    """FR-OBS-24 (c), code review round 2: ANSWER_JOB_SQL is owner-scoped through the question."""
+    from types import SimpleNamespace as Row
+
+    from reader.obs import labels
+
+    _, engine, _ = await _sessions(pg, tmp_path)
+    try:
+        ivan = await scalar(engine, "SELECT id FROM users WHERE handle = 'ivan'")
+        other = await scalar(engine, "SELECT id FROM users WHERE handle = 'live-check'")
+        _, lesson, sha = await course_for(engine, ivan, tmp_path)
+        question = uuid.uuid4()
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "INSERT INTO tutor_questions (id, owner_id, lesson_id, revision_sha256, question, state)"
+                " VALUES (:q, :o, :l, :s, 'q', 'answered')"),
+                {"q": question, "o": ivan, "l": lesson, "s": sha})
+            await conn.execute(text(
+                "INSERT INTO job_keys (kind, key, args, job_id) VALUES ('tutor.answer', 'kq',"
+                " CAST(:a AS jsonb), 9)"), {"a": json.dumps({"question_id": str(question)})})
+        async with engine.connect() as conn:
+            def row(owner: Any) -> Any:
+                return Row(target="answer", target_id=question, owner_id=owner, lesson_revision_sha256=sha)
+
+            mine = await labels.labelled_job(conn, row(ivan))
+            theirs = await labels.labelled_job(conn, row(other))
+        assert mine is not None and mine.job_id == 9
+        assert theirs is None
+    finally:
+        await engine.dispose()
+
+
 async def test_the_bench_handler_off_then_stored_row(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
-    from obs.conftest import obs_setup
     from reader.obs import bench
 
     _, engine, _ = await _sessions(pg, tmp_path)
@@ -235,7 +293,6 @@ async def test_the_bench_handler_off_then_stored_row(pg: Pg, tmp_path: Path, mon
 
 
 async def test_routes_scope_by_owner_and_refuse_by_origin_and_session(pg: Pg, tmp_path: Path) -> None:
-    from obs.conftest import obs_setup
     from reader.api.app import create_app
     from reader.obs import bench
 

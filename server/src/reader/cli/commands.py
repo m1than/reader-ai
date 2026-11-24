@@ -289,7 +289,7 @@ def wait_healthy(ctx: Ctx, model: Rendered) -> bool:
 
 
 @guarded
-def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
+def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False, obs_store_size: bool = False) -> int:
     project, expected = project_name(ctx, config_path)
     if project is None:
         print("error: no project (run `reader up` first)", file=ctx.err)
@@ -311,7 +311,7 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "unknown"
     converting = ingest_watch.converter(data_dir) if data_dir else "unknown"
     overrides = _status_overrides(ctx, project, config_path)
-    obs = _status_obs(ctx, config_path)
+    obs = _status_obs(ctx, config_path, obs_store_size)
     if as_json:
         body: dict[str, Any] = {
             "project": project,
@@ -383,8 +383,9 @@ def _status_overrides(ctx: Ctx, project: str, config_path: Path) -> list[str]:
     return override_lines(ctx, project, config)
 
 
-def _status_obs(ctx: Ctx, config_path: Path) -> list[str]:
-    """FR-CLI-24 (e): the doctor's obs lines, when `reader up` recorded the observability profile."""
+def _status_obs(ctx: Ctx, config_path: Path, store_size: bool = False) -> list[str]:
+    """FR-CLI-24 (e): the doctor's obs lines, when `reader up` recorded the observability profile; the store
+    size (`docker system df -v`, slow) only with `reader status --obs`."""
     if "observability" not in recorded_profiles(ctx):
         return []
     try:
@@ -393,7 +394,7 @@ def _status_obs(ctx: Ctx, config_path: Path) -> list[str]:
         return []  # without the reader.yaml of `reader up` the stack's names cannot be rendered
     from reader.cli.maintenance import obs_doctor_lines  # maintenance imports this module
 
-    return obs_doctor_lines(ctx, project.model)
+    return obs_doctor_lines(ctx, project.model, store_size=store_size)
 
 
 # The DB password (FR-CLI-14) ------------------------------------------------------------------------------

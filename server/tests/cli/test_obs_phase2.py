@@ -258,6 +258,11 @@ def test_status_and_doctor_json_carry_the_obs_lines(tmp_path: Path, monkeypatch:
     with held_lock(world.ctx.run_dir):
         main(["status", "--config", str(config)], ctx=world.ctx)
     assert "obs mlflow: img-mlflow running" in world.out
+    assert "store unknown" in world.out
+    assert world.runner.argvs("docker", "system", "df") == []  # status skips the slow call (round 2)
+    with held_lock(world.ctx.run_dir):
+        main(["status", "--obs", "--config", str(config)], ctx=world.ctx)
+    assert len(world.runner.argvs("docker", "system", "df")) == 1  # only when asked
     world.ctx.out.seek(0)
     world.ctx.out.truncate()
     with held_lock(world.ctx.run_dir):
@@ -270,3 +275,4 @@ def test_status_and_doctor_json_carry_the_obs_lines(tmp_path: Path, monkeypatch:
     listed = json.loads(world.out.strip().splitlines()[-1])
     obs = [c for c in listed if c["name"] == "obs"]
     assert any(c["detail"].startswith("obs mlflow:") and c["ok"] is True for c in obs)
+    assert len(world.runner.argvs("docker", "system", "df")) == 2  # doctor always measures the store

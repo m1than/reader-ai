@@ -374,7 +374,7 @@ class Jobs:
         step = "count"
         dead = False
         try:
-            enqueue = False
+            enqueue = counted_dead = False
             async with self.engine.begin() as conn:
                 await _lock(conn, key)
                 status = (
@@ -386,8 +386,9 @@ class Jobs:
                 if status != "doing" or row is None or row["outcome"] is not None:
                     return False
                 counted = await _count(conn, kind, key, code, job_id)
-                dead = counted is not None and counted[1]
+                counted_dead = counted is not None and counted[1]
                 enqueue = counted is not None and not counted[1]
+            dead = counted_dead  # only once the transaction that recorded it has committed
             if enqueue:
                 step = "re-enqueue"
                 await self._defer(kind, key, payload, {"outcome": None, "job_id": None}, 0)
@@ -570,7 +571,7 @@ class Jobs:
                 if await self._finish(job, Status.FAILED):
                     report.finished.append(job_id)
                 continue
-            enqueue = False
+            enqueue = counted_dead = False
             finish_status = Status.FAILED
             async with self.engine.begin() as conn:
                 if not await _try_lock(conn, key):
@@ -585,9 +586,10 @@ class Jobs:
                     counted = await _count(conn, kind, key, "stalled", job_id)
                     if counted is not None and counted[1]:
                         report.dead.append(key)
+                        counted_dead = True  # this iteration's own count
                     else:
                         enqueue = True
-            if key in report.dead and row is not None:
+            if counted_dead and row is not None:  # reached only after the commit
                 await _after_end(self.engine, kind, row["args"], "dead")
             if enqueue and row is not None and await self._sweep_defer(kind, key, row["args"]):
                 report.reenqueued.append(key)
@@ -610,6 +612,7 @@ class Jobs:
         for kind_name, key in candidates:
             kind = self.catalog.get(kind_name)
             action = "-"
+            counted_dead = False
             row: Mapping[str, Any] | None = None
             async with self.engine.begin() as conn:
                 if not await _try_lock(conn, key):
@@ -627,10 +630,11 @@ class Jobs:
                     counted = await _count(conn, kind, key, "orphaned", newest)
                     if counted is not None and counted[1]:
                         report.dead.append(key)
+                        counted_dead = True  # this iteration's own count
                         action = "-"
                     else:
                         action = RECONCILE_ENQUEUE
-            if key in report.dead and kind is not None and row is not None:
+            if counted_dead and kind is not None and row is not None:  # reached only after the commit
                 await _after_end(self.engine, kind, row["args"], "dead")
             if (
                 action == RECONCILE_ENQUEUE

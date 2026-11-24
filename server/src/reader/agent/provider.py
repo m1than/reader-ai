@@ -40,7 +40,7 @@ from reader.agent.pricing import (
     resolve_model,
 )
 from reader.config import ReaderConfig
-from reader.config.effective import effective_settings
+from reader.config.effective import effective_settings, file_settings
 from reader.obs.agent import AgentSpan, agent_call
 from reader.obs.cli_env import cli_env_additions
 
@@ -300,8 +300,12 @@ class AgentProvider:
 
     async def _caps(self, call: StageCall) -> Caps:
         # SRV-CONFIG FR-CONFIG-26 (paired): the budgets as reader.yaml plus the owner's overrides, per call.
-        async with self.engine.connect() as conn:
-            settings = await effective_settings(conn, self.config)
+        engine: Any = self.engine  # None only where the ledger is in memory (the freshness [image] check)
+        if engine is None:  # no database, so no overrides: reader.yaml alone
+            settings = file_settings(self.config)
+        else:
+            async with engine.connect() as conn:
+                settings = await effective_settings(conn, self.config)
         return Caps(
             run_cap_usd=call.run_cap_usd,
             task_budget_usd=settings.task_budgets.get(call.task),
