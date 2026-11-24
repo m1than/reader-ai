@@ -48,7 +48,7 @@ title: Passkey sign-in, Postgres sessions, owner bootstrap, and the server skele
 status: approved
 approved_by: agent
 approved_at: 2026-11-23
-review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate. Paired change from SRV-INGEST (2026-11-22, coordinator-scheduled, reviewed in SRV-INGEST's code review): `reader/ingest/migrations` joins VERSION_LOCATIONS (after jobs, before procrastinate) and `reader.ingest.routes` joins ROUTERS (owner-only rule checked inside its handlers); no behaviour of this module changed. Integration with SRV-AGENT and SRV-PIPELINE (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline; the two SRV-AUTH tests take these unions, plus one comment shortened for line length. Paired change from SRV-SEARCH (2026-11-22, coordinator-scheduled, reviewed in SRV-SEARCH's code review): `reader/search/migrations` joins VERSION_LOCATIONS before procrastinate's directory, `reader.search.routes` joins ROUTERS, the engine sets `hide_parameters=True` (FR-AUTH-1, FR-AUTH-10 notes); the auth tests' database image is the pgvector-enabled pin. Green: the hide_parameters test reads `engine.sync_engine.hide_parameters` (an AsyncEngine proxies it there), and `test_database_failure_while_api_runs`, which migrates as a non-superuser role, creates the `vector` extension as the superuser first, because CREATE EXTENSION vector needs a superuser (the SRV-SEARCH FR-SEARCH-4 note for a dedicated role); the test's oracle is unchanged. Integration with SRV-SEARCH (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, search, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline, search. Paired change from SRV-TUTOR (2026-11-23, reviewed in SRV-TUTOR's code review): ROUTERS appends `reader.tutor.routes`, VERSION_LOCATIONS adds `reader/tutor/migrations` after agent, and the FR-AUTH-10 `jobs` seam (planned with SRV-PIPELINE) is implemented: `create_app(..., jobs=None)` puts it on `app.state.jobs`; the api role builds one SRV-EVENTS `Jobs` (declared catalog, own procrastinate app opened in the serve coroutine, the database password as its secret value); tests updated for both lists. Integration with SRV-TUTOR (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, search, agent, pipeline, tutor, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, search, pipeline, tutor (SRV-TUTOR's order). Amendment 2026-11-23 (V.auth-page-style, owner request): FR-AUTH-14 states that the ceremony is unchanged; new FR-AUTH-19 (page look, tokens copied from WEB-UI's calm.css and the vendored library with a drift test), FR-AUTH-20 (states and messages from existing signals), FR-AUTH-21 (auth.css route, no-cache, CSP unchanged, unit/browser/live checks); paths add e2e/web/auth/**. Complex area (auth): deep-reviewer rounds until approve, run by the coordinator. Round 1 on 418312a: changes — leak review, fragment handling and asset route clean; blocking fixed: (1) `expired` only for a 400 on bootstrap options, a 400 on bootstrap verify is the retryable `not_registered` (the token stays usable, FR-AUTH-5, INV-AUTH-7), with its browser case; (2) the unreachable `known` state removed, InvalidStateError falls to `failed`; (3) the request oracle: every non-GET request recorded with page.on('request') against each case's exact list with content-type, no other /api request, the WebAuthn stub's publicKey compared with the server options; (4) `done` asserted while the navigation to / is held; (5) route registries: test_route_table_is_declared_as_data updated with the spec, the OPS-DOD operations index gains auth.css for both operations in the Green commit, the a11y cells stay missing (not pages evidence); (6) both live files named with their lines. Non-blocking applied: fragment check after every state, the no-cache wording, an unsupported case without the parse function and toJSON implied, focus after a ceremony, the token test's layer match, var fallbacks and colour-literal scan, a distinctive server body and exception text absent from #status, the font regex, asserted versus design numbers, `auth` in slice.sh's default steps, the test server's fixed map. Round 2 on faf5b2e: VERDICT approve; its non-blocking items folded in with Green (named colour keywords in the scan, the full /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done, the OPS-DOD route addition in the same commit as the Route). Approved by agent 2026-11-23. Code review round 1 on 83d4ef6: changes (ceremony verified unchanged, no server text reaches the DOM; 6 surviving mutants): browser cases for Retry-After 60, 0, 1.5, an HTTP-date and seven digits, a 500 on options, a 429 with another code and a 400 signin_failed on options; non-blocking applied: Retry-After bounded to ^\\d{1,6}$, dark and light Playwright projects, the bootstrap copy without 'owner', static data-state=loading with the button hidden in the markup and a blocked-script case, the full request list (any path) asserted. Code review round 2 on 48ce312: VERDICT approve; its notes folded in: a static status sentence on both pages for a script that fails to load (asserted in the blocked-script case), the project names auth-dark and auth-light in this text. Amendment 2026-11-23 (V.signup, ADR-0031 open sign-up with owner approval, accepted by the owner 2026-11-23): FR-AUTH-23..32 and INV-AUTH-10..15, `policy.signup`, the signup migration's columns in `tables`, `signup_not_supported` widened. Complex area (auth): ADR and spec deep-reviewer rounds 1 (changes: per-client limit removed, skeleton index on sign-up rows only, pending loses to config, display-name categories, a real live oracle), 2 (changes: i→l in the skeleton, raw `next` comparison against one constant) and 3 (VERDICT approve, three clauses folded in: live mode by FR-AUTH-23's rule, best-effort signup_superseded, reject cancels other open ceremonies). Promoted from `proposed_*` keys and approved by agent with the Red tests (2026-11-23); code review rounds follow Green. Green (2026-11-23): test corrections only, no oracle weakened — the CLI collision test binds a free port (`--bind` refuses port 0 as bind_invalid before startup), and the sign-up tests are refactored for ruff's 110-column limit (helpers extracted, statements split; no assertion removed). Code review round 1 on 209589e (39 of 41 server mutants killed, 2 equivalent): changes — blocking: web_live.py's cleanup guards every delete (sessions, credentials, user) by `source = 'signup'` and matches handles and ids with fullmatch, with a [db] test where a configured user's id in signup-created.json deletes nothing; non-blocking applied: the SKIP LOCKED test bounded by anyio.fail_after, display names trimmed of Unicode White_Space only (a leading U+001F is refused as Cc), the FR-AUTH-32 cleanup sentence matches the code, the 80-way limit race noted as probabilistic. Code review round 2 on 2eb4f42: VERDICT approve; its note applied: an id with a trailing newline (`<uuid>\\n`) joins the cleanup test's malformed entries (fullmatch refuses it). Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-AUTH-33 (obs routes in ROUTERS, the trace middleware, setup and the log filter in reader-server, the app-side Origin cases); reviewed in SRV-OBS's code review. Paired change FR-AUTH-22 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner): drafted on V/onboarding, reviewed in its deep-reviewer rounds 1–7 (round 2 made the match the exact path string and method), promoted and approved by agent on V/upload-impl with its Red test (tests/auth/test_auth_rawbody.py); every other route keeps FR-AUTH-12; that test reformatted for ruff (line length), no oracle change. Paired change from SRV-FRESH (2026-11-23, reviewed with SRV-FRESH's code; merged into V/slice-integration 2026-11-24): ROUTERS appends `reader.freshness.routes` after `reader.obs.routes`, VERSION_LOCATIONS adds `reader/freshness/migrations` after obs, and `Route.method` admits `PUT` (FR-AUTH-1, FR-AUTH-10 notes); the two list tests take the new entries; no behaviour of this module changed"
+review: "deep-reviewer (Fable) round 1: changes (B1–B10); round 2: changes (N1–N4 plus non-blocking); round 3: approve (41dbbfb), its non-blocking items folded into the approval commit (2026-11-20); 2026-11-22: import-order only change in tests/auth (ruff I001 after `reader` was pinned as known-first-party), no behaviour or oracle change; 2026-11-22: FR-AUTH-1 amended as a paired change with SRV-EVENTS (version_locations, effective-heads readiness, polled migration lock bounded at 300 s with `migration_lock_timeout`, unlock checked), reviewed in the SRV-EVENTS code review; tests added for jobs-missing readiness and the lock bound. Paired change from SRV-LESSON (2026-11-22, coordinator-scheduled, reviewed in SRV-LESSON's code review): FR-AUTH-1 and FR-AUTH-10 notes that `reader/lessons/migrations` joins VERSION_LOCATIONS and `reader.lessons.routes` joins ROUTERS; no behaviour of this module changed. Integration (V/slice-integration, 2026-11-22): VERSION_LOCATIONS is the union, in order db, lessons, jobs, procrastinate. Paired change from SRV-INGEST (2026-11-22, coordinator-scheduled, reviewed in SRV-INGEST's code review): `reader/ingest/migrations` joins VERSION_LOCATIONS (after jobs, before procrastinate) and `reader.ingest.routes` joins ROUTERS (owner-only rule checked inside its handlers); no behaviour of this module changed. Integration with SRV-AGENT and SRV-PIPELINE (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline; the two SRV-AUTH tests take these unions, plus one comment shortened for line length. Paired change from SRV-SEARCH (2026-11-22, coordinator-scheduled, reviewed in SRV-SEARCH's code review): `reader/search/migrations` joins VERSION_LOCATIONS before procrastinate's directory, `reader.search.routes` joins ROUTERS, the engine sets `hide_parameters=True` (FR-AUTH-1, FR-AUTH-10 notes); the auth tests' database image is the pgvector-enabled pin. Green: the hide_parameters test reads `engine.sync_engine.hide_parameters` (an AsyncEngine proxies it there), and `test_database_failure_while_api_runs`, which migrates as a non-superuser role, creates the `vector` extension as the superuser first, because CREATE EXTENSION vector needs a superuser (the SRV-SEARCH FR-SEARCH-4 note for a dedicated role); the test's oracle is unchanged. Integration with SRV-SEARCH (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, agent, pipeline, search, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, pipeline, search. Paired change from SRV-TUTOR (2026-11-23, reviewed in SRV-TUTOR's code review): ROUTERS appends `reader.tutor.routes`, VERSION_LOCATIONS adds `reader/tutor/migrations` after agent, and the FR-AUTH-10 `jobs` seam (planned with SRV-PIPELINE) is implemented: `create_app(..., jobs=None)` puts it on `app.state.jobs`; the api role builds one SRV-EVENTS `Jobs` (declared catalog, own procrastinate app opened in the serve coroutine, the database password as its secret value); tests updated for both lists. Integration with SRV-TUTOR (V/slice-integration, 2026-11-23): VERSION_LOCATIONS db, lessons, jobs, ingest, search, agent, pipeline, tutor, procrastinate; ROUTERS api, auth, lessons, kernels, ingest, search, pipeline, tutor (SRV-TUTOR's order). Amendment 2026-11-23 (V.auth-page-style, owner request): FR-AUTH-14 states that the ceremony is unchanged; new FR-AUTH-19 (page look, tokens copied from WEB-UI's calm.css and the vendored library with a drift test), FR-AUTH-20 (states and messages from existing signals), FR-AUTH-21 (auth.css route, no-cache, CSP unchanged, unit/browser/live checks); paths add e2e/web/auth/**. Complex area (auth): deep-reviewer rounds until approve, run by the coordinator. Round 1 on 418312a: changes — leak review, fragment handling and asset route clean; blocking fixed: (1) `expired` only for a 400 on bootstrap options, a 400 on bootstrap verify is the retryable `not_registered` (the token stays usable, FR-AUTH-5, INV-AUTH-7), with its browser case; (2) the unreachable `known` state removed, InvalidStateError falls to `failed`; (3) the request oracle: every non-GET request recorded with page.on('request') against each case's exact list with content-type, no other /api request, the WebAuthn stub's publicKey compared with the server options; (4) `done` asserted while the navigation to / is held; (5) route registries: test_route_table_is_declared_as_data updated with the spec, the OPS-DOD operations index gains auth.css for both operations in the Green commit, the a11y cells stay missing (not pages evidence); (6) both live files named with their lines. Non-blocking applied: fragment check after every state, the no-cache wording, an unsupported case without the parse function and toJSON implied, focus after a ceremony, the token test's layer match, var fallbacks and colour-literal scan, a distinctive server body and exception text absent from #status, the font regex, asserted versus design numbers, `auth` in slice.sh's default steps, the test server's fixed map. Round 2 on faf5b2e: VERDICT approve; its non-blocking items folded in with Green (named colour keywords in the scan, the full /api request list asserted, a bootstrap no-parse case, focus left alone in waiting and done, the OPS-DOD route addition in the same commit as the Route). Approved by agent 2026-11-23. Code review round 1 on 83d4ef6: changes (ceremony verified unchanged, no server text reaches the DOM; 6 surviving mutants): browser cases for Retry-After 60, 0, 1.5, an HTTP-date and seven digits, a 500 on options, a 429 with another code and a 400 signin_failed on options; non-blocking applied: Retry-After bounded to ^\\d{1,6}$, dark and light Playwright projects, the bootstrap copy without 'owner', static data-state=loading with the button hidden in the markup and a blocked-script case, the full request list (any path) asserted. Code review round 2 on 48ce312: VERDICT approve; its notes folded in: a static status sentence on both pages for a script that fails to load (asserted in the blocked-script case), the project names auth-dark and auth-light in this text. Amendment 2026-11-23 (V.signup, ADR-0031 open sign-up with owner approval, accepted by the owner 2026-11-23): FR-AUTH-23..32 and INV-AUTH-10..15, `policy.signup`, the signup migration's columns in `tables`, `signup_not_supported` widened. Complex area (auth): ADR and spec deep-reviewer rounds 1 (changes: per-client limit removed, skeleton index on sign-up rows only, pending loses to config, display-name categories, a real live oracle), 2 (changes: i→l in the skeleton, raw `next` comparison against one constant) and 3 (VERDICT approve, three clauses folded in: live mode by FR-AUTH-23's rule, best-effort signup_superseded, reject cancels other open ceremonies). Promoted from `proposed_*` keys and approved by agent with the Red tests (2026-11-23); code review rounds follow Green. Green (2026-11-23): test corrections only, no oracle weakened — the CLI collision test binds a free port (`--bind` refuses port 0 as bind_invalid before startup), and the sign-up tests are refactored for ruff's 110-column limit (helpers extracted, statements split; no assertion removed). Code review round 1 on 209589e (39 of 41 server mutants killed, 2 equivalent): changes — blocking: web_live.py's cleanup guards every delete (sessions, credentials, user) by `source = 'signup'` and matches handles and ids with fullmatch, with a [db] test where a configured user's id in signup-created.json deletes nothing; non-blocking applied: the SKIP LOCKED test bounded by anyio.fail_after, display names trimmed of Unicode White_Space only (a leading U+001F is refused as Cc), the FR-AUTH-32 cleanup sentence matches the code, the 80-way limit race noted as probabilistic. Code review round 2 on 2eb4f42: VERDICT approve; its note applied: an id with a trailing newline (`<uuid>\\n`) joins the cleanup test's malformed entries (fullmatch refuses it). Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-AUTH-33 (obs routes in ROUTERS, the trace middleware, setup and the log filter in reader-server, the app-side Origin cases); reviewed in SRV-OBS's code review. Paired change FR-AUTH-22 (2026-11-23, for SRV-INGEST revision 2, ADR-0029 accepted by the owner): drafted on V/onboarding, reviewed in its deep-reviewer rounds 1–7 (round 2 made the match the exact path string and method), promoted and approved by agent on V/upload-impl with its Red test (tests/auth/test_auth_rawbody.py); every other route keeps FR-AUTH-12; that test reformatted for ruff (line length), no oracle change. Paired change from SRV-FRESH (2026-11-23, reviewed with SRV-FRESH's code; merged into V/slice-integration 2026-11-24): ROUTERS appends `reader.freshness.routes` after `reader.obs.routes`, VERSION_LOCATIONS adds `reader/freshness/migrations` after obs, and `Route.method` admits `PUT` (FR-AUTH-1, FR-AUTH-10 notes); the two list tests take the new entries; no behaviour of this module changed. Amendment 2026-11-24 (V/manage, WEB-MANAGE FR-MANAGE-7; complex area: auth): FR-AUTH-40..48 and INV-AUTH-20..21 promoted from `proposed_manage` with the Red tests (tests/auth/test_manage_*.py, e2e/web/auth/signup.spec.ts NEXT_CASES for /settings) after deep-reviewer rounds 1–3 (round 3 approve on 2a7d86f); ADR-0036 and ADR-0037 accepted by the owner, so FR-AUTH-48 (enable) is built and FR-AUTH-29's \"cannot be undone\" points to it; `webauthn_credentials.label` (0003_manage); FR-AUTH-14/-32's `next` allow-list adds \"/settings\"; ROUTERS appends `reader.config.routes`; VERSION_LOCATIONS adds `reader/config/migrations` (paired SRV-CONFIG FR-CONFIG-26, the declared-list tests follow); FR-AUTH-23's switch is read per request through `reader.config.effective` (paired FR-CONFIG-26), so `settings_from_config` reads `sharing.signup` through that module (FR-CONFIG-26's source-scan oracle). Approved by agent with Red (2026-11-24)"
 layer: server
 track: product
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0016, ADR-0017, ADR-0018, ADR-0020, ADR-0024, ADR-0026]
@@ -128,7 +128,7 @@ policy:
 # user-owned content; INV-AUTH-8 checks every other table.
 tables:
   users: { system: true, columns: "id uuid pk, handle text unique, role text CHECK (role IN ('owner','learner')), webauthn_user_id bytea unique CHECK (octet_length = 64), display_name text, consent_evaluation bool, consent_tuning bool, disabled_at timestamptz null, created_at; signup migration (FR-AUTH-24): source text NOT NULL DEFAULT 'config' CHECK (source IN ('config','signup')), state text NOT NULL DEFAULT 'active' CHECK (state IN ('active','pending')), handle_skeleton text NOT NULL, partial unique index users_signup_skeleton ON users (handle_skeleton) WHERE source = 'signup'" }
-  webauthn_credentials: { owner_id: true, columns: "credential_id bytea pk, public_key bytea, sign_count bigint CHECK (>= 0), transports text[], aaguid uuid, backed_up bool, created_at, last_used_at" }
+  webauthn_credentials: { owner_id: true, columns: "credential_id bytea pk, public_key bytea, sign_count bigint CHECK (>= 0), transports text[], aaguid uuid, backed_up bool, created_at, last_used_at; manage migration 0003_manage (FR-AUTH-45): label text null CHECK (char_length(label) BETWEEN 1 AND 64)" }
   sessions: { owner_id: true, columns: "id_sha256 bytea pk, created_at, expires_at, revoked_at" }
   auth_challenges: { system: true, columns: "ceremony_sha256 bytea pk, kind text CHECK (kind IN ('register','authenticate','bootstrap','signup')), challenge bytea, user_id uuid null, bootstrap_token_sha256 bytea null, expires_at, consumed_at; signup migration: signup_handle text null, signup_display_name text null, signup_webauthn_user_id bytea null (all three set exactly when kind = 'signup')" }
   bootstrap_tokens: { system: true, columns: "token_sha256 bytea pk, user_id uuid, expires_at, consumed_at, revoked_at" }
@@ -203,7 +203,10 @@ requirements:
       parameters (a search query text, a token hash). SRV-TUTOR (2026-11-23, paired change) adds
       `reader/tutor/migrations`. Integrated order (V/slice-integration): db, lessons, jobs, ingest, search, agent,
       pipeline, tutor, procrastinate. SRV-FRESH (2026-11-23, paired change) adds `reader/freshness/migrations`
-      after obs.
+      after obs. SRV-CONFIG (2026-11-24, V/manage, FR-CONFIG-26, paired change) adds `reader/config/migrations`
+      (its own branch `config`, table `settings_overrides`) after freshness, before procrastinate's directory; the
+      declared-list test follows. The manage amendment adds `0003_manage` to this module's own chain
+      (`webauthn_credentials.label`, FR-AUTH-45).
       Paths and endpoints default to the container's and may be overridden by six variables (tests, and OPS-DEPLOY's
       static `READER_CONFIG`): `READER_CONFIG` (default `/etc/reader/reader.yaml`), `READER_SECRETS_ROOT`
       (`/run/secrets`), `READER_RUN_DIR` (`/tmp`, where the api writes its bound address to `reader-api.addr` for
@@ -310,7 +313,9 @@ requirements:
       `reader/freshness/migrations` follows `reader/obs/migrations`; a route's `method` may also be `PUT` (its
       `PUT /api/materials/{material_id}/bibliography`; non-GET, so under the same CSRF gate and JSON body rule).
       Paired SRV-EVENTS change (2026-11-24, V/manage, FR-EVENTS-31): ROUTERS appends `reader.jobs.audit_routes`
-      after `reader.freshness.routes`, and the declared-list test takes it.
+      after `reader.freshness.routes`, and the declared-list test takes it. Manage amendment (2026-11-24, V/manage):
+      the session routes add FR-AUTH-40..46 and FR-AUTH-48 with the `auth` kinds they name, and ROUTERS appends
+      `reader.config.routes` (SRV-CONFIG FR-CONFIG-25/-26) after `reader.jobs.audit_routes`.
   - id: FR-AUTH-11
     text: >-
       Failure limit. Every failed ceremony verification or invalid bootstrap token inserts an `auth_failures` row
@@ -635,8 +640,12 @@ requirements:
       /api/auth/signup`, `POST /api/auth/signup/options` and `POST /api/auth/signup/verify` answer 404
       `{"error":"not_found"}` before reading the body, writing a row or applying any limit (FR-AUTH-13's behaviour),
       and the sign-in page carries no sign-up link (FR-AUTH-31). The owner's sign-up routes of FR-AUTH-29 work in
-      both modes (pending and approved sign-up accounts remain after the switch goes `off`). The switch is read at
-      startup only; changing it needs an api restart, as every reader.yaml value does. [unit] the parse table
+      both modes (pending and approved sign-up accounts remain after the switch goes `off`). The file's value is
+      read at startup only; changing it needs an api restart, as every reader.yaml value does. Amendment 2026-11-24
+      (V/manage, paired SRV-CONFIG FR-CONFIG-26, ADR-0036 accepted): the three sign-up routes and the sign-in
+      page's link read the effective switch per request, the startup value narrowed by an override in
+      `settings_overrides` (`reader.config.effective`), so an override takes effect on the next request without a
+      restart; an `open` override never opens a switch whose file value is off. [unit] the parse table
       (absent with `https://localhost` → open, absent with `https://reader.example` → off plus the note, false →
       off, "off", "open" on either host, true, "yes", 1, "Open" → refused) and the 404s with zero rows written in
       `off`.
@@ -770,7 +779,7 @@ requirements:
       `POST
       /api/auth/signups/{id}/disable` (`recent_session`) on an active, not yet disabled sign-up user → in one
       transaction `disabled_at = now()` and every session revoked, rows kept (INV-AUTH-9's meaning), 204. Disable
-      cannot be undone in the product (no enable route; the owner's database is the only way back). Any other target
+      is undone by FR-AUTH-48's enable route (ADR-0037, accepted 2026-11-24). Any other target
       (unknown id, a malformed id, a config user, the wrong state) → 404 `not_found`, so these routes never touch a
       configured user. An older owner session gets 401 `reauth_required` from the dispatcher. Each action logs one
       record `auth signup_<action>` with the target id. [db] each route for the owner with a recent session, a
@@ -834,7 +843,8 @@ requirements:
       otherwise it calls `location.assign("/")` as today. No query parsing, decoding or URL construction is involved,
       so an absolute URL, `//host`, an encoded, repeated or extra parameter, or a different path all go to `/` (no
       open redirect). The bootstrap and sign-up pages never read `location.search`. The query is left in place (it is
-      not a secret).
+      not a secret). FR-AUTH-47 (2026-11-24, V/manage) adds the second constant: exactly `?next=/settings` navigates
+      to `"/settings"`, by the same raw comparison.
       No server text reaches the DOM. [unit] the pages' static rules (FR-AUTH-21's unit list extended to signup.html),
       the sign-in page in both modes (link present exactly once / absent, bytes otherwise equal); [browser] FR-AUTH-32.
   - id: FR-AUTH-32
@@ -892,6 +902,95 @@ requirements:
       pins the app site's CSP plus the dashboard site's (SRV-OBS FR-OBS-9). VERSION_LOCATIONS gains
       `obs/migrations` (SRV-OBS's `obs` branch, table `obs_tracing`, FR-OBS-10), after `plan/migrations` and before
       procrastinate's; FR-AUTH-1's declared-list test follows.
+  # Amendment (2026-11-24, V/manage): FR-AUTH-40..48, promoted with Red (see the note after `vectors`).
+  - id: FR-AUTH-40
+    text: >-
+      **People.** `GET /api/auth/users` (`session`; non-owner → 403 `owner_only`) → `{users: [{id, handle,
+      display_name, role, source, state, disabled_at, locked, created_at, last_signin_at, passkeys: [{pid, label,
+      created_at, last_used_at}], sessions_active, owns_data}]}` by handle. `last_signin_at` is
+      `max(webauthn_credentials.last_used_at)` of the user (FR-AUTH-7 updates it at each sign-in; sessions are
+      pruned hourly by FR-AUTH-17, so they cannot say when someone last signed in), null when never used.
+      `sessions_active` counts sessions neither revoked nor expired. `locked` is true for a `source = 'signup'`
+      user with zero passkeys (owner note 6: such an account cannot sign in; WEB-MANAGE shows "Locked"). `owns_data`
+      is computed by one function `owns_data(conn, user_id)` that reads, from the catalog, every foreign-key column
+      whose referenced column is `users.id` (the `_REFERENCES` query of lessons/store.py with `users` in place of
+      `lessons`), excluding SRV-AUTH's own tables (sessions, webauthn_credentials, auth_challenges,
+      bootstrap_tokens, invitations), and is true when any such column holds the user's id — every `owner_id` and
+      every `user_id` (SRV-LESSON's lesson_progress, lesson_notes, lesson_bookmarks included); a table added later
+      counts without a change here. SRV-EVENTS `audit_log.actor_id` and `settings_overrides.updated_by` have no
+      foreign key, so they never count. Read-only. [db] each field; `owns_data` for a user with only a bookmark;
+      a new test table with a foreign key to users makes it true.
+  - id: FR-AUTH-41
+    text: >-
+      **Sign a person out everywhere.** `POST /api/auth/users/{id}/sessions/revoke` (`recent_session`; owner only,
+      else 403 `owner_only`; the owner's own id → 409 `use_own_sessions`) sets `revoked_at` on every unrevoked
+      session of that user, for any source; 200 `{revoked: n}`; repeating it returns `{revoked: 0}`. [db]
+  - id: FR-AUTH-42
+    text: >-
+      **Remove a person's passkey.** `DELETE /api/auth/users/{id}/credentials/{pid}` (`recent_session`; owner only;
+      the owner's own id → 409 `use_own_passkeys`) locks the user row, deletes that credential and revokes all of
+      that user's sessions in one transaction (a lost device's sessions end with it). Removing the last passkey of a
+      sign-up user is allowed with this consequence stated in WEB-MANAGE's dialog: that account can no longer sign
+      in (owner note 6). For a configured user it is allowed too; `reader bootstrap` gives them a new one. 204;
+      repeating it → 404. [db]
+  - id: FR-AUTH-43
+    text: >-
+      **Delete a sign-up learner.** `DELETE /api/auth/users/{id}` with `{confirm}` (`recent_session`; owner only):
+      only a `source = 'signup'`, role `learner` user (else 409 `configured_user` or 409 `not_learner`); `confirm`
+      equals the handle (else 400 `confirm_mismatch`). In one transaction: lock the user row (FR-AUTH-29's lock);
+      compute `owns_data` under that lock (true → 409 `user_has_data`, disable instead); delete every
+      `auth_challenges` row whose `user_id` is the user (any kind, consumed or not, so an open register or
+      authenticate ceremony cannot complete against a deleted user) and the unconsumed `signup` challenges for its
+      handle (FR-AUTH-29's reject rule), then its sessions, credentials and user row, inside a savepoint; a
+      foreign-key violation from that DELETE (a row written by a table that `owns_data` read before the lock
+      reached it) rolls back to the savepoint and answers 409 `user_has_data`. Writes the `auth user_deleted <id>`
+      record. 204; repeating it → 404. The handle and its skeleton are free again afterwards: a new sign-up may take
+      the same handle (stated; the old passkey on the person's device names a user that no longer exists and signs
+      in to nothing, as owner note 7 says for a rejected sign-up). [db] each refusal; a user with one tutor
+      question or one bookmark cannot be deleted; a user with an open register ceremony (options issued, verify not
+      yet sent) is deleted, and the later `POST /api/auth/register/verify` with that user's old session cookie
+      answers 401 `unauthenticated` (its session rows are gone, FR-AUTH-10), after which no `webauthn_credentials`
+      row and no `users` row with that id exist; the late-violation path through a fault-injected insert; the
+      handle reused by a new sign-up.
+  - id: FR-AUTH-44
+    text: >-
+      **Own sessions.** `GET /api/auth/sessions` (`session`) → the caller's unrevoked, unexpired sessions `{sessions:
+      [{sid, created_at, expires_at, current}]}`, newest first. `DELETE /api/auth/sessions/{sid}` (`session`)
+      revokes one; revoking the current one is sign-out and its response clears the session cookie exactly as
+      `POST /api/auth/signout` does (FR-AUTH-8's cookie attributes, `Max-Age=0`); `POST
+      /api/auth/sessions/revoke-others` (`session`) revokes all but the current. Another user's sid → 404. No user
+      agent or address is stored, so none is shown (no new personal data). [db]
+  - id: FR-AUTH-45
+    text: >-
+      **Own passkeys.** `GET /api/auth/credentials` (`session`) → `{credentials: [{pid, label, created_at,
+      last_used_at, backed_up, transports}]}`; `POST /api/auth/credentials/{pid}` with `{label}` (`session`;
+      trimmed 1..64 characters, no Cc, or `null` to clear; else 400 `label_invalid`). Adding a passkey is FR-AUTH-6,
+      unchanged. [db]
+  - id: FR-AUTH-46
+    text: >-
+      **Remove an own passkey.** `DELETE /api/auth/credentials/{pid}` (`recent_session`) in one transaction that
+      first locks the caller's `users` row, then counts the caller's credentials and refuses with 409
+      `last_passkey` when it is the only one; else it deletes the credential and revokes every other session of the
+      caller (`revoked_at` on all unrevoked sessions except the current one), because a passkey is removed when its
+      device is lost or shared, and that device's sessions must end with it. The current session stays. 200
+      `{revoked_sessions: n}`; another user's pid → 404. [db] two concurrent deletes of the last two passkeys: one
+      200, one 409, one passkey left; other sessions revoked, the current one still valid.
+  - id: FR-AUTH-47
+    text: >-
+      **Return after re-auth.** FR-AUTH-14's sign-in `next` allow-list adds the constant "/settings": with
+      `location.search === "?next=/settings"` exactly, a successful sign-in navigates to "/settings". [browser]
+  - id: FR-AUTH-48
+    text: >-
+      **Enable a sign-up account** (ADR-0037, accepted 2026-11-24). `POST /api/auth/signups/{id}/enable`
+      (`recent_session`, body `{}`; owner only, else 403 `owner_only`) under FR-AUTH-29's row lock (`source =
+      'signup'` only, so a configured user is 404 as in FR-AUTH-29): on an active sign-up user with `disabled_at`
+      set, clears `disabled_at`; 200 `{"status":"active"}`; repeating it on an enabled account returns the same body
+      (idempotent); a pending user → 409 `pending` (approve instead). Sessions revoked by the disable stay revoked;
+      the person signs in again with a passkey kept through the disable. If the owner removed every passkey
+      meanwhile (FR-AUTH-42), the account is enabled but cannot sign in, and WEB-MANAGE says so. INV-AUTH-13 holds:
+      reader.yaml never changes a sign-up account. Audit action `user.enable` (SRV-EVENTS FR-EVENTS-30). [db]
+      disable → enable → sign in with the same passkey; enable twice; pending and configured refusals; a learner
+      gets 403 with nothing changed.
 
 invariants:
   - id: INV-AUTH-1
@@ -978,6 +1077,18 @@ invariants:
       Every handle FR-AUTH-25 accepts also satisfies OPS-CLI FR-CLI-4's kernel-service rule (`[a-z0-9][a-z0-9-]*`, at
       most 50 characters), so a sign-up handle can never break `reader up` if a later spec gives it a kernel. [unit]
       a property test: generated handles accepted by FR-AUTH-25 match FR-CLI-4's rule.
+  # Amendment (2026-11-24, V/manage): INV-AUTH-20..21.
+  - id: INV-AUTH-20
+    text: >-
+      **Access.** Every route of this amendment runs FR-AUTH-12 before its handler; owner-only routes answer 403
+      `owner_only` to a learner with zero rows changed; own-object routes answer 404 for another user's sid or pid;
+      no route here changes a `source = 'config'` user's row, `disabled_at` or `state`. [db] the learner and
+      second-user matrix over every route, with row snapshots of users, sessions and webauthn_credentials.
+  - id: INV-AUTH-21
+    text: >-
+      **At least one way in.** After any request of this amendment the owner has at least one passkey, and no
+      request of this amendment revokes the caller's current session except `DELETE /api/auth/sessions/{own
+      current sid}` (FR-AUTH-46 and `revoke-others` revoke only the caller's other sessions). [db]
 
 nfr: []
 
@@ -1000,20 +1111,23 @@ vectors:
       vectors fail with `user_verified_missing` (recorded without UV; this module requires UV).
     file: spec/fixtures/SRV-AUTH/py-webauthn-vectors.json
 
-# ---- Proposed amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-7; status: draft). Auth is a complex area:
-# deep-reviewer rounds until approve. Round 1 (840af4b): changes; revision 1 below. Held under `proposed_manage`
-# until approved; ids FR-AUTH-40..48 and INV-AUTH-20..21 (34..39 and 16..19 left free for parallel branches).
+# ---- Amendment (2026-11-24, V/manage, WEB-MANAGE FR-MANAGE-7): promoted with Red after deep-reviewer rounds 1–3
+# (round 1 on 840af4b: changes, revision 1; round 3 approve on 2a7d86f); ADR-0036/0037 accepted. FR-AUTH-40..48
+# and INV-AUTH-20..21 now live in `requirements` and `invariants` (34..39 and 16..19 left free for parallel
+# branches).
 # Scope: the owner manages people (list, sign out everywhere, remove a passkey, delete a sign-up learner with no
 # data); every user manages their own passkeys and sessions. Configured users stay managed by reader.yaml (FR-AUTH-1
 # would undo a UI disable at the next start; INV-AUTH-13), so no route here disables, enables or deletes a
 # `source = 'config'` user. FR-AUTH-48 (Enable) reverses ADR-0031 decision 4 ("disable cannot be undone in the
-# product"), so it is gated on ADR-0037 (proposed): it is built only once ADR-0037 reads `accepted`.
+# product"), as ADR-0037 (accepted 2026-11-24) decides.
 # Locking: every write here that touches one user's sessions or credentials first locks that user's `users` row
 # (`SELECT … FROM users WHERE id = :id FOR UPDATE`), the same row FR-AUTH-29 locks, never the credential rows, so
 # two such writes on one user serialise on one row and cannot deadlock.
-# What changes in approved text when this moves in:
-#   - FR-AUTH-29 (only once ADR-0037 is accepted): "cannot be undone in the product (no enable route…)" is replaced
-#     by a pointer to FR-AUTH-48; WEB-ACCOUNTS owner note 1 and FR-ACCOUNTS-3's copy change with it (paired).
+# What changed in approved text when this moved in (applied):
+#   - FR-AUTH-29: "cannot be undone in the product (no enable route…)" is replaced by a pointer to FR-AUTH-48;
+#     WEB-ACCOUNTS owner note 1 and FR-ACCOUNTS-3's copy change with it (paired, the web slice).
+#   - FR-AUTH-1: VERSION_LOCATIONS gains `reader/config/migrations`; FR-AUTH-23: the sign-up switch is read per
+#     request through SRV-CONFIG's `effective` (paired FR-CONFIG-26).
 #   - `tables`: `webauthn_credentials` adds `label text null CHECK (1..64 chars)`.
 #   - FR-AUTH-10: the session routes add this amendment's routes with the `auth` kinds named below; ROUTERS
 #     appends `reader.config.routes` (SRV-CONFIG FR-CONFIG-25/-26) and `reader.jobs.audit_routes` (SRV-EVENTS
@@ -1025,105 +1139,3 @@ vectors:
 # hex of sha256(credential_id); neither lets anyone authenticate (the cookie value and the private key never leave
 # the browser and the authenticator). A 16-hex prefix collision within one user's rows answers 409 `ambiguous` and is
 # logged (2^-64 per pair; hypothesis, not measured).
-proposed_manage:
-  requirements:
-    - id: FR-AUTH-40
-      text: >-
-        **People.** `GET /api/auth/users` (`session`; non-owner → 403 `owner_only`) → `{users: [{id, handle,
-        display_name, role, source, state, disabled_at, locked, created_at, last_signin_at, passkeys: [{pid, label,
-        created_at, last_used_at}], sessions_active, owns_data}]}` by handle. `last_signin_at` is
-        `max(webauthn_credentials.last_used_at)` of the user (FR-AUTH-7 updates it at each sign-in; sessions are
-        pruned hourly by FR-AUTH-17, so they cannot say when someone last signed in), null when never used.
-        `sessions_active` counts sessions neither revoked nor expired. `locked` is true for a `source = 'signup'`
-        user with zero passkeys (owner note 6: such an account cannot sign in; WEB-MANAGE shows "Locked"). `owns_data`
-        is computed by one function `owns_data(conn, user_id)` that reads, from the catalog, every foreign-key column
-        whose referenced column is `users.id` (the `_REFERENCES` query of lessons/store.py with `users` in place of
-        `lessons`), excluding SRV-AUTH's own tables (sessions, webauthn_credentials, auth_challenges,
-        bootstrap_tokens, invitations), and is true when any such column holds the user's id — every `owner_id` and
-        every `user_id` (SRV-LESSON's lesson_progress, lesson_notes, lesson_bookmarks included); a table added later
-        counts without a change here. SRV-EVENTS `audit_log.actor_id` and `settings_overrides.updated_by` have no
-        foreign key, so they never count. Read-only. [db] each field; `owns_data` for a user with only a bookmark;
-        a new test table with a foreign key to users makes it true.
-    - id: FR-AUTH-41
-      text: >-
-        **Sign a person out everywhere.** `POST /api/auth/users/{id}/sessions/revoke` (`recent_session`; owner only,
-        else 403 `owner_only`; the owner's own id → 409 `use_own_sessions`) sets `revoked_at` on every unrevoked
-        session of that user, for any source; 200 `{revoked: n}`; repeating it returns `{revoked: 0}`. [db]
-    - id: FR-AUTH-42
-      text: >-
-        **Remove a person's passkey.** `DELETE /api/auth/users/{id}/credentials/{pid}` (`recent_session`; owner only;
-        the owner's own id → 409 `use_own_passkeys`) locks the user row, deletes that credential and revokes all of
-        that user's sessions in one transaction (a lost device's sessions end with it). Removing the last passkey of a sign-up
-        user is allowed with this consequence stated in WEB-MANAGE's dialog: that account can no longer sign in
-        (owner note 6). For a configured user it is allowed too; `reader bootstrap` gives them a new one. 204;
-        repeating it → 404. [db]
-    - id: FR-AUTH-43
-      text: >-
-        **Delete a sign-up learner.** `DELETE /api/auth/users/{id}` with `{confirm}` (`recent_session`; owner only):
-        only a `source = 'signup'`, role `learner` user (else 409 `configured_user` or 409 `not_learner`); `confirm`
-        equals the handle (else 400 `confirm_mismatch`). In one transaction: lock the user row (FR-AUTH-29's lock);
-        compute `owns_data` under that lock (true → 409 `user_has_data`, disable instead); delete every
-        `auth_challenges` row whose `user_id` is the user (any kind, consumed or not, so an open register or
-        authenticate ceremony cannot complete against a deleted user) and the unconsumed `signup` challenges for its
-        handle (FR-AUTH-29's reject rule), then its sessions, credentials and user row, inside a savepoint; a
-        foreign-key violation from that DELETE (a row written by a table that `owns_data` read before the lock
-        reached it) rolls back to the savepoint and answers 409 `user_has_data`. Writes the `auth user_deleted <id>`
-        record. 204; repeating it → 404. The handle and its skeleton are free again afterwards: a new sign-up may take
-        the same handle (stated; the old passkey on the person's device names a user that no longer exists and signs
-        in to nothing, as owner note 7 says for a rejected sign-up). [db] each refusal; a user with one tutor
-        question or one bookmark cannot be deleted; a user with an open register ceremony (options issued, verify not
-        yet sent) is deleted, and the later `POST /api/auth/register/verify` with that user's old session cookie
-        answers 401 `unauthenticated` (its session rows are gone, FR-AUTH-10), after which no `webauthn_credentials`
-        row and no `users` row with that id exist; the late-violation path through a fault-injected insert; the handle reused by a new sign-up.
-    - id: FR-AUTH-44
-      text: >-
-        **Own sessions.** `GET /api/auth/sessions` (`session`) → the caller's unrevoked, unexpired sessions `{sessions:
-        [{sid, created_at, expires_at, current}]}`, newest first. `DELETE /api/auth/sessions/{sid}` (`session`)
-        revokes one; revoking the current one is sign-out and its response clears the session cookie exactly as
-        `POST /api/auth/signout` does (FR-AUTH-8's cookie attributes, `Max-Age=0`); `POST
-        /api/auth/sessions/revoke-others` (`session`)
-        revokes all but the current. Another user's sid → 404. No user agent or address is stored, so none is shown
-        (no new personal data). [db]
-    - id: FR-AUTH-45
-      text: >-
-        **Own passkeys.** `GET /api/auth/credentials` (`session`) → `{credentials: [{pid, label, created_at,
-        last_used_at, backed_up, transports}]}`; `POST /api/auth/credentials/{pid}` with `{label}` (`session`;
-        trimmed 1..64 characters, no Cc, or `null` to clear; else 400 `label_invalid`). Adding a passkey is FR-AUTH-6,
-        unchanged. [db]
-    - id: FR-AUTH-46
-      text: >-
-        **Remove an own passkey.** `DELETE /api/auth/credentials/{pid}` (`recent_session`) in one transaction that
-        first locks the caller's `users` row, then counts the caller's credentials and refuses with 409
-        `last_passkey` when it is the only one; else it deletes the credential and revokes every other session of the
-        caller (`revoked_at` on all unrevoked sessions except the current one), because a passkey is removed when its
-        device is lost or shared, and that device's sessions must end with it. The current session stays. 200
-        `{revoked_sessions: n}`; another user's pid → 404. [db] two concurrent deletes of the last two passkeys: one
-        200, one 409, one passkey left; other sessions revoked, the current one still valid.
-    - id: FR-AUTH-47
-      text: >-
-        **Return after re-auth.** FR-AUTH-14's sign-in `next` allow-list adds the constant "/settings": with
-        `location.search === "?next=/settings"` exactly, a successful sign-in navigates to "/settings". [browser]
-    - id: FR-AUTH-48
-      text: >-
-        **Enable a sign-up account** (gated: built only once ADR-0037 reads `accepted`; until then the route does not
-        exist and WEB-MANAGE shows no Enable). `POST /api/auth/signups/{id}/enable` (`recent_session`, body `{}`; owner only,
-        else 403 `owner_only`) under FR-AUTH-29's row lock (`source = 'signup'` only, so a configured user is 404 as
-        in FR-AUTH-29): on an active sign-up user with `disabled_at` set, clears `disabled_at`; 200
-        `{"status":"active"}`; repeating it on an enabled account returns the same body (idempotent); a pending user →
-        409 `pending` (approve instead). Sessions revoked by the disable stay revoked; the person signs in again with
-        a passkey kept through the disable. If the owner removed every passkey meanwhile (FR-AUTH-42), the account is
-        enabled but cannot sign in, and WEB-MANAGE says so. INV-AUTH-13 holds: reader.yaml never changes a sign-up
-        account. Audit action `user.enable` (SRV-EVENTS FR-EVENTS-30). [db] disable → enable → sign in with the same
-        passkey; enable twice; pending and configured refusals; a learner gets 403 with nothing changed.
-  invariants:
-    - id: INV-AUTH-20
-      text: >-
-        **Access.** Every route of this amendment runs FR-AUTH-12 before its handler; owner-only routes answer 403
-        `owner_only` to a learner with zero rows changed; own-object routes answer 404 for another user's sid or pid;
-        no route here changes a `source = 'config'` user's row, `disabled_at` or `state`. [db] the learner and
-        second-user matrix over every route, with row snapshots of users, sessions and webauthn_credentials.
-    - id: INV-AUTH-21
-      text: >-
-        **At least one way in.** After any request of this amendment the owner has at least one passkey, and no
-        request of this amendment revokes the caller's current session except `DELETE /api/auth/sessions/{own
-        current sid}` (FR-AUTH-46 and `revoke-others` revoke only the caller's other sessions). [db]
