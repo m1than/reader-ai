@@ -98,7 +98,32 @@ bench_results:
     per_question: { id: question_id, rank: { int_or_null: [1, 10000000] }, hit: bool,
                     top_pages: { list: { int: [1, 100000] }, max: 50 } }
     rule: "every per_question id is a record id of the uploaded set"
-  tutor:    # e2e/live/results/<date>-tutor-bench.json after SRV-TUTOR's paired change (B4: no prose keys)
+  tutor:    # the bench's records file (VEC-TUTOR-7 tutor-bench-<UTC time>.json) with SRV-TUTOR FR-TUTOR-15's header
+    required:
+      kind: { enum: [tutor] }
+      date: date
+      branch: branch
+      commit: commit
+      lesson_id: uuid
+      set: { enum: [tutor-bench-v2] }
+      records: { list: tutor_record, min: 1, max: 1000 }
+    tutor_record:   # web/src/tutor/bench.ts BenchRecord, exactly these keys
+      id: question_id
+      chapter: { int: [1, 23] }
+      question_id: { uuid_or_null: true }
+      state: { enum_or_null: [answered, failed, insufficient, expired, refused, queued] }
+      wall_s: { float: [0, 3600] }
+      usd: { float: [0, 100] }
+      output_tokens: { int: [0, 1000000] }
+      thinking_tokens: { int_or_null: [0, 1000000] }
+      grounded: bool
+      insufficient: bool
+      blocks: { int: [0, 1000] }
+      blocks_with_verified_quote: { int: [0, 1000] }
+      gold_in_top8: bool
+      gold_cited: bool
+    rule: "every record id is a record id of the uploaded set; scores are recomputed from the records (R4)"
+  tutor_summary:   # e2e/live/results/<date>-tutor-bench.json, a report after FR-TUTOR-15's migration; NOT an upload
     required:
       kind: { enum: [tutor] }
       date: date
@@ -151,7 +176,8 @@ alerts:
 
 # The worker → MLflow requests of phase 2 (ADR-0038), measured as raw REST in round 8
 # (results/20261124T150936-round8-rest/round8.json `raw`) and round 10 (results/20261124T153052-round10-setup:
-# setup, finalize, dataset search, retention deletes). Body keys only; values come from the tables above.
+# setup, finalize, dataset search, retention deletes) and round 12 (results/20261124T155700-round12-rest: a
+# same-value param re-log, the LoggedModel tag PATCH). Body keys only; values come from the tables above.
 writes:
   - { kind: obs.setup, method: GET, path: /api/2.0/mlflow/experiments/get, query: [experiment_id] }
   - { kind: obs.setup, method: GET, path: /api/2.0/mlflow/experiments/get-by-name, query: [experiment_name] }

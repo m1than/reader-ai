@@ -1584,7 +1584,11 @@ tasks:
         mirror found by name + revision, import traces by material tag, no VACUUM, flock-guarded migrate with one
         pre-migration backup, backup API always, no Jaeger sidecar (doctor via docker inspect), owner_labels.
         Round 11 (results/20261124T154753-round11-egress): mlflow's internal networks reach neither 1.1.1.1:443 nor
-        DNS; a normal network does. Next: design review round 3." }
+        DNS; a normal network does. Design review round 3 (d03645c): changes, R1-R4; revision 4 answers each
+        (phase2_review_round3): only lacking params logged; scores recomputed from registered per-question records
+        (the tutor upload is the records file); restore marker and mlflow-migrate exit 3; FR-OBS-29's image test
+        first Red. Round 12 (results/20261124T155700-round12-rest): same-value param re-log 200, changed 400;
+        LoggedModel tag PATCH and read-back; egress probe reaches MLflow /health 200. Next: design review round 4." }
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 

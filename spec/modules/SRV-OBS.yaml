@@ -1020,10 +1020,11 @@ proposed_requirements:
           without the lock can cause it, declared).
       (b) None found: creates it (`runs/create`: name, start time = the run's start, tags `reader.kind` and the id
           tag).
-      (c) While the Run is incomplete (no `reader.complete`; a new one included), every attempt logs ALL params
-          (`log-batch`: version_key, reader_version, `model.<stage>`): MLflow accepts a param logged again with the
-          same value, and params are write-once (round 8: a different value is 400), so a Run's params are always
-          those of its first end. Every attempt also logs the metrics at step = `end` (a second end re-logs the
+      (c) While the Run is incomplete (no `reader.complete`; a new one included), the attempt logs only the params
+          the Run lacks (`log-batch`: version_key, reader_version, `model.<stage>`), reading the Run's params from
+          the `runs/search` answer of (a) (round 12: the answer carries them, and logging a lacking one is 200).
+          Params are write-once (rounds 8 and 12: a different value is 400; the same value again is 200), so a
+          Run's params are always those of its first end. Every attempt also logs the metrics at step = `end` (a second end re-logs the
           same keys at step 2, which MLflow keeps as history; round 8) and the tags `reader.outcome`,
           `reader.ends`, `reader.lesson.id`, `reader.course.id` and `reader.snapshot_at` = the time this job read
           the ledger. On a second end whose values differ, the tags and the metrics' latest values are the second
@@ -1101,7 +1102,9 @@ proposed_requirements:
       The api stores the upload in Postgres table `obs_bench_results` (paired migration `obs_0002`: id uuid pk,
       owner_id, digest char(64) UNIQUE = sha256 of the canonical JSON of {set sha256, result}, kind search | tutor,
       set_name, model text null (pattern hf_model or a pricing.yaml model), commit text null, scores jsonb = the
-      declared numbers of the result only, created_at), which is the record (ADR-0038 Decision 4), and enqueues
+      scores the api recomputes by code over the per-question rows whose ids are registered records of the set
+      (the file's own aggregates, such as `recall_at_10`, `mrr` or `grounded_share`, are validated but never
+      stored; review round 3, R4), created_at), which is the record (ADR-0038 Decision 4), and enqueues
       `obs.bench` {upload_id} in the same transaction (the outbox). The job, with tracing off ending without a
       request:
       (a) finds the experiment `bench`; missing → it calls FR-OBS-26's setup function inline (idempotent; it
@@ -1110,11 +1113,14 @@ proposed_requirements:
           pinned records (`datasets/{id}/records`);
       (c) finds a Run tagged `reader.bench_upload` = upload id (`runs/search`): found and tagged `reader.complete`
           → ends `succeeded` without a request; otherwise creates it (tags `reader.bench` = kind, `reader.bench_upload`)
-          or reuses the incomplete one, logs params (model, chunk_chars, overlap, set_sha256, commit) and metrics:
-          search: hit@1, hit@3, hit@10, reciprocal rank (mean), and the per-question rank as a metric `rank` at
-          step = the record's index; tutor: grounded_share, gold_cited_share, insufficient_share, latency p50/p95,
-          mean_usd, total_usd. While the Run is incomplete every attempt logs all params again (same values; N1's
-          rule);
+          or reuses the incomplete one, logs params (model, chunk_chars, overlap, set_sha256, commit) and the
+          stored row's scores as metrics: search, from `per_question` over registered ids: hit@1, hit@3, hit@10,
+          reciprocal rank (mean; an absent rank counts 0), and the per-question rank as a metric `rank` at step =
+          the record's index; tutor, from the records file's per-question rows over registered ids (VEC-TUTOR-7's
+          records: state, grounded, gold_cited, insufficient, wall_s, usd): grounded_share, gold_cited_share,
+          insufficient_share, latency p50/p95 (nearest rank), mean_usd over costed rows, total_usd. While the Run
+          is incomplete an attempt logs only the params it lacks (FR-OBS-20 c's rule); every value comes from the
+          stored `obs_bench_results` row, which never changes, so a re-log can never differ;
       (d) logs the dataset as the Run's input (`runs/log-inputs`, the client's shape measured in round 8:
           source_type `mlflow_evaluation_dataset`, source {dataset_id}, tag `mlflow.data.context` = evaluation),
           ends the Run FINISHED and tags `reader.complete` last.
@@ -1123,10 +1129,12 @@ proposed_requirements:
       the SQLite pool at default parallelism). A bench Run has no traces, so its own experiment loses nothing (round
       7: a separate experiment's Evaluation runs tab lists and charts its Runs' metrics). Each upload is a new Run,
       so `bench`'s Evaluation runs tab charts regressions from the earliest run to the latest (round 6; round 8
-      shows the tutor bench Run there with its dataset). The committed tutor summary
-      (e2e/live/results/2026-11-23-tutor-bench.json) holds prose keys (`what`, `question_set`, notes) and a commit
-      with prose; it is migrated by paired SRV-TUTOR FR-TUTOR-15 to VEC-OBS-5's numbers-only shape (commit
-      `66fba58`, set `tutor-bench-v2`, prose keys dropped), so the committed result conforms (review round 1, B4).
+      shows the tutor bench Run there with its dataset). Because scores are recomputed from per-question rows,
+      the tutor upload is the bench's records file (VEC-TUTOR-7's `tutor-bench-<UTC time>.json`), not the
+      summary: paired SRV-TUTOR FR-TUTOR-15 gives that file a header (kind `tutor`, date, branch, commit sha,
+      lesson_id, set `tutor-bench-v2`) above its records, numbers, ids, states and flags only; the committed
+      summary (e2e/live/results/2026-11-23-tutor-bench.json) is migrated to VEC-OBS-5's numbers-only shape (commit
+      `66fba58`, prose keys dropped) and stays a report, not an upload (review rounds 1 and 3, B4 and R4).
   - id: FR-OBS-24
     text: >-
       Owner labels (ADR-0038 Decisions 2 and 3). Postgres is the record; MLflow gets a mirror. MLflow's labeling
@@ -1188,8 +1196,11 @@ proposed_requirements:
       it reads MLflow's state (`experiments/get`, `get-by-name`, `logged-models/search`), compares it with the
       file and writes only the difference (`experiments/update` for a name, `set-experiment-tag` per differing
       tag, `experiments/create` with tags, FR-OBS-21 b's LoggedModel); a tag or experiment in MLflow that the file
-      does not name is left alone and listed in the log line by key only. A repeat makes 0 writes (round 10: the
-      state dump before and after a re-run is equal, `drift` false). It runs (1) in the job `obs.setup` {digest},
+      does not name is left alone and listed in the log line by key only. A repeat on the same UTC day makes 0
+      writes (round 10: the state dump before and after a re-run is equal, `drift` false); the first run of a new
+      day makes exactly one, FR-OBS-31's `reader.last_started` tag (round 12: `PATCH logged-models/{id}/tags`
+      {tags: [{key: reader.last_started, value: <day>}]} answers 200, `logged-models/search` reads the day back,
+      and a second PATCH with the next day replaces it). It runs (1) in the job `obs.setup` {digest},
       which the worker's start hook enqueues (enqueue-only, like FR-OBS-15; digest = sha256 of the file's canonical
       JSON, the version key and the UTC start day), and (2) inline, at the start of `obs.runs`, `obs.bench` and `obs.label` when the
       experiment they need is missing. So an `obs.setup` key that ended dead never blocks anything: the key only
@@ -1234,7 +1245,7 @@ proposed_requirements:
       `restart: "no"`); `mlflow` depends on it with `condition: service_completed_successfully`. Its command is a
       shell script of exactly these steps, all under an exclusive `flock /var/lib/mlflow/.migrate.lock` (so two
       concurrent `reader up` runs cannot migrate twice):
-      (1) if `/var/lib/mlflow/mlflow.db` does not exist, skip to (4);
+      (1) if `/var/lib/mlflow/mlflow.db` does not exist, skip to (3) (no backup of an empty store);
       (2) take the one pre-migration backup through SQLite's backup API to
           `/var/lib/mlflow/backup/pre-migrate.db`, replacing the previous one (exactly one is kept), and record the
           image version in `/var/lib/mlflow/backup/pre-migrate.version`;
@@ -1242,14 +1253,26 @@ proposed_requirements:
           start, and the error names the manual restore below;
       (4) `PRAGMA journal_mode=WAL` (persistent; FR-OBS-28), then exit 0.
       Manual restore after a failed migration, with the stack down: `reader restore-obs-premigrate` (paired OPS-CLI
-      FR-CLI-24) copies `backup/pre-migrate.db` over `mlflow.db` through the backup API and pins the previous image
-      version until the owner bumps again. Why: a server stopped during its own first-start migration left the file
+      FR-CLI-24, exit codes there) copies `backup/pre-migrate.db` over `mlflow.db` through the backup API,
+      removes any stale `mlflow.db-wal` and `mlflow.db-shm` first, prints the version in `pre-migrate.version`,
+      and writes the marker `/var/lib/mlflow/backup/restored-for` holding that version. While the marker exists,
+      `mlflow-migrate` compares it with its own image version and, when they differ, exits with code 3
+      (`obs_restored_for_other_version`) before step (1), so a newer image never migrates the restored file;
+      when they match it removes the marker and goes on. Going back to the old pin (reverting the image bump in
+      deploy/compose.yaml) is the owner's own git action; reader does not change the pin. A fresh volume (no
+      `mlflow.db`) is created by step (3)'s `mlflow db upgrade`, which builds the schema from empty: that first
+      start is a migration too (declared), and `reader doctor` prints `obs mlflow: fresh store, schema <revision>`
+      after it. Why: a server stopped during its own first-start migration left the file
       half-migrated ("table _alembic_tmp_experiments already exists") and never started again (round 9); and
       3.18.0's server runs pending migrations itself at start (round 9: on a volume written by 3.10.0 it ran without
       an error until the test's 60 s limit, so it does not refuse an old schema), so without the one-shot every
-      first start after a bump is that window. Test [image]: a volume written by the previous pin is started by the
-      new pin through `mlflow-migrate`; it serves its data, `pre-migrate.db` exists and opens, and a second run of
-      `mlflow-migrate` is a no-op upgrade.
+      first start after a bump is that window. Test [image], the FIRST Red test of phase 2 (it pins the riskiest
+      behaviour before any code): under the service's own hardening (non-root uid, read-only root filesystem, only
+      the volume writable), a volume written by the previous pin is started by the new pin through
+      `mlflow-migrate`; it serves its data, `pre-migrate.db` exists and opens; two `mlflow-migrate` started at once
+      serialise on the `flock` (the second waits, then finds nothing to upgrade); a second run is a no-op
+      upgrade; after `reader restore-obs-premigrate`, `mlflow-migrate` of a different version exits 3 and of the
+      marker's version starts; a fresh volume reaches a served, empty store.
   - id: FR-OBS-30
     text: >-
       Backup and restore (paired OPS-CLI FR-CLI-24, OPS-DEPLOY FR-DEPLOY-15). `obs_mlflow` joins `reader backup`
@@ -1276,7 +1299,8 @@ proposed_requirements:
       datasets are kept (small: one Run and at most 40 records per upload; their record is Postgres). There is no
       VACUUM: SQLite reuses freed pages, and the size alert covers growth (review round 2, N6). Size:
       `reader doctor`/`status` measure the `obs_mlflow` volume on the host (`docker system df -v` for the volume;
-      no worker mount) and print a warning `obs_store_large` at 80 % of `store_bytes_max` = 4 GiB. The 4 GiB is
+      no worker mount; the size includes `backup/pre-migrate.db`, at most one copy of the store) and print a
+      warning `obs_store_large` at 80 % of `store_bytes_max` = 4 GiB. The 4 GiB is
       structural, not measured (round 9: a whole book plus 100 questions added 51.6 MB, 1.45 KB a span, so 30
       days of one book a day is about 1.6 GB, leaving more than half free).
   - id: FR-OBS-32
@@ -1302,9 +1326,12 @@ proposed_requirements:
       [config] test asserts no obs service is on a non-internal network. An [image] test (review round 2, N9) runs
       a probe container on exactly mlflow's networks: a TCP connect to an IP literal (1.1.1.1:443) fails, an
       external name (example.com) does not resolve, and the same probe on a non-internal network connects and
-      resolves (the positive control). Spike round 11 (results/20261124T154753-round11-egress): on mlflow's two
-      internal networks the connect failed (OSError) and the lookup failed (gaierror); on a normal network both
-      succeeded. The gate, the CSP and header
+      resolves (the positive control); on mlflow's networks the probe also reaches `http://mlflow:5000/health`
+      (200), so the failures are the networks', not the probe's. Spike round 11
+      (results/20261124T154753-round11-egress): on mlflow's two internal networks the connect failed (OSError) and
+      the lookup failed (gaierror); on a normal network both succeeded. Round 12
+      (results/20261124T155700-round12-rest), with MLflow healthy: the same two failures, and MLflow's /health
+      answered 200 to the probe. The gate, the CSP and header
       stripping are re-checked against every new endpoint: the bench and labels routes are on the main site
       (SRV-AUTH's Origin rules), MLflow's new paths (datasets, logged-models, runs) are reachable through 8443 only
       for the owner (INV-OBS-5's [image] test gains them). `/graphql` stays open behind the gate: MLflow's own run
@@ -1426,14 +1453,14 @@ phase2_in_place_edits:
 
 # B11: paired changes, with ids above V/manage's maxima (FR-EVENTS-31, FR-CLI-23, FR-UI-30).
 phase2_paired_changes:
-  - { spec: SRV-EVENTS, id: FR-EVENTS-32, change: "the catalogue gains obs.setup, obs.runs, obs.bench, obs.label and obs.health (phase2_job_kinds); a periodic scheduler entry for obs.health" }
+  - { spec: SRV-EVENTS, id: FR-EVENTS-32, change: "the catalogue gains obs.setup, obs.runs, obs.bench, obs.label and obs.health (phase2_job_kinds); a periodic scheduler entry for obs.health; `traced: false` for obs.health; declared: obs.runs holds a second advisory lock (lock_id(obs.runs:<kind>:<id>)) on its job's connection for the whole run, beside the key lock, so it holds one pooled connection for up to its 60 s timeout, like every running job" }
   - { spec: SRV-PIPELINE, id: FR-PIPELINE-18, change: "after the transaction that records a run's end commits, enqueue obs.runs {compile, run_id, end} inside its own try/except" }
   - { spec: SRV-INGEST, id: FR-INGEST-26, change: "the same for an import's end (obs.runs {ingest, ingest_id, 1}); id above V/manage's FR-INGEST-25 (review round 2, N10)" }
-  - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench summary file is VEC-OBS-5 bench_results.tutor exactly (kind tutor, no prose keys, commit sha only, set tutor-bench-v2); the committed 2026-11-23 file is migrated to it" }
+  - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench's records file (tutor-bench-<UTC time>.json) gains a header (kind tutor, date, branch, commit sha, lesson_id, set tutor-bench-v2) and is VEC-OBS-5 bench_results.tutor exactly (the upload); the summary file is VEC-OBS-5 tutor_summary (no prose keys, commit sha only) and the committed 2026-11-23 summary is migrated to it (a report, not an upload)" }
   - { spec: WEB-UI, id: FR-UI-31, change: "/observability: the bench upload (two file pickers, the route's errors shown by code), label buttons on lesson and answer rows (good/bad and the reason enum), one banner per alert, and a stack row (mlflow, rotel from obs_stack_status; jaeger: see reader doctor)" }
-  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader restore-obs-premigrate` (FR-OBS-29)" }
+  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader restore-obs-premigrate` (FR-OBS-29); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written; mlflow-migrate's own exit 3 (obs_restored_for_other_version) is reported by `reader up` with the marker's version and the hint that the owner reverts the pin in git" }
   - { spec: OPS-DEPLOY, id: FR-DEPLOY-15, change: "FR-OBS-27's pinned flags and environment with comments and sources; the mlflow-migrate one-shot (flock, pre-migration backup, db upgrade, WAL); no new healthchecks (rotel and jaeger have no shell; obs.health and reader doctor cover them); deploy/otel/mlflow-setup.yaml mounted read-only into the worker; the 8443 request body limit (10 MiB, structural); the obs_mlflow volume's backup label changes from excluded to included (ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion), VEC-DEPLOY-3's backup list updated" }
-  - { spec: spikes, id: "spikes/embeddings-local (no spec; spike files)", change: "bench.py writes `kind: search`, and the committed results under results/*-v2/ gain it, so they conform to VEC-OBS-5 (review round 2, N3)" }
+  - { spec: spikes, id: "spikes/embeddings-local (no spec; spike files)", change: "bench.py writes `kind: search`, and the committed results under results/20261120T195713-draft-questions/ (the run over questions.yaml, i.e. search-bench-v1's set) gain it, so they conform to VEC-OBS-5; the edit is noted in spikes/embeddings-local/RESULT.md (review rounds 2 and 3, N3 and R4)" }
   - { spec: OPS-DOD, id: "tools/ci-local.sh (paired, tooling)", change: "ci-local.sh and ci.yml run `node spec/fixtures/SRV-OBS/compose-bench.mjs --check` beside trace-check" }
   - { spec: SRV-OBS, id: VEC-OBS-5, change: "spec/fixtures/SRV-OBS/phase2.yaml" }
   - { spec: SRV-OBS, id: VEC-OBS-6, change: "spec/fixtures/SRV-OBS/mlflow-setup.yaml (deploy/otel/mlflow-setup.yaml at Green)" }
@@ -1465,6 +1492,13 @@ phase2_review_round2:
   - { id: N9, answer: "probe on exactly mlflow's networks: IP-literal connect fails, external DNS fails, positive control on a normal network succeeds; spike round 11 recorded it (FR-OBS-33)" }
   - { id: N10, answer: "FR-INGEST-26" }
   - { id: non-blocking, answer: "/version removed; obs.health every 30 min and untraced; burst test, 4 GiB structural; 1.45 KB a span; used = reader.last_started within retention_days, Runs by end_time; traces/search max_results 500 with page_token; dead obs.runs after a long MLflow restart and the ObsRunsDuplicate race (advisory lock) declared; owner_labels with the lesson revision in the unique key; tutor no_trace path dropped; compose-bench --check in ci-local.sh (paired); 10 MiB structural; ADR verified_by adds rounds 10 and 11; tables in-place edit" }
+# Design review round 3 (d03645c, changes): R1-R4 and the non-blocking items, answered in revision 4.
+phase2_review_round3:
+  - { id: R1, answer: "an incomplete Run logs only the params it lacks, read from the runs/search answer; obs.bench's values come from the stored, immutable upload row; round 12: a same-value re-log 200, a changed value 400, runs/search returns the params (FR-OBS-20 c, -23 c)" }
+  - { id: R2, answer: "round 12: PATCH /api/2.0/mlflow/logged-models/{id}/tags {tags: [{key: reader.last_started, value: day}]} 200, read back through logged-models/search, a next-day PATCH replaces it (FR-OBS-26; round12.json raw)" }
+  - { id: R3, answer: "restore-obs-premigrate removes stale -wal/-shm, prints pre-migrate.version, writes backup/restored-for; mlflow-migrate exits 3 obs_restored_for_other_version until the image matches; reverting the pin is the owner's git action; FR-CLI-24 has the exit-code table (FR-OBS-29)" }
+  - { id: R4, answer: "scores recomputed by code over registered records only, file aggregates validated but never stored; the tutor upload is the per-question records file with FR-TUTOR-15's header; kind: search points at results/20261120T195713-draft-questions, noted in spikes/embeddings-local/RESULT.md (FR-OBS-23, VEC-OBS-5)" }
+  - { id: non-blocking, answer: "fresh-volume first start declared as a migration with a doctor line; pre-migrate.db counted in the store size; FR-OBS-29's [image] test (flock, non-root, read-only) is the first Red test; the egress test shows the probe reaching MLflow (round 12: /health 200); 0 writes on the same day; the advisory-lock connection hold declared in FR-EVENTS-32" }
 
 owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."

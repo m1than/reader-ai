@@ -116,3 +116,11 @@ The full-text half of the hybrid search (Postgres FTS) is expected to raise reca
 
 - Model: `BAAI/bge-m3` confirmed.
 - `questions-v2.yaml`: the owner left the review to the agent. It is accepted as is (lint clean) and becomes the retrieval acceptance set for V.SRV-SEARCH-min. v1 stays for comparison only.
+
+## Planned edit for SRV-OBS phase 2 (2026-11-24)
+
+SRV-OBS's phase 2 design (FR-OBS-23, VEC-OBS-5; design review rounds 2 and 3) lets the owner upload a search bench
+result to MLflow. An upload carries a required `kind`. Once that design is approved, `bench.py` will write
+`kind: search` into every result. The three committed results in `results/20261120T195713-draft-questions/`, the
+run over `questions.yaml` (MLflow dataset `search-bench-v1`), will gain that one key and nothing else. Their numbers
+stay as measured. No result file has been changed yet.

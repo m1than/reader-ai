@@ -551,6 +551,31 @@ networks `reader-spike-obs_obs` and `reader-spike-obs_obs-ui`, both `internal=tr
 The probe also tried `mlflow:5000`, which was not reachable from either run: the server had only just started. That
 check is not part of the egress result.
 
+## Round 12 (design review round 3: R1, R2, and the egress probe reaching MLflow), 2026-11-24
+
+`run-round12.sh` runs `round12.py` on round 9's flags, then the egress probe after MLflow is healthy. Results are in
+`results/20261124T155700-round12-rest`. Every request is in `round12.json` `raw`, with its method, path, status and
+body.
+
+- **R1, params.** On a new Run:
+
+  | Request | Status |
+  |---|---|
+  | `log-batch` of `version_key` | 200 |
+  | the same value again | 200 |
+  | a different value | 400 |
+
+  `runs/search` returns the Run's params, so logging the one it lacked (`model.draft`) is 200. Afterwards the Run
+  has both params, with the first `version_key`.
+- **R2, LoggedModel tag.** `PATCH /api/2.0/mlflow/logged-models/{id}/tags` with
+  `{"tags": [{"key": "reader.last_started", "value": "2026-11-24"}]}` answers 200, and `logged-models/search` by
+  `reader.version_key` reads back `2026-11-24`. A second PATCH with `2026-11-25` answers 200 and reads back
+  `2026-11-25`.
+- **Egress probe on MLflow's two internal networks**, with MLflow healthy:
+  - a TCP connect to 1.1.1.1:443 fails (`OSError`);
+  - a lookup of example.com fails (`gaierror`);
+  - `http://mlflow:5000/health` answers 200, so the probe is on the right networks.
+
 ## Limits
 
 - **Memory sampling:** `docker stats` only, at 4–5 s intervals, with page cache included.
