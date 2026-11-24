@@ -151,3 +151,20 @@ async def test_compile_first_skips_inactive_lessons(pg: Pg, tmp_path: Path) -> N
         assert "run_id" in again["compile"], again
         started = await env.scalar("SELECT lesson_id FROM compile_runs")
         assert str(started) == lessons[1]["lesson_id"]
+
+
+async def test_a_deleted_material_is_neither_planned_nor_imported(pg: Pg, tmp_path: Path) -> None:
+    """FR-PLAN-20: preview and confirm answer 404 for a deleted material; FR-PIPELINE-22: `material_imported`
+    is false for it (merge with the SRV-INGEST slice)."""
+    source = need("reader.pipeline.source")
+    async with plan_env(pg, tmp_path) as env:
+        async with env.engine.begin() as conn:
+            assert await source.material_imported(conn, env.users["ivan"], PLAN_SHA) is True
+            await conn.exec_driver_sql("UPDATE materials SET deleted_at = now()")
+            assert await source.material_imported(conn, env.users["ivan"], PLAN_SHA) is False
+        async with client(env) as c:
+            r = await c.post("/api/plans/preview", json=body(weeks=3))
+            assert (r.status_code, r.json()) == (404, {"error": "not_found"})
+            r = await c.post("/api/plans/confirm", json=body(weeks=3, plan_sha256="0" * 64, compile_first=False))
+            assert (r.status_code, r.json()) == (404, {"error": "not_found"})
+        assert await env.scalar("SELECT count(*) FROM courses") == 0

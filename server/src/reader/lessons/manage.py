@@ -532,12 +532,11 @@ async def delete_course(
 
 async def material_is_live(conn: AsyncConnection, owner_id: uuid.UUID, sha256: str | None) -> bool:
     """FR-LESSON-25's `material_deleted` check: the course's material row, read FOR SHARE so a concurrent
-    material delete cannot interleave (no write skew). MERGE POINT: SRV-INGEST adds `materials.deleted_at`
-    (FR-INGEST-31); the condition `AND deleted_at IS NULL` is added here when that slice is merged."""
+    material delete cannot interleave (no write skew); a deleted material (SRV-INGEST FR-INGEST-31) is not live."""
     if sha256 is None:
         return True
     found = await conn.execute(
-        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s FOR SHARE"),
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NULL FOR SHARE"),
         {"o": owner_id, "s": sha256},
     )
     return found.first() is not None

@@ -340,9 +340,6 @@ async def test_restore_refusals(pg: Pg, tmp_path: Path) -> None:
     await w.engine.dispose()
 
 
-# Merge point: `manage.material_is_live` gains `AND deleted_at IS NULL` when SRV-INGEST's `materials.deleted_at`
-# (FR-INGEST-31, a parallel slice) is merged; strict, so the merge that switches it on must drop this marker.
-@pytest.mark.xfail(strict=True, reason="needs SRV-INGEST materials.deleted_at in material_is_live (merge point)")
 async def test_restore_refused_while_the_material_is_deleted(pg: Pg, tmp_path: Path) -> None:
     w = await manage_world(pg, tmp_path)
     sourced, _ = await make_course(w, "ivan", "Sourced", material=MATERIAL)
@@ -352,6 +349,8 @@ async def test_restore_refused_while_the_material_is_deleted(pg: Pg, tmp_path: P
         o=w.users["ivan"], s=MATERIAL,
     )
     async with client(w) as c:
+        deleted = await c.request("DELETE", f"/api/courses/{sourced}", json={"confirm": "Sourced"})
+        assert deleted.status_code == 200
         r = await c.post(f"/api/courses/{sourced}/restore", json={})
         assert (r.status_code, r.json()["error"]) == (409, "material_deleted")
         await execute(w, "UPDATE materials SET deleted_at = NULL WHERE sha256 = :s", s=MATERIAL)
