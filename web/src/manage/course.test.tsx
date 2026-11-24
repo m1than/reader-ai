@@ -118,6 +118,19 @@ describe('archive and delete with Undo (FR-MANAGE-3, INV-MANAGE-4)', () => {
     expect(await screen.findByText('A compile of this course is running. Cancel it first.')).toBeTruthy();
   });
 
+  it('sends an unauthenticated 401 to the shell’s sign-in redirect (FR-MANAGE-1)', async () => {
+    const server = fakeServer({ overrides: { 'POST /api/courses/c-fixture/archive': refusal('unauthenticated') } });
+    const navigateAway = vi.fn();
+    const { AppRoot } = await load(() => import('../app/AppRoot'));
+    await act(async () => {
+      render(<AppRoot initialPath="/" fetch={server.fetch} navigateAway={navigateAway} />);
+    });
+    await choose(await openMenu('Fixture course'), 'Archive');
+    await waitFor(() => expect(navigateAway).toHaveBeenCalledWith('/api/auth/signin'));
+    expect(screen.queryByRole('link', { name: 'Sign in again' })).toBeNull();
+    expect(server.writes()).toEqual([{ method: 'POST', path: '/api/courses/c-fixture/archive', body: {} }]);
+  });
+
   it('deletes after the impact and typed confirmation, then Undo restores at the old position', async () => {
     const server = fakeServer();
     await mount(server);

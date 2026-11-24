@@ -15,10 +15,10 @@ afterEach(() => {
   for (const a of ['data-text-size', 'data-width', 'data-theme']) document.documentElement.removeAttribute(a);
 });
 
-const mount = async (server: FakeServer, path = '/settings') => {
+const mount = async (server: FakeServer, path = '/settings', navigateAway: (url: string) => void = vi.fn()) => {
   const { AppRoot } = await load(() => import('../app/AppRoot'));
   await act(async () => {
-    render(<AppRoot initialPath={path} fetch={server.fetch} navigateAway={vi.fn()} />);
+    render(<AppRoot initialPath={path} fetch={server.fetch} navigateAway={navigateAway} />);
   });
   await screen.findByRole('heading', { level: 1, name: /Settings|Настройки/ });
 };
@@ -165,12 +165,112 @@ describe('Account (FR-MANAGE-7)', () => {
 
   it('asks for a recent sign-in when the server answers reauth_required', async () => {
     const server = fakeServer({ overrides: { 'POST /api/auth/sessions/revoke-others': refusal('reauth_required') } });
-    await mount(server);
+    const navigateAway = vi.fn();
+    await mount(server, '/settings', navigateAway);
     const panel = await tab('Account');
     const sessions = await within(panel).findByRole('region', { name: 'Sessions' });
     await act(async () => fireEvent.click(await within(sessions).findByRole('button', { name: 'Sign out everywhere else' })));
     expect(await screen.findByText('Sign in again to do this (required every 10 minutes for account actions).')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('/api/auth/signin?next=/settings');
+    // A recent-sign-in refusal stays on the page: the shell's redirect is for `unauthenticated` only.
+    expect(navigateAway).not.toHaveBeenCalled();
+  });
+
+  it('sends an unauthenticated 401 to the shell’s sign-in redirect, with no reauth line (FR-MANAGE-1)', async () => {
+    const server = fakeServer({ overrides: { 'POST /api/auth/sessions/revoke-others': refusal('unauthenticated') } });
+    const navigateAway = vi.fn();
+    await mount(server, '/settings', navigateAway);
+    const panel = await tab('Account');
+    const sessions = await within(panel).findByRole('region', { name: 'Sessions' });
+    await act(async () => fireEvent.click(await within(sessions).findByRole('button', { name: 'Sign out everywhere else' })));
+    await waitFor(() => expect(navigateAway).toHaveBeenCalledWith('/api/auth/signin'));
+    expect(screen.queryByRole('link', { name: 'Sign in again' })).toBeNull();
+  });
+});
+
+describe('Add a passkey (FR-MANAGE-7, SRV-AUTH FR-AUTH-6)', () => {
+  const CREDENTIAL_JSON = { id: 'cred-new', rawId: 'cred-new', type: 'public-key', response: { clientDataJSON: 'e30', attestationObject: 'o2N' }, clientExtensionResults: {} };
+  const stub = (create: () => Promise<unknown>) => {
+    const parse = vi.fn((json: unknown) => ({ parsed: json }));
+    vi.stubGlobal('PublicKeyCredential', Object.assign(function PublicKeyCredential() {}, { parseCreationOptionsFromJSON: parse }));
+    const createFn = vi.fn(create);
+    Object.defineProperty(navigator, 'credentials', { value: { create: createFn }, configurable: true });
+    return { parse, create: createFn };
+  };
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (navigator as { credentials?: unknown }).credentials;
+  });
+  const passkeys = async (server: FakeServer, navigateAway?: (url: string) => void) => {
+    await mount(server, '/settings', navigateAway);
+    const panel = await tab('Account');
+    return within(panel).findByRole('region', { name: 'Passkeys' });
+  };
+  const add = async (region: HTMLElement) => act(async () => fireEvent.click(await within(region).findByRole('button', { name: 'Add a passkey' })));
+
+  it('runs options → create → verify with the credential’s JSON, then refetches the list', async () => {
+    const webauthn = stub(async () => ({ toJSON: () => CREDENTIAL_JSON }));
+    const server = fakeServer();
+    const region = await passkeys(server);
+    await waitFor(() => expect(within(region).getAllByRole('listitem')).toHaveLength(3));
+    expect(within(region).queryByText(/sign in on the new device/)).toBeNull();
+    const before = server.to('/api/auth/credentials').length;
+    await add(region);
+    expect(await within(region).findByText('Passkey added.')).toBeTruthy();
+    expect(server.writes()).toEqual([
+      { method: 'POST', path: '/api/auth/register/options', body: {} },
+      { method: 'POST', path: '/api/auth/register/verify', body: CREDENTIAL_JSON },
+    ]);
+    expect(webauthn.parse).toHaveBeenCalledWith(fixture().register_options);
+    expect(webauthn.create).toHaveBeenCalledWith({ publicKey: { parsed: fixture().register_options } });
+    await waitFor(() => expect(server.to('/api/auth/credentials').length).toBeGreaterThan(before));
+  });
+
+  it('says a cancelled prompt calmly and sends no verify', async () => {
+    stub(async () => {
+      throw new DOMException('The operation either timed out or was not allowed.', 'NotAllowedError');
+    });
+    const server = fakeServer();
+    const region = await passkeys(server);
+    await add(region);
+    const line = await within(region).findByText('The passkey request was cancelled or timed out. Nothing was added.');
+    expect(line.getAttribute('role')).toBe('status');
+    expect(within(region).queryByRole('alert')).toBeNull();
+    expect(server.writes()).toEqual([{ method: 'POST', path: '/api/auth/register/options', body: {} }]);
+    expect((within(region).getByRole('button', { name: 'Add a passkey' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('takes the recent-sign-in path on reauth_required and never prompts', async () => {
+    const webauthn = stub(async () => ({ toJSON: () => CREDENTIAL_JSON }));
+    const navigateAway = vi.fn();
+    const server = fakeServer({ overrides: { 'POST /api/auth/register/options': refusal('reauth_required') } });
+    const region = await passkeys(server, navigateAway);
+    await add(region);
+    expect(await within(region).findByText('Sign in again to do this (required every 10 minutes for account actions).')).toBeTruthy();
+    expect(within(region).getByRole('link', { name: 'Sign in again' }).getAttribute('href')).toBe('/api/auth/signin?next=/settings');
+    expect(webauthn.create).not.toHaveBeenCalled();
+    expect(navigateAway).not.toHaveBeenCalled();
+  });
+
+  it('shows a refused registration and a device that already holds a passkey', async () => {
+    let attempt = 0;
+    stub(async () => {
+      attempt += 1;
+      if (attempt === 2) throw new DOMException('already registered', 'InvalidStateError');
+      return { toJSON: () => CREDENTIAL_JSON };
+    });
+    const server = fakeServer({ overrides: { 'POST /api/auth/register/verify': { status: 400, body: { error: 'register_failed' } } } });
+    const region = await passkeys(server);
+    await add(region);
+    expect(await within(region).findByText('That passkey could not be registered. Try again.')).toBeTruthy();
+    await add(region);
+    expect(await within(region).findByText('This device already has a passkey for your account.')).toBeTruthy();
+  });
+
+  it('offers no button where the browser cannot parse creation options', async () => {
+    const region = await passkeys(fakeServer());
+    expect(await within(region).findByText('This browser cannot add passkeys here.')).toBeTruthy();
+    expect(within(region).queryByRole('button', { name: 'Add a passkey' })).toBeNull();
   });
 });
 

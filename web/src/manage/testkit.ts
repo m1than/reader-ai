@@ -112,6 +112,8 @@ export const fakeServer = (opts: { role?: 'owner' | 'learner'; overrides?: Recor
     if (m(/^\/api\/auth\/credentials\/[^/]+$/)) return req.method === 'DELETE' ? { status: 200, body: { revoked_sessions: 2 } } : { status: 200, body: {} };
     if (m(/^\/api\/auth\/sessions\/[^/]+$/)) return { status: 204 };
     if (path === '/api/auth/sessions/revoke-others') return { status: 200, body: { revoked: 2 } };
+    if (path === '/api/auth/register/options') return { status: 200, body: get('register_options') };
+    if (path === '/api/auth/register/verify') return { status: 200, body: { ok: true } };
     if (m(/^\/api\/auth\/users\/[^/]+\/sessions\/revoke$/)) return { status: 200, body: { revoked: 1 } };
     if (m(/^\/api\/auth\/users\/[^/]+\/credentials\/[^/]+$/)) return { status: 204 };
     if (m(/^\/api\/auth\/users\/[^/]+$/)) return { status: 204 };

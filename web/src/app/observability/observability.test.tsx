@@ -127,7 +127,7 @@ describe('observability page (FR-UI-18)', () => {
     expect(titles()).toEqual(['Lesson one', 'Lesson three', 'Lesson two', 'deleted lesson']);
     const total = within(table).getByRole('columnheader', { name: 'Total USD' });
     expect(total.getAttribute('aria-sort')).toBe('descending');
-    expect(within(region).getByText(/includes 1 open reserves/)).toBeTruthy();
+    expect(within(region).getByText(/includes 1 open reserve\)/)).toBeTruthy();
     const traces = within(table).getAllByRole('link', { name: 'Traces' });
     expect(traces[0]!.getAttribute('href')).toBe('https://localhost:8443/#/experiments/0/traces?q=20000000-0000-4000-8000-000000000001');
     // Per 1k characters: lesson one 0.93; the others have none, so they stay last in both directions.

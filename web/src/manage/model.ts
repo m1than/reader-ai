@@ -15,11 +15,15 @@ export const cleanTitle = (v: string, max = 200): { ok: true; value: string } | 
   return n >= 1 && n <= max && !CONTROL.test(value) ? { ok: true, value } : { ok: false };
 };
 
-/** FR-MANAGE-2: the first 40 code points of the title after NFC, or the whole title when shorter. */
-export const confirmTarget = (title: string): string => [...title.trim().normalize('NFC')].slice(0, 40).join('');
+/** FR-MANAGE-2: the stored title NFC-normalised, cut to its first 40 code points, then trimmed (the server's rule,
+ * SRV-LESSON FR-LESSON-25, SRV-INGEST FR-INGEST-31). */
+export const confirmTarget = (title: string): string => [...title.normalize('NFC')].slice(0, 40).join('').trim();
 
-/** The typed text, trimmed and NFC-normalised, equals the target (the server compares the same way). */
-export const matchesConfirm = (typed: string, title: string): boolean => typed.trim().normalize('NFC') === confirmTarget(title);
+/** The request's `confirm`: the typed text NFC-normalised and trimmed. */
+export const normaliseConfirm = (typed: string): string => typed.normalize('NFC').trim();
+
+/** The typed text, normalised, equals the target (the server compares the same way). */
+export const matchesConfirm = (typed: string, title: string): boolean => normaliseConfirm(typed) === confirmTarget(title);
 
 export type ObjectKind = 'course' | 'lesson' | 'source' | 'note' | 'passkey' | 'session' | 'person' | 'setting' | 'compile';
 
@@ -65,6 +69,8 @@ export const problem = (code: string, object: ObjectKind, t: Tr = EN): Problem =
       return { text: t('notes.cell_unknown') };
     case 'last_passkey':
       return { text: t('passkey.last') };
+    case 'register_failed':
+      return { text: t('passkey.add_failed') };
     case 'user_has_data':
       return { text: t('person.has_data') };
     case 'file_narrower':

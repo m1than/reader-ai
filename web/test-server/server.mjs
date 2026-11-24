@@ -195,7 +195,7 @@ const planRoute = (method, path, body) => {
 // VEC-UI-2. Stateless apart from the role: `POST /__test__/reset?role=learner` serves the learner until the next reset.
 const manage = JSON.parse(readFileSync(join(repo, 'spec/fixtures/WEB-MANAGE/responses.json'), 'utf8'));
 const session = { role: 'owner' };
-const manageRoute = (method, path, query) => {
+const manageRoute = (method, path, query, body) => {
   const m = (re) => re.exec(path);
   const ok = (body) => [200, body];
   const learner = session.role === 'learner';
@@ -251,7 +251,23 @@ const manageRoute = (method, path, query) => {
   if (m(/^\/api\/auth\/users\/[^/]+(\/credentials\/[^/]+)?$/)) return [204, null];
   if (m(/^\/api\/auth\/signups\/[^/]+\/enable$/)) return ok({ status: 'active' });
   if (m(/^\/api\/settings\/[^/]+$/)) return ok(manage.settings);
+  // WEB-MANAGE FR-MANAGE-7 "Add a passkey" (SRV-AUTH FR-AUTH-6): options from VEC-MANAGE-1 (rp id `localhost`);
+  // verify accepts a registration whose client data is a `webauthn.create` over that challenge, else
+  // `register_failed`. No attestation is checked: the stub pins the ceremony's shape, the server pins the crypto.
+  if (method === 'POST' && path === '/api/auth/register/options') return ok(manage.register_options);
+  if (method === 'POST' && path === '/api/auth/register/verify') return registerVerify(body);
   return null;
+};
+
+const registerVerify = (body) => {
+  try {
+    const client = JSON.parse(Buffer.from(String(body?.response?.clientDataJSON ?? ''), 'base64url').toString('utf8'));
+    const shaped = body.type === 'public-key' && typeof body.id === 'string' && typeof body.response.attestationObject === 'string';
+    if (shaped && client.type === 'webauthn.create' && client.challenge === manage.register_options.challenge) return [200, { ok: true }];
+  } catch {
+    // falls through to the refusal
+  }
+  return [400, { error: 'register_failed' }];
 };
 
 const file = (root, path) => {
@@ -314,7 +330,7 @@ createServer((req, res) => {
       }
       const firstRun = (req.headers.cookie ?? '').includes('stub-first-run=1');
       const [status, body] =
-        manageRoute(req.method, path, url.searchParams) ??
+        manageRoute(req.method, path, url.searchParams, parsed) ??
         uploadRoute(req.method, path, firstRun) ??
         compileRoute(req.method, path) ??
         planRoute(req.method, path, parsed) ??

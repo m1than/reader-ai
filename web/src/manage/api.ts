@@ -70,6 +70,13 @@ const Users = v.object({
   ),
 });
 const Credentials = v.object({ credentials: v.array(v.looseObject({ ...Passkey.entries, backed_up: v.boolean(), transports: v.optional(v.array(str), []) })) });
+// WebAuthn creation options as JSON (SRV-AUTH FR-AUTH-6); the browser's parser checks the rest.
+const CreationOptions = v.looseObject({
+  challenge: str,
+  rp: v.looseObject({ name: str }),
+  user: v.looseObject({ id: str, name: str, displayName: str }),
+  pubKeyCredParams: v.array(v.looseObject({ type: str, alg: num })),
+});
 const Sessions = v.object({ sessions: v.array(v.looseObject({ sid: str, created_at: str, expires_at: str, current: v.boolean() })) });
 const Scalar = v.union([str, num, v.boolean(), v.null()]);
 const Settings = v.object({
@@ -179,6 +186,10 @@ export const createManageApi = (deps: ApiDeps) => {
     sessions: () => call('GET', '/api/auth/sessions', Sessions),
     revokeSession: (sid: string) => call('DELETE', `/api/auth/sessions/${seg(sid)}`, null, {}),
     revokeOthers: () => call('POST', '/api/auth/sessions/revoke-others', null, {}),
+    // SRV-AUTH FR-AUTH-6 (recent_session): the register ceremony of FR-MANAGE-7's "Add a passkey".
+    registerOptions: async (): Promise<PublicKeyCredentialCreationOptionsJSON> =>
+      (await call('POST', '/api/auth/register/options', CreationOptions, {})) as unknown as PublicKeyCredentialCreationOptionsJSON,
+    registerVerify: (credential: unknown) => call('POST', '/api/auth/register/verify', null, credential),
     settings: () => call('GET', '/api/settings', Settings),
     setSetting: (key: string, value: string | number, version: number) => call('POST', `/api/settings/${seg(key)}`, null, { value, version }),
     resetSetting: (key: string) => call('DELETE', `/api/settings/${seg(key)}`, null, {}),
