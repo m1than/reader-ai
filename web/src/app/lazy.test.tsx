@@ -39,5 +39,10 @@ describe('lazy chunks that fail (FR-UI-11)', () => {
     await act(async () => undefined);
     expect(screen.getByRole('button', { name: 'Courses' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: 'Lessons', level: 1 })).toBeTruthy();
+    // The main nav, which lives in the drawer below 75rem, stays reachable as plain links (code review 2026-11-24).
+    await waitFor(() => expect(document.querySelector('nav.nav-fallback')).toBeTruthy());
+    const fallback = document.querySelector('nav.nav-fallback') as HTMLElement;
+    expect(fallback.getAttribute('aria-label')).toBe('Main');
+    expect([...fallback.querySelectorAll('a')].map((a) => a.getAttribute('href'))).toEqual(['/', '/import', '/signups', '/observability']);
   });
 });

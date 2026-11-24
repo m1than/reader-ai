@@ -282,9 +282,8 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       { label: 'Observability', to: '/observability', owner_only: true },
     ]);
     if (!mod.NAV_ITEMS) return;
-    // An appended entry with a badge appears without changes to the header: its text is one inline run
-    // "<label>, <shown> <after>" whose separator and last word are the font-size-0 `.nav-words` (live fix
-    // 2026-11-24: clipped hidden spans put a space before the comma in Chromium; an aria-label failed axe).
+    // An appended entry with a badge appears without changes to the header: "<label> <shown> <after>" with only
+    // `after` visually hidden (code review 2026-11-24; no punctuation in hidden text).
     const useBadge = () => ({ shown: '7', after: 'waiting' });
     mod.NAV_ITEMS.push({ label: 'Test entry', to: '/test-entry', owner_only: false, useBadge });
     try {
@@ -292,13 +291,12 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       const nav = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
       const links = within(nav).getAllByRole('link');
       // The owner's Sign-ups count call fails here (404), so its badge renders nothing.
-      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Sign-ups', 'Observability', 'Test entry, 7 waiting']);
+      expect(links.map((a) => a.textContent)).toEqual(['Lessons', 'Import', 'Sign-ups', 'Observability', 'Test entry 7 waiting']);
       expect(within(nav).getByRole('link', { name: 'Sign-ups' })).toBe(links[2]);
       expect(links[4]!.getAttribute('aria-label')).toBeNull();
-      expect(links[4]!.querySelector('.nav-text')?.children[0]?.className).toBe('nav-words');
-      expect([...links[4]!.querySelectorAll('.nav-words')].map((s) => s.textContent)).toEqual([', ', ' waiting']);
       expect(links[4]!.querySelector('.nav-badge')?.textContent).toBe('7');
-      // Below 40rem the same nav sits in the Courses drawer (live fix 2026-11-24): same entries, same names.
+      expect(links[4]!.querySelector('.visually-hidden')?.textContent).toBe(' waiting');
+      // Below 75rem the same nav sits in the Courses drawer (live fix 2026-11-24): same entries, same names.
       fireEvent.click(screen.getByRole('button', { name: 'Courses' }));
       const drawerNav = await waitFor(() => {
         const n = document.querySelector('nav.drawer-nav');
@@ -311,7 +309,7 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
         'Import',
         'Sign-ups',
         'Observability',
-        'Test entry, 7 waiting',
+        'Test entry 7 waiting',
       ]);
       fireEvent.click(within(drawerNav).getByRole('link', { name: 'Import' }));
       await waitFor(() => expect(document.querySelector('nav.drawer-nav')).toBeNull());
@@ -321,6 +319,14 @@ describe('header and state blocks (FR-UI-11, design pass)', () => {
       await mount('/', { me: learner });
       const nav2 = await waitFor(() => screen.getByRole('navigation', { name: 'Main' }));
       expect(within(nav2).getAllByRole('link').map((a) => a.textContent)).toEqual(['Lessons', 'Test entry']);
+      // The drawer's copy follows the same owner-only rule for a learner (code review: kills an `owner={true}`).
+      fireEvent.click(screen.getByRole('button', { name: 'Courses' }));
+      const learnerDrawer = await waitFor(() => {
+        const n = document.querySelector('nav.drawer-nav');
+        if (!n) throw new Error('no drawer nav');
+        return n as HTMLElement;
+      });
+      expect(within(learnerDrawer).getAllByRole('link').map((a) => a.textContent)).toEqual(['Lessons', 'Test entry']);
     } finally {
       mod.NAV_ITEMS.pop();
     }

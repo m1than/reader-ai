@@ -599,19 +599,10 @@ h4 {
   font-weight: 600;
 }
 
-/* FR-UI-11: the nav badge (the Sign-ups count). Label, separator, badge and last word are one inline run, so
-   Chromium names the link "Sign-ups, 1 waiting" (block-level or clipped hidden parts add a space before the comma). */
-.nav-text {
-  white-space: nowrap;
-}
-
-.nav-words {
-  font-size: 0;
-}
-
+/* FR-UI-11: the nav badge (the Sign-ups count); the link reads "Sign-ups 1 waiting" ("waiting" visually hidden). */
 .nav-badge {
-  display: inline;
-  margin-left: var(--acme-space-1);
+  display: inline-block;
+  min-width: 1.25rem;
   padding: 0 var(--acme-space-1);
   border-radius: 999px;
   background: var(--acme-hover);
@@ -620,9 +611,10 @@ h4 {
   font-variant-numeric: tabular-nums;
   line-height: 1.25rem;
   text-align: center;
+  box-sizing: border-box;
 }
 
-/* FR-UI-11: the main nav inside the Courses drawer, shown only below 40rem (see the narrow-screen rules). */
+/* FR-UI-11: the main nav inside the Courses drawer, shown only below 75rem (the Courses breakpoint, below). */
 .drawer-nav {
   display: none;
   flex-direction: column;
@@ -635,6 +627,24 @@ h4 {
 
 .drawer-nav .nav-link {
   min-height: 32px;
+}
+
+/* Stories (FR-UI-8): the drawer's nav shown at any viewport width. */
+.drawer-nav.story-drawer-nav {
+  display: flex;
+}
+
+/* FR-UI-11: if the drawer chunk fails to load, the main nav stays reachable as a wrapping row under the header. */
+.app-header:has(.nav-fallback) {
+  flex-wrap: wrap;
+}
+
+.nav-fallback {
+  display: none;
+  flex-basis: 100%;
+  flex-wrap: wrap;
+  gap: var(--acme-space-1);
+  padding: 0 0 var(--acme-space-2);
 }
 
 .row-link {
@@ -1476,13 +1486,11 @@ kbd {
   font-size: 0.8125rem;
 }
 
-/* Narrow screens: tighter padding, smaller titles, list metadata under the title, brand and name as icons only. */
-@media (max-width: 40rem) {
-  .app-header {
-    padding: 0 var(--acme-space-2);
-  }
-
-  /* FR-UI-11: the main nav moves into the Courses drawer (four owner entries overflowed 390px by 119px). */
+/* FR-UI-11: below the Courses breakpoint (75rem, where the Courses button appears) the main nav lives in the Courses
+   drawer. "Below 75rem" is max-width 74.98rem, the complement of the min-width: 75rem rules. Live fix 2026-11-24:
+   four owner entries overflowed 390px by 119px, and a 40rem breakpoint still overflowed up to about 847px with a long
+   display name (code review). */
+@media (max-width: 74.98rem) {
   .main-nav {
     display: none;
   }
@@ -1491,8 +1499,16 @@ kbd {
     margin-left: auto;
   }
 
-  .drawer-nav {
+  .drawer-nav,
+  .nav-fallback {
     display: flex;
+  }
+}
+
+/* Narrow screens: tighter padding, smaller titles, list metadata under the title, brand and name as icons only. */
+@media (max-width: 40rem) {
+  .app-header {
+    padding: 0 var(--acme-space-2);
   }
 
   .brand-text,

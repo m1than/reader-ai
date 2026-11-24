@@ -1,6 +1,7 @@
 // The app header (WEB-UI FR-UI-11): Courses (below 75rem), the brand, the main nav from NAV_ITEMS and the user menu.
-// Below 40rem the main nav moves into the Courses drawer (live run 2026-11-24: the owner's four entries overflowed a
-// 390px header by 119px). The user menu and the course drawer are lazy chunks loaded on their triggers' first
+// Below 75rem, where the Courses button appears, the main nav moves into the Courses drawer (live run 2026-11-24: the
+// owner's four entries overflowed a 390px header by 119px; code review: a 40rem breakpoint still overflowed up to
+// about 847px with a long display name). The user menu and the course drawer are lazy chunks loaded on their triggers' first
 // activation (review B1); until then the triggers are plain buttons styled like the library's ghost buttons.
 import { Link } from '@tanstack/react-router';
 import { Component, lazy, Suspense, useRef, useState, type ReactNode } from 'react';
@@ -22,25 +23,22 @@ function NavEntry({ item, current, onNavigate }: { item: NavItem; current: boole
       aria-current={current ? 'page' : undefined}
       onClick={onNavigate}
     >
-      {/* FR-UI-11: one inline run "<label>, <shown> <after>" whose separator and last word are text at font size 0.
-          Live run 2026-11-24: clipped, absolutely positioned hidden spans (and flex items) made Chromium read
-          "Sign-ups , 1 waiting"; an aria-label instead fails axe's label-content-name-mismatch. */}
-      <span className="nav-text">
-        {item.label}
-        {badge ? (
-          <>
-            <span className="nav-words">, </span>
-            <span className="nav-badge">{badge.shown}</span>
-            <span className="nav-words"> {badge.after}</span>
-          </>
-        ) : null}
-      </span>
+      {/* FR-UI-11: "<label> <shown> <after>", e.g. "Sign-ups 1 waiting", with `after` visually hidden; no punctuation
+          in hidden text, so no browser's spacing can misplace it (code review 2026-11-24). */}
+      {item.label}
+      {badge ? (
+        <>
+          {' '}
+          <span className="nav-badge">{badge.shown}</span>
+          <span className="visually-hidden"> {badge.after}</span>
+        </>
+      ) : null}
     </Link>
   );
 }
 
-/** The main nav from NAV_ITEMS (FR-UI-11): `main-nav` in the header (hidden below 40rem), `drawer-nav` in the Courses
- * drawer (shown only below 40rem), so exactly one "Main" navigation is rendered visibly at any width. */
+/** The main nav from NAV_ITEMS (FR-UI-11): `main-nav` in the header (hidden below 75rem), `drawer-nav` in the Courses
+ * drawer (shown only below 75rem), so exactly one "Main" navigation is rendered visibly at any width. */
 export function MainNav({ owner, path, className, onNavigate }: { owner: boolean; path: string; className: string; onNavigate?: () => void }) {
   return (
     <nav className={className} aria-label="Main">
@@ -136,7 +134,9 @@ export function Header({
         )}
       </span>
       {drawerLoaded ? (
-        <LazyBoundary fallback={null}>
+        // FR-UI-11 (code review): if the drawer chunk fails, the main nav stays reachable as plain links (the header's
+        // own nav is hidden below 75rem); the course list waits for a reload.
+        <LazyBoundary fallback={<MainNav owner={owner} path={path} className="nav-fallback" />}>
           <Suspense fallback={null}>
             <CourseDrawer
               open={drawerOpen}

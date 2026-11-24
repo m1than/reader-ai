@@ -4,9 +4,10 @@
 // the spec fixtures (SRV-AUTH /api/me; SRV-LESSON list, lesson and revision; SRV-KERNEL session routes; no WebSocket).
 //   node test-server/server.mjs [port]      (default 4173, bound to 127.0.0.1)
 import { createServer } from 'node:http';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { staleBuilds } from './stale.mjs';
 
 const web = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const repo = resolve(web, '..');
@@ -19,27 +20,10 @@ export const cspFromCaddyfile = (text) => {
   return m[1];
 };
 
-/** Builds older than the newest source file. A stale web/storybook-static (built before the design pass) failed
- * render.spec.ts's inline-math and dual-theme checks on 2026-11-24 with no product fault, so the server refuses them. */
-export const staleBuilds = (webRoot) => {
-  const newest = (dir) =>
-    readdirSync(dir, { recursive: true, withFileTypes: true })
-      .filter((d) => d.isFile())
-      .reduce((m, d) => Math.max(m, statSync(join(d.parentPath, d.name)).mtimeMs), 0);
-  const sources = Math.max(newest(join(webRoot, 'src')), newest(join(webRoot, '.storybook')), statSync(join(webRoot, 'index.html')).mtimeMs);
-  const built = (f) => {
-    try {
-      return statSync(join(webRoot, f)).mtimeMs;
-    } catch {
-      return 0;
-    }
-  };
-  return ['dist/index.html', 'storybook-static/index.json'].filter((f) => built(f) < sources);
-};
-
+// WEB-UI INV-UI-4 "Fresh builds": refuse a dist or storybook-static older than its inputs (stale.mjs).
 const stale = staleBuilds(web);
 if (stale.length > 0) {
-  console.error(`test server: ${stale.join(' and ')} older than web/src; run \`npm run build && npm run build-storybook\` first`);
+  console.error(`test server: ${stale.join(' and ')} missing or older than the web sources; run \`npm run build && npm run build-storybook\` first`);
   process.exit(1);
 }
 

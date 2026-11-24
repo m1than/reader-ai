@@ -5,7 +5,7 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { python } from '@codemirror/lang-python';
 import { bracketMatching, HighlightStyle, indentUnit, syntaxHighlighting } from '@codemirror/language';
-import { EditorState } from '@codemirror/state';
+import { EditorSelection, EditorState } from '@codemirror/state';
 import { drawSelection, EditorView, keymap, lineNumbers } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 
@@ -51,17 +51,40 @@ const theme = EditorView.theme({
 
 // The app CSP has no 'unsafe-inline' for style attributes. When typed or inserted text replaces a selection that spans
 // highlighted spans, Chromium's contenteditable engine inserts markup with a `style` attribute (to keep the replaced
-// text's look), which the CSP blocks and reports (live run 2026-11-24, 7 reports per learner session). Plain text
-// insertions go through a CodeMirror transaction instead, so the browser never edits the DOM itself; composition
-// (IME) input stays with CodeMirror's own handling.
-const PLAIN_INSERTS = new Set(['insertText', 'insertReplacementText']);
+// text's look), which the CSP blocks and reports (live run 2026-11-24, 7 reports per learner session). Only that case
+// is taken over (code review): an `insertText` outside composition while some selection range is non-empty goes
+// through a CodeMirror transaction, applied to the event's target ranges when it has any (so a platform edit whose
+// target is not the selection keeps its meaning) and to the selection otherwise. Caret-only typing, composition (IME)
+// and `insertReplacementText` (macOS text replacement, spelling) stay with CodeMirror and the browser.
+export const INTERCEPTED_INPUT = 'insertText';
+const targetChanges = (view: EditorView, event: InputEvent, text: string) => {
+  const ranges = event.getTargetRanges();
+  if (ranges.length === 0) return null;
+  try {
+    return ranges.map((r) => {
+      const a = view.posAtDOM(r.startContainer, r.startOffset);
+      const b = view.posAtDOM(r.endContainer, r.endOffset);
+      return { from: Math.min(a, b), to: Math.max(a, b), insert: text };
+    });
+  } catch {
+    return null; // a target outside the editor's content: fall back to the selection
+  }
+};
 const insertThroughState = EditorView.domEventHandlers({
   beforeinput: (event, view) => {
-    if (!PLAIN_INSERTS.has(event.inputType) || event.isComposing || view.composing) return false;
-    const text = event.data ?? event.dataTransfer?.getData('text/plain') ?? null;
+    if (event.inputType !== INTERCEPTED_INPUT || event.isComposing || view.composing) return false;
+    if (view.state.selection.ranges.every((r) => r.empty)) return false;
+    const text = event.data;
     if (text === null) return false;
     event.preventDefault();
-    view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.type' });
+    const changes = targetChanges(view, event, text);
+    if (changes) {
+      const set = view.state.changes(changes);
+      const end = set.mapPos(Math.max(...changes.map((c) => c.to)), 1);
+      view.dispatch({ changes: set, selection: EditorSelection.cursor(end), scrollIntoView: true, userEvent: 'input.type' });
+    } else {
+      view.dispatch(view.state.replaceSelection(text), { scrollIntoView: true, userEvent: 'input.type' });
+    }
     return true;
   },
 });

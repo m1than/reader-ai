@@ -48,6 +48,7 @@ for (const width of [1280, 390])
     await expect(page.getByRole('menu')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('menu')).toBeHidden();
+    // The Courses drawer exists below 75rem (a width under 1200 px), where it also holds the main nav (FR-UI-11).
     if (width < 1200) {
       await page.getByRole('button', { name: 'Courses' }).click();
       await expect(page.locator('#course-drawer')).toBeVisible();

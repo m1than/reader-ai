@@ -1120,7 +1120,31 @@ tasks:
         fixes folded in (owner.slice: #tutor skipped, contents reopened for the 390 count, reload before the skip-link Tab
         below 1280; slice.live: Continue .first(), the open cell's warning callout, Reset kernel in More lesson actions;
         plan_shots: the plan's Lessons summary). The old owner-pages script with h1 sizes is not in the repository;
-        owner.slice.ts already checks the new scale (28/24 page titles, 32/28 lesson h1)." }
+        owner.slice.ts already checks the new scale (28/24 page titles, 32/28 lesson h1).",
+      code_review: "deep-reviewer, one round on add0a02 (outside the complex areas): changes; all applied without a second
+        round (coordinator, 2026-11-24). Findings and fixes —
+        B1 the header still overflowed just above 40rem (42px at 641px with 'Ivan', 0 only from 683px; a 12rem name
+        overflowed up to about 847px, iPad portrait scrolled): the drawer breakpoint is now the Courses breakpoint,
+        75rem, written `max-width: 74.98rem` (the complement of the `min-width: 75rem` rules; a CSS width under 1200px),
+        and every test uses `width < 1200`; header.spec.ts runs 390, 641, 768, 1024, 1199, 1200 and 1280px with 'Ivan',
+        a 64-code-point name and a 36-character Cyrillic name on /, a lesson, not-found and /import (no overflow, nav
+        hidden or visible by the breakpoint), with axe while the drawer is open; signups.spec, import.spec and csp.spec
+        conditions and FR-UI-11, FR-ACCOUNTS-5 and WEB-PLAN's text follow.
+        B2 editor beforeinput ignored getTargetRanges() and intercepted insertReplacementText (macOS double-space period,
+        text replacement): narrowed to `insertText` outside composition while some selection range is non-empty; caret
+        only and insertReplacementText are left alone; a non-empty selection takes the event's target ranges (posAtDOM)
+        when present, else the selection. editor.spec.ts kills the guard mutants with synthetic beforeinput events: a
+        caret-only insert not prevented, an isComposing insert over a selection not prevented, insertReplacementText
+        not prevented (the input-type filter), a target range [3,4] wins over the selection, no target replaces the
+        selection, a real insertion over a selection leaves zero CSP reports.
+        Non-blocking — a learner case for the drawer nav (owner entries absent; kills `owner={true}`); badge markup
+        'Sign-ups <badge>1</badge><hidden> waiting</hidden>' named 'Sign-ups 1 waiting' (no comma: FR-ACCOUNTS-4,
+        FR-UI-11), the font-size-0 run removed, the name asserted in the browser; a fallback nav (nav.nav-fallback,
+        'Main') when the drawer chunk fails (lazy.test.tsx); the fresh-build check moved to web/test-server/stale.mjs,
+        also over package.json, the lockfile, vite.config.ts and vendor/, .DS_Store ignored, stated in INV-UI-4 and
+        unit-tested in web/src/app/stale.test.ts; Header stories PendingSignups and DrawerNavWithBadge.",
+      owner_notes: "On the Mac, type two spaces after a word in a lab editor: with the system setting 'Add period with
+        double-space' on, they become '. ' (FR-NOTEBOOK-9, the editor no longer takes over that input)." }
   - { id: V.titles-data, stage: V, kind: fix, track: product, status: todo, needs: [V.design-pass],
       what: "Server data the design pass cannot fix in the web app: a human course title for plan courses (today the
         material id, e.g. 'bashir-2025') from the ingest metadata, and lesson titles better than page ranges ('pp.
