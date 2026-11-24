@@ -48,12 +48,12 @@ def report(name: str, ok: bool, detail: str = "") -> bool:
     return ok
 
 
-def session_sql(token: str) -> tuple[str, str]:
+def session_sql(token: str, ttl_min: int = SESSION_TTL_MIN) -> tuple[str, str]:
     """The INSERT and the DELETE of this run's one owner session, by its id hash only."""
     h = hashlib.sha256(token.encode("utf-8")).hexdigest()
     insert = (
         "INSERT INTO sessions (id_sha256, owner_id, expires_at) "
-        f"SELECT decode('{h}', 'hex'), id, now() + interval '{SESSION_TTL_MIN} minutes' FROM users WHERE role = 'owner';"
+        f"SELECT decode('{h}', 'hex'), id, now() + interval '{int(ttl_min)} minutes' FROM users WHERE role = 'owner';"
     )
     delete = f"DELETE FROM sessions WHERE id_sha256 = decode('{h}', 'hex');"
     return insert, delete

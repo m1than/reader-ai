@@ -204,6 +204,32 @@ def test_status_reports_the_watcher_and_the_converter(
             os.close(fd)
 
 
+def test_status_without_a_loadable_config_is_unknown_not_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mod: Any
+) -> None:
+    from reader.cli.commands import cmd_status
+
+    world, _ = _world(tmp_path, monkeypatch, mod)
+    config = _config(tmp_path)
+    # A watcher runs; status cannot see it without the config.
+    with watch_lock(_data(config), lock_line(4242)):
+        # `up` records the project, which status reads when the config does not load.
+        assert _up(world, config) == 0
+        bad = tmp_path / "bad.yaml"
+        bad.write_text("instance: [\n", encoding="utf-8")
+        for path, problem in ((tmp_path / "absent.yaml", "config_missing"), (bad, "config_invalid")):
+            cmd_status(world.ctx, path, as_json=True)
+            got = json.loads(world.out.splitlines()[-1])
+            assert (got["ingest_watcher"], got["converter"]) == ("unknown", "unknown")
+            assert got["ingest_config"] == {"problem": problem, "path": str(path)}
+            cmd_status(world.ctx, path)
+            assert f"ingest watcher unknown: {problem}" in world.out
+        cmd_status(world.ctx, config, as_json=True)
+        got = json.loads(world.out.splitlines()[-1])
+        assert got["ingest_watcher"] == "running"
+        assert "ingest_config" not in got
+
+
 # ---- reader down ----
 
 

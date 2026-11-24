@@ -292,27 +292,33 @@ def cmd_status(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         for s in services
     ]
     data_dir = _ingest_data_dir(config_path)  # FR-CLI-23
-    ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "stopped"
-    converting = ingest_watch.converter(data_dir) if data_dir else "idle"
+    # Without a loadable reader.yaml the watcher's lock cannot be found: `unknown`, never `stopped`.
+    problem = None if data_dir else ("config_missing" if not config_path.is_file() else "config_invalid")
+    ingest = ingest_watch.state(data_dir, ingest_watch.checkout_sha()) if data_dir else "unknown"
+    converting = ingest_watch.converter(data_dir) if data_dir else "unknown"
     if as_json:
-        print(
-            json.dumps(
-                {
-                    "project": project,
-                    "watcher": "running" if watcher else "stopped",
-                    "ingest_watcher": ingest,
-                    "converter": converting,
-                    "services": rows,
-                }
-            ),
-            file=ctx.out,
-        )
+        body: dict[str, Any] = {
+            "project": project,
+            "watcher": "running" if watcher else "stopped",
+            "ingest_watcher": ingest,
+            "converter": converting,
+            "services": rows,
+        }
+        if problem:
+            body["ingest_config"] = {"problem": problem, "path": str(config_path)}
+        print(json.dumps(body), file=ctx.out)
     else:
         print(
             f"project {project}; watcher {'running' if watcher else 'stopped'}; ingest watcher {ingest};"
             f" converter {converting}",
             file=ctx.out,
         )
+        if problem:
+            print(
+                f"  ingest watcher unknown: {problem} ({config_path}); "
+                "pass --config <the reader.yaml of `reader up`>",
+                file=ctx.out,
+            )
         for row in rows:
             print(f"  {row['name']}: {row['state']} {row['health'] or ''}".rstrip(), file=ctx.out)
     return code
