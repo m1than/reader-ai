@@ -1369,9 +1369,16 @@ tasks:
         alone; INV-FRESH-1 and the owner note state the hard bound (60 subject characters per query, 3 claim queries
         per check) and the stray-letter residual; tools_mismatch before the agent.call span (test); live._owner's
         filter ([db]) and crosscheck with zero rows ([unit]) tested; SRV-OBS's CLI canary runs the WebSearch call in
-        allow, deny and tool-content modes, and VEC-OBS-2 lists the claude_code.tool* spans.",
-      next: "1) Code review of the round-3 fixes (coordinator). 2) Before any live check
-        or `reader up`: the coordinator's approval (a real check ≈ $0.27). 3) WEB-IMPORT and the course page mount the
+        allow, deny and tool-content modes, and VEC-OBS-2 lists the claude_code.tool* spans.
+        Code review round 3 (deep-reviewer, 2026-11-24): changes, 4 blocking, fixed in V/fresh-r3 (14f9aae, merged
+        as eea8cbf). Code review round 4 (2026-11-24): VERDICT approve on 14f9aae; 19 of 21 mutants killed; nits
+        applied in V/fresh-r4-nits: VEC-FRESH-7 adds a number inside the copied span run and a run with `3.11` caught
+        only as written (now 21 of 21 killed: `filler: book side raw only` and `filler: query side content only`),
+        INV-FRESH-1 and the owner note widen the residual to a stray or substituted letter (another script's letter,
+        an NFKC compatibility letter, a substituted accent or `İ`), still bounded by 60 subject characters per query.
+        Note: SRV-OBS's test_cli_canary runs only with READER_TEST_IMAGE_BUILD=1 (tools/ci-local.sh does not set it, so the gate skips it).",
+      next: "1) Before any live check
+        or `reader up`: the coordinator's approval (a real check ≈ $0.27). 2) WEB-IMPORT and the course page mount the
         card; SRV-INGEST PDF Info dictionary (later, paired).",
       paired_later: "SRV-INGEST PDF Info dictionary (V/onboarding); WEB-IMPORT and the course page mount the card
         (V/onboarding, V/plan)." }

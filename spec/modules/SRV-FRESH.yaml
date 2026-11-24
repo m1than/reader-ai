@@ -444,9 +444,11 @@ invariants:
       strings are masked (FR-FRESH-5: removed from both word sequences); (c) no other text of the book can reach it.
       Words are FR-FRESH-3's everywhere (a concatenation of span words counts as those words). Hard bound, whatever
       the tokenizer: a query carries at most `subject_chars_max` (60) characters of one subject, and a check plans
-      at most 3 claim queries. Residual: a subject that joins span words with a stray letter (`alphaxbravo`, or
-      `é`, `ß` between them) counts as one token, not as the words it joins; `subject_token_chars_max` (24) bounds
-      such a token, and the 60-character bound the subject. Test: canary
+      at most 3 claim queries. Residual: a subject that joins or alters span words with a stray or substituted
+      letter (`alphaxbravo`, or `é`, `ß` between them; a letter of another script, which becomes a separate token;
+      a compatibility character that NFKC maps to a letter; a substituted accent, or `İ`) does not match the span's
+      words; `subject_token_chars_max` (24) bounds a joined token, and the 60-character bound per query
+      bounds the subject. Test: canary
       sentences of ≥ 6 unique words are planted in non-front spans and never in the outline or the bibliography; a
       fake scan may copy up to 5 canary words into a subject; the generator also joins subject words with
       punctuation (`-`, `.`, `/`, `,`), `_`, the empty joiner, U+200B, U+200D, U+02BC and a digit, optionally in
@@ -510,7 +512,7 @@ vectors:
     source: Estimate cases from sample sizes and the pricing table, recomputed by hand from REF-FRESH-2 § 4
     file: spec/fixtures/SRV-FRESH/estimate.yaml
   - id: VEC-FRESH-7
-    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims in either order and across three, U+02BC, digit and `_` joiners in one query and U+02BC across two, fullwidth and mathematical bold letters)
+    source: Query plans for synthetic bibliographies, topics and claims (with and without an original, fewer than three claims, Russian and English materials, over-long fields, a planned query dropped as unsafe, stored subjects joined by `_`, nothing or camelCase, a CJK subject, a span run split across two claims in either order and across three, U+02BC, digit and `_` joiners in one query and U+02BC across two, a number inside the copied span run, a run with a dotted number caught only as written, fullwidth and mathematical bold letters)
     file: spec/fixtures/SRV-FRESH/plans.yaml
 
 defers:
@@ -525,7 +527,7 @@ defers:
 
 owner_notes:
   - "Each check costs about $0.27 (estimate) and at most about $0.39 by the bounds, under your $1.00 run cap; it is shown before you start it; at most $2.00 a day."
-  - "Search queries are built by code from the title, edition, authors, outline topics and short topic phrases (at most 5 words each) that the scan picks out of the book. No sentence of the book's text goes into a query. Hard limit: at most 60 characters of a phrase per query and 3 phrase queries per check. One gap remains: words glued with a stray letter (like `alphaxbravo`) count as one word, at most 24 characters long."
+  - "Search queries are built by code from the title, edition, authors, outline topics and short topic phrases (at most 5 words each) that the scan picks out of the book. No sentence of the book's text goes into a query. Hard limit: at most 60 characters of a phrase per query and 3 phrase queries per check. One gap remains: book words glued or altered with a stray or substituted letter (like `alphaxbravo`, a letter from another alphabet, or a changed accent) are not recognised as the book's words; such a phrase still stays within 60 characters per query."
   - "Recommendation dates are what the model reports from the search results, not verified dates; the card says 'as reported'."
 
 review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in revision 2: (1) structural tool pin
@@ -596,4 +598,6 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
   run split across claims is checked over every order of the chosen subjects plus the candidate (FR-FRESH-5);
   words are taken over NFKC (FR-FRESH-3); VEC-FRESH-1 tests each token cap alone; INV-FRESH-1 and the owner
   note state the hard bound (60 subject characters per query, 3 claim queries per check) and the stray-letter
-  residual; FR-FRESH-14's owner lookup and its zero-row cross-check are tested; bound comment FR-AGENT-16."
+  residual; FR-FRESH-14's owner lookup and its zero-row cross-check are tested; bound comment FR-AGENT-16.
+  Code review round 4 (2026-11-24): approve; nits applied: VEC-FRESH-7 adds a number inside the copied span run and
+  a run caught only as written; INV-FRESH-1 and the owner note widen the residual to a stray or substituted letter."
