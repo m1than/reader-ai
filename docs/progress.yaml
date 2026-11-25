@@ -16,7 +16,9 @@ owner_review:            # stage exits waiting for the owner's live check and `i
 tasks:
   # Stage 0 — groundwork and spikes
   - { id: S0.owner.adr-status, stage: 0, kind: owner, status: todo, needs: [],
-      ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it. ADR-0020 (proposed 2026-11-25) waits for the owner's decision" }
+      ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it" }
+  - { id: S0.owner.adr-0020, stage: 0, kind: owner, status: todo, needs: [],
+      ask: "Review ADR-0020 (knowledge layers, brain/v1, amendment rules); accept or reject it and merge its PR (rule A9: owner merge)" }
   - { id: S0.owner.machine, stage: 0, kind: owner, status: in_progress, needs: [],
       note: "CLAUDE_CODE_OAUTH_TOKEN exported and Telegram token file in place (2026-11-20); still: bootstrap-mac.sh green, auto mode rules, Telegram link" }
   - { id: S0.skeleton, stage: 0, kind: setup, status: todo, needs: [],
@@ -54,11 +56,12 @@ tasks:
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
   # Stage 3 — ingestion and search
-  - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling] }
-  - { id: S3.spike.retrieval-ablation, stage: 3, kind: spike, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local],
-      note: "ADR-0020 B10: keep a step only if it adds >= 0.05 recall@10 or sufficiency on its question type; exact scan while vector p95 <= 150 ms" }
-  - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation],
-      note: "ADR-0020 B10: cheapest variant within 0.02 sufficiency of the best with find p95 < 2.5 s; spends Agent SDK credit, record in budget.ledger" }
+  - { id: S3.spike.retrieval-ablation, stage: 3, kind: spike, status: todo,
+      needs: [S0.owner.adr-0020, S0.spike.ingest-docling, S0.spike.embeddings-local],
+      note: "ADR-0020 B10: on ingest-docling output; question set grows to ~120 (30 per type); keep a step if it gains >= 3 of 30 questions on its type with a paired bootstrap 95% interval excluding 0; exact scan while vector p95 <= 150 ms" }
+  - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling, S3.spike.retrieval-ablation] }
+  - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation, S0.spike.agent-sdk-container],
+      note: "ADR-0020 B10: Haiku judge p95 through the Agent SDK; cheapest variant not worse than the best by more than 1 of 30 questions per type, with find p95 < 2.5 s; spends Agent SDK credit, record in budget.ledger" }
   - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local, S3.spike.judge-gate] }
   - { id: S3.live, stage: 3, kind: live, status: todo, needs: [S3.SRV-SEARCH] }
 
@@ -89,8 +92,8 @@ tasks:
       what: "friction NFR in Playwright; then 7 days of real study by the owner (owner part)" }
 
   # Stage 7 — knowledge base, export and MCP
-  - { id: S7.spike.pack-links, stage: 7, kind: spike, status: todo, needs: [S5.live],
-      note: "ADR-0020 B10: link ownership A (linking pack) vs B (bridge per pair); both must pass the add/remove/rebuild property test; fewer lines of code wins unless the other recomputes >= 30% fewer links on rebuild" }
+  - { id: S7.spike.pack-links, stage: 7, kind: spike, status: todo, needs: [S0.owner.adr-0020, S5.live],
+      note: "ADR-0020 B10: pair link runs stored per later pack (A) or per pair (B); both must pass the add/remove/rebuild property test over recorded model outputs; fewer lines of code wins unless the other rebuilds >= 30% fewer overlays on a pack rebuild" }
   - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live, S7.spike.pack-links] }
   - { id: S7.SRV-EXPORT, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB] }
   - { id: S7.SRV-MCP, stage: 7, kind: module, track: ai, status: todo, needs: [S7.SRV-KB] }

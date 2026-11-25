@@ -9,7 +9,7 @@ revisit_when: "A new MCP specification revision changes the transport or authori
 
 ## Context
 
-> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): sectors become the `topic` facet; a concept layer is added; findings gain validity and an `orphaned` state; the tool table is replaced by the `brain/v1` contract. Where the two disagree, ADR-0020 wins.
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): sectors become the `topic` facet; a concept layer is added; findings gain validity and an `orphaned` state; the tool table is replaced by the `brain/v1` contract, which keeps role filtering and the citation limit. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
 
 Owner decision, 2026-11-20: a separate connector that other agents can attach over MCP, acting as the markup source for a knowledge base organised by sectors, built from the conclusions and results produced while reading.
 

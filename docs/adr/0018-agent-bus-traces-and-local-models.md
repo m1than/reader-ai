@@ -9,7 +9,7 @@ revisit_when: "The OpenTelemetry GenAI conventions publish a stable release, or 
 
 ## Context
 
-> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): MLflow is the trace backend (owner); the `trace-backend` spike checks MLflow only; prompts are versioned in the MLflow Prompt Registry. Where the two disagree, ADR-0020 wins.
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): MLflow is the trace backend (owner), still an optional profile; retrieval-only evaluation and a prompt no-regression rule move into v1; prompt files are registered in MLflow. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
 
 Owner decisions, 2026-11-20:
 

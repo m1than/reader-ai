@@ -65,7 +65,7 @@ Open app → one-click resume to the exact cell → two-minute entry action (one
 
 ### 3. Knowledge → other agents (ADR-0015)
 
-Findings created during study (conclusions, trade-offs, decisions, open questions, errata) are stored with their source spans and tagged with sectors. The MCP server exposes them read-only by default; writes require an explicit scope.
+Findings created during study (conclusions, trade-offs, decisions, open questions, errata) are stored with their source spans and tagged with sectors. The MCP server exposes them read-only by default; writes require an explicit scope. ADR-0020 (proposed) organises the knowledge base as base packs and overlays behind an append-only manifest and exposes it through the `brain/v1` contract.
 
 ### 4. Sharing and paired study (ADR-0016)
 

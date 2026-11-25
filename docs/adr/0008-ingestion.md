@@ -9,7 +9,7 @@ revisit_when: "Docling processes the 935-page pilot slower than 10 pages per min
 
 ## Context
 
-> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): ingest output is an immutable source pack; a span is one Docling element with a context prefix and inherited source tags. Where the two disagree, ADR-0020 wins.
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): ingest output is an immutable base pack whose spans keep this ADR's locator as identity; context prefixes and tags are versioned overlays. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
 
 Owner decision, 2026-11-20: any material can be loaded; the user sets the limits.
 

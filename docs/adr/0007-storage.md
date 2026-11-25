@@ -9,7 +9,7 @@ revisit_when: "Vector count above 5 million, or hybrid search recall@10 below 0.
 
 ## Context
 
-> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): knowledge data is append-only source packs behind a manifest; exact distance on the filtered set until a spike shows HNSW is needed. Where the two disagree, ADR-0020 wins.
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): knowledge data is base packs and overlays behind an append-only manifest; exact distance on the filtered set until a spike shows HNSW is needed. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
 
 Data kinds: source material (PDFs up to tens of MB; the pilot PDF is 20.9 MB, 935 pages), parsed text and chunks, embeddings for retrieval, notebook revisions, learner state, events, jobs, findings for the knowledge base.
 
