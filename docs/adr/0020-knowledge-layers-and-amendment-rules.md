@@ -24,6 +24,16 @@ Owner decisions, 2026-11-25:
 9. This decision goes into a separate ADR that also sets the rules for amending decided ADRs and for keeping rework small.
 10. Claude Haiku is the cheap model the system is built around. Prompts and rules are written carefully against real data, versioned in MLflow, and every run is traced against the prompt versions it used.
 
+Owner answers to the open questions of the first draft, 2026-11-25:
+
+11. A chain (Bitcoin, Ethereum) is a branch of `topic`, not a facet. The topic tree stays shallow; no deeper topology.
+12. Reliability uses the Admiralty scale: source reliability A–F on the source profile, information credibility 1–6 on a finding or a link.
+13. Learner state (L5) enters retrieval from stage 6.
+14. Judge alignment is allowed: "we are not developing a model, we are building its second brain". Alignment rewrites judge instructions from the owner's labels and trains no model weights.
+15. Money for indexing: the owner tops the credit up when it is needed. The agent measures the cost, records it, and asks for a top-up when a cap is reached; it does not wait for a share to be set first.
+16. Prompts: the repository file is the source of truth. MLflow is the team's dashboard for traces, prompt versions, evaluation and labels.
+17. Tokens per answer: `find` and `open` share a 2,000-token budget per answer through their `budget` argument; `brain_map` counts once per agent session.
+
 State on 2026-11-25: no code exists under `server/`; SRV-INGEST, SRV-SEARCH, SRV-KB and SRV-MCP are `todo` in `docs/progress.yaml`. Every change below costs text now and 0 lines of code.
 
 This ADR is `proposed`. Nothing in it is in force, and no task that depends on it starts, until the owner accepts it. If the owner rejects it, the agent removes the ADR-0020 sentences from the roadmap, the pointer lines and the gated tasks in `docs/progress.yaml` in one PR, and SRV-INGEST returns to its earlier `needs`.
@@ -122,16 +132,17 @@ Facets enabled from the start, each with its consumer:
 ```yaml
 facets:
   role:        { level: source, values: [map, normative, time_axis, verification, reference_impl] }  # route filters
-  reliability: { level: source, values: [A, B, C, D, E, F] }   # fact-check threshold (scale: Open question 2)
+  reliability: { level: source, values: [A, B, C, D, E, F] }   # Admiralty source reliability; fact-check threshold
+  credibility: { level: finding, values: [1, 2, 3, 4, 5, 6] }  # Admiralty information credibility of a finding or a link; fact-check threshold
   as_of:       { level: source, type: date }                    # current-state route, supersedes rule
   license:     { level: source, values: [personal-use, shareable] }  # the existing ADR-0008/0011 vocabulary; MCP, trace and copyright invariants
   form:        { level: span,   values: [prose, code, formula, table, figure, test_vector], by: rule }  # exact route, card shape
-  topic:       { level: concept, tree: sectors, multi: true, grows: true }  # brain_map, coverage objective
+  topic:       { level: concept, tree: sectors, multi: true, grows: true }  # brain_map, coverage objective; chains are branches
 ```
 
-Proposed facets, enabled only when their consumer lands:
-- `chain` (bitcoin, ethereum, generic): a filter on exact questions that name a chain (Open question 1).
-- `knowledge_type` (fact, mechanism, procedure): recall cards versus explain cells, if the owner adopts the explain-back proposal.
+Chains are branches of `topic` (for example `bitcoin/keys`, `ethereum/transactions`), within its depth cap of 3 levels. Exact questions that name a chain filter on that branch.
+
+Proposed facet, enabled only when its consumer lands: `knowledge_type` (fact, mechanism, procedure), for recall cards versus explain cells, if the owner adopts the explain-back proposal.
 
 ### B4. Linking a pair of packs
 
@@ -208,15 +219,15 @@ Judges are **slots**: model task classes in `reader.yaml` (ADR-0005; ADR-0018 "m
 
 | Slot | Decides | Runs | Paid by | v1 binding |
 | --- | --- | --- | --- | --- |
-| `judge.link_type` | Link type between two spans (B4 step 5) | Offline, per pair run | Pack owner; index share (Open question 5) | Claude Haiku |
-| `ingest.context_prefix` | The context prefix of a span (B1) | Offline, per pack | Pack owner; index share | Claude Haiku |
+| `judge.link_type` | Link type between two spans (B4 step 5) | Offline, per pair run | Pack owner; `index` line of the ledger | Claude Haiku |
+| `ingest.context_prefix` | The context prefix of a span (B1) | Offline, per pack | Pack owner; `index` line of the ledger | Claude Haiku |
 | `judge.find` | Relevance order and sufficiency of ≤ 20 candidates in one call | Online, gated (B6 step 5) | The caller, on the caller's own provider (ADR-0005 invariant) | Claude Haiku |
 | `judge.eval.*` | Retrieval relevance, sufficiency and groundedness, plus custom judges (card is self-contained; citation supports claim) | Offline, on the evaluation set and sampled traces | Owner; evaluation cap | A strong Claude model |
 
 Rules:
 
 - **Replacing Claude in a slot** with a local model is a config change. It is allowed only when the candidate matches or beats the current binding on the evaluation set (ADR-0018 tuning rule). This is how Claude is replaced in specific places without changing the method.
-- **Caps.** Offline jobs have a USD cap per pack (prefixes) and per pair run (link judging). The values come from the costs measured in B10. Reaching 100% stops the job with an event (ADR-0005). Unjudged candidates stay unlinked, unprefixed spans keep their titles-only context, and the pack stays usable. The evaluation cap is set from the measured cost of one evaluation run (`judge-gate`).
+- **Caps.** Offline jobs have a USD cap per pack (prefixes) and per pair run (link judging). The initial values are the costs measured in B10 plus 20% (an initial value). Reaching 100% stops the job with an event (ADR-0005); the agent then blocks the task with a top-up ask to the owner (owner decision 15). Unjudged candidates stay unlinked, unprefixed spans keep their titles-only context, and the pack stays usable. The evaluation cap is set from the measured cost of one evaluation run (`judge-gate`).
 - **Judge outputs** are an append-only overlay keyed by (input hash, judge@version). A new judge version sits next to the old one, so the two can be compared on the same inputs. Replays read the recorded outputs.
 - **Prompt injection.** Judge prompts treat card and source text as data. Instructions found in material or findings are never followed. Unreviewed findings (`proposed`, including those written by external agents with `kb:write`) are excluded from `find`, from judge input and from `next`.
 - **Ranking priors.** A card's prior weight in ranking comes only from the owner's labels and the evaluation set, never from live judge scores. Otherwise the judge would reinforce its own choices.
@@ -226,13 +237,14 @@ Labels, the owner's time used as efficiently as possible:
 
 1. A binary label per trace and judge, with an optional one-line reason, stored as an MLflow human assessment under the judge's name.
 2. Sampling order: traces where two judges disagree; then judge scores within ±0.1 of the gate threshold; then the owner's thumbs-down in tutor sessions. Stratified across routes and packs.
-3. Batches of 25 traces, about 10–12 minutes at 20–30 s each. The first target is 50–100 labels per judge: MLflow judge alignment needs at least 10 and recommends 50–100. Alignment itself waits for Open question 4.
+3. Batches of 25 traces, about 10–12 minutes at 20–30 s each. The first target is 50–100 labels per judge: MLflow judge alignment needs at least 10 and recommends 50–100.
+5. Alignment (SIMBA or GEPA in MLflow) runs once a judge has 50 labels, and again after each further 50. It rewrites judge instructions and trains no model weights (owner decision 14). An aligned judge is a new prompt file version and follows the no-regression rule of B7a.
 4. Owner labels are owner data and may later feed local-model tuning (ADR-0018 excludes only Claude outputs).
 
 ### B7a. Prompts and policy versions
 
 - **Source of truth.** Every prompt the system sends (judges, context prefix, link type, card text) is a template file in the repository. It is reviewed like code, and its file hash is the provenance (ADR-0018 run records).
-- **MLflow registry.** Each file version is registered in the MLflow Prompt Registry, tagged with its commit, for lineage and comparison in the UI. Code loads prompts from the repository, not from MLflow, so MLflow stays an optional Compose profile at runtime (ADR-0018). The registry is never edited and has no runtime alias. Whether MLflow should instead be the source of truth is Open question 6.
+- **MLflow registry.** Each file version is registered in the MLflow Prompt Registry, tagged with its commit, for lineage and comparison in the UI. Code loads prompts from the repository, not from MLflow, so MLflow stays an optional Compose profile at runtime (ADR-0018). The registry is never edited and has no runtime alias. MLflow is the dashboard where the owner compares prompt versions, traces, evaluation runs and labels (owner decision 16).
 - **No-regression rule.** A prompt change merges only after the agent has run the evaluation job against the current version, with live model calls inside the evaluation cap, outside CI. The run must show no regression (B10 statistics), and the Haiku targets must hold. The result is recorded in MLflow and in the PR description. Reverting the commit is the rollback.
 - **`policy_version`** = sha256 of the declared data only: the route table, thresholds, k and the RRF constant, the facets file, slot-to-model bindings, embedding model ids and prompt file hashes. The code version is a separate trace attribute, so an unrelated commit does not change `policy_version`.
 - **Rules that need no model** (routes, facet filters, identifier regexes, budgets) stay data files: 0 calls, deterministic.
@@ -300,7 +312,7 @@ Targets (owner, 2026-11-25), each reported as a point estimate with its 95% inte
 | --- | --- |
 | Haiku ≥ 90% of the strong model's sufficiency | Point estimate |
 | Median ≤ 3 calls per answer | Median over the data set |
-| ≤ 2,000 tokens per answer | Per answer, per the owner's wording. How `brain_map` and per-response budgets add up to it is Open question 7 |
+| ≤ 2,000 tokens per answer | `find` and `open` responses of one answer, summed; `brain_map` counted once per session (owner decision 17) |
 | `find` p95 < 2.5 s | p95 over the data set |
 
 ### B10. Spikes and their decision rules
@@ -309,7 +321,7 @@ Targets (owner, 2026-11-25), each reported as a point estimate with its 95% inte
 
 | Spike | Runs | Question | Measure | Decision rule (A6) |
 | --- | --- | --- | --- | --- |
-| `retrieval-ablation` | Stage 3, after the evaluation set is written. Uses `ingest-docling` output; runs before SRV-INGEST and SRV-SEARCH are approved; extends `embeddings-local` | Which retrieval steps earn their place on one source | On exact, thematic and fact-check questions: recall@10 and sufficiency for L1; plus context prefix; plus L2 summaries; plus the `form` filter. Exact scan vs HNSW p95 at the measured size. Tokens and USD cost per pack of context prefixes and L2 summaries | Keep a step if, on its question type, its gain is significant (in practice a net ≥ 6 of 30 questions) and its measured cost per pack fits the index share the owner sets after this spike (Open question 5; owner task in `docs/progress.yaml`). Exact scan while the vector step p95 ≤ 150 ms (initial value) |
+| `retrieval-ablation` | Stage 3, after the evaluation set is written. Uses `ingest-docling` output; runs before SRV-INGEST and SRV-SEARCH are approved; extends `embeddings-local` | Which retrieval steps earn their place on one source | On exact, thematic and fact-check questions: recall@10 and sufficiency for L1; plus context prefix; plus L2 summaries; plus the `form` filter. Exact scan vs HNSW p95 at the measured size. Tokens and USD cost per pack of context prefixes and L2 summaries | Keep a step if, on its question type, its gain is significant (in practice a net ≥ 6 of 30 questions). Its measured cost per pack sets the initial cap (B7). Exact scan while the vector step p95 ≤ 150 ms (initial value) |
 | `judge-gate` | Stage 3, after `retrieval-ablation` | Whether and when the online judge runs | Haiku `judge.find` p95 through the Agent SDK path. Gate fire rate and sufficiency for: fused order only; judge on every query; judge gated at several margins. USD cost of one full evaluation run | Pick the cheapest variant that is not significantly worse than the best, is not worse by more than a net 2 of 30 questions on any type, and has `find` p95 < 2.5 s. The evaluation cap is set from the measured run cost |
 | `pack-links` | Stage 7, before SRV-KB, on Bashir plus two openly licensed sources (BIP texts, Bitcoin Optech topics) | Variant A or B for storing pair link runs (B2); the facet-filter (`role`, `reliability`, `as_of`) and current-state rules, which need several sources | Property test over recorded model outputs: after random add, remove and rebuild sequences, the active link set equals a fresh build of the same pack set. Rows, lines of code and overlays rebuilt when one pack is rebuilt. The facet-filter and current-state measures use the `retrieval-ablation` method | Both variants must pass the property test. Pick the variant with fewer lines of code, unless the other rebuilds ≥ 30% fewer overlays on a pack rebuild (initial value). Facet filters use the `retrieval-ablation` rule |
 
@@ -338,7 +350,7 @@ If MLflow fails these checks, Phoenix covers traces only, and the Prompt Registr
 | ADR | Section | Was | Becomes | Why |
 | --- | --- | --- | --- | --- |
 | ADR-0001 | Process | No rule for changing an ADR; template has `supersedes` only | Part A rules A1–A9 (A9 also amends ADR-0019, row below); the template gains `amends: []` | Changes by delta keep decided ADRs readable and keep rework visible |
-| ADR-0005 | Budgets and cost ledger | $200 credit split as compile ≤ $100 and tutor, per task class | Pack overlays (context prefixes, L2 summaries, link judging) are paid from an index share whose size the owner sets after `retrieval-ablation` measures it (Open question 5), with per-pack and per-pair-run caps. `judge.find` runs on the caller's provider and counts against the caller's tutor or MCP use. `judge.eval.*` has an evaluation cap set from the run cost measured by `judge-gate` | 23 lessons × $4.35 = $100.05 already fills the compile share; new model work needs its own owner-set money and a cap. The ADR-0005 invariant forbids borrowing credentials |
+| ADR-0005 | Budgets and cost ledger | $200 credit split as compile ≤ $100 and tutor, per task class | Pack overlays (context prefixes, L2 summaries, link judging) are recorded on their own `index` line of the ledger, with per-pack and per-pair-run caps set from the costs `retrieval-ablation` measures; when a cap is reached the owner tops the credit up. `judge.find` runs on the caller's provider and counts against the caller's tutor or MCP use. `judge.eval.*` has an evaluation cap set from the run cost measured by `judge-gate` | 23 lessons × $4.35 = $100.05 already fills the compile share; new model work needs its own owner-set money and a cap. The ADR-0005 invariant forbids borrowing credentials |
 | ADR-0007 | Decision, retrieval | Hybrid full-text plus pgvector HNSW, merged by RRF | Same fusion; exact distance on the filtered set until `retrieval-ablation` shows the vector step p95 > 150 ms; data organised as base packs and overlays behind a manifest (B2) | HNSW with filters loses most results at default settings; exact search has 100% recall |
 | ADR-0008 | Decision 3, spans | Every chunk keeps its span | A span is one Docling element of a base pack and keeps the ADR-0008 locator as its identity, plus a quote hash for re-anchoring. Context prefixes and inherited tags are overlays (B2). Decision 4 (`license`, `personal-use` never exposed) is unchanged and becomes the `license` facet | Contextual Retrieval reduced failed retrievals by 49%, and by 67% with reranking (Anthropic, 2024). A locator identity keeps citations stable across overlay changes |
 | ADR-0009 | Stage 1 output; drafting; stage 4 fact-check | Outline, chunks with spans, embeddings; claims cite spans | Stage 1 outputs a base pack and its overlays. Drafting puts the whole source section in context when its measured token count fits the policy budget. Fact-check uses the fact-check route (B6) | A chapter of about 40 pages likely fits in context; the Russian token count is measured first |
@@ -356,7 +368,7 @@ Rework (A8):
 | Roadmap rows or lines | 13 |
 | AGENTS.md sentence | 1 |
 | `docs/architecture.md` line | 1 |
-| `docs/progress.yaml` tasks added (2 owner tasks, the evaluation set, 3 spikes) | 6 |
+| `docs/progress.yaml` tasks added (1 owner task, the evaluation set, 3 spikes) | 5 |
 | `docs/progress.yaml` tasks edited | 4 |
 | Existing code | 0 lines |
 
@@ -417,16 +429,7 @@ Rework (A8):
 
 ## Open questions
 
-1. Is `chain` a separate facet, or a branch of `topic`?
-2. Reliability: Admiralty A–F × 1–6, or three levels? The facet file above carries the source letter only.
-3. L5 in retrieval from stage 6, when the tutor produces learner state, or later?
-4. **Judge alignment.** SIMBA or GEPA in MLflow runs an LLM over traces to rewrite judge instructions, and ADR-0018 records that the Consumer Terms forbid using the service to develop or train AI models. Until the owner decides whether alignment on the subscription is acceptable, alignment does not run and the judges work unaligned.
-5. **Index share.**
-   - The compile share is full: 23 × $4.35 = $100.05.
-   - Where does the money for context prefixes, L2 summaries and link judging come from? Options: lowering the lesson cap, or a separate share of the $200 credit.
-   - `retrieval-ablation` measures the cost per pack first. With one span per Docling element, the pilot may need about 9,000–10,000 prefix calls, at an assumed 10 elements per page.
-6. **Prompt source of truth.** The owner asked for prompts versioned in MLflow. This ADR keeps the repository file as the source and MLflow as the registered copy, so prompts are reviewed like code and the request path never depends on MLflow. Is that acceptable, or should MLflow aliases drive production?
-7. **Tokens per answer.** The owner's target is ≤ 2,000 tokens per answer. A 3-call answer can receive `brain_map` (≤ 1,500, once per session) plus two responses. Proposal: `find` and `open` share a 2,000-token budget per answer through their `budget` argument, and `brain_map` is counted once per session. Is that the intended reading?
+None. The seven questions of the first draft were answered by the owner on 2026-11-25 (Context, decisions 11–17). One fact stays to measure: with one span per Docling element, the pilot may need about 9,000–10,000 context-prefix calls (an assumed 10 elements per page); `retrieval-ablation` measures the real count and cost, and the compile share (23 × $4.35 = $100.05) is already full, so indexing is a separate ledger line.
 
 ## Sources
 
