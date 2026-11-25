@@ -34,7 +34,7 @@ tasks:
   - { id: S0.spike.library-publish, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
       note: "release workflow is a branch in m1than/ui-builder-lib-with-agents; publishing is the owner's (block when ready)" }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
-      note: "ADR-0020: MLflow chosen; check memory, span nesting and a score on a trace; Phoenix only as fallback" }
+      note: "Once ADR-0020 is accepted: MLflow chosen; check memory, span nesting, a score on a trace and whether MLflow judges accept an Agent SDK model adapter. Until then the spike compares MLflow and Phoenix as ADR-0018 says" }
   - { id: S0.exit, stage: 0, kind: live, status: todo,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
@@ -56,12 +56,16 @@ tasks:
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
   # Stage 3 — ingestion and search
+  # ADR-0020 tasks below start only after S0.owner.adr-0020. If the owner rejects ADR-0020, one PR removes them and
+  # restores S3.SRV-INGEST needs to [S2.live, S0.spike.ingest-docling] and S3.SRV-SEARCH needs to [S3.SRV-INGEST, S0.spike.embeddings-local].
+  - { id: S3.eval-set, stage: 3, kind: setup, status: todo, needs: [S0.owner.adr-0020],
+      what: "ADR-0020 B9: 30 questions per question type answerable from the pilot (exact, thematic, fact-check), expected facts in own words <= 300 chars; owner reviews a sample of 30" }
   - { id: S3.spike.retrieval-ablation, stage: 3, kind: spike, status: todo,
-      needs: [S0.owner.adr-0020, S0.spike.ingest-docling, S0.spike.embeddings-local],
-      note: "ADR-0020 B10: on ingest-docling output; question set grows to ~120 (30 per type); keep a step if it gains >= 3 of 30 questions on its type with a paired bootstrap 95% interval excluding 0; exact scan while vector p95 <= 150 ms" }
+      needs: [S3.eval-set, S0.skeleton, S0.spike.ingest-docling, S0.spike.embeddings-local, S0.spike.agent-sdk-container],
+      note: "ADR-0020 B10: on ingest-docling output; keep a step if it gains a net >= 3 of 30 questions on its type, significant by exact McNemar, and its measured cost per pack fits the owner's index share; exact scan while vector p95 <= 150 ms; spends Agent SDK credit, record in budget.ledger" }
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling, S3.spike.retrieval-ablation] }
   - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation, S0.spike.agent-sdk-container],
-      note: "ADR-0020 B10: Haiku judge p95 through the Agent SDK; cheapest variant not worse than the best by more than 1 of 30 questions per type, with find p95 < 2.5 s; spends Agent SDK credit, record in budget.ledger" }
+      note: "ADR-0020 B10: Haiku judge p95 through the Agent SDK and cost of one evaluation run; cheapest variant not significantly worse than the best (exact McNemar) with find p95 < 2.5 s; spends Agent SDK credit, record in budget.ledger" }
   - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local, S3.spike.judge-gate] }
   - { id: S3.live, stage: 3, kind: live, status: todo, needs: [S3.SRV-SEARCH] }
 
@@ -93,7 +97,7 @@ tasks:
 
   # Stage 7 — knowledge base, export and MCP
   - { id: S7.spike.pack-links, stage: 7, kind: spike, status: todo, needs: [S0.owner.adr-0020, S5.live],
-      note: "ADR-0020 B10: pair link runs stored per later pack (A) or per pair (B); both must pass the add/remove/rebuild property test over recorded model outputs; fewer lines of code wins unless the other rebuilds >= 30% fewer overlays on a pack rebuild" }
+      note: "ADR-0020 B10: pair link runs stored per later pack (A) or per pair (B); both must pass the add/remove/rebuild property test over recorded model outputs; fewer lines of code wins unless the other rebuilds >= 30% fewer overlays on a pack rebuild; also runs the facet-filter and current-state ablation on three sources" }
   - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live, S7.spike.pack-links] }
   - { id: S7.SRV-EXPORT, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB] }
   - { id: S7.SRV-MCP, stage: 7, kind: module, track: ai, status: todo, needs: [S7.SRV-KB] }

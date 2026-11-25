@@ -9,6 +9,8 @@ revisit_when: "A hook or CI false positive more than once a week, or a process v
 
 ## Context
 
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): rules A1–A9 for changing an ADR by delta, and an `amends:` field in the template. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
+
 > Amended by [ADR-0019](0019-autonomous-agent-mode.md) (2026-11-20): the agent approves specs and merges its own PRs; the owner keeps `implemented` and ADR decisions. Where the two disagree, ADR-0019 wins.
 
 Owner decision, 2026-11-20: reader-ai is built with the same specd-lite process as web3-noncustody, and Claude builds it from this ADR package. Two things differ from web3-noncustody:

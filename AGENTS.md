@@ -11,7 +11,7 @@ You run **autonomously** (ADR-0019): you draft and approve specs, write tests an
 3. Do the task completely: the spike, the spec, the Red tests, the Green code, and the live check script for its stage, as the task says.
 4. Run the checks (below). Fix until green.
 5. Update `docs/progress.yaml` in the same branch: status, PR link, measured numbers, anything learned that changes later tasks.
-6. Push, open a PR, wait for CI. Merge it yourself (squash) when green, unless it changes an ADR status. ADR-status PRs wait for the owner.
+6. Push, open a PR, wait for CI. Merge it yourself (squash) when green, unless it changes an ADR status. ADR-status PRs wait for the owner. Once ADR-0020 is accepted, a PR that adds or amends an ADR waits for the owner too (rule A9); until then, treat ADR-0020's own PR that way.
 7. When a stage's tasks are all done, run its live check (`bash e2e/live/stage-N.sh`), record the result in `docs/progress.yaml`, notify the owner and continue with the next stage.
 8. Repeat. Never stop to ask. When something needs the owner, set the task to `blocked` with `reason` and `ask`, run `node tools/agent/notify.mjs "<one line>"`, and take the next ready task.
 
