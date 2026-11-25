@@ -57,6 +57,8 @@ flowchart LR
   G2 --> pub[Published lesson revision]
 ```
 
+ADR-0020 (proposed) reorders the checks after drafting: schema and citation presence by rule, lab verification, claim support by a model, adversarial review last; the first failure loops back to the draft.
+
 Each stage is an idempotent job keyed by `(lesson, stage, input_sha256)`. Outputs are immutable, content-addressed artifacts. A stage that fails or exceeds its budget stops the lesson and emits an event; it never silently degrades.
 
 ### 2. Study session (ADR-0010)

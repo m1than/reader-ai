@@ -9,7 +9,7 @@ revisit_when: "An error is found in a published lesson that a stage should have 
 
 ## Context
 
-> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): stage 1 outputs a base pack and overlays; drafting puts the whole source section in context when it fits the measured budget; fact-check uses the fact-check retrieval route. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): stage 1 outputs a base pack and overlays; drafting puts the whole source section in context when it fits the measured budget; fact-check uses the fact-check retrieval route; the checks after drafting run cheapest first, with the adversarial review last (2026-11-26). In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
 
 Owner decision, 2026-11-20: the agent does all authoring tasks in staged steps with fact-checking and validation, so that material passes a thorough check.
 

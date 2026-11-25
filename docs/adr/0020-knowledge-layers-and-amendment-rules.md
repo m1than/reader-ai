@@ -34,6 +34,13 @@ Owner answers to the open questions of the first draft, 2026-11-25:
 16. Prompts: the repository file is the source of truth. MLflow is the team's dashboard for traces, prompt versions, evaluation and labels.
 17. Tokens per answer: `find` and `open` share a 2,000-token budget per answer through their `budget` argument; `brain_map` counts once per agent session.
 
+Owner decisions, 2026-11-26:
+
+18. In every selection the system makes, a model call that verifies runs only at the final step, on what the steps without a model have already selected. This covers `find` (B6) and the checks after drafting a lesson (ADR-0009, see Amends). Pair linking (B4) already works this way and stays as it is.
+19. Context prefixes and L2 summaries stay at ingest. They are text that the search ranks on, not verification: a prefix written only for spans already found would never repair a span the search missed, which is where Contextual Retrieval's 49% reduction in failed retrievals comes from. `retrieval-ablation` still decides whether each is kept.
+
+Model tags (F5) and the concept labels of B4 step 2 are proposals made before a selection, not verification, so decision 18 leaves them unchanged.
+
 State on 2026-11-25: no code exists under `server/`; SRV-INGEST, SRV-SEARCH, SRV-KB and SRV-MCP are `todo` in `docs/progress.yaml`. Every change below costs text now and 0 lines of code.
 
 This ADR is `proposed`. Nothing in it is in force, and no task that depends on it starts, until the owner accepts it. If the owner rejects it, the agent removes the ADR-0020 sentences from the roadmap, the pointer lines and the gated tasks in `docs/progress.yaml` in one PR, and SRV-INGEST returns to its earlier `needs`.
@@ -175,22 +182,29 @@ Every selection over the graph or the embeddings is a greedy algorithm with a bo
 | Graph expansion at query time | Path search can explode | At most 1 hop, top-m edges by weight | Work bounded |
 | Hierarchy of a source | Clustering | The source's own outline; no global community detection | Deterministic |
 
-**Objective of the card-selection rows.** It is weighted coverage of the query's terms and facets, which is monotone submodular. In stage 3 the terms are identifiers and full-text terms from L1 and L2. Concepts (L3) join from stage 7. Source priorities enter only as non-negative element weights. Superseded cards and license limits enter only as filters applied before selection. Either way the bounds keep holding. Lexicographic re-ranking after selection is not used.
+**Objective of the card-selection rows.** It is weighted coverage of the query's terms and facets, which is monotone submodular. In stage 3 the terms are identifiers and full-text terms from L1 and L2. Concepts (L3) join from stage 7. Source priorities enter only as non-negative element weights. Superseded cards and license limits enter only as filters applied before selection. Either way the bounds keep holding. Lexicographic re-ranking after selection is not used. On the judged path of B6, the judge's drops are a third filter between two greedy selections. Each selection keeps its bound over its own input set, but that path has no end-to-end bound against the full candidate pool; the gate and degradation paths keep the bound over their candidates. The judge's order sets only the order in which the selected cards are returned.
 
 ### B6. Retrieval cascade for `find`
 
 A route = f(channel, question type). Routes, budgets and thresholds are declared as data and versioned in `policy_version` (B7a).
+
+No step before the judge makes an LLM call (step 2 embeds the query with the local embedding model). The judge runs last and reads only the cards already selected (owner decision 18).
 
 | # | Step | Budget |
 | --- | --- | --- |
 | 1 | Route by rules: channel (MCP, tutor, pipeline) and question type (identifiers found, wording) | 0 model calls |
 | 2 | Candidates: manifest, role and license filters first, then full-text rank (`tsvector`) and dense vectors, merged by reciprocal rank fusion | ≤ 50 candidates. Exact distance on the filtered set while the vector step is fast enough. With HNSW at the default `ef_search = 40`, a filter that keeps 10% of rows leaves 40 × 10% ≈ 4 results by arithmetic (pgvector documents this overfiltering). Exact search keeps 100% recall |
 | 3 | Merge duplicates by `same_point` (B5 pivot) | One card, several citations |
-| 4 | Gate: if the fused scores separate clearly (margin rule in policy), go to step 6 | — |
-| 5 | Otherwise expand 1 hop over `next` and concept links (no model), take the top 20 of the expanded set by fused score, and make one `judge.find` call for relevance order and sufficiency | Exactly 0 or 1 judge call per `find` |
-| 6 | Select under the token budget (B5 budgeted greedy) | Within the response budget (B8) |
+| 4 | Gate: if the fused scores separate clearly (margin rule in policy), go to step 7 | 0 model calls |
+| 5 | Otherwise expand 1 hop over `next` and concept links, keep the top 50 of the expanded set by fused score, and select from them under 1.5 × the response budget (B5 budgeted greedy) | 0 model calls. The cap of 50 and the factor 1.5 are initial policy values |
+| 6 | One `judge.find` call on the step-5 selection only: relevance order, sufficiency, and which cards to drop | Exactly 0 or 1 judge call per `find`; judge input ≤ 1.5 × the response budget (3,000 tokens at the initial 2,000 maximum) |
+| 7 | Select under the response budget (B5 budgeted greedy): from the cards the judge kept when step 6 ran, otherwise from the merged candidates (step 3, or the capped expanded set of step 5). Cards are returned in the judge's order when it ran, otherwise in fused order | Within the response budget (B8) |
 
-**Degradation.** Step 5 is skipped on judge timeout or error, on an exhausted budget, or for a caller without a provider. The response is then returned in fused order with `judged: false`.
+**`judged`.** Cards carry `judged: true` only when step 6 ran. When the gate skipped the judge or step 6 degraded, they carry `judged: false`, and the trace records which of the two happened.
+
+**Degradation.** Step 6 is skipped on judge timeout or error, on an exhausted budget, or for a caller without a provider. Step 7 then selects from the capped expanded set of step 5.
+
+**Why the judge comes last.** The judge used to read the top 20 candidates before the greedy selection. By the B1 budgets an L1 card is 250–600 tokens (200–500 of text plus a prefix of 50–100), and stage 3 runs on L1 and L2. A 2,000-token response then holds 3–8 cards, so 60–85% of the 5,000–12,000 tokens the judge read were cards that were never returned. Judging the 1.5× selection reads at most 3,000 tokens (5–12 cards), every one of them a card the response can contain, and the margin of 0.5 lets the judge drop cards without leaving the response short. The price is stated in B5: the judged path has no end-to-end bound against the full candidate pool. `judge-gate` compares this order with the earlier one (B10).
 
 Whether a single gated judge call fits p95 < 2.5 s is a hypothesis owned by `judge-gate`.
 - A cheap-model call costs on the order of 1.5 s in published measurements of other models: GPT-4o-mini averaged 1,549 ms per reranking call in one study.
@@ -221,7 +235,7 @@ Judges are **slots**: model task classes in `reader.yaml` (ADR-0005; ADR-0018 "m
 | --- | --- | --- | --- | --- |
 | `judge.link_type` | Link type between two spans (B4 step 5) | Offline, per pair run | Pack owner; `index` line of the ledger | Claude Haiku |
 | `ingest.context_prefix` | The context prefix of a span (B1) | Offline, per pack | Pack owner; `index` line of the ledger | Claude Haiku |
-| `judge.find` | Relevance order and sufficiency of ≤ 20 candidates in one call | Online, gated (B6 step 5) | The caller, on the caller's own provider (ADR-0005 invariant) | Claude Haiku |
+| `judge.find` | Relevance order, sufficiency and cards to drop, over the cards already selected (≤ 1.5 × the response budget), in one call | Online, gated (B6 steps 4 and 6) | The caller, on the caller's own provider (ADR-0005 invariant) | Claude Haiku |
 | `judge.eval.*` | Retrieval relevance, sufficiency and groundedness, plus custom judges (card is self-contained; citation supports claim) | Offline, on the evaluation set and sampled traces | Owner; evaluation cap | A strong Claude model |
 
 Rules:
@@ -293,7 +307,7 @@ Span tree of one MCP call:
 - `TOOL` root with the caller (agent and model), `brain_version`, `policy_version`, the code version and the tool.
 - `ROUTER` (custom span type) with the route and filters.
 - `RETRIEVER` per layer used, returning Documents with `doc_uri` = `reader://<id>`. `page_content` carries card text only for `license: shareable` material and a content hash for `personal-use`, matching ADR-0018 ("content capture always off for `personal-use`").
-- `judge.find` when the gate fires, then assembly with the token count.
+- The selection under 1.5 × the budget, then `judge.find` on it, when the gate does not skip the judge; then the final selection with the token count.
 
 Pack builds and link runs are traced too: counts per B4 step (spans, mentions, pairs after blocking, judge calls, cost).
 
@@ -322,7 +336,7 @@ Targets (owner, 2026-11-25), each reported as a point estimate with its 95% inte
 | Spike | Runs | Question | Measure | Decision rule (A6) |
 | --- | --- | --- | --- | --- |
 | `retrieval-ablation` | Stage 3, after the evaluation set is written. Uses `ingest-docling` output; runs before SRV-INGEST and SRV-SEARCH are approved; extends `embeddings-local` | Which retrieval steps earn their place on one source | On exact, thematic and fact-check questions: recall@10 and sufficiency for L1; plus context prefix; plus L2 summaries; plus the `form` filter. Exact scan vs HNSW p95 at the measured size. Tokens and USD cost per pack of context prefixes and L2 summaries | Keep a step if, on its question type, its gain is significant (in practice a net ≥ 6 of 30 questions). Its measured cost per pack sets the initial cap (B7). Exact scan while the vector step p95 ≤ 150 ms (initial value) |
-| `judge-gate` | Stage 3, after `retrieval-ablation` | Whether and when the online judge runs | Haiku `judge.find` p95 through the Agent SDK path. Gate fire rate and sufficiency for: fused order only; judge on every query; judge gated at several margins. USD cost of one full evaluation run | Pick the cheapest variant that is not significantly worse than the best, is not worse by more than a net 2 of 30 questions on any type, and has `find` p95 < 2.5 s. The evaluation cap is set from the measured run cost |
+| `judge-gate` | Stage 3, after `retrieval-ablation` | Whether and when the online judge runs | Haiku `judge.find` p95 through the Agent SDK path. Gate fire rate and sufficiency for: fused order only; judge on every query; judge gated at several margins. Every judged variant places the judge after the selection (B6). As a reference, the earlier order (judge on the top 20 before the selection) runs once at the best margin. USD cost of one full evaluation run | Pick the cheapest variant that is not significantly worse than the best, is not worse by more than a net 2 of 30 questions on any type, and has `find` p95 < 2.5 s. If the judge-after-selection order is significantly worse than the reference, or worse by more than a net 2 of 30 on any type, the agent blocks the task for the owner with both measurements, because the order is an owner decision (18). The reference is not a candidate in the pick rule. The factor stays 1.5 in this spike, so the block also says that a loss may come from a factor that is too small; changing the factor is part of the owner's answer. The evaluation cap is set from the measured run cost |
 | `pack-links` | Stage 7, before SRV-KB, on Bashir plus two openly licensed sources (BIP texts, Bitcoin Optech topics) | Variant A or B for storing pair link runs (B2); the facet-filter (`role`, `reliability`, `as_of`) and current-state rules, which need several sources | Property test over recorded model outputs: after random add, remove and rebuild sequences, the active link set equals a fresh build of the same pack set. Rows, lines of code and overlays rebuilt when one pack is rebuilt. The facet-filter and current-state measures use the `retrieval-ablation` method | Both variants must pass the property test. Pick the variant with fewer lines of code, unless the other rebuilds ≥ 30% fewer overlays on a pack rebuild (initial value). Facet filters use the `retrieval-ablation` rule |
 
 **`trace-backend` (stage 0), once this ADR is accepted,** no longer chooses the backend. It checks MLflow on the owner's Mac:
@@ -353,7 +367,7 @@ If MLflow fails these checks, Phoenix covers traces only, and the Prompt Registr
 | ADR-0005 | Budgets and cost ledger | $200 credit split as compile ≤ $100 and tutor, per task class | Pack overlays (context prefixes, L2 summaries, link judging) are recorded on their own `index` line of the ledger, with per-pack and per-pair-run caps set from the costs `retrieval-ablation` measures; when a cap is reached the owner tops the credit up. `judge.find` runs on the caller's provider and counts against the caller's tutor or MCP use. `judge.eval.*` has an evaluation cap set from the run cost measured by `judge-gate` | 23 lessons × $4.35 = $100.05 already fills the compile share; new model work needs its own owner-set money and a cap. The ADR-0005 invariant forbids borrowing credentials |
 | ADR-0007 | Decision, retrieval | Hybrid full-text plus pgvector HNSW, merged by RRF | Same fusion; exact distance on the filtered set until `retrieval-ablation` shows the vector step p95 > 150 ms; data organised as base packs and overlays behind a manifest (B2) | HNSW with filters loses most results at default settings; exact search has 100% recall |
 | ADR-0008 | Decision 3, spans | Every chunk keeps its span | A span is one Docling element of a base pack and keeps the ADR-0008 locator as its identity, plus a quote hash for re-anchoring. Context prefixes and inherited tags are overlays (B2). Decision 4 (`license`, `personal-use` never exposed) is unchanged and becomes the `license` facet | Contextual Retrieval reduced failed retrievals by 49%, and by 67% with reranking (Anthropic, 2024). A locator identity keeps citations stable across overlay changes |
-| ADR-0009 | Stage 1 output; drafting; stage 4 fact-check | Outline, chunks with spans, embeddings; claims cite spans | Stage 1 outputs a base pack and its overlays. Drafting puts the whole source section in context when its measured token count fits the policy budget. Fact-check uses the fact-check route (B6) | A chapter of about 40 pages likely fits in context; the Russian token count is measured first |
+| ADR-0009 | Stage 1 output; drafting; stage 4 fact-check; order of the checks after drafting | Outline, chunks with spans, embeddings; claims cite spans; fact-check → lab verification → adversarial review | Stage 1 outputs a base pack and its overlays. Drafting puts the whole source section in context when its measured token count fits the policy budget. Fact-check uses the fact-check route (B6). After drafting, the checks run cheapest first and the first failure loops back to the draft: schema and citation presence (rules, 0 model calls) → lab verification (stage 5: sandbox runs; any model work is in building its independent reference path) → claim support (stage 4, with a model) → adversarial review (stage 6, last). The limit of 3 loops is unchanged, and every return to the draft counts as one loop, a rule failure included | A chapter of about 40 pages likely fits in context; the Russian token count is measured first. The adversarial review, a fresh-context agent pass, then reads only a draft that has passed every cheaper check, so no review is spent on a draft that a cheaper check would send back (owner decision 18) |
 | ADR-0015 | Knowledge model; tool table | One sector hierarchy; six tools | Sectors become the `topic` facet and stay a tree. A concept registry (L3) is added. Findings gain validity (`valid_from`, `superseded_by`) and the derived state `orphaned`. The tool table is replaced by `brain/v1` (B8), which keeps role filtering, the 300-character limit and the review queue as invariants | Small models are more sensitive to similar tools. One card shape and `next` links are the hypothesis that cuts calls per answer, measured in B9 |
 | ADR-0018 | Trace backend; v1/v2 split | Backend chosen by a stage 0 spike; evaluation harness in v2 | MLflow (owner, 2026-11-25), still an optional profile. A retrieval-only evaluation (B9) and the prompt no-regression rule (B7a) move into v1. The general regression gate for every prompt and model change stays in v2 | The owner wants the RAG traced and evaluated from the start; retrieval evaluation is the minimum that makes the Haiku target checkable |
 | ADR-0019 | Merging pull requests | The agent merges when CI is green and the PR does not change an ADR status | Also excepted: a PR that adds or amends an ADR (A9); it is merged by the owner. AGENTS.md loop step 6 says the same | An ADR changes what later tasks may do; merging it is a decision, as a status flip is |
@@ -367,7 +381,7 @@ Rework (A8):
 | Pointer lines in earlier ADRs | 8 |
 | Roadmap rows or lines | 13 |
 | AGENTS.md sentence | 1 |
-| `docs/architecture.md` line | 1 |
+| `docs/architecture.md` lines | 2 |
 | `docs/progress.yaml` tasks added (1 owner task, the evaluation set, 3 spikes) | 5 |
 | `docs/progress.yaml` tasks edited | 4 |
 | Existing code | 0 lines |
@@ -377,7 +391,7 @@ Rework (A8):
 - Knowledge is built from immutable base packs and versioned overlays, combined by an append-only manifest; removing a source costs one manifest entry.
 - Tags are facets declared as data.
 - Every selection over the graph or the embeddings is greedy with stated bounds.
-- `find` is a cascade with at most one call to the online judge slot.
+- `find` is a cascade with at most one call to the online judge slot, made last and only on the cards already selected.
 - Agents use the stable `brain/v1` contract.
 - Everything is traced and evaluated in MLflow, with prompts as reviewed files registered there.
 - Amendments to earlier ADRs follow Part A.
@@ -391,6 +405,7 @@ Rework (A8):
 | Pack id over everything (parse, tagger, models) | One id per build | Every tagger, prompt or model change creates new span ids, so every citation goes inactive and every finding becomes `orphaned` |
 | Global GraphRAG communities | Strong thematic answers | Recomputing communities over the whole graph on every new source costs in proportion to the corpus, not to the new pack |
 | LLM judge on every candidate | Best ranking per query | About 50 calls per `find`; at about 1.5 s per call in published measurements of other cheap models, far beyond 2.5 s |
+| One judge call on the top 20 before the selection (first draft) | The judge can lift a candidate the greedy would not pick | 60–85% of the judge's input is cards the response never returns (B6) |
 
 ## Rejected options — why (numbers)
 
@@ -398,6 +413,7 @@ Rework (A8):
 - **Pack id over everything.** A single prompt edit would orphan 100% of the findings that cite that source.
 - **Global GraphRAG communities.** Work per added source is proportional to the corpus. Pair linking with concept blocking is proportional to the two packs: about 15,000 pairs instead of 4 million in the B4 example.
 - **LLM judge on every candidate.** About 50 calls per query against a budget that allows at most one call (B6).
+- **Judge before the selection.** At the B1 card sizes, 20 judged cards against 3–8 returned: 60–85% of the judge's input per call is spent on cards that are dropped anyway. `judge-gate` measures whether lifting such cards is worth it; if it is, the owner decides (B10).
 - **One raw `search` tool.** A cheap model would stitch context itself, spending calls and tokens. Self-contained cards with `next` remove that work (hypothesis, measured in B9).
 - **One tool per layer.** Five or six similar tools are the case where tool-selection accuracy drops, most for small models.
 - **Exact optimisation for selection.** Budgeted max coverage, set cover and correlation clustering are NP-hard. The greedy algorithms of B5 carry proven bounds at linear or near-linear work.

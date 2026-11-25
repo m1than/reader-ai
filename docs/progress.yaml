@@ -65,7 +65,7 @@ tasks:
       note: "ADR-0020 B10: on ingest-docling output; keep a step if its gain on its type is significant by exact McNemar (in practice net >= 6 of 30); its measured cost per pack + 20% sets the initial index cap (ledger line `index`; owner tops up when reached); exact scan while vector p95 <= 150 ms; spends Agent SDK credit, record in budget.ledger" }
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling, S3.spike.retrieval-ablation] }
   - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation, S0.spike.agent-sdk-container],
-      note: "ADR-0020 B10: Haiku judge p95 through the Agent SDK and cost of one evaluation run; cheapest variant not significantly worse than the best (exact McNemar), at most a net 2 of 30 worse on any type, with find p95 < 2.5 s; spends Agent SDK credit, record in budget.ledger" }
+      note: "ADR-0020 B10: Haiku judge p95 through the Agent SDK and cost of one evaluation run; cheapest variant not significantly worse than the best (exact McNemar), at most a net 2 of 30 worse on any type, with find p95 < 2.5 s; the judge runs after the selection (B6), with the earlier order (judge on the top 20 before selection) run once as the reference, and if the new order is significantly worse or worse by a net > 2 of 30 on any type, block for the owner; spends Agent SDK credit, record in budget.ledger" }
   - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local, S3.spike.judge-gate] }
   - { id: S3.live, stage: 3, kind: live, status: todo, needs: [S3.SRV-SEARCH] }
 
