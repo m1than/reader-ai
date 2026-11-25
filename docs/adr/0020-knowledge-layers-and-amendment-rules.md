@@ -43,7 +43,7 @@ Model tags (F5) and the concept labels of B4 step 2 are proposals made before a 
 
 State on 2026-11-25: no code exists under `server/`; SRV-INGEST, SRV-SEARCH, SRV-KB and SRV-MCP are `todo` in `docs/progress.yaml`. Every change below costs text now and 0 lines of code.
 
-This ADR is `proposed`. Nothing in it is in force, and no task that depends on it starts, until the owner accepts it. If the owner rejects it, the agent removes the ADR-0020 sentences from the roadmap, the pointer lines and the gated tasks in `docs/progress.yaml` in one PR, and SRV-INGEST returns to its earlier `needs`.
+This ADR is `proposed`. Nothing in it is in force, and no task that depends on it starts, until the owner accepts it. If the owner rejects it, the agent removes the ADR-0020 sentences from the roadmap, the pointer lines and the gated tasks in `docs/progress.yaml` in one PR, and SRV-INGEST and SRV-SEARCH return to their earlier `needs`.
 
 ## Part A — Rules for amending decided ADRs
 
@@ -352,7 +352,7 @@ If MLflow fails these checks, Phoenix covers traces only, and the Prompt Registr
 | Piece | Spec | Stage |
 | --- | --- | --- |
 | Base packs, overlays (profile, tags, vectors, prefixes, L2 summaries), manifest, GC, re-anchoring, property test for packs and overlays | SRV-INGEST | 3 |
-| `find` cascade, routes, policy, judge slot `judge.find`, evaluation set | SRV-SEARCH | 3 (L1–L2), extended as L3–L5 land |
+| `find` cascade, routes, policy, judge slot `judge.find`, evaluation set | SRV-SEARCH | 3 (L1–L2), extended as L3–L5 land; SRV-AGENT (stage 5) is built before it for the `Provider` port (owner, 2026-11-26) |
 | Traces to MLflow, prompt registration | SRV-OBS, SRV-AGENT | 2 and 5 |
 | Concept registry, linking (B4), pair link runs, property test for links, findings validity and `orphaned` | SRV-KB | 7 |
 | `brain/v1` tools and invariants | SRV-MCP | 7 |
@@ -371,6 +371,7 @@ If MLflow fails these checks, Phoenix covers traces only, and the Prompt Registr
 | ADR-0015 | Knowledge model; tool table | One sector hierarchy; six tools | Sectors become the `topic` facet and stay a tree. A concept registry (L3) is added. Findings gain validity (`valid_from`, `superseded_by`) and the derived state `orphaned`. The tool table is replaced by `brain/v1` (B8), which keeps role filtering, the 300-character limit and the review queue as invariants | Small models are more sensitive to similar tools. One card shape and `next` links are the hypothesis that cuts calls per answer, measured in B9 |
 | ADR-0018 | Trace backend; v1/v2 split | Backend chosen by a stage 0 spike; evaluation harness in v2 | MLflow (owner, 2026-11-25), still an optional profile. A retrieval-only evaluation (B9) and the prompt no-regression rule (B7a) move into v1. The general regression gate for every prompt and model change stays in v2 | The owner wants the RAG traced and evaluated from the start; retrieval evaluation is the minimum that makes the Haiku target checkable |
 | ADR-0019 | Merging pull requests | The agent merges when CI is green and the PR does not change an ADR status | Also excepted: a PR that adds or amends an ADR (A9); it is merged by the owner. AGENTS.md loop step 6 says the same | An ADR changes what later tasks may do; merging it is a decision, as a status flip is |
+| ADR-0019 | What still stops a task (not the whole run) | Five conditions | Also blocks: `deep-reviewer` has not returned `VERDICT: approve` after two rounds on the same spec (owner, 2026-11-26). AGENTS.md "What blocks a task" says the same | Without a round limit the agent can loop on reviews without end |
 
 Rework (A8):
 
@@ -380,10 +381,11 @@ Rework (A8):
 | ADR template (`amends:` field) | 1 |
 | Pointer lines in earlier ADRs | 8 |
 | Roadmap rows or lines | 13 |
-| AGENTS.md sentence | 1 |
+| AGENTS.md lines (A9 merge rule; stop after two `deep-reviewer` rounds; `docs/plans/` in the map) | 3 |
 | `docs/architecture.md` lines | 2 |
+| Execution plan `docs/plans/adr-0020-execution.md` | 1 |
 | `docs/progress.yaml` tasks added (1 owner task, the evaluation set, 3 spikes) | 5 |
-| `docs/progress.yaml` tasks edited | 4 |
+| `docs/progress.yaml` tasks edited | 7 |
 | Existing code | 0 lines |
 
 ## Decision

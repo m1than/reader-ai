@@ -27,10 +27,11 @@ tasks:
   - { id: S0.spike.agent-sdk-container, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.kernel-roundtrip, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
   - { id: S0.spike.ingest-docling, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
-      note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml)" }
-  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton] }
+      note: "input: the Bashir PDF on the owner's Mac (path set in reader.yaml by the owner; sha256 in pilot/bashir/plan.yaml). Once ADR-0020 is accepted, also record Docling elements per page, Russian tokens per chapter, and dump the elements with locators to data/ (not git) for retrieval-ablation (docs/plans/adr-0020-execution.md)" }
+  - { id: S0.spike.embeddings-local, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
+      note: "Once ADR-0020 is accepted, embed the ingest-docling dump, keep the vectors locally and record exact-search p95 over them (docs/plans/adr-0020-execution.md)" }
   - { id: S0.spike.compile-cost, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
-      note: "spends Agent SDK credit; record in budget.ledger" }
+      note: "spends Agent SDK credit; record in budget.ledger. Once ADR-0020 is accepted, also record the start time of one Agent SDK call on Haiku, which judge-gate needs (docs/plans/adr-0020-execution.md)" }
   - { id: S0.spike.library-publish, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
       note: "release workflow is a branch in m1than/ui-builder-lib-with-agents; publishing is the owner's (block when ready)" }
   - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
@@ -56,17 +57,19 @@ tasks:
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
   # Stage 3 — ingestion and search
-  # ADR-0020 tasks below start only after S0.owner.adr-0020. If the owner rejects ADR-0020, one PR removes them and
+  # ADR-0020 tasks below start only after S0.owner.adr-0020; each is detailed in docs/plans/adr-0020-execution.md.
+  # S3.SRV-SEARCH needs S5.SRV-AGENT for the Provider port that judge.find runs through (owner, 2026-11-26).
+  # If the owner rejects ADR-0020, one PR removes them and
   # restores S3.SRV-INGEST needs to [S2.live, S0.spike.ingest-docling] and S3.SRV-SEARCH needs to [S3.SRV-INGEST, S0.spike.embeddings-local].
-  - { id: S3.eval-set, stage: 3, kind: setup, status: todo, needs: [S0.owner.adr-0020],
+  - { id: S3.eval-set, stage: 3, kind: setup, status: todo, needs: [S0.owner.adr-0020, S0.spike.embeddings-local],
       what: "ADR-0020 B9: 30 questions per question type answerable from the pilot (exact, thematic, fact-check), expected facts in own words <= 300 chars; owner reviews a sample of 30" }
   - { id: S3.spike.retrieval-ablation, stage: 3, kind: spike, status: todo,
       needs: [S3.eval-set, S0.skeleton, S0.spike.ingest-docling, S0.spike.embeddings-local, S0.spike.agent-sdk-container],
       note: "ADR-0020 B10: on ingest-docling output; keep a step if its gain on its type is significant by exact McNemar (in practice net >= 6 of 30); its measured cost per pack + 20% sets the initial index cap (ledger line `index`; owner tops up when reached); exact scan while vector p95 <= 150 ms; spends Agent SDK credit, record in budget.ledger" }
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling, S3.spike.retrieval-ablation] }
-  - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation, S0.spike.agent-sdk-container],
+  - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation, S0.spike.agent-sdk-container, S0.spike.compile-cost],
       note: "ADR-0020 B10: Haiku judge p95 through the Agent SDK and cost of one evaluation run; cheapest variant not significantly worse than the best (exact McNemar), at most a net 2 of 30 worse on any type, with find p95 < 2.5 s; the judge runs after the selection (B6), with the earlier order (judge on the top 20 before selection) run once as the reference, and if the new order is significantly worse or worse by a net > 2 of 30 on any type, block for the owner; spends Agent SDK credit, record in budget.ledger" }
-  - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local, S3.spike.judge-gate] }
+  - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local, S3.spike.judge-gate, S5.SRV-AGENT] }
   - { id: S3.live, stage: 3, kind: live, status: todo, needs: [S3.SRV-SEARCH] }
 
   # Stage 4 — lessons and practice

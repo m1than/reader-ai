@@ -10,7 +10,7 @@ supersedes: []
 
 ## Context
 
-> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): a PR that adds or amends an ADR is merged by the owner, like a PR that changes an ADR status. In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
+> Amendment proposed by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): a PR that adds or amends an ADR is merged by the owner, like a PR that changes an ADR status; a task also blocks when `deep-reviewer` has not approved a spec after two rounds (2026-11-26). In force once ADR-0020 is accepted; then, where the two disagree, ADR-0020 wins.
 
 Owner decisions, 2026-11-20:
 

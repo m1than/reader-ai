@@ -24,6 +24,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - A missing secret or access.
 - A change that contradicts an accepted ADR. Write a new ADR with `status: proposed` instead, and keep working on what does not depend on it.
 - The same check failing after 3 different fixes.
+- `deep-reviewer` not returning `VERDICT: approve` after two rounds on the same spec (owner, 2026-11-26).
 
 ## Gates you never cross
 
@@ -81,7 +82,7 @@ bash e2e/live/stage-N.sh                                # for the stage you touc
 
 ```
 AGENTS.md, CLAUDE.md  agent rules (this file; CLAUDE.md adds Claude Code specifics)
-docs/                 architecture.md, roadmap.md, progress.yaml (run state), adr/, research/
+docs/                 architecture.md, roadmap.md, progress.yaml (run state), adr/, plans/, research/
 spec/modules/         module specs (YAML); template spec/_template.yaml; fixtures in spec/fixtures/
 server/               Python 3.13: api, worker, mcp, host CLI `reader`; tests in server/tests/
 web/                  React + TypeScript + Vite + Storybook; tests *.test.ts(x)
