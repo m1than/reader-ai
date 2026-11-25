@@ -9,6 +9,8 @@ revisit_when: "Docling processes the 935-page pilot slower than 10 pages per min
 
 ## Context
 
+> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): ingest output is an immutable source pack; a span is one Docling element with a context prefix and inherited source tags. Where the two disagree, ADR-0020 wins.
+
 Owner decision, 2026-11-20: any material can be loaded; the user sets the limits.
 
 Measurement on the pilot PDF (2026-11-20): parsing the printed table of contents as text lost 3 of 23 chapters (8, 20, 23), because their titles wrap to a second line. The PDF bookmark outline had all 23 chapters, 494 entries on three levels. Chapter 23 has no bookmarked sections, so its structure must come from the content itself.

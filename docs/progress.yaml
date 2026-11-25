@@ -16,7 +16,7 @@ owner_review:            # stage exits waiting for the owner's live check and `i
 tasks:
   # Stage 0 — groundwork and spikes
   - { id: S0.owner.adr-status, stage: 0, kind: owner, status: todo, needs: [],
-      ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it" }
+      ask: "Set status: accepted in ADR-0001…0019 and merge; bootstrap-mac.sh checks it. ADR-0020 (proposed 2026-11-25) waits for the owner's decision" }
   - { id: S0.owner.machine, stage: 0, kind: owner, status: in_progress, needs: [],
       note: "CLAUDE_CODE_OAUTH_TOKEN exported and Telegram token file in place (2026-11-20); still: bootstrap-mac.sh green, auto mode rules, Telegram link" }
   - { id: S0.skeleton, stage: 0, kind: setup, status: todo, needs: [],
@@ -31,7 +31,8 @@ tasks:
       note: "spends Agent SDK credit; record in budget.ledger" }
   - { id: S0.spike.library-publish, stage: 0, kind: spike, status: todo, needs: [S0.skeleton],
       note: "release workflow is a branch in m1than/ui-builder-lib-with-agents; publishing is the owner's (block when ready)" }
-  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container] }
+  - { id: S0.spike.trace-backend, stage: 0, kind: spike, status: todo, needs: [S0.spike.agent-sdk-container],
+      note: "ADR-0020: MLflow chosen; check memory, span nesting and a score on a trace; Phoenix only as fallback" }
   - { id: S0.exit, stage: 0, kind: live, status: todo,
       needs: [S0.spike.passkey-localhost, S0.spike.agent-sdk-container, S0.spike.kernel-roundtrip, S0.spike.ingest-docling,
               S0.spike.embeddings-local, S0.spike.compile-cost, S0.spike.trace-backend],
@@ -54,7 +55,11 @@ tasks:
 
   # Stage 3 — ingestion and search
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling] }
-  - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local] }
+  - { id: S3.spike.retrieval-ablation, stage: 3, kind: spike, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local],
+      note: "ADR-0020 B10: keep a step only if it adds >= 0.05 recall@10 or sufficiency on its question type; exact scan while vector p95 <= 150 ms" }
+  - { id: S3.spike.judge-gate, stage: 3, kind: spike, status: todo, needs: [S3.spike.retrieval-ablation],
+      note: "ADR-0020 B10: cheapest variant within 0.02 sufficiency of the best with find p95 < 2.5 s; spends Agent SDK credit, record in budget.ledger" }
+  - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local, S3.spike.judge-gate] }
   - { id: S3.live, stage: 3, kind: live, status: todo, needs: [S3.SRV-SEARCH] }
 
   # Stage 4 — lessons and practice
@@ -84,7 +89,9 @@ tasks:
       what: "friction NFR in Playwright; then 7 days of real study by the owner (owner part)" }
 
   # Stage 7 — knowledge base, export and MCP
-  - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live] }
+  - { id: S7.spike.pack-links, stage: 7, kind: spike, status: todo, needs: [S5.live],
+      note: "ADR-0020 B10: link ownership A (linking pack) vs B (bridge per pair); both must pass the add/remove/rebuild property test; fewer lines of code wins unless the other recomputes >= 30% fewer links on rebuild" }
+  - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live, S7.spike.pack-links] }
   - { id: S7.SRV-EXPORT, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB] }
   - { id: S7.SRV-MCP, stage: 7, kind: module, track: ai, status: todo, needs: [S7.SRV-KB] }
   - { id: S7.WEB-KB, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB, S4.WEB-UI] }

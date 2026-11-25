@@ -9,6 +9,8 @@ revisit_when: "An error is found in a published lesson that a stage should have 
 
 ## Context
 
+> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): stage 1 outputs a source pack; drafting puts the whole source section in context; fact-check uses the fact-check retrieval route. Where the two disagree, ADR-0020 wins.
+
 Owner decision, 2026-11-20: the agent does all authoring tasks in staged steps with fact-checking and validation, so that material passes a thorough check.
 
 Evidence from the manual pilot (Chapter 1 lesson, 2026-11-07): the Nakamoto attacker-success table first showed 63.4% for q = 0.3, z = 1; an independent recomputation gave 62.8%. One wrong number in one table, caught only because the value was recomputed by separate code. The pipeline makes that recomputation mandatory instead of lucky.

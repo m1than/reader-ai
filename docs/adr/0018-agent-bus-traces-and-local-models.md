@@ -9,6 +9,8 @@ revisit_when: "The OpenTelemetry GenAI conventions publish a stable release, or 
 
 ## Context
 
+> Amended by [ADR-0020](0020-knowledge-layers-and-amendment-rules.md) (2026-11-25): MLflow is the trace backend (owner); the `trace-backend` spike checks MLflow only; prompts are versioned in the MLflow Prompt Registry. Where the two disagree, ADR-0020 wins.
+
 Owner decisions, 2026-11-20:
 
 - Everything runs on an agent bus, so that analysing material and building a course is itself an observable pipeline.
