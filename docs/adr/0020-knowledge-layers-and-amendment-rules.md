@@ -51,7 +51,7 @@ This ADR is the first one written under these rules.
 | Layer | Unit | Depth bound | Card budget (tokens) | Built by | Lives in |
 | --- | --- | --- | --- | --- | --- |
 | L0 Source | Source profile: role, nature, reliability, `as_of`, `license`, language, cost | 1 node per source | ≤ 200 | Ingest; owner confirms at G1 | Profile overlay |
-| L1 Span | One Docling element: paragraph, table, code block, formula, test vector. Code and vectors are not split at ingest; a card larger than its budget is cut at the budget with a `next` link to the continuation | 1 | 200–500 of text plus a context prefix of about 50–100 | Ingest | Base pack; prefix in an overlay |
+| L1 Span | One Docling element: paragraph, table, code block, formula, test vector. Code and vectors are not split at ingest; a card larger than its budget is cut at the budget with a `next` link to the continuation, whose id is the locator sub-range that follows | 1 | 200–500 of text plus a context prefix of about 50–100 | Ingest | Base pack; prefix in an overlay |
 | L2 Structure | Node of the source's own outline, with a summary | As in the source, capped at 4 levels | Leaf ≤ 100, chapter ≤ 300, root ≤ 500 | Ingest | Base pack; summaries in an overlay |
 | L3 Concept | Canonical concept (`con:bip-32`) with ru/en aliases | Topic tree ≤ 3 levels; top level approved at G1 (ADR-0015) | ≤ 150, at most 10 related concepts shown | Registry | Registry; evidence per pack |
 | L4 Finding | Atomic claim, ≤ 3 sentences, ≥ 1 citation (ADR-0015 kinds) | Flat, typed links | ≤ 120 | Pipeline, tutor, learner | Learner store |
@@ -90,7 +90,13 @@ Retrieval serves cross-source checks, the tutor and MCP.
 | P10 | Scope: one manifest per user. A shared course gives its members role-filtered read access to the course owner's packs (ADR-0016). A read that spans a member's own manifest and a course records both manifest versions |
 
 **Links are computed per pair of base packs.**
-- A link run for the unordered pair {A, B} is an overlay keyed by both pack ids and the link builder version.
+- A link run for the unordered pair {A, B} is an overlay whose version hashes all of its inputs:
+  - both base pack ids;
+  - their profile, vector and concept-evidence overlay versions;
+  - the version of the owner-approved concept set;
+  - the link builder version.
+  An owner approval or a profile change therefore yields a new run version, not a stale run.
+- Concept identity across packs: identifier concepts (`con:bip-32`) are canonical. Term concepts proposed separately in two packs (for example a Russian and an English name) stay distinct until the owner approves one as an alias of the other in the review queue. That merge is a new approved-set version, and the link runs it affects are recomputed.
 - Runs exist only for pairs that share at least one concept (pack-level blocking), so their number grows with overlapping pairs, not with n(n−1)/2.
 - When a pack is activated, runs are computed for every active partner that shares a concept and has none.
 - A run sees only P, Q and owner-approved concepts (B4), so its result depends neither on the order in which sources were added nor on any third pack.
@@ -238,7 +244,7 @@ The interface every agent sees. Tools and models behind it change freely (A5).
 | Tool | Scope | Returns |
 | --- | --- | --- |
 | `brain_map()` (also a resource) | `kb:read` | Top of the brain within 1,500 tokens: sectors with counts, sources with roles, `brain_version`, how to search. Meant to be read once per agent session |
-| `find(query, filters?, k?, budget?)` | `kb:read` | Cards chosen by B6 within `budget` tokens (default and maximum in policy; initial maximum 2,000) |
+| `find(query, filters?, k?, budget?)` | `kb:read` | Cards chosen by B6 within `budget` tokens (default and maximum in policy; initial maximum 2,000; a larger `budget` is clamped to the maximum) |
 | `open(id, depth?, budget?)` | `kb:read` | Any typed id: `src:`, `sec:`, `con:`, `fnd:`, `spn:`, `les:` (lesson outline, replacing `get_lesson_outline`); `depth ≤ 4`, same budget rule as `find` |
 | `propose(...)` | `kb:write` | A proposed finding in the owner's review queue (unchanged from ADR-0015) |
 
@@ -299,12 +305,12 @@ Targets (owner, 2026-11-25), each reported as a point estimate with its 95% inte
 
 ### B10. Spikes and their decision rules
 
-**Statistics for every rule.** Paired comparison on the same questions, with an exact McNemar test on the discordant questions. A difference is stated in whole questions per question type (30 questions per type). "Significant" means two-sided p < 0.05, which needs at least 6 discordant questions all in one direction.
+**Statistics for every rule.** Paired comparison on the same questions, with an exact McNemar test on the discordant questions. A difference is stated in whole questions per question type (30 questions per type). "Significant" means two-sided p < 0.05. At this size that needs a net gain of about 6 questions (6–0 gives p = 0.031; 5–0 gives 0.0625), so smaller gains are deliberately dropped: the system keeps only steps whose value the data can show.
 
 | Spike | Runs | Question | Measure | Decision rule (A6) |
 | --- | --- | --- | --- | --- |
-| `retrieval-ablation` | Stage 3, after the evaluation set is written. Uses `ingest-docling` output; runs before SRV-INGEST and SRV-SEARCH are approved; extends `embeddings-local` | Which retrieval steps earn their place on one source | On exact, thematic and fact-check questions: recall@10 and sufficiency for L1; plus context prefix; plus L2 summaries; plus the `form` filter. Exact scan vs HNSW p95 at the measured size. Tokens and USD cost per pack of context prefixes and L2 summaries | Keep a step if, on its question type, it gains a net ≥ 3 of 30 questions, the gain is significant, and its measured cost per pack fits the index share the owner sets (Open question 5). Exact scan while the vector step p95 ≤ 150 ms (initial value) |
-| `judge-gate` | Stage 3, after `retrieval-ablation` | Whether and when the online judge runs | Haiku `judge.find` p95 through the Agent SDK path. Gate fire rate and sufficiency for: fused order only; judge on every query; judge gated at several margins. USD cost of one full evaluation run | Pick the cheapest variant that is not significantly worse than the best and whose `find` p95 < 2.5 s. The evaluation cap is set from the measured run cost |
+| `retrieval-ablation` | Stage 3, after the evaluation set is written. Uses `ingest-docling` output; runs before SRV-INGEST and SRV-SEARCH are approved; extends `embeddings-local` | Which retrieval steps earn their place on one source | On exact, thematic and fact-check questions: recall@10 and sufficiency for L1; plus context prefix; plus L2 summaries; plus the `form` filter. Exact scan vs HNSW p95 at the measured size. Tokens and USD cost per pack of context prefixes and L2 summaries | Keep a step if, on its question type, its gain is significant (in practice a net ≥ 6 of 30 questions) and its measured cost per pack fits the index share the owner sets after this spike (Open question 5; owner task in `docs/progress.yaml`). Exact scan while the vector step p95 ≤ 150 ms (initial value) |
+| `judge-gate` | Stage 3, after `retrieval-ablation` | Whether and when the online judge runs | Haiku `judge.find` p95 through the Agent SDK path. Gate fire rate and sufficiency for: fused order only; judge on every query; judge gated at several margins. USD cost of one full evaluation run | Pick the cheapest variant that is not significantly worse than the best, is not worse by more than a net 2 of 30 questions on any type, and has `find` p95 < 2.5 s. The evaluation cap is set from the measured run cost |
 | `pack-links` | Stage 7, before SRV-KB, on Bashir plus two openly licensed sources (BIP texts, Bitcoin Optech topics) | Variant A or B for storing pair link runs (B2); the facet-filter (`role`, `reliability`, `as_of`) and current-state rules, which need several sources | Property test over recorded model outputs: after random add, remove and rebuild sequences, the active link set equals a fresh build of the same pack set. Rows, lines of code and overlays rebuilt when one pack is rebuilt. The facet-filter and current-state measures use the `retrieval-ablation` method | Both variants must pass the property test. Pick the variant with fewer lines of code, unless the other rebuilds ≥ 30% fewer overlays on a pack rebuild (initial value). Facet filters use the `retrieval-ablation` rule |
 
 **`trace-backend` (stage 0), once this ADR is accepted,** no longer chooses the backend. It checks MLflow on the owner's Mac:
@@ -331,7 +337,7 @@ If MLflow fails these checks, Phoenix covers traces only, and the Prompt Registr
 
 | ADR | Section | Was | Becomes | Why |
 | --- | --- | --- | --- | --- |
-| ADR-0001 | Process | No rule for changing an ADR; template has `supersedes` only | Part A rules A1–A8; the template gains `amends: []` | Changes by delta keep decided ADRs readable and keep rework visible |
+| ADR-0001 | Process | No rule for changing an ADR; template has `supersedes` only | Part A rules A1–A9 (A9 also amends ADR-0019, row below); the template gains `amends: []` | Changes by delta keep decided ADRs readable and keep rework visible |
 | ADR-0005 | Budgets and cost ledger | $200 credit split as compile ≤ $100 and tutor, per task class | Pack overlays (context prefixes, L2 summaries, link judging) are paid from an index share whose size the owner sets after `retrieval-ablation` measures it (Open question 5), with per-pack and per-pair-run caps. `judge.find` runs on the caller's provider and counts against the caller's tutor or MCP use. `judge.eval.*` has an evaluation cap set from the run cost measured by `judge-gate` | 23 lessons × $4.35 = $100.05 already fills the compile share; new model work needs its own owner-set money and a cap. The ADR-0005 invariant forbids borrowing credentials |
 | ADR-0007 | Decision, retrieval | Hybrid full-text plus pgvector HNSW, merged by RRF | Same fusion; exact distance on the filtered set until `retrieval-ablation` shows the vector step p95 > 150 ms; data organised as base packs and overlays behind a manifest (B2) | HNSW with filters loses most results at default settings; exact search has 100% recall |
 | ADR-0008 | Decision 3, spans | Every chunk keeps its span | A span is one Docling element of a base pack and keeps the ADR-0008 locator as its identity, plus a quote hash for re-anchoring. Context prefixes and inherited tags are overlays (B2). Decision 4 (`license`, `personal-use` never exposed) is unchanged and becomes the `license` facet | Contextual Retrieval reduced failed retrievals by 49%, and by 67% with reranking (Anthropic, 2024). A locator identity keeps citations stable across overlay changes |
@@ -350,7 +356,7 @@ Rework (A8):
 | Roadmap rows or lines | 13 |
 | AGENTS.md sentence | 1 |
 | `docs/architecture.md` line | 1 |
-| `docs/progress.yaml` tasks added (1 owner task, the evaluation set, 3 spikes) | 5 |
+| `docs/progress.yaml` tasks added (2 owner tasks, the evaluation set, 3 spikes) | 6 |
 | `docs/progress.yaml` tasks edited | 4 |
 | Existing code | 0 lines |
 
@@ -385,7 +391,7 @@ Rework (A8):
 - **Exact optimisation for selection.** Budgeted max coverage, set cover and correlation clustering are NP-hard. The greedy algorithms of B5 carry proven bounds at linear or near-linear work.
 - **All tags embedded in text.** Every owner decision about a source's role or reliability would re-embed the whole index.
 - **Decision thresholds of 0.05 or 0.02 on 30 questions.** One question is 3.3% of the set and about 14% of a 7-question type. The standard error at p = 0.8, n = 30 is about 0.073, so such thresholds sit below the resolution of the data.
-- **A lower 95% bound for the 90% target.** At 120 questions that bound would demand a point ratio near 0.98, far stricter than the owner's 90%.
+- **A lower 95% bound for the 90% target.** At 90 questions (30 per type in stage 3) that bound would demand a point ratio near 0.98, far stricter than the owner's 90%.
 
 ## Consequences
 
