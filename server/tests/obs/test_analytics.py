@@ -2,7 +2,7 @@
 attributes, by VEC-OBS-4's tables, and the helpers modules call inside a job (session marker, root attributes,
 child spans).
 
-@trace FR-OBS-12 FR-OBS-13 FR-OBS-18 VEC-OBS-4 INV-OBS-1 INV-OBS-3
+@trace FR-OBS-12 FR-OBS-13 FR-OBS-18 FR-OBS-36 VEC-OBS-4 INV-OBS-1 INV-OBS-3
 
 `oracle_derive` reads VEC-OBS-4 (spec/fixtures/SRV-OBS/analytics.yaml) independently of reader.obs.analytics and is
 used by the INV-OBS-1 property test in test_allowlist.py too.
@@ -74,6 +74,16 @@ def oracle_derive(klass: str | None, name: str, attrs: dict[str, Any], root: boo
             if isinstance(attrs.get(key), str):
                 out["session.id"] = attrs[key]
                 break
+    docs = VEC4["retriever_documents"]
+    prefix = docs["family"].replace("<i>", "")  # "reader.doc."
+    if any(k.startswith(prefix) for k in attrs):
+        shown = []
+        for i in range(25):
+            uri, sha = attrs.get(f"{prefix}{i}.uri"), attrs.get(f"{prefix}{i}.sha256")
+            if isinstance(uri, str) and isinstance(sha, str):
+                shown.append({"id": uri, "page_content": "", "metadata": {"doc_uri": uri, "content_sha256": sha}})
+        if shown:
+            out[docs["key"]] = shown
     return out
 
 
@@ -100,13 +110,39 @@ def test_module_equals_vec_obs_4() -> None:
     assert {"span": a.SESSION["span"], "from": list(a.SESSION["from"])} == VEC4["session"]
     assert dict(a.LINKED_PROMPTS) == VEC4["linked_prompts"]
     assert dict(a.PROMPTS) == VEC4["prompts"]
+    assert dict(a.RETRIEVER_DOCUMENTS) == VEC4["retriever_documents"]
+    assert list(a.JOB_KINDS) == VEC4["job_kinds"]
     for entry in VEC4["assessments"]:
         mine = a.ASSESSMENTS[entry["name"]]
         value = entry["value"] if entry["value"] == "bool" else ("float", *entry["value"]["float"])
         assert mine["value"] == value
-        assert mine["source_id"] == entry["source_id"]
-        assert {k: list(v) for k, v in mine["metadata"].items()} == entry["metadata"]
+        assert (mine["source_type"], mine["writer"]) == (entry["source_type"], entry["writer"])
+        for field in ("source_id", "source_id_pattern"):
+            assert mine.get(field) == entry.get(field), (entry["name"], field)
+        assert {k: (v if isinstance(v, str) else list(v)) for k, v in mine["metadata"].items()} == entry["metadata"]
     assert sorted(a.ASSESSMENTS) == sorted(e["name"] for e in VEC4["assessments"])
+
+
+def test_kl_catalogue_additions() -> None:
+    """VEC-OBS-4 as edited by ADR-0039: the find and pack span types, the two new trace tags, the LLM_JUDGE
+    entries and SRV-OBS's six judge prompts (judge.find's file is SRV-AGENT's and not on this branch)."""
+    assert {k: VEC4["span_types"][k] for k in ("find", "find.route", "find.retrieve", "find.preselect",
+                                               "find.judge_wait", "find.select", "pack.build", "link.run")} == {
+        "find": "TOOL", "find.route": "ROUTER", "find.retrieve": "RETRIEVER", "find.preselect": "RERANKER",
+        "find.judge_wait": "CHAIN", "find.select": "RERANKER", "pack.build": "CHAIN", "link.run": "CHAIN"}
+    assert {"reader.policy_version", "reader.eval_id"} <= set(VEC4["trace_tags"])
+    judged = {e["name"] for e in VEC4["assessments"] if e["source_type"] == "LLM_JUDGE"}
+    assert judged == {"eval.relevance", "eval.sufficiency", "eval.groundedness", "eval.self_contained",
+                      "eval.citation_supports_claim"}
+    writers = {e["source_type"]: e["writer"] for e in VEC4["assessments"]}
+    assert writers == {"CODE": "obs.feedback", "LLM_JUDGE": "obs.judge_score"}
+    files = {
+        f"reader.judge.{slot}": f"server/src/reader/obs/prompts/judge_{slot.replace('.', '_')}.md"
+        for slot in ("eval.relevance", "eval.sufficiency", "eval.groundedness", "eval.self_contained",
+                     "eval.citation_supports_claim", "align")
+    }
+    assert {k: v for k, v in VEC4["prompts"].items() if k.startswith("reader.judge.")} == files
+    assert {"obs.eval", "obs.eval_run", "obs.eval_sample", "obs.judge_score", "obs.align"} <= set(VEC4["job_kinds"])
 
 
 def test_no_preview_key_is_forbidden_and_every_preview_key_is_a_root_key() -> None:
@@ -159,9 +195,51 @@ def test_a_child_job_span_gets_no_trace_tags() -> None:
     ("agent.call", "AGENT"), ("job.session", "CHAIN"), ("tutor.retrieve", "RETRIEVER"), ("tutor.citations", "PARSER"),
     ("verify.claims", "PARSER"), ("verify.lab", "TOOL"), ("kernel.run", "TOOL"), ("ingest.parse", "PARSER"),
     ("ingest.chunk", "PARSER"), ("embed.batch", "EMBEDDING"),
+    ("find", "TOOL"), ("find.route", "ROUTER"), ("find.retrieve", "RETRIEVER"), ("find.preselect", "RERANKER"),
+    ("find.judge_wait", "CHAIN"), ("find.select", "RERANKER"), ("pack.build", "CHAIN"), ("link.run", "CHAIN"),
 ])
 def test_span_types(name: str, kind: str) -> None:
     assert _export(name, {}, parent=True)["mlflow.spanType"] == kind
+
+
+SHA = "ab" * 32
+
+
+def _doc(i: int) -> dict[str, Any]:
+    return {f"reader.doc.{i}.uri": f"reader://h/{i:02x}" + "0" * 62, f"reader.doc.{i}.sha256": SHA,
+            f"reader.doc.{i}.tokens": 10}
+
+
+def test_span_outputs_only_on_spans_with_documents() -> None:
+    """FR-OBS-12 (f) as amended: the documents list is derived only on a span carrying reader.doc.* keys, in index
+    order, with an empty page_content; no other span (a retriever without documents, tutor.retrieve, a find root)
+    gains a preview."""
+    out = _export("find.retrieve", {"reader.layer": "L1", **_doc(1), **_doc(0)}, parent=True)
+    docs = json.loads(out["mlflow.spanOutputs"])
+    assert [d["id"] for d in docs] == [f"reader://h/{i:02x}" + "0" * 62 for i in (0, 1)]
+    assert all(d["page_content"] == "" and set(d) == {"id", "page_content", "metadata"} for d in docs)
+    assert docs[0]["metadata"] == {"doc_uri": docs[0]["id"], "content_sha256": SHA}
+    for name, attrs in (("find.retrieve", {"reader.layer": "L1"}), ("tutor.retrieve", {**_doc(0)}),
+                        ("find", {**_doc(0)}), ("find.route", {**_doc(0)})):
+        assert "mlflow.spanOutputs" not in _export(name, attrs, parent=True), name
+    # A document whose uri failed its pattern is not listed.
+    bad = _export("find.select", {**_doc(0), "reader.doc.0.uri": "reader://sec:x", **_doc(2)}, parent=True)
+    assert [d["id"] for d in json.loads(bad["mlflow.spanOutputs"])] == [f"reader://h/{2:02x}" + "0" * 62]
+
+
+def test_kl_trace_tags_on_job_roots() -> None:
+    uuid = "5f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f"
+    out = _export("job tutor.answer", {"reader.job.kind": "tutor.answer", "reader.policy_version": SHA,
+                                       "reader.eval_id": uuid})
+    assert out["mlflow.traceTag.reader.policy_version"] == SHA
+    assert out["mlflow.traceTag.reader.eval_id"] == uuid
+
+
+def test_tutor_retrieve_stays_declared() -> None:
+    """FR-OBS-13 as amended: tutor.retrieve stays until SRV-TUTOR's paired change moves the tutor onto find."""
+    attrs = load_yaml(FIXTURES / "attributes.yaml")
+    assert "tutor.retrieve" in attrs["keys_by_span"]
+    assert VEC4["span_types"]["tutor.retrieve"] == "RETRIEVER"
 
 
 def test_http_root_gets_only_the_trace_name() -> None:
@@ -229,14 +307,21 @@ _DERIVING = sorted({
     *VEC4["trace_tags"], "reader.cost_usd", "reader.cost_input_usd", "reader.prompt.version", "reader.tutor.state",
     *[k for t in VEC4["previews"].values() for side in t.values() for k in side.values()],
     "mlflow.spanInputs", "mlflow.llm.cost", "mlflow.spanType", "mlflow.traceTag.mlflow.traceName", "session.id",
+    "mlflow.spanOutputs",
+    *[f"reader.doc.{i}.{p}" for i in (0, 1, 24, 25) for p in ("uri", "sha256", "tokens", "judged")],
 })
+_HOSTILE_DOCS = st.one_of(
+    _HOSTILE,
+    st.sampled_from(["reader://h/" + SHA, "reader://h/" + SHA + '"', "reader://les:" + UUID_A,
+                     "reader://sec:" + CANARY, "reader://les:" + UUID_A + "</script>", SHA]),
+)
 
 
 @settings(max_examples=200, suppress_health_check=[HealthCheck.too_slow])
 @given(
     name=st.sampled_from(["job tutor.answer", "job pipeline.stage", "agent.call", "job.session", "verify.lab",
-                          "GET other"]),
-    attrs=st.dictionaries(st.sampled_from(_DERIVING), _HOSTILE, max_size=10),
+                          "GET other", "find.retrieve", "find.select", "find"]),
+    attrs=st.dictionaries(st.sampled_from(_DERIVING), _HOSTILE_DOCS, max_size=10),
     kind=st.sampled_from(["tutor.answer", "pipeline.stage", "ingest.import", CANARY]),
 )
 def test_hostile_inputs_derive_only_valid_keys(name: str, attrs: dict[str, Any], kind: str) -> None:
@@ -244,7 +329,9 @@ def test_hostile_inputs_derive_only_valid_keys(name: str, attrs: dict[str, Any],
 
     attrs = {**attrs, "reader.job.kind": kind}
     out = _export(name, attrs)
-    klass = require("reader.obs.attributes").AllowList(catalogs()).span_class(name)
+    from .test_allowlist import cats
+
+    klass = require("reader.obs.attributes").AllowList(cats()).span_class(name)
     clean = oracle_clean(klass, attrs)
     assert decoded(out) == oracle_derive(klass, name, clean, root=True)
     for key in JSON_KEYS:

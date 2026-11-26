@@ -27,12 +27,23 @@ span_types:
   ingest.parse: PARSER
   ingest.chunk: PARSER
   embed.batch: EMBEDDING
+  # ADR-0039 (FR-OBS-36, -37). ROUTER is a custom type; MLflow 3.18.0 storing it over OTLP is pinned by the first
+  # [image] test (kl_open_points 3).
+  find: TOOL
+  find.route: ROUTER
+  find.retrieve: RETRIEVER
+  find.preselect: RERANKER
+  find.judge_wait: CHAIN
+  find.select: RERANKER
+  pack.build: CHAIN
+  link.run: CHAIN
 
 # Root spans only: `mlflow.traceTag.mlflow.traceName` = the span name, and `mlflow.traceTag.<key>` = str(value) for
 # each of these keys the root carries (already validated; ints in decimal). No cost or cache tag.
 trace_tags: [reader.job.kind, reader.job.outcome, reader.job.attempt, reader.error_code, reader.error_class,
   reader.stage, reader.step, reader.run_id, reader.lesson.id, reader.course.id, reader.question_id,
-  reader.material_sha256, reader.version_key]   # phase 2: FR-OBS-20 (d) finds import traces by the material tag; FR-OBS-21 (a)
+  reader.material_sha256, reader.version_key,   # phase 2: FR-OBS-20 (d) finds import traces by the material tag; FR-OBS-21 (a)
+  reader.policy_version, reader.eval_id]        # ADR-0039: FR-OBS-21, -39
 
 # Previews: `mlflow.spanInputs` / `mlflow.spanOutputs` = a JSON object of {preview key: validated value} for the keys
 # the root carries, in this order; nothing else (no key: no preview). A preview key is never one of the forbidden.
@@ -51,6 +62,16 @@ previews:
     outputs: { outcome: reader.job.outcome, error_code: reader.error_code }
 forbidden_preview_keys: [model, messages, prompt, input, output, content, text]
 
+# FR-OBS-36, FR-OBS-12 (f) as amended: on a span carrying reader.doc.* keys (the find subtree's RETRIEVER and
+# RERANKER spans; VEC-OBS-1 lists them nowhere else), `mlflow.spanOutputs` = a JSON list, in index order, of one
+# document per index whose validated uri and sha256 are both present: {"id": uri, "page_content": "", "metadata":
+# {"doc_uri": uri, "content_sha256": sha256}}; no such index, no key. `page_content` is always empty, whatever the
+# card's license. No other span gains a preview.
+retriever_documents:
+  family: reader.doc.<i>
+  key: mlflow.spanOutputs
+  document: { id: uri, page_content: "", metadata: { doc_uri: uri, content_sha256: sha256 } }
+
 # agent.call only, when reader.cost_usd is present (B7): input_cost = reader.cost_input_usd (0 when absent, capped
 # at the total), output_cost = reader.cost_usd − input_cost in 6-place Decimal arithmetic (never float),
 # total_cost = reader.cost_usd (the ledger's numeric(12,6)); omitted when reader.cost_usd is absent.
@@ -64,17 +85,37 @@ session: { span: job.session, from: [reader.run_id, reader.lesson.id] }
 # `prompts`; nothing otherwise.
 linked_prompts: { tutor.answer: reader.tutor, pipeline.stage: "reader.<reader.stage>" }
 
-# FR-OBS-14: the assessment catalogue. A POST body is built only from this.
+# FR-OBS-14: the assessment catalogue. A POST body is built only from this. Each entry has a `source_type` and the
+# one job kind that writes it (INV-OBS-8): CODE entries only by obs.feedback through reader.obs.feedback.body,
+# LLM_JUDGE entries (ADR-0039) only by obs.judge_score through reader.obs.feedback.eval_body; each builder refuses
+# the other's entries. An LLM_JUDGE entry's source_id is SRV-AGENT's judge string `<slot>@<version>`, matched by
+# `source_id_pattern` with the slot equal to "judge." + the entry's name; its metadata is {score_id} as a uuid.
+# HUMAN assessments (owner labels, obs.label) are VEC-OBS-5's `labels`, not this catalogue.
 assessments:
-  - { name: fact_check.passed, value: bool, source_id: reader.pipeline.fact_check,
-      metadata: { claims: [0, 10000], supported: [0, 10000] } }
-  - { name: verify.passed, value: bool, source_id: reader.pipeline.verify, metadata: {} }
-  - { name: verify.lab_passed, value: bool, source_id: reader.pipeline.verify,
-      metadata: { cells: [0, 10000], cells_ok: [0, 10000] } }
-  - { name: tutor.citations_valid, value: bool, source_id: reader.tutor.citations,
-      metadata: { total: [0, 1000], valid: [0, 1000] } }
-  - { name: tutor.citation_share, value: { float: [0, 1] }, source_id: reader.tutor.citations, metadata: {} }
-assessment_body: { source_type: CODE, rationale: never, metadata_values: decimal_strings }
+  - { name: fact_check.passed, source_type: CODE, writer: obs.feedback, value: bool,
+      source_id: reader.pipeline.fact_check, metadata: { claims: [0, 10000], supported: [0, 10000] } }
+  - { name: verify.passed, source_type: CODE, writer: obs.feedback, value: bool, source_id: reader.pipeline.verify,
+      metadata: {} }
+  - { name: verify.lab_passed, source_type: CODE, writer: obs.feedback, value: bool,
+      source_id: reader.pipeline.verify, metadata: { cells: [0, 10000], cells_ok: [0, 10000] } }
+  - { name: tutor.citations_valid, source_type: CODE, writer: obs.feedback, value: bool,
+      source_id: reader.tutor.citations, metadata: { total: [0, 1000], valid: [0, 1000] } }
+  - { name: tutor.citation_share, source_type: CODE, writer: obs.feedback, value: { float: [0, 1] },
+      source_id: reader.tutor.citations, metadata: {} }
+  - { name: eval.relevance, source_type: LLM_JUDGE, writer: obs.judge_score, value: { float: [0, 1] },
+      source_id_pattern: "^judge\\.eval\\.[a-z_]{1,40}@[0-9a-f]{12}$", metadata: { score_id: uuid } }
+  - { name: eval.sufficiency, source_type: LLM_JUDGE, writer: obs.judge_score, value: { float: [0, 1] },
+      source_id_pattern: "^judge\\.eval\\.[a-z_]{1,40}@[0-9a-f]{12}$", metadata: { score_id: uuid } }
+  - { name: eval.groundedness, source_type: LLM_JUDGE, writer: obs.judge_score, value: { float: [0, 1] },
+      source_id_pattern: "^judge\\.eval\\.[a-z_]{1,40}@[0-9a-f]{12}$", metadata: { score_id: uuid } }
+  - { name: eval.self_contained, source_type: LLM_JUDGE, writer: obs.judge_score, value: { float: [0, 1] },
+      source_id_pattern: "^judge\\.eval\\.[a-z_]{1,40}@[0-9a-f]{12}$", metadata: { score_id: uuid } }
+  - { name: eval.citation_supports_claim, source_type: LLM_JUDGE, writer: obs.judge_score, value: { float: [0, 1] },
+      source_id_pattern: "^judge\\.eval\\.[a-z_]{1,40}@[0-9a-f]{12}$", metadata: { score_id: uuid } }
+assessment_body: { source_type: "the entry's", rationale: never, metadata_values: "decimal strings (CODE), the uuid
+    (LLM_JUDGE)" }
+# The idempotency lookup before a POST matches name, source_id and, for LLM_JUDGE, metadata.score_id
+# (reader.obs.feedback.already): a retry never posts twice and a new judge version posts next to the old one.
 
 # FR-OBS-15: the prompt templates registered, by name and file.
 prompts:
@@ -83,5 +124,14 @@ prompts:
   reader.adversarial_review: server/src/reader/pipeline/prompts/adversarial_review.v1.md
   reader.revise: server/src/reader/pipeline/prompts/revise.v1.md
   reader.tutor: server/src/reader/tutor/prompts/answer-v1.md
+  # ADR-0039 (FR-OBS-15 as edited, FR-OBS-43): SRV-OBS's judge prompts. SRV-AGENT's
+  # server/src/reader/agent/prompts/judge_find.md (reader.judge.find) joins when SRV-AGENT's paired change lands on
+  # this branch; judge.link_type and ingest.context_prefix join with SRV-KB and SRV-INGEST (ADR-0039 B7a).
+  reader.judge.eval.relevance: server/src/reader/obs/prompts/judge_eval_relevance.md
+  reader.judge.eval.sufficiency: server/src/reader/obs/prompts/judge_eval_sufficiency.md
+  reader.judge.eval.groundedness: server/src/reader/obs/prompts/judge_eval_groundedness.md
+  reader.judge.eval.self_contained: server/src/reader/obs/prompts/judge_eval_self_contained.md
+  reader.judge.eval.citation_supports_claim: server/src/reader/obs/prompts/judge_eval_citation_supports_claim.md
+  reader.judge.align: server/src/reader/obs/prompts/judge_align.md
 
-job_kinds: [obs.feedback, obs.prompts]
+job_kinds: [obs.feedback, obs.prompts, obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score, obs.align]

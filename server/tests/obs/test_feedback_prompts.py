@@ -2,7 +2,7 @@
 prompt registry (`obs.prompts`, FR-OBS-15) — their bodies built only from VEC-OBS-4's catalogue and the repository's
 static files, their failure paths, and the canary over every request body and job args (INV-OBS-2).
 
-@trace FR-OBS-14 FR-OBS-15 INV-OBS-2 VEC-OBS-4
+@trace FR-OBS-14 FR-OBS-15 INV-OBS-2 INV-OBS-8 VEC-OBS-4
 
 MLflow is an in-test httpx.MockTransport that records every request.
 """
@@ -66,7 +66,8 @@ def test_kind_declarations() -> None:
     p = prompts.KIND_DECL
     assert (p.name, p.queue, p.key, p.max_attempts) == ("obs.prompts", "obs", ("digest",), 3)
     assert prompts.LOOKUP_TIMEOUT_S == 2.0 and prompts.MISS_TTL_S == 600.0
-    assert sorted(VEC4["job_kinds"]) == ["obs.feedback", "obs.prompts"]
+    assert sorted(VEC4["job_kinds"]) == ["obs.align", "obs.eval", "obs.eval_run", "obs.eval_sample", "obs.feedback",
+                                         "obs.judge_score", "obs.prompts"]
 
 
 def test_body_is_the_catalogue_only() -> None:
@@ -86,9 +87,99 @@ def test_body_is_the_catalogue_only() -> None:
         ("fact_check.passed", True, {"note": 1}),  # an unlisted metadata key
         ("fact_check.passed", True, {"claims": 10001}),  # outside its range
         ("fact_check.passed", True, {"claims": "14"}),
+        ("eval.relevance", 0.5, {}),  # an LLM_JUDGE entry: only eval_body builds it (FR-OBS-14 as amended)
+        ("eval.sufficiency", 0.5, {"score_id": 1}),
     ):
         with pytest.raises(feedback.CatalogError):
             feedback.body(name, value, meta, "tr-x")
+
+
+# --- ADR-0039: LLM_JUDGE assessments (FR-OBS-14 as amended, INV-OBS-8) ---
+
+SCORE = "6f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f"
+TRACE = "tr-" + "e" * 32
+JUDGE_NAMES = [e["name"] for e in VEC4["assessments"] if e["source_type"] == "LLM_JUDGE"]
+
+
+def test_eval_body_is_the_catalogue_only() -> None:
+    feedback = require("reader.obs.feedback")
+    body = feedback.eval_body("eval.sufficiency", 0.7, SCORE, "judge.eval.sufficiency@0123456789ab", TRACE)
+    assert body == {"assessment": {
+        "assessment_name": "eval.sufficiency", "trace_id": TRACE,
+        "source": {"source_type": "LLM_JUDGE", "source_id": "judge.eval.sufficiency@0123456789ab"},
+        "feedback": {"value": 0.7}, "metadata": {"score_id": SCORE},
+    }}
+    assert feedback.eval_body("eval.relevance", 1, SCORE, "judge.eval.relevance@0123456789ab", TRACE)[
+        "assessment"]["feedback"] == {"value": 1.0}
+    good = ("eval.relevance", 0.5, SCORE, "judge.eval.relevance@0123456789ab", TRACE)
+    for i, bad in (
+        (0, "fact_check.passed"),  # a CODE entry: only body builds it
+        (0, "owner.judge_find_ok"),  # HUMAN names are obs.label's, not this catalogue
+        (0, "eval.unknown"),
+        (1, 1.01), (1, -0.1), (1, float("nan")), (1, float("inf")), (1, True), (1, "0.5"),
+        (2, "not-a-uuid"), (2, SCORE.upper()), (2, SCORE + "\n"),
+        (3, "judge.eval.relevance@0123456789AB"), (3, "judge.eval.relevance@0123"),
+        (3, "judge.find@0123456789ab"),
+        (3, "judge.eval.sufficiency@0123456789ab"),  # another slot's judge string for this name
+        (4, "tr-x"),
+    ):
+        args = list(good)
+        args[i] = bad
+        with pytest.raises(feedback.CatalogError):
+            feedback.eval_body(*args)
+
+
+_JUDGE_TEXT = st.one_of(st.sampled_from([*CANARIES, *JUDGE_NAMES, *[e["name"] for e in VEC4["assessments"]]]),
+                        st.text(max_size=30))
+_SOURCE = st.one_of(st.sampled_from([f"judge.{n}@0123456789ab" for n in JUDGE_NAMES] + ["reader.pipeline.verify"]),
+                    st.text(max_size=40))
+
+
+@settings(max_examples=300)
+@given(name=_JUDGE_TEXT,
+       value=st.one_of(st.booleans(), st.floats(allow_nan=True), st.integers(), st.text(max_size=20)),
+       score=st.one_of(st.just(SCORE), st.text(max_size=40)), source=_SOURCE,
+       meta=st.dictionaries(_JUDGE_TEXT, st.one_of(st.integers(), st.text(max_size=10)), max_size=3))
+def test_writer_by_source(name: str, value: Any, score: str, source: str, meta: dict[str, Any]) -> None:
+    """INV-OBS-8: only catalogue entries produce a body; CODE entries only through `body` (obs.feedback), LLM_JUDGE
+    entries only through `eval_body` (obs.judge_score); an LLM_JUDGE body has a value in [0, 1], no rationale and
+    metadata {score_id} only."""
+    feedback = require("reader.obs.feedback")
+    entries = {e["name"]: e for e in VEC4["assessments"]}
+    for build, args, writer in ((feedback.body, (name, value, meta, TRACE), "obs.feedback"),
+                                (feedback.eval_body, (name, value, score, source, TRACE), "obs.judge_score")):
+        try:
+            made = build(*args)
+        except feedback.CatalogError:
+            continue
+        entry = entries[name]
+        assert entry["writer"] == writer
+        a = made["assessment"]
+        assert a["source"]["source_type"] == entry["source_type"]
+        assert "rationale" not in json.dumps(made)
+        if writer == "obs.judge_score":
+            assert isinstance(a["feedback"]["value"], float) and 0 <= a["feedback"]["value"] <= 1
+            assert a["metadata"] == {"score_id": score}
+            assert re.fullmatch(entry["source_id_pattern"], a["source"]["source_id"])
+        assert not any(c in json.dumps(made) for c in CANARIES)
+
+
+def test_lookup_matches_name_source_and_score_id() -> None:
+    """FR-OBS-14 as amended: an existing assessment counts only with the same name, source_id and, for LLM_JUDGE,
+    metadata.score_id; so a retry never posts twice and a new judge version posts next to the old one."""
+    feedback = require("reader.obs.feedback")
+    made = feedback.eval_body("eval.relevance", 0.5, SCORE, "judge.eval.relevance@0123456789ab", TRACE)
+    same = {"assessment_name": "eval.relevance", "source": {"source_type": "LLM_JUDGE",
+                                                            "source_id": "judge.eval.relevance@0123456789ab"},
+            "metadata": {"score_id": SCORE}}
+    assert feedback.already([same], made) is True
+    assert feedback.already([{**same, "metadata": {"score_id": "7" + SCORE[1:]}}], made) is False
+    assert feedback.already([{**same, "source": {"source_id": "judge.eval.relevance@ba9876543210"}}], made) is False
+    assert feedback.already([{**same, "assessment_name": "eval.sufficiency"}], made) is False
+    assert feedback.already([], made) is False
+    code = feedback.body("verify.passed", True, {}, TRACE)
+    there = {"assessment_name": "verify.passed", "source": {"source_id": "reader.pipeline.verify"}}
+    assert feedback.already([there], code) is True  # CODE: name and source decide, as before
 
 
 _TEXT = st.one_of(st.sampled_from([*CANARIES, *[e["name"] for e in VEC4["assessments"]]]), st.text(max_size=30))
@@ -105,6 +196,7 @@ def test_only_catalogue_entries_produce_a_body(name: str, value: Any, meta: dict
     except feedback.CatalogError:
         return
     entry = entries[name]  # a body exists only for a catalogue name
+    assert entry["source_type"] == "CODE"
     a = body["assessment"]
     assert set(a) == {"assessment_name", "trace_id", "source", "feedback", "metadata"}
     assert a["source"] == {"source_type": "CODE", "source_id": entry["source_id"]}
@@ -263,6 +355,18 @@ async def test_record_enqueues_and_never_raises(monkeypatch: pytest.MonkeyPatch,
 # --- FR-OBS-15: the prompt registry ---
 
 SCANNER = re.compile(r"(sk-ant-[A-Za-z0-9_-]{10,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)")
+
+
+def test_prompt_list_gains_the_judge_files() -> None:
+    """FR-OBS-15 as edited: the list is VEC-OBS-4 `prompts`, with SRV-OBS's six judge files (FR-OBS-43); SRV-AGENT's
+    judge_find.md is not on this branch yet and is not listed."""
+    prompts = require("reader.obs.prompts")
+    judge = {k: v for k, v in prompts.PROMPTS.items() if k.startswith("reader.judge.")}
+    assert sorted(judge) == sorted(
+        ["reader.judge.eval.relevance", "reader.judge.eval.sufficiency", "reader.judge.eval.groundedness",
+         "reader.judge.eval.self_contained", "reader.judge.eval.citation_supports_claim", "reader.judge.align"])
+    assert all(v.startswith("server/src/reader/obs/prompts/judge_") for v in judge.values())
+    assert "reader.judge.find" not in prompts.PROMPTS
 
 
 def test_prompt_files_are_static_and_clean() -> None:
