@@ -10,6 +10,8 @@ supersedes: []
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): Decision 1's assessment source widens from `CODE` to also `LLM_JUDGE`, written by the worker's `obs.eval` job only, scores and enums only, never text. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 ADR-0032 Decision 1 amends ADR-0025 rule 5 so that the worker reaches `mlflow` "for the retention job's delete calls
 only". SRV-OBS's proposed V.obs-analytics amendment adds two more worker → MLflow REST writes:
 

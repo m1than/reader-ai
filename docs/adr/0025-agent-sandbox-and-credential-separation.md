@@ -10,7 +10,7 @@ supersedes: []
 
 ## Context
 
-> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): a second worker service, `worker-judge`, joins `worker` on the agent-proxy network for the `judge.find` task only (rules 1–5 and `verified_by`): the caller's per-run handle, no tools, one CLI process per user and per call; the api still never reaches agent-proxy. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): a second worker service, `worker-judge`, joins `worker` on the agent-proxy network for the `judge.find` task only (rules 1–5 and `verified_by`): the caller's per-run handle issued after the reservation, no tools, one CLI spawned per call with no warm pool, at most 4 live tokens and never evicting a `worker` token; the api still never reaches agent-proxy. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
 
 ADR-0005 runs agent stages through the Agent SDK. ADR-0014 sandboxes learner code, and ADR-0022 declares the kernel services. `spikes/agent-sdk-container` (2026-11-20, RESULT.md on main, PR #6; deep-reviewer approved in round 3) found:
 

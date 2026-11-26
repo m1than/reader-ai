@@ -87,13 +87,23 @@ Each becomes an `INV` line in its module's spec and a test.
 3. Selection over the graph and the embeddings uses only the greedy algorithms of B5. Enumerating subsets, ILP solvers and global recomputation are not used (tests may enumerate small instances, n ≤ 12).
 4. No free-form tags: closed vocabularies from the facets file; synonyms are concept aliases.
 5. At most one `judge.find` call per `find`, made last and only on the cards already selected (B6). On error, timeout or an exhausted budget the response carries `judged: false`.
-6. `personal-use` source text (Bashir) never enters the repository, MLflow (ids, counts and hashes only: INV-OBS-1/2, ADR-0032, ADR-0038) or an MCP response beyond 300 characters per citation and 1,500 per response (initial value); such quotes have no continuation, and `open` resolves only sealed span ids.
+6. `personal-use` source text (Bashir) never enters the repository or MLflow (ids, counts and hashes only: INV-OBS-1/2, ADR-0032, ADR-0038). What a `personal-use` card carries is fixed per channel (ADR-0039 B8 table):
+
+   | Channel | L1 span cards | L2 summaries, L4 findings | Text bound |
+   | --- | --- | --- | --- |
+   | MCP | None; no `open` child or `next` link into L1 | Yes, quotes ≤ 300 characters per citation, no continuation | 300 characters per citation |
+   | Tutor | Full span text, cut at the card budget | Yes | The tutor's source budget (21,000 bytes today, SRV-TUTOR `bounds`) |
+   | Pipeline | Full span text | Yes | The stage's context budget (FR-PIPELINE-2) |
+   | Judge input | Full text of the cards being judged | Yes | ≤ 1.5 × the calling channel's response budget; only in `judge_requests` and the consent-gated `judge_inputs` |
+
+   `open` resolves only sealed span ids. A walk test from `brain_map` with an MCP token, following every `open` and `next` link, returns no `personal-use` span card.
 7. Unreviewed findings never reach agents or judge input; source text in a judge prompt is data, not instructions.
 8. A card's ranking prior comes only from the owner's labels and the evaluation set, never from live judge scores.
 9. Claude outputs never become tuning data (ADR-0018).
 10. MLflow is never on the request path: code reads prompts from the repository, and search works with MLflow stopped.
-11. A judge call runs on `worker-judge`, holds only the caller's own per-run handle, issued after the ledger reservation, and no tools; one CLI process serves one user and one call, then is discarded (ADR-0025 rules, as amended; B7b).
-12. Aligned judge instructions and expected facts contain no material, question or answer text (8-word verbatim test, initial value).
+11. A judge call runs on `worker-judge` on today's per-call path: reserve, issue the caller's run token, spawn one CLI, one call, revoke, discard; no warm pool and no tools. The lane holds at most 4 live tokens and never causes the eviction of a `worker` token (ADR-0025 rules, as amended; B7b).
+12. Aligned judge instructions and expected facts contain no material, question or answer text (8-word verbatim guard, initial value, run at runtime in the `judge.align` job and the proposals export; CI pins the guard on synthetic text).
+13. No query or card text appears in any `judge.find` job's args or in `job_keys`: the text travels in a `judge_requests` row that the job deletes at its end or deadline (canary test in the style of FR-EVENTS-10).
 
 ### Budgets
 
@@ -139,8 +149,8 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 
 - **Variants:** no judge; judge on every query; judge gated at 3–4 margins. In every judged variant the judge runs last, on the selection under 1.5 × the response budget (B6). Reference: the earlier order (judge on the top 20 before the selection), one run at the best margin.
 - **In:** the ablation, and the judge lane (`V.kl-agent-judges`, `V.kl-deploy-judge-lane`), so it measures the real path.
-- **Measures:** Haiku `judge.find` p95 on the `worker-judge` lane with pre-spawned processes, including the queue hop and the proxy; the time of the steps other than the judge; the lane's memory; gate fire rate; judged-path completion rate; sufficiency; USD cost of one full evaluation run.
-- **Decision rule:** the cheapest variant not significantly worse than the best, not worse by a net > 2 of 30 on any type, with `find` p95 < 2.5 s. It also sets the timeout (initial 2.2 s), the lane concurrency (initial 4) and the idle limit (initial 60 s). The reference is not a candidate. If the judge-last order is significantly worse than the reference or worse by a net > 2 of 30 on any type, block for the owner with both measurements and say that the fixed factor 1.5 may be the cause.
+- **Measures:** Haiku `judge.find` p95 on the `worker-judge` lane, one CLI spawned per call, including the queue hop and the proxy; the time of the steps other than the judge; the lane's peak memory (a paired OPS-DEPLOY change then replaces the initial limit); gate fire rate; judged-path completion rate; sufficiency; USD cost of one full evaluation run.
+- **Decision rule:** the cheapest variant not significantly worse than the best, not worse by a net > 2 of 30 on any type, with `find` p95 < 2.5 s. It also sets the timeout (initial 2.2 s) and the lane concurrency (initial 4). The reference is not a candidate. If the judge-last order is significantly worse than the reference or worse by a net > 2 of 30 on any type, block for the owner with both measurements and say that the fixed factor 1.5 may be the cause.
 - **Risk stated up front:** a Haiku call measured 1.82–2.10 s (n = 3, short prompt); with search at 173 ms p95, the 2.5 s p95 leaves about 0.2 s for everything else.
 - **Out:** RESULT.md, the initial gate margin and lane settings in the policy file, the proposed `eval` cap.
 
@@ -149,30 +159,34 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 - Judge slots as task classes in `reader.yaml` (FR-AGENT-6/17 aliases): `judge.find`, `judge.link_type`, `ingest.context_prefix` on Haiku; `judge.eval.*` and `judge.align` on a strong Claude model. Replacing a slot's model is a config change, allowed only when the new model is not worse on the evaluation set.
 - `index` and `eval` ledger lines with per-pack and per-pair-run caps (FR-AGENT-9/12); whether these caps join ADR-0036's UI allow-list is stated in the spec.
 - Recorded judge outputs keyed by (input hash, judge@version); rebuilds and tests replay them; `judge.find` outputs kept 30 days and deleted with a purge.
-- The `judge.find` path per the ADR-0025 amendment (B7b): a job on the `worker-judge` lane, max attempts 1, no model call when the deadline passed before start; the warm unit is one pre-spawned CLI per user, one call per process, then discarded; the run token is issued after the ledger reservation (FR-AGENT-3); idle processes are discarded after 60 s. INV: user A's handle never yields user B's token, and no process serves two calls.
-- Context prefixes run on the `worker` in batched jobs of 25 spans that re-enqueue themselves; the spec checks the queue serves jobs in enqueue order.
+- The `judge.find` path per the ADR-0025 amendment (B7b): a job on the `worker-judge` lane keyed by request id, max attempts 1, no model call when the deadline passed before start; each job runs today's FR-AGENT-3/-6 path (reserve, issue the token, spawn one CLI, one call, revoke), with no warm pool. INV: user A's handle never yields user B's token; no process serves two calls; the lane refuses a fifth live token, and with the lane saturated a `worker` token is never evicted from `agent-proxy`'s 32-token table.
+- The waiter (the api, or a worker job such as the tutor or the fact-check route) writes a `judge_requests` row with the query and card text and enqueues a job whose args are only the request id and the input hash; the job deletes the row at its end or deadline, and a collector deletes stale rows.
+- Context prefixes run on the `worker` in batched jobs of 25 spans that re-enqueue themselves; queue order is an SRV-EVENTS property (FR-EVENTS-9), checked in that spec. A tutor answer can wait up to one batch, 45–55 s, against NFR-TUTOR-1's 30 s on an idle worker; stated to the owner.
 - Revised ids: FR-AGENT-3, -6, -9, -12, -17.
 
-### V.kl-deploy-judge-lane — OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX revision (~150–250 lines)
+### V.kl-deploy-judge-lane — OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX, OPS-CLI, SRV-CONFIG revision (~340–600 lines)
 
-- `worker-judge`: a static Compose service from the worker image, with the worker's hardening, the DB DSN delivered as for the worker (ADR-0026), on `agentnet`, `core` and `otel`, no route to `kernel-*`, `mcp` or the web-fetch proxy; its memory limit from `judge-gate`.
-- SRV-EVENTS: a `judge.find` queue consumed only by `worker-judge` at concurrency 4 (initial value); the `worker` keeps every other queue at concurrency 1.
+- `worker-judge`: a static Compose service from the worker image, with the worker's hardening, the DB DSN delivered as for the worker (ADR-0026), on `agentnet`, `core` and `otel`, no route to `kernel-*`, `mcp` or the web-fetch proxy. Initial memory limit: four times the worker's per-call CLI footprint plus its base (initial value); `judge-gate` measures the peak on the deployed lane and a paired change sets the measured limit.
+- SRV-EVENTS: a `judge.find` queue consumed only by `worker-judge` at concurrency 4 (initial value), jobs keyed by request id; the `worker` keeps every other queue at concurrency 1; the `judge_requests` table and its collector; the no-text-in-args canary.
 - OPS-SANDBOX: every test behind ADR-0025's `verified_by` that names the worker runs against `worker-judge` too.
-- Revised ids: FR-DEPLOY-3, VEC-DEPLOY-2; FR-EVENTS-9; INV-SANDBOX-3.
+- OPS-CLI: `worker-judge` gets the `reader.yaml` bind (FR-CLI-4) and `db-password` (FR-CLI-5); backup and restore stop and start it with api, worker and mcp (FR-CLI-17, -18); the expected-override vector; the owner-run `reader obs proposals` export.
+- SRV-CONFIG: judge task classes and the `index`, `eval`, per-pack and per-pair-run caps in the schema; FR-CONFIG-25/26 only if the owner adds the caps to the UI allow-list.
+- Revised ids: FR-DEPLOY-3, VEC-DEPLOY-2; FR-EVENTS-9, -10, -11; INV-SANDBOX-3; FR-CLI-4, -5, -17, -18; SRV-CONFIG schema rows (FR-CONFIG-25, -26 conditional).
 
-### V.kl-obs-spans — SRV-OBS revision (~300–500 lines)
+### V.kl-obs-spans — SRV-OBS and WEB-MANAGE revision (~500–800 lines)
 
 - `TOOL` root, `ROUTER` and `RETRIEVER` spans for every `find`: caller, `brain_version`, `policy_version`, code version, route, filters, card ids, counts, token counts, `judged`; `doc_uri = reader://<id>` and a content hash, never card text (INV-OBS-1/2 kept; ADR-0034 stays rejected).
 - Pack-build and link-run spans with counts per B4 step and USD.
 - `ROUTER` filters from the question recorded as a concept id or a hash; the `judge.find` job as its own linked trace (ADR-0032 Decision 3).
 - A local judge-evaluation job kind (`obs.eval`): judges read card text in memory, only scores go to MLflow (ADR-0038 amendment). Owner labels per judge slot mirrored as `owner.<slot>_ok` (pass or fail; the reason stays in Postgres), next to `owner.lesson_ok` and `owner.answer_ok`.
-- The `judge_inputs` store for labelling (owner-only, 30 days, other users' queries only with their ADR-0018 evaluation consent); the labelling screen in the owner area (WEB-MANAGE).
-- Alignment (`judge.align`) after 50 labels per judge writes a `judge_prompt_proposals` row; the agent commits it as a prompt file through review and the no-regression rule; a test refuses any proposal that shares an 8-word sequence with its labels' inputs or the material.
-- Revised ids: FR-OBS-14, -21, -22, -23, -24; VEC-OBS-1/4/5; the canary tests extend to the new spans.
+- The `judge_inputs` store for labelling (owner-only, 30 days, other users' queries only with their ADR-0018 evaluation consent), filled by the `judge.find` job from its `judge_requests` row; the labelling screen, a new owner tab on `/settings` (FR-MANAGE-6, primitives of FR-MANAGE-1).
+- The worker also writes LLM_JUDGE assessments from `obs.eval` (ADR-0035 Decision 1 amendment), scores and enums only.
+- Alignment (`judge.align`) after 50 labels per judge writes a `judge_prompt_proposals` row, refused at write time by the runtime 8-word guard if it shares a sequence with its labels' inputs or the material; the agent reads it through the owner-run `reader obs proposals` export, which runs the guard again, and commits it as a prompt file through review and the no-regression rule.
+- Revised ids: FR-OBS-14, -21, -22, -23, -24; VEC-OBS-1/4/5; the canary tests extend to the new spans; FR-MANAGE-6.
 
-### V.kl-ingest-packs — SRV-INGEST revision (~1,000–1,500 lines)
+### V.kl-ingest-packs — SRV-INGEST revision, with the locator citations outside ingest (~1,200–1,850 lines)
 
-- **Span identity (ADR-0039 P2):** offsets into the page's canonical span text (a zero-length range with an ordinal for empty text; the file and line-range form for non-PDF) plus `quote_sha256`. Order: converter revision that emits locators → re-conversion of the pilot → a seq-to-locator map accepted only if 1:1 with unchanged text hashes → one Alembic migration of mutable citations (tutor, findings, freshness inputs) that refuses to finish on any unmapped id → a read-time resolver for published lesson revisions, which stay immutable (INV-LESSON-6). Re-anchoring ties among equal hashes break by ordinal on the page; unequal counts orphan the citation. Cards are cut at read time, never split at ingest.
+- **Span identity (ADR-0039 P2):** offsets into the page's canonical span text (a zero-length range with an ordinal for empty text; the file and line-range form for non-PDF) plus `quote_sha256`. Order: converter revision that emits locators → re-conversion of the pilot → a seq-to-locator map accepted only if 1:1 with unchanged text hashes → one Alembic migration of mutable citations (tutor citations; no findings table exists yet) that refuses to finish on any unmapped id → a read-time resolver for published lesson revisions, which stay immutable (INV-LESSON-6) → one new freshness scan per lesson, since freshness rows are never updated after `done` (FR-FRESH-10). Offsets count NFC code points; at most one base pack per material is active; `:` and `%` in non-PDF paths are percent-encoded. After the migration every pipeline `input_sha256` misses, so the next compile of each lesson pays in full. Re-anchoring ties among equal hashes break by ordinal on the page; unequal counts orphan the citation. Cards are cut at read time, never split at ingest.
 - **Packs:** base pack id = sha256(material sha256, parse config); states `building` → `sealed`; overlays (profile, tags, vectors per model, prefixes per prompt version, summaries) only as the ablation kept them. The existing `(ingest_id, model, params_sha256)` vector keys become the vector overlay.
 - **Manifest:** append-only, compare-and-swap on the parent entry, one per user; `brain_version` = hash of the entry; delete and restore (FR-INGEST-31) become manifest entries.
 - **GC and purge:** a background collector (N entries, minimum age, not cited by a published revision or a finding) and an owner `purge`; FR-INGEST-32's "no row is ever deleted" is revised accordingly.
@@ -188,7 +202,7 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 - The score of a card reached only by expansion is defined in the spec before approval.
 - The route table, the facets file and the policy file with schemas; `policy_version` = hash of the declared data (extends FR-OBS-21's `version_key`).
 - The B5 greedy algorithms with their bounds stated per step; the pivot seeded by the request hash.
-- Token budget clamped to the maximum, counted with SRV-AGENT's characters-per-token estimator; a cache key that includes the caller's identity, roles and manifest version; the card shape of B8; `open` resolves only sealed span ids; `personal-use` quotes have no continuation and at most 1,500 characters per response.
+- Token budget clamped to the maximum, counted with SRV-AGENT's characters-per-token estimator; a cache key that includes the caller's identity, roles and manifest version; the card shape of B8; `open` resolves only sealed span ids; `personal-use` cards follow the per-channel table of invariant 6 (on MCP no L1 cards and no link into them; quotes ≤ 300 characters per citation); response budgets are per channel in policy (MCP 2,000 tokens; the tutor's starts at its current source budget). Tests: the MCP walk test of invariant 6; the no-text-in-job-args canary.
 - **Tests:** the budget is never exceeded (property); each bounded selection keeps its bound against exhaustive search on small instances; the pivot's bound as a mean over seeds; the same input gives the same response on the judge-free path (INV-SEARCH-4); the judge receives only the 1.5× selection, at most one call; unreviewed findings never returned.
 - **Evaluation, outside CI, paid, with the owner's go:** Haiku and a strong model answer the set through `find` and `open`. Targets: Haiku ≥ 90% of the strong model's sufficiency; median ≤ 3 calls; ≤ 2,000 tokens per answer; `find` p95 < 2.5 s (ADR-0039 B9). Recall@10 is reported, not a target (measured 0.675, 27 of 40, on the chunk baseline).
 - Revised ids: FR-SEARCH-3, -4, -5, -7, -8, -9, -20; INV-SEARCH-4; NFR-SEARCH-1; VEC-SEARCH-1, -2, -5.
@@ -199,7 +213,7 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 - Fact-check uses the fact-check route of `find` (spans only, reliability and credibility above the policy thresholds) instead of the lesson's own spans.
 - The spec pins whether the lab's independent reference path is built at draft time or in lab verification.
 - Every claim gets an Admiralty credibility 1–6.
-- **Cost bound:** at the floor reserves a first pass is $1.39 and each loop $1.66, so three loops are at most about $6.37 per lesson (about $146 for 23, against ADR-0005's $100). A loop starts only if its reserve fits under `budget.compile_cap_usd` ($8) with what the lesson has spent; ADR-0005's $4.35 is the target the revised spec reports against.
+- **Cost:** at today's floor reserves a first pass is $1.39 and each loop $1.66, so three loops come to about $6.37 per lesson, about $147 for 23 (an estimate, not a bound: floors are minima and the reordered stages get their own). The bound is `budget.compile_cap_usd`: $8 per lesson, $184 for 23 of the $200 monthly credit. A loop starts only if its reserve, the sum of the FR-AGENT-9 reserves of the loop's calls, fits under the cap with what the lesson has spent; ADR-0005's $4.35 is the target the revised spec reports against.
 - A test: a draft that fails each of the four checks once stops at the fourth failure; a test that a loop whose reserve would cross the cap does not start.
 - Revised ids: FR-PIPELINE-4, -5, -6, -8; NFR-PIPELINE-1 (its metric names one loop); VEC-PIPELINE-1, -2; INV-PIPELINE-1, -2, -3, -5.
 - Overlap: `V.cost-optimize` lever 7 (RAG for fact-check and review) is superseded by this task and the ablation's fact-check comparison.
@@ -208,7 +222,7 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 
 - Retrieval goes through `find` on the tutor channel instead of `search(k=8)`.
 - L5 boost (gaps first) once learner state exists (S6.SRV-RECALL); learner state is not part of `brain_version`, so tutor responses are traced but not promised to replay.
-- The tutor today sends about 21,000 bytes of sources (SRV-TUTOR bounds), more than a 2,000-token `find` maximum; the tutor channel gets its own maximum in policy, set so NFR-TUTOR-3 grounding is not worse (a gate before approval).
+- The tutor today sends about 21,000 bytes of sources (SRV-TUTOR bounds), more than a 2,000-token `find` maximum; the tutor channel's maximum starts at its current source budget (ADR-0039 B8), and NFR-TUTOR-3 grounding is re-measured as a gate before approval. Tutor `personal-use` cards carry full span text (invariant 6).
 - Evaluation: tutor-route sufficiency not worse than without the boost; NFR-TUTOR-3 grounding re-measured.
 - Revised ids: FR-TUTOR-5; NFR-TUTOR-1, -2, -3; INV-TUTOR-2.
 - Overlap: `V.tutor-retrieval` is superseded by this task where both change tutor retrieval; its measurements feed the ablation.
@@ -253,11 +267,11 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 | V.kl-ingest-packs | SRV-INGEST, plus citation readers in SRV-PIPELINE and SRV-TUTOR, and SRV-LESSON, WEB-NOTEBOOK, SRV-FRESH | 1,200–1,850 |
 | V.kl-search-find | SRV-SEARCH | 800–1,200 |
 | V.kl-agent-judges | SRV-AGENT, SRV-CONFIG schema | 250–400 |
-| V.kl-deploy-judge-lane | OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX | 150–250 |
-| V.kl-obs-spans | SRV-OBS (and the WEB-MANAGE labelling screen) | 350–550 |
+| V.kl-deploy-judge-lane | OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX, OPS-CLI, SRV-CONFIG | 340–600 |
+| V.kl-obs-spans | SRV-OBS, WEB-MANAGE (the labelling screen) | 500–800 |
 | V.kl-pipeline-checks | SRV-PIPELINE | 300–500 |
 | V.kl-tutor-find | SRV-TUTOR | 100–200 |
-| Total | 12 approved specs | about 3,150–4,950 |
+| Total | 15 approved specs | about 3,490–5,550 |
 
 Estimates come from the 2026-11-26 gap analysis of `V/slice-integration`, not from a measurement.
 
@@ -276,13 +290,13 @@ Where a row blocks, the agent sets the task to `blocked` with `reason` and `ask`
 | `V.kl-pipeline-checks` | Accept the re-measured compile cost per lesson | The revision stays unapproved |
 | Stage 7 | Approve concept aliases; review 10 of the 30 current-state questions | Cross-pack links are built without them; the MCP evaluation runs on version 1 |
 
-The agent never does these for the owner: raise an ADR to `accepted`, `rejected` or `superseded`, or a spec to `implemented`; merge a change that adds or amends an ADR; spend past a ledger line; read secrets or send `personal-use` text out; purge a source.
+The agent never does these for the owner: raise an ADR to `accepted`, `rejected` or `superseded`, or a spec to `implemented`; merge a change that adds or amends an ADR into `main`; spend past a ledger line; read secrets or send `personal-use` text out; purge a source.
 
 ## Risks
 
 | Risk | Signal | Agent's action |
 | --- | --- | --- |
-| The judge call eats the `find` p95 budget | Haiku p95 in `judge-gate` > 2.0 s (measured 1.82–2.10 s per call) | Pre-spawned CLI processes per user (B7b); if that is not enough, `find` returns `judged: false` on timeout and the completion rate goes to the owner as a question |
+| The judge call eats the `find` p95 budget | Haiku p95 in `judge-gate` > 2.0 s (measured 1.82–2.10 s per call) | `find` returns `judged: false` on timeout; the completion rate goes to the owner as a question, together with the option of a warm pool, which needs tokens issued without a reservation and is therefore an owner decision (B7b) |
 | The citation migration loses or shifts a citation | The seq-to-locator map is not 1:1 or a text hash differs | Stop the migration and block; published revisions keep resolving their `<sha>:<seq>` ids through the map |
 | More pipeline loops raise compile cost | A loop's reserve would cross `budget.compile_cap_usd` | The loop does not start (the cap rule); the lesson stops with its last revision and the run records why |
 | Prefixes and summaries on Haiku cost more than estimated (about 9,500 prefix calls for the pilot at 10.1 spans per page) | The two-chapter projection exceeds what is left of `test_budget_usd` or the `index` cap | Stop after two chapters, block with the number, ask for a top-up |
