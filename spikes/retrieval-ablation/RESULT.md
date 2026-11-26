@@ -164,6 +164,23 @@ Cheapest order that still answers B10, each stage with a stop rule:
 Stage 1 alone is $0.50 with margin if the owner prefers to approve in two steps (stage 1 now; stages 2–5 after its
 measured numbers). Every stage's spend goes to `budget.ledger`.
 
+## Paid runner (approved by the owner 2026-11-26, $12.00 staged; the owner runs it)
+
+`paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a
+hardened container of the compile-cost image (read-only root, cap-drop ALL, no-new-privileges, tmpfs home, 4 GiB,
+`timeout -s KILL`), exported only inside its process tree, never printed or written. `paid.py` makes one CLI call
+per item with no tools and thinking off. Stages and caps (projection + 20%): `stage1` $0.47, `prefixes` $4.01
+(refused unless stage1 passed), `summaries` $0.19, then the free `v12.sh` (V1/V2 embedding, recall, `topk.json`),
+`judge` $4.73 (refused without V1/V2), `factcheck` $2.42; together $11.82 ≤ $12.00. Before every call the runner
+checks the stage cap and what is left of $12.00 across all recorded stages; a prefix stage stops after 3
+consecutive calls that read under 80% of the chapter context from cache, and fails at the end if the stage's cache
+reads are under 80% of expected. The chapter is the system prompt, so it is the cached prefix and the span is the
+only uncached input. Committed outputs: `results/paid/<stage>/calls.jsonl` and `summary.json` (ids, tokens, USD,
+wall time, cache ratio, judge verdicts as booleans and fact indices); the prefixes and summaries stay in the
+gitignored `data/spikes/retrieval-ablation/paid/text`. The last line is the `budget.ledger` row to add.
+Checked without spend: all five stages ran in the image with `--network none` and a stubbed `call`, giving 822 /
+495 / 477 / 30 calls as projected; with no cache hits stage1 stopped after 4 calls (exit 3).
+
 ## Limits
 
 - recall@10 on gold pages is page-granular: a span on a gold page counts even if it lacks the fact; sufficiency
