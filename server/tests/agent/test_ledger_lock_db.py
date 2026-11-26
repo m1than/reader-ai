@@ -53,6 +53,23 @@ async def test_concurrent_reserves_under_the_daily_scope(pg: Pg, tmp_path: Path)
     assert await ledger.spent(w.engine, owner_id=w.users["ivan"], task="draft", day=True) == D(0)
 
 
+async def test_concurrent_tutor_and_tutor_line_judges_share_the_day(pg: Pg, tmp_path: Path) -> None:
+    """FR-AGENT-12 (ADR-0039 revision): tutor calls and tutor-line judges race for one daily scope."""
+    ledger = need("reader.agent.ledger")
+    w = await world(pg, tmp_path)
+    caps = ledger.Caps(D("1.00"), None, None, None, daily_task_usd=D("0.15"))
+    owner = w.users["ivan"]
+    scopes = [
+        ledger.Scope(owner, uuid.uuid4(), None, "tutor", "tutor", 1) if i % 2 == 0
+        else ledger.Scope(owner, uuid.uuid4(), None, "judge.find", "judge.find", 1, line="tutor")
+        for i in range(CALLERS)
+    ]
+    reserved, refusals = await _race(w, scopes, caps)
+    assert reserved == 1
+    assert refusals == ["daily_budget_exhausted"] * (CALLERS - 1)
+    assert await ledger.spent(w.engine, owner_id=owner, task="tutor", day=True) == D("0.10")
+
+
 async def test_concurrent_reserves_under_the_run_cap(pg: Pg, tmp_path: Path) -> None:
     ledger = need("reader.agent.ledger")
     w = await world(pg, tmp_path)

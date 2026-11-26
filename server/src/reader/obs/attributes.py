@@ -143,6 +143,9 @@ SPEC_CODES: Final = frozenset({
     "source_too_large", "sources_unavailable", "started_lesson_dropped", "task_budget_exhausted",
     "tools_mismatch", "tools_not_allowed", "tutor_busy", "tutor_failed", "unknown_model", "unknown_revision",
     "upstream_retry", "usage_unmapped", "verify_unavailable",
+    # SRV-AGENT's ADR-0039 revision (paired, V/kl-agent-judges): the lane and ledger-line codes.
+    "cap_missing", "eval_budget_exhausted", "index_budget_exhausted", "judge_input_too_large",
+    "judge_window_too_long", "lane_saturated", "line_invalid", "replay_miss",
 })
 ERROR_CODES: Final = SPEC_CODES | JOB_CODES
 _KEY_NAME: Final = re.compile(r"[a-z][a-z0-9_.]{0,63}")

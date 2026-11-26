@@ -1,0 +1,38 @@
+# VEC-AGENT-5: judge.find outputs over ordinals 1..n (SRV-AGENT FR-AGENT-22). Hand-built from the rule; n = 3 with
+# the card ids below in judge order. `parsed` is the expected card-id form; `invalid: true` means output_invalid.
+cards: ["spn:a", "spn:b", "spn:c"]
+cases:
+  - { name: valid, text: '{"keep": [2, 1], "drop": [3], "sufficiency": 0.8}', parsed: { keep: ["spn:b", "spn:a"], drop: ["spn:c"], sufficiency: 0.8 } }
+  - { name: drop-absent, text: '{"keep": [3], "sufficiency": 1}', parsed: { keep: ["spn:c"], drop: ["spn:a", "spn:b"], sufficiency: 1 } }
+  - { name: keep-empty, text: '{"keep": [], "sufficiency": 0}', parsed: { keep: [], drop: ["spn:a", "spn:b", "spn:c"], sufficiency: 0 } }
+  - { name: fenced, text: "```json\n{\"keep\": [1, 2, 3], \"drop\": [], \"sufficiency\": 0.5}\n```", parsed: { keep: ["spn:a", "spn:b", "spn:c"], drop: [], sufficiency: 0.5 } }
+  - { name: whitespace, text: "  \n{\"keep\": [1], \"sufficiency\": 0.25}\n ", parsed: { keep: ["spn:a"], drop: ["spn:b", "spn:c"], sufficiency: 0.25 } }
+  - { name: sufficiency-absent, text: '{"keep": [1], "drop": [2, 3]}', invalid: true }
+  - { name: keep-absent, text: '{"drop": [1, 2, 3], "sufficiency": 0.1}', invalid: true }
+  - { name: unknown-key, text: '{"keep": [1], "sufficiency": 0.1, "why": "x"}', invalid: true }
+  - { name: ordinal-zero, text: '{"keep": [0], "sufficiency": 0.1}', invalid: true }
+  - { name: ordinal-above-n, text: '{"keep": [4], "sufficiency": 0.1}', invalid: true }
+  - { name: duplicate-keep, text: '{"keep": [1, 1], "sufficiency": 0.1}', invalid: true }
+  - { name: duplicate-drop, text: '{"keep": [1], "drop": [2, 2, 3], "sufficiency": 0.1}', invalid: true }
+  - { name: overlap, text: '{"keep": [1, 2], "drop": [2, 3], "sufficiency": 0.1}', invalid: true }
+  - { name: drop-not-complement, text: '{"keep": [1], "drop": [2], "sufficiency": 0.1}', invalid: true }
+  - { name: ordinal-string, text: '{"keep": ["1"], "sufficiency": 0.1}', invalid: true }
+  - { name: ordinal-true, text: '{"keep": [true], "sufficiency": 0.1}', invalid: true }
+  - { name: ordinal-float, text: '{"keep": [1.0], "sufficiency": 0.1}', invalid: true }
+  - { name: keep-not-list, text: '{"keep": 1, "sufficiency": 0.1}', invalid: true }
+  - { name: sufficiency-above-1, text: '{"keep": [1], "sufficiency": 1.2}', invalid: true }
+  - { name: sufficiency-negative, text: '{"keep": [1], "sufficiency": -0.1}', invalid: true }
+  - { name: sufficiency-true, text: '{"keep": [1], "sufficiency": true}', invalid: true }
+  - { name: sufficiency-string, text: '{"keep": [1], "sufficiency": "0.5"}', invalid: true }
+  - { name: sufficiency-nan, text: '{"keep": [1], "sufficiency": NaN}', invalid: true }
+  - { name: sufficiency-infinity, text: '{"keep": [1], "sufficiency": Infinity}', invalid: true }
+  - { name: sufficiency-minus-infinity, text: '{"keep": [1], "sufficiency": -Infinity}', invalid: true }
+  - { name: not-an-object, text: '[1, 2]', invalid: true }
+  - { name: not-json, text: 'keep 1 and 2', invalid: true }
+  - { name: two-objects, text: '{"keep": [1], "sufficiency": 0.1} {"keep": [2], "sufficiency": 0.1}', invalid: true }
+  - { name: prose-around, text: 'Here: {"keep": [1], "sufficiency": 0.1}', invalid: true }
+  - { name: sufficiency-huge-int, text: '{"keep": [1], "sufficiency": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}', invalid: true }
+  - { name: sufficiency-huge-negative-int, text: '{"keep": [1], "sufficiency": -1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000}', invalid: true }
+  - { name: sufficiency-float-overflow, text: '{"keep": [1], "sufficiency": 1e400}', invalid: true }
+  - { name: duplicate-key, text: '{"keep": [1], "keep": [2], "sufficiency": 0.1}', invalid: true }
+  - { name: fence-not-json, text: "```\n{\"keep\": [1], \"sufficiency\": 0.1}\n```", invalid: true }
