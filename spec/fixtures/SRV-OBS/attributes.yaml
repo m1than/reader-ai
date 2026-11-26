@@ -121,6 +121,7 @@ job_args:
   obs.bench: {}
   obs.label: {}
   obs.health: {}
+  judge.find: {}   # ADR-0039 B7b (SRV-AGENT FR-AGENT-21): a request id and a hash; none reaches the span
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
 instrumentation_scope: { name: reader, version: null }

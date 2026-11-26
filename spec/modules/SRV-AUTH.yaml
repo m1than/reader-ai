@@ -234,7 +234,8 @@ requirements:
       takes `--lane main|judge` (default `main`) and passes it to `reader.jobs.worker.run(lane=…)`; `--lane` with
       any other role, or another value, exits 2 (argparse usage error). The healthcheck ignores the lane.
       Red and Green in the same task (test_auth_cli.py's `--lane` cases; serve/main.py); the test reformatted
-      for ruff, no oracle changed.
+      for ruff, no oracle changed. test_auth_db.py's missing-branch case deletes the `jobs` branch's new head,
+      jobs_0004 (SRV-EVENTS FR-EVENTS-33), instead of jobs_0003; same oracle.
     tests_planned:
       - "add to server/tests/auth/test_auth_cli.py [unit]: --lane judge with --role api exits 2; --lane other exits 2; `_parser` accepts --role worker --lane judge and defaults the lane to main"
   - id: FR-AUTH-3
