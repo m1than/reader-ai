@@ -37,6 +37,7 @@ ROUTE_FORMS: dict[str, set[str] | None] = {"exact": CARD_FORMS, "thematic": None
 RRF_K = 60  # search/fusion.py RRF_K
 W_DENSE = {"w1": 1.0, "w5": 5.0}  # w5 is today's params.W_DENSE (primary); w1 the equal-weight RRF of ADR-0007
 CANDIDATES = 50  # params.CANDIDATES
+JUDGED = ("C_chunks", "V0_spans", "V3_form", "H_w5", "V1_prefix", "V2_summaries")  # judge.eval variants
 
 # ---------------------------------------------------------------- cost model inputs, each with its source
 TOKENS_PER_CHAR = Decimal(23900) / Decimal(60034)  # spikes/compile-cost: L02 source 60,034 chars ≈ 23,900 tokens
@@ -111,6 +112,9 @@ def main() -> None:
     top_chars: dict[str, dict[str, int]] = {}       # variant -> qid -> chars of the top-10 cards
     top_sets: dict[str, dict[str, tuple]] = {}
     span_chars = {s["seq"]: len(s["text"]) for s in spans}
+    v12_file = work / "dense_v12.json"
+    v12 = json.loads(v12_file.read_text()) if v12_file.exists() else None
+    topk: dict[str, dict[str, list[str]]] = {}  # card ids of the judged variants, for paid.py's judge stage
     for q in qs:
         qid, t = q["id"], q["type"]
         d, f = dense["spans"][qid], fts.get(qid) or []
@@ -132,12 +136,20 @@ def main() -> None:
             eq.append(x)
             acc += span_chars[x]
         runs["V0_spans_eqchars"] = ("span", eq)
+        if v12:  # paid arms: V1 spans with prefixes, V2 plus L2 summary entries ("n<seq>")
+            runs["V1_prefix"] = ("span", v12["V1_prefix"][qid][:K])
+            runs["V2_summaries"] = ("span", v12["V2_summaries"][qid][:K])
         for name, (unit, ids) in runs.items():
-            pages = [chunk_pages[i] for i in ids] if unit == "chunk" else [page_of_span[i] for i in ids]
+            pages = ([chunk_pages[i] for i in ids] if unit == "chunk" else
+                     [p for i in ids for p in (v12["node_pages"][i] if isinstance(i, str) else [page_of_span[i]])])
             variants.setdefault(name, {})[qid] = pages
-            chars = sum(meta["chunk_chars"][i] for i in ids) if unit == "chunk" else sum(span_chars[i] for i in ids)
+            chars = (sum(meta["chunk_chars"][i] for i in ids) if unit == "chunk" else
+                     sum(span_chars.get(i, 0) for i in ids))  # summary entries count 0 here
             top_chars.setdefault(name, {})[qid] = chars
-            top_sets.setdefault(name, {})[qid] = (unit, tuple(sorted(ids)))
+            top_sets.setdefault(name, {})[qid] = (unit, tuple(sorted(map(str, ids))))
+            if name in JUDGED:
+                topk.setdefault(name, {})[qid] = [f"c{i}" if unit == "chunk" else (i if isinstance(i, str) else f"s{i}")
+                                                  for i in ids]
 
     hit = {v: {q["id"]: any(p in q["gold"] for p in pages[q["id"]]) for q in qs} for v, pages in variants.items()}
     types = {q["id"]: q["type"] for q in qs}
@@ -147,6 +159,8 @@ def main() -> None:
     pairs = [("C_chunks", "V0_spans"), ("V0_spans", "V3_form"), ("V0_spans", "H_w5"), ("V0_spans", "H_w1"),
              ("V3_form", "V3H_w5"), ("V3_form", "V3H_w1"), ("C_chunks", "V3_form"),
              ("C_chunks", "V0_spans_eqchars")]
+    if v12:
+        pairs += [("V0_spans", "V1_prefix"), ("V1_prefix", "V2_summaries")]
     tests = []
     for base, new in pairs:
         for t in TYPES:
@@ -345,6 +359,7 @@ def main() -> None:
         {"k": K, "recall_hits": recall, "per_question": {v: {i: int(h[i]) for i in h} for v, h in hit.items()},
          "route_forms": {t: sorted(f) if f else None for t, f in ROUTE_FORMS.items()}}, indent=1))
     (out / "mcnemar.json").write_text(json.dumps(tests, indent=1))
+    (out / "topk.json").write_text(json.dumps(topk))  # card ids only
     (out / "sizes.json").write_text(json.dumps(sizes, indent=1))
     (out / "projection.json").write_text(json.dumps(
         {"assumptions": {"tokens_per_char": str(TOKENS_PER_CHAR.quantize(Decimal("0.0001"))),
