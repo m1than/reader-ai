@@ -9,16 +9,19 @@ Entry point: `python -I -m reader.agent.proxy`.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
+import ipaddress
 import json
 import logging
 import secrets
 import sys
 import time
 from collections import OrderedDict
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Final
 
 import httpx
@@ -33,7 +36,8 @@ from reader.config.secrets import host_resolved_resolver
 
 # Bounds (spec `bounds`).
 RUN_TOKEN_TTL_S: Final = 1500.0
-RUN_TOKENS_MAX: Final = 32
+RUN_TOKENS_MAX: Final = 32  # = the sum of the client quotas below
+LANE_TOKEN_TTL_S: Final = 30.0
 BODY_MAX_BYTES: Final = 33554432
 UPSTREAM_TIMEOUT_S: Final = 900.0
 PROVIDER_KIND: Final = "anthropic-subscription"
@@ -138,11 +142,32 @@ def forwarded_header(name: str) -> bool:
 
 
 @dataclass(frozen=True)
+class Client:
+    """A caller of agent-proxy, named by its fixed agentnet address (FR-AGENT-3, ADR-0039 B7b)."""
+
+    name: str
+    quota: int  # live tokens at most
+    ttl_s: float
+    tools: bool  # may be issued a web_search allowance (FR-AGENT-15)
+    evict: bool  # at its quota: revoke its own oldest token (True) or refuse the issue with 429 (False)
+
+
+# The fixed addresses OPS-DEPLOY FR-DEPLOY-16 declares on agentnet (INV-DEPLOY-11 pins them equal).
+CLIENTS: Final[Mapping[str, Client]] = MappingProxyType(
+    {
+        "10.230.7.10": Client("worker", 28, RUN_TOKEN_TTL_S, tools=True, evict=True),
+        "10.230.7.11": Client("worker-judge", 4, LANE_TOKEN_TTL_S, tools=False, evict=False),
+    }
+)
+
+
+@dataclass(frozen=True)
 class ProxySettings:
     config_path: Path = Path("/etc/reader/reader.yaml")  # OPS-CLI's read-only bind target (FR-AGENT-2)
     secrets_root: Path = Path("/run/secrets")
     upstream: str = "https://api.anthropic.com"
     clock: Callable[[], float] = time.monotonic
+    clients: Mapping[str, Client] = field(default_factory=lambda: CLIENTS)  # source address → client
 
 
 @dataclass
@@ -152,6 +177,8 @@ class Entry:
     max_output_tokens: int
     model: str
     created: float
+    client: str  # the issuing client's name (FR-AGENT-3)
+    ttl_s: float
     statuses: list[int] = field(default_factory=list)
     refused: list[str] = field(default_factory=list)
     in_flight: int = 0  # forwarded, not yet fully relayed (code review B2)
@@ -212,9 +239,26 @@ class Proxy:
         except SecretResolutionError, OSError:
             return None
 
+    # --- clients (FR-AGENT-3, ADR-0039 B7b) ---
+
+    def client_of(self, request: Request) -> Client | None:
+        """The calling client, from the connection's source address only (never a header or a body field)."""
+        host = request.client.host if request.client is not None else None
+        return self.settings.clients.get(host) if host is not None else None
+
+    def _purge(self) -> None:
+        now = self.settings.clock()
+        for digest in [d for d, e in self.tokens.items() if now - e.created > e.ttl_s]:
+            del self.tokens[digest]
+
+    def live(self, client: str) -> int:
+        """Live tokens of one client (expired entries purged first)."""
+        self._purge()
+        return sum(1 for e in self.tokens.values() if e.client == client)
+
     # --- run tokens (FR-AGENT-3) ---
 
-    async def issue(self, request: Request) -> Response:
+    async def issue(self, request: Request, client: Client) -> Response:
         body = await _json(request, 4096)
         fields = body if isinstance(body, dict) else {}
         handle, cap, model = fields.get("user"), fields.get("max_output_tokens"), fields.get("model")
@@ -231,7 +275,7 @@ class Proxy:
             return _error(400, "bad_request")
         allowance: dict[str, int] | None = None
         if "web_search" in fields:  # FR-AGENT-15: only a freshness_web token may carry an allowance
-            if task != TOOL_TASK:
+            if task != TOOL_TASK or not client.tools:  # the lane never has tools, whatever its task
                 return _error(400, "tools_not_allowed")
             if (
                 not isinstance(web_search, dict)
@@ -243,45 +287,69 @@ class Proxy:
         token = self._user_token(handle)
         if token is None:
             return _error(409, "provider_missing")
+        # Purge, quota count and insert with no `await` between them: concurrent issues cannot both pass a quota.
+        self._purge()
+        own = [d for d, e in self.tokens.items() if e.client == client.name]
+        if len(own) >= client.quota:
+            if not client.evict:
+                return _error(429, "client_quota")
+            for digest in own[: len(own) - client.quota + 1]:
+                del self.tokens[digest]  # the client's own oldest; never another client's
         run_token = secrets.token_urlsafe(32)
         self.tokens[_digest(run_token)] = Entry(
-            handle, token, cap, model, self.settings.clock(), allowance=allowance, task=task
+            handle,
+            token,
+            cap,
+            model,
+            self.settings.clock(),
+            client.name,
+            client.ttl_s,
+            allowance=allowance,
+            task=task,
         )
-        while len(self.tokens) > RUN_TOKENS_MAX:
-            self.tokens.popitem(last=False)  # the oldest is revoked
         return JSONResponse({"run_token": run_token})
 
-    async def revoke(self, request: Request) -> Response:
+    async def revoke(self, request: Request, client: Client) -> Response:
         body = await _json(request, 4096)
         run_token = body.get("run_token") if isinstance(body, dict) else None
         if not isinstance(run_token, str):
             return _error(400, "bad_request")
-        entry = self.tokens.pop(_digest(run_token), None)
-        if entry is None:
+        self._purge()
+        digest = _digest(run_token)
+        entry = self.tokens.get(digest)
+        if entry is None or entry.client != client.name:  # another client's token stays live
             return _error(404, "run_token_unknown")
+        del self.tokens[digest]
         return JSONResponse(entry.record())
+
+    def revoke_all(self, client: Client) -> Response:
+        own = [d for d, e in self.tokens.items() if e.client == client.name]
+        for digest in own:
+            del self.tokens[digest]
+        return JSONResponse({"revoked": len(own)})
 
     # --- forwarding (FR-AGENT-4) ---
 
-    def _live(self, request: Request) -> tuple[str, Entry] | None:
+    def _live(self, request: Request, client: Client) -> tuple[str, Entry] | None:
         auth = request.headers.get("authorization", "")
         scheme, _, value = auth.partition(" ")
         if scheme != "Bearer" or not value:
             return None
+        self._purge()
         digest = _digest(value)
         entry = self.tokens.get(digest)
-        if entry is None or self.settings.clock() - entry.created > RUN_TOKEN_TTL_S:
+        if entry is None or entry.client != client.name:  # only the calling client's own live token
             return None
         return digest, entry
 
-    async def forward(self, request: Request) -> tuple[Response, str]:
+    async def forward(self, request: Request, client: Client) -> tuple[Response, str]:
         if (
             request.method != "POST"
             or request.url.path != "/v1/messages"
             or request.url.query not in ("", "beta=true")
         ):
             return _error(404, "not_found"), "-"
-        live = self._live(request)
+        live = self._live(request, client)
         if live is None:
             return _error(401, "run_token_unknown"), "-"
         digest, entry = live
@@ -450,19 +518,33 @@ def create_app(
 
     async def run_tokens(request: Request) -> Response:
         started = clock()
-        response = await proxy.issue(request)
+        client = proxy.client_of(request)
+        response = _error(403, "client_unknown") if client is None else await proxy.issue(request, client)
         logged("POST", "/run-tokens", response.status_code, started, "-")
         return response
 
     async def revoke(request: Request) -> Response:
         started = clock()
-        response = await proxy.revoke(request)
+        client = proxy.client_of(request)
+        response = _error(403, "client_unknown") if client is None else await proxy.revoke(request, client)
         logged("POST", "/run-tokens/revoke", response.status_code, started, "-")
+        return response
+
+    async def revoke_all(request: Request) -> Response:
+        started = clock()
+        client = proxy.client_of(request)
+        response = _error(403, "client_unknown") if client is None else proxy.revoke_all(client)
+        logged("POST", "/run-tokens/revoke-all", response.status_code, started, "-")
         return response
 
     async def forward(request: Request) -> Response:
         started = clock()
-        response, tag = await proxy.forward(request)
+        client = proxy.client_of(request)
+        if client is None:  # nothing an unknown address sends is forwarded (FR-AGENT-3)
+            response: Response = _error(403, "client_unknown")
+            tag = "-"
+        else:
+            response, tag = await proxy.forward(request, client)
         route = "/v1/messages" if request.url.path == "/v1/messages" else "other"
         method = request.method if request.method in METHODS else "OTHER"
         logged(method, route, response.status_code, started, tag)
@@ -472,6 +554,7 @@ def create_app(
         routes=[
             Route("/run-tokens", run_tokens, methods=["POST"]),
             Route("/run-tokens/revoke", revoke, methods=["POST"]),
+            Route("/run-tokens/revoke-all", revoke_all, methods=["POST"]),
             Route("/{path:path}", forward, methods=list(METHODS)),
         ]
     )
@@ -479,11 +562,28 @@ def create_app(
     return app
 
 
-def main() -> None:
+def _bind(value: str) -> tuple[str, int]:
+    """`<ipv4>:<port>` (FR-AGENT-3: OPS-DEPLOY passes the agentnet address); anything else is a usage error."""
+    host, sep, port = value.rpartition(":")
+    try:
+        address = ipaddress.IPv4Address(host)
+        number = int(port)
+    except ValueError:
+        raise argparse.ArgumentTypeError("expected <ipv4>:<port>") from None
+    if not sep or not port.isdigit() or not 1 <= number <= 65535:
+        raise argparse.ArgumentTypeError("expected <ipv4>:<port>")
+    return str(address), number
+
+
+def main(argv: list[str] | None = None) -> None:
     import uvicorn
 
+    parser = argparse.ArgumentParser(prog="reader.agent.proxy")
+    parser.add_argument("--bind", type=_bind, default=("0.0.0.0", PORT))  # noqa: S104 - the loopback harness default
+    host, port = parser.parse_args(sys.argv[1:] if argv is None else argv).bind
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(name)s %(levelname)s %(message)s")
-    uvicorn.run(create_app(), host="0.0.0.0", port=PORT, access_log=False, log_config=None)  # noqa: S104
+    # proxy_headers=False: X-Forwarded-For is never read, so the client is the TCP source address (FR-AGENT-3).
+    uvicorn.run(create_app(), host=host, port=port, access_log=False, log_config=None, proxy_headers=False)
 
 
 if __name__ == "__main__":
