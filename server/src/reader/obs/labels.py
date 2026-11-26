@@ -31,7 +31,8 @@ SOURCE: Final = dict(phase2.VEC["labels"]["source"])
 UUID_RE: Final = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 ITEM_RE: Final = r"^(ji|es):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 MAX_ATTEMPTS: Final = 3
-# ADR-0039 (FR-OBS-24 as amended): judge labels per slot; judge.link_type joins with SRV-KB, judge.align never.
+# ADR-0039 (FR-OBS-24 as amended): judge labels per slot; judge.link_type joins with SRV-KB, judge.align
+# never.
 JUDGE_SLOTS: Final = tuple(phase2.VEC["labels"]["judge_slots"])
 NOTE_MAX: Final = int(phase2.VEC["labels"]["note_max_chars"])
 __all__ = ["NotLabelable"]
@@ -72,8 +73,8 @@ class Label:
 
 
 class LabelBody(BaseModel):
-    """The route's body: exactly these keys. Lesson and answer labels carry no free text; a judge label may carry
-    a one-line `note` (Postgres only, never mirrored, traced or logged; ADR-0039 B7 labels item 1)."""
+    """The route's body: exactly these keys. Lesson and answer labels carry no free text; a judge label may
+    carry a one-line `note` (Postgres only, never mirrored, traced or logged; ADR-0039 B7 labels item 1)."""
 
     model_config = ConfigDict(extra="forbid", strict=True)
     target: Literal["lesson", "answer", "judge"]
@@ -117,7 +118,8 @@ async def mirror(
     last attempt, the trace is missing."""
     if job_revision < label.revision:
         return None
-    name = assessment_name(str(label.slot)) if label.target == "judge" else TARGETS[label.target]["assessment"]
+    judge = label.target == "judge"
+    name = assessment_name(str(label.slot)) if judge else TARGETS[label.target]["assessment"]
     status, got = await request(
         client, "GET", "/ajax-api/3.0/mlflow/traces/get", params={"trace_id": trace_ref}, ok404=True
     )
@@ -171,13 +173,15 @@ JUDGE_SCORE_SQL: Final = (
     " LEFT JOIN judge_inputs ji ON ji.id = s.judge_input_id WHERE s.id = :id AND s.owner_id = :o"
 )
 JUDGE_UPSERT_SQL: Final = (
-    "INSERT INTO owner_labels (id, owner_id, target, target_id, lesson_revision_sha256, ok, reason, revision, slot,"
-    " note) VALUES (:id, :o, 'judge', :tid, :rev, :ok, NULL, 1, :slot, :note)"
+    "INSERT INTO owner_labels (id, owner_id, target, target_id, lesson_revision_sha256, ok, reason, revision,"
+    " slot, note) VALUES (:id, :o, 'judge', :tid, :rev, :ok, NULL, 1, :slot, :note)"
     " ON CONFLICT (owner_id, target, target_id, lesson_revision_sha256) DO UPDATE SET ok = EXCLUDED.ok,"
     " note = EXCLUDED.note, revision = owner_labels.revision + 1, updated_at = now()"
     " RETURNING id, revision"
 )
-SLOT_COUNT_SQL: Final = "SELECT count(*) FROM owner_labels WHERE owner_id = :o AND target = 'judge' AND slot = :s"
+SLOT_COUNT_SQL: Final = (
+    "SELECT count(*) FROM owner_labels WHERE owner_id = :o AND target = 'judge' AND slot = :s"
+)
 
 
 async def _judge_target(conn: Any, owner: uuid.UUID, item: str) -> tuple[str, str, str] | None:
@@ -204,7 +208,9 @@ async def _judge_target(conn: Any, owner: uuid.UUID, item: str) -> tuple[str, st
     return str(ident), str(row.slot), seen
 
 
-async def _record_judge(conn: Any, owner: uuid.UUID, body: LabelBody, mirror_on: bool) -> tuple[int, str] | None:
+async def _record_judge(
+    conn: Any, owner: uuid.UUID, body: LabelBody, mirror_on: bool
+) -> tuple[int, str] | None:
     target = await _judge_target(conn, owner, body.id)
     if target is None:
         return None

@@ -1,10 +1,11 @@
 """SRV-OBS FR-OBS-38 (ADR-0039 B7 labels item 2, B7b): the `judge_inputs` store.
 
-`SINK` implements SRV-AGENT's `JudgeInputsSink.copy(conn, request_row, output)`: the `judge.find` job calls it in
-the transaction that recorded the output, only when that insert inserted. It stores ids, hashes, the output as
-1-based ordinals into the request's card ids, and the query only for a consenting caller; card text never. A copy
-that fails validation, or any database error inside it, is skipped in a savepoint with one log line (a code,
-never a value): it never aborts the recorded output and never raises. Trace ids come from the current span.
+`SINK` implements SRV-AGENT's `JudgeInputsSink.copy(conn, request_row, output)`: the `judge.find` job calls it
+in the transaction that recorded the output, only when that insert inserted. It stores ids, hashes, the output
+as 1-based ordinals into the request's card ids, and the query only for a consenting caller; card text never.
+A copy that fails validation, or any database error inside it, is skipped in a savepoint with one log line (a
+code, never a value): it never aborts the recorded output and never raises. Trace ids come from the current
+span.
 """
 
 from __future__ import annotations
@@ -106,7 +107,8 @@ def input_sha256(owner_id: uuid.UUID, query: str, cards: Sequence[tuple[str, str
     """SRV-AGENT's `find_input_sha256` (the same canonical form)."""
     from reader.agent.proxy import canonical_sha256
 
-    return str(canonical_sha256({"owner": str(owner_id), "query": query, "cards": [[i, t] for i, t in cards]}))
+    payload = {"owner": str(owner_id), "query": query, "cards": [[i, t] for i, t in cards]}
+    return str(canonical_sha256(payload))
 
 
 class Sink:

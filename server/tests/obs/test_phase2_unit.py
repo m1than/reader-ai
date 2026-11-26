@@ -457,6 +457,8 @@ async def test_retention_deletes_old_runs_and_unused_versions() -> None:
                     [{"info": {"run_id": "old-2", "end_time": old}, "data": {}},
                      {"info": {"run_id": "new", "end_time": new}, "data": {}}]],
         "ingest": [[{"info": {"run_id": "old-i", "end_time": old}, "data": {}}], []],
+        # ADR-0039 (FR-OBS-31 as amended): eval Runs by end_time, a third per-kind search
+        "eval": [[{"info": {"run_id": "old-e", "end_time": old}, "data": {}}]],
     }
 
     def search(req: httpx.Request) -> tuple[int, dict[str, Any]]:
@@ -479,7 +481,7 @@ async def test_retention_deletes_old_runs_and_unused_versions() -> None:
         await runs.prune(c, now=datetime(2026, 11, 25, tzinfo=UTC), retention_days=30, running_key="a" * 12)
     sent = list(zip(mlflow.paths(), mlflow.bodies(), strict=True))
     deleted = [b["run_id"] for p, b in sent if p == "POST /api/2.0/mlflow/runs/delete"]
-    assert deleted == ["old", "old-2", "old-i"]  # both kinds, past the first page; the new Run stays
+    assert deleted == ["old", "old-2", "old-i", "old-e"]  # every kind, past the first page; the new Run stays
     deletes = [p for p in mlflow.paths() if p.startswith("DELETE")]
     assert deletes == ["DELETE /api/2.0/mlflow/logged-models/m-old"]  # the running key is kept
 

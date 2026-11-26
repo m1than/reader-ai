@@ -1,9 +1,9 @@
 """SRV-OBS FR-OBS-40 (ADR-0039 B7 labels items 2-4): the owner's judge labelling reads.
 
 An item is a `judge_inputs` row (slot judge.find, id `ji:<uuid>`) or an `obs_eval_scores` row (its slot, id
-`es:<uuid>`). The queue orders unlabelled items by B7 item 3's classes, then round-robin over (route, first pack)
-groups, newest first. An item's card text comes from the card-reader port in memory, as the owner may read it
-under B8 (entitled text, or the MCP row with no L1 text); nothing here stores or logs it.
+`es:<uuid>`). The queue orders unlabelled items by B7 item 3's classes, then round-robin over (route, first
+pack) groups, newest first. An item's card text comes from the card-reader port in memory, as the owner may
+read it under B8 (entitled text, or the MCP row with no L1 text); nothing here stores or logs it.
 """
 
 from __future__ import annotations
@@ -55,7 +55,8 @@ class Unwired:
 
 
 CARDS: CardReader = Unwired()
-# The policy's thresholds by slot (SRV-SEARCH: judge.find.sufficiency_threshold, judge.eval.<name>.pass_threshold).
+# The policy's thresholds by slot (SRV-SEARCH: judge.find.sufficiency_threshold,
+# judge.eval.<name>.pass_threshold).
 THRESHOLDS: Callable[[], Mapping[str, float]] = dict
 
 
@@ -76,7 +77,8 @@ def parse_item(raw: str) -> tuple[str, uuid.UUID] | None:
 
 
 def order(items: Sequence[Item], limit: int) -> list[Item]:
-    """By class; within a class round-robin over groups (the group with the newest item first), newest first."""
+    """By class; within a class round-robin over groups (the group with the newest item first), newest
+    first."""
     out: list[Item] = []
     for klass in sorted({i.klass for i in items}):
         groups: dict[tuple[str, str], list[Item]] = {}
@@ -90,16 +92,13 @@ def order(items: Sequence[Item], limit: int) -> list[Item]:
     return out[:limit]
 
 
-_UNLABELLED: Final = (
-    " AND NOT EXISTS (SELECT 1 FROM owner_labels l WHERE l.owner_id = :o AND l.target = 'judge'"
-    " AND l.target_id = {col})"
-)
 INPUTS_SQL: Final = (
     "SELECT ji.id, ji.created_at, ji.route, ji.channel, ji.pack_ids, ji.output, ji.find_trace_id,"
-    " EXISTS (SELECT 1 FROM obs_eval_scores s WHERE s.judge_input_id = ji.id AND s.slot = 'judge.eval.relevance'"
-    " AND s.value < :below) AS disagree FROM judge_inputs ji WHERE ji.labelable"
-    + _UNLABELLED.format(col="ji.id")
-    + " ORDER BY ji.created_at DESC LIMIT :n"
+    " EXISTS (SELECT 1 FROM obs_eval_scores s WHERE s.judge_input_id = ji.id"
+    " AND s.slot = 'judge.eval.relevance' AND s.value < :below) AS disagree FROM judge_inputs ji"
+    " WHERE ji.labelable AND NOT EXISTS (SELECT 1 FROM owner_labels l WHERE l.owner_id = :o"
+    " AND l.target = 'judge' AND l.target_id = ji.id)"
+    " ORDER BY ji.created_at DESC LIMIT :n"
 )
 SCORES_SQL: Final = (
     "SELECT s.id, s.created_at, s.value, s.judge_input_id, ji.route, ji.channel, ji.pack_ids,"
@@ -107,8 +106,9 @@ SCORES_SQL: Final = (
     " AND jsonb_array_length(ji.output->'keep') > 0) AS disagree"
     " FROM obs_eval_scores s LEFT JOIN judge_inputs ji ON ji.id = s.judge_input_id"
     " WHERE s.owner_id = :o AND s.slot = :slot AND (s.judge_input_id IS NULL OR ji.labelable)"
-    + _UNLABELLED.format(col="s.id")
-    + " ORDER BY s.created_at DESC LIMIT :n"
+    " AND NOT EXISTS (SELECT 1 FROM owner_labels l WHERE l.owner_id = :o AND l.target = 'judge'"
+    " AND l.target_id = s.id)"
+    " ORDER BY s.created_at DESC LIMIT :n"
 )
 # B7 item 3, class 3: finds made in tutor answers the owner labelled bad (their job traces, FR-OBS-5).
 BAD_ANSWERS_SQL: Final = (
@@ -136,7 +136,8 @@ async def queue(conn: Any, owner: uuid.UUID, slot: str, limit: int = QUEUE_MAX) 
     items: list[Item] = []
     if slot == FIND:
         bad = await _bad_traces(conn, owner)
-        rows = (await conn.execute(text(INPUTS_SQL), {"o": owner, "below": DISAGREE_BELOW, "n": FETCH_MAX})).all()
+        params = {"o": owner, "below": DISAGREE_BELOW, "n": FETCH_MAX}
+        rows = (await conn.execute(text(INPUTS_SQL), params)).all()
         for r in rows:
             suff = (r.output or {}).get("sufficiency")
             near = threshold is not None and isinstance(suff, (int, float)) and abs(suff - threshold) <= NEAR
