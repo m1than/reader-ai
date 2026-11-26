@@ -107,7 +107,8 @@
 # `ProxySettings.clients` defaults to `CLIENTS`; the loopback harnesses (SRV-FRESH, conftest `make_proxy`) pass
 # their own table. Red tests (2026-11-26): the in-process harness (conftest `Proxy.client`) sends from the worker's
 # CLIENTS address by default and from the lane's on request; test_proxy_clients.py holds FR-AGENT-3's client cases,
-# the INV-AGENT-7 state machine and VEC-AGENT-6; the INV-AGENT-6 property draws lane requests too.
+# the INV-AGENT-7 state machine and VEC-AGENT-6; the INV-AGENT-6 property draws lane requests too. Green: proxy.py
+# (CLIENTS, quotas, TTLs, revoke-all, --bind) and lane.py's JOB_KINDS; tests reformatted for ruff, no oracle changed.
 #
 # Ownership (ADR-0039 B11). SRV-AGENT: the judge slot table, judge versions, the recorded-output table and its
 # replay, the `index` and `eval` ledger lines and their caps, the `judge.find` job handler that runs on the

@@ -70,7 +70,7 @@ class JobKind:
     # (engine, payload, outcome) (SRV-PIPELINE FR-PIPELINE-18, SRV-INGEST FR-INGEST-26). A failure is logged,
     # never judged: the outcome is already recorded.
     after_end: Callable[[Any, Mapping[str, Any], str], Awaitable[None]] | None = None
-    # FR-EVENTS-11 (amended): finished `job_keys` rows of this kind older than this are deleted by the collector.
+    # FR-EVENTS-11 (amended): finished `job_keys` rows of this kind older than this are collected.
     key_retention_s: int | None = None
 
 

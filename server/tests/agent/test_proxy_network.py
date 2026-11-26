@@ -32,7 +32,7 @@ ISSUE = (
 
 
 def _docker(*args: str, timeout: float = 1200) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(["docker", *args], capture_output=True, text=True, check=False, timeout=timeout)  # noqa: S603, S607
+    return subprocess.run(["docker", *args], capture_output=True, text=True, check=False, timeout=timeout)
 
 
 def test_worker_address_is_a_client_and_another_address_is_not() -> None:

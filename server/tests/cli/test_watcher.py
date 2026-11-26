@@ -153,7 +153,7 @@ def test_ignored_event_is_logged_at_info_with_the_label_name_only(
 
 
 def test_a_started_judge_lane_gets_its_db_password_again() -> None:
-    """FR-CLI-5 amended (ADR-0039 B7b): worker-judge is a consumer; a start event schedules one db-password delivery."""
+    """FR-CLI-5 amended (ADR-0039 B7b): worker-judge is a consumer; its start event schedules a delivery."""
     from reader.cli.stack import Delivery
     from reader.cli.watcher import Watcher
     from reader.config import Secret

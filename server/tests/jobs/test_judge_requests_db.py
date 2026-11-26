@@ -1,5 +1,5 @@
-"""SRV-EVENTS: `judge_requests` and its store (FR-EVENTS-33), the collectors (FR-EVENTS-34) and the key retention
-(FR-EVENTS-11 amended), ADR-0039 B7b.
+"""SRV-EVENTS: `judge_requests` and its store (FR-EVENTS-33), the collectors (FR-EVENTS-34) and the key
+retention (FR-EVENTS-11 amended), ADR-0039 B7b.
 
 @trace FR-EVENTS-33 FR-EVENTS-34 FR-EVENTS-11
 """
@@ -32,8 +32,9 @@ async def _user(env: Env) -> uuid.UUID:
 
     async with env.engine.begin() as conn:  # committed: judge_requests references it
         value = (await conn.execute(text(
-            "INSERT INTO users (handle, handle_skeleton, role, webauthn_user_id, display_name, consent_evaluation)"
-            " VALUES ('ivan', 'ivan', 'owner', decode(repeat('ab', 64), 'hex'), 'I', false) RETURNING id"
+            "INSERT INTO users (handle, handle_skeleton, role, webauthn_user_id, display_name,"
+            " consent_evaluation) VALUES ('ivan', 'ivan', 'owner', decode(repeat('ab', 64), 'hex'), 'I',"
+            " false) RETURNING id"
         ))).scalar_one()
     return uuid.UUID(str(value))
 
@@ -75,7 +76,8 @@ async def test_put_get_delete_round_trip(pg: Pg) -> None:
         assert (got.request_id, got.owner_id, got.line, got.query, got.cards, got.pack_ids) == (
             new.request_id, owner, "tutor", new.query, CARDS, ("p1",)
         )
-        assert got.deadline == new.deadline and got.created_at < got.deadline
+        assert got.deadline == new.deadline
+        assert got.created_at < got.deadline
         assert got.run_cap_usd == Decimal("0.50")
         async with env.engine.begin() as conn:
             await STORE.delete(conn, new.request_id)
@@ -118,24 +120,21 @@ async def test_window_boundary_eight_seconds_accepted(pg: Pg) -> None:
 
 
 @pytest.mark.parametrize(
-    "values",
-    [
-        "'eval', repeat('a', 64), now(), now() + interval '5 s'",
-        "'tutor', 'not-a-hash', now(), now() + interval '5 s'",
-        "'tutor', repeat('a', 64), now(), now() - interval '1 s'",
-    ],
+    ("line", "sha", "deadline_s"),
+    [("eval", "a" * 64, 5), ("tutor", "not-a-hash", 5), ("tutor", "a" * 64, -1)],
 )
-async def test_checks_refuse_raw_inserts(pg: Pg, values: str) -> None:
+async def test_checks_refuse_raw_inserts(pg: Pg, line: str, sha: str, deadline_s: int) -> None:
     from sqlalchemy.exc import IntegrityError
 
     async with jobs_env(pg) as env:
         owner = await _user(env)
         with pytest.raises(IntegrityError):
             await env.execute(
-                "INSERT INTO judge_requests (request_id, owner_id, line, input_sha256, created_at, deadline, run_id,"
-                f" run_cap_usd, query, cards, pack_ids) VALUES (gen_random_uuid(), :o, {values},"
-                " gen_random_uuid(), 0.5, 'q', '[]', ARRAY[]::text[])",
-                o=owner,
+                "INSERT INTO judge_requests (request_id, owner_id, line, input_sha256, created_at, deadline,"
+                " run_id, run_cap_usd, query, cards, pack_ids) VALUES (gen_random_uuid(), :o, :line, :sha,"
+                " now(), now() + make_interval(secs => :d), gen_random_uuid(), 0.5, 'q', '[]',"
+                " ARRAY[]::text[])",
+                o=owner, line=line, sha=sha, d=deadline_s,
             )
 
 
@@ -178,17 +177,17 @@ def test_no_import_cycle_between_the_store_and_the_lane() -> None:
         "import sys, reader.jobs.judge_requests as r; assert 'reader.agent.lane' not in sys.modules;"
         " import reader.agent.lane as lane; assert lane.JOB_KINDS[0].name == 'judge.find'"
     )
-    first = subprocess.run([sys.executable, "-c", check], capture_output=True, text=True, check=False,  # noqa: S603
-                           env={"PYTHONPATH": str(SRC), "PATH": ""})
-    assert first.returncode == 0, first.stderr[-2000:]
-    second = subprocess.run([sys.executable, "-c", "import reader.agent.lane"], capture_output=True,  # noqa: S603
-                            text=True, check=False, env={"PYTHONPATH": str(SRC), "PATH": ""})
-    assert second.returncode == 0, second.stderr[-2000:]
+    env = {"PYTHONPATH": str(SRC), "PATH": ""}
+    for code in (check, "import reader.agent.lane"):
+        done = subprocess.run(  # noqa: S603 - this interpreter, a constant program
+            [sys.executable, "-c", code], capture_output=True, text=True, check=False, env=env
+        )
+        assert done.returncode == 0, done.stderr[-2000:]
 
 
 @contextlib.asynccontextmanager
 async def _lane_env(pg: Pg) -> AsyncIterator[tuple[Env, Any]]:
-    """The real `judge.find` kind with the production STORE, a config binding the slot, and a provider that fails."""
+    """The real `judge.find` kind with the production STORE, a config binding the slot, a failing provider."""
     from reader.agent import lane
     from reader.agent.errors import agent_error
     from reader.config import load_config
@@ -223,7 +222,8 @@ async def test_store_serves_the_lane_handler_end_to_end(pg: Pg) -> None:
         new = _new(owner, await _db_now(env) + timedelta(seconds=5))
         new = _new(owner, new.deadline, input_sha256=judges.find_input_sha256(owner, new.query, list(CARDS)))
         await _put(env, new)
-        await env.jobs.enqueue("judge.find", {"request_id": str(new.request_id), "input_sha256": new.input_sha256})
+        args = {"request_id": str(new.request_id), "input_sha256": new.input_sha256}
+        await env.jobs.enqueue("judge.find", args)
         await _work_judge_queue(env)
         assert await env.scalar("SELECT count(*) FROM judge_requests") == 0  # read, then deleted at the end
         key = await env.rows("SELECT outcome FROM job_keys WHERE kind = 'judge.find'")
@@ -232,8 +232,9 @@ async def test_store_serves_the_lane_handler_end_to_end(pg: Pg) -> None:
 
 async def _raw_expired(env: Env, owner: uuid.UUID, seconds_past: int) -> None:
     await env.execute(
-        "INSERT INTO judge_requests (request_id, owner_id, line, run_id, run_cap_usd, input_sha256, created_at,"
-        " deadline, query, cards, pack_ids) VALUES (gen_random_uuid(), :o, 'tutor', gen_random_uuid(), 0.5,"
+        "INSERT INTO judge_requests (request_id, owner_id, line, run_id, run_cap_usd, input_sha256,"
+        " created_at, deadline, query, cards, pack_ids) VALUES (gen_random_uuid(), :o, 'tutor',"
+        " gen_random_uuid(), 0.5,"
         " repeat('a', 64), now() - make_interval(secs => :p + 5), now() - make_interval(secs => :p), 'q',"
         " '[[\"c\", \"t\"]]', ARRAY['p1'])",
         o=owner, p=seconds_past,
@@ -304,7 +305,9 @@ async def test_gc_retention_periodic_rows_outputs_and_isolation(pg: Pg, monkeypa
         keys = {r[0] for r in await env.rows("SELECT key FROM job_keys")}
         assert keys == {"judge.find:young", "judge.find:open", "test.effect:old"}
         ids = {r[0] for r in await env.rows("SELECT id FROM procrastinate_jobs")}
-        assert old_judge not in ids and old_tick not in ids and old_fail in ids
+        assert old_judge not in ids
+        assert old_tick not in ids
+        assert old_fail in ids
         todo = await env.scalar("SELECT count(*) FROM procrastinate_jobs WHERE status = 'todo'")
         assert todo == 1  # the todo judge job is kept
         assert len(calls) == 1  # judges.expire once per judge_gc run, after a failing step 1

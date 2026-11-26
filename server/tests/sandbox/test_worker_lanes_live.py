@@ -1,8 +1,8 @@
 # @trace INV-SANDBOX-7
-"""[live] against the running stack (`reader up` with `agents`), skipped unless READER_LIVE=1: the worker services'
-credential and route checks (ADR-0025 `verified_by` as amended by ADR-0039 B7b). Each probe runs inside `worker` or
-`worker-judge` as uid 10001 through `docker exec`; it reads no token: it sends no bearer, a random one, or a run token
-it issued and revoked itself."""
+"""[live] against the running stack (`reader up` with `agents`), skipped unless READER_LIVE=1: the worker
+services' credential and route checks (ADR-0025 `verified_by` as amended by ADR-0039 B7b). Each probe runs
+inside `worker` or `worker-judge` as uid 10001 through `docker exec`; it reads no token: it sends no bearer,
+a random one, or a run token it issued and revoked itself."""
 
 from __future__ import annotations
 
@@ -104,7 +104,9 @@ def test_no_valid_handle_gets_no_credential(service: str) -> None:
 
 def test_worker_judge_resolves_only_its_routes() -> None:
     reachable = ["agent-proxy", "postgres"]
-    unreachable = ["mcp", "embed", "caddy", "mlflow", "jaeger", "kernel-verify", "kernel-agent", "kernel-pair-1"]
+    unreachable = [
+        "mcp", "embed", "caddy", "mlflow", "jaeger", "kernel-verify", "kernel-agent", "kernel-pair-1"
+    ]
     out = _python("worker-judge", f"NAMES = {reachable + unreachable!r}\n" + RESOLVE)
     assert isinstance(out, dict)
     assert all(out[n] for n in reachable), out

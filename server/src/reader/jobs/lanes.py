@@ -1,7 +1,7 @@
 """The worker lanes, declared as data (SRV-EVENTS FR-EVENTS-9 as amended for ADR-0039 B7b).
 
-`main` serves every queue but `judge` at concurrency 1 and runs the sweep and the periodic entries; `judge` (the
-`worker-judge` service, OPS-DEPLOY FR-DEPLOY-16) serves only `judge` at concurrency 4 and runs its own reaper.
+`main` serves every queue but `judge` at concurrency 1 and runs the sweep and the periodic entries; `judge`
+(the `worker-judge` service, OPS-DEPLOY FR-DEPLOY-16) serves only `judge` at concurrency 4, with a reaper.
 Both load the full catalog; a lane only selects queues.
 """
 

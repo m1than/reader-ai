@@ -1,5 +1,5 @@
-"""A real judge-lane worker process for SRV-EVENTS's killed-lane test: `reader.jobs.worker.run(lane="judge")` with the
-stub judge kind until killed. Reads the database target as JSON on stdin and prints "started"."""
+"""A real judge-lane worker process for SRV-EVENTS's killed-lane test: `reader.jobs.worker.run(lane="judge")`
+with the stub judge kind until killed. Reads the database target as JSON on stdin and prints "started"."""
 
 from __future__ import annotations
 

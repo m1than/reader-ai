@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 import pytest
 
-from .conftest import LANE_ADDR, FIXTURES, Upstream, forward, load_yaml, make_proxy, message_body, need
+from .conftest import FIXTURES, LANE_ADDR, Upstream, forward, load_yaml, make_proxy, message_body, need
 
 pytestmark = pytest.mark.anyio
 D = Decimal

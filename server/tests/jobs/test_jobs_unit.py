@@ -114,7 +114,9 @@ def test_catalog_bounds_priority_below_the_sweep(priority: int, ok: bool) -> Non
     assert caught.value.code == "kind_bounds_invalid"
 
 
-@pytest.mark.parametrize(("seconds", "ok"), [(None, True), (1, True), (86_400, True), (0, False), (-5, False)])
+@pytest.mark.parametrize(
+    ("seconds", "ok"), [(None, True), (1, True), (86_400, True), (0, False), (-5, False)]
+)
 def test_catalog_bounds_key_retention(seconds: int | None, ok: bool) -> None:
     """FR-EVENTS-1 (d): `key_retention_s` is positive or None."""
     import dataclasses

@@ -1,4 +1,5 @@
-# @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3, FR-DEPLOY-13, FR-DEPLOY-16
+# @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3, FR-DEPLOY-13
+# @trace FR-DEPLOY-16
 """OPS-DEPLOY [config]: networks, the api bind address, kernel isolation and the reachability matrix."""
 
 from .conftest import (

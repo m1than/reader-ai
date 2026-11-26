@@ -221,8 +221,8 @@ def compose_major(text: str) -> int | None:
 
 
 def judge_slots_check(config: Any, agents: bool) -> tuple[bool, str]:
-    """FR-CLI-25: every judge slot of SRV-AGENT's table bound in `tasks`. Only a missing `judge.find` fails (it
-    leaves every `find` unjudged); the offline slots refuse on their own. Names and aliases only, no value."""
+    """FR-CLI-25: every judge slot of SRV-AGENT's table bound in `tasks`. Only a missing `judge.find` fails
+    (it leaves every `find` unjudged); the offline slots refuse on their own. Names and aliases only."""
     from reader.agent.judges import FIND, JUDGE_SLOTS
 
     if not agents:

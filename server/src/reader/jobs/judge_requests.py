@@ -1,11 +1,11 @@
-"""`judge_requests`: the transport of a `judge.find` query and its card text (SRV-EVENTS FR-EVENTS-33, ADR-0039 B7b).
+"""`judge_requests`: the transport of a `judge.find` query and its card text (SRV-EVENTS FR-EVENTS-33).
 
-The waiter writes a row with `put` and commits, then enqueues a `judge.find` job whose args carry only the request id
-and the input hash; the lane's handler reads the row (`get`) and deletes it at its end (`delete`); the collectors
-delete rows past their deadline (`expire`, FR-EVENTS-34). Nothing here logs a query or a card text.
+The waiter writes a row with `put` and commits, then enqueues a `judge.find` job whose args carry only the
+request id and the input hash; the lane's handler reads the row (`get`) and deletes it at its end (`delete`);
+the collectors delete rows past their deadline (`expire`, FR-EVENTS-34). Nothing here logs a query or a card.
 
-`reader.agent.lane` imports this module for its `JOB_KINDS`; this module imports `reader.agent.lane` (its record and
-window bounds) only inside the functions that need it, so the two never form an import cycle.
+`reader.agent.lane` imports this module for its `JOB_KINDS`; this module imports `reader.agent.lane` (its
+record and window bounds) only inside the functions that need it, so the two never form an import cycle.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ import json
 import re
 import uuid
 from dataclasses import dataclass
-from decimal import Decimal
 from datetime import datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
@@ -121,7 +121,8 @@ class Store:
             await conn.execute(
                 text(
                     "SELECT request_id, owner_id, line, run_id, run_cap_usd, lesson_id, daily_budget_usd,"
-                    " created_at, deadline, query, cards::text, pack_ids FROM judge_requests WHERE request_id = :r"
+                    " created_at, deadline, query, cards::text, pack_ids"
+                    " FROM judge_requests WHERE request_id = :r"
                 ),
                 {"r": request_id},
             )

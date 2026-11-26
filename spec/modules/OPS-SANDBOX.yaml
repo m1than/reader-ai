@@ -318,4 +318,5 @@ vectors:
 # Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): INV-SANDBOX-3 gains worker-judge, INV-SANDBOX-7,
 # VEC-SANDBOX-1's `dns-worker-judge`; deep-reviewer (Fable) rounds 1–2 changes, round 3 approve. The token-absence
 # checks for worker-judge are SRV-AGENT's INV-AGENT-1 (server/tests/agent/test_live.py). Tests: probes.yaml gains
-# `dns-worker-judge`; server/tests/sandbox/test_worker_lanes_live.py [live] (READER_LIVE=1) holds INV-SANDBOX-7.
+# `dns-worker-judge`; server/tests/sandbox/test_worker_lanes_live.py [live] (READER_LIVE=1) holds INV-SANDBOX-7;
+# reformatted for ruff, no oracle changed.

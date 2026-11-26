@@ -251,8 +251,8 @@ class Jobs:
         self.app.periodic(cron=cron, periodic_id=name)(task)
 
     def _register_collectors(self) -> None:
-        """FR-EVENTS-34: `jobs.judge_reap` on the judge queue (the judge lane runs it whatever the main lane is
-        doing) and `jobs.judge_gc` on the sweep queue (the main lane), each every minute."""
+        """FR-EVENTS-34: `jobs.judge_reap` on the judge queue (the judge lane runs it whatever the main lane
+        is doing) and `jobs.judge_gc` on the sweep queue (the main lane), each every minute."""
 
         async def reap_task(timestamp: int) -> None:
             del timestamp
@@ -262,7 +262,8 @@ class Jobs:
             del timestamp
             await self.judge_gc()
 
-        for name, queue, fn in ((JUDGE_REAP_TASK, JUDGE_QUEUE, reap_task), (JUDGE_GC_TASK, SWEEP_TASK, gc_task)):
+        collectors = ((JUDGE_REAP_TASK, JUDGE_QUEUE, reap_task), (JUDGE_GC_TASK, SWEEP_TASK, gc_task))
+        for name, queue, fn in collectors:
             task = self.app.task(name=name, queue=queue, queueing_lock=name, priority=SWEEP_PRIORITY)(fn)
             self.app.periodic(cron="* * * * *", periodic_id=name)(task)
 
@@ -580,12 +581,16 @@ class Jobs:
         await self._cancel_unknown(report)
         return report
 
-    async def _sweep_stalled(self, report: SweepReport, stalled_after_s: float, queue: str | None = None) -> None:
-        stalled = await self.app.job_manager.get_stalled_jobs(seconds_since_heartbeat=stalled_after_s, queue=queue)
+    async def _sweep_stalled(
+        self, report: SweepReport, stalled_after_s: float, queue: str | None = None
+    ) -> None:
+        stalled = await self.app.job_manager.get_stalled_jobs(
+            seconds_since_heartbeat=stalled_after_s, queue=queue
+        )
         reserved = self.reserved_tasks
         for job in stalled:
             job_id = int(job.id or 0)
-            if job.task_name in reserved:  # a periodic task: no key row, finished failed (FR-EVENTS-15 amended)
+            if job.task_name in reserved:  # a periodic task: no key row, finished failed (FR-EVENTS-15)
                 if await self._finish(job, Status.FAILED):
                     report.finished.append(job_id)
                 continue
@@ -674,7 +679,7 @@ class Jobs:
             ):
                 report.reenqueued.append(key)
 
-    # ---- the judge lane's collectors (FR-EVENTS-34) ---------------------------------------------------------
+    # ---- the judge lane's collectors (FR-EVENTS-34) -------------------------------------------------------
 
     async def _step(self, name: str, work: Callable[[], Any]) -> None:
         """One collector step: its failure is logged with the step name only and never stops the next."""
@@ -722,8 +727,8 @@ class Jobs:
             await judges.expire(conn)
 
     async def judge_gc(self) -> None:
-        """On the main lane: expired requests (a lane that is down), key retention, the periodic tasks' own old
-        rows, and recorded judge.find outputs past their retention."""
+        """On the main lane: expired requests (a lane that is down), key retention, the periodic tasks' own
+        old rows, and recorded judge.find outputs past their retention."""
         await self._step("gc_requests", self._expire_requests)
         await self._step("gc_keys", self._retain_keys)
         await self._step("gc_periodic", self._prune_periodic)

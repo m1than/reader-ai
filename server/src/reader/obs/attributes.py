@@ -123,7 +123,7 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "obs.bench": {},
     "obs.label": {},
     "obs.health": {},  # traced: false (FR-OBS-32), listed for the catalogue's completeness
-    "judge.find": {},  # ADR-0039 B7b (SRV-AGENT FR-AGENT-21): its args are a request id and a hash; none is copied
+    "judge.find": {},  # ADR-0039 B7b (FR-AGENT-21): args are a request id and a hash; none is copied
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares

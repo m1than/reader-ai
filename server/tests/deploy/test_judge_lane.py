@@ -1,6 +1,6 @@
 # @trace FR-DEPLOY-16, INV-DEPLOY-11
 """OPS-DEPLOY [config]: the worker-judge service, the agentnet addresses pinned to agent-proxy's CLIENTS, the
-judge-db network, agent-proxy's agentnet bind and the judge slots in the example configuration (ADR-0039 B7b)."""
+judge-db network, agent-proxy's agentnet bind and the judge slots in the example (ADR-0039 B7b)."""
 
 import ipaddress
 from typing import Any
@@ -39,7 +39,7 @@ def test_lane_service_is_the_worker_with_its_own_command_networks_and_memory() -
         k: v for k, v in worker.items() if k not in DIFFERING
     }
     assert lane["healthcheck"] == worker["healthcheck"]
-    assert not render(())["services"]["worker-judge"].get("volumes")  # base: none (the override adds the bind)
+    assert not render(())["services"]["worker-judge"].get("volumes")  # base: none; the override adds the bind
     assert int(lane["mem_limit"]) == 2 * 1024**3
     assert lane["memswap_limit"] == lane["mem_limit"]
     assert not lane.get("ports")
@@ -80,7 +80,8 @@ def test_agentnet_addresses_equal_the_proxy_client_table() -> None:
             assert all(a is not None for a in addresses.values()), addresses
             for name, address in addresses.items():
                 ip = ipaddress.ip_address(str(address))
-                assert ip in AGENTNET and ip not in IP_RANGE, (name, address)
+                assert ip in AGENTNET, (name, address)
+                assert ip not in IP_RANGE, (name, address)
                 assert not services[name].get("network_mode"), name
                 assert not services[name].get("extra_hosts"), name
             assert {addresses["worker"]: "worker", addresses["worker-judge"]: "worker-judge"} == clients

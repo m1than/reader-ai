@@ -1,5 +1,5 @@
-"""SRV-EVENTS FR-EVENTS-33: `judge_requests`, the only place a `judge.find` query and its card text live (owner data,
-deleted with the user, at the job's end, or by the collectors past the deadline)."""
+"""SRV-EVENTS FR-EVENTS-33: `judge_requests`, the only place a `judge.find` query and its card text live
+(owner data, deleted with the user, at the job's end, or by the collectors past the deadline)."""
 
 from __future__ import annotations
 

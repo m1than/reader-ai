@@ -243,7 +243,7 @@ def _config() -> ReaderConfig:
 
 @asynccontextmanager
 async def _agent_provider(engine: AsyncEngine) -> AsyncIterator[Provider]:
-    """The production provider: the lane's own agent-proxy client (1 s issue timeout), closed after the call."""
+    """The production provider: the lane's agent-proxy client (1 s issue timeout), closed after the call."""
     from reader.agent.provider import AgentProvider
 
     proxy = proxy_client()
@@ -254,7 +254,7 @@ async def _agent_provider(engine: AsyncEngine) -> AsyncIterator[Provider]:
 
 
 def default_deps() -> Deps:
-    """Production wiring (V.kl-deploy-judge-lane): SRV-EVENTS' `judge_requests` store is the request source."""
+    """Production wiring (V.kl-deploy-judge-lane): SRV-EVENTS' `judge_requests` store serves the requests."""
     from reader.jobs.judge_requests import STORE
 
     return Deps(provider=_agent_provider, config=_config, requests=STORE)

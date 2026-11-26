@@ -287,7 +287,7 @@ class Proxy:
         token = self._user_token(handle)
         if token is None:
             return _error(409, "provider_missing")
-        # Purge, quota count and insert with no `await` between them: concurrent issues cannot both pass a quota.
+        # Purge, quota count and insert with no `await` between them: two issues cannot both pass a quota.
         self._purge()
         own = [d for d, e in self.tokens.items() if e.client == client.name]
         if len(own) >= client.quota:
@@ -563,7 +563,7 @@ def create_app(
 
 
 def _bind(value: str) -> tuple[str, int]:
-    """`<ipv4>:<port>` (FR-AGENT-3: OPS-DEPLOY passes the agentnet address); anything else is a usage error."""
+    """`<ipv4>:<port>` (FR-AGENT-3: OPS-DEPLOY passes the agentnet address); else a usage error."""
     host, sep, port = value.rpartition(":")
     try:
         address = ipaddress.IPv4Address(host)
@@ -582,7 +582,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--bind", type=_bind, default=("0.0.0.0", PORT))  # noqa: S104 - the loopback harness default
     host, port = parser.parse_args(sys.argv[1:] if argv is None else argv).bind
     logging.basicConfig(level=logging.INFO, stream=sys.stderr, format="%(name)s %(levelname)s %(message)s")
-    # proxy_headers=False: X-Forwarded-For is never read, so the client is the TCP source address (FR-AGENT-3).
+    # proxy_headers=False: X-Forwarded-For is never read; the client is the TCP source address (FR-AGENT-3).
     uvicorn.run(create_app(), host=host, port=port, access_log=False, log_config=None, proxy_headers=False)
 
 

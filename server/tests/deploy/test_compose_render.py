@@ -14,7 +14,6 @@ from .conftest import (
     DEPLOY,
     PROFILE_SETS,
     PROFILES,
-    SERVER_ROLES,
     SERVER_SERVICES,
     all_renders,
     render,
@@ -30,7 +29,8 @@ LOCAL_IMAGES = {
     "reader-caddy:local", "reader-embed:local",
     "reader-mlflow:local",  # FR-DEPLOY-13 (paired SRV-OBS change)
 }
-BASE = {"caddy", "api", "worker", "worker-judge", "postgres", "embed"}  # embed: SRV-SEARCH; worker-judge: FR-DEPLOY-16
+# embed: the paired SRV-SEARCH change (FR-DEPLOY-1); worker-judge: FR-DEPLOY-16
+BASE = {"caddy", "api", "worker", "worker-judge", "postgres", "embed"}
 
 
 @pytest.mark.parametrize(

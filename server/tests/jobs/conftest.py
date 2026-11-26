@@ -150,10 +150,10 @@ def effect_kind(max_attempts: int = 3, timeout_s: float = 30.0) -> Any:
     )
 
 
-# The lanes' stub kinds (FR-EVENTS-9 amended): by default `judge.find` on the `judge` queue, max attempts 1. Each
-# run records its request id in JUDGE_RUNS and, while it runs, counts in JUDGE_ACTIVE[queue] = [now, peak]; `hold`
-# names an asyncio.Event in JUDGE_GATES the run waits for; `write` commits a row through its own connection first
-# (FR-EVENTS-1 c); `fail` raises at the end.
+# The lanes' stub kinds (FR-EVENTS-9 amended): by default `judge.find` on the `judge` queue, max attempts 1.
+# Each run records its request id in JUDGE_RUNS and, while it runs, counts in JUDGE_ACTIVE[queue] (now, peak);
+# `hold` names an asyncio.Event in JUDGE_GATES the run waits for; `write` commits a row through its own
+# connection first (FR-EVENTS-1 c); `fail` raises at the end.
 JUDGE_RUNS: list[str] = []
 JUDGE_ACTIVE: dict[str, list[int]] = {}
 JUDGE_GATES: dict[str, asyncio.Event] = {}

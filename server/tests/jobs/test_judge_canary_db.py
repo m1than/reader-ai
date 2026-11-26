@@ -1,6 +1,6 @@
 """SRV-EVENTS [db]: no query or card text in the queue (INV-EVENTS-8, ADR-0039 B7b): a canary request through
-`put` + `enqueue` + a judge-lane run of SRV-AGENT's handler (a provider that fails) never reaches the job tables or a
-log record, and lives in `judge_requests` only until the run ends.
+`put` + `enqueue` + a judge-lane run of SRV-AGENT's handler (a provider that fails) never reaches the job
+tables or a log record, and lives in `judge_requests` only until the run ends.
 
 @trace INV-EVENTS-8
 """
@@ -22,7 +22,9 @@ QUERY = "zqcanaryquery hardened derivation"
 CARD_TEXTS = ("zqcanarycard-alpha text", "zqcanarycard-beta text")
 
 
-async def test_canary_text_never_reaches_the_queue_or_the_logs(pg: Pg, caplog: pytest.LogCaptureFixture) -> None:
+async def test_canary_text_never_reaches_the_queue_or_the_logs(
+    pg: Pg, caplog: pytest.LogCaptureFixture
+) -> None:
     from reader.agent import judges
 
     caplog.set_level(logging.DEBUG)
@@ -30,14 +32,16 @@ async def test_canary_text_never_reaches_the_queue_or_the_logs(pg: Pg, caplog: p
         owner = await _user(env)
         cards = tuple((card_id, text) for (card_id, _), text in zip(CARDS, CARD_TEXTS, strict=True))
         sha = judges.find_input_sha256(owner, QUERY, list(cards))
-        new = _new(owner, await _db_now(env) + timedelta(seconds=5), query=QUERY, cards=cards, input_sha256=sha)
+        deadline = await _db_now(env) + timedelta(seconds=5)
+        new = _new(owner, deadline, query=QUERY, cards=cards, input_sha256=sha)
         await _put(env, new)
         stored = await env.scalar("SELECT query FROM judge_requests")
         assert stored == QUERY  # the row is the only place the text lives
         await env.jobs.enqueue("judge.find", {"request_id": str(new.request_id), "input_sha256": sha})
         args = await env.rows("SELECT args::text FROM procrastinate_jobs WHERE task_name = 'judge.find'")
         payload: Any = args[0][0]
-        assert '"request_id"' in payload and '"input_sha256"' in payload
+        assert '"request_id"' in payload
+        assert '"input_sha256"' in payload
         await _work_judge_queue(env)
         canaries = (QUERY, *CARD_TEXTS)
         dumps = [

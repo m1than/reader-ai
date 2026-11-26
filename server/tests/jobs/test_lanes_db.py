@@ -1,6 +1,6 @@
-"""SRV-EVENTS [db]: the main and judge lanes (FR-EVENTS-9 amended for ADR-0039 B7b), the handler's own connections
-(FR-EVENTS-1 c), the reserved periodic tasks (FR-EVENTS-15 amended), the judge lane's reaper (FR-EVENTS-34) and lane
-separation (INV-EVENTS-9). Real `worker.run` tasks in process, plus one killed subprocess lane.
+"""SRV-EVENTS [db]: the main and judge lanes (FR-EVENTS-9 amended for ADR-0039 B7b), the handler's own
+connections (FR-EVENTS-1 c), the reserved periodic tasks (FR-EVENTS-15 amended), the judge lane's reaper
+(FR-EVENTS-34) and lane separation (INV-EVENTS-9). Real `worker.run` tasks in process, plus a killed lane.
 
 @trace FR-EVENTS-9 FR-EVENTS-1 FR-EVENTS-15 FR-EVENTS-34 INV-EVENTS-9
 """
@@ -75,7 +75,9 @@ async def _lane(env: Env, lane: str, **kw: Any) -> AsyncIterator[asyncio.Task[in
     from reader.jobs.worker import run
 
     stop = asyncio.Event()
-    task = asyncio.create_task(run(env.engine, target(env.pg), stop, env.jobs.catalog, hooks=(), lane=lane, **kw))
+    task = asyncio.create_task(
+        run(env.engine, target(env.pg), stop, env.jobs.catalog, hooks=(), lane=lane, **kw)
+    )
     try:
         yield task
     finally:
@@ -141,7 +143,8 @@ async def test_concurrency_four_on_the_judge_lane_and_one_on_main(pg: Pg) -> Non
             JUDGE_GATES["g"].set()
 
             async def all_done() -> bool:
-                keys = [_key(env, JUDGE, f"j{i}") for i in range(5)] + [_key(env, HOLD, f"h{i}") for i in range(3)]
+                keys = [_key(env, JUDGE, f"j{i}") for i in range(5)]
+                keys += [_key(env, HOLD, f"h{i}") for i in range(3)]
                 return all([await _done(env, k) for k in keys])
 
             await _until(all_done, 30)
@@ -150,13 +153,12 @@ async def test_concurrency_four_on_the_judge_lane_and_one_on_main(pg: Pg) -> Non
 
 
 async def test_an_idle_judge_lane_wakes_on_notify(pg: Pg) -> None:
-    async with jobs_env(pg, kinds=_kinds()) as env:
-        async with _lane(env, "judge"):
-            await asyncio.sleep(2.0)  # idle: listening
-            await env.jobs.enqueue(JUDGE, {"request_id": "wake"})
-            with anyio.fail_after(1.0):  # procrastinate's polling interval is 5 s: only the notify is this fast
-                while "wake" not in JUDGE_RUNS:  # noqa: ASYNC110
-                    await asyncio.sleep(0.02)
+    async with jobs_env(pg, kinds=_kinds()) as env, _lane(env, "judge"):
+        await asyncio.sleep(2.0)  # idle: listening
+        await env.jobs.enqueue(JUDGE, {"request_id": "wake"})
+        with anyio.fail_after(1.0):  # procrastinate polls every 5 s: only the notify is this fast
+            while "wake" not in JUDGE_RUNS:  # noqa: ASYNC110
+                await asyncio.sleep(0.02)
 
 
 async def test_own_connection_write_survives_a_failed_run(pg: Pg) -> None:
@@ -253,7 +255,8 @@ async def test_judge_gc_runs_on_an_idle_main_lane(pg: Pg) -> None:
 
         async def gc_succeeded() -> bool:
             n = await env.scalar(
-                "SELECT count(*) FROM procrastinate_jobs WHERE task_name = 'jobs.judge_gc' AND status = 'succeeded'"
+                "SELECT count(*) FROM procrastinate_jobs"
+                " WHERE task_name = 'jobs.judge_gc' AND status = 'succeeded'"
             )
             return bool(n)
 
@@ -284,7 +287,9 @@ async def test_the_judge_lane_reaps_while_main_is_busy(pg: Pg) -> None:
                 async def reaped() -> bool:
                     gone = await env.scalar("SELECT count(*) FROM judge_requests") == 0
                     outcome = await _outcome(env, _key(env, JUDGE, "stuck"))
-                    jobs = await env.rows("SELECT task_name, queue_name, status::text FROM procrastinate_jobs")
+                    jobs = await env.rows(
+                        "SELECT task_name, queue_name, status::text FROM procrastinate_jobs"
+                    )
                     seen[:] = [gone, outcome, jobs]
                     return gone and outcome == ("dead", "stalled")
 
@@ -299,7 +304,8 @@ async def _fetch_judge(env: Env) -> int:
     """Fetch the judge queue's next job under a registered worker (as that worker would); return its id."""
     worker_id = int(await env.app.job_manager.register_worker())
     job = await env.app.job_manager.fetch_job(queues=["judge"], worker_id=worker_id)
-    assert job is not None and job.task_name == JUDGE
+    assert job is not None
+    assert job.task_name == JUDGE
     return worker_id
 
 
@@ -312,8 +318,9 @@ async def _user(env: Env) -> uuid.UUID:
 async def _expired_row(env: Env, owner: uuid.UUID, seconds_past: int) -> uuid.UUID:
     rid = uuid.uuid4()
     await env.execute(
-        "INSERT INTO judge_requests (request_id, owner_id, line, run_id, run_cap_usd, input_sha256, created_at,"
-        " deadline, query, cards, pack_ids) VALUES (:r, :o, 'tutor', gen_random_uuid(), 0.5, repeat('a', 64),"
+        "INSERT INTO judge_requests (request_id, owner_id, line, run_id, run_cap_usd, input_sha256,"
+        " created_at, deadline, query, cards, pack_ids) VALUES (:r, :o, 'tutor', gen_random_uuid(), 0.5,"
+        " repeat('a', 64),"
         " now() - make_interval(secs => :p + 5), now() - make_interval(secs => :p), 'q', '[[\"c\", \"t\"]]',"
         " ARRAY['p1'])",
         r=rid, o=owner, p=seconds_past,
@@ -338,9 +345,8 @@ async def test_a_killed_judge_lane_ends_its_key_dead_without_a_second_run(pg: Pg
             proc.stdin.close()
 
             async def doing() -> bool:
-                return await env.rows("SELECT status::text FROM procrastinate_jobs WHERE lock = :k", k=key) == [
-                    ("doing",)
-                ]
+                rows = await env.rows("SELECT status::text FROM procrastinate_jobs WHERE lock = :k", k=key)
+                return rows == [("doing",)]
 
             await _until(doing, 30)
             await asyncio.sleep(1.0)

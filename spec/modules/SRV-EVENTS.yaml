@@ -755,5 +755,6 @@ audit_actions:
 # the B6 timeout and, on timeout, re-reads the recorded output once).
 # Red tests (2026-11-26): test_jobs_unit.py (KIND_MODULES, start hooks, reserved names, key retention),
 # test_lanes.py, test_lanes_db.py, test_judge_requests_db.py, test_judge_canary_db.py; the migration-head checks
-# name jobs_0004.
+# name jobs_0004. Green: lanes.py, judge_requests.py, jobs_0004, the collectors and the sweep exemption in queue.py,
+# worker.run(lane=); tests reformatted for ruff (line length, assertions split), no oracle changed.
 
