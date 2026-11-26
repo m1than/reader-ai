@@ -144,11 +144,6 @@ async def prune_starts(conn: Any, cutoff: datetime) -> None:
 
 # ADR-0039: alignment rows still running a day after their last step (FR-OBS-41), and refused or discarded
 # proposals past retention (FR-OBS-31 as amended; they hold no text).
-STEP_LOST_SQL: Final = (
-    "UPDATE judge_prompt_proposals SET state = 'refused', refusal = 'step_lost', candidate_text = NULL,"
-    " candidates_under_test = NULL, updated_at = now()"
-    " WHERE state = 'running' AND updated_at < now() - interval '1 day'"
-)
 PROPOSALS_SQL: Final = (
     "DELETE FROM judge_prompt_proposals WHERE state IN ('refused', 'discarded')"
     " AND updated_at < now() - make_interval(days => :d)"
@@ -156,8 +151,9 @@ PROPOSALS_SQL: Final = (
 
 
 async def postgres_retention(conn: Any, now: datetime, retention_days: int) -> None:
-    """FR-OBS-11 as amended: the Postgres deletes, each in its own committed transaction (so neither a later MLflow
-    failure nor the next step's failure undoes it), before any MLflow request; a failure is logged by code."""
+    """FR-OBS-11 as amended: the Postgres deletes, each in its own committed transaction (so neither a later
+    MLflow failure nor the next step's failure undoes it), before any MLflow request; a failure is logged by
+    code."""
     from sqlalchemy import text
 
     from reader.obs import judge_inputs
@@ -169,7 +165,7 @@ async def postgres_retention(conn: Any, now: datetime, retention_days: int) -> N
         await judge_inputs.delete_expired(c, retention_days)
 
     async def lost(c: Any) -> None:
-        await c.execute(text(STEP_LOST_SQL))
+        await align.mark_lost(c)
 
     async def proposals(c: Any) -> None:
         await c.execute(text(PROPOSALS_SQL), {"d": int(retention_days)})

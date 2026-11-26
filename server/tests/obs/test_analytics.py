@@ -137,7 +137,7 @@ def test_kl_catalogue_additions() -> None:
     writers = {e["source_type"]: e["writer"] for e in VEC4["assessments"]}
     assert writers == {"CODE": "obs.feedback", "LLM_JUDGE": "obs.judge_score"}
     files = {
-        f"reader.judge.{slot}": f"server/src/reader/obs/prompts/judge_{slot.replace('.', '_')}.md"
+        f"reader.judge.{slot}": f"server/src/reader/obs/judge_prompts/judge_{slot.replace('.', '_')}.md"
         for slot in ("eval.relevance", "eval.sufficiency", "eval.groundedness", "eval.self_contained",
                      "eval.citation_supports_claim", "align")
     }

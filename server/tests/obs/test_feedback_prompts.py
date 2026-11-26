@@ -365,7 +365,7 @@ def test_prompt_list_gains_the_judge_files() -> None:
     assert sorted(judge) == sorted(
         ["reader.judge.eval.relevance", "reader.judge.eval.sufficiency", "reader.judge.eval.groundedness",
          "reader.judge.eval.self_contained", "reader.judge.eval.citation_supports_claim", "reader.judge.align"])
-    assert all(v.startswith("server/src/reader/obs/prompts/judge_") for v in judge.values())
+    assert all(v.startswith("server/src/reader/obs/judge_prompts/judge_") for v in judge.values())
     assert "reader.judge.find" not in prompts.PROMPTS
 
 

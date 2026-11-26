@@ -47,6 +47,18 @@ def _obs() -> dict:  # type: ignore[type-arg]
 
 
 @requires_docker_cli
+def test_worker_judge_joins_otel_only() -> None:
+    """ADR-0039 (FR-OBS-8 as amended): `worker-judge` is on `otel` and on no other obs network (no route to
+    mlflow). OPS-DEPLOY adds the service in V.kl-deploy-judge-lane; until then the rendered model has none."""
+    services = _obs()["services"]
+    judge = services.get("worker-judge")
+    if judge is None:
+        pytest.skip("worker-judge is OPS-DEPLOY's paired change (V.kl-deploy-judge-lane)")
+    networks = set(judge.get("networks") or {})
+    assert "otel" in networks and not networks & {"obs", "obs-ui", "jaeger-in", "jaeger-ui"}
+
+
+@requires_docker_cli
 def test_services_only_in_the_profile() -> None:
     assert not set(OBS) & set(render(("kernels", "agents", "mcp"))["services"])
     assert set(OBS) <= set(_obs()["services"])

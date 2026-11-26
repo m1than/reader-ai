@@ -200,6 +200,51 @@ def test_the_version_key_is_the_sha256_of_its_canonical_inputs() -> None:
     want = hashlib.sha256(json.dumps(inputs, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     assert boot.version_key(**inputs) == want
     assert re.fullmatch(VEC5["patterns"]["version_key"], boot.short_key(want))
+    # ADR-0039 (FR-OBS-21 as amended): policy_version joins the inputs when SRV-SEARCH's policy exists
+    with_policy = {**inputs, "policy_version": "ef" * 32}
+    want_p = hashlib.sha256(json.dumps(with_policy, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    assert boot.version_key(**with_policy) == want_p != want
+
+
+POLICY = {"routes": {"exact": ["L1"]}, "thresholds": {"judge.find.sufficiency_threshold": 0.6}, "k": 8,
+          "rrf_k": 60, "facets_sha256": "a" * 64, "slots": {"judge.find": "claude-haiku-4-5"},
+          "embedding_models": ["bge-m3"], "prompts": {"reader.tutor": "b" * 64}}
+
+
+def test_policy_version_is_over_declared_data_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    versions = require("reader.obs.versions")
+    boot = require("reader.obs.bootstrap")
+    base = versions.policy_version(POLICY)
+    assert re.fullmatch(r"[0-9a-f]{64}", base) and versions.policy_version(dict(reversed(POLICY.items()))) == base
+    for key, other in (("k", 9), ("rrf_k", 61), ("facets_sha256", "c" * 64), ("embedding_models", ["e5"]),
+                       ("slots", {"judge.find": "claude-sonnet-5-5"}), ("prompts", {"reader.tutor": "d" * 64}),
+                       ("routes", {}), ("thresholds", {})):
+        assert versions.policy_version({**POLICY, key: other}) != base, key  # each input moves it
+    with pytest.raises(ValueError):
+        versions.policy_version({**POLICY, "code_version": "0.3.1"})  # the code version is never an input
+    assert versions.current_policy_version() is None and "policy_version" not in boot.current_inputs()
+    monkeypatch.setattr(versions, "POLICY", lambda: POLICY)
+    assert boot.current_inputs()["policy_version"] == base  # the LoggedModel params gain it
+
+
+def test_eval_sets_pin_and_record_shape() -> None:
+    """ADR-0039 (FR-OBS-22 as amended): brain-eval-v1 is unpinned until the owner accepts the set; a dataset
+    record never carries expected facts."""
+    assert VEC5["eval_sets"]["brain-eval-v1"]["sha256"] is None
+    assert set(VEC5["eval_record"]["inputs"]) == {"question_id", "question", "question_type", "chapter"}
+    assert set(VEC5["eval_record"]["expectations"]) == {"gold_pages"}
+    assert VEC5["eval_record"]["never_sent"] == ["expected_facts"]
+
+
+def test_bench_never_judges() -> None:
+    """ADR-0039 (FR-OBS-23 as amended): obs.bench scores from code only; model-judged scores come only from
+    obs.eval."""
+    import inspect
+
+    bench = require("reader.obs.bench")
+    source = inspect.getsource(bench)
+    for marker in ("LLM_JUDGE", "Provider", "reader.obs.eval", "judges", "mlflow.genai"):
+        assert marker not in source, marker
 
 
 def _experiments(state: dict[str, Any]) -> dict[tuple[str, str], Any]:

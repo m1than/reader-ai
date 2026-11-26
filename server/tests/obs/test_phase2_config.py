@@ -3,7 +3,7 @@ dependency on it, the worker's read-only mount of deploy/otel/mlflow-setup.yaml 
 (FR-OBS-27), no new healthchecks (FR-OBS-32), no obs service on a non-internal network (FR-OBS-33), the upgrade
 checklist's pin agreement (FR-OBS-34), the store-size constant (FR-OBS-31), the burst limits (FR-OBS-35).
 
-@trace FR-OBS-27 FR-OBS-29 FR-OBS-31 FR-OBS-32 FR-OBS-33 FR-OBS-34 FR-OBS-35 FR-DEPLOY-15 VEC-OBS-6
+@trace FR-OBS-27 FR-OBS-29 FR-OBS-31 FR-OBS-32 FR-OBS-33 FR-OBS-34 FR-OBS-35 FR-DEPLOY-15 VEC-OBS-6 FR-OBS-26
 """
 
 from __future__ import annotations
@@ -52,6 +52,16 @@ def test_worker_mounts_the_setup_file_read_only() -> None:
 
 def test_the_setup_file_is_vec_obs_6() -> None:
     assert load_yaml(DEPLOY / "otel" / "mlflow-setup.yaml") == load_yaml(FIXTURES / "mlflow-setup.yaml")
+
+
+def test_setup_names_the_eval_dataset_and_run_tag() -> None:
+    """ADR-0039 (FR-OBS-26 as amended): brain-eval-v1 and reader.eval_id; the eval Run kind is VEC-OBS-5's."""
+    from reader.obs import phase2
+
+    setup = load_yaml(FIXTURES / "mlflow-setup.yaml")
+    assert "brain-eval-v1" in setup["datasets"]["names"] and "reader.eval_id" in setup["run_tags"]
+    assert setup == phase2.SETUP  # the package's copy equals the fixture
+    assert phase2.VEC["runs"]["eval"]["tags"]["reader.kind"] == {"enum": ["eval"]}
 
 
 def test_the_8443_site_caps_bodies_at_10_mib() -> None:

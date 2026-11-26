@@ -1928,7 +1928,23 @@ tasks:
         judge task classes and the new caps in the config schema. FR-DEPLOY-3, VEC-DEPLOY-2; FR-EVENTS-9, -10, -11;
         INV-SANDBOX-3; FR-CLI-4, -5, -17, -18; SRV-CONFIG schema rows (FR-CONFIG-25, -26 only if the caps join the UI
         allow-list)" }
-  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: todo, needs: [V.owner.adr-0039],
+  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.owner.adr-0039],
+      branch: V/kl-obs-spans,
+      notes: "2026-11-26: SRV-OBS revision approved (deep-reviewer Fable design rounds 1-8, round 8 VERDICT approve on
+        bf94c6f), promoted (FR-OBS-36..43, INV-OBS-6..8, VEC-OBS-7/8; amendments to FR-OBS-7, 8, 11-16, 20-24, 26,
+        31, INV-OBS-1/2, VEC-OBS-1/4/5/6), Red then Green: migration obs_0003; find/pack span helpers and
+        allow-list (find.py, spans.py); judge_inputs sink (JudgeInputsSink); obs.eval/obs.eval_run/obs.judge_score/
+        obs.eval_sample with reader.obs.eval.start; judge labels, queue and item routes; obs.align with the guard
+        and the proposals export; judge prompts (judge_prompts/) and parsers; policy_version; retention's Postgres
+        deletes first. Waiting: the coordinator's code review before merge into V/slice-integration. Not wired on
+        this branch (ports default to NotWired): SRV-SEARCH find/card reader/policy, SRV-AGENT eval-line Provider and
+        judge.find worker capability (FR-OBS-41's judge.find half stays slot_unsupported), SRV-INGEST material
+        reader; budgets.eval_usd_per_run absent (eval starts refuse cap_missing); brain-eval-v1 pin null. Not done
+        here: the [image] tests of FR-OBS-36/-37/-39/-16 (opt-in, not written), the [live] obs_live.py find check,
+        WEB-MANAGE FR-MANAGE-6 tab, OPS-CLI `reader obs eval` / `reader obs proposals`, the per-job version key and
+        obs.setup enqueue on an unseen key (needs SRV-SEARCH's policy). Mismatch for SRV-AGENT: its lane calls
+        sink.copy(write, request, output) without the judge string; the sink reads it from judge_outputs in the same
+        transaction. Review model: Fable (deep-reviewer)",
       what: "SRV-OBS and WEB-MANAGE revision (~500–800 lines): TOOL/ROUTER/RETRIEVER spans with ids, counts, brain_version,
         policy_version and hashes only (INV-OBS-1/2 kept; question-derived filters as concept ids or hashes); the
         judge.find job as its own linked trace; a local judge-evaluation job kind obs.eval writing scores only

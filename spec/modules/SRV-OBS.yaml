@@ -783,7 +783,7 @@ requirements:
       ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): The parenthetical list of prompt files becomes 'VEC-OBS-4
       `prompts`': the list gains SRV-AGENT's `server/src/reader/agent/prompts/judge_find.md` and FR-OBS-43's six
       files (five `judge.eval.*` prompts in frame-and-section form and `judge_align.md`) under
-      `server/src/reader/obs/prompts/` (the `judge.link_type` and `ingest.context_prefix` files join when SRV-KB and
+      `server/src/reader/obs/judge_prompts/` (the `judge.link_type` and `ingest.context_prefix` files join when SRV-KB and
       SRV-INGEST add them; ADR-0039 B7a), registered by the same rules; no other change.
   - id: FR-OBS-18
     text: >-
@@ -1066,7 +1066,7 @@ requirements:
       The owner can still type a label or comment in MLflow's own trace view; that is the owner's own text in the
       owner's own store and is not read back (owner note).
       ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): (a) `owner_labels.target` gains `judge`, with the `slot` and
-      `note` columns of `proposed_tables`. (b) `POST /api/obs/labels` accepts {target: judge, id, ok, note?}: id is
+      `note` columns of `tables` (migration obs_0003). (b) `POST /api/obs/labels` accepts {target: judge, id, ok, note?}: id is
       a `judge_inputs` id (slot judge.find) or an `obs_eval_scores` id (slot from its row), i.e. FR-OBS-40's
       `ji:`/`es:` item ids; `note` is one line of at most 200 characters, judge targets only, stored in Postgres and
       never mirrored, traced, logged or put into job args; `reason` is refused for a judge target; 404 `not_found`
@@ -1704,7 +1704,9 @@ requirements:
   - id: FR-OBS-43
     text: >-
       Prompts and parsers of the `judge.eval.*` and `judge.align` slots, which SRV-AGENT leaves to SRV-OBS
-      (FR-AGENT-18): files `server/src/reader/obs/prompts/judge_eval_relevance.md`, `judge_eval_sufficiency.md`,
+      (FR-AGENT-18): files `server/src/reader/obs/judge_prompts/judge_eval_relevance.md` (a directory named
+      `judge_prompts`, not `prompts`, so it never shadows the module `reader.obs.prompts` for mypy; renamed at
+      Green), `judge_eval_sufficiency.md`,
       `judge_eval_groundedness.md`, `judge_eval_self_contained.md`, `judge_eval_citation_supports_claim.md` and
       `judge_align.md`, registered by FR-OBS-15 (VEC-OBS-4 `prompts`); each slot's version is SRV-AGENT's
       `judge_version(slot, prompt_bytes)` over the file's bytes, so a prompt edit is a new judge version next to

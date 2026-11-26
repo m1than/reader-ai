@@ -127,11 +127,11 @@ prompts:
   # ADR-0039 (FR-OBS-15 as edited, FR-OBS-43): SRV-OBS's judge prompts. SRV-AGENT's
   # server/src/reader/agent/prompts/judge_find.md (reader.judge.find) joins when SRV-AGENT's paired change lands on
   # this branch; judge.link_type and ingest.context_prefix join with SRV-KB and SRV-INGEST (ADR-0039 B7a).
-  reader.judge.eval.relevance: server/src/reader/obs/prompts/judge_eval_relevance.md
-  reader.judge.eval.sufficiency: server/src/reader/obs/prompts/judge_eval_sufficiency.md
-  reader.judge.eval.groundedness: server/src/reader/obs/prompts/judge_eval_groundedness.md
-  reader.judge.eval.self_contained: server/src/reader/obs/prompts/judge_eval_self_contained.md
-  reader.judge.eval.citation_supports_claim: server/src/reader/obs/prompts/judge_eval_citation_supports_claim.md
-  reader.judge.align: server/src/reader/obs/prompts/judge_align.md
+  reader.judge.eval.relevance: server/src/reader/obs/judge_prompts/judge_eval_relevance.md
+  reader.judge.eval.sufficiency: server/src/reader/obs/judge_prompts/judge_eval_sufficiency.md
+  reader.judge.eval.groundedness: server/src/reader/obs/judge_prompts/judge_eval_groundedness.md
+  reader.judge.eval.self_contained: server/src/reader/obs/judge_prompts/judge_eval_self_contained.md
+  reader.judge.eval.citation_supports_claim: server/src/reader/obs/judge_prompts/judge_eval_citation_supports_claim.md
+  reader.judge.align: server/src/reader/obs/judge_prompts/judge_align.md
 
 job_kinds: [obs.feedback, obs.prompts, obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score, obs.align]

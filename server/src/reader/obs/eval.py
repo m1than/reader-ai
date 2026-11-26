@@ -133,6 +133,16 @@ def tracing_on() -> bool:
 # --- start ---
 
 
+def eval_budget() -> tuple[Decimal | None, Mapping[str, Decimal]]:
+    """The `eval` cap per run (reader.yaml `budgets.eval_usd_per_run`, SRV-CONFIG paired) and each slot's
+    floor reserve (SRV-AGENT FR-AGENT-9). Until SRV-CONFIG's schema carries the cap, it is None: every start
+    is refused `cap_missing`, as SRV-AGENT refuses an eval-line call without one. Wiring sets `BUDGET`."""
+    return BUDGET
+
+
+BUDGET: tuple[Decimal | None, Mapping[str, Decimal]] = (None, {})
+
+
 def _questions(set_text: str) -> list[dict[str, Any]]:
     loaded = YAML(typ="safe").load(set_text) or {}
     found = loaded.get("questions") if isinstance(loaded, dict) else None

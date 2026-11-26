@@ -1,7 +1,7 @@
 """SRV-OBS ADR-0039 revision (V.kl-obs-spans): the judge stores.
 
-- `judge_inputs` (FR-OBS-38): one row per recorded `judge.find` output, ids, hashes and ordinals; the query only
-  for a consenting caller.
+- `judge_inputs` (FR-OBS-38): one row per recorded `judge.find` output, ids, hashes and ordinals; the query
+  only for a consenting caller.
 - `obs_eval_runs`, `obs_eval_records`, `obs_eval_scores` (FR-OBS-39): the record of a local judge evaluation.
 - `judge_prompt_proposals` (FR-OBS-41): alignment proposals; text only while running (guarded candidates) or
   once proposed.

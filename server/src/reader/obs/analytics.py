@@ -110,7 +110,7 @@ ASSESSMENTS: Final[Mapping[str, Mapping[str, Any]]] = {
 
 # FR-OBS-15 (as edited by ADR-0039): the static prompt templates, by name and repository path. SRV-AGENT's
 # judge_find.md joins when its paired change lands on this branch.
-_JUDGE_PROMPTS: Final = "server/src/reader/obs/prompts/"
+_JUDGE_PROMPTS: Final = "server/src/reader/obs/judge_prompts/"
 PROMPTS: Final[Mapping[str, str]] = {
     "reader.draft": "server/src/reader/pipeline/prompts/draft.v1.md",
     "reader.fact_check": "server/src/reader/pipeline/prompts/fact_check.v1.md",
