@@ -1862,7 +1862,7 @@ tasks:
       reason: "ADR-0039 is proposed; accepting or rejecting it is the owner's (H3). Every ADR-0039 task below waits",
       ask: "Review ADR-0039 (knowledge layers, brain/v1, amendment rules A1–A9; amends ADR-0001, 0005, 0007, 0008,
         0009, 0012, 0015, 0018, 0019, 0025, 0032, 0035, 0038); accept or reject it. Confirm or change the choices the
-        agent made (ADR-0039 'Decided by the agent', 23 items): worker-judge lane at concurrency 4 with LISTEN/NOTIFY;
+        agent made (ADR-0039 'Decided by the agent', 26 items): worker-judge lane at concurrency 4 with LISTEN/NOTIFY;
         no warm pool, one CLI spawned per call on today's FR-AGENT-3/-6 path, at most 4 live lane tokens, never evicting
         a worker token; query and card text in a judge_requests row, never in job args; judge timeout 2.2 s (basis
         n = 3); expanded-card score = parent x decay; labels owner.<slot>_ok, pass/fail only; alignment as a proposal
@@ -1877,7 +1877,11 @@ tasks:
         MLflow; an absolute judge-input cap of 3,000 tokens; personal-use full text only for an entitled caller (owner or
         own copy), everyone else the MCP row; the lane's token quota enforced in agent-proxy; late judge outputs kept for
         replay, job_keys pruned after a day; a per-token daily judge cap on MCP; evaluation and spikes on the internal
-        owner channel. The final integration PR to main waits for the owner (rule A9)" }
+        owner channel; a sliced judge input gives a mixed response (judged kept cards first, then the unjudged
+        remainder; judged per card, judge_ran per response); agent-proxy client identity from the agentnet source
+        address, revoke-all-for-client, no cross-client revoke, 30 s lane-token TTL; a kill deadline of 3 x the judge
+        timeout, insert-or-ignore late outputs, purge re-checked before writing. The final integration PR to main waits
+        for the owner (rule A9)" }
   - { id: V.kl-eval-set, stage: V, kind: setup, status: todo, needs: [V.owner.adr-0039],
       what: "ADR-0039 B9: extend questions-v2 (40, owner-accepted) to a typed set, 30 per type (exact, thematic,
         fact-check), expected facts in own words <= 300 chars, expected pages, topic branch; registered as an obs.bench
@@ -1953,7 +1957,9 @@ tasks:
         no L1 cards and no link into them, quotes <= 300 chars; tutor, pipeline and judge input for an entitled caller:
         full span text within their budgets); INV-SEARCH-1 kept until SRV-SHARE; the MCP walk test (incl. open on cited
         and guessed spn: ids) and a cross-user test; judge input capped at min(1.5 x channel budget, 3,000 tokens
-        initial), top slice only; per-channel response budgets; cache key with caller identity, roles and manifest version.
+        initial), top slice only; step 7 returns the judge's kept cards first, then the unjudged remainder by score,
+        judged per card (true only if read and kept), judge_ran per response, judged/unjudged token counts in the trace;
+        per-channel response budgets; cache key with caller identity, roles and manifest version.
         FR-SEARCH-3, -4, -5, -7, -8, -9, -20; INV-SEARCH-4; NFR-SEARCH-1; VEC-SEARCH-1, -2, -5" }
   - { id: V.kl-pipeline-checks, stage: V, kind: module, track: ai, status: todo, needs: [V.kl-search-find],
       what: "SRV-PIPELINE revision (~300–500 lines): checks after drafting cheapest first (rules, lab, claim support,
