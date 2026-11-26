@@ -1883,11 +1883,27 @@ tasks:
         address, revoke-all-for-client, no cross-client revoke, 30 s lane-token TTL; a kill deadline of 3 x the judge
         timeout, insert-or-ignore late outputs, purge re-checked before writing. The final integration PR to main waits
         for the owner (rule A9)" }
-  - { id: V.kl-eval-set, stage: V, kind: setup, status: todo, needs: [V.owner.adr-0039],
+  - { id: V.kl-eval-set, stage: V, kind: setup, status: done, needs: [V.owner.adr-0039],
+      accepted: "owner 2026-11-26 reviewed a 30-record sample (exact: v02, q10, e01, e02, e03, e04, v13, v26, q28, v39;
+        thematic: t01, v04, v08, v10, v15, v17, v24, v31, v36, v40; fact-check: f02, f04, f07, f10, f13, f18, f20, f23,
+        f27, f30): 'eval sample ok'. Frozen file sha256 1afade061858552c21d63f0eb907716fe7f2f48379e32629dc3ef919b67228a9.
+        Registration as an MLflow dataset and the pin come with the SRV-OBS amendment of V.kl-obs-spans",
+      review: "deep-reviewer (Fable), one round: changes (2 blocking: stale entry fields and a nonexistent spec id here;
+        the checker crashed without the PDF). Fixed: entry rewritten; checker prints usage and returns 2 without a PDF,
+        stops at a sha256 mismatch, refuses a non-mapping set, and checks `note` too",
       what: "ADR-0039 B9: extend questions-v2 (40, owner-accepted) to a typed set, 30 per type (exact, thematic,
         fact-check), expected facts in own words <= 300 chars, expected pages, topic branch; registered as an obs.bench
         dataset (ADR-0038) with question text, ids and gold pages; expected facts stay in the fixture and pass the
-        8-word verbatim check against the book; owner reviews 10 per type" }
+        8-word verbatim check against the book; owner reviews 10 per type",
+      result: "spec/fixtures/eval/pilot-eval-v1.yaml, accepted and frozen: 90 records, 30 exact, 30 thematic,
+        30 fact-check (claim_holds 14 true, 16 false); reused with their ids 39 of questions-v2 (v03 dropped, its
+        premise is unsupported; t01 used instead), 16 of search-bench-v1 (none of the 4 excluded for quoting), 34 new
+        (e01-e04, f01-f30); all 23 chapters; topic from a closed list of 24 branches, depth <= 3. v38's gold pages
+        extended to 866 (its list continues there). spec/fixtures/eval/check_eval_set.py against the local PDF
+        (sha256 matches): 0 issues; longest fact 232 characters; longest run shared with the book 4 words (questions)
+        and 6 words (facts), limit below 8. Nothing sent to MLflow yet. No test: no spec ID covers the checker; the
+        reviewer places its PDF-free rules (schema, counts, ids, fact length, origin identity, pin) in a unit test
+        under the SRV-OBS amendment, and the verbatim part stays a local pre-freeze gate" }
   - { id: V.spike.retrieval-ablation, stage: V, kind: spike, status: todo, needs: [V.kl-eval-set],
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
