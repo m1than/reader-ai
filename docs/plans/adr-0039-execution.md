@@ -86,7 +86,7 @@ Each becomes an `INV` line in its module's spec and a test.
 2. Removing a source is one manifest entry. Rows are deleted only by the background collector or the owner's purge, never on the request path.
 3. Selection over the graph and the embeddings uses only the greedy algorithms of B5. Enumerating subsets, ILP solvers and global recomputation are not used (tests may enumerate small instances, n ≤ 12).
 4. No free-form tags: closed vocabularies from the facets file; synonyms are concept aliases.
-5. At most one `judge.find` call per `find`, made last and only on the cards already selected (B6). On error, timeout or an exhausted budget the response carries `judged: false`.
+5. At most one `judge.find` call per `find`, made last and only on the cards already selected (B6). On error, timeout or an exhausted budget the response carries `judge_ran: false`.
 6. `personal-use` source text (Bashir) never enters the repository or MLflow (ids, counts and hashes only: INV-OBS-1/2, ADR-0032, ADR-0038). What a `personal-use` card carries is fixed per channel and per caller (ADR-0039 B8 table). An entitled caller is the pack's owner or a user who attached their own copy with the same material sha256 (ADR-0016); every other caller, including a course member reading the owner's packs, gets the MCP row on every channel:
 
    | Channel | L1 span cards | L2 summaries, L4 findings | Text bound |
@@ -298,7 +298,7 @@ The agent never does these for the owner: raise an ADR to `accepted`, `rejected`
 
 | Risk | Signal | Agent's action |
 | --- | --- | --- |
-| The judge call eats the `find` p95 budget | Haiku p95 in `judge-gate` > 2.0 s (measured 1.82–2.10 s per call) | `find` returns `judged: false` on timeout; the completion rate goes to the owner as a question, together with the option of a warm pool, which needs tokens issued without a reservation and is therefore an owner decision (B7b) |
+| The judge call eats the `find` p95 budget | Haiku p95 in `judge-gate` > 2.0 s (measured 1.82–2.10 s per call) | `find` returns `judge_ran: false` on timeout; the completion rate goes to the owner as a question, together with the option of a warm pool, which needs tokens issued without a reservation and is therefore an owner decision (B7b) |
 | The citation migration loses or shifts a citation | The seq-to-locator map is not 1:1 or a text hash differs | Stop the migration and block; published revisions keep resolving their `<sha>:<seq>` ids through the map |
 | More pipeline loops raise compile cost | A loop's reserve would cross `budget.compile_cap_usd` | The loop does not start (the cap rule); the lesson stops with its last revision and the run records why |
 | Prefixes and summaries on Haiku cost more than estimated (about 9,500 prefix calls for the pilot at 10.1 spans per page) | The two-chapter projection exceeds what is left of `test_budget_usd` or the `index` cap | Stop after two chapters, block with the number, ask for a top-up |
