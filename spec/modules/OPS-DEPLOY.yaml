@@ -601,7 +601,7 @@ proposed_invariants:
   - id: INV-DEPLOY-11
     text: >-
       `agentnet` identity. In every rendered model (INV-DEPLOY-1's sets): `agentnet`'s members are exactly worker,
-      worker-judge and agent-proxy; each has an `ipv4_address` in 10.230.7.0/24 and outside the network's ip_range;
+      worker-judge and, with the `agents` profile active, agent-proxy (without it, worker and worker-judge); each has an `ipv4_address` in 10.230.7.0/24 and outside the network's ip_range;
       the map {worker's address → worker, worker-judge's address → worker-judge} equals `reader.agent.proxy.CLIENTS`'
       address → client-name map exactly (SRV-AGENT FR-AGENT-3, proposed); agent-proxy's `--bind` host equals its
       agentnet address; the network's gateway (10.230.7.1, explicit in `ipam`) is not a `CLIENTS` address; no
