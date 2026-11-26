@@ -6,6 +6,7 @@ date: YYYY-MM-DD
 verified_by: ""             # test, gate, spike or CI job that confirms the decision. Required for accepted
 revisit_when: ""            # numeric condition that reopens the decision. Required for accepted
 supersedes: []
+amends: []                  # earlier ADRs this one changes by delta (ADR-0039 rules A2–A3); list them in an Amends table
 ---
 
 ## Context

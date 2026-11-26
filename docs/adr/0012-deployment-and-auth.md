@@ -14,6 +14,8 @@ revisit_when: "Moving from the owner's Mac to a VPS (planned after load measurem
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): one more static Compose service, `worker-judge`, the judge lane for `judge.find`. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 Owner decision, 2026-11-20: start as containers, set up volumes properly, configure through Caddy, serve any UI as a self-hosted service. The owner works on macOS; macOS, Windows and Linux must be supported.
 
 ## Decision

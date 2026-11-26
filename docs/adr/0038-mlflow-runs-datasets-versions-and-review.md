@@ -10,6 +10,8 @@ supersedes: []
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): this ADR's `revisit_when` is met (a bench needs an LLM judge): a local worker job runs `judge.eval.*` and writes scores only; judge-named owner labels and judge-instruction alignment join the catalogue. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 The owner asked on 2026-11-24 to "use all advantages of MLflow to manage everything here as a dashboard": Runs for
 compile runs and imports, the bench sets as evaluation datasets with their results as evaluation runs, agent
 versions, labeling, budgets and alerts. He then added: "all MLflow configuration must be done properly so it is a

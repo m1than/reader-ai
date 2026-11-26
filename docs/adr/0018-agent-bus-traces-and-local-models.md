@@ -9,6 +9,8 @@ revisit_when: "The OpenTelemetry GenAI conventions publish a stable release, or 
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): a retrieval evaluation with LLM judges and a prompt no-regression rule move into v1, extending ADR-0038's bench runs; the general regression gate stays in v2. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 Owner decisions, 2026-11-20:
 
 - Everything runs on an agent bus, so that analysing material and building a course is itself an observable pipeline.
