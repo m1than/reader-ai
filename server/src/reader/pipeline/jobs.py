@@ -15,7 +15,7 @@ from pydantic import BaseModel, ConfigDict
 from reader.agent.errors import TransientAgentError
 from reader.jobs import JobKind
 from reader.pipeline.errors import TransientPipelineError
-from reader.pipeline.runs import KIND_STAGE, KIND_VERIFY, ensure_all
+from reader.pipeline.runs import KIND_STAGE, KIND_VERIFY, cancel_legacy, ensure_all
 from reader.pipeline.runtime import Runtime, configure
 from reader.pipeline.steps import handle
 
@@ -73,7 +73,9 @@ JOB_KINDS: Final = (
 
 
 async def on_worker_start(jobs: Any) -> None:
-    """FR-PIPELINE-6: ensure every unfinished run at worker start."""
+    """FR-PIPELINE-20 revised (a): cancel the open runs of the approved order first; then FR-PIPELINE-6:
+    ensure every unfinished run."""
+    await cancel_legacy(jobs.engine, jobs)
     await ensure_all(jobs.engine, jobs)
 
 

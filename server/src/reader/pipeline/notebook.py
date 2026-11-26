@@ -24,8 +24,8 @@ from reader.pipeline.source import Span
 CELL_ID: Final = re.compile(r"[A-Za-z0-9_-]{1,64}")
 BASE_KEYS: Final = frozenset({"id", "kind", "source", "sectors"})
 CODE_KEYS: Final = frozenset(
-    {"provenance", "verified"}
-)  # written by code only; dropped from model output (S3)
+    {"provenance", "verified", "credibility"}
+)  # written by code only; dropped from model output (S3; FR-PIPELINE-3 (c) for credibility)
 CITING_KINDS: Final = frozenset({"explain", "changed", "erratum"})
 
 
@@ -60,10 +60,19 @@ def _reader(
     for key, value in cell.items():
         if key not in BASE_KEYS and key not in CODE_KEYS:
             reader[key] = copy.deepcopy(value)
+    if kind == "lab" and isinstance(reader.get("reference"), dict):
+        reference = reader["reference"]  # FR-PIPELINE-25: the alias becomes the span id; unknown → no span
+        if "span" in reference:
+            span = aliases.get(reference["span"]) if isinstance(reference["span"], str) else None
+            if span is None:
+                del reference["span"]
+            else:
+                reference["span"] = span.span_id
     if kind == "explain":
         for claim in reader.get("claims", []):
             if not isinstance(claim, dict):
                 raise invalid()
+            claim.pop("credibility", None)  # FR-PIPELINE-3 (c): only code writes it
             kept, dropped = expand_citations(claim.get("citations", []), aliases, title)
             claim["citations"] = kept
             if dropped:
@@ -155,10 +164,18 @@ def to_compact(notebook: Mapping[str, Any], aliases: Mapping[str, Span]) -> dict
         reader = dict(cell.get("metadata", {}).get("reader", {}))
         reader.pop("provenance", None)
         reader.pop("verified", None)
+        reader.pop("credibility", None)
         if "claims" in reader:
             reader["claims"] = [
-                {**c, "citations": [cite(x) for x in c.get("citations", [])]} for c in reader["claims"]
+                {
+                    **{k: v for k, v in c.items() if k != "credibility"},
+                    "citations": [cite(x) for x in c.get("citations", [])],
+                }
+                for c in reader["claims"]
             ]
+        if isinstance(reader.get("reference"), dict) and "span" in reader["reference"]:
+            ref = reader["reference"]
+            reader["reference"] = {**ref, "span": back.get(ref["span"], "unknown")}
         if "citations" in reader:
             reader["citations"] = [cite(x) for x in reader["citations"]]
         if isinstance(reader.get("source_ref"), dict):
