@@ -505,16 +505,18 @@ review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for 
 #     `reader.ingest.manifest.active_view` with `brain_version` (FR-INGEST-38), `request_activation(conn, owner_id,
 #     pack_id, overlays)` and `try_activate(conn, owner_id, pack_id)` that SRV-SEARCH's embed job calls in its run
 #     transaction (FR-INGEST-39), the legacy packs over backfilled locators (SRV-INGEST option (a)), the read helpers
-#     `reader.ingest.packs.pack_spans` / `pack_outline`, ADR-0039 P2 locator span ids with `quote_sha256`, the profile
-#     overlay (`pack_profiles`: license, language, role, reliability, as_of) read through one function
-#     `reader.ingest.packs.pack_profile(conn, owner_id, pack_id)` (paired: SRV-INGEST defines it, kl_paired_changes),
-#     the facets file `reader/ingest/facets.yaml` (FR-INGEST-37), GC and purge calling `search.forget_overlay` and
+#     `reader.ingest.packs.pack_spans` / `pack_outline`, `reader.ingest.overlays.begin` (registers a `building`
+#     overlay), ADR-0039 P2 locator span ids with `quote_sha256`, the profile overlay (table `pack_profiles`: license,
+#     language, role, reliability, as_of) read on the build path through one function
+#     `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` (named apart from the table; paired: SRV-INGEST
+#     defines it, kl_paired_changes), the facets file `reader/ingest/facets.yaml` (FR-INGEST-37), GC and purge calling `search.forget_overlay` and
 #     `search.forget_legacy` (FR-INGEST-44, -45), per-pack advisory locks (SRV-AGENT's `PackGuard` default). No pack
 #     generations exist (SRV-INGEST round 3 dropped rebuild-after-collect), so nothing here handles them.
 #     **Read paths:** every query path (candidates, `find`, `open`, cards) reads packs, spans, outline nodes,
-#     profiles and overlays only through the active view's pack and overlay ids (P5), never another overlay's rows.
-#     The build path (FR-SEARCH-5, -9) reads the one pack it builds for, which may not be active yet, through
-#     `pack_spans` and `pack_profile` for that (owner, pack), never another pack's rows.
+#     profiles and overlays only through the active view's pack and overlay ids (P5), never another overlay's rows;
+#     its `fts_config` is the one stored in the active vector overlay's rows. The build path (FR-SEARCH-5, -9) reads
+#     the one pack it builds for, which may not be active yet, through `pack_spans` and `profile_for_pack` for that
+#     (owner, pack), never another pack's rows.
 #   - SRV-AGENT (approved revision on V/kl-agent-judges): FR-AGENT-9's estimator (`bounds.chars_per_token_floor`
 #     2.0), FR-AGENT-18's `judge.find` slot, FR-AGENT-20's `find_input_sha256`, `judge_name`, `recorded`,
 #     FR-AGENT-21's job (args, deadline, notify), FR-AGENT-22's `render_find_input` (all data in the user message).
@@ -543,7 +545,7 @@ kl_revision:
   task: V.kl-search-find
   adr: [ADR-0039, ADR-0028, ADR-0007, ADR-0008, ADR-0015, ADR-0016, ADR-0025, ADR-0005]
   round_1: "deep-reviewer (Fable) on 4513cbe: changes, 10 blocking (owner-scoped vector keys; alignment with SRV-INGEST's seal / activate / forget; owner-channel judge context; owner budget; no response cache; budget minimum and card cost; k in step 7; quotes; H2 for every touched id; initial route table) and non-blocking 11–29; all applied"
-  round_2: "deep-reviewer (Fable) on 144b06d: changes, 8 blocking (request_activation naming the vectors overlay before try_activate; try_activate refusals roll the build back; one pack_profile read on the build path; the compatibility Hit with span_ids = [span_id]; INV-SEARCH-2 in this block; slice_empty; a deterministic per-pack quote allowance; response accounting on the whole canonical response), the `degraded` definition from the SRV-PIPELINE review, and the non-blocking notes; plus SRV-INGEST round 3 (import names its overlays via request_activation, no pack generations, buildable = in the head entry or the newest sealed); all applied"
+  round_2: "deep-reviewer (Fable) on 144b06d: changes, 8 blocking (request_activation naming the vectors overlay before try_activate; try_activate refusals roll the build back; one profile read (now profile_for_pack) read on the build path; the compatibility Hit with span_ids = [span_id]; INV-SEARCH-2 in this block; slice_empty; a deterministic per-pack quote allowance; response accounting on the whole canonical response), the `degraded` definition from the SRV-PIPELINE review, and the non-blocking notes; plus SRV-INGEST round 3 (import names its overlays via request_activation, no pack generations, buildable = in the head entry or the newest sealed); all applied"
   new_ids: [FR-SEARCH-21, FR-SEARCH-22, FR-SEARCH-23, FR-SEARCH-24, FR-SEARCH-25, FR-SEARCH-26, FR-SEARCH-27,
     FR-SEARCH-28, FR-SEARCH-29, FR-SEARCH-30, FR-SEARCH-31, FR-SEARCH-33, INV-SEARCH-9, INV-SEARCH-10,
     INV-SEARCH-11, INV-SEARCH-12, INV-SEARCH-13, INV-SEARCH-14, INV-SEARCH-15, NFR-SEARCH-5, NFR-SEARCH-6,
@@ -609,8 +611,7 @@ proposed_revisions:
       - "change server/tests/search/test_search_props.py: for any span text, the windows cover it and each passage ≤ 1,200 chars"
   - id: FR-SEARCH-4
     text: >-
-      **Tables.** Migration `search_0002` (branch `search`, re-parented onto the ingest head that creates packs and
-      overlays; this absorbs V.SRV-SEARCH-fk) creates `search_span_vectors(owner_id → users.id, overlay_id text,
+      **Tables.** Migration `search_0002` (branch `search`; parents below; this absorbs V.SRV-SEARCH-fk) creates `search_span_vectors(owner_id → users.id, overlay_id text,
       pack_id text, locator text, window_no int, char_start int, char_stop int, model text, fts_config text CHECK in
       ('russian','english','simple'), fts tsvector NOT NULL, embedding vector(1024) NOT NULL)`, primary key
       (owner_id, overlay_id, locator, window_no) — owner-scoped, because two owners of the same bytes share a pack id
@@ -638,14 +639,17 @@ proposed_revisions:
       SRV-INGEST's function (FR-INGEST-36) for kind `vectors` with inputs {model: the lock's id, params_sha256 of
       {max_seq_length, window size, overlap, minimum, fts_config}, prefix_overlay_id or null} and builder version
       `search.vectors/1`; SRV-SEARCH never hashes an overlay id itself. `fts_config` is FR-SEARCH-6's mapping of the
-      language that `reader.ingest.packs.pack_profile(conn, owner_id, pack_id)` returns for the pack being built.
+      language that `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` returns for the pack being built.
       **Buildable predicate** (one function, `buildable(conn, owner_id, pack_id)`, also used by FR-SEARCH-9): the
-      pack is in the owner's head entry; or else it is the material's newest sealed pack for that owner, not purged,
-      not collected, and its material is not soft-deleted. A legacy pack (SRV-INGEST option (a), over backfilled
-      locators) is buildable under the same rule. The handler: (1) checks the predicate and that the recomputed
-      overlay id equals the arg, else fails permanently with `overlay_superseded`; (2) a sealed overlay with this id
-      → runs (4)'s activation calls only and ends (no embed call); (3) otherwise registers the overlay `building`
-      through SRV-INGEST, windows the pack's spans read through `pack_spans` (FR-SEARCH-3), embeds in passage batches
+      pack is in the owner's head entry; or else it is the material's newest sealed pack for that owner — newest by
+      converter-version order (FR-INGEST-35's parse config), never by `sealed_at` — not purged, not collected, and its
+      material is not soft-deleted. A legacy pack (SRV-INGEST option (a), over backfilled locators) is buildable
+      under the same rule. The handler: (1) checks the predicate and that the recomputed overlay id equals the arg,
+      else fails permanently with `overlay_superseded`; an overlay with this id that GC collected also fails with
+      `overlay_superseded` (it is never rebuilt under the same id); (2) a sealed overlay with this id → runs (4)'s
+      activation calls only and ends (no embed call); (3) otherwise registers the overlay `building` with
+      `reader.ingest.overlays.begin(conn, owner_id, overlay_id, kind="vectors", pack_id, inputs, builder_version)`,
+      windows the pack's spans read through `pack_spans` (FR-SEARCH-3), embeds in passage batches
       of 8 and inserts every row with its owner and overlay id; (4) as the run transaction's last statements:
       `reader.ingest.overlays.seal(conn, owner_id, overlay_id)` (skipped in (2)), then
       `request_activation(conn, owner_id, pack_id, {"vectors": overlay_id})` naming exactly this overlay, then
@@ -659,7 +663,7 @@ proposed_revisions:
       fts in one row each) and is called only by SRV-INGEST's GC and purge under their locks (FR-INGEST-44, -45).
       Tracing as FR-OBS-13 (counts only). [db]
     tests_planned:
-      - "change server/tests/search/test_search_db.py: one build seals one overlay, then calls request_activation with exactly {vectors: <this overlay id>} and try_activate once, in the same transaction (spies; a rollback after them leaves neither the seal nor the pending row), and the appended entry names that vectors overlay; it appends no manifest entry itself and enqueues no job; a rerun with a sealed overlay makes no embed call and repeats only the two activation calls; a legacy pack over backfilled locators is built like any pack; a pack in the head entry is buildable even when a newer sealed pack exists; each failing predicate clause outside the head (building, purged, collected pack, deleted material, an older sealed pack) → overlay_superseded with no row; overlay id mismatch → overlay_superseded; try_activate returning pack_purged, pack_collected or not_sealed → overlay_superseded and zero vector rows, no seal; a purge of the pack committed during the build (two connections) → zero rows of the overlay after the job; try_activate returning deleted or seqmap_missing → committed, the overlay sealed and the activation pending; more than one batch, each ≤ 8 texts; a build writes only rows carrying its owner and overlay id; fts_config from pack_profile; forget_overlay deletes exactly that owner's rows of that overlay"
+      - "change server/tests/search/test_search_db.py: one build seals one overlay, then calls request_activation with exactly {vectors: <this overlay id>} and try_activate once, in the same transaction (spies; a rollback after them leaves neither the seal nor the pending row), and the appended entry names that vectors overlay; it appends no manifest entry itself and enqueues no job; a rerun with a sealed overlay makes no embed call and repeats only the two activation calls; a legacy pack over backfilled locators is built like any pack; a pack in the head entry is buildable even when a newer sealed pack exists; each failing predicate clause outside the head (building, purged, collected pack, deleted material, an older sealed pack) → overlay_superseded with no row; overlay id mismatch → overlay_superseded; try_activate returning pack_purged, pack_collected or not_sealed → overlay_superseded and zero vector rows, no seal; a purge of the pack committed during the build (two connections) → zero rows of the overlay after the job; try_activate returning deleted or seqmap_missing → committed, the overlay sealed and the activation pending; a collected overlay id → overlay_superseded, no row; newest chosen by converter-version order when sealed_at says otherwise; more than one batch, each ≤ 8 texts; a build writes only rows carrying its owner and overlay id; overlays.begin called once with kind vectors; fts_config from profile_for_pack; forget_overlay deletes exactly that owner's rows of that overlay"
       - "change server/tests/search/test_search_unit.py: the job's args and key are exactly {owner_id, pack_id, overlay_id} / [owner_id, overlay_id]; overlay_id comes from SRV-INGEST's function (monkeypatched spy)"
   - id: FR-SEARCH-7
     text: >-
@@ -671,7 +675,9 @@ proposed_revisions:
       when the route's `rrf` is true: the full-text list over the same windows (OR of quoted lexemes, unchanged) and
       weighted RRF with `rrf_k` and `w_dense` from policy (VEC-SEARCH-1); otherwise the dense order alone, as today.
       A span card's score is 1 − its cosine distance (dense order) or its fused score (rrf). Ties by locator. If the
-      embed call fails, the full-text list alone serves, with `degraded: true` (unchanged rule). L2 outline nodes
+      embed call fails, the full-text list alone serves, with `degraded: true` (unchanged rule); a span card's score
+      is then its best window's `ts_rank_cd(fts, tsq)`, ties by locator. The query's `fts_config` per pack is the one
+      stored in the active vector overlay's rows (the configuration its `fts` was built with). L2 outline nodes
       enter as candidates only when the route's layers include L2 and an L2 summary overlay is active (ablation);
       their score is the dense score of their summary vector. **Compatibility:** `search(owner_id, query, k,
       material_sha256=None)` keeps its signature and returns FR-SEARCH-7's candidates of the owner channel's
@@ -682,7 +688,7 @@ proposed_revisions:
       (`tutor/store.spans_by_ids` through `reader.ingest.spanref.resolve`, kl_paired_changes). [db] with a fake embed
       service.
     tests_planned:
-      - "change server/tests/search/test_search_db.py: candidates read only active packs of the caller; a span's score is its best window; rrf false → dense order with no fts rank; rrf true in a test policy → VEC-SEARCH-1's fusion; embed down → full text, degraded; filters applied before the scan (a filtered-out pack never appears even when nearest); search(owner_id, query, k, material_sha256) returns the same candidates as Hit items with span_ids == [span_id]"
+      - "change server/tests/search/test_search_db.py: candidates read only active packs of the caller; a span's score is its best window; rrf false → dense order with no fts rank; rrf true in a test policy → VEC-SEARCH-1's fusion; embed down → full text, degraded, each card scored by its best window's ts_rank_cd; the query's fts_config is the active overlay rows' even after a profile language change not yet activated; filters applied before the scan (a filtered-out pack never appears even when nearest); search(owner_id, query, k, material_sha256) returns the same candidates as Hit items with span_ids == [span_id]"
       - "add server/tests/search/test_search_unit.py [unit]: contract test — search.store.Hit is an instance of reader.tutor.jobs.Hit (runtime_checkable or a structural check of its attributes and types) and tutor.jobs.candidate_span_ids over Hit items returns the locators in rank order"
       - "change server/tests/search/test_search_props.py: FR-SEARCH-7 total order over windows with equal distances"
   - id: FR-SEARCH-8
@@ -700,14 +706,18 @@ proposed_revisions:
     text: >-
       **Status and ensure.** `search_status(owner_id, material_sha256)` takes the material's pack that satisfies
       FR-SEARCH-5's `buildable` predicate (the head entry's pack, else the newest sealed one), computes its current
-      vector overlay id through SRV-INGEST's function with the `fts_config` of `pack_profile` for that pack, and maps the job status of `[owner_id, overlay_id]` and the overlay state by VEC-SEARCH-4 (`ready` =
-      sealed and in the active entry). `ensure` and `on_worker_start` enqueue the current key for every pack that
-      satisfies the same predicate, legacy packs included (not only active packs: a sealed pack waits for its vector
-      overlay before `try_activate` can activate it) and whose current vector overlay is not sealed, with the same
-      dead-key rule.
+      vector overlay id through SRV-INGEST's function with the `fts_config` of `profile_for_pack` for that pack, and
+      maps the job status of `[owner_id, overlay_id]` and the overlay state by VEC-SEARCH-4 (`ready` = sealed and in
+      the active entry; `collected` when GC collected that overlay). `ensure` and `on_worker_start` enqueue the current
+      key for every pack that satisfies the same predicate, legacy packs included (not only active packs: a sealed
+      pack waits for its vector overlay before `try_activate` can activate it) and whose current vector overlay is
+      neither sealed nor collected (a collected overlay id is skipped: re-enqueueing it would only fail
+      `overlay_superseded`), with the same dead-key rule. `ensure(conn, owner_id, material_sha256)` is also a
+      function SRV-INGEST's restore calls when the restored material's pack has no sealed vector overlay and its key is
+      dead (a first pack whose embed died before the delete), so a restore never leaves the material dark for good.
       A material with no buildable pack prints `no_ingest` (exit 1), as before. [db]
     tests_planned:
-      - "change server/tests/search/test_search_db.py: status by the overlay key; worker start enqueues exactly the buildable packs without a sealed current overlay, a legacy pack included (a deleted material's, a purged, a collected and an older pack outside the head entry are skipped); the overlay id uses pack_profile's language; ensure on a dead key requeues it; no buildable pack → no_ingest; the new key shape [owner_id, overlay_id] is what SRV-INGEST's status and Retry read (paired)"
+      - "change server/tests/search/test_search_db.py: status by the overlay key; worker start enqueues exactly the buildable packs without a sealed current overlay, a legacy pack included (a deleted material's, a purged, a collected and an older pack outside the head entry are skipped, and a pack whose current overlay was collected); status collected for a collected overlay; the overlay id uses profile_for_pack's language; ensure called as a function on a restored material with a dead first-pack key requeues it; ensure on a dead key requeues it; no buildable pack → no_ingest; the new key shape [owner_id, overlay_id] is what SRV-INGEST's status and Retry read (paired)"
   - id: FR-SEARCH-20
     text: >-
       **Removed sources leave results through the manifest.** A material delete or restore is a manifest entry
@@ -727,16 +737,17 @@ proposed_revisions:
       - "change server/tests/search/test_search_props.py: two find calls → equal JSON; with a ReplayProvider-recorded output → equal JSON; ties broken by locator"
   - id: FR-SEARCH-6
     text: >-
-      **Full-text configuration.** A pack's `fts_config` comes from the `language` that
-      `reader.ingest.packs.pack_profile(conn, owner_id, pack_id)` returns — the head entry's profile overlay when the
-      pack is active, else the profile overlay named by its pending activation, else the one its import built
-      (SRV-INGEST `pack_profiles`, which takes the language from reader.yaml `materials[].language` or the upload):
-      `ru` → `russian`, `en` → `english`, anything else → `simple`. The build path (FR-SEARCH-5), status and ensure
-      (FR-SEARCH-9) and the query path all read it through this one function. A language change is a new profile overlay, hence
+      **Full-text configuration.** On the build path, a pack's `fts_config` comes from the `language` that
+      `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` returns — the head entry's profile overlay when
+      the pack is active, else the profile overlay named by its pending activation, else the one its import built
+      (SRV-INGEST table `pack_profiles`, which takes the language from reader.yaml `materials[].language` or the
+      upload): `ru` → `russian`, `en` → `english`, anything else → `simple`. The build (FR-SEARCH-5) and status and
+      ensure (FR-SEARCH-9) read it through this one function and store it in each vector row; the query path reads the
+      `fts_config` of the active vector overlay's rows (FR-SEARCH-7), never the profile. A language change is a new profile overlay, hence
       a new vector overlay id (FR-SEARCH-5 inputs) and a re-embed through `ensure`; until it is sealed and activated
       the old vector overlay stays active, so the material stays searchable in its old configuration. [db]
     tests_planned:
-      - "change server/tests/search/test_search_db.py: fts_config from pack_profile in each of its three cases (active head profile, pending activation's profile, the import's profile of a never-activated pack); a profile language change gives a new vector overlay id and leaves the old overlay serving until activation"
+      - "change server/tests/search/test_search_db.py: build-path fts_config from profile_for_pack in each of its three cases (active head profile, pending activation's profile, the import's profile of a never-activated pack); a profile language change gives a new vector overlay id and leaves the old overlay serving until activation"
   - id: FR-SEARCH-10
     text: >-
       **Uploaded materials.** Unchanged in effect: an upload's language reaches the profile overlay through SRV-INGEST
@@ -798,9 +809,9 @@ proposed_revisions:
     tests_planned:
       - "change server/tests/search/test_search_local.py: count truncated windows instead of chunks"
   - id: VEC-SEARCH-4
-    becomes: "spec/fixtures/SRV-SEARCH/status-map.yaml keyed by the overlay: job status × overlay state (none, building, sealed not active, sealed and active) → none | queued | running | ready | dead"
+    becomes: "spec/fixtures/SRV-SEARCH/status-map.yaml keyed by the overlay: job status × overlay state (none, building, sealed not active, sealed and active, collected) → none | queued | running | ready | dead | collected"
     tests_planned:
-      - "change server/tests/search/test_search_unit.py: VEC-SEARCH-4 over the overlay states"
+      - "change server/tests/search/test_search_unit.py: VEC-SEARCH-4 over the overlay states, including collected → collected whatever the job status"
   - id: VEC-SEARCH-1
     becomes: "unchanged cases; the test reads rrf_k and w_dense from policy/policy.json and pins them equal to the fixture's"
     tests_planned:
@@ -1009,18 +1020,24 @@ proposed_requirements:
       and repeated calls never reveal a different window; a non-L1 card carries at most `quotes_per_card_max` quoted
       citations (initial 1; further citations carry `spn` and `quote_sha256` only), and its quotes count in the card's
       cost against its L2 text budget (FR-SEARCH-22). L2 cards in stage V cite the first non-empty span of their node.
-      **Quote allowance per pack (deterministic):** `quote_allowance(pack)` walks the pack's outline nodes in outline
-      order (pre-order, then outline path) and gives node n its quote (the full ≤ 300-code-point quote, never a
-      shorter one) while the cumulative quoted code points, counting each distinct cited span once, stay ≤
-      `walk_quote_fraction_max` (initial 10%) × the pack's total span text code points; every later node's citation
-      carries `spn` and `quote_sha256` only. The allowance is a function of the sealed pack and the policy alone, so
-      no sequence of calls on any channel can obtain more quoted text of a pack than that fraction. Judge input follows
+      **Quote allowance per material (deterministic):** `quote_allowance(owner_id, material_sha256)` is computed over
+      the material's active pack only (an inactive pack serves no cards, so it has no allowance): it walks the pack's
+      outline nodes in outline order (pre-order, then outline path) and grants node n its quote while the cumulative
+      quoted code points stay ≤ `walk_quote_fraction_max` (initial 10%) × the pack's total span text code points. The
+      allowance always counts the **full** quote (the ≤ 300-code-point prefix of the cited span), each distinct cited
+      span once, even when a card later serves a shorter prefix of it because the L2 text budget cut it
+      (FR-SEARCH-22); so what any card serves is ≤ what was counted. The quote sits in `cite[0].quote` of the node's
+      card, the node's first citation; every non-granted node's citation carries `spn` and `quote_sha256` only. The
+      allowance is a function of the active pack and the policy alone, so no sequence of calls on any channel obtains
+      more quoted text of the material's active pack than that fraction (residual, declared: a pack switch after a
+      converter upgrade computes a new allowance over the new pack). The 10% is an engineering bound with no legal
+      basis claimed; it is tighter than ADR-0015, which bounds only each citation (300 characters). Judge input follows
       the channel's row for that caller (FR-SEARCH-28 (1)). Scope stays
       the caller's own manifest (INV-SEARCH-1) until SRV-SHARE; the entitlement function is still implemented and
       tested on constructed rows, so SRV-SHARE only widens the scope. [unit, db]
     tests_planned:
       - "add server/tests/search/test_cards_db.py [db]: entitled for the owner; for another user with a live own copy of the same sha256; not with a soft-deleted copy; not with only an uploads row or a sha256 given by the client; VEC-SEARCH-9's channel × entitled × license → card shape; a quote is the span's first ≤ 300 code points cut at whitespace (and hard without one); a card with two citations quotes one; the quote's estimate is inside the L2 text budget"
-      - "add server/tests/search/test_cards_props.py [unit] (Hypothesis): over generated outlines (deep trees, many short sections, sections sharing a first span, spans shorter and longer than 300 code points), quote_allowance's total distinct quoted code points ≤ 10% of the pack's text, nodes are granted in outline order with no gap (the granted set is a prefix of the order), and the result is identical across calls"
+      - "add server/tests/search/test_cards_props.py [unit] (Hypothesis): over generated outlines (deep trees, many short sections, sections sharing a first span, spans shorter and longer than 300 code points), quote_allowance's total distinct quoted code points (full quotes) ≤ 10% of the active pack's text, nodes are granted in outline order with no gap (the granted set is a prefix of the order), every served quote is a prefix of its counted full quote and sits in cite[0].quote, the result is identical across calls, and an inactive pack of the same material has no allowance"
   - id: FR-SEARCH-31
     text: >-
       **`open(caller, channel, id, depth=1, budget=None)` (B8).** `spn:` must equal the locator of a sealed span of an
@@ -1160,13 +1177,14 @@ proposed_vectors:
       - "test_judge_wait_db.py and test_find_unit.py read it (FR-SEARCH-28, -29)"
 
 kl_paired_changes:
-  - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "as drafted there (FR-INGEST-35..39, -44, -45; round-3 7282072), plus: the `overlays` registration API used by FR-SEARCH-5 step 3; the import names its profile (and tags) overlays through request_activation at its seal and enqueues search.embed {owner_id, pack_id, overlay_id} with the overlay id from FR-INGEST-36's function; `request_activation(conn, owner_id, pack_id, {vectors: id})` then `try_activate(conn, owner_id, pack_id)` callable inside the embed job's run transaction, try_activate returning its reason code (pack_purged, pack_collected, not_sealed make the embed job roll back); **new read** `reader.ingest.packs.pack_profile(conn, owner_id, pack_id)` → {license, language, role, reliability, as_of} from the head entry's profile overlay when the pack is active, else the pending activation's named profile overlay, else the import's (FR-SEARCH-5, -6, -9 read only this); the 'collected' state the buildable predicate reads (no generations); SRV-INGEST status (FR-INGEST-12, the upload view) and Retry (requeue_dead) read the search.embed key as [owner_id, overlay_id] instead of the ingest-based key; option (a): a legacy pack over backfilled locators that gets its own span-vector overlay (no legacy chunk rows as a vector overlay, no dual read path, one search-dark window per material, proposed_owner_notes); GC and purge call search.forget_legacy(conn, owner_id, ingest_id) for legacy chunk rows; the guarantee that materials.sha256 is computed by our code from the user's bytes (FR-SEARCH-30); INV-SEARCH-2 revised onto locators" }
+  - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "as drafted there (FR-INGEST-35..39, -44, -45, on V/kl-ingest-packs), plus: `reader.ingest.overlays.begin` (registration of a building overlay) used by FR-SEARCH-5 step 3; restore calls `reader.search.ensure` for a restored material whose pack has no sealed vector overlay and a dead embed key (FR-SEARCH-9); the import names its profile (and tags) overlays through request_activation at its seal and enqueues search.embed {owner_id, pack_id, overlay_id} with the overlay id from FR-INGEST-36's function; `request_activation(conn, owner_id, pack_id, {vectors: id})` then `try_activate(conn, owner_id, pack_id)` callable inside the embed job's run transaction, try_activate returning its reason code (pack_purged, pack_collected, not_sealed make the embed job roll back); **new read** `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` (named apart from the `pack_profiles` table) → {license, language, role, reliability, as_of} from the head entry's profile overlay when the pack is active, else the pending activation's named profile overlay, else the import's (FR-SEARCH-5, -6, -9 read only this); the 'collected' state the buildable predicate reads (no generations); SRV-INGEST status (FR-INGEST-12, the upload view) and Retry (requeue_dead) read the search.embed key as [owner_id, overlay_id] instead of the ingest-based key; option (a): a legacy pack over backfilled locators that gets its own span-vector overlay (no legacy chunk rows as a vector overlay, no dual read path, one search-dark window per material, proposed_owner_notes); GC and purge call search.forget_legacy(conn, owner_id, ingest_id) for legacy chunk rows; the guarantee that materials.sha256 is computed by our code from the user's bytes (FR-SEARCH-30); INV-SEARCH-2 revised onto locators" }
   - { spec: SRV-TUTOR, task: V.kl-ingest-packs (SRV-INGEST's paired reader change), change: "before SRV-SEARCH's Green lands: tutor/store.spans_by_ids reads locator span ids through reader.ingest.spanref.resolve (both forms until FR-INGEST-41 has run), because search() then returns locators (FR-SEARCH-7 compatibility); the Hit Protocol (span_id, span_ids) is unchanged" }
   - { spec: SRV-TUTOR, task: V.kl-tutor-find, change: "retrieval through find on channel tutor with judge_ctx (line tutor, the question's run) instead of search(owner_id, query, k, material_sha256), which stays until then (FR-SEARCH-7); tutor budget default 5,250 / max 10,500 estimator tokens against the 21,000-byte source cap (FR-TUTOR-5's drop rule kept); citations by locator; NFR-TUTOR-3 re-measured as the gate" }
   - { spec: SRV-OBS, task: V.kl-obs-spans, change: "FR-OBS-36 helpers called as in FR-SEARCH-33; policy_version over policy.declared(); find_routes and the facets values as enums; channel enum includes owner; thresholds read from the policy's `thresholds` keys judge.find.sufficiency_threshold and judge.eval.<name>.pass_threshold (FR-SEARCH-21); cards.read for FR-OBS-39/40; `reader.judge_skip` gains `slice_empty`; obs/runs.py's ingest Run reads of search_chunks and search_embeds (chunk count, embedded_at) move to the pack's span-vector overlay (row count of search_span_vectors for the overlay, the overlay's sealed_at), and the succeeded search.embed that enqueues obs.runs carries [owner_id, overlay_id]" }
   - { spec: SRV-AGENT, change: "ask: FR-AGENT-21 (10) notifies `<request_id>:<code>` with code in the closed set {ok, recorded, output_invalid, budget, saturated, quota_refused, expired, error} (codes only, never text); FR-SEARCH-28 reads a bare id as `ok` until it lands. Possible owner follow-up: an `owner` ledger line instead of `mcp` for the owner channel" }
   - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "judge_requests columns as FR-AGENT-21 reads them plus request_id and input_sha256 as written by FR-SEARCH-28; LISTEN channel judge_done" }
-  - { spec: SRV-PIPELINE, task: V.kl-pipeline-checks, change: "the fact-check route calls find(channel pipeline, question_type fact_check, judge_ctx line compile with the compile run)" }
+  - { spec: SRV-PIPELINE, task: V.kl-pipeline-checks, change: "the fact-check route calls find(channel pipeline, question_type fact_check, judge_ctx line compile with the compile run); it reads brain_version from the response (= reader.ingest.manifest.active_view's for the owner) and policy_version from the response (= reader.obs.versions.policy_version(reader.search.policy.declared())) and puts both into its step's input_sha256 (FR-PIPELINE-3)" }
+  - { spec: SRV-MCP, task: stage 7, change: "find and open on channel mcp; SRV-MCP builds the judge_ctx for every MCP find (line mcp, a run id per request, its run cap, lesson_id null, the user's daily budget plus the per-token daily judge cap of ADR-0039 B7) and passes it; FR-SEARCH-28's owner-channel default never applies to mcp" }
   - { spec: e2e, change: "e2e/web/live/owner.slice.ts reads locator span ids from /api/search" }
 
 kl_open_points:
@@ -1180,6 +1198,8 @@ proposed_owner_notes:
   - "set_cover is kept as a pure function with its bound test and no caller in stage V (FR-SEARCH-27 b); you may drop it, and SRV-KB would then add it with its caller."
   - "Search-dark window: SRV-SEARCH reads no legacy chunks, so each material is not searchable (tutor and search return nothing for it) once, while its first span-vector overlay is built: for the existing pilot that is its legacy pack over backfilled locators (SRV-INGEST option (a)); a later re-conversion (r3) switches packs only after the new overlay is sealed. The window is about the re-embed time, 26.8 min measured at 13 CPUs (spikes/retrieval-ablation). Run it when you are not studying."
   - "Long spans are embedded in windows of 1,200 characters (72 pilot spans are longer) rather than raising the embed service's limit (declared deviation)."
+  - "Tutor context in the interim: between this module's Green and V.kl-tutor-find, the tutor still calls search(k=8), which now returns 8 spans (about 223 characters each at the mean) instead of 8 chunks of up to 1,200 characters, so its source context is smaller than today until the tutor moves onto find with its own budget; NFR-TUTOR-3 is re-measured in V.kl-tutor-find."
+  - "Quotes on MCP: at most 10% of a material's text can be quoted across all calls (initial value). This is an engineering bound with no legal basis claimed; it is tighter than ADR-0015, which limits only each citation to 300 characters."
 
 proposed_defers:
   - "The caller of `greedy.set_cover` (atlas gaps, purchase proposals): SRV-KB, stage 7."
