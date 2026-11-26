@@ -1913,8 +1913,11 @@ tasks:
         fact-check question, so by recall only thematic can keep a prefix or summary. Paid arms projected: prefixes
         $3.73 with the chapter cached ($31.02 without), summaries $0.16, judge.eval sufficiency $3.94 (Sonnet),
         fact-check whole-section baseline $2.02; total $9.85",
-      ask: "Approve $12.00 from test_budget_usd for the paid arms, staged (2-chapter prefixes $0.39 first, stop rule
-        on cache reads), or $0.50 for stage 1 alone",
+      ask: "Spend approved by the owner 2026-11-26 ($12.00 from test_budget_usd, staged). Still needed: a permitted
+        credential path. The only agent-allowed Keychain runner is spikes/tutor-call/run.sh (allow rule pinned to
+        that script; `security find-generic-password` is denied), and the paid arms need their own runner. Owner:
+        allow `bash spikes/retrieval-ablation/paid.sh *` (same pattern as tutor-call: Keychain item piped on stdin
+        into a hardened --network-restricted spike container, never printed), or run the runner yourself",
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
         gain on its type is significant: exact McNemar p < 0.05 (at least a net 6 of 30, more with discordant losses);
