@@ -1793,7 +1793,8 @@ proposed_tables:
     (`<slot>@<version>`), value double precision, trace_id char(32), assessment_id text null, created_at;
     UNIQUE (eval_id, record_id, slot, judge) and UNIQUE (judge_input_id, slot, judge) (FR-OBS-39)" }
   judge_prompt_proposals: { owner_id: true, columns: "id uuid pk, owner_id, slot text, at_labels int, step int,
-    base_prompt_sha256 char(64), state text CHECK in (running, proposed, refused, exported, discarded), refusal
+    base_prompt_sha256 char(64), policy_version char(64) (pinned at step 0), state text CHECK in (running,
+    proposed, refused, exported, discarded), refusal
     text null CHECK in VEC-OBS-5 align.refusals, frame_sha256 char(64), work jsonb (step state: the two
     splits' label ids, the candidates' sha256s, and per held-out label its outcome for the current best and
     each candidate, label id → agree | disagree | missing; ids and enums only), candidate_text text
@@ -2029,8 +2030,10 @@ proposed_requirements:
         labelled judge version's recorded output wrong); zero training errors → refused `no_training_errors`,
         with no round and no re-run. Every step, step 0 included, first checks the current file: its
         `frame_sha256` against the row's (`frame_changed`) and sha256(section(slot)) against
-        `base_prompt_sha256` (`base_changed`), refusing at once on a difference. Step 0's refusals apply in
-        this order: `frame_changed`, `base_changed`, `slot_unsupported`, `too_few_labels`,
+        `base_prompt_sha256` (`base_changed`), and the current `policy_version` (FR-OBS-21) against the one
+        pinned on the row at step 0 (`policy_changed`), refusing at once on a difference. A slot whose policy
+        threshold (below) is missing is refused `threshold_missing`. Step 0's refusals apply in this order:
+        `frame_changed`, `base_changed`, `slot_unsupported`, `threshold_missing`, `too_few_labels`,
         `no_training_errors`. The current best is the base section (`candidate_text` NULL);
       - then for at most 3 rounds (initial), ending after the first round that does not improve the current
         best (a later round would re-sample the same errors with the same text): two proposing steps, each at
@@ -2042,9 +2045,12 @@ proposed_requirements:
         holds no error makes no call and ends with no candidate. Each
         parsed candidate that passes the guard is appended to `candidates_under_test` (at most 2); then
         scoring steps that re-run the slot's judge on the
-        held-out labels, first with the current best when no recorded output under the current judge version
-        exists for a label (the base's recorded outputs and scores count without a call when they do), then
-        with each candidate. Every re-run, of `judge.eval.*` and of `judge.find` alike, happens inside
+        held-out labels, first (round 1 only) with the base section where no recorded output under the
+        current judge version exists for a label (the base's recorded outputs and scores count without a call
+        where they do), then with each candidate. The recorded-output shortcut and base re-runs apply to the
+        base section only: a promoted candidate keeps its per-label held-out outcomes from `work` as the
+        current best's (no re-run, no shortcut), so round 2 compares against the promoted candidate's
+        measured rate, not the base's. Every re-run, of `judge.eval.*` and of `judge.find` alike, happens inside
         `obs.align` on the worker, in memory, through the `Provider` port on the `eval` line, with
         `thinking_off` and `abort_on_retry`, one after another (never in parallel), each with its own deadline
         of 8.3 s (initial: about 4 × the measured fresh-CLI Haiku result time of 1.82-2.10 s,
@@ -2062,9 +2068,12 @@ proposed_requirements:
         same kept card set (each kept ordinal mapped to its card id; order ignored) and the same side of the
         policy's sufficiency threshold (`sufficiency` ≥ threshold, or both absent); for `judge.eval.*`, the same
         side of the slot's policy pass threshold (score ≥ threshold). A label with `ok` true agrees iff eq(o, r);
-        a label with `ok` false agrees iff not eq(o, r). The same function scores the current best's re-runs
-        (when no recorded output under the current version exists) and every candidate's; where the recorded
-        output is under the current version, the current best agrees exactly when `ok` is true. Counting, per
+        a label with `ok` false agrees iff not eq(o, r). The same function scores the base's re-runs (when no
+        recorded output under the current version exists) and every candidate's; where the recorded output is
+        under the current version, the base agrees exactly when `ok` is true. Declared proxy limit: an
+        ok-false `judge.find` label agrees with any output that differs from the labelled one, including one
+        wrong in another way. The thresholds are the policy keys `judge.find.sufficiency_threshold` and
+        `judge.eval.<name>.pass_threshold` (SRV-SEARCH paired change). Counting, per
         candidate: a re-run that times out or fails at the provider is missing; a re-run whose output fails the
         parser counts as a disagreement; a candidate with more than 20 %
         (initial) of its held-out re-runs missing is `dropped_missing` (not compared), and a candidate the
@@ -2076,7 +2085,8 @@ proposed_requirements:
       {base_rate, proposed_rate, n_compared, n_train, n_heldout, n_missing, n_candidates, dropped_missing,
       dropped_guard, guard.<code> per guard code, rounds, skipped_not_entitled} (numbers only), or state
       `refused` with a code and the same counts and no text. Codes (VEC-OBS-5 `align.refusals`):
-      `too_few_labels`, `no_training_errors`, `slot_unsupported`, `frame_changed`, `base_changed`, `eval_cap`
+      `too_few_labels`, `no_training_errors`, `slot_unsupported`, `threshold_missing`, `frame_changed`,
+      `base_changed`, `policy_changed`, `eval_cap`
       when the `eval` cap is reached, the guard's own code when the final text fails the guard's second run,
       `provider_error` for a
       failed `judge.align` call, `output_invalid` for a refused `judge.align` parse, `step_lost` for a row
@@ -2104,7 +2114,8 @@ proposed_requirements:
       it equals the base section. The guard runs on each parsed candidate before it is stored in
       `candidates_under_test` (a refused candidate is `dropped_guard` and counted under `guard.<code>`) and
       again on the final text, where a refusal sets the end code to the guard's code and increments no
-      `guard.<code>` count. `n_candidates` counts parsed candidates before the guard. Instructions only: the proposal never carries appended examples. A
+      `guard.<code>` count. `n_candidates` counts parsed candidates before the guard. Instructions only:
+      the proposal never carries appended examples. A
       proposal is model text derived from queries and material: it lives only in Postgres
       (`candidates_under_test` and `candidate_text` while running, `proposed_text` after), is never traced,
       logged, posted to MLflow or put into job args, and is kept until the owner discards it.
@@ -2211,7 +2222,7 @@ proposed_vectors:
     source: "Hand-derived from FR-OBS-36 and -37: a recorded `find` (owner channel, a sliced judge, documents of every id form including sec:, con: and non-PDF spn: ids, 26 cards so the 25-document cap applies, and a stage-7 case whose identifier resolves to a term concept with Cyrillic text in its id, exported only as reader://h/<sha256>) and one pack build and link run, each as the caller's attributes and the expected exported span (validated keys, derived mlflow.spanType and mlflow.spanOutputs)"
     file: spec/fixtures/SRV-OBS/find-spans.yaml
   - id: VEC-OBS-8
-    source: "Synthetic text only (no material): alignment guard cases for FR-OBS-41 and INV-OBS-7, each a proposal, a label set and the expected verdict (verbatim_8, whole_input, demonstration, section_delimiter, no_change, accept), including `READER-INSTRUCTIONS` inside a word, a lone delimiter line, `READER-READER-INSTRUCTIONSINSTRUCTIONS` (one deletion leaves another occurrence) and the neutralised `READER_INSTRUCTIONS_DATA` (accepted); plus an `agree` table of (slot family, ok, recorded output, re-run output, threshold, expected agree | disagree) rows covering FR-OBS-41's agreement cases, including a 2-word query, a 7-word overlap and ё/soft-hyphen variants"
+    source: "Synthetic text only (no material): alignment guard cases for FR-OBS-41 and INV-OBS-7, each a proposal, a label set and the expected verdict (verbatim_8, whole_input, demonstration, section_delimiter, no_change, accept), including `READER-INSTRUCTIONS` inside a word, a lone delimiter line, `READER-READER-INSTRUCTIONSINSTRUCTIONS` (one deletion leaves another occurrence) and the neutralised `READER_INSTRUCTIONS_DATA` (accepted), a 2-word query, a 7-word overlap and ё/soft-hyphen variants; plus an `agree` table of (slot family, ok, recorded output, re-run output, threshold, expected agree | disagree) rows covering FR-OBS-41's agreement cases"
     file: spec/fixtures/SRV-OBS/align-guard.yaml
 
 # The new text of changed approved ids, applied at Red (with ADR-0039 added to `adr`, the tables above to
@@ -2345,7 +2356,7 @@ kl_in_place_edits:
       (FR-OBS-24 scope) and the judge target; `align` {refusals: [verbatim_8, whole_input, demonstration,
       no_change, guard_inputs_missing, too_few_labels, slot_unsupported, eval_cap, provider_error,
       output_invalid, step_lost, section_delimiter, frame_changed, base_changed, all_guard_refused,
-      no_training_errors],
+      no_training_errors, threshold_missing, policy_changed],
       drop_kinds [dropped_missing, dropped_guard], data_delimiter_replacement {READER-INSTRUCTIONS:
       READER_INSTRUCTIONS_DATA}, rerun_deadline_s 8.3,
       max_missing_share 0.2, scoring_step_budget_s 150, section_delimiters [`<<<READER-INSTRUCTIONS`,
@@ -2411,7 +2422,7 @@ kl_planned_tests:
   - { id: FR-OBS-39, level: image, file: server/tests/obs/test_images_kl.py, change: add, what: "an LLM_JUDGE assessment accepted by MLflow 3.18.0 and shown on the Quality dashboard next to CODE ones; the eval Run in experiment 0 lists its record traces; log-inputs of the bench-experiment dataset into that Run is pinned (or the declared fallback is exercised)" }
   - { id: FR-OBS-40, level: unit, file: server/tests/obs/test_judge_labels.py, change: add, what: "queue ordering over in-memory rows (classes, round-robin, newest first), item id parsing (ji:/es:), B8 text decision per card" }
   - { id: FR-OBS-40, level: db, file: server/tests/obs/test_judge_labels_db.py, change: add, what: "owner-only and Origin checks, both item kinds, item text per B8 (another user's personal-use card gives no L1 text), 404 for expired, 409 for unconsented and unresolvable cards, cascade of sample scores, no-store header" }
-  - { id: FR-OBS-41, level: unit, file: server/tests/obs/test_align_guard.py, change: add, what: "VEC-OBS-8 verdicts, the split seeded by (slot, at_labels) capped at 70/30, too_few_labels below 10, greedy rounds bounded at 3 with 2 one-call proposing steps; counting rules over in-memory outcomes: timeout → missing, parse failure → disagreement, a candidate over 20 % missing dropped while the other is compared, rates over labels counted for both, a tie keeps the current best; agreement cases (VEC-OBS-8 `agree`): judge.find ok false with a re-run keeping a different card set → agree, the same set and side → disagree, ok true with the same set in another order → agree, the same set across the sufficiency threshold → disagree; judge.eval ok true, recorded 0.70 and re-run 0.71 on the same side of the threshold → agree, across it → disagree, ok false across it → agree; an unparsable re-run → disagree; the current best with a current-version recorded output agrees iff ok; step-0 refusal order (a case where several apply returns the first); if the current best is not the base → proposed; a final-text guard refusal sets its code without incrementing guard.<code>; n_candidates counts candidates before the guard; zero training errors (every training label ok true) → no_training_errors with no proposing call and no re-run; a round with no improvement ends the run (no round 2 or 3); a final text that fails the guard's second run → refused with that guard code; n_candidates counted; the end-code precedence: one scored and none better → no_change, all dropped_missing → provider_error, all dropped_guard → all_guard_refused, a mix → provider_error; guard.<code> counts in scores; training errors taken from the labelled version's recorded outputs in every round, and a half with no error makes no call and yields no candidate" }
+  - { id: FR-OBS-41, level: unit, file: server/tests/obs/test_align_guard.py, change: add, what: "VEC-OBS-8 verdicts, the split seeded by (slot, at_labels) capped at 70/30, too_few_labels below 10, greedy rounds bounded at 3 with 2 one-call proposing steps; counting rules over in-memory outcomes: timeout → missing, parse failure → disagreement, a candidate over 20 % missing dropped while the other is compared, rates over labels counted for both, a tie keeps the current best; agreement cases (VEC-OBS-8 `agree`): judge.find ok false with a re-run keeping a different card set → agree, the same set and side → disagree, ok true with the same set in another order → agree, the same set across the sufficiency threshold → disagree; judge.eval ok true, recorded 0.70 and re-run 0.71 on the same side of the threshold → agree, across it → disagree, ok false across it → agree; an unparsable re-run → disagree; the base with a current-version recorded output agrees iff ok; round 2 after a promotion compares against the promoted candidate's measured rate, not the base's, and re-runs nothing for it; step-0 refusal order (a case where several apply returns the first), threshold_missing for a slot without its policy key, policy_changed when the policy differs at a later step; if the current best is not the base → proposed; a final text that fails the guard's second run → refused with that guard code without incrementing guard.<code>; n_candidates counts parsed candidates before the guard; zero training errors (every training label ok true) → no_training_errors with no proposing call and no re-run; a round with no improvement ends the run (no round 2 or 3); the end-code precedence: one scored and none better → no_change, all dropped_missing → provider_error, all dropped_guard → all_guard_refused, a mix → provider_error; guard.<code> counts in scores; training errors taken from the labelled version's recorded outputs in every round, and a half with no error makes no call and yields no candidate" }
   - { id: FR-OBS-41, level: db, file: server/tests/obs/test_align_db.py, change: add, what: "the 50th judge label inserts the row and enqueues step 0 once, a relabel does not count, the 51st..99th enqueue nothing; a label whose judge_inputs row was made unlabelable by forget_queries is excluded at step 0; labels over a learner's personal-use pack without the owner's copy are excluded and no such card text reaches the stub provider; slot judge.find refused slot_unsupported at step 0 while the SRV-AGENT capability flag is off; (after that change) judge.find re-runs run in obs.align through the stub Provider on line eval, sequentially, with the 8.3 s deadline, thinking_off, abort_on_retry and run_id = the proposal id on every call (proposing ones included), a scoring step that re-enqueues after 150 s, write no judge_requests row, and after the alignment judges.recorded(owner, input, current judge) is unchanged for every labelled input and a live find on the same input never replays a candidate output; candidates_under_test holds at most 2 guarded candidates during a round and is emptied after it; candidate_text and candidates_under_test are NULL after proposed, refused and step_lost (the CHECK refuses otherwise); the candidate appears only between the delimiters of wrap(slot, ...); a stub model whose every reply is verbatim ends refused all_guard_refused with no text and guard.verbatim_8 counted; a frame edit between steps → frame_changed at the next step; a section edit between steps → base_changed at the next step; work holds per-label agree/disagree/missing outcomes only; eval_cap, provider_error and output_invalid outcomes; a lost step becomes step_lost via obs.retention; an accepted proposal row" }
   - { id: FR-OBS-42, level: unit, file: server/tests/obs/test_proposals.py, change: add, what: "file name and header (UNTRUSTED line) from a row" }
   - { id: FR-OBS-42, level: db, file: server/tests/obs/test_align_db.py, change: add, what: "export of the owner's rows only, guard rerun, guard_inputs_missing after expiry, frame_changed after a frame edit, base_changed after a section edit, the header names the file, frame and section, the body is the section only, state exported" }
@@ -2444,7 +2455,7 @@ kl_planned_tests:
   - { id: VEC-OBS-8, level: unit, file: server/tests/obs/test_align_guard.py, change: add, what: "every case's verdict" }
 
 kl_paired_changes:
-  - { spec: SRV-SEARCH, task: V.kl-search-find, change: "opens FR-OBS-36's spans through reader.obs.find helpers; publishes the route ids (find_routes) and the loaded policy for policy_version; a card-text-by-id reader for FR-OBS-39/40/41 that applies B8 entitlement" }
+  - { spec: SRV-SEARCH, task: V.kl-search-find, change: "opens FR-OBS-36's spans through reader.obs.find helpers; publishes the route ids (find_routes) and the loaded policy for policy_version; a card-text-by-id reader for FR-OBS-39/40/41 that applies B8 entitlement; the policy file declares `judge.find.sufficiency_threshold` and `judge.eval.<name>.pass_threshold` per judge.eval slot (initial values, hashed into policy_version), which FR-OBS-41's agreement and FR-OBS-40's queue read" }
   - { spec: SRV-AGENT, task: V.kl-agent-judges, change: "already planned there: slot names judge.eval.{relevance, sufficiency, groundedness, self_contained, citation_supports_claim} and judge.align on the eval line, JudgeInputsSink.copy(conn, request_row, output) inside the output transaction (SRV-OBS supplies reader.obs.judge_inputs.SINK), judge_version(slot, prompt_bytes) for SRV-OBS's files. To ask (the coordinator raises it): (1) `prompts/judge_find.md` becomes a fixed frame plus one instructions section between FR-OBS-43's delimiter lines, with SRV-AGENT's test that its production system prompt equals wrap(judge.find, section) byte for byte, and judge.find's input renderer puts all data in the user message with every `READER-INSTRUCTIONS` in a data value replaced by `READER_INSTRUCTIONS_DATA` (FR-OBS-43's rule; a unit case with both delimiter lines in a query and a card); (2) a `judge.find` call on the worker through the Provider port on line `eval` with a caller-given system prompt (only ever a wrap of that frame), thinking_off and abort_on_retry, not recorded to judge_outputs and not looked up there, plus a capability flag SRV-OBS reads; FR-OBS-41's judge.find half goes Red only after both are approved" }
   - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "catalogue gains kl_job_kinds (obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score, obs.align; queue obs, the worker) and the periodic obs.eval_sample entry (off by default); judge_requests is unchanged" }
   - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "pack.build spans; its purge calls reader.obs.judge_inputs.purge_pack under the pack locks; a material text reader for the guard" }
@@ -2490,6 +2501,8 @@ kl_review_round5:
   - { id: all, answer: "deep-reviewer round 5 on 6e3a5a7 (1 blocker): zero training errors refused at step 0 with no_training_errors (no round, no re-run), in align.refusals and the unit test; 'or no candidate at all' removed from the precedence. Non-blocking: n_candidates in scores as the refusal-rate denominator; a final-text guard refusal refuses with the guard's code; the work column comment states per-label outcomes; judge.align's system prompt is the file's bytes under the same data rule; a training error is a label with ok false; rounds end after the first round with no improvement; base_changed checked per step; review answers one key per round" }
 kl_review_round6:
   - { id: all, answer: "deep-reviewer round 6 on 304972f (1 blocker): agree(label, output) defined by the slot family's eq (judge.find: same kept card set and same side of the sufficiency threshold; judge.eval.*: same side of the pass threshold), ok true → eq, ok false → not eq, used for base and candidate re-runs; VEC-OBS-8 agree cases in the unit test. Non-blocking: proposed when the current best is not the base, else the precedence; step-0 refusal order; base_changed between steps in the db test; final-text guard refusal sets the code without a count, n_candidates before the guard; 'for every slot with a section'; long lines wrapped; review keys ordered by round" }
+kl_review_round7:
+  - { id: all, answer: "deep-reviewer round 7 on 013c88a (1 blocker): the recorded-output shortcut and base re-runs apply to the base section only; a promoted candidate keeps its work outcomes as the current best's, so round 2 compares against its measured rate; unit cases reworded and added. Non-blocking: threshold policy keys named in the SRV-SEARCH pair, threshold_missing at step 0, policy_version pinned on the row with policy_changed, the ok-false judge.find proxy limit declared, the VEC-OBS-8 sentence reordered, duplicated test clauses merged, line wrapped" }
 
 owner_notes:
   - "The dashboard is a second origin, https://localhost:8443, not https://localhost/traces/ (ADR-0032): MLflow's UI then runs its JavaScript outside the app's origin, so a flaw in it cannot call /api/* with your session (the app's Origin check refuses it). Your existing passkey session is reused: browsers send the localhost cookie to every port, and the api checks it, and the request's Origin, on every request to 8443."
