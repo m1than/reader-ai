@@ -1883,11 +1883,25 @@ tasks:
         address, revoke-all-for-client, no cross-client revoke, 30 s lane-token TTL; a kill deadline of 3 x the judge
         timeout, insert-or-ignore late outputs, purge re-checked before writing. The final integration PR to main waits
         for the owner (rule A9)" }
-  - { id: V.kl-eval-set, stage: V, kind: setup, status: todo, needs: [V.owner.adr-0039],
+  - { id: V.kl-eval-set, stage: V, kind: setup, status: blocked, needs: [V.owner.adr-0039],
       what: "ADR-0039 B9: extend questions-v2 (40, owner-accepted) to a typed set, 30 per type (exact, thematic,
         fact-check), expected facts in own words <= 300 chars, expected pages, topic branch; registered as an obs.bench
         dataset (ADR-0038) with question text, ids and gold pages; expected facts stay in the fixture and pass the
-        8-word verbatim check against the book; owner reviews 10 per type" }
+        8-word verbatim check against the book; owner reviews 10 per type",
+      result: "draft spec/fixtures/eval/pilot-eval-v1.yaml (branch V/kl-eval-set): 90 records, 30 exact, 30 thematic,
+        30 fact-check (claim_holds 14 true, 16 false); reused with their ids 39 of questions-v2 (v03 dropped, its
+        premise is unsupported; t01 used instead), 16 of search-bench-v1 (none of the 4 excluded for quoting), 34 new
+        (e01-e04, f01-f30); all 23 chapters; topic from a closed list of 24 branches, depth <= 3. v38's gold pages
+        extended to 866 (its list continues there). spec/fixtures/eval/check_eval_set.py against the local PDF
+        (sha256 matches): 0 issues; longest fact 232 characters; longest run shared with the book 4 words (questions)
+        and 6 words (facts), limit below 8. Not registered as an obs.bench dataset and nothing sent to MLflow: pinning
+        waits for the owner's review and the SRV-OBS amendment of a later ADR-0039 task. No test added: no spec ID
+        covers the checker yet",
+      reason: "ADR-0039 B9 and the plan: the owner reviews a sample of 30 (10 per type) before the set is frozen; the
+        ablation does not start before the owner's approval",
+      ask: "Review these 30 records in spec/fixtures/eval/pilot-eval-v1.yaml (question, gold pages, expected facts,
+        claim_holds) and approve or list fixes. exact: v02, q10, e01, e02, e03, e04, v13, v26, q28, v39. thematic:
+        t01, v04, v08, v10, v15, v17, v24, v31, v36, v40. fact-check: f02, f04, f07, f10, f13, f18, f20, f23, f27, f30" }
   - { id: V.spike.retrieval-ablation, stage: V, kind: spike, status: todo, needs: [V.kl-eval-set],
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
