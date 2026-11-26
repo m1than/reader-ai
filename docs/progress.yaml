@@ -92,7 +92,9 @@ tasks:
       accepted: "owner 2026-11-20 accepted ADR-0020 in chat ('3 - accept') and set its status: line with a one-line command (H3).
         Branch 0/python-3.14 (PR #14) moves the 3.13 pins: server requires-python, ruff target, mypy python_version, .python-version,
         uv.lock, AGENTS.md, roadmap 0.2, ADR-0006 runtime row note. Evidence: Docling + EasyOCR run on python:3.14-slim-trixie
-        (ingest-docling). Kernel-roundtrip re-run on 3.14 still pending (ADR-0020 evidence table).",
+        (ingest-docling). Kernel-roundtrip re-run on 3.14: PASS on 2026-11-26 (branch V/adr-0020-closeout,
+        spikes/kernel-roundtrip/results-314: 60/60 cells, warm pilot crates 0.98-0.99 s, cold peak 1,534 MiB of 2 GiB).
+        The ADR-0020 evidence-table amendment and its two open questions wait for the owner (H3).",
       pr: "https://github.com/m1than/reader-ai/pull/8", review: "deep-reviewer (Fable): approve, round 3",
       what: "owner 2026-11-20: use the latest LTS versions. Proposed ADR-0020: Node 26 LTS, Python 3.14 (3.15: 5 dependencies lack cp315 aarch64 wheels), Debian 13 trixie",
       note: "Done in this branch: web/ engines >=26 <27 and .nvmrc; CI reads web/.nvmrc (typecheck, vitest, storybook green on node 26.13.0).
