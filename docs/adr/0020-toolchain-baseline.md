@@ -8,6 +8,8 @@ revisit_when: "A new Node LTS line is promoted (next: Node 28, about 2027-10); e
 supersedes: []
 ---
 
+> Amendment (owner, 2026-11-26), evidence: both hypothesis rows are now measured on Python 3.14 / Debian 13. Kernel sandbox: `spikes/kernel-roundtrip` re-run on `python:3.14-slim-trixie` passes (RESULT.md "Re-run on Python 3.14", `results-314/`: 60/60 cells, warm pilot crates 0.98-0.99 s, cold peak 1,534 MiB of 2 GiB). OCR path: `spikes/ingest-docling` runs on 3.14 (RESULT.md). No image stays on 3.13. Open question 1 is settled by practice: shipped images in `sandbox/` and `deploy/` pin their base by digest. Open question 2 (`tools/` on Node 26) stays open. The decision is unchanged.
+
 ## Context
 
 Owner decision, 2026-11-20: "Use latest LTS versions of libs etc."
