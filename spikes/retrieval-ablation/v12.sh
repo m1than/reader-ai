@@ -10,9 +10,9 @@ REPO="$(cd "$HERE/../.." && pwd)"
 ART="$REPO/data/spikes/retrieval-ablation/convert/out"
 WORK="$REPO/data/spikes/retrieval-ablation/work"
 TEXT="$REPO/data/spikes/retrieval-ablation/paid/text"
-for f in prefixes.jsonl summaries.jsonl; do
-  [[ -s "$TEXT/$f" ]] || { echo "missing $TEXT/$f: run the paid prefixes and summaries stages first" >&2; exit 2; }
-done
+# shellcheck source=gates.sh
+source "$HERE/gates.sh"
+require_prefixes_and_summaries "$HERE/results/paid"
 
 docker run --rm --network none -e HOME=/tmp \
   -v "$ART/spans.jsonl:/in/spans.jsonl:ro" -v "$ART/outline.json:/in/outline.json:ro" -v "$TEXT:/text:ro" \

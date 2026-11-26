@@ -30,6 +30,8 @@ TEXT="$REPO/data/spikes/retrieval-ablation/paid/text"
 NUM="$HERE/results/paid"
 IMAGE=reader-spike-compile          # the compile-cost image: python 3.14 + claude-agent-sdk, non-root
 TOTAL_USD=12.00
+# shellcheck source=gates.sh
+source "$HERE/gates.sh"
 
 case "$STAGE" in
   stage1) CAP=0.47; KILL_S=3600 ;;
@@ -45,10 +47,11 @@ for f in spans.jsonl outline.json; do
 done
 
 if [[ "$STAGE" == prefixes ]]; then
-  jq -e '.cache_rule_pass == true and .stopped == null' "$NUM/stage1/summary.json" >/dev/null 2>&1 \
-    || { echo "refused: stage1 has not passed (cache rule or cap); re-ask the owner" >&2; exit 3; }
+  passed "$NUM" stage1 \
+    || { echo "refused: stage1 has not passed (cap, cache rule or coverage); re-ask the owner" >&2; exit 3; }
 fi
 if [[ "$STAGE" == judge ]]; then
+  require_prefixes_and_summaries "$NUM"
   jq -e 'has("V1_prefix") and has("V2_summaries")' "$HERE/results/topk.json" >/dev/null 2>&1 \
     || { echo "refused: results/topk.json lacks V1/V2; run spikes/retrieval-ablation/v12.sh first" >&2; exit 3; }
 fi
@@ -69,7 +72,10 @@ docker run --rm --network none -v "$REPO/spec/fixtures/eval/pilot-eval-v1.yaml:/
   --entrypoint python reader-embed:local -c \
   'import json, yaml; print(json.dumps(yaml.safe_load(open("/in/eval.yaml", encoding="utf-8"))["questions"], ensure_ascii=False))' \
   > "$TEXT/../eval.json"
-[[ -f "$HERE/results/topk.json" ]] || echo '{}' > "$HERE/results/topk.json"
+# pricing.yaml as JSON for the cost cross-check in summary.json (usd_recomputed_total)
+docker run --rm --network none -v "$REPO/server/src/reader/agent/pricing.yaml:/in/pricing.yaml:ro" \
+  --entrypoint python reader-embed:local -c \
+  'import json, yaml; print(json.dumps(yaml.safe_load(open("/in/pricing.yaml"))["models"]))' > "$TEXT/../prices.json"
 
 docker build -q --platform linux/arm64 -t "$IMAGE" "$HERE/../compile-cost" >/dev/null
 security find-generic-password -s reader-ai -a claude-oauth-token -w | docker run --rm -i --platform linux/arm64 \
@@ -78,7 +84,8 @@ security find-generic-password -s reader-ai -a claude-oauth-token -w | docker ru
   --cap-drop ALL --security-opt no-new-privileges --memory 4g --memory-swap 4g --pids-limit 512 \
   -v "$HERE/paid.py:/app/paid.py:ro" -v "$REPO/server/src/reader/search/chunking.py:/in/chunking.py:ro" \
   -v "$ART/spans.jsonl:/in/spans.jsonl:ro" -v "$ART/outline.json:/in/outline.json:ro" \
-  -v "$TEXT/../eval.json:/in/eval.json:ro" -v "$HERE/results/topk.json:/work/topk.json:ro" \
+  -v "$TEXT/../eval.json:/in/eval.json:ro" -v "$TEXT/../prices.json:/in/prices.json:ro" \
+  -v "$HERE/results/topk.json:/work/topk.json:ro" \
   -v "$NUM:/out/numbers" -v "$TEXT:/out/text" \
   --entrypoint sh "$IMAGE" -c \
   "IFS= read -r CLAUDE_CODE_OAUTH_TOKEN && export CLAUDE_CODE_OAUTH_TOKEN && exec timeout -s KILL $KILL_S python /app/paid.py $STAGE"

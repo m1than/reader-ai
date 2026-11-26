@@ -3,36 +3,46 @@ claude-agent-sdk), started by paid.sh with the provider token on stdin; one CLI 
 
     python /app/paid.py <stage>      stage: stage1 | prefixes | summaries | judge | factcheck
 
-Inputs (read-only): /in/spans.jsonl, /in/outline.json, /in/eval.json, /in/chunking.py, /work (topk.json for the
-judge). Outputs:
-  /out/numbers/<stage>/calls.jsonl  one line per call: id, model, usage tokens, USD, wall s (committed; no text)
-  /out/numbers/<stage>/summary.json totals, cache rule, cap, pass/fail, ledger row (committed)
-  /out/text/                        model outputs (prefixes, summaries, judge reasons): derived from the book,
-                                    gitignored, never committed
-Env: STAGE_CAP_USD (this stage's cap), TOTAL_LEFT_USD (left of the owner's $12.00), CONCURRENCY.
-Stops before a call that could pass either cap, and stops a prefix stage when the shared chapter context is not
-read from cache (3 consecutive calls under 80% of the chapter's measured context).
+Inputs (read-only): /in/spans.jsonl, /in/outline.json, /in/eval.json, /in/prices.json, /in/chunking.py,
+/work/topk.json (judge). Outputs:
+  /out/numbers/<stage>/calls.jsonl  one line per call: ids, model, token counts, USD, wall s, enum verdicts
+                                    (committed; no free model text, no book text)
+  /out/numbers/<stage>/summary.json totals, cache rule, coverage, caps, cost cross-check, ledger row (committed)
+  /out/text/                        model outputs (prefixes, summaries): derived from the book; gitignored
+Env: STAGE_CAP_USD, TOTAL_LEFT_USD (left of the owner's $12.00 before this run), CONCURRENCY; tests only:
+CLI_PATH (a stub CLI).
+
+Caps: every call reserves its estimated cost inside the concurrency slot, before it starts; a call starts only if
+the stage's recorded spend + the reservations in flight + its own estimate stay within the stage cap and within what
+is left of $12.00. The system prompt (for prefixes: the whole chapter) is written to the tmpfs and passed as
+--system-prompt-file, never in argv (Linux caps one argument at 131,072 bytes).
 """
 
 from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import importlib.util
 import json
 import os
 import re
+import shutil
 import sys
 import time
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, TextBlock, query
 
 HAIKU, STRONG = "claude-haiku-5-5", "claude-sonnet-5-5"
-NUM, TXT, WORK = Path("/out/numbers"), Path("/out/text"), Path("/work")
+NUM, TXT, WORK, SYS = Path("/out/numbers"), Path("/out/text"), Path("/work"), Path("/tmp/system")
 CACHE_RULE = 0.80
-PILOT2 = (6, 13)  # analyze.py: the two chapters with the most evaluation questions (results/projection.json)
-K = 10
+STOP_AFTER = 3       # consecutive errors, or rows without a reported cost, before the stage stops
+PILOT2 = (6, 13)     # analyze.py: the two chapters with the most evaluation questions (results/projection.json)
+CLAIMS = ("holds", "fails", "undecided")
+FLOOR = {"stage1": Decimal("0.0005"), "prefixes": Decimal("0.0005"), "summaries": Decimal("0.002"),
+         "judge": Decimal("0.01"), "factcheck": Decimal("0.1")}  # first-call estimates (projection.json, rounded up)
 
 PREFIX_SYSTEM = """Ты пишешь краткий контекст к фрагменту книги для улучшения поиска по ней.
 Ниже вся глава книги. Пользователь пришлёт один фрагмент из этой главы.
@@ -65,7 +75,7 @@ def load_chunking():
     return module
 
 
-def book() -> tuple[list[dict], list[dict], dict[int, int], dict[int, list[dict]]]:
+def book() -> tuple[list[dict], list[dict], dict[int, list[dict]]]:
     spans = [json.loads(line) for line in open("/in/spans.jsonl", encoding="utf-8")]
     outline = json.loads(Path("/in/outline.json").read_text(encoding="utf-8"))
     starts = sorted(o["page"] for o in outline if o["level"] == 1 and o["page"])
@@ -76,138 +86,202 @@ def book() -> tuple[list[dict], list[dict], dict[int, int], dict[int, list[dict]
             last = next((x - 1 for x in starts if x > o["page"]), 10 ** 4)
             for p in range(o["page"], last + 1):
                 ch_of_page[p] = int(m.group(1))
-    indexed = [s for s in spans if s["text"].strip()]
     groups: dict[int, list[dict]] = {}
-    for s in indexed:
-        groups.setdefault(ch_of_page.get(s["page"], 0), []).append(s)
-    return spans, outline, ch_of_page, groups
+    for s in spans:
+        if s["text"].strip():
+            groups.setdefault(ch_of_page.get(s["page"], 0), []).append(s)
+    return spans, outline, groups
+
+
+def outline_nodes(outline: list[dict]) -> list[dict]:
+    return sorted((o for o in outline if o["level"] <= 4 and o["page"]), key=lambda o: (o["page"], o["seq"]))
 
 
 def chapter_text(group: list[dict]) -> str:
     return "\n".join(s["text"] for s in group)
 
 
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+PRICES = json.loads(Path("/in/prices.json").read_text()) if Path("/in/prices.json").exists() else {}
+
+
+def recompute(row: dict) -> Decimal | None:
+    """Cross-check of the CLI's total_cost_usd from the token counts and pricing.yaml (micro, ROUND_HALF_UP)."""
+    rates = PRICES.get(row["model"])
+    if not rates:
+        return None
+    prompt = row["input"] + row["cache_write"] + row["cache_read"]
+    if prompt > 100_000 and "above_100k" in rates:
+        rates = rates["above_100k"]
+    w1h = row.get("cache_write_1h", row["cache_write"])
+    w5m = row["cache_write"] - w1h
+    total = sum((Decimal(n) * Decimal(str(rates[k])) for n, k in (
+        (row["input"], "input"), (row["output"], "output"), (w1h, "cache_write_1h"), (w5m, "cache_write_5m"),
+        (row["cache_read"], "cache_read"))), Decimal(0))
+    return (total / Decimal(10 ** 6)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+
 class Ledger:
-    """Calls of one stage across runs (calls.jsonl is append-only); caps checked before every call."""
+    """The stage's calls across runs (calls.jsonl is append-only); spending checked and reserved before each call."""
 
     def __init__(self, stage: str) -> None:
+        self.stage = stage
         self.dir = NUM / stage
         self.dir.mkdir(parents=True, exist_ok=True)
         self.file = self.dir / "calls.jsonl"
-        self.rows = [json.loads(x) for x in self.file.read_text().splitlines()] if self.file.exists() else []
-        self.start_spent = self.spent()
-        self.start_calls = len(self.rows)
-        self.cap = float(os.environ["STAGE_CAP_USD"])
-        self.total_left = float(os.environ["TOTAL_LEFT_USD"])  # left of $12.00 before this run
-        self.lock = asyncio.Lock()
+        self.rows = read_jsonl(self.file)
+        self.start_spent, self.start_calls = self.spent(), len(self.rows)
+        self.cap = Decimal(os.environ["STAGE_CAP_USD"])
+        self.total_left = Decimal(os.environ["TOTAL_LEFT_USD"])
+        self.reserved = Decimal(0)
         self.stopped: str | None = None
+        self.errors_in_row = 0
+        self.nocost_in_row = 0
 
-    def spent(self) -> float:
-        return sum(r["usd"] or 0 for r in self.rows)
+    def spent(self) -> Decimal:
+        return sum((Decimal(str(r["usd"])) for r in self.rows if r.get("usd") is not None), Decimal(0))
 
-    def next_call_estimate(self, floor: float) -> float:
-        return max([floor] + [r["usd"] or 0 for r in self.rows[-50:]])
+    def estimate(self) -> Decimal:
+        seen = [Decimal(str(r["usd"])) for r in self.rows[-50:] if r.get("usd") is not None]
+        return max([FLOOR[self.stage], *seen])
 
-    def may_call(self, floor: float) -> bool:
+    def reserve(self) -> Decimal | None:
+        """Called inside the concurrency slot; no await between the check and the reservation."""
         if self.stopped:
-            return False
-        est = self.next_call_estimate(floor)
-        if self.spent() + est > self.cap:
-            self.stopped = f"stage cap {self.cap:.2f} USD reached (spent {self.spent():.6f})"
-        elif self.spent() - self.start_spent + est > self.total_left:
-            self.stopped = f"total cap of the owner's 12.00 USD reached (left {self.total_left:.6f} at start)"
-        return self.stopped is None
+            return None
+        est = self.estimate()
+        if self.spent() + self.reserved + est > self.cap:
+            self.stopped = f"stage cap {self.cap} USD reached (spent {self.spent()}, in flight {self.reserved})"
+        elif self.spent() - self.start_spent + self.reserved + est > self.total_left:
+            self.stopped = f"the owner's 12.00 USD would be passed (left {self.total_left} at the start of this run)"
+        if self.stopped:
+            return None
+        self.reserved += est
+        return est
 
-    async def add(self, row: dict) -> None:
-        async with self.lock:
-            self.rows.append(row)
-            with self.file.open("a") as f:
-                f.write(json.dumps(row) + "\n")
+    def add(self, row: dict, reservation: Decimal) -> None:
+        self.reserved -= reservation
+        if row.get("usd") is not None:
+            row["usd_recomputed"] = None if (r := recompute(row)) is None else float(r)
+        self.rows.append(row)
+        with self.file.open("a") as f:
+            f.write(json.dumps(row) + "\n")
+        self.errors_in_row = self.errors_in_row + 1 if row.get("error") or row.get("subtype") != "success" else 0
+        self.nocost_in_row = self.nocost_in_row + 1 if row.get("usd") is None else 0
+        if self.errors_in_row >= STOP_AFTER:
+            self.stopped = f"{STOP_AFTER} consecutive failed calls (last: {row.get('error') or row.get('subtype')})"
+        elif self.nocost_in_row >= STOP_AFTER:
+            self.stopped = f"{STOP_AFTER} consecutive calls without a reported cost"
+
+
+def system_file(text: str) -> str:
+    SYS.mkdir(parents=True, exist_ok=True)
+    path = SYS / (hashlib.sha256(text.encode()).hexdigest()[:16] + ".txt")
+    if not path.exists():
+        path.write_text(text, encoding="utf-8")
+    return str(path)
 
 
 async def call(model: str, system: str, prompt: str, max_usd: float, max_out: int) -> tuple[str, dict]:
     env = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1", "MAX_THINKING_TOKENS": "0",
            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_out)}
-    opts = ClaudeAgentOptions(system_prompt=system, tools=[], allowed_tools=[], setting_sources=[], max_turns=1,
-                              model=model, max_budget_usd=max_usd, env=env)
+    opts = ClaudeAgentOptions(system_prompt={"type": "file", "path": system_file(system)}, tools=[], allowed_tools=[],
+                              setting_sources=[], max_turns=1, model=model, max_budget_usd=max_usd, env=env,
+                              cli_path=os.environ.get("CLI_PATH") or None)
     t0 = time.monotonic()
-    text, result = "", None
-    async for msg in query(prompt=prompt, options=opts):
-        if isinstance(msg, AssistantMessage):
-            text += "".join(b.text for b in msg.content if isinstance(b, TextBlock))
-        elif isinstance(msg, ResultMessage):
-            result = msg
-    usage = (result.usage or {}) if result else {}
+    text, result, error = "", None, None
+    try:
+        async for msg in query(prompt=prompt, options=opts):
+            if isinstance(msg, AssistantMessage):
+                text += "".join(b.text for b in msg.content if isinstance(b, TextBlock))
+            elif isinstance(msg, ResultMessage):
+                result = msg
+    except Exception as exc:  # recorded as a failed call; the stage stops after STOP_AFTER in a row
+        error = type(exc).__name__
+    usage = (getattr(result, "usage", None) or {}) if result else {}
+    created = usage.get("cache_creation") or {}
     return text.strip(), {
-        "model": model, "wall_s": round(time.monotonic() - t0, 2),
+        "model": model, "wall_s": round(time.monotonic() - t0, 2), "error": error,
         "usd": getattr(result, "total_cost_usd", None), "subtype": getattr(result, "subtype", None),
-        "input": usage.get("input_tokens", 0), "output": usage.get("output_tokens", 0),
-        "cache_write": usage.get("cache_creation_input_tokens", 0),
-        "cache_read": usage.get("cache_read_input_tokens", 0)}
+        "input": usage.get("input_tokens", 0) or 0, "output": usage.get("output_tokens", 0) or 0,
+        "cache_write": usage.get("cache_creation_input_tokens", 0) or 0,
+        "cache_write_1h": created.get("ephemeral_1h_input_tokens", usage.get("cache_creation_input_tokens", 0)) or 0,
+        "cache_read": usage.get("cache_read_input_tokens", 0) or 0}
 
 
-def done_ids(path: Path) -> set:
-    if not path.exists():
-        return set()
-    return {json.loads(x)["id"] for x in path.read_text().splitlines()}
-
-
-async def append_text(path: Path, row: dict, lock: asyncio.Lock) -> None:
-    async with lock:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+def append_text(path: Path, row: dict) -> None:
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 # ---------------------------------------------------------------- context prefixes (V1)
-async def prefixes(stage: str, chapters: list[int], conc: int) -> dict:
-    _, _, _, groups = book()
-    led = Ledger(stage)
-    out = TXT / "prefixes.jsonl"
-    have = done_ids(out)
-    tlock = asyncio.Lock()
-    sem = asyncio.Semaphore(conc)
-    cache = {"read": 0, "expected": 0}
-    t_stage = time.monotonic()
+def prefixed_ids() -> set[int]:
+    return {r["id"] for r in read_jsonl(TXT / "prefixes.jsonl")}
 
-    async def one(n: int, system: str, s: dict, misses: list[int], ctx: list[int]) -> None:
-        if not led.may_call(0.0005):
+
+def cache_stats(rows: list[dict]) -> dict:
+    """Over every row of the stage, all runs: the chapter context each later call should have read from cache."""
+    expected = sum(r.get("ctx_expected", 0) for r in rows)
+    read = sum(r["cache_read"] for r in rows if r.get("ctx_expected", 0))
+    ratio = read / expected if expected else None
+    return {"cache_read_tokens": read, "cache_expected_tokens": expected,
+            "cache_ratio": None if ratio is None else round(ratio, 4),
+            "cache_rule_pass": ratio is not None and ratio >= CACHE_RULE}
+
+
+async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
+    _, _, groups = book()
+    out = TXT / "prefixes.jsonl"
+    have = prefixed_ids()
+    sem = asyncio.Semaphore(conc)
+    empty = 0
+    misses: list[int] = []
+
+    async def one(n: int, system: str, s: dict, ctx: int) -> None:
+        nonlocal empty
+        res = led.reserve()
+        if res is None:
             return
         text, row = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 300)
-        row |= {"id": s["seq"], "chapter": n}
-        await led.add(row)
-        if not text:
-            return
-        await append_text(out, {"id": s["seq"], "prefix": text}, tlock)
-        if ctx:  # not the chapter's first call: the chapter context should come from cache
-            cache["read"] += row["cache_read"]
-            cache["expected"] += ctx[0]
-            misses.append(1 if row["cache_read"] < CACHE_RULE * ctx[0] else 0)
-            if sum(misses[-3:]) == 3:
-                led.stopped = f"cache rule: 3 consecutive calls in chapter {n} read < 80% of the chapter from cache"
+        row |= {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text}
+        if text:
+            append_text(out, {"id": s["seq"], "prefix": text})
+        else:
+            empty += 1
+        led.add(row, res)
+        if ctx:  # a later call of the chapter: its context should come from cache
+            misses.append(1 if row["cache_read"] < CACHE_RULE * ctx else 0)
+            if sum(misses[-STOP_AFTER:]) == STOP_AFTER and not led.stopped:
+                led.stopped = (f"cache rule: {STOP_AFTER} consecutive calls in chapter {n} read < 80% of the "
+                               "chapter context from cache")
 
     for n in chapters:
         todo = [s for s in groups[n] if s["seq"] not in have]
         if not todo or led.stopped:
             continue
         system = PREFIX_SYSTEM.format(chapter=chapter_text(groups[n]))
-        misses: list[int] = []
-        ctx: list[int] = []
-        await one(n, system, todo[0], misses, ctx)        # the first call writes the chapter to the cache
-        first = led.rows[-1] if led.rows and led.rows[-1]["id"] == todo[0]["seq"] else {}
-        ctx.append(first.get("cache_write", 0) + first.get("cache_read", 0))
-        if ctx[0] == 0 and not led.stopped:
+        async with sem:
+            await one(n, system, todo[0], 0)    # this run's first call of the chapter writes (or reads) the cache
+        first = led.rows[-1] if led.rows and led.rows[-1]["id"] == todo[0]["seq"] else None
+        ctx = (first["cache_write"] + first["cache_read"]) if first else 0
+        if first and ctx == 0 and not led.stopped:
             led.stopped = f"cache rule: chapter {n}'s first call neither wrote nor read a cache"
 
         async def guarded(s: dict) -> None:
             async with sem:
-                await one(n, system, s, misses, ctx)
+                await one(n, system, s, ctx)
         await asyncio.gather(*(guarded(s) for s in todo[1:]))
-    ratio = cache["read"] / cache["expected"] if cache["expected"] else None
-    return {"cache_read_tokens": cache["read"], "cache_expected_tokens": cache["expected"],
-            "cache_ratio": round(ratio, 4) if ratio is not None else None,
-            "cache_rule_pass": ratio is not None and ratio >= CACHE_RULE,
-            "stage_wall_s": round(time.monotonic() - t_stage, 1), "concurrency": conc,
-            "spans_with_prefix": len(done_ids(out)), "ledger": led}
+    have = prefixed_ids()
+    stage_spans = [s["seq"] for n in chapters for s in groups[n]]
+    indexed = [s["seq"] for g in groups.values() for s in g]
+    return cache_stats(led.rows) | {
+        "concurrency": conc, "empty_returns_this_run": empty,
+        "stage_spans": len(stage_spans), "stage_spans_with_prefix": sum(x in have for x in stage_spans),
+        "book_indexed_spans": len(indexed), "book_spans_with_prefix": sum(x in have for x in indexed),
+        "coverage_complete": all(x in have for x in stage_spans)}
 
 
 # ---------------------------------------------------------------- L2 summaries (V2)
@@ -215,15 +289,13 @@ WORDS = {"leaf": 70, "inner": 200, "chapter": 200, "root": 350}  # about the B1 
 TOKENS = {"leaf": 100, "inner": 300, "chapter": 300, "root": 500}
 
 
-async def summaries(conc: int) -> dict:
-    spans, outline, _, _ = book()
-    led = Ledger("summaries")
+async def summaries(led: Ledger, conc: int) -> dict:
+    spans, outline, _ = book()
     out = TXT / "summaries.jsonl"
-    have = {r["id"]: r["summary"] for r in (json.loads(x) for x in out.read_text().splitlines())} if out.exists() else {}
-    tlock = asyncio.Lock()
+    have = {str(r["id"]): r["summary"] for r in read_jsonl(out)}
     sem = asyncio.Semaphore(conc)
-    t_stage = time.monotonic()
-    nodes = sorted((o for o in outline if o["level"] <= 4 and o["page"]), key=lambda o: (o["page"], o["seq"]))
+    empty = 0
+    nodes = outline_nodes(outline)
     by_page: dict[int, list[str]] = {}
     for s in spans:
         if s["text"].strip():
@@ -244,72 +316,89 @@ async def summaries(conc: int) -> dict:
     def kind(o: dict) -> str:
         return "chapter" if o["level"] == 1 else ("inner" if kids[o["seq"]] else "leaf")
 
-    async def one(node_id, k: str, own_text: str, children: list[str]) -> None:
-        if node_id in have or not led.may_call(0.002):
+    async def one(node_id: str, k: str, own_text: str, children: list[str]) -> None:
+        nonlocal empty
+        if node_id in have:
             return
         async with sem:
+            res = led.reserve()
+            if res is None:
+                return
             text, row = await call(HAIKU, SUMMARY_SYSTEM.format(words=WORDS[k]),
                                    SUMMARY_USER.format(own=own_text, children="\n\n".join(children)), 0.1,
                                    TOKENS[k] * 2)
-        row |= {"id": node_id, "kind": k}
-        await led.add(row)
-        if text:
-            have[node_id] = text
-            await append_text(out, {"id": node_id, "kind": k, "summary": text}, tlock)
+            row |= {"id": node_id, "kind": k, "empty": not text}
+            if text:
+                have[node_id] = text
+                append_text(out, {"id": node_id, "kind": k, "summary": text})
+            else:
+                empty += 1
+            led.add(row, res)
 
     for level in (4, 3, 2, 1):  # children before parents
-        await asyncio.gather(*(one(o["seq"], kind(o), own[o["seq"]], [have[c] for c in kids[o["seq"]] if c in have])
+        await asyncio.gather(*(one(str(o["seq"]), kind(o), own[o["seq"]],
+                                   [have[str(c)] for c in kids[o["seq"]] if str(c) in have])
                                for o in nodes if o["level"] == level))
-    top = [have[o["seq"]] for o in nodes if o["level"] == 1 and o["seq"] in have]
-    await one("root", "root", "", top)
-    return {"stage_wall_s": round(time.monotonic() - t_stage, 1), "concurrency": conc,
-            "nodes": len(nodes) + 1, "summaries": len(have), "ledger": led}
+    if not led.stopped:
+        await one("root", "root", "", [have[str(o["seq"])] for o in nodes if o["level"] == 1 and str(o["seq"]) in have])
+    return {"concurrency": conc, "empty_returns_this_run": empty, "nodes": len(nodes) + 1, "summaries": len(have),
+            "coverage_complete": len(have) == len(nodes) + 1}
 
 
 # ---------------------------------------------------------------- judge.eval sufficiency
 def parse_judge(text: str) -> dict:
+    """Only booleans, fact indices and the claim enum are kept; anything else is a parse failure."""
+    bad = {"sufficient": False, "facts_present": [], "claim": None, "parse_ok": False}
     try:
         d = json.loads(text.strip().removeprefix("```json").removesuffix("```").strip())
-        return {"sufficient": bool(d.get("sufficient")), "facts_present": sorted(set(int(x) for x in d.get("facts_present") or [])),
-                "claim": d.get("claim"), "parse_ok": True}
+        claim = d.get("claim")
+        if not isinstance(d.get("sufficient"), bool) or (claim is not None and claim not in CLAIMS):
+            return bad
+        return {"sufficient": d["sufficient"], "facts_present": sorted({int(x) for x in d.get("facts_present") or []}),
+                "claim": claim, "parse_ok": True}
     except (ValueError, TypeError, AttributeError):
-        return {"sufficient": False, "facts_present": [], "claim": None, "parse_ok": False}
+        return bad
 
 
-async def judge_calls(stage: str, items: list[tuple[str, dict, list[str]]], conc: int) -> dict:
-    led = Ledger(stage)
+async def judge_calls(led: Ledger, items: list[tuple[str, dict, list[str]]], conc: int) -> dict:
     have = {r["id"] for r in led.rows if r.get("parse_ok")}
     sem = asyncio.Semaphore(conc)
-    t_stage = time.monotonic()
 
     async def one(key: str, q: dict, cards: list[str]) -> None:
-        if key in have or not led.may_call(0.01):
+        if key in have:
             return
         facts = "\n".join(f"{i}. {f}" for i, f in enumerate(q["expected_facts"]))
         kind = "claim to verify" if q["type"] == "fact-check" else "question"
         prompt = (f"<{kind}>\n{q['question']}\n</{kind}>\n<expected_facts>\n{facts}\n</expected_facts>\n<cards>\n"
                   + "\n".join(f"<card n=\"{i}\">\n{c}\n</card>" for i, c in enumerate(cards)) + "\n</cards>")
         async with sem:
+            res = led.reserve()
+            if res is None:
+                return
             text, row = await call(STRONG, JUDGE_SYSTEM, prompt, 0.5, 600)
-        verdict = parse_judge(text)
-        if q["type"] == "fact-check" and verdict["claim"] in ("holds", "fails"):
-            verdict["claim_correct"] = (verdict["claim"] == "holds") == bool(q["claim_holds"])
-        await led.add(row | {"id": key, "qid": q["id"], "type": q["type"], "facts": len(q["expected_facts"]),
-                             **verdict})
+            verdict = parse_judge(text)
+            verdict["facts_present"] = [i for i in verdict["facts_present"] if 0 <= i < len(q["expected_facts"])]
+            if q["type"] == "fact-check":
+                # "undecided" or no claim counts as not correct (the route did not settle the claim)
+                verdict["claim_correct"] = (verdict["claim"] in ("holds", "fails")
+                                            and (verdict["claim"] == "holds") == bool(q["claim_holds"]))
+            led.add(row | {"id": key, "qid": q["id"], "type": q["type"], "facts": len(q["expected_facts"]),
+                           **verdict}, res)
 
     await asyncio.gather(*(one(k, q, c) for k, q, c in items))
-    return {"stage_wall_s": round(time.monotonic() - t_stage, 1), "concurrency": conc,
-            "judged": len({r["id"] for r in led.rows if r.get("parse_ok")}), "items": len(items), "ledger": led}
+    judged = {r["id"] for r in led.rows if r.get("parse_ok")}
+    return {"concurrency": conc, "items": len(items), "judged": len(judged),
+            "coverage_complete": all(k in judged for k, _, _ in items)}
 
 
 def cards_for_variants() -> list[tuple[str, dict, list[str]]]:
-    """One judge item per (question, distinct card set); the key names the set, variants map to keys in topk.json."""
-    spans, _, _, _ = book()
+    """One judge item per (question, distinct card set); prefixed variants never share an item with plain ones."""
+    spans, _, _ = book()
     by_seq = {s["seq"]: s for s in spans}
     chunking = load_chunking()
     chunks = chunking.chunk_spans([chunking.Span(s["seq"], s["page"], s["text"]) for s in spans], 1200, 200, 80)
-    pre = {r["id"]: r["prefix"] for r in map(json.loads, (TXT / "prefixes.jsonl").read_text().splitlines())}
-    summ = {str(r["id"]): r["summary"] for r in map(json.loads, (TXT / "summaries.jsonl").read_text().splitlines())}
+    pre = {r["id"]: r["prefix"] for r in read_jsonl(TXT / "prefixes.jsonl")}
+    summ = {str(r["id"]): r["summary"] for r in read_jsonl(TXT / "summaries.jsonl")}
     topk = json.loads((WORK / "topk.json").read_text())  # variant -> qid -> card ids ("c<i>", "s<seq>", "n<seq>")
     eval_q = {q["id"]: q for q in json.loads(Path("/in/eval.json").read_text())}
     prefixed = {"V1_prefix", "V2_summaries"}
@@ -319,63 +408,81 @@ def cards_for_variants() -> list[tuple[str, dict, list[str]]]:
         if kind == "c":
             return chunks[int(ident)].text
         if kind == "n":
-            return summ.get(ident, "")
+            return summ[ident]
         s = by_seq[int(ident)]["text"]
-        return f"{pre[int(ident)]}\n{s}" if with_prefix and int(ident) in pre else s
+        return f"{pre[int(ident)]}\n{s}" if with_prefix else s
 
     items, seen = [], set()
     for variant, per_q in topk.items():
         for qid, cards in per_q.items():
             key = f"{qid}|{'P' if variant in prefixed else ''}|{','.join(sorted(cards))}"
-            if key in seen:
-                continue
-            seen.add(key)
-            items.append((key, eval_q[qid], [text(c, variant in prefixed) for c in cards]))
+            if key not in seen:
+                seen.add(key)
+                items.append((key, eval_q[qid], [text(c, variant in prefixed) for c in cards]))
     return items
 
 
 def whole_chapter_items() -> list[tuple[str, dict, list[str]]]:
-    _, _, _, groups = book()
+    """Proxy for today's whole-section fact-check: the question's whole chapter as one card."""
+    _, _, groups = book()
     qs = [q for q in json.loads(Path("/in/eval.json").read_text()) if q["type"] == "fact-check"]
     return [(f"{q['id']}|whole-chapter", q, [chapter_text(groups[q["chapter"]])]) for q in qs]
 
 
 # ---------------------------------------------------------------- main
+def summarise(stage: str, led: Ledger, res: dict, t0: float) -> dict:
+    rows = led.rows
+    run_usd = led.spent() - led.start_spent
+    same = [r for r in rows if r.get("usd_recomputed") is not None]
+    disk = {p: shutil.disk_usage(p)._asdict() for p in ("/home/worker", "/tmp") if Path(p).exists()}
+    walls = sorted(r["wall_s"] for r in rows)
+    out = res | {
+        "stage": stage, "cap_usd": str(led.cap), "calls": len(rows), "calls_this_run": len(rows) - led.start_calls,
+        "usd_stage_total": str(led.spent()), "usd_this_run": str(run_usd),
+        "usd_recomputed_total": str(sum((Decimal(str(r["usd_recomputed"])) for r in same), Decimal(0))),
+        "usd_reported_same_rows": str(sum((Decimal(str(r["usd"])) for r in same), Decimal(0))),
+        "stopped": led.stopped, "run_wall_s": round(time.monotonic() - t0, 1),
+        "tokens": {k: sum(r.get(k, 0) or 0 for r in rows) for k in ("input", "output", "cache_write", "cache_read")},
+        "wall_s_per_call_p50": walls[len(walls) // 2] if walls else None,
+        "wall_s_per_call_p95": walls[int(len(walls) * 0.95)] if walls else None,
+        "failed_calls": sum(1 for r in rows if r.get("error") or r.get("subtype") != "success"),
+        "tmpfs_bytes": disk, "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")}
+    out["ledger_row"] = (f"- {{ task: V.spike.retrieval-ablation, usd: {run_usd}, date: {datetime.date.today()}, "
+                         f"funding: test_budget_usd, what: \"paid arm {stage}: {out['calls_this_run']} calls this run, "
+                         f"{len(rows)} in total; spikes/retrieval-ablation/results/paid/{stage}/\" }}")
+    return out
+
+
 async def main() -> None:
     stage = sys.argv[1]
     conc = int(os.environ.get("CONCURRENCY", "4"))
     TXT.mkdir(parents=True, exist_ok=True)
-    if stage == "stage1":
-        res = await prefixes("stage1", list(PILOT2), conc)
-    elif stage == "prefixes":
-        _, _, _, groups = book()
-        res = await prefixes("prefixes", [n for n in sorted(groups) if n not in PILOT2], conc)
-    elif stage == "summaries":
-        res = await summaries(conc)
-    elif stage == "judge":
-        res = await judge_calls("judge", cards_for_variants(), conc)
-    elif stage == "factcheck":
-        res = await judge_calls("factcheck", whole_chapter_items(), conc)
-    else:
-        raise SystemExit(f"unknown stage {stage}")
-    led: Ledger = res.pop("ledger")
-    run_usd = led.spent() - led.start_spent
-    rows = led.rows
-    summary = res | {
-        "stage": stage, "cap_usd": led.cap, "calls": len(rows), "usd_stage_total": round(led.spent(), 6),
-        "usd_this_run": round(run_usd, 6), "stopped": led.stopped,
-        "tokens": {k: sum(r.get(k, 0) or 0 for r in rows) for k in ("input", "output", "cache_write", "cache_read")},
-        "wall_s_per_call": sorted(r["wall_s"] for r in rows)[len(rows) // 2] if rows else None,
-        "errors": sum(1 for r in rows if r.get("subtype") not in (None, "success")),
-        "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")}
-    summary["ledger_row"] = (f"- {{ task: V.spike.retrieval-ablation, usd: {run_usd:.6f}, date: "
-                             f"{datetime.date.today().isoformat()}, funding: test_budget_usd, what: \"paid arm {stage}: "
-                             f"{len(rows) - led.start_calls} calls this run, {len(rows)} in total; "
-                             f"spikes/retrieval-ablation/results/paid/{stage}/\" }}")
-    (led.dir / "summary.json").write_text(json.dumps(summary, indent=1))
-    print(json.dumps({k: v for k, v in summary.items() if k != "ledger_row"}))
-    print("LEDGER ROW TO ADD:", summary["ledger_row"])
-    failed = led.stopped or (stage in ("stage1", "prefixes") and not summary.get("cache_rule_pass"))
+    led = Ledger(stage)
+    res: dict = {}
+    t0 = time.monotonic()
+    try:
+        if stage == "stage1":
+            res = await prefixes(led, list(PILOT2), conc)
+        elif stage == "prefixes":
+            _, _, groups = book()
+            res = await prefixes(led, [n for n in sorted(groups) if n not in PILOT2], conc)
+        elif stage == "summaries":
+            res = await summaries(led, conc)
+        elif stage == "judge":
+            res = await judge_calls(led, cards_for_variants(), conc)
+        elif stage == "factcheck":
+            res = await judge_calls(led, whole_chapter_items(), conc)
+        else:
+            raise SystemExit(f"unknown stage {stage}")
+    finally:
+        summary = summarise(stage, led, res, t0)
+        (led.dir / "summary.json").write_text(json.dumps(summary, indent=1))
+        print(json.dumps({k: v for k, v in summary.items() if k != "ledger_row"}))
+        if stage == "stage1":
+            print("tmpfs:", json.dumps(summary["tmpfs_bytes"]))
+        print("LEDGER ROW TO ADD:", summary["ledger_row"])
+    failed = (led.stopped or not res.get("coverage_complete")
+              or (stage in ("stage1", "prefixes") and not res.get("cache_rule_pass")))
     raise SystemExit(3 if failed else 0)
 
 

@@ -1,0 +1,65 @@
+#!/usr/bin/env python3
+"""Stub of the Claude Code CLI for the no-spend dry run of paid.py (dry_run.sh): speaks the SDK's stream-json
+protocol on stdin/stdout, never touches the network, and checks what the real CLI would receive.
+
+- Refuses (exit 7) any argv entry of 131,072 bytes or more (Linux MAX_ARG_STRLEN) and a missing
+  --system-prompt-file.
+- Prompt caching like the API: the first call with a given system file writes it, later calls read it
+  (STUB_NOCACHE=1: every call writes). Tokens = bytes / 3. Cost per call: STUB_USD.
+- Answers: a judge-shaped JSON for judge prompts, a short Russian line otherwise; STUB_EMPTY=1 answers "".
+"""
+
+import hashlib
+import json
+import os
+import sys
+from pathlib import Path
+
+LIMIT = 131072
+args = sys.argv[1:]
+if any(len(a.encode()) >= LIMIT for a in args):
+    print("stub: argument over MAX_ARG_STRLEN", file=sys.stderr)
+    sys.exit(7)
+if "--system-prompt" in args or "--system-prompt-file" not in args:
+    print("stub: the system prompt must come as a file", file=sys.stderr)
+    sys.exit(7)
+system = Path(args[args.index("--system-prompt-file") + 1])
+if not system.is_file():
+    print("stub: system prompt file missing", file=sys.stderr)
+    sys.exit(7)
+size = len(system.read_bytes()) // 3
+state = Path("/tmp/stubcache") / hashlib.sha256(str(system).encode()).hexdigest()
+state.parent.mkdir(exist_ok=True)
+hit = state.exists() and os.environ.get("STUB_NOCACHE") != "1"
+state.touch()
+
+
+def send(obj: dict) -> None:
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+for line in sys.stdin:
+    msg = json.loads(line)
+    if msg.get("type") == "control_request":
+        send({"type": "control_response",
+              "response": {"subtype": "success", "request_id": msg["request_id"], "response": {}}})
+    elif msg.get("type") == "user":
+        content = msg["message"]["content"]
+        prompt = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+        if os.environ.get("STUB_EMPTY") == "1":
+            text = ""
+        elif "expected_facts" in prompt:
+            text = '{"sufficient": true, "facts_present": [0], "claim": "holds"}'
+        else:
+            text = "контекст фрагмента"
+        usage = {"input_tokens": len(prompt.encode()) // 3, "output_tokens": 20,
+                 "cache_creation_input_tokens": 0 if hit else size, "cache_read_input_tokens": size if hit else 0,
+                 "cache_creation": {"ephemeral_1h_input_tokens": 0 if hit else size, "ephemeral_5m_input_tokens": 0}}
+        send({"type": "assistant", "message": {"role": "assistant", "model": "stub",
+                                                "content": [{"type": "text", "text": text}]},
+              "parent_tool_use_id": None, "session_id": "stub"})
+        send({"type": "result", "subtype": "success", "duration_ms": 1, "duration_api_ms": 1, "is_error": False,
+              "num_turns": 1, "session_id": "stub", "total_cost_usd": float(os.environ.get("STUB_USD", "0.0004")),
+              "usage": usage, "result": text})
+        break

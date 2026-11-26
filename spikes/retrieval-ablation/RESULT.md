@@ -123,7 +123,9 @@ Inputs: real span and chapter sizes from the artifact; Claude tokens = 0.398 × 
 L02's 60,034 characters ≈ 23,900 tokens), which puts the book at about 808,000 tokens and a chapter at 20,100–45,200;
 410 CLI overhead tokens per call (`spikes/tutor-call`, custom system prompt); instruction sizes are assumptions
 (prefix 120, summary 150, judge 600 tokens; judge output 200). Chapters are the 23 "Глава N" bookmarks; 705 spans
-outside them are one more group with a mean-chapter context. Wall time at 1.82–2.10 s per Haiku call, sequential.
+outside them are one more group with a mean-chapter context (≈ 35,100 tokens; their own text is 188,492 characters,
+≈ 75,000 tokens, which the runner sends as that group's context: 705 cache reads of ≈ 40,000 more tokens each add
+≈ $0.29, so the `prefixes` stage projects ≈ $3.63 against its $4.01 cap). Wall time at 1.82–2.10 s per Haiku call, sequential.
 
 | Arm | Calls | Input tokens | Output tokens | USD | Wall time |
 | --- | --- | --- | --- | --- | --- |
@@ -151,14 +153,19 @@ V.freshness 0.012588); left $26.70.
 Cheapest order that still answers B10, each stage with a stop rule:
 
 1. **Prefixes for chapters 6 and 13** (822 Haiku calls, ≈ $0.39, ≈ 27 min). Record real input, cache-read and
-   output tokens, USD and wall time. **Stop and re-ask** if cache reads are under 80% of the projected ≈ 32.6 M tokens, or
-   the cost per call exceeds 1.5× the projection (0.00048 → $0.00071).
+   output tokens, USD and wall time. **Stop and re-ask** (as `paid.py` enforces it): if 3 consecutive later calls
+   of a chapter read under 80% of that chapter's context from cache (the stage stops at once), if the stage's cache
+   reads over all its calls are under 80% of expected, if a chapter's first call neither writes nor reads a cache, or
+   if the stage would pass its cap of projection + 20% ($0.47).
 2. **Prefixes for the rest of the book** (8,282 calls, ≈ $3.34, ≈ 4.2–4.8 h sequential), re-embed (≈ 27 min or
    more, local, free), recall@10 for V1. Needed because the 90 questions cover all 23 chapters.
 3. **L2 summaries** (495 calls, ≈ $0.16), recall@10 for V2.
 4. **judge.eval sufficiency** on the six variants, Sonnet 5.5 (477 calls, ≈ $3.94): the only measure that can keep
    a prefix or summary on exact and fact-check (Decision 5).
-5. **Fact-check route vs whole-section baseline**, Sonnet 5.5 (30 calls, ≈ $2.02).
+5. **Fact-check route vs whole-section baseline**, Sonnet 5.5 (30 calls, ≈ $2.02). The baseline is a **proxy**:
+   the question's whole chapter as one card stands in for today's whole-section fact-check (the lesson's section
+   sent to the fact-check stage); the judge's verdict is compared with `claim_holds`. A claim judged `undecided`, or
+   none, counts as not correct, and its question as not sufficient unless the judge said sufficient.
 
 **Spend request: approve $12.00 from `test_budget_usd`** for stages 1–5 (projection $9.85 + 20%), leaving $14.70.
 Stage 1 alone is $0.50 with margin if the owner prefers to approve in two steps (stage 1 now; stages 2–5 after its
@@ -171,15 +178,29 @@ hardened container of the compile-cost image (read-only root, cap-drop ALL, no-n
 `timeout -s KILL`), exported only inside its process tree, never printed or written. `paid.py` makes one CLI call
 per item with no tools and thinking off. Stages and caps (projection + 20%): `stage1` $0.47, `prefixes` $4.01
 (refused unless stage1 passed), `summaries` $0.19, then the free `v12.sh` (V1/V2 embedding, recall, `topk.json`),
-`judge` $4.73 (refused without V1/V2), `factcheck` $2.42; together $11.82 ≤ $12.00. Before every call the runner
-checks the stage cap and what is left of $12.00 across all recorded stages; a prefix stage stops after 3
-consecutive calls that read under 80% of the chapter context from cache, and fails at the end if the stage's cache
-reads are under 80% of expected. The chapter is the system prompt, so it is the cached prefix and the span is the
-only uncached input. Committed outputs: `results/paid/<stage>/calls.jsonl` and `summary.json` (ids, tokens, USD,
-wall time, cache ratio, judge verdicts as booleans and fact indices); the prefixes and summaries stay in the
-gitignored `data/spikes/retrieval-ablation/paid/text`. The last line is the `budget.ledger` row to add.
-Checked without spend: all five stages ran in the image with `--network none` and a stubbed `call`, giving 822 /
-495 / 477 / 30 calls as projected; with no cache hits stage1 stopped after 4 calls (exit 3).
+`judge` $4.73, `factcheck` $2.42; together $11.82 ≤ $12.00. Gates (`gates.sh`): `prefixes` needs stage1 passed
+(not stopped, every stage span prefixed, cache rule met); `judge` and `v12.sh` need stage1, prefixes and summaries
+passed, every indexed span prefixed and every outline node summarised; a rerun of a passed stage makes no calls and
+stays passed. Inside each concurrency slot, before a call starts, the runner reserves its estimated cost and starts
+it only if recorded spend + reservations in flight + the estimate fit the stage cap and what is left of $12.00, so
+a stage makes at most cap / price + concurrency calls. A prefix stage stops after 3 consecutive later calls of a
+chapter that read under 80% of its context from cache (calls in flight finish: at most concurrency − 1 more) and
+fails if its cache reads over all its calls, all runs, are under 80% of expected (`ctx_expected` per row). A stage
+also stops after 3 consecutive failed calls or calls without a reported cost; `summary.json` is written in a
+`finally` and recomputes the cost from the tokens with `pricing.yaml` as a cross-check. The system prompt (for
+prefixes the whole chapter, up to ≈ 230 KB, ≈ 380 KB for group 0, over Linux's 131,072-byte single-argument limit) goes to the tmpfs and
+reaches the CLI as `--system-prompt-file`, so it is the cached prefix and the span the only uncached input; stage1
+prints the tmpfs usage at the end. Committed outputs: `results/paid/<stage>/calls.jsonl` and `summary.json` (ids,
+tokens, USD, wall time, cache ratio; judge verdicts only as booleans, fact indices and the claim enum, anything
+else is a parse failure); the prefixes and summaries stay in the gitignored `data/spikes/retrieval-ablation/paid/text`.
+The last line is the `budget.ledger` row to add.
+
+Checked without spend: `bash spikes/retrieval-ablation/dry_run.sh <scratch dir>` runs every stage in the real image
+and SDK with `--network none`, no token, against a stub CLI (`stub/claude`: speaks the SDK's stream-json protocol,
+refuses any argument of 131,072 bytes or more and a missing `--system-prompt-file`, simulates the cache). 29 of 29
+checks pass: 822 / 495 / 477 / 30 calls with full coverage; a rerun of stage1 keeps its pass with 0 calls; every stage
+stops at a low cap within cap / price + concurrency; with no cache hits stage1 stops (exit 3) after 4–7 calls; empty
+answers fail coverage; the gates refuse incomplete or capped stages; no committed row holds free text.
 
 ## Limits
 
