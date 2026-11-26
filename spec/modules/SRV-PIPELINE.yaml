@@ -91,8 +91,9 @@
 id: SRV-PIPELINE
 title: Compile pipeline — stages as data, one revise loop, budgeted agent stages, findings as open cells, lab verification, G2 report (slice)
 status: approved
-approved_by: agent
+approved_by: owner          # ADR-0039 revision: owner-approved, conditional on the round-5 fix (relayed by the coordinator, 2026-11-26); first approval 2026-11-22 by agent
 approved_at: 2026-11-22
+review: "ADR-0039 revision (V.kl-pipeline-checks): deep-reviewer (Fable) rounds 1–5 changes; owner-approved with the round-5 fix (2026-11-26), no further round."
 layer: server
 track: ai
 adr: [ADR-0009, ADR-0004, ADR-0005, ADR-0006, ADR-0008, ADR-0022, ADR-0025, ADR-0017]
@@ -693,19 +694,22 @@ proposed_revisions:
   - id: FR-PIPELINE-20
     text: >-
       Cancel a run, as approved, plus **the order change at deploy.** Migration `pipeline_0006` adds
-      `compile_runs.order_version` (proposed_tables). No derived state is used for `order_version` 1 runs.
-      (a) At worker start, in the pipeline kind module's `on_worker_start` and before FR-PIPELINE-6's `ensure` of
-      unfinished runs, one statement cancels every open v1 run: `UPDATE compile_runs SET cancelled_at = now(),
-      finished_at = now(), ends = ends + 1 WHERE finished_at IS NULL AND cancelled_at IS NULL AND order_version = 1
-      RETURNING id`, whatever its jobs' state (queued, running, dead or none); after that commit, one `obs.runs`
-      end per returned id is enqueued as FR-PIPELINE-18 does (its enqueue-failure rule unchanged). A second start
-      returns no row and does nothing. (b) Read (1) of the step handler (above) also returns without effect when
+      `compile_runs.order_version` (proposed_tables). The cancel at worker start does not depend on a v1 run's
+      derived state. (a) At worker start, in the pipeline kind module's `on_worker_start` and before FR-PIPELINE-6's
+      `ensure` of unfinished runs, one transaction cancels every open v1 run: `UPDATE compile_runs SET cancelled_at =
+      now(), finished_at = now(), ends = least(ends + 1, 100) WHERE finished_at IS NULL AND cancelled_at IS NULL AND
+      order_version = 1 RETURNING id, ends, lesson_id, owner_id`, whatever its jobs' state (queued, dead or none;
+      the start sweep has already settled jobs of a dead worker), and in the same transaction writes one audit row
+      per returned run, action `compile.cancel`, actor `DEPLOY_ACTOR` (the nil UUID, which no user has; it marks the
+      deploy as the actor), detail `{lesson_id}` (SRV-EVENTS FR-EVENTS-30's allowed key); after that commit, one
+      `obs.runs` end per returned row (its `ends` as `end`) is enqueued as FR-PIPELINE-18 does (its enqueue-failure
+      rule unchanged). A second start returns no row and does nothing. (b) Read (1) of the step handler (above) also returns without effect when
       the run's `order_version` is 1, so a v1 job still queued after (a) reserves, calls and writes nothing. (c) A
       v1 run that finished before the deploy derives its state by the approved FR-PIPELINE-6 rule (`budget_refused`,
       else `g2.blocking_open`), with `stop` and `refused_limit` null and `loops` as stored. A cancelled v1 run is
       `cancelled` as approved; the owner compiles the lesson again as a new (v2) run.
     tests_planned:
-      - "add server/tests/pipeline/test_legacy_order_db.py [db]: migration pipeline_0006 gives existing rows order_version 1 and new runs 2, and its downgrade drops the column; at on_worker_start an open v1 run with a queued job, one with a dead job and one with no job are each cancelled (cancelled_at, finished_at set, ends + 1) with exactly one obs.runs end enqueued after commit per run; a queued v1 job run afterwards writes no reserve row, revision or compile_steps row; a finished v1 run derives the same state as under the approved rule, with stop null; a second worker start changes nothing; open v2 runs are untouched"
+      - "add server/tests/pipeline/test_legacy_order_db.py [db]: migration pipeline_0006 gives existing rows order_version 1 and new runs 2, and its downgrade drops the column; at on_worker_start an open v1 run with a queued job, one with a dead job and one with no job are each cancelled (cancelled_at, finished_at set, ends + 1, capped at 100) with exactly one obs.runs end enqueued after commit per run and one audit row compile.cancel with the nil-UUID actor and {lesson_id}; a queued v1 job run afterwards writes no reserve row, revision or compile_steps row; a finished v1 run derives the same state as under the approved rule, with stop null; a second worker start changes nothing; open v2 runs are untouched"
   - id: FR-PIPELINE-3
     text: >-
       As approved, with three changes. (a) `revise`'s user prompt carries the current notebook and the report of the
@@ -756,7 +760,10 @@ proposed_revisions:
       `budget_refused` set when its handler starts returns without effect: no reservation, no call, no revision, no
       `compile_steps` row (the read is FR-PIPELINE-20's read (1), extended to `budget_refused` and to
       `order_version` 1; a route-mode `fact_check` makes that read before its find phase and again before its model
-      call). A `findings` job
+      call); for `budget_refused` it enqueues `findings` before returning (nothing before any notebook exists).
+      **A refusal wins over `next`:** when `budget_refused` is set, the run's next step is `findings` (none before
+      any notebook exists) whatever `next` is recorded, for `ensure`, for FR-PIPELINE-6's derivation and for a stale
+      model step. A `findings` job
       returns without effect when the run's recorded decision admitted a loop (the last check's report has `next:
       revise`) and neither a refusal nor `loop_limit` is recorded after it. Each check's report carries the
       decision as a named field, `next: revise | findings | <the next check>`, with `stop` (`passed`, `loop_limit`,
@@ -772,7 +779,7 @@ proposed_revisions:
     tests_planned:
       - "change server/tests/pipeline/test_stages.py: next_stage over the revised VEC-PIPELINE-2, including four-checks-fail-once (stops at the fourth failure with loops 3), rule-failure-counts, fourth-failure-at-rules, budget-stops-before-draft and the loop_cap cases"
       - "change server/tests/pipeline/test_pipeline_db.py: the revised VEC-PIPELINE-2 end to end with a fake provider, a fake kernel and a fake loop_fits_limit; a rule failure loops back with no provider call before revise; budget refusal mid-loop (budget-refused-mid-loop) runs findings only and the refused step writes no compile_steps row; a refusal at draft finishes budget_exhausted with no findings step"
-      - "add to test_loop_rule_db.py [db], the stale-revise sequence: a revise job enqueued, then budget_refused set by a concurrent refusal, then the revise job runs → no reserve row, no revision, no compile_steps row; a check whose transaction fails after the loop decision leaves neither the row nor loops + 1; ensure on a run whose recorded decision admitted a loop re-enqueues revise with loop_fits_limit not called (the fake counts calls); a stale findings job enqueued while the recorded decision admits a loop (no refusal, no loop_limit) returns without effect: no open cell, no G2, no finish"
+      - "add to test_loop_rule_db.py [db], the stale-revise sequence: a revise job enqueued, then budget_refused set by a concurrent refusal, then the revise job runs → no reserve row, no revision, no compile_steps row; a check whose transaction fails after the loop decision leaves neither the row nor loops + 1; ensure on a run whose recorded decision admitted a loop re-enqueues revise with loop_fits_limit not called (the fake counts calls); a stale findings job enqueued while the recorded decision admits a loop (no refusal, no loop_limit) returns without effect: no open cell, no G2, no finish; a model step refused for budget whose findings enqueue is lost: ensure enqueues findings, not the refused step, and calls no loop_fits_limit"
   - id: FR-PIPELINE-6
     text: >-
       Run state, as approved, with these changes: `stalled` when no key is queued, running or dead and the run has
