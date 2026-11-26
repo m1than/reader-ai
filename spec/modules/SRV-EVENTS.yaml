@@ -661,7 +661,11 @@ proposed_revisions:
       Connections: a `judge.find` run holds at most 2 database connections at once besides procrastinate's own: its
       run transaction (key lock, outcome) and one handler connection at a time (FR-AGENT-21 opens its reads, the
       ledger's reserve and settle, its output write and its final delete one after another), so the lane needs at
-      most 8 from its SQLAlchemy engine at concurrency 4, inside the default pool of 5 + 10 overflow.
+      most 8 from its SQLAlchemy engine at concurrency 4, inside the default pool of 5 + 10 overflow. procrastinate's
+      psycopg pool (`POOL_MAX_SIZE`, 4 at concurrency 1) is sized per lane as concurrency + 4: 8 for the judge lane
+      (the listener, fetch, heartbeat and periodic deferrer, plus one job-finish write per running job), 5 for main.
+      `jobs.judge_reap` is model-free database maintenance: it runs in one of the judge lane's 4 slots and counts in
+      INV-EVENTS-9's bound of 4.
       Both lanes load the full catalog, so neither cancels the other's `todo` jobs (FR-EVENTS-15) nor writes
       `unknown_kind` for them (FR-EVENTS-7). procrastinate's periodic deferrer runs in both processes; its
       `procrastinate_periodic_defers` unique (task, periodic id, tick) defers each tick once, and only the main
@@ -675,7 +679,7 @@ proposed_revisions:
     tests_planned:
       - "add server/tests/jobs/test_lanes.py [unit]: LANES' queues per lane for the integrated catalog (main: every queue but judge, plus the sweep queue; judge: [judge]); concurrency 1 and 4; hooks per lane; queue_unserved with a LANES argument whose main lane omits a declared queue, queue_reserved and lane_unknown refusals; KIND_MODULES order ends with reader.agent.lane (FR-EVENTS-1's declared-list test updated)"
       - "add server/tests/jobs/test_lanes_db.py [db]: with a main and a judge worker running, a judge.find job (stub handler) is run only by the judge lane and a search.embed job only by main; 4 judge jobs that each wait on an event run at once while a fifth waits; main never runs two jobs at once; a judge job deferred to an idle judge worker starts within 1 s (the notify path); one periodic tick with both lanes running enqueues once; the judge lane runs no start sweep"
-      - "add to test_lanes_db.py [db]: four concurrent judge.find runs (SRV-AGENT's handler, fake provider) on the production engine settings never check out more than 8 connections (pool event counter) and see no pool timeout"
+      - "add to test_lanes_db.py [db]: four concurrent judge.find runs (SRV-AGENT's handler, fake provider) on the production engine settings never check out more than 8 connections from the SQLAlchemy engine and more than 8 from procrastinate's pool (pool event counters on both) and see no pool timeout"
       - "add to test_lanes_db.py [db]: the judge lane killed mid-job (SIGKILL of a subprocess `run(lane='judge')`) — the main lane's sweep ends the key dead/stalled after the stall, with no second run"
   - id: FR-EVENTS-1
     text: >-
@@ -697,6 +701,16 @@ proposed_revisions:
       request-id key is never asked again.
     tests_planned:
       - "test_judge_requests_db.py [db] (FR-EVENTS-34's collector case): a finished judge.find key older than one day is deleted, a younger one and an unfinished one stay, a finished key of another kind of any age stays"
+  - id: FR-EVENTS-15
+    text: >-
+      As approved, except the cancel rule's exemption: each sweep cancels every `todo` job whose `task_name` is
+      neither in `KINDS` nor a reserved periodic task. The reserved periodic tasks are exactly `jobs.sweep`,
+      `jobs.judge_reap`, `jobs.judge_gc` and every `<kind>.tick` task registered for a kind with a `periodic`
+      entry (FR-EVENTS-32), whichever lane's queue they sit on. FR-EVENTS-7 likewise: a stalled `jobs.judge_reap`
+      or `jobs.judge_gc` job (and a stalled `<kind>.tick`) is finished `failed` with no outcome, like a stalled
+      `jobs.sweep`; none of them has a `job_keys` row.
+    tests_planned:
+      - "add to test_lanes_db.py [db]: with both lanes' tasks registered, a main-lane sweep leaves todo jobs.judge_reap, jobs.judge_gc and an obs.health.tick uncancelled and still cancels a todo job of an unknown task; a stalled judge_reap and a stalled judge_gc are finished failed with no outcome and no job_keys row; over two real ticks with an idle main lane, jobs.judge_gc reaches succeeded"
 
 proposed_requirements:
   - id: FR-EVENTS-33
@@ -719,15 +733,16 @@ proposed_requirements:
       clock). `reader.agent.lane` imports this module for its `JOB_KINDS`, so this module imports
       `reader.agent.lane` (the record and the window bounds) only inside `get` and `put`, never at module level: no
       import cycle. `put` validates before the insert (line, a non-empty `cards` of string pairs, `pack_ids` strings,
-      the hash shape, `deadline` after the database's `now()`, and `deadline` − `now()` at most the lane's accepted
-      window (`lane_token_ttl_s` − `lane_ttl_margin_s`) / `judge_kill_factor`, 8.33 s at today's bounds, so a request
-      the lane would refuse with `judge_window_too_long`, FR-AGENT-21 step 4, is never written) and raises
+      the hash shape, `deadline` after the database's `now()`, and, in the lane's own form, `judge_kill_factor` ×
+      (`deadline` − `now()`) ≤ `lane_token_ttl_s` − `lane_ttl_margin_s` (3 × 8.33 s ≤ 25 s at today's bounds), with
+      `now()` read in the same transaction as the insert, whose `created_at` is that same `now()`; so a request the
+      lane would refuse with `judge_window_too_long`, FR-AGENT-21 step 4, is never written) and raises
       `JobError("judge_request_invalid")` naming the field only. The
       waiter commits its `put` before it enqueues the job (FR-EVENTS-3 commits independently), so the job never runs
       ahead of its row. Nothing in this module logs a row's query or card text; its records carry the request id
       only.
     tests_planned:
-      - "add server/tests/jobs/test_judge_requests_db.py [db]: put/get round trip equals the JudgeRequest record (cards order kept, created_at from the database); delete removes one row and a second delete is a no-op; each invalid field refused with its name and nothing inserted; the CHECKs refuse a raw insert with a bad line, hash or deadline; a deadline 8.4 s ahead refused and 8.3 s ahead accepted (window from the lane's bounds); deleting the owner removes the row; migration heads at jobs_0004 and its downgrade drops only judge_requests (FR-EVENTS-11's head test updated); `alembic upgrade heads` on a fresh, empty database succeeds with jobs_0004 after 0001_auth"
+      - "add server/tests/jobs/test_judge_requests_db.py [db]: put/get round trip equals the JudgeRequest record (cards order kept, created_at from the database); delete removes one row and a second delete is a no-op; each invalid field refused with its name and nothing inserted; the CHECKs refuse a raw insert with a bad line, hash or deadline; a deadline 9 s ahead refused and 8 s ahead accepted (window from the lane's bounds); deleting the owner removes the row; migration heads at jobs_0004 and its downgrade drops only judge_requests (FR-EVENTS-11's head test updated); `alembic upgrade heads` on a fresh, empty database succeeds with jobs_0004 after 0001_auth"
       - "add to test_judge_requests_db.py [unit]: importing reader.jobs.judge_requests in a fresh interpreter does not import reader.agent.lane, and importing reader.agent.lane first works (no cycle)"
       - "add to test_judge_requests_db.py [db]: STORE passes SRV-AGENT's lane handler end to end with a fake provider (request read, deleted at the end)"
   - id: FR-EVENTS-34
@@ -740,7 +755,9 @@ proposed_requirements:
       every `judge_requests` row whose `deadline` + 60 s < `now()` (the job deletes its own row at its end, SRV-AGENT
       FR-AGENT-21; this catches rows of jobs that never ran or died); (2) FR-EVENTS-7's stalled-job rule restricted
       to jobs of the `judge` queue (`max_attempts` 1: the key ends `dead`, `stalled`, never re-enqueued). Bound: a
-      row is gone within its deadline + 60 s + one tick (60 s) while either lane runs.
+      row is gone within its deadline + 60 s + one tick (60 s) while the judge lane runs (its reap may queue behind
+      4 running `judge.find` jobs, each killed by 6.6 s, FR-AGENT-21), or while the main lane is free to run
+      `jobs.judge_gc`.
       `jobs.judge_gc` on the sweep queue (main lane): (1) the same delete as `judge_reap`'s step 1 (idempotent; covers
       a lane that is down); (2) FR-EVENTS-11's retention: delete the `job_keys` rows of kinds with `key_retention_s`
       past it, and the same kinds' terminal procrastinate jobs through `JobManager.delete_old_jobs(nb_hours=24,
@@ -749,7 +766,7 @@ proposed_requirements:
       queue>)` (succeeded only, so failures stay visible); (4) call SRV-AGENT's `judges.expire(conn)` (recorded
       `judge.find` outputs past their retention, FR-AGENT-20).
     tests_planned:
-      - "add to test_judge_requests_db.py [db]: a row 61 s past its deadline is deleted, one 59 s past stays; with the main lane busy in a long stub job, the judge lane alone deletes an expired row within deadline + 60 s + one tick and ends a stalled judge.find key dead/stalled; the retention case of FR-EVENTS-11; terminal judge-queue procrastinate jobs older than 24 h deleted, a todo one kept; succeeded sweep-queue rows older than 24 h deleted, a failed one kept; judges.expire called once per judge_gc tick (spy); a failing step 1 still runs the later steps; jobs.judge_reap and jobs.judge_gc are reserved names (catalog refusal)"
+      - "add to test_judge_requests_db.py [db]: rows written by raw insert with a past created_at and deadline (put refuses those): one 61 s past its deadline is deleted by a direct call of the reap step, one 59 s past stays; with the main lane busy in a long stub job, one real judge-lane tick (cron every minute, the test waits up to 70 s) deletes an expired row and ends a stalled judge.find key dead/stalled; the retention case of FR-EVENTS-11; terminal judge-queue procrastinate jobs older than 24 h deleted, a todo one kept; succeeded sweep-queue rows older than 24 h deleted, a failed one kept; judges.expire called once per judge_gc tick (spy); a failing step 1 still runs the later steps; jobs.judge_reap and jobs.judge_gc are reserved names (catalog refusal)"
 
 proposed_invariants:
   - id: INV-EVENTS-8
