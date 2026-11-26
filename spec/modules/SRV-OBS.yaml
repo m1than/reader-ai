@@ -331,7 +331,8 @@ requirements:
       telemetry is off. Paired amendment (ADR-0039 Amends row ADR-0032; OPS-DEPLOY FR-DEPLOY-16,
       V.kl-deploy-judge-lane, 2026-11-26): `otel` holds exactly api, worker, worker-judge and rotel; worker-judge
       exports its spans to rotel and joins no other observability network. Its tracing service name stays the
-      worker's until a SRV-OBS change gives the judge lane its own (open).
+      worker's until a SRV-OBS change gives the judge lane its own (open). The test change lands with
+      OPS-DEPLOY's compose change in the same commit.
     tests_planned:
       - "change server/tests/obs/test_deploy_config.py: the otel membership assertion gains worker-judge"
   - id: FR-OBS-9

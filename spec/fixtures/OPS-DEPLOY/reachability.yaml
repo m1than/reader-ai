@@ -29,9 +29,25 @@ allowed:
   - [caddy, mlflow]            # obs-ui
   - [rotel, jaeger]            # jaeger-in (ADR-0033, SRV-OBS FR-OBS-19)
   - [caddy, jaeger]            # jaeger-ui
+  # ADR-0039 B7b (OPS-DEPLOY FR-DEPLOY-16): worker-judge reaches agent-proxy, Postgres and Rotel only; it shares
+  # agentnet and otel with the worker and otel with the api, none of which listens there (FR-DEPLOY-4).
+  - [worker, worker-judge]     # agentnet, otel
+  - [worker-judge, agent-proxy]  # agentnet
+  - [worker-judge, postgres]   # judge-db
+  - [worker-judge, rotel]      # otel
+  - [api, worker-judge]        # otel
 internet_egress: [caddy, agent-proxy]   # members of the only non-internal networks (edge, egress)
 never:
   # explicit negatives, also implied by `allowed` being exact
+  - [worker-judge, mcp]
+  - [worker-judge, caddy]
+  - [worker-judge, embed]
+  - [worker-judge, mlflow]
+  - [worker-judge, jaeger]
+  - [worker-judge, kernel-verify]
+  - [worker-judge, kernel-agent]
+  - [worker-judge, kernel-pair-1]
+  - [worker-judge, kernel-user-ivan]
   - [kernel-verify, kernel-agent]
   - [kernel-user-ivan, kernel-pair-1]
   - [kernel-agent, agent-proxy]

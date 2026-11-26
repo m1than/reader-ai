@@ -587,3 +587,5 @@ vectors:
 #   client identity (FR-AGENT-3, INV-AGENT-7, VEC-AGENT-6), SRV-EVENTS FR-EVENTS-9/-33/-34, OPS-CLI FR-CLI-25 and
 #   SRV-AUTH's `--lane`. Still open, paired elsewhere: SRV-OBS's tracing service name `worker-judge` (the lane traces
 #   as `worker` until then) and SRV-SEARCH's waiter (`judge_requests.put`, LISTEN, enqueue, wait).
+#   Red tests: the deploy [config] tests gain worker-judge in the service, consumer, bind, environment, health and
+#   network sets; server/tests/deploy/test_judge_lane.py holds FR-DEPLOY-16's and INV-DEPLOY-11's own cases.
