@@ -28,7 +28,7 @@
 #     this kind belongs to the later ADR-0039 tasks).
 #
 #     uv run --script spec/fixtures/eval/check_eval_set.py <pdf>
-status: "draft — owner reviews a sample of 30 (10 per type); sample ids in docs/progress.yaml V.kl-eval-set"
+status: "accepted (owner 2026-11-26 reviewed the sample of 30, 10 per type, listed in docs/progress.yaml V.kl-eval-set: 'eval sample ok'); frozen"
 source_sha256: 61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2
 language: ru
 topics:

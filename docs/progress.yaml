@@ -1883,7 +1883,9 @@ tasks:
         address, revoke-all-for-client, no cross-client revoke, 30 s lane-token TTL; a kill deadline of 3 x the judge
         timeout, insert-or-ignore late outputs, purge re-checked before writing. The final integration PR to main waits
         for the owner (rule A9)" }
-  - { id: V.kl-eval-set, stage: V, kind: setup, status: blocked, needs: [V.owner.adr-0039],
+  - { id: V.kl-eval-set, stage: V, kind: setup, status: done, needs: [V.owner.adr-0039],
+      accepted: "owner 2026-11-26 reviewed the 30-record sample below: 'eval sample ok'; the set is frozen. Registration as
+        the brain-eval-v1 dataset in MLflow is done by SRV-OBS (V.kl-obs-spans, FR-OBS-39)",
       what: "ADR-0039 B9: extend questions-v2 (40, owner-accepted) to a typed set, 30 per type (exact, thematic,
         fact-check), expected facts in own words <= 300 chars, expected pages, topic branch; registered as an obs.bench
         dataset (ADR-0038) with question text, ids and gold pages; expected facts stay in the fixture and pass the
