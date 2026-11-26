@@ -23,9 +23,8 @@
 #     consecutive words with the book's text layer, read locally at check time; the book text is never stored.
 #   - Gold pages and facts found through the text layer of the local PDF and checked by reading each gold page
 #     (2026-11-26). The book is personal-use: no book text is in this file.
-#   - Not registered as an obs.bench dataset yet: registration pins the frozen file's sha256 in
-#     spec/fixtures/SRV-OBS/phase2.yaml `bench_sets` after the owner's review (the SRV-OBS amendment that adds
-#     this kind belongs to the later ADR-0039 tasks).
+#   - Accepted and frozen by the owner (2026-11-26). Registration as an MLflow dataset and a pinned sha256 come with
+#     the SRV-OBS amendment of task V.kl-obs-spans; until then the frozen sha256 is recorded in docs/progress.yaml.
 #
 #     uv run --script spec/fixtures/eval/check_eval_set.py <pdf>
 status: "accepted (owner 2026-11-26 reviewed the sample of 30, 10 per type, listed in docs/progress.yaml V.kl-eval-set: 'eval sample ok'); frozen"

@@ -94,9 +94,15 @@ def longest_run(w: list[str], grams: dict[int, set[int]]) -> int:
 
 
 def main() -> int:
+    if len(sys.argv) < 2 or not Path(sys.argv[1]).is_file():
+        print("usage: check_eval_set.py <pilot pdf> [set.yaml]  (the PDF is required and is never committed)")
+        return 2
     pdf = sys.argv[1]
     set_path = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_SET
     data = yaml.safe_load(set_path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        print("ISSUE file: the set is not a mapping")
+        return 1
     problems: list[str] = []
 
     def bad(rid: str, what: str) -> None:
@@ -105,7 +111,8 @@ def main() -> int:
     if set(data) != TOP_KEYS:
         bad("file", f"top-level keys {sorted(set(data) ^ TOP_KEYS)} differ")
     if sha256(pdf) != data.get("source_sha256"):
-        bad("file", "the PDF's sha256 differs from source_sha256")
+        print("ISSUE file: the PDF's sha256 differs from source_sha256; nothing else is checked")
+        return 1
     topics = set(data.get("topics") or [])
     for t in topics:
         if len(t.split("/")) > TOPIC_DEPTH:
@@ -186,6 +193,10 @@ def main() -> int:
             max_f = max(max_f, n)
             if n >= QUOTE_WORDS:
                 bad(rid, f"fact {k + 1} shares a {n}-word run with the book")
+        if r.get("note"):
+            n = longest_run(words(str(r["note"])), grams)
+            if n >= QUOTE_WORDS:
+                bad(rid, f"note shares a {n}-word run with the book")
 
     longest_fact = max((len(f) for r in records for f in r.get("expected_facts") or [] if isinstance(f, str)),
                        default=0)
