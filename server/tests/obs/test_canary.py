@@ -144,4 +144,7 @@ def test_fr_obs_7_every_kind_and_route_is_a_listed_span_name() -> None:
     } <= kinds
     for kind in kinds:
         assert allow.span_class(f"job {kind}") == "job", kind
-    assert set(attrs.JOB_ARGS) == kinds
+    # ADR-0039 (FR-OBS-7 as amended): `judge.find` is SRV-AGENT's lane kind (reader.agent.lane), declared in
+    # VEC-OBS-1 `job_args` ahead of its merge onto this branch; every other listed kind is in the catalogue.
+    assert set(attrs.JOB_ARGS) - {"judge.find"} == kinds - {"judge.find"}
+    assert set(attrs.JOB_ARGS) >= kinds
