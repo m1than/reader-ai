@@ -1762,7 +1762,7 @@ kl_revision:
   retested_unchanged_in_substance: [INV-OBS-1, INV-OBS-2]
   # Not in ADR-0039's Rework row, but their approved text contradicts the ADR as written; see kl_open_points 1.
   changed_ids_consequential: [FR-OBS-7, FR-OBS-8, FR-OBS-11, FR-OBS-12, FR-OBS-13, FR-OBS-15, FR-OBS-16, FR-OBS-20,
-    FR-OBS-26, VEC-OBS-6]
+    FR-OBS-26, FR-OBS-31, VEC-OBS-6]
   reconciled_with: "SRV-AGENT revision on origin/V/kl-agent-judges (8d2799f and later): slot names, JudgeInputsSink,
     the judge.find output as card ordinals mapped to ids (FR-AGENT-22), judge_outputs keyed (owner_id,
     input_sha256, judge) with its own retention (FR-AGENT-20), and SRV-OBS owning the judge.eval.* and judge.align
@@ -1899,8 +1899,8 @@ proposed_requirements:
       comes from the current span, never a parameter: `judge_trace_id` = the trace id of the current job root
       (FR-OBS-5), `find_trace_id` = the trace id of that root's link (null without one). The row stores
       `card_ids` (the request's ids in judge order), the output as 1-based ordinals into `card_ids`
-      (VEC-OBS-5 `judge_inputs.output`), `pack_ids`, ids and hashes; card text is never stored. A row with line
-      `eval` (an alignment re-run, FR-OBS-41) is not copied. Consent: `query` is stored and `labelable` true only
+      (VEC-OBS-5 `judge_inputs.output`), `pack_ids`, ids and hashes; card text is never stored. Alignment
+      re-runs never reach the lane or the sink (FR-OBS-41). Consent: `query` is stored and `labelable` true only
       when the caller is the instance owner or the caller's `users.consent_evaluation` is true (SRV-AUTH;
       ADR-0018); otherwise `query` is NULL and `labelable` false. Validation (an output id not in the request's
       cards, a duplicate, a non-finite `sufficiency`, more than 50 cards) skips the copy with one log line `obs
@@ -1909,7 +1909,9 @@ proposed_requirements:
       `copy`. Readers: owner-only routes (FR-OBS-40) and `obs.eval`/`obs.align`, which load card text by id from
       SRV-SEARCH in memory. Retention: `obs.retention` deletes rows created before now − `observability.
       retention_days` (default 30, B7's initial value) first, in Postgres, with tracing on or off and whatever
-      the MLflow delete then does (FR-OBS-11 as edited). Declared divergence: SRV-AGENT's `judge_outputs` (ids and
+      the MLflow delete then does (FR-OBS-11 as edited), so a row lives up to `retention_days` plus one day; a
+      caller's withdrawal of `consent_evaluation` nulls that caller's stored queries at once (kl_text_paths,
+      paired SRV-AUTH). Declared divergence: SRV-AGENT's `judge_outputs` (ids and
       numbers only) follow its own `bounds.judge_find_output_retention_days` (FR-AGENT-20), so a recorded output
       may outlive its `judge_inputs` row or the reverse; neither holds text, and a label needs only
       `judge_inputs`. `reader.obs.judge_inputs.purge_pack(conn, pack_id)` deletes every row whose `pack_ids`
@@ -1921,12 +1923,16 @@ proposed_requirements:
       amended). Judges that read text run in the worker; only scores reach MLflow, as LLM_JUDGE assessments built
       from VEC-OBS-4 `assessments` (FR-OBS-14) by the worker's own HTTP client; the MLflow client package and
       `mlflow.genai.evaluate` stay out of the worker. Job kinds in `kl_job_kinds`.
-      (a) Start, one function: `reader.obs.eval.start(conn, owner_id, set_text, budget_profile, judges)` refuses
+      (a) Start, one function: `reader.obs.eval.start(conn, owner_id, budget_profile, judges, *, set_text=None,
+          sample_ids=None)`, exactly one of `set_text` (mode dataset) or `sample_ids` (judge_inputs ids, mode
+          sample, where the pin check is skipped and `records` = len(sample_ids)) given, refuses
           with `set_not_pinned` unless the set's sha256 is pinned in VEC-OBS-5 `eval_sets`, `bad_request` for an
           unknown profile or slot, and `eval_cap` when records × judges × each slot's FR-AGENT-9 floor reserve
           exceeds `budgets.eval_usd_per_run` (SRV-AGENT; no cap set → `cap_missing`); otherwise, in the caller's
           transaction, it inserts the `obs_eval_runs` row (`set_doc` = the parsed set; expected facts live there
-          and in the repository fixture, never in MLflow; `deadline` = now + records × 180 s + 600 s, initial),
+          and in the repository fixture, never in MLflow; `deadline` = now + records × 180 s + 600 s, initial,
+          which assumes the worker is otherwise free: behind a long compile or embed job, records still queued at
+          the deadline are marked failed (declared),
           one `obs_eval_records` row per record (state queued), one `obs.eval` per record and one `obs.eval_run`
           {eval_id, check: 1} with `schedule_in` up to the deadline, and returns the id. Callers:
           `POST /api/obs/eval` (owner only, FR-OBS-10's checks; JSON ≤ 256 KiB {set, budget_profile, judges?};
@@ -1935,8 +1941,9 @@ proposed_requirements:
           the worker image; the agent may run it for B7a's no-regression rule, inside the `eval` cap and
           `budget.live_runs_usd` (it checks the remaining live budget first; AGENTS.md). `mode: sample` starts
           come from `obs.eval_sample`, enqueued by the worker's periodic scheduler at the interval in policy, off
-          by default (initial) until `judge-gate` sets the `eval` cap: up to 20 (initial) `labelable`
-          judge_inputs rows of the last day, newest first; sampled rows are gated finds of consenting callers
+          by default (initial) until `judge-gate` sets the `eval` cap: it calls `start(conn, <instance owner>,
+          "mcp", <the policy's judges>, sample_ids=...)` with up to 20 (initial) `labelable` judge_inputs rows
+          of the last day, newest first; sampled rows are gated finds of consenting callers
           only (the gate-separated and non-consenting finds are never sampled; declared bias).
       (b) One record. `obs.eval` (max_attempts 1, so no judge call is ever repeated): a record of a closed run
           ends without a call. Dataset mode calls `find` on the internal `owner` channel with the record's
@@ -2009,26 +2016,34 @@ proposed_requirements:
         cards include another user's `personal-use` pack without the owner's own copy is excluded and counted,
         so the owner's provider never receives a learner's `personal-use` L1 text), newest first, capped at 70
         training and 30 held-out labels (initial) and split by a seed of (slot, at_labels); fewer than 10 in
-        either split → refused `too_few_labels`. The base agreement on the held-out split comes from the
-        recorded outputs and scores, without a call;
+        either split → refused `too_few_labels`. Slot `judge.find` is refused here with `slot_unsupported`
+        while SRV-AGENT's paired capability (a `judge.find` call on the worker, line `eval`, with a caller-given
+        prompt, below) is absent. The base agreement on the held-out split comes from the recorded outputs and
+        scores, without a call;
       - then for at most 3 rounds (initial): one step in which the `judge.align` model reads the current
         instructions and the training labels the judge got wrong (judge output, the owner's pass or fail and
         note; inputs presented as data, FR-OBS-43) and proposes 2 (initial) rewritten instructions; then
-        scoring steps that re-run the slot's judge with each candidate on the held-out labels. `judge.eval.*`
-        re-runs go through the `Provider` port on the `eval` line; `judge.find` re-runs go through the lane: the
-        step writes a `judge_requests` row with line `eval`, run id = the proposal id and the candidate
-        instructions, enqueues `judge.find` and waits by LISTEN/NOTIFY with the lane's timeout (paired SRV-AGENT
-        and SRV-EVENTS: line `eval` and a candidate-instructions column on the request row, text deleted with it);
-        the best candidate replaces the current one only if it agrees with more held-out labels; no subset or
-        combination is enumerated.
+        scoring steps that re-run the slot's judge with each candidate on the held-out labels. Every re-run, of
+        `judge.eval.*` and of `judge.find` alike, happens inside `obs.align` on the worker, in memory, through the
+        `Provider` port on the `eval` line, one after another (never in parallel), each with its own deadline of
+        8.3 s (initial). The candidate runs inside FR-OBS-43's fixed, reviewed wrapper prompt for its slot, the
+        candidate filling only the wrapper's instructions section, so B7's frame (text in the data is never
+        followed) stays the wrapper's. Nothing enters the lane or `judge_requests`, and nothing is looked up in
+        or recorded to SRV-AGENT's `judge_outputs`: a candidate output never becomes a recorded output, so a live
+        `find` never replays one. A re-run with no parsed output by its deadline excludes that label from both
+        the base and the candidate counts; when more than 20 % (initial) of a candidate's held-out re-runs are
+        missing, the proposal is refused `provider_error`. The best candidate replaces the current one only if it
+        agrees with more of the counted held-out labels; no subset or combination is enumerated.
       Outcomes: state `proposed` with the text, its sha256, the label ids and scores {base_agreement,
-      proposed_agreement, n_train, n_heldout, rounds, skipped_not_entitled}, or state `refused` with a code
-      (VEC-OBS-5 `align.refusals`: the guard's codes below, `too_few_labels`, `eval_cap` when the `eval` cap is
-      reached, `provider_error` for a failed or refused model call, `output_invalid` for a refused parse,
-      `step_lost` for a row still running a day after its last step, set by `obs.retention`) and no text. Each
-      step has max_attempts 1, so a crashed step loses that proposal until the next 50 labels (declared).
+      proposed_agreement, n_train, n_heldout, n_missing, rounds, skipped_not_entitled}, or state `refused` with a
+      code (VEC-OBS-5 `align.refusals`: the guard's codes below, `too_few_labels`, `slot_unsupported`, `eval_cap`
+      when the `eval` cap is reached, `provider_error` for a failed `judge.align` call or the missing share
+      above, `output_invalid` for a refused `judge.align` parse, `step_lost` for a row still running a day after
+      its last step, set by `obs.retention`) and no text. Each step has max_attempts 1, so a crashed step loses
+      that proposal until the next 50 labels (declared). Red order: FR-OBS-41's `judge.find` half (its re-runs
+      and tests) goes Red only after SRV-AGENT's paired change is approved; the `judge.eval.*` half does not wait.
       Declared wait: a tutor job can wait behind one step on the concurrency-1 worker (one strong-model call,
-      unmeasured, or 10 judge re-runs, about 22 s at the 2.2 s lane timeout), within the 180 s step timeout.
+      unmeasured, or 10 sequential re-runs, at most 83 s at the 8.3 s deadline), within the 180 s step timeout.
       Runtime guard (`reader.obs.align_guard`, version in `guard_version`), run before a proposal is stored:
       on FR-OBS-22's normaliser (NFC, U+FFFE, U+00AD and line-end hyphens joined, lower case, ё→е, words only),
       refuse with `verbatim_8` when the proposal shares a sequence of 8 (initial) consecutive words with any
@@ -2073,7 +2088,12 @@ proposed_requirements:
       number in [0, 1]}; `judge.align`: exactly {"instructions": a JSON string of 1..8,000 characters}. A
       boolean, a string number, an unknown or missing key, `NaN`, `Infinity` or `-Infinity` (which Python's json
       accepts) is `output_invalid`, with no score or candidate written. The parsed value, never the model's
-      text, leaves the parser. [unit]
+      text, leaves the parser. Alignment wrappers: `server/src/reader/obs/prompts/align_wrapper_judge_find.md`
+      and `align_wrapper_judge_eval.md`, fixed and reviewed like code, each with one instructions section that
+      FR-OBS-41's candidate fills (the candidate is inserted verbatim there and nowhere else) and the slot's own
+      data frame and output contract around it: the `judge.find` wrapper renders cards as ordinals and is parsed
+      by SRV-AGENT's FR-AGENT-22 parser, the `judge.eval` wrapper by the parser above. A wrapper is registered
+      by FR-OBS-15 like any prompt; a candidate is never registered. [unit]
 
 proposed_invariants:
   - id: INV-OBS-6
@@ -2085,8 +2105,9 @@ proposed_invariants:
       `job_keys` row (`obs.eval`, `obs.judge_score`, `obs.label`, `obs.align` included), in any MLflow request
       body (in-test receiver), in any log line, or in any row of `obs_eval_records` or `obs_eval_scores`; in
       `owner_labels` only the note canary appears, in `note` only; the query canary appears in `judge_inputs` only
-      for a consenting caller; the proposal canary appears only in `judge_prompt_proposals.candidate_text` or
-      `proposed_text` and an export's bytes, and only when the guard passed.
+      for a consenting caller; the proposal canary appears in `judge_prompt_proposals.candidate_text` only while
+      the row's state is `running`, in `proposed_text` and an export's bytes only when the guard passed, and
+      nowhere else (never in `judge_requests`, `judge_outputs` or a refused row).
   - id: INV-OBS-7
     text: >-
       Alignment guard. For any proposal and label set (Hypothesis over synthetic Russian and English text, with
@@ -2128,7 +2149,8 @@ kl_in_place_edits:
       and `metadata.score_id`, so a retry never posts twice and a new judge version posts next to the old one."
   - id: FR-OBS-15
     becomes: "The parenthetical list of prompt files becomes 'VEC-OBS-4 `prompts`': the list gains SRV-AGENT's
-      `server/src/reader/agent/prompts/judge_find.md` and FR-OBS-43's six files under
+      `server/src/reader/agent/prompts/judge_find.md` and FR-OBS-43's eight files (six slot prompts, two
+      alignment wrappers) under
       `server/src/reader/obs/prompts/` (the `judge.link_type` and `ingest.context_prefix` files join when
       SRV-KB and SRV-INGEST add them; ADR-0039 B7a), registered by the same rules; no other change."
   - id: FR-OBS-11
@@ -2155,6 +2177,14 @@ kl_in_place_edits:
   - id: FR-OBS-26
     becomes: "mlflow-setup.yaml's dataset names gain `brain-eval-v1` and its Run tag keys gain `reader.eval_id`;
       `reader.kind` gains the value `eval`; nothing else changes."
+  - id: FR-OBS-31
+    becomes: "Retention also searches `tags.reader.kind = 'eval'` (a third per-kind search) and soft-deletes eval
+      Runs by `end_time` like compile and import Runs. The growth list gains: eval Runs by retention_days;
+      `obs_eval_runs`, `obs_eval_records` and `obs_eval_scores` kept (the record; bounded by starts: at most 90
+      records and 5 scores each per run, plus at most 20 sample records a day while sampling is on), except
+      sample scores, which go with their `judge_inputs` row (cascade); `judge_inputs` by retention_days
+      (FR-OBS-38); `judge_prompt_proposals`: a discard nulls `proposed_text` at once, and refused and discarded
+      rows (no text) are deleted after retention_days; proposed and exported rows are kept until discarded."
   - id: VEC-OBS-6
     becomes: "spec/fixtures/SRV-OBS/mlflow-setup.yaml (and deploy/otel/mlflow-setup.yaml) gain FR-OBS-26's
       additions."
@@ -2232,7 +2262,8 @@ kl_in_place_edits:
     becomes: "spec/fixtures/SRV-OBS/phase2.yaml gains: `eval_sets` (FR-OBS-22); `eval_record`; `judge_inputs.output`
       (keys keep, drop, sufficiency; ordinals 1..50; a finite number in [0, 1] or null); `labels.judge_slots`
       (FR-OBS-24 scope) and the judge target; `align` {refusals: [verbatim_8, whole_input, demonstration,
-      no_change, guard_inputs_missing, too_few_labels, eval_cap, provider_error, output_invalid, step_lost],
+      no_change, guard_inputs_missing, too_few_labels, slot_unsupported, eval_cap, provider_error,
+      output_invalid, step_lost], rerun_deadline_s 8.3, max_missing_share 0.2,
       demonstration_markers, limits: {train 70, heldout 30, min_split 10, rounds 3, candidates 2, batch 10,
       every 50}}; Run keys for kind eval (params incl. caller, metrics, tags); `writes` entries for
       `obs.judge_score` (traces/{id}/assessments POST and the GET before it, source LLM_JUDGE), `obs.eval_run`
@@ -2264,6 +2295,7 @@ kl_job_kinds:
 
 # ADR-0039 wording that this spec reads in a defined way (notes, not amendments).
 kl_adr_notes:
+  - "B9 'only scores reach MLflow, as code-written assessments with source LLM_JUDGE' from the `obs.eval` job: the scores are computed in `obs.eval` and posted by its follow-up kind `obs.judge_score` (args {score_id}), so a failed post is retried without repeating a judge call."
   - "B9 'TOOL root': the `find` span is the root of the find subtree; it is a child of the current request or job span when one exists, and a trace root only when none does."
   - "B9 'ROUTER with the route and filters': single-valued facet filters are enums; question-derived filters are counts and hashes; a concept id is exported only as reader://h/<sha256>, since a term concept's id may carry book text (stricter than B9's 'a concept id or a hash')."
   - "B7 labels item 1 'an optional one-line reason': for judge targets this is the free-text `note` (Postgres only); lesson and answer labels keep FR-OBS-24's reason enum."
@@ -2272,8 +2304,7 @@ kl_adr_notes:
 
 # Text that does leave the span/MLflow boundary, all in Postgres and owner-only or lane-only (declared residuals).
 kl_text_paths:
-  - "judge_requests (SRV-EVENTS/SRV-AGENT): query and card text, deleted at the job's end or deadline; for alignment re-runs also the candidate instructions."
-  - "judge_inputs.query: consenting callers only, retention_days."
+  - "judge_inputs.query: consenting callers only, for up to retention_days; when a caller withdraws `consent_evaluation`, the paired SRV-AUTH change nulls that caller's stored queries and sets labelable false in the same transaction (declared; a label already made keeps its row, without the query)."
   - "obs_eval_runs.set_doc: the pinned set (committed text: questions and expected facts)."
   - "judge_prompt_proposals.candidate_text / proposed_text: guarded model text, until discarded; the export's files outside the work tree."
   - "owner_labels.note: the owner's own one-line note."
@@ -2295,10 +2326,10 @@ kl_planned_tests:
   - { id: FR-OBS-40, level: unit, file: server/tests/obs/test_judge_labels.py, change: add, what: "queue ordering over in-memory rows (classes, round-robin, newest first), item id parsing (ji:/es:), B8 text decision per card" }
   - { id: FR-OBS-40, level: db, file: server/tests/obs/test_judge_labels_db.py, change: add, what: "owner-only and Origin checks, both item kinds, item text per B8 (another user's personal-use card gives no L1 text), 404 for expired, 409 for unconsented and unresolvable cards, cascade of sample scores, no-store header" }
   - { id: FR-OBS-41, level: unit, file: server/tests/obs/test_align_guard.py, change: add, what: "VEC-OBS-8 verdicts, the split seeded by (slot, at_labels) capped at 70/30, too_few_labels below 10, greedy rounds bounded at 3 with 2 candidates and batches of 10" }
-  - { id: FR-OBS-41, level: db, file: server/tests/obs/test_align_db.py, change: add, what: "the 50th judge label inserts the row and enqueues step 0 once, a relabel does not count, the 51st..99th enqueue nothing; labels over a learner's personal-use pack without the owner's copy are excluded and no such card text reaches the stub provider; judge.find re-runs write judge_requests rows with line eval and are not copied to judge_inputs; a stub model's verbatim reply ends refused with no text; eval_cap, provider_error and output_invalid outcomes; a lost step becomes step_lost via obs.retention; an accepted proposal row" }
+  - { id: FR-OBS-41, level: db, file: server/tests/obs/test_align_db.py, change: add, what: "the 50th judge label inserts the row and enqueues step 0 once, a relabel does not count, the 51st..99th enqueue nothing; labels over a learner's personal-use pack without the owner's copy are excluded and no such card text reaches the stub provider; slot judge.find refused slot_unsupported at step 0 while the SRV-AGENT capability flag is off; (after that change) judge.find re-runs run in obs.align through the stub Provider on line eval, sequentially, with the 8.3 s deadline, write no judge_requests row, and after the alignment judges.recorded(owner, input, current judge) is unchanged for every labelled input and a live find on the same input never replays a candidate output; a missing re-run is excluded from base and candidate counts, above 20 % missing → provider_error; the candidate appears only in the wrapper's instructions section of the rendered prompt; a stub model's verbatim reply ends refused with no text; eval_cap, provider_error and output_invalid outcomes; a lost step becomes step_lost via obs.retention; an accepted proposal row" }
   - { id: FR-OBS-42, level: unit, file: server/tests/obs/test_proposals.py, change: add, what: "file name and header (UNTRUSTED line) from a row" }
   - { id: FR-OBS-42, level: db, file: server/tests/obs/test_align_db.py, change: add, what: "export of the owner's rows only, guard rerun, guard_inputs_missing after expiry, state exported" }
-  - { id: FR-OBS-43, level: unit, file: server/tests/obs/test_judges_obs.py, change: add, what: "both parsers over valid, fenced, unknown key, missing key, bool, string number, NaN, Infinity, -Infinity, score 1.2, instructions empty and over 8,000; prompts render cards as ordinals with no id; judge_version changes with the file bytes" }
+  - { id: FR-OBS-43, level: unit, file: server/tests/obs/test_judges_obs.py, change: add, what: "both parsers over valid, fenced, unknown key, missing key, bool, string number, NaN, Infinity, -Infinity, score 1.2, instructions empty and over 8,000; prompts render cards as ordinals with no id; judge_version changes with the file bytes; each alignment wrapper has exactly one instructions section, a candidate containing a fake section delimiter is placed inside it and changes no other part of the rendered prompt" }
   - { id: INV-OBS-6, level: "unit + db", file: server/tests/obs/test_canary.py, change: change, what: "the new canaries (note and concept id included) across OTLP bytes, job args of every new kind and obs.label, MLflow bodies, logs and tables" }
   - { id: INV-OBS-7, level: unit, file: server/tests/obs/test_align_guard.py, change: add, what: "Hypothesis property over synthetic text: each refusal kind, and acceptance after deletion to a fixpoint with disjoint filler" }
   - { id: INV-OBS-8, level: unit, file: server/tests/obs/test_feedback_prompts.py, change: change, what: "writer-by-source property (obs.judge_score only for LLM_JUDGE); body and eval_body refuse each other's entries" }
@@ -2308,6 +2339,7 @@ kl_planned_tests:
   - { id: FR-OBS-16, level: image, file: server/tests/obs/test_images_kl.py, change: add, what: "Evaluation runs lists the eval Run; the saved view ?q=<policy_version>" }
   - { id: FR-OBS-20, level: unit, file: server/tests/obs/test_phase2_unit.py, change: change, what: "the shared steps function called with kind eval keeps compile and ingest results unchanged" }
   - { id: FR-OBS-26, level: unit, file: server/tests/obs/test_phase2_config.py, change: change, what: "setup file names brain-eval-v1, reader.eval_id and kind eval; package copy equals the fixture" }
+  - { id: FR-OBS-31, level: db, file: server/tests/obs/test_overrides_db.py, change: change, what: "eval Runs found by the third per-kind search; refused and discarded proposals deleted after retention_days, proposed and exported kept; a discard nulls proposed_text; sample scores cascade with judge_inputs" }
   - { id: VEC-OBS-6, level: unit, file: server/tests/obs/test_phase2_config.py, change: change, what: "the fixture and deploy copy agree" }
   - { id: FR-OBS-13, level: unit, file: server/tests/obs/test_analytics.py, change: change, what: "tutor.retrieve still declared until SRV-TUTOR's paired removal" }
   - { id: FR-OBS-21, level: unit, file: server/tests/obs/test_phase2_unit.py, change: change, what: "policy_version over declared data only (a code change does not move it, each input does), version key includes it, an unseen key enqueues obs.setup" }
@@ -2327,21 +2359,22 @@ kl_planned_tests:
 
 kl_paired_changes:
   - { spec: SRV-SEARCH, task: V.kl-search-find, change: "opens FR-OBS-36's spans through reader.obs.find helpers; publishes the route ids (find_routes) and the loaded policy for policy_version; a card-text-by-id reader for FR-OBS-39/40/41 that applies B8 entitlement" }
-  - { spec: SRV-AGENT, task: V.kl-agent-judges, change: "already planned there: slot names judge.eval.{relevance, sufficiency, groundedness, self_contained, citation_supports_claim} and judge.align on the eval line, JudgeInputsSink.copy(conn, request_row, output) inside the output transaction (SRV-OBS supplies reader.obs.judge_inputs.SINK), judge_version(slot, prompt_bytes) for SRV-OBS's files. To ask (the coordinator raises it): the lane accepts judge_requests rows with line `eval` and candidate instructions for FR-OBS-41's re-runs, recorded under the candidate's judge version, and passes the line to the sink" }
-  - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "catalogue gains kl_job_kinds (obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score, obs.align; queue obs, the worker) and the periodic obs.eval_sample entry (off by default); judge_requests gains line eval and a candidate-instructions column (text, deleted with the row, never in args)" }
+  - { spec: SRV-AGENT, task: V.kl-agent-judges, change: "already planned there: slot names judge.eval.{relevance, sufficiency, groundedness, self_contained, citation_supports_claim} and judge.align on the eval line, JudgeInputsSink.copy(conn, request_row, output) inside the output transaction (SRV-OBS supplies reader.obs.judge_inputs.SINK), judge_version(slot, prompt_bytes) for SRV-OBS's files. To ask (the coordinator raises it): a `judge.find` call on the worker through the Provider port on line `eval` with a caller-given prompt (FR-OBS-43's wrapper), not recorded to judge_outputs and not looked up there, plus a capability flag SRV-OBS reads; FR-OBS-41's judge.find half goes Red only after it is approved" }
+  - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "catalogue gains kl_job_kinds (obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score, obs.align; queue obs, the worker) and the periodic obs.eval_sample entry (off by default); judge_requests is unchanged" }
   - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "pack.build spans; its purge calls reader.obs.judge_inputs.purge_pack under the pack locks; a material text reader for the guard" }
   - { spec: SRV-KB, task: S7.SRV-KB, change: "link.run spans" }
   - { spec: OPS-DEPLOY, task: V.kl-deploy-judge-lane, change: "worker-judge on otel (FR-DEPLOY-3, VEC-DEPLOY-2: worker-judge–rotel allowed, worker-judge–mlflow never)" }
   - { spec: OPS-CLI, task: V.kl-deploy-judge-lane, change: "`reader obs proposals --out DIR` (owner-run): calls FR-OBS-42's export in a one-shot worker-image container, refuses a DIR inside a git work tree; `reader obs eval --set FILE --profile mcp|tutor`: calls reader.obs.eval.start with the instance owner as payer in a one-shot worker-image container and prints the eval id or the refusal code; the agent may run it within the eval cap and budget.live_runs_usd" }
   - { spec: WEB-MANAGE, task: V.kl-obs-spans, change: "FR-MANAGE-6: an owner tab 'Judges' on /settings over FR-OBS-40's routes and FR-OBS-24's judge labels (pass/fail, optional one-line note), batches of 25" }
   - { spec: WEB-UI, task: V.kl-obs-spans, change: "/observability: start an evaluation (set file picker, budget profile) through POST /api/obs/eval" }
+  - { spec: SRV-AUTH, task: V.kl-obs-spans, change: "withdrawing `users.consent_evaluation` (when a route for it exists) calls reader.obs.judge_inputs.forget_queries(conn, user_id) in the same transaction: query NULL, labelable false" }
 
 kl_open_points:
   - "1. ADR-0039's Rework row lists FR-OBS-14, -21..-24 only; FR-OBS-7, -8, -11, -12, -13, -15, -16, -20, -26 and VEC-OBS-6 contradict or must name the ADR's additions, so they are edited too (kl_in_place_edits)."
   - "2. Settled: `worker-judge` runs `reader-server --role worker` restricted to the judge.find queue, so FR-OBS-1 and the resource are unchanged (OPS-DEPLOY confirms in V.kl-deploy-judge-lane)."
   - "3. MLflow 3.18.0 storing a custom span type `ROUTER` over OTLP, and a cross-experiment dataset input, are not measured; the first Red [image] test pins both. If MLflow rewrites ROUTER, find.route falls back to UNKNOWN with this spec revised; the dataset has its declared fallback (FR-OBS-39 c)."
   - "4. Settled: B7a's no-regression evaluation runs through reader.obs.eval.start, called by the route (owner) or the paired OPS-CLI `reader obs eval` (agent or owner), inside the eval cap and budget.live_runs_usd."
-  - "4a. Depends on SRV-AGENT accepting line `eval` and candidate instructions on judge_requests for FR-OBS-41's judge.find re-runs (kl_paired_changes); until then alignment of judge.find refuses with provider_error and judge.eval.* alignment works."
+  - "4a. FR-OBS-41's judge.find re-runs depend on SRV-AGENT allowing a worker-side judge.find call on line `eval` with a caller-given prompt, unrecorded (kl_paired_changes); until then step 0 refuses judge.find with slot_unsupported, judge.eval.* alignment works, and that half goes Red only after the SRV-AGENT change is approved."
   - "5. Caller `none` only: obs.eval measures retrieval with the question as the single query. B9's caller-model matrix (Haiku vs a strong model driving find/open, calls per answer) needs an agent loop with a declared {find, open} tool set (ADR-0025 rule 2, SRV-AGENT); `caller` admits only `none` until that paired change exists."
   - "6. judge_inputs follow `observability.retention_days` (default 30, ADR-0039's initial value) rather than a separate setting; alignment loses labels whose inputs expired."
   - "7. A hash of a short identifier or span is confirmable by guessing (FR-OBS-36 residual); ADR-0039 allows hashes, so no keyed hash is added."
@@ -2360,6 +2393,7 @@ kl_review_round1:
   - { id: 10, answer: "obs.eval_run registers brain-eval-v1 in bench (datasets/* writes); cross-experiment log-inputs pinned by the first image test with a fallback; VEC-OBS-6 and FR-OBS-26 edits" }
   - { id: 11, answer: "reader.obs.eval.start used by the route and OPS-CLI `reader obs eval`; eval cap check at start, budget.live_runs_usd for the agent" }
   - { id: reconcile, answer: "citation_supports_claim; JudgeInputsSink; judge_outputs on SRV-AGENT's retention, declared; judge.find re-runs through the lane with line eval; FR-OBS-43 prompts and parsers" }
+  - { id: round2, answer: "deep-reviewer round 2 on 7c6912e (5 blockers, candidate instructions via judge_requests): re-runs moved into obs.align on the worker through the Provider port, line eval, inside FR-OBS-43's fixed wrappers, unrecorded, with an 8.3 s deadline and a 20 % missing-share refusal; slot_unsupported for judge.find until SRV-AGENT's change is approved; INV-OBS-6 candidate_text only while running; judge_requests dropped from kl_text_paths; non-blocking: kl_adr_notes, FR-OBS-31 growth and retention, sample start signature, free-worker deadline, sequential re-runs, consent withdrawal" }
   - { id: non-blocking, answer: "FR-OBS-12, -13, -16, -20 edits; label slot scope and injectivity check; kl_adr_notes; kl_text_paths; guard and export declarations; FR-OBS-37 image and -38/-40/-42 unit tests; preselect documents; sample mode and its bias; open point 2 settled; Run param caller none" }
 
 owner_notes:
