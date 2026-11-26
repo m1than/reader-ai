@@ -1,7 +1,7 @@
 ---
 id: ADR-0039
 title: Knowledge layers as append-only source packs, faceted tags, greedy retrieval with judges, the brain/v1 agent contract; rules for amending decided ADRs
-status: proposed
+status: accepted
 date: 2026-11-26
 verified_by: "RESULT.md of spikes retrieval-ablation, judge-gate and pack-links applying the decision rules in B10; SRV-INGEST property test (base packs, overlays, manifest, re-anchoring) and SRV-KB property test (pair link runs), both over recorded model outputs; SRV-SEARCH and SRV-MCP evaluation meets the brain/v1 targets; SRV-PIPELINE test of the check order and loop limit; trace-check green"
 revisit_when: "Claude Haiku as caller stays below 90% of the strong model's retrieval sufficiency (point estimate) after two policy versions; find p95 reaches 2.5 s on the owner's Mac; the judged path degrades to judge_ran:false on more than 20% of gated queries for a week (initial value); more than 200 packs are active in one manifest (initial value); or brain/v1 needs a breaking change"

@@ -1858,7 +1858,8 @@ tasks:
   # greedy cascade now). Every task below starts only after V.owner.adr-0039 and is detailed in
   # docs/plans/adr-0039-execution.md. Each module task revises an approved spec, so its tests change with it (H2).
   # If the owner rejects ADR-0039, one PR removes these tasks and the ADR-0039 sentences in docs/roadmap.md.
-  - { id: V.owner.adr-0039, stage: V, kind: owner, status: blocked, needs: [],
+  - { id: V.owner.adr-0039, stage: V, kind: owner, status: done, needs: [],
+      accepted: "owner 2026-11-26 accepted ADR-0039 and confirmed its 26 'Decided by the agent' items as written; merged PR #43",
       reason: "ADR-0039 is proposed; accepting or rejecting it is the owner's (H3). Every ADR-0039 task below waits",
       ask: "Review ADR-0039 (knowledge layers, brain/v1, amendment rules A1–A9; amends ADR-0001, 0005, 0007, 0008,
         0009, 0012, 0015, 0018, 0019, 0025, 0032, 0035, 0038); accept or reject it. Confirm or change the choices the
