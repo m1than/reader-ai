@@ -172,6 +172,34 @@ Cheapest order that still answers B10, each stage with a stop rule:
 Stage 1 alone is $0.50 with margin if the owner prefers to approve in two steps (stage 1 now; stages 2–5 after its
 measured numbers). Every stage's spend goes to `budget.ledger`.
 
+## Stage 1 measured (owner's run, 2026-11-26; `results/paid/stage1/`)
+
+| Measure | Projected | Measured |
+| --- | --- | --- |
+| Calls, chapters 6 and 13 | 822 | 822 (0 failed, 0 empty, full coverage) |
+| USD | 0.37–0.39 | **0.4493** (SDK 0.44929147; recomputed from tokens with pricing.yaml 0.449298) |
+| USD per call | 0.00045–0.00048 | 0.000547 |
+| Cache reads / expected | ≥ 80% | 31,080,627 / 31,397,244 = **0.9899** |
+| Cache writes | ≈ 80,000 (2 chapters) | 463,399 |
+| Output tokens | 41,100–82,200 | 91,282 (111 per call) |
+| Uncached input tokens | ≈ 73,000 | 1,644 |
+| Chapter context, tokens per character | 0.398 (L02) | 0.392 (ch. 6), 0.382 (ch. 13) |
+| Wall per call, p50 / p95 | 1.82–2.10 | 1.71 / 2.31 s |
+| Run wall, concurrency 4 | 25–29 min sequential | 367 s (0.447 s per call) |
+| HOME left per call | — | 40 bytes (0.36 MB over 9,104 calls; tmpfs check passed) |
+
+**Why it cost 15% more.** The CLI also writes the span (the user message) to the 1-hour cache, so the span is billed
+at the write rate (2× input) instead of as plain input (1,644 uncached input tokens in total), and the prefixes
+average 111 output tokens, above B1's 50–100. The cache itself works: 99% of the chapter context was read.
+
+**`prefixes` re-projected from stage 1** (per chapter: one write of the chapter at the measured 0.387 tokens per
+character, later calls read it at the cache rate, plus the measured $0.000150 per call of span write and output;
+group 0 with its own 228,699-byte context): **$4.29 for 8,282 calls, ≈ 62 min at concurrency 4 (≈ 4.05 h
+sequential at the measured 1.76 s mean)**. That is above the stage's $4.01 cap, so as coded the stage would stop at
+about 93% coverage and fail its gate. The whole-book prefix cost becomes $0.45 + $4.29 = **$4.74 per pack**, an
+initial `index` cap of **$5.69** (+20%). Before `paid.sh prefixes` runs, the owner either raises its cap to $4.72
+($4.29 + 10%; stage1 spent + all caps = $12.51), or keeps $12.00 and lowers the judge cap to $4.22.
+
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; the owner runs it)
 
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a

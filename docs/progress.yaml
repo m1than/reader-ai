@@ -20,8 +20,9 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 8.7542      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 9.2035      # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # (+ V.freshness live web-search call 0.012588, 2026-11-23)
+                         # (+ V.spike.retrieval-ablation stage1 0.4493, 2026-11-26)
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
                          #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
                          #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
@@ -51,6 +52,9 @@ budget:
         what: "spikes/web-search § 5b live call, run by the owner (cap $0.10): one WebSearch run on Haiku 5.5, 3 upstream
           requests, 1 search ($0.01 fee included); SDK total_cost_usd = the recording proxy's sum;
           spikes/web-search/results/20261123T214429/live.json. Whether the fee draws from the Agent SDK credit: unknown" }
+    - { task: V.spike.retrieval-ablation, usd: 0.4493, date: 2026-11-26, funding: test_budget_usd,
+        what: "paid arm stage1: 822 calls; results/paid/stage1/ (run by the owner; SDK total 0.44929147, recomputed
+          from tokens with pricing.yaml 0.449298; cap $0.47 of the owner's staged $12.00)" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -1913,11 +1917,11 @@ tasks:
         fact-check question, so by recall only thematic can keep a prefix or summary. Paid arms projected: prefixes
         $3.73 with the chapter cached ($31.02 without), summaries $0.16, judge.eval sufficiency $3.94 (Sonnet),
         fact-check whole-section baseline $2.02; total $9.85",
-      ask: "Spend approved by the owner 2026-11-26 ($12.00 from test_budget_usd, staged). Still needed: a permitted
-        credential path. The only agent-allowed Keychain runner is spikes/tutor-call/run.sh (allow rule pinned to
-        that script; `security find-generic-password` is denied), and the paid arms need their own runner. Owner:
-        allow `bash spikes/retrieval-ablation/paid.sh *` (same pattern as tutor-call: Keychain item piped on stdin
-        into a hardened --network-restricted spike container, never printed), or run the runner yourself",
+      ask: "The owner runs spikes/retrieval-ablation/paid.sh ($12.00 approved 2026-11-26, staged). stage1 done
+        2026-11-26: $0.4493, cache ratio 0.9899, 822/822. Measured re-projection of `prefixes`: $4.29 (8,282 calls,
+        ≈ 62 min at concurrency 4), above its $4.01 cap. Owner: raise the prefixes cap to $4.72 (+10%) and the
+        total to $12.51 (stage1 spent + all caps), or keep $12.00 with the judge cap cut to $4.22, before running
+        `paid.sh prefixes`",
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
         gain on its type is significant: exact McNemar p < 0.05 (at least a net 6 of 30, more with discordant losses);

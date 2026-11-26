@@ -1,0 +1,49 @@
+{
+ "cache_read_tokens": 31080627,
+ "cache_expected_tokens": 31397244,
+ "cache_ratio": 0.9899,
+ "cache_rule_pass": true,
+ "concurrency": 4,
+ "empty_returns_this_run": 0,
+ "stage_spans": 822,
+ "stage_spans_with_prefix": 822,
+ "book_indexed_spans": 9104,
+ "book_spans_with_prefix": 822,
+ "coverage_complete": true,
+ "stage": "stage1",
+ "cap_usd": "0.47",
+ "calls": 822,
+ "calls_this_run": 822,
+ "usd_stage_total": "0.44929147000000001396",
+ "usd_this_run": "0.44929147000000001396",
+ "usd_recomputed_total": "0.449298",
+ "usd_reported_same_rows": "0.44929147000000001396",
+ "stopped": null,
+ "run_wall_s": 367.1,
+ "tokens": {
+  "input": 1644,
+  "output": 91282,
+  "cache_write": 463399,
+  "cache_read": 31080627
+ },
+ "wall_s_per_call_p50": 1.71,
+ "wall_s_per_call_p95": 2.31,
+ "failed_calls": 0,
+ "tmpfs_bytes": {
+  "/home/worker": {
+   "total": 536870912,
+   "used": 32768,
+   "free": 536838144
+  },
+  "/tmp": {
+   "total": 536870912,
+   "used": 344064,
+   "free": 536526848
+  }
+ },
+ "at": "2026-11-26T19:37:29+00:00",
+ "home_bytes_per_call": 40,
+ "home_extrapolated_bytes_9104_calls": 362920,
+ "home_tmpfs_ok": true,
+ "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 0.44929147000000001396, date: 2026-11-26, funding: test_budget_usd, what: \"paid arm stage1: 822 calls this run, 822 in total; spikes/retrieval-ablation/results/paid/stage1/\" }"
+}
