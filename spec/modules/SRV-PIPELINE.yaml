@@ -631,11 +631,11 @@ owner_notes:
 #     dependency": it becomes one in route mode, FR-PIPELINE-26);
 #   - `bounds.max_revise_loops` (→ `max_loops`); `errors` gains the proposed codes; the defers "More revise loops"
 #     and "Independent expected values for labs"; the owner note "With one loop the measured outcome is open findings";
-#   - FR-PIPELINE-11's status body (gains `loops`, `stop`, `refused_limit`, `target_usd`, `legacy_order`);
+#   - FR-PIPELINE-11's status body (gains `loops`, `stop`, `refused_limit`, `target_usd`);
 #     FR-PIPELINE-17's list states (budget_exhausted now includes the loop_cap codes); `tables.compile_runs` gains
 #     `order_version` (proposed_tables).
-# Deploy: runs open under the old order when this revision is deployed are handled by FR-PIPELINE-20 revised (running
-# ones cancelled at worker start, stalled and stage_failed ones listed and not resumable), so no run mixes the orders.
+# Deploy: every run still open under the old order when this revision is deployed is cancelled at worker start
+# (FR-PIPELINE-20 revised), so no run mixes the orders.
 #
 # Cost (ADR-0039 ADR-0005 row; estimates, not bounds): at today's floors a first pass is $1.39 and each loop $1.66,
 # three loops about $6.37 per lesson. The measured L02 loop (revise + fact-check + review) cost $1.475–1.634 and took
@@ -663,7 +663,7 @@ owner_notes:
 #   - SRV-FRESH: no change. The ADR-0030 freshness check keeps its place beside fact-check (ADR-0039 ADR-0009 row): it
 #     is not one of the four checks, never counts as a loop and spends on the `freshness` line; FR-PIPELINE-7's slice
 #     rule for `changed` cells and URL citations stays.
-#   - SRV-OBS: `reader.obs.attributes.SPEC_CODES` gains `loop_cap_run`, `loop_cap_task`, `loop_cap_month`, `legacy_order` (its
+#   - SRV-OBS: `reader.obs.attributes.SPEC_CODES` gains `loop_cap_run`, `loop_cap_task`, `loop_cap_month` (its
 #     catalogue test reads `errors`). `verify.lab`, `verify.claims`, `fact_check.passed` and `verify.lab_passed` (FR-OBS-13, -14) fire once
 #     per check run inside the sequence; tests/pipeline/test_pipeline_obs_db.py, traced to SRV-OBS, changes its
 #     expected stage order, so SRV-OBS carries a one-line paired note with it (H2).
@@ -678,14 +678,13 @@ proposed_bounds:
   fact_find_phase_s: 250                # structural (FR-PIPELINE-26): stage_job_timeout_s 1,200 − SRV-AGENT
                                         # proxy_upstream_timeout_s 900 − a 50 s parse margin; the finds' deadline
 
-proposed_errors: [loop_cap_run, loop_cap_task, loop_cap_month, legacy_order]   # the loop_cap codes are
-                                        # `budget_refused` codes written by the pipeline (D3); legacy_order: FR-PIPELINE-20
+proposed_errors: [loop_cap_run, loop_cap_task, loop_cap_month]   # `budget_refused` codes written by the pipeline (D3)
 
 proposed_owner_notes:
   - "Your choice to confirm (D6): each compile task's example budget (draft, fact_check, review, judge.find) equals the $8 run cap, so only the run cap, the loop rule and the per-call reserve stop a compile; the live check reports spend per task so you can lower them."
   - "Your choice to confirm (D7): a model output that does not parse or fails the notebook schema is retried as the same call (up to 3 attempts) and does not count as one of the 3 loops; only checks on a valid notebook count."
   - "A lesson stopped after its fourth failure shows `stop: loop_limit` in the compile status; until notifications exist, that status is the question to you."
-  - "At the deploy of this revision, compiles started under the old order (draft → fact-check → review → 1 loop): those still running are cancelled when the worker starts; those stalled or stopped on an error stay listed with `legacy_order: true` and cannot be resumed. Each needs a new compile under the new order, about $1.39 (one clean pass at today's floors, an estimate) up to the $8 cap."
+  - "At the deploy of this revision, every compile started under the old order (draft → fact-check → review → 1 loop) that has not finished — running, waiting or stopped on an error — is cancelled when the worker starts. Finished compiles keep their results. Each cancelled lesson needs a new compile under the new order, about $1.39 (one clean pass at today's floors, an estimate) up to the $8 cap."
 
 proposed_tables:
   compile_runs: "as approved, plus order_version int NOT NULL (1 = the approved order, 2 = this revision's; migration pipeline_0006 adds it with DEFAULT 1, so existing rows get 1, then sets DEFAULT 2 for new runs)"
@@ -694,18 +693,19 @@ proposed_revisions:
   - id: FR-PIPELINE-20
     text: >-
       Cancel a run, as approved, plus **the order change at deploy.** Migration `pipeline_0006` adds
-      `compile_runs.order_version` (proposed_tables). At worker start, in the pipeline kind module's
-      `on_worker_start` and before FR-PIPELINE-6's `ensure` of unfinished runs, every run with `order_version` 1
-      that is open (`finished_at` and `cancelled_at` null) and whose derived state is `running` is cancelled by the
-      cancel path above (`cancelled_at`, `finished_at`), its end counted (`ends` + 1) and `obs.runs` enqueued after
-      commit as FR-PIPELINE-18 does; a run whose state is `stalled` or `stage_failed` is not cancelled and keeps its
-      data, but `ensure` never re-enqueues an `order_version` 1 run, `POST /api/compiles/{run_id}/resume` answers
-      409 `legacy_order` for it, and the status routes (FR-PIPELINE-11, -17, -21) show `legacy_order: true`. A new
-      compile of that lesson works as usual (the owner's cancel of the legacy run first, since a stalled run still
-      holds `compile_running`). Steps of `order_version` 2 runs follow FR-PIPELINE-5 revised; no handler runs the old
-      order. Cancelling at worker start is idempotent (a second start finds no open running v1 run).
+      `compile_runs.order_version` (proposed_tables). No derived state is used for `order_version` 1 runs.
+      (a) At worker start, in the pipeline kind module's `on_worker_start` and before FR-PIPELINE-6's `ensure` of
+      unfinished runs, one statement cancels every open v1 run: `UPDATE compile_runs SET cancelled_at = now(),
+      finished_at = now(), ends = ends + 1 WHERE finished_at IS NULL AND cancelled_at IS NULL AND order_version = 1
+      RETURNING id`, whatever its jobs' state (queued, running, dead or none); after that commit, one `obs.runs`
+      end per returned id is enqueued as FR-PIPELINE-18 does (its enqueue-failure rule unchanged). A second start
+      returns no row and does nothing. (b) Read (1) of the step handler (above) also returns without effect when
+      the run's `order_version` is 1, so a v1 job still queued after (a) reserves, calls and writes nothing. (c) A
+      v1 run that finished before the deploy derives its state by the approved FR-PIPELINE-6 rule (`budget_refused`,
+      else `g2.blocking_open`), with `stop` and `refused_limit` null and `loops` as stored. A cancelled v1 run is
+      `cancelled` as approved; the owner compiles the lesson again as a new (v2) run.
     tests_planned:
-      - "add server/tests/pipeline/test_legacy_order_db.py [db]: migration pipeline_0006 gives existing rows order_version 1 and new runs 2, and its downgrade drops the column; at on_worker_start a running v1 run is cancelled with ends + 1 and exactly one obs.runs enqueued after commit (FR-PIPELINE-18's end), a stalled v1 run and a stage_failed v1 run are not cancelled, are listed with legacy_order true, are not re-enqueued by ensure, and their resume answers 409 legacy_order; a second worker start changes nothing; a v2 run is untouched"
+      - "add server/tests/pipeline/test_legacy_order_db.py [db]: migration pipeline_0006 gives existing rows order_version 1 and new runs 2, and its downgrade drops the column; at on_worker_start an open v1 run with a queued job, one with a dead job and one with no job are each cancelled (cancelled_at, finished_at set, ends + 1) with exactly one obs.runs end enqueued after commit per run; a queued v1 job run afterwards writes no reserve row, revision or compile_steps row; a finished v1 run derives the same state as under the approved rule, with stop null; a second worker start changes nothing; open v2 runs are untouched"
   - id: FR-PIPELINE-3
     text: >-
       As approved, with three changes. (a) `revise`'s user prompt carries the current notebook and the report of the
@@ -754,12 +754,15 @@ proposed_revisions:
       came before any notebook exists (the draft), finishes directly as `budget_exhausted` with no `findings`.
       **Stale steps.** Any model step (`draft`, `revise`, `fact_check`, `adversarial_review`) whose run has
       `budget_refused` set when its handler starts returns without effect: no reservation, no call, no revision, no
-      `compile_steps` row (the read is FR-PIPELINE-20's read (1), extended to `budget_refused`). A `findings` job
+      `compile_steps` row (the read is FR-PIPELINE-20's read (1), extended to `budget_refused` and to
+      `order_version` 1; a route-mode `fact_check` makes that read before its find phase and again before its model
+      call). A `findings` job
       returns without effect when the run's recorded decision admitted a loop (the last check's report has `next:
       revise`) and neither a refusal nor `loop_limit` is recorded after it. Each check's report carries the
       decision as a named field, `next: revise | findings | <the next check>`, with `stop` (`passed`, `loop_limit`,
-      `loop_cap`) when it is `findings`; a model step refused for budget records `next: findings` and `stop:
-      budget_refused` on its own report. The handler of a check writes its `compile_steps` row (with that report)
+      `loop_cap`) when it is `findings`. A model step refused for budget writes no `compile_steps` row: it commits
+      `budget_refused` and enqueues `findings` (or finishes the run, before any notebook), and FR-PIPELINE-6 derives
+      `stop: budget_refused` from the column. The handler of a check writes its `compile_steps` row (with that report)
       and the loop decision (`loops` + 1, or `budget_refused`) in one transaction; the enqueue
       of the next step follows SRV-EVENTS FR-EVENTS-3 (its own commit, before the handler returns), as approved.
       `ensure` and a handler that finds its step already recorded re-enqueue the recorded `next` without calling
@@ -768,7 +771,7 @@ proposed_revisions:
       check run.
     tests_planned:
       - "change server/tests/pipeline/test_stages.py: next_stage over the revised VEC-PIPELINE-2, including four-checks-fail-once (stops at the fourth failure with loops 3), rule-failure-counts, fourth-failure-at-rules, budget-stops-before-draft and the loop_cap cases"
-      - "change server/tests/pipeline/test_pipeline_db.py: the revised VEC-PIPELINE-2 end to end with a fake provider, a fake kernel and a fake loop_fits_limit; a rule failure loops back with no provider call before revise; budget refusal mid-loop runs findings only; a refusal at draft finishes budget_exhausted with no findings step"
+      - "change server/tests/pipeline/test_pipeline_db.py: the revised VEC-PIPELINE-2 end to end with a fake provider, a fake kernel and a fake loop_fits_limit; a rule failure loops back with no provider call before revise; budget refusal mid-loop (budget-refused-mid-loop) runs findings only and the refused step writes no compile_steps row; a refusal at draft finishes budget_exhausted with no findings step"
       - "add to test_loop_rule_db.py [db], the stale-revise sequence: a revise job enqueued, then budget_refused set by a concurrent refusal, then the revise job runs → no reserve row, no revision, no compile_steps row; a check whose transaction fails after the loop decision leaves neither the row nor loops + 1; ensure on a run whose recorded decision admitted a loop re-enqueues revise with loop_fits_limit not called (the fake counts calls); a stale findings job enqueued while the recorded decision admits a loop (no refusal, no loop_limit) returns without effect: no open cell, no G2, no finish"
   - id: FR-PIPELINE-6
     text: >-
@@ -828,7 +831,7 @@ proposed_revisions:
       equal the run cap for each compile task; the run records `loops`, `stop`, spend per task and wall time, which
       the owner reviews to accept the re-measured compile cost per lesson. [live]
     tests_planned:
-      - "change server/tests/pipeline/test_live.py: assert the effective task budgets of draft, fact_check, review and judge.find equal the run cap before the run; loops ≤ 3, stop present, zero task_budget_exhausted rows, ledger sum equal to the SDK total"
+      - "change server/tests/pipeline/test_live.py: assert the effective task budgets of draft, fact_check, review and judge.find equal the run cap before the run; record each loop decision's planned sum and its planned judge.find sum (FR-PIPELINE-23) beside the actual spend; loops ≤ 3, stop present, zero task_budget_exhausted rows, ledger sum equal to the SDK total"
       - "add a [unit] test in test_stages.py: deploy/reader.example.yaml gives draft, fact_check, review and judge.find a budget_usd_per_lesson equal to bounds.run_cap_usd"
   - id: NFR-PIPELINE-1
     metric: wall time of one L02 compile from run creation to its terminal state, with up to 3 loops, minutes
@@ -919,7 +922,9 @@ proposed_requirements:
       make no calls and are not planned. A loop with no planned call starts without asking. Otherwise it calls
       SRV-AGENT `loop_fits_limit(owner_id, run_id, compile_runs.cap_usd, planned)`: None → enqueue `revise`; a limit
       → set `budget_refused` to `loop_cap_run`, `loop_cap_task` or `loop_cap_month` when it is null, enqueue
-      `findings`, start no model call. The decision commits with the check's step row (FR-PIPELINE-5). The plan is
+      `findings`, start no model call. The decision commits with the check's step row (FR-PIPELINE-5), whose
+      report also records `planned_usd` (the sum of the planned reserves) and `planned_judge_usd` (its `judge.find`
+      part). The plan is
       an admission estimate: every call still reserves under FR-AGENT-9, so no cap can be crossed when the revised
       notebook is larger than planned. The first pass is not a loop and is not planned.
     tests_planned:
@@ -969,7 +974,9 @@ proposed_requirements:
       claim, a `changed` or `erratum` cell) in notebook order, at most one SRV-SEARCH `find(caller, channel:
       pipeline, query, budget, judge_ctx, question_type: fact_check)` (FR-SEARCH-22). `query` = the first 1,000
       characters of the item's text (the claim text; the cell's source for a cell) after NFC normalisation and
-      trimming (FR-SEARCH-22 allows 1–1000; an item whose text is empty after trimming gets no find). `judge_ctx`
+      trimming (FR-SEARCH-22 allows 1–1000). An item whose text is empty after trimming gets no find and is judged
+      on its cited spans; it is not under the incomplete-evidence rule below, so an `unsupported` verdict on it
+      fails the check and causes a loop like any other (the drafter wrote an empty claim). `judge_ctx`
       = {line: `compile`, run_id: the compile run, run_cap_usd: `compile_runs.cap_usd`, lesson_id, daily_budget_usd:
       the owner's effective daily budget (`reader.config.effective`, as the tutor passes it)}. **Two alias
       namespaces, never mixed.** The notebook passed to fact_check
@@ -981,16 +988,16 @@ proposed_requirements:
       FR-PIPELINE-2 (VEC-PIPELINE-5). A card's context prefix (ADR-0039 B1) is not rendered: it is retrieval text,
       not evidence. **Bound and per-find budget.** The rendered fact-check source is bounded by
       `bounds.source_max_chars` (300,000; the pipeline channel's budget is the stage's own context budget, ADR-0039
-      B8). Finds run one after another (initial). Before the find of the i-th item that gets one (of n remaining,
-      this one included), its token budget is floor((`source_max_chars` − the characters already rendered: the
-      cited spans and the cards kept so far) / (2.0 × n)), 2.0 being SRV-AGENT's `chars_per_token_floor` and n
-      the items not yet given a find; a card's estimated tokens are at least half its rendered characters, so the
-      cards fit the bound by construction, and the divisor counts only items still to be reached, never items
-      the deadline skips. A budget below SRV-SEARCH policy `budget_min` (400) → that item gets no find.
-      **Find-phase deadline.** The finds share a deadline of `bounds.fact_find_phase_s` (250 s = the 1,200 s
-      `stage_job_timeout_s` − SRV-AGENT's 900 s `proxy_upstream_timeout_s` − a 50 s parse margin), so the find
-      phase plus the longest model call fit the step's job timeout; an item not reached by the deadline gets no
-      find. **Guard cut.** If the rendered cards still exceed the bound (a find returned more than its budget),
+      B8). Finds run one after another (initial), in notebook order over the items with non-empty text. Before each
+      find, its token budget is floor((`source_max_chars` − the characters already rendered: the cited spans and
+      the cards kept so far) / (2.0 × n)), 2.0 being SRV-AGENT's `chars_per_token_floor` and n the number of
+      items, this one included, that are still to be asked; an item skipped (its budget below SRV-SEARCH policy
+      `budget_min`, 400, so it gets no find) leaves n before the next item's budget is computed, so the divisor
+      counts only items that may still get a find. A card's estimated tokens are at least half its rendered
+      characters, so the cards fit the bound by construction. **Find-phase deadline.** The finds share a deadline
+      of `bounds.fact_find_phase_s` (250 s = the 1,200 s `stage_job_timeout_s` − SRV-AGENT's 900 s
+      `proxy_upstream_timeout_s` − a 50 s parse margin), checked before each find, so the find phase plus the
+      longest model call fit the step's job timeout; once it has passed, the remaining items get no find. **Guard cut.** If the rendered cards still exceed the bound (a find returned more than its budget),
       cards are kept per item, first each item's top card (its first by `find`'s order), then the items' next
       cards round-robin in item order, each card whole, until the next would cross the bound.
       **One rule for incomplete evidence.** An item judged without its full route evidence — a card cut by the
@@ -1005,14 +1012,15 @@ proposed_requirements:
       recorded on the step's report, so that step is never reused (FR-PIPELINE-5); an embed-degraded find blocks
       reuse like a judge-degraded one. A gate-skipped response (`judge_skip: gate`, `judge_ran: false`,
       `degraded: false`) does not block reuse.
-      **Fallback and decision hook:** `section` is the value until (1) SRV-SEARCH's fact-check route is approved and
-      merged (V.kl-search-find) and (2) spikes/retrieval-ablation/RESULT.md applies ADR-0039 B10's rule to the
+      **Fallback and decision hook:** `section` is the value until (1) SRV-SEARCH's fact-check route, with the
+      paired-change row of this revision's header, is approved and merged (V.kl-search-find); that row is a
+      promotion gate for `route`, not for this revision, and (2) spikes/retrieval-ablation/RESULT.md applies ADR-0039 B10's rule to the
       fact-check comparison: if the route is not significantly worse than the whole-section baseline and not worse by
       more than a net 2 of 30, the value becomes `route` in one data change citing that RESULT.md; otherwise it stays
       `section` and the task blocks for the owner with both measurements.
     tests_planned:
-      - "add server/tests/pipeline/test_fact_source_db.py [db] with a fake find: section mode makes no find; route mode makes one find per item in notebook order with channel pipeline, route fact_check and line compile with the run id; the notebook keeps s<k> aliases and every cited span is rendered as its s<k> line; cards already cited are not repeated; other cards get r<k> in first-seen order; a fact report naming s<k> and r<k> aliases expands both; no context prefix in the rendered source; an unrendered s<k> in the report is forced as not in the source; the budget passed to each fake find equals floor((source_max_chars − rendered chars so far) / (2.0 × items still to reach)); the query passed is the NFC-trimmed text cut to 1,000 characters (a 1,000-character claim passes whole, a 1,001-character claim loses its last character); judge_ctx equals {line compile, run_id, run_cap_usd, lesson_id, daily_budget_usd}; a degraded find (degraded true, from a judge skip and from a failed embed) leaves budget_refused null and makes the step rerun on a recompile; a gate-skipped find (judge_skip gate, judge_ran false, degraded false) is reused; reuse in route mode makes no find"
-      - "add to test_fact_source_db.py, the incomplete-evidence rule on all three branches, each with model verdicts unsupported, supported and contradicted: (a) guard cut (a fake find returning more than its budget: each item's top card kept first, then round-robin whole cards), (b) deadline (a fake clock past fact_find_phase_s: later items get no find), (c) budget below budget_min (a large cited source: the item gets no find); in each branch unsupported → source_too_large, supported and contradicted stand, the check passes on source_too_large and findings adds a blocking source_too_large cell"
+      - "add server/tests/pipeline/test_fact_source_db.py [db] with a fake find: section mode makes no find; route mode makes one find per item in notebook order with channel pipeline, route fact_check and line compile with the run id; the notebook keeps s<k> aliases and every cited span is rendered as its s<k> line; cards already cited are not repeated; other cards get r<k> in first-seen order; a fact report naming s<k> and r<k> aliases expands both; no context prefix in the rendered source; an unrendered s<k> in the report is forced as not in the source; the budget passed to each fake find equals floor((source_max_chars − rendered chars so far) / (2.0 × items still to be asked)), and after an item skipped below budget_min the next budget is computed with that item no longer counted; an empty-text item gets no find and its unsupported verdict fails the check; the query passed is the NFC-trimmed text cut to 1,000 characters (a 1,000-character claim passes whole, a 1,001-character claim loses its last character); judge_ctx equals {line compile, run_id, run_cap_usd, lesson_id, daily_budget_usd}; a degraded find (degraded true, from a judge skip and from a failed embed) leaves budget_refused null and makes the step rerun on a recompile; a gate-skipped find (judge_skip gate, judge_ran false, degraded false) is reused; reuse in route mode makes no find"
+      - "add to test_fact_source_db.py, the incomplete-evidence rule on all three branches, each with model verdicts unsupported, supported and contradicted: (a) guard cut (a fake find returning more than its budget: each item's top card kept first, then round-robin whole cards), (b) deadline (a fake clock past fact_find_phase_s, checked before each find: later items get no find), and a route-mode fact_check whose run is cancelled between the find phase and the model call makes no model call, (c) budget below budget_min (a large cited source: the item gets no find); in each branch unsupported → source_too_large, supported and contradicted stand, the check passes on source_too_large and findings adds a blocking source_too_large cell"
       - "add a [unit] test: bounds.fact_find_phase_s equals stage_job_timeout_s − SRV-AGENT proxy_upstream_timeout_s − 50, and the pipeline reads budget_min from SRV-SEARCH policy (400)"
       - "add to test_stages.py: stages.yaml with fact_check.source other than section or route is refused at load"
   - id: FR-PIPELINE-27
