@@ -1922,10 +1922,13 @@ tasks:
         of 30 worse on any type, find p95 < 2.5 s, else block for the owner with both measurements. Sets the timeout
         (initial 2.2 s), the judge-input cap (initial 3,000 tokens) and the lane concurrency (initial 4), per channel where they differ. Spends credit:
         budget.ledger, the owner asked first" }
-  - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: in_progress, needs: [V.owner.adr-0039],
+  - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: done, needs: [V.owner.adr-0039],
       branch: V/kl-agent-judges,
-      review: "spec: deep-reviewer (Fable) round 1 changes (10 blockers fixed), round 2 approve (2026-11-26); code
-        review by the coordinator before the merge into V/slice-integration (pending)",
+      review: "spec: deep-reviewer (Fable) round 1 changes (10 blockers fixed), round 2 approve (2026-11-26). Code:
+        deep-reviewer (Fable) round 1 changes (1 blocker: OverflowError on a huge integer sufficiency, fixed with
+        ±400-digit and 1e400 vectors), round 2 approve (2026-11-26; 12 mutants killed; 337 agent tests pass). Merged
+        into V/slice-integration. Deferred items (FR-AGENT-3 client identity, INV-AGENT-7, VEC-AGENT-6, judge_requests)
+        are implemented by V.kl-deploy-judge-lane",
       done_here: "spec promoted (FR-AGENT-6, -9, -10, -12, -17 revised; FR-AGENT-18..23; INV-AGENT-8..10;
         VEC-AGENT-5); Red then Green: judges.py (slots, lines, caps, versions, owner-scoped recorded outputs,
         replay, ordinal parser, delimiter neutralising), lane.py (judge.find handler, kind, start hook), ledger
