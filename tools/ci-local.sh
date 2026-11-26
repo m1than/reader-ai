@@ -8,7 +8,7 @@
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo "$(dirname "$0")/..")"
 BASE="${BASE:-origin/main}"
-NODE26="/opt/homebrew/opt/node@26/bin"   # web/ pins Node 26 in web/.nvmrc (proposed ADR-0020)
+NODE26="/opt/homebrew/opt/node@26/bin"   # web/ pins Node 26 in web/.nvmrc (ADR-0020)
 FAILS=0
 
 step() { # name, command...

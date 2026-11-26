@@ -1,6 +1,7 @@
 # Spike image (never shipped): Kernel Gateway with python3, rust (evcxr) and deno kernels (ADR-0003),
 # run hardened as in ADR-0014. The pilot crates are pre-built into a read-only evcxr cache.
-FROM python:3.13-slim-bookworm
+# ADR-0020: re-measured on the target runtime (3.13/bookworm numbers stay in results/).
+FROM python:3.14-slim-trixie
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates build-essential unzip \

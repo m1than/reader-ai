@@ -134,7 +134,7 @@ Rejected orders:
 | # | Action | Why |
 | --- | --- | --- |
 | 1 | Set ADR-0001 … 0016 to `accepted` in one commit and merge PR #1 | H3: only the owner raises status |
-| 2 | Install Docker Desktop (Apple Silicon), `uv`, Node 26 LTS (`brew install node@26`; proposed ADR-0020), Claude Code | Toolchain for the stack and the agent |
+| 2 | Install Docker Desktop (Apple Silicon), `uv`, Node 26 LTS (`brew install node@26`; ADR-0020), Claude Code | Toolchain for the stack and the agent |
 | 3 | ✅ 2026-11-20: `claude setup-token` done; token exported as `CLAUDE_CODE_OAUTH_TOKEN` in the owner's shell → `secret://env/CLAUDE_CODE_OAUTH_TOKEN` | Provider credential (ADR-0005, ADR-0011) |
 | 4 | ✅ 2026-11-20: Telegram bot created; token in a private file on the Mac → `secret://hostfile/<path>` (mode 0600, outside git work trees) | Notifier adapter (ADR-0010) |
 | 5 | Keep the Bashir PDF at a stable path, for example `~/reader-ai-data/materials/` | Ingestion input; never committed |
