@@ -553,3 +553,71 @@ vectors:
 #   single use are SRV-AUTH's.
 # - The pair-pool size is not a reader.yaml field; v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
 # - The power assertion (`caffeinate`) from the roadmap's risk table belongs to the job runner (stage 2+), not here.
+
+# ---- Proposed revision (ADR-0039 B7b, accepted 2026-11-26; task V.kl-deploy-judge-lane, phase 1) ----
+#
+# `worker-judge` (OPS-DEPLOY FR-DEPLOY-16, proposed) is a server role in the default profile and a `db-password`
+# consumer, so it gets the reader.yaml bind, the secret, and the backup/restore stop and start like the worker. A new
+# doctor check names judge slots missing from `tasks`. This module handles secrets: full deep-reviewer rounds until
+# approve. These items join `requirements` and `vectors` with their Red tests after that approval.
+# Not in this revision: the owner-run `reader obs proposals` export (docs/plans/adr-0039-execution.md) waits for
+# SRV-OBS's `judge.align` proposals table (V.kl-obs-spans).
+
+proposed_revisions:
+  - id: FR-CLI-4
+    text: >-
+      As approved, except the services given the read-only reader.yaml bind are exactly `api`, `worker`,
+      `worker-judge`, `mcp` and `agent-proxy` (worker-judge is a server role and reads `tasks` and the budgets,
+      SRV-AGENT FR-AGENT-21); no other service gets it. `READER_CONFIG` stays static in compose.yaml on the four
+      server services (OPS-DEPLOY FR-DEPLOY-16 f).
+    tests_planned:
+      - "change server/tests/cli/test_stack.py [unit]: the override for VEC-CLI-1 equals the revised VEC-CLI-2 (bind on worker-judge); no other service gets the bind"
+  - id: FR-CLI-5
+    text: >-
+      As approved, except `db-password` goes to postgres, api, worker, worker-judge and mcp (FR-DEPLOY-10 b as
+      revised), worker-judge at its rendered uid (10001). worker-judge receives no provider token: provider tokens go
+      to agent-proxy only (ADR-0025 rule 1 as amended by ADR-0039 B7b). The watcher's consumer set gains
+      worker-judge, so a restarted lane gets its file again (FR-CLI-8).
+    tests_planned:
+      - "change server/tests/cli/test_stack.py [unit]: the delivery plan equals the revised VEC-CLI-3 (worker-judge, 10001, db-password only); no provider file name is planned for worker-judge with agents on or off"
+      - "change server/tests/cli/test_watcher.py [unit]: a start event for worker-judge with the project's labels schedules exactly one db-password delivery as 10001"
+  - id: FR-CLI-17
+    text: >-
+      As approved, except `reader backup DIR` stops `api`, `worker`, `worker-judge` and `mcp` (worker-judge holds
+      database sessions and writes recorded outputs and the ledger) inside the same `try` whose `finally` starts them
+      again.
+    tests_planned:
+      - "change server/tests/cli/test_maintenance.py [unit]: the backup's stop and start argv name api, worker, worker-judge and mcp; a failing dump still starts all four"
+  - id: FR-CLI-18
+    text: >-
+      As approved, except `reader restore DIR` stops `api`, `worker`, `worker-judge`, `mcp` and `caddy` inside the
+      `try` whose `finally` starts them again, so no lane session holds a lock or writes during `pg_restore --clean`.
+    tests_planned:
+      - "change server/tests/cli/test_maintenance.py [unit]: the restore's stop and start argv name api, worker, worker-judge, mcp and caddy; a failing pg_restore still starts all five"
+
+proposed_requirements:
+  - id: FR-CLI-25
+    text: >-
+      **Judge slots in `reader doctor`** (ADR-0039 B7; SRV-AGENT FR-AGENT-18: a slot missing from `tasks` raises
+      `unknown_model` before any spend, so a missing `judge.find` silently leaves every `find` unjudged). The check
+      `judge_slots` reads `reader.agent.judges.JUDGE_SLOTS` (each `judge.eval.<name>` expanded) and the loaded
+      reader.yaml's `tasks`. When `reader up` would choose the `agents` profile now (FR-CLI-5): every slot bound →
+      ok, detail `all bound`; `judge.find` missing → fails; only other slots missing → ok (they run only in offline
+      index and evaluation jobs, which refuse with `unknown_model` on their own). Whenever any slot is missing the
+      detail is `missing: <slot names, sorted>; add tasks.<slot>: {model: <alias>} to reader.yaml (v1 bindings:
+      deploy/reader.example.yaml)`. With `agents` not chosen → ok, detail `off`. Slot names and aliases are not
+      secrets; no value is read.
+    tests_planned:
+      - "add server/tests/cli/test_judge_slots.py [unit]: all bound → ok `all bound`; judge.find missing → fails with the hint; only judge.eval.relevance missing → ok with the hint naming it; agents not chosen → ok `off`; `doctor --json` carries {name: judge_slots, ok, detail}"
+
+proposed_vectors:
+  - id: VEC-CLI-2
+    source: "Revised: as approved, with the read-only reader.yaml bind also on worker-judge (FR-CLI-4 revised); for `ivan` alone it equals OPS-DEPLOY's revised VEC-DEPLOY-3"
+    file: spec/fixtures/OPS-CLI/override-two-users.yaml
+    tests_planned:
+      - "test_stack.py's override comparison and the VEC-DEPLOY-3 equality check read the revised fixtures"
+  - id: VEC-CLI-3
+    source: "Revised: the rendered-model excerpt and the default-profile delivery plan gain worker-judge (uid 10001, db-password)"
+    file: spec/fixtures/OPS-CLI/delivery-plan.yaml
+    tests_planned:
+      - "test_stack.py's delivery-plan test reads the revised fixture"
