@@ -1862,7 +1862,7 @@ tasks:
       reason: "ADR-0039 is proposed; accepting or rejecting it is the owner's (H3). Every ADR-0039 task below waits",
       ask: "Review ADR-0039 (knowledge layers, brain/v1, amendment rules A1–A9; amends ADR-0001, 0005, 0007, 0008,
         0009, 0012, 0015, 0018, 0019, 0025, 0032, 0035, 0038); accept or reject it. Confirm or change the choices the
-        agent made (ADR-0039 'Decided by the agent', 17 items): worker-judge lane at concurrency 4 with LISTEN/NOTIFY;
+        agent made (ADR-0039 'Decided by the agent', 23 items): worker-judge lane at concurrency 4 with LISTEN/NOTIFY;
         no warm pool, one CLI spawned per call on today's FR-AGENT-3/-6 path, at most 4 live lane tokens, never evicting
         a worker token; query and card text in a judge_requests row, never in job args; judge timeout 2.2 s (basis
         n = 3); expanded-card score = parent x decay; labels owner.<slot>_ok, pass/fail only; alignment as a proposal
@@ -1874,7 +1874,10 @@ tasks:
         judge_inputs store, 30 days, consent-gated; personal-use material on MCP returns no L1 span cards (L2 and L4
         only, quotes <= 300 chars), internal channels keep full span text; per-channel response budgets; judge jobs
         keyed by request id; the lane's initial memory limit before judge-gate measures it; expected facts kept out of
-        MLflow. The final integration PR to main waits for the owner (rule A9)" }
+        MLflow; an absolute judge-input cap of 3,000 tokens; personal-use full text only for an entitled caller (owner or
+        own copy), everyone else the MCP row; the lane's token quota enforced in agent-proxy; late judge outputs kept for
+        replay, job_keys pruned after a day; a per-token daily judge cap on MCP; evaluation and spikes on the internal
+        owner channel. The final integration PR to main waits for the owner (rule A9)" }
   - { id: V.kl-eval-set, stage: V, kind: setup, status: todo, needs: [V.owner.adr-0039],
       what: "ADR-0039 B9: extend questions-v2 (40, owner-accepted) to a typed set, 30 per type (exact, thematic,
         fact-check), expected facts in own words <= 300 chars, expected pages, topic branch; registered as an obs.bench
@@ -1890,19 +1893,23 @@ tasks:
         and V.cost-optimize lever 7. Spends Agent SDK credit: budget.ledger, the owner asked first" }
   - { id: V.spike.judge-gate, stage: V, kind: spike, status: todo,
       needs: [V.spike.retrieval-ablation, V.kl-agent-judges, V.kl-deploy-judge-lane],
-      note: "ADR-0039 B10: Haiku judge.find p95 on the deployed worker-judge lane, one CLI spawned per call (measured SDK
+      note: "ADR-0039 B10, on the internal owner channel and per channel budget (MCP 2,000 tokens; tutor at its source
+        budget with the judge input at the 3,000-token cap): Haiku judge.find p95 and judged-path completion on the deployed worker-judge lane, one CLI spawned per call (measured SDK
         call 1.82–2.10 s on Haiku including the spawn, n = 3 short prompts, spikes/agent-sdk-container), the steps other
         than the judge, the lane's peak memory (a paired OPS-DEPLOY change then sets the limit), gate fire rate, judged-path completion, sufficiency, cost of one evaluation run; judge after the
         selection, the earlier order once as the reference; cheapest variant not significantly worse, at most a net 2
         of 30 worse on any type, find p95 < 2.5 s, else block for the owner with both measurements. Sets the timeout
-        (initial 2.2 s) and the lane concurrency (initial 4). Spends credit:
+        (initial 2.2 s), the judge-input cap (initial 3,000 tokens) and the lane concurrency (initial 4), per channel where they differ. Spends credit:
         budget.ledger, the owner asked first" }
   - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: todo, needs: [V.owner.adr-0039],
       what: "SRV-AGENT revision (~250–400 lines): judge slots as task classes (judge.find, judge.link_type,
         ingest.context_prefix, judge.eval.*, judge.align), index and eval ledger lines with per-pack and per-pair-run
         caps, recorded judge outputs by (input hash, judge@version); the judge.find job on the worker-judge lane (ADR-0039
         B7b): keyed by request id, max attempts 1, no model call past the deadline, today's per-call path (reserve,
-        token, one CLI, one call, revoke), no warm pool, at most 4 live lane tokens and never evicting a worker token;
+        token, one CLI, one call, revoke), no warm pool, at most 4 live lane tokens enforced by agent-proxy as a
+        per-client-service quota (refuse, never evict; purge expired; lane revokes its tokens at start; killed-lane test),
+        never evicting a worker token; late outputs kept for replay; judge.find ledger line by channel (tutor use; the
+        compile run on the fact-check route; MCP monthly plus a per-token daily cap in SRV-MCP);
         query and card text only in a judge_requests row; context prefixes in batched worker jobs of 25 spans.
         FR-AGENT-3, -6, -9, -12, -17" }
   - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: todo,
@@ -1941,9 +1948,12 @@ tasks:
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
         budget with stated bounds, 1-hop expansion, one judge.find job last on the worker-judge lane), policy_version,
-        manifest views, card shape, judged flag; open resolves only sealed span ids; personal-use cards per channel (MCP: no L1
-        cards and no link into them, quotes <= 300 chars; tutor, pipeline and judge input: full span text within their
-        budgets), the MCP walk test; per-channel response budgets; cache key with caller identity, roles and manifest version.
+        manifest views, card shape, judged flag; open resolves only sealed span ids; personal-use cards per channel and
+        caller (MCP, and any caller who is neither the pack owner nor holds an own copy of the same sha256 (ADR-0016):
+        no L1 cards and no link into them, quotes <= 300 chars; tutor, pipeline and judge input for an entitled caller:
+        full span text within their budgets); INV-SEARCH-1 kept until SRV-SHARE; the MCP walk test (incl. open on cited
+        and guessed spn: ids) and a cross-user test; judge input capped at min(1.5 x channel budget, 3,000 tokens
+        initial), top slice only; per-channel response budgets; cache key with caller identity, roles and manifest version.
         FR-SEARCH-3, -4, -5, -7, -8, -9, -20; INV-SEARCH-4; NFR-SEARCH-1; VEC-SEARCH-1, -2, -5" }
   - { id: V.kl-pipeline-checks, stage: V, kind: module, track: ai, status: todo, needs: [V.kl-search-find],
       what: "SRV-PIPELINE revision (~300–500 lines): checks after drafting cheapest first (rules, lab, claim support,
