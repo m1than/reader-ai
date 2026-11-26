@@ -28,7 +28,6 @@ UPGRADE = (
         pack_ids text[] NOT NULL DEFAULT '{}',
         overlay_id text NULL,
         request_id uuid NULL,
-        reservation_id bigint NULL REFERENCES agent_spend (id) ON DELETE RESTRICT,
         created_at timestamptz NOT NULL DEFAULT now(),
         PRIMARY KEY (owner_id, input_sha256, judge)
     )""",

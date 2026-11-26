@@ -118,18 +118,6 @@ def prompt_bytes(slot: str) -> bytes:
     return (PROMPTS / name).read_bytes()
 
 
-def instructions_of(prompt: str) -> str:
-    """The text of the one instructions section."""
-    start = prompt.index(INSTRUCTIONS_BEGIN) + len(INSTRUCTIONS_BEGIN)
-    return prompt[start : prompt.index(INSTRUCTIONS_END)]
-
-
-def with_instructions(prompt: str, instructions: str) -> str:
-    """The prompt with only its instructions section replaced (the frame never changes)."""
-    start = prompt.index(INSTRUCTIONS_BEGIN) + len(INSTRUCTIONS_BEGIN)
-    return prompt[:start] + instructions + prompt[prompt.index(INSTRUCTIONS_END) :]
-
-
 def judge_version(prompt: bytes, model: str, schema_version: int) -> str:
     digest = hashlib.sha256()
     for part in (prompt, model.encode("utf-8"), str(schema_version).encode("ascii")):
@@ -175,6 +163,13 @@ def _no_constant(_name: str) -> Any:
     raise ValueError("non-finite number")
 
 
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    keys = [k for k, _ in pairs]
+    if len(set(keys)) != len(keys):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def _ordinals(value: Any, n: int) -> list[int]:
     if not isinstance(value, list) or not all(type(v) is int and 1 <= v <= n for v in value):
         raise agent_error("output_invalid")
@@ -190,7 +185,7 @@ def parse_find_output(raw: str, card_ids: Sequence[str]) -> dict[str, Any]:
     if fenced is not None:
         body = fenced.group(1)
     try:
-        data = json.loads(body, parse_constant=_no_constant)
+        data = json.loads(body, parse_constant=_no_constant, object_pairs_hook=_unique_keys)
     except ValueError:
         raise agent_error("output_invalid") from None
     keys = set(data) if isinstance(data, dict) else set()
@@ -206,7 +201,8 @@ def parse_find_output(raw: str, card_ids: Sequence[str]) -> dict[str, Any]:
     else:
         drop = rest
     suff = data["sufficiency"]
-    if type(suff) not in (int, float) or not math.isfinite(suff) or not 0 <= suff <= 1:
+    # The range first: an integer like 10**400 is too large for float, and isfinite would raise OverflowError.
+    if type(suff) not in (int, float) or not 0 <= suff <= 1 or not math.isfinite(suff):
         raise agent_error("output_invalid")
     return {
         "keep": [card_ids[o - 1] for o in keep],
@@ -227,14 +223,13 @@ async def record(
     pack_ids: Sequence[str] = (),
     overlay_id: str | None = None,
     request_id: uuid.UUID | None = None,
-    reservation_id: int | None = None,
 ) -> bool:
     """Insert-or-ignore; True when this call inserted the row."""
     row = await conn.execute(
         text(
             "INSERT INTO judge_outputs (owner_id, input_sha256, judge, output, pack_ids, overlay_id,"
-            " request_id, reservation_id) VALUES (:o, :h, :j, CAST(:out AS jsonb), CAST(:p AS text[]), :ov,"
-            " :rq, :rs) ON CONFLICT DO NOTHING RETURNING 1"
+            " request_id) VALUES (:o, :h, :j, CAST(:out AS jsonb), CAST(:p AS text[]), :ov, :rq)"
+            " ON CONFLICT DO NOTHING RETURNING 1"
         ),
         {
             "o": owner_id,
@@ -244,7 +239,6 @@ async def record(
             "p": list(pack_ids),
             "ov": overlay_id,
             "rq": request_id,
-            "rs": reservation_id,
         },
     )
     return row.first() is not None
@@ -277,12 +271,11 @@ _FORGET_OVERLAY: Final = "DELETE FROM judge_outputs WHERE owner_id = :o AND over
 
 
 async def _delete(conn: AsyncConnection, statement: str, params: Mapping[str, Any]) -> int:
-    """A DELETE the trigger allows: the setting is on for this statement only."""
+    """A DELETE the trigger allows: the setting is on for this statement only. No `finally`: a failed DELETE
+    aborts the transaction, which ends the transaction-local setting too, and its error is the one raised."""
     await conn.execute(text("SELECT set_config('reader.judge_delete', 'on', true)"))
-    try:
-        result = await conn.execute(text(statement), dict(params))
-    finally:
-        await conn.execute(text("SELECT set_config('reader.judge_delete', 'off', true)"))
+    result = await conn.execute(text(statement), dict(params))
+    await conn.execute(text("SELECT set_config('reader.judge_delete', 'off', true)"))
     count: int = result.rowcount
     return count
 

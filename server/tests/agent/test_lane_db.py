@@ -144,6 +144,15 @@ async def test_one_call_records_notifies_and_deletes(pg: Pg, tmp_path: Path) -> 
     w = await world(pg, tmp_path, CONFIG_JUDGES)
     ln = _lane(w, tmp_path)
     req, h = await _request(ln)
+    reserves_at_issue: list[int] = []
+    issue = ln.proxy.issue
+
+    async def issue_after_reserve(*a: Any, **kw: Any) -> str:  # INV-AGENT-8: the token after the reservation
+        reserves_at_issue.append(await scalar(w.engine, "SELECT count(*) FROM agent_spend WHERE kind = 'reserve'"))
+        token: str = await issue(*a, **kw)
+        return token
+
+    ln.proxy.issue = issue_after_reserve  # type: ignore[method-assign]
     heard: list[str] = []
     async with w.engine.connect() as listen:
         raw = await listen.get_raw_connection()
@@ -156,6 +165,7 @@ async def test_one_call_records_notifies_and_deletes(pg: Pg, tmp_path: Path) -> 
                 break
             await asyncio.sleep(0.02)
     assert heard == [str(req.request_id)]  # the payload is the id only
+    assert reserves_at_issue == [1]
     assert await _spend(w) == ["reserve", "settle"]
     out = await rows(
         w.engine, "SELECT owner_id, input_sha256, judge, output, pack_ids, request_id FROM judge_outputs"
@@ -200,18 +210,21 @@ async def test_handle_comes_from_users(pg: Pg, tmp_path: Path) -> None:
     assert ln.proxy.issued[0][0] == "anna"
 
 
-@pytest.mark.parametrize("case", ["no-row", "eval-line", "deadline-passed", "hash-mismatch", "no-time-left"])
+@pytest.mark.parametrize("case", ["no-row", "eval-line", "deadline-passed", "hash-mismatch", "no-user"])
 async def test_no_call(pg: Pg, tmp_path: Path, case: str) -> None:
+    judges = need("reader.agent.judges")
     w = await world(pg, tmp_path, CONFIG_JUDGES)
     ln = _lane(w, tmp_path)
     if case == "eval-line":
         req, h = await _request(ln, line="eval")
     elif case == "deadline-passed":
         req, h = await _request(ln, age_s=3.0)
-    elif case == "no-time-left":  # past the deadline and the kill window
-        req, h = await _request(ln, timeout_s=1.0, age_s=4.0)
     else:
         req, h = await _request(ln)
+    if case == "no-user":  # an owner with no users row: the handle lookup finds nobody
+        req = replace(req, owner_id=uuid.uuid4())
+        ln.requests.rows[req.request_id] = req
+        h = judges.find_input_sha256(req.owner_id, req.query, list(req.cards))
     if case == "no-row":
         ln.requests.rows.clear()
     if case == "hash-mismatch":

@@ -85,5 +85,6 @@ issue_settlements:
   - { name: issue-refused-client,  reserve: 0.002, answer: { status: 403, error: client_unknown }, settled_usd: 0, error: sdk_error }
   - { name: issue-refused-tools,   reserve: 0.25,  answer: { status: 400, error: tools_not_allowed }, settled_usd: 0, error: sdk_error }
   - { name: issue-provider-missing, reserve: 0.25, answer: { status: 409, error: provider_missing }, settled_usd: 0, error: provider_missing }
-  - { name: issue-failed-5xx,      reserve: 0.25,  answer: { status: 502, error: x },              settled_usd: 0, error: provider_unavailable }
+  - { name: issue-429-other,       reserve: 0.25,  answer: { status: 429, error: rate_limited },   settled_usd: 0, error: provider_unavailable }
+  - { name: issue-failed-5xx,     reserve: 0.25,  answer: { status: 502, error: x },              settled_usd: 0, error: provider_unavailable }
   - { name: issue-failed-transport, reserve: 0.25, answer: transport,                             settled_usd: 0, error: provider_unavailable }

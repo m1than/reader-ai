@@ -138,6 +138,23 @@ async def test_void_removes_an_unsettled_reservation_only(pg: Pg, tmp_path: Path
         await ledger.void(w.engine, crashed)  # twice
 
 
+async def test_settle_and_void_rows_copy_the_line(pg: Pg, tmp_path: Path) -> None:
+    """FR-AGENT-9 (b): the reserve row stores the call's line; its settle or void row copies it."""
+    ledger = need("reader.agent.ledger")
+    w = await world(pg, tmp_path)
+    owner = w.users["ivan"]
+    caps = _caps(task=None, month=None)
+    a = await ledger.reserve(w.engine, ledger.Scope(owner, uuid.uuid4(), None, "s", "draft", 0, line="compile"),
+                             "claude-opus-5-5", D("0.10"), caps)
+    b = await ledger.reserve(w.engine, ledger.Scope(owner, uuid.uuid4(), None, "s", "judge.find", 0, line="mcp"),
+                             "claude-haiku-5-5", D("0.10"), caps)
+    await ledger.settle(w.engine, a, D("0.05"), D("0.05"), D("0.05"), None,
+                        ledger.UpstreamRecord(statuses=(200,), refused=()))
+    await ledger.void(w.engine, b)
+    got = [(r[0], r[1]) for r in await rows(w.engine, "SELECT kind, line FROM agent_spend ORDER BY id")]
+    assert got == [("reserve", "compile"), ("reserve", "mcp"), ("settle", "compile"), ("void", "mcp")]
+
+
 def test_void_cli_usage() -> None:
     need("reader.agent.void")
     result = subprocess.run(

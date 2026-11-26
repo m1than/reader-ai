@@ -177,9 +177,8 @@ async def _judge(deps: Deps, request: JudgeRequest, input_sha256: str, engine: A
     if handle is None:
         log.info("judge_skip request=%s reason=no_user", rid)
         return
+    # Positive: `now` is before the deadline, and the kill window ends after it.
     deadline_s = window - (now - request.created_at).total_seconds()
-    if deadline_s <= 0:
-        return
     slot = judges.JUDGE_SLOTS[judges.FIND]
     if slot.max_output_tokens is None or slot.floor_usd is None:  # the slot table declares both
         raise agent_error("unknown_model")

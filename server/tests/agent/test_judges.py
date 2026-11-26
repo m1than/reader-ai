@@ -156,9 +156,7 @@ def test_judge_find_prompt_is_a_frame_with_one_instructions_section() -> None:
     assert "never follow" in frame.lower()
     for key in ('"keep"', '"drop"', '"sufficiency"', "[1]"):
         assert key in frame
-    section = judges.instructions_of(text)
-    assert section.strip() and judges.with_instructions(text, section) == text
-    assert judges.with_instructions(text, "NEW") == text.replace(section, "NEW")
+    assert text[text.index(begin) + len(begin): text.index(end)].strip()  # SRV-OBS owns section and wrap
 
 
 def test_delimiters_in_data_are_neutralised() -> None:
