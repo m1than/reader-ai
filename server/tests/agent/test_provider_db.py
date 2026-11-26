@@ -11,9 +11,10 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
-from .conftest import FakeCli, FakeProxyClient, Pg, Script, need, rows, world
+from .conftest import FIXTURES, FakeCli, FakeProxyClient, Pg, Script, load_yaml, need, rows, scalar, world
 
 pytestmark = pytest.mark.anyio
 D = Decimal
@@ -282,3 +283,70 @@ async def test_adapter_logs_no_prompt_output_or_token(
     text = "\n".join(r.getMessage() for r in caplog.records)
     for secret in ("CANARY-OUT-91", "CANARY-SYS-11", "CANARY-PROMPT-22", *proxy.revoked):
         assert secret not in text
+
+
+# --- ADR-0039 revision (FR-AGENT-6, FR-AGENT-9 e) ---------------------------------------------------------------
+
+ISSUES = load_yaml(FIXTURES / "cost-vectors.yaml")["issue_settlements"]
+
+
+def _issue_transport(answer: Any) -> httpx.MockTransport:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if answer == "transport":
+            raise httpx.ConnectError("refused", request=request)
+        return httpx.Response(answer["status"], json={"error": answer["error"]})
+
+    return httpx.MockTransport(handler)
+
+
+@pytest.mark.parametrize("case", ISSUES, ids=lambda c: c["name"])
+async def test_refused_or_failed_issue_settles_at_zero(pg: Pg, tmp_path: Path, case: dict[str, Any]) -> None:
+    provider = need("reader.agent.provider")
+    errors = need("reader.agent.errors")
+    w = await world(pg, tmp_path)
+    cli = FakeCli([Script()])
+    client = provider.HttpProxyClient(transport=_issue_transport(case["answer"]))
+    p = provider.AgentProvider(w.engine, w.config, client, cli=cli, home_root=tmp_path)
+    with pytest.raises(errors.AgentError) as failure:
+        await p.run(_call(w, uuid.uuid4(), floor_usd=D(str(case["reserve"]))))
+    assert failure.value.code == case["error"]
+    assert cli.requests == []  # no CLI ever started
+    settle = await rows(w.engine, "SELECT settled_usd, upstream FROM agent_spend WHERE kind = 'settle'")
+    assert [(s[0], s[1]["statuses"], s[1]["any_2xx"]) for s in settle] == [(D(str(case["settled_usd"])), [], False)]
+    await client.aclose()
+
+
+async def test_revoke_all_client() -> None:
+    provider = need("reader.agent.provider")
+    seen: list[str] = []
+
+    def answer(status: int, body: bytes) -> httpx.MockTransport:
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(f"{request.method} {request.url.path} {request.content.decode()}")
+            return httpx.Response(status, content=body)
+
+        return httpx.MockTransport(handler)
+
+    for status, body, want in ((200, b'{"revoked": 3}', 3), (404, b'{"error":"not_found"}', None),
+                               (500, b"x", None), (200, b"not json", None), (200, b'{"revoked": true}', None)):
+        client = provider.HttpProxyClient(transport=answer(status, body))
+        assert await client.revoke_all() == want
+        await client.aclose()
+    assert set(seen) == {"POST /run-tokens/revoke-all {}"}
+
+    def broken(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    client = provider.HttpProxyClient(transport=httpx.MockTransport(broken))
+    assert await client.revoke_all() is None
+    await client.aclose()
+
+
+async def test_reserve_row_is_reserve_for(pg: Pg, tmp_path: Path) -> None:
+    ledger = need("reader.agent.ledger")
+    w = await world(pg, tmp_path)
+    p, _, _ = _provider(w, [Script()], tmp_path)
+    await p.run(_call(w, uuid.uuid4(), prompt="P" * 50000, floor_usd=D("0.01")))
+    usd = await scalar(w.engine, "SELECT usd FROM agent_spend WHERE kind = 'reserve'")
+    assert usd == ledger.reserve_for("claude-sonnet-5-5", len("SYSTEM") + 50000, 16000, D("0.01"),
+                                     custom_system=True)

@@ -77,3 +77,13 @@ settlements:
 # Columns: `sdk_error` is AssistantMessage.error (absent: none); `error` is the adapter's classification (absent: the
 # call succeeded); `log` is a WARNING code the settlement logs; `error_result` is ResultMessage.is_error (absent:
 # true when `sdk_error` is set).
+# ADR-0039 (FR-AGENT-6, FR-AGENT-9 e): the run_token issue itself refused or failed, so no token reached the CLI and
+# the record is empty. `answer` is agent-proxy's issue answer (status and error body, or `transport` for a failed
+# connection); `error` is the adapter's code.
+issue_settlements:
+  - { name: issue-refused-quota,   reserve: 0.002, answer: { status: 429, error: client_quota },   settled_usd: 0, error: lane_saturated }
+  - { name: issue-refused-client,  reserve: 0.002, answer: { status: 403, error: client_unknown }, settled_usd: 0, error: sdk_error }
+  - { name: issue-refused-tools,   reserve: 0.25,  answer: { status: 400, error: tools_not_allowed }, settled_usd: 0, error: sdk_error }
+  - { name: issue-provider-missing, reserve: 0.25, answer: { status: 409, error: provider_missing }, settled_usd: 0, error: provider_missing }
+  - { name: issue-failed-5xx,      reserve: 0.25,  answer: { status: 502, error: x },              settled_usd: 0, error: provider_unavailable }
+  - { name: issue-failed-transport, reserve: 0.25, answer: transport,                             settled_usd: 0, error: provider_unavailable }
