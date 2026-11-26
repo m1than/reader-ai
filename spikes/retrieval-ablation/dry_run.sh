@@ -10,7 +10,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 ART="$REPO/data/spikes/retrieval-ablation/convert/out"
 IMAGE=reader-spike-compile
-docker image inspect "$IMAGE" >/dev/null 2>&1 || docker build -q --platform linux/arm64 -t "$IMAGE" "$HERE/../compile-cost" >/dev/null
+# the dry run never builds (building needs the network to install the SDK): paid.sh builds the image
+docker image inspect "$IMAGE" >/dev/null 2>&1 || {
+  echo "refused: image $IMAGE is missing; build it first (docker build --platform linux/arm64 -t $IMAGE spikes/compile-cost)" >&2
+  exit 2; }
 
 docker run --rm --network none -v "$REPO/spec/fixtures/eval/pilot-eval-v1.yaml:/in/eval.yaml:ro" \
   -v "$REPO/server/src/reader/agent/pricing.yaml:/in/pricing.yaml:ro" --entrypoint python reader-embed:local -c '
@@ -84,11 +87,16 @@ check "no cache: stage1 stops (exit 3, $n calls)" '[[ $rc == 3 && $n -ge 4 && $n
 # empty answers: counted, coverage incomplete, exit 3
 rc=$(run empty summaries 12.00 -e STUB_USD=0.0004 -e STUB_EMPTY=1)
 check "empty answers fail coverage" '[[ $rc == 3 && $(sum .coverage_complete empty summaries) == false ]]'
+# files left in HOME: 100 kB per call extrapolates past the 512 MB tmpfs over 9,104 calls, so stage1 fails
+rc=$(run home stage1 12.00 -e STUB_USD=0.0004 -e STUB_HOME_BYTES=100000)
+check "home tmpfs: stage1 fails when HOME grows per call" '[[ $rc == 3 && $(sum .home_tmpfs_ok home stage1) == false ]]'
+check "home tmpfs: the stub run left HOME empty" '[[ $(sum .home_tmpfs_ok full-stage1 stage1) == true ]]'
 
 # gates (gates.sh, used by paid.sh and v12.sh)
 source "$HERE/gates.sh"
 check "gate: stage1 passed" 'passed "$S/full-stage1/num" stage1'
 check "gate: no-cache stage1 refused" '! passed "$S/nocache/num" stage1'
+check "gate: stage1 with a growing HOME refused" '! passed "$S/home/num" stage1'
 check "gate: capped stage refused" '! passed "$S/cap-summaries/num" summaries'
 mkdir -p "$S/gate/num"
 cp -R "$S/full-stage1/num/stage1" "$S/full-prefixes/num/prefixes" "$S/full-summaries/num/summaries" "$S/gate/num/"

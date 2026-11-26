@@ -124,6 +124,13 @@ def recompute(row: dict) -> Decimal | None:
     return (total / Decimal(10 ** 6)).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
 
+def write_cost(model: str, system: str) -> Decimal:
+    """Estimated 1-hour cache write of a system prompt: 0.42 tokens per character (spikes/compile-cost measured
+    0.398 on Russian text; rounded up), at pricing.yaml's rate (Haiku's 0.20 per million if prices are missing)."""
+    rate = Decimal(str(PRICES.get(model, {}).get("cache_write_1h", "0.20")))
+    return Decimal(len(system)) * Decimal("0.42") * rate / Decimal(10 ** 6)
+
+
 class Ledger:
     """The stage's calls across runs (calls.jsonl is append-only); spending checked and reserved before each call."""
 
@@ -148,11 +155,12 @@ class Ledger:
         seen = [Decimal(str(r["usd"])) for r in self.rows[-50:] if r.get("usd") is not None]
         return max([FLOOR[self.stage], *seen])
 
-    def reserve(self) -> Decimal | None:
-        """Called inside the concurrency slot; no await between the check and the reservation."""
+    def reserve(self, extra: Decimal = Decimal(0)) -> Decimal | None:
+        """Called inside the concurrency slot; no await between the check and the reservation. `extra`: a known
+        additional cost of this call (a chapter-first call writes the whole chapter to the cache)."""
         if self.stopped:
             return None
-        est = self.estimate()
+        est = self.estimate() + extra
         if self.spent() + self.reserved + est > self.cap:
             self.stopped = f"stage cap {self.cap} USD reached (spent {self.spent()}, in flight {self.reserved})"
         elif self.spent() - self.start_spent + self.reserved + est > self.total_left:
@@ -190,7 +198,10 @@ async def call(model: str, system: str, prompt: str, max_usd: float, max_out: in
            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_out)}
     opts = ClaudeAgentOptions(system_prompt={"type": "file", "path": system_file(system)}, tools=[], allowed_tools=[],
                               setting_sources=[], max_turns=1, model=model, max_budget_usd=max_usd, env=env,
-                              cli_path=os.environ.get("CLI_PATH") or None)
+                              cli_path=os.environ.get("CLI_PATH") or None,
+                              # no session transcript per call in /home/worker (about 2x the system prompt each;
+                              # the 512 MB tmpfs would fill after about 1,500 prefix calls)
+                              extra_args={"no-session-persistence": None})
     t0 = time.monotonic()
     text, result, error = "", None, None
     try:
@@ -242,16 +253,22 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
 
     async def one(n: int, system: str, s: dict, ctx: int) -> None:
         nonlocal empty
-        res = led.reserve()
+        # a chapter-first call writes the chapter to the cache: reserve that write on top of the estimate
+        res = led.reserve(Decimal(0) if ctx else write_cost(HAIKU, system))
         if res is None:
             return
-        text, row = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 300)
-        row |= {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text}
-        if text:
-            append_text(out, {"id": s["seq"], "prefix": text})
-        else:
-            empty += 1
-        led.add(row, res)
+        row: dict = {"id": s["seq"], "chapter": n, "error": "NotRecorded", "usd": None, "subtype": None}
+        try:
+            text, got = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 300)
+            row = got | {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text}
+            if text:
+                append_text(out, {"id": s["seq"], "prefix": text})
+            else:
+                empty += 1
+        finally:
+            led.add(row, res)
+        if not ctx and row.get("input", 0) + row.get("cache_write", 0) + row.get("cache_read", 0) > 100_000:
+            led.stopped = f"chapter {n}'s first call passed 100,000 prompt tokens (Haiku's above_100k pricing)"
         if ctx:  # a later call of the chapter: its context should come from cache
             misses.append(1 if row["cache_read"] < CACHE_RULE * ctx else 0)
             if sum(misses[-STOP_AFTER:]) == STOP_AFTER and not led.stopped:
@@ -324,16 +341,19 @@ async def summaries(led: Ledger, conc: int) -> dict:
             res = led.reserve()
             if res is None:
                 return
-            text, row = await call(HAIKU, SUMMARY_SYSTEM.format(words=WORDS[k]),
-                                   SUMMARY_USER.format(own=own_text, children="\n\n".join(children)), 0.1,
-                                   TOKENS[k] * 2)
-            row |= {"id": node_id, "kind": k, "empty": not text}
-            if text:
-                have[node_id] = text
-                append_text(out, {"id": node_id, "kind": k, "summary": text})
-            else:
-                empty += 1
-            led.add(row, res)
+            row: dict = {"id": node_id, "kind": k, "error": "NotRecorded", "usd": None, "subtype": None}
+            try:
+                text, got = await call(HAIKU, SUMMARY_SYSTEM.format(words=WORDS[k]),
+                                       SUMMARY_USER.format(own=own_text, children="\n\n".join(children)), 0.1,
+                                       TOKENS[k] * 2)
+                row = got | {"id": node_id, "kind": k, "empty": not text}
+                if text:
+                    have[node_id] = text
+                    append_text(out, {"id": node_id, "kind": k, "summary": text})
+                else:
+                    empty += 1
+            finally:
+                led.add(row, res)
 
     for level in (4, 3, 2, 1):  # children before parents
         await asyncio.gather(*(one(str(o["seq"]), kind(o), own[o["seq"]],
@@ -356,7 +376,7 @@ def parse_judge(text: str) -> dict:
             return bad
         return {"sufficient": d["sufficient"], "facts_present": sorted({int(x) for x in d.get("facts_present") or []}),
                 "claim": claim, "parse_ok": True}
-    except (ValueError, TypeError, AttributeError):
+    except (ValueError, TypeError, AttributeError, ArithmeticError, RecursionError):
         return bad
 
 
@@ -375,15 +395,20 @@ async def judge_calls(led: Ledger, items: list[tuple[str, dict, list[str]]], con
             res = led.reserve()
             if res is None:
                 return
-            text, row = await call(STRONG, JUDGE_SYSTEM, prompt, 0.5, 600)
-            verdict = parse_judge(text)
-            verdict["facts_present"] = [i for i in verdict["facts_present"] if 0 <= i < len(q["expected_facts"])]
-            if q["type"] == "fact-check":
-                # "undecided" or no claim counts as not correct (the route did not settle the claim)
-                verdict["claim_correct"] = (verdict["claim"] in ("holds", "fails")
-                                            and (verdict["claim"] == "holds") == bool(q["claim_holds"]))
-            led.add(row | {"id": key, "qid": q["id"], "type": q["type"], "facts": len(q["expected_facts"]),
-                           **verdict}, res)
+            base = {"id": key, "qid": q["id"], "type": q["type"], "facts": len(q["expected_facts"])}
+            row: dict = base | {"error": "NotRecorded", "usd": None, "subtype": None, "parse_ok": False}
+            try:
+                text, got = await call(STRONG, JUDGE_SYSTEM, prompt, 0.5, 600)
+                row = got | base | {"parse_ok": False}
+                verdict = parse_judge(text)
+                verdict["facts_present"] = [i for i in verdict["facts_present"] if 0 <= i < len(q["expected_facts"])]
+                if q["type"] == "fact-check":
+                    # "undecided" or no claim counts as not correct (the route did not settle the claim)
+                    verdict["claim_correct"] = (verdict["claim"] in ("holds", "fails")
+                                                and (verdict["claim"] == "holds") == bool(q["claim_holds"]))
+                row |= verdict
+            finally:
+                led.add(row, res)  # the spend is recorded whatever happens after the call
 
     await asyncio.gather(*(one(k, q, c) for k, q, c in items))
     judged = {r["id"] for r in led.rows if r.get("parse_ok")}
@@ -447,6 +472,19 @@ def summarise(stage: str, led: Ledger, res: dict, t0: float) -> dict:
         "wall_s_per_call_p95": walls[int(len(walls) * 0.95)] if walls else None,
         "failed_calls": sum(1 for r in rows if r.get("error") or r.get("subtype") != "success"),
         "tmpfs_bytes": disk, "at": datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds")}
+    # what the CLI leaves in /home/worker per call, extrapolated to the largest run (all 9,104 prefix calls)
+    home = disk.get("/home/worker")
+    if home and out["calls_this_run"]:
+        per_call = home["used"] / out["calls_this_run"]
+        out["home_bytes_per_call"] = round(per_call)
+        out["home_extrapolated_bytes_9104_calls"] = round(per_call * 9104)
+        out["home_tmpfs_ok"] = per_call * 9104 <= home["total"]
+    else:  # a run without calls keeps the last measured verdict, so a rerun cannot clear a failed check
+        prev = json.loads((led.dir / "summary.json").read_text()) if (led.dir / "summary.json").exists() else {}
+        for k in ("home_bytes_per_call", "home_extrapolated_bytes_9104_calls"):
+            if k in prev:
+                out[k] = prev[k]
+        out["home_tmpfs_ok"] = prev.get("home_tmpfs_ok")
     out["ledger_row"] = (f"- {{ task: V.spike.retrieval-ablation, usd: {run_usd}, date: {datetime.date.today()}, "
                          f"funding: test_budget_usd, what: \"paid arm {stage}: {out['calls_this_run']} calls this run, "
                          f"{len(rows)} in total; spikes/retrieval-ablation/results/paid/{stage}/\" }}")
@@ -482,7 +520,8 @@ async def main() -> None:
             print("tmpfs:", json.dumps(summary["tmpfs_bytes"]))
         print("LEDGER ROW TO ADD:", summary["ledger_row"])
     failed = (led.stopped or not res.get("coverage_complete")
-              or (stage in ("stage1", "prefixes") and not res.get("cache_rule_pass")))
+              or (stage in ("stage1", "prefixes") and not res.get("cache_rule_pass"))
+              or (stage == "stage1" and summary.get("home_tmpfs_ok") is False))
     raise SystemExit(3 if failed else 0)
 
 

@@ -5,13 +5,15 @@
 #   bash spikes/retrieval-ablation/paid.sh <stage> [concurrency]
 #   stage, in order:
 #     stage1     context prefixes for chapters 6 and 13 (822 Haiku calls), cap $0.47 (projection $0.39 + 20%)
-#     prefixes   the rest of the book (8,282 calls), cap $4.01 ($3.34 + 20%); refused unless stage1 passed
+#     prefixes   the rest of the book (8,282 calls), cap $4.01 (projection $3.63 incl. group 0's real context
+#                + 10.5%); refused unless stage1 passed
 #     summaries  L2 summaries, 495 calls, cap $0.19 ($0.16 + 20%)
 #     (then, free and local: bash spikes/retrieval-ablation/v12.sh — V1/V2 embedding, recall, topk.json)
 #     judge      judge.eval sufficiency, Sonnet 5.5, deduped card sets of 6 variants (≈ 477 calls), cap $4.73
 #     factcheck  the whole-chapter fact-check baseline, 30 Sonnet 5.5 calls, cap $2.42
 # Caps sum to $11.82 ≤ $12.00; the runner also refuses to start when the recorded spend of all stages leaves less
-# than this stage needs, and paid.py stops before any call that could pass either cap.
+# than this stage needs, and paid.py starts a call only if its reserved estimate (for a chapter-first prefix call,
+# plus the chapter's cache write) fits both caps. One run at a time (a lock directory).
 #
 # Token: like spikes/tutor-call and spikes/compile-cost, this runner reads the Keychain item
 # reader-ai/claude-oauth-token and pipes it to the container on stdin; it is never printed, written or passed as an
@@ -45,6 +47,11 @@ esac
 for f in spans.jsonl outline.json; do
   [[ -f "$ART/$f" ]] || { echo "missing $ART/$f: run the converter step of RESULT.md first" >&2; exit 2; }
 done
+# one paid run at a time: two runs would each see the other's spend only after it is recorded
+LOCK="$REPO/data/spikes/retrieval-ablation/paid/.lock"
+mkdir -p "$(dirname "$LOCK")"
+mkdir "$LOCK" 2>/dev/null || { echo "refused: another paid.sh run holds $LOCK (remove it only if none is running)" >&2; exit 3; }
+trap 'rmdir "$LOCK"' EXIT
 
 if [[ "$STAGE" == prefixes ]]; then
   passed "$NUM" stage1 \

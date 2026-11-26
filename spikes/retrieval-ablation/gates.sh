@@ -3,7 +3,10 @@
 passed() {  # passed <results/paid dir> <stage>
   local f="$1/$2/summary.json"
   case "$2" in
-    stage1|prefixes) jq -e '.stopped == null and .coverage_complete == true and .cache_rule_pass == true' "$f" ;;
+    # stage1 also proves the CLI leaves too little in the tmpfs home to fill it over all 9,104 prefix calls
+    stage1) jq -e '.stopped == null and .coverage_complete == true and .cache_rule_pass == true
+                   and .home_tmpfs_ok == true' "$f" ;;
+    prefixes) jq -e '.stopped == null and .coverage_complete == true and .cache_rule_pass == true' "$f" ;;
     *) jq -e '.stopped == null and .coverage_complete == true' "$f" ;;
   esac >/dev/null 2>&1
 }

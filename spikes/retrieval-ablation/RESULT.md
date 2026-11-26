@@ -124,7 +124,7 @@ L02's 60,034 characters ≈ 23,900 tokens), which puts the book at about 808,000
 410 CLI overhead tokens per call (`spikes/tutor-call`, custom system prompt); instruction sizes are assumptions
 (prefix 120, summary 150, judge 600 tokens; judge output 200). Chapters are the 23 "Глава N" bookmarks; 705 spans
 outside them are one more group with a mean-chapter context (≈ 35,100 tokens; their own text is 188,492 characters,
-≈ 75,000 tokens, which the runner sends as that group's context: 705 cache reads of ≈ 40,000 more tokens each add
+228,699 bytes, ≈ 75,000 tokens by the 0.398 ratio, which the runner sends as that group's context: 705 cache reads of ≈ 40,000 more tokens each add
 ≈ $0.29, so the `prefixes` stage projects ≈ $3.63 against its $4.01 cap). Wall time at 1.82–2.10 s per Haiku call, sequential.
 
 | Arm | Calls | Input tokens | Output tokens | USD | Wall time |
@@ -157,7 +157,8 @@ Cheapest order that still answers B10, each stage with a stop rule:
    of a chapter read under 80% of that chapter's context from cache (the stage stops at once), if the stage's cache
    reads over all its calls are under 80% of expected, if a chapter's first call neither writes nor reads a cache, or
    if the stage would pass its cap of projection + 20% ($0.47).
-2. **Prefixes for the rest of the book** (8,282 calls, ≈ $3.34, ≈ 4.2–4.8 h sequential), re-embed (≈ 27 min or
+2. **Prefixes for the rest of the book** (8,282 calls, ≈ $3.63 with group 0's real context, cap $4.01 =
+   projection + 10.5%, ≈ 4.2–4.8 h sequential), re-embed (≈ 27 min or
    more, local, free), recall@10 for V1. Needed because the 90 questions cover all 23 chapters.
 3. **L2 summaries** (495 calls, ≈ $0.16), recall@10 for V2.
 4. **judge.eval sufficiency** on the six variants, Sonnet 5.5 (477 calls, ≈ $3.94): the only measure that can keep
@@ -176,7 +177,8 @@ measured numbers). Every stage's spend goes to `budget.ledger`.
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a
 hardened container of the compile-cost image (read-only root, cap-drop ALL, no-new-privileges, tmpfs home, 4 GiB,
 `timeout -s KILL`), exported only inside its process tree, never printed or written. `paid.py` makes one CLI call
-per item with no tools and thinking off. Stages and caps (projection + 20%): `stage1` $0.47, `prefixes` $4.01
+per item with no tools and thinking off. Stages and caps (projection + 20%, except `prefixes`, whose $4.01 is $3.63 + 10.5% once group 0's real context
+is counted): `stage1` $0.47, `prefixes` $4.01
 (refused unless stage1 passed), `summaries` $0.19, then the free `v12.sh` (V1/V2 embedding, recall, `topk.json`),
 `judge` $4.73, `factcheck` $2.42; together $11.82 ≤ $12.00. Gates (`gates.sh`): `prefixes` needs stage1 passed
 (not stopped, every stage span prefixed, cache rule met); `judge` and `v12.sh` need stage1, prefixes and summaries
@@ -188,7 +190,7 @@ chapter that read under 80% of its context from cache (calls in flight finish: a
 fails if its cache reads over all its calls, all runs, are under 80% of expected (`ctx_expected` per row). A stage
 also stops after 3 consecutive failed calls or calls without a reported cost; `summary.json` is written in a
 `finally` and recomputes the cost from the tokens with `pricing.yaml` as a cross-check. The system prompt (for
-prefixes the whole chapter, up to ≈ 230 KB, ≈ 380 KB for group 0, over Linux's 131,072-byte single-argument limit) goes to the tmpfs and
+prefixes the whole chapter, up to 194,793 bytes, 228,699 for group 0, over Linux's 131,072-byte single-argument limit) goes to the tmpfs and
 reaches the CLI as `--system-prompt-file`, so it is the cached prefix and the span the only uncached input; stage1
 prints the tmpfs usage at the end. Committed outputs: `results/paid/<stage>/calls.jsonl` and `summary.json` (ids,
 tokens, USD, wall time, cache ratio; judge verdicts only as booleans, fact indices and the claim enum, anything
@@ -197,10 +199,19 @@ The last line is the `budget.ledger` row to add.
 
 Checked without spend: `bash spikes/retrieval-ablation/dry_run.sh <scratch dir>` runs every stage in the real image
 and SDK with `--network none`, no token, against a stub CLI (`stub/claude`: speaks the SDK's stream-json protocol,
-refuses any argument of 131,072 bytes or more and a missing `--system-prompt-file`, simulates the cache). 29 of 29
-checks pass: 822 / 495 / 477 / 30 calls with full coverage; a rerun of stage1 keeps its pass with 0 calls; every stage
-stops at a low cap within cap / price + concurrency; with no cache hits stage1 stops (exit 3) after 4–7 calls; empty
-answers fail coverage; the gates refuse incomplete or capped stages; no committed row holds free text.
+refuses any argument of 131,072 bytes or more, a missing `--system-prompt-file` and a missing
+`--no-session-persistence`, simulates the cache and, on request, files left in HOME). It never builds the image (that
+needs the network) and refuses to run without it. 32 of 32 checks pass: 822 / 495 / 477 / 30 calls with full
+coverage; a rerun of stage1 keeps its pass with 0 calls; every stage stops at a low cap within cap / price +
+concurrency; with no cache hits stage1 stops (exit 3) after 4–7 calls; stage1 fails when HOME grows by 100 kB per
+call (extrapolated past the 512 MB tmpfs over 9,104 calls); empty answers fail coverage; the gates refuse
+incomplete, capped or HOME-failed stages; no committed row holds free text.
+
+Without `--no-session-persistence` the real CLI writes a session transcript per call into the home tmpfs (about
+2× the system prompt), which would fill 512 MB after about 1,500 prefix calls; paid.py passes the flag, stage1
+records the home bytes per call and fails if they extrapolate past the tmpfs. Every call's row is written in a
+`finally`, so a spend is recorded even if parsing fails; a chapter-first prefix call that reports over 100,000
+prompt tokens (Haiku's higher tier) stops the stage.
 
 ## Limits
 

@@ -2,8 +2,9 @@
 """Stub of the Claude Code CLI for the no-spend dry run of paid.py (dry_run.sh): speaks the SDK's stream-json
 protocol on stdin/stdout, never touches the network, and checks what the real CLI would receive.
 
-- Refuses (exit 7) any argv entry of 131,072 bytes or more (Linux MAX_ARG_STRLEN) and a missing
-  --system-prompt-file.
+- Refuses (exit 7) any argv entry of 131,072 bytes or more (Linux MAX_ARG_STRLEN), a missing
+  --system-prompt-file and a missing --no-session-persistence.
+- STUB_HOME_BYTES=n leaves n bytes in $HOME per call, as a transcript would (tests the home-tmpfs check).
 - Prompt caching like the API: the first call with a given system file writes it, later calls read it
   (STUB_NOCACHE=1: every call writes). Tokens = bytes / 3. Cost per call: STUB_USD.
 - Answers: a judge-shaped JSON for judge prompts, a short Russian line otherwise; STUB_EMPTY=1 answers "".
@@ -20,6 +21,13 @@ args = sys.argv[1:]
 if any(len(a.encode()) >= LIMIT for a in args):
     print("stub: argument over MAX_ARG_STRLEN", file=sys.stderr)
     sys.exit(7)
+if "--no-session-persistence" not in args:
+    print("stub: a call must pass --no-session-persistence (the real CLI writes a transcript per call)", file=sys.stderr)
+    sys.exit(7)
+if os.environ.get("STUB_HOME_BYTES"):  # simulate files the CLI leaves in HOME, for the home-tmpfs check
+    leftovers = Path(os.environ["HOME"]) / ".stub"
+    leftovers.mkdir(exist_ok=True)
+    (leftovers / os.urandom(8).hex()).write_bytes(b"x" * int(os.environ["STUB_HOME_BYTES"]))
 if "--system-prompt" in args or "--system-prompt-file" not in args:
     print("stub: the system prompt must come as a file", file=sys.stderr)
     sys.exit(7)
