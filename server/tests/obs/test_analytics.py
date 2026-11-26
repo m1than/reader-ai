@@ -21,7 +21,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from .conftest import FIXTURES, catalogs, load_yaml, obs_setup, require
+from .conftest import FIXTURES, load_yaml, obs_setup, require
 
 VEC4 = load_yaml(FIXTURES / "analytics.yaml")
 UUID_A = "3f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f"

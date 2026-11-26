@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Final
 
 SCOPE: Final = "reader"
@@ -19,8 +19,21 @@ MAX_STRING: Final = 128
 METHODS: Final = ("GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "TRACE", "CONNECT", "_OTHER")
 UUID: Final = "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 TOKENS: Final = (0, 1_000_000_000)
+HEX64: Final = "^[0-9a-f]{64}$"
+HASHED_URI: Final = "^reader://h/[0-9a-f]{64}$"
+# FR-OBS-36 (ADR-0039 P2): clear only for a PDF span locator, a finding or a lesson; anything else is hashed.
+CLEAR_ID: Final = (
+    "spn:[0-9a-f]{64}:p[0-9]{1,5}:[0-9]{1,7}-[0-9]{1,7}(#[0-9]{1,4})?"
+    "|(fnd|les):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+)
+DOC_URI: Final = f"^reader://({CLEAR_ID}|h/[0-9a-f]{{64}})$"
+# VEC-OBS-5 labels.judge_slots (FR-OBS-24 scope): the `judge_slots` catalog's default.
+JUDGE_SLOTS: Final = frozenset({
+    "judge.find", "judge.eval.relevance", "judge.eval.sufficiency", "judge.eval.groundedness",
+    "judge.eval.self_contained", "judge.eval.citation_supports_claim",
+})
 
-ATTRIBUTES: Final[Mapping[str, Mapping[str, Any]]] = {
+_LISTED: Final[Mapping[str, Mapping[str, Any]]] = {
     "http.request.method": {"type": "string", "enum": METHODS},
     "http.route": {"type": "string", "enum_from": "route_templates"},
     "http.response.status_code": {"type": "int", "range": (100, 599)},
@@ -71,15 +84,104 @@ ATTRIBUTES: Final[Mapping[str, Mapping[str, Any]]] = {
     "reader.chunks": {"type": "int", "range": (0, 10000000)},
     "reader.embed.vectors": {"type": "int", "range": (0, 10000000)},
     "reader.embed.batch": {"type": "int", "range": (0, 100000)},
+    # ADR-0039 (FR-OBS-21, -39): job-root versions and the evaluation id.
+    "reader.policy_version": {"type": "string", "pattern": HEX64},
+    "reader.eval_id": {"type": "string", "pattern": UUID},
+    # FR-OBS-36: the find subtree; ids, enums, counts and hashes only.
+    "reader.find.channel": {"type": "string", "enum": ("mcp", "tutor", "pipeline", "owner")},
+    "reader.caller.model": {"type": "string", "enum_from": "models"},
+    "reader.brain_version": {"type": "string", "pattern": HEX64},
+    "reader.find.question_type": {
+        "type": "string", "enum": ("exact", "thematic", "current_state", "fact_check"),
+    },
+    "reader.find.entitled": {"type": "bool"},
+    "reader.find.k": {"type": "int", "range": (0, 1000)},
+    "reader.find.budget_tokens": {"type": "int", "range": (0, 10_000_000)},
+    "reader.find.cards": {"type": "int", "range": (0, 100_000)},
+    "reader.find.tokens": {"type": "int", "range": TOKENS},
+    "reader.find.judged_tokens": {"type": "int", "range": TOKENS},
+    "reader.find.unjudged_tokens": {"type": "int", "range": TOKENS},
+    "reader.judge_ran": {"type": "bool"},
+    "reader.judge_source": {"type": "string", "enum": ("live", "recorded")},
+    "reader.judge_skip": {
+        "type": "string",
+        "enum": ("gate", "timeout", "error", "budget", "saturated", "quota_refused", "no_provider"),
+    },
+    "reader.find.route": {"type": "string", "enum_from": "find_routes"},
+    "reader.find.filter.role": {"type": "string", "enum_from": "facet_values.role"},
+    "reader.find.filter.form": {"type": "string", "enum_from": "facet_values.form"},
+    "reader.find.filter.reliability_min": {"type": "string", "enum": ("A", "B", "C", "D", "E", "F")},
+    "reader.find.filter.topic": {"type": "string", "enum_from": "topic_paths"},
+    "reader.find.filter.identifiers": {"type": "int", "range": (0, 1000)},
+    "reader.find.filter.identifiers_sha256": {"type": "string", "pattern": HEX64},
+    "reader.find.filter.concept_uri": {"type": "string", "pattern": HASHED_URI},
+    "reader.layer": {"type": "string", "enum": ("L1", "L2", "L3", "L4")},
+    "reader.find.method": {"type": "string", "enum": ("dense", "dense_fts_rrf", "outline", "registry")},
+    "reader.find.merged": {"type": "int", "range": (0, 100_000)},
+    "reader.find.gate": {"type": "string", "enum": ("separated", "not_separated")},
+    "reader.find.expanded": {"type": "bool"},
+    "reader.find.candidates_in": {"type": "int", "range": (0, 100_000)},
+    "reader.judge.input_sha256": {"type": "string", "pattern": HEX64},
+    "reader.judge.input_tokens": {"type": "int", "range": TOKENS},
+    "reader.judge.kept": {"type": "int", "range": (0, 50)},
+    "reader.judge.dropped": {"type": "int", "range": (0, 50)},
+    # FR-OBS-37: pack builds and link runs (reader.build.usd is for reading only, never a cost key).
+    "reader.pack.id": {"type": "string", "pattern": HEX64},
+    "reader.overlay.version": {"type": "string", "pattern": HEX64},
+    "reader.overlay.kind": {
+        "type": "string",
+        "enum": ("base", "profile", "tags", "vectors", "prefixes", "summaries", "concept_evidence"),
+    },
+    "reader.pack.state": {"type": "string", "enum": ("building", "sealed", "failed")},
+    "reader.pack.spans": {"type": "int", "range": (0, 100_000_000)},
+    "reader.pack.outline_nodes": {"type": "int", "range": (0, 10_000_000)},
+    "reader.pack.rows": {"type": "int", "range": (0, 100_000_000)},
+    "reader.build.calls": {"type": "int", "range": (0, 10_000_000)},
+    "reader.build.usd": {"type": "float", "range": (0, 100_000)},
+    "reader.build.cap_hit": {"type": "bool"},
+    "reader.pack.a": {"type": "string", "pattern": HEX64},
+    "reader.pack.b": {"type": "string", "pattern": HEX64},
+    "reader.link.mentions": {"type": "int", "range": (0, 100_000_000)},
+    "reader.link.concepts_proposed": {"type": "int", "range": (0, 10_000_000)},
+    "reader.link.pairs_blocked": {"type": "int", "range": (0, 100_000_000)},
+    "reader.link.pairs_kept": {"type": "int", "range": (0, 100_000_000)},
+    "reader.link.judge_calls": {"type": "int", "range": (0, 10_000_000)},
+    "reader.link.judge_replayed": {"type": "int", "range": (0, 10_000_000)},
+    "reader.link.links": {"type": "int", "range": (0, 100_000_000)},
 }
 
-# FR-OBS-12 (e) and FR-OBS-13: span names listed literally (the session marker and the child spans).
+# FR-OBS-36: `reader.doc.<i>.<part>` for i in 0..DOC_CAP-1, expanded below into listed keys.
+DOC_CAP: Final = 25
+DOC_FAMILY: Final[Mapping[str, Mapping[str, Any]]] = {
+    "uri": {"type": "string", "pattern": DOC_URI},
+    "sha256": {"type": "string", "pattern": HEX64},
+    "tokens": {"type": "int", "range": (0, 1_000_000)},
+    "judged": {"type": "bool"},
+}
+DOC_SPANS: Final[Mapping[str, tuple[str, ...]]] = {
+    "find.retrieve": ("uri", "sha256", "tokens"),
+    "find.preselect": ("uri", "sha256", "tokens"),
+    "find.select": ("uri", "sha256", "tokens", "judged"),
+}
+
+
+def doc_key(i: int, part: str) -> str:
+    return f"reader.doc.{i}.{part}"
+
+
+ATTRIBUTES: Final[Mapping[str, Mapping[str, Any]]] = {
+    **_LISTED, **{doc_key(i, p): r for i in range(DOC_CAP) for p, r in DOC_FAMILY.items()},
+}
+
+# FR-OBS-12 (e), FR-OBS-13, -36, -37: span names listed literally (the session marker and the child spans).
 CHILD_SPANS: Final = (
     "job.session", "tutor.retrieve", "tutor.citations", "verify.claims", "verify.lab", "kernel.run",
     "ingest.parse", "ingest.chunk", "embed.batch",
+    "find", "find.route", "find.retrieve", "find.preselect", "find.judge_wait", "find.select", "pack.build",
+    "link.run",
 )
 
-KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
+_SPAN_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
     "http": ("http.request.method", "http.route", "http.response.status_code"),
     "ws": ("http.request.method", "http.route", "reader.ws.close_code"),
     "job": (
@@ -87,6 +189,7 @@ KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
         "reader.error_class", "reader.run_id", "reader.step", "reader.stage", "reader.question_id",
         "reader.ingest_id", "reader.material_sha256", "reader.lesson.id", "reader.course.id",
         "reader.tutor.state", "reader.prompt.version", "reader.version_key",
+        "reader.policy_version", "reader.eval_id", "reader.judge.input_sha256",
     ),
     "agent.call": (
         "reader.task", "reader.stage", "gen_ai.request.model", "gen_ai.usage.input_tokens",
@@ -104,6 +207,47 @@ KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
     "ingest.parse": ("reader.pages", "reader.bytes"),
     "ingest.chunk": ("reader.chunks",),
     "embed.batch": ("reader.embed.vectors", "reader.embed.batch"),
+    "find": (
+        "reader.find.channel", "reader.caller.model", "reader.brain_version", "reader.policy_version",
+        "reader.find.question_type", "reader.find.entitled", "reader.find.k", "reader.find.budget_tokens",
+        "reader.find.cards", "reader.find.tokens", "reader.find.judged_tokens", "reader.find.unjudged_tokens",
+        "reader.judge_ran", "reader.judge_source", "reader.judge_skip",
+    ),
+    "find.route": (
+        "reader.find.route", "reader.find.filter.role", "reader.find.filter.form",
+        "reader.find.filter.reliability_min", "reader.find.filter.topic", "reader.find.filter.identifiers",
+        "reader.find.filter.identifiers_sha256", "reader.find.filter.concept_uri",
+    ),
+    "find.retrieve": (
+        "reader.layer", "reader.find.method", "reader.retrieval.candidates", "reader.retrieval.hits",
+    ),
+    "find.preselect": (
+        "reader.find.merged", "reader.find.gate", "reader.find.expanded", "reader.find.candidates_in",
+        "reader.find.cards", "reader.find.tokens", "reader.find.budget_tokens",
+    ),
+    "find.judge_wait": (
+        "reader.judge.input_sha256", "reader.judge.input_tokens", "reader.judge.kept", "reader.judge.dropped",
+        "reader.judge_ran", "reader.judge_source", "reader.judge_skip",
+    ),
+    "find.select": (
+        "reader.find.cards", "reader.find.tokens", "reader.find.judged_tokens", "reader.find.unjudged_tokens",
+        "reader.find.budget_tokens",
+    ),
+    "pack.build": (
+        "reader.pack.id", "reader.overlay.version", "reader.material_sha256", "reader.overlay.kind",
+        "reader.pack.state", "reader.pack.spans", "reader.pack.outline_nodes", "reader.pack.rows",
+        "reader.build.calls", "reader.build.usd", "reader.build.cap_hit",
+    ),
+    "link.run": (
+        "reader.pack.a", "reader.pack.b", "reader.overlay.version", "reader.link.mentions",
+        "reader.link.concepts_proposed", "reader.link.pairs_blocked", "reader.link.pairs_kept",
+        "reader.link.judge_calls", "reader.link.judge_replayed", "reader.link.links", "reader.build.usd",
+        "reader.build.cap_hit",
+    ),
+}
+KEYS_BY_SPAN: Final[Mapping[str, tuple[str, ...]]] = {
+    span: keys + tuple(doc_key(i, p) for i in range(DOC_CAP) for p in DOC_SPANS.get(span, ()))
+    for span, keys in _SPAN_KEYS.items()
 }
 
 # FR-OBS-5 (b): argument fields copied from a job's validated args to its root span; no other field is read.
@@ -123,6 +267,13 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "obs.bench": {},
     "obs.label": {},
     "obs.health": {},  # traced: false (FR-OBS-32), listed for the catalogue's completeness
+    # ADR-0039 (V.kl-obs-spans): FR-OBS-36 (e) and FR-OBS-39; the other new kinds copy nothing.
+    "judge.find": {"input_sha256": "reader.judge.input_sha256"},
+    "obs.eval": {"eval_id": "reader.eval_id"},
+    "obs.eval_run": {},
+    "obs.eval_sample": {},
+    "obs.judge_score": {},
+    "obs.align": {},
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares
@@ -157,6 +308,12 @@ class Catalogs:
     pipeline_stages: frozenset[str]
     tasks: frozenset[str]
     models: frozenset[str]
+    # ADR-0039 (FR-OBS-36): empty until SRV-SEARCH publishes its route table and facets file
+    # (V.kl-search-find); setup's default_catalogs passes them then.
+    find_routes: frozenset[str] = frozenset()
+    facet_values: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    topic_paths: frozenset[str] = frozenset()
+    judge_slots: frozenset[str] = JUDGE_SLOTS
 
 
 def key_name(key: object) -> str:
@@ -173,7 +330,12 @@ class AllowList:
             "tasks": frozenset(catalogs.tasks),
             "models": frozenset(catalogs.models),
             "error_codes": ERROR_CODES,
+            "find_routes": frozenset(catalogs.find_routes),
+            "topic_paths": frozenset(catalogs.topic_paths),
+            "judge_slots": frozenset(catalogs.judge_slots),
         }
+        for facet in ("role", "form"):
+            self._enums[f"facet_values.{facet}"] = frozenset(catalogs.facet_values.get(facet, ()))
         self._patterns = {k: re.compile(r["pattern"]) for k, r in ATTRIBUTES.items() if "pattern" in r}
 
     def span_class(self, name: object) -> str | None:

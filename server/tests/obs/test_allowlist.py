@@ -57,6 +57,8 @@ def test_module_data_equals_vec_obs_1() -> None:
     assert sorted(attrs.JUDGE_SLOTS) == sorted(
         ["judge.find", "judge.eval.relevance", "judge.eval.sufficiency", "judge.eval.groundedness",
          "judge.eval.self_contained", "judge.eval.citation_supports_claim"])
+    assert attrs.FALLBACK_NAME == VEC["fallback_name"] == "reader.unlisted"
+    assert attrs.SCOPE == VEC["instrumentation_scope"]["name"] == "reader"
 
 
 def test_find_span_names() -> None:
@@ -65,8 +67,6 @@ def test_find_span_names() -> None:
                  "pack.build", "link.run"):
         assert allow.span_class(name) == name
     assert allow.span_class("find.other") is None
-    assert attrs.FALLBACK_NAME == VEC["fallback_name"] == "reader.unlisted"
-    assert attrs.SCOPE == VEC["instrumentation_scope"]["name"] == "reader"
 
 
 JOB_CODES = {
