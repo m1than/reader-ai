@@ -24,7 +24,11 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from reader.jobs.catalog import SWEEP_PRIORITY, Catalog
+from reader.jobs.lanes import JUDGE_QUEUE, LANES, Lane, lane_queues
 from reader.jobs.model import (
+    JUDGE_GC_TASK,
+    JUDGE_REAP_TASK,
+    RESERVED_TASKS,
     SWEEP_TASK,
     JobContext,
     JobError,
@@ -193,15 +197,19 @@ class Jobs:
         catalog: Catalog,
         secret_values: Iterable[str] = (),
         retry_delay: Callable[[int], int] = retry_delay_s,
+        lane: Lane = LANES["main"],
     ) -> None:
         self.engine = engine
         self.app = app
         self.catalog = catalog
+        self.lane = lane
         self._secrets = tuple(secret_values)
         self.retry_delay = retry_delay
         for kind in catalog.values():
             self._register(kind)
         self._register_sweep()
+        if any(k.queue == JUDGE_QUEUE for k in catalog.values()):  # FR-EVENTS-34: only with judge.find
+            self._register_collectors()
 
     # ---- registration -------------------------------------------------------------------------------------
 
@@ -242,9 +250,30 @@ class Jobs:
         task = self.app.task(name=name, queue=SWEEP_TASK, queueing_lock=name, priority=SWEEP_PRIORITY)(tick)
         self.app.periodic(cron=cron, periodic_id=name)(task)
 
+    def _register_collectors(self) -> None:
+        """FR-EVENTS-34: `jobs.judge_reap` on the judge queue (the judge lane runs it whatever the main lane is
+        doing) and `jobs.judge_gc` on the sweep queue (the main lane), each every minute."""
+
+        async def reap_task(timestamp: int) -> None:
+            del timestamp
+            await self.judge_reap()
+
+        async def gc_task(timestamp: int) -> None:
+            del timestamp
+            await self.judge_gc()
+
+        for name, queue, fn in ((JUDGE_REAP_TASK, JUDGE_QUEUE, reap_task), (JUDGE_GC_TASK, SWEEP_TASK, gc_task)):
+            task = self.app.task(name=name, queue=queue, queueing_lock=name, priority=SWEEP_PRIORITY)(fn)
+            self.app.periodic(cron="* * * * *", periodic_id=name)(task)
+
+    @property
+    def reserved_tasks(self) -> frozenset[str]:
+        """FR-EVENTS-15 (amended): the periodic tasks a sweep never cancels and finishes like `jobs.sweep`."""
+        return RESERVED_TASKS | self.catalog.periodic_tasks
+
     @property
     def queues(self) -> list[str]:
-        return [*self.catalog.queues, SWEEP_TASK]
+        return lane_queues(self.lane, self.catalog.queues)
 
     # ---- enqueue (FR-EVENTS-3) ----------------------------------------------------------------------------
 
@@ -551,11 +580,12 @@ class Jobs:
         await self._cancel_unknown(report)
         return report
 
-    async def _sweep_stalled(self, report: SweepReport, stalled_after_s: float) -> None:
-        stalled = await self.app.job_manager.get_stalled_jobs(seconds_since_heartbeat=stalled_after_s)
+    async def _sweep_stalled(self, report: SweepReport, stalled_after_s: float, queue: str | None = None) -> None:
+        stalled = await self.app.job_manager.get_stalled_jobs(seconds_since_heartbeat=stalled_after_s, queue=queue)
+        reserved = self.reserved_tasks
         for job in stalled:
             job_id = int(job.id or 0)
-            if job.task_name == SWEEP_TASK:
+            if job.task_name in reserved:  # a periodic task: no key row, finished failed (FR-EVENTS-15 amended)
                 if await self._finish(job, Status.FAILED):
                     report.finished.append(job_id)
                 continue
@@ -644,8 +674,63 @@ class Jobs:
             ):
                 report.reenqueued.append(key)
 
+    # ---- the judge lane's collectors (FR-EVENTS-34) ---------------------------------------------------------
+
+    async def _step(self, name: str, work: Callable[[], Any]) -> None:
+        """One collector step: its failure is logged with the step name only and never stops the next."""
+        try:
+            await work()
+        except Exception:
+            log.warning("collector step failed: step=%s", name)
+
+    async def _expire_requests(self) -> None:
+        from reader.jobs import judge_requests
+
+        async with self.engine.begin() as conn:
+            count = await judge_requests.expire(conn)
+        log.info("judge_requests expired: count=%s", count)
+
+    async def judge_reap(self, stalled_after_s: float = STALLED_AFTER_S) -> None:
+        """On the judge lane: expired requests, then stalled jobs of the judge queue (FR-EVENTS-7's rule)."""
+        await self._step("reap_requests", self._expire_requests)
+        await self._step(
+            "reap_stalled", lambda: self._sweep_stalled(SweepReport(), stalled_after_s, queue=JUDGE_QUEUE)
+        )
+
+    async def _retain_keys(self) -> None:
+        kinds = [(k.name, k.key_retention_s) for k in self.catalog.values() if k.key_retention_s is not None]
+        async with self.engine.begin() as conn:
+            for name, seconds in kinds:
+                await conn.execute(
+                    text(
+                        "DELETE FROM job_keys WHERE kind = :k AND outcome IS NOT NULL"
+                        " AND finished_at < now() - make_interval(secs => :s)"
+                    ),
+                    {"k": name, "s": seconds},
+                )
+        await self.app.job_manager.delete_old_jobs(
+            nb_hours=24, queue=JUDGE_QUEUE, include_failed=True, include_cancelled=True, include_aborted=True
+        )
+
+    async def _prune_periodic(self) -> None:
+        await self.app.job_manager.delete_old_jobs(nb_hours=24, queue=SWEEP_TASK)  # succeeded only
+
+    async def _expire_outputs(self) -> None:
+        from reader.agent import judges
+
+        async with self.engine.begin() as conn:
+            await judges.expire(conn)
+
+    async def judge_gc(self) -> None:
+        """On the main lane: expired requests (a lane that is down), key retention, the periodic tasks' own old
+        rows, and recorded judge.find outputs past their retention."""
+        await self._step("gc_requests", self._expire_requests)
+        await self._step("gc_keys", self._retain_keys)
+        await self._step("gc_periodic", self._prune_periodic)
+        await self._step("gc_outputs", self._expire_outputs)
+
     async def _cancel_unknown(self, report: SweepReport) -> None:
-        known = [*self.catalog, SWEEP_TASK]
+        known = [*self.catalog, *self.reserved_tasks]
         async with self.engine.connect() as conn:
             ids = (
                 (

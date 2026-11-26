@@ -233,6 +233,7 @@ requirements:
       Paired amendment (SRV-EVENTS FR-EVENTS-9, ADR-0039 B7b, V.kl-deploy-judge-lane, 2026-11-26): `--role worker`
       takes `--lane main|judge` (default `main`) and passes it to `reader.jobs.worker.run(lane=…)`; `--lane` with
       any other role, or another value, exits 2 (argparse usage error). The healthcheck ignores the lane.
+      Red and Green in the same task (test_auth_cli.py's `--lane` cases; serve/main.py).
     tests_planned:
       - "add to server/tests/auth/test_auth_cli.py [unit]: --lane judge with --role api exits 2; --lane other exits 2; `_parser` accepts --role worker --lane judge and defaults the lane to main"
   - id: FR-AUTH-3

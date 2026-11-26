@@ -150,6 +150,53 @@ def effect_kind(max_attempts: int = 3, timeout_s: float = 30.0) -> Any:
     )
 
 
+# The lanes' stub kinds (FR-EVENTS-9 amended): by default `judge.find` on the `judge` queue, max attempts 1. Each
+# run records its request id in JUDGE_RUNS and, while it runs, counts in JUDGE_ACTIVE[queue] = [now, peak]; `hold`
+# names an asyncio.Event in JUDGE_GATES the run waits for; `write` commits a row through its own connection first
+# (FR-EVENTS-1 c); `fail` raises at the end.
+JUDGE_RUNS: list[str] = []
+JUDGE_ACTIVE: dict[str, list[int]] = {}
+JUDGE_GATES: dict[str, asyncio.Event] = {}
+
+
+def judge_stub_kind(name: str = "judge.find", queue: str = "judge") -> Any:
+    from pydantic import BaseModel, ConfigDict
+    from sqlalchemy import text
+
+    jobs = require_jobs()
+
+    class Args(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        request_id: str
+        hold: str = ""
+        sleep_s: float = 0.0
+        write: bool = False
+        fail: bool = False
+
+    async def handler(args: Args, conn: Any, ctx: Any) -> None:
+        JUDGE_RUNS.append(args.request_id)
+        active = JUDGE_ACTIVE.setdefault(queue, [0, 0])
+        active[0] += 1
+        active[1] = max(active)
+        try:
+            if args.write:
+                async with conn.engine.begin() as own:
+                    await own.execute(text(_EFFECT_SQL), {"k": args.request_id, "j": ctx.job_id})
+            if args.hold:
+                await JUDGE_GATES.setdefault(args.hold, asyncio.Event()).wait()
+            if args.sleep_s:
+                await asyncio.sleep(args.sleep_s)
+            if args.fail:
+                raise RuntimeError("stub failure")
+        finally:
+            active[0] -= 1
+
+    return jobs.JobKind(
+        name=name, queue=queue, args=Args, key=("request_id",), handler=handler, max_attempts=1,
+        timeout_s=600.0, key_retention_s=86_400,
+    )
+
+
 @dataclass
 class Env:
     pg: Pg

@@ -123,6 +123,7 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "obs.bench": {},
     "obs.label": {},
     "obs.health": {},  # traced: false (FR-OBS-32), listed for the catalogue's completeness
+    "judge.find": {},  # ADR-0039 B7b (SRV-AGENT FR-AGENT-21): its args are a request id and a hash; none is copied
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares
@@ -146,6 +147,8 @@ SPEC_CODES: Final = frozenset({
     # SRV-AGENT's ADR-0039 revision (paired, V/kl-agent-judges): the lane and ledger-line codes.
     "cap_missing", "eval_budget_exhausted", "index_budget_exhausted", "judge_input_too_large",
     "judge_window_too_long", "lane_saturated", "line_invalid", "replay_miss",
+    # SRV-AGENT FR-AGENT-3's client identity (V.kl-deploy-judge-lane): agent-proxy's own codes.
+    "client_quota", "client_unknown",
 })
 ERROR_CODES: Final = SPEC_CODES | JOB_CODES
 _KEY_NAME: Final = re.compile(r"[a-z][a-z0-9_.]{0,63}")

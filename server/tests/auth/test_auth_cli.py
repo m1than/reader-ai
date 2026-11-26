@@ -68,6 +68,24 @@ def test_mcp_role_exits_2(tmp_path: Path) -> None:
     assert "mcp role arrives with SRV-MCP" in r.stdout + r.stderr
 
 
+@pytest.mark.parametrize("args", [["--role", "api", "--lane", "judge"], ["--role", "worker", "--lane", "fast"]])
+def test_lane_only_main_or_judge_and_only_for_the_worker(tmp_path: Path, args: list[str]) -> None:
+    """FR-AUTH-2 (paired SRV-EVENTS FR-EVENTS-9): `--lane main|judge` only with `--role worker`."""
+    r = _run(_closed_db_env(tmp_path), *args)
+    assert r.returncode == 2
+
+
+def test_lane_defaults_to_main_and_reaches_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reader.serve import main
+
+    seen: list[str] = []
+    monkeypatch.setattr(main, "_run_worker", lambda env, lane="main": seen.append(lane))
+    monkeypatch.setattr(main.Env, "read", classmethod(lambda cls, environ: None))
+    assert main.run(["--role", "worker"], {}) == 0
+    assert main.run(["--role", "worker", "--lane", "judge"], {}) == 0
+    assert seen == ["main", "judge"]
+
+
 @pytest.mark.parametrize("role", ["api", "worker"])
 def test_config_error_exits_1_before_connecting(tmp_path: Path, role: str) -> None:
     env = _closed_db_env(tmp_path, users=(("a", "learner"),))

@@ -332,7 +332,9 @@ requirements:
       V.kl-deploy-judge-lane, 2026-11-26): `otel` holds exactly api, worker, worker-judge and rotel; worker-judge
       exports its spans to rotel and joins no other observability network. Its tracing service name stays the
       worker's until a SRV-OBS change gives the judge lane its own (open). The test change lands with
-      OPS-DEPLOY's compose change in the same commit.
+      OPS-DEPLOY's compose change in the same commit. With the judge lane in SRV-EVENTS' KIND_MODULES,
+      `attributes.JOB_ARGS` lists `judge.find` with no copied argument and `SPEC_CODES` gains SRV-AGENT's
+      `client_unknown` and `client_quota` (the catalogue tests read the kinds and the `errors` lists).
     tests_planned:
       - "change server/tests/obs/test_deploy_config.py: the otel membership assertion gains worker-judge"
   - id: FR-OBS-9

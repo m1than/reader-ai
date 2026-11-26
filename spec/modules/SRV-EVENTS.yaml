@@ -753,4 +753,7 @@ audit_actions:
 # Still open, paired elsewhere: SRV-SEARCH's waiter (`judge_requests.put` and commit, then LISTEN on SRV-AGENT's
 # `judge_done` channel, and only then `enqueue`, so a notify sent by a fast job is never missed; it waits at most
 # the B6 timeout and, on timeout, re-reads the recorded output once).
+# Red tests (2026-11-26): test_jobs_unit.py (KIND_MODULES, start hooks, reserved names, key retention),
+# test_lanes.py, test_lanes_db.py, test_judge_requests_db.py, test_judge_canary_db.py; the migration-head checks
+# name jobs_0004.
 
