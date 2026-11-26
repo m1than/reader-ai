@@ -95,6 +95,14 @@
 # Phase 2 code review round 2 (2026-11-24, V/p2-fix3): a provider built without an engine (the freshness agent
 # [image] check, whose ledger is in memory) reads the caps from reader.yaml alone (`file_settings`), since there
 # is no database holding overrides; a [unit] test pins it. No oracle loosened.
+# Proposed revision (2026-11-26, V/kl-agent-judges; ADR-0039 accepted; DRAFT, phase 1 = spec only): the
+# `proposed_*` sections at the end of this file implement ADR-0039's SRV-AGENT part (B7 judge slots, ledger lines and
+# caps, recorded judge outputs; B7b the judge lane and the proxy's token-table bound; the ADR-0005 amendment's loop
+# rule). `proposed_revisions` replaces the text of FR-AGENT-3, -6, -9, -12 and -17 (the Rework table's ids, nothing
+# else); `proposed_requirements`, `proposed_invariants` and `proposed_vectors` add FR-AGENT-18..23, INV-AGENT-7..10
+# and VEC-AGENT-5/-6. Each item carries `tests_planned` (H2: the listed tests change only with this spec). They join
+# `requirements` / `invariants` / `vectors` with their Red tests after deep-reviewer approves; until then the
+# approved text above stays in force and `status` is unchanged.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
@@ -103,7 +111,7 @@ approved_by: agent
 approved_at: 2026-11-22
 layer: server
 track: ai
-adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017, ADR-0030]
+adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017, ADR-0030, ADR-0039]
 slice: V.COMPILE-min
 
 paths:
@@ -478,3 +486,295 @@ defers:
 owner_notes:
   - "ADR-0025 hypothesis 1 passed against a stub (spikes/agent-proxy-handshake, zero credit). FR-AGENT-11 checks the real upstream (≈ $0.03) under the owner's $30 test budget (budget.test_budget_usd, 2026-11-22), which covers live checks and live L02 compiles without further consent; every spend goes to the ledger and the per-run cap still applies."
   - "Spend is the Agent SDK credit of the subscription (ADR-0005). The ledger records it; docs/progress.yaml's budget ledger keeps the development spend."
+
+# ---- Proposed revision (ADR-0039 B7, B7a, B7b; DRAFT, not yet requirements) ----
+#
+# Ownership (ADR-0039 B11). SRV-AGENT: the judge slot table, judge versions, the recorded-output table and its
+# replay, the `index` and `eval` ledger lines and their caps, the `judge.find` job handler that runs on the
+# `worker-judge` lane, agent-proxy's client identity and per-client token table, and the loop-fit check the compile
+# loop rule reads. Not here: the `worker-judge` Compose service, its fixed `agentnet` address and memory (OPS-DEPLOY);
+# the `judge.find` queue, its consumer, the `judge_requests` table, its collector and the no-text-in-args canary
+# (SRV-EVENTS); building the judge input, waiting by LISTEN/NOTIFY and applying the output (SRV-SEARCH); per-pack
+# advisory locks, the active-pack check and the context-prefix batch job of 25 spans (SRV-INGEST); the `judge_inputs`
+# copy and its consent rule (SRV-OBS); the loop order and the resized `budget_usd_per_lesson` values (SRV-PIPELINE);
+# the new settings' schema (SRV-CONFIG); the per-token daily judge cap on MCP (SRV-MCP, stage 7).
+#
+# New files, all inside the existing `paths`: server/src/reader/agent/judges.py (slots, lines, versions, recorded
+# outputs), server/src/reader/agent/lane.py (the `judge.find` job kind and handler),
+# server/src/reader/agent/prompts/judge_find.md, migration agent_0004, fixtures VEC-AGENT-5/-6. `paths` is unchanged.
+#
+# Paired changes (each in its own spec, in V.kl-deploy-judge-lane unless named):
+#   - OPS-DEPLOY: `agentnet` gets an explicit subnet with fixed IPv4 addresses for `worker` and `worker-judge`;
+#     a test pins them equal to `reader.agent.proxy.CLIENTS`. deploy/reader.example.yaml binds the slots
+#     (FR-AGENT-18) and, once `retrieval-ablation` and `judge-gate` have measured them, the new caps.
+#   - SRV-EVENTS: KIND_MODULES gains `reader.agent.lane`; the `judge.find` queue is consumed only by worker-judge;
+#     `judge_requests` carries the columns FR-AGENT-21 reads.
+#   - SRV-CONFIG: `tasks` keys may contain dots (slot names; the schema already allows any non-empty key, but the
+#     override key pattern `tasks.<name>.budget_usd_per_lesson` (`[a-z0-9][a-z0-9_-]*`) does not match them, so a
+#     slot's task budget is a file setting only); `budgets.index_usd_per_pack`, `budgets.index_usd_per_pair_run`,
+#     `budgets.eval_usd_per_run` (positive decimals, optional). They are file settings, not in ADR-0036's UI
+#     allow-list (FR-CONFIG-25/-26 unchanged) unless the owner adds them; then `policy_version` hashes the effective
+#     values (ADR-0039 B7).
+#   - SRV-PIPELINE (V.kl-pipeline-checks): calls `loop_fits` (FR-AGENT-23) before each loop and resizes
+#     `tasks.*.budget_usd_per_lesson` for the four checks; SRV-AGENT pins only the rule, not the values.
+#   - SRV-INGEST (V.kl-ingest-packs): `PackGuard.lock_active(conn, pack_ids)` (sorted per-pack advisory xact locks,
+#     the ones a purge takes; true iff every pack is active and not purged) and calls `judges.forget_pack` and
+#     `judges.forget_overlay` under the same locks. Until it exists the lane takes the guard as an injected protocol.
+#   - SRV-OBS (V.kl-obs-spans): `JudgeInputsSink.copy(conn, request_row, output)` under its consent rule, called in
+#     the lane's write transaction; the `judge.find` job's linked trace.
+
+proposed_bounds:
+  run_tokens_max: 32               # unchanged: the table total, now split by client (FR-AGENT-3 revised)
+  client_quota: { worker: 28, worker-judge: 4 }   # 28 + 4 = 32. worker: concurrency 1 (FR-EVENTS-9), 28 keeps
+                                   # today's evict-oldest headroom; worker-judge: its concurrency (ADR-0039 B7b,
+                                   # initial value set by judge-gate)
+  lane_token_ttl_s: 30             # ADR-0039 B7b initial value; must stay >= the kill window (FR-AGENT-21 refuses a
+                                   # request whose kill window does not fit under it, minus lane_ttl_margin_s)
+  lane_ttl_margin_s: 5             # structural: revoke and settle after the kill take well under 1 s
+  judge_kill_factor: 3             # ADR-0039 B7b: kill deadline = 3 x the B6 timeout (6.6 s at the initial 2.2 s)
+  judge_find_output_retention_days: 30   # ADR-0039 B7 (the trace retention of ADR-0032 Decision 6), initial value
+  judge_find_max_output_tokens: 512      # initial value: <= 13 cards fit the 3,000-token input cap at 230 tokens each,
+                                   # so the output (ids + one number) is a few hundred tokens; judge-gate measures it
+  judge_find_floor_usd: 0.002      # FR-AGENT-9's formula on Haiku for the cap: (1,000 + ceil(7,500 chars / 2.0))
+                                   # x $0.20/M + 512 x $0.50/M = $0.0012; rounded up
+
+proposed_errors: [lane_saturated, client_unknown, line_invalid, cap_missing, index_budget_exhausted,
+  eval_budget_exhausted, replay_miss, judge_window_too_long]
+
+proposed_tables:
+  agent_spend: "agent_0004 adds `line text null`, CHECK line IN (compile, tutor, freshness, mcp, index, eval); the append-only trigger is unchanged; rows written before agent_0004 keep null"
+  judge_outputs: { owner_id: true, columns: "input_sha256 text, judge text (`<slot>@<version>`), owner_id → users.id, output jsonb (parsed ids and numbers only, never query, card or model text), pack_ids text[] (judge.find), overlay_id text null (offline slots), request_id uuid null, reservation_id bigint null → agent_spend.id, created_at; PRIMARY KEY (input_sha256, judge); a trigger refuses UPDATE and TRUNCATE; DELETE only through FR-AGENT-20's retention and forget functions (agent_0004)" }
+
+proposed_revisions:
+  - id: FR-AGENT-3
+    text: >-
+      Run tokens, per client. agent-proxy establishes the calling client from the connection's source address on
+      `agentnet` and never from a request field or header: `CLIENTS` (data in proxy.py) maps each fixed IPv4
+      address that OPS-DEPLOY declares to a client name with its quota, TTL and full-table rule — `worker`: quota
+      `bounds.client_quota.worker`, TTL `bounds.run_token_ttl_s`, oldest own token revoked when exceeded;
+      `worker-judge`: quota `bounds.client_quota.worker-judge`, TTL `bounds.lane_token_ttl_s`, the issue refused
+      when full. The server runs with `proxy_headers=False`, so `X-Forwarded-For` is never read. Any request from an
+      address not in `CLIENTS` (another service, the proxy's `egress` side) gets 403 `client_unknown` on every route,
+      and nothing is issued, revoked or forwarded. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n,
+      "model": "<full id>"}` returns `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that
+      user, output cap, model and client for the client's TTL. Before every issue, revoke and forward the proxy
+      purges every expired entry (age > its TTL), so an expired token never counts against a quota. A client at its
+      quota: `worker` revokes its own oldest token; `worker-judge` gets 429 `client_quota` and no token. One client's
+      issue never evicts another client's token. `POST /run-tokens/revoke {"run_token": "..."}` revokes a token of the
+      calling client only and returns its upstream record `{"requests": k, "statuses": [...], "any_2xx": bool,
+      "refused": [...], "in_flight": n, "failed": m}` (meanings as before: upstream statuses in order, the proxy's own
+      refusal codes, requests still relayed at revoke, requests failed after connect); an unknown, expired, evicted
+      or other client's token answers 404 `run_token_unknown`, returns no record and leaves the other client's token
+      live. `POST /run-tokens/revoke-all {}` revokes every token of the calling client and returns
+      `{"revoked": n}`; records are dropped. A forwarded request's bearer must name a live token of the calling
+      client (FR-AGENT-4's 401 `run_token_unknown` otherwise). A user without a loaded token gets 409
+      `provider_missing`. Tokens are stored only as sha256 digests and compared in constant time. FR-AGENT-15's
+      `task` and `web_search` fields are unchanged.
+    tests_planned:
+      - "change server/tests/agent/test_proxy.py: the ASGI transport sends from the worker's CLIENTS address; the eviction test uses the worker quota (28) instead of 32"
+      - "change server/tests/agent/test_websearch.py: the same worker source address in its proxy fixture"
+      - "add server/tests/agent/test_proxy_clients.py [unit]: unknown address 403 on all three routes and on /v1/messages; X-Forwarded-For ignored; fifth worker-judge issue 429 client_quota with 4 live; saturated lane never evicts a worker token; a 29th worker token evicts the worker's oldest only; expired lane token purged (clock) frees its slot and its revoke is 404; worker-judge revoke of a worker token 404 and the worker token still forwards; revoke-all revokes the caller's tokens only; a worker-judge token used from the worker address is 401"
+      - "add the killed-lane case to test_proxy_clients.py: 4 lane tokens issued and never revoked (a crashed lane), revoke-all from the lane address → {revoked: 4}, lane count 0, worker token live"
+  - id: FR-AGENT-6
+    text: >-
+      Provider port (as approved, with these changes). `StageCall` gains `line: str | None = None` (FR-AGENT-19); its
+      `task` may be a judge slot name (FR-AGENT-18), resolved through `reader.yaml` `tasks` like any task. The
+      adapter's issue maps agent-proxy's answers: 200 → the token; 409 → `provider_missing`; 429 `client_quota` →
+      `lane_saturated`; 403 `client_unknown` → `sdk_error`; anything else or a transport error →
+      `provider_unavailable`. In each refused or failed issue no run_token reached the CLI, so the call settles at $0
+      (FR-AGENT-9 revised). `HttpProxyClient` gains `revoke_all() -> int | None` (None on any failure). A provider's
+      `run` validates the line (FR-AGENT-19) before the reservation and before FR-AGENT-14's span, like FR-AGENT-15's
+      `tools_mismatch`. The reserve is computed by one public function, `reserve_for(model, call)`, used by `run` and
+      by `loop_fits` (FR-AGENT-23), including FR-AGENT-17's search fees. Everything else in the approved text is
+      unchanged.
+    tests_planned:
+      - "change server/tests/agent/test_provider_db.py: a 429 client_quota issue raises lane_saturated and the settle row has settled_usd 0 and an empty record; 403 client_unknown raises sdk_error and settles 0; HttpProxyClient.revoke_all against a stub (200, 500, not JSON)"
+      - "change server/tests/agent/test_provider_caps.py: a slot-named task (judge.find → haiku) resolves; reserve_for equals the reserve row's usd for a plain call and for a web-search call"
+  - id: FR-AGENT-9
+    text: >-
+      Reservations, settlements and budgets (as approved, with these changes). (a) The reserve is `reserve_for`
+      (FR-AGENT-6 revised), unchanged in value. (b) Each reserve row stores the call's line (FR-AGENT-19). (c) The run
+      cap: for a call on the `index` or `eval` line the run cap is min(the call's `run_cap_usd`, the line's configured
+      cap, FR-AGENT-19), refused with `index_budget_exhausted` or `eval_budget_exhausted` instead of
+      `budget_exhausted`; every other line is as approved. The monthly cap applies to every line, since every line
+      spends the same subscription credit. (d) `task_budget_exhausted` keeps its scope, spent(run, task) against
+      `tasks.<task>.budget_usd_per_lesson`, one compile run for the compile tasks (the field name stays); a
+      `judge.find` call on the `compile` line is in the compile run's scope through its `run_id`, so it counts in
+      `budget.compile_cap_usd` (the run cap) and in the loop rule (FR-AGENT-23). The resized values for the four checks
+      are SRV-PIPELINE's. (e) Settlement adds one explicit case before the record rules: a run_token issue refused or
+      failed (no token reached the CLI) → $0 with an empty record, also for `lane_saturated`. Reservations of calls
+      whose process died (a killed lane, then revoke-all at its start) stay unsettled and count at their reserve.
+    tests_planned:
+      - "change server/tests/agent/test_ledger_db.py: the line column is stored on reserve and copied to settle; an index call over the per-pack cap is refused index_budget_exhausted with nothing written, an eval call over the eval cap eval_budget_exhausted; the monthly cap still refuses an index call"
+      - "change server/tests/agent/test_settlement.py: VEC-AGENT-1 gains `issue_refused` (no token: $0) and `issue_failed` cases"
+      - "change spec/fixtures/SRV-AGENT/cost-vectors.yaml: the two settlement cases above (VEC-AGENT-1 changes with this spec)"
+  - id: FR-AGENT-12
+    text: >-
+      Daily scope (as approved, with one change). A call with `daily_budget_usd` set is refused with
+      `daily_budget_exhausted` when spent(user, key, UTC calendar day) + reserve > that budget, where the scope key is
+      the call's task, except that a `judge.find` row counts in the scope of its line: a tutor-channel judge (line
+      `tutor`) counts in the `tutor` scope, so the tutor's daily cap covers its judges. `ledger.spent(owner_id=…,
+      task=k, day=True)` returns that scope (rows with task k, plus `judge.find` rows with line k), so SRV-TUTOR's
+      pre-check needs no change. Checked with the other caps under the same per-user lock before the reserve row.
+    tests_planned:
+      - "change server/tests/agent/test_call_options_db.py: a judge.find row on line tutor counts in spent(task='tutor', day=True); one on line compile does not; a tutor call is refused daily_budget_exhausted when tutor + tutor-line judge spend reach the cap"
+      - "change server/tests/agent/test_ledger_lock_db.py: two concurrent reserves (a tutor call and a tutor-line judge) with room for one give one reserve and one refusal"
+  - id: FR-AGENT-17
+    text: >-
+      Search fee, Haiku 5.5 and settlement (as approved, with one addition). The alias data also resolves judge slot
+      bindings (FR-AGENT-18): `haiku` → `claude-haiku-5-5` for `judge.find`, `judge.link_type` and
+      `ingest.context_prefix`, `opus` → `claude-opus-5-5` for `judge.eval.*` and `judge.align`; every v1 binding has a
+      pricing row. A judge call's reserve and cost use the tier rule as approved (an `ingest.context_prefix` call with
+      its section in context may pass 100,000 prompt tokens and is then reserved at the higher tier).
+    tests_planned:
+      - "change server/tests/agent/test_pricing.py: every JUDGE_SLOTS v1 binding resolves to a priced full id; a context-prefix-sized estimate over 100,000 tokens reserves at above_100k"
+
+proposed_requirements:
+  - id: FR-AGENT-18
+    text: >-
+      Judge slots as task classes (ADR-0039 B7). `reader.agent.judges.JUDGE_SLOTS` is data, one entry per slot: name,
+      line, where it runs, v1 binding, max output tokens, floor, prompt file and output parser. `judge.find`: line from
+      the caller (`tutor`, `compile` or `mcp`), the worker-judge lane, `haiku`, `bounds.judge_find_max_output_tokens`,
+      `bounds.judge_find_floor_usd`, `prompts/judge_find.md`, FR-AGENT-22. `judge.link_type` and
+      `ingest.context_prefix`: line `index`, the worker, `haiku`; prompt and parser owned by SRV-KB and SRV-INGEST and
+      registered here by path. `judge.eval.<name>` (`relevance`, `sufficiency`, `groundedness`, `self_contained`,
+      `citation_supports_claim`) and `judge.align`: line `eval`, the worker, `opus`; prompts and parsers owned by
+      SRV-OBS. The model is the slot's `reader.yaml` `tasks.<slot>.model` (an alias or a priced full id); a slot
+      missing from `tasks` raises `unknown_model` before any spend, as any task. Replacing a binding is a config
+      change, allowed only when the candidate is not worse on the evaluation set (ADR-0018 tuning rule, B7a
+      no-regression rule; a review rule, not a code check). Every slot call runs tool-less (FR-AGENT-4, -7): no slot
+      is in `TOOL_STAGES`.
+    tests_planned:
+      - "add server/tests/agent/test_judges.py [unit]: the slot table's names, lines and v1 bindings; no slot in TOOL_STAGES; a slot missing from tasks → unknown_model with no reserve row (with test_provider_db's fakes)"
+  - id: FR-AGENT-19
+    text: >-
+      Ledger lines and the index and eval caps (ADR-0039 B7, ADR-0005 amendment). `TASK_LINES` (data in judges.py):
+      `draft`, `fact_check`, `review`, `revise` → `compile`; `tutor` → `tutor`; `freshness_*` → `freshness`;
+      `judge.link_type`, `ingest.context_prefix` → `index`; `judge.eval.*`, `judge.align` → `eval`. A call's line is
+      `call.line` when given, else its task's line, else null (a task with no line, such as the live check). `run`
+      refuses with `line_invalid`, before the reservation: a `judge.find` call whose line is not `tutor`, `compile` or
+      `mcp`; a call whose `line` differs from its task's fixed line. Caps read per call through `reader.config.effective`
+      (file settings): `ingest.context_prefix` → `budgets.index_usd_per_pack`, whose run scope is one prefix overlay
+      build (the caller's `run_id` = the overlay build id, constant over its re-enqueued batches); `judge.link_type` →
+      `budgets.index_usd_per_pair_run` (run_id = the pair run id); the `eval` line → `budgets.eval_usd_per_run`
+      (run_id = one evaluation run or one `judge.align` job). A missing cap refuses the call with `cap_missing`
+      before any spend, so no index or eval credit is spent before the owner sets the measured caps (B10 cost + 20%).
+      The refusals of FR-AGENT-9 (c) are budget outcomes, not job failures: the calling job stops with an event and
+      leaves the pack usable (unprefixed spans keep their titles-only context, unjudged pairs stay unlinked).
+      `ledger.spent` gains `line=` for per-line totals.
+    tests_planned:
+      - "add server/tests/agent/test_lines_db.py [db]: TASK_LINES applied to the stored line; judge.find with no line / line index → line_invalid, nothing reserved, no span; an index call with no budgets.index_usd_per_pack → cap_missing; per-pack cap across two batches of one overlay build refuses the second batch's call once the build's spend + reserve exceeds the cap; spent(line=...) per line"
+  - id: FR-AGENT-20
+    text: >-
+      Judge versions and recorded outputs (ADR-0039 B7, B7a). `judge_version(slot)` = the first 12 hex of sha256 over
+      the slot's prompt file bytes, the resolved model id and the parser's schema version; `judge` = `<slot>@<version>`.
+      `judges.find_input_sha256(owner_id, query, cards)` = sha256 of canonical JSON (FR-AGENT-15's `canonical_sha256`)
+      of `{"owner": <uuid>, "query": <text>, "cards": [[id, text], ...]}` in judge order; SRV-SEARCH computes it, the
+      lane recomputes it. `judges.record(conn, input_sha256, judge, owner_id, output, pack_ids | overlay_id,
+      request_id, reservation_id)` inserts with ON CONFLICT DO NOTHING and returns whether it inserted;
+      `judges.recorded(conn, input_sha256, judge)` returns the parsed output or None. Rows hold card ids and numbers,
+      never text. Replay: `ReplayProvider` (tests and rebuilds) answers a slot call from the recorded output for the
+      current judge and raises `replay_miss` with no model call when there is none. Retention: `judge.find` rows older
+      than `bounds.judge_find_output_retention_days` are deleted by `judges.expire(conn)` (SRV-EVENTS's collector
+      calls it); `judges.forget_pack(conn, pack_id)` deletes every `judge.find` row citing that pack, and
+      `judges.forget_overlay(conn, overlay_id)` the offline rows of an overlay, both called by SRV-INGEST and SRV-KB
+      under their locks. A new judge version sits next to the old one; nothing is updated.
+    tests_planned:
+      - "add server/tests/agent/test_judges.py [unit]: judge_version changes with the prompt bytes, the model id and the schema version and with nothing else; find_input_sha256 changes with owner, query, card order, card id and card text"
+      - "add server/tests/agent/test_judges_db.py [db]: record twice → one row, second returns False; UPDATE refused by the trigger; recorded() after record; ReplayProvider hit makes no CLI call, miss raises replay_miss; expire deletes only judge.find rows past 30 days; forget_pack deletes rows citing the pack and no other; forget_overlay"
+  - id: FR-AGENT-21
+    text: >-
+      The `judge.find` job (ADR-0039 B6, B7b). `reader.agent.lane` declares the job kind `judge.find` (max attempts 1,
+      keyed by the request id, args exactly `{"request_id", "input_sha256"}`), consumed only on the worker-judge lane
+      (SRV-EVENTS). The handler: (1) reads the `judge_requests` row by request id (owner, handle, line, run_id,
+      run_cap_usd, lesson_id, daily_budget_usd, created_at, deadline, query, cards, pack_ids); no row → done, no call.
+      (2) now ≥ deadline → delete the row, no reserve, no call. (3) the row's recomputed `find_input_sha256` differs
+      from the arg → delete the row, log `judge_input_mismatch`, no call. (4) the kill window
+      `judge_kill_factor` × (deadline − created_at) exceeds `lane_token_ttl_s` − `lane_ttl_margin_s` → delete the row,
+      raise `judge_window_too_long`, no call (keeps lane TTL ≥ kill deadline when the timeout is retuned).
+      (5) a recorded output for (input hash, current judge) → no call. (6) otherwise exactly one `Provider.run` with
+      task `judge.find`, the row's line, run_id, run cap and daily budget, `thinking_off`, `abort_on_retry`, and
+      `deadline_s` = created_at + the kill window − now (≤ 0 → no call), today's per-call path (reserve, issue, one CLI
+      with a fresh HOME, one call, revoke, settle), no pre-spawned process. (7) on a parsed output (FR-AGENT-22): one
+      transaction takes `PackGuard.lock_active(pack_ids)`; if false (a pack purged meanwhile) it writes nothing;
+      else `judges.record(...)` and, only when it inserted, `JudgeInputsSink.copy(...)`; a late output (after the
+      deadline) is written the same way. (8) `pg_notify('judge_done', <request id>)` after commit, payload the id only;
+      the row is deleted in a `finally`. `lane_saturated`, budget refusals, `deadline_exceeded`, `upstream_retry`,
+      `output_invalid` and every provider error end the job without retry and without an output row (the waiter
+      degrades). Lane start: an `on_worker_start` hook calls `revoke_all()` on every worker service (each revokes only
+      its own client's tokens); a failed hook is isolated (FR-EVENTS-1) and stale lane tokens then expire within
+      `lane_token_ttl_s`. Nothing in this module logs or puts into job args, ledger rows or `judge_outputs` any query
+      or card text.
+    tests_planned:
+      - "add server/tests/agent/test_lane_db.py [db] with a fake CLI, stub proxy, fake PackGuard and sink: no row → no call; deadline passed → row deleted, no reserve row; hash mismatch → no call; window over the TTL → judge_window_too_long, no call; recorded hit → no call, notify; one call → one reserve, one settle, one output row, one notify, row deleted; late output still recorded; two jobs with one input → one output row, one sink copy; guard false → nothing written; lane_saturated → settle $0, no output, row deleted; the kind's max_attempts 1 and args keys"
+      - "add a [unit] case in test_lane_db.py: the start hook calls revoke_all once and a failing proxy does not raise out of the hook"
+  - id: FR-AGENT-22
+    text: >-
+      `judge.find` output (VEC-AGENT-5). The model's text is one JSON object, optionally inside a single ```json
+      fence, with exactly the keys `keep` (card ids in relevance order), `drop` (card ids) and `sufficiency` (a number
+      in [0, 1], not a boolean). `keep` and `drop` are disjoint, hold no duplicates and together equal the input card
+      ids exactly; `keep` may be empty. Anything else is `output_invalid` (no output row, the waiter degrades). The
+      parsed form, never the model text, is what is recorded and returned.
+    tests_planned:
+      - "add server/tests/agent/test_judges.py [unit]: the parser over VEC-AGENT-5 (valid, fenced, unknown key, missing id, extra id, duplicate, overlap, sufficiency 1.2, true, string)"
+  - id: FR-AGENT-23
+    text: >-
+      Loop fit for the compile loop rule (ADR-0005 amendment, ADR-0039 decision 22). `AgentProvider.loop_fits(owner_id,
+      run_id, run_cap_usd, planned)` takes the planned calls of one loop, each (task, prompt characters upper bound,
+      max output tokens, floor, custom system) with the run's run id, and returns true iff, at the time of the check,
+      spent(run) + the sum of their `reserve_for` reserves ≤ `run_cap_usd` (the compile run's cap,
+      `budget.compile_cap_usd`), for each task spent(run, task) + that task's summed reserves ≤ its
+      `budget_usd_per_lesson` (when set), and the user's month spend + the sum ≤ `budgets.monthly_usd` (when set). It
+      writes nothing and takes no lock; each call still reserves under FR-AGENT-9, which stays the enforcing check. A
+      `judge.find` call the fact-check route will make is a planned call of the loop (line `compile`).
+    tests_planned:
+      - "add server/tests/agent/test_loop_fits_db.py [db]: true when the sum fits exactly; false when the run cap, one task budget or the monthly cap would be crossed by the sum though each call alone fits; spent reservations count; nothing is written"
+
+proposed_invariants:
+  - id: INV-AGENT-7
+    text: >-
+      For any sequence of issue, revoke, revoke-all and forward requests from `worker`, `worker-judge` and unknown
+      addresses, with clock advances: each client's live tokens ≤ its quota (worker-judge ≤ 4); no request of one
+      client revokes, evicts or forwards with another client's token; an unknown address is never issued a token and
+      nothing it sends is forwarded; no expired token is forwarded; after a client's revoke-all it holds 0 tokens and
+      the other client's tokens are unchanged (property test against a stub upstream; extends INV-AGENT-2).
+    tests_planned:
+      - "add a Hypothesis state machine in server/tests/agent/test_proxy_clients.py"
+  - id: INV-AGENT-8
+    text: >-
+      One call, one process, one token: a `judge.find` job makes at most one `Provider.run`; each run starts at most
+      one CLI process, with its own fresh HOME and its own run_token, issued after its reservation; no CLI process
+      outlives its call's `deadline_s` by more than 1 s; no two jobs share a process, HOME or token (property test over
+      concurrent jobs with a fake CLI that records spawns).
+    tests_planned:
+      - "add server/tests/agent/test_lane_db.py [db] property case: 4 concurrent jobs, spawn and token sets disjoint, ≤ 1 spawn per job, reserve precedes issue"
+  - id: INV-AGENT-9
+    text: >-
+      Recorded outputs: for any interleaving of jobs with equal (input hash, judge), at most one `judge_outputs` row
+      exists and it is never updated; a replay of a recorded input makes no model call and returns that output; no row
+      is written for a pack the guard reports purged (property test).
+    tests_planned:
+      - "add server/tests/agent/test_judges_db.py [db] property case over interleavings and purges"
+  - id: INV-AGENT-10
+    text: >-
+      Text-free lane: no `judge.find` job's args, `job_keys` row, `agent_spend` row, `judge_outputs` row or log line of
+      agent-proxy, the adapter or the lane contains a query or card text (canary test with marker strings in the query
+      and every card).
+    tests_planned:
+      - "add a canary case in server/tests/agent/test_lane_db.py (args, agent_spend, judge_outputs, caplog); SRV-EVENTS's own canary covers job_keys"
+
+proposed_vectors:
+  - id: VEC-AGENT-5
+    source: judge.find outputs — valid, fenced, and refused shapes per FR-AGENT-22, with the expected parse or output_invalid
+    file: spec/fixtures/SRV-AGENT/judge-find-outputs.yaml
+    tests_planned:
+      - "test_judges.py reads it (FR-AGENT-22)"
+  - id: VEC-AGENT-6
+    source: agent-proxy client sequences per FR-AGENT-3 revised — lane quota, purge by clock, revoke-all, cross-client revoke and forward, unknown address — with the expected statuses and live counts
+    file: spec/fixtures/SRV-AGENT/client-sequences.yaml
+    tests_planned:
+      - "test_proxy_clients.py reads it (FR-AGENT-3, INV-AGENT-7)"
+
+proposed_defers:
+  - "The per-token daily judge cap on MCP (SRV-MCP, stage 7): FR-AGENT-12's scope is per user; an atomic per-token scope is specified with SRV-MCP."
+  - "The `index` and `eval` cap values: set from `retrieval-ablation` and `judge-gate` (B10); until then `cap_missing` refuses those lines."
