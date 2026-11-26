@@ -752,8 +752,10 @@ owner_notes:
 #     so the findings of a later refusal at the same step must have another key (test_loop_rule_db.py pins it).
 #   - FR-PIPELINE-13's example task budgets (D6) are OPS-DEPLOY's deploy/reader.example.yaml change, listed for its
 #     task; the live check asserts the effective budgets of the stack it runs against.
-#   - Paired SRV-LESSON schema change made here (its header note); WEB-UI FR-UI-15 labels, OPS-DEPLOY example budgets
-#     (D6), SRV-OBS SPEC_CODES and OPS-SANDBOX's import test are listed for their own tasks.
+#   - Paired changes made here because this task's tests need them: the SRV-LESSON schema (its header note) and
+#     SRV-OBS's SPEC_CODES plus test_pipeline_obs_db.py's step order (its header note). Listed for their own tasks:
+#     WEB-UI FR-UI-15 labels, OPS-DEPLOY example budgets (D6), OPS-SANDBOX's reference-library import test,
+#     SRV-SEARCH's route.
 #
 # Source: ADR-0039 (accepted 2026-11-26), owner decisions 18 and 22, its ADR-0005 and ADR-0009 Amends rows and its
 # Rework row "Pipeline check order, loops, the cap rule, fact-check route, credibility" (FR-PIPELINE-4, -5, -6, -8;

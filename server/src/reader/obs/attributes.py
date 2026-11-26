@@ -146,6 +146,8 @@ SPEC_CODES: Final = frozenset({
     # SRV-AGENT's ADR-0039 revision (paired, V/kl-agent-judges): the lane and ledger-line codes.
     "cap_missing", "eval_budget_exhausted", "index_budget_exhausted", "judge_input_too_large",
     "judge_window_too_long", "lane_saturated", "line_invalid", "replay_miss",
+    # SRV-PIPELINE's ADR-0039 revision (paired, V/kl-pipeline-checks): the loop rule's refusal codes.
+    "loop_cap_month", "loop_cap_run", "loop_cap_task",
 })
 ERROR_CODES: Final = SPEC_CODES | JOB_CODES
 _KEY_NAME: Final = re.compile(r"[a-z][a-z0-9_.]{0,63}")

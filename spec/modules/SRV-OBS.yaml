@@ -65,7 +65,7 @@
 # `fact_check.passed` assessments fire once per check run, and a lab failure is now followed by a loop.
 # tests/pipeline/test_pipeline_obs_db.py follows the new step order and counts; no FR-OBS text and no oracle's rule
 # changes. `reader.obs.attributes.SPEC_CODES` gains SRV-PIPELINE's `loop_cap_run`, `loop_cap_task` and
-# `loop_cap_month` with SRV-OBS's own catalogue change (listed for its task).
+# `loop_cap_month` (test_allowlist.py reads SRV-PIPELINE's `errors`, unchanged).
 
 id: SRV-OBS
 title: Tracing with an attribute allow-list, Rotel and MLflow behind an owner-only gate, retention and the owner's views
