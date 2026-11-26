@@ -120,8 +120,9 @@ async def test_line_cap_refuses_the_second_call_of_one_scope(
     a, b = w.users["ivan"], w.users["anna"]
     run_a = judges.scope_run_id(a, kind, "version-1")
     await p.run(_call(w, task, run_a, line=line))  # reserve 0.20 ≤ 0.30, settles 0.01
-    await p.run(_call(w, task, run_a, line=line, floor_usd=D("0.29")))  # 0.01 + 0.29 ≤ 0.30
-    assert await _refused(p, _call(w, task, run_a, line=line)) == code  # 0.30 + 0.20 > 0.30
+    await p.run(_call(w, task, run_a, line=line, floor_usd=D("0.29")))  # 0.01 + 0.29 ≤ 0.30, settles 0.01
+    third = _call(w, task, run_a, line=line, floor_usd=D("0.29"))
+    assert await _refused(p, third) == code  # 0.02 + 0.29 > 0.30
     # another owner with the same version id has its own scope and cap
     run_b = judges.scope_run_id(b, kind, "version-1")
     assert run_b != run_a

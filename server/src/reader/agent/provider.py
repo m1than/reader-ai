@@ -17,7 +17,7 @@ import signal
 import tempfile
 import time
 import uuid
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -26,13 +26,12 @@ from typing import Any, Final, Protocol
 import httpx
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from reader.agent import ledger
-from reader.agent.errors import AgentError, agent_error
+from reader.agent import judges, ledger
+from reader.agent.errors import PROXY_CODES, AgentError, agent_error
 from reader.agent.ledger import Caps, Scope, UpstreamRecord
 from reader.agent.pricing import (
     Usage,
     cost,
-    load_pricing,
     log_crosscheck,
     map_model_usage,
     map_usage,
@@ -107,6 +106,7 @@ class StageCall:
     course_id: uuid.UUID | None = None  # FR-AGENT-14 (SRV-OBS FR-OBS-12 d): on the `agent.call` span only
     step: int | None = None  # FR-AGENT-14: the compile step, on the `agent.call` span only
     web_search: WebSearchCall | None = None  # FR-AGENT-15: only for a (task, stage) in TOOL_STAGES
+    line: str | None = None  # FR-AGENT-19: required for judge.find, else None or the task's fixed line
 
     @property
     def declared_tools(self) -> tuple[str, ...]:
@@ -114,6 +114,18 @@ class StageCall:
         if self.web_search is None:
             return ()
         return TOOL_STAGES.get((self.task, self.stage), ())
+
+
+@dataclass(frozen=True)
+class PlannedCall:
+    """One call a compile loop will make: `reserve_for`'s arguments before model resolution (FR-AGENT-23)."""
+
+    task: str
+    prompt_chars: int
+    max_output_tokens: int
+    floor_usd: Decimal
+    custom_system: bool = False
+    searches_max: int = 0
 
 
 @dataclass(frozen=True)
@@ -171,25 +183,46 @@ CliRun = Callable[[CliRequest], AsyncIterator[Any]]
 class HttpProxyClient:
     """The worker's client for agent-proxy on agentnet (FR-AGENT-3)."""
 
-    def __init__(self, base_url: str = PROXY_URL, transport: httpx.AsyncBaseTransport | None = None) -> None:
-        self.client = httpx.AsyncClient(base_url=base_url, transport=transport, timeout=10.0, trust_env=False)
+    def __init__(
+        self,
+        base_url: str = PROXY_URL,
+        transport: httpx.AsyncBaseTransport | None = None,
+        timeout_s: float = 10.0,
+    ) -> None:
+        self.client = httpx.AsyncClient(
+            base_url=base_url, transport=transport, timeout=timeout_s, trust_env=False
+        )
 
     async def issue(self, handle: str, max_output_tokens: int, model: str, **extra: Any) -> str:
-        """`extra`: `task` and `web_search` for a tool call (FR-AGENT-15)."""
+        """`extra`: `task` and `web_search` for a tool call (FR-AGENT-15). FR-AGENT-6 maps a refusal."""
         body = {"user": handle, "max_output_tokens": max_output_tokens, "model": model, **extra}
         try:
             r = await self.client.post("/run-tokens", json=body)
         except httpx.HTTPError:
             raise agent_error("provider_unavailable") from None
+        try:
+            data: Any = r.json()
+        except ValueError:
+            data = None
         if r.status_code == 409:
             raise agent_error("provider_missing")
-        try:
-            token = r.json().get("run_token") if r.status_code == 200 else None
-        except ValueError:
-            token = None
+        if r.status_code == 429 and isinstance(data, dict) and data.get("error") == "client_quota":
+            raise agent_error(PROXY_CODES["client_quota"])
+        if r.status_code in (400, 403):  # client_unknown, bad_request, tools_not_allowed: never retried
+            raise agent_error("sdk_error")
+        token = data.get("run_token") if r.status_code == 200 and isinstance(data, dict) else None
         if not isinstance(token, str):
             raise agent_error("provider_unavailable")
         return token
+
+    async def revoke_all(self) -> int | None:
+        """Revoke every token of this client (FR-AGENT-3 revised); None on any failure."""
+        try:
+            r = await self.client.post("/run-tokens/revoke-all", json={})
+            revoked = r.json().get("revoked") if r.status_code == 200 else None
+        except httpx.HTTPError, ValueError, AttributeError:
+            return None
+        return revoked if type(revoked) is int else None
 
     async def revoke(self, run_token: str) -> UpstreamRecord | None:
         """The upstream record, or None when unknown (404, a failed call, or an answer that is not JSON)."""
@@ -293,25 +326,41 @@ class AgentProvider:
         cli: CliRun = sdk_cli,
         home_root: Path | None = None,
         proxy_url: str = PROXY_URL,
+        line_caps: Callable[[ReaderConfig], Mapping[str, Decimal | None]] = judges.line_caps,
     ) -> None:
         self.engine, self.config, self.proxy, self.cli = engine, config, proxy, cli
         self.home_root = home_root
         self.proxy_url = proxy_url
+        self.line_caps = line_caps
 
-    async def _caps(self, call: StageCall) -> Caps:
+    async def _settings(self) -> Any:
         # SRV-CONFIG FR-CONFIG-26 (paired): the budgets as reader.yaml plus the owner's overrides, per call.
         engine: Any = self.engine  # None only where the ledger is in memory (the freshness [image] check)
         if engine is None:  # no database, so no overrides: reader.yaml alone
-            settings = file_settings(self.config)
-        else:
-            async with engine.connect() as conn:
-                settings = await effective_settings(conn, self.config)
+            return file_settings(self.config)
+        async with engine.connect() as conn:
+            return await effective_settings(conn, self.config)
+
+    def _line_cap(self, task: str, line: str | None) -> tuple[Decimal | None, str]:
+        """FR-AGENT-19: the configured cap a call runs under and its refusal code; `cap_missing` if unset."""
+        key = judges.cap_key(task, line)
+        if key is None:
+            return None, "budget_exhausted"
+        cap = self.line_caps(self.config).get(key)
+        if cap is None:
+            raise agent_error("cap_missing")
+        return cap, "index_budget_exhausted" if key.startswith("index") else "eval_budget_exhausted"
+
+    async def _caps(self, call: StageCall) -> Caps:
+        settings = await self._settings()
+        line_cap, run_code = self._line_cap(call.task, judges.line_for(call.task, call.line))
         return Caps(
-            run_cap_usd=call.run_cap_usd,
+            run_cap_usd=call.run_cap_usd if line_cap is None else min(call.run_cap_usd, line_cap),
             task_budget_usd=settings.task_budgets.get(call.task),
             monthly_usd=settings.monthly_usd,
             warn_at=settings.warn_at,
             daily_task_usd=call.daily_budget_usd,
+            run_code=run_code,
         )
 
     async def run(self, call: StageCall) -> StageResult:
@@ -319,31 +368,57 @@ class AgentProvider:
             (call.task, call.stage) not in TOOL_STAGES or call.web_search.hook is None
         ):
             raise agent_error("tools_mismatch")  # FR-AGENT-15: before any reservation; no tool without a gate
+        line = judges.line_for(call.task, call.line)  # FR-AGENT-19: before any reservation and the span
         task = self.config.tasks.get(call.task)
         if task is None:
             raise agent_error("unknown_model")
         model = resolve_model(task.model)
+        self._line_cap(call.task, line)  # `cap_missing` before any spend
         # FR-AGENT-14 (SRV-OBS FR-OBS-6): the call runs inside `agent.call`, current while the CLI starts.
         with agent_call(call.task, call.stage, model, call.lesson_id, call.course_id, call.step) as span:
-            return await self._run(call, model, span)
+            return await self._run(call, model, span, line)
 
-    async def _run(self, call: StageCall, model: str, span: AgentSpan) -> StageResult:
+    async def loop_fits(
+        self, owner_id: uuid.UUID, run_id: uuid.UUID, run_cap_usd: Decimal, planned: Sequence[PlannedCall]
+    ) -> bool:
+        """FR-AGENT-23: would every call of one loop pass FR-AGENT-9's caps, summed, now? Writes nothing."""
+        settings = await self._settings()
+        by_task: dict[str, Decimal] = {}
+        for p in planned:
+            task = self.config.tasks.get(p.task)
+            if task is None:
+                raise agent_error("unknown_model")
+            usd = ledger.reserve_for(
+                resolve_model(task.model), p.prompt_chars, p.max_output_tokens, p.floor_usd,
+                custom_system=p.custom_system, searches_max=p.searches_max,
+            )
+            by_task[p.task] = by_task.get(p.task, Decimal(0)) + usd
+        total = sum(by_task.values(), Decimal(0))
+        if await ledger.spent(self.engine, run_id=run_id) + total > run_cap_usd:
+            return False
+        for name, usd in by_task.items():
+            budget = settings.task_budgets.get(name)
+            if budget is None:
+                continue
+            if await ledger.spent(self.engine, run_id=run_id, task=name) + usd > budget:
+                return False
+        monthly: Decimal | None = settings.monthly_usd
+        if monthly is None:
+            return True
+        month: Decimal = await ledger.spent(self.engine, owner_id=owner_id, month=True)
+        return month + total <= monthly
+
+    async def _run(self, call: StageCall, model: str, span: AgentSpan, line: str | None) -> StageResult:
         tool_call = call.web_search is not None
-        reserve = ledger.reserve_amount(
+        reserve = ledger.reserve_for(
             model,
             len(call.system or "") + len(call.prompt),
             call.max_output_tokens,
             call.floor_usd,
             custom_system=call.system is not None,
+            searches_max=call.web_search.allowance.searches_max if call.web_search is not None else 0,
         )
-        if call.web_search is not None:  # FR-AGENT-17: the search fees on top
-            fees = load_pricing().web_search_usd * call.web_search.allowance.searches_max
-            estimate = ledger.worst_case(
-                model, len(call.system or "") + len(call.prompt), call.max_output_tokens,
-                custom_system=call.system is not None,
-            ) + fees
-            reserve = max(call.floor_usd, estimate)
-        scope = Scope(call.owner_id, call.run_id, call.lesson_id, call.stage, call.task, call.attempt)
+        scope = Scope(call.owner_id, call.run_id, call.lesson_id, call.stage, call.task, call.attempt, line)
         reservation = await ledger.reserve(self.engine, scope, model, reserve, await self._caps(call))
         started = time.monotonic()
         home: Path | None = None

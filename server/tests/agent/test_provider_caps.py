@@ -34,7 +34,7 @@ async def test_caps_without_an_engine_are_the_files(tmp_path: Path) -> None:
 
 
 def test_reserve_for_is_the_one_reserve() -> None:
-    """FR-AGENT-6 (ADR-0039 revision): max(floor, worst case + searches_max × the search fee)."""
+    """FR-AGENT-6 (ADR-0039 revision): max(floor, worst case + searches_max * the search fee)."""
     ledger = need("reader.agent.ledger")
     pricing = need("reader.agent.pricing")
     fee = pricing.load_pricing().web_search_usd

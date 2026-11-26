@@ -629,10 +629,14 @@ requirements:
       integers, not booleans or floats, in 1..n, with no duplicates; `drop`, when present, equals the complement of
       `keep` exactly, and when absent is that complement. `NaN`, `Infinity` and `-Infinity` are refused, as are
       booleans and strings for numbers. Anything else is `output_invalid` (no output row, the waiter degrades).
+      The system prompt is exactly the prompt file (frame plus instructions section); all data, the query and the
+      cards, travels in the user message (`judges.render_find_input`), never in the system prompt, and the renderer
+      neutralises every data line that contains `<<<READER-INSTRUCTIONS` or `READER-INSTRUCTIONS>>>` (SRV-OBS's
+      delimiter) by replacing the token `READER-INSTRUCTIONS` with `READER_INSTRUCTIONS_DATA`.
       `judges.parse_find_output(text, card_ids)` maps ordinals back to card ids: `{"keep": [ids], "drop": [ids],
       "sufficiency": x}` is what is recorded and returned, never the model text.
     tests_planned:
-      - "test_judges.py [unit]: the parser over VEC-AGENT-5 and the mapping back to card ids"
+      - "test_judges.py [unit]: the parser over VEC-AGENT-5 and the mapping back to card ids; a query and a card carrying both delimiter lines leave the system prompt bytes unchanged and put no raw delimiter in the rendered user message"
   - id: FR-AGENT-23
     text: >-
       Loop fit for the compile loop rule (ADR-0005 amendment, ADR-0039 decision 22). `AgentProvider.loop_fits(owner_id,

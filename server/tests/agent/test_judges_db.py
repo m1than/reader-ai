@@ -94,10 +94,11 @@ async def test_forget_pack_and_overlay(pg: Pg, tmp_path: Path) -> None:
     # the delete permission does not outlive the call
     from sqlalchemy.exc import DBAPIError
 
-    with pytest.raises(DBAPIError):
-        async with w.engine.begin() as conn:
-            await judges.forget_pack(conn, a, "p3")
+    async with w.engine.connect() as conn:
+        await judges.forget_pack(conn, a, "p3")
+        with pytest.raises(DBAPIError):
             await conn.execute(text("DELETE FROM judge_outputs"))
+        await conn.rollback()
 
 
 async def test_expire_deletes_old_judge_find_rows_only(pg: Pg, tmp_path: Path) -> None:
