@@ -138,6 +138,23 @@ async def test_void_removes_an_unsettled_reservation_only(pg: Pg, tmp_path: Path
         await ledger.void(w.engine, crashed)  # twice
 
 
+async def test_settle_and_void_rows_copy_the_line(pg: Pg, tmp_path: Path) -> None:
+    """FR-AGENT-9 (b): the reserve row stores the call's line; its settle or void row copies it."""
+    ledger = need("reader.agent.ledger")
+    w = await world(pg, tmp_path)
+    owner = w.users["ivan"]
+    caps = _caps(task=None, month=None)
+    a = await ledger.reserve(w.engine, ledger.Scope(owner, uuid.uuid4(), None, "s", "draft", 0, line="compile"),
+                             "claude-opus-5-5", D("0.10"), caps)
+    b = await ledger.reserve(w.engine, ledger.Scope(owner, uuid.uuid4(), None, "s", "judge.find", 0, line="mcp"),
+                             "claude-haiku-5-5", D("0.10"), caps)
+    await ledger.settle(w.engine, a, D("0.05"), D("0.05"), D("0.05"), None,
+                        ledger.UpstreamRecord(statuses=(200,), refused=()))
+    await ledger.void(w.engine, b)
+    got = [(r[0], r[1]) for r in await rows(w.engine, "SELECT kind, line FROM agent_spend ORDER BY id")]
+    assert got == [("reserve", "compile"), ("reserve", "mcp"), ("settle", "compile"), ("void", "mcp")]
+
+
 def test_void_cli_usage() -> None:
     need("reader.agent.void")
     result = subprocess.run(
@@ -199,3 +216,51 @@ async def test_spent_never_exceeds_a_cap_by_more_than_one_reserve(pg: Pg, tmp_pa
         )
         assert settled_sum == expected_settled
         assert spent <= cap + D("1.2")  # at most one call's settled amount above its reserve (sdk ≤ 1.2)
+
+
+async def test_line_caps_and_the_tutor_day_hold_over_random_sequences(pg: Pg, tmp_path: Path) -> None:
+    """INV-AGENT-4 extended (ADR-0039): index and eval line caps refuse with their own code, tutor-line judge rows
+    count in the tutor day, and no scope ends above its cap by more than one call's overshoot."""
+    ledger = need("reader.agent.ledger")
+    errors = need("reader.agent.errors")
+    w = await world(pg, tmp_path)
+    owner = w.users["ivan"]
+    rnd = random.Random(20261126)  # noqa: S311
+    day_cap = D("3.0")
+    codes: set[str] = set()
+    for round_ in range(8):
+        line = rnd.choice(["index", "eval"])
+        task = "ingest.context_prefix" if line == "index" else "judge.align"
+        code = f"{line}_budget_exhausted"
+        run, cap = uuid.uuid4(), D(str(rnd.choice(["0.5", "1.0"])))
+        for _step in range(8):
+            reserve = D(str(rnd.choice(["0.1", "0.2", "0.3"])))
+            caps = ledger.Caps(cap, None, None, None, run_code=code)
+            try:
+                rid = await ledger.reserve(w.engine, ledger.Scope(owner, run, None, task, task, 1, line=line),
+                                           "claude-haiku-5-5", reserve, caps)
+            except errors.BudgetRefused as refused:
+                codes.add(refused.code)
+                continue
+            sdk = D(str(rnd.choice(["0.05", "0.1", "0.4"])))
+            record = ledger.UpstreamRecord(statuses=(200,), refused=())
+            amount, _ = ledger.settle_amount(reserve, record, sdk)
+            await ledger.settle(w.engine, rid, amount, sdk, sdk, None, record)
+        assert await ledger.spent(w.engine, run_id=run) <= cap + D("0.4")
+        # the tutor day: a tutor call or a tutor-line judge, alternately
+        judge = round_ % 2 == 1
+        scope = ledger.Scope(owner, uuid.uuid4(), None, "judge.find" if judge else "tutor",
+                             "judge.find" if judge else "tutor", 1, line="tutor" if judge else None)
+        try:
+            rid = await ledger.reserve(w.engine, scope, "claude-haiku-5-5", D("0.5"),
+                                       ledger.Caps(D("10"), None, None, None, daily_task_usd=day_cap))
+        except errors.BudgetRefused as refused:
+            codes.add(refused.code)
+            continue
+        await ledger.settle(w.engine, rid, D("0.6"), D("0.6"), D("0.6"), None,
+                            ledger.UpstreamRecord(statuses=(200,), refused=()))
+    assert codes <= {"index_budget_exhausted", "eval_budget_exhausted", "daily_budget_exhausted"}
+    tutor_day = await ledger.spent(w.engine, owner_id=owner, task="tutor", day=True)
+    assert D("0") < tutor_day <= day_cap + D("0.1")  # 0.6 settled against a 0.5 reserve: 0.1 overshoot per call
+    assert await ledger.spent(w.engine, owner_id=owner, line="index") + await ledger.spent(
+        w.engine, owner_id=owner, line="eval") + tutor_day == await ledger.spent(w.engine, owner_id=owner, month=True)

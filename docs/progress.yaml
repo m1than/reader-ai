@@ -1922,7 +1922,21 @@ tasks:
         of 30 worse on any type, find p95 < 2.5 s, else block for the owner with both measurements. Sets the timeout
         (initial 2.2 s), the judge-input cap (initial 3,000 tokens) and the lane concurrency (initial 4), per channel where they differ. Spends credit:
         budget.ledger, the owner asked first" }
-  - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: todo, needs: [V.owner.adr-0039],
+  - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: in_progress, needs: [V.owner.adr-0039],
+      branch: V/kl-agent-judges,
+      review: "spec: deep-reviewer (Fable) round 1 changes (10 blockers fixed), round 2 approve (2026-11-26); code
+        review by the coordinator before the merge into V/slice-integration (pending)",
+      done_here: "spec promoted (FR-AGENT-6, -9, -10, -12, -17 revised; FR-AGENT-18..23; INV-AGENT-8..10;
+        VEC-AGENT-5); Red then Green: judges.py (slots, lines, caps, versions, owner-scoped recorded outputs,
+        replay, ordinal parser, delimiter neutralising), lane.py (judge.find handler, kind, start hook), ledger
+        lines and line caps, reserve_for, loop_fits, issue mapping and revoke_all, migration agent_0004. No paid
+        call: fakes only. No measured numbers yet (lane latency, memory and cap values come from judge-gate and
+        retrieval-ablation)",
+      left_for_deploy: "V.kl-deploy-judge-lane: FR-AGENT-3 client identity, INV-AGENT-1/-6 revised, INV-AGENT-7,
+        VEC-AGENT-6 (still proposed in the spec); the judge_requests table and a JudgeRequests implementation;
+        reader.agent.lane in KIND_MODULES with the judge queue on worker-judge; SRV-CONFIG's three caps (until then
+        cap_missing refuses the index and eval lines); SRV-INGEST's PackGuard and SRV-OBS's JudgeInputsSink replace
+        the defaults",
       what: "SRV-AGENT revision (~250–400 lines): judge slots as task classes (judge.find, judge.link_type,
         ingest.context_prefix, judge.eval.*, judge.align), index and eval ledger lines with per-pack and per-pair-run
         caps, recorded judge outputs by (input hash, judge@version); the judge.find job on the worker-judge lane (ADR-0039
@@ -1932,7 +1946,10 @@ tasks:
         never evicting a worker token; late outputs kept for replay; judge.find ledger line by channel (tutor use; the
         compile run on the fact-check route; MCP monthly plus a per-token daily cap in SRV-MCP);
         query and card text only in a judge_requests row; context prefixes in batched worker jobs of 25 spans.
-        FR-AGENT-3, -6, -9, -12, -17" }
+        FR-AGENT-3, -6, -9, -12, -17",
+      note: "Promotion order (deep-reviewer round 1): FR-AGENT-3 revised (agent-proxy client identity), INV-AGENT-7 and
+        VEC-AGENT-6 go Green only in the same integration merge as V.kl-deploy-judge-lane's OPS-DEPLOY agentnet subnet
+        and fixed addresses, never before (else every worker issue is 403 client_unknown); the rest may merge earlier" }
   - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: todo,
       needs: [V.owner.adr-0039, V.kl-agent-judges],
       what: "OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX, OPS-CLI and SRV-CONFIG revision (~340–600 lines): the worker-judge
