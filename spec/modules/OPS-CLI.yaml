@@ -131,7 +131,12 @@ requirements:
       contents, if that path contains `$` (Compose would interpolate it). Relative paths inside reader.yaml then resolve
       against `/etc/reader` in the containers (a note for the server modules). The override is the only route of this path into the
       containers: compose.yaml keeps no `$` (OPS-DEPLOY INV-DEPLOY-2). The override carries no secret (reader.yaml holds
-      only `secret://` references) and reaches `docker compose` only on stdin.
+      only `secret://` references) and reaches `docker compose` only on stdin. Amended (ADR-0039 B7b,
+      V.kl-deploy-judge-lane): the services given the bind are exactly `api`, `worker`, `worker-judge`, `mcp` and
+      `agent-proxy` (worker-judge is a server role and reads `tasks` and the budgets, SRV-AGENT FR-AGENT-21);
+      `READER_CONFIG` stays static in compose.yaml on the four server services (OPS-DEPLOY FR-DEPLOY-16 f).
+    tests_planned:
+      - "change server/tests/cli/test_stack.py [unit]: the override for VEC-CLI-1 equals the revised VEC-CLI-2 (bind on worker-judge); no other service gets the bind"
   - id: FR-CLI-5
     text: >-
       Active profiles: `reader up` activates the default profile plus `kernels` (task V.OPS-CLI-kernels, vertical slice:
@@ -159,7 +164,13 @@ requirements:
       a container, not on the host) stops `up` with code `not_deliverable`. Provider tokens go to agent-proxy only
       (ADR-0023, ADR-0025): no other service receives one, and without agent-proxy in the active model no provider
       reference is resolved at all. The watcher's consumer set is the plan's services, so it gains agent-proxy exactly
-      when `agents` is active. Kernel services and the `embed` service (SRV-SEARCH) receive nothing.
+      when `agents` is active. Kernel services and the `embed` service (SRV-SEARCH) receive nothing. Amended
+      (ADR-0039 B7b): `db-password` goes to postgres, api, worker, worker-judge and mcp (FR-DEPLOY-10 b as amended
+      by FR-DEPLOY-16), worker-judge at its rendered uid (10001); worker-judge receives no provider token (ADR-0025
+      rule 1 as amended). The watcher's consumer set gains worker-judge, so a restarted lane gets its file again.
+    tests_planned:
+      - "change server/tests/cli/test_stack.py [unit]: the delivery plan equals the revised VEC-CLI-3 (worker-judge, 10001, db-password only); no provider file name is planned for worker-judge with agents on or off"
+      - "change server/tests/cli/test_watcher.py [unit]: a start event for worker-judge with the project's labels schedules exactly one db-password delivery as 10001"
   - id: FR-CLI-6
     text: >-
       Delivery protocol (ADR-0026): for one (container, uid, name, value) the watcher runs
@@ -296,7 +307,10 @@ requirements:
       `pg_dump` and `pg_restore` (a pilot-sized database, revised from the live drill), 120 s for each tar, untar and
       find one-off and each `psql` query (local volume and socket work). A timeout is a failure with a fixed message.
       The archives are held in memory before the 0600 file is written (stage-1 limit; streaming to `<file>.tmp` plus
-      rename is planned).
+      rename is planned). Amended (ADR-0039 B7b): the stopped and restarted services are `api`, `worker`,
+      `worker-judge` and `mcp` (worker-judge holds database sessions and writes recorded outputs and the ledger).
+    tests_planned:
+      - "change server/tests/cli/test_maintenance.py [unit]: the backup's stop and start argv name api, worker, worker-judge and mcp; a failing dump still starts all four"
   - id: FR-CLI-18
     text: >-
       `reader restore DIR` refuses unless the watcher runs, then verifies every sha256 in the manifest. Precondition: no
@@ -317,6 +331,10 @@ requirements:
       restore never discards data), and `--clean --if-exists` lets the archive replace the empty schema that migrations
       created at first start instead of failing on existing objects. The `-Fc` archive holds one database and no roles or
       passwords; the restored database is served by the target's postgres with the target machine's own FR-CLI-14 item.
+      Amended (ADR-0039 B7b): the stopped and restarted services are `api`, `worker`, `worker-judge`, `mcp` and
+      `caddy`, so no lane session holds a lock or writes during `pg_restore --clean`.
+    tests_planned:
+      - "change server/tests/cli/test_maintenance.py [unit]: the restore's stop and start argv name api, worker, worker-judge, mcp and caddy; a failing pg_restore still starts all five"
   - id: FR-CLI-19
     text: >-
       Logging: the CLI and the watcher log structured fields (event, service, container, name, exit code, duration). A
@@ -458,6 +476,19 @@ requirements:
       command level] `cmd_restore` with the obs volume runs `mlflow-migrate` after the store copy and before mlflow
       starts, and leaves mlflow stopped when it exits non-zero; `cmd_backup` writes the three obs files; `cmd_up`
       prints the migrate message when `up` fails with the profile.
+  - id: FR-CLI-25
+    text: >-
+      **Judge slots in `reader doctor`** (ADR-0039 B7; SRV-AGENT FR-AGENT-18: a slot missing from `tasks` raises
+      `unknown_model` before any spend, so a missing `judge.find` silently leaves every `find` unjudged). The check
+      `judge_slots` reads `reader.agent.judges.JUDGE_SLOTS` (each `judge.eval.<name>` expanded) and the loaded
+      reader.yaml's `tasks`. When `reader up` would choose the `agents` profile now (FR-CLI-5): every slot bound →
+      ok, detail `all bound`; `judge.find` missing → fails; only other slots missing → ok (they run only in offline
+      index and evaluation jobs, which refuse with `unknown_model` on their own). Whenever any slot is missing the
+      detail is `missing: <slot names, sorted>; add tasks.<slot>: {model: <alias>} to reader.yaml (v1 bindings:
+      deploy/reader.example.yaml)`. With `agents` not chosen → ok, detail `off`. Slot names and aliases are not
+      secrets; no value is read.
+    tests_planned:
+      - "add server/tests/cli/test_judge_slots.py [unit]: all bound → ok `all bound`; judge.find missing → fails with the hint; only judge.eval.relevance missing → ok with the hint naming it; agents not chosen → ok `off`; `doctor --json` carries {name: judge_slots, ok, detail}"
 
 invariants:
   - id: INV-CLI-1
@@ -513,10 +544,10 @@ vectors:
     source: "A reader.yaml with two users and env, keychain, op and hostfile references (references only, no values)"
     file: spec/fixtures/OPS-CLI/config.yaml
   - id: VEC-CLI-2
-    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the read-only reader.yaml bind with create_host_path false on api, worker and mcp, no environment entry); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065), same bind source /tmp/reader-ai-test/reader.yaml. The test writes the config into a per-test temporary directory and compares with that directory's resolved path substituted for /tmp/reader-ai-test (a general swap, not macOS-specific); VEC-DEPLOY-3 is static and never resolved"
+    source: "Expected override for VEC-CLI-1's two users loaded from /tmp/reader-ai-test/reader.yaml (kernel services, networks, and the read-only reader.yaml bind with create_host_path false on api, worker, worker-judge and mcp (ADR-0039 B7b), no environment entry); for `ivan` alone it equals OPS-DEPLOY's VEC-DEPLOY-3 (origin/1/S1.OPS-DEPLOY, 9aee065), same bind source /tmp/reader-ai-test/reader.yaml. The test writes the config into a per-test temporary directory and compares with that directory's resolved path substituted for /tmp/reader-ai-test (a general swap, not macOS-specific); VEC-DEPLOY-3 is static and never resolved"
     file: spec/fixtures/OPS-CLI/override-two-users.yaml
   - id: VEC-CLI-3
-    source: "Rendered-model excerpts (project name, pgdata volume name, consumer uids) and the expected default-profile delivery plan; no values"
+    source: "Rendered-model excerpts (project name, pgdata volume name, consumer uids) and the expected default-profile delivery plan, worker-judge included (uid 10001, db-password; ADR-0039 B7b); no values"
     file: spec/fixtures/OPS-CLI/delivery-plan.yaml
   - id: VEC-CLI-4
     source: "docker events lines (own project, foreign project, one-off, non-consumer, labels missing) and the deliveries each must cause (FR-CLI-9)"
@@ -554,74 +585,13 @@ vectors:
 # - The pair-pool size is not a reader.yaml field; v1 keeps OPS-DEPLOY's static `kernel-pair-1`.
 # - The power assertion (`caffeinate`) from the roadmap's risk table belongs to the job runner (stage 2+), not here.
 
-# ---- Proposed revision (ADR-0039 B7b, accepted 2026-11-26; task V.kl-deploy-judge-lane, phase 1) ----
-#
-# `worker-judge` (OPS-DEPLOY FR-DEPLOY-16, proposed) is a server role in the default profile and a `db-password`
-# consumer, so it gets the reader.yaml bind, the secret, and the backup/restore stop and start like the worker. A new
-# doctor check names judge slots missing from `tasks`. This module handles secrets: full deep-reviewer rounds until
-# approve. These items join `requirements` and `vectors` with their Red tests after that approval.
+# ---- Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): FR-CLI-4, -5, -17, -18 amended, FR-CLI-25,
+# VEC-CLI-2/-3 revised; deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (secrets: full rounds).
+# `worker-judge` (OPS-DEPLOY FR-DEPLOY-16) is a server role in the default profile and a `db-password` consumer, so
+# it gets the reader.yaml bind, the secret, and the backup/restore stop and start like the worker.
 # Owner ask, planned: the owner's reader.yaml is outside the repository and the agent never edits it, so before the
 # stage's live check runs `reader doctor` (FR-CLI-25 fails while `judge.find` is unbound with `agents` on), the task
 # records an `ask` in docs/progress.yaml and notifies the owner: add the judge slots (`tasks.judge.find: {model:
-# haiku}` at least; the v1 bindings are in deploy/reader.example.yaml) once SRV-CONFIG's dotted keys are merged.
+# haiku}` at least; the v1 bindings are in deploy/reader.example.yaml; dotted task keys already load).
 # Not in this revision: the owner-run `reader obs proposals` export (docs/plans/adr-0039-execution.md) waits for
 # SRV-OBS's `judge.align` proposals table (V.kl-obs-spans).
-
-proposed_revisions:
-  - id: FR-CLI-4
-    text: >-
-      As approved, except the services given the read-only reader.yaml bind are exactly `api`, `worker`,
-      `worker-judge`, `mcp` and `agent-proxy` (worker-judge is a server role and reads `tasks` and the budgets,
-      SRV-AGENT FR-AGENT-21); no other service gets it. `READER_CONFIG` stays static in compose.yaml on the four
-      server services (OPS-DEPLOY FR-DEPLOY-16 f).
-    tests_planned:
-      - "change server/tests/cli/test_stack.py [unit]: the override for VEC-CLI-1 equals the revised VEC-CLI-2 (bind on worker-judge); no other service gets the bind"
-  - id: FR-CLI-5
-    text: >-
-      As approved, except `db-password` goes to postgres, api, worker, worker-judge and mcp (FR-DEPLOY-10 b as
-      revised), worker-judge at its rendered uid (10001). worker-judge receives no provider token: provider tokens go
-      to agent-proxy only (ADR-0025 rule 1 as amended by ADR-0039 B7b). The watcher's consumer set gains
-      worker-judge, so a restarted lane gets its file again (FR-CLI-8).
-    tests_planned:
-      - "change server/tests/cli/test_stack.py [unit]: the delivery plan equals the revised VEC-CLI-3 (worker-judge, 10001, db-password only); no provider file name is planned for worker-judge with agents on or off"
-      - "change server/tests/cli/test_watcher.py [unit]: a start event for worker-judge with the project's labels schedules exactly one db-password delivery as 10001"
-  - id: FR-CLI-17
-    text: >-
-      As approved, except `reader backup DIR` stops `api`, `worker`, `worker-judge` and `mcp` (worker-judge holds
-      database sessions and writes recorded outputs and the ledger) inside the same `try` whose `finally` starts them
-      again.
-    tests_planned:
-      - "change server/tests/cli/test_maintenance.py [unit]: the backup's stop and start argv name api, worker, worker-judge and mcp; a failing dump still starts all four"
-  - id: FR-CLI-18
-    text: >-
-      As approved, except `reader restore DIR` stops `api`, `worker`, `worker-judge`, `mcp` and `caddy` inside the
-      `try` whose `finally` starts them again, so no lane session holds a lock or writes during `pg_restore --clean`.
-    tests_planned:
-      - "change server/tests/cli/test_maintenance.py [unit]: the restore's stop and start argv name api, worker, worker-judge, mcp and caddy; a failing pg_restore still starts all five"
-
-proposed_requirements:
-  - id: FR-CLI-25
-    text: >-
-      **Judge slots in `reader doctor`** (ADR-0039 B7; SRV-AGENT FR-AGENT-18: a slot missing from `tasks` raises
-      `unknown_model` before any spend, so a missing `judge.find` silently leaves every `find` unjudged). The check
-      `judge_slots` reads `reader.agent.judges.JUDGE_SLOTS` (each `judge.eval.<name>` expanded) and the loaded
-      reader.yaml's `tasks`. When `reader up` would choose the `agents` profile now (FR-CLI-5): every slot bound →
-      ok, detail `all bound`; `judge.find` missing → fails; only other slots missing → ok (they run only in offline
-      index and evaluation jobs, which refuse with `unknown_model` on their own). Whenever any slot is missing the
-      detail is `missing: <slot names, sorted>; add tasks.<slot>: {model: <alias>} to reader.yaml (v1 bindings:
-      deploy/reader.example.yaml)`. With `agents` not chosen → ok, detail `off`. Slot names and aliases are not
-      secrets; no value is read.
-    tests_planned:
-      - "add server/tests/cli/test_judge_slots.py [unit]: all bound → ok `all bound`; judge.find missing → fails with the hint; only judge.eval.relevance missing → ok with the hint naming it; agents not chosen → ok `off`; `doctor --json` carries {name: judge_slots, ok, detail}"
-
-proposed_vectors:
-  - id: VEC-CLI-2
-    source: "Revised: as approved, with the read-only reader.yaml bind also on worker-judge (FR-CLI-4 revised); for `ivan` alone it equals OPS-DEPLOY's revised VEC-DEPLOY-3"
-    file: spec/fixtures/OPS-CLI/override-two-users.yaml
-    tests_planned:
-      - "test_stack.py's override comparison and the VEC-DEPLOY-3 equality check read the revised fixtures"
-  - id: VEC-CLI-3
-    source: "Revised: the rendered-model excerpt and the default-profile delivery plan gain worker-judge (uid 10001, db-password)"
-    file: spec/fixtures/OPS-CLI/delivery-plan.yaml
-    tests_planned:
-      - "test_stack.py's delivery-plan test reads the revised fixture"

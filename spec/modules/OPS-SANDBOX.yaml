@@ -254,9 +254,11 @@ invariants:
       canaries OPS-CLI delivers); no Docker socket path exists. [image] and [live]
   - id: INV-SANDBOX-3
     text: >-
-      From a kernel, `postgres`, `worker`, `caddy`, `mcp`, `agent-proxy` and every other kernel service do not resolve,
-      and no TCP port 1–65535 of `api` is connectable on any of its addresses (ADR-0014 as reworded by OPS-DEPLOY,
-      header note). [live]
+      From a kernel, `postgres`, `worker`, `worker-judge` (ADR-0039 B7b), `caddy`, `mcp`, `agent-proxy` and every
+      other kernel service do not resolve, and no TCP port 1–65535 of `api` is connectable on any of its addresses
+      (ADR-0014 as reworded by OPS-DEPLOY, header note). [live]
+    tests_planned:
+      - "change server/tests/sandbox/test_invariants.py: the [live] name probes read the revised VEC-SANDBOX-1 (dns-worker-judge); e2e/live/slice.sh's probe cells follow the fixture"
   - id: INV-SANDBOX-4
     text: >-
       Limits hold from a cell: the process runs as uid 1000 with `CapEff` 0, `NoNewPrivs` 1 and `Seccomp` 2 in
@@ -278,45 +280,6 @@ invariants:
       8889 on 0.0.0.0 and on [::] fails (EADDRINUSE, or EADDRNOTAVAIL/EAFNOSUPPORT when the container has no IPv6).
       [image] (A cell may still call `POST /control/exit` itself; that resets its own principal's container only, which
       ADR-0022 permits.)
-
-nfr: []
-
-vectors:
-  - id: VEC-SANDBOX-1
-    source: >-
-      Probe targets derived from OPS-DEPLOY's network table (VEC-DEPLOY-2) and ADR-0014's controls; the kernel
-      environment list measured by deep-reviewer round 1
-    file: spec/fixtures/OPS-SANDBOX/probes.yaml
-
-# Owner notes:
-# - The container's own addresses (FR-SANDBOX-6 d) are read once at start. That is enough for a kernel on a single
-#   network that never changes while it runs; revisit in stage 4a if a kernel service can gain networks at run time.
-# - The slice image carries only the Python standard library for labs. Packages the L02 labs need are added to the lock
-#   when V.COMPILE-min fixes L02 (pip in a cell cannot reach the network).
-# - The `x-kernel` template mounts /run/evcxr (exec, 1 GiB) although the python3-only image does not use it; it stays
-#   because the template is fixed by OPS-DEPLOY and ADR-0022, and it is empty after every reset (INV-SANDBOX-5).
-# - Re-run of the kernel-roundtrip numbers on Python 3.14 / trixie (ADR-0022 hypothesis) is covered for python3 by the
-#   [image] tests; if KG 3.0.1 or ipykernel 7.4.0 fails on 3.14, the task blocks with the version evidence.
-
-# ---- Proposed revision (ADR-0039 B7b, accepted 2026-11-26; task V.kl-deploy-judge-lane, phase 1) ----
-#
-# ADR-0025's `verified_by`, as amended by ADR-0039 B7b: every test that names the worker also runs against
-# `worker-judge` (OPS-DEPLOY FR-DEPLOY-16, proposed). The token-absence checks are SRV-AGENT's INV-AGENT-1 (revised,
-# approved text on V/kl-agent-judges: server/tests/agent/test_live.py parametrised over worker and worker-judge); this
-# spec adds the kernel-side name probe and the no-valid-handle and route checks from both worker services. These
-# items join `invariants` and `vectors` with their Red tests after deep-reviewer approval (sandbox: complex area).
-# New file inside `paths`: server/tests/sandbox/test_worker_lanes_live.py.
-
-proposed_revisions:
-  - id: INV-SANDBOX-3
-    text: >-
-      From a kernel, `postgres`, `worker`, `worker-judge`, `caddy`, `mcp`, `agent-proxy` and every other kernel
-      service do not resolve, and no TCP port 1–65535 of `api` is connectable on any of its addresses (ADR-0014 as
-      reworded by OPS-DEPLOY, header note). [live]
-    tests_planned:
-      - "change server/tests/sandbox/test_invariants.py: the [live] name probes read the revised VEC-SANDBOX-1 (dns-worker-judge); e2e/live/slice.sh's probe cells follow the fixture"
-
-proposed_invariants:
   - id: INV-SANDBOX-7
     text: >-
       The worker services' credential and route checks (ADR-0025 `verified_by` as amended by ADR-0039 B7b), from
@@ -332,12 +295,26 @@ proposed_invariants:
     tests_planned:
       - "add server/tests/sandbox/test_worker_lanes_live.py [live] (READER_LIVE=1, docker exec into each worker service as 10001): (a) for worker and worker-judge, three bearers → 401 run_token_unknown each; (b) the resolve and non-resolve name lists from worker-judge; (c) the port scan of each worker service from the other"
 
-proposed_vectors:
+nfr: []
+
+vectors:
   - id: VEC-SANDBOX-1
     source: >-
-      Revised: as approved, plus the probe `dns-worker-judge` (`socket.getaddrinfo('worker-judge', 80)`, expect
-      `resolve_fails`, level live) from OPS-DEPLOY's revised VEC-DEPLOY-2 (no kernel shares a network with
-      worker-judge)
+      Probe targets derived from OPS-DEPLOY's network table (VEC-DEPLOY-2) and ADR-0014's controls; the kernel
+      environment list measured by deep-reviewer round 1; the probe `dns-worker-judge` added for ADR-0039 B7b (no
+      kernel shares a network with worker-judge)
     file: spec/fixtures/OPS-SANDBOX/probes.yaml
-    tests_planned:
-      - "test_invariants.py's [live] probe loop reads the revised fixture (INV-SANDBOX-3)"
+
+# Owner notes:
+# - The container's own addresses (FR-SANDBOX-6 d) are read once at start. That is enough for a kernel on a single
+#   network that never changes while it runs; revisit in stage 4a if a kernel service can gain networks at run time.
+# - The slice image carries only the Python standard library for labs. Packages the L02 labs need are added to the lock
+#   when V.COMPILE-min fixes L02 (pip in a cell cannot reach the network).
+# - The `x-kernel` template mounts /run/evcxr (exec, 1 GiB) although the python3-only image does not use it; it stays
+#   because the template is fixed by OPS-DEPLOY and ADR-0022, and it is empty after every reset (INV-SANDBOX-5).
+# - Re-run of the kernel-roundtrip numbers on Python 3.14 / trixie (ADR-0022 hypothesis) is covered for python3 by the
+#   [image] tests; if KG 3.0.1 or ipykernel 7.4.0 fails on 3.14, the task blocks with the version evidence.
+
+# Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): INV-SANDBOX-3 gains worker-judge, INV-SANDBOX-7,
+# VEC-SANDBOX-1's `dns-worker-judge`; deep-reviewer (Fable) rounds 1–2 changes, round 3 approve. The token-absence
+# checks for worker-judge are SRV-AGENT's INV-AGENT-1 (server/tests/agent/test_live.py).

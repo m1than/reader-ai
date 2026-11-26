@@ -51,7 +51,8 @@ review: "deep-reviewer (Fable): spec rounds 1–3 changes, round 4 approve; code
   line of server.Dockerfile that SRV-INGEST FR-INGEST-23 names (round 4). Its test reformatted for ruff (line
   length, split assertions), no oracle change. The [image] `caddy adapt` test's set of proxied paths gains
   `/api/materials/uploads` (same api upstream), as FR-DEPLOY-14 requires; at the merge it sits beside SRV-OBS's
-  8443 site and its upstreams."
+  8443 site and its upstreams. Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): FR-DEPLOY-16,
+  INV-DEPLOY-11, VEC-DEPLOY-2/-3 revised; deep-reviewer (Fable) rounds 1–2 changes, round 3 approve; approved_by agent."
 layer: ops
 track: engineering
 adr: [ADR-0012, ADR-0006, ADR-0011, ADR-0014, ADR-0020, ADR-0022, ADR-0023, ADR-0024, ADR-0025, ADR-0026]
@@ -391,6 +392,73 @@ requirements:
       blocks, the upload path's 200 MiB and the 8443 site's 10 MiB. Tests: [config] the rendered model's
       mlflow command and environment equal (a) exactly; mlflow-migrate's hardening, memory limit, network-less
       placement and the dependency; the worker's read-only mount; the 8443 body limit in the Caddyfile; the volume's backup label.
+  - id: FR-DEPLOY-16
+    text: >-
+      **The judge lane** (ADR-0039 B7b; amends ADR-0012's service list and ADR-0025 rules 1, 3, 4 and 5 as ADR-0039
+      states). This item amends FR-DEPLOY-1, -3, -4, -5, -9, -10, -11, -13 and INV-DEPLOY-2 for the named services
+      only; FR-DEPLOY-13's `otel` becomes {api, worker, worker-judge, rotel}.
+      (a) **Service.** `worker-judge` in the default profile, like `worker` (the lane is up whenever the stack is, so a
+      waiter never waits on an undeployed lane; with `agents` off its run-token issue fails at once and `find`
+      degrades, SRV-AGENT FR-AGENT-21). It is `<<: *server` unchanged: image `reader-server:local`, `user:
+      "10001:10001"`, `read_only: true`, tmpfs `/home/reader`, `/tmp` and `/run/secrets` as the worker's, `cap_drop:
+      [ALL]`, `no-new-privileges`, `restart: unless-stopped`, environment `READER_CONFIG` only, `depends_on` postgres
+      healthy. Command exactly `["reader-server", "--role", "worker", "--lane", "judge"]`: the worker role is reused
+      (same image, same entrypoint wrapper waiting for `db-password`, same health command) and the lane is an
+      argument (SRV-EVENTS FR-EVENTS-9; SRV-AUTH's `--lane`), because a separate role would duplicate the worker's
+      start path for one queue selection. Healthcheck `["CMD", "reader-server", "--role", "worker", "--healthcheck"]`
+      with the server roles' timing. No `volumes` (no `blobs`, no mlflow-setup bind: `judge.find` reads only
+      Postgres), no `ports`, no `--bind`; the lane opens no listening socket, so FR-DEPLOY-4's compensating control
+      also covers the pairs worker ↔ worker-judge (agentnet, otel) and api ↔ worker-judge (otel; api listens on its
+      `front` address only).
+      (b) **Memory.** `mem_limit: 2g` equal to `memswap_limit: 2g`. An initial value, not a measurement (ADR-0039
+      B7b, decision 17): 4 concurrent CLI processes × an assumed 384 MiB + 512 MiB for the worker process itself. No
+      per-call CLI footprint has been measured in this repository (spikes/agent-sdk-container ran under a 2 GiB limit
+      without recording a peak). `judge-gate` records the deployed lane's cgroup `memory.peak`, `memory.stat` anon,
+      `memory.events` oom_kill and the `/tmp` tmpfs use at concurrency 4 (each call's CLI HOME is a `mkdtemp` under
+      `/tmp`, 64m, and tmpfs pages count in the same 2g cgroup), and whether each call's HOME is removed after the
+      call (a leaked HOME would grow the cgroup until the tmpfs fills); a paired change then sets the limit to the
+      anon maximum × 1.25, rounded up to 128 MiB (the rule FR-DEPLOY-9 used for `embed`).
+      (c) **Networks.** `agentnet` keeps `internal: true` and gains `ipam: {config: [{subnet: 10.230.7.0/24,
+      ip_range: 10.230.7.128/25, gateway: 10.230.7.1}]}` (outside Docker's default pools, next to FR-DEPLOY-13's
+      10.230.2–6; the gateway explicit, so the rendered model shows that no client address is the bridge's); fixed
+      `ipv4_address`es: agent-proxy 10.230.7.2, worker 10.230.7.10, worker-judge 10.230.7.11. Dynamic addresses
+      stay inside the ip_range, so no other container can take a client's address. A new internal network
+      `judge-db` (`ipam` subnet 10.230.8.0/24) holds exactly `postgres` and `worker-judge`: the lane reaches
+      Postgres without joining `core`, because `core` holds `mcp` and ADR-0025 rule 5 as amended lets worker-judge
+      reach only agent-proxy, Postgres and Rotel. worker-judge's networks are exactly `agentnet` (10.230.7.11),
+      `judge-db` and `otel`; no `sb-*`, `embed`, `obs`, `front`, `core` or `egress`.
+      (d) **agent-proxy binds its agentnet address only.** agent-proxy's `command` is exactly `["--bind",
+      "10.230.7.2:8080"]` (appended to the image's entrypoint `python -I -m reader.agent.proxy`; SRV-AGENT
+      FR-AGENT-3), so issue, revoke, revoke-all and forward are not served on its `egress` address or on loopback;
+      its healthcheck becomes `["CMD", "python", "-I", "-c", "import socket;
+      socket.create_connection(('10.230.7.2', 8080), 2).close()"]`, because the image's script probes 127.0.0.1,
+      where nothing listens any more. FR-AGENT-3's source-address check still refuses any address outside
+      `CLIENTS`; the bind is the second layer. Upgrade of a running stack: the existing `agentnet` was created
+      without `ipam`, and Compose does not change a network's IPAM in place; the live check records what `reader up`
+      does over the old network and, if Compose refuses or keeps the old subnet, the stage note tells the owner to
+      run `reader down` (volumes kept) before `reader up`, which recreates the network.
+      (e) **Secrets.** worker-judge consumes `db-password` only, as the worker does (ADR-0026): FR-DEPLOY-10 (b)'s
+      list becomes postgres, api, worker, worker-judge and mcp; (d)'s wait wrapper applies unchanged (same image). It
+      never receives a provider token (ADR-0025 rule 1 as amended: it presents per-run tokens only).
+      (f) FR-DEPLOY-5 and INV-DEPLOY-2 (1): `READER_CONFIG` is set on exactly api, worker, worker-judge and mcp, and
+      the override's read-only reader.yaml bind goes to those four and agent-proxy (OPS-CLI FR-CLI-4; VEC-DEPLOY-3
+      gains worker-judge's bind). FR-DEPLOY-1: the default profile gains `worker-judge`. FR-DEPLOY-9: worker-judge's
+      hardening is the worker's.
+      (g) Stage-1 live checks that list the default services (NFR-DEPLOY-1's bench included) count worker-judge.
+      (h) deploy/reader.example.yaml `tasks` gains SRV-AGENT's `JUDGE_SLOTS` with their v1 bindings (FR-AGENT-18:
+      `judge.find`, `judge.link_type`, `ingest.context_prefix` → haiku; `judge.eval.relevance`,
+      `judge.eval.sufficiency`, `judge.eval.groundedness`, `judge.eval.self_contained`,
+      `judge.eval.citation_supports_claim`, `judge.align` → opus); dotted task keys already load through SRV-CONFIG
+      (checked 2026-11-26), so no SRV-CONFIG change is needed for this.
+    tests_planned:
+      - "change server/tests/deploy/test_compose_render.py [config]: worker-judge in the default render; its rendered service equals the worker's on every key except command, networks, volumes (none) and mem_limit/memswap_limit (2g, equal); command exactly (a)'s, no `--bind` in it; healthcheck test and timing equal the worker's; no ports; FR-DEPLOY-1's default service set gains worker-judge"
+      - "change server/tests/deploy/test_compose_render.py [config]: agent-proxy's command (when present, with `agents`) is exactly [--bind, 10.230.7.2:8080] and its healthcheck probes that address"
+      - "change server/tests/deploy/test_compose_networks.py [config]: agentnet internal, subnet 10.230.7.0/24, ip_range 10.230.7.128/25, gateway 10.230.7.1; the membership assertions change: agentnet = {worker, worker-judge} plus agent-proxy with `agents` (was {worker, agent-proxy}), otel = {api, worker, worker-judge, rotel} (was without worker-judge), judge-db = {postgres, worker-judge} (new, internal, subnet 10.230.8.0/24); worker-judge's networks exactly {agentnet, judge-db, otel}; VEC-DEPLOY-2 exact (revised fixture)"
+      - "paired SRV-OBS test change: server/tests/obs/test_deploy_config.py:144's otel set gains worker-judge (SRV-OBS's H2, same merge)"
+      - "change server/tests/deploy/test_compose_secrets.py [config]: the /run/secrets tmpfs consumer set and the READER_CONFIG set gain worker-judge; worker-judge has memswap_limit equal to mem_limit and no environment entry beyond READER_CONFIG"
+      - "change server/tests/deploy/test_example_config.py [config]: VEC-DEPLOY-1 loads and binds every JUDGE_SLOTS name"
+      - "[live] the stage's live check: `reader up` over a stack started before this change (agentnet without ipam) — record whether Compose recreates the network; after `reader down` and `reader up`, `docker network inspect` shows subnet 10.230.7.0/24 and the three fixed addresses"
+      - "[live] the stage's live check: after `reader up`, worker-judge is healthy, runs as 10001 read-only with cap-drop ALL, its /run/secrets holds only db-password; from the worker, no TCP port 1–65535 of worker-judge's agentnet and otel addresses accepts; inside agent-proxy, 127.0.0.1:8080 refuses"
 
 invariants:
   - id: INV-DEPLOY-1
@@ -445,6 +513,18 @@ invariants:
       `ipc: host`, `uts: host`, `cgroup: host`, `userns_mode: host`, `volumes_from`, `extra_hosts`, `devices`, or a
       `security_opt` that disables seccomp or AppArmor in either form Docker accepts, `seccomp=unconfined` /
       `apparmor=unconfined` or the legacy `seccomp:unconfined` / `apparmor:unconfined`. [config]
+  - id: INV-DEPLOY-11
+    text: >-
+      `agentnet` identity. In every rendered model (INV-DEPLOY-1's sets): `agentnet`'s members are exactly worker,
+      worker-judge and, with the `agents` profile active, agent-proxy; each has an `ipv4_address` in 10.230.7.0/24
+      and outside the network's ip_range; the map {worker's address → worker, worker-judge's address →
+      worker-judge} equals `reader.agent.proxy.CLIENTS`' address → client-name map exactly (SRV-AGENT FR-AGENT-3);
+      agent-proxy's `--bind` host, when agent-proxy is present, equals its agentnet address; the network's gateway
+      (10.230.7.1, explicit in `ipam`) is not a `CLIENTS` address; no agentnet member has `network_mode` or
+      `extra_hosts` (FR-DEPLOY-15 (b)'s `network_mode: none` on `mlflow-migrate`, which is on no network, is
+      unaffected), and no service has a fixed address on another network equal to a client address. [config]
+    tests_planned:
+      - "add to server/tests/deploy/test_compose_networks.py [config]: the rendered agentnet addresses against reader.agent.proxy.CLIENTS (imported), ip_range exclusion, the gateway not in CLIENTS, no network_mode or extra_hosts on agentnet members, agent-proxy's bind host"
 
 nfr:
   - id: NFR-DEPLOY-1
@@ -459,13 +539,20 @@ vectors:
     source: The documented example configuration (FR-DEPLOY-12), written in Green; loaded through SRV-CONFIG load_config
     file: deploy/reader.example.yaml
   - id: VEC-DEPLOY-2
-    source: Allowed service pairs sharing a network, from ADR-0012, ADR-0022 (routes) and ADR-0025 (routes, egress)
+    source: >-
+      Allowed service pairs sharing a network, from ADR-0012, ADR-0022 (routes) and ADR-0025 (routes, egress).
+      Revised (ADR-0039 B7b, ADR-0025 rule 5 as amended): `allowed` gains [worker, worker-judge] (agentnet, otel;
+      neither listens, FR-DEPLOY-4), [worker-judge, agent-proxy] (agentnet), [worker-judge, postgres] (judge-db),
+      [worker-judge, rotel] (otel) and [api, worker-judge] (otel; api listens on `front` only); `never` gains
+      worker-judge with mcp, caddy, embed, mlflow, jaeger, kernel-verify, kernel-agent, kernel-pair-1 and
+      kernel-user-ivan.
     file: spec/fixtures/OPS-DEPLOY/reachability.yaml
   - id: VEC-DEPLOY-3
     source: >-
       The override OPS-CLI must emit for one configured user: the fully expanded kernel-<user> service, its network and
-      api's attachment to it, and the read-only reader.yaml bind on api, worker and mcp (FR-DEPLOY-5; source
-      `/tmp/reader-ai-test/reader.yaml`, equal to OPS-CLI's VEC-CLI-2 so the two fixtures stay equal). Merged with compose.yaml it shows that bind on exactly those three services and nowhere else.
+      api's attachment to it, and the read-only reader.yaml bind on api, worker, worker-judge and mcp (FR-DEPLOY-5,
+      FR-DEPLOY-16 f; source `/tmp/reader-ai-test/reader.yaml`, equal to OPS-CLI's VEC-CLI-2 so the two fixtures stay
+      equal). Merged with compose.yaml it shows that bind on exactly those four services and nowhere else.
       It carries no secrets (FR-DEPLOY-10 delivers them over docker exec)
     file: spec/fixtures/OPS-DEPLOY/cli-override.example.yaml
 
@@ -495,137 +582,8 @@ vectors:
 # - The lab egress proxy (ADR-0014) is OPS-SANDBOX's.
 # - ADR-0021: if M1 sends ingestion native, the worker needs a route to the host converter; not added until decided.
 
-# ---- Proposed revision (ADR-0039 B7b, accepted 2026-11-26; task V.kl-deploy-judge-lane, phase 1) ----
-#
-# The judge lane: a second worker service, `worker-judge`, from the worker image, consuming only the `judge` queue at
-# concurrency 4 (SRV-EVENTS FR-EVENTS-9 revised), on `agentnet` with a fixed address that agent-proxy maps to a
-# client identity (SRV-AGENT FR-AGENT-3, proposed). These items join `requirements`, `invariants` and `vectors`
-# with their Red tests after deep-reviewer approval, in the same integration merge as SRV-AGENT's proposed items
-# below: with the fixed addresses and without SRV-AGENT's CLIENTS table nothing changes for the worker; with that
-# table and without these addresses every worker issue would be refused `client_unknown`.
-#
-# SRV-AGENT items promoted in this task (approved text on V/kl-agent-judges, spec/modules/SRV-AGENT.yaml, section
-# "Still proposed"; not rewritten here): FR-AGENT-3 revised (client identity from the `agentnet` source address,
-# per-client quota and TTL, revoke-all, no cross-client revoke, `proxy_headers=False`), INV-AGENT-1 and INV-AGENT-6
-# revised for worker-judge, INV-AGENT-7 (client-table state machine), VEC-AGENT-6
-# (spec/fixtures/SRV-AGENT/client-sequences.yaml), `proposed_bounds.client_quota` {worker: 28, worker-judge: 4} and
-# `proposed_errors` [client_unknown, client_quota]. Their promotion gate is SRV-AGENT's [image] test
-# server/tests/agent/test_proxy_network.py: on a network with this revision's subnet and addresses a real worker
-# container's issue returns 200 and another address gets 403. INV-DEPLOY-11 pins the addresses to `CLIENTS`.
-#
-# Merge-together prerequisites (open paired changes, each in its own spec; none of this revision goes Green alone):
-#   - SRV-AUTH: `reader-server --role worker --lane main|judge` (default `main`; `--lane` only with `--role worker`),
-#     passed to SRV-EVENTS' `worker.run(lane=…)`.
-#   - SRV-AGENT: `python -m reader.agent.proxy --bind <ip:port>` (main() binds the given host instead of 0.0.0.0;
-#     default unchanged for the loopback harnesses), so (d) below can bind the agentnet address only; and
-#     `reader.agent.lane` exporting `JOB_KINDS` wired to SRV-EVENTS' `judge_requests.STORE`; plus the promotion of
-#     its still-proposed items (above).
-#   - SRV-CONFIG: dotted `tasks` keys, so deploy/reader.example.yaml can bind the judge slots ((h) below).
-#   - SRV-OBS: `worker-judge` on `otel` (ADR-0039 Amends row ADR-0032) and the judge lane's tracing service name
-#     `worker-judge` (`start_obs`); its test server/tests/obs/test_deploy_config.py:144 (`members["otel"] == {"api",
-#     "worker", "rotel"}`) changes to include worker-judge, under SRV-OBS's H2.
-#   - SRV-SEARCH: the waiter (`judge_requests.put`, LISTEN, enqueue, wait; SRV-EVENTS FR-EVENTS-33).
-#   - SRV-EVENTS FR-EVENTS-9/-33/-34 and OPS-CLI FR-CLI-4, -5, -17, -18, -25 (this task), and VEC-DEPLOY-3.
-
-proposed_requirements:
-  - id: FR-DEPLOY-16
-    text: >-
-      **The judge lane** (ADR-0039 B7b; amends ADR-0012's service list and ADR-0025 rules 1, 3, 4 and 5 as ADR-0039
-      states). This item amends FR-DEPLOY-1, -3, -4, -5, -9, -10, -11, -13 and INV-DEPLOY-2 for the named services
-      only; FR-DEPLOY-13's `otel` becomes {api, worker, worker-judge, rotel}.
-      (a) **Service.** `worker-judge` in the default profile, like `worker` (the lane is up whenever the stack is, so a
-      waiter never waits on an undeployed lane; with `agents` off its run-token issue fails at once and `find`
-      degrades, SRV-AGENT FR-AGENT-21). It is `<<: *server` unchanged: image `reader-server:local`, `user:
-      "10001:10001"`, `read_only: true`, tmpfs `/home/reader`, `/tmp` and `/run/secrets` as the worker's, `cap_drop:
-      [ALL]`, `no-new-privileges`, `restart: unless-stopped`, environment `READER_CONFIG` only, `depends_on` postgres
-      healthy. Command exactly `["reader-server", "--role", "worker", "--lane", "judge"]`: the worker role is reused
-      (same image, same entrypoint wrapper waiting for `db-password`, same health command) and the lane is an
-      argument (SRV-EVENTS FR-EVENTS-9 revised), because a separate role would duplicate the worker's start path for
-      one queue selection. Healthcheck `["CMD", "reader-server", "--role", "worker", "--healthcheck"]` with the
-      server roles' timing. No `volumes` (no `blobs`, no mlflow-setup bind: `judge.find` reads only Postgres), no
-      `ports`, no `--bind`; the lane opens no listening socket, so FR-DEPLOY-4's compensating control also covers the
-      pairs worker ↔ worker-judge (agentnet, otel) and api ↔ worker-judge (otel; api listens on its `front` address
-      only).
-      (b) **Memory.** `mem_limit: 2g` equal to `memswap_limit: 2g`. An initial value, not a measurement (ADR-0039
-      B7b, decision 17): 4 concurrent CLI processes × an assumed 384 MiB + 512 MiB for the worker process itself. No
-      per-call CLI footprint has been measured in this repository (spikes/agent-sdk-container ran under a 2 GiB limit
-      without recording a peak). `judge-gate` records the deployed lane's cgroup `memory.peak`, `memory.stat` anon,
-      `memory.events` oom_kill and the `/tmp` tmpfs use at concurrency 4 (each call's CLI HOME is a `mkdtemp` under
-      `/tmp`, 64m, and tmpfs pages count in the same 2g cgroup), and whether each call's HOME is removed after the
-      call (a leaked HOME would grow the cgroup until the tmpfs fills); a paired change then sets the limit to the anon maximum × 1.25, rounded up to 128 MiB (the
-      rule FR-DEPLOY-9 used for `embed`).
-      (c) **Networks.** `agentnet` keeps `internal: true` and gains `ipam: {config: [{subnet: 10.230.7.0/24,
-      ip_range: 10.230.7.128/25, gateway: 10.230.7.1}]}` (the gateway explicit, so the rendered model shows that no
-      client address is the bridge's) (outside Docker's default pools, next to FR-DEPLOY-13's 10.230.2–6); fixed
-      `ipv4_address`es: agent-proxy 10.230.7.2, worker 10.230.7.10, worker-judge 10.230.7.11. Dynamic addresses stay
-      inside the ip_range, so no other container can take a client's address. A new internal network `judge-db`
-      (`ipam` subnet 10.230.8.0/24) holds exactly `postgres` and `worker-judge`: the lane reaches Postgres without
-      joining `core`, because `core` holds `mcp` and ADR-0025 rule 5 as amended lets worker-judge reach only
-      agent-proxy, Postgres and Rotel. worker-judge's networks are exactly `agentnet` (10.230.7.11), `judge-db` and
-      `otel`; no `sb-*`, `embed`, `obs`, `front`, `core` or `egress`.
-      (d) **agent-proxy binds its agentnet address only.** agent-proxy's `command` is exactly `["--bind",
-      "10.230.7.2:8080"]` (appended to the image's entrypoint `python -I -m reader.agent.proxy`; paired SRV-AGENT
-      change), so issue, revoke, revoke-all and forward are not served on its `egress` address or on loopback; its
-      healthcheck becomes `["CMD", "python", "-I", "-c", "import socket;
-      socket.create_connection(('10.230.7.2', 8080), 2).close()"]`, because the image's script probes 127.0.0.1,
-      where nothing listens any more. FR-AGENT-3's source-address check still refuses any address outside
-      `CLIENTS`; the bind is the second layer.
-      Upgrade of a running stack: the existing `agentnet` was created without `ipam`, and Compose does not change a
-      network's IPAM in place; the live check records what `reader up` does over the old network and, if Compose
-      refuses or keeps the old subnet, the stage note tells the owner to run `reader down` (volumes kept) before
-      `reader up`, which recreates the network.
-      (e) **Secrets.** worker-judge consumes `db-password` only, as the worker does (ADR-0026): FR-DEPLOY-10 (b)'s
-      list becomes postgres, api, worker, worker-judge and mcp; (d)'s wait wrapper applies unchanged (same image). It
-      never receives a provider token (ADR-0025 rule 1 as amended: it presents per-run tokens only).
-      (f) FR-DEPLOY-5 and INV-DEPLOY-2 (1): `READER_CONFIG` is set on exactly api, worker, worker-judge and mcp, and
-      the override's read-only reader.yaml bind goes to those four and agent-proxy (OPS-CLI FR-CLI-4 revised;
-      VEC-DEPLOY-3 gains worker-judge's bind). FR-DEPLOY-1: the default profile gains `worker-judge`. FR-DEPLOY-9:
-      worker-judge's hardening is the worker's.
-      (g) Stage-1 live checks that list the default services (NFR-DEPLOY-1's bench included) count worker-judge.
-      (h) deploy/reader.example.yaml `tasks` gains SRV-AGENT's `JUDGE_SLOTS` with their v1 bindings (FR-AGENT-18:
-      `judge.find`, `judge.link_type`, `ingest.context_prefix` → haiku; `judge.eval.relevance`,
-      `judge.eval.sufficiency`, `judge.eval.groundedness`, `judge.eval.self_contained`,
-      `judge.eval.citation_supports_claim`, `judge.align` → opus), in the same merge as SRV-CONFIG's dotted task
-      keys (earlier, VEC-DEPLOY-1 would fail to load).
-    tests_planned:
-      - "change server/tests/deploy/test_compose_render.py [config]: worker-judge in the default render; its rendered service equals the worker's on every key except command, networks, volumes (none) and mem_limit/memswap_limit (2g, equal); command exactly (a)'s, no `--bind` in it; healthcheck test and timing equal the worker's; no ports; FR-DEPLOY-1's default service set gains worker-judge"
-      - "change server/tests/deploy/test_compose_render.py [config]: agent-proxy's command is exactly [--bind, 10.230.7.2:8080] and its healthcheck probes that address"
-      - "change server/tests/deploy/test_compose_networks.py [config]: agentnet internal, subnet 10.230.7.0/24, ip_range 10.230.7.128/25, gateway 10.230.7.1; the membership assertions change: agentnet = {worker, worker-judge, agent-proxy} (was {worker, agent-proxy}), otel = {api, worker, worker-judge, rotel} (was without worker-judge), judge-db = {postgres, worker-judge} (new, internal, subnet 10.230.8.0/24); worker-judge's networks exactly {agentnet, judge-db, otel}; VEC-DEPLOY-2 exact (revised fixture)"
-      - "paired SRV-OBS test change: server/tests/obs/test_deploy_config.py:144's otel set gains worker-judge (SRV-OBS's H2, same merge)"
-      - "change server/tests/deploy/test_compose_secrets.py [config]: the /run/secrets tmpfs consumer set and the READER_CONFIG set gain worker-judge; worker-judge has memswap_limit equal to mem_limit and no environment entry beyond READER_CONFIG"
-      - "change server/tests/deploy/test_example_config.py [config]: VEC-DEPLOY-1 loads and binds every JUDGE_SLOTS name (with SRV-CONFIG's dotted keys)"
-      - "[live] the stage's live check: `reader up` over a stack started before this change (agentnet without ipam) — record whether Compose recreates the network; after `reader down` and `reader up`, `docker network inspect` shows subnet 10.230.7.0/24 and the three fixed addresses"
-      - "[live] the stage's live check: after `reader up`, worker-judge is healthy, runs as 10001 read-only with cap-drop ALL, its /run/secrets holds only db-password; from the worker, no TCP port 1–65535 of worker-judge's agentnet and otel addresses accepts; inside agent-proxy, 127.0.0.1:8080 refuses"
-
-proposed_invariants:
-  - id: INV-DEPLOY-11
-    text: >-
-      `agentnet` identity. In every rendered model (INV-DEPLOY-1's sets): `agentnet`'s members are exactly worker,
-      worker-judge and, with the `agents` profile active, agent-proxy (without it, worker and worker-judge); each has an `ipv4_address` in 10.230.7.0/24 and outside the network's ip_range;
-      the map {worker's address → worker, worker-judge's address → worker-judge} equals `reader.agent.proxy.CLIENTS`'
-      address → client-name map exactly (SRV-AGENT FR-AGENT-3, proposed); agent-proxy's `--bind` host equals its
-      agentnet address; the network's gateway (10.230.7.1, explicit in `ipam`) is not a `CLIENTS` address; no
-      agentnet member has `network_mode` or `extra_hosts` (FR-DEPLOY-15 (b)'s `network_mode: none` on
-      `mlflow-migrate`, which is on no network, is unaffected), and no service has a fixed address on another network
-      equal to a client address. [config]
-    tests_planned:
-      - "add to server/tests/deploy/test_compose_networks.py [config]: the rendered agentnet addresses against reader.agent.proxy.CLIENTS (imported), ip_range exclusion, the gateway not in CLIENTS, no network_mode or extra_hosts on agentnet members, agent-proxy's bind host"
-
-proposed_vectors:
-  - id: VEC-DEPLOY-2
-    source: >-
-      Revised (ADR-0039 B7b, ADR-0025 rule 5 as amended): `allowed` gains [worker, worker-judge] (agentnet, otel;
-      neither listens, FR-DEPLOY-4), [worker-judge, agent-proxy] (agentnet), [worker-judge, postgres] (judge-db),
-      [worker-judge, rotel] (otel) and [api, worker-judge] (otel; api listens on `front` only); `never` gains
-      worker-judge with mcp, caddy, embed, mlflow, jaeger, kernel-verify, kernel-agent, kernel-pair-1 and
-      kernel-user-ivan. The header's ADR-0025 line becomes "worker and worker-judge ↔ agent-proxy".
-    file: spec/fixtures/OPS-DEPLOY/reachability.yaml
-    tests_planned:
-      - "test_compose_networks.py's exact-pairs test reads the revised fixture (FR-DEPLOY-16, INV-DEPLOY-4)"
-  - id: VEC-DEPLOY-3
-    source: >-
-      Revised: the override's read-only reader.yaml bind also on worker-judge (OPS-CLI FR-CLI-4 revised); merged with
-      compose.yaml it shows that bind on exactly api, worker, worker-judge, mcp and agent-proxy (when present).
-    file: spec/fixtures/OPS-DEPLOY/cli-override.example.yaml
-    tests_planned:
-      - "test_compose_render.py's override test with the revised fixture; OPS-CLI's VEC-CLI-2 equality test"
+# - Judge lane (ADR-0039 B7b; V.kl-deploy-judge-lane): FR-DEPLOY-16, INV-DEPLOY-11 and VEC-DEPLOY-2/-3 revised,
+#   promoted after deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (2026-11-26), together with SRV-AGENT's
+#   client identity (FR-AGENT-3, INV-AGENT-7, VEC-AGENT-6), SRV-EVENTS FR-EVENTS-9/-33/-34, OPS-CLI FR-CLI-25 and
+#   SRV-AUTH's `--lane`. Still open, paired elsewhere: SRV-OBS's tracing service name `worker-judge` (the lane traces
+#   as `worker` until then) and SRV-SEARCH's waiter (`judge_requests.put`, LISTEN, enqueue, wait).

@@ -230,6 +230,11 @@ requirements:
       level, the first line of the message template (asyncio puts the task repr, with the exception text, on later
       lines), the exception type and its innermost frame as `file:line function` (no message, no locals), never the
       stack or the args; `reader.*` records add their own args (route, failure reason), one line, never a stack.
+      Paired amendment (SRV-EVENTS FR-EVENTS-9, ADR-0039 B7b, V.kl-deploy-judge-lane, 2026-11-26): `--role worker`
+      takes `--lane main|judge` (default `main`) and passes it to `reader.jobs.worker.run(lane=…)`; `--lane` with
+      any other role, or another value, exits 2 (argparse usage error). The healthcheck ignores the lane.
+    tests_planned:
+      - "add to server/tests/auth/test_auth_cli.py [unit]: --lane judge with --role api exits 2; --lane other exits 2; `_parser` accepts --role worker --lane judge and defaults the lane to main"
   - id: FR-AUTH-3
     text: >-
       RP ID is the lower-cased host of `instance.url`; the only accepted origin is `scheme://host[:port]`, lower-cased,
