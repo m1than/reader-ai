@@ -88,3 +88,13 @@ issue_settlements:
   - { name: issue-429-other,       reserve: 0.25,  answer: { status: 429, error: rate_limited },   settled_usd: 0, error: provider_unavailable }
   - { name: issue-failed-5xx,     reserve: 0.25,  answer: { status: 502, error: x },              settled_usd: 0, error: provider_unavailable }
   - { name: issue-failed-transport, reserve: 0.25, answer: transport,                             settled_usd: 0, error: provider_unavailable }
+# FR-AGENT-23 loop_fits_limit: `open` is an open reservation per task in this run (`month_other` one in another run of
+# the same month); `planned` are (task, floor) calls whose floors exceed their worst case; the config's task budgets
+# are draft 4.0, fact_check 2.0, review 4.0; `monthly` overrides budgets.monthly_usd. `limit` is the expected answer.
+loop_limits:
+  - { name: fits-exactly, open: { draft: 1.0 }, planned: [[draft, 1.0], [fact_check, 0.5], [review, 1.5]], run_cap: 4.0, monthly: 200, limit: null }
+  - { name: run,          open: { draft: 1.0 }, planned: [[draft, 1.0], [fact_check, 0.5], [review, 1.5]], run_cap: 3.99, monthly: 200, limit: run }
+  - { name: task,         open: { fact_check: 0.5 }, planned: [[fact_check, 0.75], [fact_check, 0.76]], run_cap: 8.0, monthly: 200, limit: task }
+  - { name: month,        open: {}, month_other: 3.0, planned: [[draft, 1.0], [review, 1.01]], run_cap: 8.0, monthly: 5, limit: month }
+  - { name: run-first,    open: { fact_check: 0.5 }, month_other: 3.0, planned: [[fact_check, 1.0], [fact_check, 1.0]], run_cap: 2.0, monthly: 5, limit: run }
+  - { name: task-before-month, open: {}, month_other: 3.0, planned: [[fact_check, 1.2], [fact_check, 1.2]], run_cap: 8.0, monthly: 5, limit: task }

@@ -382,6 +382,12 @@ class AgentProvider:
         self, owner_id: uuid.UUID, run_id: uuid.UUID, run_cap_usd: Decimal, planned: Sequence[PlannedCall]
     ) -> bool:
         """FR-AGENT-23: would every call of one loop pass FR-AGENT-9's caps, summed, now? Writes nothing."""
+        return await self.loop_fits_limit(owner_id, run_id, run_cap_usd, planned) is None
+
+    async def loop_fits_limit(
+        self, owner_id: uuid.UUID, run_id: uuid.UUID, run_cap_usd: Decimal, planned: Sequence[PlannedCall]
+    ) -> str | None:
+        """FR-AGENT-23: None when the loop fits, else the first refusing limit: `run`, `task`, `month`."""
         settings = await self._settings()
         by_task: dict[str, Decimal] = {}
         for p in planned:
@@ -395,18 +401,18 @@ class AgentProvider:
             by_task[p.task] = by_task.get(p.task, Decimal(0)) + usd
         total = sum(by_task.values(), Decimal(0))
         if await ledger.spent(self.engine, run_id=run_id) + total > run_cap_usd:
-            return False
-        for name, usd in by_task.items():
+            return "run"
+        for name, usd in by_task.items():  # first-planned order
             budget = settings.task_budgets.get(name)
             if budget is None:
                 continue
             if await ledger.spent(self.engine, run_id=run_id, task=name) + usd > budget:
-                return False
+                return "task"
         monthly: Decimal | None = settings.monthly_usd
         if monthly is None:
-            return True
+            return None
         month: Decimal = await ledger.spent(self.engine, owner_id=owner_id, month=True)
-        return month + total <= monthly
+        return None if month + total <= monthly else "month"
 
     async def _run(self, call: StageCall, model: str, span: AgentSpan, line: str | None) -> StageResult:
         tool_call = call.web_search is not None

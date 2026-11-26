@@ -10,10 +10,11 @@ from typing import Any
 
 import pytest
 
-from .conftest import CONFIG, FakeCli, FakeProxyClient, Pg, need, scalar, world
+from .conftest import CONFIG, FIXTURES, FakeCli, FakeProxyClient, Pg, load_yaml, need, scalar, world
 
 pytestmark = pytest.mark.anyio
 D = Decimal
+LIMITS = load_yaml(FIXTURES / "cost-vectors.yaml")["loop_limits"]
 
 
 def _provider(w: Any, tmp: Path) -> Any:
@@ -73,3 +74,18 @@ async def test_reserve_is_reserve_for(pg: Pg, tmp_path: Path) -> None:
     want = ledger.reserve_for("claude-opus-5-5", 60034, 32000, D("0.61"))
     assert await p.loop_fits(owner, run, want, [big]) is True
     assert await p.loop_fits(owner, run, want - D("0.000001"), [big]) is False
+
+
+@pytest.mark.parametrize("case", LIMITS, ids=lambda c: c["name"])
+async def test_loop_fits_limit(pg: Pg, tmp_path: Path, case: dict[str, Any]) -> None:
+    """FR-AGENT-23 revision: the first refusing limit in the order run, task, month; None when the loop fits."""
+    w = await world(pg, tmp_path, CONFIG.replace("monthly_usd: 200", f"monthly_usd: {case['monthly']}"))
+    p, run, owner = _provider(w, tmp_path), uuid.uuid4(), w.users["ivan"]
+    for task, usd in case["open"].items():
+        await _open_reserve(w, run, task, str(usd))
+    if "month_other" in case:
+        await _open_reserve(w, uuid.uuid4(), "draft", str(case["month_other"]))
+    loop = [_planned(task, str(floor)) for task, floor in case["planned"]]
+    cap = D(str(case["run_cap"]))
+    assert await p.loop_fits_limit(owner, run, cap, loop) == case["limit"]
+    assert await p.loop_fits(owner, run, cap, loop) is (case["limit"] is None)

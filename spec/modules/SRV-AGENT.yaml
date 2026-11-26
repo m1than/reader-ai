@@ -666,9 +666,15 @@ requirements:
       spent(run) + the sum of their reserves ≤ `run_cap_usd`, for each task spent(run, task) + that task's summed
       reserves ≤ its effective `budget_usd_per_lesson` (when set), and the user's month spend + the sum ≤ the effective
       `budgets.monthly_usd` (when set). It writes nothing and takes no lock; each call still reserves under FR-AGENT-9.
-      A `judge.find` call the fact-check route will make is a planned call of the loop.
+      A `judge.find` call the fact-check route will make is a planned call of the loop. Revision (asked by
+      SRV-PIPELINE's V.kl-pipeline-checks, D3): `AgentProvider.loop_fits_limit(owner_id, run_id, run_cap_usd,
+      planned)` makes the same checks with the same arithmetic and returns None when the loop fits, else the first
+      refusing limit in the fixed order `run` (the run cap, `budget.compile_cap_usd`), `task` (a planned task's
+      `budget_usd_per_lesson`, tasks checked in their first-planned order), `month` (`budgets.monthly_usd`);
+      `loop_fits(...)` is `loop_fits_limit(...) is None`.
     tests_planned:
       - "test_loop_fits_db.py [db]: true when the sum fits exactly; false when the run cap, one task budget or the monthly cap would be crossed by the sum though each call alone fits; open reservations count; nothing is written"
+      - "test_loop_fits_db.py [db]: loop_fits_limit over VEC-AGENT-1's `loop_limits` cases — None, `run`, `task`, `month`, and `run` before `task` before `month` when several refuse; loop_fits agrees with it on every case"
 
 invariants:
   - id: INV-AGENT-1
@@ -725,7 +731,7 @@ nfr:
 
 vectors:
   - id: VEC-AGENT-1
-    source: All 12 spikes/compile-cost stages (exact token counts, SDK-reported costs), usage-key mapping, edge cases, settlements from the measured error shapes
+    source: All 12 spikes/compile-cost stages (exact token counts, SDK-reported costs), usage-key mapping, edge cases, settlements from the measured error shapes; issue refusals (FR-AGENT-9 e) and loop-limit cases per limit (FR-AGENT-23), hand-built
     file: spec/fixtures/SRV-AGENT/cost-vectors.yaml
   - id: VEC-AGENT-2
     source: Pricing table (Anthropic API rates as cached 2026-11-03; cache multipliers from the prompt-caching economics; Haiku 5.5 tiers and the web search fee from the pricing page fetched 2026-11-23)
