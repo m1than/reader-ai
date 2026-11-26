@@ -560,6 +560,10 @@ vectors:
 # consumer, so it gets the reader.yaml bind, the secret, and the backup/restore stop and start like the worker. A new
 # doctor check names judge slots missing from `tasks`. This module handles secrets: full deep-reviewer rounds until
 # approve. These items join `requirements` and `vectors` with their Red tests after that approval.
+# Owner ask, planned: the owner's reader.yaml is outside the repository and the agent never edits it, so before the
+# stage's live check runs `reader doctor` (FR-CLI-25 fails while `judge.find` is unbound with `agents` on), the task
+# records an `ask` in docs/progress.yaml and notifies the owner: add the judge slots (`tasks.judge.find: {model:
+# haiku}` at least; the v1 bindings are in deploy/reader.example.yaml) once SRV-CONFIG's dotted keys are merged.
 # Not in this revision: the owner-run `reader obs proposals` export (docs/plans/adr-0039-execution.md) waits for
 # SRV-OBS's `judge.align` proposals table (V.kl-obs-spans).
 
