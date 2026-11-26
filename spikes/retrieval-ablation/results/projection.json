@@ -1,0 +1,228 @@
+{
+ "assumptions": {
+  "tokens_per_char": "0.3981",
+  "cli_overhead": 410,
+  "prefix_instr": 120,
+  "summary_instr": 150,
+  "judge_instr": 600,
+  "judge_out": 200,
+  "haiku_s": [
+   "1.82",
+   "2.10"
+  ]
+ },
+ "pilot2_chapters": [
+  6,
+  13
+ ],
+ "prefix": {
+  "out50": {
+   "book": {
+    "chapters": 24,
+    "calls": 9104,
+    "input_tokens": 305643199,
+    "output_tokens": 455200,
+    "largest_call_input_tokens": 45691,
+    "usd_uncached": "30.791920",
+    "usd_cached_1h": "3.504491",
+    "usd_cached_5m": "3.446175",
+    "wall_h_seq": [
+     "4.60",
+     "5.31"
+    ]
+   },
+   "pilot2": {
+    "chapters": 2,
+    "calls": 822,
+    "input_tokens": 32723317,
+    "output_tokens": 41100,
+    "largest_call_input_tokens": 39872,
+    "usd_uncached": "3.292882",
+    "usd_cached_1h": "0.369919",
+    "usd_cached_5m": "0.363964",
+    "wall_h_seq": [
+     "0.42",
+     "0.48"
+    ]
+   }
+  },
+  "out100": {
+   "book": {
+    "chapters": 24,
+    "calls": 9104,
+    "input_tokens": 305643199,
+    "output_tokens": 910400,
+    "largest_call_input_tokens": 45691,
+    "usd_uncached": "31.019520",
+    "usd_cached_1h": "3.732091",
+    "usd_cached_5m": "3.673775",
+    "wall_h_seq": [
+     "4.60",
+     "5.31"
+    ]
+   },
+   "pilot2": {
+    "chapters": 2,
+    "calls": 822,
+    "input_tokens": 32723317,
+    "output_tokens": 82200,
+    "largest_call_input_tokens": 39872,
+    "usd_uncached": "3.313432",
+    "usd_cached_1h": "0.390469",
+    "usd_cached_5m": "0.384514",
+    "wall_h_seq": [
+     "0.42",
+     "0.48"
+    ]
+   }
+  }
+ },
+ "summaries": {
+  "calls": 495,
+  "nodes_by_kind": {
+   "leaf": 379,
+   "inner": 88,
+   "chapter": 27,
+   "root": 1
+  },
+  "input_tokens": 1203533,
+  "output_tokens": 72900,
+  "usd": "0.156803",
+  "wall_h_seq": [
+   "0.25",
+   "0.29"
+  ]
+ },
+ "judge_eval": {
+  "claude-sonnet-5-5": {
+   "calls": 477,
+   "input_tokens": 1491640,
+   "output_tokens": 95400,
+   "usd": "3.937280",
+   "per_variant": {
+    "C_chunks": {
+     "calls": 90,
+     "input_tokens": 465455
+    },
+    "V0_spans": {
+     "calls": 90,
+     "input_tokens": 189425
+    },
+    "V3_form": {
+     "calls": 52,
+     "input_tokens": 134142
+    },
+    "H_w5": {
+     "calls": 65,
+     "input_tokens": 188768
+    },
+    "V1_prefix": {
+     "calls": 90,
+     "input_tokens": 256925
+    },
+    "V2_summaries": {
+     "calls": 90,
+     "input_tokens": 256925
+    }
+   }
+  },
+  "claude-opus-5-5": {
+   "calls": 477,
+   "input_tokens": 1491640,
+   "output_tokens": 95400,
+   "usd": "7.874560",
+   "per_variant": {
+    "C_chunks": {
+     "calls": 90,
+     "input_tokens": 465455
+    },
+    "V0_spans": {
+     "calls": 90,
+     "input_tokens": 189425
+    },
+    "V3_form": {
+     "calls": 52,
+     "input_tokens": 134142
+    },
+    "H_w5": {
+     "calls": 65,
+     "input_tokens": 188768
+    },
+    "V1_prefix": {
+     "calls": 90,
+     "input_tokens": 256925
+    },
+    "V2_summaries": {
+     "calls": 90,
+     "input_tokens": 256925
+    }
+   }
+  }
+ },
+ "factcheck_whole_section": {
+  "claude-sonnet-5-5": {
+   "calls": 30,
+   "input_tokens": 979861,
+   "usd": "2.019722"
+  },
+  "claude-opus-5-5": {
+   "calls": 30,
+   "input_tokens": 979861,
+   "usd": "4.039444"
+  }
+ },
+ "latency": {
+  "pgvector": "0.8.7",
+  "postgres": "18.7 (Debian 18.7-1.pgdg13+2)",
+  "rows": 9104,
+  "table_mb": 117.1,
+  "hnsw_mb": 68.4,
+  "variants": {
+   "exact": {
+    "n": 450,
+    "p50_ms": 26.44,
+    "p95_ms": 31.35,
+    "max_ms": 41.22,
+    "recall10_vs_exact": 1.0,
+    "recall50_vs_exact": 1.0
+   },
+   "hnsw_ef100": {
+    "n": 450,
+    "p50_ms": 1.13,
+    "p95_ms": 1.41,
+    "max_ms": 1.98,
+    "recall10_vs_exact": 0.9856,
+    "recall50_vs_exact": 0.9747
+   },
+   "hnsw_ef40": {
+    "n": 450,
+    "p50_ms": 0.63,
+    "p95_ms": 0.98,
+    "max_ms": 1.67,
+    "recall10_vs_exact": 0.9667,
+    "recall50_vs_exact": 0.8102
+   }
+  }
+ },
+ "embed": {
+  "spans": {
+   "texts": 9104,
+   "wall_s": 1607.6,
+   "texts_per_s": 5.66,
+   "batch": 8,
+   "torch_threads": 13,
+   "measured_at": "2026-11-26T16:38:26",
+   "cache": "miss"
+  },
+  "chunks": {
+   "texts": 2247,
+   "wall_s": 1125.2,
+   "texts_per_s": 2.0,
+   "batch": 8,
+   "torch_threads": 13,
+   "measured_at": "2026-11-26T16:57:12",
+   "cache": "miss"
+  },
+  "query_embed_ms_mean": 111.1
+ }
+}

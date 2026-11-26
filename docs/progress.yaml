@@ -1904,7 +1904,17 @@ tasks:
         and 6 words (facts), limit below 8. Nothing sent to MLflow yet. No test: no spec ID covers the checker; the
         reviewer places its PDF-free rules (schema, counts, ids, fact length, origin identity, pin) in a unit test
         under the SRV-OBS amendment, and the verbatim part stays a local pre-freeze gate" }
-  - { id: V.spike.retrieval-ablation, stage: V, kind: spike, status: todo, needs: [V.kl-eval-set],
+  - { id: V.spike.retrieval-ablation, stage: V, kind: spike, status: blocked, needs: [V.kl-eval-set],
+      branch: V/spike-retrieval-ablation,
+      reason: "2026-11-26 free arms done with 0 model calls (spikes/retrieval-ablation/RESULT.md): recall@10 of 30
+        per type (exact/thematic/fact-check) chunks 27/20/29, V0 spans 25/17/29, +form 25/17/30, +RRF w5 24/16/29;
+        no McNemar p < 0.05, so the form filter and RRF are not kept; exact scan stays (vector step p95 31.35 ms at
+        9,104 spans; HNSW 0.98 ms, top-50 overlap 0.81); span re-embedding 26.8 min. V0 misses only 5 exact and 1
+        fact-check question, so by recall only thematic can keep a prefix or summary. Paid arms projected: prefixes
+        $3.73 with the chapter cached ($31.02 without), summaries $0.16, judge.eval sufficiency $3.94 (Sonnet),
+        fact-check whole-section baseline $2.02; total $9.85",
+      ask: "Approve $12.00 from test_budget_usd for the paid arms, staged (2-chapter prefixes $0.39 first, stop rule
+        on cache reads), or $0.50 for stage 1 alone",
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
         gain on its type is significant: exact McNemar p < 0.05 (at least a net 6 of 30, more with discordant losses);

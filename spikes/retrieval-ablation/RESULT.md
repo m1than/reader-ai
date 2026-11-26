@@ -1,0 +1,175 @@
+# Spike retrieval-ablation — free arms measured, paid arms projected (2026-11-26)
+
+**Question (ADR-0039 B10; docs/plans/adr-0039-execution.md V.spike.retrieval-ablation):** which retrieval steps earn
+their place on one source. This run covers the arms that need no model call: V0 spans against today's chunks, the
+`form` filter, RRF hybrid on spans, exact vs HNSW vector-step latency, the span re-embedding wall time. Context
+prefixes (V1), L2 summaries (V2), judge-scored sufficiency and the fact-check route against the whole-section
+baseline need model calls; they are **projected only** (below) and wait for the owner's spend approval.
+**Model calls made: 0. USD spent: 0.**
+
+## Method
+
+- **Spans.** The pilot PDF (sha256 `61e8d4c3…c9e2b2`) re-converted on the host with the stack's own pinned
+  converter (`reader.ingest.host.convert`, docling 2.151.1+r2, the `+r2` converter venv and models of `reader-ingest
+  --setup`) into the gitignored `data/spikes/retrieval-ablation/convert/out`. Same artifact as the stack's
+  `material_spans`: 9,463 spans, 494 outline entries (bookmarks), code line 360/10/7/0, `spans_sha256 8b1b3db9…`
+  (V.live recorded 9,463 spans, 494 outline entries and the same code line). 702 s wall, peak RSS 4.36 GB. The
+  owner's stack and database were not touched.
+- **Variants** (recall@10: a question hits when any of the top 10 results' pages is a gold page):
+  - `C_chunks`: today's reference: `search/chunking.py` `chunk_spans` (loaded from the repository file) over every
+    span, 1,200/200/80 characters → 2,247 chunks; dense top 10.
+  - `V0_spans`: one Docling element per span (B1); the 359 spans with empty text (figures without caption,
+    undecoded formulas) cannot be embedded and are not indexed → 9,104 spans; dense top 10.
+  - `V3_form`: `form` by rule from span kind (B3): text and list_item → prose, code → code or test_vector (≥ 32
+    non-space characters, ≥ 60% hex digits), formula, table, figure; a heading is structure (L2) and has no form.
+    Route filter from the B6 table: exact and fact-check keep {prose, code, test_vector, formula, table};
+    thematic has no form filter. Declared in `analyze.py` before any result was computed.
+  - `H_w5` / `H_w1`: RRF over dense top 50 and the full-text list, exactly as SRV-SEARCH builds it (OR of the
+    query's russian lexemes, `ts_rank_cd`, top 50; `search/fusion.py` rrf, k = 60) with w_dense 5 (today's
+    `params.W_DENSE`, primary) and 1 (equal weight). `V3H_*`: the same after the form filter.
+  - `V0_spans_eqchars` (informative, not a B10 variant): spans in dense order until they hold as many characters
+    as that question's top 10 chunks.
+- **Embedding.** The embed service's own image (`reader-embed:local`) and encoder class (`SentenceEncoder`,
+  BAAI/bge-m3@5617a9f6, CPU fp32, max_seq_length 1,024, normalised), one `encode` per batch of 8 in seq order
+  as the `search.embed` job sends them; a new container with `--network none`, Docker VM 13 CPUs, 13 torch threads.
+- **Latency.** A throwaway `pgvector/pgvector` container (pgvector 0.8.7, Postgres 18.7, digest pinned in
+  `run.sh`, `--network none`, cluster on tmpfs, default `shared_buffers` as in the stack): the vector step alone,
+  `SELECT seq FROM vec ORDER BY embedding <=> q LIMIT 50` (the candidate count), timed inside plpgsql, 90 queries ×
+  5 repetitions after one warm-up pass. HNSW with the defaults (m 16, ef_construction 64); the plan files confirm a
+  sequential scan for exact and an index scan for HNSW.
+- **Statistics.** Exact two-sided McNemar on the discordant questions, stdlib (`math.comb`), per question type
+  (30 each), as B10 states.
+- **Copyright.** Book text exists only in memory and in the gitignored `data/`. `results/*.json` hold ids, page
+  numbers, counts and numbers. Run: `bash spikes/retrieval-ablation/run.sh data/spikes/retrieval-ablation/convert/out`.
+
+## Results: recall@10, hits of 30 per type (`results/recall.json`)
+
+| Variant | exact | thematic | fact-check | all (90) | mean chars in top 10 |
+| --- | --- | --- | --- | --- | --- |
+| C_chunks (today) | 27 | 20 | 29 | 76 | 10,454 |
+| V0_spans | 25 | 17 | 29 | 71 | 2,750 |
+| V3_form | 25 | 17 | 30 | 72 | 3,509 |
+| H_w5 (spans + RRF) | 24 | 16 | 29 | 69 | 4,196 |
+| H_w1 | 24 | 17 | 28 | 69 | 9,620 |
+| V3H_w5 | 23 | 16 | 30 | 69 | 4,744 |
+| V3H_w1 | 23 | 17 | 28 | 68 | 9,884 |
+| full text alone | 17 | 5 | 18 | 40 | 15,971 |
+| V0_spans_eqchars (informative) | 30 | 23 | 30 | 83 | 11,705 |
+
+No full-text list was empty (0 of 90).
+
+## McNemar between neighbouring variants (`results/mcnemar.json`)
+
+Gains / losses are discordant questions (new hit, base missed / base hit, new missed).
+
+| Base → new | exact: g/l, p | thematic: g/l, p | fact-check: g/l, p |
+| --- | --- | --- | --- |
+| C_chunks → V0_spans | 1/3, 0.625 | 1/4, 0.375 | 1/1, 1.0 |
+| V0_spans → V3_form | 0/0, 1.0 | 0/0, 1.0 | 1/0, 1.0 |
+| V0_spans → H_w5 | 0/1, 1.0 | 0/1, 1.0 | 1/1, 1.0 |
+| V0_spans → H_w1 | 0/1, 1.0 | 2/2, 1.0 | 1/2, 1.0 |
+| V3_form → V3H_w5 | 0/2, 0.5 | 0/1, 1.0 | 0/0, 1.0 |
+| V3_form → V3H_w1 | 0/2, 0.5 | 2/2, 1.0 | 0/2, 0.5 |
+| C_chunks → V0_spans_eqchars | 3/0, 0.25 | 4/1, 0.375 | 1/0, 1.0 |
+
+No comparison is significant (all p ≥ 0.25).
+
+## Vector step and re-embedding (`results/latency.json`, `results/projection.json` `embed`)
+
+| Vector step, 9,104 spans, LIMIT 50 | p50 ms | p95 ms | max ms | overlap with exact top 10 / top 50 |
+| --- | --- | --- | --- | --- |
+| exact (sequential scan) | 26.44 | 31.35 | 41.22 | 1 / 1 |
+| HNSW ef_search 40 (default) | 0.63 | 0.98 | 1.67 | 0.967 / 0.810 |
+| HNSW ef_search 100 | 1.13 | 1.41 | 1.98 | 0.986 / 0.975 |
+
+Table 117.1 MB, HNSW index 68.4 MB, built in 3.35 s. The 150 ms threshold applies to this vector step alone; the
+6.6 ms measured earlier was 2,285 chunks, the 173 ms end-to-end search p95 is a different quantity.
+
+| Re-embedding (13 CPUs, batches of 8) | texts | wall | texts/s |
+| --- | --- | --- | --- |
+| spans (V0) | 9,104 | 1,607.6 s (26.8 min) | 5.66 |
+| chunks (today) | 2,247 | 1,125.2 s (18.8 min) | 2.00 |
+
+Query embedding: 111 ms mean per question. 72 spans exceed 1,200 characters (today's `MAX_PASSAGE_CHARS`, so the
+embed service's limit must rise for span-level vectors) and 1 exceeds 1,024 bge-m3 tokens (truncated).
+Span sizes: mean 223 characters (p50 129, p95 654), about 89 Claude tokens at the mean; bge-m3 mean 54 tokens.
+
+## Decisions for the free arms (B10 rule: keep a step only if its gain is significant, p < 0.05)
+
+1. **`form` filter: not kept.** Net 0, 0 and +1 of 30 (p = 1.0 on every type). It only drops headings and
+   uncaptioned-figure spans from exact and fact-check routes, which rarely reach the top 10 anyway.
+2. **RRF hybrid on spans: not kept; stays off on every route.** w 5: net −1, −1, 0; w 1: net −1, 0, −1; after the
+   form filter up to −2. Same direction as the chunk measurement (24 vs 27 of 40). Full text alone gets 40 of 90.
+3. **Vector step: exact scan stays.** p95 31.35 ms ≤ 150 ms at 9,104 spans. HNSW is 30× faster but loses recall
+   (top-50 overlap 0.81 at the default ef_search), which the rule does not need to buy yet. At linear growth the
+   exact p95 reaches 150 ms near 44,000 spans, about 4–5 books of this size.
+4. **V0 spans vs today's chunks: no significant difference** (net −2, −3, 0; p 0.625, 0.375, 1.0), while the top
+   10 spans carry 3.8× less text. With the same amount of text, spans hit 83 of 90 against 76 (net +3, +3, +1;
+   not significant). This is not a B10 "step" (spans are B1's decision), so the rule neither keeps nor drops it;
+   the owner should know that at 10 cards the thematic route sits 3 questions below today's chunks.
+5. **What recall can still decide.** V0 misses 5 exact, 13 thematic and 1 fact-check question. A significant gain
+   needs a net of at least 6, so by recall@10 a context prefix or an L2 summary can be kept **only on thematic**;
+   on exact (5–0 gives p = 0.0625) and fact-check it cannot pass whatever its effect. Sufficiency from the judge is
+   the only measure that can keep them there.
+
+## Paid arms: cost projection only (`results/projection.json`)
+
+Prices from `server/src/reader/agent/pricing.yaml` (Haiku 5.5: input 0.10, output 0.50, 1-hour cache write 0.20,
+5-minute write 0.125, cache read 0.01 USD per million; Sonnet 5.5 2.00 / 10.00; Opus 5.5 4.00 / 20.00), Decimal,
+quantised to micro-dollars with ROUND_HALF_UP as `pricing.micro`, each call priced on its own (the >100k tier is
+per request; the largest prefix call is 45,691 tokens, below it).
+
+Inputs: real span and chapter sizes from the artifact; Claude tokens = 0.398 × characters (`spikes/compile-cost`:
+L02's 60,034 characters ≈ 23,900 tokens), which puts the book at about 808,000 tokens and a chapter at 20,100–45,200;
+410 CLI overhead tokens per call (`spikes/tutor-call`, custom system prompt); instruction sizes are assumptions
+(prefix 120, summary 150, judge 600 tokens; judge output 200). Chapters are the 23 "Глава N" bookmarks; 705 spans
+outside them are one more group with a mean-chapter context. Wall time at 1.82–2.10 s per Haiku call, sequential.
+
+| Arm | Calls | Input tokens | Output tokens | USD | Wall time |
+| --- | --- | --- | --- | --- | --- |
+| Context prefixes, whole book, chapter context, **no caching** | 9,104 | 305.6 M | 0.46–0.91 M | 30.79–31.02 | 4.60–5.31 h |
+| Context prefixes, whole book, chapter cached (1-hour write, as the CLI writes) | 9,104 | 305.6 M (≈ 98% cache reads) | 0.46–0.91 M | **3.50–3.73** | 4.60–5.31 h |
+| same, 5-minute cache write | 9,104 | | | 3.45–3.67 | |
+| Prefixes, 2 chapters first (6 and 13: most questions, 13 of 90), cached 1 h | 822 | 32.7 M | 0.04–0.08 M | **0.37–0.39** (uncached 3.29–3.31) | 25–29 min |
+| L2 summaries, one per outline node + root (379 leaf, 88 inner, 27 level-1) | 495 | 1.20 M | 0.07 M | **0.16** | 15–17 min |
+| judge.eval sufficiency, Sonnet 5.5, 6 variants (C, V0, V3, H_w5, V1, V2), identical top-10 sets judged once | 477 | 1.49 M | 0.10 M | **3.94** (Opus 7.87) | not measured for Sonnet |
+| Fact-check route vs whole-section baseline: 30 judge calls with the question's chapter, Sonnet 5.5 | 30 | 0.98 M | 0.006 M | **2.02** (Opus 4.04) | not measured |
+
+Prefix output is the B1 range 50–100 tokens. Without caching the prefixes alone exceed what is left of the test
+budget, so caching is a condition, not an optimisation: the chapter must be the leading, byte-identical part of
+every call's prompt, and the 2-chapter stage checks that the CLI actually reads it from cache across processes
+(compile-cost run 2 observed such a cross-process hit, with 1-hour writes).
+
+**Initial `index` caps (B7: cost + 20%), provisional until measured:** prefixes $4.48 per pack (3.73 × 1.2), L2
+summaries $0.19 per pack.
+
+## Proposed design and spend request
+
+Budget: `test_budget_usd` $30; spent from it $3.2966 (ledger: tutor-call 0.0383, V.live 1.2587 + 0.90 + 1.0870,
+V.freshness 0.012588); left $26.70.
+
+Cheapest order that still answers B10, each stage with a stop rule:
+
+1. **Prefixes for chapters 6 and 13** (822 Haiku calls, ≈ $0.39, ≈ 27 min). Record real input, cache-read and
+   output tokens, USD and wall time. **Stop and re-ask** if cache reads are under 80% of the projected ≈ 32.6 M tokens, or
+   the cost per call exceeds 1.5× the projection (0.00048 → $0.00071).
+2. **Prefixes for the rest of the book** (8,282 calls, ≈ $3.34, ≈ 4.2–4.8 h sequential), re-embed (≈ 27 min or
+   more, local, free), recall@10 for V1. Needed because the 90 questions cover all 23 chapters.
+3. **L2 summaries** (495 calls, ≈ $0.16), recall@10 for V2.
+4. **judge.eval sufficiency** on the six variants, Sonnet 5.5 (477 calls, ≈ $3.94): the only measure that can keep
+   a prefix or summary on exact and fact-check (Decision 5).
+5. **Fact-check route vs whole-section baseline**, Sonnet 5.5 (30 calls, ≈ $2.02).
+
+**Spend request: approve $12.00 from `test_budget_usd`** for stages 1–5 (projection $9.85 + 20%), leaving $14.70.
+Stage 1 alone is $0.50 with margin if the owner prefers to approve in two steps (stage 1 now; stages 2–5 after its
+measured numbers). Every stage's spend goes to `budget.ledger`.
+
+## Limits
+
+- recall@10 on gold pages is page-granular: a span on a gold page counts even if it lacks the fact; sufficiency
+  (paid) closes that gap.
+- Token counts for Claude are estimated from one measured ratio; stage 1 replaces them with measured numbers.
+- Latency is measured in a fresh container with only the spike's tables; the live database has other tables and
+  load, and its exact-scan p95 will be somewhat higher.
+- Instruction sizes of prefix, summary and judge prompts are assumptions; they move the totals by under 1%
+  (prefix, summary) and about 15% (judge).
