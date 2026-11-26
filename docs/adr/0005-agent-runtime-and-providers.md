@@ -11,6 +11,8 @@ revisit_when: "Anthropic changes the subscription terms for the Agent SDK, or a 
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): pack overlays (context prefixes, summaries, link judging) go on their own `index` ledger line with per-pack and per-run caps set from measured cost, and the owner tops up when a cap is reached; the online `judge.find` runs on the caller's own provider; evaluation has its own cap. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 Owner decision, 2026-11-20: only the owner's $200 subscription, no API spending here; "not everyone fits this, then different providers must be configurable".
 
 Anthropic's terms as of 2026-11-20 (code.claude.com, Legal and compliance; Agent SDK billing notice):

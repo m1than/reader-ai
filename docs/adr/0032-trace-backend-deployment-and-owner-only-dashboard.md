@@ -10,6 +10,8 @@ supersedes: []
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): `TOOL`, `ROUTER` and `RETRIEVER` spans join the attribute allow-list with ids, counts, `brain_version`, `policy_version` and content hashes only, never card text. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 The owner asked on 2026-11-24 for "the tracing system via dashboard for this system".
 
 ADR-0018 (**proposed**, not accepted) puts traces in v1:

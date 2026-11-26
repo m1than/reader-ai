@@ -11,7 +11,7 @@ You run **autonomously** (ADR-0019): you draft and approve specs, write tests an
 3. Do the task completely: the spike, the spec, the Red tests, the Green code, and the live check script for its stage, as the task says.
 4. Run the checks (below). Fix until green.
 5. Update `docs/progress.yaml` in the same branch: status, PR link, measured numbers, anything learned that changes later tasks.
-6. Push, open a PR, wait for CI. Merge it yourself (squash) when green, unless it changes an ADR status. ADR-status PRs wait for the owner.
+6. Push, open a PR, wait for CI. Merge it yourself (squash) when green, unless it changes an ADR status. ADR-status PRs wait for the owner. Once ADR-0039 is accepted, a PR that adds or amends an ADR waits for the owner too (rule A9); until then, treat ADR-0039's own PR that way. On the integration flow, the same holds for the merge that brings such a change to `main`.
 7. When a stage's tasks are all done, run its live check (`bash e2e/live/stage-N.sh`), record the result in `docs/progress.yaml`, notify the owner and continue with the next stage.
 8. Repeat. Never stop to ask. When something needs the owner, set the task to `blocked` with `reason` and `ask`, run `node tools/agent/notify.mjs "<one line>"`, and take the next ready task.
 
@@ -24,6 +24,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - A missing secret or access.
 - A change that contradicts an accepted ADR. Write a new ADR with `status: proposed` instead, and keep working on what does not depend on it.
 - The same check failing after 3 different fixes.
+- `deep-reviewer` not returning `VERDICT: approve` after two rounds on the same spec (owner, 2026-11-26; in force once ADR-0039 is accepted).
 
 ## Gates you never cross
 
@@ -87,7 +88,7 @@ bash e2e/live/stage-N.sh                                # for the stage you touc
 
 ```
 AGENTS.md, CLAUDE.md  agent rules (this file; CLAUDE.md adds Claude Code specifics)
-docs/                 architecture.md, roadmap.md, progress.yaml (run state), adr/, research/
+docs/                 architecture.md, roadmap.md, progress.yaml (run state), adr/, plans/, research/
 spec/modules/         module specs (YAML); template spec/_template.yaml; fixtures in spec/fixtures/
 server/               Python 3.14 (ADR-0020): api, worker, mcp, host CLI `reader`; tests in server/tests/
 web/                  React + TypeScript + Vite + Storybook; tests *.test.ts(x)

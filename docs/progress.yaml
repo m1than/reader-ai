@@ -1853,6 +1853,62 @@ tasks:
   - { id: S2.SRV-NOTIFY, stage: 2, kind: module, track: product, status: todo, needs: [S2.SRV-EVENTS] }
   - { id: S2.live, stage: 2, kind: live, status: todo, needs: [S2.SRV-OBS, S2.SRV-NOTIFY] }
 
+  # ADR-0039 knowledge layers (PR #42 rebased as ADR-0039; owner answers 2026-11-26: migrate span ids to locators,
+  # online judge in find (amends ADR-0025), decision 18 applied to the pipeline in full, build packs/manifest/facets/
+  # greedy cascade now). Every task below starts only after V.owner.adr-0039 and is detailed in
+  # docs/plans/adr-0039-execution.md. Each module task revises an approved spec, so its tests change with it (H2).
+  # If the owner rejects ADR-0039, one PR removes these tasks and the ADR-0039 sentences in docs/roadmap.md.
+  - { id: V.owner.adr-0039, stage: V, kind: owner, status: todo, needs: [],
+      ask: "Review ADR-0039 (knowledge layers, brain/v1, amendment rules A1–A9; amends ADR-0001, 0005, 0007, 0008,
+        0009, 0015, 0018, 0019, 0025, 0032, 0038); accept or reject it and merge its PR (rule A9: owner merge)" }
+  - { id: V.kl-eval-set, stage: V, kind: setup, status: todo, needs: [V.owner.adr-0039],
+      what: "ADR-0039 B9: extend questions-v2 (40, owner-accepted) to a typed set, 30 per type (exact, thematic,
+        fact-check), expected facts in own words <= 300 chars, expected pages, topic branch; registered as an obs.bench
+        dataset (ADR-0038); owner reviews 10 per type" }
+  - { id: V.spike.retrieval-ablation, stage: V, kind: spike, status: todo, needs: [V.kl-eval-set],
+      note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
+        +form filter; keep a step if its gain on its type is significant by exact McNemar (net >= 6 of 30); its cost per
+        pack + 20% sets the initial index cap. Exact scan already measured (6.6 ms at 2,285 chunks; live p95 173 ms):
+        state what the 150 ms rule applies to. Shares measurements with V.tutor-retrieval and V.cost-optimize lever 7.
+        Spends Agent SDK credit: budget.ledger" }
+  - { id: V.spike.judge-gate, stage: V, kind: spike, status: todo, needs: [V.spike.retrieval-ablation],
+      note: "ADR-0039 B10: Haiku judge.find p95 through agent-proxy (measured SDK call 1.82–2.10 s on Haiku,
+        spikes/agent-sdk-container), gate fire rate, sufficiency, cost of one evaluation run; judge after the selection,
+        the earlier order once as the reference; cheapest variant not significantly worse, at most a net 2 of 30 worse
+        on any type, find p95 < 2.5 s, else block for the owner with both measurements. Spends credit: budget.ledger" }
+  - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: todo, needs: [V.owner.adr-0039],
+      what: "SRV-AGENT revision (~250–400 lines): judge slots as task classes, index and eval ledger lines with per-pack
+        and per-pair-run caps, recorded judge outputs by (input hash, judge@version); the api's online judge.find path
+        per the ADR-0025 amendment (concurrency and reach). FR-AGENT-6, -9, -12, -17" }
+  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: todo, needs: [V.owner.adr-0039],
+      what: "SRV-OBS revision (~300–500 lines): TOOL/ROUTER/RETRIEVER spans with ids, counts, brain_version,
+        policy_version and hashes only (INV-OBS-1/2 kept); a local judge-evaluation job kind writing scores only
+        (ADR-0038 amendment); judge-named HUMAN labels. FR-OBS-14, -21, -22, -23, -24; VEC-OBS-1/4/5" }
+  - { id: V.kl-ingest-packs, stage: V, kind: module, track: engineering, status: todo,
+      needs: [V.owner.adr-0039, V.spike.retrieval-ablation],
+      what: "SRV-INGEST revision (~1,000–1,500 lines): span identity = ADR-0008 locator (page, char offsets) + quote
+        hash with a migration of stored citations (lessons, tutor); base packs, overlays kept by the ablation, append-only
+        manifest with CAS, building -> sealed, GC off the request path, owner purge, re-anchoring job; property test
+        over recorded model outputs. FR-INGEST-6, -10, -13, -14, -17, -31, -32; INV-INGEST-1; FR-PIPELINE-7;
+        FR-TUTOR-5/8" }
+  - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: todo,
+      needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
+      what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
+        budget with stated bounds, 1-hop expansion, one judge.find call last), policy_version, manifest views, card
+        shape, judged flag. FR-SEARCH-3, -4, -7, -8, -9, -20; INV-SEARCH-4; NFR-SEARCH-1; VEC-SEARCH-1/2" }
+  - { id: V.kl-pipeline-checks, stage: V, kind: module, track: ai, status: todo, needs: [V.kl-search-find],
+      what: "SRV-PIPELINE revision (~300–500 lines): checks after drafting cheapest first (rules, lab, claim support,
+        adversarial review), first failure loops back, at most 3 loops, every return counted; fact-check through the
+        fact-check route; Admiralty credibility 1–6 per claim. FR-PIPELINE-4, -5, -6, -8; VEC-PIPELINE-1/2. Compile
+        cost per lesson re-measured against $4.35" }
+  - { id: V.kl-tutor-find, stage: V, kind: module, track: ai, status: todo, needs: [V.kl-search-find],
+      what: "SRV-TUTOR revision (~100–200 lines): retrieval through find on the tutor channel; L5 boost once learner
+        state exists (S6.SRV-RECALL). FR-TUTOR-5, NFR-TUTOR-*" }
+  - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
+      what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer
+        sees it; restore -> the same cards; MLflow stopped -> search still answers; Haiku evaluation meets the brain/v1
+        targets (90% sufficiency, median <= 3 calls, <= 2,000 tokens, find p95 < 2.5 s)" }
+
   # Stage 3 — ingestion and search
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling] }
   - { id: S3.SRV-SEARCH, stage: 3, kind: module, track: ai, status: todo, needs: [S3.SRV-INGEST, S0.spike.embeddings-local] }
@@ -1885,7 +1941,11 @@ tasks:
       what: "friction NFR in Playwright; then 7 days of real study by the owner (owner part)" }
 
   # Stage 7 — knowledge base, export and MCP
-  - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live] }
+  - { id: S7.spike.pack-links, stage: 7, kind: spike, status: todo, needs: [V.owner.adr-0039, V.kl-live],
+      note: "ADR-0039 B10: pair link runs stored per later pack (A) or per pair (B); both must pass the add/remove/rebuild
+        property test over recorded model outputs; fewer lines of code wins unless the other rebuilds >= 30% fewer
+        overlays on a pack rebuild; also runs the facet-filter and current-state ablation on three sources" }
+  - { id: S7.SRV-KB, stage: 7, kind: module, track: ai, status: todo, needs: [S5.live, S7.spike.pack-links] }
   - { id: S7.SRV-EXPORT, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB] }
   - { id: S7.SRV-MCP, stage: 7, kind: module, track: ai, status: todo, needs: [S7.SRV-KB] }
   - { id: S7.WEB-KB, stage: 7, kind: module, track: product, status: todo, needs: [S7.SRV-KB, S4.WEB-UI] }

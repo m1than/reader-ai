@@ -11,6 +11,8 @@ revisit_when: "Docling processes the 935-page pilot slower than 10 pages per min
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): ingest output is an immutable base pack whose spans take this ADR's locator (page, character offsets) as identity plus a quote hash, and stored citations migrate to it; context prefixes and tags are versioned overlays. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 Owner decision, 2026-11-20: any material can be loaded; the user sets the limits.
 
 Measurement on the pilot PDF (2026-11-20): parsing the printed table of contents as text lost 3 of 23 chapters (8, 20, 23), because their titles wrap to a second line. The PDF bookmark outline had all 23 chapters, 494 entries on three levels. Chapter 23 has no bookmarked sections, so its structure must come from the content itself.

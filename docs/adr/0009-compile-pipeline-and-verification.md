@@ -9,6 +9,8 @@ revisit_when: "An error is found in a published lesson that a stage should have 
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): stage 1 outputs a base pack and overlays; fact-check uses the fact-check retrieval route; the checks after drafting run cheapest first (rules, lab, claim support, adversarial review last), the first failure loops back, at most 3 loops with every return counted. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 Owner decision, 2026-11-20: the agent does all authoring tasks in staged steps with fact-checking and validation, so that material passes a thorough check.
 
 Evidence from the manual pilot (Chapter 1 lesson, 2026-11-07): the Nakamoto attacker-success table first showed 63.4% for q = 0.3, z = 1; an independent recomputation gave 62.8%. One wrong number in one table, caught only because the value was recomputed by separate code. The pipeline makes that recomputation mandatory instead of lucky.

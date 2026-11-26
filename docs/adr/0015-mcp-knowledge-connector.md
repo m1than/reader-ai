@@ -9,6 +9,8 @@ revisit_when: "A new MCP specification revision changes the transport or authori
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): sectors become the `topic` facet; a concept layer is added; findings gain validity and an `orphaned` state; the tool table is replaced by the `brain/v1` contract, which keeps role filtering and the citation limit. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 Owner decision, 2026-11-20: a separate connector that other agents can attach over MCP, acting as the markup source for a knowledge base organised by sectors, built from the conclusions and results produced while reading.
 
 MCP state as of 2026-11-20: revision 2026-07-28 (final since 2026-07-28) removed the initialize handshake and the `Mcp-Session-Id` header. Every Streamable HTTP request is self-contained and carries `MCP-Protocol-Version`, `Mcp-Method` and `Mcp-Name` headers; HTTP+SSE transport, Roots, Sampling and Logging are deprecated.

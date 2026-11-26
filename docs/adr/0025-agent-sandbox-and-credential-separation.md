@@ -10,6 +10,8 @@ supersedes: []
 
 ## Context
 
+> Amendment proposed by [ADR-0039](0039-knowledge-layers-and-amendment-rules.md) (2026-11-26): one online `judge.find` call per `find` reaches agent-proxy on the caller's own credentials, with no tools, outside the worker's single job slot. In force once ADR-0039 is accepted; then, where the two disagree, ADR-0039 wins.
+
 ADR-0005 runs agent stages through the Agent SDK. ADR-0014 sandboxes learner code, and ADR-0022 declares the kernel services. `spikes/agent-sdk-container` (2026-11-20, RESULT.md on main, PR #6; deep-reviewer approved in round 3) found:
 
 | Fact | Source |
