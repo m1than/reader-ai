@@ -59,9 +59,10 @@
 # The default `observability.enabled: true` follows the owner's request; it costs about 1.25 GiB of memory limits
 # (mlflow 1g, rotel 256m) and two image pulls.
 #
-# ADR-0039 revision (V.kl-obs-spans), drafted 2026-11-26: the `kl_*` and `proposed_*` keys near the end of this
-# file. Nothing there is in force until deep-reviewer approves it and Red moves it into `requirements`,
-# `invariants` and `vectors` with its tests (H2), as phase 2 did.
+# ADR-0039 revision (V.kl-obs-spans), drafted 2026-11-26, promoted at Red on V/kl-obs-spans (deep-reviewer round 8
+# VERDICT approve): FR-OBS-36..43, INV-OBS-6..8, VEC-OBS-7/-8 and the new tables are in `requirements`,
+# `invariants`, `vectors` and `tables`, and the in-place edits are appended to their ids with their tests (H2), as
+# phase 2 did. The remaining `kl_*` keys near the end of this file are the design record.
 
 id: SRV-OBS
 title: Tracing with an attribute allow-list, Rotel and MLflow behind an owner-only gate, retention and the owner's views
@@ -102,10 +103,13 @@ review: "deep-reviewer (Fable) design review, 2026-11-24. Round 1 (37ac503..431a
   (2026-11-24, V/manage-fix-auth; SRV-CONFIG FR-CONFIG-26 B5): tests/obs/test_overrides_db.py adds the [db] oracle
   through the real readers: an `observability.retention_days` override reaches the retention job's cutoff (the
   trace delete's and the obs_tracing prune's, FR-OBS-11) and the summary's trace cutoff (FR-OBS-1), where the file's
-  value would give another; no requirement changed."
+  value would give another; no requirement changed. ADR-0039 revision (V.kl-obs-spans, 2026-11-26): deep-reviewer
+  (Fable) design rounds 1-8 (answers in kl_review_round1..7), round 8 VERDICT approve on bf94c6f with its refinements
+  applied in f48c272; promoted and approved by agent with the Red tests; FR-OBS-41's judge.find half stays refused
+  with slot_unsupported until SRV-AGENT's worker-side eval-line judge.find capability is merged."
 layer: server
 track: engineering
-adr: [ADR-0018, ADR-0032, ADR-0033, ADR-0035, ADR-0038, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026]
+adr: [ADR-0018, ADR-0032, ADR-0033, ADR-0035, ADR-0038, ADR-0011, ADR-0012, ADR-0024, ADR-0025, ADR-0026, ADR-0039]
 
 paths:
   - server/src/reader/obs/**
@@ -121,8 +125,14 @@ tables:
   obs_tracing: { system: true, columns: "started_at timestamptz pk, enabled boolean" }
   # Phase 2 (ADR-0038), migration `obs_0002`.
   obs_bench_results: { owner_id: true, columns: "id uuid pk, owner_id → users.id, digest char(64) UNIQUE, kind text CHECK in (search, tutor), set_name text, model text null, commit text null, scores jsonb, created_at timestamptz (FR-OBS-23)" }
-  owner_labels: { owner_id: true, columns: "id uuid pk, owner_id → users.id, target text CHECK in (lesson, answer), target_id uuid, lesson_revision_sha256 char(64), ok bool, reason text null CHECK in VEC-OBS-5 labels.reasons, revision int ≥ 1, assessment_id text null, created_at, updated_at; UNIQUE (owner_id, target, target_id, lesson_revision_sha256) (FR-OBS-24)" }
+  owner_labels: { owner_id: true, columns: "id uuid pk, owner_id → users.id, target text CHECK in (lesson, answer, judge) (judge added by migration obs_0003), target_id uuid (for a judge target: judge_inputs.id or obs_eval_scores.id), lesson_revision_sha256 char(64) (for a judge target: the judged input's sha256; the column keeps its name: what the owner saw), ok bool, reason text null CHECK in VEC-OBS-5 labels.reasons, slot text null (obs_0003; CHECK: NULL exactly when target <> 'judge'; a value of VEC-OBS-5 labels.judge_slots), note text null (obs_0003; judge targets only, ≤ 200 characters, one line), revision int ≥ 1, assessment_id text null, created_at, updated_at; UNIQUE (owner_id, target, target_id, lesson_revision_sha256), unchanged (FR-OBS-24)" }
   obs_stack_status: { system: true, columns: "member text pk CHECK in (mlflow, rotel), ok bool, detail text CHECK in (healthy, unhealthy, unreachable, listening), checked_at timestamptz (FR-OBS-32; one row per member)" }
+  # ADR-0039 revision (V.kl-obs-spans), migration `obs_0003` (Alembic branch obs). Every user-data table carries owner_id.
+  judge_inputs: { owner_id: true, columns: "migration obs_0003: id uuid pk, owner_id → users.id (the find caller), slot text CHECK in (judge.find), input_sha256 char(64), judge text (`judge.find@<version>`, SRV-AGENT's), query text null (NULL unless FR-OBS-38's consent rule holds), card_ids text[] (judge order, ≤ 50), pack_ids char(64)[], output jsonb ({keep: [ordinal], drop: [ordinal], sufficiency: number | null}, 1-based indexes into card_ids, nothing else), find_trace_id char(32) null, judge_trace_id char(32) null, channel text, route text, labelable bool, created_at; UNIQUE (owner_id, input_sha256, judge) (FR-OBS-38)" }
+  obs_eval_runs: { owner_id: true, columns: "migration obs_0003: id uuid pk, owner_id → users.id (the payer), mode text CHECK in (dataset, sample), set_name text null, set_sha256 char(64) null, set_doc jsonb null (the pinned set file as uploaded), caller text CHECK in (none), budget_profile text CHECK in (mcp, tutor), judges text[], brain_version char(64), policy_version char(64), version_key char(12), records int, deadline timestamptz, state text CHECK in (queued, running, done, capped, failed), created_at, finished_at null (FR-OBS-39)" }
+  obs_eval_records: { owner_id: true, columns: "migration obs_0003: eval_id → obs_eval_runs.id, record_id text, owner_id, card_ids text[] (the returned cards in order, ≤ 50), pack_ids char(64)[], find_ms int null, cards int, tokens int, judged_tokens int, unjudged_tokens int, judge_ran bool null, judge_skip text null, gate text null, skipped_not_entitled int, invalid_outputs int, trace_id char(32) null, state text CHECK in (queued, done, failed, capped); PK (eval_id, record_id) (FR-OBS-39)" }
+  obs_eval_scores: { owner_id: true, columns: "migration obs_0003: id uuid pk, owner_id, eval_id null → obs_eval_runs.id, judge_input_id null → judge_inputs.id ON DELETE CASCADE, record_id text null, slot text, judge text (`<slot>@<version>`), value double precision, trace_id char(32), assessment_id text null, created_at; UNIQUE (eval_id, record_id, slot, judge) and UNIQUE (judge_input_id, slot, judge) (FR-OBS-39)" }
+  judge_prompt_proposals: { owner_id: true, columns: "migration obs_0003: id uuid pk, owner_id, slot text, at_labels int, step int, base_prompt_sha256 char(64), policy_version char(64) null (NULL until step 0 pins it), state text CHECK in (running, proposed, refused, exported, discarded), refusal text null CHECK in VEC-OBS-5 align.refusals, frame_sha256 char(64), work jsonb (step state: the two splits' label ids, the candidates' sha256s, and per held-out label its outcome for the current best and each candidate, label id → agree | disagree | missing; ids and enums only), candidate_text text null (the current best section while running; NULL = the base), candidates_under_test text[] null (the round's guarded candidates, at most 2); both NULL once proposed, refused or step_lost, CHECK enforced; proposed_text text null (NULL unless state proposed or exported), proposed_sha256 char(64) null, label_ids uuid[], scores jsonb (numbers only), guard_version text, created_at, exported_at null; UNIQUE (owner_id, slot, at_labels) (FR-OBS-41)" }
 
 normative:
   - id: REF-OBS-1
@@ -304,6 +314,9 @@ requirements:
       the stack and is not traced); search is the request span of its route plus `job search.embed` for embedding;
       a kernel session is its WebSocket span (FR-OBS-3). agent-proxy, the mcp role and the kernel containers are not
       instrumented and have no route to Rotel.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): The list of module-specific spans gains FR-OBS-36's `find`
+      subtree and FR-OBS-37's `pack.build` and `link.run`; a tutor or pipeline job that calls `find` shows it under
+      its root, and a `judge.find` job is its own trace linked from `find.judge_wait`.
   - id: FR-OBS-8
     text: >-
       Collector and backend (deploy/otel/**, wired by the paired OPS-DEPLOY change). Profile `observability`:
@@ -333,6 +346,10 @@ requirements:
       removes rotel and mlflow and keeps the volume; turning it on again finds the old traces, which the next
       retention run trims. Egress: none; no service of the profile is on `edge` or `egress`, and MLflow's server
       telemetry is off.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Network `otel` holds exactly api, worker, worker-judge and
+      rotel (ADR-0032 Decision 1 as amended by ADR-0039); `worker-judge` is on no other obs network (no `obs`, no
+      route to mlflow). Paired OPS-DEPLOY FR-DEPLOY-3 and VEC-DEPLOY-2 (worker-judge–rotel allowed;
+      worker-judge–mlflow never).
   - id: FR-OBS-9
     text: >-
       Dashboard access (ADR-0032; paired OPS-DEPLOY and OPS-CLI changes). Caddy serves a second site `localhost:8443`
@@ -488,6 +505,13 @@ requirements:
       freed pages are reused, so the store's size stays bounded by the retained traces. In the same run the handler
       deletes the `obs_tracing` rows (FR-OBS-10) started before now − `retention_days`, except the latest of them,
       which still decides the rows between the cutoff and the next start.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): The handler's order becomes: enqueue the next day's key
+      (unchanged); then the Postgres deletes, always, with tracing on or off and before any MLflow request:
+      `judge_inputs` rows older than `retention_days` (FR-OBS-38), `obs_tracing` rows as today, and
+      `judge_prompt_proposals` rows still `running` a day after their last step set `refused` `step_lost`
+      (FR-OBS-41), each in its own transaction, a failure logged by code and never stopping the next step; then,
+      only with tracing on, the MLflow deletes as written. With tracing off the handler no longer returns right
+      after the enqueue: it does the Postgres deletes, then returns.
   # FR-OBS-12..19: the V.obs-analytics amendment (design review round 3 on 6ccbb08, deep-reviewer VERDICT approve),
   # moved here at Red. The owner accepted ADR-0033 and ADR-0035 and rejected ADR-0034 (2026-11-24), so FR-OBS-14,
   # -15 and -18 (held for ADR-0035) and FR-OBS-19 (ADR-0033's Jaeger view) are in scope too; no text-content mode
@@ -592,6 +616,8 @@ requirements:
       only derived `mlflow.*` keys, each `mlflow.spanInputs`/`Outputs`/`llm.cost` parses as JSON whose keys are
       exactly the table's and whose values pass their rules, `input_cost + output_cost = total_cost` at 6 places,
       and no generated canary appears. [unit, image]
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): (f) gains: `mlflow.spanOutputs` is also derived for a span
+      that carries `reader.doc.*` keys, by FR-OBS-36's `retriever_documents` table; no other span gains a preview.
   - id: FR-OBS-13
     text: >-
       Child spans where a stage has measurable parts (counts, sizes and durations as numbers; names fixed): tutor
@@ -609,6 +635,9 @@ requirements:
       table (FR-OBS-12 a). A child that ends with an exception sets status ERROR (no description); otherwise OK
       (FR-OBS-12 h). Measured rendering: the trace detail shows each with its type icon and duration; the tool-calls
       dashboard lists `verify.lab`. [unit, image]
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Unchanged; one sentence added: `tutor.retrieve` stays until
+      V.kl-tutor-find moves the tutor onto `find`, which then shows FR-OBS-36's subtree instead, and SRV-TUTOR's
+      paired change removes it.
   - id: FR-OBS-16
     text: >-
       Every tab of MLflow 3.18.0's GenAI experiment UI, and what reader-ai puts there (measured before and after in
@@ -633,6 +662,10 @@ requirements:
       answers `?q=job%20tutor.answer`, sessions `?groupBy=session`, and the Usage, Quality and Tool calls dashboards
       (`#/experiments/0/dashboard/usage|quality|tool-calls`). "Slowest first" has no working URL in 3.18.0
       (`sort`/`dir` did not reorder); the Usage dashboard's latency percentiles stand in. [image, live]
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Evaluation runs (experiment 0) also lists `reader.kind` = eval
+      Runs (FR-OBS-39) with their record traces; the Quality dashboard shows LLM_JUDGE assessments next to CODE and
+      HUMAN ones; Judges stays empty (scores are computed in the worker, not by MLflow jobs); a saved view
+      `?q=<policy_version>` is added.
   - id: FR-OBS-17
     text: >-
       Cost per lesson (owner, 2026-11-24: "pricing of each lesson in traces and other data"). In MLflow (measured,
@@ -710,6 +743,16 @@ requirements:
       `skipped` outcome (Green, 2026-11-24). Paths: GET `/ajax-api/3.0/mlflow/traces/get?trace_id=tr-<id>`, POST
       `/ajax-api/3.0/mlflow/traces/tr-<id>/assessments` (the spike's). Measured: 8 of 8 created; the Quality dashboard showed a
       summary row, counts and averages per name, and per-value bars. [unit, db, image]
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): The catalogue (VEC-OBS-4 `assessments`) gains a
+      `source_type` per entry, CODE or LLM_JUDGE. CODE entries are unchanged and posted only by `obs.feedback`.
+      LLM_JUDGE entries (ADR-0035 Decision 1 as amended by ADR-0039) are posted only by the job kind
+      `obs.judge_score` (kl_job_kinds; args {score_id} only, the value read from the `obs_eval_scores` row, so no
+      score travels in args) through `reader.obs.feedback.eval_body`, which refuses a CODE entry, while `body`
+      refuses an LLM_JUDGE one: names `eval.relevance`, `eval.sufficiency`, `eval.groundedness`,
+      `eval.self_contained`, `eval.citation_supports_claim`, each a float 0..1, `source_id` = SRV-AGENT's judge
+      string `<slot>@<version>` (pattern `^judge\.eval\.[a-z_]{1,40}@[0-9a-f]{12}$`), metadata {score_id} as an id,
+      no `rationale`. Lookup, retry and 404 rules are FR-OBS-14's as written; the lookup matches name, `source_id`
+      and `metadata.score_id`, so a retry never posts twice and a new judge version posts next to the old one.
   - id: FR-OBS-15
     text: >-
       Under ADR-0035 (as FR-OBS-14). Prompts tab: our own static prompt templates, never book text, listed as data in
@@ -737,6 +780,11 @@ requirements:
       failure for `MISS_TTL_S` = 600 s, so a job never waits on MLflow more than once per name per 10 minutes; an
       unknown version links nothing. Measured: 3 prompts
       registered, listed with their tags, and "1 linked prompt" on a trace. [unit, image]
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): The parenthetical list of prompt files becomes 'VEC-OBS-4
+      `prompts`': the list gains SRV-AGENT's `server/src/reader/agent/prompts/judge_find.md` and FR-OBS-43's six
+      files (five `judge.eval.*` prompts in frame-and-section form and `judge_align.md`) under
+      `server/src/reader/obs/prompts/` (the `judge.link_type` and `ingest.context_prefix` files join when SRV-KB and
+      SRV-INGEST add them; ADR-0039 B7a), registered by the same rules; no other change.
   - id: FR-OBS-18
     text: >-
       Under ADR-0035 (with FR-OBS-15; split out of FR-OBS-12 (g), review round 3). Linked prompts: the root's
@@ -852,6 +900,9 @@ requirements:
       passes them; INV-OBS-2's phase 2 clause holds because these values come from the package version and the
       owner's own bench result file, never from material, questions or answers, not because the pattern would
       refuse a canary.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Unchanged for compile and ingest; steps (a)-(e) become one
+      function that `obs.eval_run` also calls with kind `eval` and the id tag `reader.eval_id` (VEC-OBS-5
+      `runs.eval`).
   - id: FR-OBS-21
     text: >-
       Agent versions. A version key is the sha256 of the canonical JSON of {prompt_set_sha256, stage_models,
@@ -871,6 +922,17 @@ requirements:
       so the tab's own per-version trace list stays empty; versions are compared in MLflow only, through the
       Traces tab filtered by `tag.reader.version_key` (cost, latency and assessment columns). The api gains no
       per-version view (review round 1, B9).
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): The version key is the sha256 of the canonical JSON of
+      {prompt_set_sha256, stage_models, pipeline_config_sha256, policy_version}. `policy_version` (ADR-0039 B7a) is
+      `reader.obs.versions.policy_version(policy)` = the sha256 of the canonical JSON of the declared data only: the
+      route table, thresholds, k, the RRF constant, the facets file's sha256, the slot-to-model bindings, the
+      embedding model ids and the prompt files' sha256s by name, taken from the effective values the caller used
+      (SRV-SEARCH passes its loaded policy; ADR-0036 overrides included when the owner adds caps to the UI
+      allow-list); the code version is never an input. (a) becomes: the key is computed per job root from the
+      effective settings and policy the job read, cached per process by their digest; a key the process has not
+      seen enqueues `obs.setup` {digest} (enqueue-only), so its LoggedModel exists before the next start.
+      `reader.policy_version` (64 hex) is also a validated root attribute and a trace tag. (b) LoggedModel params
+      gain policy_version. Everything else stands.
   - id: FR-OBS-22
     text: >-
       Evaluation datasets (ADR-0038 Decision 1). VEC-OBS-5 `bench_sets` pins each committed bench set by ONE file
@@ -890,6 +952,15 @@ requirements:
       wording, the only non-numeric content in phase 2. Shipped code never reads `spikes/`: the owner's upload
       (FR-OBS-23) carries the set file, which the api accepts only if its sha256 is pinned, and only the pinned
       record ids are registered (`datasets/records` upserts: a repeat updates, never duplicates; round 8).
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): VEC-OBS-5 gains `eval_sets`: `brain-eval-v1`, the extended
+      set of V.kl-eval-set (30 questions per type: exact, thematic, fact_check; 90 records), one committed file with
+      its sha256, pinned when the owner accepts the set (until then the pin is null and the api refuses every eval
+      set). Its record holds `inputs` {question_id, question, question_type, chapter} and `expectations`
+      {gold_pages} for MLflow; `expected_facts` (each ≤ 300 characters, the owner's or agent's own words) stay in
+      the file and in `obs_eval_runs.set_doc` and are never sent to MLflow (ADR-0039 B9). Before the pin, every
+      question passes the existing 5-word check and every expected fact an 8-word check against the pilot's text
+      layer, by check_bench_quotes.py with a `--run 8 --field expected_facts` mode, recording the set's and the
+      PDF's sha256 and printing ids and counts only. The two existing sets are unchanged.
   - id: FR-OBS-23
     text: >-
       Evaluation runs. The upload route records results; it NEVER starts a bench (no model call, no search, no job
@@ -946,6 +1017,10 @@ requirements:
       upload needs a new bench run (VEC-TUTOR-7: about 40 × $0.027 ≈ $1.10 at the measured mean), which spends
       Agent SDK credit from `budget.live_runs_usd` and waits for the owner's go-ahead like every live run
       (declared; phase 2 itself spends nothing).
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Unchanged except one sentence: 'Scores come from code over
+      ids and page numbers: no model call, no judge, no mlflow.genai.evaluate' becomes 'obs.bench scores only from
+      code over ids and page numbers; model-judged scores come only from `obs.eval` (FR-OBS-39), never from
+      `obs.bench` or the upload route; neither uses mlflow.genai.evaluate'.
   - id: FR-OBS-24
     text: >-
       Owner labels (ADR-0038 Decisions 2 and 3). Postgres is the record; MLflow gets a mirror. MLflow's labeling
@@ -990,6 +1065,20 @@ requirements:
           either side.
       The owner can still type a label or comment in MLflow's own trace view; that is the owner's own text in the
       owner's own store and is not read back (owner note).
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): (a) `owner_labels.target` gains `judge`, with the `slot` and
+      `note` columns of `proposed_tables`. (b) `POST /api/obs/labels` accepts {target: judge, id, ok, note?}: id is
+      a `judge_inputs` id (slot judge.find) or an `obs_eval_scores` id (slot from its row), i.e. FR-OBS-40's
+      `ji:`/`es:` item ids; `note` is one line of at most 200 characters, judge targets only, stored in Postgres and
+      never mirrored, traced, logged or put into job args; `reason` is refused for a judge target; 404 `not_found`
+      as before (another owner's id included); 409 `not_labelable` as FR-OBS-40. (c) The mirror posts a HUMAN
+      assessment named `owner.<slot>_ok` with the slot's dots as underscores (`owner.judge_find_ok`,
+      `owner.judge_eval_sufficiency_ok`; pattern `^owner\.judge_[a-z_]{1,48}_ok$`, enum computed from VEC-OBS-5
+      `labels.judge_slots`), value pass or fail, metadata {judge_input_id | score_id, revision}, on the judge.find
+      job's trace (`judge_trace_id`; no mirror when it is null) or on the score's own trace; `owner.lesson_ok` and
+      `owner.answer_ok` are unchanged. Scope: `labels.judge_slots` is `judge.find` and the five `judge.eval.*`
+      slots; `judge.link_type` joins with SRV-KB (stage 7) and `judge.align` is never labelled. At load, a check
+      refuses a slot list whose dot-to-underscore mapping is not injective (two slots giving one name). The insert
+      triggers FR-OBS-41.
   - id: FR-OBS-25
     text: >-
       Budgets and alerts. MLflow 3.18.0 has budgets only as AI-gateway policies: they count gateway traffic only
@@ -1043,6 +1132,8 @@ requirements:
       JSON, the version key and the UTC start day), and (2) inline, at the start of `obs.runs`, `obs.bench` and `obs.label` when the
       experiment they need is missing. So an `obs.setup` key that ended dead never blocks anything: the key only
       records that a start ran setup (review round 2, N2). With tracing off neither path makes a request.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): mlflow-setup.yaml's dataset names gain `brain-eval-v1` and
+      its Run tag keys gain `reader.eval_id`; `reader.kind` gains the value `eval`; nothing else changes.
   - id: FR-OBS-27
     text: >-
       Server settings, pinned in deploy/compose.yaml with a comment and a source each (paired OPS-DEPLOY
@@ -1203,6 +1294,14 @@ requirements:
       and datasets kept (bounded by uploads: one Run and at most 40 records each), Postgres `obs_bench_results` and
       `owner_labels` kept (the record), `obs_stack_status` keeps the newest row per member only; soft-deleted Run
       rows stay (no `mlflow gc`) and count in the store size.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Retention also searches `tags.reader.kind = 'eval'` (a third
+      per-kind search) and soft-deletes eval Runs by `end_time` like compile and import Runs. The growth list gains:
+      eval Runs by retention_days; `obs_eval_runs`, `obs_eval_records` and `obs_eval_scores` kept (the record;
+      bounded by starts: at most 90 records and 5 scores each per run, plus at most 20 sample records a day while
+      sampling is on), except sample scores, which go with their `judge_inputs` row (cascade); `judge_inputs` by
+      retention_days (FR-OBS-38); `judge_prompt_proposals`: a discard nulls `proposed_text` at once, and refused
+      and discarded rows (no text) are deleted after retention_days; proposed and exported rows are kept until
+      discarded.
   - id: FR-OBS-32
     text: >-
       Health and self-monitoring (paired OPS-DEPLOY FR-DEPLOY-15, OPS-CLI FR-CLI-24, WEB-UI FR-UI-33).
@@ -1260,556 +1359,6 @@ requirements:
       of 8466329): the replay is not built yet, so the limits above rest on round 9's spike only; the burst test
       lives in the test suite (its replay is the test's own code, never shipped) and skips with that reason; the
       shipped `reader.obs.burst` holds only the limits.
-
-invariants:
-  - id: INV-OBS-1
-    text: >-
-      For any span the api or worker builds, with any name, attributes, events, status description, tracestate,
-      instrumentation scope and links (Hypothesis-generated, including the canary strings below), what
-      AllowListExporter hands to the OTLP exporter has a name matching VEC-OBS-1 or `reader.unlisted`, only keys
-      listed for that span with values passing their rules, no events, no status description, empty tracestate on the
-      span and its links, link attributes empty, the instrumentation scope `reader`, and the resource of FR-OBS-1;
-      the only `mlflow.*` and `session.id` keys are those FR-OBS-12 and FR-OBS-18 derive, each JSON value parses
-      with exactly its table's keys and values passing their rules, and `mlflow.llm.cost`'s parts sum to its total
-      at 6 places (hostile inputs of FR-OBS-12 included).
-  - id: INV-OBS-2
-    text: >-
-      Canary. With book-text, question, answer, system-prompt, run_token and secret canaries placed in a request path
-      parameter, query string, header, cookie and body, in a tutor question and answer, a stage's prompt and output,
-      a job's args, an exception message and the process's resolved settings, the bytes the OTLP exporter sends
-      (captured by an in-test OTLP/HTTP receiver) contain none of them, decoded or raw. For the CLI: under FR-OBS-6's
-      environment the bundled CLI's OTLP export contains no prompt, system-prompt, response or run_token canary, its
-      span names and attribute and resource keys are a subset of VEC-OBS-2, and the same harness with
-      OTEL_LOG_USER_PROMPTS=1 finds the prompt canary (positive control). The worker's MLflow writes (ADR-0035) too:
-      the canaries are absent from every `obs.feedback` job's args, every assessment request body and every prompt
-      registration request body (captured by an in-test HTTP receiver standing in for MLflow); and for arbitrary
-      (name, value, metadata) only VEC-OBS-4 catalogue entries produce a request, whose body's keys and values are
-      exactly the catalogue's. Phase 2 (ADR-0038): with the canaries placed in a lesson's text, a tutor question and
-      answer, a bench upload's unknown or prose keys and an upload's set file (a non-pinned set), no `obs.runs`,
-      `obs.bench`, `obs.label`, `obs.setup` or `obs.health` request body (captured by the in-test MLflow receiver)
-      and no row of `obs_bench_results`, `owner_labels` or `obs_stack_status` contains any of them; for arbitrary
-      uploads only those passing VEC-OBS-5 produce a row and a job; the pinned questions are the only text that
-      reaches MLflow.
-  - id: INV-OBS-3
-    text: >-
-      Telemetry never changes an outcome: with Rotel unreachable, refusing, slow (beyond the export timeout) or
-      returning 500, every request's status and body and every job's outcome equal those with tracing disabled, no
-      exception leaves an OTel call, and no export runs on the request's or job's own task (export runs only on the
-      BatchSpanProcessor's thread or the session marker's daemon flush thread; a full queue drops spans instead of
-      waiting); a failing `obs.feedback` enqueue never changes the computing job's outcome. Phase 2: a failing
-      `obs.runs` enqueue (made outside the run's final transaction), `obs.label` or `obs.bench` enqueue, and any
-      phase 2 job failure never changes a compile run's, an import's or a question's outcome, and a failed mirror
-      never changes a label's record.
-  - id: INV-OBS-4
-    text: >-
-      Propagation. A job enqueued inside an active span has exactly one link, to that span's context; its root span
-      is in a new trace whose id equals FR-OBS-5's derivation from (job id, key); a malformed, unsampled or all-zero
-      `trace` gives no link and no error; a retry or a handler enqueue made inside a run links to the running job's
-      root span; a sweep re-enqueue has no link.
-  - id: INV-OBS-5
-    text: >-
-      Owner-only, through Caddy on localhost:8443, before any byte reaches MLflow: every path answers 401 without a
-      session cookie and 403 with a learner's session; with the owner's cookie, a POST whose Origin is a foreign
-      localhost origin (`https://localhost:3000`), the app origin (`https://localhost`) or absent answers 403, a GET
-      with a foreign Origin answers 403, and a POST with `Origin: https://localhost:8443` reaches MLflow; by the
-      gate's decision table, `Sec-Fetch-Site: same-site` with Mode `navigate`, Dest `document` and method GET gives
-      204, and `same-site` with Dest `script`, `image` or `empty` (or Mode other than `navigate`) gives 403, as does
-      any `cross-site`; no response
-      carries an `Access-Control-*` header or `Set-Cookie`, and an echo upstream behind the same proxy settings sees
-      no `Cookie` or `Authorization`; every blocked pattern answers Caddy's own 404. The app's side holds too: a POST to
-      https://localhost/api/* and the kernel WebSocket upgrade with `Origin: https://localhost:8443` and the owner's
-      cookie answer 403 (SRV-AUTH's Origin check). MLflow and Rotel publish no port and share no network with
-      postgres, embed, agent-proxy, mcp or any kernel; caddy shares none with rotel or the worker. Per site
-      (ADR-0033): the same holds on localhost:8444 for Jaeger; the 8443 site refuses `Origin: https://localhost:8444`
-      and the 8444 site refuses `https://localhost:8443` with the owner's cookie; a client-sent `X-Reader-Site` is
-      overridden; a gate request with no site header is 403; `https://localhost/api/obs/gate` answers as before
-      (site `app`); Jaeger shares no network with mlflow, the worker or the api.
-
-nfr:
-  - id: NFR-OBS-1
-    metric: seconds from a job's end to its trace being returned by MLflow's get-trace with every span, on the Mac
-    threshold: 30
-    verified_by: test
-    # Source: structural. 5 s processor delay + Rotel batching + MLflow write; the spike waited 10 s after a flush and
-    # found every trace complete (RESULT.md). The [live] step polls up to 30 s, and checks a tutor trace's session
-    # equals its lesson id (FR-OBS-12 e).
-
-vectors:
-  - id: VEC-OBS-1
-    source: "Hand-derived from FR-OBS-3, -5, -6 and the route, kind and error catalogs: span name patterns, attribute keys with types, value rules and span kinds, and job_args per kind"
-    file: spec/fixtures/SRV-OBS/attributes.yaml
-  - id: VEC-OBS-2
-    source: "spikes/cli-otel-content/results/20261124T002020/report.json, mode agent-env: the bundled CLI 2.1.330's span names, attribute keys and resource keys under FR-OBS-6's environment (stub upstream, fake credential); the WebSearch run's tool spans from spikes/web-search-otel/results/20261124T122933/report.json, mode content-off"
-    file: spec/fixtures/SRV-OBS/cli-span-keys.yaml
-  - id: VEC-OBS-3
-    source: "Hand-derived from FR-OBS-10 and SRV-AGENT FR-AGENT-9: seeded agent_spend, compile_runs/compile_steps, tutor_questions and job_keys rows, including a failed step attempt that billed money (a settle row with settled_usd > 0 on an attempt whose job ended failed) and an unsettled reserve, with the expected summary JSON"
-    file: spec/fixtures/SRV-OBS/summary.yaml
-  - id: VEC-OBS-4
-    source: "Hand-derived from FR-OBS-12..15 and -18 (V.obs-analytics; design review rounds 1-3): the derivation tables (span types, trace tags, previews, forbidden preview keys, llm cost, session, linked prompts), the handler-set root keys, the assessment catalogue and the prompt list; its attribute, span-name and key entries are merged into VEC-OBS-1"
-    file: spec/fixtures/SRV-OBS/analytics.yaml
-  - id: VEC-OBS-5
-    source: "Phase 2 (FR-OBS-20..25, ADR-0038): the patterns, Run params/metrics/tags, pinned bench sets, dataset record, upload result schemas (search, tutor records), label catalogue, alert codes and the worker → MLflow write list, measured as raw REST in spikes/obs-stack rounds 8, 10 and 12"
-    file: spec/fixtures/SRV-OBS/phase2.yaml
-  - id: VEC-OBS-6
-    source: "Phase 2 (FR-OBS-26): the declarative MLflow bootstrap (experiments, descriptions, tags, dataset names, LoggedModel naming, Run tag keys), deploy/otel/mlflow-setup.yaml at Green; setup's drift check measured in spikes/obs-stack round 10"
-    file: spec/fixtures/SRV-OBS/mlflow-setup.yaml
-
-# Test levels.
-#   [unit]   pure Python with OTel's in-memory pieces and an in-test OTLP/HTTP receiver (no Docker): the allow-list
-#            (FR-OBS-2, INV-OBS-1, Hypothesis), the middleware with a test app (FR-OBS-3, -4), the derived trace ids and
-#            link parsing (FR-OBS-5, INV-OBS-4), the CLI environment builder and the uv.lock pin check against VEC-OBS-2
-#            (FR-OBS-6 a), the gate's decision table over (Origin, X-Forwarded-Method, Sec-Fetch-Site/-Mode/-Dest,
-#            session role) (FR-OBS-9, INV-OBS-5), the summary's percentile, scoping and join functions over rows
-#            (FR-OBS-10), VEC-OBS-3's keys recomputed from its args with reader.jobs.model.idempotency_key and its
-#            trace ids from FR-OBS-5's derivation (the gate for the fixture; trace-ids.mjs only generates), the
-#            `truncated` flag shown when recent_keys_of hits its limit, the retention cutoff and the
-#            next-day-first order (FR-OBS-11), the canary for our process (INV-OBS-2 first half), failure isolation
-#            (INV-OBS-3: a failing exporter, and a tracer whose start, attribute or end call raises inside the
-#            middleware). Code review round 1 added: an oracle of VEC-OBS-1 read from the YAML independently of
-#            reader.obs.attributes (used by the INV-OBS-1 property test) with example rows at every bound; the gate's
-#            remaining Sec-Fetch, OPTIONS and inexact-Origin rows; the regexp of FR-OBS-9 on its own. Round 2 added:
-#            an upper-case traceparent is refused (W3C: lower-case hex only), and the retention handler takes
-#            `enabled` and `retention_days` from `current_settings()`.
-#   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
-#            capturing exporter (INV-OBS-4 end to end), the summary queries on VEC-OBS-3 (FR-OBS-10; the fixture's ISO
-#            times are seeded as timezone-aware datetimes), the gate route on real sessions (FR-OBS-9).
-#   [config] OPS-DEPLOY's rendered-model tests for the paired services, networks, ports and env (FR-OBS-8, INV-OBS-5),
-#            and `caddy adapt` of the Caddyfile: both sites' upstreams, the handle order, every blocked pattern, the
-#            header_up/header_down removals and the 8443 CSP (FR-OBS-9).
-#   [image]  opt-in READER_TEST_IMAGE_BUILD=1: rotel and reader-mlflow:local start healthy under the compose
-#            hardening; a span sent to rotel is returned by MLflow (FR-OBS-8); retention against real MLflow: a trace
-#            ingested with a 40-day-old timestamp is deleted by the handler and a fresh one stays (FR-OBS-11, measured
-#            in spikes/obs-stack round 2); the Caddy + gate + echo upstream case of INV-OBS-5 (no Cookie or
-#            Authorization upstream, no Set-Cookie or Access-Control-* down; every blocked path of FR-OBS-9, deep,
-#            upper-case, with repeated slashes and with an encoded slash, answers Caddy's empty 404); the CLI canary of
-#            INV-OBS-2 and
-#            FR-OBS-6 (b) in server/tests/obs/cli_canary/ (no network, stub upstream, zero credit). The backend
-#            tests' internal networks take explicit subnets 10.233.<n>.0/24 (random n per network, a new n on an
-#            overlap), because Docker Desktop's predefined pools run out (measured 2026-11-24); nothing else in the
-#            repository or on the owner's Docker uses 10.233/16. The ingest check reads the spans of
-#            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24);
-#            span attributes come back as OTLP values, a JSON object such as `mlflow.llm.cost` as a kvlist
-#            `{values: [{key, value: {double_value}}]}` (measured on the V.obs-analytics image run), which the
-#            FR-OBS-12 image test decodes. The V.obs-analytics image tests (test_images_analytics.py) use images by id
-#            and allow MLflow 180 s to turn healthy (over 60 s was measured on a loaded Mac). Phase 2: the hardened
-#            migrate test (test_images_migrate.py: uid 10004, read-only rootfs, --network none, the volume the only
-#            writable path, previous pin MLflow 3.10.0 by digest) is the first; the no-egress probe and the opt-in
-#            burst test (READER_TEST_BURST=1) are [image] too.
-#   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (e2e/live/lib/obs_live.py, run
-#            as `python -I`, and obs_browser.mjs, which finds the summary's trace links by the exact name `Trace`:
-#            the page's "traces dashboard" link also contains it, live check 2026-11-24). It is run by hand until the stage-2 live check script
-#            (`e2e/live/stage-2.sh`, docs/roadmap.md) exists; that script will call it. DIR is resolved and checked to
-#            lie outside the repository before anything is created. Sessions: one owner and one live-check learner
-#            row, each created and deleted by its id hash only (each statement must report exactly one row), through
-#            the live library's `docker compose exec -T postgres psql` helper (the script itself runs no `docker
-#            exec`); it never runs OWNER_RESET_SQL and never touches the owner's passkeys or other sessions. Caddy's
-#            public root is read the way `reader trust` reads it and is never trusted system-wide. Zero credit by
-#            default: 8443 answers 401 without a cookie, 403 for a learner, 2xx for the owner; the INV-OBS-5 Origin,
-#            method and Sec-Fetch cases; FR-OBS-9's blocked paths (deep, upper-case, repeated slashes) answer
-#            Caddy's empty 404; no Set-Cookie or Access-Control-* and the CSP on 8443; the summary is refused to a
-#            learner; the first 20 summary trace ids (FR-OBS-10) each open an existing MLflow trace. In the browser
-#            (Playwright, real Chromium over TLS): a trace link on /observability opens https://localhost:8443 with
-#            the span tree; the newest trace from MLflow's own traces/search (request traces exist at zero credit)
-#            gives the detail page, its CSP and one UI write (an assessment note saved; the probe's assessments are
-#            then deleted through MLflow's REST whatever happened); no CSP violation anywhere. A check that cannot
-#            run on the stack's data (the link click when the summary gives no trace id) prints SKIP, counted apart
-#            from the passes. `--with-credit` (off by default; spends Agent SDK credit; the canary question stays in
-#            the owner's tutor history): within NFR-OBS-1 a `job tutor.answer` trace with each link of the chain job →
-#            agent.call → claude_code.interaction → claude_code.llm_request; the CLI's span names, attribute keys
-#            (MLflow's own `mlflow.*` keys aside) and the trace's resource keys (MLflow keeps them as trace tags; the
-#            CLI's and FR-OBS-1's allowed) within VEC-OBS-2 (FR-OBS-6 c); the canary absent from the trace JSON. The
-#            live stack has no stub provider, so those checks need real credit; without it, the nesting against a
-#            stub upstream is covered by the [image] CLI canary and [db] propagation tests (declared, live check
-#            2026-11-24).
-test_levels:
-  FR-OBS-1: unit
-  FR-OBS-2: unit
-  FR-OBS-3: unit
-  FR-OBS-4: unit
-  FR-OBS-5: "unit + db"
-  FR-OBS-6: "unit + image + live"
-  FR-OBS-7: "db + live"
-  FR-OBS-8: "config + image"
-  FR-OBS-9: "unit + db + config + live"
-  FR-OBS-10: "unit + db + live"
-  FR-OBS-11: "unit + image"
-  FR-OBS-12: "unit + image + live"
-  FR-OBS-13: "unit + image"
-  FR-OBS-14: "unit + db + image"
-  FR-OBS-15: "unit + image"
-  FR-OBS-16: "image + live"
-  FR-OBS-17: "unit + db + live"
-  FR-OBS-18: "unit + image"
-  FR-OBS-19: "config + image + live"
-  FR-OBS-20: "unit + db + image"
-  FR-OBS-21: "unit + image"
-  FR-OBS-22: unit
-  FR-OBS-23: "unit + db + image"
-  FR-OBS-24: "unit + db + image"
-  FR-OBS-25: "unit + db"
-  FR-OBS-26: "unit + image"
-  FR-OBS-27: "config + image"
-  FR-OBS-28: image
-  FR-OBS-29: image
-  FR-OBS-30: "image + live"
-  FR-OBS-31: "db + image"
-  FR-OBS-32: "unit + config + image + live"
-  FR-OBS-33: "config + image"
-  FR-OBS-34: config
-  FR-OBS-35: "image (burst, opt-in)"
-  INV-OBS-1: unit
-  INV-OBS-2: "unit + image + live"
-  INV-OBS-3: unit
-  INV-OBS-4: "unit + db"
-  INV-OBS-5: "config + image + live"
-
-# Proposed paired changes (applied in each spec at this spec's approval, with its own tests; not edited by this draft).
-paired_changes:
-  - spec: OPS-DEPLOY
-    items:
-      - "FR-DEPLOY-1: profile `observability` with `rotel` and `mlflow` (FR-OBS-8)."
-      - "FR-DEPLOY-2: `deploy/otel/mlflow.Dockerfile` is under the same pin, allow-list and no-ADD rules; it copies nothing; its `.dockerignore` excludes `**`; rotel's image is third-party and pinned by digest."
-      - "FR-DEPLOY-3: networks `otel` 10.230.2.0/24 (api, worker, rotel), `obs` 10.230.3.0/24 (rotel, mlflow, worker) and `obs-ui` 10.230.4.0/24 (caddy, mlflow), all internal with explicit subnets."
-      - "VEC-DEPLOY-2 gains exactly these allowed pairs: api–rotel, worker–rotel (otel); rotel–mlflow, worker–mlflow (obs); caddy–mlflow (obs-ui). And these `never` pairs: caddy–rotel, caddy–worker (unchanged), mlflow–api, mlflow–postgres, mlflow–embed, mlflow–agent-proxy, mlflow–mcp, mlflow–kernel-* and mlflow–kernel-user-*, rotel–postgres, rotel–embed, rotel–agent-proxy, rotel–mcp, rotel–kernel-* and rotel–kernel-user-*."
-      - "FR-DEPLOY-5: volume `obs_mlflow` (mlflow only, `org.reader-ai.backup=exclude`)."
-      - "FR-DEPLOY-6: the base compose.yaml still publishes only `127.0.0.1:443:443`; `127.0.0.1:8443:8443` on caddy comes from OPS-CLI's override when `observability` is active (VEC-DEPLOY-3 gains a variant with it). INV-DEPLOY-6 unchanged (127.0.0.1 only)."
-      - "FR-DEPLOY-7: the second Caddy site of FR-OBS-9. `server/tests/deploy/test_caddy_and_images.py`: the upstream set becomes {10.230.1.10:8000, mcp:8001, mlflow:5000} (forward_auth to 10.230.1.10:8000 on 8443 included), the proxied map gains the 8443 catch-all → mlflow:5000, and new asserts cover the handle order, every blocked pattern answering 404 in Caddy's own handler, the header_up/header_down removals and the 8443 CSP string."
-      - "FR-DEPLOY-9: rotel uid 10005, mlflow uid 10004; both read_only, tmpfs /tmp, cap_drop ALL, no-new-privileges; rotel 256m, mlflow 1g (memswap equal); not secret consumers."
-      - "FR-DEPLOY-11: the two healthchecks of FR-OBS-8, with the server roles' timing."
-      - "INV-DEPLOY-2 (1): the only `environment` entries are READER_CONFIG on the server roles and exactly `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, `MLFLOW_DISABLE_TELEMETRY=true` on mlflow (a non-secret allow-list)."
-      - "INV-DEPLOY-3: `obs_mlflow` is mounted only by mlflow."
-      - "INV-DEPLOY-4: the full pair set equals the extended VEC-DEPLOY-2."
-  - spec: OPS-CLI
-    items:
-      - "FR-CLI-5: `reader up` also activates `observability` when `observability.enabled` is true (default), building reader-mlflow:local through the service's `build` section; the override then adds caddy's `127.0.0.1:8443:8443`. When it turns false, the withdrawn-profile rule removes rotel and mlflow (their volume stays) and the port is not published."
-      - "FR-CLI-13: `reader status` lists rotel and mlflow with the recorded profiles (no new code path)."
-      - "FR-CLI-15: `reader doctor` adds `observability`: when the profile is recorded active, `https://localhost:8443/` answers 401 without a cookie (the gate is in front of MLflow); detail `gate ok`, `gate open` (fails) or `unreachable`."
-      - "FR-CLI-8 output: after all healthy, `reader up` prints `traces: https://localhost:8443/` when the profile is active."
-      - "Backup: `obs_mlflow` carries backup=exclude, so `reader backup`/`restore` skip it (no code change)."
-  - spec: SRV-CONFIG
-    items:
-      - "A tenth top-level section `observability: {enabled: bool = true, retention_days: int 1..365 = 30}`; OPS-DEPLOY FR-DEPLOY-12's example gains it (ten sections)."
-  - spec: SRV-AUTH
-    items:
-      - "reader.api.app: ROUTERS adds `reader.obs.routes` (GET /api/obs/gate, GET /api/obs/summary); the app factory wraps the app in `reader.obs.asgi.TraceMiddleware` outermost."
-      - "reader.serve: `--role api|worker` calls `reader.obs.setup(role, settings)` after loading the configuration and `shutdown()` on SIGTERM; serving_logs adds FR-OBS-4's trace filter to the `reader` handler."
-      - "The CSRF Origin check is unchanged; INV-OBS-5's app-side cases (POST and kernel WS upgrade with Origin https://localhost:8443 → 403) are added to its tests."
-  - spec: SRV-EVENTS
-    items:
-      - "FR-EVENTS-3/-6/-4: `_defer` passes the `trace` kwarg of FR-OBS-5 (a); the registered task accepts `trace: str | None = None`; `_run` wraps `_attempt` and `_judge` in FR-OBS-5 (b)'s root span; the sweep's defers pass none (c)."
-      - "FR-EVENTS-1: KIND_MODULES lists `reader.obs.jobs` (kind `obs.retention`, an `on_worker_start` hook)."
-      - "FR-EVENTS-16: procrastinate log records gain no trace field; the scrubber already removes `task_kwargs` whole, so `trace` never reaches a log; unchanged behaviour."
-      - "New FR-EVENTS-18 (based on origin/V/slice-integration's SRV-EVENTS, which has FR-EVENTS-17 `dead_error_code_of` and the rule that no module queries `job_keys` directly): published reads next to `job_status_of` and `dead_error_code_of`, on an open connection without a procrastinate app, read-only: `key_rows_of(conn, keys) -> list[KeyRow]` (keys of any kinds in one call: the kind is the key's `<kind>:` prefix, matched against the row's kind; primary-key lookup) and `recent_keys_of(conn, kind_names, outcome, since, limit) -> tuple[list[KeyRow], bool]` (newest `finished_at` first; 1 ≤ `limit` ≤ 500, structural; the bool is `truncated`, true when `limit` rows were returned), `KeyRow = (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at)`; a migration `jobs_0002` adds an index on job_keys (kind, outcome, finished_at). [db] tests: keys of two kinds in one call, unknown keys omitted, a key whose prefix differs from its row's kind omitted, outcome filter, window, limit and `truncated` at exactly `limit`, ordering, the index used (EXPLAIN shows an index scan on a seeded table)."
-      - "Owner note: the stage-2 outbox must store the traceparent with the enqueue it defers (FR-OBS-5 d)."
-  - spec: SRV-AGENT
-    items:
-      - "FR-AGENT-6: the `agent.call` span and the CLI environment additions of FR-OBS-6, only when tracing is enabled; INV-AGENT-1's environment test lists them, with OTEL_LOG_RAW_API_BODIES, ENABLE_BETA_TRACING_DETAILED and BETA_TRACING_ENDPOINT blank."
-  - spec: WEB-UI
-    items:
-      - "Route `/observability`, owner only (hidden from other roles' navigation; a non-owner gets the not-found view), rendering FR-OBS-10's four views from GET /api/obs/summary with each trace id linked to the 8443 deep link; axe-clean; a Storybook story per view with fixture data."
-  - spec: OPS-DOD
-    items:
-      - "spec/fixtures/OPS-DOD/operations.yaml: operation `obs.view` (Open the traces dashboard and the observability page; surface web; specs SRV-OBS, OPS-DEPLOY, WEB-UI; routes GET /api/obs/gate, GET /api/obs/summary once implemented): security INV-OBS-5, FR-OBS-9; privacy INV-OBS-1, INV-OBS-2; a11y pages [/observability]; latency missing (no sourced budget); cost na (no provider call); observability FR-OBS-4 (the summary route's line); recovery INV-OBS-3, FR-OBS-11."
-      - "Observability cells that FR-OBS-3/-4's request line fills once its test exists (today `missing`): auth.signout, material.browse, search.query, lesson.list, lesson.open, cell.run, cell.interrupt, cell.reset, cell.run_all (the WebSocket session line; no kernel content, INV-KERNEL-6 unchanged), course.import, lesson.findings → items [FR-OBS-4] (SRV-OBS added to each operation's specs). ingest.setup stays missing (host CLI, not traced)."
-      - "Existing observability cells gain FR-OBS-5 (job trace and its log lines) where the operation runs a job: material.ingest, ingest.requeue, lesson.compile, lesson.compile_status, lesson.compile_resume, tutor.ask; and FR-OBS-6 for lesson.compile and tutor.ask."
-      - "not_user_facing: none added."
-
-# V.obs-analytics paired changes (FR-OBS-12..19; ADR-0033 and ADR-0035 accepted 2026-11-24, ADR-0034 rejected),
-# applied in each spec at Green on V/obs-analytics-impl with their own tests, reviewed in SRV-OBS's code review.
-analytics_paired_changes:
-  - spec: SRV-AGENT
-    items:
-      - "FR-AGENT-14: `agent.call` gains `gen_ai.operation.name: invoke_agent`, `gen_ai.provider.name: anthropic`,
-        and FR-OBS-12 (b)'s token keys (input including the cache); the exporter derives its `mlflow.spanType`."
-      - "FR-AGENT-14: `StageCall` already carries owner, run, lesson and stage; it gains only `course_id: UUID |
-        None` and `step: int | None` (review: no separate CallContext). After the settle, `agent.call` sets
-        `reader.cost_usd` (settled_usd) and `reader.cost_input_usd` (FR-OBS-12 c's split from the settle row's token
-        columns and pricing.yaml), and `reader.lesson.id`, `reader.course.id`, `reader.step`. SRV-AGENT already writes
-        `agent_spend.lesson_id` on every row of a call with a lesson; FR-OBS-17 relies on it."
-  - spec: OPS-DEPLOY
-    items:
-      - "jaeger service, `jaeger-in` and `jaeger-ui` networks, rotel's two named exporters, the 8444 Caddy site and
-        the X-Reader-Site headers (FR-OBS-19, FR-OBS-9); VEC-DEPLOY-2 gains rotel–jaeger and caddy–jaeger and the
-        jaeger `never` pairs."
-      - "mlflow service: environment adds `MLFLOW_MODEL_CATALOG_URI=` (empty: no remote price fetch); reader-mlflow's
-        image replaces the bundled model catalog (FR-OBS-12 c): `deploy/otel/mlflow.Dockerfile` (and its
-        .dockerignore) gains the copy of `deploy/otel/mlflow-catalog/anthropic.json`. Generator
-        `deploy/otel/mlflow_catalog.py` (stdlib + `ruamel.yaml`, the server's locked YAML library, through `uv run
-        --project server`; `--write` regenerates,
-        `--check` exits 1 on any difference) reads pricing.yaml's model ids and `deploy/otel/mlflow-bundled-anthropic.txt`.
-        Tests: [unit] `--check` passes and every pricing.yaml model is in the file; [image] the built image's
-        `mlflow/utils/model_catalog/` has that `anthropic.json` as its only `*.json` (fails when the replacement is
-        missing or another file is left), the running container's `MLFLOW_MODEL_CATALOG_URI` is set and empty (read
-        from `docker inspect`'s Config.Env, not by exec), the base image's bundled ids equal `mlflow-bundled-anthropic.txt` (a base-image bump fails until it is
-        regenerated), and through rotel a CLI-shaped `llm_request` for a model absent from pricing.yaml and one with
-        no provider key both cost 0.0 while `agent.call` keeps its ledger cost."
-  - spec: SRV-PIPELINE
-    items:
-      - "Root attributes `reader.lesson.id`, `reader.course.id` (from the run's lesson row; the `job.session` marker
-        with `reader.run_id` comes from the job wrapper, FR-OBS-12 e) (FR-OBS-12 d); `verify.claims`, `verify.lab`,
-        `kernel.run` spans (FR-OBS-13); `obs.feedback` enqueues for fact_check.passed, verify.passed,
-        verify.lab_passed (FR-OBS-14); `reader.prompt.version` on the root (FR-OBS-18)."
-  - spec: OPS-CLI
-    items:
-      - "`reader up`'s in-memory override publishes `127.0.0.1:8444:8444` with 8443 while the observability profile
-        is active (FR-OBS-19)."
-  - spec: SRV-TUTOR
-    items:
-      - "Root attributes `reader.lesson.id`, `reader.course.id` (from the question row and its lesson),
-        `reader.tutor.state`, and `reader.obs.session_marker(\"reader.lesson.id\", lesson_id)` called by the handler
-        after it reads the question row and before `Provider.run` (FR-OBS-12 d, e, f);
-        `tutor.retrieve` and `tutor.citations` spans (FR-OBS-13); `obs.feedback` for tutor.citations_valid and
-        tutor.citation_share (FR-OBS-14); `reader.prompt.version` (FR-OBS-18)."
-  - spec: SRV-INGEST
-    items:
-      - "`ingest.parse`, `ingest.chunk` spans (FR-OBS-13)."
-  - spec: SRV-SEARCH
-    items:
-      - "`embed.batch` spans in `search.embed` (FR-OBS-13)."
-  - spec: SRV-EVENTS
-    items:
-      - "FR-EVENTS-19's job wrapper calls `reader.obs.session_marker(\"reader.run_id\", args.run_id)` right after
-        opening the root for `pipeline.*` kinds only (the run id from the validated args); the helper flushes off
-        the job's task and never raises (FR-OBS-12 e). KIND_MODULES unchanged; `reader.obs.jobs` gains the kinds
-        `obs.feedback` and `obs.prompts` (FR-OBS-14, -15) and a start hook enqueuing `obs.prompts`."
-  - spec: WEB-UI
-    items:
-      - "/observability: a `Dashboards` list of FR-OBS-16's saved views (links to https://localhost:8443, `rel=noopener
-        noreferrer`), and the note that MLflow's cost column and dashboard show the ledger's per-call amounts while
-        this page's run and lesson totals also count open reserves. No header, nav or app.css change
-        (V/live-ui-fixes owns those while it is open)."
-      - "/observability: a fifth view, `Cost per lesson` (FR-OBS-17): a table of the `lessons` rows (title, course,
-        compile total, runs, last compile, tutor, total, per 1k characters, a `Traces` link to `mlflow_url`), a
-        course total row per course, sortable by every column (`aria-sort` on the active header; default total
-        descending); a Storybook story with VEC-OBS-3's lessons. Each trace link has a Jaeger twin (FR-OBS-19)."
-
-# Per-tab plan for phase 2. Privacy: every listed value is an id, an enum, a number or pinned committed repository
-# data. "Writes" names the worker → MLflow requests (ADR-0035 or ADR-0038); "none" means OTLP or read-only.
-phase2_tabs:
-  - tab: Experiment 0 Training runs and Evaluation runs (Runs)
-    shows: one Run per compile run and import, with params, metrics and a cumulative-cost chart; the Run's Traces tab lists its stage traces with assessments (round 6; a Run in another experiment found none, round 7)
-    source: agent_spend, the pipeline and ingest tables, linked traces
-    privacy: ids, model ids, sha256s, numbers
-    writes: runs/search, runs/create, log-batch, runs/update, runs/set-tag, traces/search, traces/link-to-run (ADR-0038)
-  - tab: Experiment `bench` Datasets
-    shows: tutor-bench-v2 (40) and search-bench-v1 (26) with question ids, questions, chapters and gold pages
-    source: the owner's upload of a set whose sha256 is pinned (FR-OBS-22)
-    privacy: the agent's own committed questions, with no 5-word run shared with the book (measured); ids and page numbers
-    writes: datasets/search, datasets/create, datasets/{id}/records (ADR-0038); the experiment comes from obs.setup
-  - tab: Experiment `bench` Evaluation runs
-    shows: one Run per bench upload; the tab's chart shows hit@k, reciprocal rank, grounded and gold-cited shares, latency and cost over time
-    source: the owner's uploads, recorded in obs_bench_results (FR-OBS-23)
-    privacy: ids, numbers, model names, commit shas
-    writes: runs/search, runs/create, log-batch, log-inputs, runs/update, runs/set-tag (ADR-0038)
-  - tab: Agent versions
-    shows: one LoggedModel per version key, with its params (prompt-set sha256, the stage → model map, the pipeline config sha256); traces are compared by the tag reader.version_key
-    source: obs.setup (FR-OBS-21 b, FR-OBS-26)
-    privacy: sha256s, model ids
-    writes: logged-models/search, logged-models create, logged-models/{id} PATCH status READY (ADR-0038); the root tag goes through OTLP
-  - tab: Trace view, assessments (owner labels)
-    shows: owner.lesson_ok / owner.answer_ok HUMAN assessments on the labelled traces, a relabel's new revision with the old one marked invalid (round 8); Review queues and label schemas are not used (B8)
-    source: owner_labels in Postgres (FR-OBS-24), mirrored by obs.label
-    privacy: pass/fail, reason enum, ids, a revision number
-    writes: traces/{id}/assessments POST (with overrides for a relabel), GET by id (ADR-0038 Decision 2)
-  - tab: Experiments list
-    shows: "`reader` (experiment 0, renamed) and `bench`, each with its description and reader.* tags (round 10)"
-    source: deploy/otel/mlflow-setup.yaml through obs.setup (FR-OBS-26)
-    privacy: committed configuration only
-    writes: experiments/get|get-by-name|update|create|set-experiment-tag (ADR-0038)
-  - tab: Traces, Sessions, Overview, Dashboard, Prompts, Issues
-    shows: as in phase 1, plus the tags reader.version_key and mlflow.sourceRun (from the link) as filters
-    source: OTLP, FR-OBS-14/-15
-    privacy: unchanged (phase 1)
-    writes: none new
-  - tab: AI Gateway budgets
-    shows: disabled (MLFLOW_ENABLE_AI_GATEWAY=false answers 501, round 9); budgets count gateway traffic only and alert by an outbound webhook
-    source: none
-    privacy: n/a
-    writes: none (FR-OBS-25 keeps alerts on /observability)
-
-# B3: the phase 2 job kinds, declared like FR-OBS-14's (SRV-EVENTS `JobKind`, queue `obs`, delays 5 s and 25 s).
-# Every handler with tracing off ends without a request; every 4xx other than the listed transients ends `dead` with
-# the class name; HTTP 5xx, timeouts and transport errors are transient; INV-OBS-3 holds for every enqueue.
-phase2_job_kinds:
-  - { kind: obs.setup, args: "{digest: sha256}", key: [digest], max_attempts: 3, timeout_s: 60,
-      enqueued_by: "the worker's start hook (enqueue-only)", dead: [ObsSetupRefused],
-      note: "a dead key blocks nothing: ensure_setup() also runs inline in obs.runs, obs.bench and obs.label (N2)" }
-  - { kind: obs.runs, args: "{kind: compile|ingest, id: uuid, end: int 1..100}", key: [kind, id, end],
-      max_attempts: 3, timeout_s: 60, schedule_in_s: 60, lock: "advisory lock_id(obs.runs:<kind>:<id>)",
-      enqueued_by: "SRV-PIPELINE / SRV-INGEST after the end's transaction commits (FR-PIPELINE-18, FR-INGEST-26)",
-      dead: [ObsRunsRefused, ObsRunsDuplicate] }
-  - { kind: obs.bench, args: "{upload_id: uuid}", key: [upload_id], max_attempts: 3, timeout_s: 60,
-      enqueued_by: "POST /api/obs/bench, in the transaction that stores the upload",
-      idempotent_by: "the Run tag reader.bench_upload", dead: [ObsBenchRefused] }
-  - { kind: obs.label, args: "{label_id: uuid, revision: int}", key: [label_id, revision], max_attempts: 3,
-      timeout_s: 30, schedule_in_s: 0, enqueued_by: "POST /api/obs/labels in its transaction",
-      idempotent_by: "assessment_name + metadata.revision on the trace; a revision below the row's ends at once (N4)",
-      transient: [TraceMissing], dead: [ObsLabelRefused] }
-  - { kind: obs.health, args: "{slot: datetime truncated to 30 min}", key: [slot], max_attempts: 1, timeout_s: 20,
-      traced: false, enqueued_by: "the worker's periodic scheduler (SRV-EVENTS), every 30 minutes", dead: [] }
-  - { kind: obs.retention, change: "also deletes old Runs and LoggedModels (FR-OBS-31)" }
-
-# Edits to approved text: ALL APPLIED at Red (V/obs-mlflow-phase2-impl, 2026-11-25) in INV-OBS-2, INV-OBS-3, `adr`,
-# FR-OBS-5 (f), FR-OBS-9, FR-OBS-31, `tables` and VEC-OBS-4; kept here as the record of what changed.
-phase2_in_place_edits:
-  - "INV-OBS-2 gains a phase 2 clause: with the canaries placed in a lesson's text, a tutor question and answer, a
-    bench upload's unknown or prose keys and an upload's set file (a non-pinned set), no `obs.runs`, `obs.bench`,
-    `obs.label`, `obs.setup` or `obs.health` request body (captured by the in-test MLflow receiver) and no row of
-    `obs_bench_results`, `owner_labels` or `obs_stack_status` contains any of them; for arbitrary uploads only
-    those passing VEC-OBS-5 produce a row and a job; the pinned questions are the only text that reaches MLflow."
-  - "INV-OBS-3 is extended: a failing `obs.runs` enqueue (outside the run's final transaction), `obs.label` or
-    `obs.bench` enqueue, and any phase 2 job failure never changes a compile run's, an import's or a question's
-    outcome, and a failed mirror never changes a label's record."
-  - "ADR list gains ADR-0038; FR-OBS-9's blocked list is unchanged (the gateway, assistant, MCP and v1 ingest stay
-    blocked; /graphql stays open, FR-OBS-33)."
-  - "FR-OBS-9 residual list (review round 1, non-blocking) is restated: (1) MLflow's UI JavaScript runs on 8443
-    with the owner's session through the gate, so a flaw in it can call any open MLflow route as the owner: the
-    blocked list, no CORS and the read-only Jaeger site bound it; (2) a comment the owner types in MLflow is stored
-    as typed (owner note); (3) `/health` ignores --allowed-hosts (round 10); (4) MLflow logs a 500 for an empty
-    /graphql body; (5) a soft-deleted Run keeps its rows (lifecycle stage `deleted`) because reader never runs
-    `mlflow gc` (FR-OBS-31)."
-  - "Unbounded growth is declared and pruned: traces and compile/import Runs by retention_days, LoggedModels of
-    unused version keys by retention_days, bench Runs and datasets kept (bounded by uploads: one Run and at most 40
-    records each), Postgres `obs_bench_results` and `owner_labels` kept (the record), `obs_stack_status` keeps
-    the newest row per member only; soft-deleted Run rows stay (no `mlflow gc`) and count in the store size."
-  - "`tables` gains: `obs_bench_results` (FR-OBS-23; owner: true), `owner_labels` (FR-OBS-24; owner: true),
-    `obs_stack_status` (FR-OBS-32; system: true, one row per member: member text pk, ok bool, detail text CHECK in
-    an enum of probe outcomes, checked_at timestamptz), all in migration `obs_0002`."
-  - "VEC-OBS-4 `trace_tags` gains `reader.material_sha256` (the import job's root key, so FR-OBS-20 (d) finds
-    import traces by tag) and `reader.version_key` (FR-OBS-21 a)."
-  - "FR-OBS-5's job root is skipped for kinds declared `traced: false` (only `obs.health`), so the 30-minute probe
-    adds no trace."
-
-# B11: paired changes, with ids above V/manage's maxima (FR-EVENTS-31, FR-CLI-23, FR-UI-30).
-phase2_paired_changes:
-  - { spec: SRV-EVENTS, id: FR-EVENTS-32, change: "the catalogue gains obs.setup, obs.runs, obs.bench, obs.label and obs.health (phase2_job_kinds); a periodic scheduler entry for obs.health; `traced: false` for obs.health; declared: obs.runs holds a second advisory lock (lock_id(obs.runs:<kind>:<id>)) on its job's connection for the whole run, beside the key lock, so it holds one pooled connection for up to its 60 s timeout, like every running job" }
-  - { spec: SRV-PIPELINE, id: FR-PIPELINE-18, change: "after the transaction that records a run's end commits, enqueue obs.runs {compile, run_id, end} inside its own try/except" }
-  - { spec: SRV-INGEST, id: FR-INGEST-26, change: "the same for an import's end (obs.runs {ingest, ingest_id, 1}); id above V/manage's FR-INGEST-25 (review round 2, N10)" }
-  - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench's records file (tutor-bench-<UTC time>.json) gains a header (kind tutor, date, branch, commit sha, lesson_id, set tutor-bench-v2) and is VEC-OBS-5 bench_results.tutor exactly (the upload); the summary file is spec/fixtures/SRV-TUTOR/bench-summary.yaml's tutor_summary (no prose keys, commit sha only; moved to SRV-TUTOR in review round 4) and the committed 2026-11-23 summary is migrated to it (a report, not an upload)" }
-  - { spec: WEB-UI, id: FR-UI-33, change: "/observability: the bench upload (two file pickers, the route's errors shown by code), label buttons on lesson and answer rows (good/bad and the reason enum), one banner per alert, and a stack row (mlflow, rotel from obs_stack_status; jaeger: see reader doctor)" }
-  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader backup` also writes `obs_mlflow.store.version` (the volume's store.version, when present) beside `obs_mlflow.db`, and `reader restore` (stack down) first removes the volume's store.version and the markers backup/in-progress, backup/fresh and backup/restored-for, then replaces mlflow.db through the backup API, then writes store.version back from the backup (absent when the backup has none) (FR-OBS-30, H2, review round 7); `reader restore-obs-premigrate` (FR-OBS-29; with --force it prints the version it rolls back to before copying); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written, 6 no `backup/in-progress` (nothing failed; rerun with `--force` to restore anyway), 7 no `pre-migrate.version` (code review round 1 of phase 2); `reader up` reports mlflow-migrate's own codes (FR-OBS-29: 10 obs_migration_incomplete → run restore-obs-premigrate; 11 obs_restored_for_other_version → the marker's version and the hint that the owner reverts the pin in git; 12 obs_migration_failed and 13 obs_migration_finish_failed → restore-obs-premigrate), which never overlap the restore command's 0..7; `reader restore` runs mlflow-migrate itself and starts mlflow only after it exited 0; `reader status` and `doctor --json` carry the obs lines" }
-  - { spec: OPS-DEPLOY, id: FR-DEPLOY-15, change: "FR-OBS-27's pinned flags and environment with comments and sources; the mlflow-migrate one-shot (flock, pre-migration backup, db upgrade, WAL); no new healthchecks (rotel and jaeger have no shell; obs.health and reader doctor cover them); deploy/otel/mlflow-setup.yaml mounted read-only into the worker; the 8443 request body limit (10 MiB, structural); the obs_mlflow volume's backup label changes from excluded to included (ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion), VEC-DEPLOY-3's backup list updated" }
-  - { spec: spikes, id: "spikes/embeddings-local (no spec; spike files)", change: "bench.py writes `kind: search`, and the committed results under results/20261120T195713-draft-questions/ (the run over questions.yaml, i.e. search-bench-v1's set) gain it, so they conform to VEC-OBS-5; the edit is noted in spikes/embeddings-local/RESULT.md (review rounds 2 and 3, N3 and R4)" }
-  - { spec: OPS-DOD, id: "tools/ci-local.sh (paired, tooling)", change: "ci-local.sh and ci.yml run `node spec/fixtures/SRV-OBS/compose-bench.mjs --check` beside trace-check" }
-  - { spec: SRV-OBS, id: VEC-OBS-5, change: "spec/fixtures/SRV-OBS/phase2.yaml" }
-  - { spec: SRV-OBS, id: VEC-OBS-6, change: "spec/fixtures/SRV-OBS/mlflow-setup.yaml (deploy/otel/mlflow-setup.yaml at Green)" }
-
-# Design review round 1 (b1a84d5, changes): each finding and its answer in this revision.
-phase2_review:
-  - { id: B1, answer: "bench_regressed reads Postgres obs_bench_results only (FR-OBS-23, -25); the api never reads MLflow (ADR-0038 Decision 4)" }
-  - { id: B2, answer: "obs.runs: key [kind, id, end]; reader.complete written last; an incomplete Run is completed, not duplicated; snapshot_at (a tag since round 2), never refreshed; a second end re-logs metrics at step 2 (FR-OBS-20; round 8)" }
-  - { id: B3, answer: "phase2_job_kinds declares every kind; obs.runs schedule_in 60 s; start-time setup is the enqueue-only obs.setup; obs.bench idempotent by reader.bench_upload; INV-OBS-3 extended (phase2_in_place_edits)" }
-  - { id: B4, answer: "VEC-OBS-5 written with patterns, enums and ranges, unknown keys rejected; commit ^[0-9a-f]{7,40}$; the committed tutor result is migrated through SRV-TUTOR FR-TUTOR-15; INV-OBS-2 phase 2 clause" }
-  - { id: B5, answer: "one composed committed fixture bench-tutor-v2.yaml (compose-bench.mjs, --check in CI) with one sha256; inputs.chapter is an integer 1..23" }
-  - { id: B6, answer: "check_bench_quotes.py: threshold 5, U+FFFE/U+00AD/line-end hyphens joined, NFC, set and PDF sha256 recorded; rerun (round 8 quotes.json); FR-OBS-22 says verbatim only" }
-  - { id: B7, answer: "owner_labels (renamed in round 2) is the record; obs.label mirrors HUMAN assessments; a relabel updates the row and posts a new revision with overrides (round 8)" }
-  - { id: B8, answer: "the FR-OBS-14 / ADR-0035 amendment is ADR-0038 Decision 2; the false consequence is fixed (without ADR-0038 labels stay in Postgres only); the route's error table includes no trace (stored), another owner (404) and tracing off; review queues and label schemas dropped" }
-  - { id: B9, answer: "by_version dropped; versions compared in MLflow by tag only (FR-OBS-21)" }
-  - { id: B10, answer: "reader obs bench dropped; uploads from /observability only (FR-OBS-23, WEB-UI FR-UI-33)" }
-  - { id: B11, answer: "phase2_paired_changes with ids above V/manage's maxima; round 8 replayed every write as raw REST (round8.json `raw`; round 10 the rest), a dataset in bench, link-to-run over 100, a Run after deleting 5 of its 120 traces (115 listed)" }
-  - { id: non-blocking, answer: "the bench route never starts a bench; ADR-0038 cites ADR-0034 and says why it differs; daily_spend_high per task; bench_regressed compares the same kind, set and model; FR-OBS-9 residual list; unbounded growth declared and pruned (phase2_in_place_edits)" }
-# Design review round 2 (ac3a79d, changes): N1-N10 and the non-blocking items, answered in revision 3.
-phase2_review_round2:
-  - { id: N1, answer: "snapshot_at is the tag reader.snapshot_at; while a Run is incomplete every attempt re-logs all params (same values); on a second end with different values tags and metrics update and params stay the first end's (FR-OBS-20 c)" }
-  - { id: N2, answer: "ensure_setup() runs inline when an experiment is missing (0 writes on a repeat); --repair-mirrors dropped; a dead obs.setup key blocks nothing (FR-OBS-26, -30)" }
-  - { id: N3, answer: "search-bench-v2 dropped; the result's required kind must equal the pinned set's (FR-OBS-23, VEC-OBS-5)" }
-  - { id: N4, answer: "obs.label finds its mirror by assessment_name + metadata.revision; a revision below the row's ends without a request (FR-OBS-24 c)" }
-  - { id: N5, answer: "import traces by tag.reader.material_sha256 (VEC-OBS-4 trace_tags gains it); the trace tag list is gone from mlflow-setup.yaml" }
-  - { id: N6, answer: "no VACUUM; mlflow-migrate's exact steps under flock with one pre-migration backup at backup/pre-migrate.db and `reader restore-obs-premigrate`; the false sentences fixed (3.18 does not refuse an old schema; soft-deleted rows stay without mlflow gc) (FR-OBS-29, -31, residual list)" }
-  - { id: N7, answer: "obs_mlflow stays in reader backup, always through SQLite's backup API; ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion; the backup label change is in FR-DEPLOY-15" }
-  - { id: N8, answer: "no Jaeger sidecar; doctor/status use docker inspect; store size measured on the host with docker system df -v; obs_store_large is a doctor/status warning, not an api alert (FR-OBS-25, -31, -32)" }
-  - { id: N9, answer: "probe on exactly mlflow's networks: IP-literal connect fails, external DNS fails, positive control on a normal network succeeds; spike round 11 recorded it (FR-OBS-33)" }
-  - { id: N10, answer: "FR-INGEST-26" }
-  - { id: non-blocking, answer: "/version removed; obs.health every 30 min and untraced; burst test, 4 GiB structural; 1.45 KB a span; used = reader.last_started within retention_days, Runs by end_time; traces/search max_results 500 with page_token; dead obs.runs after a long MLflow restart and the ObsRunsDuplicate race (advisory lock) declared; owner_labels with the lesson revision in the unique key; tutor no_trace path dropped; compose-bench --check in ci-local.sh (paired); 10 MiB structural; ADR verified_by adds rounds 10 and 11; tables in-place edit" }
-# Design review round 3 (d03645c, changes): R1-R4 and the non-blocking items, answered in revision 4.
-phase2_review_round3:
-  - { id: R1, answer: "an incomplete Run logs only the params it lacks, read from the runs/search answer; obs.bench's values come from the stored, immutable upload row; round 12: a same-value re-log 200, a changed value 400, runs/search returns the params (FR-OBS-20 c, -23 c)" }
-  - { id: R2, answer: "round 12: PATCH /api/2.0/mlflow/logged-models/{id}/tags {tags: [{key: reader.last_started, value: day}]} 200, read back through logged-models/search, a next-day PATCH replaces it (FR-OBS-26; round12.json raw)" }
-  - { id: R3, answer: "restore-obs-premigrate removes stale -wal/-shm, prints pre-migrate.version, writes backup/restored-for; mlflow-migrate exits 3 obs_restored_for_other_version until the image matches; reverting the pin is the owner's git action; FR-CLI-24 has the exit-code table (FR-OBS-29)" }
-  - { id: R4, answer: "scores recomputed by code over registered records only, file aggregates validated but never stored; the tutor upload is the per-question records file with FR-TUTOR-15's header; kind: search points at results/20261120T195713-draft-questions, noted in spikes/embeddings-local/RESULT.md (FR-OBS-23, VEC-OBS-5)" }
-  - { id: non-blocking, answer: "fresh-volume first start declared as a migration with a doctor line; pre-migrate.db counted in the store size; FR-OBS-29's [image] test (flock, non-root, read-only) is the first Red test; the egress test shows the probe reaching MLflow (round 12: /health 200); 0 writes on the same day; the advisory-lock connection hold declared in FR-EVENTS-32" }
-# Design review round 4 (03124aa, changes): F1 and the non-blocking items, answered in revision 5.
-phase2_review_round4:
-  - { id: F1, answer: "FR-OBS-29: step 4 writes store.version; step 2 copies store.version into pre-migrate.version (3.18.0 for a store made before this change); an in-progress marker is written before step 3 and removed after step 4; at start an existing marker exits 10 obs_migration_incomplete before step 2, so the backup is never overwritten; the [image] test names N and N+1: a failed N→N+1 exits 12, a second run exits 10 with pre-migrate.db byte-identical, the restore prints N, then N+1 exits 11 and N starts" }
-  - { id: non-blocking, answer: "`db upgrade` from empty marked a hypothesis with its fallback (skip to the server's own initialisation, WAL and store.version at the next run); the first tutor records upload needs a new bench run that spends live-budget credit (declared); tutor_summary moved to spec/fixtures/SRV-TUTOR/bench-summary.yaml; mlflow-migrate exits 10..13, the restore command 0..5" }
-# Design review round 5 (46e9017, changes): G1 and the non-blocking items, answered in revision 6.
-phase2_review_round5:
-  - { id: G1, answer: "a fresh volume writes backup/fresh in step 1 (and under the fallback); step 0 with backup/fresh wipes mlflow.db, -wal, -shm and in-progress and starts fresh, no restore; a successful step 4 clears it; the [image] test kills a fresh volume's first mlflow-migrate (or first server start under the fallback) and the next reader up reaches a served, empty store" }
-  - { id: non-blocking, answer: "steps 2-3 skipped when store.version equals the image's (no backup or marker window on normal starts); restore-obs-premigrate requires in-progress or --force (exit 6 otherwise); a crash in step 4 costs a restore and a second bump (declared)" }
-# Design review round 6 (4b81738, changes): H1, H2 and the non-blocking items, answered in revision 7.
-phase2_review_round6:
-  - { id: H1, answer: "the fallback initialises the empty store inside mlflow-migrate with one SqlAlchemyStore call, then step 4, so backup/fresh is always cleared before the server first starts; step 0 with fresh runs db upgrade first and wipes only if it fails; spike round 13 measured both paths (db upgrade on a missing file and the SqlAlchemyStore call: 71 tables, head f4a9b2c7d1e6, no-op second upgrade, health 200), so the hypothesis held for 3.18.0; [image] case: a fallback store served with a trace still holds it after the next migrate" }
-  - { id: H2, answer: "reader backup writes obs_mlflow.store.version beside obs_mlflow.db; reader restore puts it back or removes the volume's store.version when the backup has none (FR-OBS-30, FR-CLI-24); [image] case: a backup from N restored under N+1 goes through steps 2-3 and serves its data" }
-  - { id: non-blocking, answer: "a --force restore prints the version it rolls back to before copying; the restore exit codes are 0..6 in both FR-OBS-29 and FR-CLI-24" }
-
-# =====================================================================================================================
-# ADR-0039 revision (task V.kl-obs-spans, phase 1: spec only; ADR-0039 accepted by the owner 2026-11-26, including
-# its "Decided by the agent" items). Sources: ADR-0039 B6 (`judged`, `judge_ran`, `judge_source`), B7 (labels items
-# 1-6, `judge.eval.*` and `judge.align` slots), B7a (`policy_version`, no-regression rule), B7b (transport, the
-# `judge_inputs` copy), B8 (per-channel text table, entitlement), B9 (span tree, evaluation), B11 (SRV-OBS owns
-# text-free `find` spans, `policy_version`, `obs.eval`, judge labels, `judge_inputs`, alignment and its proposals),
-# the Amends rows for ADR-0032, ADR-0035 and ADR-0038, and the Rework row "policy_version, obs.eval, ...".
-# Held under `proposed_*` and `kl_*` keys (trace-check's T5 reads only `requirements`, `invariants`, `nfr` and
-# `vectors`), moved and applied at Red with the tests of `kl_planned_tests`. Ids: next free numbers, nothing
-# renumbered. Every number below that is not measured is an initial policy value (ADR-0039 A5), marked "initial".
-# =====================================================================================================================
-kl_revision:
-  task: V.kl-obs-spans
-  adr: [ADR-0039, ADR-0032, ADR-0035, ADR-0038, ADR-0018, ADR-0025]
-  new_ids: [FR-OBS-36, FR-OBS-37, FR-OBS-38, FR-OBS-39, FR-OBS-40, FR-OBS-41, FR-OBS-42, FR-OBS-43, INV-OBS-6,
-    INV-OBS-7, INV-OBS-8, VEC-OBS-7, VEC-OBS-8]
-  changed_ids_rework_table: [FR-OBS-14, FR-OBS-21, FR-OBS-22, FR-OBS-23, FR-OBS-24, VEC-OBS-1, VEC-OBS-4, VEC-OBS-5]
-  retested_unchanged_in_substance: [INV-OBS-1, INV-OBS-2]
-  # Not in ADR-0039's Rework row, but their approved text contradicts the ADR as written; see kl_open_points 1.
-  changed_ids_consequential: [FR-OBS-7, FR-OBS-8, FR-OBS-11, FR-OBS-12, FR-OBS-13, FR-OBS-15, FR-OBS-16, FR-OBS-20,
-    FR-OBS-26, FR-OBS-31, VEC-OBS-6]
-  reconciled_with: "SRV-AGENT revision on origin/V/kl-agent-judges (8d2799f and later): slot names, JudgeInputsSink,
-    the judge.find output as card ordinals mapped to ids (FR-AGENT-22), judge_outputs keyed (owner_id,
-    input_sha256, judge) with its own retention (FR-AGENT-20), and SRV-OBS owning the judge.eval.* and judge.align
-    prompts and parsers (FR-AGENT-18)"
-  paths: "unchanged: every new file is under server/src/reader/obs/**, server/tests/obs/** or spec/fixtures/SRV-OBS/**"
-  size_estimate: "about 350-550 lines of code (ADR-0039 Rework) plus the tests below"
-
-proposed_tables:
-  # Migration obs_0003 (Alembic branch obs). Every user-data table carries owner_id (INV-SEARCH-1 style scoping).
-  judge_inputs: { owner_id: true, columns: "id uuid pk, owner_id → users.id (the find caller), slot text CHECK
-    in (judge.find), input_sha256 char(64), judge text (`judge.find@<version>`, SRV-AGENT's), query text null
-    (NULL unless FR-OBS-38's consent rule holds), card_ids text[] (judge order, ≤ 50), pack_ids char(64)[],
-    output jsonb ({keep: [ordinal], drop: [ordinal], sufficiency: number | null}, 1-based indexes into card_ids,
-    nothing else), find_trace_id char(32) null, judge_trace_id char(32) null, channel text, route text,
-    labelable bool, created_at; UNIQUE (owner_id, input_sha256, judge) (FR-OBS-38)" }
-  obs_eval_runs: { owner_id: true, columns: "id uuid pk, owner_id → users.id (the payer), mode text CHECK in
-    (dataset, sample), set_name text null, set_sha256 char(64) null, set_doc jsonb null (the pinned set file as
-    uploaded), caller text CHECK in (none), budget_profile text CHECK in (mcp, tutor), judges text[],
-    brain_version char(64), policy_version char(64), version_key char(12), records int, deadline timestamptz,
-    state text CHECK in (queued, running, done, capped, failed), created_at, finished_at null (FR-OBS-39)" }
-  obs_eval_records: { owner_id: true, columns: "eval_id → obs_eval_runs.id, record_id text, owner_id, card_ids
-    text[] (the returned cards in order, ≤ 50), pack_ids char(64)[], find_ms int null, cards int, tokens int,
-    judged_tokens int, unjudged_tokens int, judge_ran bool null, judge_skip text null, gate text null,
-    skipped_not_entitled int, invalid_outputs int, trace_id char(32) null, state text CHECK in (queued, done,
-    failed, capped); PK (eval_id, record_id) (FR-OBS-39)" }
-  obs_eval_scores: { owner_id: true, columns: "id uuid pk, owner_id, eval_id null → obs_eval_runs.id,
-    judge_input_id null → judge_inputs.id ON DELETE CASCADE, record_id text null, slot text, judge text
-    (`<slot>@<version>`), value double precision, trace_id char(32), assessment_id text null, created_at;
-    UNIQUE (eval_id, record_id, slot, judge) and UNIQUE (judge_input_id, slot, judge) (FR-OBS-39)" }
-  judge_prompt_proposals: { owner_id: true, columns: "id uuid pk, owner_id, slot text, at_labels int, step int,
-    base_prompt_sha256 char(64), policy_version char(64) null (NULL until step 0 pins it), state text CHECK in (running,
-    proposed, refused, exported, discarded), refusal
-    text null CHECK in VEC-OBS-5 align.refusals, frame_sha256 char(64), work jsonb (step state: the two
-    splits' label ids, the candidates' sha256s, and per held-out label its outcome for the current best and
-    each candidate, label id → agree | disagree | missing; ids and enums only), candidate_text text
-    null (the current best section while running; NULL = the base), candidates_under_test text[] null (the
-    round's guarded candidates, at most 2); both NULL once proposed, refused or step_lost, CHECK enforced;
-    proposed_text text null (NULL unless state
-    proposed or exported), proposed_sha256 char(64) null, label_ids uuid[], scores jsonb (numbers only),
-    guard_version text, created_at, exported_at null; UNIQUE (owner_id, slot, at_labels) (FR-OBS-41)" }
-  owner_labels: { change: "target CHECK gains `judge`; new columns slot text null (CHECK: NULL exactly when
-    target <> 'judge'; a value of VEC-OBS-5 labels.judge_slots), note text null (judge targets only, ≤ 200
-    characters, one line); for a judge target, target_id = judge_inputs.id or obs_eval_scores.id and
-    lesson_revision_sha256 = the judged input's sha256 (the column keeps its name: what the owner saw); the
-    UNIQUE key is unchanged (FR-OBS-24)" }
-
-proposed_requirements:
   - id: FR-OBS-36
     text: >-
       Text-free `find` spans (ADR-0039 B9; ADR-0032 Decision 5 as amended; ADR-0034 stays rejected). SRV-SEARCH
@@ -2188,7 +1737,76 @@ proposed_requirements:
       `judge_align.md` itself is not aligned and has no section: its system prompt is the file's bytes, and the
       same data rule applies (all data in the user message, `READER-INSTRUCTIONS` neutralised). [unit]
 
-proposed_invariants:
+invariants:
+  - id: INV-OBS-1
+    text: >-
+      For any span the api or worker builds, with any name, attributes, events, status description, tracestate,
+      instrumentation scope and links (Hypothesis-generated, including the canary strings below), what
+      AllowListExporter hands to the OTLP exporter has a name matching VEC-OBS-1 or `reader.unlisted`, only keys
+      listed for that span with values passing their rules, no events, no status description, empty tracestate on the
+      span and its links, link attributes empty, the instrumentation scope `reader`, and the resource of FR-OBS-1;
+      the only `mlflow.*` and `session.id` keys are those FR-OBS-12 and FR-OBS-18 derive, each JSON value parses
+      with exactly its table's keys and values passing their rules, and `mlflow.llm.cost`'s parts sum to its total
+      at 6 places (hostile inputs of FR-OBS-12 included).
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Unchanged in substance: 'those FR-OBS-12 and FR-OBS-18
+      derive' becomes 'those FR-OBS-12, -18 and -36 derive'; the Hypothesis strategies gain the new keys, families
+      and hostile card ids.
+  - id: INV-OBS-2
+    text: >-
+      Canary. With book-text, question, answer, system-prompt, run_token and secret canaries placed in a request path
+      parameter, query string, header, cookie and body, in a tutor question and answer, a stage's prompt and output,
+      a job's args, an exception message and the process's resolved settings, the bytes the OTLP exporter sends
+      (captured by an in-test OTLP/HTTP receiver) contain none of them, decoded or raw. For the CLI: under FR-OBS-6's
+      environment the bundled CLI's OTLP export contains no prompt, system-prompt, response or run_token canary, its
+      span names and attribute and resource keys are a subset of VEC-OBS-2, and the same harness with
+      OTEL_LOG_USER_PROMPTS=1 finds the prompt canary (positive control). The worker's MLflow writes (ADR-0035) too:
+      the canaries are absent from every `obs.feedback` job's args, every assessment request body and every prompt
+      registration request body (captured by an in-test HTTP receiver standing in for MLflow); and for arbitrary
+      (name, value, metadata) only VEC-OBS-4 catalogue entries produce a request, whose body's keys and values are
+      exactly the catalogue's. Phase 2 (ADR-0038): with the canaries placed in a lesson's text, a tutor question and
+      answer, a bench upload's unknown or prose keys and an upload's set file (a non-pinned set), no `obs.runs`,
+      `obs.bench`, `obs.label`, `obs.setup` or `obs.health` request body (captured by the in-test MLflow receiver)
+      and no row of `obs_bench_results`, `owner_labels` or `obs_stack_status` contains any of them; for arbitrary
+      uploads only those passing VEC-OBS-5 produce a row and a job; the pinned questions are the only text that
+      reaches MLflow.
+      ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Unchanged in substance; the canary placements gain a `find`
+      query, card text, an extracted identifier, filter values and a judge output (OTLP half), and the MLflow half
+      gains `obs.judge_score`, `obs.eval_run` and judge-label request bodies. INV-OBS-6 adds the Postgres and
+      proposal side.
+  - id: INV-OBS-3
+    text: >-
+      Telemetry never changes an outcome: with Rotel unreachable, refusing, slow (beyond the export timeout) or
+      returning 500, every request's status and body and every job's outcome equal those with tracing disabled, no
+      exception leaves an OTel call, and no export runs on the request's or job's own task (export runs only on the
+      BatchSpanProcessor's thread or the session marker's daemon flush thread; a full queue drops spans instead of
+      waiting); a failing `obs.feedback` enqueue never changes the computing job's outcome. Phase 2: a failing
+      `obs.runs` enqueue (made outside the run's final transaction), `obs.label` or `obs.bench` enqueue, and any
+      phase 2 job failure never changes a compile run's, an import's or a question's outcome, and a failed mirror
+      never changes a label's record.
+  - id: INV-OBS-4
+    text: >-
+      Propagation. A job enqueued inside an active span has exactly one link, to that span's context; its root span
+      is in a new trace whose id equals FR-OBS-5's derivation from (job id, key); a malformed, unsampled or all-zero
+      `trace` gives no link and no error; a retry or a handler enqueue made inside a run links to the running job's
+      root span; a sweep re-enqueue has no link.
+  - id: INV-OBS-5
+    text: >-
+      Owner-only, through Caddy on localhost:8443, before any byte reaches MLflow: every path answers 401 without a
+      session cookie and 403 with a learner's session; with the owner's cookie, a POST whose Origin is a foreign
+      localhost origin (`https://localhost:3000`), the app origin (`https://localhost`) or absent answers 403, a GET
+      with a foreign Origin answers 403, and a POST with `Origin: https://localhost:8443` reaches MLflow; by the
+      gate's decision table, `Sec-Fetch-Site: same-site` with Mode `navigate`, Dest `document` and method GET gives
+      204, and `same-site` with Dest `script`, `image` or `empty` (or Mode other than `navigate`) gives 403, as does
+      any `cross-site`; no response
+      carries an `Access-Control-*` header or `Set-Cookie`, and an echo upstream behind the same proxy settings sees
+      no `Cookie` or `Authorization`; every blocked pattern answers Caddy's own 404. The app's side holds too: a POST to
+      https://localhost/api/* and the kernel WebSocket upgrade with `Origin: https://localhost:8443` and the owner's
+      cookie answer 403 (SRV-AUTH's Origin check). MLflow and Rotel publish no port and share no network with
+      postgres, embed, agent-proxy, mcp or any kernel; caddy shares none with rotel or the worker. Per site
+      (ADR-0033): the same holds on localhost:8444 for Jaeger; the 8443 site refuses `Origin: https://localhost:8444`
+      and the 8444 site refuses `https://localhost:8443` with the owner's cookie; a client-sent `X-Reader-Site` is
+      overridden; a gate request with no site header is 403; `https://localhost/api/obs/gate` answers as before
+      (site `app`); Jaeger shares no network with mlflow, the worker or the api.
   - id: INV-OBS-6
     text: >-
       Judge text confinement. With query, card-text, extracted-identifier, concept-id, judge-rationale,
@@ -2223,7 +1841,34 @@ proposed_invariants:
       entries only from `obs.label`; every LLM_JUDGE body has a numeric value in [0, 1], no `rationale`, and
       metadata keys and values within the catalogue's.
 
-proposed_vectors:
+nfr:
+  - id: NFR-OBS-1
+    metric: seconds from a job's end to its trace being returned by MLflow's get-trace with every span, on the Mac
+    threshold: 30
+    verified_by: test
+    # Source: structural. 5 s processor delay + Rotel batching + MLflow write; the spike waited 10 s after a flush and
+    # found every trace complete (RESULT.md). The [live] step polls up to 30 s, and checks a tutor trace's session
+    # equals its lesson id (FR-OBS-12 e).
+
+vectors:
+  - id: VEC-OBS-1
+    source: "Hand-derived from FR-OBS-3, -5, -6 and the route, kind and error catalogs: span name patterns, attribute keys with types, value rules and span kinds, and job_args per kind. ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): spec/fixtures/SRV-OBS/attributes.yaml gains: the span names `find`, `find.route`, `find.retrieve`, `find.preselect`, `find.judge_wait`, `find.select`, `pack.build`, `link.run`; every key of FR-OBS-36 and -37 with its rule and its spans in `keys_by_span`; `key_families` (`reader.doc.<i>.{uri, sha256, tokens, judged}`, i 0..24; uri pattern `^reader://(spn:[0-9a-f]{64}:p[0-9]{1,5}:[0-9]{1,7}-[0-9]{1,7}(#[0-9]{1,4})?|(fnd|les):<uuid>|h/[0-9a-f]{64})$`); `reader.find.filter.concept_uri` with the `reader://h/<64 hex>` pattern only (no clear concept key); the catalogs `find_routes`, `facet_values.<facet>`, `topic_paths` and `judge_slots`; `reader.policy_version` on job roots and `reader.eval_id` on `obs.eval` roots; `job_args` for `judge.find` {input_sha256: reader.judge.input_sha256}, `obs.eval` {eval_id: reader.eval_id}, `obs.eval_run`, `obs.eval_sample`, `obs.judge_score` and `obs.align` {} and the pack-build kinds SRV-INGEST declares ({} unless that spec lists an id). The resource is unchanged: `worker-judge` runs `reader-server --role worker` with a queue restriction (kl_open_points 2), so its spans carry `service.name: reader-worker`."
+    file: spec/fixtures/SRV-OBS/attributes.yaml
+  - id: VEC-OBS-2
+    source: "spikes/cli-otel-content/results/20261124T002020/report.json, mode agent-env: the bundled CLI 2.1.330's span names, attribute keys and resource keys under FR-OBS-6's environment (stub upstream, fake credential); the WebSearch run's tool spans from spikes/web-search-otel/results/20261124T122933/report.json, mode content-off"
+    file: spec/fixtures/SRV-OBS/cli-span-keys.yaml
+  - id: VEC-OBS-3
+    source: "Hand-derived from FR-OBS-10 and SRV-AGENT FR-AGENT-9: seeded agent_spend, compile_runs/compile_steps, tutor_questions and job_keys rows, including a failed step attempt that billed money (a settle row with settled_usd > 0 on an attempt whose job ended failed) and an unsettled reserve, with the expected summary JSON"
+    file: spec/fixtures/SRV-OBS/summary.yaml
+  - id: VEC-OBS-4
+    source: "Hand-derived from FR-OBS-12..15 and -18 (V.obs-analytics; design review rounds 1-3): the derivation tables (span types, trace tags, previews, forbidden preview keys, llm cost, session, linked prompts), the handler-set root keys, the assessment catalogue and the prompt list; its attribute, span-name and key entries are merged into VEC-OBS-1. ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): spec/fixtures/SRV-OBS/analytics.yaml gains: `span_types` find TOOL, find.route ROUTER, find.retrieve RETRIEVER, find.preselect RERANKER, find.judge_wait CHAIN, find.select RERANKER, pack.build CHAIN, link.run CHAIN; `retriever_documents` (FR-OBS-36's derivation, only for spans carrying `reader.doc.*` keys); `trace_tags` gain reader.policy_version and reader.eval_id; `assessments` gain `source_type` and the LLM_JUDGE entries of FR-OBS-14 (writer `obs.judge_score`); `prompts` gain the judge prompt files of FR-OBS-15 as edited; `job_kinds` gain obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score and obs.align."
+    file: spec/fixtures/SRV-OBS/analytics.yaml
+  - id: VEC-OBS-5
+    source: "Phase 2 (FR-OBS-20..25, ADR-0038): the patterns, Run params/metrics/tags, pinned bench sets, dataset record, upload result schemas (search, tutor records), label catalogue, alert codes and the worker → MLflow write list, measured as raw REST in spikes/obs-stack rounds 8, 10 and 12. ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): spec/fixtures/SRV-OBS/phase2.yaml gains: `eval_sets` (FR-OBS-22); `eval_record`; `judge_inputs.output` (keys keep, drop, sufficiency; ordinals 1..50; a finite number in [0, 1] or null); `labels.judge_slots` (FR-OBS-24 scope) and the judge target; `align` {refusals: [verbatim_8, whole_input, demonstration, no_change, guard_inputs_missing, too_few_labels, slot_unsupported, eval_cap, provider_error, output_invalid, step_lost, section_delimiter, frame_changed, base_changed, all_guard_refused, no_training_errors, threshold_missing, policy_changed], drop_kinds [dropped_missing, dropped_guard], data_delimiter_replacement {READER-INSTRUCTIONS: READER_INSTRUCTIONS_DATA}, rerun_deadline_s 8.3, max_missing_share 0.2, scoring_step_budget_s 150, section_delimiters [`<<<READER-INSTRUCTIONS`, `READER-INSTRUCTIONS>>>`], demonstration_markers, limits: {train 70, heldout 30, min_split 10, rounds 3, proposing_steps 2, every 50}}; Run keys for kind eval (params incl. caller, metrics, tags); `writes` entries for `obs.judge_score` (traces/{id}/assessments POST and the GET before it, source LLM_JUDGE), `obs.eval_run` (datasets/search, datasets/create, datasets/{id}/records for brain-eval-v1, and the runs, traces/search, link-to-run and log-inputs writes of obs.runs and obs.bench) and `obs.label`'s judge names. No new endpoint: each is one already measured in rounds 8, 10 and 12 or ADR-0035's; only the cross-experiment log-inputs is new (FR-OBS-39 c)."
+    file: spec/fixtures/SRV-OBS/phase2.yaml
+  - id: VEC-OBS-6
+    source: "Phase 2 (FR-OBS-26): the declarative MLflow bootstrap (experiments, descriptions, tags, dataset names, LoggedModel naming, Run tag keys), deploy/otel/mlflow-setup.yaml at Green; setup's drift check measured in spikes/obs-stack round 10. ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): spec/fixtures/SRV-OBS/mlflow-setup.yaml (and deploy/otel/mlflow-setup.yaml) gain FR-OBS-26's additions."
+    file: spec/fixtures/SRV-OBS/mlflow-setup.yaml
   - id: VEC-OBS-7
     source: "Hand-derived from FR-OBS-36 and -37: a recorded `find` (owner channel, a sliced judge, documents of every id form including sec:, con: and non-PDF spn: ids, 26 cards so the 25-document cap applies, and a stage-7 case whose identifier resolves to a term concept with Cyrillic text in its id, exported only as reader://h/<sha256>) and one pack build and link run, each as the caller's attributes and the expected exported span (validated keys, derived mlflow.spanType and mlflow.spanOutputs)"
     file: spec/fixtures/SRV-OBS/find-spans.yaml
@@ -2231,9 +1876,437 @@ proposed_vectors:
     source: "Synthetic text only (no material): alignment guard cases for FR-OBS-41 and INV-OBS-7, each a proposal, a label set and the expected verdict (verbatim_8, whole_input, demonstration, section_delimiter, no_change, accept), including `READER-INSTRUCTIONS` inside a word, a lone delimiter line, `READER-READER-INSTRUCTIONSINSTRUCTIONS` (one deletion leaves another occurrence) and the neutralised `READER_INSTRUCTIONS_DATA` (accepted), a 2-word query, a 7-word overlap and ё/soft-hyphen variants; plus an `agree` table of (slot family, ok, recorded output, re-run output, threshold, expected agree | disagree) rows covering FR-OBS-41's agreement cases"
     file: spec/fixtures/SRV-OBS/align-guard.yaml
 
+# Test levels.
+#   [unit]   pure Python with OTel's in-memory pieces and an in-test OTLP/HTTP receiver (no Docker): the allow-list
+#            (FR-OBS-2, INV-OBS-1, Hypothesis), the middleware with a test app (FR-OBS-3, -4), the derived trace ids and
+#            link parsing (FR-OBS-5, INV-OBS-4), the CLI environment builder and the uv.lock pin check against VEC-OBS-2
+#            (FR-OBS-6 a), the gate's decision table over (Origin, X-Forwarded-Method, Sec-Fetch-Site/-Mode/-Dest,
+#            session role) (FR-OBS-9, INV-OBS-5), the summary's percentile, scoping and join functions over rows
+#            (FR-OBS-10), VEC-OBS-3's keys recomputed from its args with reader.jobs.model.idempotency_key and its
+#            trace ids from FR-OBS-5's derivation (the gate for the fixture; trace-ids.mjs only generates), the
+#            `truncated` flag shown when recent_keys_of hits its limit, the retention cutoff and the
+#            next-day-first order (FR-OBS-11), the canary for our process (INV-OBS-2 first half), failure isolation
+#            (INV-OBS-3: a failing exporter, and a tracer whose start, attribute or end call raises inside the
+#            middleware). Code review round 1 added: an oracle of VEC-OBS-1 read from the YAML independently of
+#            reader.obs.attributes (used by the INV-OBS-1 property test) with example rows at every bound; the gate's
+#            remaining Sec-Fetch, OPTIONS and inexact-Origin rows; the regexp of FR-OBS-9 on its own. Round 2 added:
+#            an upper-case traceparent is refused (W3C: lower-case hex only), and the retention handler takes
+#            `enabled` and `retention_days` from `current_settings()`.
+#   [db]     testcontainers Postgres (SRV-EVENTS' pinned digest): enqueue → run → retry → handler enqueue → sweep with a
+#            capturing exporter (INV-OBS-4 end to end), the summary queries on VEC-OBS-3 (FR-OBS-10; the fixture's ISO
+#            times are seeded as timezone-aware datetimes), the gate route on real sessions (FR-OBS-9).
+#   [config] OPS-DEPLOY's rendered-model tests for the paired services, networks, ports and env (FR-OBS-8, INV-OBS-5),
+#            and `caddy adapt` of the Caddyfile: both sites' upstreams, the handle order, every blocked pattern, the
+#            header_up/header_down removals and the 8443 CSP (FR-OBS-9).
+#   [image]  opt-in READER_TEST_IMAGE_BUILD=1: rotel and reader-mlflow:local start healthy under the compose
+#            hardening; a span sent to rotel is returned by MLflow (FR-OBS-8); retention against real MLflow: a trace
+#            ingested with a 40-day-old timestamp is deleted by the handler and a fresh one stays (FR-OBS-11, measured
+#            in spikes/obs-stack round 2); the Caddy + gate + echo upstream case of INV-OBS-5 (no Cookie or
+#            Authorization upstream, no Set-Cookie or Access-Control-* down; every blocked path of FR-OBS-9, deep,
+#            upper-case, with repeated slashes and with an encoded slash, answers Caddy's empty 404); the CLI canary of
+#            INV-OBS-2 and
+#            FR-OBS-6 (b) in server/tests/obs/cli_canary/ (no network, stub upstream, zero credit). The backend
+#            tests' internal networks take explicit subnets 10.233.<n>.0/24 (random n per network, a new n on an
+#            overlap), because Docker Desktop's predefined pools run out (measured 2026-11-24); nothing else in the
+#            repository or on the owner's Docker uses 10.233/16. The ingest check reads the spans of
+#            `GET /api/3.0/mlflow/traces/get` at `trace.spans` (MLflow 3.18.0's response, measured 2026-11-24);
+#            span attributes come back as OTLP values, a JSON object such as `mlflow.llm.cost` as a kvlist
+#            `{values: [{key, value: {double_value}}]}` (measured on the V.obs-analytics image run), which the
+#            FR-OBS-12 image test decodes. The V.obs-analytics image tests (test_images_analytics.py) use images by id
+#            and allow MLflow 180 s to turn healthy (over 60 s was measured on a loaded Mac). Phase 2: the hardened
+#            migrate test (test_images_migrate.py: uid 10004, read-only rootfs, --network none, the volume the only
+#            writable path, previous pin MLflow 3.10.0 by digest) is the first; the no-egress probe and the opt-in
+#            burst test (READER_TEST_BURST=1) are [image] too.
+#   [live]   `bash e2e/live/obs.sh --out DIR [--with-credit]` against `reader up` (e2e/live/lib/obs_live.py, run
+#            as `python -I`, and obs_browser.mjs, which finds the summary's trace links by the exact name `Trace`:
+#            the page's "traces dashboard" link also contains it, live check 2026-11-24). It is run by hand until the stage-2 live check script
+#            (`e2e/live/stage-2.sh`, docs/roadmap.md) exists; that script will call it. DIR is resolved and checked to
+#            lie outside the repository before anything is created. Sessions: one owner and one live-check learner
+#            row, each created and deleted by its id hash only (each statement must report exactly one row), through
+#            the live library's `docker compose exec -T postgres psql` helper (the script itself runs no `docker
+#            exec`); it never runs OWNER_RESET_SQL and never touches the owner's passkeys or other sessions. Caddy's
+#            public root is read the way `reader trust` reads it and is never trusted system-wide. Zero credit by
+#            default: 8443 answers 401 without a cookie, 403 for a learner, 2xx for the owner; the INV-OBS-5 Origin,
+#            method and Sec-Fetch cases; FR-OBS-9's blocked paths (deep, upper-case, repeated slashes) answer
+#            Caddy's empty 404; no Set-Cookie or Access-Control-* and the CSP on 8443; the summary is refused to a
+#            learner; the first 20 summary trace ids (FR-OBS-10) each open an existing MLflow trace. In the browser
+#            (Playwright, real Chromium over TLS): a trace link on /observability opens https://localhost:8443 with
+#            the span tree; the newest trace from MLflow's own traces/search (request traces exist at zero credit)
+#            gives the detail page, its CSP and one UI write (an assessment note saved; the probe's assessments are
+#            then deleted through MLflow's REST whatever happened); no CSP violation anywhere. A check that cannot
+#            run on the stack's data (the link click when the summary gives no trace id) prints SKIP, counted apart
+#            from the passes. `--with-credit` (off by default; spends Agent SDK credit; the canary question stays in
+#            the owner's tutor history): within NFR-OBS-1 a `job tutor.answer` trace with each link of the chain job →
+#            agent.call → claude_code.interaction → claude_code.llm_request; the CLI's span names, attribute keys
+#            (MLflow's own `mlflow.*` keys aside) and the trace's resource keys (MLflow keeps them as trace tags; the
+#            CLI's and FR-OBS-1's allowed) within VEC-OBS-2 (FR-OBS-6 c); the canary absent from the trace JSON. The
+#            live stack has no stub provider, so those checks need real credit; without it, the nesting against a
+#            stub upstream is covered by the [image] CLI canary and [db] propagation tests (declared, live check
+#            2026-11-24).
+test_levels:
+  FR-OBS-1: unit
+  FR-OBS-2: unit
+  FR-OBS-3: unit
+  FR-OBS-4: unit
+  FR-OBS-5: "unit + db"
+  FR-OBS-6: "unit + image + live"
+  FR-OBS-7: "db + live"
+  FR-OBS-8: "config + image"
+  FR-OBS-9: "unit + db + config + live"
+  FR-OBS-10: "unit + db + live"
+  FR-OBS-11: "unit + image"
+  FR-OBS-12: "unit + image + live"
+  FR-OBS-13: "unit + image"
+  FR-OBS-14: "unit + db + image"
+  FR-OBS-15: "unit + image"
+  FR-OBS-16: "image + live"
+  FR-OBS-17: "unit + db + live"
+  FR-OBS-18: "unit + image"
+  FR-OBS-19: "config + image + live"
+  FR-OBS-20: "unit + db + image"
+  FR-OBS-21: "unit + image"
+  FR-OBS-22: unit
+  FR-OBS-23: "unit + db + image"
+  FR-OBS-24: "unit + db + image"
+  FR-OBS-25: "unit + db"
+  FR-OBS-26: "unit + image"
+  FR-OBS-27: "config + image"
+  FR-OBS-28: image
+  FR-OBS-29: image
+  FR-OBS-30: "image + live"
+  FR-OBS-31: "db + image"
+  FR-OBS-32: "unit + config + image + live"
+  FR-OBS-33: "config + image"
+  FR-OBS-34: config
+  FR-OBS-35: "image (burst, opt-in)"
+  FR-OBS-36: "unit + image + live"
+  FR-OBS-37: "unit + image"
+  FR-OBS-38: "unit + db"
+  FR-OBS-39: "unit + db + image"
+  FR-OBS-40: "unit + db"
+  FR-OBS-41: "unit + db"
+  FR-OBS-42: "unit + db"
+  FR-OBS-43: unit
+  INV-OBS-1: unit
+  INV-OBS-2: "unit + image + live"
+  INV-OBS-3: unit
+  INV-OBS-4: "unit + db"
+  INV-OBS-5: "config + image + live"
+  INV-OBS-6: "unit + db"
+  INV-OBS-7: unit
+  INV-OBS-8: unit
+
+# Proposed paired changes (applied in each spec at this spec's approval, with its own tests; not edited by this draft).
+paired_changes:
+  - spec: OPS-DEPLOY
+    items:
+      - "FR-DEPLOY-1: profile `observability` with `rotel` and `mlflow` (FR-OBS-8)."
+      - "FR-DEPLOY-2: `deploy/otel/mlflow.Dockerfile` is under the same pin, allow-list and no-ADD rules; it copies nothing; its `.dockerignore` excludes `**`; rotel's image is third-party and pinned by digest."
+      - "FR-DEPLOY-3: networks `otel` 10.230.2.0/24 (api, worker, rotel), `obs` 10.230.3.0/24 (rotel, mlflow, worker) and `obs-ui` 10.230.4.0/24 (caddy, mlflow), all internal with explicit subnets."
+      - "VEC-DEPLOY-2 gains exactly these allowed pairs: api–rotel, worker–rotel (otel); rotel–mlflow, worker–mlflow (obs); caddy–mlflow (obs-ui). And these `never` pairs: caddy–rotel, caddy–worker (unchanged), mlflow–api, mlflow–postgres, mlflow–embed, mlflow–agent-proxy, mlflow–mcp, mlflow–kernel-* and mlflow–kernel-user-*, rotel–postgres, rotel–embed, rotel–agent-proxy, rotel–mcp, rotel–kernel-* and rotel–kernel-user-*."
+      - "FR-DEPLOY-5: volume `obs_mlflow` (mlflow only, `org.reader-ai.backup=exclude`)."
+      - "FR-DEPLOY-6: the base compose.yaml still publishes only `127.0.0.1:443:443`; `127.0.0.1:8443:8443` on caddy comes from OPS-CLI's override when `observability` is active (VEC-DEPLOY-3 gains a variant with it). INV-DEPLOY-6 unchanged (127.0.0.1 only)."
+      - "FR-DEPLOY-7: the second Caddy site of FR-OBS-9. `server/tests/deploy/test_caddy_and_images.py`: the upstream set becomes {10.230.1.10:8000, mcp:8001, mlflow:5000} (forward_auth to 10.230.1.10:8000 on 8443 included), the proxied map gains the 8443 catch-all → mlflow:5000, and new asserts cover the handle order, every blocked pattern answering 404 in Caddy's own handler, the header_up/header_down removals and the 8443 CSP string."
+      - "FR-DEPLOY-9: rotel uid 10005, mlflow uid 10004; both read_only, tmpfs /tmp, cap_drop ALL, no-new-privileges; rotel 256m, mlflow 1g (memswap equal); not secret consumers."
+      - "FR-DEPLOY-11: the two healthchecks of FR-OBS-8, with the server roles' timing."
+      - "INV-DEPLOY-2 (1): the only `environment` entries are READER_CONFIG on the server roles and exactly `MLFLOW_SERVER_ENABLE_JOB_EXECUTION=false`, `MLFLOW_DISABLE_TELEMETRY=true` on mlflow (a non-secret allow-list)."
+      - "INV-DEPLOY-3: `obs_mlflow` is mounted only by mlflow."
+      - "INV-DEPLOY-4: the full pair set equals the extended VEC-DEPLOY-2."
+  - spec: OPS-CLI
+    items:
+      - "FR-CLI-5: `reader up` also activates `observability` when `observability.enabled` is true (default), building reader-mlflow:local through the service's `build` section; the override then adds caddy's `127.0.0.1:8443:8443`. When it turns false, the withdrawn-profile rule removes rotel and mlflow (their volume stays) and the port is not published."
+      - "FR-CLI-13: `reader status` lists rotel and mlflow with the recorded profiles (no new code path)."
+      - "FR-CLI-15: `reader doctor` adds `observability`: when the profile is recorded active, `https://localhost:8443/` answers 401 without a cookie (the gate is in front of MLflow); detail `gate ok`, `gate open` (fails) or `unreachable`."
+      - "FR-CLI-8 output: after all healthy, `reader up` prints `traces: https://localhost:8443/` when the profile is active."
+      - "Backup: `obs_mlflow` carries backup=exclude, so `reader backup`/`restore` skip it (no code change)."
+  - spec: SRV-CONFIG
+    items:
+      - "A tenth top-level section `observability: {enabled: bool = true, retention_days: int 1..365 = 30}`; OPS-DEPLOY FR-DEPLOY-12's example gains it (ten sections)."
+  - spec: SRV-AUTH
+    items:
+      - "reader.api.app: ROUTERS adds `reader.obs.routes` (GET /api/obs/gate, GET /api/obs/summary); the app factory wraps the app in `reader.obs.asgi.TraceMiddleware` outermost."
+      - "reader.serve: `--role api|worker` calls `reader.obs.setup(role, settings)` after loading the configuration and `shutdown()` on SIGTERM; serving_logs adds FR-OBS-4's trace filter to the `reader` handler."
+      - "The CSRF Origin check is unchanged; INV-OBS-5's app-side cases (POST and kernel WS upgrade with Origin https://localhost:8443 → 403) are added to its tests."
+  - spec: SRV-EVENTS
+    items:
+      - "FR-EVENTS-3/-6/-4: `_defer` passes the `trace` kwarg of FR-OBS-5 (a); the registered task accepts `trace: str | None = None`; `_run` wraps `_attempt` and `_judge` in FR-OBS-5 (b)'s root span; the sweep's defers pass none (c)."
+      - "FR-EVENTS-1: KIND_MODULES lists `reader.obs.jobs` (kind `obs.retention`, an `on_worker_start` hook)."
+      - "FR-EVENTS-16: procrastinate log records gain no trace field; the scrubber already removes `task_kwargs` whole, so `trace` never reaches a log; unchanged behaviour."
+      - "New FR-EVENTS-18 (based on origin/V/slice-integration's SRV-EVENTS, which has FR-EVENTS-17 `dead_error_code_of` and the rule that no module queries `job_keys` directly): published reads next to `job_status_of` and `dead_error_code_of`, on an open connection without a procrastinate app, read-only: `key_rows_of(conn, keys) -> list[KeyRow]` (keys of any kinds in one call: the kind is the key's `<kind>:` prefix, matched against the row's kind; primary-key lookup) and `recent_keys_of(conn, kind_names, outcome, since, limit) -> tuple[list[KeyRow], bool]` (newest `finished_at` first; 1 ≤ `limit` ≤ 500, structural; the bool is `truncated`, true when `limit` rows were returned), `KeyRow = (kind, key, args, outcome, error_code, job_id, attempts, created_at, finished_at)`; a migration `jobs_0002` adds an index on job_keys (kind, outcome, finished_at). [db] tests: keys of two kinds in one call, unknown keys omitted, a key whose prefix differs from its row's kind omitted, outcome filter, window, limit and `truncated` at exactly `limit`, ordering, the index used (EXPLAIN shows an index scan on a seeded table)."
+      - "Owner note: the stage-2 outbox must store the traceparent with the enqueue it defers (FR-OBS-5 d)."
+  - spec: SRV-AGENT
+    items:
+      - "FR-AGENT-6: the `agent.call` span and the CLI environment additions of FR-OBS-6, only when tracing is enabled; INV-AGENT-1's environment test lists them, with OTEL_LOG_RAW_API_BODIES, ENABLE_BETA_TRACING_DETAILED and BETA_TRACING_ENDPOINT blank."
+  - spec: WEB-UI
+    items:
+      - "Route `/observability`, owner only (hidden from other roles' navigation; a non-owner gets the not-found view), rendering FR-OBS-10's four views from GET /api/obs/summary with each trace id linked to the 8443 deep link; axe-clean; a Storybook story per view with fixture data."
+  - spec: OPS-DOD
+    items:
+      - "spec/fixtures/OPS-DOD/operations.yaml: operation `obs.view` (Open the traces dashboard and the observability page; surface web; specs SRV-OBS, OPS-DEPLOY, WEB-UI; routes GET /api/obs/gate, GET /api/obs/summary once implemented): security INV-OBS-5, FR-OBS-9; privacy INV-OBS-1, INV-OBS-2; a11y pages [/observability]; latency missing (no sourced budget); cost na (no provider call); observability FR-OBS-4 (the summary route's line); recovery INV-OBS-3, FR-OBS-11."
+      - "Observability cells that FR-OBS-3/-4's request line fills once its test exists (today `missing`): auth.signout, material.browse, search.query, lesson.list, lesson.open, cell.run, cell.interrupt, cell.reset, cell.run_all (the WebSocket session line; no kernel content, INV-KERNEL-6 unchanged), course.import, lesson.findings → items [FR-OBS-4] (SRV-OBS added to each operation's specs). ingest.setup stays missing (host CLI, not traced)."
+      - "Existing observability cells gain FR-OBS-5 (job trace and its log lines) where the operation runs a job: material.ingest, ingest.requeue, lesson.compile, lesson.compile_status, lesson.compile_resume, tutor.ask; and FR-OBS-6 for lesson.compile and tutor.ask."
+      - "not_user_facing: none added."
+
+# V.obs-analytics paired changes (FR-OBS-12..19; ADR-0033 and ADR-0035 accepted 2026-11-24, ADR-0034 rejected),
+# applied in each spec at Green on V/obs-analytics-impl with their own tests, reviewed in SRV-OBS's code review.
+analytics_paired_changes:
+  - spec: SRV-AGENT
+    items:
+      - "FR-AGENT-14: `agent.call` gains `gen_ai.operation.name: invoke_agent`, `gen_ai.provider.name: anthropic`,
+        and FR-OBS-12 (b)'s token keys (input including the cache); the exporter derives its `mlflow.spanType`."
+      - "FR-AGENT-14: `StageCall` already carries owner, run, lesson and stage; it gains only `course_id: UUID |
+        None` and `step: int | None` (review: no separate CallContext). After the settle, `agent.call` sets
+        `reader.cost_usd` (settled_usd) and `reader.cost_input_usd` (FR-OBS-12 c's split from the settle row's token
+        columns and pricing.yaml), and `reader.lesson.id`, `reader.course.id`, `reader.step`. SRV-AGENT already writes
+        `agent_spend.lesson_id` on every row of a call with a lesson; FR-OBS-17 relies on it."
+  - spec: OPS-DEPLOY
+    items:
+      - "jaeger service, `jaeger-in` and `jaeger-ui` networks, rotel's two named exporters, the 8444 Caddy site and
+        the X-Reader-Site headers (FR-OBS-19, FR-OBS-9); VEC-DEPLOY-2 gains rotel–jaeger and caddy–jaeger and the
+        jaeger `never` pairs."
+      - "mlflow service: environment adds `MLFLOW_MODEL_CATALOG_URI=` (empty: no remote price fetch); reader-mlflow's
+        image replaces the bundled model catalog (FR-OBS-12 c): `deploy/otel/mlflow.Dockerfile` (and its
+        .dockerignore) gains the copy of `deploy/otel/mlflow-catalog/anthropic.json`. Generator
+        `deploy/otel/mlflow_catalog.py` (stdlib + `ruamel.yaml`, the server's locked YAML library, through `uv run
+        --project server`; `--write` regenerates,
+        `--check` exits 1 on any difference) reads pricing.yaml's model ids and `deploy/otel/mlflow-bundled-anthropic.txt`.
+        Tests: [unit] `--check` passes and every pricing.yaml model is in the file; [image] the built image's
+        `mlflow/utils/model_catalog/` has that `anthropic.json` as its only `*.json` (fails when the replacement is
+        missing or another file is left), the running container's `MLFLOW_MODEL_CATALOG_URI` is set and empty (read
+        from `docker inspect`'s Config.Env, not by exec), the base image's bundled ids equal `mlflow-bundled-anthropic.txt` (a base-image bump fails until it is
+        regenerated), and through rotel a CLI-shaped `llm_request` for a model absent from pricing.yaml and one with
+        no provider key both cost 0.0 while `agent.call` keeps its ledger cost."
+  - spec: SRV-PIPELINE
+    items:
+      - "Root attributes `reader.lesson.id`, `reader.course.id` (from the run's lesson row; the `job.session` marker
+        with `reader.run_id` comes from the job wrapper, FR-OBS-12 e) (FR-OBS-12 d); `verify.claims`, `verify.lab`,
+        `kernel.run` spans (FR-OBS-13); `obs.feedback` enqueues for fact_check.passed, verify.passed,
+        verify.lab_passed (FR-OBS-14); `reader.prompt.version` on the root (FR-OBS-18)."
+  - spec: OPS-CLI
+    items:
+      - "`reader up`'s in-memory override publishes `127.0.0.1:8444:8444` with 8443 while the observability profile
+        is active (FR-OBS-19)."
+  - spec: SRV-TUTOR
+    items:
+      - "Root attributes `reader.lesson.id`, `reader.course.id` (from the question row and its lesson),
+        `reader.tutor.state`, and `reader.obs.session_marker(\"reader.lesson.id\", lesson_id)` called by the handler
+        after it reads the question row and before `Provider.run` (FR-OBS-12 d, e, f);
+        `tutor.retrieve` and `tutor.citations` spans (FR-OBS-13); `obs.feedback` for tutor.citations_valid and
+        tutor.citation_share (FR-OBS-14); `reader.prompt.version` (FR-OBS-18)."
+  - spec: SRV-INGEST
+    items:
+      - "`ingest.parse`, `ingest.chunk` spans (FR-OBS-13)."
+  - spec: SRV-SEARCH
+    items:
+      - "`embed.batch` spans in `search.embed` (FR-OBS-13)."
+  - spec: SRV-EVENTS
+    items:
+      - "FR-EVENTS-19's job wrapper calls `reader.obs.session_marker(\"reader.run_id\", args.run_id)` right after
+        opening the root for `pipeline.*` kinds only (the run id from the validated args); the helper flushes off
+        the job's task and never raises (FR-OBS-12 e). KIND_MODULES unchanged; `reader.obs.jobs` gains the kinds
+        `obs.feedback` and `obs.prompts` (FR-OBS-14, -15) and a start hook enqueuing `obs.prompts`."
+  - spec: WEB-UI
+    items:
+      - "/observability: a `Dashboards` list of FR-OBS-16's saved views (links to https://localhost:8443, `rel=noopener
+        noreferrer`), and the note that MLflow's cost column and dashboard show the ledger's per-call amounts while
+        this page's run and lesson totals also count open reserves. No header, nav or app.css change
+        (V/live-ui-fixes owns those while it is open)."
+      - "/observability: a fifth view, `Cost per lesson` (FR-OBS-17): a table of the `lessons` rows (title, course,
+        compile total, runs, last compile, tutor, total, per 1k characters, a `Traces` link to `mlflow_url`), a
+        course total row per course, sortable by every column (`aria-sort` on the active header; default total
+        descending); a Storybook story with VEC-OBS-3's lessons. Each trace link has a Jaeger twin (FR-OBS-19)."
+
+# Per-tab plan for phase 2. Privacy: every listed value is an id, an enum, a number or pinned committed repository
+# data. "Writes" names the worker → MLflow requests (ADR-0035 or ADR-0038); "none" means OTLP or read-only.
+phase2_tabs:
+  - tab: Experiment 0 Training runs and Evaluation runs (Runs)
+    shows: one Run per compile run and import, with params, metrics and a cumulative-cost chart; the Run's Traces tab lists its stage traces with assessments (round 6; a Run in another experiment found none, round 7)
+    source: agent_spend, the pipeline and ingest tables, linked traces
+    privacy: ids, model ids, sha256s, numbers
+    writes: runs/search, runs/create, log-batch, runs/update, runs/set-tag, traces/search, traces/link-to-run (ADR-0038)
+  - tab: Experiment `bench` Datasets
+    shows: tutor-bench-v2 (40) and search-bench-v1 (26) with question ids, questions, chapters and gold pages
+    source: the owner's upload of a set whose sha256 is pinned (FR-OBS-22)
+    privacy: the agent's own committed questions, with no 5-word run shared with the book (measured); ids and page numbers
+    writes: datasets/search, datasets/create, datasets/{id}/records (ADR-0038); the experiment comes from obs.setup
+  - tab: Experiment `bench` Evaluation runs
+    shows: one Run per bench upload; the tab's chart shows hit@k, reciprocal rank, grounded and gold-cited shares, latency and cost over time
+    source: the owner's uploads, recorded in obs_bench_results (FR-OBS-23)
+    privacy: ids, numbers, model names, commit shas
+    writes: runs/search, runs/create, log-batch, log-inputs, runs/update, runs/set-tag (ADR-0038)
+  - tab: Agent versions
+    shows: one LoggedModel per version key, with its params (prompt-set sha256, the stage → model map, the pipeline config sha256); traces are compared by the tag reader.version_key
+    source: obs.setup (FR-OBS-21 b, FR-OBS-26)
+    privacy: sha256s, model ids
+    writes: logged-models/search, logged-models create, logged-models/{id} PATCH status READY (ADR-0038); the root tag goes through OTLP
+  - tab: Trace view, assessments (owner labels)
+    shows: owner.lesson_ok / owner.answer_ok HUMAN assessments on the labelled traces, a relabel's new revision with the old one marked invalid (round 8); Review queues and label schemas are not used (B8)
+    source: owner_labels in Postgres (FR-OBS-24), mirrored by obs.label
+    privacy: pass/fail, reason enum, ids, a revision number
+    writes: traces/{id}/assessments POST (with overrides for a relabel), GET by id (ADR-0038 Decision 2)
+  - tab: Experiments list
+    shows: "`reader` (experiment 0, renamed) and `bench`, each with its description and reader.* tags (round 10)"
+    source: deploy/otel/mlflow-setup.yaml through obs.setup (FR-OBS-26)
+    privacy: committed configuration only
+    writes: experiments/get|get-by-name|update|create|set-experiment-tag (ADR-0038)
+  - tab: Traces, Sessions, Overview, Dashboard, Prompts, Issues
+    shows: as in phase 1, plus the tags reader.version_key and mlflow.sourceRun (from the link) as filters
+    source: OTLP, FR-OBS-14/-15
+    privacy: unchanged (phase 1)
+    writes: none new
+  - tab: AI Gateway budgets
+    shows: disabled (MLFLOW_ENABLE_AI_GATEWAY=false answers 501, round 9); budgets count gateway traffic only and alert by an outbound webhook
+    source: none
+    privacy: n/a
+    writes: none (FR-OBS-25 keeps alerts on /observability)
+
+# B3: the phase 2 job kinds, declared like FR-OBS-14's (SRV-EVENTS `JobKind`, queue `obs`, delays 5 s and 25 s).
+# Every handler with tracing off ends without a request; every 4xx other than the listed transients ends `dead` with
+# the class name; HTTP 5xx, timeouts and transport errors are transient; INV-OBS-3 holds for every enqueue.
+phase2_job_kinds:
+  - { kind: obs.setup, args: "{digest: sha256}", key: [digest], max_attempts: 3, timeout_s: 60,
+      enqueued_by: "the worker's start hook (enqueue-only)", dead: [ObsSetupRefused],
+      note: "a dead key blocks nothing: ensure_setup() also runs inline in obs.runs, obs.bench and obs.label (N2)" }
+  - { kind: obs.runs, args: "{kind: compile|ingest, id: uuid, end: int 1..100}", key: [kind, id, end],
+      max_attempts: 3, timeout_s: 60, schedule_in_s: 60, lock: "advisory lock_id(obs.runs:<kind>:<id>)",
+      enqueued_by: "SRV-PIPELINE / SRV-INGEST after the end's transaction commits (FR-PIPELINE-18, FR-INGEST-26)",
+      dead: [ObsRunsRefused, ObsRunsDuplicate] }
+  - { kind: obs.bench, args: "{upload_id: uuid}", key: [upload_id], max_attempts: 3, timeout_s: 60,
+      enqueued_by: "POST /api/obs/bench, in the transaction that stores the upload",
+      idempotent_by: "the Run tag reader.bench_upload", dead: [ObsBenchRefused] }
+  - { kind: obs.label, args: "{label_id: uuid, revision: int}", key: [label_id, revision], max_attempts: 3,
+      timeout_s: 30, schedule_in_s: 0, enqueued_by: "POST /api/obs/labels in its transaction",
+      idempotent_by: "assessment_name + metadata.revision on the trace; a revision below the row's ends at once (N4)",
+      transient: [TraceMissing], dead: [ObsLabelRefused] }
+  - { kind: obs.health, args: "{slot: datetime truncated to 30 min}", key: [slot], max_attempts: 1, timeout_s: 20,
+      traced: false, enqueued_by: "the worker's periodic scheduler (SRV-EVENTS), every 30 minutes", dead: [] }
+  - { kind: obs.retention, change: "also deletes old Runs and LoggedModels (FR-OBS-31)" }
+
+# Edits to approved text: ALL APPLIED at Red (V/obs-mlflow-phase2-impl, 2026-11-25) in INV-OBS-2, INV-OBS-3, `adr`,
+# FR-OBS-5 (f), FR-OBS-9, FR-OBS-31, `tables` and VEC-OBS-4; kept here as the record of what changed.
+phase2_in_place_edits:
+  - "INV-OBS-2 gains a phase 2 clause: with the canaries placed in a lesson's text, a tutor question and answer, a
+    bench upload's unknown or prose keys and an upload's set file (a non-pinned set), no `obs.runs`, `obs.bench`,
+    `obs.label`, `obs.setup` or `obs.health` request body (captured by the in-test MLflow receiver) and no row of
+    `obs_bench_results`, `owner_labels` or `obs_stack_status` contains any of them; for arbitrary uploads only
+    those passing VEC-OBS-5 produce a row and a job; the pinned questions are the only text that reaches MLflow."
+  - "INV-OBS-3 is extended: a failing `obs.runs` enqueue (outside the run's final transaction), `obs.label` or
+    `obs.bench` enqueue, and any phase 2 job failure never changes a compile run's, an import's or a question's
+    outcome, and a failed mirror never changes a label's record."
+  - "ADR list gains ADR-0038; FR-OBS-9's blocked list is unchanged (the gateway, assistant, MCP and v1 ingest stay
+    blocked; /graphql stays open, FR-OBS-33)."
+  - "FR-OBS-9 residual list (review round 1, non-blocking) is restated: (1) MLflow's UI JavaScript runs on 8443
+    with the owner's session through the gate, so a flaw in it can call any open MLflow route as the owner: the
+    blocked list, no CORS and the read-only Jaeger site bound it; (2) a comment the owner types in MLflow is stored
+    as typed (owner note); (3) `/health` ignores --allowed-hosts (round 10); (4) MLflow logs a 500 for an empty
+    /graphql body; (5) a soft-deleted Run keeps its rows (lifecycle stage `deleted`) because reader never runs
+    `mlflow gc` (FR-OBS-31)."
+  - "Unbounded growth is declared and pruned: traces and compile/import Runs by retention_days, LoggedModels of
+    unused version keys by retention_days, bench Runs and datasets kept (bounded by uploads: one Run and at most 40
+    records each), Postgres `obs_bench_results` and `owner_labels` kept (the record), `obs_stack_status` keeps
+    the newest row per member only; soft-deleted Run rows stay (no `mlflow gc`) and count in the store size."
+  - "`tables` gains: `obs_bench_results` (FR-OBS-23; owner: true), `owner_labels` (FR-OBS-24; owner: true),
+    `obs_stack_status` (FR-OBS-32; system: true, one row per member: member text pk, ok bool, detail text CHECK in
+    an enum of probe outcomes, checked_at timestamptz), all in migration `obs_0002`."
+  - "VEC-OBS-4 `trace_tags` gains `reader.material_sha256` (the import job's root key, so FR-OBS-20 (d) finds
+    import traces by tag) and `reader.version_key` (FR-OBS-21 a)."
+  - "FR-OBS-5's job root is skipped for kinds declared `traced: false` (only `obs.health`), so the 30-minute probe
+    adds no trace."
+
+# B11: paired changes, with ids above V/manage's maxima (FR-EVENTS-31, FR-CLI-23, FR-UI-30).
+phase2_paired_changes:
+  - { spec: SRV-EVENTS, id: FR-EVENTS-32, change: "the catalogue gains obs.setup, obs.runs, obs.bench, obs.label and obs.health (phase2_job_kinds); a periodic scheduler entry for obs.health; `traced: false` for obs.health; declared: obs.runs holds a second advisory lock (lock_id(obs.runs:<kind>:<id>)) on its job's connection for the whole run, beside the key lock, so it holds one pooled connection for up to its 60 s timeout, like every running job" }
+  - { spec: SRV-PIPELINE, id: FR-PIPELINE-18, change: "after the transaction that records a run's end commits, enqueue obs.runs {compile, run_id, end} inside its own try/except" }
+  - { spec: SRV-INGEST, id: FR-INGEST-26, change: "the same for an import's end (obs.runs {ingest, ingest_id, 1}); id above V/manage's FR-INGEST-25 (review round 2, N10)" }
+  - { spec: SRV-TUTOR, id: FR-TUTOR-15, change: "the bench's records file (tutor-bench-<UTC time>.json) gains a header (kind tutor, date, branch, commit sha, lesson_id, set tutor-bench-v2) and is VEC-OBS-5 bench_results.tutor exactly (the upload); the summary file is spec/fixtures/SRV-TUTOR/bench-summary.yaml's tutor_summary (no prose keys, commit sha only; moved to SRV-TUTOR in review round 4) and the committed 2026-11-23 summary is migrated to it (a report, not an upload)" }
+  - { spec: WEB-UI, id: FR-UI-33, change: "/observability: the bench upload (two file pickers, the route's errors shown by code), label buttons on lesson and answer rows (good/bad and the reason enum), one banner per alert, and a stack row (mlflow, rotel from obs_stack_status; jaeger: see reader doctor)" }
+  - { spec: OPS-CLI, id: FR-CLI-24, change: "reader doctor/status lines for mlflow, rotel and jaeger from docker inspect (image, running, restart count, Docker health), mlflow's store size from `docker system df -v` with the obs_store_large warning, the journal mode and the last retention and setup; reader backup/restore include obs_mlflow, always through SQLite's backup API (stack up or down; restore with the stack down, before mlflow-migrate); `reader backup` also writes `obs_mlflow.store.version` (the volume's store.version, when present) beside `obs_mlflow.db`, and `reader restore` (stack down) first removes the volume's store.version and the markers backup/in-progress, backup/fresh and backup/restored-for, then replaces mlflow.db through the backup API, then writes store.version back from the backup (absent when the backup has none) (FR-OBS-30, H2, review round 7); `reader restore-obs-premigrate` (FR-OBS-29; with --force it prints the version it rolls back to before copying); the doctor line `obs mlflow: fresh store, schema <revision>` after a first start; exit codes of restore-obs-premigrate: 0 restored (prints the version), 2 the stack is up (stop it first), 3 no pre-migrate.db, 4 the backup API copy failed (mlflow.db untouched), 5 the marker could not be written, 6 no `backup/in-progress` (nothing failed; rerun with `--force` to restore anyway), 7 no `pre-migrate.version` (code review round 1 of phase 2); `reader up` reports mlflow-migrate's own codes (FR-OBS-29: 10 obs_migration_incomplete → run restore-obs-premigrate; 11 obs_restored_for_other_version → the marker's version and the hint that the owner reverts the pin in git; 12 obs_migration_failed and 13 obs_migration_finish_failed → restore-obs-premigrate), which never overlap the restore command's 0..7; `reader restore` runs mlflow-migrate itself and starts mlflow only after it exited 0; `reader status` and `doctor --json` carry the obs lines" }
+  - { spec: OPS-DEPLOY, id: FR-DEPLOY-15, change: "FR-OBS-27's pinned flags and environment with comments and sources; the mlflow-migrate one-shot (flock, pre-migration backup, db upgrade, WAL); no new healthchecks (rotel and jaeger have no shell; obs.health and reader doctor cover them); deploy/otel/mlflow-setup.yaml mounted read-only into the worker; the 8443 request body limit (10 MiB, structural); the obs_mlflow volume's backup label changes from excluded to included (ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion), VEC-DEPLOY-3's backup list updated" }
+  - { spec: spikes, id: "spikes/embeddings-local (no spec; spike files)", change: "bench.py writes `kind: search`, and the committed results under results/20261120T195713-draft-questions/ (the run over questions.yaml, i.e. search-bench-v1's set) gain it, so they conform to VEC-OBS-5; the edit is noted in spikes/embeddings-local/RESULT.md (review rounds 2 and 3, N3 and R4)" }
+  - { spec: OPS-DOD, id: "tools/ci-local.sh (paired, tooling)", change: "ci-local.sh and ci.yml run `node spec/fixtures/SRV-OBS/compose-bench.mjs --check` beside trace-check" }
+  - { spec: SRV-OBS, id: VEC-OBS-5, change: "spec/fixtures/SRV-OBS/phase2.yaml" }
+  - { spec: SRV-OBS, id: VEC-OBS-6, change: "spec/fixtures/SRV-OBS/mlflow-setup.yaml (deploy/otel/mlflow-setup.yaml at Green)" }
+
+# Design review round 1 (b1a84d5, changes): each finding and its answer in this revision.
+phase2_review:
+  - { id: B1, answer: "bench_regressed reads Postgres obs_bench_results only (FR-OBS-23, -25); the api never reads MLflow (ADR-0038 Decision 4)" }
+  - { id: B2, answer: "obs.runs: key [kind, id, end]; reader.complete written last; an incomplete Run is completed, not duplicated; snapshot_at (a tag since round 2), never refreshed; a second end re-logs metrics at step 2 (FR-OBS-20; round 8)" }
+  - { id: B3, answer: "phase2_job_kinds declares every kind; obs.runs schedule_in 60 s; start-time setup is the enqueue-only obs.setup; obs.bench idempotent by reader.bench_upload; INV-OBS-3 extended (phase2_in_place_edits)" }
+  - { id: B4, answer: "VEC-OBS-5 written with patterns, enums and ranges, unknown keys rejected; commit ^[0-9a-f]{7,40}$; the committed tutor result is migrated through SRV-TUTOR FR-TUTOR-15; INV-OBS-2 phase 2 clause" }
+  - { id: B5, answer: "one composed committed fixture bench-tutor-v2.yaml (compose-bench.mjs, --check in CI) with one sha256; inputs.chapter is an integer 1..23" }
+  - { id: B6, answer: "check_bench_quotes.py: threshold 5, U+FFFE/U+00AD/line-end hyphens joined, NFC, set and PDF sha256 recorded; rerun (round 8 quotes.json); FR-OBS-22 says verbatim only" }
+  - { id: B7, answer: "owner_labels (renamed in round 2) is the record; obs.label mirrors HUMAN assessments; a relabel updates the row and posts a new revision with overrides (round 8)" }
+  - { id: B8, answer: "the FR-OBS-14 / ADR-0035 amendment is ADR-0038 Decision 2; the false consequence is fixed (without ADR-0038 labels stay in Postgres only); the route's error table includes no trace (stored), another owner (404) and tracing off; review queues and label schemas dropped" }
+  - { id: B9, answer: "by_version dropped; versions compared in MLflow by tag only (FR-OBS-21)" }
+  - { id: B10, answer: "reader obs bench dropped; uploads from /observability only (FR-OBS-23, WEB-UI FR-UI-33)" }
+  - { id: B11, answer: "phase2_paired_changes with ids above V/manage's maxima; round 8 replayed every write as raw REST (round8.json `raw`; round 10 the rest), a dataset in bench, link-to-run over 100, a Run after deleting 5 of its 120 traces (115 listed)" }
+  - { id: non-blocking, answer: "the bench route never starts a bench; ADR-0038 cites ADR-0034 and says why it differs; daily_spend_high per task; bench_regressed compares the same kind, set and model; FR-OBS-9 residual list; unbounded growth declared and pruned (phase2_in_place_edits)" }
+# Design review round 2 (ac3a79d, changes): N1-N10 and the non-blocking items, answered in revision 3.
+phase2_review_round2:
+  - { id: N1, answer: "snapshot_at is the tag reader.snapshot_at; while a Run is incomplete every attempt re-logs all params (same values); on a second end with different values tags and metrics update and params stay the first end's (FR-OBS-20 c)" }
+  - { id: N2, answer: "ensure_setup() runs inline when an experiment is missing (0 writes on a repeat); --repair-mirrors dropped; a dead obs.setup key blocks nothing (FR-OBS-26, -30)" }
+  - { id: N3, answer: "search-bench-v2 dropped; the result's required kind must equal the pinned set's (FR-OBS-23, VEC-OBS-5)" }
+  - { id: N4, answer: "obs.label finds its mirror by assessment_name + metadata.revision; a revision below the row's ends without a request (FR-OBS-24 c)" }
+  - { id: N5, answer: "import traces by tag.reader.material_sha256 (VEC-OBS-4 trace_tags gains it); the trace tag list is gone from mlflow-setup.yaml" }
+  - { id: N6, answer: "no VACUUM; mlflow-migrate's exact steps under flock with one pre-migration backup at backup/pre-migrate.db and `reader restore-obs-premigrate`; the false sentences fixed (3.18 does not refuse an old schema; soft-deleted rows stay without mlflow gc) (FR-OBS-29, -31, residual list)" }
+  - { id: N7, answer: "obs_mlflow stays in reader backup, always through SQLite's backup API; ADR-0038 Decision 6 replaces ADR-0032 Decision 1's exclusion; the backup label change is in FR-DEPLOY-15" }
+  - { id: N8, answer: "no Jaeger sidecar; doctor/status use docker inspect; store size measured on the host with docker system df -v; obs_store_large is a doctor/status warning, not an api alert (FR-OBS-25, -31, -32)" }
+  - { id: N9, answer: "probe on exactly mlflow's networks: IP-literal connect fails, external DNS fails, positive control on a normal network succeeds; spike round 11 recorded it (FR-OBS-33)" }
+  - { id: N10, answer: "FR-INGEST-26" }
+  - { id: non-blocking, answer: "/version removed; obs.health every 30 min and untraced; burst test, 4 GiB structural; 1.45 KB a span; used = reader.last_started within retention_days, Runs by end_time; traces/search max_results 500 with page_token; dead obs.runs after a long MLflow restart and the ObsRunsDuplicate race (advisory lock) declared; owner_labels with the lesson revision in the unique key; tutor no_trace path dropped; compose-bench --check in ci-local.sh (paired); 10 MiB structural; ADR verified_by adds rounds 10 and 11; tables in-place edit" }
+# Design review round 3 (d03645c, changes): R1-R4 and the non-blocking items, answered in revision 4.
+phase2_review_round3:
+  - { id: R1, answer: "an incomplete Run logs only the params it lacks, read from the runs/search answer; obs.bench's values come from the stored, immutable upload row; round 12: a same-value re-log 200, a changed value 400, runs/search returns the params (FR-OBS-20 c, -23 c)" }
+  - { id: R2, answer: "round 12: PATCH /api/2.0/mlflow/logged-models/{id}/tags {tags: [{key: reader.last_started, value: day}]} 200, read back through logged-models/search, a next-day PATCH replaces it (FR-OBS-26; round12.json raw)" }
+  - { id: R3, answer: "restore-obs-premigrate removes stale -wal/-shm, prints pre-migrate.version, writes backup/restored-for; mlflow-migrate exits 3 obs_restored_for_other_version until the image matches; reverting the pin is the owner's git action; FR-CLI-24 has the exit-code table (FR-OBS-29)" }
+  - { id: R4, answer: "scores recomputed by code over registered records only, file aggregates validated but never stored; the tutor upload is the per-question records file with FR-TUTOR-15's header; kind: search points at results/20261120T195713-draft-questions, noted in spikes/embeddings-local/RESULT.md (FR-OBS-23, VEC-OBS-5)" }
+  - { id: non-blocking, answer: "fresh-volume first start declared as a migration with a doctor line; pre-migrate.db counted in the store size; FR-OBS-29's [image] test (flock, non-root, read-only) is the first Red test; the egress test shows the probe reaching MLflow (round 12: /health 200); 0 writes on the same day; the advisory-lock connection hold declared in FR-EVENTS-32" }
+# Design review round 4 (03124aa, changes): F1 and the non-blocking items, answered in revision 5.
+phase2_review_round4:
+  - { id: F1, answer: "FR-OBS-29: step 4 writes store.version; step 2 copies store.version into pre-migrate.version (3.18.0 for a store made before this change); an in-progress marker is written before step 3 and removed after step 4; at start an existing marker exits 10 obs_migration_incomplete before step 2, so the backup is never overwritten; the [image] test names N and N+1: a failed N→N+1 exits 12, a second run exits 10 with pre-migrate.db byte-identical, the restore prints N, then N+1 exits 11 and N starts" }
+  - { id: non-blocking, answer: "`db upgrade` from empty marked a hypothesis with its fallback (skip to the server's own initialisation, WAL and store.version at the next run); the first tutor records upload needs a new bench run that spends live-budget credit (declared); tutor_summary moved to spec/fixtures/SRV-TUTOR/bench-summary.yaml; mlflow-migrate exits 10..13, the restore command 0..5" }
+# Design review round 5 (46e9017, changes): G1 and the non-blocking items, answered in revision 6.
+phase2_review_round5:
+  - { id: G1, answer: "a fresh volume writes backup/fresh in step 1 (and under the fallback); step 0 with backup/fresh wipes mlflow.db, -wal, -shm and in-progress and starts fresh, no restore; a successful step 4 clears it; the [image] test kills a fresh volume's first mlflow-migrate (or first server start under the fallback) and the next reader up reaches a served, empty store" }
+  - { id: non-blocking, answer: "steps 2-3 skipped when store.version equals the image's (no backup or marker window on normal starts); restore-obs-premigrate requires in-progress or --force (exit 6 otherwise); a crash in step 4 costs a restore and a second bump (declared)" }
+# Design review round 6 (4b81738, changes): H1, H2 and the non-blocking items, answered in revision 7.
+phase2_review_round6:
+  - { id: H1, answer: "the fallback initialises the empty store inside mlflow-migrate with one SqlAlchemyStore call, then step 4, so backup/fresh is always cleared before the server first starts; step 0 with fresh runs db upgrade first and wipes only if it fails; spike round 13 measured both paths (db upgrade on a missing file and the SqlAlchemyStore call: 71 tables, head f4a9b2c7d1e6, no-op second upgrade, health 200), so the hypothesis held for 3.18.0; [image] case: a fallback store served with a trace still holds it after the next migrate" }
+  - { id: H2, answer: "reader backup writes obs_mlflow.store.version beside obs_mlflow.db; reader restore puts it back or removes the volume's store.version when the backup has none (FR-OBS-30, FR-CLI-24); [image] case: a backup from N restored under N+1 goes through steps 2-3 and serves its data" }
+  - { id: non-blocking, answer: "a --force restore prints the version it rolls back to before copying; the restore exit codes are 0..6 in both FR-OBS-29 and FR-CLI-24" }
+
+# =====================================================================================================================
+# ADR-0039 revision (task V.kl-obs-spans, phase 1: spec only; ADR-0039 accepted by the owner 2026-11-26, including
+# its "Decided by the agent" items). Sources: ADR-0039 B6 (`judged`, `judge_ran`, `judge_source`), B7 (labels items
+# 1-6, `judge.eval.*` and `judge.align` slots), B7a (`policy_version`, no-regression rule), B7b (transport, the
+# `judge_inputs` copy), B8 (per-channel text table, entitlement), B9 (span tree, evaluation), B11 (SRV-OBS owns
+# text-free `find` spans, `policy_version`, `obs.eval`, judge labels, `judge_inputs`, alignment and its proposals),
+# the Amends rows for ADR-0032, ADR-0035 and ADR-0038, and the Rework row "policy_version, obs.eval, ...".
+# Held under `proposed_*` and `kl_*` keys (trace-check's T5 reads only `requirements`, `invariants`, `nfr` and
+# `vectors`), moved and applied at Red with the tests of `kl_planned_tests`. Ids: next free numbers, nothing
+# renumbered. Every number below that is not measured is an initial policy value (ADR-0039 A5), marked "initial".
+# =====================================================================================================================
+kl_revision:
+  task: V.kl-obs-spans
+  adr: [ADR-0039, ADR-0032, ADR-0035, ADR-0038, ADR-0018, ADR-0025]
+  new_ids: [FR-OBS-36, FR-OBS-37, FR-OBS-38, FR-OBS-39, FR-OBS-40, FR-OBS-41, FR-OBS-42, FR-OBS-43, INV-OBS-6,
+    INV-OBS-7, INV-OBS-8, VEC-OBS-7, VEC-OBS-8]
+  changed_ids_rework_table: [FR-OBS-14, FR-OBS-21, FR-OBS-22, FR-OBS-23, FR-OBS-24, VEC-OBS-1, VEC-OBS-4, VEC-OBS-5]
+  retested_unchanged_in_substance: [INV-OBS-1, INV-OBS-2]
+  # Not in ADR-0039's Rework row, but their approved text contradicts the ADR as written; see kl_open_points 1.
+  changed_ids_consequential: [FR-OBS-7, FR-OBS-8, FR-OBS-11, FR-OBS-12, FR-OBS-13, FR-OBS-15, FR-OBS-16, FR-OBS-20,
+    FR-OBS-26, FR-OBS-31, VEC-OBS-6]
+  reconciled_with: "SRV-AGENT revision on origin/V/kl-agent-judges (8d2799f and later): slot names, JudgeInputsSink,
+    the judge.find output as card ordinals mapped to ids (FR-AGENT-22), judge_outputs keyed (owner_id,
+    input_sha256, judge) with its own retention (FR-AGENT-20), and SRV-OBS owning the judge.eval.* and judge.align
+    prompts and parsers (FR-AGENT-18)"
+  paths: "unchanged: every new file is under server/src/reader/obs/**, server/tests/obs/** or spec/fixtures/SRV-OBS/**"
+  size_estimate: "about 350-550 lines of code (ADR-0039 Rework) plus the tests below"
+
 # The new text of changed approved ids, applied at Red (with ADR-0039 added to `adr`, the tables above to
 # `tables`, and the proposed_* entries moved into their sections).
-kl_in_place_edits:
+# All entries below were applied at Red on V/kl-obs-spans (appended to each id's text or source as an "ADR-0039 amendment").
+kl_in_place_edits_applied:
   - id: FR-OBS-14
     becomes: "The catalogue (VEC-OBS-4 `assessments`) gains a `source_type` per entry, CODE or LLM_JUDGE. CODE
       entries are unchanged and posted only by `obs.feedback`. LLM_JUDGE entries (ADR-0035 Decision 1 as amended
