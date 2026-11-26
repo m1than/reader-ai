@@ -124,9 +124,11 @@
 #   - `PackGuard.lock_active(conn, pack_ids)`: production default `always_active` (true) while no purge exists;
 #     SRV-INGEST (V.kl-ingest-packs) switches the default to its per-pack lock check.
 #   - `JudgeInputsSink.copy(conn, request, output)`: production default a no-op; SRV-OBS (V.kl-obs-spans) supplies it.
-#   - The index and eval caps: `judges.line_caps(config)` reads `budgets.index_usd_per_pack`,
-#     `budgets.index_usd_per_pair_run` and `budgets.eval_usd_per_run` when SRV-CONFIG's schema has them, else None
-#     (so `cap_missing`); the provider takes `line_caps=` for tests.
+#   - The index and eval caps: `judges.line_caps(config)` returns None for `budgets.index_usd_per_pack`,
+#     `budgets.index_usd_per_pair_run` and `budgets.eval_usd_per_run` (so `cap_missing`) until SRV-CONFIG's schema
+#     rows land; its paired change supplies them through `reader.config.effective`, the only module that reads
+#     overridable keys (SRV-CONFIG's test). The provider takes `line_caps=` for tests.
+#   - SRV-OBS: `reader.obs.attributes.SPEC_CODES` gains the new error codes (its catalogue test reads `errors`).
 #
 # Paired changes (each in its own spec, in V.kl-deploy-judge-lane unless named):
 #   - OPS-DEPLOY: `agentnet` with an explicit subnet and fixed IPv4 addresses for `worker` and `worker-judge`, pinned

@@ -99,13 +99,9 @@ def cap_key(task: str, line: str | None) -> str | None:
 
 
 def line_caps(config: ReaderConfig) -> Mapping[str, Decimal | None]:
-    """The index and eval caps from reader.yaml; None until SRV-CONFIG's schema has them (`cap_missing`)."""
-    budgets: Any = getattr(config, "budgets", None)
-    caps: dict[str, Decimal | None] = {}
-    for key in CAP_KEYS:
-        value = getattr(budgets, key, None)
-        caps[key] = None if value is None else Decimal(str(value))
-    return caps
+    """The index and eval caps: all None (so `cap_missing`) until SRV-CONFIG's schema rows land and its paired
+    change supplies them through `reader.config.effective`, the only reader of overridable keys."""
+    return dict.fromkeys(CAP_KEYS)
 
 
 def scope_run_id(owner_id: uuid.UUID, kind: str, version_id: str) -> uuid.UUID:
