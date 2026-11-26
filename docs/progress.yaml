@@ -1916,7 +1916,10 @@ tasks:
         never evicting a worker token; late outputs kept for replay; judge.find ledger line by channel (tutor use; the
         compile run on the fact-check route; MCP monthly plus a per-token daily cap in SRV-MCP);
         query and card text only in a judge_requests row; context prefixes in batched worker jobs of 25 spans.
-        FR-AGENT-3, -6, -9, -12, -17" }
+        FR-AGENT-3, -6, -9, -12, -17",
+      note: "Promotion order (deep-reviewer round 1): FR-AGENT-3 revised (agent-proxy client identity), INV-AGENT-7 and
+        VEC-AGENT-6 go Green only in the same integration merge as V.kl-deploy-judge-lane's OPS-DEPLOY agentnet subnet
+        and fixed addresses, never before (else every worker issue is 403 client_unknown); the rest may merge earlier" }
   - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: todo,
       needs: [V.owner.adr-0039, V.kl-agent-judges],
       what: "OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX, OPS-CLI and SRV-CONFIG revision (~340–600 lines): the worker-judge
