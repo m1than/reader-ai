@@ -3,7 +3,7 @@
 # hardening on an internal network (no internet), runs client.py from a second container on that
 # network, and writes everything measured to $OUT/<mode>-<run>.json (default results/).
 #   bash spikes/kernel-roundtrip/run.sh               # build, then 3 warm runs and 1 cold run
-#   SKIP_BUILD=1 RUNS=1 bash spikes/kernel-roundtrip/run.sh
+#   SKIP_BUILD=1 RUNS=1 bash spikes/kernel-roundtrip/run.sh   # also skips the client image: rebuild after editing client.py
 #   OUT=results-314 bash spikes/kernel-roundtrip/run.sh   # ADR-0020 re-run on python:3.14-slim-trixie
 # Cold = the pre-built evcxr cache is not copied in, so the pilot crates compile from source (offline).
 set -euo pipefail
@@ -31,8 +31,9 @@ cleanup
 docker network create --internal "$NET" >/dev/null
 
 # The client is its own image (client.Dockerfile, dependencies baked in), run on the internal network;
-# the gateway container is only ever on that network.
-client() { docker run --rm --network "$NET" "$CLIENT" "$@"; }
+# the gateway container is only ever on that network. Calls are sequential, so one container name is enough,
+# and `cleanup` removes a client left running by an interrupt.
+client() { docker run --rm --name "$CLIENT" --network "$NET" "$CLIENT" "$@"; }
 
 mem_mib() { docker stats --no-stream --format '{{.MemUsage}}' "$GW" | awk '{ v = $1
   if (v ~ /GiB/) { sub(/GiB/, "", v); v *= 1024 } else if (v ~ /KiB/) { sub(/KiB/, "", v); v /= 1024 } else { sub(/MiB/, "", v) }

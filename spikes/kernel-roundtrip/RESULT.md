@@ -88,9 +88,9 @@ Warm is warm only because of the pre-built cache. cargo still walks the whole de
 
 ## Re-run on Python 3.14 / Debian 13 (ADR-0020), 2026-11-26
 
-**Verdict: PASS.** The same spike on `python:3.14-slim-trixie` (Python 3.14.10) passes the same criterion. This closes the "kernel sandbox" row that ADR-0020 lists as a hypothesis.
+**Verdict: PASS.** The same spike on `python:3.14-slim-trixie` (Python 3.14.10, *observed, not recorded*: read from the built image) passes the same criterion. This is the evidence for the "kernel sandbox" row that ADR-0020 lists as a hypothesis; the ADR's amendment is the owner's.
 
-Command: `OUT=results-314 bash spikes/kernel-roundtrip/run.sh` (3 warm runs, 1 cold run; default `RUNS=3`). Every number comes from `results-314/*.json`; the 3.13 numbers above stay in `results/`. Same host, the same Docker Desktop VM (4 CPUs), the same ADR-0014 controls, and the same versions: Kernel Gateway 3.0.1, ipykernel 7.4.0, rustc 1.100.0, evcxr_jupyter 0.23.0, deno 2.9.8.
+Command: `OUT=results-314 bash spikes/kernel-roundtrip/run.sh` (3 warm runs, 1 cold run; default `RUNS=3`). Every number comes from `results-314/*.json`; the 3.13 numbers above stay in `results/`. Same ADR-0014 controls. Host, VM (4 CPUs) and versions are *observed, not recorded* (the base tag and rustup `stable` float; read from the built image): Kernel Gateway 3.0.1, ipykernel 7.4.0, rustc 1.100.0, evcxr_jupyter 0.23.0, deno 2.9.8.
 
 Two harness changes:
 - `client.py` runs from its own image (`client.Dockerfile`, also on 3.14/trixie) with `docker run --rm` on the internal network. Before, it ran in a long-lived container through `docker exec`.
@@ -103,9 +103,9 @@ Two harness changes:
 | Pilot crates, warm, one kernel | 1.00–1.17 s | **0.98–0.99 s** |
 | Pilot crates, two Rust kernels at once (warm) | 1.30–1.46 s | 1.26–1.29 s |
 | Pilot crates, cold: one kernel / two at once | 4.92 s / 9.97 and 10.17 s | 4.57 s / 9.02 and 9.00 s |
-| Peak memory, warm / cold (2 GiB limit) | 648 MiB (warm-1) / 1,404 MiB | 495–890 MiB / 1,534 MiB |
-| Idle memory | 53.6 MiB | 60.2–68.1 MiB |
+| Peak memory, warm / cold (2 GiB limit) | 453–1,023 MiB / 1,404 MiB | 495–890 MiB / 1,534 MiB |
+| Idle memory | 53.5–54.0 MiB | 60.2–68.1 MiB |
 | Image size | 1,905,968,091 bytes | 1,988,059,072 bytes (+82 MB) |
-| Image build | 313 s, uncached (*observed, not recorded*) | 284 s (`build_s`: gateway and client images; only the base image was cached) |
+| Image build | 313 s, uncached (*observed, not recorded*) | 284 s (`build_s`: gateway and client images; only the base image was cached, *observed* in the build log) |
 
-The cold peak rose by 130 MiB to 1.5 GiB, still under the 2 GiB limit. The 3.13 findings above (mounts, per-kernel cleanup, memory per container) hold unchanged.
+The cold peak rose by 130 MiB to 1.5 GiB, still under the 2 GiB limit; warm peaks are in the same range as on 3.13. The 3.13 findings above (mounts, per-kernel cleanup, memory per container) hold unchanged.
