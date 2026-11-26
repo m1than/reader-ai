@@ -69,6 +69,28 @@ async def test_daily_scope(pg: Pg, tmp_path: Path) -> None:
     await p.run(_call(w, task="draft", daily_budget_usd=D("0.21")))  # another task has its own day
 
 
+async def test_tutor_line_judges_count_in_the_tutor_day(pg: Pg, tmp_path: Path) -> None:
+    """FR-AGENT-12 (ADR-0039 revision): a judge.find on line tutor counts in the tutor's daily scope; on line
+    compile it does not."""
+    from .conftest import CONFIG_JUDGES
+
+    ledger = need("reader.agent.ledger")
+    errors = need("reader.agent.errors")
+    w = await world(pg, tmp_path, CONFIG_JUDGES)
+    p, _, _ = _provider(w, [Script(cost=0.06) for _ in range(4)], tmp_path)
+    owner = w.users["ivan"]
+    await p.run(_call(w, task="tutor", stage="tutor", daily_budget_usd=D("0.25")))  # 0.06
+    await p.run(_call(w, task="judge.find", stage="judge.find", line="tutor", daily_budget_usd=D("0.25")))  # 0.12
+    await p.run(_call(w, task="judge.find", stage="judge.find", line="compile"))  # not in the tutor day
+    assert await ledger.spent(w.engine, owner_id=owner, task="tutor", day=True) == D("0.12")
+    assert await ledger.spent(w.engine, owner_id=owner, task="judge.find", day=True) == D("0")
+    with pytest.raises(errors.BudgetRefused) as refused:  # 0.12 + 0.10 > 0.21
+        await p.run(_call(w, task="tutor", stage="tutor", daily_budget_usd=D("0.21")))
+    assert refused.value.code == "daily_budget_exhausted"
+    with pytest.raises(errors.BudgetRefused):  # the judge on the tutor line sees the same day
+        await p.run(_call(w, task="judge.find", stage="judge.find", line="tutor", daily_budget_usd=D("0.21")))
+
+
 async def test_thinking_off_system_prompt_and_stop_reason(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     p, cli, _ = _provider(w, [Script(stop_reason="max_tokens"), Script()], tmp_path)
