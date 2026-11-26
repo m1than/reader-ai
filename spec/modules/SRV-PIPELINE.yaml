@@ -84,6 +84,9 @@
 # SRV-AGENT's reserve enforces the effective budget per call. tests/pipeline/test_overrides_db.py adds the [db]
 # oracle: a task budget override appears in a new run's snapshot, and an override lowered after the run's creation
 # refuses the run's draft (`task_budget_exhausted`) while the status still shows the creation-time snapshot.
+# ADR-0039 revision (V.kl-pipeline-checks, 2026-11-26, proposed): the check order after drafting, up to 3 loops under
+# the loop rule, the rule checks, the lab reference path, fact-check through the search route, Admiralty credibility.
+# Drafted at the end of this file as proposed_* sections; nothing above changes until it is approved with its tests.
 
 id: SRV-PIPELINE
 title: Compile pipeline — stages as data, one revise loop, budgeted agent stages, findings as open cells, lab verification, G2 report (slice)
@@ -569,3 +572,334 @@ owner_notes:
 # `order_source` is `manual` (owner, 2026-11-24: manual lesson order survives a re-plan), plan order otherwise.
 # A new course goes first: SRV-LESSON's `create_course` shifts the owner's positioned courses, then inserts at 1
 # (SRV-LESSON FR-LESSON-20), so the course import needs no change of its own beyond calling it.
+
+# ---- ADR-0039 revision (V.kl-pipeline-checks, 2026-11-26): PROPOSED, phase 1 (spec only, no code) ----
+#
+# Source: ADR-0039 (accepted 2026-11-26), owner decisions 18 and 22, its ADR-0005 and ADR-0009 Amends rows and its
+# Rework row "Pipeline check order, loops, the cap rule, fact-check route, credibility" (FR-PIPELINE-4, -5, -6, -8;
+# NFR-PIPELINE-1; VEC-PIPELINE-1, -2; INV-PIPELINE-1, -2, -3, -5); docs/plans/adr-0039-execution.md
+# "V.kl-pipeline-checks". Each item below replaces the approved text of its id (or joins `requirements`,
+# `invariants`, `vectors`) only together with its tests (H2), after deep-reviewer approval (complex area: the compile
+# pipeline's verification stages and cost math) and after the owner accepts the re-measured compile cost per lesson
+# (plan, owner gates). Until then the approved text above is what the code does.
+# Not in the Rework table, but changed by the new order and stated so the review sees them: FR-PIPELINE-3 (the revise
+# input, the fact-check prompt), FR-PIPELINE-9 (`labs_unverifiable` moves to the rule check), FR-PIPELINE-10 (rule and
+# lab findings, checks not run), FR-PIPELINE-13 (task budgets for four calls per task).
+#
+# What it replaces in approved text: the header's "Loops" bullet (at most 1 revise loop, the measured deviation);
+# `bounds.max_revise_loops`; the defers "More revise loops" and "Independent expected values for labs" (both removed
+# at promotion). The $8 cap stays (`bounds.run_cap_usd`); ADR-0039's ADR-0005 row makes ADR-0005's $4.35 a target the
+# run status reports against, not a stop. The ADR-0005 owner note stays.
+#
+# Decisions taken here (for the review):
+#   D1 The lab's independent reference path (ADR-0009 stage 5) is built AT DRAFT TIME, by the drafter (and the
+#      reviser), as data on each lab cell (`reference`, FR-PIPELINE-25), not in lab verification. Lab verification
+#      stays model-free (sandbox runs only), so no model call verifies before claim support (decision 18). The rule
+#      check pins that a reference is declared and resolvable; the adversarial review, last, judges whether it is
+#      independent of the drafter's own computation.
+#   D2 The four failures are: a rule failure, a failing lab, an unsupported or contradicted verdict, a blocking review
+#      finding. Each sends the run to `revise` and counts as one loop (decision 22). After `bounds.max_loops` (3)
+#      loops the next failure is the fourth and stops the lesson (ADR-0009: "the fourth failure stops the lesson and
+#      asks the owner"); the owner sees it as `stop: loop_limit` in the run status.
+#   D3 A loop that SRV-AGENT `loop_fits` refuses does not start: the run sets `budget_refused = loop_cap`, so
+#      FR-PIPELINE-6 derives `budget_exhausted` and FR-PIPELINE-17 lists it, with no new column.
+#   D4 The fact-check source is data, `fact_check.source: section | route` in stages.yaml. `section` (today's
+#      whole-section fact-check over the lesson's own spans) is the fallback and the default until SRV-SEARCH's
+#      fact-check route lands AND retrieval-ablation's fact-check comparison passes ADR-0039 B10's rule; the switch
+#      is a one-line data change that cites that RESULT.md (FR-PIPELINE-26).
+#   D5 Admiralty credibility is the fact_check model's value per report item, constrained to its verdict by code
+#      (VEC-PIPELINE-6) and stamped on the claim by code, like `verified` on labs; the model never writes it into a
+#      notebook (FR-PIPELINE-27).
+#   D6 Task budgets: the example `budget_usd_per_lesson` of each compile task (draft, fact_check, review, and
+#      `judge.find`) equals `bounds.run_cap_usd`. The reordered stages have no measured floors yet, so per-task
+#      sizes would be guesses; with cap-sized task budgets the run cap, the loop rule and FR-AGENT-9 per call are the
+#      bound, and the live check records spend per task for the owner to lower them (FR-PIPELINE-13).
+#   D7 "Schema" in ADR-0039's first check is the parse-time gate that already exists: an output that does not parse
+#      or fails SRV-LESSON's schema is `output_invalid`, a transient retry of the same call (FR-PIPELINE-3,
+#      FR-AGENT-10), because a revision must validate before it is written (SRV-LESSON FR-LESSON-1), so there is no
+#      notebook to send back. It is not counted as a loop. Everything checkable on a valid notebook with 0 calls is
+#      the rule check (FR-PIPELINE-24) and counts.
+#
+# Cost (ADR-0039 ADR-0005 row; estimates, not bounds): at today's floors a first pass is $1.39 and each loop $1.66,
+# three loops about $6.37 per lesson. The measured L02 loop (revise + fact-check + review) cost $1.475–1.634 and took
+# 312–314 s (REF-PIPELINE-2). The bound is the run cap through the loop rule (FR-PIPELINE-23) and FR-AGENT-9 per call.
+#
+# Paired changes (each in its own spec):
+#   - SRV-LESSON: claim objects and `changed` / `erratum` cells gain optional `credibility` (integer 1–6, written by
+#     code only, like `verified`); lab cells gain optional `reference` (FR-PIPELINE-25's shape; optional so that
+#     stored revisions stay valid, required by the rule check); the provenance stage enum and `finding.stage` gain
+#     `rules`; G2 deferred item (c) reads the four check records of FR-PIPELINE-8 (c) revised.
+#   - SRV-SEARCH (V.kl-search-find): `find` callable from a worker job on channel `pipeline`, route `fact_check`,
+#     with a ledger context {line: compile, run_id, run_cap_usd, lesson_id} that its `judge.find` request carries, so
+#     a judge call is spent on the compile run (SRV-AGENT FR-AGENT-9 (d)); a call-free read of the current
+#     `brain_version` and `policy_version`. Until it lands, `fact_check.source` stays `section`.
+#   - SRV-AGENT (approved on V/kl-agent-judges): `loop_fits` (FR-AGENT-23) and `reserve_for` (FR-AGENT-6) used as
+#     written; no change.
+#   - OPS-DEPLOY: deploy/reader.example.yaml task budgets per D6, including `tasks."judge.find".budget_usd_per_lesson`.
+#   - SRV-FRESH: no change. The ADR-0030 freshness check keeps its place beside fact-check (ADR-0039 ADR-0009 row): it
+#     is not one of the four checks, never counts as a loop and spends on the `freshness` line; FR-PIPELINE-7's slice
+#     rule for `changed` cells and URL citations stays.
+#   - SRV-OBS: `verify.lab`, `verify.claims`, `fact_check.passed` and `verify.lab_passed` (FR-OBS-13, -14) fire once
+#     per check run inside the sequence; tests/pipeline/test_pipeline_obs_db.py, traced to SRV-OBS, changes its
+#     expected stage order, so SRV-OBS carries a one-line paired note with it (H2).
+#   - OPS-SANDBOX: every module named in `reference_libraries` imports in the kernel image ([image] test); a
+#     package outside the standard library is added to sandbox/requirements.lock first.
+
+proposed_bounds:
+  max_loops: 3                          # ADR-0009 and ADR-0039 decision 22; replaces max_revise_loops: 1
+  fact_route_source_chars_max: 120000   # initial value: 2× L02's 60,034-character source (REF-PIPELINE-2); the
+                                        # route's rendered cards are cut here (whole cards), and loop_fits plans the
+                                        # route-mode fact_check prompt at this size
+
+proposed_errors: [loop_cap]             # a `budget_refused` code written by the pipeline (D3), not by SRV-AGENT
+
+proposed_revisions:
+  - id: FR-PIPELINE-3
+    text: >-
+      As approved, with three changes. (a) `revise`'s user prompt carries the current notebook and the report of the
+      check that failed (the rule, lab, fact or review report, FR-PIPELINE-5), not the last fact and review reports.
+      (b) The fact_check stage's system prompt carries the fact-check source of FR-PIPELINE-26 (the lesson's source,
+      or the route's cards) in the same delimiter, and its `input_sha256` is FR-PIPELINE-26's. (c) A `credibility`
+      the model writes on a claim or cell is dropped like `provenance` and `verified` (only code writes it,
+      FR-PIPELINE-27); a lab's `reference` is the drafter's and is kept (FR-PIPELINE-25).
+    tests_planned:
+      - "change server/tests/pipeline/test_source_and_reports.py: the revise prompt holds the failing check's report and no other report; a model-written credibility is dropped; a model-written lab reference is kept"
+  - id: FR-PIPELINE-4
+    text: >-
+      Report schemas (VEC-PIPELINE-4, VEC-PIPELINE-6). Fact report: as approved, and every item carries
+      `credibility`, an integer 1–6 (Admiralty information credibility); a missing or out-of-range value is
+      `output_invalid`. After validation and the forced verdicts (FR-PIPELINE-4, -7), code constrains credibility
+      to the verdict (FR-PIPELINE-27). In route mode the item's `spans` are aliases of the route's cards
+      (FR-PIPELINE-26), expanded to span ids in the stored report. Review report: as approved. Rule report
+      (FR-PIPELINE-24): `{failures: [{rule, cell|null, claim|null, text}]}`, written by code. Lab report: as
+      FR-PIPELINE-9. Each check's outcome: the rule check fails iff `failures` is non-empty; lab verification iff a
+      lab failed; fact_check iff a verdict is `unsupported` or `contradicted` after forcing; the review iff a finding
+      is blocking. All reports cap at `bounds.items_max_per_report` and are stored on their `compile_steps` row with
+      the notebook sha256 they judged.
+    tests_planned:
+      - "change spec/fixtures/SRV-PIPELINE/verdicts.yaml and test_source_and_reports.py: every report item carries credibility; missing, 0, 7 and a non-integer credibility → output_invalid"
+      - "add to test_source_and_reports.py: the outcome function per report kind (fails iff the rule above)"
+  - id: FR-PIPELINE-5
+    text: >-
+      Steps and check order (VEC-PIPELINE-1, -2; ADR-0039 decisions 18 and 22). A run executes `draft`, then the
+      checks of `order.checks` = [`rules`, `lab_verification`, `fact_check`, `adversarial_review`], cheapest first,
+      each on the notebook the previous check passed (lab verification's stamped revision for fact_check, the
+      credibility-stamped revision for the review). The first check that fails ends the pass: if `loops` <
+      `bounds.max_loops` and the loop rule (FR-PIPELINE-23) admits a loop, the run executes `revise` (`loops` + 1)
+      and the checks again from `rules`; if `loops` = `bounds.max_loops`, that failure is the fourth and the run
+      stops with `stop: loop_limit`; if the loop rule refuses, the run stops with `budget_refused = loop_cap`. When
+      all four pass, the run stops with `stop: passed`. Every return to `revise` counts as one loop, a rule failure
+      included. After any stop the run executes `findings`, its last step. Each step is one job as approved (`rules`,
+      `fact_check`, `adversarial_review`, `revise`, `findings` of kind `pipeline.stage`; `lab_verification` of kind
+      `pipeline.verify` with `bounds.verify_job_timeout_s`). Reuse by `input_sha256` as approved, for `rules` too
+      (its input is FR-PIPELINE-24's). A budget refusal before a model step (SRV-AGENT FR-AGENT-9) sets
+      `budget_refused` and the run executes `findings` only. One run per lesson at a time (`compile_running`). The
+      SRV-OBS tracing of the approved text is unchanged, per check run.
+    tests_planned:
+      - "change server/tests/pipeline/test_stages.py: next_stage over the revised VEC-PIPELINE-2, including four-checks-fail-once (stops at the fourth failure with loops 3), rule-failure-counts, fourth-failure-at-rules and the loop_cap cases"
+      - "change server/tests/pipeline/test_pipeline_db.py: the revised VEC-PIPELINE-2 end to end with a fake provider, a fake kernel and a fake loop_fits; a rule failure loops back with no provider call before revise; budget refusal mid-loop runs findings only"
+  - id: FR-PIPELINE-6
+    text: >-
+      Run state, as approved, with these changes: `stalled` when no key is queued, running or dead and the run has
+      not finished `findings`; after `findings`: `budget_exhausted` if `budget_refused` is set (including `loop_cap`),
+      `converged` if the run stopped with `stop: passed` and no open cell of the final revision is blocking, else
+      `open_findings`. The status routes (FR-PIPELINE-11, -17, -21) add `loops` and `stop` (`passed`, `loop_limit`,
+      `loop_cap`, `budget_refused`, or null while no stop is recorded), derived from the steps and `budget_refused`,
+      and `target_usd` = 4.35 (ADR-0005's per-lesson target, reported beside `spent_usd`, never a stop).
+    tests_planned:
+      - "change test_pipeline_db.py: each terminal case of VEC-PIPELINE-2 derives its state and stop; a loop_cap stop is budget_exhausted and listed by GET /api/compiles; target_usd is reported"
+  - id: FR-PIPELINE-8
+    text: >-
+      G2 report, as approved, with these changes. (a) labs: the lab report is that of the last `lab_verification`
+      whose input derives from M (none, while M has labs → `labs.unverified`). (c) stages: each of the four checks
+      has a step in the run whose input notebook is M's deterministic derivation — M for `rules` and
+      `lab_verification`, `stamp_labs(M, lab_report)` for `fact_check`, `stamp_credibility(stamp_labs(M,
+      lab_report), fact_report)` for `adversarial_review` — recomputed as in (d); otherwise `stages.missing` names
+      the check. (d) deltas: F equals `append_findings(stamp_credibility(stamp_labs(M, lab_report), fact_report),
+      reports)`, where an absent report is the identity, compared on SRV-LESSON's canonical bytes as approved.
+    tests_planned:
+      - "change spec/fixtures/SRV-PIPELINE/g2-cases.yaml and test_g2_and_findings.py: stages.missing per check; a credibility stamp differing from the fact report is a delta; a lab stamp from another notebook's report is labs.binding"
+  - id: FR-PIPELINE-9
+    text: >-
+      Lab verification, as approved, with these changes: it runs as the second check, on a notebook that passed
+      `rules`; the time bound that gave `labs_unverifiable` is a rule (FR-PIPELINE-24), so lab verification never
+      receives such a notebook; a lab that fails (an assert, a timeout, non-identical outputs) fails the check and
+      becomes an open cell only through `findings` (FR-PIPELINE-10) when the run stops on it. It runs the cell's
+      source and asserts only; the reference path lives inside the asserts (FR-PIPELINE-25). No model call.
+    tests_planned:
+      - "change server/tests/pipeline/test_verify.py: the lab report carries no open cell; a lab failure fails the check; [image] tests unchanged"
+  - id: FR-PIPELINE-10
+    text: >-
+      Findings step, as approved (ids, collapse, suffixes, `notes` untouched), appending one open cell per remaining
+      problem of the stop: every rule failure of the last rule report on the final notebook (`rules`, blocking);
+      every failed lab of the last lab report on it (`lab_verification`, blocking); every unsupported or contradicted
+      verdict of the last fact report on it (`fact_check`, blocking); every finding of the last review on it
+      (`adversarial_review`, its blocking flag); one blocking `check_not_run` cell per check that did not run on the
+      final notebook (the stage of that check; the run stopped earlier); and the slice's `changed_unchecked` and
+      `url_citation_unchecked` items (`fact_check`, non-blocking).
+    tests_planned:
+      - "change test_g2_and_findings.py: open cells per check kind; check_not_run cells for a stop at rules; a rerun neither duplicates nor renumbers them"
+  - id: FR-PIPELINE-13
+    text: >-
+      Live compile of L02 on the Bashir pilot, as approved, with up to `bounds.max_loops` loops: one run ends in
+      `converged`, `open_findings` or `budget_exhausted` within the cap, with zero task-budget refusals (D6: each
+      compile task's example budget equals the run cap); its settled ledger sum, judge calls included, equals the
+      SDK-reported total; the run records `loops`, `stop`, spend per task and wall time, which the owner reviews to
+      accept the re-measured compile cost per lesson. [live]
+    tests_planned:
+      - "change server/tests/pipeline/test_live.py: assert loops ≤ 3, stop present, zero task_budget_exhausted rows, ledger sum equal to the SDK total"
+      - "add a [unit] test in test_stages.py: deploy/reader.example.yaml gives draft, fact_check, review and judge.find a budget_usd_per_lesson equal to bounds.run_cap_usd"
+  - id: NFR-PIPELINE-1
+    metric: wall time of one L02 compile from run creation to its terminal state, with up to 3 loops, minutes
+    threshold: 45            # ADR-0005/roadmap criterion. Estimate (not a bound): measured stage times give
+                             # 138 + 38 + 84 + 3 × 314 ≈ 1,200 s of model time (REF-PIPELINE-2), plus, in route mode,
+                             # up to 94 sequential finds per fact-check pass at the 2.5 s p95 target ≈ 4 min each,
+                             # 4 passes ≈ 16 min: about 36 min worst case; measured by the stage live check
+    verified_by: bench
+    tests_planned:
+      - "the stage live check records the wall time of the FR-PIPELINE-13 run (bench, not CI)"
+  - id: INV-PIPELINE-1
+    text: >-
+      For any sequence of check outcomes, costs and loop_fits answers (VEC-PIPELINE-2 and generated ones), a run never
+      starts a model step whose reserve would exceed a cap, never starts a loop that loop_fits refused, runs at most
+      `bounds.max_loops` loops and counts every return to `revise` as one, never runs a check on a notebook that has
+      not passed every cheaper check of the order (decision 18), and ends in exactly one derived terminal state with
+      every unresolved problem present as an `open` cell (property test with a fake provider, kernel and loop_fits).
+    tests_planned:
+      - "change the Hypothesis property in test_stages.py and test_pipeline_db.py to the four-check order and the loop rule"
+  - id: INV-PIPELINE-2
+    text: >-
+      As approved, and: a reused `fact_check` in route mode makes no `find` and no `judge.find` call; a reused
+      `rules` step recomputes nothing.
+    tests_planned:
+      - "add to test_pipeline_db.py: a recompile with an unchanged notebook, brain_version and policy_version reuses fact_check with zero find calls on the fake search"
+  - id: INV-PIPELINE-3
+    text: >-
+      Every span citation in a stored revision names a span of the lesson's source, with page and title taken from
+      that span; every span in a stored fact report names a span of the fact-check source that step rendered
+      (FR-PIPELINE-26).
+    tests_planned:
+      - "change test_pipeline_db.py: in route mode a fact report's spans are among the rendered cards' span ids"
+  - id: INV-PIPELINE-5
+    text: >-
+      The final revision of a finished run always equals FR-PIPELINE-8 (d)'s derivation from its last model-written
+      revision.
+    tests_planned:
+      - "change test_g2_and_findings.py and test_pipeline_db.py: the derivation includes stamp_credibility"
+  - id: VEC-PIPELINE-1
+    source: >-
+      The compile steps as data (server/src/reader/pipeline/stages.yaml must equal the fixture): `prompt_version` v2;
+      `max_loops` 3; `fact_check: {source: section}` (D4); the stages of the approved file plus `{name: rules, task:
+      none, max_output_tokens: 0, floor_reserve_usd: 0.0, output: rule_report}` (floors of the model stages stay the
+      measured ones until the stage live check re-measures them); `rules:` the ordered rule names of FR-PIPELINE-24;
+      `reference_libraries:` the module names a `library` reference may name (FR-PIPELINE-25; initial list: the
+      standard library's `hashlib`, `hmac`, `secrets`, `decimal`, `fractions`, `math`); `order: {first: [draft],
+      checks: [rules, lab_verification, fact_check, adversarial_review], loop: [revise], final: [findings]}`
+    file: spec/fixtures/SRV-PIPELINE/stages.yaml
+    tests_planned:
+      - "change test_stages.py: the runtime file equals the fixture; load refuses an unknown fact_check.source, a check missing from the stages, or a rule name without a function"
+  - id: VEC-PIPELINE-2
+    source: >-
+      Loop decision table for the four-check order: clean-first-pass; four-checks-fail-once (draft fails rules, the
+      first revision fails the lab, the second fails fact_check, the third fails the review → stop loop_limit after
+      loops 3, state open_findings, no fourth revise); rule-failure-counts; fourth-failure-at-rules (check_not_run
+      cells); loop-cap-before-first-loop and loop-cap-before-third-loop (no revise, budget_refused loop_cap);
+      budget-refused-mid-loop; exhausted stage; recompile with reuse (rules and model checks reused)
+    file: spec/fixtures/SRV-PIPELINE/loop-cases.yaml
+    tests_planned:
+      - "test_stages.py and test_pipeline_db.py read it (FR-PIPELINE-5, -6, -23, INV-PIPELINE-1)"
+
+proposed_requirements:
+  - id: FR-PIPELINE-23
+    text: >-
+      **Loop rule** (ADR-0039 ADR-0005 row; SRV-AGENT FR-AGENT-23). Before enqueuing `revise`, the handler of the
+      check that failed builds the loop's planned calls, each an SRV-AGENT `PlannedCall`: `revise` (its prompt
+      rendered now, exact); `fact_check` and `adversarial_review` (prompts rendered from the current notebook as an
+      estimate of the revised one; in route mode the fact-check source counted at
+      `bounds.fact_route_source_chars_max`); and in route mode one `judge.find` per fact-checkable item of the
+      current notebook (at most `bounds.items_max_per_report`), with the slot's input cap, max output and floor.
+      Rules and lab verification make no calls and are not planned. It calls `loop_fits(owner_id, run_id,
+      compile_runs.cap_usd, planned)`. True → enqueue `revise`. False → set `budget_refused = 'loop_cap'` when it is
+      null, enqueue `findings`, start no model call. The plan is an admission estimate: every call still reserves
+      under FR-AGENT-9, so no cap can be crossed when the revised notebook is larger than planned. The first pass
+      is not a loop and is not planned.
+    tests_planned:
+      - "add server/tests/pipeline/test_loop_rule_db.py [db]: a loop whose summed reserve would cross the run cap does not start (no revise step, no new reserve row, budget_refused loop_cap, state budget_exhausted, findings ran); a sum that fits exactly starts the loop; the planned calls recorded by a fake loop_fits: section mode → revise (task draft), fact_check, review; route mode → plus one judge.find per claim, changed and erratum cell; the first pass never calls loop_fits"
+  - id: FR-PIPELINE-24
+    text: >-
+      **Rule check** (stage `rules`, 0 model calls, no reservation, no ledger row). Rules are declared by name in
+      stages.yaml `rules`, each a pure function in `reader.pipeline.rules` over (notebook, the source's aliases, the
+      model step's strip list, stages.yaml), run in declared order: `explain_without_claims` (an `explain` cell with
+      no claim); `claim_uncited` (a claim with no citation after FR-PIPELINE-7's expansion); `cell_uncited` (a
+      `changed` or `erratum` cell with no citation); `citation_stripped` (the model step's output cited an alias not
+      in the source, which FR-PIPELINE-7 removed; the draft and revise steps record the strip list on their report);
+      `lab_reference_missing` (a lab without `reference`); `lab_reference_unresolved` (FR-PIPELINE-25's checks);
+      `labs_unverifiable` (FR-PIPELINE-9's time bound exceeded). Report per FR-PIPELINE-4, items in cell order then
+      rule order. `input_sha256` = sha256 of the canonical JSON of (stage, notebook sha256, strip list sha256,
+      sha256 of stages.yaml's `rules` and `reference_libraries`, `RULES_VERSION`).
+    tests_planned:
+      - "add server/tests/pipeline/test_rules.py [unit] over VEC-PIPELINE-7: each rule fires on its case and on no other; a clean notebook passes; the provider object is never touched (a fake that raises)"
+      - "add to test_pipeline_db.py [db]: a rules step writes no agent_spend row and is reused by input_sha256"
+  - id: FR-PIPELINE-25
+    text: >-
+      **Lab reference path** (ADR-0009 stage 5; D1). The drafter, and the reviser, write on each `lab` cell a
+      `reference`, one of `{kind: test_vector, span: "s<k>", expected: [string, ...]}` (official test vectors in a
+      span of the source), `{kind: library, module: <name>}` (a reference library in the kernel image) or `{kind:
+      second_implementation}` (a separate implementation inside the asserts). The independent path is built then,
+      at draft time; lab verification only runs it. Rules (`lab_reference_unresolved`): for `test_vector`, the alias
+      is in the source, each `expected` string occurs verbatim (NFC) in that span's text and in at least one assert;
+      for `library`, the module is in stages.yaml `reference_libraries` and named in at least one assert;
+      `second_implementation` has no rule beyond presence. The adversarial review's prompt instructs the reviewer to
+      report, as blocking, a lab whose reference is not independent of the lab's own computation. L02 has no labs;
+      the first lab-bearing lesson measures how often references fail (defers).
+    tests_planned:
+      - "test_rules.py over VEC-PIPELINE-7's reference cases: unknown alias, expected string absent from the span or from every assert, module outside the list, module in no assert, each kind valid"
+      - "add to test_source_and_reports.py: the adversarial_review prompt file of prompt_version v2 contains the reference-independence instruction (by its fixed marker line)"
+  - id: FR-PIPELINE-26
+    text: >-
+      **Fact-check source** (ADR-0039 B6 fact-check route; D4). stages.yaml `fact_check.source`: `section` → the
+      lesson's source of FR-PIPELINE-2 (today's behaviour); `route` → for each fact-checkable item (an `explain`
+      claim, a `changed` or `erratum` cell) in notebook order, one SRV-SEARCH `find` on channel `pipeline`, route
+      `fact_check`, query the claim text (the cell's source for a cell), with the ledger context {line: compile,
+      run_id, run_cap_usd, lesson_id}; the returned cards are deduplicated by span id in first-seen order,
+      rendered in FR-PIPELINE-2's delimiter with aliases `s1`…`sN` in that order, and cut after the last whole card
+      within `bounds.fact_route_source_chars_max`. Finds run one after another (initial). In route mode
+      `input_sha256` = sha256 of the canonical JSON of (stage, notebook sha256, `brain_version`, `policy_version`,
+      prompt_version, prompt file sha256, resolved model), read before any find, so a reused step makes no find. A
+      find whose judge degraded (`judge_ran: false`, B6) is used as returned and never sets `budget_refused`.
+      **Fallback and decision hook:** `section` is the value until (1) SRV-SEARCH's fact-check route is approved and
+      merged (V.kl-search-find) and (2) spikes/retrieval-ablation/RESULT.md applies ADR-0039 B10's rule to the
+      fact-check comparison: if the route is not significantly worse than the whole-section baseline and not worse by
+      more than a net 2 of 30, the value becomes `route` in one data change citing that RESULT.md; otherwise it stays
+      `section` and the task blocks for the owner with both measurements.
+    tests_planned:
+      - "add server/tests/pipeline/test_fact_source_db.py [db] with a fake find: section mode makes no find; route mode makes one find per item in notebook order with channel pipeline, route fact_check and line compile with the run id; cards deduplicated, aliases in first-seen order, cut at the bound on a whole card; a degraded find leaves budget_refused null; reuse in route mode makes no find"
+      - "add to test_stages.py: stages.yaml with fact_check.source other than section or route is refused at load"
+  - id: FR-PIPELINE-27
+    text: >-
+      **Admiralty credibility** (ADR-0039 owner decision 12; VEC-PIPELINE-6). After FR-PIPELINE-4's validation and
+      forcing, code constrains each item's credibility to its verdict: `supported` → 1–3, `unsupported` → 4 or 6,
+      `contradicted` → 5; a value outside its verdict's set becomes 3, 6 and 5 respectively; 1 ("confirmed by
+      independent sources") requires cited spans from at least two distinct materials, otherwise it becomes 2. The
+      fact_check step writes its revision with each claim's, and each `changed` or `erratum` cell's, `credibility`
+      set to that value (`stamp_credibility`); nothing else changes. Credibility does not change the check's outcome
+      (the verdict does); it is the `credibility` facet of ADR-0039 B3 when SRV-KB turns claims into L4 findings.
+    tests_planned:
+      - "add to test_source_and_reports.py: stamp_credibility over VEC-PIPELINE-6"
+      - "add to test_pipeline_db.py [db]: the fact_check step's revision differs from its input only in credibility fields, present on every claim and every changed and erratum cell"
+
+proposed_vectors:
+  - id: VEC-PIPELINE-6
+    source: Credibility by verdict — each verdict with in-set and out-of-set values, forced verdicts, 1 with one and with two materials
+    file: spec/fixtures/SRV-PIPELINE/credibility.yaml
+    tests_planned:
+      - "test_source_and_reports.py reads it (FR-PIPELINE-4, -27)"
+  - id: VEC-PIPELINE-7
+    source: Rule cases — one notebook per rule of FR-PIPELINE-24 that fires it alone, the lab reference cases of FR-PIPELINE-25, and a clean notebook
+    file: spec/fixtures/SRV-PIPELINE/rules.yaml
+    tests_planned:
+      - "test_rules.py reads it (FR-PIPELINE-24, -25)"
+
+# Proposed defers at promotion (replacing the two named above): "Parallel finds in route mode (the judge lane runs
+# 4 at once) if NFR-PIPELINE-1 is threatened"; "A measured floor per reordered stage, from the stage live check";
+# "How often lab references fail, measured on the first lab-bearing lesson".
