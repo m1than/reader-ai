@@ -398,7 +398,14 @@ requirements:
       the periodic entry enqueues one `obs.health` per slot; `after_end` runs after the succeeded and the dead
       outcome have committed, and a raising `after_end` leaves the outcome recorded and logs the line; a lost
       run, a stalled job and an orphaned key that each end dead call `after_end` exactly once (and a lost run
-      that is enqueued again, not dead, never calls it).
+      that is enqueued again, not dead, never calls it). Paired SRV-OBS ADR-0039 change (V.kl-obs-spans,
+      2026-11-26; SRV-OBS `kl_job_kinds`, reviewed in SRV-OBS's design rounds 1-8): `reader.obs.jobs` declares,
+      after `obs.health`, `obs.eval` {eval_id, record_no} key [eval_id, record_no], 1 attempt, 180 s;
+      `obs.eval_run` {eval_id, check} key [eval_id, check], 3 attempts, 60 s; `obs.judge_score` {score_id} key
+      [score_id], 3 attempts, 30 s; `obs.eval_sample` {slot} key [slot], 1 attempt, 30 s (no periodic entry until
+      `judge-gate` sets the sample interval: off by default); `obs.align` {proposal_id, step} key [proposal_id,
+      step], 1 attempt, 180 s; all queue `obs`, no argument copied to the span beyond SRV-OBS's VEC-OBS-1
+      `job_args`. The [unit] catalogue test lists them in this order.
   # Amendment (2026-11-24, V/manage, WEB-MANAGE; header note above `audit_actions`).
   - id: FR-EVENTS-30
     text: >-
