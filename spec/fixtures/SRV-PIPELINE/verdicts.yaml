@@ -1,45 +1,70 @@
 # VEC-PIPELINE-4: fact-report validation, alias expansion and citation handling (FR-PIPELINE-2, -4, -7).
 # Notebook: cells `e1` (explain, claims c1, c2), `ch1` (changed), `er1` (erratum). The lesson's source has three spans
 # with aliases s1, s2, s3 expanding to `A:0`, `A:1`, `A:2`, where A is a 64-hex material sha256 (abbreviated here; the
-# test uses a full one). The model only ever sees and writes aliases.
+# test uses a full one). The model only ever sees and writes aliases. ADR-0039 revision (FR-PIPELINE-4): every item
+# carries `credibility`, an integer 1–6; a missing, out-of-range or non-integer value is output_invalid.
 aliases: { s1: "A:0", s2: "A:1", s3: "A:2" }
 cases:
   - name: complete-report
-    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1] },
-             { cell: e1, claim: c2, verdict: unsupported, spans: [] },
-             { cell: ch1, verdict: supported, spans: [s2] },
-             { cell: er1, verdict: contradicted, spans: [s3] }]
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1], credibility: 2 },
+             { cell: e1, claim: c2, verdict: unsupported, spans: [], credibility: 6 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 3 },
+             { cell: er1, verdict: contradicted, spans: [s3], credibility: 5 }]
     result: valid
   - name: missing-claim
-    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1] },
-             { cell: ch1, verdict: supported, spans: [s2] },
-             { cell: er1, verdict: supported, spans: [s3] }]
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1], credibility: 2 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: er1, verdict: supported, spans: [s3], credibility: 2 }]
     result: output_invalid
   - name: summary-only            # spikes/compile-cost finding 2
     report: { all_supported: true, count: 4 }
     result: output_invalid
   - name: unknown-claim
-    report: [{ cell: e1, claim: c9, verdict: supported, spans: [s1] }]
+    report: [{ cell: e1, claim: c9, verdict: supported, spans: [s1], credibility: 2 }]
+    result: output_invalid
+  - name: credibility-missing
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1] },
+             { cell: e1, claim: c2, verdict: unsupported, spans: [], credibility: 6 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 3 },
+             { cell: er1, verdict: contradicted, spans: [s3], credibility: 5 }]
+    result: output_invalid
+  - name: credibility-zero
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1], credibility: 0 },
+             { cell: e1, claim: c2, verdict: unsupported, spans: [], credibility: 6 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 3 },
+             { cell: er1, verdict: contradicted, spans: [s3], credibility: 5 }]
+    result: output_invalid
+  - name: credibility-seven
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1], credibility: 7 },
+             { cell: e1, claim: c2, verdict: unsupported, spans: [], credibility: 6 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 3 },
+             { cell: er1, verdict: contradicted, spans: [s3], credibility: 5 }]
+    result: output_invalid
+  - name: credibility-not-an-integer
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s1], credibility: 2.5 },
+             { cell: e1, claim: c2, verdict: unsupported, spans: [], credibility: 6 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: "3" },
+             { cell: er1, verdict: contradicted, spans: [s3], credibility: true }]
     result: output_invalid
   - name: supported-without-span
-    report: [{ cell: e1, claim: c1, verdict: supported, spans: [] },
-             { cell: e1, claim: c2, verdict: supported, spans: [s2] },
-             { cell: ch1, verdict: supported, spans: [s2] },
-             { cell: er1, verdict: supported, spans: [s3] }]
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [], credibility: 2 },
+             { cell: e1, claim: c2, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: er1, verdict: supported, spans: [s3], credibility: 2 }]
     result: valid
     forced: [{ cell: e1, claim: c1, verdict: unsupported, reason: no_span }]
   - name: supported-with-unknown-span
-    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s99] },
-             { cell: e1, claim: c2, verdict: supported, spans: [s2] },
-             { cell: ch1, verdict: supported, spans: [s2] },
-             { cell: er1, verdict: supported, spans: [s3] }]
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: [s99], credibility: 2 },
+             { cell: e1, claim: c2, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: er1, verdict: supported, spans: [s3], credibility: 2 }]
     result: valid
     forced: [{ cell: e1, claim: c1, verdict: unsupported, reason: citation_unknown_span }]
   - name: raw-span-id-is-not-an-alias   # the model must cite aliases; a raw span id counts as unknown
-    report: [{ cell: e1, claim: c1, verdict: supported, spans: ["A:0"] },
-             { cell: e1, claim: c2, verdict: supported, spans: [s2] },
-             { cell: ch1, verdict: supported, spans: [s2] },
-             { cell: er1, verdict: supported, spans: [s3] }]
+    report: [{ cell: e1, claim: c1, verdict: supported, spans: ["A:0"], credibility: 2 },
+             { cell: e1, claim: c2, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: ch1, verdict: supported, spans: [s2], credibility: 2 },
+             { cell: er1, verdict: supported, spans: [s3], credibility: 2 }]
     result: valid
     forced: [{ cell: e1, claim: c1, verdict: unsupported, reason: citation_unknown_span }]
 citations:

@@ -23,7 +23,7 @@ import pytest
 
 from obs.conftest import obs_setup
 
-from .conftest import BY_NAME_HINT, FIXTURES, Pg, client, load_yaml, pipeline_env, scripts_for
+from .conftest import BY_NAME_HINT, FIXTURES, Pg, client, lab_modes, load_yaml, pipeline_env, scripts_for
 
 pytestmark = pytest.mark.anyio
 CASES = {c["name"]: c for c in load_yaml(FIXTURES / "loop-cases.yaml")["cases"]}
@@ -52,6 +52,7 @@ async def _compile(pg: Pg, tmp: Path, name: str, monkeypatch: pytest.MonkeyPatch
     with obs_setup("worker", enabled=enabled):
         async with pipeline_env(pg, tmp, labs=case.get("labs", "pass"), floors=RESERVES) as env:
             env.cli.scripts[:] = scripts_for(case["results"], case.get("labs", "pass"))
+            env.verify.modes[:] = lab_modes(case["results"])
             await env.import_plan()
             run = await env.compile(str(case.get("cap", "8.00")))
             for _ in range(6):
@@ -63,9 +64,9 @@ async def _compile(pg: Pg, tmp: Path, name: str, monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.parametrize("name", [
-    "clean-first-pass", "invalid-fact-report-exhausts-attempts", "one-loop-converges", "not-converged-after-loop",
-    "budget-stops-before-revise", "budget-stops-before-draft",
-])
+    "clean-first-pass", "invalid-fact-report-exhausts-attempts", "one-loop-converges", "four-checks-fail-once",
+    "loop-cap-before-first-loop", "budget-refused-mid-loop", "budget-stops-before-draft",
+])  # ADR-0039 order: the findings step ends a run (or a refusal before any notebook)
 async def test_a_run_end_enqueues_obs_runs_once(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                 name: str) -> None:
     """Only the step that ended the run counts (code review of 8466329: never one per stage)."""

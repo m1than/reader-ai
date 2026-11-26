@@ -58,6 +58,14 @@
 #
 # The default `observability.enabled: true` follows the owner's request; it costs about 1.25 GiB of memory limits
 # (mlflow 1g, rotel 256m) and two image pulls.
+#
+# Paired note (2026-11-27, V/kl-pipeline-checks, SRV-PIPELINE's ADR-0039 revision, owner-approved): the compile
+# runs its checks after drafting in the order rules → lab verification → fact-check → review, with up to 3 loops,
+# so FR-OBS-13's `verify.lab` and `verify.claims` spans and FR-OBS-14's `verify.lab_passed`, `verify.passed` and
+# `fact_check.passed` assessments fire once per check run, and a lab failure is now followed by a loop.
+# tests/pipeline/test_pipeline_obs_db.py follows the new step order and counts; no FR-OBS text and no oracle's rule
+# changes. `reader.obs.attributes.SPEC_CODES` gains SRV-PIPELINE's `loop_cap_run`, `loop_cap_task` and
+# `loop_cap_month` with SRV-OBS's own catalogue change (listed for its task).
 
 id: SRV-OBS
 title: Tracing with an attribute allow-list, Rotel and MLflow behind an owner-only gate, retention and the owner's views

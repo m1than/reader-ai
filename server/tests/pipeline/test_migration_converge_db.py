@@ -46,8 +46,10 @@ async def test_pipeline_0005_converges_from_either_pipeline_0004(pg: Pg, pre_sta
 
     async with engine.begin() as conn:
         await conn.execute(text(PRE_STATES[pre_state]))
+        # rewind the later head too (pipeline_0006, FR-PIPELINE-20 revised: order_version) to the pre-state
+        await conn.execute(text("ALTER TABLE compile_runs DROP COLUMN order_version"))
         await conn.execute(
-            text("UPDATE alembic_version SET version_num = 'pipeline_0004' WHERE version_num = 'pipeline_0005'")
+            text("UPDATE alembic_version SET version_num = 'pipeline_0004' WHERE version_num = 'pipeline_0006'")
         )
         left = (await conn.execute(text(COLUMNS))).all()
     assert len(left) == 1

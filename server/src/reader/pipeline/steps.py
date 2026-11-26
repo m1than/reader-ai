@@ -429,7 +429,8 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
     if stage == "findings" and len(steps) == args.step - 1 and next_step(rt, run, steps) != "findings":
         log.info("compile_step_stale run=%s step=%s", run.id, args.step)  # the decision admitted a loop
         return
-    if len(steps) != args.step - 1 or step_input(rt, lesson, steps, stage) != args.input_sha256:
+    expected = step_input(rt, lesson, steps, stage, run.budget_refused)
+    if len(steps) != args.step - 1 or expected != args.input_sha256:
         raise InputNotReady()
     m = model_sha(steps)
     latest = latest_sha(steps)
@@ -472,14 +473,18 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
             notebook = current
     elif stage == "rules":
         assert current is not None  # noqa: S101
-        data = rules_mod.RuleInput(
-            current,
-            {span.span_id: span for span in lesson.source.aliases.values()},
-            {(c, k) for c, k in strip_list(steps)},
-            rt.pipeline.reference_libraries,
-        )
-        report = rules_mod.report(rt.pipeline.rules, data)
         notebook = current
+        reuse = await _reusable(conn, run, stage, args.input_sha256)  # FR-PIPELINE-5: rules reuse too
+        if reuse is not None:
+            reused_from, report = reuse.id, runs.judgement(reuse.report)
+        else:
+            data = rules_mod.RuleInput(
+                current,
+                {span.span_id: span for span in lesson.source.aliases.values()},
+                {(c, k) for c, k in strip_list(steps)},
+                rt.pipeline.reference_libraries,
+            )
+            report = rules_mod.report(rt.pipeline.rules, data)
     elif stage == "findings":
         assert current is not None  # noqa: S101
         problems = _findings_problems(steps, current)

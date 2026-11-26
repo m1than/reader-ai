@@ -18,11 +18,13 @@ from typing import Any, Final
 
 from sqlalchemy import text
 
+from reader.config.effective import effective_settings
 from reader.db import make_engine
 from reader.jobs import load_kinds
 from reader.jobs.queue import Jobs
 from reader.jobs.worker import make_app
 from reader.pipeline import runs
+from reader.pipeline import runtime as runtime_mod
 from reader.serve.main import Env, _target
 
 WAIT_S: Final = 3600.0
@@ -46,6 +48,11 @@ async def _run(plan_lesson_id: str) -> dict[str, Any]:
                     {"p": plan_lesson_id},
                 )
             ).one()
+        rt = runtime_mod.get(engine)
+        async with engine.connect() as conn:  # FR-PIPELINE-13 revised: effective budgets, not the snapshot
+            settings = await effective_settings(conn, rt.config)
+        budgets = {k: str(v) for k, v in settings.task_budgets.items() if v is not None}
+        started = time.monotonic()
         run = await runs.create_run(engine, jobs, owner, lesson, Decimal("8.00"))
         deadline = time.monotonic() + WAIT_S
         status = await runs.status(engine, jobs, owner, run)
@@ -62,7 +69,34 @@ async def _run(plan_lesson_id: str) -> dict[str, Any]:
                     {"r": run},
                 )
             ).one()
+            by_task = {
+                str(t): str(u)
+                for t, u in await conn.execute(
+                    text(
+                        "SELECT task, coalesce(sum(settled_usd), 0) FROM agent_spend WHERE run_id = :r"
+                        " AND kind = 'settle' GROUP BY task"
+                    ),
+                    {"r": run},
+                )
+            }
+            planned = [
+                {"planned_usd": r[0], "planned_judge_usd": r[1]}
+                for r in await conn.execute(
+                    text(
+                        "SELECT report ->> 'planned_usd', report ->> 'planned_judge_usd' FROM compile_steps"
+                        " WHERE run_id = :r AND report ? 'planned_usd' ORDER BY step"
+                    ),
+                    {"r": run},
+                )
+            ]
         return {
+            "wall_s": round(time.monotonic() - started, 1),
+            "effective_task_budgets": budgets,
+            "spent_by_task": by_task,
+            "loop_plans": planned,
+            "loops": status["loops"],
+            "stop": status["stop"],
+            "refused_limit": status["refused_limit"],
             "run_id": str(run),
             "state": status["state"],
             "refusals": status["refusals"],

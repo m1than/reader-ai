@@ -1,0 +1,67 @@
+# VEC-PIPELINE-7: the rule check (FR-PIPELINE-24) and the lab reference rules (FR-PIPELINE-25), 0 model calls.
+# Each case is a list of cells in the stored form (only `id` and the `reader` metadata matter to the rules), with
+# span ids `A:<n>` (A = a 64-hex material sha256, abbreviated) whose texts are in `spans`; `stripped` is the model
+# step's citation strip list; `expect` lists the failures as (rule, cell, claim), in cell order then rule order.
+# `libraries` defaults to the stages.yaml list. The round-trip case is read by test_source_and_reports.py.
+spans: { "A:0": "Block zero.", "A:1": "Test vector: SHA-256(abc) = ba7816bf8f01cfea.", "A:2": "Block two." }
+clean_cells:
+  - { id: e1, reader: { kind: explain, claims: [{ id: c1, text: t, citations: [{ span: "A:0" }] }] } }
+  - { id: ch1, reader: { kind: changed, as_of: "2026-11-01", citations: [{ span: "A:2" }] } }
+  - { id: lab1, reader: { kind: lab, asserts: ["h == 'ba7816bf8f01cfea'"],
+                          reference: { kind: test_vector, span: "A:1", expected: [ba7816bf8f01cfea] } } }
+  - { id: lab2, reader: { kind: lab, asserts: ["x == hashlib.sha256(b'abc').hexdigest()"],
+                          reference: { kind: library, module: hashlib } } }
+  - { id: lab3, reader: { kind: lab, asserts: ["f(3) == g(3)"], reference: { kind: second_implementation } } }
+cases:
+  - name: clean
+    cells: clean
+    expect: []
+  - name: explain-without-claims
+    cells: [{ id: e1, reader: { kind: explain, claims: [] } }]
+    expect: [[explain_without_claims, e1, null]]
+  - name: claim-uncited
+    cells: [{ id: e1, reader: { kind: explain, claims: [{ id: c1, text: t, citations: [] },
+                                                        { id: c2, text: t, citations: [{ span: "A:0" }] }] } }]
+    expect: [[claim_uncited, e1, c1]]
+  - name: cell-uncited
+    cells: [{ id: er1, reader: { kind: erratum, citations: [] } }]
+    expect: [[cell_uncited, er1, null]]
+  - name: citation-stripped
+    cells: [{ id: e1, reader: { kind: explain, claims: [{ id: c1, text: t, citations: [{ span: "A:0" }] }] } }]
+    stripped: [[e1, c1]]
+    expect: [[citation_stripped, e1, c1]]
+  - name: lab-reference-missing
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["x == 1"] } }]
+    expect: [[lab_reference_missing, lab1, null]]
+  - name: test-vector-unknown-alias          # the alias was dropped at build: the reference has no span
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["h == 'ba7816bf8f01cfea'"],
+                                  reference: { kind: test_vector, expected: [ba7816bf8f01cfea] } } }]
+    expect: [[lab_reference_unresolved, lab1, null]]
+  - name: test-vector-span-outside-source
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["h == 'ba7816bf8f01cfea'"],
+                                  reference: { kind: test_vector, span: "A:9", expected: [ba7816bf8f01cfea] } } }]
+    expect: [[lab_reference_unresolved, lab1, null]]
+  - name: expected-not-in-span
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["h == 'deadbeef'"],
+                                  reference: { kind: test_vector, span: "A:1", expected: [deadbeef] } } }]
+    expect: [[lab_reference_unresolved, lab1, null]]
+  - name: expected-in-no-assert
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["len(h) == 16"],
+                                  reference: { kind: test_vector, span: "A:1", expected: [ba7816bf8f01cfea] } } }]
+    expect: [[lab_reference_unresolved, lab1, null]]
+  - name: library-not-declared
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["secrets.token_hex(1)"],
+                                  reference: { kind: library, module: secrets } } }]
+    expect: [[lab_reference_unresolved, lab1, null]]
+  - name: library-in-no-assert
+    cells: [{ id: lab1, reader: { kind: lab, asserts: ["x == 1"], reference: { kind: library, module: hashlib } } }]
+    expect: [[lab_reference_unresolved, lab1, null]]
+  - name: labs-unverifiable                  # 31 labs of 1 assert: 31 × 2 × 65 × 2 + 2 × 30 = 8,120 s > 3,600 s
+    labs_over_time: 31
+    expect: [[labs_unverifiable, null, null]]
+  - name: order-is-cell-then-rule
+    cells:
+      - { id: lab1, reader: { kind: lab, asserts: ["x == 1"] } }
+      - { id: e1, reader: { kind: explain, claims: [{ id: c1, text: t, citations: [] }] } }
+    stripped: [[e1, c1]]
+    expect: [[lab_reference_missing, lab1, null], [claim_uncited, e1, c1], [citation_stripped, e1, c1]]

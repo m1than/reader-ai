@@ -1,4 +1,4 @@
-# @trace VEC-PIPELINE-4, VEC-PIPELINE-5, FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-7
+# @trace VEC-PIPELINE-4, VEC-PIPELINE-5, VEC-PIPELINE-6, FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-7, FR-PIPELINE-25, FR-PIPELINE-27
 """Source rendering with aliases and delimiters, prompts and input hashes, report validation, forced verdicts,
 citation expansion and the slice's open-cell items (pure)."""
 
@@ -206,7 +206,14 @@ def test_citation_vectors(case: dict[str, Any]) -> None:
         verdicts = reports.validate_fact_report(
             {
                 "verdicts": [
-                    {"cell": "e1", "claim": "c1", "verdict": "supported", "spans": ["s1"], "note": ""}
+                    {
+                        "cell": "e1",
+                        "claim": "c1",
+                        "verdict": "supported",
+                        "spans": ["s1"],
+                        "credibility": 2,
+                        "note": "",
+                    }
                 ]
             },
             built.notebook,
@@ -345,8 +352,8 @@ def test_unknown_alias_on_changed_and_erratum_cells_forces_unsupported() -> None
     verdicts = reports.validate_fact_report(
         {
             "verdicts": [
-                {"cell": "ch1", "verdict": "supported", "spans": ["s1"], "note": ""},
-                {"cell": "er1", "verdict": "supported", "spans": ["s2"], "note": ""},
+                {"cell": "ch1", "verdict": "supported", "spans": ["s1"], "credibility": 2, "note": ""},
+                {"cell": "er1", "verdict": "supported", "spans": ["s2"], "credibility": 2, "note": ""},
             ]
         },
         built.notebook,
@@ -393,3 +400,157 @@ def test_material_title_comes_from_the_caller() -> None:
     )
     citation = built.notebook["cells"][0]["metadata"]["reader"]["claims"][0]["citations"][0]
     assert citation["material_title"] == "Course title"
+
+
+# --- ADR-0039 revision: credibility, outcomes, lab references, the revise input ---------------------------------
+
+CREDIBILITY = load_yaml(FIXTURES / "credibility.yaml")
+B = "cd" * 32
+
+
+@pytest.mark.parametrize("case", CREDIBILITY["cases"], ids=lambda c: c["name"])
+def test_credibility_vectors(case: dict[str, Any]) -> None:
+    """FR-PIPELINE-27 over VEC-PIPELINE-6."""
+    reports = need("reader.pipeline.reports")
+    spans = [s.replace("A:", f"{A}:").replace("B:", f"{B}:") for s in case["spans"]]
+    assert reports.constrain_credibility(case["verdict"], case["given"], spans) == case["expect"]
+
+
+def _credible_notebook() -> dict[str, Any]:
+    built = _build(
+        [
+            {
+                "id": "e1",
+                "kind": "explain",
+                "source": "x",
+                "claims": [
+                    {"id": "c1", "text": "t", "citations": [{"span": "s1"}]},
+                    {"id": "c2", "text": "t", "citations": [{"span": "s2"}]},
+                ],
+            },
+            {"id": "ch1", "kind": "changed", "source": "x", "as_of": "2026-11-01", "citations": [{"span": "s3"}]},
+        ]
+    )
+    return dict(built.notebook)
+
+
+def test_stamp_credibility_changes_only_credibility() -> None:
+    """FR-PIPELINE-27: each judged claim and changed cell gets its value; nothing else changes."""
+    reports = need("reader.pipeline.reports")
+    findings = need("reader.pipeline.findings")
+    nb = _credible_notebook()
+    verdicts = [
+        reports.Verdict("e1", "c1", "supported", (f"{A}:0",), "", None, 2),
+        reports.Verdict("e1", "c2", "unsupported", (), "", None, 6),
+        reports.Verdict("ch1", None, "contradicted", (f"{A}:2",), "", None, 5),
+    ]
+    stamped = findings.stamp_credibility(nb, verdicts)
+    claims = stamped["cells"][0]["metadata"]["reader"]["claims"]
+    assert [c["credibility"] for c in claims] == [2, 6]
+    assert stamped["cells"][1]["metadata"]["reader"]["credibility"] == 5
+    again = json.loads(json.dumps(stamped))
+    for c in again["cells"][0]["metadata"]["reader"]["claims"]:
+        del c["credibility"]
+    del again["cells"][1]["metadata"]["reader"]["credibility"]
+    assert again == nb
+    # FR-PIPELINE-10: an item no fact_check judged gets 6 in the findings step
+    filled = findings.fill_credibility(nb)
+    assert [c["credibility"] for c in filled["cells"][0]["metadata"]["reader"]["claims"]] == [6, 6]
+
+
+def test_model_written_credibility_is_dropped_and_lab_reference_kept() -> None:
+    """FR-PIPELINE-3 (c) and FR-PIPELINE-25: credibility is code's; the drafter's reference is kept, its alias
+    expanded to the span id, an unknown alias dropped; to_compact maps it back (round trip)."""
+    notebook = need("reader.pipeline.notebook")
+    lab = {
+        "id": "lab1",
+        "kind": "lab",
+        "source": "x = 6 * 7",
+        "kernel": "python3",
+        "network": "none",
+        "asserts": ["x == 42"],
+        "reference": {"kind": "test_vector", "span": "s2", "expected": ["42"]},
+    }
+    explain = {
+        "id": "e1",
+        "kind": "explain",
+        "source": "x",
+        "credibility": 1,
+        "claims": [{"id": "c1", "text": "t", "credibility": 1, "citations": [{"span": "s1"}]}],
+    }
+    built = _build([explain, lab])
+    reader = built.notebook["cells"][0]["metadata"]["reader"]
+    assert "credibility" not in reader and "credibility" not in reader["claims"][0]
+    lab_reader = built.notebook["cells"][1]["metadata"]["reader"]
+    assert lab_reader["reference"] == {"kind": "test_vector", "span": f"{A}:1", "expected": ["42"]}
+    compact = notebook.to_compact(built.notebook, _aliases())
+    assert compact["cells"][1]["reference"]["span"] == "s2"
+    rebuilt = notebook.build(
+        compact,
+        title="L",
+        aliases=_aliases(),
+        material_title="Course title",
+        stage="draft",
+        prompt_version="v1",
+        model="m",
+        previous=None,
+    )
+    assert rebuilt.notebook == built.notebook  # build(to_compact(n)) == n
+    unknown = _build([{**lab, "reference": {"kind": "test_vector", "span": "s99", "expected": ["42"]}}])
+    assert unknown.notebook["cells"][0]["metadata"]["reader"]["reference"] == {
+        "kind": "test_vector",
+        "expected": ["42"],
+    }
+    assert unknown.stripped == frozenset()  # not a citation: the rule check reports it instead
+
+
+def test_check_outcomes() -> None:
+    """FR-PIPELINE-4: each check fails iff its rule; source_too_large does not fail the fact check."""
+    reports = need("reader.pipeline.reports")
+    failed = reports.check_failed
+    assert failed("rules", {"failures": [{"rule": "claim_uncited"}]}) and not failed("rules", {"failures": []})
+    lab_ok = {"lab_report": {"results": {"l": {"passed": True}}, "problems": []}}
+    lab_bad = {"lab_report": {"results": {"l": {"passed": False}}, "problems": [{"kind": "lab_failed"}]}}
+    assert failed("lab_verification", lab_bad) and not failed("lab_verification", lab_ok)
+    for verdict, bad in (("supported", False), ("source_too_large", False), ("unsupported", True),
+                         ("contradicted", True)):
+        assert failed("fact_check", {"verdicts": [{"verdict": verdict}]}) is bad
+    assert failed("adversarial_review", {"findings": [{"blocking": True}]})
+    assert not failed("adversarial_review", {"findings": [{"blocking": False}]})
+
+
+def test_revise_prompt_holds_only_the_failing_report() -> None:
+    """FR-PIPELINE-3 (a): revise reads the notebook and the report of the check that failed, nothing else."""
+    steps_mod = need("reader.pipeline.steps")
+    runs = need("reader.pipeline.runs")
+    source = need("reader.pipeline.source")
+    from decimal import Decimal
+
+    nb = _credible_notebook()
+    lesson = runs.Lesson(source.render(synthetic_spans(3)), "L", "Course title")
+    sid = lesson.source.aliases["s1"].span_id
+
+    def row(n: int, stage: str, report: dict[str, Any]) -> Any:
+        return runs.StepRow(n, n, stage, "", None, report, None, None, Decimal(0), Decimal(0))
+
+    fact = {"verdicts": [{"cell": "e1", "claim": "c1", "verdict": "unsupported", "spans": [sid],
+                          "note": "n", "forced": None, "credibility": 6}], "next": "revise"}
+    steps = [row(1, "draft", {"stripped": []}), row(2, "rules", {"failures": [], "next": "lab_verification"}),
+             row(3, "lab_verification", {"lab_report": {"results": {}, "problems": []}, "next": "fact_check"}),
+             row(4, "fact_check", fact)]
+    payload = json.loads(steps_mod._user_prompt("revise", nb, lesson, steps))
+    assert payload["failed_check"] == "fact_check"
+    assert payload["fact_report"][0]["spans"] == ["s1"] and "credibility" not in payload["fact_report"][0]
+    assert set(payload) == {"notebook", "failed_check", "fact_report"}
+    rules_failed = [row(1, "draft", {"stripped": []}),
+                    row(2, "rules", {"failures": [{"rule": "claim_uncited", "cell": "e1", "claim": "c1",
+                                                   "text": "uncited"}], "next": "revise"})]
+    payload = json.loads(steps_mod._user_prompt("revise", nb, lesson, rules_failed))
+    assert set(payload) == {"notebook", "failed_check", "rule_report"}
+
+
+def test_review_prompt_asks_for_independent_lab_references() -> None:
+    """FR-PIPELINE-25: the adversarial review's prompt (v1, edited in place) carries the instruction."""
+    prompts = need("reader.pipeline.prompts")
+    text = prompts.load().text("adversarial_review")
+    assert "Lab references:" in text and "not independent of the lab's own computation" in text

@@ -272,8 +272,13 @@ def rules_inputs(rt: Runtime, steps: Sequence[StepRow]) -> list[str]:
     ]
 
 
-def step_input(rt: Runtime, lesson: Lesson, steps: Sequence[StepRow], stage: str) -> str:
-    """FR-PIPELINE-3: sha256 over (stage, source, the stage's inputs, prompt version and content, model)."""
+def step_input(
+    rt: Runtime, lesson: Lesson, steps: Sequence[StepRow], stage: str, refused: str | None = None
+) -> str:
+    """FR-PIPELINE-3: sha256 over (stage, source, the stage's inputs, prompt version and content, model).
+
+    `findings` also hashes the run's refusal code, so the findings job of a refused run never shares its key
+    with a stale findings job enqueued while the recorded decision still admitted a loop (FR-PIPELINE-5)."""
     m = model_sha(steps) or ""
     if stage == "draft":
         inputs = [canonical_sha256(lesson.title)]
@@ -283,7 +288,11 @@ def step_input(rt: Runtime, lesson: Lesson, steps: Sequence[StepRow], stage: str
         failing = last_check(steps)
         inputs = [m, canonical_sha256(judgement(failing.report)) if failing else ""]
     elif stage == "findings":
-        inputs = [latest_sha(steps) or "", *(canonical_sha256(judgement(s.report)) for s in checks_on(steps))]
+        inputs = [
+            latest_sha(steps) or "",
+            *(canonical_sha256(judgement(s.report)) for s in checks_on(steps)),
+            refused or "",
+        ]
     else:  # lab_verification, fact_check, adversarial_review: the notebook the previous check passed
         inputs = [latest_sha(steps) or ""]
     model = stage_model(rt, stage)
@@ -302,8 +311,8 @@ def step_args(run: RunRow, step: int, stage: str, input_sha: str) -> dict[str, A
 async def enqueue_next(jobs: Any, rt: Runtime, run: RunRow, lesson: Lesson, steps: Sequence[StepRow]) -> None:
     stage = next_step(rt, run, steps)
     if stage is not None:
-        args = step_args(run, len(steps) + 1, stage, step_input(rt, lesson, steps, stage))
-        await jobs.enqueue(kind_for(stage), args)
+        input_sha = step_input(rt, lesson, steps, stage, run.budget_refused)
+        await jobs.enqueue(kind_for(stage), step_args(run, len(steps) + 1, stage, input_sha))
 
 
 def _str(value: Decimal) -> str:
@@ -338,7 +347,8 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
             if stage is not None:
                 try:
                     lesson = await load_lesson(conn, rt, owner_id, run.lesson_id)
-                    args = step_args(run, len(steps) + 1, stage, step_input(rt, lesson, steps, stage))
+                    input_sha = step_input(rt, lesson, steps, stage, run.budget_refused)
+                    args = step_args(run, len(steps) + 1, stage, input_sha)
                 except (PipelineError, AgentError):  # unloadable lesson or unresolvable model: no args
                     args = None
                 status = "none"

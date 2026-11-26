@@ -123,7 +123,7 @@ async def test_a_code_for_another_step_is_not_reported(pg: Pg, tmp_path: Path) -
             await _set_stage_error(env, run, '{"step": 1, "input_sha256": "' + dead_input + '", "code": "provider_missing"}')
             body = (await c.get(f"/api/compiles/{run}")).json()
             assert body["state"] == "stage_failed"
-            assert body["steps"][-1]["step"] == 2
+            assert body["steps"][-1]["step"] == 4  # draft, rules, lab_verification, then fact_check stopped
             assert body["error"] is None
 
 
