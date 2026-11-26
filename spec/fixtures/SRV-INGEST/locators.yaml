@@ -1,0 +1,80 @@
+# VEC-INGEST-8: locator cases for FR-INGEST-33 and FR-INGEST-34, written by hand for this spec (synthetic text, no
+# book text). Every expected value below was computed by hand from the rules, not by the code under test.
+material_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+# One page each: the spans' stored texts in reading order and the expected span ids (without the common prefix
+# "spn:<material_sha256>:p<page>:"). The canonical page text is the non-empty texts joined by "\n".
+pages:
+  - name: empty spans before, between and after text
+    page: 3
+    texts: ["", "Hello", "", "", "World!", ""]
+    page_text: "Hello\nWorld!"
+    ranges: ["0-0#0", "0-5", "6-6#0", "6-6#1", "6-12", "12-12#0"]
+  - name: a page of only figures
+    page: 7
+    texts: ["", ""]
+    page_text: ""
+    ranges: ["0-0#0", "0-0#1"]
+  - name: composed accent and an astral code point count as one each
+    page: 12
+    texts: ["é\U0001D538b", "x"]
+    page_text: "é\U0001D538b\nx"
+    ranges: ["0-3", "4-5"]
+  - name: a 3-line code span
+    page: 1
+    texts: ["a\n  b\nc", "z"]
+    page_text: "a\n  b\nc\nz"
+    ranges: ["0-7", "8-9"]
+
+# Non-PDF form: path, line range, expected id (without "spn:<material_sha256>:").
+files:
+  - path: "docs/a:b%c.md"
+    lines: [3, 5]
+    id: "docs/a%3Ab%25c.md:L3-5"
+  - path: "x%3Ay"
+    lines: [1, 1]
+    id: "x%253Ay:L1-1"
+  - path: "book/ch1.md"
+    lines: [10, 12]
+    id: "book/ch1.md:L10-12"
+
+# Ids the parser must refuse with locator_invalid. "{sha}" stands for material_sha256.
+malformed:
+  - "spn:{sha}:p0:0-1"
+  - "spn:{sha}:p01:0-1"
+  - "spn:{sha}:p1:01-2"
+  - "spn:{sha}:p1:5-3"
+  - "spn:{sha}:p1:0-3#0"
+  - "spn:{sha}:p1:4-4"
+  - "spn:{sha}:p1:4-4#01"
+  - "spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p1:0-1"
+  - "spn:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA:p1:0-1"
+  - "spn:{sha}:a:b:L1-2"
+  - "spn:{sha}:a/../b:L1-2"
+  - "spn:{sha}:/etc:L1-1"
+  - "spn:{sha}:x:L5-3"
+  - "spn:{sha}:x:L0-1"
+  - "spn:{sha}:x%41:L1-1"
+  - "spn:{sha}:x%3a:L1-1"
+  - "{sha}:12"
+  - "spn:{sha}:p1:0-1 "
+  - "sec:{sha}:1/2"
+
+# Outline levels in order and the expected sibling-ordinal paths (FR-INGEST-33 outline ids).
+outlines:
+  - name: a skipped level and two roots
+    levels: [1, 2, 2, 1, 3, 2]
+    paths: ["1", "1/1", "1/2", "2", "2/1", "2/2"]
+  - name: a leading level-2 entry
+    levels: [2, 3, 1, 2]
+    paths: ["1", "1/1", "2", "2/1"]
+
+# FR-INGEST-34: quote hashes and equal-hash ordinals.
+quote_hashes:
+  - text: ""
+    sha256: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  - text: "abc"
+    sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+equal_hash_ordinals:
+  texts: ["Intro", "x", "Intro", "", "", ""]
+  ordinals: [0, 0, 1, 0, 1, 2]

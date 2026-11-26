@@ -1162,6 +1162,60 @@ requirements:
       is 404). [db] row counts and a listing of the blobs root before and after a delete–restore cycle; the learner,
       second-owner and foreign-Origin matrix over the four routes.
 
+  # ---- Revision 3 (ADR-0039), promoted in phase 2 unit by unit with their Red tests; see the revision block. ----
+  - id: FR-INGEST-33
+    text: >-
+      **Locator span ids** (ADR-0039 P2, owner decision 20; ADR-0008 Decision 3). `reader.ingest.locator` (stdlib only,
+      so the converter, the worker and the tests share it) defines the span id of every span of a base pack:
+      - **Canonical page text** of page p: the texts of the pack's spans whose `page` is p, in `seq` order (reading
+        order, FR-INGEST-8), **non-empty texts only**, joined by one `\n`. Texts are the stored normalised text of
+        FR-INGEST-6/-7: decoded LaTeX for a formula, the Markdown export for a table, the caption for a figure, the
+        marker-prefixed text for a list item, the reconstructed code text for code. Offsets count Unicode code points
+        of that text, which is NFC by INV-INGEST-1 (Python `len` of `str`, Postgres `length` and `substr` on a UTF-8
+        database; never UTF-16 units or bytes).
+      - **Non-empty span:** `spn:<material_sha256>:p<page>:<start>-<end>`, where `start` is the offset of its first
+        code point and `end` = `start` + its length, so `page_text[start:end]` equals its text.
+      - **Empty span** (a figure without a caption, an undecoded formula with text ""): a zero-length range at the
+        offset where the next non-empty span of the page starts, or at the length of the page text when none follows,
+        plus `#<n>`, its 0-based ordinal among the page's empty spans at that offset in reading order:
+        `spn:<sha>:p<page>:<o>-<o>#<n>`. Empty spans add no separator, so a caption-less figure never shifts the
+        offsets of the text around it (the reading of P2's "ordinal among the empty spans at that offset", decided
+        by the agent; with every span joined, two empty spans could never share an offset and the ordinal would be
+        vacuous). The pilot has 359 empty spans (deep-reviewer round 1 count over the r2 span dump, 2026-11-26), so
+        the rule is exercised on real data.
+      - **Non-PDF material** (no converter yet; the form, encoder and parser exist now):
+        `spn:<material_sha256>:<path>:L<a>-<b>`, 1-based inclusive line range a ≤ b, `<path>` the NFC relative path
+        with `%` encoded as `%25` first and then `:` as `%3A`, at most 1,024 bytes encoded
+        (`bounds.locator_path_bytes_max` of the revision block). A raw `:` therefore never occurs inside a field, so
+        a split on `:` gives exactly four fields and a reader that splits on the last `:` still finds the range.
+      - **Parser:** `parse(id) -> Locator` accepts exactly
+        `^spn:[0-9a-f]{64}:p[1-9][0-9]{0,4}:(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(#(0|[1-9][0-9]{0,5}))?$` with
+        start ≤ end and `#n` present iff start = end, or the non-PDF form with `L` range, a path that decodes to
+        valid UTF-8 with no control character and no `/`-leading or `..` segment; anything else is `locator_invalid`.
+        `format(parse(x)) == x` for every accepted x.
+      - **Outline ids** are `sec:<material_sha256>:<path>`, `<path>` the 1-based sibling ordinals from the root joined
+        by `/` (`sec:<sha>:3/2/1`), derived from `material_outline` (level and order); titles never enter an id. An
+        entry's parent is the nearest preceding entry with a lower level; a skipped level (a level-3 entry directly
+        under a level-1 entry) makes it a child of that entry with no synthetic node between, and an entry with no
+        lower-level predecessor is a root (sibling ordinal among roots).
+      - The card budget is policy and never part of an id; spans are never split at ingest (B1, decision 9).
+      - The legacy id `<material_sha256>:<seq>` (FR-INGEST-17) is never issued again once FR-INGEST-17's revision is
+        promoted; it is accepted only as input of the resolver (FR-INGEST-42) and of the citation migration
+        (FR-INGEST-41).
+      [unit, property] server/tests/ingest/test_locator_unit.py over VEC-INGEST-8: the cases above,
+      page_text[start:end] equal to every span's text, the parse/format round trip, each malformed id refused (`p0`,
+      leading zeros, start > end, `#` on a non-empty range, missing `#` on an empty one, 63-hex sha, raw `:` in a
+      path, `..` segment), and a Hypothesis property over generated pages.
+  - id: FR-INGEST-34
+    text: >-
+      **Quote hash.** Every span of a base pack stores `quote_sha256` = sha256 of the UTF-8 bytes of its stored
+      normalised text (the empty text hashes to `e3b0c442…b855`). Every citation that names a locator carries the
+      quote hash of the span it cited (SRV-LESSON, SRV-TUTOR, SRV-FRESH paired). The **equal-hash ordinal** of a span
+      is its 0-based rank, in reading order, among the spans of the same page with the same `quote_sha256`; it is
+      derived, never stored, and used only by re-anchoring (FR-INGEST-43). [unit] test_locator_unit.py: the hash of a
+      known text and of the empty text, and equal-hash ordinals on a page with a repeated heading and three empty
+      figures; [db] the stored column arrives with FR-INGEST-35's unit (test_packs_db.py).
+
 invariants:
   - id: INV-INGEST-1
     text: >-
@@ -1450,6 +1504,9 @@ vectors:
       body. [local] the pilot PDF passes the check (sha256-matched, read on the owner's Mac). The synthetic upload for
       the live check is VEC-INGEST-2's generator output.
     file: spec/fixtures/SRV-INGEST/magic-cases.yaml
+  - id: VEC-INGEST-8
+    source: "Locator cases written for this spec (synthetic text, no book text): pages, spans and expected locators per FR-INGEST-33, malformed ids with their refusal, non-PDF paths with their encodings, and outlines (with a skipped level, a leading level-2 entry and two roots) with their expected `sec:` paths; read by test_locator_unit.py."
+    file: spec/fixtures/SRV-INGEST/locators.yaml
 
 defers:
   - "Upload formats other than PDF, and a browser preview of the uploaded file (ADR-0029 keeps every parser out of the stack and the browser)."
@@ -1633,57 +1690,7 @@ proposed_tables:
   outline_summaries: { owner_id: true, columns: "FR-INGEST-48 (conditional): owner_id, overlay_id, outline_path, text" }
 
 proposed_requirements:
-  - id: FR-INGEST-33
-    text: >-
-      **Locator span ids** (ADR-0039 P2, owner decision 20; ADR-0008 Decision 3). `reader.ingest.locator` (stdlib only,
-      so the converter, the worker and the tests share it) defines the span id of every span of a base pack:
-      - **Canonical page text** of page p: the texts of the pack's spans whose `page` is p, in `seq` order (reading
-        order, FR-INGEST-8), **non-empty texts only**, joined by one `\n`. Texts are the stored normalised text of
-        FR-INGEST-6/-7: decoded LaTeX for a formula, the Markdown export for a table, the caption for a figure, the
-        marker-prefixed text for a list item, the reconstructed code text for code. Offsets count Unicode code points
-        of that text, which is NFC by INV-INGEST-1 (Python `len` of `str`, Postgres `length` and `substr` on a UTF-8
-        database; never UTF-16 units or bytes).
-      - **Non-empty span:** `spn:<material_sha256>:p<page>:<start>-<end>`, where `start` is the offset of its first
-        code point and `end` = `start` + its length, so `page_text[start:end]` equals its text.
-      - **Empty span** (a figure without a caption, an undecoded formula with text ""): a zero-length range at the
-        offset where the next non-empty span of the page starts, or at the length of the page text when none follows,
-        plus `#<n>`, its 0-based ordinal among the page's empty spans at that offset in reading order:
-        `spn:<sha>:p<page>:<o>-<o>#<n>`. Empty spans add no separator, so a caption-less figure never shifts the
-        offsets of the text around it (the reading of P2's "ordinal among the empty spans at that offset", decided
-        by the agent; with every span joined, two empty spans could never share an offset and the ordinal would be
-        vacuous). The pilot has 359 empty spans (deep-reviewer round 1 count over the r2 span dump, 2026-11-26), so
-        the rule is exercised on real data.
-      - **Non-PDF material** (no converter yet; the form, encoder and parser exist now):
-        `spn:<material_sha256>:<path>:L<a>-<b>`, 1-based inclusive line range a ≤ b, `<path>` the NFC relative path
-        with `%` encoded as `%25` first and then `:` as `%3A`, at most `bounds.locator_path_bytes_max` bytes encoded.
-        A raw `:` therefore never occurs inside a field, so a split on `:` gives exactly four fields and a reader
-        that splits on the last `:` still finds the range.
-      - **Parser:** `parse(id) -> Locator` accepts exactly
-        `^spn:[0-9a-f]{64}:p[1-9][0-9]{0,4}:(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(#(0|[1-9][0-9]{0,5}))?$` with
-        start ≤ end and `#n` present iff start = end, or the non-PDF form with `L` range, a path that decodes to
-        valid UTF-8 with no control character and no `/`-leading or `..` segment; anything else is `locator_invalid`.
-        `format(parse(x)) == x` for every accepted x.
-      - **Outline ids** are `sec:<material_sha256>:<path>`, `<path>` the 1-based sibling ordinals from the root joined
-        by `/` (`sec:<sha>:3/2/1`), derived from `material_outline` (level and order); titles never enter an id. An
-        entry's parent is the nearest preceding entry with a lower level; a skipped level (a level-3 entry directly
-        under a level-1 entry) makes it a child of that entry with no synthetic node between, and an entry with no
-        lower-level predecessor is a root (sibling ordinal among roots).
-      - The card budget is policy and never part of an id; spans are never split at ingest (B1, decision 9).
-      - The legacy id `<material_sha256>:<seq>` (FR-INGEST-17) is never issued again; it is accepted only as input of
-        the resolver (FR-INGEST-42) and of the citation migration (FR-INGEST-41).
-    tests_planned:
-      - "add server/tests/ingest/test_locator_unit.py [unit]: VEC-INGEST-8's cases (pages with empty spans before, between and after text, two figures at one offset → #0 and #1, a page of only figures, combining marks already composed, astral code points counted as one, a 3-line code span, a non-PDF path with `:` and `%` and a literal `%3A`; outline paths with a skipped level, a leading level-2 entry and two roots); page_text[start:end] equals every span's text; parse/format round trip; each malformed id refused (`p0`, leading zeros, start > end, `#` on a non-empty range, missing `#` on an empty one, 63-hex sha, raw `:` in a path, `..` segment)"
-      - "add to test_locator_unit.py [property]: for generated pages (random texts incl. empty and NFC-stable astral text) every non-empty span's slice equals its text, locators are unique within a pack, and an empty span's offset equals the next non-empty span's start"
-  - id: FR-INGEST-34
-    text: >-
-      **Quote hash.** Every span of a base pack stores `quote_sha256` = sha256 of the UTF-8 bytes of its stored
-      normalised text (the empty text hashes to `e3b0c442…b855`). Every citation that names a locator carries the
-      quote hash of the span it cited (SRV-LESSON, SRV-TUTOR, SRV-FRESH paired). The **equal-hash ordinal** of a span
-      is its 0-based rank, in reading order, among the spans of the same page with the same `quote_sha256`; it is
-      derived, never stored, and used only by re-anchoring (FR-INGEST-43). [unit, db]
-    tests_planned:
-      - "test_locator_unit.py [unit]: the hash of a known text, of the empty text, and equal-hash ordinals on a page with a repeated heading and three empty figures"
-      - "test_packs_db.py [db]: every material_spans row of a sealed pack has quote_sha256 equal to sha256(text) (SQL `encode(sha256(convert_to(text,'UTF8')),'hex')`)"
+  # FR-INGEST-33 and -34 are promoted into `requirements` (phase 2, unit 1); the rest stay here until their unit.
   - id: FR-INGEST-35
     text: >-
       **Base packs** (ADR-0039 B2, P1). The **parse config** of a conversion is
@@ -2399,11 +2406,7 @@ proposed_invariants:
       - "add server/tests/ingest/test_readers_scan_unit.py [unit]: an AST scan of every reader.* module outside reader.ingest finds no string constant (docstrings excluded) matching \\b(ingests|material_spans|material_outline)\\b, except the listed REFERENCES lines in plan/migrations/plan_0001.py and freshness/migrations/freshness_0001.py; a planted literal in a temporary module is found"
 
 proposed_vectors:
-  - id: VEC-INGEST-8
-    source: "Locator cases written for this spec (synthetic text, no book text): pages, spans and expected locators per FR-INGEST-33, malformed ids with their refusal, non-PDF paths with their encodings, and outlines (with a skipped level, a leading level-2 entry and two roots) with their expected `sec:` paths."
-    file: spec/fixtures/SRV-INGEST/locators.yaml
-    tests_planned:
-      - "test_locator_unit.py reads it"
+  # VEC-INGEST-8 is promoted into `vectors` (phase 2, unit 1).
   - id: VEC-INGEST-9
     source: "Facets files: the committed one and one invalid variant per schema rule (including `enabled` and unresolvable consumers), plus kind → form expectations and test-vector rule cases (synthetic hex and base58 xprv/xpub vectors)."
     file: spec/fixtures/SRV-INGEST/facets-cases.yaml
