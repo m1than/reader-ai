@@ -1,6 +1,6 @@
 """The watcher: bundle, delivery protocol, event trust, reconcile, resubscription, lock, stop, hardening, log.
 
-@trace FR-CLI-6, FR-CLI-7, FR-CLI-8, FR-CLI-9, FR-CLI-19, FR-CLI-20, VEC-CLI-4
+@trace FR-CLI-5, FR-CLI-6, FR-CLI-7, FR-CLI-8, FR-CLI-9, FR-CLI-19, FR-CLI-20, VEC-CLI-4
 @trace INV-CLI-3, INV-CLI-7, INV-CLI-8
 """
 
@@ -150,6 +150,30 @@ def test_ignored_event_is_logged_at_info_with_the_label_name_only(
     assert "deadbeef0123" in record.getMessage()
     assert "VALUE-" not in caplog.text
     assert runner.calls == []
+
+
+def test_a_started_judge_lane_gets_its_db_password_again() -> None:
+    """FR-CLI-5 amended (ADR-0039 B7b): worker-judge is a consumer; a start event schedules one db-password delivery."""
+    from reader.cli.stack import Delivery
+    from reader.cli.watcher import Watcher
+    from reader.config import Secret
+
+    runner = FakeRunner()
+    w = Watcher(
+        runner=runner, env={"PATH": "/usr/bin"}, project=EVENTS["project"],
+        deliveries=[*_deliveries(), Delivery("worker-judge", 10001, "db-password")],
+        values={"db-password": Secret(CANARY)}, submit=lambda job: job(), sleep=FakeClock().sleep,
+    )
+    attributes = {
+        "com.docker.compose.project": EVENTS["project"],
+        "com.docker.compose.oneoff": "False",
+        "com.docker.compose.service": "worker-judge",
+    }
+    event = {"Type": "container", "Action": "start", "Actor": {"ID": "c0ffee", "Attributes": attributes}}
+    w.handle_line(json.dumps(event))
+    (call,) = runner.calls
+    assert call.argv[:5] == ["docker", "exec", "-i", "-u", "10001"]
+    assert call.argv[-1] == "db-password"
 
 
 def test_garbage_event_lines_are_ignored() -> None:

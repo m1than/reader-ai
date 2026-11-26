@@ -77,6 +77,8 @@ def rendered(name: str = "reader-vec", *, agents: bool = False, mcp: bool = Fals
             "user": "10001:10001",
             "volumes": [_vol("blobs", "/var/lib/reader/blobs")],
         },
+        # OPS-DEPLOY FR-DEPLOY-16 (ADR-0039 B7b): the judge lane, default profile, no volume
+        "worker-judge": {"image": "reader-server:local", "user": "10001:10001"},
     }
     if mcp:
         services["mcp"] = {"image": "reader-server:local", "user": "10001:10001"}

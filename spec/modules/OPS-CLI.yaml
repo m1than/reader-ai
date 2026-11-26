@@ -588,7 +588,9 @@ vectors:
 # ---- Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): FR-CLI-4, -5, -17, -18 amended, FR-CLI-25,
 # VEC-CLI-2/-3 revised; deep-reviewer (Fable) rounds 1–2 changes, round 3 approve (secrets: full rounds).
 # `worker-judge` (OPS-DEPLOY FR-DEPLOY-16) is a server role in the default profile and a `db-password` consumer, so
-# it gets the reader.yaml bind, the secret, and the backup/restore stop and start like the worker.
+# it gets the reader.yaml bind, the secret, and the backup/restore stop and start like the worker. Red tests: the
+# fake rendered model gains worker-judge; test_maintenance.py's stop/start sets, test_watcher.py's lane delivery,
+# test_judge_slots.py; VEC-CLI-2/-3 revised.
 # Owner ask, planned: the owner's reader.yaml is outside the repository and the agent never edits it, so before the
 # stage's live check runs `reader doctor` (FR-CLI-25 fails while `judge.find` is unbound with `agents` on), the task
 # records an `ask` in docs/progress.yaml and notifies the owner: add the judge slots (`tasks.judge.find: {model:
