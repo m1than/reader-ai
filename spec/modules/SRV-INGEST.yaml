@@ -1537,11 +1537,14 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 #     (FR-SEARCH-7, -9) and the `deleted_at` join (FR-SEARCH-20: a deleted material is absent from the head entry,
 #     FR-INGEST-39); INV-SEARCH-2 is restated as "every result's span id is a sealed locator of an active pack and its
 #     card text is that span's text, cut at read time"; `search.forget_overlay(conn, owner_id, overlay_id)` deletes
-#     its rows for GC and purge (FR-INGEST-44, -45; SRV-SEARCH defines it); the embed job seals the vector overlay
-#     and enqueues `ingest.activate` with explicit overlay ids, while activation itself stays here (FR-INGEST-39).
-#     SRV-SEARCH has a single read path through vector overlays: legacy chunk rows are never an overlay, so search is
-#     dark for a migrated material until its r3 vector overlay is active (FR-INGEST-40; 26.8 min re-embed measured).
-#     `policy_version` hashes the facets file.
+#     its rows for GC and purge (FR-INGEST-44, -45; SRV-SEARCH defines it), and `search.forget_legacy(conn,
+#     owner_id, ingest_id)` deletes the legacy `search_chunks` and `search_embeds` rows of an ingest (GC and purge
+#     call it); the embed job seals the vector overlay and, in the same transaction, calls
+#     `reader.ingest.manifest.request_activation` and `try_activate` with explicit overlay ids, while activation
+#     itself stays here (FR-INGEST-39). SRV-SEARCH has a single read path through vector overlays: legacy chunk rows
+#     are never an overlay, so every material, the migrated r2 packs included, is dark in search for one span-level
+#     embed (FR-INGEST-40; 26.8 min measured for the pilot, spikes/retrieval-ablation RESULT.md, which merges into
+#     the integration branch before this revision is promoted). `policy_version` hashes the facets file.
 #   - SRV-LESSON: the citation `span_ref` pattern (cell.schema.json, VEC-LESSON-3 mutations) accepts both
 #     `<sha>:<seq>` (published revisions, never rewritten) and the locator form of FR-INGEST-33, and a citation gains
 #     an optional `quote_sha256` (64 hex, required with a locator); INV-LESSON-6 is unchanged and retested: the
@@ -1566,10 +1569,11 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 #     or "(source changed)" as plain text (INV-NOTEBOOK-2's canary extends to the state label).
 #   - SRV-AGENT: `PackGuard.lock_active(conn, pack_ids)` gains `owner_id` (`lock_active(conn, owner_id, pack_ids)`):
 #     pack ids are not owner-unique (two owners of the same book share a pack id, FR-INGEST-35), and "active" is a
-#     property of one owner's manifest; the lane passes the request's owner_id. If the ablation keeps L2 summaries,
+#     property of one owner's manifest; the lane passes the request's owner_id. FR-INGEST-45 (purge) and -46 are
+#     promoted only together with that SRV-AGENT change and its tests (H2). If the ablation keeps L2 summaries,
 #     a slot `ingest.summary` (line `index`, worker, `haiku`, cap `budgets.index_usd_per_pack`) joins JUDGE_SLOTS.
 #   - SRV-EVENTS: KIND_MODULES gains the kinds of `reader.ingest.jobs.KINDS` added here, each with its key as
-#     stated in its requirement (`ingest.seqmap`, `ingest.reanchor`, `ingest.activate`, `ingest.retag`, `ingest.gc`,
+#     stated in its requirement (`ingest.seqmap`, `ingest.reanchor`, `ingest.retag`, `ingest.gc`,
 #     `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge`, and conditionally `ingest.prefix`, `ingest.summary`);
 #     the periodic entry enqueues `ingest.gc` {slot} once a day (FR-INGEST-44).
 #   - SRV-CONFIG: optional `ingest.gc.keep_entries` (integer ≥ 1) and `ingest.gc.age_floor_days` (integer ≥ 1), file
@@ -1610,7 +1614,7 @@ proposed_bounds:
 
 proposed_tables:
   base_packs: { owner_id: true, columns: "FR-INGEST-35: owner_id → users.id, pack_id text CHECK 64 hex, material_sha256, ingest_id → ingests.id, parse_config jsonb, state CHECK in (building, sealed), created_at, sealed_at null, collected_at null, purged_at null; PRIMARY KEY (owner_id, pack_id). The row and its `ingests` row are tombstones: never deleted (FR-INGEST-44, -45)" }
-  overlays: { owner_id: true, columns: "FR-INGEST-36: owner_id, overlay_id text CHECK 64 hex, pack_id, kind CHECK in (profile, tags, vectors, prefixes, summaries), builder_version text, inputs jsonb (ids and hashes only), state CHECK in (building, sealed), created_at, sealed_at null; PRIMARY KEY (owner_id, overlay_id)" }
+  overlays: { owner_id: true, columns: "FR-INGEST-36: owner_id, overlay_id text CHECK 64 hex, pack_id, kind CHECK in (profile, tags, vectors, prefixes, summaries), builder_version text, inputs jsonb (ids and hashes only), state CHECK in (building, sealed), created_at, sealed_at null, collected_at null; PRIMARY KEY (owner_id, overlay_id); the row stays as a tombstone when GC or purge deletes the overlay's rows" }
   pack_profiles: { owner_id: true, columns: "FR-INGEST-36: owner_id, overlay_id, role null, reliability null, as_of date null, license, language, set_by CHECK in (rule, owner)" }
   span_tags: { owner_id: true, columns: "FR-INGEST-37: owner_id, overlay_id, pack_id, locator text, facet, value, by CHECK in (rule, model, owner), confidence real, tagger_version; PRIMARY KEY (owner_id, overlay_id, locator, facet, value)" }
   manifest_entries: { owner_id: true, columns: "FR-INGEST-38: owner_id, seq bigint ≥ 1, parent_seq bigint ≥ 0, entry jsonb, brain_version text CHECK 64 hex, reason text, created_at; PRIMARY KEY (owner_id, seq); UNIQUE (owner_id, parent_seq)" }
@@ -1618,7 +1622,7 @@ proposed_tables:
   span_seq_map: { owner_id: true, columns: "FR-INGEST-40: owner_id, from_ingest_id, to_pack_id, seq, locator, quote_sha256; PRIMARY KEY (owner_id, from_ingest_id, seq); (owner_id, from_ingest_id, to_pack_id) → seq_maps; never collected while its legacy revisions exist (FR-INGEST-44)" }
   anchor_maps: { owner_id: true, columns: "FR-INGEST-43: owner_id, from_pack_id, to_pack_id, from_locator, quote_sha256, to_locator null, state CHECK in (mapped, orphaned); PRIMARY KEY (owner_id, from_pack_id, to_pack_id, from_locator)" }
   anchor_runs: { owner_id: true, columns: "FR-INGEST-43: owner_id, from_pack_id, to_pack_id, mapped int, orphaned int, finished_at; PRIMARY KEY (owner_id, from_pack_id, to_pack_id); written in the same transaction as the run's anchor_maps rows, so its presence proves the run completed" }
-  pending_activations: { owner_id: true, columns: "FR-INGEST-39: id bigint identity, owner_id, material_sha256, pack_id, overlays jsonb (kind → overlay_id), created_at; one row per activation skipped because the material was deleted" }
+  pending_activations: { owner_id: true, columns: "FR-INGEST-39: owner_id, pack_id, material_sha256, overlays jsonb (kind → overlay_id, the desired overlays), reason text null (the last waiting reason), updated_at; PRIMARY KEY (owner_id, pack_id); deleted when the activation appends or finds no_change" }
   citation_migrations: { owner_id: true, columns: "FR-INGEST-41: owner_id, target text, rows int, finished_at" }
   span_prefixes: { owner_id: true, columns: "FR-INGEST-47 (conditional): owner_id, overlay_id, locator, text" }
   outline_summaries: { owner_id: true, columns: "FR-INGEST-48 (conditional): owner_id, overlay_id, outline_path, text" }
@@ -1697,13 +1701,23 @@ proposed_requirements:
         of `material_spans` or `material_outline` rows whose pack is `sealed`, except DELETE inside GC or purge, which
         set the transaction-local `reader.pack_delete = on` (the pattern of SRV-AGENT's `reader.judge_delete`).
       - A pack with `collected_at` or `purged_at` set is **gone**: its spans, outline, overlays and artifact are
-        deleted, it never re-enters a manifest entry (`pack_collected`, `pack_purged`), and a new import of the same
-        (material, converter version) is refused by the import key (FR-INGEST-13) until the r number rises.
+        deleted, and no manifest entry can name it while it is gone (`pack_collected`, `pack_purged`).
+      - **Rebuilding a collected pack is allowed; a purged one is not.** `base_packs` and `overlays` carry a
+        `generation` (0 for the first build; primary keys (owner_id, pack_id, generation) and (owner_id, overlay_id,
+        generation)), with at most one generation per (owner, pack id) that is neither collected nor purged (partial
+        unique index). FR-INGEST-12 reports a key whose pack is collected as `collected`, and `reader-ingest` (or an
+        upload's Retry, whose inbox original is kept, FR-INGEST-19) converts again; the import key is
+        [material_sha256, converter_version] for generation 0 and [material_sha256, converter_version, g] for
+        generation g ≥ 1, g = the number of collected generations, so the succeeded key of the first build never
+        blocks it. The rebuilt pack has the same pack id, locators and quote hashes (same parse config, deterministic
+        converter), its `ingests` row is new (UNIQUE (material_id, converter_version, generation)), and the entries
+        that named the pack id name it again once it is sealed. A purged pack id refuses a new import with
+        `pack_purged` until the r number rises: the owner's purge is final for that converter version.
       - A `building` pack is never read by a view and never enters a manifest entry (FR-INGEST-38).
       - The converter is no longer frozen (P2: the `version_frozen` rule of FR-INGEST-11, -12, -13, -17 and INV-INGEST-2
         is lifted): a material may hold one pack per converter version; at most one of them is active (FR-INGEST-38).
     tests_planned:
-      - "add server/tests/ingest/test_packs_db.py [db]: pack_id is sha256 of the canonical {material_sha256, parse_config} (fixed vector) and equal for two owners of the same bytes, each with their own rows; import ends sealed; each trigger refusal (UPDATE of a sealed row, a span INSERT into a sealed pack, a span DELETE without reader.pack_delete, any DELETE of base_packs or ingests even with it, a second collected_at or purged_at); building packs absent from active_view"
+      - "add server/tests/ingest/test_packs_db.py [db]: pack_id is sha256 of the canonical {material_sha256, parse_config} (fixed vector) and equal for two owners of the same bytes, each with their own rows; import ends sealed; each trigger refusal (UPDATE of a sealed row, a span INSERT into a sealed pack, a span DELETE without reader.pack_delete, any DELETE of base_packs or ingests even with it, a second collected_at or purged_at); building packs absent from active_view; a collected pack rebuilt as generation 1 under import key [sha, version, 1] has the same pack id and locators and an entry naming it is accepted again; a purged pack's re-import refused pack_purged"
       - "add to test_locator_unit.py [unit]: PARSE_CONFIGS holds literal r2 and r3 entries; r3's profile_sha256 equals the sha256 of reader/ingest/host/converter.sb; r2's equals its pinned literal"
   - id: FR-INGEST-36
     text: >-
@@ -1732,7 +1746,8 @@ proposed_requirements:
       - **Rebuilt tags overlay:** the job `ingest.retag` {owner_id, pack_id, overlay_id}, key [owner_id, pack_id,
         overlay_id], enqueued at worker start for every active pack whose active tags overlay's inputs (facets sha256,
         tagger version) differ from the current ones (as SRV-SEARCH's `ensure` does for vectors), builds and seals the
-        new tags overlay, then enqueues `ingest.activate` with the head's overlay ids and only `tags` switched.
+        new tags overlay, and in the same transaction calls `request_activation(…, {tags: <new id>})` and
+        `try_activate` (FR-INGEST-39), so only `tags` is switched and the other kinds keep the head's ids.
     tests_planned:
       - "add server/tests/ingest/test_overlays_db.py [db]: overlay_id fixed vector per kind; a changed tagger version gives a new tags overlay and the same pack id; seal only from building; a row insert into a sealed overlay refused; a build cannot write a row with another overlay's id (CHECK via the builder API); profile change → new overlay and one manifest entry, no vector overlay rebuilt; a replacing pack's profile carries the owner-set role, reliability and as_of; retag with a test facets file enabling `form` builds a tags overlay and activates it with only `tags` switched; with the committed file no tags overlay is built"
   - id: FR-INGEST-37
@@ -1782,11 +1797,13 @@ proposed_requirements:
         inserts `seq = parent_seq + 1`; `UNIQUE (owner_id, parent_seq)` makes a concurrent append with the same parent
         fail, which returns `manifest_conflict`; callers re-read the head and retry up to
         `bounds.manifest_cas_retries` times. The first entry has parent 0.
-      - **Locks before the insert:** `append` first takes `lock_packs` (FR-INGEST-46) on every pack the entry adds
-        relative to its parent entry, then re-checks those packs, then inserts. GC and purge delete under the same
-        locks after reading the head, so an append either commits before GC's check (and GC then sees the pack in the
-        last N entries) or waits and is refused `pack_collected` / `pack_purged`. Removing a pack takes no lock (the
-        remover never needs the rows). Because the locks are taken before the insert, an appender never holds the
+      - **Locks before the insert:** `append` first takes `lock_packs` (FR-INGEST-46) on every pack whose element in
+        the entry differs from the parent entry's (a pack added, or a pack kept with any overlay id changed), then
+        re-checks those packs **and every overlay the entry names for them** (sealed, this owner's, of that pack, not
+        collected or purged), then inserts. GC (`ingest.gc_pack`, `ingest.gc_overlay`) and purge delete a pack or an
+        overlay only under its pack's lock after reading the head, so an append either commits before GC's check (and
+        GC then sees the pack or overlay in the last N entries) or waits and is refused `pack_collected` /
+        `pack_purged`. Removing a pack takes no lock (the remover never needs the rows). Because the locks are taken before the insert, an appender never holds the
         `(owner_id, parent_seq)` key while waiting for a pack lock.
       - **Lock order, global** (stated with FR-INGEST-31's): job key (SRV-EVENTS, for jobs) → FR-INGEST-31's course
         locks → lesson run locks → the owner's "RCPO" lock → pack locks (ascending, one call) → manifest insert and
@@ -1805,40 +1822,48 @@ proposed_requirements:
       - "add server/tests/ingest/test_manifest_db.py [db]: brain_version fixed vector and equal for equal entries; append chain; two concurrent appends with one parent → one row and one manifest_conflict, the loser's retry succeeds; each refusal code with nothing appended (pack_collected and pack_purged included); UPDATE, DELETE and TRUNCATE refused; two owners' manifests independent; active_view hides a pack absent from the head entry; append takes pack locks only on added packs (pg_locks while blocked)"
   - id: FR-INGEST-39
     text: >-
-      **Activation, removal and restore** (P4, P9). The job `ingest.activate` {owner_id, pack_id, overlays}, where
-      `overlays` maps kind → overlay id **explicitly** (the caller names every overlay it switches), key [owner_id,
-      pack_id, sha256 of the canonical JSON of `overlays`], so the key names the entry it writes. Callers:
-      SRV-SEARCH's embed job when a vector overlay seals (overlays: the import's profile and, if any, tags overlay ids
-      plus the new vector overlay id), `ingest.retag` (FR-INGEST-36), `ingest.prefix` / `ingest.summary` when they seal
-      (conditional), and restore (below). Overlays are **never chosen by `sealed_at`** or any recency order.
-      - **Entry:** the head's packs; this material's entry (if any) is replaced by this pack; kinds named in
-        `overlays` take the given ids; kinds not named keep the head's overlay id for this pack, or are absent when
-        this pack was not in the head.
-      - **Preconditions, checked by the job itself** in its transaction after `lock_packs([pack_id])`; when one fails
-        it appends nothing and logs `ingest activate_waiting <reason>`:
-        - the pack and every named overlay are `sealed`, belong to this owner and to this pack, and are not collected
-          or purged (else FR-INGEST-38's refusal code);
-        - the material has a legacy ingest (imported before this revision) → an `accepted` `seq_maps` row from that
-          ingest to this pack exists (`seqmap_missing`; a `refused` one keeps the task blocked, FR-INGEST-40);
+      **Activation, removal and restore** (P4, P9). Activation is one function, not a job:
+      `reader.ingest.manifest.request_activation(conn, owner_id, pack_id, overlays)` merges `overlays` (kind →
+      overlay id, named **explicitly** by the caller) into the pack's `pending_activations` row (a kind named again
+      takes the new id; kinds not named keep the row's id), and `try_activate(conn, owner_id, pack_id)` attempts the
+      append. Both run **inside the transaction of each producer of a precondition**, which calls them before it
+      commits: SRV-SEARCH's embed job when it seals a vector overlay (paired), `ingest.seqmap` when it accepts a map,
+      `ingest.reanchor` when it writes its `anchor_runs` row, `ingest.retag` when it seals a tags overlay
+      (FR-INGEST-36), `ingest.prefix` / `ingest.summary` when they seal (conditional), and restore. Overlays are
+      **never chosen by `sealed_at`** or any recency order; the desired set is only what callers named.
+      - **`try_activate`**, after `lock_packs` on the pack and on the material's pack in the head entry (if any), in
+        one call: with no pending row it does nothing. Otherwise it checks, in order, and on the first failure stores
+        the reason on the row (`deleted`, FR-INGEST-38's refusal codes, `seqmap_missing`, `anchors_missing`), logs
+        `ingest activate_waiting <reason>`, appends nothing and returns the reason:
+        - the material is not deleted (`deleted_at` null);
+        - the pack and every desired overlay are `sealed`, this owner's, of this pack, and not collected or purged;
+        - the material has a legacy ingest (imported before this revision) **and this pack is not that ingest's own
+          pack** → an `accepted` `seq_maps` row from that ingest to this pack exists (a `refused` one keeps the task
+          blocked, FR-INGEST-40); the legacy pack itself needs no map (it is the map's source);
         - another pack of the material is in the head entry → an `anchor_runs` row (from that pack, to this one)
-          exists (`anchors_missing`); `ingest.reanchor` enqueues `ingest.activate` with the same args when it ends.
-        The job is idempotent: an entry equal to the head is `no_change` and succeeds.
-      - **Deleted material:** the job appends nothing, writes one `pending_activations` row with its args and logs
-        `ingest activate_deleted`.
+          exists; if not, it enqueues `ingest.reanchor` for the pair, whose end calls `try_activate` again.
+        Then it builds the **entry**: the head's packs; this material's entry (if any) is replaced by this pack; each
+        desired kind takes the desired id; kinds not desired keep the head's overlay id for this pack, or are absent
+        when this pack was not in the head. An entry equal to the head is `no_change`; otherwise it appends
+        (FR-INGEST-38). In both cases the pending row is deleted. Idempotency is therefore `no_change` when the head
+        already names the desired overlays, not a job key.
       - FR-INGEST-31's **delete** appends one entry without the material's pack, after FR-INGEST-31's locks. Its
-        **restore** appends one entry that puts back the pack and overlay ids of the material's entry in the last
-        manifest entry where the material was present, re-anchoring first if that is a rollback onto another pack
-        (FR-INGEST-43). A pack or overlay collected or purged meanwhile refuses the restore with that code and the
-        material stays deleted-in-manifest but restored as a row. A material **never activated** (no entry ever named
-        it) appends nothing at restore and re-enqueues its newest `pending_activations` row by id (insertion order,
-        not `sealed_at`); with none, nothing is enqueued, and the next seal of its vector overlay activates it.
+        **restore** calls `request_activation` with the pack and overlay ids of the material's entry in the last
+        manifest entry where the material was present, runs re-anchoring **inline** in its own transaction when that
+        pack differs from the material's pack in the head and the `anchor_runs` row is missing, then calls
+        `try_activate`; a pack or overlay collected or purged meanwhile refuses with that code (the material row is
+        restored, the manifest unchanged). A material **never activated** (no entry ever named it) calls
+        `try_activate` on its pending row for the pack of the current `CONVERTER_VERSION`, if one exists (a deleted
+        material's waiting activation stays in that row with reason `deleted`); otherwise nothing.
       - **Rollback** to an earlier entry (`reader.ingest.manifest.rollback(conn, owner_id, to_seq)`) appends that
-        entry's content as a new entry, after re-anchoring for every material whose pack differs (FR-INGEST-43).
+        entry's content as a new entry, running re-anchoring inline for every material whose pack differs from the
+        head's and whose `anchor_runs` row is missing (FR-INGEST-43).
       The course cascade of FR-INGEST-31 is unchanged (P9).
     tests_planned:
-      - "add to test_manifest_db.py [db]: import → embed sealed → activate → one entry with the pack and exactly the named overlays; a retag switches only tags and keeps the head's vectors id; two sealed vector overlays where the older is named → the older is activated (no sealed_at choice); same args twice → one entry; delete → one entry without it; restore → one entry with the same pack and overlays and the same brain_version as before the delete; activate of a deleted material appends nothing and writes a pending row, restore enqueues it; restore of a never-activated material with no pending row appends nothing"
-      - "add to test_manifest_db.py [db]: legacy ingest without an accepted seq map → activate appends nothing (seqmap_missing), with it → one entry; another active pack without anchor_runs → nothing (anchors_missing), after reanchor → one entry"
-      - "add to test_gc_db.py [db]: restore racing GC of the same pack (two connections, the GC holding the pack lock first) → GC deletes and the restore is refused pack_collected, or the restore commits first and GC keeps the pack; never an entry naming a collected pack"
+      - "add to test_manifest_db.py [db]: import → embed seal calls request_activation + try_activate → one entry with the pack and exactly the named overlays; a retag switches only tags and keeps the head's vectors id; two sealed vector overlays where the older is named → the older is activated (no sealed_at choice); try_activate twice → one entry, the second no_change; delete → one entry without it; restore → one entry with the same pack and overlays and the same brain_version as before the delete; an activation of a deleted material stores reason deleted, and restore appends it; restore of a never-activated material with no pending row appends nothing"
+      - "add to test_manifest_db.py [db]: **a waiting activation runs through**: an r3 pack whose vectors seal before its seq map exists → reason seqmap_missing, nothing appended; the seq-map accept calls try_activate → anchors_missing and ingest.reanchor enqueued; the reanchor end calls try_activate → one entry naming the r3 pack and its overlays, pending row gone; the legacy pack's own vector overlay activates with no seq map"
+      - "add to test_manifest_db.py [db]: rollback and restore onto another pack with no anchor_runs row re-anchor inline and append in one transaction"
+      - "add to test_gc_db.py [db]: restore racing GC of the same pack (two connections, the GC holding the pack lock first) → GC deletes and the restore is refused pack_collected, or the restore commits first and GC keeps the pack; never an entry naming a collected pack; and a rollback racing `ingest.gc_overlay` of an overlay the rolled-back entry names (pack unchanged, overlay id differs from the head's) → the same two outcomes, never an entry naming a collected overlay"
       - "change server/tests/ingest/test_manage_db.py [db] (FR-INGEST-31 revised): the delete–restore cycle also asserts exactly two manifest entries and the restored brain_version"
   - id: FR-INGEST-40
     text: >-
@@ -1856,7 +1881,8 @@ proposed_requirements:
       the same page, the same kind and an unchanged `quote_sha256`. Accepted: one `seq_maps` row `accepted` and one
       `span_seq_map` row per seq (seq → the new pack's locator and quote hash), in one transaction. Otherwise one
       `seq_maps` row `refused` with the first mismatch (`count`, `page`, `kind` or `text` and the seq, never text),
-      no map rows, nothing activated, and the owner is notified (the task blocks, P2 (3)).
+      no map rows, nothing activated, and the owner is notified (the task blocks, P2 (3)). An accept calls
+      `try_activate` for the new pack in the same transaction (FR-INGEST-39).
       **The legacy ingest as a pack.** Migration `ingest_0004_packs` registers each existing `ingests` row as a sealed
       base pack of its converter version (`docling-2.151.1+r2` parse config), backfilling `locator` and
       `quote_sha256` from its stored rows (FR-INGEST-33 over stored data, so no re-conversion is needed for it), with
@@ -1864,15 +1890,20 @@ proposed_requirements:
       spans, outline and plan readers keep their material. Its locators are not the map: the map is proven against
       the re-converted r3 pack only. The legacy chunk rows are **not** registered as a vector overlay (cross-spec
       decision from the SRV-SEARCH review, 2026-11-26: SRV-SEARCH keeps a single read path, through vector overlays
-      only). **Search is therefore dark** for a migrated material from `ingest_0004_packs` until its r3 pack's
-      span-level vector overlay seals and `ingest.activate` appends the entry; the re-embed alone measured 26.8 min
-      for the pilot (spikes/retrieval-ablation RESULT.md), plus the re-conversion and the seq map. Declared to the
-      owner in `proposed_owner_notes`. Alembic revision `ingest_0004_packs` writes the packs, profile overlays and
+      only). Instead (option (a), coordinator 2026-11-26) **the legacy pack gets its own span-level vector overlay**
+      over its backfilled locators: SRV-SEARCH's `ensure` at worker start enqueues the embed for every pack in the
+      head entry without a vectors overlay, and its seal activates it through `try_activate` with no seq-map
+      precondition (the legacy pack is the map's source, FR-INGEST-39). So **every material, an r2 browser upload
+      included, is dark in search for one embed** after `ingest_0004_packs`: 26.8 min measured for the pilot
+      (spikes/retrieval-ablation RESULT.md, merged before promotion). The r3 pack later replaces it in one entry,
+      once its own vectors, its seq map and its anchors exist, with no second dark window. Declared to the owner in
+      `proposed_owner_notes` (note 8). Alembic revision `ingest_0004_packs` writes the packs, profile overlays and
       first entries and depends on no `search` revision.
     tests_planned:
       - "change server/tests/ingest/test_ingest_artifact.py [unit] (FR-INGEST-10, INV-INGEST-1 revised): format reader-ingest/2; a span with a wrong locator, a wrong quote_sha256, or a locator of another page → locator_mismatch; r2 artifacts refused as `version_mismatch` by an r3 receive"
       - "add server/tests/ingest/test_seqmap_db.py [db]: VEC-INGEST-10's cases — identical re-conversion → accepted with one row per seq; one span dropped (count), one span moved to the next page (page), a kind change (kind), one changed text (text) → refused with that reason and seq, no map rows, no activation"
       - "add to test_packs_db.py [db]: migration ingest_0004 on a database holding an r2 ingest → one sealed pack with locators equal to FR-INGEST-33 over its rows, one manifest entry naming the pack with its profile overlay only and no vectors overlay; downgrade drops only the new tables and columns"
+      - "add to test_packs_db.py [db]: an r2 material imported by browser upload (an uploads row in `received`, its ingest under r2) → after ingest_0004 a sealed legacy pack in the first entry; the (fake) embed of its span-level overlay seals and try_activate appends one entry naming that vectors overlay with no seq map; search over it is empty before and returns its spans after"
   - id: FR-INGEST-41
     text: >-
       **Migration step 4: mutable citations** (P2 (4)). `python -I -m reader.ingest.migrate_citations` (run by
@@ -1908,18 +1939,20 @@ proposed_requirements:
       2. the material's active pack holds a span at that locator with that hash → `active`;
       3. else follow `anchor_maps` hops from any pack of the owner where the locator had that hash: each hop's
          `from_locator` and `quote_sha256` must equal the current (locator, hash), the next hop starts at its
-         `to_locator` with the target span's hash re-read and checked equal; a chain that reaches the active pack →
-         `reanchored` (text from the active pack); a hop that is `orphaned`, a hash that differs, or a cycle ends the
-         walk; at most one hop per pack of the material;
+         `to_locator` with the target span's hash re-read and checked equal; a hop that is `orphaned`, a hash that
+         differs, or a cycle ends that chain; at most one hop per pack of the material per chain. All chains from all
+         starting packs are walked, and **any chain that reaches the active pack wins** → `reanchored` (text from the
+         active pack); different chains reaching different active spans cannot happen (one active pack, one span per
+         locator), and if they reach different locators the lowest locator in parse order is returned;
       4. else a sealed pack of the owner, not collected or purged, that holds a span at that locator with that hash
          (lowest pack id when several, a deterministic choice) → `inactive`, text from that pack;
-      5. else, when some pack of the material that held it was collected or purged → `removed` (text null; locator
-         and page stay displayable, P6);
+      5. else, when the material has at least one collected or purged pack of this owner → `removed` (text null;
+         locator and page stay displayable, P6): the cited span may have lived in it, and its rows are gone;
       6. else → `orphaned`.
       A reference to another owner's material is `unmapped` or `orphaned`, never served. Text is returned only to an
       entitled caller (ADR-0039 B8) and only to the calling module, never logged.
     tests_planned:
-      - "add server/tests/ingest/test_spanref_db.py [db]: one ref per state (invalid, unmapped, active, reanchored over one and over two hops, inactive, removed, orphaned); a hop whose target hash differs stops the walk; an anchor cycle terminates; a legacy id resolves through the map and no lesson_revisions row or blob changes (row count and blob listing before and after); another owner's ref is never served"
+      - "add server/tests/ingest/test_spanref_db.py [db]: one ref per state (invalid, unmapped, active, reanchored over one and over two hops, inactive, removed, orphaned) — `removed` only when the material has a collected or purged pack of this owner and no active, anchored or inactive span matches, `orphaned` for the same ref when no pack of the material is collected or purged; a hop whose target hash differs stops that chain while another chain from a second starting pack still reaches the active pack (reanchored); an anchor cycle terminates; a legacy id resolves through the map and no lesson_revisions row or blob changes (row count and blob listing before and after); another owner's ref is never served"
   - id: FR-INGEST-43
     text: >-
       **Re-anchoring** (P2 quote hash and re-anchoring, P8). The job `ingest.reanchor` {owner_id, from_pack_id,
@@ -1929,8 +1962,9 @@ proposed_requirements:
       row for the pair is reused. For every span of the old pack it writes one `anchor_maps` row: the new
       span on the **same page** with the **same quote_sha256** and the **same equal-hash ordinal** (FR-INGEST-34) →
       `mapped`; if the number of spans with that hash on that page differs between the two packs, or there is none →
-      `orphaned` (never guessed). One transaction, ending with the pair's `anchor_runs` row; then it enqueues the
-      waiting `ingest.activate` (or the rollback's append). Rows belong to the target pack and are collected with it. Counts
+      `orphaned` (never guessed). One transaction, ending with the pair's `anchor_runs` row and, as a job, a call to
+      `try_activate(conn, owner_id, to_pack_id)` in the same transaction; restore and rollback run the same function
+      inline in their own transaction instead (FR-INGEST-39). Rows belong to the target pack and are collected with it. Counts
       (mapped, orphaned) are recorded in the job's result and trace, never texts. Mutable rows are not rewritten by
       re-anchoring: every reader resolves through FR-INGEST-42, one rule for published and mutable citations.
     tests_planned:
@@ -1940,7 +1974,8 @@ proposed_requirements:
       **Garbage collection** (P6), background only, never by a route. The scanner job `ingest.gc` {slot}, key
       [slot] (the UTC date of the daily periodic entry, SRV-EVENTS paired), reads candidates without locks and
       enqueues **one job per pack**, `ingest.gc_pack` {owner_id, pack_id, slot}, key [owner_id, pack_id, slot], and
-      one per lone overlay, `ingest.gc_overlay` {owner_id, overlay_id, slot}. A deleter collects a pack (its
+      one per lone overlay, `ingest.gc_overlay` {owner_id, overlay_id, slot}, key [owner_id, overlay_id, slot]. A
+      deleter collects a pack (its
       `material_spans` and `material_outline` rows, its overlays and their rows; the `ingests` and `base_packs` rows
       stay as the tombstone with `collected_at` set) or an overlay only when all hold, re-checked under the pack's
       lock (FR-INGEST-46) in the deleting transaction, in the order job key → pack lock → reads and deletes:
@@ -1950,7 +1985,9 @@ proposed_requirements:
         accepted seq map (every legacy revision of its material cites it through the map), and not cited by a finding
         (a seam returning none until SRV-KB).
       Each pack is collected in its own transaction with `reader.pack_delete = on`; the transaction also calls
-      `judges.forget_pack`, `judges.forget_overlay` (SRV-AGENT) and SRV-SEARCH's `forget_overlay`. **After it has
+      `judges.forget_pack`, `judges.forget_overlay` (SRV-AGENT), SRV-SEARCH's `forget_overlay` for each of its
+      vector overlays and SRV-SEARCH's `search.forget_legacy(conn, owner_id, ingest_id)` for its `ingests` row, which
+      deletes that ingest's legacy `search_chunks` and `search_embeds` rows (paired; a no-op for an r3 pack). **After it has
       committed**, the job removes the pack's artifact directory from the blobs volume when no `ingests` row of any
       owner whose pack is not collected or purged names that artifact id; a crash between the commit and the removal
       leaves a directory the next scanner removes by the same rule. `freshness_reports` and `study_plans` rows that
@@ -1958,38 +1995,47 @@ proposed_requirements:
       inbox originals are never touched (P6). This replaces FR-INGEST-32's tombstone-only rule for span, outline and
       overlay data.
     tests_planned:
-      - "add server/tests/ingest/test_gc_db.py [db]: a pack outside the last N entries and older than the floor is collected — spans, outline, overlays, judge outputs and vector rows gone, ingests and base_packs rows kept with collected_at — while a freshness_reports row and a study_plans row referencing its ingest stay and still read; kept when within N, younger than the floor, cited by a revision_packs row, the target of an accepted seq map, or active; an abandoned building pack past the floor is collected; the scanner enqueues one gc_pack job per candidate and a repeat in the same slot enqueues none; the artifact directory is removed only after commit (a rolled-back collection leaves it) and kept while another owner's live ingest names it; material and uploads rows unchanged; no route of reader.ingest.routes or any other api module calls the GC (import-graph test)"
+      - "add server/tests/ingest/test_gc_db.py [db]: a pack outside the last N entries and older than the floor is collected — spans, outline, overlays, judge outputs, vector rows and the legacy search_chunks and search_embeds rows of its ingest gone, ingests and base_packs rows kept with collected_at — while a freshness_reports row and a study_plans row referencing its ingest stay and still read; kept when within N, younger than the floor, cited by a revision_packs row, the target of an accepted seq map, or active; an abandoned building pack past the floor is collected; the scanner enqueues one gc_pack job per candidate and a repeat in the same slot enqueues none; the artifact directory is removed only after commit (a rolled-back collection leaves it) and kept while another owner's live ingest names it; material and uploads rows unchanged; no route of reader.ingest.routes or any other api module calls the GC (import-graph test)"
   - id: FR-INGEST-45
     text: >-
-      **Owner purge** (P6, ADR-0017 data ownership). `POST /api/materials/{material_id}/packs/{pack_id}/purge` with
+      **Owner purge** (P6, ADR-0017 data ownership). Promoted only together with the paired SRV-AGENT `PackGuard`
+      change (FR-INGEST-46), since a purge without the guard could race a judge write.
+      `GET /api/materials/{material_id}/packs` (owner only) lists the material's packs of the session's owner as
+      `[{pack_id, converter_version, generation, state, active, collected_at, purged_at}]` in converter-version
+      order, so the owner can name the pack to purge. `POST /api/materials/{material_id}/packs/{pack_id}/purge` with
       `{confirm}` (FR-INGEST-31's confirm rule, owner only, FR-AUTH-12) answers 202 and enqueues `ingest.purge`
       {owner_id, pack_id}, key [owner_id, pack_id]; the route itself deletes nothing (no deletion on a request path).
       The route answers 404 `not_found` when `pack_id` is not a pack of that material of the session's owner. The job,
       in the order job key → pack lock (FR-INGEST-46) → the rest, appends one manifest entry without the pack if it
       is active (CAS, FR-INGEST-38), sets `purged_at`, and collects as GC does but without the N, age and citation
-      conditions; the `ingests` and `base_packs` rows stay as the tombstone. In the same transaction it also deletes
+      conditions (including `search.forget_legacy`); the `ingests` and `base_packs` rows stay as the tombstone. In the
+      same transaction it also deletes
       the `judge_inputs` rows (SRV-OBS seam) and pending `judge_requests` rows (SRV-EVENTS seam) whose cards cite the
       pack; the artifact directory is removed after commit by GC's rule. Citations keep their locator and resolve as
       `removed` (FR-INGEST-42). An earlier manifest entry that names the purged pack stays (append-only) and can no
       longer be restored (`pack_purged`). A second purge answers 202 and its job does nothing.
     tests_planned:
-      - "add server/tests/ingest/test_purge_db.py [db]: purge of an active pack → one entry without it; spans, outline, overlays, judge outputs, judge_inputs, pending judge_requests and vector rows gone; ingests and base_packs rows kept with purged_at; a freshness report and a study plan referencing it stay valid; citations resolve `removed`; purge of a cited inactive pack collects it anyway; restore to an entry naming it → pack_purged; the route answers 202 with zero rows deleted before the job runs; learner 403 owner_only; another owner's material 404; a pack_id that exists only for another owner (same book) → 404 and nothing enqueued; a pack_id of another material of the same owner → 404; confirm_mismatch"
+      - "add server/tests/ingest/test_purge_db.py [db]: purge of an active pack → one entry without it; spans, outline, overlays, judge outputs, judge_inputs, pending judge_requests and vector rows gone; purge of a migrated r2 pack deletes its ingest's search_chunks and search_embeds rows (search.forget_legacy called once with that ingest id); ingests and base_packs rows kept with purged_at; the packs listing route shows each pack with its state, owner only; a freshness report and a study plan referencing it stay valid; citations resolve `removed`; purge of a cited inactive pack collects it anyway; restore to an entry naming it → pack_purged; the route answers 202 with zero rows deleted before the job runs; learner 403 owner_only; another owner's material 404; a pack_id that exists only for another owner (same book) → 404 and nothing enqueued; a pack_id of another material of the same owner → 404; confirm_mismatch"
   - id: FR-INGEST-46
     text: >-
       **Per-pack advisory locks** (ADR-0039 B7b; the lock contract of SRV-AGENT FR-AGENT-21 step 9).
       `reader.ingest.packs.lock_packs(conn, pack_ids)` takes `pg_advisory_xact_lock(<"RKPK">, key(id))` for each
       distinct id in **ascending pack-id order**, in one call, where `key(id)` = int(id[0:8], 16) − 2^31 is monotone
       in the hex id, so ascending id order is non-decreasing key order and two ids that share a key are adjacent: no
-      two transactions can wait on each other's keys in opposite order, collisions included. A transaction takes pack
-      locks once, in one call, after its job key and FR-INGEST-31's locks (FR-INGEST-38's global order) and before any
-      other lock it waits on. The lock is not per owner: two owners of one book share it, which only serialises them.
+      two transactions can wait on each other's keys in opposite order, collisions included. A transaction takes its
+      pack locks after its job key and FR-INGEST-31's locks (FR-INGEST-38's global order) and before any other lock
+      it waits on. **Later calls in the same transaction** (an inline re-anchoring followed by `try_activate`, or a
+      producer's `try_activate` after its own locks): a key the transaction already holds is granted at once
+      (Postgres advisory locks are re-entrant within a session) and never waits; a later call may add only keys
+      greater than every key the transaction already holds, and otherwise raises `lock_order` before taking any lock,
+      so ascending order holds across calls. Callers that know their whole set take it in the first call. The lock is not per owner: two owners of one book share it, which only serialises them.
       **`PackGuard`** (production default replacing `AlwaysActive`, only together with the paired SRV-AGENT revision
       that adds `owner_id` to the Protocol and changes its tests, H2): `PackLocks.lock_active(conn, owner_id,
       pack_ids)` takes the locks, then returns true iff every pack is in the owner's head manifest entry, `sealed`
       and neither collected nor purged. Because purge and GC delete under the same lock, a judge output is either written before a purge
       (and then deleted by its `forget_pack`) or not written at all.
     tests_planned:
-      - "add server/tests/ingest/test_pack_locks_db.py [db]: key() is monotone over sorted random ids and colliding prefixes; lock_active true for active packs, false after purge, false for a building or inactive pack; a purge waiting on a held guard lock deletes after the guard's transaction and the guard's judge output is then gone; two transactions locking {a,b} and {b,a} both complete (no deadlock_detected), with held and awaited locks read from pg_locks as INV-LESSON-23's oracles do"
+      - "add server/tests/ingest/test_pack_locks_db.py [db]: key() is monotone over sorted random ids and colliding prefixes; lock_active true for active packs, false after purge, false for a building or inactive pack; a purge waiting on a held guard lock deletes after the guard's transaction and the guard's judge output is then gone; two transactions locking {a,b} and {b,a} both complete (no deadlock_detected), with held and awaited locks read from pg_locks as INV-LESSON-23's oracles do; a second call with held keys does not wait, with a greater key succeeds, with a smaller new key raises lock_order and takes nothing"
   - id: FR-INGEST-47
     text: >-
       **Conditional on retrieval-ablation keeping context prefixes.** Context-prefix overlay (B1, B7, decision 19):
@@ -2001,10 +2047,17 @@ proposed_requirements:
       next batch, so a tutor job waits at most one batch. Outputs are recorded by `judges.record` keyed (owner, input
       hash, judge) with the overlay id, and a rebuild replays them (`ReplayProvider`, no spend). A budget refusal
       stops the build with an event, leaves the overlay `building` and the pack active with its earlier overlays
-      (titles-only context; the task then blocks for a top-up, owner decision 15). The last batch seals the overlay
-      and enqueues a vector rebuild (the vector overlay's inputs include the prefix overlay id).
+      (titles-only context; the task then blocks for a top-up, owner decision 15); the refused batch ends `succeeded`
+      with the event `ingest.prefix budget_stopped batch=<n>` and records the batch number on the overlay row.
+      **Resume:** the job key is [owner_id, overlay_id, batch_no, resume], `resume` = the number of budget stops of
+      that overlay so far (0 on the first pass). At worker start, every `building` prefix overlay whose pack is in a
+      head entry and whose last batch stopped on the cap is re-enqueued at that batch with `resume` + 1. Because the
+      run id is the same `scope_run_id`, the cap counts what the overlay already spent: the resume makes progress
+      only once the owner has raised `budgets.index_usd_per_pack` (the top-up), and spans already prefixed in that
+      batch replay from recorded outputs at no cost. The last batch seals the overlay and enqueues a vector rebuild
+      (the vector overlay's inputs include the prefix overlay id).
     tests_planned:
-      - "add server/tests/ingest/test_prefix_db.py [db] (fake provider): 60 spans → 3 batches, each re-enqueues the next, the third seals; run_id equals scope_run_id(owner, overlay, overlay_id) on every call; the cap refused mid-build leaves the overlay building, no next batch, the pack's head entry unchanged; a rebuild from recorded outputs makes no provider call and yields the same overlay id and rows"
+      - "add server/tests/ingest/test_prefix_db.py [db] (fake provider): 60 spans → 3 batches, each re-enqueues the next, the third seals; run_id equals scope_run_id(owner, overlay, overlay_id) on every call; the cap refused mid-build leaves the overlay building, no next batch, the pack's head entry unchanged; a rebuild from recorded outputs makes no provider call and yields the same overlay id and rows; resume after a stop: with the cap unchanged the restarted batch stops again at once, after raising the cap it continues from the stopped batch with resume 1, replays the batch's recorded spans without calls and seals"
   - id: FR-INGEST-48
     text: >-
       **Conditional on retrieval-ablation keeping L2 summaries.** Summary overlay (B1 L2): one summary per outline
@@ -2040,7 +2093,8 @@ proposed_revisions:
   - id: FR-INGEST-12
     text: >-
       `status` reports the key (material_sha256, `CONVERTER_VERSION`) only; there is no frozen version. `reader-ingest`
-      converts when that key is `none`, so a converter upgrade re-converts and creates a new pack (P2).
+      converts when that key is `none`, so a converter upgrade re-converts and creates a new pack (P2), and when its
+      pack is `collected`, under the next generation's key (FR-INGEST-35); `purged` exits 2 `pack_purged`.
     tests_planned:
       - "change test_ingest_db.py [db]: status of an r2-imported material under r3 is `none`"
   - id: FR-INGEST-13
@@ -2055,8 +2109,8 @@ proposed_revisions:
       - "change test_ingest_db.py [db]: an import ends with a sealed pack and a sealed profile overlay (no tags overlay with the committed facets file); a second converter version imports a second pack; the enqueues per case"
   - id: FR-INGEST-14
     text: >-
-      As approved, plus migration `ingest_0004_packs`: `ingests` drops UNIQUE (material_id) for UNIQUE (material_id,
-      converter_version); `material_spans` adds `locator text`, `quote_sha256 text` (NOT NULL after the backfill of
+      As approved, plus migration `ingest_0004_packs`: `ingests` adds `generation int NOT NULL DEFAULT 0` and drops
+      UNIQUE (material_id) for UNIQUE (material_id, converter_version, generation) (FR-INGEST-35); `material_spans` adds `locator text`, `quote_sha256 text` (NOT NULL after the backfill of
       FR-INGEST-40) and UNIQUE (ingest_id, locator); the tables of `proposed_tables` with their triggers. `ingests`
       rows are never deleted (tombstones, FR-INGEST-35), so the `ON DELETE CASCADE` of `material_spans` and
       `material_outline` never fires and the RESTRICT keys of `freshness_reports` and `study_plans` stay valid. The
@@ -2230,7 +2284,8 @@ proposed_defers:
     - "Locators for the 6 pilot pages without a text layer arrive with OCR (their figure spans already have zero-length locators)."
 
 proposed_owner_notes:
-  - "8. (Revision 3, ADR-0039.) While your book is moved to the new span ids, search and tutor answers find nothing in it: from the update until its re-converted copy is indexed. Indexing alone measured 26.8 minutes for the whole book; re-conversion on your Mac takes about 12 minutes before that. Lessons and the notebook stay readable throughout."
+  - "8. (Revision 3, ADR-0039.) After this update every book you have imported is re-indexed once at its new span level: until that finishes, search and tutor answers find nothing in it. For the Bashir book that took 26.8 minutes (measured). The later move to the re-converted copy (about 12 minutes of conversion on your Mac, then its own indexing in the background) causes no second gap. Lessons and the notebook stay readable throughout."
+  - "9. (Revision 3.) Old, unused copies of a book's index are cleaned up automatically after 30 days. A cleaned-up copy can be rebuilt by converting the book again. A copy you purge yourself is gone for good for that converter version: it can come back only with a newer converter."
 
 # Round 1 (deep-reviewer, Fable, on fe2dc2b): changes, 7 blocking; all addressed in this draft:
 #   B1 GC and purge keep `ingests` and `base_packs` rows as tombstones (FR-INGEST-35, -44, -45; FKs of
@@ -2245,9 +2300,20 @@ proposed_owner_notes:
 #      test-vector measurement before promotion, base58 keys, lock order, one job per pack, artifact removal after
 #      commit, G1 values carried over, seq_maps keys, 702 s / 4.36 GB, judge_inputs and judge_requests on purge,
 #      foreign pack 404, no GC after append).
-# Cross-spec decision (SRV-SEARCH review, 2026-11-26): legacy chunk rows are not a vector overlay; search is dark
-# during the r3 re-embed (owner note 8); SRV-SEARCH defines `search.forget_overlay` and its embed job seals the
-# vector overlay and enqueues `ingest.activate`.
+# Cross-spec decision (SRV-SEARCH review, 2026-11-26): legacy chunk rows are not a vector overlay; SRV-SEARCH
+# defines `search.forget_overlay` and `search.forget_legacy`, and its embed job seals the vector overlay and calls
+# `try_activate` in the same transaction.
+# Round 2 (deep-reviewer, on 8709ee0): changes, 5 blocking, with the coordinator's decisions applied:
+#   B1 activation is `request_activation` + `try_activate`, called in-transaction by every producer of a
+#      precondition, desired overlays in `pending_activations`, idempotent by `no_change`, inline re-anchoring in
+#      restore and rollback, a waiting-to-appended test; B2 option (a): the legacy pack needs no seq map and gets its
+#      own span-level vector overlay, so every material is dark for one embed (owner note 8, an r2-upload test);
+#      B3 append locks every pack whose element differs from the parent and re-checks its overlays, rollback vs
+#      gc_overlay test; B4 `removed` defined by a collected or purged pack of the material, test oracle fixed;
+#      B5 `search.forget_legacy` in GC and purge. Non-blocking applied: header lines, the RESULT.md merge note, the
+#      gc_overlay key, rebuilding a collected pack (generations) with owner note 9, FR-INGEST-45 gated on the
+#      SRV-AGENT change, the packs listing route, resume after a cap stop, lock re-entry wording, any anchor chain
+#      reaching the active pack wins.
 #
 # Open points:
 #   1. FR-INGEST-41 runs as a one-shot command, not an Alembic migration (P2 (4) wording): startup migrations would
