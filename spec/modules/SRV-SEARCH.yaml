@@ -467,3 +467,490 @@ review: "draft 2026-11-21. deep-reviewer round 1 (30a4120): changes (B1 ADR for 
 
 # ---- Amendment (2026-11-24, V/manage): promoted with Red after deep-review rounds 1–3, round 3 approve on 2a7d86f
 # (WEB-MANAGE; paired with SRV-INGEST FR-INGEST-31). Id FR-SEARCH-20 (11..19 left free), in `requirements`.
+
+# ==== Revision for ADR-0039 (accepted 2026-11-26), task V.kl-search-find — phase 1 DRAFT ====
+# Spec text only, no code. The status line above is unchanged: the approved items stay in force until this block is
+# reviewed (deep-reviewer, mandatory: the judge waiter and the cost path are complex areas) and promoted with its Red
+# tests. Each proposed item carries `tests_planned` (H2: a test traced to an id changes only with that id's text).
+# New ids continue after the last used ones (FR-SEARCH-21.., INV-SEARCH-9.., NFR-SEARCH-5.., VEC-SEARCH-6..);
+# FR-SEARCH-11..19 stay free as the 2026-11-24 amendment left them.
+#
+# What this revision covers (ADR-0039 B5, B6, B7a, B8; B11 row "SRV-SEARCH"): the span-level vector overlay; the
+# `find` cascade (route by rules → candidates → pivot merge → gate → 1-hop expansion and a 1.5× preselection →
+# at most one `judge.find` call on the top slice → final two-pass selection); the policy file, the facets file and
+# their JSON Schemas; `policy_version` input; the B5 greedy algorithms with their bounds per pass; per-channel token
+# budgets with clamping; the brain/v1 card shape; per-card `judged`, response `judge_ran` and `judge_source`; the
+# per-channel personal-use table and the entitlement rule; `open` on sealed span ids only; a response cache keyed by
+# caller identity, roles and manifest version.
+#
+# Values the spikes set (kept as policy data, never as code constants):
+#   - `retrieval-ablation` (B10): whether RRF hybrid runs on a route (`routes[].rrf`, false on every route until
+#     then; FR-SEARCH-7 measured hybrid 24 vs dense 27 of 40), whether context prefixes and L2 summaries exist
+#     (FR-SEARCH-3 revised reads the prefix overlay only when it is active), the span-vs-chunk V0 baseline.
+#   - `judge-gate` (B10): the gate mode and margin (`gate.mode` `never_judge` until then, so no judge call and no
+#     expansion run before the spike), the judge timeout (2.2 s initial), the judge-input cap (3,000 tokens initial)
+#     per channel where they differ.
+#
+# Dependencies (built elsewhere; this block names the interface it reads, the owning spec names the rest):
+#   - SRV-INGEST (V.kl-ingest-packs): base packs, overlays, the manifest and `brain_version`; ADR-0039 P2 locator
+#     span ids with `quote_sha256`; the profile overlay carrying `license`, `role`, `reliability`, `as_of` and the
+#     language (B3 F2); manifest views restricted to the active entry (P5); overlay register / seal / activate with
+#     compare-and-swap (P1, P4); per-pack advisory locks (SRV-AGENT's `PackGuard` default). SRV-SEARCH reads packs,
+#     spans, outline nodes and overlays only through those views, never the base tables.
+#   - SRV-AGENT (approved revision on V/kl-agent-judges): FR-AGENT-9's estimator (`bounds.chars_per_token_floor`
+#     2.0), FR-AGENT-18's `judge.find` slot, FR-AGENT-20's `find_input_sha256`, `judge_name`, `recorded`,
+#     FR-AGENT-21's job (args, deadline, notify), FR-AGENT-22's `render_find_input` (all data in the user message).
+#   - SRV-EVENTS (V.kl-deploy-judge-lane): the `judge_requests` table with the columns FR-AGENT-21 reads, the `judge`
+#     queue consumed only by worker-judge, its collector.
+#   - SRV-OBS (revision on V/kl-obs-spans): FR-OBS-36's `reader.obs.find` helpers, FR-OBS-21's
+#     `reader.obs.versions.policy_version(policy)`.
+#
+# New files inside the existing `paths` (server/src/reader/search/**): find.py (the cascade), greedy.py (pure B5
+# algorithms), policy.py with policy/policy.json, policy/policy.schema.json, policy/facets.json,
+# policy/facets.schema.json, cards.py (card shape, cutting, entitlement), judge_wait.py (the waiter), opening.py
+# (`open`), migration search_0002; fixtures under spec/fixtures/SRV-SEARCH/ (VEC-SEARCH-6..10).
+
+kl_revision:
+  task: V.kl-search-find
+  adr: [ADR-0039, ADR-0028, ADR-0007, ADR-0008, ADR-0015, ADR-0016, ADR-0025, ADR-0005]
+  new_ids: [FR-SEARCH-21, FR-SEARCH-22, FR-SEARCH-23, FR-SEARCH-24, FR-SEARCH-25, FR-SEARCH-26, FR-SEARCH-27,
+    FR-SEARCH-28, FR-SEARCH-29, FR-SEARCH-30, FR-SEARCH-31, FR-SEARCH-32, FR-SEARCH-33, INV-SEARCH-9, INV-SEARCH-10,
+    INV-SEARCH-11, INV-SEARCH-12, INV-SEARCH-13, INV-SEARCH-14, INV-SEARCH-15, NFR-SEARCH-5, NFR-SEARCH-6,
+    NFR-SEARCH-7, VEC-SEARCH-6, VEC-SEARCH-7, VEC-SEARCH-8, VEC-SEARCH-9, VEC-SEARCH-10]
+  revised_ids: [FR-SEARCH-3, FR-SEARCH-4, FR-SEARCH-5, FR-SEARCH-7, FR-SEARCH-8, FR-SEARCH-9, FR-SEARCH-20,
+    INV-SEARCH-4, NFR-SEARCH-1, VEC-SEARCH-1, VEC-SEARCH-2, VEC-SEARCH-5]
+  revised_elsewhere: "INV-SEARCH-2 (citations resolve) is revised by V.kl-ingest-packs onto locator ids (docs/plans/adr-0039-execution.md); this block reads it as revised"
+  consequential: "FR-SEARCH-6 and FR-SEARCH-10: fts_config's language is read from the pack's profile overlay once SRV-INGEST moves it there (B3); the mapping ru/en/other is unchanged"
+  kept_unchanged: "INV-SEARCH-1 (owner isolation) stays in force until SRV-SHARE specifies course reads (B8, P10); FR-SEARCH-1, -2, INV-SEARCH-3, -5..-8, NFR-SEARCH-2..-4"
+
+proposed_bounds:
+  # Every value below lives in policy/policy.json (FR-SEARCH-21) and enters policy_version; this list gives its source.
+  chars_per_token: "SRV-AGENT bounds.chars_per_token_floor (2.0), imported, never re-declared: estimate(s) = ceil(len(s) / 2.0) over Unicode code points (B8 invariant 3)"
+  candidates_max: "50 — B6 step 2 (≤ 50 candidates) and B5's bounded scan; FR-SEARCH-7's measured depth"
+  expand_cap: "50 — B6 step 5 initial value"
+  preselect_factor: "1.5 — B6 step 5 initial value, fixed in judge-gate (B10)"
+  expand_decay: "0.5 — initial policy value, unmeasured (ADR-0039 agent decision 4 leaves it to policy); the evaluation reports it"
+  expand_per_card: "2 — structural: an L1 card has exactly two 1-hop links before SRV-KB, its next span and its section"
+  judge_input_cap_tokens: "3000 — B6 step 6 initial; equals SRV-AGENT bounds.judge_find_input_tokens_max (a test pins equality)"
+  judge_timeout_s: "2.2 — B6 initial value, weak basis (n = 3 short prompts); judge-gate sets it. Schema maximum 8.0: FR-AGENT-21 (4) refuses a kill window 3 × timeout over lane_token_ttl_s − margin = 25 s"
+  card_budget_tokens: "L0 200, L1 600, L2 leaf 100 / chapter 300 / root 500 — B1 initial values"
+  quote_max_chars: "300 — ADR-0008 Decision 4, ADR-0015, B8"
+  channel_budgets: "tokens by the estimator, default = max: mcp 2000 (owner decision 17), owner 2000 (the internal owner channel the stage-V evaluation runs on, B9 target ≤ 2,000), tutor 10500 (= 21,000 source bytes of SRV-TUTOR bounds / 2.0; B8 'starts at its current source budget'; see kl_open_points 3), pipeline 150000 (= SRV-PIPELINE bounds.source_max_chars 300,000 / 2.0)"
+  open_depth_max: "4 — B8 initial value"
+  k_max: "50 — equals candidates_max"
+  objective_weights: "identifier element weight 2, lexeme weight 1, relevance weight λ 1.0 — initial policy values, unmeasured; the evaluation reports them"
+  judge_thresholds: "judge.find.sufficiency_threshold 0.5, judge.eval.<name>.pass_threshold 0.5 for relevance, sufficiency, groundedness, self_contained, citation_supports_claim — initial values read by SRV-OBS FR-OBS-40/41"
+  cache_entries: "256 per process — structural: LRU of whole responses, bounded memory (≤ 256 × the largest channel budget)"
+  rrf: "rrf_k 60 (REF-SEARCH-4), w_dense 5 (NFR-SEARCH-1 protocol); used only on a route whose `rrf` is true"
+
+proposed_errors: [query_invalid, budget_invalid, k_invalid, filter_invalid, id_invalid, not_found, depth_invalid,
+  policy_invalid, channel_invalid]
+
+proposed_revisions:
+  - id: FR-SEARCH-3
+    text: >-
+      **Span windows (replaces chunking across spans).** The unit of retrieval is the L1 span of an active base pack
+      (ADR-0039 B1). For the vector overlay, every span with non-empty text yields its windows: the span's text
+      alone, cut by VEC-SEARCH-2's algorithm with size 1,200, overlap 200 and no minimum for the first window (a short
+      span is one window; trailing windows under 80 characters are merged into the previous one). When a context
+      prefix overlay is active for the pack (only if `retrieval-ablation` keeps prefixes), the embedded text of each
+      window is prefix + "\n" + window and the window size shrinks to 1,200 − len(prefix) − 1, so every embed passage
+      stays ≤ 1,200 characters (FR-SEARCH-1). Each window records the span locator, `window_no`, `char_start`,
+      `char_stop` (offsets into the span text). Empty-text spans get no window; they are reached only through `next`
+      and outline links. Pure and deterministic. [unit]
+    tests_planned:
+      - "change server/tests/search/test_search_unit.py: windows per span over VEC-SEARCH-2 (revised); a span under 80 chars is one window; a prefix shrinks the window and every passage ≤ 1,200 chars; empty span → no window"
+      - "change server/tests/search/test_search_props.py: for any span text, the windows cover it and each passage ≤ 1,200 chars"
+  - id: FR-SEARCH-4
+    text: >-
+      **Tables.** Migration `search_0002` (branch `search`, re-parented onto the ingest head that creates packs and
+      overlays; this absorbs V.SRV-SEARCH-fk) creates `search_span_vectors(owner_id → users.id, overlay_id text, pack_id
+      text, locator text, window_no int, char_start int, char_stop int, model text, fts_config text CHECK in
+      ('russian','english','simple'), fts tsvector generated as in FR-SEARCH-4 from the window text, embedding
+      vector(1024) NOT NULL)`, primary key (overlay_id, locator, window_no), `USING gin (fts)`, and (owner_id,
+      overlay_id) btree. The table stores no text column: the window's text is read from the span through the manifest
+      view at query time; `fts` is computed at insert from the passage text. Rows are written only by the build of
+      their own overlay (P1). `search_chunks` and `search_embeds` are no longer read; they stay until V.kl-live passes
+      and are dropped by a later migration (defers). No vector index (unchanged deviation). [db]
+    tests_planned:
+      - "change server/tests/search/test_search_db.py: search_0002 upgrades and downgrades on the heads; the key and CHECK refuse duplicates and bad fts_config; no text column"
+      - "change server/tests/search/conftest.py: fixtures create packs and spans through SRV-INGEST's test helpers instead of chunks"
+  - id: FR-SEARCH-5
+    text: >-
+      **The vector overlay build.** Kind `search.embed`, args `{pack_id, overlay_id}`, key `[overlay_id]`, max attempts
+      3, timeout 3,600 s, transient classes unchanged. `overlay_id` = sha256 of the canonical JSON of {pack_id,
+      builder `search.vectors/1`, model (the lock's id), max_seq_length, window parameters, fts_config, the prefix
+      overlay version or null} (B2 overlay version). The handler registers the overlay as `building` through
+      SRV-INGEST, windows the pack's spans (FR-SEARCH-3), embeds in passage batches of 8, inserts every row with its
+      overlay id, then seals it and appends the manifest entry that activates it (SRV-INGEST's compare-and-swap), as the
+      run transaction's last statements. A pack that is no longer active or a changed overlay id (language or prefix
+      change since enqueue) fails permanently (`overlay_superseded`). Tracing as FR-OBS-13 (counts only). [db]
+    tests_planned:
+      - "change server/tests/search/test_search_db.py: one build seals one overlay and activates it in one manifest entry; a rerun of a sealed key makes no embed call (INV-SEARCH-3 on the overlay key); an inactive pack → overlay_superseded; more than one batch, each ≤ 8 texts; a build writes only rows carrying its overlay id"
+  - id: FR-SEARCH-7
+    text: >-
+      **Candidates (B6 step 2).** `candidates(conn, caller, route, query)` reads, through the manifest views, the
+      caller's active packs (INV-SEARCH-1) after the route's filters and the channel's eligibility (FR-SEARCH-30) are
+      applied in SQL, then: (1) embeds the query (kind `query`, 30 s); (2) dense list: exact scan `ORDER BY embedding
+      <=> $q, overlay_id, locator, window_no` over the windows of the active vector overlay of each eligible pack, top
+      `candidates_max` windows, aggregated to spans by their best window (a span's distance is its minimum); (3) only
+      when the route's `rrf` is true: the full-text list over the same windows (OR of quoted lexemes, unchanged) and
+      weighted RRF with `rrf_k` and `w_dense` from policy (VEC-SEARCH-1); otherwise the dense order alone, as today.
+      A span card's score is 1 − its cosine distance (dense order) or its fused score (rrf). Ties by locator. If the
+      embed call fails, the full-text list alone serves, with `degraded: true` (unchanged rule). L2 outline nodes
+      enter as candidates only when the route's layers include L2 and an L2 summary overlay is active (ablation);
+      their score is the dense score of their summary vector. [db] with a fake embed service.
+    tests_planned:
+      - "change server/tests/search/test_search_db.py: candidates read only active packs of the caller; a span's score is its best window; rrf false → dense order with no fts rank; rrf true in a test policy → VEC-SEARCH-1's fusion; embed down → full text, degraded; filters applied before the scan (a filtered-out pack never appears even when nearest)"
+      - "change server/tests/search/test_search_props.py: FR-SEARCH-7 total order over windows with equal distances"
+  - id: FR-SEARCH-8
+    text: >-
+      **Routes.** Owner role only, `auth: session`, a learner gets 404, FR-AUTH-12 Origin, logs lengths and counts only
+      (unchanged rules). `POST /api/search` stays the candidate list (bench and live check): `{q, k?, material?}` →
+      `{results: [{span_id: <locator>, material_sha256, page, score, dense_rank, fts_rank, snippet}], degraded}`, the
+      step-2 list of the owner channel's `thematic` route. New: `POST /api/find` `{q, k?, budget?, filters?}` and `POST
+      /api/open` `{id, depth?, budget?}` call FR-SEARCH-22 and FR-SEARCH-31 on channel `owner` and return their brain/v1
+      response. Errors 400 with FR-SEARCH-22's codes; 503 `config_unavailable` as before. [db]
+    tests_planned:
+      - "change server/tests/search/test_search_db.py: /api/search items carry locator span ids; learner 404; logs carry no q"
+      - "add server/tests/search/test_find_routes_db.py [db]: /api/find and /api/open happy paths, each 400 code, learner 404, no q or card text in any log record (caplog canary)"
+  - id: FR-SEARCH-9
+    text: >-
+      **Status and ensure.** `search_status(owner_id, material_sha256)` reads the current vector overlay key of the
+      material's active pack (FR-SEARCH-5) and maps the job and the overlay state by VEC-SEARCH-4 (`ready` = sealed and
+      active). `ensure` and `on_worker_start` enqueue the current key for every active pack whose current vector
+      overlay is not sealed, with the same dead-key rule. [db]
+    tests_planned:
+      - "change server/tests/search/test_search_db.py: status by overlay key; worker start enqueues only active packs without a sealed current overlay"
+  - id: FR-SEARCH-20
+    text: >-
+      **Removed sources leave results through the manifest.** A material delete or restore is a manifest entry
+      (SRV-INGEST, P9); candidates, `find` and `open` read only the active entry, so a removed pack's spans are never
+      ranked, cited or opened, and a restore serves the same cards from the same sealed overlays without a re-embed.
+      A `material` filter or an `open` id naming an inactive pack answers 404 `not_found`. [db]
+    tests_planned:
+      - "change server/tests/search/test_search_manage.py: after delete the hit is gone on search, find and open; restore returns the identical card list; no search_span_vectors row changed"
+  - id: INV-SEARCH-4
+    text: >-
+      **Deterministic responses.** For the same `brain_version`, `policy_version`, caller (id, roles, channel) and
+      request, two `find` calls on the judge-free path (gate separated, or degraded the same way) return identical
+      responses in identical order, and so do two calls whose judge output is replayed from `judge_outputs`; both
+      candidate lists stay totally ordered; the pivot order is a function of the request hash only. Property test with
+      duplicate texts (equal distances), equal ratios in the greedy and equal scores. [db] [unit]
+    tests_planned:
+      - "change server/tests/search/test_search_props.py: two find calls → equal JSON; with a ReplayProvider-recorded output → equal JSON; ties broken by locator"
+  - id: NFR-SEARCH-1
+    metric: Haiku answer sufficiency through find and open divided by a strong model's on the evaluation set (pilot-eval-v1, 90 records), internal owner channel
+    threshold: 0.9
+    verified_by: bench
+    note: "ADR-0039 B9 target; paid, outside CI, with the owner's go. Recall@10 of step 2 on questions-v2 is reported beside it, not a target (chunk baseline 27 of 40)."
+    tests_planned:
+      - "change server/tests/search/test_search_local.py: the bench drives find/open for both models and reports sufficiency ratio, recall@10 on spans and the chunk baseline"
+  - id: VEC-SEARCH-1
+    becomes: "unchanged cases; the test reads rrf_k and w_dense from policy/policy.json and pins them equal to the fixture's"
+    tests_planned:
+      - "change server/tests/search/test_search_unit.py: VEC-SEARCH-1 with the policy's constants"
+  - id: VEC-SEARCH-2
+    becomes: "spec/fixtures/SRV-SEARCH/chunking.yaml re-cut as windows within one span (FR-SEARCH-3 revised), hand-computed with small parameters, including a prefix case"
+    tests_planned:
+      - "change server/tests/search/test_search_unit.py: reads the re-cut cases"
+  - id: VEC-SEARCH-5
+    becomes: "spec/fixtures/SRV-SEARCH/fts-or.yaml over span windows; adds the query-element extraction cases the coverage objective uses (FR-SEARCH-27)"
+    tests_planned:
+      - "change server/tests/search/test_search_db.py: VEC-SEARCH-5 over windows and query elements"
+
+proposed_requirements:
+  - id: FR-SEARCH-21
+    text: >-
+      **Policy and facets as data (B6, B7a, B3 F4).** `reader/search/policy/policy.json` declares: `channels` (mcp,
+      owner, tutor, pipeline → `budget_default`, `budget_max`), `routes` (id `<channel>.<question type>` for every
+      channel × {exact, thematic, current_state, fact_check} → `layers` (ordered subset of L0..L4), `filters` (role,
+      form, reliability_min, newest_as_of), `rrf` (bool), `l5_boost` (tutor only, inert until S6.SRV-RECALL)),
+      `question_rules` (identifier regexes and current-state wording regexes, per language), `card_budgets`,
+      `candidates_max`, `expand_cap`, `expand_per_card`, `expand_decay`, `preselect_factor`, `objective` (weights),
+      `same_point_tau` (null until SRV-KB sets it with its links),
+      `gate` (`mode` ∈ never_judge | always_judge | margin, `margin` number or null, required when mode is margin),
+      `judge` (`timeout_s`, `input_cap_tokens`), `thresholds` (flat keys exactly as SRV-OBS FR-OBS-40/41 read them:
+      `judge.find.sufficiency_threshold` and `judge.eval.<name>.pass_threshold` for each judge.eval slot), `rrf_k`, `w_dense`, `k_max`, `open_depth_max`, `quote_max_chars`, `cache_entries`.
+      `policy.schema.json` (Draft 2020-12) closes every object (`additionalProperties: false`) and bounds every number
+      (`timeout_s` ≤ 8.0; `preselect_factor` ≥ 1; budgets ≥ 1; thresholds in [0, 1]). `facets.json` holds the B3
+      vocabularies (role, reliability, credibility, as_of, license, form, topic as a reference to reader.yaml sectors),
+      validated by `facets.schema.json`; free values are refused. Both files load once per process; a file that fails
+      its schema stops the api and worker start with `policy_invalid` (no partial policy). `policy.declared()` returns
+      the declared data FR-OBS-21 hashes: the policy file's parsed content, the facets file's sha256, the slot-to-model
+      bindings of the judge slots from the effective config, the embedding model id(s) and the sha256 of each prompt
+      file by name; never the code version. `policy.find_routes()` returns the route ids (SRV-OBS enum `find_routes`).
+      [unit]
+    tests_planned:
+      - "add server/tests/search/test_policy_unit.py [unit]: the shipped files validate; each closed object refuses an extra key; out-of-range numbers refused; margin mode without margin refused; every channel × type has a route; declared() changes with each input (a route field, the facets bytes, a slot model, the embed model, a prompt's bytes) and not with the code version; find_routes() equals the route ids; judge.input_cap_tokens equals SRV-AGENT's judge_find_input_tokens_max"
+  - id: FR-SEARCH-22
+    text: >-
+      **`find` entry, budget and response (B8).** `find(caller, channel, query, filters=None, k=None, budget=None,
+      judge_ctx=None, question_type=None)`; `caller` = (user id, course roles, provider presence). `query` is NFC,
+      trimmed, 1–1000 characters (`query_invalid`); `filters` keys come from the facets file (`filter_invalid`); `k`
+      1..k_max (`k_invalid`), unset = no count cap; `budget` an integer ≥ 1 (`budget_invalid`), unset = the channel's
+      default, above the channel's maximum clamped to it (not an error); `question_type` only from internal callers
+      (the pipeline's fact-check route). Token counts use SRV-AGENT's estimator on the card's canonical JSON
+      (sorted keys, no spaces); the response is `{brain_version, policy_version, budget: <effective>, cards: [...],
+      judge_ran, judge_source?, degraded}` and the cards' budget is the effective budget minus the estimate of that
+      envelope with empty cards. A card is `{id, layer, title, text, cite: [{spn, quote_sha256, quote?}], source: {id,
+      role, as_of, reliability, license}, next: [ids], judged, more?}`; `more: true` only for a cut `shareable` L1
+      card. L1 text is cut to its card budget (estimator) at the last whitespace at or before the limit, hard when
+      there is none. The request hash = sha256 of the canonical JSON {user id, sorted roles, channel, query, filters,
+      k, effective budget, brain_version, policy_version}. [unit, db]
+    tests_planned:
+      - "add server/tests/search/test_find_unit.py [unit]: each validation code; budget above max → clamped and echoed; card JSON shape; cut at whitespace and hard; more only for shareable; request hash changes with each field"
+  - id: FR-SEARCH-23
+    text: >-
+      **Step 1, route by rules (0 model calls).** Question type: the caller's `question_type` when given (only
+      `fact_check` is accepted from internal callers); else `exact` when any identifier regex of `question_rules`
+      matches the query; else `current_state` when a wording regex matches; else `thematic`. Route = `routes[<channel>.
+      <type>]`. Layers not yet built (L3, L4, L5 before their specs) are skipped and the trace says which layers were
+      available. Identifiers found become the `exact` route's filter and objective elements. [unit]
+    tests_planned:
+      - "add server/tests/search/test_find_unit.py [unit]: VEC-SEARCH-8 classification and route lookup; unbuilt layers skipped"
+  - id: FR-SEARCH-24
+    text: >-
+      **Steps 3–5: merge, gate, expansion and preselection (0 model calls).** (3) Cards linked by `same_point` above
+      the policy's τ are merged by the pivot algorithm (FR-SEARCH-27 c); the merged card keeps the pivot's text and
+      takes all members' citations and the maximum score. The links come from a `Links` port; its production default
+      returns no links until SRV-KB, so step 3 is the identity in stage V. (4) Gate: `never_judge` → separated;
+      `always_judge` → not separated; `margin` → separated iff there is at most one card or s1 − s2 ≥ margin over the
+      merged cards' scores. Separated → step 7 on the merged cards with `judge_skip: gate`. (5) Otherwise expand 1 hop:
+      each merged card adds its `next` targets (an L1 card: the next span in reading order and its section; L2: its
+      children), at most `expand_per_card` per card; a card reached only by expansion scores max over its parents of
+      parent score × `expand_decay`, a card that is also a candidate keeps its own score if higher. Keep the top
+      `expand_cap` of the expanded set by (score desc, id), then select with FR-SEARCH-27's budgeted greedy under
+      `preselect_factor` × the cards' budget. Expanded cards obey the channel's eligibility (FR-SEARCH-30): no link
+      into an ineligible L1 card is followed. [unit, db]
+    tests_planned:
+      - "add server/tests/search/test_find_unit.py [unit]: gate modes and the margin rule at the boundary; expansion score rule (only-by-expansion, both, two parents); cap 50 by (score, id); the preselection's cost ≤ 1.5 × budget; Links fake with edges merges as VEC-SEARCH-7"
+      - "add server/tests/search/test_find_db.py [db]: expansion over real next links of an active pack; an ineligible L1 target is not added"
+  - id: FR-SEARCH-25
+    text: >-
+      **The coverage objective (B5).** Query elements E = the lexemes of `to_tsvector(cfg, query)` for each fts_config
+      of the eligible packs ∪ the identifiers of step 1 (lowercased); weights: identifier `objective.identifier_weight`,
+      lexeme `objective.lexeme_weight`, normalised to sum 1 when E is non-empty. A card covers e when e is among the
+      lexemes of its window `fts` values (L1) or of `to_tsvector(cfg, title || summary)` (L2), or, for an identifier,
+      when it occurs case-insensitively in the card text. Each card c also covers a private element of weight λ ·
+      rel(c), rel(c) = max(0, score(c)) / the top merged score of the request (fixed for the request). f(S) = the
+      weight of the elements covered by S: a weighted coverage, monotone submodular with non-negative weights, so the
+      bounds of FR-SEARCH-27 apply. License and supersession enter only as filters before selection. [unit]
+    tests_planned:
+      - "add server/tests/search/test_greedy_unit.py [unit]: elements and weights over VEC-SEARCH-5 (revised); f is monotone and submodular on random instances (Hypothesis); rel normalisation fixed per request"
+  - id: FR-SEARCH-26
+    text: >-
+      **Bounded work.** Every selection over the graph and the embeddings is FR-SEARCH-27's greedy over at most
+      `candidates_max` (step 2) or `expand_cap` (step 5) cards; nothing enumerates subsets, calls a solver or
+      recomputes globally (ADR-0039 invariant 3). Each greedy pass evaluates at most n² marginal gains for n ≤ 50. [unit]
+    tests_planned:
+      - "add server/tests/search/test_greedy_unit.py [unit]: gain evaluations counted ≤ n² on n = 50"
+  - id: FR-SEARCH-27
+    text: >-
+      **The B5 greedy algorithms (`reader.search.greedy`, pure).** (a) **Budgeted max coverage** `budgeted(cards, f,
+      cost, B, order, k=None)`: G starts empty; repeatedly add, among the cards not in G that fit (cost(G) + cost(c) ≤
+      B) and have Δ(c | G) > 0, the one with the largest Δ/cost (ties: higher score, then smaller id), stopping at k
+      cards when k is set; c* = the fitting single card of largest f({c}) (same ties); T = G if f(G) ≥ f({c*}) else
+      {c*}; then **fill**: walk `order` and add each card that still fits (and k allows). Bound, stated per pass over
+      its own input and budget: f(T) ≥ (1 − 1/e)/2 · OPT ≈ 0.316 · OPT (Khuller, Moss and Naor 1999), for unset k; the
+      fill only adds cards, so by monotonicity it never lowers f. This answers B6 step 7's two choices: a fitting
+      zero-gain card is returned through the fill, and a fill after the best-single-card branch is allowed. When k
+      binds no bound is claimed (declared). (b) **Weighted set cover** `set_cover(universe, sets, cost)`: lowest cost
+      per newly covered weight first, ties by id; bound H(d) ≤ 1 + ln d, d the largest set size (Chvátal 1979; Feige
+      1998 threshold). Its consumer is the atlas-gap and purchase-proposal path (SRV-KB, stage 7); stage V ships it
+      only with its bound test (kl_open_points 5). (c) **Pivot** `pivot(cards, plus, seed)`: order the cards by
+      sha256(seed ‖ id); take the first unassigned card, attach its unassigned + neighbours, repeat; seed = the request
+      hash. Bound: expected disagreements ≤ 3 · OPT over seeds (Ailon, Charikar and Newman 2005). [unit]
+    tests_planned:
+      - "add server/tests/search/test_greedy_unit.py [unit]: VEC-SEARCH-6 hand-computed cases (ratio pick, best-single branch wins, fill after each branch, zero-gain fitting card filled, k stop, ties); pivot over VEC-SEARCH-7; set_cover hand cases"
+  - id: FR-SEARCH-28
+    text: >-
+      **Step 6, the `judge.find` waiter (B6, B7b).** Runs only when step 4 is not separated and the preselection is
+      non-empty. (1) **Slice:** the longest prefix of the preselection in score order whose rendered input
+      (`judges.render_find_input(query, cards)`) estimates ≤ min(`preselect_factor` × the cards' budget,
+      `judge.input_cap_tokens`); the cards are rendered exactly as the channel serves them to this caller (so the
+      judge reads the MCP row for a non-entitled caller, FR-SEARCH-30). (2) **Recorded:** input hash =
+      `judges.find_input_sha256(caller id, query, [[id, text], …])`; a `judges.recorded` hit under the current judge
+      name is applied with `judge_source: recorded`, no row, no job, $0. (3) **Preconditions**, each a degrade without
+      a row or job: no provider handle for the caller → `no_provider`; no `judge_ctx` (line, run_id, run_cap_usd,
+      lesson_id, daily_budget_usd) from the caller → `budget`; the slot missing from config → `error`. (4) **Request:**
+      on one connection, `LISTEN judge_done`; then in one committed transaction insert the `judge_requests` row
+      (owner_id, the ctx fields, created_at = now(), deadline = now() + `judge.timeout_s`, query, cards, pack_ids) and
+      enqueue `judge.find` with args exactly `{request_id, input_sha256}` keyed by the request id. (5) **Wait** for a
+      notification whose payload is the request id, at most `judge.timeout_s` from created_at: then `judges.recorded`
+      hit → applied, `judge_source: live`; miss → degrade `error` (finer codes per kl_open_points 2); no notification
+      in time → degrade `timeout` (the late job still records its output for replay; this response ignores it). Any
+      database or enqueue error → `error`. The waiter never retries and makes at most one request per `find`. The
+      same code runs in the api and in worker jobs that call `find`. [db]
+    tests_planned:
+      - "add server/tests/search/test_judge_wait_db.py [db] (fake lane that reads the row and records an output): slice within min(1.5 × budget, 3,000) by the rendered estimate and in score order (VEC-SEARCH-10); a recorded hit → no row, no job, judge_source recorded; no provider → no_provider; no ctx → budget; live output in time → applied, live; no notification within the timeout → timeout and the response returns by timeout + 0.5 s; notify without output → error; enqueue failure → error; exactly one row and one job per find; the job args are exactly {request_id, input_sha256}"
+  - id: FR-SEARCH-29
+    text: >-
+      **Step 7, final selection and order (B6).** Cards budget B. **Without an applied judge output:** one
+      FR-SEARCH-27 (a) pass over the merged cards (gate separated) or the capped expanded set (degraded), order by
+      score; every card `judged: false`; `judge_ran: false`. **With an applied output:** pass 1 over the cards the
+      judge kept, under B, fill order = the judge's order; pass 2 over the unjudged remainder (preselection minus the
+      slice) under B − cost(pass 1), on f(· ∪ P1) − f(P1), fill order = score; cards the judge read and dropped are
+      excluded. Response order: pass-1 cards in the judge's order, then pass-2 cards by score. `judged: true` exactly for
+      pass-1 cards; `judge_ran: true`; `judge_source` live or recorded. A remainder card never displaces a kept one.
+      The trace records judged and unjudged token counts and `judge_skip` (gate, timeout, error, budget, saturated,
+      quota_refused, no_provider) when no judge ran (FR-SEARCH-33). The judge's `sufficiency` is recorded for the slice
+      only and is not applied to the remainder. [unit]
+    tests_planned:
+      - "add server/tests/search/test_find_unit.py [unit]: VEC-SEARCH-10 mixed responses — kept first in judge order, remainder by score, judged false on the remainder, dropped excluded, kept cards exceeding B chosen by the greedy not the judge order; degraded path selects from the capped expanded set; all-dropped → pass 2 only"
+  - id: FR-SEARCH-30
+    text: >-
+      **Personal-use cards per channel and caller (B8 table).** `entitled(caller, pack)` is true iff the caller owns
+      the pack, or the caller has a material row that is not soft-deleted whose sha256 our code computed from bytes
+      that caller uploaded or imported (SRV-INGEST receive), equal to the pack's material sha256; a client-declared
+      sha256 never counts. Eligibility for a pack with `license: personal-use`: on channel `mcp`, and on every channel
+      for a caller who is not entitled, no L1 card is returned, no `next` link and no `open` child leads to an L1 id,
+      and L2 (and, from SRV-KB, L4) cards carry quotes ≤ `quote_max_chars` per citation with no continuation; on
+      `owner`, `tutor` and `pipeline` for an entitled caller, full L1 text cut at the card budget. `shareable` packs are
+      eligible on every channel. Judge input follows the channel's row for that caller (FR-SEARCH-28 (1)). Scope stays
+      the caller's own manifest (INV-SEARCH-1) until SRV-SHARE; the entitlement function is still implemented and
+      tested on constructed rows, so SRV-SHARE only widens the scope. [unit, db]
+    tests_planned:
+      - "add server/tests/search/test_cards_db.py [db]: entitled for the owner; for another user with a live own copy of the same sha256; not with a soft-deleted copy; not with only an uploads row or a sha256 given by the client; VEC-SEARCH-9's channel × entitled × license → card shape"
+  - id: FR-SEARCH-31
+    text: >-
+      **`open(caller, channel, id, depth=1, budget=None)` (B8).** `spn:` must equal the locator of a sealed span of an
+      active pack in the caller's manifest; any other range, an inactive or another user's pack, or an ineligible L1
+      span (FR-SEARCH-30) answers `not_found` (the same code, so a refusal never confirms existence). For a cut
+      `shareable` span it returns the full text within the open budget (`more: true` again when still cut). `sec:`
+      returns the node's card and its children down to `depth` (≤ `open_depth_max`, else `depth_invalid`), skipping
+      ineligible L1 children; `src:` returns the L0 profile card and the top outline level. `con:`, `fnd:`, `les:`
+      answer `not_found` until SRV-KB and SRV-LESSON provide them (declared). Malformed ids → `id_invalid`. Same
+      budget clamping and card shape as `find`; no judge. [db]
+    tests_planned:
+      - "add server/tests/search/test_open_db.py [db]: a sealed locator resolves; a shifted range, a guessed offset, an empty-span ordinal that does not exist, an inactive pack and another owner's span → not_found; sec children to depth and depth_invalid; budget clamp; shareable more/continuation"
+  - id: FR-SEARCH-32
+    text: >-
+      **Response cache (B8 reproducibility).** An in-process LRU of `cache_entries` whole responses, keyed by the
+      request hash (FR-SEARCH-22: caller id, roles, channel, request, effective budget, brain_version, policy_version).
+      Stored only when the judge was skipped by the gate or a judge output was applied; never a degraded response
+      (embed degraded or judge timeout, error, budget, saturated, quota_refused, no_provider), so a repeat after a late
+      judge output is served judged. The tutor channel is never cached (L5 and findings change outside the manifest).
+      A hit is traced like a miss with the same attributes. [unit]
+    tests_planned:
+      - "add server/tests/search/test_find_unit.py [unit]: hit on an identical request; miss when user, a role, channel, brain_version or policy_version differs; a degraded response is not stored; tutor never stored; LRU evicts at 256"
+  - id: FR-SEARCH-33
+    text: >-
+      **Tracing and readers for SRV-OBS.** `find` opens FR-OBS-36's subtree through `reader.obs.find` helpers with
+      ids, enums, counts and hashes only (channel, route, question type, entitled, layers, counts, token counts,
+      `judge_ran`, `judge_source`, `judge_skip`, the gate outcome, card uris and sha256s); `find.judge_wait` is
+      current while the waiter enqueues. `reader.search.cards.read(conn, caller, ids)` returns the cards' text as that
+      caller may read it on the owner channel (B8: the MCP row for packs the caller is not entitled to), in memory, for
+      SRV-OBS FR-OBS-39/40. Nothing in reader.search logs or traces a query, filter value or card text. [unit, db]
+    tests_planned:
+      - "add server/tests/search/test_find_obs_db.py [db]: the span tree and attributes for a gated, a judged and a degraded find (in-memory exporter); a canary in the query and in a span text appears in no span attribute and no log record; cards.read applies the MCP row for a non-entitled pack"
+
+proposed_invariants:
+  - id: INV-SEARCH-9
+    text: >-
+      **Budget never exceeded.** For any request (any budget, including one above the channel maximum, any k) and any
+      corpus, the sum of the returned cards' estimates ≤ the effective cards' budget ≤ the channel maximum, and every
+      L1 card ≤ its card budget. Property test. [unit]
+    tests_planned:
+      - "add server/tests/search/test_find_props.py [unit] (Hypothesis)"
+  - id: INV-SEARCH-10
+    text: >-
+      **Greedy bounds against exhaustive search, per pass.** On random instances with n ≤ 12 cards: the step-5
+      preselection, step-7 pass 1 and step-7 pass 2 (on its marginal objective with pass 1's output fixed) each reach
+      ≥ (1 − 1/e)/2 of the optimum over all subsets within that pass's budget (k unset); `set_cover` costs ≤ H(d) ×
+      the optimum; the pivot's disagreements averaged over 200 seeds ≤ 3 × the optimum clustering (n ≤ 8, all
+      partitions). No bound over the union of the two step-7 passes is asserted (ADR-0039 B5). Enumeration exists only
+      in the tests. [unit]
+    tests_planned:
+      - "add server/tests/search/test_greedy_props.py [unit] (Hypothesis, exhaustive oracles)"
+  - id: INV-SEARCH-11
+    text: >-
+      **One judge call at most, last, on the slice only.** For any `find`: no model call before step 6; at most one
+      `judge_requests` row and one `judge.find` job; the cards in the row are a prefix in score order of the step-5
+      selection whose rendered estimate ≤ min(1.5 × budget, the cap); a recorded hit makes no row. [db]
+    tests_planned:
+      - "add server/tests/search/test_judge_wait_db.py: property over random corpora and policies with a counting fake Provider and lane"
+  - id: INV-SEARCH-12
+    text: >-
+      **Personal-use walk and cross-user tests (B1 navigation invariant, B8).** Starting from the sources' top cards
+      with channel `mcp`, following every `next` and `open` child: no personal-use L1 card is returned, no citation
+      quote exceeds 300 characters, and `open` on every cited `spn:` id and on guessed locators of the same material
+      answers `not_found`. On every channel, a second user without an own copy gets no card of the owner's pack (trivial
+      under INV-SEARCH-1, listed again as an SRV-SHARE required test) and no judge request carrying L1 text; with an own
+      copy on tutor, L1 cards. For an entitled caller on tutor and owner every active span is reachable from the
+      sources' top cards. [db]
+    tests_planned:
+      - "add server/tests/search/test_walk_db.py [db]"
+  - id: INV-SEARCH-13
+    text: >-
+      **open resolves only sealed span ids.** For any string after `spn:`, `open` returns a card only when it equals a
+      stored locator of a sealed span of an active pack in the caller's manifest. Property test over random ranges
+      around real locators. [db]
+    tests_planned:
+      - "add server/tests/search/test_open_db.py: Hypothesis over shifted ranges and ordinals"
+  - id: INV-SEARCH-14
+    text: >-
+      **No text in judge job args (waiter side).** With a canary in the query and in a card text, no `judge.find` job's
+      args and no `job_keys` row contain it; the text is only in the `judge_requests` row. (The table-side canary and the
+      collector are SRV-EVENTS'.) [db]
+    tests_planned:
+      - "add server/tests/search/test_judge_wait_db.py: canary over procrastinate_jobs args and job_keys"
+  - id: INV-SEARCH-15
+    text: >-
+      **Unreviewed findings never returned.** Cards of layer L4 come from a `Findings` port (production default: empty
+      until SRV-KB) and only reviewed findings are eligible on any channel or in judge input. [unit]
+    tests_planned:
+      - "add server/tests/search/test_find_unit.py [unit]: a fake Findings port with reviewed and unreviewed findings"
+
+proposed_nfr:
+  - id: NFR-SEARCH-5
+    metric: median find/open calls per answered evaluation question, Haiku, internal owner channel
+    threshold: 3
+    verified_by: bench
+    note: "ADR-0039 B9; paid, outside CI, owner's go."
+  - id: NFR-SEARCH-6
+    metric: tokens of find/open responses per answer (estimator), maximum over the evaluation set, owner channel
+    threshold: 2000
+    verified_by: bench
+    note: "ADR-0039 B9; with the owner channel's 2,000-token budget INV-SEARCH-9 already bounds one response; this counts all calls of an answer."
+  - id: NFR-SEARCH-7
+    metric: find p95 latency in ms on the evaluation set, judged path included, live stack
+    threshold: 2500
+    verified_by: bench
+    note: "ADR-0039 B6/B9; holds only if the steps other than the judge stay within about 0.3 s (judge-gate measures them)."
+
+proposed_vectors:
+  - id: VEC-SEARCH-6
+    source: hand-computed budgeted greedy cases (ratio choice, best-single branch, fill, zero-gain fill, k stop, ties, pass 2 on a marginal objective)
+    file: spec/fixtures/SRV-SEARCH/greedy.yaml
+  - id: VEC-SEARCH-7
+    source: hand-computed pivot clusterings for fixed seeds, and set-cover cases
+    file: spec/fixtures/SRV-SEARCH/pivot-cover.yaml
+  - id: VEC-SEARCH-8
+    source: synthetic questions (agent's wording, no book text) → question type and route per channel
+    file: spec/fixtures/SRV-SEARCH/routes.yaml
+  - id: VEC-SEARCH-9
+    source: B8 per-channel table — channel × entitled × license × layer → card returned, text bound, next/open into L1
+    file: spec/fixtures/SRV-SEARCH/personal-use.yaml
+  - id: VEC-SEARCH-10
+    source: judge slicing and mixed responses — preselection, cap, kept/dropped output, expected order and judged flags
+    file: spec/fixtures/SRV-SEARCH/judge-mixed.yaml
+
+kl_paired_changes:
+  - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "manifest views of active packs, spans (locator, page, form from kind, text, quote_sha256, outline path), outline nodes and overlays, plus brain_version; the profile overlay with license, role, reliability, as_of and language; overlay register/seal and the activating manifest entry for the vector overlay (FR-SEARCH-5); per-pack advisory locks; the guarantee that materials.sha256 is computed by our code from the user's bytes (FR-SEARCH-30); INV-SEARCH-2 revised onto locators; the import handler enqueues search.embed by overlay key; the tagger reads search/policy/facets.json" }
+  - { spec: SRV-TUTOR, task: V.kl-tutor-find, change: "retrieval through find on channel tutor with judge_ctx (line tutor, the question's run) instead of search(k=8); the 10,500-token budget against the 21,000-byte source cap (FR-TUTOR-5's drop rule kept); citations by locator; NFR-TUTOR-3 re-measured as the gate" }
+  - { spec: SRV-OBS, task: V.kl-obs-spans, change: "FR-OBS-36 helpers called as in FR-SEARCH-33; policy_version over policy.declared(); find_routes and the facets values as enums; channel enum includes owner; thresholds read from the policy's `thresholds` keys judge.find.sufficiency_threshold and judge.eval.<name>.pass_threshold (FR-SEARCH-21); cards.read for FR-OBS-39/40" }
+  - { spec: SRV-AGENT, change: "kl_open_points 1 and 2 (a line for the owner channel; an outcome code in the judge_done payload)" }
+  - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "judge_requests columns as FR-AGENT-21 reads them; LISTEN channel judge_done" }
+  - { spec: SRV-PIPELINE, task: V.kl-pipeline-checks, change: "the fact-check route calls find(channel pipeline, question_type fact_check, judge_ctx line compile with the compile run)" }
+  - { spec: e2e, change: "e2e/web/live/owner.slice.ts reads locator span ids from /api/search" }
+
+kl_open_points:
+  - "1. Ledger line for a judge.find made on the owner channel (/api/find, the stage-V evaluation): SRV-AGENT's lines for judge.find are tutor, compile, mcp, eval (lane refuses eval). Proposal: mcp until SRV-MCP; else a new `owner` line (SRV-AGENT paired change)."
+  - "2. The waiter sees only 'notified without output', so SRV-OBS's judge_skip values budget, saturated and quota_refused cannot be told from error. Proposal: FR-AGENT-21 (10) notifies `<request_id>:<code>` (codes only, no text); until then they record as error."
+  - "3. Tutor budget unit: 10,500 estimator tokens is 21,000 characters, about 2× the tutor's 21,000-byte cap for Cyrillic; the tutor's drop rule trims it. V.kl-tutor-find may set the tutor budget from the measured bytes per character."
+  - "4. k with a budget: no approximation bound is claimed when k binds (FR-SEARCH-27); B8 keeps k optional."
+  - "5. set_cover has no stage-V consumer (SRV-KB, stage 7); kept because the task asks for it, could move to SRV-KB."
+  - "6. Unmeasured initial values in policy (expand_decay 0.5, objective weights, thresholds 0.5): AGENTS.md routes numbers without a spike to Fable; the evaluation reports their effect, none gates a merge."
+  - "7. If retrieval-ablation's span-level V0 is significantly worse than the chunk baseline (27 of 40), the span unit (ADR-0039 B1) is an owner question: block, do not fall back silently."
+  - "8. Long spans: windows with min-distance aggregation (FR-SEARCH-3) versus one vector of the first 1,200 characters; the ablation's span run should use the chosen form."
