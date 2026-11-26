@@ -114,7 +114,11 @@ async def test_eval_start(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatc
                                 hashlib.sha256(SET.encode()).hexdigest())
             r = await c.post("/api/obs/eval", json=body)
             assert (r.status_code, r.json()) == (400, {"error": "cap_missing"})  # no eval cap configured
-            monkeypatch.setattr(evaluation, "BUDGET", (Decimal(5), {}))
+            monkeypatch.setattr(evaluation, "BUDGET", (Decimal(5), {}))  # no floor reserve: fails closed
+            r = await c.post("/api/obs/eval", json=body)
+            assert (r.status_code, r.json()) == (400, {"error": "cap_missing"})
+            floors = {s: Decimal("0.01") for s in evaluation.EVAL_SLOTS}
+            monkeypatch.setattr(evaluation, "BUDGET", (Decimal(5), floors))
             shapes = ({"set": SET}, {**body, "note": "x"}, {**body, "judges": "judge.eval.relevance"}, [])
             for shape in shapes:
                 r = await c.post("/api/obs/eval", json=shape)

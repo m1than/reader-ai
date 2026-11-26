@@ -1423,7 +1423,7 @@ requirements:
       declared: a sha256 of a short identifier or a short span is a correlation id, not secrecy; a guess can be
       confirmed by hashing it. Status OK, or ERROR without a description on an exception (FR-OBS-12 h). The mcp
       role stays untraced (FR-OBS-1), so stage-7 MCP calls get these spans only when SRV-MCP adds that role.
-      [unit, image, live]
+      [unit; image and live in V.kl-live]
   - id: FR-OBS-37
     text: >-
       Pack-build and link-run spans (ADR-0039 B9), next to `ingest.chunk` and `embed.batch`, opened by SRV-INGEST
@@ -1439,7 +1439,7 @@ requirements:
       ledger amounts, shown for reading only: it is never `reader.cost_usd` and derives no `mlflow.llm.cost`,
       because each model call already carries its cost on its own `agent.call` (FR-OBS-12 c), and MLflow sums
       span costs without dedup (measured, round 4). No span, name or attribute carries span, heading or term
-      text. [unit, image]
+      text. [unit; image in V.kl-live]
   - id: FR-OBS-38
     text: >-
       The `judge_inputs` store (ADR-0039 B7 labels item 2, B7b). `reader.obs.judge_inputs.SINK` implements
@@ -1481,7 +1481,8 @@ requirements:
           sample, where the pin check is skipped and `records` = len(sample_ids)) given, refuses
           with `set_not_pinned` unless the set's sha256 is pinned in VEC-OBS-5 `eval_sets`, `bad_request` for an
           unknown profile or slot, and `eval_cap` when records × judges × each slot's FR-AGENT-9 floor reserve
-          exceeds `budgets.eval_usd_per_run` (SRV-AGENT; no cap set → `cap_missing`); otherwise, in the caller's
+          exceeds `budgets.eval_usd_per_run` (SRV-AGENT; no cap set, or a slot without its floor reserve →
+          `cap_missing`, failing closed); otherwise, in the caller's
           transaction, it inserts the `obs_eval_runs` row (`set_doc` = the parsed set; expected facts live there
           and in the repository fixture, never in MLflow; `deadline` = now + records × 180 s + 600 s, initial,
           which assumes the worker is otherwise free: behind a long compile or embed job, records still queued at
@@ -1509,16 +1510,20 @@ requirements:
           of a `personal-use` pack the owner is not entitled to is never sent; it counts in
           `skipped_not_entitled`, and a record left with no card is not judged. It writes the record and its
           `obs_eval_scores` rows and enqueues one `obs.judge_score` {score_id} per score. A refused parse counts
-          in `invalid_outputs` and writes no score; model text (a rationale included) is dropped in memory, never
+          in `invalid_outputs` and writes no score (a provider failure writes no score and is not counted
+          there); model text (a rationale included) is dropped in memory, never
           stored, logged, traced or posted. `eval` cap reached → the record ends `capped`, no further judge call
           in the run, an event (ADR-0005). Sample-mode scores attach to the row's `find_trace_id` (else
           `judge_trace_id`), dataset-mode scores to the record job's own trace (FR-OBS-5).
       (c) The Run. The record that leaves no record queued (under `lock_id("obs.eval:<id>")`) enqueues
           `obs.eval_run` {eval_id, check: 0}; the `check: 1` job enqueued at start runs at the deadline. Either,
-          under the same lock, first marks every record still queued as `failed` (a dead, killed or never-run
-          record) and closes the run (`done`, `capped`, or `failed` when every record failed); a later one finds
-          the Run complete and ends. It then registers the pinned set as a dataset in experiment `bench` and
-          upserts its records (FR-OBS-23 b's writes; question text, ids and gold pages only), and writes one Run in
+          under the same lock and in its own committed transaction before any MLflow request (code review round
+          1), first marks every record still queued as `failed` (a dead, killed or never-run record) and closes
+          the run (`done`, `capped`, or `failed` when every record failed), so an MLflow 4xx or 5xx afterwards
+          never reopens it; a retry finds the run closed and writes the Run again (FR-OBS-20's steps are
+          idempotent). It then registers the pinned set as a dataset in experiment `bench` and upserts its
+          records (FR-OBS-23 b's writes; question text, ids, the question type, and chapter and gold pages only
+          where the set gives them, never invented), and writes one Run in
           experiment 0 by FR-OBS-20's steps (a)-(e) with `reader.kind` = eval and the id tag `reader.eval_id`:
           params set_sha256, budget_profile, caller (`none`), brain_version, policy_version, version_key and
           `judge.<slot>` = the slot's judge version; metrics computed by code from the Postgres rows: per-slot
@@ -1528,14 +1533,14 @@ requirements:
           type, so B10's paired McNemar comparison can be run from two Runs' records (the comparison is the
           spikes' and the agent's, not this job's); traces linked by tag `reader.eval_id`; the dataset as the
           Run's input (FR-OBS-23 d's shape). Logging a `bench` dataset as an input of a Run in experiment 0 is
-          not measured: the first [image] test pins it; if MLflow 3.18.0 refuses it, the declared fallback creates
-          the dataset with `experiment_ids` [0, bench].
+          not measured: the first [image] test pins it; the declared fallback is built: when MLflow answers 400 to
+          that `log-inputs`, the job creates the dataset with `experiment_ids` [0, bench] and logs it again.
       (d) Posting. `obs.judge_score` reads the score row and posts it as an LLM_JUDGE assessment by FR-OBS-14's
           lookup, retry and 404 rules, then stores `assessment_id`.
       With tracing off the jobs still score and store rows but post nothing and write no Run. Postgres is the
       record (ADR-0038 Decision 4). Declared: on the one worker at concurrency 1, a tutor job can wait behind
       one `obs.eval` record (a find plus up to five judge calls on the strong model, unmeasured; at Haiku's
-      measured 1.82-2.10 s it would be about 10-12 s), within its 180 s timeout. [unit, db, image]
+      measured 1.82-2.10 s it would be about 10-12 s), within its 180 s timeout. [unit, db; image in V.kl-live]
   - id: FR-OBS-40
     text: >-
       Judge labelling reads for the owner tab of `/settings` (paired WEB-MANAGE FR-MANAGE-6). Owner-only routes
@@ -1587,7 +1592,7 @@ requirements:
         `base_changed`, `policy_changed`. The current best is the base section (`candidate_text` NULL);
       - then for at most 3 rounds (initial), ending after the first round that does not improve the current
         best (a later round would re-sample the same errors with the same text): two proposing steps, each at
-        most one `judge.align` call that reads the current best section and one seeded half of the training
+        most one `judge.align` call (its deadline 150 s, initial, inside the 180 s step timeout) that reads the current best section and one seeded half of the training
         errors, each with the labelled output and the owner's note (inputs presented as data in the user
         message, FR-OBS-43), and returns one rewritten section (FR-OBS-43's parser: exactly
         {"instructions": ...}). There are no training re-runs and no spend on them, so in rounds 2 and 3 the
@@ -1981,10 +1986,13 @@ test_levels:
   FR-OBS-33: "config + image"
   FR-OBS-34: config
   FR-OBS-35: "image (burst, opt-in)"
-  FR-OBS-36: "unit + image + live"
-  FR-OBS-37: "unit + image"
+  # Code review round 1 (V.kl-obs-spans): the [image] checks of FR-OBS-36, -37, -39 (ROUTER stored, documents
+  # rendered, the cross-experiment dataset input, LLM_JUDGE on the Quality dashboard) and FR-OBS-36's [live] find
+  # check move to V.kl-live, where SRV-SEARCH's find exists to produce the spans; until then these levels hold.
+  FR-OBS-36: unit
+  FR-OBS-37: unit
   FR-OBS-38: "unit + db"
-  FR-OBS-39: "unit + db + image"
+  FR-OBS-39: "unit + db"
   FR-OBS-40: "unit + db"
   FR-OBS-41: "unit + db"
   FR-OBS-42: "unit + db"
@@ -2537,7 +2545,7 @@ kl_planned_tests:
 
 kl_paired_changes:
   - { spec: SRV-SEARCH, task: V.kl-search-find, change: "opens FR-OBS-36's spans through reader.obs.find helpers; publishes the route ids (find_routes) and the loaded policy for policy_version; a card-text-by-id reader for FR-OBS-39/40/41 that applies B8 entitlement; the policy file declares `judge.find.sufficiency_threshold` and `judge.eval.<name>.pass_threshold` per judge.eval slot (initial values, hashed into policy_version), which FR-OBS-41's agreement and FR-OBS-40's queue read" }
-  - { spec: SRV-AGENT, task: V.kl-agent-judges, change: "already planned there: slot names judge.eval.{relevance, sufficiency, groundedness, self_contained, citation_supports_claim} and judge.align on the eval line, JudgeInputsSink.copy(conn, request_row, output) inside the output transaction (SRV-OBS supplies reader.obs.judge_inputs.SINK), judge_version(slot, prompt_bytes) for SRV-OBS's files. To ask (the coordinator raises it): (1) `prompts/judge_find.md` becomes a fixed frame plus one instructions section between FR-OBS-43's delimiter lines, with SRV-AGENT's test that its production system prompt equals wrap(judge.find, section) byte for byte, and judge.find's input renderer puts all data in the user message with every `READER-INSTRUCTIONS` in a data value replaced by `READER_INSTRUCTIONS_DATA` (FR-OBS-43's rule; a unit case with both delimiter lines in a query and a card); (2) a `judge.find` call on the worker through the Provider port on line `eval` with a caller-given system prompt (only ever a wrap of that frame), thinking_off and abort_on_retry, not recorded to judge_outputs and not looked up there, plus a capability flag SRV-OBS reads; FR-OBS-41's judge.find half goes Red only after both are approved" }
+  - { spec: SRV-AGENT, task: V.kl-agent-judges, change: "already planned there: slot names judge.eval.{relevance, sufficiency, groundedness, self_contained, citation_supports_claim} and judge.align on the eval line, JudgeInputsSink.copy(conn, request_row, output) inside the output transaction (SRV-OBS supplies reader.obs.judge_inputs.SINK), judge_version(slot, prompt_bytes) for SRV-OBS's files. To ask (the coordinator raises it): (1) `prompts/judge_find.md` becomes a fixed frame plus one instructions section between FR-OBS-43's delimiter lines, with SRV-AGENT's test that its production system prompt equals wrap(judge.find, section) byte for byte, and judge.find's input renderer puts all data in the user message with every `READER-INSTRUCTIONS` in a data value replaced by `READER_INSTRUCTIONS_DATA` (FR-OBS-43's rule; a unit case with both delimiter lines in a query and a card); (2) a `judge.find` call on the worker through the Provider port on line `eval` with a caller-given system prompt (only ever a wrap of that frame), thinking_off and abort_on_retry, not recorded to judge_outputs and not looked up there, plus a capability flag SRV-OBS reads; FR-OBS-41's judge.find half goes Red only after both are approved; (3) code review round 1: the lane passes the judge string (and the input hash) to `copy` instead of the sink reading the newest judge_outputs row of the transaction, and SRV-AGENT's `neutralise` replaces the token in every data value as FR-OBS-43 does (it replaces only on delimiter lines today)" }
   - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "catalogue gains kl_job_kinds (obs.eval, obs.eval_run, obs.eval_sample, obs.judge_score, obs.align; queue obs, the worker) and the periodic obs.eval_sample entry (off by default); judge_requests is unchanged" }
   - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "pack.build spans; its purge calls reader.obs.judge_inputs.purge_pack under the pack locks; a material text reader for the guard" }
   - { spec: SRV-KB, task: S7.SRV-KB, change: "link.run spans" }

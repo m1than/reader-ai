@@ -197,6 +197,7 @@ async def test_the_deadline_check_fails_stuck_records_and_closes_the_run(pg: Any
         await _record(engine, eval_id, 0)  # e02's job died: it stays queued
         async with engine.begin() as conn:
             await conn.execute(text("UPDATE obs_eval_runs SET deadline = now() - interval '1 second'"))
+        async with engine.connect() as conn:  # the close commits in its own transaction
             await ev.handle_run(ev.RunArgs(eval_id=str(eval_id), check=1), conn, Ctx(200, "obs.eval_run:1"))
         async with engine.connect() as conn:
             states = [r.state for r in (await conn.execute(text(
@@ -265,5 +266,167 @@ async def test_a_judge_score_posts_once_across_a_retry(pg: Any, pinned: None, mo
         async with engine.connect() as conn:
             assert (await conn.execute(text("SELECT assessment_id FROM obs_eval_scores WHERE id = :i"),
                                        {"i": score.id})).scalar_one() == "a-9"
+    finally:
+        await engine.dispose()
+
+
+# --- obs.eval_run with tracing on (code review round 1): close first, then the Run and the dataset ---
+
+RUN_REPLIES: dict[tuple[str, str], Any] = {
+    ("POST", "/api/2.0/mlflow/runs/search"): {"runs": []},
+    ("POST", "/api/2.0/mlflow/runs/create"): {"run": {"info": {"run_id": "r1"}}},
+    ("POST", "/ajax-api/3.0/mlflow/traces/search"): {"traces": []},
+    ("GET", "/api/2.0/mlflow/experiments/get-by-name"): {"experiment": {"experiment_id": "7"}},
+    ("POST", "/api/3.0/mlflow/datasets/search"): {"datasets": []},
+    ("POST", "/api/3.0/mlflow/datasets/create"): {"dataset": {"dataset_id": "d1"}},
+}
+
+
+async def _closable(engine: Any, monkeypatch: Any) -> uuid.UUID:
+    """A two-record run with one record scored and one stuck, its deadline past."""
+    ev = require("reader.obs.eval")
+    owner = await user(engine, "owner")
+    monkeypatch.setattr(ev, "PORTS", Ports())
+    eval_id = await _start(engine, owner)
+    await _record(engine, eval_id, 0)
+    async with engine.begin() as conn:
+        await conn.execute(text("UPDATE obs_eval_runs SET deadline = now() - interval '1 second'"))
+    return eval_id
+
+
+async def _run(engine: Any, eval_id: uuid.UUID) -> None:
+    ev = require("reader.obs.eval")
+    async with engine.connect() as conn:
+        await ev.handle_run(ev.RunArgs(eval_id=str(eval_id), check=1), conn, Ctx(300, "obs.eval_run:1"))
+
+
+async def test_the_run_and_dataset_bodies_with_tracing_on(pg: Any, pinned: None, monkeypatch: Any) -> None:
+    from .test_phase2_unit import VEC5, Mlflow
+
+    ev = require("reader.obs.eval")
+    engine = await engine_for(pg)
+    try:
+        eval_id = await _closable(engine, monkeypatch)
+        mlflow = Mlflow(dict(RUN_REPLIES))
+        monkeypatch.setattr(ev, "tracing_on", lambda: True)
+        monkeypatch.setattr(ev, "client_factory", mlflow.client)
+        await _run(engine, eval_id)
+        declared = {(w["method"], w["path"]) for w in VEC5["writes"] if w["kind"] == "obs.eval_run"}
+        import re
+
+        for request in mlflow.requests:
+            path = re.sub(r"/datasets/[^/]+/records$", "/datasets/{id}/records", request.url.path)
+            assert (request.method, path) in declared, (request.method, path)
+        sent = json.dumps(mlflow.bodies())
+        assert "FACT-CANARY" not in sent and "expected_facts" not in sent
+        (records,) = [json.loads(b["records"]) for p, b in zip(mlflow.paths(), mlflow.bodies(), strict=True)
+                      if p.endswith("/records")]
+        assert records[0]["inputs"] == {"question_id": "e01", "question": "What is a hardened key?",
+                                        "question_type": "exact", "chapter": 3}
+        assert "expectations" not in records[0]  # no gold pages in the set: none invented
+        (made,) = [b for p, b in zip(mlflow.paths(), mlflow.bodies(), strict=True) if p.endswith("/runs/create")]
+        assert made["tags"] == [{"key": "reader.kind", "value": "eval"}, {"key": "reader.eval_id",
+                                                                         "value": str(eval_id)}]
+        # a retry finds the run closed and the Run complete: no second Run is created
+        done = {"info": {"run_id": "r1"}, "data": {"params": [], "tags": [{"key": "reader.ends", "value": "1"},
+                                                                          {"key": "reader.complete", "value": "true"}]}}
+        again = Mlflow({**RUN_REPLIES, ("POST", "/api/2.0/mlflow/runs/search"): {"runs": [done]},
+                        ("POST", "/api/3.0/mlflow/datasets/search"): {"datasets": [{"dataset_id": "d1"}]}})
+        monkeypatch.setattr(ev, "client_factory", again.client)
+        await _run(engine, eval_id)
+        assert "POST /api/2.0/mlflow/runs/create" not in again.paths()
+        assert "POST /api/3.0/mlflow/datasets/create" not in again.paths()
+    finally:
+        await engine.dispose()
+
+
+async def test_a_refused_dataset_input_falls_back_to_both_experiments(pg: Any, pinned: None,
+                                                                      monkeypatch: Any) -> None:
+    from .test_phase2_unit import Mlflow
+
+    ev = require("reader.obs.eval")
+    engine = await engine_for(pg)
+    try:
+        eval_id = await _closable(engine, monkeypatch)
+        calls = {"n": 0}
+
+        def log_inputs(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            calls["n"] += 1
+            return (400, {}) if calls["n"] == 1 else (200, {})
+
+        mlflow = Mlflow({**RUN_REPLIES, ("POST", "/api/2.0/mlflow/runs/log-inputs"): log_inputs})
+        monkeypatch.setattr(ev, "tracing_on", lambda: True)
+        monkeypatch.setattr(ev, "client_factory", mlflow.client)
+        await _run(engine, eval_id)
+        creates = [b for p, b in zip(mlflow.paths(), mlflow.bodies(), strict=True) if p.endswith("datasets/create")]
+        assert [c["experiment_ids"] for c in creates] == [["7"], ["0", "7"]] and calls["n"] == 2
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("status", [400, 503])
+async def test_an_mlflow_failure_leaves_the_run_closed(pg: Any, pinned: None, monkeypatch: Any,
+                                                       status: int) -> None:
+    from .test_phase2_unit import Mlflow
+
+    ev = require("reader.obs.eval")
+    runs = require("reader.obs.runs")
+    engine = await engine_for(pg)
+    try:
+        eval_id = await _closable(engine, monkeypatch)
+        mlflow = Mlflow({**RUN_REPLIES, ("POST", "/api/2.0/mlflow/runs/create"): (status, {})})
+        monkeypatch.setattr(ev, "tracing_on", lambda: True)
+        monkeypatch.setattr(ev, "client_factory", mlflow.client)
+        with pytest.raises(runs.ObsRunsRefused if status == 400 else httpx.HTTPStatusError):
+            await _run(engine, eval_id)
+        async with engine.connect() as conn:
+            run = (await conn.execute(text("SELECT state, finished_at FROM obs_eval_runs"))).one()
+            states = [r.state for r in (await conn.execute(text(
+                "SELECT state FROM obs_eval_records ORDER BY record_id"))).all()]
+        assert run.state == "done" and run.finished_at is not None and states == ["done", "failed"]
+    finally:
+        await engine.dispose()
+
+
+# --- obs.eval_sample ---
+
+
+async def test_the_sampler(pg: Any, monkeypatch: Any, caplog: Any) -> None:
+    import logging
+
+    ev = require("reader.obs.eval")
+    ji = require("reader.obs.judge_inputs")
+    engine = await engine_for(pg)
+    try:
+        owner = await user(engine, "owner")
+        consenting = await user(engine, "learner", consent=True)
+        silent = await user(engine, "learner", consent=False)
+        for caller, query in ((owner, "owner q"), (consenting, "consenting q"), (silent, "silent q")):
+            request = Request(caller, query, CARDS)
+            output = {"keep": [CARDS[0][0]], "sufficiency": 0.5}
+            async with engine.begin() as conn:
+                await record_output(conn, request, output)
+                await ji.SINK.copy(conn, request, output)
+        args = ev.SampleArgs(slot="2026-11-26T12:00")
+
+        async def sample() -> None:
+            async with engine.begin() as conn:
+                await ev.handle_sample(args, conn, Ctx(400, "obs.eval_sample:x"))
+
+        await sample()  # off by default: no judges in the policy
+        async with engine.connect() as conn:
+            assert (await conn.execute(text("SELECT count(*) FROM obs_eval_runs"))).scalar_one() == 0
+        monkeypatch.setattr(ev, "SAMPLE_POLICY", ev.SamplePolicy(judges=SLOTS, cap_usd=None))
+        with caplog.at_level(logging.INFO, logger="reader.obs"):
+            await sample()
+        assert "obs eval_sample_refused code=cap_missing" in caplog.text
+        monkeypatch.setattr(ev, "SAMPLE_POLICY", ev.SamplePolicy(
+            judges=SLOTS, cap_usd=Decimal(5), floors={s: Decimal("0.01") for s in SLOTS}))
+        await sample()
+        async with engine.connect() as conn:
+            run = (await conn.execute(text("SELECT mode, records FROM obs_eval_runs"))).one()
+            queries = {r.query for r in (await conn.execute(text(
+                "SELECT ji.query FROM obs_eval_records e JOIN judge_inputs ji ON ji.id = e.judge_input_id"))).all()}
+        assert (run.mode, run.records) == ("sample", 2) and queries == {"owner q", "consenting q"}
     finally:
         await engine.dispose()

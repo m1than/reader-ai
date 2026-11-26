@@ -63,7 +63,9 @@ def guard(proposal: str, inputs: GuardInputs) -> str | None:
         return "whole_input"
     if len(proposal) > MAX_LENGTH_FACTOR * len(inputs.base):
         return "demonstration"
-    for line in _joined(proposal).split("\n"):
+    # Declared limits (code review round 1): words are Latin, Cyrillic and digits only, so text in other
+    # scripts is not compared; the markers `q` and `a` also refuse a line that starts with the article "A".
+    for line in _joined(proposal).splitlines():  # every line break: \n, \r, U+2028 and the rest
         first = words(line)[:1]
         if first and first[0] in MARKERS:
             return "demonstration"

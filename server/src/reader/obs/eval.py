@@ -171,8 +171,8 @@ def check_start(
         raise StartRefused("bad_request")
     if len(set(judges)) != len(judges):
         raise StartRefused("bad_request")
-    if cap_usd is None:
-        raise StartRefused("cap_missing")
+    if cap_usd is None or any(j not in floors for j in judges):
+        raise StartRefused("cap_missing")  # no cap, or a slot without its floor reserve: fail closed
     count = len(records) if set_text is not None else sample_n
     estimate = sum((floors.get(j, Decimal(0)) for j in judges), Decimal(0)) * count
     if estimate > cap_usd:
@@ -336,9 +336,8 @@ async def handle_record(args: EvalArgs, conn: Any, ctx: Any) -> None:
             except EvalCapReached:
                 state = "capped"
                 break
-            except Exception as failure:
+            except Exception as failure:  # a provider failure is no score and not an invalid output
                 log.info("obs eval_judge_failed code=%s", type(failure).__name__)
-                invalid += 1
                 continue
             try:
                 value = judges.parse_eval(raw)
@@ -485,30 +484,52 @@ def _qtype(doc: Any, record_id: str) -> str | None:
     return None
 
 
+def client_factory() -> httpx.AsyncClient:
+    return httpx.AsyncClient(trust_env=False)
+
+
+async def _close(engine: Any, args: RunArgs) -> tuple[Any, list[RecordRow], list[Any]] | None:
+    """In its own committed transaction (so an MLflow failure afterwards never reopens it): fail the records
+    still queued and close the run, or (before the deadline) re-enqueue the check. Returns the closed run, its
+    records and scores, or None when there is nothing to write yet."""
+    async with engine.begin() as own:
+        await own.execute(text(LOCK_SQL), {"k": _lock_key(args.eval_id)})
+        run = (await own.execute(text(RUN_ROW_SQL), {"e": args.eval_id})).first()
+        if run is None:
+            return None
+        if run.finished_at is None:
+            left = int((await own.execute(text(LEFT_SQL), {"e": args.eval_id})).scalar_one())
+            now = datetime.now(UTC)
+            if left and args.check >= 1 and now < run.deadline:
+                await _again(args, (run.deadline - now).total_seconds())
+                return None
+            if left and args.check == 0:
+                return None  # not every record has ended; the deadline check closes the run
+            await own.execute(text(FAIL_SQL), {"e": args.eval_id})
+            rows = (await own.execute(text(RECORDS_SQL), {"e": args.eval_id})).all()
+            failed = all(r.state == "failed" for r in rows)
+            state = "capped" if run.state == "capped" else ("failed" if failed else "done")
+            await own.execute(text(CLOSE_SQL), {"s": state, "e": args.eval_id})
+            run = (await own.execute(text(RUN_ROW_SQL), {"e": args.eval_id})).first()
+        rows = (await own.execute(text(RECORDS_SQL), {"e": args.eval_id})).all()
+        records = [RecordRow(_qtype(run.set_doc, r.record_id), r.find_ms, r.tokens, r.judge_ran, r.gate,
+                             r.state, r.skipped_not_entitled, r.invalid_outputs) for r in rows]
+        scores = list((await own.execute(text(SCORES_SQL), {"e": args.eval_id})).all())
+    return run, records, scores
+
+
 async def handle_run(args: RunArgs, conn: Any, ctx: Any) -> None:
-    await conn.execute(text(LOCK_SQL), {"k": _lock_key(args.eval_id)})
-    run = (await conn.execute(text(RUN_ROW_SQL), {"e": args.eval_id})).first()
-    if run is None or run.finished_at is not None:
+    """Close first (own transaction), then, with tracing on, the Run and the dataset input; a retry after an
+    MLflow failure finds the run closed and writes the Run again (runs.sync is idempotent)."""
+    closed = await _close(conn.engine, args)
+    if closed is None or not tracing_on():
         return
-    left = int((await conn.execute(text(LEFT_SQL), {"e": args.eval_id})).scalar_one())
-    now = datetime.now(UTC)
-    if left and args.check >= 1 and now < run.deadline:
-        await _again(args, (run.deadline - now).total_seconds())
-        return
-    if left and args.check == 0:
-        return  # not every record has ended; the deadline check closes the run
-    await conn.execute(text(FAIL_SQL), {"e": args.eval_id})
-    rows = (await conn.execute(text(RECORDS_SQL), {"e": args.eval_id})).all()
-    records = [RecordRow(_qtype(run.set_doc, r.record_id), r.find_ms, r.tokens, r.judge_ran, r.gate, r.state,
-                         r.skipped_not_entitled, r.invalid_outputs) for r in rows]
-    state = "capped" if run.state == "capped" else ("failed" if all(r.state == "failed" for r in records)
-                                                     else "done")
-    await conn.execute(text(CLOSE_SQL), {"s": state, "e": args.eval_id})
-    if not tracing_on():
-        return
+    run, records, rows = closed
+    state = str(run.state)
+    now = run.finished_at or datetime.now(UTC)
     scores: dict[str, list[tuple[str | None, float]]] = {}
     judge_of: dict[str, str] = {}
-    for s in (await conn.execute(text(SCORES_SQL), {"e": args.eval_id})).all():
+    for s in rows:
         scores.setdefault(s.slot, []).append((_qtype(run.set_doc, s.record_id), float(s.value)))
         judge_of[s.slot] = s.judge
     params = {"budget_profile": run.budget_profile, "caller": run.caller}
@@ -528,7 +549,7 @@ async def handle_run(args: RunArgs, conn: Any, ctx: Any) -> None:
     from reader.obs import runs
 
     try:
-        async with httpx.AsyncClient(trust_env=False) as client:
+        async with client_factory() as client:
             run_id = await runs.sync(snap, client)
             if run.set_name and run.set_doc:
                 await _log_dataset(client, run_id, run)
@@ -552,26 +573,53 @@ async def _log_dataset(client: httpx.AsyncClient, run_id: str, run: Any) -> None
     from reader.obs.bench import _bench_experiment
 
     experiment = await _bench_experiment(client)
-    _, found = await request(client, "POST", "/api/3.0/mlflow/datasets/search",
-                             {"experiment_ids": [experiment], "filter_string": f"name = '{run.set_name}'"})
-    listed = [d for d in found.get("datasets") or [] if isinstance(d, dict)]
+    dataset_id = await _dataset(client, run, [experiment])
+    try:
+        await _log_input(client, run_id, run, dataset_id)
+    except MlflowRefused as refused:
+        if refused.status != 400:
+            raise
+        # FR-OBS-39 (c)'s declared fallback: MLflow refused a `bench` dataset as an input of a Run in
+        # experiment 0, so the dataset is made in both experiments and logged again.
+        dataset_id = await _dataset(client, run, ["0", experiment], search=False)
+        await _log_input(client, run_id, run, dataset_id)
+
+
+def dataset_records(set_doc: Any) -> list[dict[str, Any]]:
+    """VEC-OBS-5 `eval_record`: question text, ids, the question type and, where the set gives them, chapter
+    and gold pages (never invented); expected facts never."""
+    out: list[dict[str, Any]] = []
+    for q in (set_doc or {}).get("questions") or []:
+        inputs: dict[str, Any] = {"question_id": str(q["id"]), "question": str(q.get("question", "")),
+                                  "question_type": str(q.get("question_type", ""))}
+        if isinstance(q.get("chapter"), int):
+            inputs["chapter"] = q["chapter"]
+        pages = [p for p in q.get("gold_pages") or [] if isinstance(p, int)]
+        out.append({"inputs": inputs, "expectations": {"gold_pages": pages}} if pages else {"inputs": inputs})
+    return out
+
+
+async def _dataset(client: httpx.AsyncClient, run: Any, experiments: list[str], search: bool = True) -> str:
+    listed: list[dict[str, Any]] = []
+    if search:
+        _, found = await request(client, "POST", "/api/3.0/mlflow/datasets/search",
+                                 {"experiment_ids": experiments, "filter_string": f"name = '{run.set_name}'"})
+        listed = [d for d in found.get("datasets") or [] if isinstance(d, dict)]
     if listed:
         dataset = listed[0]
     else:
         _, made = await request(client, "POST", "/api/3.0/mlflow/datasets/create", {
-            "name": run.set_name, "experiment_ids": [experiment],
+            "name": run.set_name, "experiment_ids": experiments,
             "tags": json.dumps({"reader.source_sha256": str(run.set_sha256).strip(), "reader.eval": "brain"}),
         })
         dataset = made.get("dataset") or {}
     dataset_id = str(dataset["dataset_id"])
-    records = [
-        {"inputs": {"question_id": str(q["id"]), "question": str(q.get("question", "")),
-                    "question_type": str(q.get("question_type", "")), "chapter": int(q.get("chapter", 1))},
-         "expectations": {"gold_pages": [int(p) for p in q.get("gold_pages") or [1]]}}
-        for q in (run.set_doc or {}).get("questions") or []
-    ]
     await request(client, "POST", f"/api/3.0/mlflow/datasets/{dataset_id}/records",
-                  {"records": json.dumps(records)})
+                  {"records": json.dumps(dataset_records(run.set_doc))})
+    return dataset_id
+
+
+async def _log_input(client: httpx.AsyncClient, run_id: str, run: Any, dataset_id: str) -> None:
     await request(client, "POST", "/api/2.0/mlflow/runs/log-inputs", {
         "run_id": run_id,
         "datasets": [{"dataset": {"name": run.set_name, "digest": str(run.set_sha256).strip()[:8],
@@ -651,8 +699,9 @@ class SampleArgs(BaseModel):
 
 
 SAMPLE_SQL: Final = (
-    "SELECT id FROM judge_inputs WHERE labelable AND created_at > now() - interval '1 day'"
-    " ORDER BY created_at DESC LIMIT :n"
+    "SELECT ji.id FROM judge_inputs ji WHERE ji.labelable AND ji.created_at > now() - interval '1 day'"
+    " AND NOT EXISTS (SELECT 1 FROM obs_eval_scores s WHERE s.judge_input_id = ji.id)"
+    " ORDER BY ji.created_at DESC LIMIT :n"
 )
 OWNER_SQL: Final = "SELECT id FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1"
 

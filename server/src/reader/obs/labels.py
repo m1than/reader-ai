@@ -226,6 +226,11 @@ async def _record_judge(
     if mirror_on:
         await phase2.stage(conn, KIND_DECL, {"label_id": label_id, "revision": revision})
     if revision == 1:  # a new label (a relabel does not count): FR-OBS-41's trigger
+        from reader.jobs.model import lock_id
+
+        # one counter per (owner, slot): two concurrent labels never both see the same multiple of 50
+        key = lock_id(f"obs.align:{owner}:{slot}")
+        await conn.execute(text("SELECT pg_advisory_xact_lock(:k)"), {"k": key})
         count = int((await conn.execute(text(SLOT_COUNT_SQL), {"o": owner, "s": slot})).scalar_one())
         await _maybe_align(conn, owner, slot, count)
     return revision, label_id
@@ -233,12 +238,8 @@ async def _record_judge(
 
 async def _maybe_align(conn: Any, owner: uuid.UUID, slot: str, count: int) -> None:
     """FR-OBS-41: every 50th judge label of a slot starts an alignment proposal in this transaction."""
-    import importlib
+    from reader.obs import align
 
-    try:
-        align = importlib.import_module("reader.obs.align")
-    except ModuleNotFoundError:
-        return
     await align.start_if_due(conn, owner, slot, count)
 
 

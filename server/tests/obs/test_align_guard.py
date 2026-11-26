@@ -54,6 +54,15 @@ def test_vec_obs_8_nested_delimiter_needs_two_deletions() -> None:
     assert _guard().guard(once.replace("READER-INSTRUCTIONS", "", 1), _inputs(case)) is None
 
 
+@pytest.mark.parametrize("brk", ["\r", "\r\n", chr(0x2028), chr(0x2029), "\x0b"])
+def test_a_marker_after_any_line_break_is_a_demonstration(brk: str) -> None:
+    """Code review round 1: the marker check splits on every line break, not only \\n."""
+    g = require("reader.obs.align_guard")
+    base = "Grade the card set strictly against the question and say whether it answers it fully."
+    proposal = f"Grade strictly.{brk}Example: a card that answers fully"
+    assert g.guard(proposal, g.GuardInputs(base=base, whole=(), verbatim=())) == "demonstration"
+
+
 def test_vec_obs_8_covers_every_verdict() -> None:
     assert {c["expect"] for c in VEC["cases"]} == {
         "verbatim_8", "whole_input", "demonstration", "section_delimiter", "no_change", "accept"}

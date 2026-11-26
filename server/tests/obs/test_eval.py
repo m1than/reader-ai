@@ -39,6 +39,7 @@ def test_an_unpinned_set_is_refused_while_the_pin_is_null() -> None:
     ("mcp", ("judge.eval.vibes",), Decimal(5), "bad_request"),
     ("mcp", ("judge.find",), Decimal(5), "bad_request"),  # only judge.eval.* slots score an evaluation
     ("mcp", SLOTS, None, "cap_missing"),
+    ("mcp", (*SLOTS, "judge.eval.groundedness"), Decimal(5), "cap_missing"),  # a slot without a floor
     ("mcp", SLOTS, Decimal("0.09"), "eval_cap"),  # 1 record, 2 judges at 0.05 each: 0.10 > 0.09
 ])
 def test_start_refusals(monkeypatch: Any, profile: str, judges: Any, cap: Any, code: str) -> None:

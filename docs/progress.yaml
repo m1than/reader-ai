@@ -1960,7 +1960,12 @@ tasks:
         WEB-MANAGE FR-MANAGE-6 tab, OPS-CLI `reader obs eval` / `reader obs proposals`, the per-job version key and
         obs.setup enqueue on an unseen key (needs SRV-SEARCH's policy). Mismatch for SRV-AGENT: its lane calls
         sink.copy(write, request, output) without the judge string; the sink reads it from judge_outputs in the same
-        transaction. Review model: Fable (deep-reviewer)",
+        transaction. Review model: Fable (deep-reviewer). Process note (code review round 1): during Red a real
+        spec wording fix was kept uncommitted so the H2 hook allowed the test writes; the coordinator judged it
+        legitimate in substance, and it is not to be repeated: a test change goes with its own spec change in the
+        same commit. Code review round 1 fixes: obs.eval_run closes in its own transaction before MLflow, the
+        [0, bench] dataset fallback, tests with the in-test MLflow (bodies, 400/503, retry), the sampler, the
+        INV-OBS-6 end-to-end canary; image levels of FR-OBS-36/-37/-39 moved to V.kl-live",
       what: "SRV-OBS and WEB-MANAGE revision (~500–800 lines): TOOL/ROUTER/RETRIEVER spans with ids, counts, brain_version,
         policy_version and hashes only (INV-OBS-1/2 kept; question-derived filters as concept ids or hashes); the
         judge.find job as its own linked trace; a local judge-evaluation job kind obs.eval writing scores only
