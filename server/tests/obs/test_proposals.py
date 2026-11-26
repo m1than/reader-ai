@@ -40,7 +40,7 @@ def test_header_and_body_from_a_row() -> None:
     assert name == f"proposal-judge-eval-self_contained-{SHA[:12]}.md"
     assert section == TEXT + "\n"  # the section only
     assert "slot: judge.eval.self_contained" in head
-    assert "file: server/src/reader/obs/prompts/judge_eval_self_contained.md" in head
+    assert "file: server/src/reader/obs/judge_prompts/judge_eval_self_contained.md" in head
     assert f"frame_sha256: {'f' * 64}" in head
     assert f"base_section_sha256: {'b' * 64}" in head
     assert f"proposed_sha256: {SHA}" in head

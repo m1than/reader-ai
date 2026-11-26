@@ -101,7 +101,7 @@ def _variant(word: str, how: int) -> str:
     if how == 1:
         return word.upper()
     if how == 2:
-        return word.replace("е", "ё") if "е" in word else word.title()
+        return word.replace("е", "ё") if "е" in word else word.title()  # noqa: RUF001 (ye to yo)
     if how == 3 and len(word) > 3:
         return word[:2] + "­" + word[2:]
     if how == 4 and len(word) > 3:
@@ -165,7 +165,9 @@ def _fixpoint(tokens: list[str], sep: list[str], inputs: Any) -> list[str]:
 def _accepts_after_fixpoint(tokens: list[str], sep: list[str], inputs: Any) -> None:
     g = _guard()
     fixed = _fixpoint(list(tokens), sep, inputs)
-    padded = [*fixed, "weigh", "prefer", "strictly"]
+    # filler only where the fixpoint left the base itself or nothing (to stay distinct from the base)
+    distinct = fixed and g.guard(_text(fixed, sep), inputs) != "no_change"
+    padded = fixed if distinct else [*fixed, "weigh", "prefer", "strictly"]
     assert g.guard(_text(padded, sep), inputs) is None
 
 

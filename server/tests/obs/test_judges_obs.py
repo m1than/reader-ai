@@ -25,7 +25,7 @@ EVAL_SLOTS = (
     "judge.eval.self_contained",
     "judge.eval.citation_supports_claim",
 )
-PROMPTS_DIR = Path(__file__).resolve().parents[2] / "src" / "reader" / "obs" / "prompts"
+PROMPTS_DIR = Path(__file__).resolve().parents[2] / "src" / "reader" / "obs" / "judge_prompts"
 FIND_FILE = Path(__file__).resolve().parents[2] / "src" / "reader" / "agent" / "prompts" / "judge_find.md"
 
 
