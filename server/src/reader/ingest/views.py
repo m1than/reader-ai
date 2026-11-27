@@ -50,6 +50,7 @@ class PackSpan:
     kind: str
     text: str
     quote_sha256: str | None
+    locator: str | None = None  # the stored locator, also for a legacy pack (SRV-SEARCH cards cite it)
 
 
 @dataclass(frozen=True)
@@ -127,7 +128,7 @@ async def pack_spans(
     rows = await conn.execute(text(sql + " ORDER BY seq"),
                               {"i": pack.ingest_id, "o": pack.owner_id, "f": first, "l": last})
     return [PackSpan(_span_id(pack, int(r[0]), r[4]), int(r[0]), int(r[1]), str(r[2]), str(r[3]),
-                     None if r[5] is None else str(r[5])) for r in rows]
+                     None if r[5] is None else str(r[5]), None if r[4] is None else str(r[4])) for r in rows]
 
 
 async def span_ids(conn: AsyncConnection, pack: Pack, seqs: Sequence[int]) -> dict[int, str]:

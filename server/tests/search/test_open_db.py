@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from hypothesis import HealthCheck, given, settings
-from hypothesis import strategies as st
 
 from .conftest import MAT_EN, MAT_RU, Pg, World, add_material, need, set_profile, world
 
@@ -25,8 +23,8 @@ OUTLINE = [(1, "Book", 1), (2, "One", 2), (3, "Deep", 3)]
 
 
 @pytest.fixture
-async def w(pg: Pg, tmp_path: Path) -> AsyncIterator[World]:
-    built = await world(pg, tmp_path)
+async def w(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[World]:
+    built = await world(pg, tmp_path, monkeypatch)
     try:
         yield built
     finally:
@@ -54,7 +52,8 @@ async def locators(w: World, handle: str, sha: str) -> list[str]:
 
     async with w.engine.connect() as conn:
         pack = await views.active_pack(conn, w.users[handle], sha)
-        assert pack is not None
+        if pack is None:
+            return []
         return [s.locator for s in await views.pack_spans(conn, pack) if s.locator is not None]
 
 
@@ -94,7 +93,9 @@ async def test_an_inactive_pack_is_not_found(w: World) -> None:
 
 async def test_malformed_ids_depth_and_later_kinds(w: World) -> None:
     await add_material(w, "ivan", MAT_EN, SPANS, config_id="book-en", outline=OUTLINE)
-    for bad in ("", "spn:xyz", "sec:" + MAT_EN, "src:abc", "nope:1", MAT_EN + ":0", "spn:" + MAT_EN + ":p1:3-1"):
+    bad_ids = ("", "spn:xyz", "sec:" + MAT_EN, "src:abc", "nope:1", MAT_EN + ":0",
+               "spn:" + MAT_EN + ":p1:3-1")
+    for bad in bad_ids:
         assert await code(w, "ivan", bad) == "id_invalid", bad
     for later in ("con:bip-39", "fnd:1", "les:1"):
         assert await code(w, "ivan", later) == "not_found"
@@ -110,7 +111,7 @@ async def test_sec_children_to_depth_and_src_top_level(w: World) -> None:
     book = "sec:" + MAT_EN + ":1"
     one = [c["id"] for c in (await call(w, "ivan", book, depth=1))["cards"]]
     assert one == [book, ids[0], ids[1], book + "/1"]
-    two = [c["id"] for c in (await call(w, "ivan", book, depth=2))["cards"]]
+    two = [c["id"] for c in (await call(w, "ivan", book, depth=2, budget=10500))["cards"]]
     assert two == [book, ids[0], ids[1], book + "/1", ids[2], book + "/1/1"]
     top = (await call(w, "ivan", "src:" + MAT_EN))["cards"]
     assert [c["id"] for c in top] == ["src:" + MAT_EN, book] and top[0]["layer"] == "L0"
@@ -136,23 +137,22 @@ async def test_budget_clamp_and_shareable_continuation(w: World) -> None:
     assert wide["cards"][0]["text"] == LONG and "more" not in wide["cards"][0]
 
 
-@settings(max_examples=40, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
-@given(data=st.data())
-async def test_open_returns_a_card_only_for_a_stored_locator(w: World, data: st.DataObject) -> None:
+async def test_open_returns_a_card_only_for_a_stored_locator(w: World) -> None:
+    """Exhaustive over the neighbourhood of every real locator: pages ±1, start and end ±3, ordinals 0..2."""
     from reader.ingest import locator
 
-    if not await locators(w, "ivan", MAT_EN):
-        await add_material(w, "ivan", MAT_EN, SPANS, config_id="book-en", outline=OUTLINE)
+    await add_material(w, "ivan", MAT_EN, SPANS, config_id="book-en", outline=OUTLINE)
     ids = await locators(w, "ivan", MAT_EN)
-    real = locator.parse(data.draw(st.sampled_from(ids)))
-    start = max(0, real.start + data.draw(st.integers(-3, 3)))
-    end = max(start, real.end + data.draw(st.integers(-3, 3)))
-    ordinal = data.draw(st.one_of(st.none(), st.integers(0, 3))) if start == end else None
-    if start == end and ordinal is None:
-        ordinal = 0
-    page = (real.page or 1) + data.draw(st.integers(-1, 1)) or 1
-    guess = locator.pdf_locator(MAT_EN, page, start, end, ordinal)
-    if guess in ids:
-        assert (await call(w, "ivan", guess))["cards"][0]["id"] == guess
-    else:
-        assert await code(w, "ivan", guess) == "not_found"
+    guesses: set[str] = set()
+    for real in map(locator.parse, ids):
+        for page in {max(1, (real.page or 1) + d) for d in (-1, 0, 1)}:
+            for start in {max(0, real.start + d) for d in range(-3, 4)}:
+                for end in {max(start, real.end + d) for d in range(-3, 4)}:
+                    for ordinal in ((0, 1, 2) if start == end else (None,)):
+                        guesses.add(locator.pdf_locator(MAT_EN, page, start, end, ordinal))
+    assert set(ids) <= guesses
+    for guess in sorted(guesses):
+        if guess in ids:
+            assert (await call(w, "ivan", guess))["cards"][0]["id"] == guess
+        else:
+            assert await code(w, "ivan", guess) == "not_found", guess

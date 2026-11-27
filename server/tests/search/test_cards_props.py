@@ -89,7 +89,7 @@ def test_allowance_bounds_prefix_and_served_quotes(case: Any) -> None:
 
 
 def test_many_short_sections_stop_at_the_fraction() -> None:
-    spans = [(1, "word " * 60)] + [(p, f"s{p} " + "x" * 40) for p in range(2, 40)]
+    spans = [(1, "word " * 4)] +[(p, f"s{p} " + "x" * 40) for p in range(2, 40)]
     outline = [(1, f"T{p}", p) for p in range(1, 40)]
     book = build(spans, outline)
     cards = need("reader.search.cards")

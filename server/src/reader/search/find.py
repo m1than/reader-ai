@@ -168,14 +168,17 @@ def validate(
     data = policy.data
     if k is not None and (isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= data["k_max"]):
         raise FindError("k_invalid")
+    return Request(channel, text, found, k, effective_budget(policy, channel, budget))
+
+
+def effective_budget(policy: Policy, channel: str, budget: int | None) -> int:
+    """FR-SEARCH-22: unset → the channel's default; below budget_min → budget_invalid; above max → clamped."""
     channel_budgets = policy.channel(channel)
     if budget is None:
-        effective = channel_budgets["budget_default"]
-    elif isinstance(budget, bool) or not isinstance(budget, int) or budget < data["budget_min"]:
+        return channel_budgets["budget_default"]
+    if isinstance(budget, bool) or not isinstance(budget, int) or budget < policy.data["budget_min"]:
         raise FindError("budget_invalid")
-    else:
-        effective = min(budget, channel_budgets["budget_max"])
-    return Request(channel, text, found, k, effective)
+    return min(budget, channel_budgets["budget_max"])
 
 
 def classify(

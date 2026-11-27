@@ -282,7 +282,8 @@ async def set_profile(w: World, handle: str, sha: str, license_: str, language: 
     async with w.engine.begin() as conn:
         pack = await views.active_pack(conn, owner, sha)
         assert pack is not None
-        oid = await overlays.build_profile(conn, owner, pack.pack_id, {"license": license_, "language": language})
+        values = {"license": license_, "language": language}
+        oid = await overlays.build_profile(conn, owner, pack.pack_id, values)
         seq, top = await manifest.head(conn, owner)
         elements = {e["pack_id"]: dict(e["overlays"]) for e in top["packs"]}
         elements[pack.pack_id]["profile"] = oid

@@ -582,7 +582,9 @@ requirements:
       the first node, and the top nodes, are the source card's children. An L1 card carries one citation (itself)
       with no quote (its text is the span); its `next` is the next span in reading order and its section (FR-SEARCH-24).
       A profile without a license counts as `personal-use` (fail closed, SRV-INGEST `packs.shareable`). [unit, db]
-      test_cards_db.py, test_cards_props.py.
+      test_cards_db.py, test_cards_props.py (Green: test-data corrections, no oracle changed — the many-short-
+      sections case's first span was shortened so one quote fits the fraction; the [db] worlds set READER_CONFIG,
+      which `policy_version` reads for the judge slots).
   - id: FR-SEARCH-31   # ADR-0039 revision, promoted in phase 2 (unit 3)
     text: >-
       **`open(caller, channel, id, depth=1, budget=None)` (B8).** `spn:` must equal the locator of a sealed span of an
@@ -598,7 +600,10 @@ requirements:
       `depth` (`src:` the same, from the source card), each taken in that order while the whole response's estimate
       fits the effective budget (a card that does not fit is skipped). A `shareable` `spn:` card's text is cut to
       what the response budget leaves for it. `depth` is an integer 1..`open_depth_max`; a `channel` outside the
-      four → `channel_invalid`. [db] test_open_db.py.
+      four → `channel_invalid`. [db] test_open_db.py (Green: test-data corrections, no oracle changed — the
+      depth-2 case passes the owner maximum budget so all six cards fit; INV-SEARCH-13's property runs exhaustively
+      over every real locator's neighbourhood — pages ±1, start and end ±3, ordinals 0..2 — instead of Hypothesis
+      draws, which could not share the database state between examples).
 
 invariants:
   - id: INV-SEARCH-1

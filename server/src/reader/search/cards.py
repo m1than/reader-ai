@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
@@ -132,8 +132,37 @@ def l2_text(title: str, summary: str | None, quote: str | None, tokens: int) -> 
     return text, served or None
 
 
+def l1_allowed(channel: str, *, entitled: bool, shareable: bool) -> bool:
+    """FR-SEARCH-30: L1 of a personal-use pack only for an entitled caller and never on mcp."""
+    return shareable or (channel != "mcp" and entitled)
+
+
 def eligible(card: Card, channel: str) -> bool:
     """FR-SEARCH-30: a personal-use L1 card is served only to an entitled caller and never on mcp."""
-    if card.layer != "L1" or card.source.license == SHAREABLE:
+    if card.layer != "L1":
         return True
-    return channel != "mcp" and card.entitled
+    return l1_allowed(channel, entitled=card.entitled, shareable=card.source.license == SHAREABLE)
+
+
+def quote(text: str, max_chars: int) -> str:
+    """FR-SEARCH-30: the first ≤ max_chars code points of a span's text, cut at whitespace (hard without)."""
+    return cut_chars(text, max_chars)
+
+
+def allowance(nodes: Sequence[tuple[str, str | None, int]], total: int, fraction: float) -> frozenset[str]:
+    """FR-SEARCH-30's quote allowance over (node id, cited span or None, full quote length) in outline order:
+    each distinct cited span counts once; the walk stops at the first node that would pass fraction * total,
+    so the granted set is a prefix of the order."""
+    limit = fraction * total
+    counted: set[str] = set()
+    used = 0
+    granted: list[str] = []
+    for node_id, span, length in nodes:
+        extra = 0 if span is None or span in counted else length
+        if used + extra > limit:
+            break
+        used += extra
+        if span is not None:
+            counted.add(span)
+        granted.append(node_id)
+    return frozenset(granted)

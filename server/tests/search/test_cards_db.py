@@ -67,8 +67,9 @@ async def test_entitled_for_the_owner_and_an_own_live_copy_only(w: World) -> Non
     await add_material(w, "anna", MAT_RU, SPANS)  # her own copy, received from her bytes
     assert await is_entitled(w, "anna", "ivan", MAT_RU)
     async with w.engine.begin() as conn:
-        await conn.execute(text("UPDATE materials SET deleted_at = now() WHERE owner_id = :o AND sha256 = :s"),
-                           {"o": w.users["anna"], "s": MAT_RU})
+        await conn.execute(
+            text("UPDATE materials SET deleted_at = now() WHERE owner_id = :o AND sha256 = :s"),
+            {"o": w.users["anna"], "s": MAT_RU})
     assert not await is_entitled(w, "anna", "ivan", MAT_RU)
 
 

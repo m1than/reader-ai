@@ -15,15 +15,16 @@ from .conftest import MAT_EN, Pg, World, add_material, need, set_profile, world
 
 pytestmark = pytest.mark.anyio
 
-SPANS = [(p, f"Page {p} part {k}. " + "lorem ipsum dolor " * (5 + 7 * k)) for p in range(1, 13) for k in range(3)]
+SPANS = [(p, f"Page {p} part {k}. " + "lorem ipsum dolor " * (5 + 7 * k))
+         for p in range(1, 13) for k in range(3)]
 SPANS.insert(4, (2, ""))  # an empty span (a figure without a caption)
 OUTLINE = [(1, "Chapter A", 1), (2, "A.1", 2), (2, "A.2", 3), (1, "Chapter B", 5), (2, "B.1", 6),
            (3, "B.1.a", 7), (1, "Chapter C", 9), (2, "C.1", 10), (2, "C.2", 11)]
 
 
 @pytest.fixture
-async def w(pg: Pg, tmp_path: Path) -> AsyncIterator[World]:
-    built = await world(pg, tmp_path)
+async def w(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[World]:
+    built = await world(pg, tmp_path, monkeypatch)
     try:
         yield built
     finally:
@@ -104,7 +105,7 @@ async def test_cross_user_without_and_with_an_own_copy(w: World) -> None:
     assert any(card["layer"] == "L1" for card in seen.values())
 
 
-@pytest.mark.parametrize("channel,license_", [("tutor", None), ("owner", None), ("pipeline", None),
+@pytest.mark.parametrize(("channel", "license_"), [("tutor", None), ("owner", None), ("pipeline", None),
                                               ("mcp", "shareable")])
 async def test_every_non_empty_span_is_reachable(w: World, channel: str, license_: str | None) -> None:
     await add_material(w, "ivan", MAT_EN, SPANS, config_id="book-en", outline=OUTLINE)
