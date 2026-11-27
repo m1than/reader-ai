@@ -20,6 +20,7 @@ from .conftest import need
 CHANNELS = ("mcp", "owner", "tutor", "pipeline")
 TYPES = ("exact", "thematic", "current_state", "fact_check")
 SLOTS = {"judge.find": "claude-haiku-4-5"}
+MODELS = ["BAAI/bge-m3@r1"]
 
 
 def _policy() -> Any:
@@ -44,8 +45,8 @@ def _refused(tmp_path: Path, data: dict[str, Any]) -> None:
 
 
 def _expected_route(channel: str, kind: str) -> dict[str, Any]:
-    """proposed_bounds routes_initial: L1 everywhere, every filter null, newest_as_of false, rrf false; the tutor
-    routes carry l5_boost true (inert)."""
+    """proposed_bounds routes_initial: L1 everywhere, every filter null, newest_as_of false, rrf false;
+    the tutor routes carry l5_boost true (inert)."""
     route: dict[str, Any] = {
         "layers": ["L1"],
         "filters": {"role": None, "form": None, "reliability_min": None, "newest_as_of": False},
@@ -106,7 +107,7 @@ def test_every_closed_object_refuses_an_extra_key(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "path, value",
+    ("path", "value"),
     [
         (("judge", "timeout_s"), 8.1),
         (("channels", "mcp", "budget_default"), 2001),  # default above max
@@ -163,7 +164,7 @@ def test_declared_has_fr_obs_21_keys_and_moves_with_each_input(tmp_path: Path) -
 
     def declared(data: dict[str, Any] | None = None, **kw: Any) -> dict[str, Any]:
         loaded = _load(tmp_path, data or _shipped()) if data is not None else policy.load(facets_path=facets)
-        args: dict[str, Any] = {"slots": SLOTS, "embedding_models": ["BAAI/bge-m3@r1"], "prompts_dir": prompts}
+        args: dict[str, Any] = {"slots": SLOTS, "embedding_models": MODELS, "prompts_dir": prompts}
         args.update(kw)
         result: dict[str, Any] = policy.declared(loaded, **args)
         return result
@@ -176,8 +177,8 @@ def test_declared_has_fr_obs_21_keys_and_moves_with_each_input(tmp_path: Path) -
     assert base["slots"] == SLOTS and base["embedding_models"] == ["BAAI/bge-m3@r1"]
     assert base["facets_sha256"] == hashlib.sha256(facets.read_bytes()).hexdigest()
     version = versions.policy_version(base)
-    assert policy.policy_version(policy.load(facets_path=facets), slots=SLOTS, embedding_models=["BAAI/bge-m3@r1"],
-                                 prompts_dir=prompts) == version
+    loaded = policy.load(facets_path=facets)
+    assert policy.policy_version(loaded, slots=SLOTS, embedding_models=MODELS, prompts_dir=prompts) == version
     changed = _shipped()
     changed["routes"]["mcp.exact"]["rrf"] = True
     assert versions.policy_version(declared(changed)) != version  # a route field

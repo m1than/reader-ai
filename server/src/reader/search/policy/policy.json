@@ -1,0 +1,65 @@
+{
+  "version": 1,
+  "channels": {
+    "mcp": {"budget_default": 2000, "budget_max": 2000},
+    "owner": {"budget_default": 2000, "budget_max": 10500},
+    "tutor": {"budget_default": 5250, "budget_max": 10500},
+    "pipeline": {"budget_default": 150000, "budget_max": 150000}
+  },
+  "routes": {
+    "mcp.exact": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "mcp.thematic": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "mcp.current_state": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "mcp.fact_check": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "owner.exact": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "owner.thematic": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "owner.current_state": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "owner.fact_check": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "tutor.exact": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false, "l5_boost": true},
+    "tutor.thematic": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false, "l5_boost": true},
+    "tutor.current_state": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false, "l5_boost": true},
+    "tutor.fact_check": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false, "l5_boost": true},
+    "pipeline.exact": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "pipeline.thematic": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "pipeline.current_state": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false},
+    "pipeline.fact_check": {"layers": ["L1"], "filters": {"role": null, "form": null, "reliability_min": null, "newest_as_of": false}, "rrf": false}
+  },
+  "question_rules": {
+    "identifier": [
+      "(?i)\\b(?:BIP|SLIP|RFC|EIP|ERC|NIP)[- ]?[0-9]{1,5}\\b",
+      "\\bOP_[A-Z0-9_]{2,30}\\b",
+      "\\b0x[0-9a-fA-F]{8,64}\\b"
+    ],
+    "current_state": {
+      "ru": ["(?i)(?:сейчас|текущ[а-яё]{0,4}|актуальн[а-яё]{0,4}|на данный момент|в настоящее время)"],
+      "en": ["(?i)\\b(?:currently|current|latest|nowadays|as of now|as of today|up to date)\\b"]
+    }
+  },
+  "card_budgets": {"L0": 200, "L1": 600, "L2": {"leaf": 100, "chapter": 300, "root": 500}},
+  "candidates_max": 50,
+  "expand_cap": 50,
+  "expand_per_card": 2,
+  "expand_decay": 0.5,
+  "preselect_factor": 1.5,
+  "objective": {"identifier_weight": 2, "lexeme_weight": 1, "relevance_weight": 1.0},
+  "same_point_tau": null,
+  "gate": {"mode": "never_judge", "margin": null},
+  "judge": {"timeout_s": 2.2, "input_cap_tokens": 3000},
+  "thresholds": {
+    "judge.find.sufficiency_threshold": 0.5,
+    "judge.eval.relevance.pass_threshold": 0.5,
+    "judge.eval.sufficiency.pass_threshold": 0.5,
+    "judge.eval.groundedness.pass_threshold": 0.5,
+    "judge.eval.self_contained.pass_threshold": 0.5,
+    "judge.eval.citation_supports_claim.pass_threshold": 0.5
+  },
+  "rrf_k": 60,
+  "w_dense": 5,
+  "k_max": 50,
+  "budget_min": 400,
+  "open_depth_max": 4,
+  "quote_max_chars": 300,
+  "quotes_per_card_max": 1,
+  "walk_quote_fraction_max": 0.1,
+  "owner_judge_run_cap_usd": 0.01
+}

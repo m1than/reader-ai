@@ -410,8 +410,10 @@ requirements:
       `declared()`. `policy.find_routes()` returns the route ids (SRV-OBS enum
       `find_routes`). Canonical JSON everywhere in this module = `json.dumps(sort_keys=True, separators=(",", ":"),
       ensure_ascii=False)` encoded as UTF-8; the token estimate of a string is SRV-AGENT's
-      `ceil(len(s) / chars_per_token_floor)` over code points. [unit]
-      test_policy_unit.py.
+      `ceil(len(s) / chars_per_token_floor)` over code points. The regex time bound is checked at load twice: a
+      repeat of more than one nested in another (star height > 1) is refused outright, then each pattern must answer
+      a fixed set of 1,000-character adversarial inputs within 50 ms. [unit] test_policy_unit.py (Green: lint-only
+      test edits, no oracle changed).
 
 invariants:
   - id: INV-SEARCH-1
