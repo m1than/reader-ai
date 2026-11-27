@@ -2058,8 +2058,15 @@ tasks:
         transaction per pack; locator fullmatch; shareable() fails closed on a null license; pending-branch test).
         REMAINING GATE: start_reconcile and the sweep are not wired into SRV-EVENTS' worker start (paired change);
         it must land before any consumer of profile_for_pack or active_view merges. PackGuard waits for SRV-AGENT.
-        Remaining units: 4 converter r3 and artifact format 2; 5 GC and purge (with the restore-vs-GC races);
-        6 facets.",
+        Unit 4 done: artifact format reader-ingest/2 (locators, quote hashes, parse_config, pack_id), CONVERTER_VERSION
+        docling-2.151.1+r3, no frozen version, status collected/purged (FR-INGEST-10..13, -15 first part, -17;
+        INV-INGEST-1, -2, -7; VEC-INGEST-1, -5); fixtures only, the pilot was not re-converted. MERGE GATE (code
+        review of unit A): the r3 CONVERTER_VERSION must not merge into the integration branch before (a) SRV-EVENTS
+        KIND_MODULES and SRV-OBS's span list serve ingest.seqmap and ingest.reanchor, (b) start_reconcile and the
+        sweep are wired at worker start, (c) the seqmap_missing re-enqueue (done). Code review of unit A: 6 blocking
+        fixed (vacuous deadlock test, int4 seq overflow, migrate_citations walk, no_targets and strict import,
+        seqmap re-enqueue with a sweep test, spanref edge tests, the gate). Remaining units: 5 GC and purge (with the
+        restore-vs-GC races); 6 facets.",
       what: "SRV-INGEST revision (~1,200–1,850 lines with the citation readers): span identity = ADR-0039 P2 locator
         (offsets into the page's canonical span text; empty text as a zero-length range with an ordinal; file and
         line range for non-PDF) + quote hash. Order: converter revision -> re-conversion -> seq-to-locator map, 1:1
