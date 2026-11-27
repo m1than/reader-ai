@@ -378,6 +378,40 @@ requirements:
       import nothing (ADR-0028). Another owner's rows and other ingests' rows stay. [db] test_search_forget_db.py:
       the call deletes exactly the owner's chunk and embed rows of that ingest and returns their count; a second
       ingest of the same owner and a row of another owner stay; a second call deletes nothing.
+  - id: FR-SEARCH-34   # ADR-0039 revision (V.kl-search-find), the draft's FR-SEARCH-21 renumbered (id taken)
+    text: >-
+      **Policy and facets as data (B6, B7a, B3 F4).** `reader/search/policy/policy.json` declares: `channels` (mcp,
+      owner, tutor, pipeline → `budget_default`, `budget_max`), `routes` (id `<channel>.<question type>` for every
+      channel × {exact, thematic, current_state, fact_check} → `layers` (ordered subset of L0..L4), `filters` (role,
+      form, reliability_min, newest_as_of), `rrf` (bool), `l5_boost` (tutor only, inert until S6.SRV-RECALL)),
+      `question_rules` (`identifier`: identifier regexes, language-independent; `current_state`: wording regexes per
+      language), `card_budgets`,
+      `candidates_max`, `expand_cap`, `expand_per_card`, `expand_decay`, `preselect_factor`, `objective` (weights),
+      `same_point_tau` (null until SRV-KB sets it with its links),
+      `gate` (`mode` ∈ never_judge | always_judge | margin, `margin` number or null, required when mode is margin),
+      `judge` (`timeout_s`, `input_cap_tokens`), `thresholds` (flat keys exactly as SRV-OBS FR-OBS-40/41 read them:
+      `judge.find.sufficiency_threshold` and `judge.eval.<name>.pass_threshold` for each judge.eval slot), `rrf_k`,
+      `w_dense`, `k_max`, `budget_min`, `open_depth_max`, `quote_max_chars`, `quotes_per_card_max`,
+      `walk_quote_fraction_max`, `owner_judge_run_cap_usd`. The shipped values are proposed_bounds' (`routes_initial`
+      for the route table).
+      `policy.schema.json` (Draft 2020-12) closes every object (`additionalProperties: false`) and bounds every number
+      (`timeout_s` ≤ 8.0; `preselect_factor` ≥ 1; `budget_default` ≤ `budget_max`, both ≥ `budget_min`; thresholds in
+      [0, 1]; `owner_judge_run_cap_usd` ≥ 0.002); filter values must be values of SRV-INGEST's facets file
+      (`reader/ingest/facets.yaml`, FR-INGEST-37), checked at load. Every `question_rules` pattern must pass the
+      regex time bound (proposed_bounds `regex_time`). The policy loads once per process; a file that fails its schema
+      or these checks stops the api and worker start with `policy_invalid` (no partial policy). `policy.declared()`
+      returns the declared data FR-OBS-21 hashes: the policy file's parsed content, the facets file's sha256, the
+      slot-to-model bindings of the judge slots from the effective config, the embedding model id(s) and the sha256 of
+      each prompt file by name; never the code version. Deviation (phase 2): FR-OBS-21's `policy_version` accepts only
+      its closed key set (routes, thresholds, k, rrf_k, facets_sha256, slots, embedding_models, prompts), so
+      `declared()` returns exactly those keys, with `routes` carrying the whole parsed policy file (so every declared
+      value moves the version), `thresholds`, `k` (= `k_max`) and `rrf_k` repeating their policy values, and `prompts`
+      the sha256 of each file under `reader/agent/prompts/`. `policy_version()` = FR-OBS-21's function over
+      `declared()`. `policy.find_routes()` returns the route ids (SRV-OBS enum
+      `find_routes`). Canonical JSON everywhere in this module = `json.dumps(sort_keys=True, separators=(",", ":"),
+      ensure_ascii=False)` encoded as UTF-8; the token estimate of a string is SRV-AGENT's
+      `ceil(len(s) / chars_per_token_floor)` over code points. [unit]
+      test_policy_unit.py.
 
 invariants:
   - id: INV-SEARCH-1
@@ -591,7 +625,8 @@ kl_revision:
     FR-SEARCH-28, FR-SEARCH-29, FR-SEARCH-30, FR-SEARCH-31, FR-SEARCH-33, INV-SEARCH-9, INV-SEARCH-10,
     INV-SEARCH-11, INV-SEARCH-12, INV-SEARCH-13, INV-SEARCH-14, INV-SEARCH-15, NFR-SEARCH-5, NFR-SEARCH-6,
     NFR-SEARCH-7, VEC-SEARCH-6, VEC-SEARCH-7, VEC-SEARCH-8, VEC-SEARCH-9, VEC-SEARCH-10]
-  retired_draft_ids: "FR-SEARCH-32 (response cache) dropped in round 1; the id is not reused"
+  retired_draft_ids: "FR-SEARCH-32 (response cache) dropped in round 1; the id is not reused. The draft's FR-SEARCH-21 (policy) collided with the approved FR-SEARCH-21 (forget_legacy, V.kl-ingest-packs) and is promoted as FR-SEARCH-34 (phase 2)"
+  phase_2_deviations: "Recorded at promotion, each in its item's text: FR-SEARCH-34 renumbered and declared() over FR-OBS-21's closed key set."
   revised_ids: [FR-SEARCH-3, FR-SEARCH-4, FR-SEARCH-5, FR-SEARCH-6, FR-SEARCH-7, FR-SEARCH-8, FR-SEARCH-9,
     FR-SEARCH-10, FR-SEARCH-20, INV-SEARCH-1, INV-SEARCH-2, INV-SEARCH-3, INV-SEARCH-4, INV-SEARCH-7, NFR-SEARCH-1,
     NFR-SEARCH-2, NFR-SEARCH-4, VEC-SEARCH-1, VEC-SEARCH-2, VEC-SEARCH-4, VEC-SEARCH-5]
@@ -599,7 +634,7 @@ kl_revision:
   kept_unchanged: "FR-SEARCH-1, -2, INV-SEARCH-5, -6, -8, NFR-SEARCH-3, VEC-SEARCH-3 (questions-v2: kept unchanged as the reference set of /api/search and of NFR-SEARCH-1's reported recall; NFR-SEARCH-2 now reads pilot-eval-v1); INV-SEARCH-1's owner isolation stays in force until SRV-SHARE specifies course reads (B8, P10), restated over the new tables below"
 
 proposed_bounds:
-  # Every value below lives in policy/policy.json (FR-SEARCH-21) and enters policy_version; this list gives its source.
+  # Every value below lives in policy/policy.json (FR-SEARCH-34, the draft's FR-SEARCH-21) and enters policy_version; this list gives its source.
   chars_per_token: "SRV-AGENT bounds.chars_per_token_floor (2.0), imported, never re-declared: estimate(s) = ceil(len(s) / 2.0) over Unicode code points (B8 invariant 3)"
   candidates_max: "50 — B6 step 2 (≤ 50 candidates) and B5's bounded scan; FR-SEARCH-7's measured depth"
   expand_cap: "50 — B6 step 5, initial"
@@ -867,33 +902,8 @@ proposed_revisions:
       - "change server/tests/search/test_search_db.py: VEC-SEARCH-5 over windows and query elements"
 
 proposed_requirements:
-  - id: FR-SEARCH-21
-    text: >-
-      **Policy and facets as data (B6, B7a, B3 F4).** `reader/search/policy/policy.json` declares: `channels` (mcp,
-      owner, tutor, pipeline → `budget_default`, `budget_max`), `routes` (id `<channel>.<question type>` for every
-      channel × {exact, thematic, current_state, fact_check} → `layers` (ordered subset of L0..L4), `filters` (role,
-      form, reliability_min, newest_as_of), `rrf` (bool), `l5_boost` (tutor only, inert until S6.SRV-RECALL)),
-      `question_rules` (identifier regexes and current-state wording regexes, per language), `card_budgets`,
-      `candidates_max`, `expand_cap`, `expand_per_card`, `expand_decay`, `preselect_factor`, `objective` (weights),
-      `same_point_tau` (null until SRV-KB sets it with its links),
-      `gate` (`mode` ∈ never_judge | always_judge | margin, `margin` number or null, required when mode is margin),
-      `judge` (`timeout_s`, `input_cap_tokens`), `thresholds` (flat keys exactly as SRV-OBS FR-OBS-40/41 read them:
-      `judge.find.sufficiency_threshold` and `judge.eval.<name>.pass_threshold` for each judge.eval slot), `rrf_k`,
-      `w_dense`, `k_max`, `budget_min`, `open_depth_max`, `quote_max_chars`, `quotes_per_card_max`,
-      `owner_judge_run_cap_usd`. The shipped values are proposed_bounds' (`routes_initial` for the route table).
-      `policy.schema.json` (Draft 2020-12) closes every object (`additionalProperties: false`) and bounds every number
-      (`timeout_s` ≤ 8.0; `preselect_factor` ≥ 1; `budget_default` ≤ `budget_max`, both ≥ `budget_min`; thresholds in
-      [0, 1]; `owner_judge_run_cap_usd` ≥ 0.002); filter values must be values of SRV-INGEST's facets file
-      (`reader/ingest/facets.yaml`, FR-INGEST-37), checked at load. Every `question_rules` pattern must pass the
-      regex time bound (proposed_bounds `regex_time`). The policy loads once per process; a file that fails its schema
-      or these checks stops the api and worker start with `policy_invalid` (no partial policy). `policy.declared()`
-      returns the declared data FR-OBS-21 hashes: the policy file's parsed content, the facets file's sha256, the
-      slot-to-model bindings of the judge slots from the effective config, the embedding model id(s) and the sha256 of
-      each prompt file by name; never the code version. `policy.find_routes()` returns the route ids (SRV-OBS enum
-      `find_routes`). Canonical JSON everywhere in this module = `json.dumps(sort_keys=True, separators=(",", ":"),
-      ensure_ascii=False)` encoded as UTF-8. [unit]
-    tests_planned:
-      - "add server/tests/search/test_policy_unit.py [unit]: the shipped file validates and equals routes_initial; each closed object refuses an extra key; out-of-range numbers refused (timeout 8.1, default > max, budget below budget_min, run cap 0.001); margin mode without margin refused; a filter value outside the facets file refused; every channel × type has a route; declared() changes with each input (a route field, the facets bytes, a slot model, the embed model, a prompt's bytes) and not with the code version; find_routes() equals the route ids; judge.input_cap_tokens equals SRV-AGENT's judge_find_input_tokens_max; each question_rules pattern on 1,000-character adversarial inputs (repeated identifier fragments, long runs without a match) ≤ 50 ms; canonical JSON keeps non-ASCII characters"
+  # FR-SEARCH-21 of the draft (the policy) moved to `requirements` as FR-SEARCH-34 with its Red test (phase 2,
+  # 2026-11-27): FR-SEARCH-21 is taken by forget_legacy (paired change of V.kl-ingest-packs).
   - id: FR-SEARCH-22
     text: >-
       **`find` entry, budget and response (B8).** `find(caller, channel, query, filters=None, k=None, budget=None,
@@ -1221,7 +1231,7 @@ kl_paired_changes:
   - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "as drafted there (FR-INGEST-35..39, -44, -45, on V/kl-ingest-packs), plus: `reader.ingest.overlays.begin` (registration of a building overlay) used by FR-SEARCH-5 step 3; restore calls `reader.search.ensure` for a restored material whose pack has no sealed vector overlay and a dead embed key (FR-SEARCH-9); the import names its profile (and tags) overlays through request_activation at its seal and enqueues search.embed {owner_id, pack_id, overlay_id} with the overlay id from FR-INGEST-36's function; `request_activation(conn, owner_id, pack_id, {vectors: id})` then `try_activate(conn, owner_id, pack_id)` callable inside the embed job's run transaction, try_activate returning its reason code (pack_purged, pack_collected, not_sealed make the embed job roll back); **new read** `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` (named apart from the `pack_profiles` table) → {license, language, role, reliability, as_of} from the head entry's profile overlay when the pack is active, else the pending activation's named profile overlay, else the import's (FR-SEARCH-5, -6, -9 read only this); the 'collected' state the buildable predicate reads (no generations); SRV-INGEST status (FR-INGEST-12, the upload view) and Retry (requeue_dead) read the search.embed key as [owner_id, overlay_id] instead of the ingest-based key; option (a): a legacy pack over backfilled locators that gets its own span-vector overlay (no legacy chunk rows as a vector overlay, no dual read path, one search-dark window per material, proposed_owner_notes); GC and purge call search.forget_legacy(conn, owner_id, ingest_id) for legacy chunk rows; the guarantee that materials.sha256 is computed by our code from the user's bytes (FR-SEARCH-30); INV-SEARCH-2 revised onto locators" }
   - { spec: SRV-TUTOR, task: V.kl-ingest-packs (SRV-INGEST's paired reader change), change: "before SRV-SEARCH's Green lands: tutor/store.spans_by_ids reads locator span ids through reader.ingest.spanref.resolve (both forms until FR-INGEST-41 has run), because search() then returns locators (FR-SEARCH-7 compatibility); the Hit Protocol (span_id, span_ids) is unchanged" }
   - { spec: SRV-TUTOR, task: V.kl-tutor-find, change: "retrieval through find on channel tutor with judge_ctx (line tutor, the question's run) instead of search(owner_id, query, k, material_sha256), which stays until then (FR-SEARCH-7); tutor budget default 5,250 / max 10,500 estimator tokens against the 21,000-byte source cap (FR-TUTOR-5's drop rule kept); citations by locator; NFR-TUTOR-3 re-measured as the gate" }
-  - { spec: SRV-OBS, task: V.kl-obs-spans, change: "FR-OBS-36 helpers called as in FR-SEARCH-33; policy_version over policy.declared(); find_routes and the facets values as enums; channel enum includes owner; thresholds read from the policy's `thresholds` keys judge.find.sufficiency_threshold and judge.eval.<name>.pass_threshold (FR-SEARCH-21); cards.read for FR-OBS-39/40; `reader.judge_skip` gains `slice_empty`; obs/runs.py's ingest Run reads of search_chunks and search_embeds (chunk count, embedded_at) move to the pack's span-vector overlay (row count of search_span_vectors for the overlay, the overlay's sealed_at), and the succeeded search.embed that enqueues obs.runs carries [owner_id, overlay_id]" }
+  - { spec: SRV-OBS, task: V.kl-obs-spans, change: "FR-OBS-36 helpers called as in FR-SEARCH-33; policy_version over policy.declared(); find_routes and the facets values as enums; channel enum includes owner; thresholds read from the policy's `thresholds` keys judge.find.sufficiency_threshold and judge.eval.<name>.pass_threshold (FR-SEARCH-34); cards.read for FR-OBS-39/40; `reader.judge_skip` gains `slice_empty`; obs/runs.py's ingest Run reads of search_chunks and search_embeds (chunk count, embedded_at) move to the pack's span-vector overlay (row count of search_span_vectors for the overlay, the overlay's sealed_at), and the succeeded search.embed that enqueues obs.runs carries [owner_id, overlay_id]" }
   - { spec: SRV-AGENT, change: "ask: FR-AGENT-21 (10) notifies `<request_id>:<code>` with code in the closed set {ok, recorded, output_invalid, budget, saturated, quota_refused, expired, error} (codes only, never text); FR-SEARCH-28 reads a bare id as `ok` until it lands. Possible owner follow-up: an `owner` ledger line instead of `mcp` for the owner channel" }
   - { spec: SRV-EVENTS, task: V.kl-deploy-judge-lane, change: "judge_requests columns as FR-AGENT-21 reads them plus request_id and input_sha256 as written by FR-SEARCH-28; LISTEN channel judge_done" }
   - { spec: SRV-PIPELINE, task: V.kl-pipeline-checks, change: "the fact-check route calls find(channel pipeline, question_type fact_check, judge_ctx line compile with the compile run); it reads brain_version from the response (= reader.ingest.manifest.active_view's for the owner) and policy_version from the response (= reader.obs.versions.policy_version(reader.search.policy.declared())) and puts both into its step's input_sha256 (FR-PIPELINE-3)" }
