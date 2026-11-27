@@ -2273,7 +2273,23 @@ tasks:
         proposed FR-LESSON-32 (revision_packs) with paired SRV-INGEST FR-INGEST-49 (views.citing_packs);
         SRV-PIPELINE proposed_revisions FR-PIPELINE-7, -27, INV-PIPELINE-3; WEB-NOTEBOOK proposed_revisions
         FR-NOTEBOOK-2; SRV-INGEST proposed FR-INGEST-40 step (r3 bump) with the owner's live re-conversion step
-        (reader-ingest --setup, watcher restart, reader-ingest <material>). CONVERTER_VERSION untouched.",
+        (reader-ingest --setup, watcher restart, reader-ingest <material>). CONVERTER_VERSION untouched.
+        Gate (h) also fixes a live bug: SRV-SEARCH already cites locators for legacy packs
+        (reader/search/store.py search()), so the tutor's Ask panel, sharing citations.ts's grouping, shows each
+        cited page as its own 'source spn:...' entry today.
+        Deep-reviewer (Fable) round 1 on 340bc02: changes, 5 blocking (gate findings confirmed), fixed in the specs:
+        (1) VEC-LESSON-1's if needs `required: [span]` (span-less source_ref / lab reference stay valid; 3 new
+        VEC-LESSON-3 cases); (2) FR-INGEST-49 citing_packs names one pack per locator (the active pack when it
+        holds the span, else the lowest pack id; FR-INGEST-42 steps 2, 4), none for a legacy id, so no backfill and
+        the r2 pack is not pinned; cross-spec note keys aligned; (3) compile runs in flight across the activation:
+        option (a), the owner step forbids compiles from the re-conversion until `appended`, INV-PIPELINE-3 stated
+        per step, a unit test over a legacy-id notebook with r3 aliases; (4) SRV-FRESH revision (FR-FRESH-2, -3,
+        -10: sample and claims carry quote_sha256 beside a locator) added to the bump precondition; (5) the bump's
+        tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is
+        covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused (tutor too); state labels go
+        to WEB-NOTEBOOK defers; a locator without hash fails closed. Real cost of skipping step (3)'s check: still
+        one dark window, but up to one embed longer, and the legacy embed's work is wasted. Not approved: awaiting
+        the coordinator's next review round.",
       what: "spec revisions for FR-INGEST-40 gates (e), (f), (h), (i) and the final CONVERTER_VERSION r3 step" }
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer

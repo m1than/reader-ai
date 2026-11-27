@@ -109,6 +109,7 @@ defers:
   - "older revisions and a revision picker: stage 4b"
   - "rust and deno kernels: stage 4a/4b"
   - "learner progress (which lessons a learner has read) for a 'next to study' that is not 'next unpublished': stage 6"
+  - "citation state labels '<title>, p. <page> (source removed)' / '(source changed)' for citations SRV-INGEST FR-INGEST-42 resolves `removed`, `orphaned` or `inactive` (SRV-INGEST cross-spec note; INV-NOTEBOOK-2's canary extends to the label): not part of FR-INGEST-40 gate (h). Trigger: SRV-LESSON's revision route returns each span citation's resolver state, which first matters when GC may collect a cited pack (SRV-INGEST gc.Seams.cited bound, SRV-LESSON FR-LESSON-32)"
 
 normative:
   - id: REF-NOTEBOOK-1
@@ -509,7 +510,10 @@ vectors:
 # V/slice-integration (83e1831): citations.ts `materialOf` takes the part before the last `:`, so a locator
 # `spn:<sha>:p70:0-120` groups as material `spn:<sha>:p70` and every page becomes its own entry ("source spn:bfaf…").
 # Only the grouping key changes; the "(source removed)" / "(source changed)" state labels of SRV-INGEST's cross-spec
-# note need the resolver's state in the lesson response and are not part of this gate (open question 1).
+# note need the resolver's state in the lesson response and are not part of this gate (recorded in `defers` with
+# their trigger; deep-reviewer round 1, 340bc02). The fix also corrects a live bug: SRV-SEARCH already cites
+# locators for legacy packs (reader/search/store.py), so the tutor's Ask panel, which shares this grouping
+# (FR-TUTOR-11), shows each cited page of a search hit as its own "source spn:…" entry today.
 proposed_revisions:
   - id: FR-NOTEBOOK-2
     text: >-
@@ -524,5 +528,5 @@ proposed_revisions:
       - "add to web/src/notebook/citations.test.ts [unit]: locators on pages 69, 70 and 75 of one material (synthetic 64-hex sha) → one entry \"<title>, pp. 69–70, 75\"; a legacy id and a locator of the same material → one entry with both pages; locators of two materials → two entries in first-use order; an empty-span locator (`:p3:40-40#0`) counts page 3; the fallback title of a locator-only material is \"source <first 8 hex of the sha>\", not \"source spn:…\"; a title on a legacy citation is used for the locator citations of its material (lessonTitles); `spn:` followed by fewer than 64 hex keeps the approved last-colon rule"
       # VEC-NOTEBOOK-1 (W01) is unchanged: the unit cases above carry their own synthetic citations.
 
-proposed_open_questions:
-  - "1. The state labels \"(source removed)\" / \"(source changed)\" (SRV-INGEST cross-spec note, FR-INGEST-42 states) need SRV-LESSON's revision route to return each citation's resolver state; left out of gate (h) as not needed for correct grouping. Should they block the bump?"
+proposed_decisions:  # deep-reviewer round 1 (340bc02), coordinator answer
+  - "The state labels do not block the bump and are not gate (h); they are recorded in `defers` with their trigger."

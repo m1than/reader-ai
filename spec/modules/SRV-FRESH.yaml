@@ -637,3 +637,35 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
 # material through one helper
 # `live_material(conn, owner_id, material_id)` that returns nothing for a deleted material (`materials.deleted_at
 # IS NOT NULL`, SRV-INGEST). Reports are kept (never deleted) and come back with the material's restore.
+
+# ---- Proposed revision (2026-11-28, V/kl-r3-gates; DRAFT, not approved): a precondition of SRV-INGEST
+# FR-INGEST-40-r3-bump (deep-reviewer round 1 on 340bc02, blocking 4). SRV-INGEST FR-INGEST-34: every citation that
+# names a locator carries the quote hash of the span it cited. After the bump the view mints locators for the r3
+# pack (FR-FRESH-2's paired change), so a report's `sample[].span` and `claims[].span` would name locators without
+# their hash. Legacy ids (every stored report) are unchanged and carry no hash (the same rule as SRV-LESSON's
+# schema). Not changed: `scan_inputs_sha256` (span ids only; a locator already fixes its span), the prompt (aliases
+# only), the rest of the SRV-INGEST note for this module (the pack id in `scan_inputs_sha256`), FR-FRESH-10 rows
+# already stored (never updated).
+proposed_revisions:
+  - id: FR-FRESH-2
+    text: >-
+      As approved (with its active-pack paired change), plus: a sampled span whose view id is a locator records its
+      stored `quote_sha256` (`views.PackSpan.quote_sha256`), and the stored sample entry is `{span, page,
+      quote_sha256}` for a locator and `{span, page}` for a legacy id, as before. A locator span without a stored
+      hash cannot occur (an active pack is sealed); if it does, the check fails `output_invalid` (fail closed, as
+      SRV-PIPELINE FR-PIPELINE-7).
+    tests_planned:
+      - "add to server/tests/freshness/test_freshness_active_pack_db.py [db]: with the material's r3 pack active the stored sample's entries are {span: <locator>, page, quote_sha256} with the spans' stored hashes; with the r2 legacy pack active they stay {span: <sha>:<seq>, page} (no hash key), byte-identical to today's sample"
+      - "add to server/tests/freshness/test_units.py [unit]: a Picked span with a locator id and no hash fails output_invalid; scan_inputs_sha256 of a sample is unchanged by the added hash field"
+  - id: FR-FRESH-3
+    text: >-
+      As approved, plus: code's expansion of a claim's alias adds the span's `quote_sha256` beside a locator
+      (`{…, page, span, quote_sha256}`); a legacy id gets none.
+    tests_planned:
+      - "add to test_freshness_active_pack_db.py [db] (fake provider): a scan over the r3 pack stores claims whose span is a locator with its span's quote_sha256; over the legacy pack, no quote_sha256 key"
+  - id: FR-FRESH-10
+    text: >-
+      As approved, with the read shape's `claims` entries gaining `quote_sha256` when `span` is a locator (an
+      additive field; WEB-FRESH VEC-FRESHUI-1 ignores unknown fields — to be confirmed in WEB-FRESH's paired note).
+    tests_planned:
+      - "change server/tests/freshness/test_freshness_db.py's read-shape test [db]: a report scanned over an r3 pack returns claims with quote_sha256; a legacy report's claims are unchanged"

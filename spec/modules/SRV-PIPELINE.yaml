@@ -1148,11 +1148,14 @@ proposed_revisions:
       no stored hash cannot occur (an active pack is sealed, and the seal trigger requires it); if it does, the step
       fails `output_invalid`, never a citation without its hash. The material of a span id is
       `reader.pipeline.notebook.material_of(span_id)`: `reader.ingest.locator.parse(span_id).material_sha256` for a
-      locator, the part before the `:` for a legacy id (`locator.is_legacy_id`), never a split of a locator on `:`.
+      locator, the part before the `:` for a legacy id (`locator.is_legacy_id`), never a split of a locator on `:`;
+      a string of neither form raises `LocatorError` (the caller's step fails `output_invalid`; every id it is given
+      came from a view, so this is unreachable in operation).
       The model's compact view (`to_compact`) maps a stored citation back to its alias by span id and drops
       `quote_sha256` (the model never sees ids or hashes).
     tests_planned:
-      - "add to server/tests/pipeline/test_source_and_reports.py [unit]: expand_citations over one legacy-pack Span and one r3 Span (synthetic sha, synthetic text) → the legacy citation is {span, page, material_title}, the r3 one adds its quote_sha256; material_of over a PDF locator, an empty-span locator (#0) and a legacy id gives the 64-hex material; an r3 Span with quote_sha256 None → output_invalid"
+      - "add to server/tests/pipeline/test_source_and_reports.py [unit]: expand_citations over one legacy-pack Span and one r3 Span (synthetic sha, synthetic text) → the legacy citation is {span, page, material_title}, the r3 one adds its quote_sha256; material_of over a PDF locator, an empty-span locator (#0) and a legacy id gives the 64-hex material, and over `spn:abc`, `a:b:3` and `` raises LocatorError; an r3 Span with quote_sha256 None → output_invalid"
+      - "add to test_source_and_reports.py [unit] (round 1, blocking 3): a stored notebook whose citations hold legacy ids (written by a draft over the legacy pack) while the step's aliases are r3 spans: to_compact, the rule checks (FR-PIPELINE-24) and the failing check's payload to revise run without an exception; each legacy-id citation appears as `{span: unknown}` in the compact view and in the payload; no span id or quote hash reaches either"
       - "add to test_source_and_reports.py [unit]: build() of a compact notebook citing an r3 span in an explain claim, an erratum source_ref, a route source_refs entry and a lab reference validates under SRV-LESSON's revised schema, each with the span's hash and source_ref.material_sha256 equal to the material; to_compact gives back the aliases with no quote_sha256 key"
       - "add to server/tests/pipeline/test_source_active_pack_db.py [db]: with the material's r3 pack active, DbSpanReader's spans carry the stored quote hashes and a compiled draft's citations name locators with them"
   - id: FR-PIPELINE-27
@@ -1165,12 +1168,16 @@ proposed_revisions:
       - "change spec/fixtures/SRV-PIPELINE/credibility.yaml (VEC-PIPELINE-6) and its test in test_source_and_reports.py: the span placeholders `A:<n>` / `B:<n>` gain locator forms (`spn:A:p<n>:<s>-<e>`, A and B 64-hex) with cases supported-1-two-locators-one-material → 2, supported-1-locators-two-materials → 1, supported-1-locator-and-legacy-same-material → 2; the existing cases keep their expectations"
   - id: INV-PIPELINE-3
     text: >-
-      As revised by ADR-0039, plus: a span citation (and a `source_ref`, `source_refs` entry or lab `reference`) that
-      names a locator carries the `quote_sha256` of that span in the lesson's source, and its `material_sha256`
-      (where the object has one) equals the locator's material.
+      As revised by ADR-0039, with "the lesson's source" read as **the source as loaded by the step that wrote the
+      citation** (a run in flight across an activation may hold citations of the pack its draft loaded; SRV-INGEST
+      FR-INGEST-40-r3-bump's owner step forbids such runs for the pilot, round 1, blocking 3), plus: a span citation
+      (and a `source_ref`, `source_refs` entry or lab `reference`) that names a locator carries the `quote_sha256`
+      of that span in that source, and its `material_sha256` (where the object has one) equals the locator's
+      material.
     tests_planned:
       - "change test_pipeline_db.py [db]: the INV-PIPELINE-3 check over stored revisions also compares each locator citation's quote_sha256 with the source span's stored hash"
 
-proposed_open_questions:
-  - "1. A locator span with no stored hash fails the step (output_invalid) rather than dropping the citation. The seal trigger makes it unreachable; is fail-closed the right shape?"
-  - "2. VEC-PIPELINE-6 is extended in place (new cases, old ones kept) rather than replaced; the old `A:1` placeholders are legacy-id shaped and stay valid."
+proposed_decisions:  # deep-reviewer round 1 (340bc02), coordinator answers
+  - "A locator span with no stored hash fails the step closed (output_invalid), never a citation without its hash."
+  - "VEC-PIPELINE-6 is extended in place (new cases, old ones kept); the old `A:1` placeholders are legacy-id shaped and stay valid."
+  - "A compile run in flight across the r3 activation: option (a), the owner step forbids it and INV-PIPELINE-3 is stated per step."
