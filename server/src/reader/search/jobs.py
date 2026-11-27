@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from reader.ingest import views
 from reader.jobs.model import JobContext, JobKind, idempotency_key
 from reader.obs.spans import child_span
 from reader.search import embed_client, params
@@ -50,38 +51,28 @@ def embed_args(material_sha256: str, ingest_id: UUID, fts_config: str) -> EmbedA
     )
 
 
-async def _resolve(conn: AsyncConnection, args: EmbedArgs) -> UUID:
-    """FR-SEARCH-5 step 1: the material's frozen ingest. None yet is IngestNotReady at once (SRV-EVENTS
-    retries it; the worker's only slot is not held); another ingest is `ingest_superseded`."""
-    found = (
-        await conn.execute(
-            text(
-                "SELECT i.owner_id FROM ingests i JOIN materials m ON m.id = i.material_id"
-                " WHERE i.id = :i AND m.sha256 = :s"
-            ),
-            {"i": args.ingest_id, "s": args.material_sha256},
-        )
-    ).first()
-    if found is not None:
-        owner: UUID = found[0]
-        return owner
-    other = (
-        await conn.execute(
-            text(
-                "SELECT 1 FROM ingests i JOIN materials m ON m.id = i.material_id"
-                " WHERE m.sha256 = :s LIMIT 1"
-            ),
-            {"s": args.material_sha256},
-        )
-    ).first()
-    if other is not None:
+async def _resolve(conn: AsyncConnection, args: EmbedArgs) -> views.Pack:
+    """FR-SEARCH-5 step 1: the ingest's base pack (SRV-INGEST views). None yet is IngestNotReady at once
+    (SRV-EVENTS retries it; the worker's only slot is not held); another pack only is `ingest_superseded`."""
+    pack = await views.pack_of_ingest(conn, args.ingest_id)
+    if pack is not None and pack.material_sha256 == args.material_sha256:
+        return pack
+    if await views.material_has_pack(conn, args.material_sha256):
         raise SearchError("ingest_superseded")
     raise IngestNotReady("ingest_not_ready")
 
 
+async def _activate(conn: AsyncConnection, pack: views.Pack) -> None:
+    """FR-INGEST-39's contract on the legacy path: the embedded pack becomes active once it is searchable."""
+    from reader.ingest import manifest
+
+    await manifest.try_activate(conn, pack.owner_id, pack.pack_id)
+
+
 async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) -> None:
     del ctx
-    owner = await _resolve(conn, args)
+    pack = await _resolve(conn, args)
+    owner = pack.owner_id
     fts_config = await fts_config_of(conn, args.material_sha256, args.ingest_id)
     if args.model != params.MODEL_ID or args.params_sha256 != params.params_sha256(fts_config):
         raise SearchError("params_mismatch")
@@ -90,15 +81,13 @@ async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) 
         {"i": args.ingest_id, "m": args.model, "p": args.params_sha256},
     )
     if done.first() is not None:
+        await _activate(conn, pack)
         return
     await embed_client.wait_healthy(HEALTH_WAIT_S)
-    rows = await conn.execute(
-        text("SELECT seq, page, text FROM material_spans WHERE ingest_id = :i ORDER BY seq"),
-        {"i": args.ingest_id},
-    )
+    rows = await views.pack_spans(conn, pack)
     with child_span("ingest.chunk") as chunked:  # SRV-OBS FR-OBS-13: counts only
         chunks = chunk_spans(
-            [Span(int(r[0]), int(r[1]), str(r[2])) for r in rows],
+            [Span(r.seq, r.page, r.text) for r in rows],
             size=params.CHUNK_SIZE,
             overlap=params.CHUNK_OVERLAP,
             min_len=params.CHUNK_MIN,
@@ -135,6 +124,7 @@ async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) 
         ),
         {"o": owner, "i": args.ingest_id, "m": args.model, "p": args.params_sha256, "n": len(chunks)},
     )
+    await _activate(conn, pack)
     log.info("embedded chunks=%d", len(chunks))
 
 
@@ -154,8 +144,8 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
         embeds = (
             await conn.execute(
                 text(
-                    "SELECT count(*) FROM search_embeds e JOIN ingests i ON i.id = e.ingest_id"
-                    " AND i.owner_id = e.owner_id WHERE e.ingest_id = :i"
+                    "SELECT count(*) FROM search_embeds e JOIN base_packs b ON b.ingest_id = e.ingest_id"
+                    " AND b.owner_id = e.owner_id WHERE e.ingest_id = :i"
                 ),
                 {"i": str(payload["ingest_id"])},
             )
@@ -190,20 +180,16 @@ JOB_KINDS: Final[tuple[JobKind, ...]] = (
 
 
 async def _current_args(queue: Any, owner_id: UUID, material_sha256: str) -> EmbedArgs | None:
+    """The key of the material's active pack's ingest, else of its newest live pack (awaiting activation)."""
     async with queue.engine.connect() as conn:
-        row = (
-            await conn.execute(
-                text(
-                    "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id"
-                    " WHERE m.owner_id = :o AND m.sha256 = :s"
-                ),
-                {"o": owner_id, "s": material_sha256},
-            )
-        ).first()
-        if row is None:
+        pack = await views.active_pack(conn, owner_id, material_sha256)
+        if pack is None:
+            live = [p for p in await views.live_packs(conn, owner_id) if p.material_sha256 == material_sha256]
+            pack = live[-1] if live else None
+        if pack is None:
             return None
-        fts_config = await fts_config_of(conn, material_sha256, row[0])
-    return embed_args(material_sha256, row[0], fts_config)
+        fts_config = await fts_config_of(conn, material_sha256, pack.ingest_id)
+    return embed_args(material_sha256, pack.ingest_id, fts_config)
 
 
 def _key(args: EmbedArgs) -> str:
@@ -245,9 +231,8 @@ async def on_worker_start(queue: Any) -> None:
     Dead keys stay dead (only `ensure` requeues them), so a permanent failure is not retried on every restart.
     The worker's start-hook handler guards the whole hook (reader.jobs.worker).
     """
-    imported = "SELECT i.owner_id, m.sha256 FROM ingests i JOIN materials m ON m.id = i.material_id"
     async with queue.engine.connect() as conn:
-        rows = (await conn.execute(text(imported))).all()
+        rows = dict.fromkeys((p.owner_id, p.material_sha256) for p in await views.live_packs(conn))
     for owner_id, material_sha256 in rows:
         args = await _current_args(queue, owner_id, material_sha256)
         if args is not None and str(await queue.job_status(KIND, _key(args))) == "none":
