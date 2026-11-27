@@ -25,7 +25,7 @@ from reader.freshness.bibliography import FIELDS, from_scan
 from reader.freshness.errors import OutputInvalid
 from reader.freshness.prompts import Prompt
 from reader.freshness.queries import subject_ok
-from reader.freshness.sample import Picked, Sample, span_id
+from reader.freshness.sample import Picked, Sample
 from reader.freshness.text import clean, has_surrogate, sanitise, vocabulary
 
 OPEN: Final = "⟦source⟧"
@@ -122,7 +122,7 @@ def parse(text: str, aliases: Mapping[str, Picked], material_sha256: str, today:
         kept.append(
             {
                 "id": f"c{len(kept) + 1}",
-                "span": span_id(material_sha256, span.seq),
+                "span": span.id_in(material_sha256),
                 "page": span.page,
                 "subject": sanitise(subject, params.SUBJECT_CHARS_MAX),
                 "kind": item["kind"],

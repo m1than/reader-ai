@@ -30,6 +30,7 @@ class SpanRow:
     page: int
     kind: str
     text: str
+    span_id: str | None = None  # SRV-INGEST views' id (FR-FRESH-2's paired change); None: `<sha>:<seq>`
 
 
 @dataclass(frozen=True)
@@ -47,6 +48,10 @@ class Picked:
     kind: str
     text: str  # cut to span_chars_max
     front: bool
+    span_id: str | None = None
+
+    def id_in(self, material_sha256: str) -> str:
+        return self.span_id or span_id(material_sha256, self.seq)
 
 
 @dataclass(frozen=True)
@@ -63,7 +68,7 @@ class Sample:
 
     def stored(self, material_sha256: str) -> list[dict[str, object]]:
         """What the report stores: span ids and pages only (FR-FRESH-2)."""
-        return [{"span": span_id(material_sha256, p.seq), "page": p.page} for p in self.spans]
+        return [{"span": p.id_in(material_sha256), "page": p.page} for p in self.spans]
 
     @property
     def non_front_texts(self) -> list[str]:
@@ -78,7 +83,7 @@ class Topic:
 
 
 def span_id(material_sha256: str, seq: int) -> str:
-    """SRV-INGEST FR-INGEST-17's public span id."""
+    """SRV-INGEST FR-INGEST-17's public span id (a legacy pack's; an r3 pack's spans carry their locator)."""
     return f"{material_sha256}:{seq}"
 
 
@@ -113,7 +118,7 @@ def build(spans: Sequence[SpanRow], outline: Sequence[OutlineRow], page_count: i
             continue
         if used + len(piece) > params.FRONT_CHARS_MAX:
             break
-        picked.append(Picked(span.seq, span.page, span.kind, piece, True))
+        picked.append(Picked(span.seq, span.page, span.kind, piece, True, span.span_id))
         used += len(piece)
     front = {p.seq for p in picked}
     others = [s for s in ordered if s.seq not in front and s.kind in BODY_KINDS and s.text.strip()]
@@ -132,7 +137,7 @@ def build(spans: Sequence[SpanRow], outline: Sequence[OutlineRow], page_count: i
             if used + len(piece) > params.SAMPLE_CHARS_MAX:
                 full = True
                 break
-            picked.append(Picked(span.seq, span.page, span.kind, piece, False))
+            picked.append(Picked(span.seq, span.page, span.kind, piece, False, span.span_id))
             used += len(piece)
         rank += 1
     return Sample(tuple(sorted(picked, key=lambda p: p.seq)))

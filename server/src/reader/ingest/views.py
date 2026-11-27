@@ -2,8 +2,8 @@
 
 Other modules never name the ingest tables: they find a material's pack through the owner's head manifest
 entry (`active_pack`) and read its spans and outline here. A pack and its `ingests` row are one to one
-(FR-INGEST-35), so a pack is addressed by its ingest id, the key other modules already store (`study_plans`,
-`freshness_reports`). Span ids follow FR-INGEST-33: the locator, except for a pack of a legacy converter
+(FR-INGEST-35), so a pack is addressed by its ingest id, the key other modules already store (SRV-PLAN's and
+SRV-FRESH's rows). Span ids follow FR-INGEST-33: the locator, except for a pack of a legacy converter
 version, whose spans keep the `<material_sha256>:<seq>` form that published citations and the seq map already
 hold (FR-INGEST-17, -40, -42).
 """
