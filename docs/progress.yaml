@@ -2065,8 +2065,13 @@ tasks:
         KIND_MODULES and SRV-OBS's span list serve ingest.seqmap and ingest.reanchor, (b) start_reconcile and the
         sweep are wired at worker start, (c) the seqmap_missing re-enqueue (done). Code review of unit A: 6 blocking
         fixed (vacuous deadlock test, int4 seq overflow, migrate_citations walk, no_targets and strict import,
-        seqmap re-enqueue with a sweep test, spanref edge tests, the gate). Remaining units: 5 GC and purge (with the
-        restore-vs-GC races); 6 facets.",
+        seqmap re-enqueue with a sweep test, spanref edge tests, the gate). Unit 5 done: GC and purge
+        (reader.ingest.gc: ingest.gc daily scanner, gc_pack, gc_overlay, purge; FR-INGEST-44, -45, -32 rev,
+        INV-INGEST-14) with the restore-vs-GC and rollback-vs-gc_overlay races, the packs listing and owner purge
+        routes (404 for a foreign pack). Recorded deviations: purge promoted without PackGuard (a judge output
+        committed after a purge may name the pack until SRV-AGENT's PackGuard); seams declared in gc.Seams —
+        SRV-SEARCH forget_overlay/forget_legacy and SRV-EVENTS judge_requests purge are no-ops until paired; `cited`
+        fails closed (no pack is collected until SRV-LESSON revision_packs and SRV-KB bind it). Remaining: 6 facets.",
       what: "SRV-INGEST revision (~1,200–1,850 lines with the citation readers): span identity = ADR-0039 P2 locator
         (offsets into the page's canonical span text; empty text as a zero-length range with an ordinal; file and
         line range for non-PDF) + quote hash. Order: converter revision -> re-conversion -> seq-to-locator map, 1:1
