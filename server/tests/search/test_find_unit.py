@@ -130,7 +130,7 @@ def test_each_validation_code(kw: dict[str, Any], code: str) -> None:
 def test_budget_min_is_accepted_and_a_budget_above_max_is_clamped() -> None:
     assert _run(Corpus([]), budget=400)["budget"] == 400
     assert _run(Corpus([]), channel="mcp", budget=999_999)["budget"] == 2000
-    assert _run(Corpus([]), channel="tutor")["budget"] == 5250
+    assert _run(Corpus([]), channel="tutor")["budget"] == 10500
     assert _run(Corpus([]))["budget"] == 2000
 
 

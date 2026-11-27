@@ -1161,7 +1161,7 @@ proposed_bounds:
   quote_max_chars: "300 — ADR-0008 Decision 4, ADR-0015, B8"
   quotes_per_card_max: "1 — initial: a non-L1 card quotes at most one citation; over the pilot's 494 outline entries that is ≤ 148,200 quoted characters, about 7% of the material's ≈ 2.11 M characters (9,463 spans × 223 mean, spikes/retrieval-ablation)"
   walk_quote_fraction_max: "0.10 — initial: the per-pack quote allowance (FR-SEARCH-30) grants quotes in outline order until the distinct quoted code points reach 10% of the pack's span text, so any walk sees at most that (INV-SEARCH-12); for the pilot about 7% is expected from the line above, so the allowance should not bind there"
-  channel_budgets: "tokens by the estimator: mcp default 2000 / max 2000 (owner decision 17); owner default 2000 / max 10500 (the tutor's maximum, so the internal owner channel can reproduce tutor-sized reads; the B9 target is ≤ 2,000 and the evaluation harness passes its budget explicitly); tutor default 5250 / max 10500 (5,250 tokens = 10,500 characters ≈ 21,000 bytes of Cyrillic, the unit SRV-TUTOR enforces: its 21,000-byte source cap, B8 'starts at its current source budget'); pipeline default = max 150000 (= SRV-PIPELINE bounds.source_max_chars 300,000 / 2.0)"
+  channel_budgets: "tokens by the estimator: mcp default 2000 / max 2000 (owner decision 17); owner default 2000 / max 10500 (the tutor's maximum, so the internal owner channel can reproduce tutor-sized reads; the B9 target is ≤ 2,000 and the evaluation harness passes its budget explicitly); tutor default = max 10500 (V.kl-tutor-find, kl_tutor_find.policy_change: the earlier default 5,250 counted span text only, but an L1 card costs 400.6 estimator tokens on the pilot, SRV-TUTOR M1, so 10,500 holds about 25 cards; SRV-TUTOR's 21,000-byte source cap still binds what is sent, B8 'starts at its current source budget'); pipeline default = max 150000 (= SRV-PIPELINE bounds.source_max_chars 300,000 / 2.0)"
   budget_min: "400 — the estimate of the response envelope with no cards (two 64-hex versions and the fixed keys, ≈ 220 characters, ≈ 110 tokens) plus the smallest card (an L2 card with empty text: its id, one citation with a locator and a quote hash, and a source id, four 64-hex values and the fixed keys, ≈ 460 characters, ≈ 230 tokens), rounded up; a unit test pins budget_min ≥ that computed sum; below it → budget_invalid"
   owner_judge_run_cap_usd: "0.01 — initial; schema minimum 0.002 (SRV-AGENT bounds.judge_find_floor_usd), so one judge call always fits its own run"
   open_depth_max: "4 — B8 initial value"
@@ -1495,7 +1495,8 @@ kl_tutor_find:
       a card's JSON costs about 330 tokens before its title and text (`cards.cost`, SRV-TUTOR proposed_bounds find_budget), so
       the tutor's source budget needs the maximum. This moves `policy_version` (FR-OBS-21 over `declared()`): judge
       outputs recorded under the old version are not replayed for new requests (none exist while the gate is
-      `never_judge`). Initial until SRV-TUTOR's M1.
+      `never_judge`). M1 (spikes/tutor-find-m1): mean L1 card cost 400.6 tokens, about 25 cards in 10,500.
+      Promoted into proposed_bounds.channel_budgets with the tests below (2026-11-28).
     tests_planned:
       - "change server/tests/search/test_policy_unit.py [unit]: tutor budget_default == budget_max == the owner channel's budget_max"
       - "change server/tests/search/test_find_unit.py:133 [unit]: the tutor channel's default budget is 10500 (was 5250)"
