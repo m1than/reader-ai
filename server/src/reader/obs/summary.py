@@ -318,14 +318,12 @@ LESSON_TITLES_SQL: Final = (
     " JOIN courses c ON c.id = l.course_id WHERE l.owner_id = :o AND l.id = ANY(:ids)"
     " AND l.deleted_at IS NULL AND c.deleted_at IS NULL"  # a tombstoned lesson or course shows as deleted
 )
-# SRV-PIPELINE's DbSpanReader's rows per lesson; owner-scoped at every table; the database returns numbers
-LESSON_CHARS_SQL: Final = (
-    "SELECT p.lesson_id, sum(char_length(s.text)) AS chars FROM course_plans p"
+# SRV-PIPELINE's DbSpanReader's rows per lesson: the lessons' page ranges here (owner-scoped), their
+# characters from the material's active pack through SRV-INGEST's views (INV-INGEST-16); numbers only
+LESSON_PAGES_SQL: Final = (
+    "SELECT p.lesson_id, p.material_sha256, p.pdf_first, p.pdf_last FROM course_plans p"
     " JOIN materials m ON m.sha256 = p.material_sha256 AND m.owner_id = :o"
-    " JOIN ingests i ON i.material_id = m.id"
-    " JOIN material_spans s ON s.ingest_id = i.id AND s.owner_id = :o"
-    " AND s.page BETWEEN p.pdf_first AND p.pdf_last"
-    " WHERE p.owner_id = :o AND p.lesson_id = ANY(:ids) GROUP BY p.lesson_id"
+    " WHERE p.owner_id = :o AND p.lesson_id = ANY(:ids)"
 )
 LESSONS_LIMIT: Final = 200
 MLFLOW_LESSON_URL: Final = "https://localhost:8443/#/experiments/0/traces?q={}"
@@ -335,6 +333,27 @@ def _per_1k(total: Decimal, chars: int | None) -> float | None:
     if not chars:
         return None
     return float(round(total / (Decimal(chars) / 1000), 6))
+
+
+async def _lesson_chars(
+    conn: AsyncConnection, owner: uuid.UUID, ids: list[uuid.UUID]
+) -> dict[uuid.UUID, int]:
+    """Per lesson, the characters of the active pack's spans on its pages; absent when it has none there."""
+    from reader.ingest import views
+
+    heads = await views.active_packs(conn, owner)
+    pages: dict[str, dict[int, int]] = {}
+    out: dict[uuid.UUID, int] = {}
+    for r in await _rows(conn, LESSON_PAGES_SQL, o=owner, ids=ids):
+        pack = heads.get(r.material_sha256)
+        if pack is None:
+            continue
+        if r.material_sha256 not in pages:
+            pages[r.material_sha256] = {p: n for p, n, _ in await views.page_stats(conn, pack)}
+        found = [n for p, n in pages[r.material_sha256].items() if r.pdf_first <= p <= r.pdf_last]
+        if found:
+            out[r.lesson_id] = sum(found)
+    return out
 
 
 async def _lessons(conn: AsyncConnection, owner: uuid.UUID, since: datetime) -> dict[str, Any]:
@@ -352,9 +371,8 @@ async def _lessons(conn: AsyncConnection, owner: uuid.UUID, since: datetime) -> 
     ids = sorted(per)
     titles = {r.id: r for r in await _rows(conn, LESSON_TITLES_SQL, o=owner, ids=ids)} if ids else {}
     chars: dict[uuid.UUID, int] = {}
-    if titles and (await conn.execute(text("SELECT to_regclass('material_spans')"))).scalar() is not None:
-        found = await _rows(conn, LESSON_CHARS_SQL, o=owner, ids=list(titles))
-        chars = {r.lesson_id: int(r.chars) for r in found}
+    if titles and (await conn.execute(text("SELECT to_regclass('base_packs')"))).scalar() is not None:
+        chars = await _lesson_chars(conn, owner, list(titles))
     rows: list[dict[str, Any]] = []
     for lesson_id, p in per.items():
         t = titles.get(lesson_id)  # None: the lesson was deleted; its spend stays (totals equal the ledger)

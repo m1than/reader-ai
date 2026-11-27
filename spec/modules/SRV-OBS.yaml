@@ -734,7 +734,9 @@ requirements:
       no active pack gives null. The Run snapshot of an import (FR-OBS-20) reads the ingest's counts through
       `views.ingest_facts`, by its ingest id, whatever its pack's state. Fixtures seal their ingests as active r2
       packs (server/tests/ingest/packseed.py); tests that changed span texts after the import choose them before it
-      (a sealed pack's rows are immutable). [db] test_summary.py.
+      (a sealed pack's rows are immutable). [db] test_summary.py: VEC-OBS-3's ingests sealed as active packs give
+      its expected JSON unchanged; an r3 pack of the owner's material with other page lengths, inactive, changes no
+      chars, and once activated replaces the r2 pack's (never the sum).
   - id: FR-OBS-14
     text: >-
       Under ADR-0035 (accepted 2026-11-24: the worker's assessment and prompt writes to MLflow). Code-sourced

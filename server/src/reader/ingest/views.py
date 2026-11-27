@@ -62,7 +62,9 @@ class OutlineEntry:
 
 @dataclass(frozen=True)
 class IngestFacts:
-    pack: Pack
+    owner_id: uuid.UUID
+    material_sha256: str
+    converter_version: str
     span_count: int
     imported_at: datetime
     page_count: int
@@ -163,14 +165,15 @@ async def pack_outline(conn: AsyncConnection, pack: Pack) -> list[OutlineEntry]:
 
 
 async def ingest_facts(conn: AsyncConnection, ingest_id: uuid.UUID) -> IngestFacts | None:
-    """An ingest's recorded counts (SRV-OBS's Run of an import), whatever its pack's state."""
-    pack = await pack_of_ingest(conn, ingest_id)
-    if pack is None:
-        return None
+    """An ingest's recorded row (SRV-OBS's Run of an import), whatever its pack's state."""
     row = (await conn.execute(text(
-        "SELECT i.span_count, i.imported_at, m.page_count FROM ingests i JOIN materials m"
-        " ON m.id = i.material_id AND m.owner_id = i.owner_id WHERE i.id = :i"), {"i": ingest_id})).one()
-    return IngestFacts(pack, int(row[0]), row[1], int(row[2]))
+        "SELECT i.owner_id, m.sha256, i.converter_version, i.span_count, i.imported_at, m.page_count"
+        " FROM ingests i JOIN materials m ON m.id = i.material_id AND m.owner_id = i.owner_id"
+        " WHERE i.id = :i"),
+        {"i": ingest_id})).first()
+    if row is None:
+        return None
+    return IngestFacts(row[0], str(row[1]), str(row[2]), int(row[3] or 0), row[4], int(row[5] or 0))
 
 
 async def active_span_texts(
