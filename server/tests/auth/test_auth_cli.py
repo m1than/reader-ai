@@ -92,7 +92,7 @@ def test_lane_defaults_to_main_and_reaches_the_worker(monkeypatch: pytest.Monkey
 def test_run_worker_hands_its_lane_to_the_job_runner(
     monkeypatch: pytest.MonkeyPatch, args: tuple[str, ...], lane: str
 ) -> None:
-    """FR-AUTH-2 (paired SRV-EVENTS FR-EVENTS-9): `_run_worker` passes its lane to `reader.jobs.worker.run`."""
+    """FR-AUTH-2 (paired FR-EVENTS-9): `_run_worker` passes its lane to `reader.jobs.worker.run`."""
     import reader.jobs.worker
     from reader.config import Secret
     from reader.db import DbTarget

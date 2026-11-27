@@ -237,7 +237,7 @@ requirements:
       for ruff, no oracle changed. test_auth_db.py's missing-branch case deletes the `jobs` branch's new head,
       jobs_0004 (SRV-EVENTS FR-EVENTS-33), instead of jobs_0003; same oracle. Code review round 1: a unit test
       drives `_run_worker` itself with `reader.jobs.worker.run`, `wait_for_heads` and `start_obs` replaced and
-      checks the lane `run` receives (`judge`, and `main` by default).
+      checks the lane `run` receives (`judge`, and `main` by default); its docstring shortened for ruff.
     tests_planned:
       - "add to server/tests/auth/test_auth_cli.py [unit]: --lane judge with --role api exits 2; --lane other exits 2; `_parser` accepts --role worker --lane judge and defaults the lane to main"
       - "add to server/tests/auth/test_auth_cli.py [unit]: _run_worker(env, 'judge') passes lane='judge' to reader.jobs.worker.run; _run_worker(env) passes lane='main'"
