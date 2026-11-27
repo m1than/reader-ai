@@ -3,7 +3,7 @@
   "channels": {
     "mcp": {"budget_default": 2000, "budget_max": 2000},
     "owner": {"budget_default": 2000, "budget_max": 10500},
-    "tutor": {"budget_default": 5250, "budget_max": 10500},
+    "tutor": {"budget_default": 10500, "budget_max": 10500},
     "pipeline": {"budget_default": 150000, "budget_max": 150000}
   },
   "routes": {
