@@ -1573,6 +1573,9 @@ requirements:
       the worker. The import enqueues `ingest.seqmap` (and `ingest.reanchor` when another pack of the material is in
       the head) **after its commit** (`reader.ingest.jobs.enqueue_followups`, from the import's `after_end`), so the
       job never reads an uncommitted pack; the r3-format part (step 1) is built with unit 4 (converter r3).
+      The two kinds are declared in `reader.ingest.jobs.PACK_KINDS`, outside `JOB_KINDS` until SRV-EVENTS' paired
+      KIND_MODULES change (and SRV-OBS's span-name list) takes them; until then `enqueue_known` logs
+      `ingest kind_unwired <kind>` and enqueues nothing, so a waiting activation stays waiting (never wrong).
       [db] test_seqmap_db.py: VEC-INGEST-10's cases — identical re-conversion → accepted with one row per seq; one
       span dropped (count), one span moved to the next page (page), a kind change (kind), one changed text (text) →
       refused with that reason and seq, no map rows, no activation; a second run → `exists`; the kinds' keys, and the

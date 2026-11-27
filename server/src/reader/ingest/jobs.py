@@ -219,7 +219,6 @@ async def enqueue_followups(conn: AsyncConnection, owner: uuid.UUID, pid: str) -
     material has a legacy ingest and no accepted map from it, and `ingest.reanchor` when another pack of it
     is in the head."""
     from reader.ingest import manifest, packs
-    from reader.jobs import running
 
     sha = await packs.material_of(conn, owner, pid)
     version = (await conn.execute(text(
@@ -234,21 +233,37 @@ async def enqueue_followups(conn: AsyncConnection, owner: uuid.UUID, pid: str) -
         " WHERE m.owner_id = b.owner_id AND m.from_ingest_id = b.ingest_id AND m.state = 'accepted')"
         " ORDER BY b.created_at LIMIT 1"),
         {"o": owner, "s": sha, "v": list(ingest.LEGACY_VERSIONS)})).scalar()
-    if legacy is not None:
-        await running().enqueue(SEQMAP_KIND, {"owner_id": str(owner), "material_sha256": sha,
-                                              "from_ingest_id": str(legacy), "to_pack_id": pid})
+    if legacy is not None and await enqueue_known(SEQMAP_KIND, {
+        "owner_id": str(owner), "material_sha256": sha, "from_ingest_id": str(legacy), "to_pack_id": pid,
+    }):
         done.append(SEQMAP_KIND)
     _, top = await manifest.head(conn, owner)
     for element in top["packs"]:
         other = element["pack_id"]
-        if other != pid and await packs.material_of(conn, owner, other) == sha:
-            await running().enqueue(REANCHOR_KIND, {"owner_id": str(owner), "from_pack_id": other,
-                                                    "to_pack_id": pid})
+        if other != pid and await packs.material_of(conn, owner, other) == sha and await enqueue_known(
+            REANCHOR_KIND, {"owner_id": str(owner), "from_pack_id": other, "to_pack_id": pid}
+        ):
             done.append(REANCHOR_KIND)
     return done
 
 
-JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)
+async def enqueue_known(kind: str, args: Mapping[str, Any]) -> bool:
+    """Enqueue `kind` when the running catalog serves it; else log `ingest kind_unwired <kind>`."""
+    from reader.jobs import running
+
+    jobs = running()
+    if jobs.catalog.get(kind) is None:
+        store.log.warning("ingest kind_unwired %s", kind)
+        return False
+    await jobs.enqueue(kind, args)
+    return True
+
+
+_ALL_KINDS: Final = make_kinds(ingest.BLOBS_DIR)
+JOB_KINDS: Final = _ALL_KINDS[:1]
+# FR-INGEST-40, -43: declared for SRV-EVENTS' paired KIND_MODULES change (and SRV-OBS's span list); until it
+# lands the worker does not serve them and `enqueue_known` skips them (the activation then waits, logged).
+PACK_KINDS: Final = _ALL_KINDS[1:]
 
 
 async def start_reconcile(jobs: Any) -> None:

@@ -197,10 +197,10 @@ async def _precondition(conn: AsyncConnection, owner_id: uuid.UUID, pid: str, sh
 
 
 async def _enqueue_reanchor(owner_id: uuid.UUID, from_pack: str, to_pack: str) -> None:
-    from reader.jobs import running
+    from reader.ingest.jobs import enqueue_known
 
-    await running().enqueue(REANCHOR_KIND, {"owner_id": str(owner_id), "from_pack_id": from_pack,
-                                            "to_pack_id": to_pack})
+    await enqueue_known(REANCHOR_KIND, {"owner_id": str(owner_id), "from_pack_id": from_pack,
+                                        "to_pack_id": to_pack})
 
 
 async def _wait(conn: AsyncConnection, owner_id: uuid.UUID, pid: str, reason: str) -> str:

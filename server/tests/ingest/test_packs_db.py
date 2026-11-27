@@ -113,7 +113,8 @@ async def test_an_update_cannot_move_a_row_into_a_sealed_pack(pg: Pg, tmp_path: 
             bare = (await conn.execute(text(
                 "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
                 " outline_count, outline_source, pages_without_text)"
-                " VALUES (:o, :m, 'v', :a, 1, 0, 'headings', '{}') RETURNING id"), {"o": owner, "m": m, "a": "d" * 64})).scalar_one()
+                " VALUES (:o, :m, 'v', :a, 1, 0, 'headings', '{}') RETURNING id"),
+                {"o": owner, "m": m, "a": "d" * 64})).scalar_one()
             await conn.execute(text(
                 "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
                 " VALUES (:i, :o, 9999, 1, 'text', 'injected', 0, 0, 1, 1)"), {"i": bare, "o": owner})
