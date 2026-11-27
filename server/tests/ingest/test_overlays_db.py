@@ -1,6 +1,6 @@
 """Overlays: ids, states, the profile overlay, profile_for_pack and the worker-start reconcile ([db]).
 
-@trace FR-INGEST-36 FR-INGEST-35 INV-INGEST-11
+@trace FR-INGEST-36 FR-INGEST-35 INV-INGEST-11 FR-INGEST-37
 """
 
 from __future__ import annotations
@@ -250,6 +250,40 @@ async def test_span_tags_cannot_move_into_a_sealed_overlay(pg: Pg, tmp_path: Pat
                 await conn.execute(text("UPDATE span_tags SET overlay_id = :s WHERE overlay_id = :b"),
                                    {"s": ids[1], "b": ids[0]})
             await conn.rollback()
+
+
+async def test_tag_writes_are_checked_against_the_facets_file(pg: Pg, tmp_path: Path) -> None:
+    """FR-INGEST-37: unknown facet or value and disabled facets are refused with nothing written."""
+    overlays, facets = need("reader.ingest.overlays"), need("reader.ingest.facets")
+    from ruamel.yaml import YAML
+
+    data = YAML(typ="safe").load(facets.FACETS_FILE.read_text(encoding="utf-8"))
+    data["facets"]["form"].update(enabled=True, consumer="profile_for_pack")
+    path = tmp_path / "facets.yaml"
+    with path.open("w", encoding="utf-8") as out:
+        YAML(typ="safe").dump(data, out)
+    enabled = facets.load(path)
+    async with world(pg, tmp_path) as w:
+        pack, owner = await imported(w), w.users["ivan"]
+        loc = await w.scalar("SELECT locator FROM material_spans ORDER BY seq LIMIT 1")
+        oid = overlays.overlay_id("tags", pack, {}, "t/1")
+        async with w.engine.begin() as conn:
+            await overlays.begin(conn, owner, oid, kind="tags", pack_id=pack, inputs={},
+                                 builder_version="t/1")
+        for loaded, facet, value, code in ((facets.load(), "form", "code", "facet_disabled"),
+                                           (enabled, "form", "poem", "tag_value_unknown"),
+                                           (enabled, "mood", "calm", "tag_value_unknown")):
+            async with w.engine.begin() as conn:
+                with pytest.raises(facets.FacetsError) as refused:
+                    await overlays.write_tags(conn, owner, oid, pack, loaded, [
+                        (loc, "form", "prose", "rule", 1.0, "t/1"), (loc, facet, value, "rule", 1.0, "t/1")])
+            assert refused.value.code == code
+            assert await w.scalar("SELECT count(*) FROM span_tags") == 0
+        async with w.engine.begin() as conn:
+            tag = (loc, "form", "code", "rule", 1.0, "t/1")
+            await overlays.write_tags(conn, owner, oid, pack, enabled, [tag])
+        assert await w.rows("SELECT facet, value, by, confidence, tagger_version FROM span_tags") == [
+            ("form", "code", "rule", 1.0, "t/1")]
 
 
 async def test_profile_for_pack_reads_the_pending_profile(pg: Pg, tmp_path: Path) -> None:

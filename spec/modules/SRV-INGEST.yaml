@@ -1432,6 +1432,57 @@ requirements:
       (blocking 4, 6, 7). The replacing pack's carried owner
       values (two packs) are tested with the seq map and re-anchoring (unit 4), the tags reconcile with the facets
       file (unit 6).
+  - id: FR-INGEST-37
+    text: >-
+      **Facets file** (ADR-0039 B3, F1–F6). `reader/ingest/facets.yaml` declares the facets with their level, closed
+      value set (or `type: date`, or `tree: sectors` for `topic`), `by`, `enabled` and `consumer`, exactly B3's seven:
+      role, reliability (A–F), credibility (1–6), as_of, license (personal-use, shareable), form, topic.
+      `reader/ingest/facets.schema.json` (JSON Schema 2020-12) closes it: `additionalProperties: false` at every
+      level, the facet names an enum of those seven, `level` in {source, span, concept, finding}, values unique
+      strings, `enabled` a required boolean, and for `form` a required `rule` mapping whose keys are exactly
+      INV-INGEST-1's span kinds. **Consumer (F6):** `consumer` is a requirement id (`FR-`, `INV-` or `NFR-` of some
+      spec) or a view name from `reader.ingest.manifest.VIEWS`; an `enabled: true` facet must have a consumer that
+      resolves, and a facet whose consumer does not resolve yet is `enabled: false` with the consumer it waits for.
+      A disabled facet's values are still validated, but no tag of it is written and no query path may filter on
+      it. The loader validates the file against the schema at import (a failure is a permanent error of the import,
+      never a silent default).
+      **Enabled at this revision:** `license` (consumer: view `profile_for_pack`, FR-INGEST-36, read by the
+      entitlement and personal-use checks). `role`, `reliability`, `as_of`, `credibility` and `topic` are disabled
+      until SRV-SEARCH, SRV-PIPELINE or SRV-KB name a requirement that consumes them; their paired change flips
+      `enabled`. **`form` is disabled and no form tags are written** until SRV-SEARCH has a card-shape requirement
+      that reads it: the ablation dropped the `form` filter, so the exact route has no consumer for it. Its rule below
+      is specified and unit-tested so that enabling it is a data change.
+      **`form` by rule** (F5, B3 note): heading, text and list_item → `prose`; code → `code`, or `test_vector` when the
+      declared test-vector rule matches; formula → `formula`; table → `table`; figure → `figure`. The test-vector rule
+      (initial value, data in the facets file): a code span with at least 2 lines each matching
+      `^\s*([A-Za-z][\w .-]{0,40}\s*[:=]\s*)?((0x)?[0-9A-Fa-f]{32,}|[xt](prv|pub)[1-9A-HJ-NP-Za-km-z]{100,})\s*$`
+      (hex, or a base58 extended key as BIP-32's test vectors print them). Tags record `by: rule`, confidence 1.0 and
+      the tagger version. A tag whose facet or value is not in the file is refused (`tag_value_unknown`); free-form
+      tags do not exist (F4). Only `topic` grows, through SRV-KB. The facets file's sha256 is an input of the tags
+      overlay (FR-INGEST-36) and of `policy_version` (SRV-SEARCH, SRV-OBS paired).
+      **Recorded deviation (phase 2 unit 6):** the revision measured the test-vector rule on the pilot's r2 span dump
+      before promotion; this unit may not read the owner's database or the pilot, so the rule is promoted
+      unmeasured. It has no effect while `form` is disabled: **the measurement (the count of code spans it marks and
+      a hand check of every marked span's page, counts and pages only) is owed before `form` is enabled**, and the
+      change that enables it carries the RESULT.
+      **Green, stated:** "at least 2 lines each matching" counts matching lines: a code span is `test_vector` when 2
+      or more of its lines match (`test_vector_rule.min_lines`), whatever its other lines hold (a label line such as
+      `Chain m/0H` between values does not break it). A disabled facet's consumer names what it waits for, either a
+      requirement id that does not resolve yet or the spec expected to declare it (`SRV-SEARCH`, `SRV-PIPELINE`,
+      `SRV-KB`); a spec name never resolves, so its facet must be disabled. The loader (`reader.ingest.facets.load`)
+      checks the schema, the form rule's values against `form`'s values, and that an enabled facet's consumer is a
+      view in `manifest.VIEWS` or a requirement id; that the id is declared in a spec is checked by the unit test
+      (the specs are not in the image). A tag of a disabled facet is refused `facet_disabled` (never silently
+      dropped). The import job loads the file first and fails permanently with `facets_invalid`.
+      [unit] test_facets_unit.py: the committed file validates; VEC-INGEST-9's invalid files are each refused (extra
+      facet, extra key, duplicate value, missing consumer, a `form` rule missing a kind or naming an unknown kind or a
+      value outside `form`'s values, a free-form value list on a closed facet, `enabled` missing, an enabled facet
+      whose consumer does not resolve); form of every kind; the test-vector rule on synthetic hex and base58
+      xprv/xpub vectors (no book text) and on code that is not a vector; every enabled facet's consumer resolves (a
+      requirement id declared in spec/modules/*.yaml or a view in manifest.VIEWS); `form` is disabled. [db]
+      test_packs_db.py: an import with the committed facets file writes no span_tags row; test_overlays_db.py: a
+      tag write with an unknown facet or value → tag_value_unknown, with a disabled facet → facet_disabled,
+      nothing written; with a test facets file that enables `form`, a `form` tag is written.
   - id: FR-INGEST-38
     text: >-
       **Manifest** (ADR-0039 B2, P4, P5, P10). One manifest per owner: `manifest_entries` rows (owner_id, seq,
@@ -2178,6 +2229,9 @@ vectors:
   - id: VEC-INGEST-8
     source: "Locator cases written for this spec (synthetic text, no book text): pages, spans and expected locators per FR-INGEST-33, malformed ids with their refusal, non-PDF paths with their encodings, and outlines (with a skipped level, a leading level-2 entry and two roots) with their expected `sec:` paths; read by test_locator_unit.py."
     file: spec/fixtures/SRV-INGEST/locators.yaml
+  - id: VEC-INGEST-9
+    source: "Facets cases (synthetic, no book text): invalid variants of the committed facets file, one per schema or loader rule (including `enabled` and an unresolvable consumer), each a set or delete at a path of the committed file; kind → form expectations; test-vector rule cases (synthetic hex and base58 xprv/xpub vectors, and code that is not a vector). Read by test_facets_unit.py."
+    file: spec/fixtures/SRV-INGEST/facets-cases.yaml
   - id: VEC-INGEST-10
     source: "Seq-map cases: an old and a new span list ([page, kind, text] with synthetic tokens, no book text; a span's quote_sha256 is its token's sha256) with the expected accept or the refusal reason and seq; read by test_seqmap_db.py."
     file: spec/fixtures/SRV-INGEST/seqmap-cases.yaml
@@ -2369,43 +2423,8 @@ proposed_tables:
 proposed_requirements:
   # FR-INGEST-33 and -34 are promoted into `requirements` (phase 2, unit 1); the rest stay here until their unit.
   # FR-INGEST-35, -36, -38, -39 and -46 are promoted into `requirements` (phase 2, unit 2).
-  - id: FR-INGEST-37
-    text: >-
-      **Facets file** (ADR-0039 B3, F1–F6). `reader/ingest/facets.yaml` declares the facets with their level, closed
-      value set (or `type: date`, or `tree: sectors` for `topic`), `by`, `enabled` and `consumer`, exactly B3's seven:
-      role, reliability (A–F), credibility (1–6), as_of, license (personal-use, shareable), form, topic.
-      `reader/ingest/facets.schema.json` (JSON Schema 2020-12) closes it: `additionalProperties: false` at every
-      level, the facet names an enum of those seven, `level` in {source, span, concept, finding}, values unique
-      strings, `enabled` a required boolean, and for `form` a required `rule` mapping whose keys are exactly
-      INV-INGEST-1's span kinds. **Consumer (F6):** `consumer` is a requirement id (`FR-`, `INV-` or `NFR-` of some
-      spec) or a view name from `reader.ingest.manifest.VIEWS`; an `enabled: true` facet must have a consumer that
-      resolves, and a facet whose consumer does not resolve yet is `enabled: false` with the consumer it waits for.
-      A disabled facet's values are still validated, but no tag of it is written and no query path may filter on
-      it. The loader validates the file against the schema at import (a failure is a permanent error of the import,
-      never a silent default).
-      **Enabled at this revision:** `license` (consumer: view `profile_for_pack`, FR-INGEST-36, read by the entitlement
-      and
-      personal-use checks). `role`, `reliability`, `as_of`, `credibility` and `topic` are disabled until SRV-SEARCH,
-      SRV-PIPELINE or SRV-KB name a requirement that consumes them; their paired change flips `enabled`. **`form` is
-      disabled and no form tags are written** until SRV-SEARCH has a card-shape requirement that reads it: the
-      ablation dropped the `form` filter, so the exact route has no consumer for it. Its rule below is specified and
-      unit-tested so that enabling it is a data change.
-      **`form` by rule** (F5, B3 note): heading, text and list_item → `prose`; code → `code`, or `test_vector` when the
-      declared test-vector rule matches; formula → `formula`; table → `table`; figure → `figure`. The test-vector rule
-      (initial value, data in the facets file): a code span with at least 2 lines each matching
-      `^\s*([A-Za-z][\w .-]{0,40}\s*[:=]\s*)?((0x)?[0-9A-Fa-f]{32,}|[xt](prv|pub)[1-9A-HJ-NP-Za-km-z]{100,})\s*$`
-      (hex, or a base58 extended key as BIP-32's test vectors print them). **Before promotion** the rule is measured
-      on the pilot's r2 span dump on the owner's Mac ($0, no model call): the number of code spans it marks and a
-      hand check of every marked span's page, recorded as counts and pages only in the RESULT of that measurement.
-      Tags record `by: rule`, confidence 1.0 and
-      the tagger version. A tag whose facet or value is not in the file is refused (`tag_value_unknown`); free-form
-      tags do not exist (F4). Only `topic` grows, through SRV-KB. The facets file's sha256 is an input of the tags
-      overlay (FR-INGEST-36) and of `policy_version` (SRV-SEARCH, SRV-OBS paired).
-    tests_planned:
-      - "add server/tests/ingest/test_facets_unit.py [unit]: the committed file validates; VEC-INGEST-9's invalid files are each refused (extra facet, extra key, duplicate value, missing consumer, a `form` rule missing a kind or naming an unknown kind, a free-form value list on a closed facet, `enabled` missing, an enabled facet with no consumer); form of every kind; test-vector rule on synthetic hex and base58 xprv/xpub vectors (no book text) and on code that is not a vector"
-      - "add to test_facets_unit.py [unit]: every consumer resolves — a requirement id is declared in spec/modules/*.yaml or a view name is in manifest.VIEWS; every enabled facet's consumer resolves; `form` is disabled in the committed file"
-      - "add to test_packs_db.py [db]: an import with the committed facets file writes no span_tags row"
-      - "add to test_overlays_db.py [db]: a tag write with an unknown facet or value → tag_value_unknown, nothing written"
+  # FR-INGEST-37 is promoted into `requirements` (phase 2, unit 6; the test-vector measurement is a recorded
+  # deviation there).
   # FR-INGEST-39's planned tests. Written in unit 3 (server/tests/ingest/test_restore_db.py, a new file instead of
   # growing test_manifest_db.py; test_manage_db.py for FR-INGEST-31): the run-through, delete while waiting then
   # restore (with the one-call lock set), one seq map suffices with r3 mapped but never activated and restore skipping
@@ -2594,12 +2613,7 @@ proposed_invariants:
       - "add server/tests/ingest/test_readers_scan_unit.py [unit]: an AST scan of every reader.* module outside reader.ingest finds no string constant (docstrings excluded) matching \\b(ingests|material_spans|material_outline)\\b, except the listed REFERENCES lines in plan/migrations/plan_0001.py and freshness/migrations/freshness_0001.py; a planted literal in a temporary module is found"
 
 proposed_vectors:
-  # VEC-INGEST-8 is promoted into `vectors` (phase 2, unit 1).
-  - id: VEC-INGEST-9
-    source: "Facets files: the committed one and one invalid variant per schema rule (including `enabled` and unresolvable consumers), plus kind → form expectations and test-vector rule cases (synthetic hex and base58 xprv/xpub vectors)."
-    file: spec/fixtures/SRV-INGEST/facets-cases.yaml
-    tests_planned:
-      - "test_facets_unit.py reads it"
+  # VEC-INGEST-8 is promoted into `vectors` (phase 2, unit 1), VEC-INGEST-9 in unit 6.
   # VEC-INGEST-10 and -11 are promoted into `vectors` (phase 2, unit 3).
 
 proposed_defers:

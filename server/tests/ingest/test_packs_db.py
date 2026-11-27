@@ -1,6 +1,6 @@
 """Base packs, their triggers, the import's seal and migration ingest_0004_packs (SRV-INGEST [db]).
 
-@trace FR-INGEST-35 FR-INGEST-34 FR-INGEST-13 FR-INGEST-14 INV-INGEST-11
+@trace FR-INGEST-35 FR-INGEST-34 FR-INGEST-13 FR-INGEST-14 INV-INGEST-11 FR-INGEST-37
 """
 
 from __future__ import annotations
@@ -75,6 +75,19 @@ async def test_pack_id_and_the_import_seal(pg: Pg, tmp_path: Path) -> None:
         assert [(p[0], p[1]) for p in pending] == [(pack, {"profile": profile})]
         assert await w.scalar("SELECT count(*) FROM manifest_entries") == 0
         assert await w.scalar("SELECT count(*) FROM span_tags") == 0
+
+
+async def test_an_invalid_facets_file_fails_the_import(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    """FR-INGEST-37: the committed file writes no span_tags row (above); a broken one fails the import."""
+    facets = need("reader.ingest.facets")
+    broken = tmp_path / "facets.yaml"
+    broken.write_text("version: 1\nfacets: {}\n", encoding="utf-8")
+    monkeypatch.setattr(facets, "FACETS_FILE", broken)
+    async with world(pg, tmp_path) as w:
+        await imported(w)
+        row = await w.rows("SELECT outcome, error_code FROM job_keys WHERE kind = 'ingest.import'")
+        assert [tuple(r) for r in row] == [("dead", "facets_invalid")]
+        assert await w.scalar("SELECT count(*) FROM base_packs") == 0
 
 
 async def test_triggers_keep_sealed_packs_immutable(pg: Pg, tmp_path: Path) -> None:

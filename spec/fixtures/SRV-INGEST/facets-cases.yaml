@@ -1,0 +1,67 @@
+# VEC-INGEST-9 (SRV-INGEST FR-INGEST-37): synthetic facets cases, no book text.
+# invalid: each case changes the committed server/src/reader/ingest/facets.yaml at `path` (keys from the root):
+# `set` replaces or adds the value there, `delete: true` removes the key; the loader must refuse the result.
+invalid:
+  - { name: extra_facet, path: [facets, mood],
+      set: { level: span, values: [calm], by: rule, enabled: false, consumer: SRV-KB } }
+  - { name: extra_key, path: [facets, role, colour], set: blue }
+  - { name: extra_top_key, path: [notes], set: anything }
+  - { name: duplicate_value, path: [facets, license, values], set: [personal-use, personal-use] }
+  - { name: empty_values, path: [facets, reliability, values], set: [] }
+  - { name: non_string_value, path: [facets, credibility, values], set: [1, 2, 3, 4, 5, 6] }
+  - { name: missing_consumer, path: [facets, role, consumer], delete: true }
+  - { name: missing_enabled, path: [facets, license, enabled], delete: true }
+  - { name: enabled_not_boolean, path: [facets, license, enabled], set: "yes" }
+  - { name: free_form_values, path: [facets, role, values], set: "*" }
+  - { name: missing_facet, path: [facets, topic], delete: true }
+  - { name: unknown_level, path: [facets, role, level], set: chapter }
+  - { name: unknown_by, path: [facets, role, by], set: guess }
+  - { name: form_rule_missing_kind, path: [facets, form, rule, code], delete: true }
+  - { name: form_rule_unknown_kind, path: [facets, form, rule, caption], set: prose }
+  - { name: form_rule_unknown_form, path: [facets, form, rule, code], set: poem }
+  - { name: form_without_rule, path: [facets, form, rule], delete: true }
+  - { name: enabled_spec_consumer, path: [facets, role, enabled], set: true }
+  - { name: enabled_bad_consumer, path: [facets, license, consumer], set: "not a consumer" }
+  - { name: enabled_unknown_view, path: [facets, license, consumer], set: brain_map }
+  - { name: rule_without_pattern, path: [test_vector_rule, pattern], delete: true }
+  - { name: rule_bad_pattern, path: [test_vector_rule, pattern], set: "([" }
+
+# kind → form for a span whose text is not a test vector.
+forms:
+  heading: prose
+  text: prose
+  list_item: prose
+  code: code
+  formula: formula
+  table: table
+  figure: figure
+
+# code spans and the form the rule gives them (synthetic values).
+test_vectors:
+  - name: two_hex_lines_with_labels
+    text: "Seed: 000102030405060708090a0b0c0d0e0f\nchain = 0x00112233445566778899aabbccddeeff00112233"
+    form: test_vector
+  - name: bare_hex_lines
+    text: "  00112233445566778899aabbccddeeff\n  ffeeddccbbaa99887766554433221100  "
+    form: test_vector
+  - name: extended_keys_with_a_label_line
+    text: "Chain m/0H\next pub: xpub9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K\next prv: xprv9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K"
+    form: test_vector
+  - name: testnet_keys
+    text: "tpub9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K\ntprv9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K"
+    form: test_vector
+  - name: one_hex_line
+    text: "Seed: 000102030405060708090a0b0c0d0e0f"
+    form: code
+  - name: short_hex
+    text: "a = 0x00ff\nb = 0xdeadbeef"
+    form: code
+  - name: base58_with_excluded_letters
+    text: "xpub0OIl9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQ\nxprv0OIl9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQH143K9s21ZrQ"
+    form: code
+  - name: program
+    text: "def double(x):\n    return 2 * x"
+    form: code
+  - name: hex_inside_a_call
+    text: "h(0x00112233445566778899aabbccddeeff)\nh(0xffeeddccbbaa99887766554433221100)"
+    form: code
