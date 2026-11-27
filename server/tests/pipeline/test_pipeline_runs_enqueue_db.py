@@ -180,12 +180,15 @@ async def test_the_ending_step_rule_case_by_case(pg: Pg, tmp_path: Path, monkeyp
     async def inside(env: Any, run: Any) -> None:
         last = int(await env.scalar("SELECT max(step) FROM compile_steps WHERE run_id = :r", r=run))
 
-        async def end(step: int, outcome: str) -> int:
-            await pipeline_jobs.after_end(env.engine, {"run_id": str(run), "step": step, "stage": "x"}, outcome)
+        async def end(step: int, outcome: str, stage: str = "findings") -> int:
+            payload = {"run_id": str(run), "step": step, "stage": stage}
+            await pipeline_jobs.after_end(env.engine, payload, outcome)
             return int(await env.scalar("SELECT ends FROM compile_runs WHERE id = :r", r=run))
 
-        got["earlier"] = await end(last - 1, "succeeded")
+        got["earlier"] = await end(last - 1, "succeeded", "adversarial_review")
         got["dead"] = await end(last, "dead")
+        # ADR-0039 revision: a stale model step at the last step number has no row of its own: nothing counts
+        got["stale"] = await end(last, "succeeded", "fact_check")
         got["final"] = await end(last, "succeeded")
         from sqlalchemy import text
 
@@ -194,7 +197,7 @@ async def test_the_ending_step_rule_case_by_case(pg: Pg, tmp_path: Path, monkeyp
         got["cancelled"] = await end(last, "succeeded")
 
     _, enqueued, _ = await _compile(pg, tmp_path, "clean-first-pass", monkeypatch, inside=inside)
-    assert got == {"earlier": 1, "dead": 1, "final": 2, "cancelled": 2}
+    assert got == {"earlier": 1, "dead": 1, "stale": 1, "final": 2, "cancelled": 2}
     assert [e[1]["end"] for e in enqueued] == [1, 2]
 
 

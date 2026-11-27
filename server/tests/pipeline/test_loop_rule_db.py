@@ -194,26 +194,43 @@ REFUSING = {"draft": 4.0, "fact_check": 0.3, "review": 4.0}  # the fact_check re
 
 
 async def test_a_refusal_survives_a_rolled_back_step(
-    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The refused step's transaction is lost after its refusal and findings enqueue; the retry is refused with
-    the same code (the stale-step path): the refusal was committed on its own, the findings ran once, and the run
-    ends budget_exhausted."""
+    """The refused step's transaction is lost after its refusal and findings enqueue; the refusal was already
+    committed on its own connection (read from another connection before the loss), so the retry takes the
+    stale-step branch (no second refusal, no reservation); the findings ran once, the run ends budget_exhausted
+    and counts one end."""
+    import logging
+
+    from sqlalchemy import text
+
     steps = need("reader.pipeline.steps")
     errors = need("reader.pipeline.errors")
+    caplog.set_level(logging.INFO, logger="reader.pipeline")
     async with pipeline_env(pg, tmp_path, task_budgets=REFUSING, floors=DEFAULTS["reserves"]) as env:
         real = steps._refused
         lost: list[int] = []
+        seen: list[Any] = []
 
         async def refused_then_lost(*args: Any) -> None:
             await real(*args)
-            if not lost:
-                lost.append(1)
-                raise errors.InputNotReady()  # the job transaction rolls back; the job is retried
+            async with env.engine.connect() as other:  # a separate connection sees the committed refusal
+                query = text("SELECT budget_refused FROM compile_runs WHERE id = :r")
+                seen.append((await other.execute(query, {"r": args[3].id})).scalar())
+            lost.append(1)
+            raise errors.InputNotReady()  # the job transaction rolls back; the job is retried
 
         monkeypatch.setattr(steps, "_refused", refused_then_lost)
         run = await _start(env, [{"stage": "draft", "cost": 0.6}])
-        assert lost == [1]
+        assert lost == [1]  # the retry never reached the model call, so it never refused again
+        assert seen == ["task_budget_exhausted"]
+        # the retry (attempt 2) returned early: by the stale-step branch, or, when the findings job ran first, by
+        # the already-recorded branch; either way no reservation and no second refusal
+        outcome = await env.scalar(
+            "SELECT outcome FROM job_keys WHERE args->>'run_id' = :r AND args->>'stage' = 'fact_check'", r=str(run)
+        )
+        assert outcome == "succeeded"  # the retried job completed without reaching the model call
+        assert await env.scalar("SELECT ends FROM compile_runs WHERE id = :r", r=run) == 1
         state = await env.state(run)
         assert state["state"] == "budget_exhausted" and state["refusals"] == ["task_budget_exhausted"]
         assert await _stages(env, run) == ["draft", "rules", "lab_verification", "findings"]

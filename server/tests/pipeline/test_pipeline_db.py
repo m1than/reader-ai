@@ -213,11 +213,10 @@ async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tm
         async with pipeline_env(fresh_pg(pg_container), sub, **_env_kwargs(prior)) as env:
             await _run_case(env, prior)
             changed = recompile["changed"]
-            if "adversarial_review.prompt_version" in changed:
-                p = env.runtime.prompts
-                env.runtime.prompts = p.with_text(
-                    "adversarial_review", p.text("adversarial_review") + "\nNew rule."
-                )
+            for stage in ("adversarial_review", "fact_check"):
+                if f"{stage}.prompt_version" in changed:
+                    p = env.runtime.prompts
+                    env.runtime.prompts = p.with_text(stage, p.text(stage) + "\nNew rule.")
             if "source" in changed:
                 env.spans.spans[:] = synthetic_spans(extra=" (edited)")
             results = recompile.get("results", prior["results"] if "source" in changed else [])
@@ -242,8 +241,8 @@ async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tm
                 assert status["state"] == recompile["expect_state"]
             if recompile["name"] == "recompile-unchanged":
                 assert counting.calls == 0  # every call of the loop was reusable: no ask, even at the month cap
-            if recompile["name"] == "recompile-after-review-prompt-change":
-                assert counting.planned == [["review"]]  # the review's input changed with its prompt
+            if "expect_planned" in recompile:  # FR-PIPELINE-23: the loop plan, reuse checked first
+                assert counting.planned == recompile["expect_planned"], recompile["name"]
 
 
 async def test_converged_run_with_a_finding_has_no_deltas_mismatch(pg: Pg, tmp_path: Path) -> None:
@@ -342,3 +341,28 @@ async def test_source_comes_from_the_lessons_page_range(pg: Pg, tmp_path: Path) 
         assert all(s.page == 61 for s in spans)
         payload = json.dumps([s.text for s in spans])
         assert CANARY in payload
+
+
+async def test_g2_stages_need_the_derivation_of_m(pg: Pg, tmp_path: Path) -> None:
+    """FR-PIPELINE-8 (c) revised: a check counts on M only when the notebook it judged is M's deterministic
+    derivation; the same run's report naming another notebook makes that check missing."""
+    steps_mod = need("reader.pipeline.steps")
+    runs = need("reader.pipeline.runs")
+    case = BY_NAME["clean-first-pass"]
+    async with pipeline_env(pg, tmp_path, **_env_kwargs(case)) as env:
+        run, status = await _run_case(env, case)
+        assert "stages.missing_fact_check" not in status["g2"]["failing"]
+        async with env.engine.begin() as conn:
+            row = await runs.load_run(conn, run)
+            done = await runs.load_steps(conn, run)
+            tampered = [
+                s if s.stage != "fact_check" else
+                runs.StepRow(s.id, s.step, s.stage, s.input_sha256, s.output_sha256,
+                             {**s.report, "notebook_sha256": "0" * 64}, s.reused_from, s.model, s.cost_usd,
+                             s.duration_s)
+                for s in done
+            ]
+            final = await env.notebook(done[-1].output_sha256)
+            await steps_mod._finish(conn, env.runtime, row, tampered, final, done[-1].output_sha256)
+        g2 = await env.scalar("SELECT g2 FROM compile_runs WHERE id = :r", r=run)
+        assert "stages.missing_fact_check" in g2["failing"] and g2["publishable"] is False

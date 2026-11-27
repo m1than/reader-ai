@@ -184,3 +184,14 @@ def test_live_check_refuses_budgets_other_than_the_cap() -> None:
         with pytest.raises(live.BudgetsNotCap) as wrong:
             live.check_budgets(p, {**cap, task: value})
         assert wrong.value.tasks == [task]
+
+
+def test_live_main_exits_3_on_budgets_other_than_the_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    live = need("reader.pipeline.live")
+
+    async def refused(plan_lesson_id: str) -> Any:
+        raise live.BudgetsNotCap(["review"])
+
+    monkeypatch.setattr(live, "_run", refused)
+    monkeypatch.setattr("sys.argv", ["live", "L02"])
+    assert live.main() == 3

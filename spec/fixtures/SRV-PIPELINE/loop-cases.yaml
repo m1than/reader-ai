@@ -216,6 +216,20 @@ recompiles:
     expect_reused: [draft, rules, fact_check, revise, rules, fact_check]
     expect_provider_calls: 1
     expect_spent: 0.5
+    expect_planned: [[review]]           # FR-PIPELINE-23: the review's input changed with its prompt
+    expect_state: converged
+  - name: recompile-after-fact-check-prompt-change
+    prior: one-loop-converges
+    changed: [fact_check.prompt_version]
+    results:   # the same outcomes as before, from the new prompt
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+    # the loop's revise is reusable (same notebook and report), its fact_check is not, so every later check is
+    # planned too, even though the review then turns out reusable
+    expect_planned: [[fact_check, review]]
+    expect_reused: [draft, rules, revise, rules, adversarial_review]
+    expect_provider_calls: 2
+    expect_spent: 0.48
     expect_state: converged
   - name: recompile-after-source-change
     prior: one-loop-converges

@@ -761,6 +761,12 @@ owner_notes:
 #     custom_system=True like every stage call, so the planned sum equals the reserves the calls write; history
 #     rows carry loops, stop and refused_limit. The route-mode `degraded` reuse exclusion is not in the code until
 #     FR-PIPELINE-26's route lands (no find runs in section mode).
+#   - Code review round 2 (29279e1) fixes: once a check of the loop is planned, every later check is planned too
+#     (the review is droppable only when revise and fact_check are both reusable); FR-PIPELINE-18's ending-step
+#     rule for a succeeded step now requires the run's last compile_steps row to be this (step, stage), or no row
+#     at all for the draft's refusal, so a stale model step that returns after the end counts nothing. A stale
+#     findings key that dies while the run is still looping is a dead step of an unfinished run and counts an end
+#     by FR-PIPELINE-18's dead rule; a later real end counts again (two ends for one run, a known edge).
 #   - Notes for the record: under prompt_version v1 two prompt texts now exist (before and after this revision);
 #     input_sha256 hashes the file content, so they never share a reuse. VEC-PIPELINE-1's text changed from v2 to v1
 #     after the owner's approval (Green note above). ADR-0039 B7a's no-regression evaluation rule for prompt
@@ -935,8 +941,9 @@ revisions:
       included. After any stop the run executes `findings`, its last step, whenever a notebook exists. Each step is
       one job as approved (`rules`, `fact_check`, `adversarial_review`, `revise`, `findings` of kind
       `pipeline.stage`; `lab_verification` of kind `pipeline.verify` with `bounds.verify_job_timeout_s`). Reuse by
-      `input_sha256` as approved, for `rules` too (its input is FR-PIPELINE-24's); a `fact_check` step that recorded
-      a find response with `degraded: true` (FR-PIPELINE-26) is never reused; one whose finds only skipped the judge
+      `input_sha256` as approved, for `rules` too (its input is FR-PIPELINE-24's); in route mode, with
+      FR-PIPELINE-26 (not built in this slice), a `fact_check` step that recorded
+      a find response with `degraded: true` is never reused; one whose finds only skipped the judge
       at the gate (`judge_ran: false`, `degraded: false`) is reused as usual. A budget refusal before a model step
       (SRV-AGENT FR-AGENT-9) sets `budget_refused`; the run then executes `findings` only, or, when the refusal
       came before any notebook exists (the draft), finishes directly as `budget_exhausted` with no `findings`.

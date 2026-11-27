@@ -36,14 +36,18 @@ class StageArgs(BaseModel):
 KEY: Final = ("run_id", "step", "stage", "input_sha256")
 
 # FR-PIPELINE-18: a run's end is counted only by the step that ended it: a succeeded step of a finished, not
-# cancelled run whose step is at least every recorded step (the final step, whatever its stage: lab
-# verification or a budget refusal), or a dead step of a run that is not finished (it stops failed). A cancel
-# counts its own end (runs.cancel). Counted once per committed end.
+# cancelled run that is the run's last recorded step with this (step, stage) — the findings step — or, before
+# any step was recorded, the draft whose budget refusal finished the run; or a dead step of a run that is not
+# finished (it stops failed). A stale model step that returns after the end (ADR-0039 revision,
+# FR-PIPELINE-5) has no row of its own, so it counts nothing. A cancel counts its own end (runs.cancel). Once
+# per committed end.
 _ENDED_SQL: Final = (
     "UPDATE compile_runs r SET ends = ends + 1 WHERE r.id = CAST(:r AS uuid) AND r.ends < 100"
     " AND r.cancelled_at IS NULL"
     " AND CASE WHEN :dead THEN r.finished_at IS NULL ELSE r.finished_at IS NOT NULL"
-    " AND :step >= coalesce((SELECT max(s.step) FROM compile_steps s WHERE s.run_id = r.id), 0) END"
+    " AND (EXISTS (SELECT 1 FROM compile_steps s WHERE s.run_id = r.id AND s.step = :step"
+    " AND s.stage = :stage AND s.step = (SELECT max(t.step) FROM compile_steps t WHERE t.run_id = r.id))"
+    " OR (:step = 1 AND NOT EXISTS (SELECT 1 FROM compile_steps s WHERE s.run_id = r.id))) END"
     " RETURNING r.ends"
 )
 
@@ -55,7 +59,8 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
 
     async with engine.begin() as conn:  # the end is counted with tracing off too; only the enqueue is skipped
         ends = (await conn.execute(text(_ENDED_SQL), {
-            "r": str(payload["run_id"]), "dead": outcome == "dead", "step": int(payload["step"])})).scalar()
+            "r": str(payload["run_id"]), "dead": outcome == "dead", "step": int(payload["step"]),
+            "stage": str(payload["stage"])})).scalar()
     if ends is not None:
         await obs_runs.enqueue_end("compile", str(payload["run_id"]), int(ends))
 
