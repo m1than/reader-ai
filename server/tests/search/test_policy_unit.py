@@ -69,7 +69,7 @@ def test_shipped_policy_validates_and_carries_the_initial_values() -> None:
         "tutor": {"budget_default": 10500, "budget_max": 10500},
         "pipeline": {"budget_default": 150000, "budget_max": 150000},
     }
-    tutor = data["channels"]["tutor"]  # V.kl-tutor-find: the tutor's default is its maximum, the owner's maximum
+    tutor = data["channels"]["tutor"]  # V.kl-tutor-find: default = maximum = the owner's maximum
     assert tutor["budget_default"] == tutor["budget_max"] == data["channels"]["owner"]["budget_max"]
     assert data["card_budgets"] == {"L0": 200, "L1": 600, "L2": {"leaf": 100, "chapter": 300, "root": 500}}
     assert data["gate"] == {"mode": "never_judge", "margin": None}

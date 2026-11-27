@@ -1496,7 +1496,7 @@ kl_tutor_find:
       the tutor's source budget needs the maximum. This moves `policy_version` (FR-OBS-21 over `declared()`): judge
       outputs recorded under the old version are not replayed for new requests (none exist while the gate is
       `never_judge`). M1 (spikes/tutor-find-m1): mean L1 card cost 400.6 tokens, about 25 cards in 10,500.
-      Promoted into proposed_bounds.channel_budgets with the tests below (2026-11-28).
+      Promoted into proposed_bounds.channel_budgets with the tests below (2026-11-28; Red 8e53a2f, Green 6e7bd41).
     tests_planned:
       - "change server/tests/search/test_policy_unit.py [unit]: tutor budget_default == budget_max == the owner channel's budget_max"
       - "change server/tests/search/test_find_unit.py:133 [unit]: the tutor channel's default budget is 10500 (was 5250)"
