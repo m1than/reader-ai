@@ -24,7 +24,7 @@ Commit at least after every unit of work. A run may be cut off at any time: what
 - A missing secret or access.
 - A change that contradicts an accepted ADR. Write a new ADR with `status: proposed` instead, and keep working on what does not depend on it.
 - The same check failing after 3 different fixes.
-- `deep-reviewer` not returning `VERDICT: approve` after two rounds on the same spec (owner, 2026-11-26; in force once ADR-0039 is accepted).
+- `deep-reviewer` not returning `VERDICT: approve` after four rounds on the same spec (owner, 2026-11-26; in force once ADR-0039 is accepted).
 
 ## Gates you never cross
 

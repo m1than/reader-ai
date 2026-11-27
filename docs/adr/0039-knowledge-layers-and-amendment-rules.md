@@ -9,6 +9,10 @@ supersedes: []
 amends: [ADR-0001, ADR-0005, ADR-0007, ADR-0008, ADR-0009, ADR-0012, ADR-0015, ADR-0018, ADR-0019, ADR-0025, ADR-0032, ADR-0035, ADR-0038]
 ---
 
+> Amendment (owner, 2026-11-26), P2 migration step (4): mutable rows (tutor citations) are rewritten through the seq-to-locator map by a one-shot command (SRV-INGEST FR-INGEST-41), not an Alembic migration. Alembic migrations run at api start, before the worker can re-convert the material and build the map, so a migration would keep the stack from starting. The command keeps the same contract: one transaction, all or nothing, refused if any id fails to map; the resolver reads legacy ids until it has run. The decision is otherwise unchanged.
+
+> Amendment (owner, 2026-11-26), review rounds: the limit is 4 `deep-reviewer` rounds without `VERDICT: approve` on the same spec, not 2; a task blocks after the fourth. The SRV-OBS revision of V.kl-obs-spans, approved in round 8, is an owner-allowed exception. The decision is otherwise unchanged.
+
 ## Context
 
 This ADR was first drafted on 2026-11-25 as ADR-0020 (PR #42) at stage 0. That number now belongs to the toolchain baseline, so it is renumbered ADR-0039 and restated against the code that exists on `V/slice-integration`.
