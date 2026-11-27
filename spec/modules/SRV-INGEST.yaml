@@ -1815,7 +1815,14 @@ requirements:
         (a seam returning none until SRV-KB);
       - it is not the pack of, nor an overlay desired by, a `pending_activations` row (a waiting activation keeps
         what it waits to activate; a pack whose rows are only stale desires leaves with its row when the owner purges
-        it).
+        it);
+      - for a lone overlay, its kind is neither `profile` nor `vectors` (code review of unit B, blocking 2): those are
+        kept for as long as their pack is and go only with it (pack GC or purge). A collected id is never built again
+        (FR-INGEST-35), so collecting them would strand a flip back: a license or language that returns to an earlier
+        value must reuse that profile overlay (FR-INGEST-36's A → B → A), and an embedding model or SRV-SEARCH params
+        that are reverted must be able to resume their vector overlay; were either collected, the reconcile would log
+        `overlay_collected` and keep the head's, so a `personal-use` material could stay `shareable`. A profile row is
+        a few ids and values; a lone vector overlay's rows are the cost of a reversible model change.
       Each pack is collected in its own transaction with `reader.pack_delete = on`; the transaction also calls
       `judges.forget_pack`, `judges.forget_overlay` (SRV-AGENT), SRV-SEARCH's `forget_overlay` for each of its
       vector overlays and SRV-SEARCH's `search.forget_legacy(conn, owner_id, ingest_id)` for its `ingests` row, which
@@ -1855,7 +1862,11 @@ requirements:
       appends no entry naming it; the restore committing first keeps the pack (it is in the head); never an entry
       naming a collected pack. A rollback racing `ingest.gc_overlay` of an overlay the rolled-back entry names (pack
       unchanged, overlay id differs from the head's) — GC first: the rollback is refused `overlay_collected`;
-      rollback first: GC keeps the overlay; never an entry naming a collected overlay.
+      rollback first: GC keeps the overlay; never an entry naming a collected overlay. The lone-overlay cases use
+      `tags` overlays (code review of unit B, blocking 2), and two more hold: a lone sealed `vectors` overlay past the
+      floor and outside the last N entries is kept, and the **flip back** — profile `personal-use` → `shareable`
+      (reconcile), a GC pass over the left `personal-use` profile overlay (kept), the rule back to `personal-use` →
+      reconcile → the head profile's license is `personal-use` and `shareable(profile_for_pack)` is false.
   - id: FR-INGEST-45
     text: >-
       **Owner purge** (P6, ADR-0017 data ownership).

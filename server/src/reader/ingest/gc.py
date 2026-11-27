@@ -119,6 +119,7 @@ _OVERLAY_ELIGIBLE: Final = (  # constants only
     "SELECT o.pack_id FROM overlays o"  # noqa: S608
     " JOIN base_packs b ON b.owner_id = o.owner_id AND b.pack_id = o.pack_id"
     " WHERE o.owner_id = :o AND o.overlay_id = :i AND o.collected_at IS NULL"
+    " AND o.kind NOT IN ('profile', 'vectors')"  # kept while their pack is: a flip back reuses them
     " AND b.collected_at IS NULL AND b.purged_at IS NULL"
     " AND ((o.state = 'sealed'"
     "   AND o.sealed_at < coalesce(CAST(:now AS timestamptz), now()) - make_interval(days => :d))"
