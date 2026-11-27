@@ -498,3 +498,66 @@ def test_judge_input_cuts_l1_on_the_pipeline_and_the_slice_obeys_the_budget_fact
     many = [_card(f"c{i}", 0.9 - i / 100, "z " * 150, covers=[f"e{i}"]) for i in range(8)]
     _run(Corpus(many), policy=policy, judge=small, budget=400)
     assert 0 < len(small.calls[0].cards) < 8  # 1.5 x the cards' budget binds below the 3,000-token cap
+
+
+# ---- phase 2 unit 5: the deferred review items ----
+
+
+def test_the_response_fits_a_six_digit_budget_at_the_boundary() -> None:
+    cards = [_with(_card(f"c{i:02d}", 1 - i / 100, "w " * 2300 + str(i), covers=[f"e{i}"]))
+             for i in range(50)]
+    for budget in (100_000, 100_001, 109_999):
+        out = _run(Corpus(cards), channel="pipeline", budget=budget)
+        assert out["budget"] == budget and _estimate(out) <= budget
+        assert len(out["cards"]) < len(cards)  # the budget binds
+        smallest = min(_cards().cost(c) for c in cards)
+        assert _estimate(out) + smallest > budget - 1  # filled up to its limit
+
+
+def test_findings_without_l4_in_the_route_add_no_card() -> None:
+    find = _find()
+    policy = _policy()
+    assert "L4" not in policy.data["routes"]["owner.thematic"]["layers"]
+    finding = _card("fnd:good", 0.99, "a reviewed finding", layer="L4", covers=["e1"])
+
+    class Findings:
+        async def for_query(self, caller: Any, channel: str, query: str) -> list[Any]:
+            return [find.Finding(card=finding, reviewed=True)]
+
+    deps = find.Deps(corpus=Corpus([_card("a", 0.5, "alpha", covers=["e2"])]), judge=None, policy=policy,
+                     policy_version=lambda: POLICY_V, findings=Findings())
+    caller = find.Caller(user_id=USER, roles=("owner",), provider=True)
+    out = asyncio.run(find.find(caller, "owner", "q", deps=deps))
+    assert [c["id"] for c in out["cards"]] == ["a"]
+
+
+def test_the_pivot_is_seeded_with_the_request_hash(monkeypatch: pytest.MonkeyPatch) -> None:
+    find = _find()
+    seeds: list[str] = []
+    real = find.greedy.pivot
+
+    def spy(ids: Any, plus: Any, seed: str) -> Any:
+        seeds.append(seed)
+        return real(ids, plus, seed)
+
+    monkeypatch.setattr(find.greedy, "pivot", spy)
+    _run(Corpus([_card("a", 0.9, "A"), _card("b", 0.8, "B")]), query="seeded", k=2, budget=900)
+    expected = find.request_hash(
+        user_id=str(USER), roles=["owner"], channel="owner", query="seeded", filters={}, k=2, budget=900,
+        brain_version=BRAIN, policy_version=POLICY_V,
+    )
+    assert seeds == [expected]
+
+
+def test_a_policy_error_is_a_find_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    find, policy = _find(), need("reader.search.policy")
+
+    def broken() -> Any:
+        raise policy.PolicyError("policy_invalid")
+
+    monkeypatch.setattr(policy, "current", broken)
+    deps = find.Deps(corpus=Corpus([]))
+    caller = find.Caller(user_id=USER, roles=("owner",), provider=True)
+    with pytest.raises(find.FindError) as caught:
+        asyncio.run(find.find(caller, "owner", "q", deps=deps))
+    assert caught.value.code == "policy_invalid"

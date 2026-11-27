@@ -250,6 +250,10 @@ requirements:
       (paired note in SRV-INGEST FR-INGEST-45). The build and read paths (FR-SEARCH-3, -5..-10, -20 revisions) move
       onto these rows in unit 4b; until then the legacy chunk path above serves. Tests in a new file instead of
       test_search_db.py. [db] test_span_vectors_db.py (Green: lint-only test edits, no oracle changed).
+      **Phase 2 (unit 5), code review of 4b (non-blocking):** `search_0002`'s downgrade drops
+      `search_span_vectors` and its trigger function and leaves `search_chunks`; an owner purge through SRV-INGEST's
+      production seams (no seam replaced) deletes the purged pack's rows built by the real embed job and leaves the
+      other owner's rows. test_span_vectors_db.py.
   - id: FR-SEARCH-5
     text: >-
       **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.JOB_KINDS`:
@@ -391,6 +395,15 @@ requirements:
       search reads no reader.yaml any more, so a broken one no longer answers 503 (the `config_unavailable` branch
       stays for a policy file that cannot be read); a `material` filter naming a material without an active pack
       answers 404 `not_found`.
+      **Promoted revision (phase 2, unit 5):** this id's text in `proposed_revisions` (/api/find and /api/open)
+      replaces the text above. Recorded: the channel is always `owner`, set by the route; a body key outside
+      `{q, k, budget, filters}` (/api/find) or `{id, depth, budget}` (/api/open), such as `channel`, answers 400
+      (`query_invalid` for find, `id_invalid` for open), and a wrong type answers the field's code; `not_found`
+      answers 404, `policy_invalid` and `config_unavailable` answer 503 `config_unavailable`, every other
+      FR-SEARCH-22 / -31 code 400. The caller is the session user (`roles` = their role, `provider` from the
+      effective config), so cards come from their own manifest and entitlement only (INV-SEARCH-1); the judge is the
+      FR-SEARCH-28 waiter on the api's `Jobs` (none: `error` when the gate does not separate). Logs carry lengths,
+      counts and codes only. [db] test_find_routes_db.py; test_search_db.py keeps /api/search.
   - id: FR-SEARCH-9
     text: >-
       **Status and ensure.** `search_status(owner_id, material_sha256)` returns `none | queued | running | ready | dead`
@@ -442,7 +455,9 @@ requirements:
       changed across the cycle.
       **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (removal through
       the manifest) replaces the text above for search and the candidates; `find` and `open` over a restored
-      material are covered with unit 5's routes. test_search_manage.py.
+      material are covered with unit 5's routes. test_search_manage.py (unit 5: after the delete /api/find
+      returns no card of the material and /api/open on its span answers 404; the restore returns the identical
+      card list).
   - id: FR-SEARCH-21   # paired change for SRV-INGEST FR-INGEST-44, -45 (V.kl-ingest-packs, ADR-0039 P6)
     text: >-
       **Forgetting a legacy ingest.** `reader.search.store.forget_legacy(conn, owner_id, ingest_id)` deletes the
@@ -489,6 +504,15 @@ requirements:
       repeat of more than one nested in another (star height > 1) is refused outright, then each pattern must answer
       a fixed set of 1,000-character adversarial inputs within 50 ms. [unit] test_policy_unit.py (Green: lint-only
       test edits, no oracle changed).
+      **Phase 2 (unit 5), deferred review items:** the star-height check scans the pattern text itself (groups,
+      classes, escapes, quantifiers), without CPython's private `re._parser`; the 50 ms check is not run at load
+      (a wall-clock bound at start can fail a loaded machine), it runs in test_policy_unit.py over every shipped
+      pattern — deviation from "checked at load twice" above. `policy.bind()` loads the policy, computes
+      `policy_version` once and binds SRV-OBS `reader.obs.versions.POLICY` to `declared()`; `current()` returns the
+      bound (policy, version), else computes them. The api and every worker lane call `bind()` at start before
+      serving (paired SRV-AUTH change in `reader.serve.main`): a `PolicyError` stops the start with
+      `reader-server: policy_invalid` (or `config_unavailable` when the judge slots cannot be read). [unit]
+      test_policy_unit.py.
   - id: FR-SEARCH-25   # ADR-0039 revision, promoted in phase 2 (unit 2)
     text: >-
       **The coverage objective (B5).** Query elements E = the lexemes of `to_tsvector(cfg, query)` for each fts_config
@@ -574,6 +598,12 @@ requirements:
       largest envelope's estimate plus the cost of the smallest card (an L2 card with empty text, one citation, a
       64-hex source id), pinned by a unit test. [unit, db] test_find_unit.py (Green: the boundary test's cards were
       shortened to 20 characters so a 400-token response holds one; no rule changed).
+      **Phase 2 (unit 5), deferred review items:** `find` with no `deps.policy` takes the process's bound policy and
+      version (FR-SEARCH-34 `current()`), and a `PolicyError` there is a `FindError` with the same code
+      (`policy_invalid`, `config_unavailable`); the facets file is read once per policy (`Policy.facets`), not per
+      request; sums of float costs use `math.fsum`. Pinned by tests: the response fits a 6-digit effective budget at
+      the boundary (pipeline, 100,000 tokens, uncut L1 cards); a `Findings` port with a route that does not list L4
+      adds no L4 card; the pivot of step 3 is seeded with the request hash (INV-SEARCH-4). test_find_unit.py.
   - id: FR-SEARCH-23   # ADR-0039 revision, promoted in phase 2 (unit 2)
     text: >-
       **Step 1, route by rules (0 model calls).** Question type: the caller's `question_type` when given (only
@@ -694,6 +724,77 @@ requirements:
       depth-2 case passes the owner maximum budget so all six cards fit; INV-SEARCH-13's property runs exhaustively
       over every real locator's neighbourhood — pages ±1, start and end ±3, ordinals 0..2 — instead of Hypothesis
       draws, which could not share the database state between examples).
+      **Phase 2 (unit 5), code review of 4b (non-blocking):** the in-order fill is pinned on `src:` at depth
+      `open_depth_max` with budget `budget_min` (400): the whole response's estimate stays ≤ the budget. [db]
+      test_open_db.py.
+  - id: FR-SEARCH-28   # ADR-0039 revision, promoted in phase 2 (unit 5)
+    text: >-
+      **Step 6, the `judge.find` waiter (B6, B7b).** Runs only when step 4 is not separated. (1) **Slice:** the
+      longest prefix of the preselection in score order whose rendered input (`judges.render_find_input(query,
+      cards)`) estimates ≤ min(`preselect_factor` × the cards' budget, `judge.input_cap_tokens`). Each card is
+      rendered as the channel serves it to this caller (so the judge reads the MCP row for a non-entitled caller,
+      FR-SEARCH-30), with its L1 text cut at `card_budgets.L1` on every channel, pipeline included. **Empty slice**
+      (an empty preselection, or a first card whose rendered input with the query and the frame already exceeds the
+      limit, as with a small budget): no row, no job, no call, `judge_skip: slice_empty`, `degraded` false, and step 7
+      selects from the capped expanded set, as when the judge degrades. (2) **Recorded:** input hash =
+      `judges.find_input_sha256(caller id, query, [[id, text], …])`; a `judges.recorded` hit under the current judge
+      name is applied with `judge_source: recorded`, no row, no job, $0. (3) **Context** (`judge_ctx` = line, run_id,
+      run_cap_usd, lesson_id, daily_budget_usd): the caller's when given (tutor: line `tutor` and the question's run;
+      pipeline: line `compile` and the compile run; `obs.eval` passes its own). On the owner channel without one,
+      `find` builds {line `mcp`, run_id: a fresh uuid4 per request, run_cap_usd: policy `owner_judge_run_cap_usd`,
+      lesson_id: null, daily_budget_usd: the user's effective daily budget}. Degrades without a row or job: no
+      provider handle for the caller → `no_provider`; no context on another channel, or the slot missing from config
+      → `error`. (4) **Request:** the process-wide listener (one connection per process holding `LISTEN judge_done`,
+      dispatching payloads to waiting requests by request id; it is started before the first request and restarted on
+      loss, and a request issued while it is down degrades `error`) registers the request id first; then one
+      committed transaction inserts the `judge_requests` row (request_id, input_sha256, owner_id, the context fields,
+      created_at = the database's `now()`, deadline = the database's `now()` + `judge.timeout_s`, never the process
+      clock, query, cards, pack_ids); then `judge.find` is enqueued
+      with args exactly `{request_id, input_sha256}` keyed by the request id; on an enqueue failure the row is deleted
+      and the find degrades `error`. (5) **Wait** at most `judge.timeout_s` from created_at for the request's
+      notification. Payload `<request_id>:<code>`, code in the closed set {ok, recorded, output_invalid, budget,
+      saturated, quota_refused, expired, error} (paired SRV-AGENT ask, kl_paired_changes): ok or recorded →
+      `judges.recorded`; a hit is applied with `judge_source: live`, a miss degrades `error`; budget, saturated and
+      quota_refused degrade with that `judge_skip` (saturated = SRV-AGENT's lane_saturated); every other code →
+      `error`. Interim rule while FR-AGENT-21 still sends the bare id: a payload without `:` is read as code `ok`. No
+      notification in time → `timeout` (the late job still records its output for replay; this response ignores it).
+      Any database error → `error`. The waiter never retries and makes at most one request per `find`. The same code
+      runs in the api and in worker jobs that call `find`. A separate `owner` ledger line instead of `mcp` is a
+      possible owner follow-up (kl_open_points 1). [db]
+      **Phase 2 (unit 5), interface and recorded choices:** `reader.search.judge_wait.Waiter(engine, enqueue,
+      policy, *, config, store, daily_budget_usd, listener)` is find's `Judge` port (`enqueue(kind, args)` is
+      SRV-EVENTS' `Jobs.enqueue`; a result other than `queued`, or an exception, is an enqueue failure);
+      `Listener` holds one engine connection with `LISTEN judge_done`; `listener(engine)` returns the process's
+      listener for that engine (one engine per process in production) and `stop(engine)` closes it; `parse(payload)`
+      applies the closed code set and the bare-id rule. The listener starts at the first request (before its
+      registration) and, after a lost connection (asyncpg's termination callback), restarts at the next request;
+      a start that fails degrades that request `error`. Checks run in this order, each degrading without a row or
+      job: the `judge.find` slot missing from the effective config (`error`; the judge name needs its model), the
+      recorded lookup, `no_provider`, the context (missing on a channel other than owner, or missing keys →
+      `error`; a context whose line `judge_requests` refuses, such as `eval`, fails the insert → `error`). The row's
+      created_at and deadline both come from the insert's `now()` (deadline = `now()` + `make_interval(secs =>
+      timeout_s)`); the wait is bounded by the monotonic clock from just before the insert. **Deviation (daily
+      budget):** no per-user daily judge budget for the `mcp` line exists in config yet (SRV-MCP's per-token cap
+      lands in stage 7), so the owner-channel context carries the waiter's `daily_budget_usd`, None in production:
+      each owner request stays capped by `owner_judge_run_cap_usd`, and the owner channel is reachable only by the
+      owner (FR-SEARCH-8); kl_open_points 5. Caller.provider comes from the effective config (the user has a
+      provider entry). test_judge_wait_db.py.
+  - id: FR-SEARCH-33   # ADR-0039 revision, promoted in phase 2 (unit 5)
+    text: >-
+      **Tracing and readers for SRV-OBS.** `find` opens FR-OBS-36's subtree through `reader.obs.find` helpers with
+      ids, enums, counts and hashes only (channel, route, question type, entitled, layers, counts, token counts,
+      `judge_ran`, `judge_source`, `judge_skip`, the gate outcome, card uris and sha256s); `find.judge_wait` is
+      current while the waiter enqueues. `reader.search.cards.read(conn, caller, ids)` returns the cards' text as that
+      caller may read it on the owner channel (B8: the MCP row for packs the caller is not entitled to), in memory, for
+      SRV-OBS FR-OBS-39/40. Nothing in reader.search logs or traces a query, filter value or card text. [unit, db]
+      **Phase 2 (unit 5), recorded:** the `find` span's `brain_version` is set once the candidates return it (the
+      span opens before routing); `entitled` is true iff every served card's pack is the caller's own or an own copy;
+      a document's sha256 is the sha256 of the card's canonical JSON and its tokens the card's estimate; each span
+      lists at most 25 documents (SRV-OBS DOC_CAP), the rest only counted; one `find.retrieve` (layer L1, method
+      `dense` or `dense_fts_rrf` by the route's rrf) per find; `find.judge_wait` opens only when the waiter is
+      called. `cards.read` returns `{id: text}` for the ids that resolve in the caller's active packs (unknown or
+      ineligible ids are left out). Paired SRV-OBS change: `slice_empty` joins `reader.judge_skip`'s enum and
+      `reader.obs.find.JudgeSkip` (kl_paired_changes). test_find_obs_db.py.
 
 invariants:
   - id: INV-SEARCH-1
@@ -702,7 +803,10 @@ invariants:
       is B, through either list or the fusion. Property test over random corpora split between owners. [db]
       **Promoted revision (phase 2, unit 4b):** this id's text in `proposed_revisions` (over search_span_vectors and
       the active views, two owners of the same bytes) replaces the text above; `open` and the judge request are
-      covered by test_open_db.py and unit 5. test_search_props.py.
+      covered by test_open_db.py and unit 5. test_search_props.py. Unit 5: a second user's find on every channel
+      over the owner's material makes no card and no judge request, and the owner's request carries only the
+      owner's id and text (test_judge_wait_db.py); /api/find never returns another user's material
+      (test_find_routes_db.py).
   - id: INV-SEARCH-2
     text: >-
       **Citations resolve.** Every result's `span_id` and every entry of `span_ids` names a row of `material_spans` of the
@@ -722,6 +826,10 @@ invariants:
       **Total, deterministic order.** For any corpus and query, two calls return identical results in identical order;
       both candidate lists are totally ordered ((distance, id) and (ts_rank_cd desc, id)). Property test with duplicate
       texts, so equal distances and equal ranks occur. [db]
+      **Promoted revision (phase 2, unit 5):** this id's text in `proposed_revisions` (deterministic `find`
+      responses) replaces the text above. Two judge-free finds over equal scores and a replayed judge output
+      (recorded) give equal JSON in test_judge_wait_db.py; the pivot seed is the request hash in test_find_unit.py;
+      the candidate total order stays in test_search_props.py.
   - id: INV-SEARCH-5
     text: >-
       **No text in logs.** With a canary word in a span's text and in `q`, no log record of the api, the worker or the
@@ -779,7 +887,8 @@ invariants:
       Coverage: for an entitled caller on tutor, owner and pipeline, and for any caller on `mcp` for a `shareable`
       pack, every active non-empty span is reachable from the sources' top cards by `open` children and `next`
       links. Phase 2 (unit 3): the sources' top cards are the `src:` card of each active pack; the judge-request part
-      of the cross-user case lands with the waiter (unit 5, test_judge_wait_db.py). [db] test_walk_db.py.
+      of the cross-user case lands with the waiter (unit 5, test_judge_wait_db.py: no row for a second user on tutor,
+      owner and pipeline; the owner's row carries the L1 text). [db] test_walk_db.py, test_judge_wait_db.py.
       Code review of fb7b926 (blocking 1): the bound covers every served code point that repeats span text, not
       quotes alone — the walk sums, per material, each distinct served own title that is a prefix of or equal to a
       span text, plus each distinct quote, and that sum is ≤ the fraction; the walk runs also on a material whose
@@ -791,6 +900,18 @@ invariants:
       **open resolves only sealed span ids.** For any string after `spn:`, `open` returns a card only when it equals a
       stored locator of a sealed span of an active pack in the caller's manifest. Property test over random ranges
       around real locators. [db] test_open_db.py.
+  - id: INV-SEARCH-11   # ADR-0039 revision, promoted in phase 2 (unit 5)
+    text: >-
+      **One judge call at most, last, on the slice only.** For any `find`: no model call before step 6; at most one
+      `judge_requests` row and one `judge.find` job; the cards in the row are a prefix in score order of the step-5
+      selection whose rendered estimate ≤ min(1.5 × budget, the cap); a recorded hit makes no row; an empty slice
+      makes no row, no job and no call and reports `slice_empty`. [db] test_judge_wait_db.py (random corpora and
+      budgets over a seeded generator instead of Hypothesis, as INV-SEARCH-13: the database state is shared).
+  - id: INV-SEARCH-14   # ADR-0039 revision, promoted in phase 2 (unit 5)
+    text: >-
+      **No text in judge job args (waiter side).** With a canary in the query and in a card text, no `judge.find` job's
+      args and no `job_keys` row contain it; the text is only in the `judge_requests` row. (The table-side canary and the
+      collector are SRV-EVENTS'.) [db] test_judge_wait_db.py.
 
 nfr:
   - id: NFR-SEARCH-1
@@ -975,7 +1096,7 @@ kl_revision:
     Green wait for: SRV-INGEST's revision approved (packs, overlays, manifest, profile_for_pack, overlays.begin,
     request_activation, try_activate) and SRV-TUTOR's locator reader (kl_paired_changes). proposed_owner_notes and
     proposed_defers join owner_notes and defers at the same time.
-  new_ids: [FR-SEARCH-21, FR-SEARCH-22, FR-SEARCH-23, FR-SEARCH-24, FR-SEARCH-25, FR-SEARCH-26, FR-SEARCH-27,
+  new_ids: [FR-SEARCH-34, FR-SEARCH-22, FR-SEARCH-23, FR-SEARCH-24, FR-SEARCH-25, FR-SEARCH-26, FR-SEARCH-27,
     FR-SEARCH-28, FR-SEARCH-29, FR-SEARCH-30, FR-SEARCH-31, FR-SEARCH-33, INV-SEARCH-9, INV-SEARCH-10,
     INV-SEARCH-11, INV-SEARCH-12, INV-SEARCH-13, INV-SEARCH-14, INV-SEARCH-15, NFR-SEARCH-5, NFR-SEARCH-6,
     NFR-SEARCH-7, VEC-SEARCH-6, VEC-SEARCH-7, VEC-SEARCH-8, VEC-SEARCH-9, VEC-SEARCH-10]
@@ -1028,8 +1149,8 @@ proposed_revisions:
   # The reviewed ADR-0039 texts of the revised ids. Phase 2, unit 4b: FR-SEARCH-3, -5, -6, -7, -9, -10, -20,
   # INV-SEARCH-1, -2, -3, -7 and VEC-SEARCH-1, -2, -4, -5 are PROMOTED with their Red tests: each one's entry in
   # requirements / invariants / vectors names this text as normative (replacing its earlier text there) and records
-  # its phase-2 deviations; the text stays here verbatim, as reviewed, instead of being re-typed. FR-SEARCH-8,
-  # INV-SEARCH-4, NFR-SEARCH-1, -2, -4 are still proposed (unit 5 and the paid bench).
+  # its phase-2 deviations; the text stays here verbatim, as reviewed, instead of being re-typed. Unit 5
+  # promoted FR-SEARCH-8 and INV-SEARCH-4 the same way; NFR-SEARCH-1, -2, -4 are still proposed (the paid bench).
   - id: FR-SEARCH-3
     text: >-
       **Span windows (replaces chunking across spans).** The unit of retrieval is the L1 span of an active base pack
@@ -1245,75 +1366,18 @@ proposed_requirements:
   # 2026-11-27): FR-SEARCH-21 is taken by forget_legacy (paired change of V.kl-ingest-packs).
   # FR-SEARCH-22, -23, -24 promoted to `requirements` with test_find_unit.py (phase 2, unit 2).
   # FR-SEARCH-25, -26, -27 promoted to `requirements` with test_greedy_unit.py (phase 2, unit 2).
-  - id: FR-SEARCH-28
-    text: >-
-      **Step 6, the `judge.find` waiter (B6, B7b).** Runs only when step 4 is not separated. (1) **Slice:** the
-      longest prefix of the preselection in score order whose rendered input (`judges.render_find_input(query,
-      cards)`) estimates ≤ min(`preselect_factor` × the cards' budget, `judge.input_cap_tokens`). Each card is
-      rendered as the channel serves it to this caller (so the judge reads the MCP row for a non-entitled caller,
-      FR-SEARCH-30), with its L1 text cut at `card_budgets.L1` on every channel, pipeline included. **Empty slice**
-      (an empty preselection, or a first card whose rendered input with the query and the frame already exceeds the
-      limit, as with a small budget): no row, no job, no call, `judge_skip: slice_empty`, `degraded` false, and step 7
-      selects from the capped expanded set, as when the judge degrades. (2) **Recorded:** input hash =
-      `judges.find_input_sha256(caller id, query, [[id, text], …])`; a `judges.recorded` hit under the current judge
-      name is applied with `judge_source: recorded`, no row, no job, $0. (3) **Context** (`judge_ctx` = line, run_id,
-      run_cap_usd, lesson_id, daily_budget_usd): the caller's when given (tutor: line `tutor` and the question's run;
-      pipeline: line `compile` and the compile run; `obs.eval` passes its own). On the owner channel without one,
-      `find` builds {line `mcp`, run_id: a fresh uuid4 per request, run_cap_usd: policy `owner_judge_run_cap_usd`,
-      lesson_id: null, daily_budget_usd: the user's effective daily budget}. Degrades without a row or job: no
-      provider handle for the caller → `no_provider`; no context on another channel, or the slot missing from config
-      → `error`. (4) **Request:** the process-wide listener (one connection per process holding `LISTEN judge_done`,
-      dispatching payloads to waiting requests by request id; it is started before the first request and restarted on
-      loss, and a request issued while it is down degrades `error`) registers the request id first; then one
-      committed transaction inserts the `judge_requests` row (request_id, input_sha256, owner_id, the context fields,
-      created_at = the database's `now()`, deadline = the database's `now()` + `judge.timeout_s`, never the process
-      clock, query, cards, pack_ids); then `judge.find` is enqueued
-      with args exactly `{request_id, input_sha256}` keyed by the request id; on an enqueue failure the row is deleted
-      and the find degrades `error`. (5) **Wait** at most `judge.timeout_s` from created_at for the request's
-      notification. Payload `<request_id>:<code>`, code in the closed set {ok, recorded, output_invalid, budget,
-      saturated, quota_refused, expired, error} (paired SRV-AGENT ask, kl_paired_changes): ok or recorded →
-      `judges.recorded`; a hit is applied with `judge_source: live`, a miss degrades `error`; budget, saturated and
-      quota_refused degrade with that `judge_skip` (saturated = SRV-AGENT's lane_saturated); every other code →
-      `error`. Interim rule while FR-AGENT-21 still sends the bare id: a payload without `:` is read as code `ok`. No
-      notification in time → `timeout` (the late job still records its output for replay; this response ignores it).
-      Any database error → `error`. The waiter never retries and makes at most one request per `find`. The same code
-      runs in the api and in worker jobs that call `find`. A separate `owner` ledger line instead of `mcp` is a
-      possible owner follow-up (kl_open_points 1). [db]
-    tests_planned:
-      - "add server/tests/search/test_judge_wait_db.py [db] (fake lane that reads the row, records an output and notifies): slice within min(1.5 × budget, 3,000) by the rendered estimate and in score order (VEC-SEARCH-10); a pipeline card over 600 tokens is cut in the judge input only; empty preselection → no row, no job, judge_skip slice_empty, degraded false; a budget so small that the first card's rendered input exceeds 1.5 × B → the same; created_at and deadline come from the database clock (a test with a skewed process clock); a recorded hit → no row, no job, judge_source recorded; no provider → no_provider; tutor channel without ctx → error; owner channel without ctx → a row with line mcp, a fresh run_id per request, run cap from policy, lesson_id null, the user's daily budget; a caller-given ctx is used unchanged; live output in time → applied, live; each payload code maps as stated; a bare-id payload → read as ok; no notification within the timeout → timeout, returned by timeout + 0.5 s; enqueue failure → the row deleted, error; listener down → error with no row; the row carries request_id and input_sha256; the registration precedes the insert (a lane that notifies at once is not missed); exactly one row and one job per find; the job args are exactly {request_id, input_sha256}; one LISTEN connection per process under 20 concurrent finds"
   # FR-SEARCH-29 promoted to `requirements` with test_find_unit.py (phase 2, unit 2).
   # FR-SEARCH-30, -31 promoted to `requirements` with test_cards_db.py, test_cards_props.py, test_open_db.py (unit 3).
-  - id: FR-SEARCH-33
-    text: >-
-      **Tracing and readers for SRV-OBS.** `find` opens FR-OBS-36's subtree through `reader.obs.find` helpers with
-      ids, enums, counts and hashes only (channel, route, question type, entitled, layers, counts, token counts,
-      `judge_ran`, `judge_source`, `judge_skip`, the gate outcome, card uris and sha256s); `find.judge_wait` is
-      current while the waiter enqueues. `reader.search.cards.read(conn, caller, ids)` returns the cards' text as that
-      caller may read it on the owner channel (B8: the MCP row for packs the caller is not entitled to), in memory, for
-      SRV-OBS FR-OBS-39/40. Nothing in reader.search logs or traces a query, filter value or card text. [unit, db]
-    tests_planned:
-      - "add server/tests/search/test_find_obs_db.py [db]: the span tree and attributes for a gated, a judged and a degraded find (in-memory exporter); a canary in the query and in a span text appears in no span attribute and no log record; cards.read applies the MCP row for a non-entitled pack"
+  # FR-SEARCH-28, -33 promoted to `requirements` with test_judge_wait_db.py and test_find_obs_db.py (unit 5).
+  []
 
 proposed_invariants:
   # INV-SEARCH-9 promoted to `invariants` with test_find_props.py (phase 2, unit 2).
   # INV-SEARCH-10 promoted to `invariants` with test_greedy_props.py (phase 2, unit 2).
-  - id: INV-SEARCH-11
-    text: >-
-      **One judge call at most, last, on the slice only.** For any `find`: no model call before step 6; at most one
-      `judge_requests` row and one `judge.find` job; the cards in the row are a prefix in score order of the step-5
-      selection whose rendered estimate ≤ min(1.5 × budget, the cap); a recorded hit makes no row; an empty slice
-      makes no row, no job and no call and reports `slice_empty`. [db]
-    tests_planned:
-      - "add server/tests/search/test_judge_wait_db.py: property over random corpora, budgets (including ones below one rendered card) and policies with a counting fake Provider and lane; VEC-SEARCH-10's slice_empty cases"
   # INV-SEARCH-12, -13 promoted to `invariants` with test_walk_db.py and test_open_db.py (phase 2, unit 3).
-  - id: INV-SEARCH-14
-    text: >-
-      **No text in judge job args (waiter side).** With a canary in the query and in a card text, no `judge.find` job's
-      args and no `job_keys` row contain it; the text is only in the `judge_requests` row. (The table-side canary and the
-      collector are SRV-EVENTS'.) [db]
-    tests_planned:
-      - "add server/tests/search/test_judge_wait_db.py: canary over procrastinate_jobs args and job_keys"
+  # INV-SEARCH-11, -14 promoted to `invariants` with test_judge_wait_db.py (phase 2, unit 5).
   # INV-SEARCH-15 promoted to `invariants` with test_find_unit.py (phase 2, unit 2).
+  []
 
 proposed_nfr:
   - id: NFR-SEARCH-5
@@ -1359,6 +1423,7 @@ kl_open_points:
   - "2. Until SRV-AGENT sends `<request_id>:<code>`, budget, saturated and quota_refused degrade as error (interim parse rule, FR-SEARCH-28)."
   - "3. When k binds together with the budget, no approximation bound is claimed (FR-SEARCH-27); B8 keeps k optional."
   - "4. Unmeasured values are marked initial in policy (expand_decay, objective weights, thresholds, quotes_per_card_max, walk_quote_fraction_max, owner_judge_run_cap_usd); the evaluation reports their effect, none gates a merge; judge-gate and the paid ablation arms replace the ones they measure."
+  - "5. The owner channel's judge context has no daily budget (`daily_budget_usd` null) until a per-user daily judge budget for the `mcp` line exists (SRV-MCP, stage 7); each owner request is capped by owner_judge_run_cap_usd and the shipped gate (never_judge) makes no judge call until judge-gate (FR-SEARCH-28, unit 5)."
 
 proposed_owner_notes:
   - "Spans vs chunks (spikes/retrieval-ablation): at 10 cards, spans hit 71 of 90 against today's chunks' 76; the difference is not significant (thematic 17 vs 20, exact 25 vs 27, fact-check equal), and spans carry 3.8× less text. With the same amount of text spans hit 83. find selects under a token budget, not 10 cards, so the thematic route should not lose in practice; NFR-SEARCH-2's floor is 68 (the spike's 71 minus a margin of 3)."

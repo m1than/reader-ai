@@ -130,3 +130,57 @@ async def test_gc_seam_is_bound_to_forget_overlay(w: World) -> None:
         assert await gc.SEAMS[0].search_forget_overlay(conn, ivan, oid) == 1
     assert gc.Seams().search_forget_overlay.__module__ == gc.__name__
     assert callable(store.forget_overlay)
+
+
+# ---- phase 2 unit 5: code review of 4b (non-blocking) ----
+
+
+async def test_an_owner_purge_with_production_seams_deletes_the_built_rows(
+    w: World, embed_server: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reader.ingest import views
+
+    from .conftest import embed_material
+
+    monkeypatch.setenv("READER_EMBED_URL", embed_server.url)
+    gc = need("reader.ingest.gc")
+    spans = [(1, "Wallet keys sign every transfer."), (2, "A miner earns the block reward.")]
+    for handle in ("ivan", "anna"):  # two owners of the same bytes: one pack id, two row sets
+        await embed_material(w, await add_material(w, handle, MAT_EN, spans, config_id="book-en"), MAT_EN)
+    count = "SELECT count(*) FROM search_span_vectors WHERE owner_id = :o"
+    ivan, anna = w.users["ivan"], w.users["anna"]
+    assert await scalar(w.engine, count, o=ivan) == 2 and await scalar(w.engine, count, o=anna) == 2
+    async with w.engine.begin() as conn:
+        pack = await views.active_pack(conn, ivan, MAT_EN)
+        assert pack is not None
+        assert gc.SEAMS[0] == gc.Seams()  # the production seams, none replaced
+        assert await gc.purge(conn, ivan, pack.pack_id, gc.SEAMS[0]) is True
+    assert await scalar(w.engine, count, o=ivan) == 0
+    assert await scalar(w.engine, count, o=anna) == 2
+
+
+async def test_the_downgrade_drops_only_the_span_vectors(w: World) -> None:
+    from alembic import command
+
+    from reader.db import alembic_config
+
+    def move(target: str, up: bool) -> Any:
+        def run(connection: Any) -> None:
+            config = alembic_config()
+            config.attributes["connection"] = connection
+            (command.upgrade if up else command.downgrade)(config, target)
+
+        return run
+
+    async with w.engine.connect() as conn:
+        await conn.run_sync(move("search_0001", up=False))
+        await conn.commit()
+    regclass = "SELECT to_regclass(:t)::text"
+    assert await scalar(w.engine, regclass, t="search_span_vectors") is None
+    assert await scalar(w.engine, regclass, t="search_chunks") == "search_chunks"
+    guard = "SELECT count(*) FROM pg_proc WHERE proname = 'search_span_vectors_guard'"
+    assert await scalar(w.engine, guard) == 0
+    async with w.engine.connect() as conn:
+        await conn.run_sync(move("heads", up=True))
+        await conn.commit()
+    assert await scalar(w.engine, regclass, t="search_span_vectors") == "search_span_vectors"

@@ -289,7 +289,7 @@ async def test_a_dead_purge_is_requeued_by_the_next_request(
             await vectors(conn, w.users["ivan"], pid)
         unbound = dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)
         monkeypatch.setattr(gc, "SEAMS", [unbound])
-        url =f"/api/materials/synthetic/packs/{pid}/purge"
+        url = f"/api/materials/synthetic/packs/{pid}/purge"
         async with client(w, jobs=w.jobs) as c:
             assert (await c.post(url, json={"confirm": "synthetic"})).json()["enqueued"] is True
         await w.work()

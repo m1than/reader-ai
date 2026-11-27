@@ -156,3 +156,14 @@ async def test_open_returns_a_card_only_for_a_stored_locator(w: World) -> None:
             assert (await call(w, "ivan", guess))["cards"][0]["id"] == guess
         else:
             assert await code(w, "ivan", guess) == "not_found", guess
+
+
+async def test_the_in_order_fill_stays_within_the_smallest_budget(w: World) -> None:
+    import json
+    import math
+
+    await add_material(w, "ivan", MAT_EN, SPANS, config_id="book-en", outline=OUTLINE)
+    got = await call(w, "ivan", f"src:{MAT_EN}", depth=4, budget=400)
+    size = len(json.dumps(got, sort_keys=True, separators=(",", ":"), ensure_ascii=False))
+    assert got["budget"] == 400 and got["cards"] and math.ceil(size / 2) <= 400
+    assert got["cards"][0]["id"] == f"src:{MAT_EN}"

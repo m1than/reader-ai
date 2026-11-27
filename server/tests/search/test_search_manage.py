@@ -161,3 +161,22 @@ async def test_another_owners_deleted_material_does_not_hide_mine(w: World) -> N
     assert MAT_RU in {h.material_sha256 for h in mine.results}
     theirs = await store.search(w.engine, w.users["anna"], QUERY, k=10)
     assert theirs.results == []
+
+
+async def test_find_and_open_leave_a_deleted_material_and_the_restore_serves_it_again(w: World) -> None:
+    await course_columns(w)
+    await two_materials(w)
+    body = {"q": QUERY, "budget": 10500}
+    async with client(w) as c:
+        first = (await c.post("/api/find", json=body)).json()["cards"]
+        mine = [x["id"] for x in first if x["source"]["id"] == f"src:{MAT_RU}"]
+        assert mine
+        gone = await c.request("DELETE", "/api/materials/book-ru", json={"confirm": "book-ru"})
+        assert gone.status_code == 200
+        after = (await c.post("/api/find", json=body)).json()["cards"]
+        assert after and {x["source"]["id"] for x in after} == {f"src:{MAT_EN}"}
+        opened = await c.post("/api/open", json={"id": mine[0]})
+        assert (opened.status_code, opened.json()) == (404, {"error": "not_found"})
+        assert (await c.post("/api/materials/book-ru/restore", json={})).status_code == 200
+        assert (await c.post("/api/find", json=body)).json()["cards"] == first
+        assert (await c.post("/api/open", json={"id": mine[0]})).status_code == 200

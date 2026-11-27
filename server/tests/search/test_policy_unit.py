@@ -233,3 +233,66 @@ def test_shipped_policy_copy_is_independent() -> None:
     other = copy.deepcopy(data)
     other["k_max"] = 1
     assert _policy().load().data["k_max"] == 50
+
+
+# ---- phase 2 unit 5: the structural regex check, bind() and the start of api and worker ----
+
+
+@pytest.mark.parametrize(
+    ("pattern", "nested"),
+    [
+        ("(a+)+$", True), ("(a*)*", True), ("(?:ab+){2,}", True), ("((x+)y)*", True), ("(a|b+)+", True),
+        ("(a{2})+", True), ("(?=(a+)+)", True),
+        ("a+b*", False), ("(ab)+", False), ("(a+)?", False), (r"\(a+\)+", False), ("[(]a+[)]+", False),
+        (r"[\]+]+", False), ("(a{1})*", False), (r"\bBIP-?\d{1,4}\b", False), ("a{,3}", False),
+        ("x{2}", False), ("(a?)+", False),
+    ],
+)
+def test_the_star_height_check_scans_the_pattern(pattern: str, nested: bool) -> None:
+    assert _policy()._nested_repeat(pattern) is nested
+
+
+def test_load_uses_no_private_parser_and_no_wall_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = _policy()
+    source = Path(policy.__file__).read_text(encoding="utf-8")
+    assert "re._parser" not in source and "sre_parse" not in source
+
+    def no_clock() -> float:
+        raise AssertionError("load read the clock")
+
+    monkeypatch.setattr(time, "perf_counter", no_clock)
+    monkeypatch.setattr(time, "monotonic", no_clock)
+    assert policy.load().data["k_max"] == 50
+
+
+def test_bind_caches_the_version_and_binds_obs(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = _policy()
+    from reader.obs import versions
+
+    monkeypatch.setattr(policy, "_BOUND", [None])
+    monkeypatch.setattr(versions, "POLICY", versions.POLICY)
+    monkeypatch.setattr(policy, "effective_slots", lambda: dict(SLOTS))
+    loaded, version = policy.bind()
+    assert version == policy.policy_version(loaded, slots=SLOTS)
+    assert versions.current_policy_version() == version
+    monkeypatch.setattr(policy, "effective_slots", lambda: {"judge.find": "another"})
+    assert policy.current() == (loaded, version)  # cached per process, not recomputed
+
+
+def test_a_bad_policy_stops_the_api_and_worker_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    policy = _policy()
+    from reader.serve import main
+
+    data = _shipped()
+    data["k_max"] = 0
+    bad = tmp_path / "policy.json"
+    bad.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(policy, "POLICY_FILE", bad)
+    monkeypatch.setattr(policy, "_BOUND", [None])
+    policy.policy.cache_clear()
+    try:
+        with pytest.raises(main.Failure) as caught:
+            main.bind_policy()
+        assert caught.value.code == "policy_invalid"
+    finally:
+        policy.policy.cache_clear()

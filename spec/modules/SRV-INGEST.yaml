@@ -1979,6 +1979,11 @@ requirements:
       the job runs; learner 403 owner_only; another owner's material 404; a pack_id that exists only for another
       owner (same book) → 404 and nothing enqueued; a pack_id of another material of the same owner → 404;
       confirm_mismatch.
+      Paired note (V.kl-search-find unit 5, 2026-11-28): every text-holding seam is bound in production
+      (`search_forget_overlay` to SRV-SEARCH's `store.forget_overlay`), so `gc._unbound` serves only the tests that
+      check a delete rolls back with `seam_unbound`; its docstring says so. test_purge_db.py: one lint-only edit
+      (spacing), no oracle changed; SRV-SEARCH test_span_vectors_db.py purges real span-vector rows with the
+      production seams.
   - id: FR-INGEST-46
     text: >-
       **Per-pack advisory locks** (ADR-0039 B7b; the lock contract of SRV-AGENT FR-AGENT-21 step 9).
