@@ -242,9 +242,13 @@ per call), p50 1.59 s, p95 3.83 s per call.
    ≈ $0.15 if each is continued to 4 requests again (run 1's premium, $0.0027 per call). **≈ $2.22–2.33, ≈ 35 min**
    at concurrency 4. The stage cap leaves $4.72 − $2.1445 = $2.58, a margin of ≥ 10%; spent so far $2.5938, and
    with the other caps the total stays at $12.51. Checked without spend: the fixed `paid.py` resumed a copy of this
-   run's real `calls.jsonl` and prefixes against the stub CLI (`--network none`): 4,344 calls, all 9,104 indexed
-   spans done, cache ratio 0.9953, no stop, exit 0; `dry_run.sh` also checks that spans failing twice end as
-   `prefix: none` after every first try and the stage completes.
+   run's real `calls.jsonl` and prefixes against the stub CLI (`--network none`): 4,344 calls in the order
+   chapters 11, 12, 14–23, then group 0, the 54 retries as the last 54 calls; all 9,104 indexed spans done, cache
+   ratio 0.9952, no stop, exit 0. `dry_run.sh` (38 of 38) also makes run 1's 54 spans fail every time (the stub
+   gets their sha256 prefixes, not their text): the stage completes in one run, each is retried once after every
+   other span and ends as `prefix: none`. To keep such clusters from stopping a stage, it now stops after 10
+   consecutive failed calls instead of 3 (at most ≈ $0.03 on a systemic failure); calls without a reported cost
+   still stop it after 3.
 
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
