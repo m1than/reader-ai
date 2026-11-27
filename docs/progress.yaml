@@ -2141,7 +2141,7 @@ tasks:
         V.kl-search-find's vector overlays before any r2 -> r3 re-conversion, or a legacy-path rule that a
         replacing pack is not activated before its search_embeds row exists (SRV-INGEST FR-INGEST-40 gate
         (e)-(i))." }
-  - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: in_progress,
+  - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: done,
       note: "2026-11-27, branch V/kl-search-find, phase 2 (implementation). Done, each promoted with its Red test
         then Green: unit 1 FR-SEARCH-34 (the draft's FR-SEARCH-21, renumbered: id taken by forget_legacy) policy.json
         + schema, policy.load/declared/policy_version/find_routes (declared() maps onto FR-OBS-21's closed key set,
@@ -2209,7 +2209,8 @@ tasks:
         Mutants on the fixes: 11 of 11 killed (the 5 reviewer survivors above plus current() never/always re-binds,
         unreadable config raises, lane config instead of the bound path, no lifespan stop, no NUL/surrogate check).
         Survivors left, equivalent in output: o_no_doc_cap, o_no_doc_cap_sel (reader.obs.find caps at DOC_CAP
-        again)",
+        again). Gate: BASE=origin/V/slice-integration bash tools/ci-local.sh LOCAL CI: PASS (2026-11-28) on c1e8996;
+        status done; the merge into V/slice-integration is the coordinator's",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
         budget with stated bounds, 1-hop expansion, one judge.find job last on the worker-judge lane), policy_version,
