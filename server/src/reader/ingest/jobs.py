@@ -102,6 +102,17 @@ class PurgeArgs(BaseModel):
 ManifestConflict = import_error("manifest_conflict")  # FR-INGEST-45: a purge's lost CAS is transient
 
 
+async def _audit_purge(conn: AsyncConnection, owner_id: uuid.UUID, pack_id: str) -> None:
+    """FR-INGEST-45 (4): the applied purge's audit row, in the job's transaction (SRV-EVENTS FR-EVENTS-30)."""
+    from reader.jobs import audit
+
+    material_id = (await conn.execute(text(
+        "SELECT m.config_id FROM base_packs b JOIN materials m"
+        " ON m.owner_id = b.owner_id AND m.sha256 = b.material_sha256"
+        " WHERE b.owner_id = :o AND b.pack_id = :p"), {"o": owner_id, "p": pack_id})).scalar_one()
+    await audit.record(conn, owner_id, "material.purge_pack", str(material_id), {"pack_id": pack_id})
+
+
 def _gc_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
     """FR-INGEST-44, -45: the scanner, the two deleters and purge; artifact directories go after commit."""
 
@@ -128,7 +139,8 @@ def _gc_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
 
         del ctx
         try:
-            await gc.purge(conn, args.owner_id, args.pack_id, gc.SEAMS[0])
+            if await gc.purge(conn, args.owner_id, args.pack_id, gc.SEAMS[0]):
+                await _audit_purge(conn, args.owner_id, args.pack_id)
         except manifest.ManifestError as error:
             if error.code != "manifest_conflict":
                 raise

@@ -178,6 +178,36 @@ async def test_the_routes(pg: Pg, tmp_path: Path) -> None:
         assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.purge'") == 1
 
 
+async def audit_rows(w: World) -> list[tuple[Any, ...]]:
+    rows = await w.rows("SELECT actor_id, object_kind, object_id, detail FROM audit_log"
+                        " WHERE action = 'material.purge_pack' ORDER BY id")
+    return [tuple(r) for r in rows]
+
+
+async def test_an_applied_purge_writes_one_audit_row(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gc, jobs = need("reader.ingest.gc"), need("reader.ingest.jobs")
+    from reader.jobs.model import JobContext
+
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        pid = await pack(w, MATERIAL_SHA, R2, material_id="synthetic")
+        url = f"/api/materials/synthetic/packs/{pid}/purge"
+        async with client(w, jobs=w.jobs) as c:
+            assert (await c.post(url, json={"confirm": "nope"})).status_code == 400
+            assert (await c.post(f"/api/materials/synthetic/packs/{'f' * 64}/purge",
+                                 json={"confirm": "synthetic"})).status_code == 404
+        assert await audit_rows(w) == []  # refused requests write none
+        monkeypatch.setattr(gc, "SEAMS", [Calls().seams()])
+        kind = next(k for k in jobs.make_kinds(w.blobs) if k.name == "ingest.purge")
+        for attempt in range(2):  # the second run finds the pack purged: no row
+            async with w.engine.begin() as conn:
+                await kind.handler(kind.args(owner_id=owner, pack_id=pid), conn,
+                                   JobContext(job_id=1, key="k", attempts=attempt))
+        assert await audit_rows(w) == [(owner, "material", "synthetic", {"pack_id": pid})]
+
+
 async def test_a_dead_purge_is_requeued_by_the_next_request(
     pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

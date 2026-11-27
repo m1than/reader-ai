@@ -148,6 +148,9 @@ def test_accepted_rows() -> None:
     audit.check("settings.set", "tasks.draft.budget_usd_per_lesson", {"old": None, "new": 2.5})
     audit.check("material.delete", "up-0123456789ab", {"courses": 2})
     audit.check("material.rename", "bashir", {"version": 2})
+    audit.check("material.purge_pack", "up-0123456789ab", {"pack_id": "c" * 64})
+    with pytest.raises(audit.AuditRefused):
+        audit.check("material.purge_pack", "bashir", {"pack_id": "C" * 64})
 
 
 @pytest.mark.parametrize(
