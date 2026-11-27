@@ -540,6 +540,65 @@ requirements:
       saturated, quota_refused, no_provider} when no judge ran, and the trace the judged and unjudged token counts
       (FR-SEARCH-33; `slice_empty` joins SRV-OBS's enum, kl_paired_changes). The judge's `sufficiency` is recorded for
       the slice only and is not applied to the remainder. [unit] test_find_unit.py.
+  - id: FR-SEARCH-30   # ADR-0039 revision, promoted in phase 2 (unit 3)
+    text: >-
+      **Personal-use cards per channel and caller (B8 table).** `entitled(caller, pack)` is true iff the caller owns
+      the pack, or the caller has a material row that is not soft-deleted whose sha256 our code computed from bytes
+      that caller uploaded or imported (SRV-INGEST receive), equal to the pack's material sha256; a client-declared
+      sha256 never counts. Eligibility for a pack with `license: personal-use`: on channel `mcp`, and on every channel
+      for a caller who is not entitled, no L1 card is returned, no `next` link and no `open` child leads to an L1 id,
+      and L2 (and, from SRV-KB, L4) cards carry their citations with quotes and no continuation; on `owner` and
+      `tutor` for an entitled caller, full L1 text cut at the card budget; on `pipeline` for an entitled caller, full
+      span text, not cut (B8 table; the pipeline's budget bounds the response). `shareable` packs are eligible on
+      every channel. **Quotes:** a quote is the first ≤ `quote_max_chars` (300) code points of the cited span's text,
+      cut at the last whitespace at or before 300 (hard when there is none), so its position is fixed by the locator
+      and repeated calls never reveal a different window; a non-L1 card carries at most `quotes_per_card_max` quoted
+      citations (initial 1; further citations carry `spn` and `quote_sha256` only), and its quotes count in the card's
+      cost against its L2 text budget (FR-SEARCH-22). L2 cards in stage V cite the first non-empty span of their node.
+      **Quote allowance per material (deterministic):** `quote_allowance(owner_id, material_sha256)` is computed over
+      the material's active pack only (an inactive pack serves no cards, so it has no allowance): it walks the pack's
+      outline nodes in outline order (pre-order, then outline path) and grants node n its quote while the cumulative
+      quoted code points stay ≤ `walk_quote_fraction_max` (initial 10%) × the pack's total span text code points. The
+      allowance always counts the **full** quote (the ≤ 300-code-point prefix of the cited span), each distinct cited
+      span once, even when a card later serves a shorter prefix of it because the L2 text budget cut it
+      (FR-SEARCH-22); so what any card serves is ≤ what was counted. The quote sits in `cite[0].quote` of the node's
+      card, the node's first citation; every non-granted node's citation carries `spn` and `quote_sha256` only. The
+      allowance is a function of the active pack and the policy alone, so no sequence of calls on any channel obtains
+      more quoted text of the material's active pack than that fraction (residual, declared: a pack switch after a
+      converter upgrade computes a new allowance over the new pack). The 10% is an engineering bound with no legal
+      basis claimed; it is tighter than ADR-0015, which bounds only each citation (300 characters). Judge input follows
+      the channel's row for that caller (FR-SEARCH-28 (1)). Scope stays
+      the caller's own manifest (INV-SEARCH-1) until SRV-SHARE; the entitlement function is still implemented and
+      tested on constructed rows, so SRV-SHARE only widens the scope. **Phase 2 (unit 3), interface and recorded
+      choices:** `reader.search.opening` holds `entitled(conn, user_id, pack)`, `quote_allowance(conn, owner_id,
+      material_sha256)` and the pure `Book` (one active pack's cards); `reader.search.cards.allowance(nodes, total,
+      fraction)` is the pure walk (the granted set is a prefix of outline order: the walk stops at the first node
+      whose quote would pass the fraction) and `cards.quote(text, max_chars)` the quote cut. Card ids: L1 = the span's
+      stored locator (also for a legacy r2 pack over backfilled locators; SRV-INGEST's `views.PackSpan` gains the
+      stored `locator`, an additive paired field), L2 = `sec:<material_sha256>:<outline path>` (FR-INGEST-33's
+      outline id), L0 = `src:<material_sha256>` (also every card's `source.id`). A node's span range starts at the
+      first span on or after its page (never before the previous node's start) and its direct spans run to the next
+      node's start; its children (`next`) are its direct spans in reading order, then its child nodes; spans before
+      the first node, and the top nodes, are the source card's children. An L1 card carries one citation (itself)
+      with no quote (its text is the span); its `next` is the next span in reading order and its section (FR-SEARCH-24).
+      A profile without a license counts as `personal-use` (fail closed, SRV-INGEST `packs.shareable`). [unit, db]
+      test_cards_db.py, test_cards_props.py.
+  - id: FR-SEARCH-31   # ADR-0039 revision, promoted in phase 2 (unit 3)
+    text: >-
+      **`open(caller, channel, id, depth=1, budget=None)` (B8).** `spn:` must equal the locator of a sealed span of an
+      active pack in the caller's manifest; any other range, an inactive or another user's pack, or an ineligible L1
+      span (FR-SEARCH-30) answers `not_found` (the same code, so a refusal never confirms existence). For a cut
+      `shareable` span it returns the full text within the open budget (`more: true` again when still cut). `sec:`
+      returns the node's card and its children down to `depth` (≤ `open_depth_max`, else `depth_invalid`), skipping
+      ineligible L1 children; `src:` returns the L0 profile card and the top outline level. `con:`, `fnd:`, `les:`
+      answer `not_found` until SRV-KB and SRV-LESSON provide them (declared). Malformed ids → `id_invalid`. Same
+      budget clamping and card shape as `find`; no judge. **Phase 2 (unit 3):** `reader.search.opening.open_(conn,
+      caller, channel, id, *, depth=1, budget=None, policy=None, policy_version=None)` returns `{brain_version,
+      policy_version, budget, cards}`; the cards are the opened card, then its descendants in pre-order down to
+      `depth` (`src:` the same, from the source card), each taken in that order while the whole response's estimate
+      fits the effective budget (a card that does not fit is skipped). A `shareable` `spn:` card's text is cut to
+      what the response budget leaves for it. `depth` is an integer 1..`open_depth_max`; a `channel` outside the
+      four → `channel_invalid`. [db] test_open_db.py.
 
 invariants:
   - id: INV-SEARCH-1
@@ -602,6 +661,25 @@ invariants:
       **Unreviewed findings never returned.** Cards of layer L4 come from a `Findings` port (production default: empty
       until SRV-KB) and only reviewed findings are eligible on any channel or in judge input. [unit]
       test_find_unit.py.
+  - id: INV-SEARCH-12   # ADR-0039 revision, promoted in phase 2 (unit 3)
+    text: >-
+      **Personal-use walk and cross-user tests (B1 navigation invariant, B8).** Starting from the sources' top cards
+      with channel `mcp`, following every `next` and `open` child of a personal-use pack: no L1 card is returned, no
+      quote exceeds 300 characters, no card carries more than `quotes_per_card_max` quotes, the distinct quoted
+      characters over the whole walk are ≤ `walk_quote_fraction_max` (initial 10%) of the material's span text (the
+      per-pack allowance of FR-SEARCH-30 makes this hold by construction; the walk checks it end to end), and
+      `open` on every cited `spn:` id and on guessed locators of the same material answers `not_found`. On every
+      channel, a second user without an own copy gets no card of the owner's pack (trivial under INV-SEARCH-1, listed
+      again as an SRV-SHARE required test) and no judge request carrying L1 text; with an own copy on tutor, L1 cards.
+      Coverage: for an entitled caller on tutor, owner and pipeline, and for any caller on `mcp` for a `shareable`
+      pack, every active non-empty span is reachable from the sources' top cards by `open` children and `next`
+      links. Phase 2 (unit 3): the sources' top cards are the `src:` card of each active pack; the judge-request part
+      of the cross-user case lands with the waiter (unit 5, test_judge_wait_db.py). [db] test_walk_db.py.
+  - id: INV-SEARCH-13   # ADR-0039 revision, promoted in phase 2 (unit 3)
+    text: >-
+      **open resolves only sealed span ids.** For any string after `spn:`, `open` returns a card only when it equals a
+      stored locator of a sealed span of an active pack in the caller's manifest. Property test over random ranges
+      around real locators. [db] test_open_db.py.
 
 nfr:
   - id: NFR-SEARCH-1
@@ -667,6 +745,9 @@ vectors:
   - id: VEC-SEARCH-10
     source: judge slicing and mixed responses — preselection, cap, kept/dropped output, k across the two passes, expected order and judged flags; slice_empty cases (empty preselection; a first card whose rendered input exceeds 1.5 × a small budget) with no row and degraded false
     file: spec/fixtures/SRV-SEARCH/judge-mixed.yaml
+  - id: VEC-SEARCH-9
+    source: B8 per-channel table — channel × entitled × license × layer → card returned, text bound, quotes, next/open into L1; L2 cut order cases (title path alone over the budget → title cut, no quote; title fits → quote takes the rest, cut at whitespace; nothing left → quote omitted; summary between title and quote when active); a node past the pack's quote allowance → spn and quote_sha256 only
+    file: spec/fixtures/SRV-SEARCH/personal-use.yaml
 
 # Test levels: [unit] pure functions and the service protocol with a fake encoder; [db] Postgres via testcontainers on
 # the reader-postgres image with pgvector, with a fake embed service returning deterministic hash-derived unit vectors;
@@ -788,7 +869,7 @@ kl_revision:
     INV-SEARCH-11, INV-SEARCH-12, INV-SEARCH-13, INV-SEARCH-14, INV-SEARCH-15, NFR-SEARCH-5, NFR-SEARCH-6,
     NFR-SEARCH-7, VEC-SEARCH-6, VEC-SEARCH-7, VEC-SEARCH-8, VEC-SEARCH-9, VEC-SEARCH-10]
   retired_draft_ids: "FR-SEARCH-32 (response cache) dropped in round 1; the id is not reused. The draft's FR-SEARCH-21 (policy) collided with the approved FR-SEARCH-21 (forget_legacy, V.kl-ingest-packs) and is promoted as FR-SEARCH-34 (phase 2)"
-  phase_2_deviations: "Recorded at promotion, each in its item's text: FR-SEARCH-34 renumbered and declared() over FR-OBS-21's closed key set."
+  phase_2_deviations: "Recorded at promotion, each in its item's text: FR-SEARCH-34 renumbered and declared() over FR-OBS-21's closed key set; FR-SEARCH-30 card ids, node ranges and children, L1 cards without a quote, a license-less profile as personal-use, and the additive `views.PackSpan.locator` field (paired, SRV-INGEST); FR-SEARCH-31's response shape and in-order budget fill; INV-SEARCH-12's judge-request part with the waiter (unit 5)."
   revised_ids: [FR-SEARCH-3, FR-SEARCH-4, FR-SEARCH-5, FR-SEARCH-6, FR-SEARCH-7, FR-SEARCH-8, FR-SEARCH-9,
     FR-SEARCH-10, FR-SEARCH-20, INV-SEARCH-1, INV-SEARCH-2, INV-SEARCH-3, INV-SEARCH-4, INV-SEARCH-7, NFR-SEARCH-1,
     NFR-SEARCH-2, NFR-SEARCH-4, VEC-SEARCH-1, VEC-SEARCH-2, VEC-SEARCH-4, VEC-SEARCH-5]
@@ -1105,51 +1186,7 @@ proposed_requirements:
     tests_planned:
       - "add server/tests/search/test_judge_wait_db.py [db] (fake lane that reads the row, records an output and notifies): slice within min(1.5 × budget, 3,000) by the rendered estimate and in score order (VEC-SEARCH-10); a pipeline card over 600 tokens is cut in the judge input only; empty preselection → no row, no job, judge_skip slice_empty, degraded false; a budget so small that the first card's rendered input exceeds 1.5 × B → the same; created_at and deadline come from the database clock (a test with a skewed process clock); a recorded hit → no row, no job, judge_source recorded; no provider → no_provider; tutor channel without ctx → error; owner channel without ctx → a row with line mcp, a fresh run_id per request, run cap from policy, lesson_id null, the user's daily budget; a caller-given ctx is used unchanged; live output in time → applied, live; each payload code maps as stated; a bare-id payload → read as ok; no notification within the timeout → timeout, returned by timeout + 0.5 s; enqueue failure → the row deleted, error; listener down → error with no row; the row carries request_id and input_sha256; the registration precedes the insert (a lane that notifies at once is not missed); exactly one row and one job per find; the job args are exactly {request_id, input_sha256}; one LISTEN connection per process under 20 concurrent finds"
   # FR-SEARCH-29 promoted to `requirements` with test_find_unit.py (phase 2, unit 2).
-  - id: FR-SEARCH-30
-    text: >-
-      **Personal-use cards per channel and caller (B8 table).** `entitled(caller, pack)` is true iff the caller owns
-      the pack, or the caller has a material row that is not soft-deleted whose sha256 our code computed from bytes
-      that caller uploaded or imported (SRV-INGEST receive), equal to the pack's material sha256; a client-declared
-      sha256 never counts. Eligibility for a pack with `license: personal-use`: on channel `mcp`, and on every channel
-      for a caller who is not entitled, no L1 card is returned, no `next` link and no `open` child leads to an L1 id,
-      and L2 (and, from SRV-KB, L4) cards carry their citations with quotes and no continuation; on `owner` and
-      `tutor` for an entitled caller, full L1 text cut at the card budget; on `pipeline` for an entitled caller, full
-      span text, not cut (B8 table; the pipeline's budget bounds the response). `shareable` packs are eligible on
-      every channel. **Quotes:** a quote is the first ≤ `quote_max_chars` (300) code points of the cited span's text,
-      cut at the last whitespace at or before 300 (hard when there is none), so its position is fixed by the locator
-      and repeated calls never reveal a different window; a non-L1 card carries at most `quotes_per_card_max` quoted
-      citations (initial 1; further citations carry `spn` and `quote_sha256` only), and its quotes count in the card's
-      cost against its L2 text budget (FR-SEARCH-22). L2 cards in stage V cite the first non-empty span of their node.
-      **Quote allowance per material (deterministic):** `quote_allowance(owner_id, material_sha256)` is computed over
-      the material's active pack only (an inactive pack serves no cards, so it has no allowance): it walks the pack's
-      outline nodes in outline order (pre-order, then outline path) and grants node n its quote while the cumulative
-      quoted code points stay ≤ `walk_quote_fraction_max` (initial 10%) × the pack's total span text code points. The
-      allowance always counts the **full** quote (the ≤ 300-code-point prefix of the cited span), each distinct cited
-      span once, even when a card later serves a shorter prefix of it because the L2 text budget cut it
-      (FR-SEARCH-22); so what any card serves is ≤ what was counted. The quote sits in `cite[0].quote` of the node's
-      card, the node's first citation; every non-granted node's citation carries `spn` and `quote_sha256` only. The
-      allowance is a function of the active pack and the policy alone, so no sequence of calls on any channel obtains
-      more quoted text of the material's active pack than that fraction (residual, declared: a pack switch after a
-      converter upgrade computes a new allowance over the new pack). The 10% is an engineering bound with no legal
-      basis claimed; it is tighter than ADR-0015, which bounds only each citation (300 characters). Judge input follows
-      the channel's row for that caller (FR-SEARCH-28 (1)). Scope stays
-      the caller's own manifest (INV-SEARCH-1) until SRV-SHARE; the entitlement function is still implemented and
-      tested on constructed rows, so SRV-SHARE only widens the scope. [unit, db]
-    tests_planned:
-      - "add server/tests/search/test_cards_db.py [db]: entitled for the owner; for another user with a live own copy of the same sha256; not with a soft-deleted copy; not with only an uploads row or a sha256 given by the client; VEC-SEARCH-9's channel × entitled × license → card shape; a quote is the span's first ≤ 300 code points cut at whitespace (and hard without one); a card with two citations quotes one; the quote's estimate is inside the L2 text budget"
-      - "add server/tests/search/test_cards_props.py [unit] (Hypothesis): over generated outlines (deep trees, many short sections, sections sharing a first span, spans shorter and longer than 300 code points), quote_allowance's total distinct quoted code points (full quotes) ≤ 10% of the active pack's text, nodes are granted in outline order with no gap (the granted set is a prefix of the order), every served quote is a prefix of its counted full quote and sits in cite[0].quote, the result is identical across calls, and an inactive pack of the same material has no allowance"
-  - id: FR-SEARCH-31
-    text: >-
-      **`open(caller, channel, id, depth=1, budget=None)` (B8).** `spn:` must equal the locator of a sealed span of an
-      active pack in the caller's manifest; any other range, an inactive or another user's pack, or an ineligible L1
-      span (FR-SEARCH-30) answers `not_found` (the same code, so a refusal never confirms existence). For a cut
-      `shareable` span it returns the full text within the open budget (`more: true` again when still cut). `sec:`
-      returns the node's card and its children down to `depth` (≤ `open_depth_max`, else `depth_invalid`), skipping
-      ineligible L1 children; `src:` returns the L0 profile card and the top outline level. `con:`, `fnd:`, `les:`
-      answer `not_found` until SRV-KB and SRV-LESSON provide them (declared). Malformed ids → `id_invalid`. Same
-      budget clamping and card shape as `find`; no judge. [db]
-    tests_planned:
-      - "add server/tests/search/test_open_db.py [db]: a sealed locator resolves; a shifted range, a guessed offset, an empty-span ordinal that does not exist, an inactive pack and another owner's span → not_found; sec children to depth and depth_invalid; budget clamp; shareable more/continuation"
+  # FR-SEARCH-30, -31 promoted to `requirements` with test_cards_db.py, test_cards_props.py, test_open_db.py (unit 3).
   - id: FR-SEARCH-33
     text: >-
       **Tracing and readers for SRV-OBS.** `find` opens FR-OBS-36's subtree through `reader.obs.find` helpers with
@@ -1172,28 +1209,7 @@ proposed_invariants:
       makes no row, no job and no call and reports `slice_empty`. [db]
     tests_planned:
       - "add server/tests/search/test_judge_wait_db.py: property over random corpora, budgets (including ones below one rendered card) and policies with a counting fake Provider and lane; VEC-SEARCH-10's slice_empty cases"
-  - id: INV-SEARCH-12
-    text: >-
-      **Personal-use walk and cross-user tests (B1 navigation invariant, B8).** Starting from the sources' top cards
-      with channel `mcp`, following every `next` and `open` child of a personal-use pack: no L1 card is returned, no
-      quote exceeds 300 characters, no card carries more than `quotes_per_card_max` quotes, the distinct quoted
-      characters over the whole walk are ≤ `walk_quote_fraction_max` (initial 10%) of the material's span text (the
-      per-pack allowance of FR-SEARCH-30 makes this hold by construction; the walk checks it end to end), and
-      `open` on every cited `spn:` id and on guessed locators of the same material answers `not_found`. On every
-      channel, a second user without an own copy gets no card of the owner's pack (trivial under INV-SEARCH-1, listed
-      again as an SRV-SHARE required test) and no judge request carrying L1 text; with an own copy on tutor, L1 cards.
-      Coverage: for an entitled caller on tutor, owner and pipeline, and for any caller on `mcp` for a `shareable`
-      pack, every active non-empty span is reachable from the sources' top cards by `open` children and `next`
-      links. [db]
-    tests_planned:
-      - "add server/tests/search/test_walk_db.py [db]: the MCP walk on a personal-use pack (no L1, quote length and count, distinct quoted characters ≤ 10% of the material, refusals); the cross-user case; reachability on tutor, owner and pipeline (entitled) and on mcp for a shareable pack"
-  - id: INV-SEARCH-13
-    text: >-
-      **open resolves only sealed span ids.** For any string after `spn:`, `open` returns a card only when it equals a
-      stored locator of a sealed span of an active pack in the caller's manifest. Property test over random ranges
-      around real locators. [db]
-    tests_planned:
-      - "add server/tests/search/test_open_db.py: Hypothesis over shifted ranges and ordinals"
+  # INV-SEARCH-12, -13 promoted to `invariants` with test_walk_db.py and test_open_db.py (phase 2, unit 3).
   - id: INV-SEARCH-14
     text: >-
       **No text in judge job args (waiter side).** With a canary in the query and in a card text, no `judge.find` job's
@@ -1226,14 +1242,10 @@ proposed_nfr:
     tests_planned:
       - "change server/tests/search/test_search_local.py: find latency per call against the live stack, p95 reported"
 
-proposed_vectors:
+proposed_vectors: []
   # VEC-SEARCH-6, -7 promoted to `vectors` with test_greedy_unit.py (phase 2, unit 2).
   # VEC-SEARCH-8 and VEC-SEARCH-10 promoted to `vectors` (phase 2, unit 2).
-  - id: VEC-SEARCH-9
-    source: B8 per-channel table — channel × entitled × license × layer → card returned, text bound, quotes, next/open into L1; L2 cut order cases (title path alone over the budget → title cut, no quote; title fits → quote takes the rest, cut at whitespace; nothing left → quote omitted; summary between title and quote when active); a node past the pack's quote allowance → spn and quote_sha256 only
-    file: spec/fixtures/SRV-SEARCH/personal-use.yaml
-    tests_planned:
-      - "test_cards_db.py reads it (FR-SEARCH-22, -30)"
+  # VEC-SEARCH-9 promoted to `vectors` with test_cards_db.py (phase 2, unit 3).
 
 kl_paired_changes:
   - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "as drafted there (FR-INGEST-35..39, -44, -45, on V/kl-ingest-packs), plus: `reader.ingest.overlays.begin` (registration of a building overlay) used by FR-SEARCH-5 step 3; restore calls `reader.search.ensure` for a restored material whose pack has no sealed vector overlay and a dead embed key (FR-SEARCH-9); the import names its profile (and tags) overlays through request_activation at its seal and enqueues search.embed {owner_id, pack_id, overlay_id} with the overlay id from FR-INGEST-36's function; `request_activation(conn, owner_id, pack_id, {vectors: id})` then `try_activate(conn, owner_id, pack_id)` callable inside the embed job's run transaction, try_activate returning its reason code (pack_purged, pack_collected, not_sealed make the embed job roll back); **new read** `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` (named apart from the `pack_profiles` table) → {license, language, role, reliability, as_of} from the head entry's profile overlay when the pack is active, else the pending activation's named profile overlay, else the import's (FR-SEARCH-5, -6, -9 read only this); the 'collected' state the buildable predicate reads (no generations); SRV-INGEST status (FR-INGEST-12, the upload view) and Retry (requeue_dead) read the search.embed key as [owner_id, overlay_id] instead of the ingest-based key; option (a): a legacy pack over backfilled locators that gets its own span-vector overlay (no legacy chunk rows as a vector overlay, no dual read path, one search-dark window per material, proposed_owner_notes); GC and purge call search.forget_legacy(conn, owner_id, ingest_id) for legacy chunk rows; the guarantee that materials.sha256 is computed by our code from the user's bytes (FR-SEARCH-30); INV-SEARCH-2 revised onto locators" }

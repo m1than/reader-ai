@@ -223,8 +223,10 @@ async def add_material(
     spans: Sequence[tuple[int, str]],
     config_id: str | None = "book-ru",
     kinds: Sequence[str] | None = None,
+    outline: Sequence[tuple[int, str, int | None]] = (),
 ) -> uuid.UUID:
-    """A material with one ingest and its spans: (page, text) in seq order. Returns the ingest id."""
+    """A material with one ingest, its spans ((page, text) in seq order) and its outline ((level, title, page)
+    in pre-order), sealed as an active pack. Returns the ingest id."""
     from sqlalchemy import text
 
     owner = w.users[handle]
@@ -257,11 +259,34 @@ async def add_material(
                 ),
                 {"i": ingest, "o": owner, "q": seq, "p": page, "k": span_kinds[seq], "t": body},
             )
+        for seq, (level, title, page) in enumerate(outline):
+            await conn.execute(
+                text(
+                    "INSERT INTO material_outline (ingest_id, owner_id, seq, level, title, page)"
+                    " VALUES (:i, :o, :q, :l, :t, :p)"
+                ),
+                {"i": ingest, "o": owner, "q": seq, "l": level, "t": title, "p": page},
+            )
         from ingest.packseed import seal  # FR-SEARCH-5: the ingest's pack, active (searched) by default
 
         await seal(conn, owner, ingest, sha)
     result: uuid.UUID = ingest
     return result
+
+
+async def set_profile(w: World, handle: str, sha: str, license_: str, language: str = "en") -> None:
+    """Give the material's active pack a profile overlay in a new head entry (SRV-INGEST FR-INGEST-36)."""
+    from reader.ingest import manifest, overlays, views
+
+    owner = w.users[handle]
+    async with w.engine.begin() as conn:
+        pack = await views.active_pack(conn, owner, sha)
+        assert pack is not None
+        oid = await overlays.build_profile(conn, owner, pack.pack_id, {"license": license_, "language": language})
+        seq, top = await manifest.head(conn, owner)
+        elements = {e["pack_id"]: dict(e["overlays"]) for e in top["packs"]}
+        elements[pack.pack_id]["profile"] = oid
+        await manifest.append(conn, owner, seq, manifest.make_entry(elements), "test_fixture")
 
 
 async def scalar(engine: Any, sql: str, **params: Any) -> Any:

@@ -1,0 +1,41 @@
+# VEC-SEARCH-9 — the B8 per-channel table (ADR-0039 B8; SRV-SEARCH FR-SEARCH-22, -30). Synthetic, agent's wording.
+#
+# table: channel × entitled × license → what an L1 card of the pack is on that channel:
+#   none — no L1 card is returned, and no `next` or `open` child of an L2 / L0 card names an L1 id;
+#   cut  — L1 text cut at card_budgets.L1 (600 tokens = 1,200 characters), `more` only when shareable and cut;
+#   full — the span's full text, never cut (the pipeline's budget bounds the response).
+# L2 cards are returned on every row, carry their citation (with its quote when the allowance grants it) and
+# link into L1 exactly when the row's L1 is not `none`.
+table:
+  - { channel: mcp, entitled: true, license: personal-use, l1: none }
+  - { channel: mcp, entitled: false, license: personal-use, l1: none }
+  - { channel: mcp, entitled: true, license: shareable, l1: cut }
+  - { channel: owner, entitled: true, license: personal-use, l1: cut }
+  - { channel: owner, entitled: false, license: personal-use, l1: none }
+  - { channel: owner, entitled: false, license: shareable, l1: cut }
+  - { channel: tutor, entitled: true, license: personal-use, l1: cut }
+  - { channel: tutor, entitled: false, license: personal-use, l1: none }
+  - { channel: pipeline, entitled: true, license: personal-use, l1: full }
+  - { channel: pipeline, entitled: false, license: personal-use, l1: none }
+  - { channel: pipeline, entitled: false, license: shareable, l1: cut }
+  - { channel: pipeline, entitled: true, license: shareable, l1: full }
+
+# L2 cut order (cards.l2_text(title path, summary, quote, tokens)); a token is 2 characters.
+l2_cut:
+  - { case: title alone over the budget, title: "aaaa bbbb cccc", summary: null, quote: "q", tokens: 3,
+      text: "aaaa", quote_served: null }
+  - { case: title fits and the quote takes the rest, title: "Intro", summary: null,
+      quote: "one two three four five", tokens: 10, text: "Intro", quote_served: "one two three" }
+  - { case: nothing left for the quote, title: "abcdefghij", summary: null, quote: "x y", tokens: 5,
+      text: "abcdefghij", quote_served: null }
+  - { case: summary between title and quote, title: "T", summary: "sum text", quote: "q1 q2", tokens: 10,
+      text: "T\nsum text", quote_served: "q1 q2" }
+
+# The quote allowance walk (cards.allowance(nodes, total, fraction)): nodes are (id, cited span, full quote length)
+# in outline order; each distinct span counts once; the walk stops at the first node that would pass the limit.
+allowance:
+  - { case: shared span counts once, nodes: [[a, s1, 5], [b, s2, 4], [c, s1, 5], [d, s3, 2], [e, null, 0]],
+      total: 100, fraction: 0.1, granted: [a, b, c] }
+  - { case: a node without a citation is granted, nodes: [[a, null, 0], [b, s1, 11]], total: 100, fraction: 0.1,
+      granted: [a] }
+  - { case: exactly at the limit, nodes: [[a, s1, 10], [b, s2, 1]], total: 100, fraction: 0.1, granted: [a] }
