@@ -634,3 +634,83 @@ owner_notes:
 # test_manage_lessons_db.py renames a lesson and reads a course's impact while its only run is cancelled with
 # `finished_at` still null. FR-LESSON-25 gains the empty-target sentence (same wording as SRV-INGEST FR-INGEST-31
 # and WEB-MANAGE FR-MANAGE-2); [unit] tests/lessons/test_manage_confirm_unit.py.
+
+# ---- Proposed revision (2026-11-28, V/kl-r3-gates; DRAFT, not approved): SRV-INGEST FR-INGEST-40 gate (e), locator
+# span ids in lessons (ADR-0039 P2, owner decision 20). Paired: SRV-INGEST FR-INGEST-49 (`views.citing_packs`),
+# SRV-PIPELINE FR-PIPELINE-7 (the only writer of locator citations), WEB-NOTEBOOK FR-NOTEBOOK-2 (grouping).
+# Nothing here changes a stored revision: every revision stored today holds `<sha>:<seq>` ids, which stay valid
+# (INV-LESSON-6; SRV-INGEST FR-INGEST-42 resolves them at read time). The header's decision "Span ids in citations
+# have the form `<material_sha256>:<seq>`" becomes "either that form or a PDF locator with its quote hash".
+# Not in this revision: binding SRV-INGEST gc.Seams.cited to `revision_packs` (it stays fail-closed until SRV-KB's
+# findings seam exists too) and any backfill of `revision_packs` for revisions stored before it (open question 1).
+# At promotion ADR-0039 joins `adr`, `revision_packs` moves into `tables` and the header decision above is reworded.
+proposed_tables:
+  revision_packs: { owner_id: true, columns: "lesson_id uuid, sha256 text, pack_id text CHECK (64 lowercase hex), created_at timestamptz NOT NULL DEFAULT now(); PRIMARY KEY (lesson_id, sha256, pack_id); FK (lesson_id, sha256) → lesson_revisions (lesson_id, sha256); FK (lesson_id, owner_id) → lessons (id, owner_id); ON DELETE RESTRICT; append-only (INV-LESSON-6 revised)" }
+
+proposed_requirements:
+  - id: FR-LESSON-32
+    text: >-
+      **Packs a revision cites** (SRV-INGEST FR-INGEST-44's `revision_packs`). Migration `lessons_0003` (branch label
+      `lessons`) creates `revision_packs` (proposed_tables). FR-LESSON-4 step 6, only when it inserts the revision row
+      (`created` true), collects the notebook's distinct span references: every `span` of a citation, a `source_ref`,
+      a `source_refs` entry and a lab `reference`, each with its `quote_sha256` when it is a locator; it calls
+      `reader.ingest.views.citing_packs(conn, owner_id, refs)` (SRV-INGEST FR-INGEST-49) and inserts one row per
+      returned pack id, in the same transaction as the revision row. A reference that names no pack of this owner
+      (the fixture lesson's synthetic material, a collected pack) adds no row and never fails the write. A write
+      that reproduces an existing revision (`created` false) adds no row. The function reads only through
+      `reader.ingest.views` (INV-INGEST-16), never the ingest tables.
+    tests_planned:
+      - "add to server/tests/lessons/test_lessons_store.py [db]: a revision citing two locators of one sealed active pack (with their hashes) and one legacy id of a material whose legacy pack exists → one row per distinct pack id (2 rows), written in the revision's transaction (a rollback after write_revision leaves none); rewriting the same bytes adds none; F01 (synthetic material, no pack) writes its revision with no row; a locator whose hash differs from the stored span's adds no row"
+      - "change test_lessons_store.py's migration test [db]: lessons_0003 is the branch head; its downgrade drops only revision_packs; the test downgrades `lessons@-1` three times"
+
+proposed_revisions:
+  - id: VEC-LESSON-1
+    text: >-
+      cell.schema.json (fixture and packaged copy byte-identical, as approved), with: `span_ref` accepts the legacy
+      id `^[0-9a-f]{64}:(0|[1-9][0-9]{0,11})$` or the PDF locator of SRV-INGEST FR-INGEST-33
+      `^spn:[0-9a-f]{64}:p[1-9][0-9]{0,4}:(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(#(0|[1-9][0-9]{0,5}))?$` (still
+      under `single_line`); the non-PDF form (`:L<a>-<b>`) is refused until a non-PDF converter exists. Every object
+      that holds a `span` (the span `citation`, `source_ref`, the `test_vector` lab `reference`) gains an optional
+      `quote_sha256` (`$defs/sha256`) under one rule: required when `span` starts with `spn:`, absent otherwise (a
+      legacy id is resolved through the seq map, so a stored hash beside it would have no meaning), expressed as
+      `if {span: {pattern: "^spn:"}} then {required: [quote_sha256]} else {not: {required: [quote_sha256]}}`.
+      The `span_ref` description names both forms.
+    tests_planned:
+      - "change test_lessons_schema.py::test_packaged_schema_is_the_vector: reads the new fixture bytes (oracle unchanged)"
+  - id: FR-LESSON-1
+    text: >-
+      As approved, plus step (7b) after the schema pass: every `span` value that starts with `spn:` is parsed with
+      `reader.ingest.locator.parse` (stdlib only; FR-INGEST-33), which also checks what the pattern cannot (start ≤
+      end; `#n` present iff start = end); a `LocatorError` is `cell_schema`.
+    tests_planned:
+      - "test_lessons_schema.py::test_vector_case over the new VEC-LESSON-3 cases"
+  - id: VEC-LESSON-3
+    text: >-
+      invalid.yaml as approved, plus mutations of F01's citation 1 (span ids over F01's synthetic material sha
+      `bfaf5f84…f1a1`, synthetic hashes; no book text): `span-locator-with-quote` (a valid PDF locator and a
+      `quote_sha256`) → write null; `span-locator-empty-with-ordinal` (`…:p3:40-40#0` with a hash) → null;
+      `span-locator-no-quote` → cell_schema; `span-legacy-with-quote` → cell_schema; `span-locator-start-after-end`
+      (`:p1:9-3`) → cell_schema (step 7b); `span-locator-ordinal-on-range` (`:p1:0-9#0`) → cell_schema (7b);
+      `span-locator-empty-no-ordinal` (`:p1:4-4`) → cell_schema (7b); `span-locator-file-form`
+      (`spn:<sha>:notes.md:L1-2`) → cell_schema; `span-locator-page-zero` (`:p0:0-1`) → cell_schema;
+      `quote-uppercase` (an uppercase-hex hash) → cell_schema; `source-ref-locator-no-quote` (an erratum
+      `source_ref.span` locator without a hash) → cell_schema; `lab-reference-locator-with-quote` → null.
+      The existing `span-old-form` case (`fixture:F01:p1:0-120`) stays cell_schema.
+    tests_planned:
+      - "change test_lessons_schema.py::test_vector_case: parametrised over the new cases (the file is the oracle)"
+  - id: FR-LESSON-4
+    text: >-
+      As approved, plus FR-LESSON-32's `revision_packs` rows in step 6 when the revision row is inserted.
+    tests_planned:
+      - "FR-LESSON-32's test_lessons_store.py cases"
+  - id: INV-LESSON-6
+    text: >-
+      As approved, and `revision_packs` rows are never updated, deleted or truncated (the same row and statement
+      triggers). The read-time resolver (SRV-INGEST FR-INGEST-42) writes no revision, stage record or
+      `revision_packs` row.
+    tests_planned:
+      - "add to test_lessons_store.py [db]: UPDATE, DELETE and TRUNCATE of revision_packs are refused"
+
+proposed_open_questions:
+  - "1. Revisions stored before lessons_0003 cite legacy ids and get no revision_packs rows. Harmless while gc.Seams.cited fails closed; before it is bound, either backfill (read each revision blob once; legacy ids map to the material's legacy pack) or keep every legacy pack cited by rule."
+  - "2. quote_sha256 beside a legacy id is refused (one meaning per form). Alternative: allow and ignore it."

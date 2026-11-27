@@ -2249,6 +2249,32 @@ tasks:
         grounding re-measured as a gate; L5 boost once learner
         state exists (S6.SRV-RECALL). FR-TUTOR-5; NFR-TUTOR-1, -2, -3; INV-TUTOR-2. Supersedes V.tutor-retrieval where
         both change tutor retrieval" }
+  - { id: V.kl-r3-gates, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.kl-search-find],
+      branch: V/kl-r3-gates,
+      note: "2026-11-28. The r3 converter bump (SRV-INGEST FR-INGEST-40) is held at docling-2.151.1+r2 until gates
+        (e)-(i) land on V/slice-integration. Gate status, verified on origin/V/slice-integration at 83e1831 by code
+        and tests: (a)-(d) MET (FR-INGEST-40 notes; INV-INGEST-16 scan passes). (e) NOT MET: cell.schema.json
+        span_ref still accepts only `<sha>:<seq>` (pattern ^[0-9a-f]{64}:(0|[1-9][0-9]{0,11})$), citations have
+        no quote_sha256, and lessons has no revision_packs table (migrations 0001, 0002 only). (f) NOT MET:
+        pipeline/notebook.py `_ref` takes the material as span_id.split(':', 1)[0] and reports.py
+        constrain_credibility counts materials the same way (a locator gives `spn` for every span, so credibility 1
+        becomes unreachable and source_ref.material_sha256 would be `spn`, refused by the schema); pipeline Span has
+        no quote_sha256 and no citation carries one. (g) handled by V.kl-tutor-find (FR-TUTOR-8 quote_sha256;
+        not touched here). (h) NOT MET: web/src/notebook/citations.ts materialOf groups by the part before the last
+        `:`, so every page of a locator becomes its own material. (i) MET: search/jobs.py seals the vector overlay
+        then calls request_activation({vectors}) and try_activate in the run transaction; manifest._precondition
+        refuses `vectors_missing` when the replaced head element names a vectors overlay; tests
+        ingest/test_manifest_db.py::test_activation_contract (r3 replacing a vectored pack -> vectors_missing, then
+        seqmap_missing) and search/test_search_active_pack_db.py (r3 sealed overlay waits, the legacy pack keeps
+        serving). Residual for the reviewer: when the legacy pack's own embed has not sealed yet (its dark window
+        after ingest_0004), the replaced element names no vectors and an r3 pack may enter the head without
+        vectors; this opens no second dark window. Drafted (proposed, not approved; the coordinator runs
+        deep-reviewer): SRV-LESSON proposed_revisions FR-LESSON-1, -4, VEC-LESSON-1, -3, INV-LESSON-6 and
+        proposed FR-LESSON-32 (revision_packs) with paired SRV-INGEST FR-INGEST-49 (views.citing_packs);
+        SRV-PIPELINE proposed_revisions FR-PIPELINE-7, -27, INV-PIPELINE-3; WEB-NOTEBOOK proposed_revisions
+        FR-NOTEBOOK-2; SRV-INGEST proposed FR-INGEST-40 step (r3 bump) with the owner's live re-conversion step
+        (reader-ingest --setup, watcher restart, reader-ingest <material>). CONVERTER_VERSION untouched.",
+      what: "spec revisions for FR-INGEST-40 gates (e), (f), (h), (i) and the final CONVERTER_VERSION r3 step" }
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer
         sees it; restore -> the same cards; MLflow stopped -> search still answers; Haiku evaluation meets the brain/v1

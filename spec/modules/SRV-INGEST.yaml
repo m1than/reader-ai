@@ -2651,6 +2651,55 @@ proposed_requirements:
       ancestor (B1 depth cap).
     tests_planned:
       - "add server/tests/ingest/test_summary_db.py [db] (fake provider): bottom-up order, depth fold at 4, cap and replay as FR-INGEST-47"
+  # ---- V/kl-r3-gates (2026-11-28; DRAFT, not approved): FR-INGEST-40's held r3 bump. Gate status on
+  # V/slice-integration at 83e1831 (docs/progress.yaml V.kl-r3-gates): (a)-(d) met; (e) SRV-LESSON, (f) SRV-PIPELINE
+  # and (h) WEB-NOTEBOOK drafted as proposed revisions of those specs; (g) is V.kl-tutor-find's; (i) met:
+  # reader.search.jobs seals the vector overlay, then request_activation({vectors}) and try_activate in the run
+  # transaction, and try_activate refuses `vectors_missing` (test_manifest_db.py::test_activation_contract,
+  # test_search_active_pack_db.py). FR-INGEST-49 is the read helper gate (e) needs (INV-INGEST-16: SRV-LESSON reads
+  # packs only through views).
+  - id: FR-INGEST-49
+    text: >-
+      **Packs a citation names** (paired with SRV-LESSON FR-LESSON-32). `reader.ingest.views.citing_packs(conn,
+      owner_id, refs) -> set[str]`, `refs` a sequence of (span id, quote_sha256 | None), reads only and returns the
+      pack ids of this owner that a stored revision citing `refs` depends on:
+      - a locator (FR-INGEST-33's `parse` accepts it) with a hash → every base pack of this owner, `sealed` and not
+        collected or purged, that holds a span with that `locator` and that `quote_sha256` (several when the span is
+        unchanged across packs; keeping more packs is the safe side for GC);
+      - a legacy id (`locator.is_legacy_id`) → this owner's pack of the material's legacy ingest (a pack whose
+        converter version is in `LEGACY_VERSIONS`), when it is not collected or purged;
+      - anything else (malformed, a locator without a hash, another owner's material, no matching span) → nothing.
+      Two queries at most (one per form), whatever the number of refs.
+    tests_planned:
+      - "add server/tests/ingest/test_citing_packs_db.py [db]: a locator and hash held by the r2 legacy pack (backfilled) and by the r3 pack → both ids; the same locator with another hash → none; a legacy id → the legacy pack only; after the legacy pack is collected → none for it; another owner's pack with the same locator and hash is never returned; a malformed id and a locator without a hash → none; 200 refs run 2 statements (statement count through a SQLAlchemy before_cursor_execute listener)"
+      - "change server/tests/ingest/test_readers_scan_unit.py only if the scan needs reader/lessons/store.py listed as a paired reader (it reads through views)"
+  - id: FR-INGEST-40-r3-bump
+    text: >-
+      **The held r3 bump, the last step of gates (a)-(i).** Precondition: SRV-LESSON's revision (gate (e)),
+      SRV-PIPELINE's FR-PIPELINE-7/-27 revision (f), SRV-TUTOR FR-TUTOR-8's `quote_sha256` (g, V.kl-tutor-find) and
+      WEB-NOTEBOOK's FR-NOTEBOOK-2 revision (h) are promoted, Green and merged into V/slice-integration; (i) holds as
+      recorded above. Change: `reader.ingest.CONVERTER_VERSION` = `docling-2.151.1+r3` (one constant; FR-INGEST-10
+      already names r3); FR-INGEST-40's hold paragraph gains "lifted <date>, V/kl-r3-gates". No other code changes:
+      r3's artifact format, receive checks, packs, seq map and re-anchoring are already on the branch and tested
+      with the r3 constant named explicitly.
+      **Owner step (live, after the merge; the agent never runs it):** (1) `reader-ingest --setup` from the new
+      checkout creates `venv-docling-2.151.1+r3` (the only networked step); (2) `reader up` with the new images, so
+      receive and the import expect r3 (an artifact of the old r2 venv is now refused `version_mismatch`), and the
+      watcher is restarted on the new checkout (OPS-CLI FR-CLI-23 restarts an idle watcher whose sha changed; run
+      the step while no upload is converting, `reader status`); (3) check that the pilot's legacy pack is searchable
+      (its vectors overlay sealed, ingest_0004's dark window over), so the r3 pack waits for its own embed
+      (`vectors_missing`) and no r3 pack enters the head without vectors (the residual of gate (i));
+      (4) `reader-ingest <pilot material id>` converts
+      again (FR-INGEST-12 revised: no import under the current version; 702 s and 4.36 GB peak measured);
+      (5) watch the r3 pack's pending activation pass `vectors_missing` (one embed, 26.8 min measured),
+      `seqmap_missing` (`ingest.seqmap`) and `anchors_missing` (`ingest.reanchor`) to `appended`. A refused seq map
+      (`ingest seqmap_refused <reason>:<seq>` in the worker log) blocks the task for the owner (P2 (3)); the legacy
+      pack keeps serving meanwhile. Browser uploads convert under r3 from step (2) on.
+    tests_planned:
+      - "change server/tests/ingest/test_ingest_artifact.py: CONVERTER_VERSION == docling-2.151.1+r3 (was the held r2 assertion); PARSE_CONFIGS unchanged"
+      - "change server/tests/ingest/conftest.py and its users (test_upload_db.py, test_ingest_obs_db.py, test_manage_db.py): the r3_converter fixture is removed (the constant is r3); oracles unchanged"
+      - "change test_upload_db.py: the host-state cases that pass the current converter version take ingest.CONVERTER_VERSION instead of the r2 literal; packseed.R2, test_seqmap_db.py and test_ingest_host.py keep r2 where they model the legacy pack"
+      - "e2e/live: V.kl-live's upload case runs after the bump (one manifest entry per upload under r3)"
 
 proposed_revisions:
   - id: FR-INGEST-6
