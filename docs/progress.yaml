@@ -2066,6 +2066,10 @@ tasks:
         per-channel response budgets; cache key with caller identity, roles and manifest version.
         FR-SEARCH-3, -4, -5, -7, -8, -9, -20; INV-SEARCH-4; NFR-SEARCH-1; VEC-SEARCH-1, -2, -5" }
   - { id: V.kl-pipeline-checks, stage: V, kind: module, track: ai, status: in_progress, needs: [V.kl-search-find],
+      code_review: "deep-reviewer (Fable) code rounds 1-3 changes (5, 3, 1 blockers), round 4 approve (2026-11-27;
+        mutants killed). Section mode merged into V/slice-integration 2026-11-27 (LOCAL CI PASS after merging the
+        SRV-OBS and deploy-lane changes). Remaining in this task: route mode (fact_check.source: route), which waits
+        for V.kl-search-find and the retrieval-ablation fact-check rule",
       note: "2026-11-27, branch V/kl-pipeline-checks: spec revision owner-approved after deep-reviewer (Fable) rounds
         1–5 with the round-5 fix; promoted with Red tests, Green in section mode (rules → lab → fact-check → review,
         up to 3 loops under loop_fits_limit, rule checks, lab references, Admiralty credibility, old-order runs
