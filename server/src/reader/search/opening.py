@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import re
 import uuid
+from bisect import bisect_left
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
+from itertools import accumulate
 from typing import Any, Final
 
 from sqlalchemy import text
@@ -61,28 +63,41 @@ class Book:
                              license=str(values.get("license") or PERSONAL_USE))
         self.language = values.get("language")
         n, m = len(self.spans), len(self.nodes)
+        # linear in spans + nodes (code review of fb7b926): the first span on or after a page is a bisection
+        # over the running maximum of span pages; parents and subtree ends come from one stack pass each
+        reach = list(accumulate((s.page for s in self.spans), max))
         starts: list[int] = []
         for node in self.nodes:
-            if node.page is None:
-                at = starts[-1] if starts else 0
-            else:
-                at = next((j for j, s in enumerate(self.spans) if s.page >= node.page), n)
+            at = (starts[-1] if starts else 0) if node.page is None else bisect_left(reach, node.page)
             starts.append(max(at, starts[-1]) if starts else at)
-        self.parent: list[int | None] = [
-            next((j for j in range(i - 1, -1, -1) if self.nodes[j].level < node.level), None)
-            for i, node in enumerate(self.nodes)
-        ]
+        self.parent: list[int | None] = []
+        stack: list[int] = []
+        for i, node in enumerate(self.nodes):
+            while stack and self.nodes[stack[-1]].level >= node.level:
+                stack.pop()
+            self.parent.append(stack[-1] if stack else None)
+            stack.append(i)
+        ends = [n] * m
+        stack = []
+        for i in range(m - 1, -1, -1):
+            while stack and self.nodes[stack[-1]].level > self.nodes[i].level:
+                stack.pop()
+            ends[i] = starts[stack[-1]] if stack else n
+            stack.append(i)
+        following: list[int | None] = [None] * (n + 1)  # the first span at or after j with text
+        for j in range(n - 1, -1, -1):
+            following[j] = j if self.spans[j].text else following[j + 1]
         self.children: dict[str, list[str]] = {self.source.id: []}
         self.section: list[str] = [self.source.id] * n
         self.cited: list[int | None] = []
         self.paths: list[str] = []
         for i, node in enumerate(self.nodes):
             stop = starts[i + 1] if i + 1 < m else n
-            end = next((starts[j] for j in range(i + 1, m) if self.nodes[j].level <= node.level), n)
             self.children[node.id] = [self.spans[j].locator for j in range(starts[i], stop)]
             for j in range(starts[i], stop):
                 self.section[j] = node.id
-            self.cited.append(next((j for j in range(starts[i], end) if self.spans[j].text), None))
+            hit = following[starts[i]]
+            self.cited.append(hit if hit is not None and hit < ends[i] else None)
             up = self.parent[i]
             self.paths.append(node.title if up is None else self.paths[up] + _TITLE_SEP + node.title)
         first = starts[0] if starts else n
@@ -96,9 +111,15 @@ class Book:
         limit = policy.data["quote_max_chars"]
         self.granted = card_shape.allowance(
             [(node.id, None if c is None else self.spans[c].locator,
-              0 if c is None else len(card_shape.quote(self.spans[c].text, limit)))
+              0 if c is None else len(card_shape.quote(self.spans[c].text, limit)), len(node.title))
              for node, c in zip(self.nodes, self.cited, strict=True)],
             self.total, policy.data["walk_quote_fraction_max"])
+        # where L1 is not served, a node past the allowance is titled by its outline number ("1.2.3")
+        self.closed_paths: list[str] = []
+        for i, node in enumerate(self.nodes):
+            own = node.title if node.id in self.granted else node.id.rsplit(":", 1)[1].replace("/", ".")
+            up = self.parent[i]
+            self.closed_paths.append(own if up is None else self.closed_paths[up] + _TITLE_SEP + own)
 
     @property
     def shareable(self) -> bool:
@@ -135,7 +156,8 @@ class Book:
         full = None
         if c is not None and node.id in self.granted:
             full = card_shape.quote(self.spans[c].text, self.policy.data["quote_max_chars"])
-        title, served = card_shape.l2_text(self.paths[i], None, full, tokens)
+        path = self.paths[i] if self.l1_ok(channel, entitled) else self.closed_paths[i]
+        title, served = card_shape.l2_text(path, None, full, tokens)
         cite = () if c is None else (Cite(self.spans[c].locator, self.spans[c].quote_sha256, served),)
         return self._card(node.id, "L2", title, title, cite, self.children[node.id], channel, entitled)
 

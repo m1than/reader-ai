@@ -31,7 +31,10 @@ def books(draw: Any) -> tuple[list[tuple[int, str]], list[tuple[int, str, int | 
     for _ in range(count):
         top = (levels[-1] + 1) if levels else 1
         levels.append(draw(st.integers(min_value=1, max_value=min(top, 16))))
-    outline = [(level, f"S{i}", draw(st.one_of(st.none(), st.integers(min_value=1, max_value=pages))))
+    # titles are synthetic or, as in an outline built from heading spans, a span's whole text
+    texts = [body for _, body in spans if body] or ["S"]
+    outline = [(level, draw(st.one_of(st.just(f"S{i}"), st.sampled_from(texts))),
+                draw(st.one_of(st.none(), st.integers(min_value=1, max_value=pages))))
                for i, level in enumerate(levels)]
     return spans, outline
 
@@ -65,14 +68,28 @@ def test_allowance_bounds_prefix_and_served_quotes(case: Any) -> None:
     granted = book.granted
     # a prefix of outline order, with no gap
     assert granted == frozenset(order[: len(granted)])
-    # distinct quoted code points (full quotes) within the fraction
+    # distinct quoted code points (full quotes) plus every granted node's own title within the fraction
     counted: dict[str, int] = {}
+    titles = 0
     for i, node in enumerate(book.nodes):
         cited = book.cited[i]
-        if node.id in granted and cited is not None:
-            span = book.spans[cited]
-            counted[span.locator] = len(cards.quote(span.text, limit))
-    assert sum(counted.values()) <= fraction * book.total
+        if node.id in granted:
+            titles += len(node.title)
+            if cited is not None:
+                span = book.spans[cited]
+                counted[span.locator] = len(cards.quote(span.text, limit))
+    assert titles + sum(counted.values()) <= fraction * book.total
+    # on mcp every title path segment is a granted title or an outline number; the card shows a prefix of it
+    numbers = {n.id: n.id.rsplit(":", 1)[1].replace("/", ".") for n in book.nodes}
+    for i in range(len(book.nodes)):
+        chain: list[str] = []
+        j: int | None = i
+        while j is not None:
+            other = book.nodes[j]
+            chain.append(other.title if other.id in granted else numbers[other.id])
+            j = book.parent[j]
+        assert book.closed_paths[i] == " / ".join(reversed(chain))
+        assert book.closed_paths[i].startswith(book.node_card(i, "mcp", True).title)
     for channel in ("mcp", "owner", "tutor", "pipeline"):
         for i, node in enumerate(book.nodes):
             card = book.node_card(i, channel, True)

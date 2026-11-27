@@ -94,6 +94,45 @@ async def test_mcp_walk_on_a_personal_use_pack(w: World) -> None:
         assert await open_(w, "ivan", spn, "mcp") == "not_found"
 
 
+def heading(page: int) -> str:
+    return f"Heading {page} " + " ".join(f"w{page}x{k}" for k in range(8))
+
+
+HEADING_ONLY = [(p, heading(p)) for p in range(1, 41)]
+HEADED_BODY = [(p, t) for p in range(1, 41)
+               for t in (heading(p), f"Body {p}. " + "lorem ipsum dolor " * 4)]
+
+
+@pytest.mark.parametrize("spans", [HEADING_ONLY, HEADED_BODY], ids=["heading-only", "headings-and-body"])
+async def test_mcp_walk_counts_titles_built_from_heading_spans(
+    w: World, spans: list[tuple[int, str]]
+) -> None:
+    """Code review of fb7b926: an outline built from heading spans (outline_source 'headings') serves span
+    text as titles; every served code point that repeats span text counts against the fraction."""
+    outline = [(1, heading(p), p) for p in range(1, 41)]
+    await add_material(w, "ivan", MAT_EN, spans, config_id="book-en", outline=outline)
+    texts = await span_texts(w, "ivan")
+    cards = await walk(w, "ivan", "mcp")
+    assert len(cards) == 1 + len(outline)
+    titles: set[str] = set()
+    quoted: dict[str, int] = {}
+    numbered = 0
+    for card in cards.values():
+        if card["layer"] != "L2":
+            continue
+        for segment in card["title"].split(" / "):
+            if any(t.startswith(segment) for t in texts.values() if segment):
+                titles.add(segment)
+            numbered += segment.isdigit()
+        for cite in card["cite"]:
+            if "quote" in cite:
+                quoted[cite["spn"]] = max(quoted.get(cite["spn"], 0), len(cite["quote"]))
+    total = sum(len(t) for t in texts.values())
+    served = sum(len(t) for t in titles) + sum(quoted.values())
+    assert 0 < served <= 0.1 * total
+    assert numbered > 0  # nodes past the allowance are titled by their outline number
+
+
 async def test_cross_user_without_and_with_an_own_copy(w: World) -> None:
     await add_material(w, "ivan", MAT_EN, SPANS, config_id="book-en", outline=OUTLINE)
     for channel in ("mcp", "owner", "tutor", "pipeline"):

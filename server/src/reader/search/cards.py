@@ -149,16 +149,19 @@ def quote(text: str, max_chars: int) -> str:
     return cut_chars(text, max_chars)
 
 
-def allowance(nodes: Sequence[tuple[str, str | None, int]], total: int, fraction: float) -> frozenset[str]:
-    """FR-SEARCH-30's quote allowance over (node id, cited span or None, full quote length) in outline order:
-    each distinct cited span counts once; the walk stops at the first node that would pass fraction * total,
-    so the granted set is a prefix of the order."""
+def allowance(
+    nodes: Sequence[tuple[str, str | None, int, int]], total: int, fraction: float
+) -> frozenset[str]:
+    """FR-SEARCH-30's allowance over (node id, cited span or None, full quote length, title length) in
+    outline order: a node's own title always counts (an outline built from heading spans repeats span text),
+    each distinct cited span's quote counts once; the walk stops at the first node that would pass
+    fraction * total, so the granted set is a prefix of the order."""
     limit = fraction * total
     counted: set[str] = set()
     used = 0
     granted: list[str] = []
-    for node_id, span, length in nodes:
-        extra = 0 if span is None or span in counted else length
+    for node_id, span, length, title in nodes:
+        extra = title + (0 if span is None or span in counted else length)
         if used + extra > limit:
             break
         used += extra

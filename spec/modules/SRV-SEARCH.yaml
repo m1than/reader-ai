@@ -606,6 +606,21 @@ requirements:
       test_cards_db.py, test_cards_props.py (Green: test-data corrections, no oracle changed — the many-short-
       sections case's first span was shortened so one quote fits the fraction; the [db] worlds set READER_CONFIG,
       which `policy_version` reads for the judge slots).
+      **Code review of fb7b926 (blocking 1): titles count.** When a PDF has no bookmarks, SRV-INGEST builds the
+      outline from heading spans (`ingests.outline_source = 'headings'`, ingest/host/mapping.py), so an L2 title is
+      span text; served on mcp outside the allowance, titles reached up to 103% of a heading-only material. The
+      allowance therefore counts every served code point that can repeat span text: each node's own title (always,
+      whatever the outline source; simpler than detecting heading-derived titles) plus its full quote as above,
+      walked in outline order (`cards.allowance(nodes, total, fraction)` over (node id, cited span, full quote
+      length, title length)). Where the channel does not serve L1 to this caller (the personal-use rows above), a
+      node past the allowance carries no quote and is titled by its outline number (its outline path with `.`,
+      e.g. `1.2.3`) in place of its title, in its own card and in every descendant's title path; where L1 is
+      served, titles are unchanged (the span text is served anyway). The granted set is still a prefix of outline
+      order, so every ancestor of a granted node is granted and a title path never shows a non-granted title. Also
+      from that review (non-blocking): the `Book` is built in time linear in spans and nodes (the first span on or
+      after a page by bisection over the running maximum of span pages; parents, subtree ends and cited spans by
+      stack passes), measured 8.06 s → 0.02 s for 45,000 spans and 20,000 nodes, identical structure on 3,000
+      random books (scratch comparison against the previous code).
   - id: FR-SEARCH-31   # ADR-0039 revision, promoted in phase 2 (unit 3)
     text: >-
       **`open(caller, channel, id, depth=1, budget=None)` (B8).** `spn:` must equal the locator of a sealed span of an
@@ -701,6 +716,12 @@ invariants:
       pack, every active non-empty span is reachable from the sources' top cards by `open` children and `next`
       links. Phase 2 (unit 3): the sources' top cards are the `src:` card of each active pack; the judge-request part
       of the cross-user case lands with the waiter (unit 5, test_judge_wait_db.py). [db] test_walk_db.py.
+      Code review of fb7b926 (blocking 1): the bound covers every served code point that repeats span text, not
+      quotes alone — the walk sums, per material, each distinct served own title that is a prefix of or equal to a
+      span text, plus each distinct quote, and that sum is ≤ the fraction; the walk runs also on a material whose
+      outline comes from its heading spans (titles equal to span texts), including a heading-only material, and
+      checks that a node past the allowance is titled by its outline number on mcp. The pure property
+      (test_cards_props.py) does the same over generated books whose titles are drawn from their span texts.
   - id: INV-SEARCH-13   # ADR-0039 revision, promoted in phase 2 (unit 3)
     text: >-
       **open resolves only sealed span ids.** For any string after `spn:`, `open` returns a card only when it equals a
@@ -895,7 +916,7 @@ kl_revision:
     INV-SEARCH-11, INV-SEARCH-12, INV-SEARCH-13, INV-SEARCH-14, INV-SEARCH-15, NFR-SEARCH-5, NFR-SEARCH-6,
     NFR-SEARCH-7, VEC-SEARCH-6, VEC-SEARCH-7, VEC-SEARCH-8, VEC-SEARCH-9, VEC-SEARCH-10]
   retired_draft_ids: "FR-SEARCH-32 (response cache) dropped in round 1; the id is not reused. The draft's FR-SEARCH-21 (policy) collided with the approved FR-SEARCH-21 (forget_legacy, V.kl-ingest-packs) and is promoted as FR-SEARCH-34 (phase 2)"
-  code_review_units_1_2: "Code review of f573e0c (2026-11-27), 4 blocking, fixed with tests: (1) VEC-SEARCH-6 gains the cases that pin the Δ/cost rule against gain order, gain × cost and cheapest-first, the k switch (k costliest fit → gain order) and k set with the k costliest not fitting (ratio order), and INV-SEARCH-10 a structured strategy (one or two costly high-value cards against many cheap ones, relevance 0, budget near the costly card) so the bound can bind; (2) find sanitises the judge outcome: kept ids deduplicated in order and restricted to the slice, a skip outside FR-SEARCH-29's closed set or a source outside {live, recorded} → `error` (test_find_props.py); (3) step 7's pass 2 runs on the marginal objective inside find and the preselection has no k (VEC-SEARCH-10 cases through find); (4) a personal-use L1 card on mcp, or for a non-entitled caller, is absent from the response and from the judge input, also as an expansion target, and an L1 text over 1,200 characters is cut on owner (`more` only when shareable) and uncut on pipeline (test_find_unit.py). Also: a zero-gain fill-order case and the judge input's L1 cut on the pipeline; the reviewer's mutants re-run on the fix, all killed except slice_limit_cap_only (equivalent in practice: a card's cost exceeds its rendered judge input, so the preselection under 1.5 x B already bounds the slice). Non-blocking applied: find keeps at most candidates_max candidates; cut_chars cuts hard when the only whitespace is at position 0. Deferred to unit 5 (recorded): policy_version and facets cached per process with PolicyError mapped to a FindError, the pivot-seed test at find level, math.fsum, re._parser, the startup check, kl_revision.new_ids cleanup."
+  code_review_units_1_2: "Code review of f573e0c (2026-11-27), 4 blocking, fixed with tests: (1) VEC-SEARCH-6 gains the cases that pin the Δ/cost rule against gain order, gain × cost and cheapest-first, the k switch (k costliest fit → gain order) and k set with the k costliest not fitting (ratio order), and INV-SEARCH-10 a structured strategy (one or two costly high-value cards against many cheap ones, relevance 0, budget near the costly card) so the bound can bind; (2) find sanitises the judge outcome: kept ids deduplicated in order and restricted to the slice, a skip outside FR-SEARCH-29's closed set or a source outside {live, recorded} → `error` (test_find_props.py); (3) step 7's pass 2 runs on the marginal objective inside find and the preselection has no k (VEC-SEARCH-10 cases through find); (4) a personal-use L1 card on mcp, or for a non-entitled caller, is absent from the response and from the judge input, also as an expansion target, and an L1 text over 1,200 characters is cut on owner (`more` only when shareable) and uncut on pipeline (test_find_unit.py). Also: a zero-gain fill-order case and the judge input's L1 cut on the pipeline; the reviewer's mutants re-run on the fix, 31 killed and 4 survivors, among them slice_limit_cap_only, first recorded here as equivalent in practice; that was wrong (code review of fb7b926, blocking 2): the rendered judge input includes the query, so with a 999-character query and one 1,199-character personal-use L1 card on owner at budget 740 the rendered input passes 1.5 x B while the card's cost fits the preselection; test_find_unit.py now pins that case (no judge call, judge_skip slice_empty). Non-blocking applied: find keeps at most candidates_max candidates; cut_chars cuts hard when the only whitespace is at position 0. Deferred to unit 5 (recorded): policy_version and facets cached per process with PolicyError mapped to a FindError, the pivot-seed test at find level, math.fsum, re._parser, the startup check, kl_revision.new_ids cleanup."
   phase_2_deviations: "Recorded at promotion, each in its item's text: FR-SEARCH-34 renumbered and declared() over FR-OBS-21's closed key set; FR-SEARCH-30 card ids, node ranges and children, L1 cards without a quote, a license-less profile as personal-use, and the additive `views.PackSpan.locator` field (paired, SRV-INGEST); FR-SEARCH-31's response shape and in-order budget fill; INV-SEARCH-12's judge-request part with the waiter (unit 5)."
   revised_ids: [FR-SEARCH-3, FR-SEARCH-4, FR-SEARCH-5, FR-SEARCH-6, FR-SEARCH-7, FR-SEARCH-8, FR-SEARCH-9,
     FR-SEARCH-10, FR-SEARCH-20, INV-SEARCH-1, INV-SEARCH-2, INV-SEARCH-3, INV-SEARCH-4, INV-SEARCH-7, NFR-SEARCH-1,

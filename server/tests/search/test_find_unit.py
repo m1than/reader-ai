@@ -154,6 +154,21 @@ def test_response_shape_and_degraded_rules() -> None:
     assert "judge_skip" not in out
     empty = _run(Corpus([]), policy=judged, judge=Judge())
     assert (empty["judge_skip"], empty["degraded"]) == ("slice_empty", False)
+
+
+def test_slice_limit_counts_the_query_in_the_rendered_input() -> None:
+    """Code review of fb7b926 (blocking 2): the slice limit is min(1.5 x B, cap) on the rendered input, which
+    includes the query; one full personal-use L1 card whose cost fits the preselection but whose rendering
+    with a 999-character query passes 1.5 x B is not sent."""
+    sha = "a" * 64
+    body = ("word " * 240).strip()  # 1,199 characters
+    spn = f"spn:{sha}:p1:0-1199"
+    judge = Judge()
+    judged = _policy(gate={"mode": "always_judge", "margin": None})
+    out = _run(Corpus([_card(spn, 0.9, body)]), policy=judged, judge=judge, query=("why " * 250).strip(),
+               budget=740)
+    assert judge.calls == []
+    assert (out["judge_skip"], out["degraded"], out["judge_ran"]) == ("slice_empty", False, False)
     no_lane = _run(Corpus([_card("a", 0.9, "alpha")]), policy=judged, judge=None)
     assert (no_lane["judge_skip"], no_lane["degraded"]) == ("error", True)
 

@@ -2148,7 +2148,11 @@ tasks:
         allowance, open on sealed span ids; views.PackSpan gains the stored locator, paired); unit 4a FR-SEARCH-4
         revision: search_0002 search_span_vectors with the P1 trigger, store.forget_overlay bound as SRV-INGEST's
         GC/purge seam (SRV-INGEST FR-INGEST-45 paired note); code review of f573e0c: 4 blocking fixed with tests
-        (mutants killed but one equivalent). Remaining: unit 4b (the embed job on overlays with seal ->
+        (31 mutants killed, 4 survivors; slice_limit_cap_only was wrongly called equivalent, see below); code
+        review of fb7b926: 2 blocking fixed with tests (L2 titles count in the per-material allowance and a node
+        past it is titled by its outline number where L1 is not served, a heading-only walk; the slice-limit case
+        with a 999-character query kills slice_limit_cap_only), plus the Book built in linear time (8.06 s to
+        0.02 s at 45,000 spans and 20,000 nodes). Remaining: unit 4b (the embed job on overlays with seal ->
         request_activation -> try_activate, candidates over search_span_vectors as the production Corpus, the
         legacy search() Hit contract, status/ensure on overlay keys, the ingest/uploads/obs paired key changes;
         FR-SEARCH-3, -5..-10, -20 revisions), unit 5 (judge.find

@@ -112,7 +112,7 @@ def test_vec_search_9_l2_cut_order(case: dict[str, Any]) -> None:
 @pytest.mark.parametrize("case", fixture("personal-use.yaml")["allowance"], ids=lambda c: c["case"])
 def test_vec_search_9_allowance_walk(case: dict[str, Any]) -> None:
     cards = need("reader.search.cards")
-    nodes = [(n[0], n[1], n[2]) for n in case["nodes"]]
+    nodes = [(n[0], n[1], n[2], n[3]) for n in case["nodes"]]
     assert cards.allowance(nodes, case["total"], case["fraction"]) == frozenset(case["granted"])
 
 
@@ -145,6 +145,9 @@ async def test_l2_quote_fits_the_l2_text_budget_and_past_allowance_nodes_carry_n
         else:
             seen_refused = True
             assert cite.quote is None
+            # past the allowance, a node is titled by its outline number where L1 is not served (mcp)
+            assert card.title == node.id.rsplit(":", 1)[1].replace("/", ".")
+            assert book.node_card(i, "owner", True).title == node.title
     assert seen_granted and seen_refused
 
 

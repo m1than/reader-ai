@@ -31,11 +31,17 @@ l2_cut:
   - { case: summary between title and quote, title: "T", summary: "sum text", quote: "q1 q2", tokens: 10,
       text: "T\nsum text", quote_served: "q1 q2" }
 
-# The quote allowance walk (cards.allowance(nodes, total, fraction)): nodes are (id, cited span, full quote length)
-# in outline order; each distinct span counts once; the walk stops at the first node that would pass the limit.
+# The allowance walk (cards.allowance(nodes, total, fraction)): nodes are (id, cited span, full quote length, title
+# length) in outline order; every node's own title counts (an outline built from heading spans repeats span text;
+# code review of fb7b926), each distinct cited span's quote counts once; the walk stops at the first node that would
+# pass the limit.
 allowance:
-  - { case: shared span counts once, nodes: [[a, s1, 5], [b, s2, 4], [c, s1, 5], [d, s3, 2], [e, null, 0]],
+  - { case: shared span counts once, nodes: [[a, s1, 5, 0], [b, s2, 4, 0], [c, s1, 5, 0], [d, s3, 2, 0], [e, null, 0, 0]],
       total: 100, fraction: 0.1, granted: [a, b, c] }
-  - { case: a node without a citation is granted, nodes: [[a, null, 0], [b, s1, 11]], total: 100, fraction: 0.1,
+  - { case: a node without a citation is granted, nodes: [[a, null, 0, 0], [b, s1, 11, 0]], total: 100, fraction: 0.1,
       granted: [a] }
-  - { case: exactly at the limit, nodes: [[a, s1, 10], [b, s2, 1]], total: 100, fraction: 0.1, granted: [a] }
+  - { case: exactly at the limit, nodes: [[a, s1, 10, 0], [b, s2, 1, 0]], total: 100, fraction: 0.1, granted: [a] }
+  - { case: titles count with quotes, nodes: [[a, s1, 4, 3], [b, null, 0, 3], [c, s1, 4, 1]], total: 100,
+      fraction: 0.1, granted: [a, b] }
+  - { case: a title alone passes the limit, nodes: [[a, null, 0, 11], [b, null, 0, 1]], total: 100, fraction: 0.1,
+      granted: [] }
