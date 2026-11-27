@@ -16,3 +16,8 @@ cases:
   - { name: contradicted-kept,              verdict: contradicted,     given: 5, spans: ["A:3"],        expect: 5 }
   - { name: contradicted-out-of-set,        verdict: contradicted,     given: 1, spans: ["A:3", "B:1"], expect: 5 }
   - { name: source-too-large,               verdict: source_too_large, given: 4, spans: [],             expect: 6 }
+  # r3_gates_revision (FR-PIPELINE-27 revised): locators (`spn:A:p<n>:<s>-<e>`) count by their material field, and a
+  # locator and a legacy id of one material count once.
+  - { name: supported-1-two-locators-one-material, verdict: supported, given: 1, spans: ["spn:A:p1:0-5", "spn:A:p2:0-7"], expect: 2 }
+  - { name: supported-1-locators-two-materials,    verdict: supported, given: 1, spans: ["spn:A:p1:0-5", "spn:B:p1:0-5"], expect: 1 }
+  - { name: supported-1-locator-and-legacy-same-material, verdict: supported, given: 1, spans: ["spn:A:p1:0-5", "A:1"], expect: 2 }

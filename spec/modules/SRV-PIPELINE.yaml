@@ -250,6 +250,11 @@ requirements:
       model never writes them). In the slice, every `changed` cell and
       every URL citation also becomes an open cell (`url_citation_unchecked`, `changed_unchecked`; `finding.stage`
       `fact_check`), since there is no web fact-check yet.
+      **Promoted revision (r3_gates_revision, unit f):** this id's text in `proposed_revisions` (a locator span id
+      carries its `quote_sha256`; `material_of`) extends the text above. Recorded: `material_of` is defined in
+      `reader.pipeline.source` beside `Span` (reports.py needs it, and notebook.py imports reports.py) and
+      re-exported as `reader.pipeline.notebook.material_of`; `to_compact` also drops a lab reference's
+      `quote_sha256`. test_source_and_reports.py, test_source_active_pack_db.py.
   - id: FR-PIPELINE-8
     text: >-
       G2 report (VEC-PIPELINE-3), computed after lab verification and stored on the run; no publish in the slice. For the
@@ -633,6 +638,9 @@ requirements:
       step writes its revision with each claim's, and each `changed` or `erratum` cell's, `credibility` set to that
       value (`stamp_credibility`); nothing else changes. Credibility does not change the check's outcome (the verdict
       does); it is the `credibility` facet of ADR-0039 B3 when SRV-KB turns claims into L4 findings.
+      **Promoted revision (r3_gates_revision, unit f):** this id's text in `proposed_revisions` (distinct materials
+      through `material_of`) extends the text above. VEC-PIPELINE-6 gains the locator cases.
+      test_source_and_reports.py.
     tests_planned:
       - "add to test_source_and_reports.py: stamp_credibility over VEC-PIPELINE-6"
       - "add to test_pipeline_db.py [db]: the fact_check step's revision differs from its input only in credibility fields, present on every claim and every changed and erratum cell"
@@ -653,6 +661,10 @@ invariants:
     text: >-
       Every span citation in a stored revision names a span of the lesson's source, with page and title taken from
       that span. **Revised by ADR-0039 (in force 2026-11-26): `revisions` → INV-PIPELINE-3.**
+      **Promoted revision (r3_gates_revision, unit f):** this id's text in `proposed_revisions` (per step; a
+      locator citation carries its span's `quote_sha256`) extends the text in `revisions`. test_pipeline_db.py runs
+      the check over a legacy-id source and over a locator source; test_source_and_reports.py holds the
+      legacy-id-with-r3-aliases case.
   - id: INV-PIPELINE-4
     text: No log line contains source text, a prompt, model output or a claim text (canary test); only ids, stage names, costs and counts.
   - id: INV-PIPELINE-5
